@@ -9,11 +9,13 @@
  * owner typed in full asks nothing; on a model's line it is ignored).
  */
 import { quoteSlashCommandArg } from '../slash-command-parser.js';
+import { valuesAsShown } from './lists.js';
 import {
   effectiveRisk as capabilityEffectiveRisk,
   fillSentence as capabilityFillSentence,
   lastsWords as capabilityLastsWords,
   riskDoneLine,
+  showWhenHolds,
 } from '@goodvibes/engine/platform/platform/capabilities/words';
 import {
   RISK_WORDS,
@@ -66,9 +68,9 @@ export function listChoices(input: InputDescription): ListChoices | undefined {
   return input.choices !== undefined && !Array.isArray(input.choices) ? (input.choices as ListChoices) : undefined;
 }
 
-/** Whether an input is asked with these values (one shown only when another holds a value). */
+/** Whether an input is asked with these values (its declared `showWhen`: capabilities/types.ts `InputShowWhen`). */
 export function isShown(input: InputDescription, values: ActionValues): boolean {
-  return !input.showWhen || values[input.showWhen.input] === input.showWhen.is;
+  return showWhenHolds(input.showWhen, values);
 }
 
 /** An option typed as a bare switch: present means the one non-default value. */
@@ -295,6 +297,23 @@ export function riskWords(risk: ActionRisk): string {
   return risk === 'none' ? '' : RISK_WORDS[risk];
 }
 
+/**
+ * The question's risk, in short sentences: the risk in force with these values, and, when that is a loosening that
+ * outranks the action's own "cannot be undone" (or the chosen value's, or a value its `irreversibleWhen` names), that
+ * too: "This loosens a protection. This cannot be undone." Empty for none.
+ */
+export function riskSentences(action: ActionShape, values: ActionValues): string {
+  const risk = effectiveRisk(action, values);
+  if (risk === 'none') return '';
+  const irreversible = (action as { readonly irreversibleWhen?: { readonly input: string; readonly values: readonly string[] } | undefined }).irreversibleWhen;
+  const chosenIrreversible = action.inputs.some((input) => {
+    const value = values[input.id];
+    return value !== undefined && fixedChoices(input)?.some((choice) => choice.value === value && choice.risk === 'cannot-be-undone') === true;
+  }) || (irreversible !== undefined && irreversible.values.includes((values[irreversible.input] ?? '').trim()));
+  const alsoIrreversible = risk === 'loosens-a-protection' && (action.risk === 'cannot-be-undone' || chosenIrreversible);
+  return alsoIrreversible ? `This ${RISK_WORDS['loosens-a-protection']}. This ${RISK_WORDS['cannot-be-undone']}.` : `This ${RISK_WORDS[risk]}.`;
+}
+
 /** Fill `{input}` blanks and `{lasts}`; a blank with no value reads as its label in angle brackets. */
 export function fillSentence(template: string, values: ActionValues, lasts: string): string {
   return capabilityFillSentence(template, values, lasts);
@@ -302,12 +321,20 @@ export function fillSentence(template: string, values: ActionValues, lasts: stri
 
 /** The action's sentence for these values. */
 export function actionSentence(action: ActionShape, values: ActionValues): string {
-  return fillSentence(action.sentence, values, lastsWords(action, values));
+  // A value picked from a list reads as its label ("Quick model", not "qm-1"); the line sent keeps the id. An input
+  // left on its default reads as the default the form shows ("seven days"), never as a blank.
+  const shown = valuesAsShown(action.inputs, values);
+  for (const input of action.inputs as readonly InputDescription[]) {
+    if (shown[input.id] !== undefined && shown[input.id] !== '') continue;
+    const required = input.required;
+    if (typeof required === 'object') shown[input.id] = required.defaultMeans;
+  }
+  return fillSentence(action.sentence, shown, lastsWords(action, values));
 }
 
 /** The action's done line for these values; empty for an action that has none (a read). */
 export function actionDoneLine(action: ActionShape, values: ActionValues): string {
-  return action.done ? fillSentence(action.done, values, lastsWords(action, values)) : '';
+  return action.done ? fillSentence(action.done, valuesAsShown(action.inputs, values), lastsWords(action, values)) : '';
 }
 
 const LEADING_ADVERB = /^(never|always)$/i;
@@ -352,9 +379,12 @@ export function actionButton(action: ActionShape): string {
     if (closing > 0) return [...out, rest[closing]!].join(' ');
   }
   if (OBJECT_START.test(next)) return out.join(' ');
-  // A bare object noun: keep words up to the next object start ("Install hooks", "Save memory").
+  // A bare object noun: keep words up to the next object start ("Install hooks", "Save memory"), and never past a
+  // clause's end ("Disconnect Google: remove its stored credentials" -> "Disconnect Google").
   const stop = rest.findIndex((word) => OBJECT_START.test(word));
-  return [...out, ...(stop < 0 ? rest : rest.slice(0, stop))].join(' ');
+  const object = stop < 0 ? rest : rest.slice(0, stop);
+  const ends = object.findIndex((word) => /[:;,.]$/.test(word));
+  return [...out, ...(ends < 0 ? object : [...object.slice(0, ends), object[ends]!.replace(/[:;,.]+$/, '')])].join(' ');
 }
 
 /**
@@ -380,9 +410,9 @@ export function actionRiskDoneLine(action: ActionShape & Pick<ActionDescription<
 
 /** What submitting does, in the words the typed line's question uses: the sentence, then its risk. */
 export function actionConsequence(action: ActionShape, values: ActionValues): string {
-  const risk = effectiveRisk(action, values);
+  const risks = riskSentences(action, values);
   const sentence = actionSentence(action, values);
-  return risk === 'none' ? sentence : `${sentence} This ${riskWords(risk)}.`;
+  return risks ? `${sentence} ${risks}` : sentence;
 }
 
 // What an action sends to its operator method; defined once with the capabilities, which the daemon runs too.

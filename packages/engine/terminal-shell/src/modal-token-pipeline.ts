@@ -4,7 +4,6 @@ import { isTrackedModal, type StackedModal } from './surface-modal-host.js';
 type ModalRoute =
   | 'handleSelectionModalToken'
   | 'handleBookmarkModalToken'
-  | 'handleSettingsModalToken'
   | 'handleMcpWorkspaceToken'
   | 'handleSessionPickerToken'
   | 'handleProfilePickerToken'
@@ -21,7 +20,6 @@ type ModalRoute =
 const MODAL_ROUTES: Readonly<Partial<Record<string, ModalRoute>>> = {
   bookmark: 'handleBookmarkModalToken',
   liveTail: 'live-tail',
-  settings: 'handleSettingsModalToken',
   mcpWorkspace: 'handleMcpWorkspaceToken',
   agentWorkspace: 'agent-workspace',
   sessionPicker: 'handleSessionPickerToken',
@@ -52,7 +50,6 @@ export type CommonModalRoutingState = ModalTokenSnapshot &
         | 'setSelectionCallback'
         | 'bookmarkModal'
         | 'commandContext'
-        | 'settingsModal'
         | 'openModelPickerWithTarget'
         | 'openProviderModelPickerWithTarget'
         | 'mcpWorkspace'
@@ -113,17 +110,6 @@ export function createModalTokenPipeline<State extends CommonModalRoutingState>(
       value: {
         bookmarkModal: State['bookmarkModal'];
         commandContext: State['commandContext'];
-        requestRender: State['requestRender'];
-        handleEscape: State['handleEscape'];
-      },
-      arg1: InputToken,
-    ) => boolean;
-    handleSettingsModalToken: (
-      value: {
-        settingsModal: State['settingsModal'];
-        commandContext: State['commandContext'];
-        openModelPickerWithTarget: State['openModelPickerWithTarget'];
-        openProviderModelPickerWithTarget: State['openProviderModelPickerWithTarget'];
         requestRender: State['requestRender'];
         handleEscape: State['handleEscape'];
       },
@@ -269,23 +255,6 @@ export function createModalTokenPipeline<State extends CommonModalRoutingState>(
       return withState(state, true);
     }
   }
-  function handleSettingsModalToken(state: State, token: InputToken): ModalTokenResult | undefined {
-    if (
-      bindings.handleSettingsModalToken(
-        {
-          settingsModal: state.settingsModal,
-          commandContext: state.commandContext,
-          openModelPickerWithTarget: state.openModelPickerWithTarget,
-          openProviderModelPickerWithTarget: state.openProviderModelPickerWithTarget,
-          requestRender: state.requestRender,
-          handleEscape: state.handleEscape,
-        },
-        token,
-      )
-    ) {
-      return withState(state, true);
-    }
-  }
   function handleMcpWorkspaceToken(state: State, token: InputToken): ModalTokenResult | undefined {
     if (bindings.handleMcpWorkspaceToken(state.mcpWorkspace, token, state.handleEscape, state.requestRender)) {
       return withState(state, true);
@@ -405,7 +374,6 @@ export function createModalTokenPipeline<State extends CommonModalRoutingState>(
   const routes = {
     handleSelectionModalToken,
     handleBookmarkModalToken,
-    handleSettingsModalToken,
     handleMcpWorkspaceToken,
     handleSessionPickerToken,
     handleProfilePickerToken,

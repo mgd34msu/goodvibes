@@ -9,6 +9,7 @@ import { summarizeError } from '../../utils/error-display.js';
 import { logger } from '../../utils/logger.js';
 import { callingAgentId } from '../../agents/calling-agent.js';
 import { resolveCredentialEnvScrub, scrubCredentialEnv, type ResolvedCredentialEnvScrub } from '../exec/credential-env.js';
+import { withModelCommandMark } from '../exec/model-command-mark.js';
 
 /**
  * ProcessManager, tracks background processes for a single GoodVibes runtime.
@@ -474,7 +475,8 @@ export class ProcessManager {
     assertSynchronousAdmission(assertAdmissionCurrent);
     if (this._closed) throw new Error('ProcessManager is closed');
     admissionSignal?.throwIfAborted();
-    const mergedEnv = { ...scrubbedBase, ...env };
+    // A model's command, marked last so the caller's environment cannot clear it (exec/model-command-mark.ts).
+    const mergedEnv = withModelCommandMark({ ...scrubbedBase, ...env });
 
     const id = this.newId();
     const entry: BackgroundProcess = {

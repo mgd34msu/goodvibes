@@ -145,21 +145,21 @@ function describeTarget(
           effect: 'read-only',
           values: 'Full webhook URLs are not returned because they can contain bearer tokens or secret path/query values.',
           delivery: 'Use agent_notify only for one explicit, confirmed notification requested by the user.',
-          management: 'Use confirmed /notify mirrors only when the user explicitly asks to add, remove, clear, test, or send notification targets.',
+          management: 'Run the notify capabilities (capability_run) only when the user explicitly asks to add, remove, clear, test, or send notification targets.',
           ...(target.state === 'unreadable'
             ? { repair: `This target's ${UNREADABLE_TARGET_SENTENCE}, so nothing is known about it until it reads. Repair the secret store first (unlock it, or restore the stored secret); only if the secret is gone for good does the owner remove this entry by its number and add the URL again.` }
             : {}),
         },
         modelAccess: {
           sendTool: 'agent_notify',
-          listCommand: '/notify list',
-          addCommand: '/notify add <url> --yes',
-          removeCommand: '/notify remove <index> --yes',
-          clearCommand: '/notify clear --yes',
-          testCommand: '/notify test --yes',
+          listCapability: 'notify.list',
+          addCapability: 'notify.add',
+          removeCapability: 'notify.remove',
+          clearCapability: 'notify.clear',
+          testCapability: 'notify.test',
           settingsCategory: 'notifications.webhookUrls',
           targetValueRequiredForRemove: false,
-          targetValuePolicy: '/notify remove takes the target\'s number as /notify list shows it, which is this target\'s index; confirm with the user which target before removing it.',
+          targetValuePolicy: 'notify.remove takes the target\'s number as notify.list shows it, which is this target\'s index; confirm with the user which target before removing it.',
         },
       }
       : {

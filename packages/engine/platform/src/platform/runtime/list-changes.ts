@@ -35,12 +35,14 @@ export type ChangedList = 'memory' | 'checkpoints' | 'ci-watches' | 'check-ins' 
   | 'triggers'
   // Permissions and safety: a permission rule, a secret, a folder's trust, a local sign-in, the policy or the sandbox.
   | 'safety'
-  // Money: a card added or removed, a repeat purchase allowed or stopped (payments/host), an address set (capabilities/builtin/money.ts).
+  // Money: a card added or removed, a repeat purchase allowed or stopped (payments/host), an address set (capabilities/builtin/money.ts);
+  // Waiting for you, Purchases: a checkout admitted or moved on (payments/host/operation-store.ts), a security code asked for or settled
+  // (payments/security-code-requests.ts).
   | 'payments'
   // Money: the daemon recorded what a model call cost (runtime/cost/attribution.ts).
   | 'spending'
   // Memory and knowledge: the Agent's own stores, changed by the daemon (terminal-shell agent-turn/agent-store-runner.ts).
-  | 'notes' | 'personas' | 'routines' | 'documents' | 'artifacts'
+  | 'notes' | 'personas' | 'routines' | 'documents' | 'artifacts' | 'agent-homes'
   // Memory and knowledge: what is known about you, written or edited by hand (owner-profile/store.ts), and a template
   // deleted through the daemon (capabilities/builtin/templates.ts).
   | 'profile' | 'templates'
@@ -50,17 +52,45 @@ export type ChangedList = 'memory' | 'checkpoints' | 'ci-watches' | 'check-ins' 
   | 'network-scan'
   // Devices and network: a settings sync bundle pulled or a setting that disagreed settled through the daemon (capabilities/builtin/settings-sync.ts).
   | 'settings-sync'
+  // Devices and network, and Settings' Secure address: this machine's group changed (a join, a leave, a removal, a rename,
+  // a new key, from this machine or another), a group was heard on the network, or the group's certificate changed
+  // (cluster/group-runtime.ts onGroupChanged, daemon/lan-https/secure-address.ts).
+  | 'machine-group'
   // This conversation: a model's context window size set or cleared through the daemon (capabilities/builtin/context-windows.ts);
   // each running program reads the daemon's file again on it (terminal-shell context-windows-follow.ts).
   | 'context-windows'
+  // Code and changes: a build of the project's code index began or ended (state/code-index-store.ts).
+  | 'code-index'
+  // Code and changes: a project's worktree register changed (runtime/worktree/registry.ts); the id is the register file.
+  | 'worktrees'
   // Mail, calendar and channels: the daemon's webhook addresses changed, or a notification failed (capabilities/builtin/notify.ts).
-  | 'notifications';
+  | 'notifications'
+  // Mail, calendar and channels: the Google connection changed, or a step of connecting, checking or disconnecting it
+  // began or ended, or its consent link opened or closed (google/daemon-work.ts).
+  | 'google'
+  // System: the daemon's update state changed (a check ended, an install began or ended, recovery needed: daemon/auto-updater.ts).
+  | 'system-updates'
+  // System: the setup record changed (a checklist topic skipped or brought back, "Who decides" answered or put off: capabilities/builtin/system-setup.ts).
+  | 'setup'
+  // System: a terminal program's own setting changed or was put back through the daemon (capabilities/builtin/system-settings.ts);
+  // a daemon-owned setting is said on the `config` domain instead.
+  | 'settings'
+  // Any place: a capability that changes something ran through capabilities.run (control-plane/routes/capabilities.ts);
+  // `id` is the capability's id, and every list that capability acts on is read again (places/place-modal.ts followPlace).
+  | 'capabilities';
 
 export interface ListChange {
   readonly list: ChangedList;
   readonly change: 'created' | 'changed' | 'deleted';
   /** The record that changed, when the store names one. */
   readonly id?: string | undefined;
+  /**
+   * The project (its resolved folder) a per-project change is about: a screen showing another project's list does
+   * not read again for it. Absent for a shared list (every screen reads again).
+   */
+  readonly project?: string | undefined;
+  /** The session a per-session change is about; absent for anything not one session's. */
+  readonly sessionId?: string | undefined;
 }
 
 const listeners = new Set<(change: ListChange) => void>();

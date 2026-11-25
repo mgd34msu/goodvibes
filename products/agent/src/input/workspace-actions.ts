@@ -7,16 +7,22 @@
  * workspace and the command cannot say different things.
  */
 import {
+  daemonCapabilityAction,
   describedCommandByName,
   fillSentence,
   lastsWords,
   renderTypedLine,
   runGuided,
+  sessionCapabilityAction,
   type ActionDescription,
   type ActionValues,
   type CommandDescription,
 } from '@goodvibes/engine/terminal-shell/command-actions';
+import { DAEMON_CAPABILITIES, SESSION_CAPABILITIES, type CapabilityDefinition } from '@goodvibes/engine/platform/platform/capabilities';
+import type { SessionCapabilityServices } from '@goodvibes/engine/terminal-shell/agent-turn/capability-tools';
 import type { CommandContext } from './command-registry.ts';
+import { capabilityBinding } from './commands/capability-binding.ts';
+import { sessionCapabilityServices } from './commands/session-capabilities.ts';
 
 /** What a row runs: a command, one of its actions (by id or typed word), and any values the row fills in. */
 export interface WorkspaceActionTarget {
@@ -28,20 +34,49 @@ export interface WorkspaceActionTarget {
 interface ResolvedTarget {
   readonly command: CommandDescription<never>;
   readonly action: ActionDescription<never> | undefined;
+  /** True when the row runs a daemon capability no slash command carries: never as a typed line. */
+  readonly capability?: true | undefined;
 }
 
-/** The described command and action a row names, or undefined while the command is not described. */
+/**
+ * A daemon capability the row names by its command and action (`knowledge ingest-url`, `memory remember`) once no
+ * slash command carries it: its definition's action, run through the daemon's `capabilities.run` as the owner's own
+ * request, so every write reaches the daemon's one store (its knowledge, memory and profile).
+ */
+function daemonCapabilityTarget(target: WorkspaceActionTarget): ResolvedTarget | undefined {
+  const wanted = target.action;
+  if (!wanted) return undefined;
+  const named = (entry: { readonly definition: { readonly actionId: string; readonly word: string }; readonly command: { readonly name: string } }): boolean =>
+    entry.command.name === target.command && (entry.definition.actionId === wanted || entry.definition.word === wanted);
+  const moved = DAEMON_CAPABILITIES.find(named);
+  // One that runs where the conversation is (starting a routine): run here, with this conversation's services.
+  const here = moved ? undefined : SESSION_CAPABILITIES.find(named);
+  if (here) {
+    const action = sessionCapabilityAction<CommandContext, SessionCapabilityServices>(here.definition as unknown as CapabilityDefinition<SessionCapabilityServices>, sessionCapabilityServices,
+      { terminalOnly: 'It runs in this conversation.' }) as unknown as ActionDescription<never>;
+    const command: CommandDescription<never> = { name: here.command.name, title: here.command.title, summary: here.definition.label, group: 'Knowledge', actions: [action] };
+    return { command, action, capability: true };
+  }
+  if (!moved) return undefined;
+  const action = daemonCapabilityAction<CommandContext>(moved.definition as unknown as CapabilityDefinition<never>, capabilityBinding) as unknown as ActionDescription<never>;
+  const command: CommandDescription<never> = { name: moved.command.name, title: moved.command.title, summary: moved.definition.label, group: 'Knowledge', actions: [action] };
+  return { command, action, capability: true };
+}
+
+/** The described command and action a row names (or the daemon capability it names), or undefined while neither is there. */
 export function resolveWorkspaceAction(target: WorkspaceActionTarget): ResolvedTarget | undefined {
   const command = describedCommandByName(target.command);
-  if (!command) return undefined;
   const wanted = target.action;
-  const action = wanted ? command.actions.find((candidate) => candidate.id === wanted) ?? command.actions.find((candidate) => candidate.word === wanted) : undefined;
-  return { command, action };
+  const action = command && wanted ? command.actions.find((candidate) => candidate.id === wanted) ?? command.actions.find((candidate) => candidate.word === wanted) : undefined;
+  if (command && (action || !wanted)) return { command, action };
+  return daemonCapabilityTarget(target) ?? (command ? { command, action } : undefined);
 }
 
 /** The line a person could type for the row. */
 export function workspaceActionLine(target: WorkspaceActionTarget): string {
   const resolved = resolveWorkspaceAction(target);
+  // A capability no slash command carries has no line to type: its name stands for it.
+  if (resolved?.capability && resolved.action) return resolved.action.label;
   if (resolved?.action) return renderTypedLine(resolved.command, resolved.action.id, target.values ?? {});
   return `/${target.command}${target.action ? ` ${target.action}` : ''}`;
 }

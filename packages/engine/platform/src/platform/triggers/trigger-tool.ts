@@ -64,6 +64,8 @@ function fail(error: unknown): { success: false; error: string } {
 export interface TriggerToolOptions {
   /** The session making the call; a trigger created from it on a local supervisor is reaped when that session is gone. */
   readonly resolveSessionId?: (() => string | undefined) | undefined;
+  /** The folder this registry's turns work in: a trigger made from it works in that project. */
+  readonly workingDirectory?: string | undefined;
 }
 
 /**
@@ -94,11 +96,13 @@ export function createTriggerTool(supervisor: TriggerManager | TriggerOperations
               return { success: false, error: 'create needs a definition object: { id, label, spec, action? }.' };
             }
             // The owner session is the host's: the session of the turn this call runs in, never one the model names.
-            const { ownerSessionId: _modelOwner, ...input } = definition as Record<string, unknown>;
+            // So is its project: the folder this turn works in, never one the model names.
+            const { ownerSessionId: _modelOwner, workingDirectory: _modelFolder, ...input } = definition as Record<string, unknown>;
             const owner = local ? currentTurn()?.ownerSessionId ?? sessionOwner?.() : undefined;
             const created = await operations.create({
               ...input,
               ...(typeof owner === 'string' && owner.length > 0 ? { ownerSessionId: owner } : {}),
+              ...(options.workingDirectory ? { workingDirectory: options.workingDirectory } : {}),
             });
             return { success: true, output: JSON.stringify({ created }) };
           }

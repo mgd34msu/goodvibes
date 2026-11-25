@@ -97,14 +97,15 @@ export function catalogTextWork(provider: string, modelId: string): CatalogTextW
 /**
  * What one model costs to use, as a fact a picker shows beside it: `free`
  * (the catalog lists it at no charge), `paid` (charged per token),
- * `subscription` (served through a plan the person signed in with), or
- * `unknown` (nothing says).
+ * `subscription` (served through a plan the person signed in with), `local`
+ * (a server on this computer or your own network serves it: nothing is charged
+ * per token), or `unknown` (nothing says).
  */
-export type ModelPriceTier = 'free' | 'paid' | 'subscription' | 'unknown';
+export type ModelPriceTier = 'free' | 'paid' | 'subscription' | 'local' | 'unknown';
 
-/** The price tier in the words a picker shows: "free" | "paid" | "subscription" | "price not known". */
+/** The price tier in the words a picker shows: "free" | "paid" | "subscription" | "local" | "price not known". */
 export const MODEL_PRICE_TIER_WORDS: Readonly<Record<ModelPriceTier, string>> = {
-  free: 'free', paid: 'paid', subscription: 'subscription', unknown: 'price not known',
+  free: 'free', paid: 'paid', subscription: 'subscription', local: 'local', unknown: 'price not known',
 };
 
 /**
@@ -113,7 +114,9 @@ export const MODEL_PRICE_TIER_WORDS: Readonly<Record<ModelPriceTier, string>> = 
  * then the registry's own tier (`standard` and `premium` are metered models).
  * One owner for the fact both pickers show (the terminal's and the web UI's, through models.list).
  */
-export function modelPriceTier(model: { readonly provider: string; readonly id: string; readonly tier?: string | undefined }): ModelPriceTier {
+export function modelPriceTier(model: { readonly provider: string; readonly id: string; readonly tier?: string | undefined; readonly local?: boolean | undefined }): ModelPriceTier {
+  // A model a server on this computer or your own network serves is never "paid", whatever a catalog row of the same id says.
+  if (model.local === true) return 'local';
   if (model.tier === 'subscription') return 'subscription';
   const listed = new Set(catalogModelsForReference(model.id, model.provider).map((entry) => entry.tier));
   if (listed.size === 1) return listed.values().next().value!;

@@ -381,11 +381,12 @@ export function createAgentModelCompareTool(sourceDeps: AgentModelCompareToolDep
             ].join('\n'));
           }
           await ensureSelectableWinnerModel(deps.modelCatalog, judgment.winnerModel.registryKey);
-          const result = await deps.applyModelRoute(judgment.winnerModel.registryKey);
-          // The route has changed by now, so nothing below may turn this into a failure.
-          let usageError: string | null = null;
-          try { await deps.modelCatalog.recordModelUsage?.(judgment.winnerModel.registryKey); }
-          catch (error) { usageError = error instanceof Error ? error.message : String(error); }
+          // Changing the default model changes the settings this call was admitted under, and from that moment the
+          // gate holds every further write of the call as stale. So the record of the decision and the model's use
+          // are written first, and the change of model is the call's last act.
+          const winnerKey = judgment.winnerModel.registryKey;
+          const before = (await resolveCurrentModel(deps.modelCatalog))?.registryKey ?? '';
+          const planned = { ...(before ? { previousModel: before } : {}), selectedModel: winnerKey };
           let receipt: SavedComparisonArtifact | null = null;
           let receiptError: string | null = null;
           try {
@@ -393,11 +394,21 @@ export function createAgentModelCompareTool(sourceDeps: AgentModelCompareToolDep
               artifactStore: deps.artifactStore,
               decision: 'applied-winner',
               judgment,
-              route: result,
+              route: planned,
               explicitUserRequest,
             });
           } catch (error) {
             receiptError = error instanceof Error ? error.message : String(error);
+          }
+          let usageError: string | null = null;
+          try { await deps.modelCatalog.recordModelUsage?.(winnerKey); }
+          catch (error) { usageError = error instanceof Error ? error.message : String(error); }
+          let result: Awaited<ReturnType<NonNullable<typeof deps.applyModelRoute>>>;
+          try {
+            result = await deps.applyModelRoute(winnerKey);
+          } catch (error) {
+            const why = error instanceof Error ? error.message : String(error);
+            return failure(`The default model was not changed: ${why}${receipt ? ` The decision record ${receipt.artifactId}, saved just before, names ${winnerKey} as applied; it was not.` : ''}`);
           }
           return output(formatApplyResult({ judgment, result, receipt, receiptError, usageError, winnerUnchecked: !checked }));
         }
@@ -681,7 +692,8 @@ export function createAgentModelCompareTool(sourceDeps: AgentModelCompareToolDep
         try {
           operation.assertSend();
           settled = await Promise.allSettled(models.map((model, index) => runAdmittedComparisonCandidate(sourceDeps.toolRegistry, options,
-            model, BLIND_LABELS[index] ?? String(index + 1), prompt, systemPrompt, maxTokens, operation.assertCurrent, rawArgs, screening.id)));
+            model, BLIND_LABELS[index] ?? String(index + 1), prompt, systemPrompt, maxTokens, operation.assertCurrent, rawArgs, screening.id,
+            sourceDeps.dispatchCandidate)));
         } finally { await screening.release().catch(() => {}); }
         operation.assertCurrent();
         // A candidate that was refused or dropped is recorded as failed so the

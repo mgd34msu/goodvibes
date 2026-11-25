@@ -21,7 +21,7 @@ import { existsSync } from 'node:fs';
 import { join } from 'node:path';
 import { afterAll, describe, expect, test } from 'bun:test';
 import {
-  answerWorkspaceQuestion,
+  awaitWorkspaceRegistered,
   inputAreaVisible,
   lastUserText,
   launchAgent,
@@ -55,8 +55,8 @@ describe('first turn against a paired host', () => {
   test('the binary starts in a real terminal with nothing on stderr', async () => {
     agent = launchAgent(home!, { cols: 100, rows: 30, env: host!.env });
     await agent.waitForScreen('the main screen', inputAreaVisible);
-    // A workspace this home has never seen: the first-start question comes first.
-    await answerWorkspaceQuestion(agent, 'decline');
+    // A workspace this home has never seen: the Agent registers it as it starts, asking nothing.
+    await awaitWorkspaceRegistered(agent);
     expect(agent.stderr()).toBe('');
   });
 
@@ -82,7 +82,7 @@ describe('no paired host', () => {
     home = await makeHome(model);
     agent = launchAgent(home, { cols: 100, rows: 30 });
     await agent.waitForScreen('the main screen', inputAreaVisible);
-    await answerWorkspaceQuestion(agent, 'decline');
+    await awaitWorkspaceRegistered(agent);
   });
 
   test('the first prompt runs in this process: its reply is drawn and nothing is submitted', async () => {

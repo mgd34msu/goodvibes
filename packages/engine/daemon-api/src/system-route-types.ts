@@ -265,31 +265,6 @@ export interface ApprovalActionsLike {
   ): Promise<ApprovalActionResultLike>;
 }
 
-export interface WorkspaceSwapManagerLike {
-  getCurrentWorkingDir(): string;
-  requestSwap(newWorkingDir: string): Promise<
-    | {
-      ok: true;
-      previous: string;
-      current: string;
-      /** False when the new path could not be saved, so it will not survive a restart. */
-      persisted?: boolean | undefined;
-      /** True when the daemon moves to `current` in this process (now, or once busy sessions finish). */
-      moving?: boolean | undefined;
-      /** Busy sessions the move waits for. */
-      waitingForSessions?: number | undefined;
-      /** True when nothing moves until the daemon restarts. */
-      restartRequired?: boolean | undefined;
-      /** Subsystems that keep using the previous working directory until restart. */
-      requiresRestart?: readonly string[] | undefined;
-      note?: string | undefined;
-    }
-    | { ok: false; code: 'INVALID_PATH'; reason: string }
-    | { ok: false; code: 'REROOT_FAILED'; reason: string }
-    | { ok: false; code: 'WORKSPACE_BUSY'; reason: string; retryAfter: number }
-  >;
-}
-
 /**
  * Secret-free status metadata for a single credential held in the daemon's
  * shared store (or overridden by an environment variable). This is the ONLY
@@ -407,7 +382,5 @@ export interface DaemonSystemRouteContext {
    */
   readonly resolveAuthenticatedPrincipal?: ((req: Request) => { readonly principalId: string; readonly credentialKind?: CredentialKind | null | undefined; readonly actor?: Actor | undefined } | null) | undefined;
   readonly routeBindings: RouteBindingManagerLike;
-  /** Manages runtime.workingDir swaps. Null when workspace swapping is not available. */
-  readonly swapManager: WorkspaceSwapManagerLike | null;
   readonly watcherRegistry: WatcherRegistryLike;
 }

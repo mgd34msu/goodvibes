@@ -11,14 +11,16 @@ import {
 } from '../../runtime/relay-host.ts';
 import { invokeConnectedHostMethod } from '../connected-host-routes.ts';
 import { readAgentHostPairingStatus, runAgentHostPair, runAgentHostUnpair } from './onboarding-runtime.ts';
+import { unpairAgentHost } from '../../runtime/agent-host-pairing.ts';
+import { formatSetupPairing } from '../../runtime/setup-pairing-presentation.ts';
 import { requirePlatform, requireShellPaths } from './runtime-services.ts';
 import { capabilityBinding } from './capability-binding.ts';
 
 /** The controls the relay's sentences name: the Devices place's Relay tab and its Pair something. */
 const DEVICES_RELAY_WORDS: RelayActionWords = {
-  status: 'The Devices place\'s Relay tab (is the relay reachable)',
-  pair: 'Pair something in the Devices place',
-  codes: 'the Devices place\'s Relay tab',
+  status: 'The Relay tab of Devices and network (is the relay reachable)',
+  pair: 'Pair something in Devices and network',
+  codes: 'the Relay tab of Devices and network',
   revoke: 'cut off, on a device there,',
 };
 
@@ -71,7 +73,18 @@ export const AGENT_PAIRING: DevicesPairingHost<CommandContext> = {
   // The press in the place is the owner's own: the same owner-checked flow /setup pair runs.
   pairHost: async (ctx, request) => await runAgentHostPair(ctx, { apply: request.apply, name: request.name }, 'devices', ctx.invokedByModel !== true),
   hostStatus: async (ctx) => await readAgentHostPairingStatus(ctx),
-  unpairHost: async (ctx) => await runAgentHostUnpair(ctx, 'devices', ctx.invokedByModel !== true),
+  async unpairHost(ctx) {
+    // Nothing forgotten (no key kept, or the store could not be read) is said as a refusal, so no "To undo" follows it.
+    if (ctx.invokedByModel !== true) {
+      const homeDirectory = ctx.workspace?.shellPaths?.homeDirectory;
+      if (homeDirectory) {
+        const result = await unpairAgentHost({ configManager: requirePlatform(ctx).configManager, homeDirectory });
+        if (result.status === 'blocked' || result.status === 'pairing-store-unreadable') throw commandRefusal(result.message ?? 'Nothing was forgotten.');
+        return formatSetupPairing(result);
+      }
+    }
+    return await runAgentHostUnpair(ctx, 'devices', ctx.invokedByModel !== true);
+  },
   async pairRelay(ctx, name) {
     // The relay off: asked in place (opening on No), with the relay's address in the same step when none is set;
     // yes saves it, turns the relay on and pairs in the same run (terminal-shell/relay-pairing-ask.ts).

@@ -26,7 +26,7 @@ export const builtinGatewayPermissionRuleMethodDescriptors: readonly GatewayMeth
   methodDescriptor({
     id: 'permissions.rules.list',
     title: 'List Durable Permission Rules',
-    description: 'List the durable user-origin permission rules written by remembered approval decisions (exact command / command class / path scope / whole tool), newest first, the persistent grants and denials the permission manager consults before ever prompting. Project-scoped.',
+    description: 'List the durable user-origin permission rules written by remembered approval decisions (exact command / command class / path scope / whole tool), newest first, the persistent grants and denials the permission manager consults before ever prompting. Project-scoped: with `project` (a folder), only the rules in force there, that project\'s own and those of every project; without it, every rule with the project it belongs to.',
     category: 'permissions',
     effects: ['approvals.read'],
     transport: ['ws'],

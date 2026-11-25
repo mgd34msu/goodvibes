@@ -147,7 +147,10 @@ export async function runNativeMutation<T>(input: {
     assertCurrent();
     const admission = await admitExternalRequest(host, { connectionId: randomUUID(), destination: input.method, signal, assertCurrent: () => signal.throwIfAborted() },
       { sourceOf: () => source, assertCurrent, signal }, { tool: effect === 'send' ? 'send_message' : 'write', args, effect,
-        serverPolicy: { principalKind: 'paired-token', admin: true, scopes, effect, method: input.method } }).catch(error => {
+        serverPolicy: { principalKind: 'paired-token', admin: true, scopes, effect, method: input.method },
+        // The run that sent it answers every question itself and its script said yes to this call: decided there, so
+        // nobody is asked here again (a deny rule or plan mode still refuses it).
+        ...(context.decidedInRun === true ? { ownerConfirmed: true } : {}) }).catch(error => {
           // Before claim, the original native source can identify retirement
           // hidden by a failed reading. No effect has been attempted here.
           assertCurrent(); throw error;

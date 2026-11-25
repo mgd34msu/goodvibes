@@ -2,7 +2,6 @@ import { OwnedSelectionObservation } from '@goodvibes/engine/platform/platform/r
 import { registerWorkCommand } from '@goodvibes/engine/terminal-shell/native/work-command';
 import {
   createBoundNativeWorkLedgerView,
-  type NativeLedgerBindingFactory,
   type NativeLedgerHost,
 } from '@goodvibes/engine/terminal-shell/native/bound-work-ledger-host';
 import type { NativeWorkLedgerView } from '@goodvibes/engine/terminal-shell/native/work-ledger-view';
@@ -31,7 +30,6 @@ export function createNativeWorkLedgerHost(
     readonly journalPath?: string;
     readonly workspace: () => string;
   },
-  bind?: NativeLedgerBindingFactory,
 ): NativeWorkLedgerHost {
   const observation = new OwnedSelectionObservation();
   const homeDirectory = () => (typeof deps.homeDirectory === 'function' ? deps.homeDirectory() : deps.homeDirectory);
@@ -47,16 +45,11 @@ export function createNativeWorkLedgerHost(
       journalPath: deps.journalPath,
     };
   };
-  const view = createBoundNativeWorkLedgerView(
-    resolve,
-    // Nothing in this program draws the view: the Work place reads work from the daemon.
-    () => {},
-    {
-      identityFormat: 'credential',
-      intake: TUI_NATIVE_INTAKE_POLICY,
-    },
-    bind,
-  );
+  // The work itself is read from the daemon by the Work place; this is the link for what you ask for and type.
+  const view = createBoundNativeWorkLedgerView(resolve, {
+    identityFormat: 'credential',
+    intake: TUI_NATIVE_INTAKE_POLICY,
+  });
   return { view };
 }
 

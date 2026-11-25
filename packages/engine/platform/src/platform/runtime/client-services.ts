@@ -67,6 +67,8 @@
  *   Pick, so this narrowing renames an idiom rather than inventing one.
  */
 
+import { resolve } from 'node:path';
+import { projectIdentityOf } from '../workspace/project-identity.js';
 import type { ConfigManager } from '../config/manager.js';
 import type { SecretsManager } from '../config/secrets.js';
 import { ServiceRegistry } from '../config/service-registry.js';
@@ -87,6 +89,7 @@ import type { ArchetypeLoader } from '../agents/archetypes.js';
 import { ProcessManager } from '../tools/shared/process-manager.js';
 import { OverflowHandler } from '../tools/shared/overflow.js';
 import { ModeManager } from '../state/mode-manager.js';
+import { memoryProjectOf } from '../state/memory-project.js';
 import { FileUndoManager } from '../state/file-undo.js';
 import { FileStateCache } from '../state/file-cache.js';
 import { FileWatcher } from '../state/file-watcher.js';
@@ -438,12 +441,24 @@ export interface ClientRuntimeServicesOptions {
    */
   readonly userPermissionRuleStore?: UserPermissionRuleAccess | undefined;
   /**
+   * The project this graph's permission decisions are for when its settings
+   * are another's: a session the daemon hosts in a project reads the daemon's
+   * settings and keeps, matches and lists its rules, and resolves its paths,
+   * for its own project (`workingDir`). Default: the settings owner's folder.
+   */
+  readonly permissionProject?: string | undefined;
+  /**
    * The exec posture every worker this graph spawns runs under. A hosted
    * composition passes the same posture it gives its session's own exec tool,
    * otherwise a delegated worker would run on the host while its parent could
    * not. Default: not stated, the terminal behaviour.
    */
   readonly execContainment?: import('../tools/exec/containment.js').ExecContainmentRequirement | undefined;
+  /**
+   * `host`: the settings manager is lent by a host that keeps its own dispatcher in its one hook slot (a daemon's
+   * hosted floor), so this composition leaves the slot alone. Default: this composition takes the slot.
+   */
+  readonly configHookSlot?: 'host' | undefined;
   /**
    * The owner inbox the `query` tool of every agent this composition runs asks
    * in, as spawned agents elsewhere do. Absent: its agents have no `query`.
@@ -566,8 +581,13 @@ function composeClientRuntimeServices(
     },
     hookActivityTracker,
   );
-  configManager.attachHookDispatcher(hookDispatcher);
-  const hookWorkbench = createHookWorkbench({ hookDispatcher, configManager });
+  // A settings manager lent by a host (a daemon's hosted floor) keeps the host's own dispatcher in its one hook slot:
+  // a floor taking it would take the host's settings-change hooks, and leave none when it closes.
+  if (options.configHookSlot !== 'host') disposalScope.registry.add('config hook attachment', configManager.attachHookDispatcher(hookDispatcher));
+  // The hooks file of this composition's own project (a hosted floor's project, not the lent settings' folder): the
+  // one at the project's root, also for a program opened in a subfolder of it (workspace/project-identity.ts).
+  const hookWorkbench = createHookWorkbench({ hookDispatcher, configManager,
+    hooksFilePathResolver: () => resolve(projectIdentityOf(workingDirectory), String(configManager.get('tools.hooksFile'))) });
 
   const workflow = createWorkflowServices({ workingDirectory: shellPaths.workingDirectory });
   disposalScope.registry.add('hook action dispatch', hookDispatcher.setHookActions(workflow.hookActions, featureFlags));
@@ -586,6 +606,7 @@ function composeClientRuntimeServices(
   })();
   const permissionManager = createBrokeredPermissionManager({
     workspaceTrust,
+    ...(options.permissionProject !== undefined ? { project: options.permissionProject } : {}),
     requestApproval: options.requestApproval,
     configManager,
     policyRuntimeState,
@@ -736,7 +757,8 @@ function composeClientRuntimeServices(
   }));
   if (!borrowedSessionOrchestration) disposalScope.registry.add('cross-session task registry', () => sessionOrchestration.dispose());
   disposalScope.registry.add('agent orchestrator', () => agents.agentOrchestrator.dispose());
-  disposalScope.registry.add('hosted agent runs', () => { cancelAllAgentRuns(agents.agentManager); });
+  // The runner is told first: agents ending with the program neither stop nor fail the work they run.
+  disposalScope.registry.add('hosted agent runs', () => { contracts.runner.prepareToClose?.(); cancelAllAgentRuns(agents.agentManager); });
   disposalScope.registry.add('contract runner', () => contracts.dispose());
   void resumeContracts(contracts.runner, workingDirectory);
 
@@ -744,6 +766,8 @@ function composeClientRuntimeServices(
     ? new MemorySpineClient({
         local: options.memory.local,
         ...(options.memory.transport === undefined ? {} : { transport: options.memory.transport }),
+        // A "this project" record this program (or hosted floor) adds is for its own project.
+        project: memoryProjectOf(workingDirectory),
       })
     : null;
 

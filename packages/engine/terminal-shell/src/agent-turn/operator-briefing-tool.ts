@@ -1,15 +1,10 @@
-import { createBrowserGoodVibesPlatform } from '@goodvibes/engine/platform/browser';
-import { getOperatorWorkLedgerProject } from '@goodvibes/engine/platform/platform/workflow/work-ledger/native-execution-client';
-import { createOperatorWorkLedgerReadClient } from '@goodvibes/engine/platform/platform/workflow/work-ledger/operator-read-client';
 import type { Tool } from '@goodvibes/engine/platform/platform/types';
 import type { ToolRegistry } from '@goodvibes/engine/platform/platform/tools';
 import type { ShellPathService } from '@goodvibes/engine/platform/platform/runtime/shell';
-import { requestDeadline, resolveConnectedHost, type ConnectedHostConfigReader as AgentConnectedHostConfigReader } from './connected-host-client.js';
+import type { ConnectedHostConfigReader as AgentConnectedHostConfigReader } from './connected-host-client.js';
 import type { AgentInProcessHost } from './in-process-host.js';
 import { requireOperatorHttpBinding } from './operator-contract-routes.js';
-
-type WorkLedgerReadClient = ReturnType<typeof createOperatorWorkLedgerReadClient>;
-type WorkLedgerReadSnapshot = Awaited<ReturnType<WorkLedgerReadClient['readSnapshot']>>;
+import { runDaemonMethodNested } from './capability-tools.js';
 
 type JsonRecord = Record<string, unknown>;
 
@@ -27,7 +22,7 @@ interface OperatorRouteSuccess {
 interface OperatorRouteFailure {
   readonly ok: false;
   readonly route: OperatorRouteDescriptor;
-  readonly kind: 'auth_required' | 'connected_host_unavailable' | 'connected_host_route_unavailable' | 'connected_host_error';
+  readonly kind: 'connected_host_error';
   readonly error: string;
 }
 
@@ -92,85 +87,22 @@ function readString(value: unknown, key: string): string | null {
   return typeof candidate === 'string' ? candidate : null;
 }
 
-async function readResponseBody(response: Response): Promise<unknown> {
-  const text = await response.text();
-  if (!text.trim()) return {};
-  try {
-    return JSON.parse(text) as unknown;
-  } catch {
-    return text;
-  }
+/** The first line of why a read did not come back, short: the nested call's own words. */
+function shortReason(error: string): string {
+  const line = error.split('\n').find((entry) => entry.trim() !== '') ?? 'no answer';
+  return line.length > 200 ? `${line.slice(0, 199)}…` : line;
 }
 
-function classifyHttpFailure(route: OperatorRouteDescriptor, status: number): OperatorRouteFailure {
-  return {
-    ok: false,
-    route,
-    kind: status === 401 || status === 403
-      ? 'auth_required'
-      : status === 404
-        ? 'connected_host_route_unavailable'
-        : 'connected_host_error',
-    error: `HTTP ${status}`,
-  };
-}
-
-/** One deadline for the whole briefing: every read runs at once, so the slowest one bounds the wait. */
-const BRIEFING_DEADLINE_MS = 5_000;
-
-function unanswered(signal: AbortSignal, deadlineMs: number): string {
-  return signal.reason instanceof DOMException && signal.reason.name === 'TimeoutError'
-    ? `no answer within ${deadlineMs / 1000}s` : 'cancelled';
-}
-
-/** The host a briefing reads and how: the configured connected host over the network, or the daemon hosting this turn. */
-interface BriefingConnection {
-  readonly baseUrl: string;
-  readonly token: string | null;
-  readonly fetch: typeof fetch;
-  /** Why there is no credential, and what to do about it. */
-  readonly unavailable?: string | undefined;
-  readonly next?: readonly string[] | undefined;
-}
-
-function briefingConnection(configManager: AgentConnectedHostConfigReader, homeDirectory: string,
-  inProcess: AgentInProcessHost | undefined): BriefingConnection {
-  // The Agent's one resolution: the dial setting, the host build check, the
-  // cached credential and the reason with its next step when there is none.
-  const resolved = resolveConnectedHost({ configManager, homeDirectory, inProcess });
-  return {
-    baseUrl: resolved.baseUrl, token: resolved.token, fetch: resolved.fetch ?? fetch,
-    unavailable: resolved.unavailable?.reason, next: resolved.unavailable?.next,
-  };
-}
-
-async function fetchOperatorRoute(
-  connection: BriefingConnection,
-  token: string,
-  route: OperatorRouteDescriptor,
-  signal: AbortSignal,
-  deadlineMs: number,
-): Promise<OperatorRouteResult> {
-  try {
-    const response = await connection.fetch(`${connection.baseUrl}${route.path}`, {
-      headers: { authorization: `Bearer ${token}` },
-      signal,
-    });
-    const body = await readResponseBody(response);
-    if (!response.ok) return classifyHttpFailure(route, response.status);
-    // A 200 that is not the route's documented shape (a proxy page, an error envelope) is not data.
-    if (!hasExpectedShape(route.id, body)) {
-      return { ok: false, route, kind: 'connected_host_error', error: 'unexpected response shape' };
-    }
-    return { ok: true, route, body };
-  } catch (error) {
-    return {
-      ok: false,
-      route,
-      kind: 'connected_host_unavailable',
-      error: signal.aborted ? unanswered(signal, deadlineMs) : `request failed: ${error instanceof Error ? error.message : String(error)}`,
-    };
-  }
+/**
+ * One read of the briefing, as a nested `capability_run` call naming its method: judged by the method's own
+ * declarations (a read), with the credential the daemon-method runner holds.
+ */
+async function readRoute(route: OperatorRouteDescriptor, options: Parameters<Tool['execute']>[1]): Promise<OperatorRouteResult> {
+  const answer = await runDaemonMethodNested(route.id, {}, options);
+  if (!answer.ok) return { ok: false, route, kind: 'connected_host_error', error: shortReason(answer.error) };
+  // An answer that is not the route's documented shape (a proxy page, an error envelope) is not data.
+  if (!hasExpectedShape(route.id, answer.body)) return { ok: false, route, kind: 'connected_host_error', error: 'unexpected response shape' };
+  return { ok: true, route, body: answer.body };
 }
 
 /** The minimum each formatter needs, so a shape it cannot read is reported instead of printed as zeros. */
@@ -242,15 +174,8 @@ function formatCapacity(body: unknown): string {
   return `  scheduler: ${slots}; ${waiting} due and waiting for a slot or heartbeat${age}`;
 }
 
-function formatRouteFailureKind(kind: OperatorRouteFailure['kind']): string {
-  if (kind === 'auth_required') return 'authorization required';
-  if (kind === 'connected_host_unavailable') return 'connected host unavailable';
-  if (kind === 'connected_host_route_unavailable') return 'connected host route unavailable';
-  return 'connected host error';
-}
-
 function formatRoute(result: OperatorRouteResult): string {
-  if (!result.ok) return `  ${result.route.id}: unavailable (${result.kind}; ${result.error})`;
+  if (!result.ok) return `  ${result.route.id}: unavailable (${result.error})`;
   if (result.route.id === 'projectPlanning.workPlan.snapshot') return formatWorkPlan(result.body);
   if (result.route.id === 'approvals.list') return formatApprovals(result.body);
   if (result.route.id === 'automation.integration.snapshot') return formatAutomation(result.body);
@@ -280,26 +205,31 @@ function formatBriefing(nativeWork: NativeWorkReading, results: readonly Operato
   ].join('\n');
 }
 
-function formatNativeWork(snapshot: WorkLedgerReadSnapshot): string {
-  const reported = { pending: 0, in_progress: 0, blocked: 0, complete: 0, cancelled: 0 };
-  const verification = { unverified: 0, verified: 0, failed: 0, unavailable: 0, stale: 0 };
-  for (const entry of snapshot.works) {
-    reported[entry.work.reportedState] += 1;
-    verification[entry.verification.state] += 1;
-  }
-  const counts = (values: Record<string, number>) => Object.entries(values).map(([state, count]) => `${state} ${count}`).join('; ');
+const REPORTED_STATES = ['pending', 'in_progress', 'blocked', 'complete', 'cancelled'] as const;
+const VERIFICATION_STATES = ['unverified', 'verified', 'failed', 'unavailable', 'stale'] as const;
+
+/** The work ledger's snapshot as counts: each work's reported state and its verification state. */
+function formatNativeWork(snapshot: unknown): string {
+  const works = readArray(snapshot, 'works');
+  const count = (states: readonly string[], read: (entry: unknown) => string | null) => states
+    .map((state) => `${state} ${works.filter((entry) => read(entry) === state).length}`).join('; ');
   return [
-    `  native work: total ${snapshot.works.length}; revision ${snapshot.revision}`,
-    `  reportedState: ${counts(reported)}`,
-    `  verification.state: ${counts(verification)}`,
+    `  native work: total ${works.length}; revision ${readNumber(snapshot, 'revision') ?? '?'}`,
+    `  reportedState: ${count(REPORTED_STATES, (entry) => readString(readRecord(entry, 'work'), 'reportedState'))}`,
+    `  verification.state: ${count(VERIFICATION_STATES, (entry) => readString(readRecord(entry, 'verification'), 'state'))}`,
   ].join('\n');
 }
 
+/**
+ * `agent_operator_briefing`: what the daemon holds of the owner's work, approvals, automation and capacity, read in
+ * one call. Every read is a nested `capability_run` call naming its method (a read, judged by the method's own
+ * declarations), the one gate a model's daemon call goes through.
+ */
 export function createAgentOperatorBriefingTool(
-  shellPaths: ShellPathService,
-  configManager: AgentConnectedHostConfigReader,
-  deadlineMs: number = BRIEFING_DEADLINE_MS,
-  inProcess?: AgentInProcessHost,
+  _shellPaths: ShellPathService,
+  _configManager: AgentConnectedHostConfigReader,
+  _deadlineMs?: number,
+  _inProcess?: AgentInProcessHost,
 ): Tool {
   return {
     definition: {
@@ -311,59 +241,36 @@ export function createAgentOperatorBriefingTool(
         properties: {},
         additionalProperties: false,
       },
-      sideEffects: ['network'],
+      // Every read reaches only the daemon, through nested capability_run calls.
+      sideEffects: ['state'],
+      category: 'read',
     },
     execute: async (_args, options) => {
       if (options?.signal?.aborted) return { success: false, error: 'briefing_cancelled: the call was cancelled before anything was read' };
-      // The connection is resolved once; every read of this briefing uses it.
-      const connection = briefingConnection(configManager, shellPaths.homeDirectory, inProcess);
-      const token = connection.token;
-      if (!token) {
-        const next = connection.next?.length ? `; next: ${connection.next.join('; ')}` : '';
-        return { success: false, error: `auth_required: ${connection.unavailable ?? 'no connected-host operator token'}${next}` };
-      }
-      const { signal } = requestDeadline(deadlineMs, options?.signal);
-      // No streams, subscriptions, retries, history, or lifecycle calls. The
-      // snapshot reader is disposed when the briefing ends, which aborts its request.
-      const platformClient = createBrowserGoodVibesPlatform({ baseUrl: connection.baseUrl,
-        getAuthToken: () => token, retry: { maxAttempts: 1 },
-        fetch: (input, init) => connection.fetch(input, { ...init, signal: init?.signal ? AbortSignal.any([init.signal, signal]) : signal }) });
-      let reader: WorkLedgerReadClient | undefined;
       const readNative = async (): Promise<NativeWorkReading> => {
-        try {
-          const projectId = await getOperatorWorkLedgerProject(platformClient.operator, { signal });
-          if (signal.aborted) throw signal.reason;
-          reader = createOperatorWorkLedgerReadClient(platformClient.operator, projectId, { requestTimeoutMs: deadlineMs });
-          const snapshot = await Promise.race([reader.readSnapshot(), new Promise<never>((_resolve, reject) => {
-            if (signal.aborted) reject(signal.reason);
-            signal.addEventListener('abort', () => reject(signal.reason), { once: true });
-          })]);
-          return { text: formatNativeWork(snapshot), available: true };
-        } catch (error) {
-          // The host's own error text is not repeated (it can carry request details); its status is.
-          const status = isRecord(error) || error instanceof Error ? (error as { status?: unknown }).status : undefined;
-          const cause = signal.aborted ? unanswered(signal, deadlineMs) : typeof status === 'number' ? `HTTP ${status}` : 'read failed';
-          return { text: `  native work: unavailable (${cause}; no historical fallback)`, available: false };
-        }
+        // This program's project's work (the daemon keeps Work per project, by folder).
+        const folder = _shellPaths.workingDirectory;
+        const project = await runDaemonMethodNested('workLedger.project', { workingDirectory: folder }, options);
+        const projectId = project.ok ? readString(project.body, 'projectId') : null;
+        if (!project.ok || !projectId) return { text: `  native work: unavailable (${project.ok ? 'no project' : shortReason(project.error)}; no historical fallback)`, available: false };
+        const snapshot = await runDaemonMethodNested('workLedger.snapshot', { projectId, workingDirectory: folder }, options);
+        if (!snapshot.ok || !isRecord(snapshot.body)) return { text: `  native work: unavailable (${snapshot.ok ? 'unexpected response shape' : shortReason(snapshot.error)}; no historical fallback)`, available: false };
+        return { text: formatNativeWork(snapshot.body), available: true };
       };
-      try {
-        const routes = briefingRoutes().filter(route => route.id !== 'workLedger.project' && route.id !== 'workLedger.snapshot');
-        const [nativeWork, results] = await Promise.all([
-          readNative(),
-          Promise.all(routes.map(route => fetchOperatorRoute(connection, token, route, signal, deadlineMs))),
-        ]);
-        if (options?.signal?.aborted) return { success: false, error: 'briefing_cancelled: the call was cancelled before the host answered' };
-        return { success: true, output: formatBriefing(nativeWork, results) };
-      } finally {
-        reader?.dispose();
-      }
+      const routes = briefingRoutes().filter((route) => route.id !== 'workLedger.project' && route.id !== 'workLedger.snapshot');
+      const nativeWork = await readNative();
+      const results: OperatorRouteResult[] = [];
+      for (const route of routes) results.push(await readRoute(route, options));
+      if (options?.signal?.aborted) return { success: false, error: 'briefing_cancelled: the call was cancelled before the host answered' };
+      return { success: true, output: formatBriefing(nativeWork, results) };
     },
   };
 }
 
 /**
  * `inProcess`: the daemon hosting this turn, which is then the host the
- * briefing reads (in-process-host.ts); absent in the Agent's own process.
+ * briefing reads (in-process-host.ts); absent in the Agent's own process. The
+ * reads are sent by the nested daemon-method runner, which holds the connection.
  */
 export function registerAgentOperatorBriefingTool(
   registry: ToolRegistry,
@@ -371,5 +278,5 @@ export function registerAgentOperatorBriefingTool(
   configManager: AgentConnectedHostConfigReader,
   inProcess?: AgentInProcessHost,
 ): void {
-  registry.register(createAgentOperatorBriefingTool(shellPaths, configManager, BRIEFING_DEADLINE_MS, inProcess));
+  registry.register(createAgentOperatorBriefingTool(shellPaths, configManager, undefined, inProcess));
 }

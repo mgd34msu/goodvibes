@@ -77,8 +77,8 @@ would be false in the unhelpful direction.
 ## How it gets onto a machine
 
 **The model ships with the installation.** That is a deliberate reversal of the
-first shape of this feature, where provisioning was reachable only by typing
-`/voice wake-setup`. Everything needed to detect the phrase existed and the
+first shape of this feature, where provisioning was reachable only by a typed
+wake setup command. Everything needed to detect the phrase existed and the
 ordinary outcome of installing goodvibes was a wake word that could not start,
 waiting on a download most people would never go and find.
 
@@ -109,7 +109,7 @@ Four rules hold across all three:
    retry converge rather than re-inspecting the same torn file forever.
 4. **Turning the feature on runs the voice setup.** `voice.wake.enabled`
    moving to `true` in the terminal app, the Agent or the web UI runs the same
-   setup as `/voice wake-setup` (the daemon's `voice.setup`, or
+   setup as setting up the wake word (System place, Voice; the daemon's `voice.setup`, or
    `VoiceSetupService.setup` in-process): this surface's row is set, missing
    models are fetched and verified (about 6 MB), and the plan is shown,
    proposing speech-to-text when it is missing. The wake listener itself still

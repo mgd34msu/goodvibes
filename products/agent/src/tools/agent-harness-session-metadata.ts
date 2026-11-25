@@ -130,10 +130,10 @@ function describeSession(
       modelRoutes: {
         inspectSessions: 'sessions action:"list"',
         inspectSession: 'sessions action:"get"',
-        resumeSession: '/session resume <session-id-or-name>',
-        saveSession: '/session save [name]',
-        exportSession: '/session save-saved <session-id> markdown --print',
-        deleteSession: '/session delete <session-id> --yes',
+        resumeSession: 'capability_run id:"session.resume" inputs:{session:"<session-id-or-name>"}',
+        saveSession: 'capability_run id:"session.save" inputs:{name:"[name]"}',
+        exportSession: 'capability_run id:"session.save-saved" inputs:{session:"<session-id>", where:"here"}',
+        deleteSession: 'capability_run id:"session.delete" inputs:{session:"<session-id>"}',
       },
     } : {}),
     ...(options.lookup ? { lookup: options.lookup } : {}),
@@ -191,7 +191,7 @@ function bookmarkSummary(context: CommandContext, includeParameters = false): Re
     ...(includeParameters ? {
       modelRoutes: {
         visibleBookmarkPicker: 'agent_harness mode:"open_ui_surface" surfaceId:"bookmarks" explicitUserRequest:"..."',
-        command: '/session bookmarks',
+        command: 'capability_run id:"session.bookmarks"',
         importIntoKnowledge: 'agent_knowledge_ingest sourceKind:"bookmarks_file"',
       },
     } : {}),

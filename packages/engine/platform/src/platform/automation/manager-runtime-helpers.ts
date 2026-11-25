@@ -49,6 +49,8 @@ export interface CreateAutomationJobInput {
   readonly failure?: Partial<AutomationFailurePolicy> | undefined;
   readonly enabled?: boolean | undefined;
   readonly deleteAfterRun?: boolean | undefined;
+  /** The project folder its runs work in (the folder of the program or caller that made it). */
+  readonly workingDirectory?: string | undefined;
 }
 
 export interface UpdateAutomationJobInput {
@@ -92,6 +94,10 @@ export interface SpawnAutomationTaskInput {
   readonly context?: string | undefined;
   /** The shared session the run answers in, when it has one: the agent is that session's. */
   readonly sessionId?: string | undefined;
+  /** What the run's spending is for (Money, Spending): `schedule "<its name>"`. */
+  readonly spendingSource?: string | undefined;
+  /** The project folder the run works in (its job's). */
+  readonly workingDirectory?: string | undefined;
 }
 
 export function sortJobs(jobs: Iterable<AutomationJob>): AutomationJob[] {
@@ -295,6 +301,7 @@ export function buildDefaultExecution(
     ...(input.allowUnsafeExternalContent !== undefined ? { allowUnsafeExternalContent: input.allowUnsafeExternalContent } : {}),
     ...(input.externalContentSource !== undefined ? { externalContentSource: input.externalContentSource } : {}),
     ...(input.lightContext !== undefined ? { lightContext: input.lightContext } : {}),
+    ...(input.workingDirectory ? { workingDirectory: input.workingDirectory } : {}),
   };
 }
 

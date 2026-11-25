@@ -50,7 +50,7 @@ export interface PaymentsAddressConfig {
 
 export interface PaymentsConfig {
   enabled: boolean;                 // default: false. Master switch
-  confirmEveryPurchase: boolean;    // default: false. Require /payments approve before each purchase
+  confirmEveryPurchase: boolean;    // default: false. Require an approval ahead of time (payments.approve) before each purchase
   defaultCardId: string;            // default: ''. The card a purchase that names none is paid with
   currency: string;                 // default: 'USD'. ISO-4217 the budgets are denominated in
   cvvHandling: CvvHandling;         // default: 'stored'

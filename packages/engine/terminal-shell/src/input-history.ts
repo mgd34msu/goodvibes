@@ -103,39 +103,14 @@ export interface HistoryRedactionRule {
 /**
  * Built-in redaction rules that apply regardless of caller-supplied rules.
  * An executed command's secret arguments are redacted from its own
- * declaration (`secretArgs` on the command registration) before the line
- * gets here. These rules cover a line whose command is not registered on this
- * surface (the Agent has no `/local-auth`, and an unknown command line is
- * still kept so it can be recalled and corrected) and token flags typed
- * anywhere.
+ * declaration (`secretArgs` on the command registration, made from the
+ * secret inputs of its actions) before the line gets here, so every command a
+ * person can still type that takes a secret is masked by what it declares.
+ * The one rule here covers token flags typed anywhere. The commands that once
+ * took a password on the line (`/auth local`, `/local-auth`, `/login service`,
+ * `/auth login`) are gone; their acts take the password on a hidden line.
  */
-const LOCAL_AUTH = String.raw`\/(?:auth\s+local|auth-local|local-auth)`;
 const BUILTIN_REDACTION_RULES: readonly HistoryRedactionRule[] = [
-    {
-        // /auth local add-user <user> <password> [roles]
-        pattern: new RegExp(String.raw`(${LOCAL_AUTH}\s+add-user\s+\S+)\s+(\S+)`, 'i'),
-        replacement: '$1 <redacted>',
-    },
-    {
-        // /auth local rotate-password <user> <password>
-        pattern: new RegExp(String.raw`(${LOCAL_AUTH}\s+rotate-password\s+\S+)\s+(\S+)`, 'i'),
-        replacement: '$1 <redacted>',
-    },
-    {
-        // /auth local revoke-session <session-id-or-token>
-        pattern: new RegExp(String.raw`(${LOCAL_AUTH}\s+revoke-session)\s+\S+`, 'i'),
-        replacement: '$1 <redacted>',
-    },
-    {
-        // /login service <daemon|listener> <baseUrl> <username> <password> [secretKey]
-        pattern: /(\/login\s+service\s+\S+\s+\S+\s+\S+)\s+\S+/i,
-        replacement: '$1 <redacted>',
-    },
-    {
-        // /auth login <daemon|listener> <baseUrl> <username> <password> [secretKey]
-        pattern: /(\/auth\s+login\s+\S+\s+\S+\s+\S+)\s+\S+/i,
-        replacement: '$1 <redacted>',
-    },
     {
         // --token, --bootstrap-token, --operator-token, --worker-client-token, --worker-token (space or = form).
         // The -ref and -env flags name a stored secret and stay readable.

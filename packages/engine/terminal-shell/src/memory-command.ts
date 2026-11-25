@@ -129,7 +129,7 @@ defineList<MemoryCommandContext>({
   name: 'memory.file-proposals',
   async read(ctx, earlier) {
     const services = memorySessionServices(ctx);
-    const dir = services.filesFolder(earlier.dir ?? '');
+    const dir = services.filesFolder(earlier.dir ?? '', ctx.invokedByModel !== true);
     if (!existsSync(dir)) return [];
     const { proposals } = await memoryFileProposals(services, dir);
     return [
@@ -179,18 +179,18 @@ async function capture(ctx: MemoryCommandContext, what: string, which: string): 
 
 /**
  * This program's services for the memory capabilities that run where the conversation is: its turns' record, what
- * it holds, and the memory files of its project (the records read and written through the daemon). The same services
- * serve the person's press and the model's call, so the memory files folder is always one inside the workspace.
+ * it holds, and the memory files of its project (the records read and written through the daemon). The memory files
+ * folder is this project's by default; a folder the person names may be anywhere, one a model names is confined to
+ * the workspace.
  */
 export function memorySessionServices(ctx: MemoryCommandContext): NonNullable<MemorySessionCapabilityServices['memorySession']> {
-  const byModel = true;
   return {
     ...(injectionsOf ? { injections: (agent: string) => injectionsOf!(ctx, agent) } : {}),
     capture: (what, which) => capture(ctx, what, which),
     records: async (limit) => spineOf(ctx).list({ limit }) as Promise<readonly MemoryRecord[]>,
     update: async (id, patch) => spineOf(ctx).update(id, patch as { scope?: MemoryScope; summary?: string; detail?: string; tags?: string[] }),
     delete: async (id) => spineOf(ctx).delete(id),
-    filesFolder: (given) => confinedPath(ctx, given || String(ctx.platform.configManager.get('memory.projection.dir')), byModel),
+    filesFolder: (given, personAsked) => confinedPath(ctx, given || String(ctx.platform.configManager.get('memory.projection.dir')), !personAsked),
   };
 }
 

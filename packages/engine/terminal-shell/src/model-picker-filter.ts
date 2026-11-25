@@ -100,7 +100,8 @@ export function buildFilteredModels(params: FilterModelParams, cache: FilteredMo
     }
     else if (categoryFilter === 'paid') {
         // Only a model the catalog prices: one whose tier is not published yet is not known to be paid.
-        result = result.filter(m => m.tier === 'standard' || m.tier === 'premium');
+        // A model a server on this computer or your own network serves is never paid (modelPriceTier).
+        result = result.filter(m => (m.tier === 'standard' || m.tier === 'premium') && m.local !== true);
     }
     else if (categoryFilter === 'subscription') {
         result = result.filter(m => tierToCategoryFilter(m.tier) === 'subscription');

@@ -35,6 +35,11 @@ export interface CostUsageRecord {
   readonly tool?: string | undefined;
   readonly hook?: string | undefined;
   readonly mcpServer?: string | undefined;
+  /**
+   * What the spending was for, in a person's words: `schedule "Morning brief"`, `work "Add retries"`, `chat "Plans"`,
+   * `shared session "Support"`, `conversation` (a conversation the daemon holds), `voice` (runtime/cost/model-usage.ts).
+   */
+  readonly source?: string | undefined;
   readonly inputTokens: number;
   readonly outputTokens: number;
   readonly cacheReadTokens: number;
@@ -42,7 +47,7 @@ export interface CostUsageRecord {
 }
 
 /** The dimension an attribution query groups by. */
-export type CostDimension = 'agent' | 'tool' | 'hook' | 'mcp' | 'model' | 'provider' | 'session';
+export type CostDimension = 'agent' | 'tool' | 'hook' | 'mcp' | 'model' | 'provider' | 'session' | 'source';
 
 /** Aggregation window. */
 export type CostWindow = '24h' | '7d';
@@ -80,6 +85,18 @@ export interface CostAttributionRow {
   readonly pricedRecordCount: number;
   readonly unpricedRecordCount: number;
   readonly tokens: CostTokenTotals;
+  /**
+   * The models that spent it, each as `provider:model` (the key a price of your own is set under) with whether it has
+   * a price: a row whose model has none is where a price is given (Money, Spending).
+   */
+  readonly models: readonly CostAttributionModel[];
+}
+
+/** One model that contributed to a row. */
+export interface CostAttributionModel {
+  /** `provider:model`, or the model alone when the record named no provider. */
+  readonly key: string;
+  readonly priced: boolean;
 }
 
 /** The full attribution result. */
@@ -132,6 +149,7 @@ const DIMENSION_KEY: Record<CostDimension, (r: CostUsageRecord) => string | unde
   model: (r) => r.model,
   provider: (r) => r.provider,
   session: (r) => r.sessionId,
+  source: (r) => r.source,
 };
 
 const UNATTRIBUTED = '(unattributed)';
@@ -150,10 +168,18 @@ interface AccumulatorState {
   sources: Set<'user' | 'provider' | 'catalog'>;
   /** Oldest ISO date among dated pricing snapshots that contributed. */
   oldestAsOf: string | null;
+  /** The models that contributed (`provider:model`), each with whether it was priced. */
+  models: Map<string, boolean>;
 }
 
 function emptyAccumulator(): AccumulatorState {
-  return { costUsd: 0, hasPriced: false, priced: 0, unpriced: 0, inputTokens: 0, outputTokens: 0, cacheReadTokens: 0, cacheWriteTokens: 0, sources: new Set(), oldestAsOf: null };
+  return { costUsd: 0, hasPriced: false, priced: 0, unpriced: 0, inputTokens: 0, outputTokens: 0, cacheReadTokens: 0, cacheWriteTokens: 0, sources: new Set(), oldestAsOf: null, models: new Map() };
+}
+
+/** The key a price of your own is set under (`pricing.modelPrices`): `provider:model`. */
+function modelKeyOf(rec: CostUsageRecord): string | undefined {
+  if (!rec.model) return undefined;
+  return rec.provider && !rec.model.startsWith(`${rec.provider}:`) ? `${rec.provider}:${rec.model}` : rec.model;
 }
 
 function resolveState(acc: Pick<AccumulatorState, 'priced' | 'unpriced'>): CostAttributionState {
@@ -235,7 +261,9 @@ export class CostAttributionService {
         group = emptyAccumulator();
         groups.set(key, group);
       }
+      const modelKey = modelKeyOf(rec);
       for (const acc of [group, total]) {
+        if (modelKey !== undefined) acc.models.set(modelKey, state === 'priced');
         acc.inputTokens += rec.inputTokens;
         acc.outputTokens += rec.outputTokens;
         acc.cacheReadTokens += rec.cacheReadTokens;
@@ -265,6 +293,7 @@ export class CostAttributionService {
         pricedRecordCount: acc.priced,
         unpricedRecordCount: acc.unpriced,
         tokens: this.tokensOf(acc),
+        models: [...acc.models.entries()].map(([model, priced]) => ({ key: model, priced })),
       }))
       .sort((a, b) => (b.costUsd ?? -1) - (a.costUsd ?? -1) || a.key.localeCompare(b.key));
 

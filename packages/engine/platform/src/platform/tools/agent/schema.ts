@@ -269,7 +269,7 @@ export type AgentInputFieldRule = 'host-stamped' | 'host-only' | 'contract-fence
 export const AGENT_INPUT_FIELD_RULES = {
   authoritativeTask: 'host-stamped',
   captureAuthority: 'host-only', systemPromptAddendum: 'host-only', proposedUnits: 'host-only',
-  replyStyle: 'host-only', workingDirectory: 'host-only', routing: 'host-only', sessionId: 'host-only',
+  replyStyle: 'host-only', workingDirectory: 'host-only', routing: 'host-only', sessionId: 'host-only', spendingSource: 'host-only',
   // The agent whose call this is, set by the host from the turn it runs in (security/turn-boundary.ts
   // callerAgentId): a model can neither name another agent's ceiling nor drop its own.
   parentAgentId: 'host-only',
@@ -367,6 +367,8 @@ export interface AgentInput {
    * What a session's model and transcript are told about agents is scoped to it.
    */
   sessionId?: string | undefined;
+  /** Internal: what this run's spending is for (AgentRecord.spendingSource), stamped by the host that starts it. */
+  spendingSource?: string | undefined;
   successCriteria?: string[] | undefined;
   requiredEvidence?: string[] | undefined;
   writeScope?: string[] | undefined;

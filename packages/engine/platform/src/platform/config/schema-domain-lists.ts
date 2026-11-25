@@ -30,7 +30,7 @@ export interface ListConfigSetting extends Omit<ConfigSetting, 'key' | 'type' | 
 
 /**
  * A notification webhook list member: a `goodvibes://secrets/` reference to
- * the stored URL (the form `/notify add` writes), or an http or https URL, the
+ * the stored URL (the form the `notify.add` capability writes), or an http or https URL, the
  * only kind a webhook can post to. A literal URL is refused at the write
  * (write-admission.ts): the list is declared secret-bearing.
  */
@@ -100,10 +100,10 @@ export const listConfigSettings: readonly ListConfigSetting[] = [
     key: 'notifications.webhookUrls',
     label: 'Webhooks that receive notifications',
     type: 'object',
-    description: 'Webhook URLs that receive the notifications this machine sends (turn ends, approvals waiting, budget alerts). Each URL carries its own key, so it is kept in the secret store and this list holds a goodvibes://secrets/ reference to each; add one with /notify add <url>. Screens show only each URL\'s host. Applies at the next start',
+    description: 'Webhook URLs that receive the notifications this machine sends (turn ends, approvals waiting, budget alerts). Each URL carries its own key, so it is kept in the secret store and this list holds a goodvibes://secrets/ reference to each; add one with "add an address" on the Notifications tab of Mail, calendar and channels. One list, the daemon\'s, for every program on this machine. Screens show only each URL\'s host. Applies at the next start',
     validate: (value) => stringList(value) && value.every(webhookUrl),
     closedShape: true,
-    validationHint: 'list of goodvibes://secrets/ references to stored webhook URLs; add a URL with /notify add <url>',
+    validationHint: 'list of goodvibes://secrets/ references to stored webhook URLs; add a URL with "add an address" on the Notifications tab of Mail, calendar and channels',
   },
   {
     key: 'sandbox.egressAllowlist',

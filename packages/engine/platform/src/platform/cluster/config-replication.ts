@@ -230,6 +230,8 @@ export class ConfigReplicationService {
   private resyncUntil: number | null = null;
   /** True once this copy has merged a member's full document, or matched one's digest, since it was adopted. */
   private synced = false;
+  /** True while the copy in use is the one this machine kept in its records, before an exchange since the start. */
+  private keptFromRecord = false;
   private readonly divergentPeers = new Set<string>();
   private readonly lastExchange = new Map<string, number>();
   private readonly held = new Map<string, HeldChange>();
@@ -249,12 +251,16 @@ export class ConfigReplicationService {
    * joined. What is still to apply here is derived from the document and its
    * applied state (`pendingEffects`), so nothing that was saved is forgotten.
    */
-  adopt(document: ConfigReplicaDocument, held: readonly HeldConfigChange[] = []): void {
+  adopt(document: ConfigReplicaDocument, held: readonly HeldConfigChange[] = [], fromRecord = false): void {
     this.snapshots.clear();
     this.held.clear();
     this.resyncUntil = null; this.divergentPeers.clear(); this.lastExchange.clear();
     this.localDifferences.clear();
     this.synced = false;
+    // The group's settings this machine kept in its records (read back at start): they are the group's settings here
+    // until the next exchange replaces them, so nothing shared is missing between a restart and that exchange.
+    // Changes made here are still held until that exchange (`inStep`), so none overwrites a newer group change.
+    this.keptFromRecord = fromRecord && document.revision > 0;
     this.document = this.publicDocument(document);
     // Changes held before a restart are held again, for the same group only.
     for (const change of held) this.held.set(change.path, { kind: change.kind, secret: change.secret, applyLocal: change.applyLocal });
@@ -293,12 +299,23 @@ export class ConfigReplicationService {
       tombstones: this.document.tombstones.length,
       lastAppliedFrom: this.lastAppliedFrom,
       lastAppliedAt: this.lastAppliedAt,
-      awaitingSync: !this.inStep || this.resyncUntil !== null || this.divergentPeers.size > 0,
+      awaitingSync: !(this.inStep || this.keptFromRecord) || this.resyncUntil !== null || this.divergentPeers.size > 0,
       credentialsMissing: this.missingCredentials().length,
       changesNotApplied: (() => { const pending = this.pendingEffects(); return pending.sets.length + pending.deletes.length; })(),
       localChangesHeld: this.held.size,
       localDifferences: [...this.localDifferences].map(([path, difference]) => ({ path, origin: difference.origin })),
     };
+  }
+
+  /**
+   * The shared settings that differ here, each with this machine's value and the group's, for the owner choosing one
+   * to share or take. Only settings that hold no secret are ever listed (a local difference never is one).
+   */
+  localDifferenceValues(): readonly { readonly path: string; readonly origin: string; readonly here: unknown; readonly group: unknown }[] {
+    const config = this.host.config();
+    return [...this.localDifferences].filter(([path]) => !isSecretBearingConfigKey(path)).map(([path, difference]) => ({
+      path, origin: difference.origin, here: config?.get(path), group: findReplicaEntry(this.document, path)?.value,
+    }));
   }
 
   private publicDocument(document: ConfigReplicaDocument): ConfigReplicaDocument {

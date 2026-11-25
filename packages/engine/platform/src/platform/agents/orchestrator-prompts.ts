@@ -17,6 +17,7 @@ import { homedir } from 'node:os';
 import { presetForMode } from '../gate/presets.js';
 import { knowledgeQueryText } from './turn-knowledge-injection.js';
 import { builtinAgentTemplate } from './builtin-templates.js';
+import { memoryProjectOf } from '../state/memory-project.js';
 
 type PromptContextDeps = {
   readonly workingDirectory: string;
@@ -307,7 +308,9 @@ You are writing a message to a person, most likely read on a phone.
 export async function resolveSpawnKnowledgeInjections(record: AgentRecord, deps?: PromptContextDeps): Promise<void> {
   if (record.knowledgeInjections && record.knowledgeInjections.length > 0) return;
   record.knowledgeInjections = deps?.memoryRegistry
-    ? await selectKnowledgeForTask(deps.memoryRegistry, knowledgeQueryText(record.task), record.writeScope ?? [])
+    // The agent's own project (its folder, else the one it was composed for): never another project's records.
+    ? await selectKnowledgeForTask(deps.memoryRegistry, knowledgeQueryText(record.task), record.writeScope ?? [], undefined,
+      memoryProjectOf(record.workingDirectory ?? deps.workingDirectory))
     : [];
 }
 

@@ -224,6 +224,25 @@ export const DAEMON_OWNED_CONFIG_KEYS: readonly string[] = [
   // The spending alert: one amount for every program on this machine, set in Money (any program, the web UI, a
   // script) and checked by each program at the end of a turn from its copy of the daemon's settings.
   'behavior.budgetAlertUsd',
+  // The one list of webhook addresses notifications go to (capabilities/builtin/notify.ts): the daemon's, read by every
+  // program that sends a notice on its own events. The lists each program kept until 3.5.0 are carried into it once,
+  // every address kept (settings-carry-forward.ts MERGED_DAEMON_LISTS), and left in the program's file for a rollback.
+  'notifications.webhookUrls',
+  // Whether MCP servers run inside the sandbox: one choice for every program on this machine, written by the daemon
+  // (Permissions and safety, any program, the web UI, a script) and followed by each program from its copy of the
+  // daemon's settings, which restarts its running MCP servers under it. The value each program kept until 3.5.0 is
+  // copied into the daemon's settings once and left in the program's file for a rollback (settings-carry-forward.ts).
+  'sandbox.mcpIsolation',
+  // Whether commands run inside the sandbox: one choice for every program on this machine, written by the daemon
+  // (Permissions and safety, Sandbox setting, in any program) and read by each program from its copy of the daemon's
+  // settings at its next start. The stricter of the values the programs kept until 3.5.0 is copied into the daemon's
+  // settings once and left in each program's file for a rollback (settings-carry-forward.ts STRICTER_KEPT_KEYS).
+  'sandbox.enabled',
+  // Your own prices for models (USD per 1M tokens, keyed `provider:model`): one list for every program on this machine
+  // and the daemon's own cost records, set in Money, Spending (any program, the web UI, a script) and read by each
+  // program from its copy of the daemon's settings. The prices each program kept until 3.5.0 are carried into it once,
+  // every model kept (settings-carry-forward.ts MERGED_DAEMON_RECORDS), and left in the program's file for a rollback.
+  'pricing.modelPrices',
 ];
 
 

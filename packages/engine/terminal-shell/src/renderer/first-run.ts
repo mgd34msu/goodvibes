@@ -347,7 +347,7 @@ export function renderDecideStep(screenW: number, screenH: number, view: DecideS
       });
     });
     lines.push([]);
-    wrap([{ text: 'Chosen once; change it any time in /settings (When GoodVibes asks).', tone: 'dim' }]);
+    wrap([{ text: 'Change it any time here: System, Setup, Who decides.', tone: 'dim' }]);
     if (view.error) { lines.push([]); lines.push(...wrapSegments([{ text: '✕', tone: 'bad' }, { text: ` ${view.error}` }], inner)); }
     hints = [['↑↓', 'move'], ['⏎', 'choose'], ['esc', 'later']];
   } else {

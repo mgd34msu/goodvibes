@@ -1,17 +1,28 @@
 import { captureStrictJudgmentJson } from '@goodvibes/engine/platform/platform/gate';
 import { currentTurn } from '@goodvibes/engine/platform/platform/security';
+import { programCallHeaders } from '@goodvibes/engine/platform/platform/runtime/client';
 import { isServiceMethodId, serviceExpectedOutcome, serviceLifecycleDecision, serviceOutcomeCertified, serviceReceiptEvidence } from './service-lifecycle.js';
 import type { Tool } from '@goodvibes/engine/platform/platform/types';
 import { assertCurrentToolInvocation, type ToolRegistry } from '@goodvibes/engine/platform/platform/tools';
 import { logger, redactStructuredDataAsync, type StructuredRedactionOptions } from '@goodvibes/engine/platform/platform/utils';
 import { isDeepStrictEqual } from 'node:util';
 import type { ShellPathService } from '@goodvibes/engine/platform/platform/runtime/shell';
-import { connectedHostRequestDeadline, type ConnectedHostConfigReader as AgentConnectedHostConfigReader, type RequestDeadline } from './connected-host-client.js';
+import { runAnswersEveryQuestion, runHoldsForOwner } from '@goodvibes/engine/platform/platform/permissions';
+import { connectedHostRequestDeadline, DECIDED_IN_RUN_HEADER, type ConnectedHostConfigReader as AgentConnectedHostConfigReader, type RequestDeadline } from './connected-host-client.js';
 import type { AgentInProcessHost } from './in-process-host.js';
 import { assertOperatorEffect, captureOperatorConnection } from './operator-connection-owner.js';
 import { forgetDelegatedCredential } from './agent-delegation-credential.js';
 import { agentCallConnection, agentCallCredential } from './agent-call-credential.js';
 import { NATIVELY_ADMITTED_METHOD_IDS } from '@goodvibes/engine/platform/platform/control-plane';
+import { movedCapabilityEntries } from '@goodvibes/engine/platform/platform/capabilities';
+
+/**
+ * The daemon methods a capability that only tightens a protection runs through (its definition's `tightens: true`,
+ * reached by capability_run through this tool): such a call is never refused or asked about, in any folder or mode.
+ */
+function tighteningMethodIds(): readonly string[] {
+  return movedCapabilityEntries().flatMap((entry) => (entry.tightens === true && entry.method ? [entry.method.id] : []));
+}
 import { publishOperatorMethodReceipt } from './operator-method-receipt.js';
 import { appendOperatorQuery, operatorMethodIsReadOnly, operatorOwnerDecisions, ownerOnlyOperatorMethodIds, READ_ONLY_HTTP_METHODS, resolveOperatorContractMethod, substituteOperatorPath } from './operator-contract-routes.js';
 import { createOperatorInputProjector, operatorExecutionConnection, operatorExecutionWireInput, operatorExecutionRequestPolicy, operatorMethodIsOutward, operatorMethodIsOwnerOnly } from './operator-input-projector.js';
@@ -385,6 +396,8 @@ export function createAgentOperatorMethodTool(
       hostDecides: { field: 'methodId', values: [...NATIVELY_ADMITTED_METHOD_IDS].filter((methodId) => agentCallCredential(methodId, 'agent') === 'delegated') },
       // Irreversible methods, contract changes and sends to a recipient nobody allowed are the owner's to decide.
       ownerDecisions: operatorOwnerDecisions('methodId', 'input'),
+      // A method reached only to tighten a protection (an "always allow" grant revoked) is never refused or asked about.
+      tightens: { field: 'methodId', values: tighteningMethodIds() },
     },
     execute: async (rawArgs, options) => {
       let args: OperatorMethodToolArgs;
@@ -410,12 +423,18 @@ export function createAgentOperatorMethodTool(
       if (operatorMethodIsOwnerOnly(method.id)) {
         return {
           success: false,
-          error: `operator method '${method.id}' is the owner's own act (answering a purchase window, typing a card security code, recording what the merchant history shows, or approving a purchase in advance). Nothing was sent. Ask the owner: /payments pending answers windows and codes, "Approve one purchase ahead of time" in the Money place approves a purchase in advance, and the web UI Purchases panel does both. payments.purchase.status and payments.purchases.list can be read here to tell him where it stands; payments.checkout.begin and payments.purchase.cancel can be called here. Standing authorisations for scheduled purchases are his to add with "Allow a repeat purchase" in the Money place; payments.standing.list can be read here, and a scheduled begin names one as standingId.`,
+          error: `operator method '${method.id}' is the owner's own act (answering a purchase window, typing a card security code, recording what the merchant history shows, or approving a purchase in advance). Nothing was sent. Ask the owner: Waiting for you, under Purchases, answers windows and codes and records what the merchant history shows, "Approve one purchase ahead of time" in the Money place approves a purchase in advance, and the web UI Purchases panel does both. payments.purchase.status and payments.purchases.list can be read here to tell him where it stands; payments.checkout.begin and payments.purchase.cancel can be called here. Standing authorisations for scheduled purchases are his to add with "Allow a repeat purchase" in the Money place; payments.standing.list can be read here, and a scheduled begin names one as standingId.`,
         };
       }
       // A capability's risk is read from the capability itself, by capability_run; through this tool it would not be.
       if (method.id.startsWith('capabilities.')) {
         return { success: false, error: `operator method '${method.id}' is reached through capability_run, which reads each capability's own risk; call capability_run with the capability's id instead. Nothing was sent.` };
+      }
+      // A question's asker is whoever posted it: a model posting one names no session or agent as the asker (the owner's
+      // answer would be delivered into a conversation that did not ask). Its own questions go through the query tool.
+      const postedMetadata = method.id === 'inbox.post' && isRecord(args.input) && isRecord(args.input['metadata']) ? args.input['metadata'] : undefined;
+      if (postedMetadata && ['answerSession', 'answerAgent', 'askerSessionFile', 'askerHost'].some((key) => postedMetadata[key] !== undefined)) {
+        return { success: false, error: 'inbox.post with answerSession, answerAgent, askerSessionFile or askerHost is refused: a question names its asker by who posts it, so a model cannot name another conversation as the one asking. Nothing was sent. Ask the owner with the query tool; its answer comes back into this conversation.' };
       }
       if (PROFILE_TOOL_ONLY_METHOD_IDS.has(method.id)) {
         return {
@@ -507,17 +526,27 @@ export function createAgentOperatorMethodTool(
         // The owner-request signal for a purchase rides only on a call whose admission was just confirmed here.
         assertCurrent();
         stage = 'sending';
-        // A host that takes the request and never answers ends the call at the deadline, not the turn.
-        bounded = connectedHostRequestDeadline(readOnlyHttp, options?.signal);
+        // A method the daemon admits natively may wait there for the owner's answer to its question: no time limit
+        // decides a permission question, so only the turn ends that wait. Any other request a host takes and never
+        // answers ends at the deadline, not the turn.
+        const nativelyAdmitted = NATIVELY_ADMITTED_METHOD_IDS.has(methodSnapshot.id);
+        bounded = nativelyAdmitted ? undefined : connectedHostRequestDeadline(readOnlyHttp, options?.signal);
+        // A run whose script answers every question decided this call here (its gate put it to the script): it is sent
+        // saying so, and the daemon does not put it to the owner a second time (permissions/run-answerer.ts).
+        // A run nobody answers decided it here too (what the owner must decide was held for him before it got here).
+        const decidedHere = nativelyAdmitted && (runAnswersEveryQuestion() || runHoldsForOwner());
         // The connection's own transport: the network, or the daemon's request path in a turn it hosts.
         const response = await (connection.fetch ?? fetch)(`${connection.baseUrl}${requestPath}`, {
-          signal: bounded.signal,
+          ...(bounded ? { signal: bounded.signal } : options?.signal ? { signal: options.signal } : {}),
           redirect: 'error',
           method: route.httpMethod,
           headers: {
             authorization: `Bearer ${bearer}`,
+            // The program's call context (its project and conversation), when a terminal program set one (call-context.ts).
+            ...programCallHeaders(),
             ...(READ_ONLY_HTTP_METHODS.has(route.httpMethod) ? {} : { 'content-type': 'application/json' }),
             ...(ownerRequest ? { 'x-goodvibes-explicit-user-request': 'true' } : {}),
+            ...(decidedHere ? { [DECIDED_IN_RUN_HEADER]: 'true' } : {}),
           },
           ...(READ_ONLY_HTTP_METHODS.has(route.httpMethod) ? {} : { body: JSON.stringify(route.invokeEndpoint ? { body: wirePayload } : wirePayload) }),
         });

@@ -193,6 +193,11 @@ export interface DaemonRuntimeRouteContext {
   readonly requireAdmin: (req: Request) => Response | null;
   /** Whether the caller may read a session (a hosted one: its owners and admins). Absent: every session the route admits. */
   readonly mayReadSession?: SessionReadPolicy | undefined;
+  /**
+   * The principal the request was authenticated as (its id), set by the listener. A session is kept as registered by
+   * the principal whose `sessions.register` made it; only that principal may name it as a question's asker.
+   */
+  readonly requestPrincipalId?: ((req: Request) => string | undefined) | undefined;
   readonly sessionBroker: {
     start(): Promise<void>;
     submitMessage(input: {
@@ -257,6 +262,8 @@ export interface DaemonRuntimeRouteContext {
       title?: string | undefined;
       participant: SessionParticipantInput;
       reopen?: boolean | undefined;
+      /** The principal registering it; kept on a session this registration makes, never changed after. */
+      registeredBy?: string | undefined;
     }): Promise<{
       record: { id: string };
       reopened: boolean;
@@ -358,6 +365,12 @@ export interface DaemonRuntimeRouteContext {
   } | null;
   /** Open a shared-session SSE stream for turn and agent events. */
   readonly openSessionEventStream: (req: Request, sessionId: string) => Response;
+  /**
+   * Whether the owner typed this message into his own program: the request was authenticated as the owner with a
+   * person's credential (this machine, his paired device or his login), names itself a terminal app or the Agent, and
+   * claims a person asked for it. Stamped on the input (OWNER_TYPED_METADATA_KEY); absent means never.
+   */
+  readonly ownerTypedAtProgram?: ((req: Request) => boolean) | undefined;
 }
 
 export type DaemonRuntimeRouteHandlerMap = DaemonRuntimeRouteHandlers;

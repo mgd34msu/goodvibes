@@ -26,6 +26,7 @@ import { daemonCapability, type DaemonCapabilityServices } from '../../capabilit
 import type { CapabilityCatalog } from '../../capabilities/catalog.js';
 import { findCapabilities } from '../../capabilities/find.js';
 import { checkCapabilityInputs } from '../../capabilities/validate.js';
+import { pathInputsRefusal } from '../../capabilities/path-inputs.js';
 import { methodBodyOf } from '../../capabilities/operator-input.js';
 import { CapabilityRefusal } from '../../capabilities/types.js';
 import type { Tool } from '../../types/tools.js';
@@ -51,6 +52,16 @@ export interface DaemonCapabilityToolHost {
 function message(error: unknown): string {
   if (error instanceof CapabilityRefusal) return error.next ? `${error.message} ${error.next}.` : error.message;
   return error instanceof Error ? error.message : String(error);
+}
+
+/**
+ * The one line a call naming a capability method itself is refused with: a capability is run by its own id, and a
+ * capability call is never wrapped in a method call, where it would be judged as that method instead of as itself.
+ */
+function capabilityMethodRefusal(id: string): string {
+  return id === 'capabilities.run' || id === 'capabilities.find'
+    ? `${id} is not run through capability_run: a capability is run by its own id (capability_find gives it), and a capability call is never wrapped in a method call to be judged another way.`
+    : `${id} is what this tool calls: name the capability itself (capability_find gives its id).`;
 }
 
 /** Who a call of this turn acts as: the model, for the turn's owner. */
@@ -98,12 +109,48 @@ export function createDaemonCapabilityTools(host: DaemonCapabilityToolHost, fall
         .map((method) => [method.id, method.recipients!.map((path) => `inputs.${path}`)])),
     });
   };
+  // The bodies an action's preview read before the gate, each taken once by its call's run (as the daemon's own route).
+  const previews = new Map<string, Record<string, unknown>>();
+  const previewKey = (id: string, values: Readonly<Record<string, string>>): string => `${id}\u0000${JSON.stringify(Object.entries(values).sort(([a], [b]) => a.localeCompare(b)))}`;
   const run: Tool = {
     definition: definitionFor(decidedBy),
+    // What refuses the call without the owner (its id, its inputs, its preview) is read before this turn's gate
+    // decides it, in the order capabilities.run reads it for an outside caller: nobody is asked about a call that fails.
+    async refuseBeforeGate(args, { signal }) {
+      const id = typeof args.id === 'string' ? args.id.trim() : '';
+      if (!id) return 'id is required: a capability id from capability_find, or a daemon method id.';
+      if (id.startsWith('capabilities.')) return capabilityMethodRefusal(id);
+      const entry = decidedBy.get(id);
+      if (!entry) return undefined;
+      const secret = entry.inputs.filter((input) => input.kind === 'secret');
+      const given: Record<string, unknown> = { ...(args.inputs !== null && typeof args.inputs === 'object' && !Array.isArray(args.inputs) ? args.inputs as Record<string, unknown> : {}) };
+      for (const input of secret) if (input.required === true && (typeof given[input.id] !== 'string' || given[input.id] === '')) given[input.id] = '(typed by the person)';
+      const checked = checkCapabilityInputs(entry, given);
+      if (!checked.ok) return checked.problem;
+      // Its preview check (a file outside the project, named by the model): refused before this turn's gate asks anyone.
+      // Every file named by path is inside the project first (capabilities/path-inputs.ts).
+      const turnCaller = { workingDirectory: host.workingDirectory(), personAsked: false };
+      const previewRefusal = pathInputsRefusal(entry, checked.values, turnCaller)
+        ?? (entry.home === 'daemon' ? daemonCapability(entry.id)?.check?.(checked.values, turnCaller) : undefined);
+      if (previewRefusal) return message(previewRefusal);
+      if (entry.home !== 'daemon' || daemonCapability(entry.id) || !entry.method?.preview || secret.length > 0) return undefined;
+      const method = entry.method;
+      try {
+        const body = await methodBodyOf(method, checked.values, (previewId, fields) =>
+          host.methods.invoke(previewId, { body: fields, ...(signal ? { signal } : {}), context: { actor: turnAgent(), clientKind: 'daemon-turn', principalId: turnAgent().id } }),
+          // What it makes belongs to this turn's project.
+          host.workingDirectory());
+        previews.set(previewKey(entry.id, checked.values), body);
+        while (previews.size > 16) previews.delete(previews.keys().next().value!);
+      } catch (error) {
+        return message(error);
+      }
+      return undefined;
+    },
     async execute(args, options) {
       const id = typeof args.id === 'string' ? args.id.trim() : '';
       if (!id) return { success: false, error: 'id is required: a capability id from capability_find, or a daemon method id.' };
-      if (id.startsWith('capabilities.')) return { success: false, error: `${id} is what this tool calls: name the capability itself (capability_find gives its id).` };
+      if (id.startsWith('capabilities.')) return { success: false, error: capabilityMethodRefusal(id) };
       const actor = turnAgent();
       // `capabilities.run` is told the call was decided here (the Agent's kind); a method is called as the owner's model
       // without it, so a method the daemon admits natively for the Agent's own credential is not decided a second time:
@@ -135,7 +182,10 @@ export function createDaemonCapabilityTools(host: DaemonCapabilityToolHost, fall
       const checked = checkCapabilityInputs(entry, inputs);
       if (!checked.ok) return { success: false, error: checked.problem };
       if (entry.home === 'session') return { success: false, error: `${entry.id} acts on a terminal program's open conversation; this turn is the daemon's own and has none.` };
-      if (daemonCapability(entry.id)) {
+      // A moved capability, or one whose method is served over the daemon's HTTP route only (no handler to call here):
+      // through the daemon's own `capabilities.run`, which reaches that route with the daemon's own credential for this
+      // turn's actor (daemon/capability-wiring.ts `invokeMethod`, `daemonTurn`), as a terminal program's model reaches it.
+      if (daemonCapability(entry.id) || (entry.method !== undefined && !host.methods.hasHandler(entry.method.id))) {
         try {
           // Its effects are admitted there for this actor; this call was decided here already.
           const answer = await host.methods.invoke(CAPABILITY_RUN_METHOD_ID, {
@@ -149,9 +199,12 @@ export function createDaemonCapabilityTools(host: DaemonCapabilityToolHost, fall
       }
       if (entry.method) {
         const method = entry.method;
-        // The preview (a read) first when the action has one: its answer is the method's body.
-        return callMethod(method.id, () => methodBodyOf(method, checked.values, (previewId, fields) =>
-          host.methods.invoke(previewId, { body: fields, ...(options?.signal ? { signal: options.signal } : {}), context: methodContext })));
+        // The preview (a read) first when the action has one: its answer is the method's body, as read before the gate.
+        const key = previewKey(entry.id, checked.values);
+        const read = previews.get(key);
+        previews.delete(key);
+        return callMethod(method.id, read ? read : () => methodBodyOf(method, checked.values, (previewId, fields) =>
+          host.methods.invoke(previewId, { body: fields, ...(options?.signal ? { signal: options.signal } : {}), context: methodContext }), host.workingDirectory()));
       }
       return { success: false, error: `${entry.id} (/${entry.command}${entry.word ? ` ${entry.word}` : ''}) runs only inside a terminal program for now.` };
     },
@@ -163,7 +216,7 @@ export function createDaemonCapabilityTools(host: DaemonCapabilityToolHost, fall
       run.definition = definitionFor(catalog);
     }).catch(() => { /* the moved capabilities and the daemon methods stay what this tool decides and runs */ });
   }
-  const runProjection = createSecretInputProjector((capabilityId) => (decidedBy.get(capabilityId)?.inputs ?? [])
-    .filter((input) => input.kind === 'secret').map((input) => input.id));
+  const runProjection = createSecretInputProjector((capabilityId, given) => (decidedBy.get(capabilityId)?.inputs ?? [])
+    .filter((input) => input.kind === 'secret' && input.plainWhen?.(given) !== true).map((input) => input.id));
   return { tools: [find, run], runProjection };
 }

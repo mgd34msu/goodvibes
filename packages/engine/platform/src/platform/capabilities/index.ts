@@ -13,6 +13,7 @@ export {
   type CapabilityEntry, type CapabilityEntryHome, type CatalogActionSource, type CatalogCommandSource,
 } from './catalog.js';
 export { checkCapabilityInputs, type CapabilityInputCheck } from './validate.js';
+export { pathInputsRefusal } from './path-inputs.js';
 export { capabilityOutcomeText, fillSentence, hiddenSecret, lastsWords, shownValues } from './outcome.js';
 export { methodBodyOf, operatorInputFromValues, type CapabilityMethod } from './operator-input.js';
 export {
@@ -20,9 +21,9 @@ export {
   type CapabilityFindResult, type CapabilityGroupReading, type FoundCapability,
 } from './find.js';
 export * from './builtin/index.js';
-export { capabilityAskWords, presentCapabilityRunAsks } from './ask-words.js';
+export { capabilityAskWords, nameCapabilityValuesWith, presentCapabilityRunAsks, type CapabilityValueTitle } from './ask-words.js';
 export { daemonCapabilityCatalog, loadedDaemonCapabilityCatalog, preloadDaemonCapabilityCatalog } from './daemon-catalog.js';
-export { createDaemonCapabilityServices, type DaemonCapabilityServiceSources } from './daemon-services.js';
+export { createDaemonCapabilityServices, traceProjectHookRuns, type DaemonCapabilityServiceSources } from './daemon-services.js';
 export {
   CAPABILITY_FIND_METHOD_ID, CAPABILITY_METHOD_IDS, CAPABILITY_RUN_METHOD_ID, builtinGatewayCapabilityMethodDescriptors,
 } from '../control-plane/method-catalog-capabilities.js';

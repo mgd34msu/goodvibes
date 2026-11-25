@@ -9,6 +9,7 @@
  * A stream that cannot be opened or ends quietly stops: the screen still reads the
  * list when it opens. Nothing here retries or waits on a clock.
  */
+import { resolve } from 'node:path';
 import { openRawServerSentEventStream } from '../transports/sse-stream.js';
 import { buildUrl } from '../transports/transport-paths.js';
 import { logger } from '../../utils/logger.js';
@@ -22,14 +23,42 @@ export interface ListChangeSubscriberOptions {
   readonly baseUrl: string | (() => string);
   readonly getAuthToken?: (() => string | null | Promise<string | null>) | undefined;
   readonly fetchImpl?: typeof fetch | undefined;
+  /**
+   * The folder this screen's program works in: a LIST_CHANGED about another project's list (one that names its
+   * project) is not a change for this screen. Absent: every notice counts.
+   */
+  readonly workingDirectory?: string | undefined;
+}
+
+/** Whether a notice that names a project is about another project than the screen's (so the screen ignores it). */
+function aboutAnotherProject(record: { readonly project?: string | undefined } | undefined, workingDirectory: string | undefined): boolean {
+  return record?.project !== undefined && workingDirectory !== undefined && resolve(workingDirectory) !== record.project;
 }
 
 /** The `list` a frame's LIST_CHANGED names (the envelope or its payload), or undefined for any other frame. */
 export function listChangeOf(frame: unknown): string | undefined {
-  const outer = (typeof frame === 'object' && frame !== null ? frame : {}) as { type?: unknown; list?: unknown; payload?: unknown };
-  const inner = (typeof outer.payload === 'object' && outer.payload !== null ? outer.payload : {}) as { type?: unknown; list?: unknown };
+  return listChangeRecordOf(frame)?.list;
+}
+
+/** A frame's runtime event type (`LIST_CHANGED`, `NATIVE_REQUEST_CHANGED`: the envelope's or its payload's), if it has one. */
+export function eventTypeOf(frame: unknown): string | undefined {
+  const outer = (typeof frame === 'object' && frame !== null ? frame : {}) as { type?: unknown; payload?: unknown };
+  const inner = (typeof outer.payload === 'object' && outer.payload !== null ? outer.payload : {}) as { type?: unknown };
+  return typeof inner.type === 'string' ? inner.type : typeof outer.type === 'string' ? outer.type : undefined;
+}
+
+/** The list a frame's LIST_CHANGED names and the record it names (`id`: for `capabilities`, the capability that ran). */
+export function listChangeRecordOf(frame: unknown): { readonly list: string; readonly id?: string | undefined; readonly project?: string | undefined; readonly sessionId?: string | undefined } | undefined {
+  const outer = (typeof frame === 'object' && frame !== null ? frame : {}) as { type?: unknown; list?: unknown; id?: unknown; project?: unknown; sessionId?: unknown; payload?: unknown };
+  const inner = (typeof outer.payload === 'object' && outer.payload !== null ? outer.payload : {}) as { type?: unknown; list?: unknown; id?: unknown; project?: unknown; sessionId?: unknown };
   for (const event of [inner, outer]) {
-    if (event.type === 'LIST_CHANGED' && typeof event.list === 'string') return event.list;
+    if (event.type === 'LIST_CHANGED' && typeof event.list === 'string') {
+      return {
+        list: event.list, ...(typeof event.id === 'string' ? { id: event.id } : {}),
+        ...(typeof event.project === 'string' ? { project: event.project } : {}),
+        ...(typeof event.sessionId === 'string' ? { sessionId: event.sessionId } : {}),
+      };
+    }
   }
   return undefined;
 }
@@ -44,6 +73,16 @@ export interface DaemonFrameInterest {
   readonly lists?: readonly string[] | undefined;
 }
 
+/** The frame that counted: its wire event, and the LIST_CHANGED list it names when it is one. */
+export interface DaemonFrameChange {
+  readonly event: string;
+  readonly list?: string | undefined;
+  /** The runtime event's own type, when the frame carries one (`NATIVE_REQUEST_CHANGED`). */
+  readonly type?: string | undefined;
+  /** The record the LIST_CHANGED names: for `capabilities`, the id of the capability that ran. */
+  readonly id?: string | undefined;
+}
+
 /** How a followed stream stands, for a screen that says why its list may be old. */
 export type DaemonFrameStreamState =
   | { readonly kind: 'open' }
@@ -51,9 +90,11 @@ export type DaemonFrameStreamState =
 
 /**
  * Follow the daemon's event stream for what `interest` names: `onChange` is
- * called for each frame that counts, and once each time the stream opens
- * again after it was lost (frames may have been missed in between, so the
- * screen reads its list again). `onState` hears the stream open and get lost.
+ * called for each frame that counts, with that frame (so a screen of several
+ * lists reads only those that follow it), and once with nothing each time the
+ * stream opens again after it was lost (frames may have been missed in
+ * between, so the screen reads every list again). `onState` hears the stream
+ * open and get lost.
  * A stream that cannot be opened at all reports that once and stops; the
  * screen still reads its list when it opens. Nothing here waits on a clock:
  * reconnecting is the transport's own.
@@ -61,7 +102,7 @@ export type DaemonFrameStreamState =
 export function subscribeDaemonEventFrames(
   options: ListChangeSubscriberOptions,
   interest: DaemonFrameInterest,
-  onChange: () => void,
+  onChange: (change?: DaemonFrameChange) => void,
   onState?: ((state: DaemonFrameStreamState) => void) | undefined,
 ): () => void {
   let closed = false;
@@ -71,9 +112,9 @@ export function subscribeDaemonEventFrames(
   if (typeof fetchImpl !== 'function') return () => { closed = true; };
   const events = new Set(interest.events);
   const lists = new Set(interest.lists ?? []);
-  const changed = (): void => {
+  const changed = (change?: DaemonFrameChange): void => {
     if (closed) return;
-    try { onChange(); } catch (error) { logger.debug('[daemon frames] a subscriber threw', { error: summarizeError(error) }); }
+    try { onChange(change); } catch (error) { logger.debug('[daemon frames] a subscriber threw', { error: summarizeError(error) }); }
   };
   const state = (next: DaemonFrameStreamState): void => {
     if (closed) return;
@@ -90,12 +131,16 @@ export function subscribeDaemonEventFrames(
         {
           onEvent: ({ name: eventName, payload }) => {
             if (closed) return;
-            if (eventName === LIST_CHANGE_WIRE_EVENT && lists.size > 0) {
-              const list = listChangeOf(payload);
-              if (list !== undefined && lists.has(list)) changed();
-              if (!events.has(eventName)) return;
+            // One call per frame, naming it: a LIST_CHANGED for a followed list, or a followed wire event.
+            const record = eventName === LIST_CHANGE_WIRE_EVENT ? listChangeRecordOf(payload) : undefined;
+            // Another project's list changed: nothing this screen shows.
+            if (aboutAnotherProject(record, options.workingDirectory)) return;
+            const list = record?.list;
+            // A runtime event's own type ("NATIVE_REQUEST_CHANGED") counts too, so a screen can name one event of a busy domain.
+            const type = eventTypeOf(payload);
+            if (events.has(eventName) || (type !== undefined && events.has(type)) || (list !== undefined && lists.has(list))) {
+              changed({ event: eventName, ...(type !== undefined ? { type } : {}), ...(list !== undefined ? { list } : {}), ...(record?.id !== undefined ? { id: record.id } : {}) });
             }
-            if (events.has(eventName)) changed();
           },
           onReady: () => {
             state({ kind: 'open' });
@@ -152,7 +197,9 @@ export function subscribeDaemonListChanges(
         {
           onEvent: ({ name: eventName, payload }) => {
             if (closed || eventName !== LIST_CHANGE_WIRE_EVENT) return;
-            const list = listChangeOf(payload);
+            const record = listChangeRecordOf(payload);
+            if (aboutAnotherProject(record, options.workingDirectory)) return;
+            const list = record?.list;
             if (list === undefined || !wanted.has(list)) return;
             try {
               onChange(list);

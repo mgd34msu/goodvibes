@@ -21,8 +21,9 @@
  *
  * Cost: a few stat calls per boundary built.
  */
-import { existsSync, statSync } from 'node:fs';
+import { existsSync, lstatSync, readdirSync, statSync } from 'node:fs';
 import { delimiter, isAbsolute, join, resolve, sep } from 'node:path';
+import { resolveGoodVibesDaemonHome, resolveGoodVibesHome } from '../../config/goodvibes-home.js';
 
 /** Paths under home the boundary never shows, relative to home. */
 const HOME_SECRETS: readonly string[] = [
@@ -164,6 +165,54 @@ export function sandboxHomeBindArgs(view: SandboxHomeView): string[] {
 /** The bubblewrap arguments that cover the secrets inside the shown folders again; emitted after every other bind. */
 export function sandboxHomeCoverArgs(view: SandboxHomeView): string[] {
   return view.hidden.flatMap((secret) => secret.kind === 'dir' ? ['--tmpfs', secret.path] : ['--ro-bind', '/dev/null', secret.path]);
+}
+
+/**
+ * What to cover of `dir` so nothing in it shows, except the folders a boundary must keep (`keep`: the workspace, the
+ * working directory, the writable extras), which may lie inside it (a worktree kept under the GoodVibes state): the
+ * whole folder when none is inside it, else every entry not on the way to one, entry by entry.
+ */
+function coverAround(dir: string, keep: readonly string[], out: { path: string; kind: 'file' | 'dir' }[]): void {
+  const inside = keep.filter((path) => within(path, dir));
+  if (inside.length === 0) {
+    out.push({ path: dir, kind: 'dir' });
+    return;
+  }
+  if (inside.some((path) => path === dir)) return;
+  let entries: string[];
+  try { entries = readdirSync(dir); } catch { return; }
+  for (const name of entries) {
+    const child = join(dir, name);
+    let isDir = false;
+    try { isDir = lstatSync(child).isDirectory(); } catch { continue; }
+    if (isDir) coverAround(child, keep, out);
+    else out.push({ path: child, kind: 'file' });
+  }
+}
+
+/**
+ * The GoodVibes state folder and the daemon's home (its operator token, pairing and secret stores), wherever they are:
+ * `GOODVIBES_HOME` and `GOODVIBES_DAEMON_HOME` may put them outside $HOME (a service install), inside the workspace,
+ * or inside a folder a boundary binds, where the home mask does not reach. Covered after every other bind in every
+ * boundary, whatever else it shows. Absent ones are skipped.
+ */
+export function goodVibesStateCovers(keep: readonly string[], env: NodeJS.ProcessEnv = process.env): readonly { readonly path: string; readonly kind: 'file' | 'dir' }[] {
+  const root = resolveGoodVibesHome(env);
+  const roots = [...new Set([join(root, '.goodvibes'), resolveGoodVibesDaemonHome(root, env)].map((path) => resolve(path)))];
+  const kept = keep.map((path) => resolve(path));
+  const out: { path: string; kind: 'file' | 'dir' }[] = [];
+  for (const dir of roots) {
+    if (!existsSync(dir)) continue;
+    // A folder already covered by another root's cover needs none of its own.
+    if (out.some((covered) => covered.kind === 'dir' && within(dir, covered.path))) continue;
+    coverAround(dir, kept, out);
+  }
+  return out;
+}
+
+/** The bubblewrap arguments of those covers; emitted after every other bind. */
+export function goodVibesStateCoverArgs(keep: readonly string[], env: NodeJS.ProcessEnv = process.env): string[] {
+  return goodVibesStateCovers(keep, env).flatMap((secret) => secret.kind === 'dir' ? ['--tmpfs', secret.path] : ['--ro-bind', '/dev/null', secret.path]);
 }
 
 const MISSING = /no such file|not found|cannot access|enoent|does not exist|could not (?:open|read|find)/i;

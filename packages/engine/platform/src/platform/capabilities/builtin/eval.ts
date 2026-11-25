@@ -74,8 +74,9 @@ export const EVAL_LIST = evalCapability({
 });
 
 export const EVAL_RUN = evalCapability({
-  actionId: 'run', label: 'Run a task suite to test the product', inputs: [SUITE], repeat: 'unsafe', touches: 'this-machine', lasts: 'not-a-change',
-  sentence: 'Each task of the suite runs as one goodvibes run in a scratch copy, then its verify.sh says pass or fail; the suite itself is never changed.',
+  actionId: 'run', label: 'Run a task suite to test the product', inputs: [SUITE], repeat: 'unsafe', touches: 'this-machine', lasts: 'session',
+  // Its result is a row of Evaluations, kept for the session: the empty tab names this action first.
+  sentence: 'Each task of the suite runs as one goodvibes run in a scratch copy, then its verify.sh says pass or fail; the suite itself is never changed, and the result is listed for this session only.',
   example: { suite: 'evals/tasks' },
   async run(values, services) { return { text: await suitesOf(services).run(values.suite ?? '') }; },
 });

@@ -358,6 +358,12 @@ function postProcess(
   if (command === 'run' && flags.fork !== undefined) {
     errors.push('--fork is not supported with run; use --resume <id> or --session <id> to continue a session headlessly.');
   }
+  // `do` and `find` reach the daemon this program is set to; --hostname (--host) and --port only say where a server or
+  // web command listens. Read as an address, they were ignored and the call went to this machine's daemon instead.
+  if ((command === 'do' || command === 'find') && (flags.hostname !== undefined || flags.port !== undefined)) {
+    const given = [flags.hostname !== undefined ? '--host' : '', flags.port !== undefined ? '--port' : ''].filter(Boolean).join(' and ');
+    errors.push(`${given} ${given.includes(' and ') ? 'say' : 'says'} where a server or web command listens; ${command} does not read ${given.includes(' and ') ? 'them' : 'it'} and reaches the daemon this program is set to (daemon.connectedHost.url, or this machine's), so nothing was sent. Remove ${given.includes(' and ') ? 'them' : 'it'}, or run goodvibes-daemon ${command} --host <address> --token <token>.`);
+  }
 
   return { ...result, command, flags, errors };
 }

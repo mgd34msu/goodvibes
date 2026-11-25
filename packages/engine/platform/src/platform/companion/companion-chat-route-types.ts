@@ -33,6 +33,12 @@ export interface CompanionChatRouteContext {
    */
   readonly requireScope?: ((req: Request, scope: string) => Response | null) | undefined;
   /**
+   * True when the request's credential is the owner's own (security/turn-input-party.ts): a message from anyone else
+   * (an admin or member who is not the owner, a device with a scope list) drives a turn on someone else's input, which
+   * runs no command outside a real sandbox and writes no file. Omitted: every caller is the owner.
+   */
+  readonly isOwnerCaller?: ((req: Request) => boolean) | undefined;
+  /**
    * Stable identity of the authenticated caller for the per-client message cap
    * (a token id). Omitted: derived from the request's credential headers.
    */

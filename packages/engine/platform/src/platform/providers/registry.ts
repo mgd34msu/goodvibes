@@ -10,7 +10,7 @@ import { resolveProviderConfiguredStatus, type ProviderConfiguredStatus } from '
 import { join } from 'node:path';
 import { resolveSharedDirectory } from '../runtime/surface-root.js';
 import { logger } from '../utils/logger.js';
-import { ProviderCapabilityRegistry, type ProviderCapability, type RequestProfile, type RouteExplanation } from './capabilities.js';
+import { ProviderCapabilityRegistry, type ModelCapabilityFactsSource, type ProviderCapability, type RequestProfile, type RouteExplanation } from './capabilities.js';
 import { recordProviderAdapterKind } from './adapter-kind.js';
 import type { DiscoveredServer } from '../discovery/scanner.js';
 import { createDiscoveredProvider } from './discovered-factory.js';
@@ -45,7 +45,7 @@ import { getModelLimitsCachePath, ModelLimitsService } from './model-limits.js';
 import { getGitHubCopilotTokenCachePath } from './github-copilot.js';
 import { summarizeError } from '../utils/error-display.js';
 import { knownFallbackContextWindow } from './context-window-fallback.js';
-import { ContextWindowOverrideStore, getContextWindowOverridesPath } from './context-window-overrides.js';
+import { ContextWindowOverrideStore, getContextWindowOverridesPath, type LearnedContextWindow } from './context-window-overrides.js';
 import { CatalogContextWindowResolver } from './context-window-catalog.js';
 import { splitModelRegistryKey, withRegistryKey } from './registry-helpers.js';
 import { computeConfiguredProviderIds } from './registry-configured-ids.js';
@@ -243,6 +243,8 @@ export class ProviderRegistry {
     const stopContextWindows = onListChanged((change) => { if (change.list === 'context-windows') this.contextWindowsChanged(); });
     try { options.registerDispose?.(stopContextWindows); }
     catch (error) { stopContextWindows(); throw error; }
+    // The router reads a model's own definition first (modelFactsSource), before any catalog is read.
+    this.capabilityRegistry.setModelFactsSource(this.modelFactsSource(undefined));
     this.registerBuiltins(); // builtins register BEFORE the configured model is read: a bare id resolves against the real registry
     this.configuredModel = new ConfiguredModelFollower({
       readConfiguredModel: () => getConfiguredModelId(this.configManager),
@@ -456,8 +458,30 @@ export class ProviderRegistry {
     this.pricingCatalog = { fetchedAt, models: this.catalogModels };
     this.catalogCheckedAt = Math.max(this.catalogCheckedAt, fetchedAt);
     this.syntheticCanonicalModels = buildSyntheticCanonicalModels(this.catalogModels, this.catalogProviderUsable);
-    this.capabilityRegistry.setModelFactsSource(modelCapabilityFactsFromCatalog(this.catalogModels));
+    this.capabilityRegistry.setModelFactsSource(this.modelFactsSource(modelCapabilityFactsFromCatalog(this.catalogModels)));
     this._invalidateModelRegistry();
+  }
+
+  /**
+   * What the router knows of a model (its context, output cap, reasoning) read first from the model's own
+   * definition, the one the Models list and the picker show (a provider file of your own, a discovered server, the
+   * catalog's row as a definition), then from the catalog for a field the definition does not carry. So "why
+   * requests go there" and the Models tab state the same context and reasoning for a model.
+   */
+  private modelFactsSource(catalog: ModelCapabilityFactsSource | undefined): ModelCapabilityFactsSource {
+    return (providerId, modelId) => {
+      const fromCatalog = catalog?.(providerId, modelId);
+      let definition: ModelDefinition | undefined;
+      try { definition = findModelDefinition(`${providerId}:${modelId}`, this.getModelRegistry()); } catch { definition = undefined; }
+      if (!definition) return fromCatalog;
+      const output = definition.tokenLimits?.maxOutputTokens;
+      return {
+        ...fromCatalog,
+        ...(definition.contextWindow > 0 ? { maxContextTokens: definition.contextWindow } : {}),
+        ...(output !== undefined && output > 0 ? { maxOutputTokens: output } : {}),
+        reasoningControls: definition.capabilities.reasoning,
+      };
+    };
   }
 
   /** A catalog provider can be called when a provider answers for it and says it is configured (environment or stored key). */
@@ -476,6 +500,8 @@ export class ProviderRegistry {
   private _invalidateModelRegistry(): void {
     this._cachedModelRegistry = null;
     this._modelRegistryRevision++;
+    // A model's definition changed: what the router knows of it is read again (modelFactsSource).
+    this.capabilityRegistry.invalidate();
     for (const wake of [...this._registryChangeWaiters]) wake();
   }
 
@@ -518,7 +544,11 @@ export class ProviderRegistry {
       catalogModels: this.getCatalogBuiltins(),
       discoveredModels: this.discoveredModels,
       suppressedCatalogRegistryKeys: this.getSuppressedCatalogModelRegistryKeys(),
-    }).map((model) => applyOverrides(this.catalogWindows.apply(model)));
+    }).map((model) => {
+      const resolved = applyOverrides(this.catalogWindows.apply(model));
+      // A model a server on this computer or your own network serves is marked local (modelPriceTier: never "paid").
+      return this.catalogWindows.isLocalProvider(resolved.provider) ? { ...resolved, local: true } : resolved;
+    });
     return this._cachedModelRegistry;
   }
 
@@ -1258,7 +1288,7 @@ export class ProviderRegistry {
       `The model '${registryKey}' cannot be used: no registered provider is named '${provider}'.`,
       `Registered providers: ${registered.join(', ') || 'none'}.`,
       'Choose another model with /model, or on the command line with `models use <provider>:<model>` (`models` lists them).',
-      'A local server found by a scan is registered from the saved scan; if it is not running or has moved, start it and scan again (/scan).',
+      'A model server found on this computer is registered from the saved scan; if it is not running or has moved, start it and find it again ("Find model servers on this computer" in Models and providers).',
     ].join(' ');
   }
 
@@ -1349,6 +1379,24 @@ export class ProviderRegistry {
   recordContextWindowRejection(registryKey: string, rejectedAtTokens: number): void {
     this.contextWindowOverrideStore().recordRejection(registryKey, rejectedAtTokens);
     this._invalidateModelRegistry();
+  }
+
+  /**
+   * A provider accepted `acceptedInputTokens` of real input although the model states a smaller window, as a program
+   * posted it (context.windows.learned.post): the floor is raised (raise only).
+   */
+  recordContextWindowAccepted(registryKey: string, acceptedInputTokens: number): boolean {
+    const changed = this.contextWindowOverrideStore().recordAccepted(registryKey, acceptedInputTokens);
+    if (changed) this._invalidateModelRegistry();
+    return changed;
+  }
+
+  /**
+   * Told each limit or floor this program's own turns learn while the daemon owns the file (a terminal program): the
+   * program reports it to the daemon, so the one file holds it and every program has it. Returns the unsubscribe.
+   */
+  onContextWindowLearned(listener: (learned: LearnedContextWindow) => void): () => void {
+    return this.contextWindowOverrideStore().onLearned(listener);
   }
 
   /** A request with real billed input succeeded (see ContextWindowOverrideStore.reconcileSuccessfulInput). */

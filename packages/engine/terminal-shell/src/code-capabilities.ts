@@ -57,6 +57,8 @@ export const codeResults: CodeResults = createCodeResults();
 export interface CodeProgramPieces {
   readonly workingDirectory: string;
   readonly worktreeRegistry?: WorktreeRegistry | undefined;
+  /** The register is read here, never changed (the Agent): pausing, keeping, tying and stopping tracking are not offered. */
+  readonly readOnlyWorktrees?: boolean | undefined;
   readonly codeIndex?: CodeIndexServices | undefined;
   readonly intelligence?: {
     readonly hold: () => CodeIntelligenceHold;
@@ -68,6 +70,8 @@ export interface CodeProgramPieces {
   /** Committing every change (the terminal app's own commit, as /quit's write-and-quit makes it). */
   readonly commit?: { preview(): Promise<string>; commitAll(): Promise<string> } | undefined;
   readonly results?: CodeResults | undefined;
+  /** The session's change tracker: a turn's file changes, also where no checkpoint follows the turn. */
+  readonly turnChanges?: CodeServices['turnChanges'];
 }
 
 function gitOf(workingDirectory: string, commit: CodeProgramPieces['commit']): CodeGitServices {
@@ -76,7 +80,10 @@ function gitOf(workingDirectory: string, commit: CodeProgramPieces['commit']): C
     isRepo: () => GitService.isGitRepo(workingDirectory),
     async status() {
       const status = await git().status();
-      return { staged: [...status.staged], modified: [...status.modified], notAdded: [...status.not_added], deleted: [...status.deleted] };
+      // git's own "modified" also holds a file changed only in the index (staged): changed means changed in the
+      // working tree, so a staged file is listed once, and again only when it was changed after it was staged.
+      const changedHere = new Set(status.files.filter((file) => file.working_dir === 'M').map((file) => file.path));
+      return { staged: [...status.staged], modified: status.modified.filter((path) => changedHere.has(path)), notAdded: [...status.not_added], deleted: [...status.deleted] };
     },
     async log(count) {
       return (await git().log(count)).map((entry) => ({ hash: entry.hash, date: entry.date, message: entry.message }));
@@ -93,9 +100,10 @@ function gitOf(workingDirectory: string, commit: CodeProgramPieces['commit']): C
   };
 }
 
-function worktreesOf(workingDirectory: string, registry: WorktreeRegistry): CodeWorktreeServices {
+function worktreesOf(workingDirectory: string, registry: WorktreeRegistry, readOnly: boolean): CodeWorktreeServices {
   const paths = { workingDirectory };
   return {
+    ...(readOnly ? { readOnly: true as const } : {}),
     list: () => registry.list(),
     records: () => listPersistedWorktreeMeta(paths),
     record: (path) => getPersistedWorktreeMeta(path, paths),
@@ -143,12 +151,13 @@ export function codeServices(pieces: CodeProgramPieces): CodeServices {
   return {
     workingDirectory: pieces.workingDirectory,
     git: gitOf(pieces.workingDirectory, pieces.commit),
-    ...(pieces.worktreeRegistry ? { worktrees: worktreesOf(pieces.workingDirectory, pieces.worktreeRegistry) } : {}),
+    ...(pieces.worktreeRegistry ? { worktrees: worktreesOf(pieces.workingDirectory, pieces.worktreeRegistry, pieces.readOnlyWorktrees === true) } : {}),
     ...(pieces.codeIndex ? { codeIndex: pieces.codeIndex } : {}),
     ...(pieces.intelligence ? { intelligence: intelligenceOf(pieces.intelligence) } : {}),
     ...(pieces.tests ? { tests: pieces.tests } : {}),
     ...(pieces.changesView ? { changesView: pieces.changesView } : {}),
     ...(pieces.results ? { results: pieces.results } : {}),
+    ...(pieces.turnChanges ? { turnChanges: pieces.turnChanges } : {}),
   };
 }
 

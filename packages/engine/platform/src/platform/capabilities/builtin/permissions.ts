@@ -11,13 +11,13 @@
 import { basename } from 'node:path';
 import { ownerRuleRecord } from '../../gate/policy/permissions-runtime.js';
 import { modeInForceLine, type ModeInForceWords } from '../../permissions/decision-model-readiness.js';
-import type { UserPermissionRuleStore } from '../../permissions/user-rule-store.js';
+import { projectIdentity, type UserPermissionRuleStore } from '../../permissions/user-rule-store.js';
 import { summarizeError } from '../../utils/native-error-summary.js';
 import { CapabilityRefusal, type CapabilityDefinition, type InputDescription } from '../types.js';
 
-/** What adding a rule needs: the one rule store. */
+/** What adding a rule (and placing a carried one) needs: the one rule store. */
 export interface PermissionRulesCapabilityServices {
-  readonly permissionRules: Pick<UserPermissionRuleStore, 'add'>;
+  readonly permissionRules: Pick<UserPermissionRuleStore, 'add'> & Partial<Pick<UserPermissionRuleStore, 'list'>>;
 }
 
 /** What the two reads of this conversation's permissions need, from the program holding it. */
@@ -100,7 +100,7 @@ async function addRule(services: PermissionRulesCapabilityServices, args: readon
     throw new CapabilityRefusal(`No rule was added: ${summarizeError(error)}`);
   }
   const text = record.tier === 'never-run'
-    ? `Added: ${record.rule.description}. Every tool that can reach a shell is refused a command that runs it, in every permission mode including yolo, in every project.`
+    ? `Added: ${record.rule.description}. Every tool that can reach a shell is refused a command that runs it, in every permission mode, YOLO included, in every project.`
     // The project by its folder's name: a whole path is a long unbroken run a screen's outcome line leaves out.
     : `Added: ${record.rule.description}, in this project (${basename(record.project ?? '') || 'this folder'}).`;
   return { text, data: { rule: record.rule.id, effect: record.rule.effect, tier: record.tier, ...(record.project !== undefined ? { project: record.project } : {}) } };
@@ -115,7 +115,7 @@ export const PERMISSIONS_NEVER: CapabilityDefinition<PermissionRulesCapabilitySe
   capability: { id: 'permissions.never', group: 'safety', home: 'daemon', repeat: 'unsafe' },
   actionId: 'never', label: 'Never run a command', word: 'never', inputs: [COMMAND_INPUT],
   sentence: 'Every tool is refused a command that runs "{command}", in every permission mode and every project, until you change it.', done: '',
-  touches: 'this-machine', lasts: 'kept', risk: 'none', undoneBy: 'revoke', example: { command: 'git push' },
+  touches: 'this-machine', lasts: 'kept', risk: 'none', undoneBy: 'revoke', tightens: true, example: { command: 'git push' },
   async run(values, services) {
     return addRule(services, ['never', ...values.command!.trim().split(/\s+/)], null);
   },
@@ -141,10 +141,46 @@ export const PERMISSIONS_ADD: CapabilityDefinition<PermissionRulesCapabilityServ
     { id: 'target', label: 'Which', help: 'The command, word, folder or tool', kind: 'text', freeTextReason: 'a command, word, folder or tool name', required: true, typed: { tail: true } },
   ],
   sentence: 'In this project, a call matching {kind} {target} will {effect} until you change it.', done: '',
-  touches: 'this-machine', lasts: 'kept', risk: 'none', undoneBy: 'revoke', example: { effect: 'deny', kind: 'class', target: 'rm' },
+  touches: 'this-machine', lasts: 'kept', risk: 'none', undoneBy: 'revoke',
+  // A rule that refuses or asks only tightens; one that runs a call without asking loosens (its choice's risk).
+  tightens: { input: 'effect', values: ['deny', 'ask'] }, example: { effect: 'deny', kind: 'class', target: 'rm' },
   async run(values, services, caller) {
     // A project rule is scoped to the folder of the program that asked.
     if (!caller.workingDirectory) throw new CapabilityRefusal('No rule was added: no project folder was given to scope it to.', 'A rule that refuses a command everywhere needs none: "Never run a command".');
     return addRule(services, [values.effect!, values.kind!, values.target!.trim()], caller.workingDirectory);
+  },
+};
+
+/** The rules in force (safety-methods.ts PERMISSION_RULES_LIST_NAME); a carried one (permissions/daemon-folder-rules-notice.ts) is placed from its row. */
+const RULES_IN_FORCE_LIST = 'permissions.rules' as import('../types.js').ListName;
+
+export const PERMISSIONS_PLACE: CapabilityDefinition<PermissionRulesCapabilityServices> = {
+  capability: { id: 'permissions.place', group: 'safety', home: 'daemon', repeat: 'safe' },
+  actionId: 'place', label: 'Keep a carried rule for this project only', word: 'place',
+  inputs: [{ id: 'rule', label: 'Rule', help: 'The rules carried from 3.5.0 to every project', kind: 'choice', choices: { list: RULES_IN_FORCE_LIST }, required: true, typed: { position: 1 } }],
+  sentence: '{rule}, carried from 3.5.0 to every project, will apply in this project only, until you change it.', done: '',
+  // It narrows where a refusal applies: in every other project the calls it refused are decided as usual again.
+  touches: 'this-machine', lasts: 'kept', risk: 'loosens-a-protection', undoneBy: 'revoke',
+  ownerOnly: { reason: 'it stops a rule refusing calls in every other project', instead: 'Ask the owner to place it under Permissions and safety, Rules.' },
+  example: { rule: 'user-exact-exec-mwwdnn58-8d7p7m' },
+  async run(values, services, caller) {
+    if (!caller.workingDirectory) throw new CapabilityRefusal('Nothing was changed: no project folder was given to keep the rule for.', 'Choose it from the project it belongs to.');
+    const list = services.permissionRules.list;
+    if (!list) throw new CapabilityRefusal('This program cannot read the permission rules; nothing was changed.', undefined, 'UNAVAILABLE');
+    const record = list().find((entry) => entry.rule.id === values.rule && entry.carried !== undefined);
+    if (!record) throw new CapabilityRefusal(`No rule carried from 3.5.0 has the id ${values.rule}; nothing was changed.`, '"See the permission rules" lists them under "Every project (carried from 3.5.0)".', 'NOT_FOUND');
+    const { carried: _carried, ...placed } = record;
+    try {
+      await services.permissionRules.add({ ...placed, project: projectIdentity(caller.workingDirectory) });
+      // A refusal (or an ask) also stays where 3.5.0 reads it, every project as before, for a 3.5.0 daemon put back; this
+      // version never reads that copy (user-rule-store.ts `keptFor`) and it goes with the rule. An allow is never carried.
+      if (record.rule.effect !== 'allow') {
+        const { project: _none, ...everywhere } = placed;
+        await services.permissionRules.add({ ...everywhere, rule: { ...record.rule, id: `${record.rule.id}~3.5.0` }, keptFor: { release: '3.5.0', of: record.rule.id } });
+      }
+    } catch (error) {
+      throw new CapabilityRefusal(`Nothing was changed: ${summarizeError(error)}`);
+    }
+    return { text: `${record.rule.description ?? record.rule.id} now applies in ${basename(caller.workingDirectory)} only.`, data: { rule: record.rule.id, project: projectIdentity(caller.workingDirectory) } };
   },
 };

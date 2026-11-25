@@ -55,6 +55,7 @@ import {
 import type { RevisionSource } from '../utils/revision.js';
 import type { AskPresentation } from '../permissions/ask-presentation.js';
 import type { PermissionPromptRequest } from '../permissions/prompt.js';
+import { toolAskWords } from '../permissions/tool-ask-words.js';
 import { logger } from '../utils/logger.js';
 import { askerLivenessPath, isClaimGone, isTakerGone, processTaker, sessionAskerKey, settleAskerLock, type OwnerAskerKind } from './owner-asker-liveness.js';
 
@@ -89,6 +90,11 @@ export interface OwnerAnswer {
 export interface OwnerAnswerSource {
   readonly actor: string;
   readonly surface: string;
+  /**
+   * The owner himself answered (his own credential, his sign-in or a device he paired, never a model acting for him):
+   * every surface says "you"; any other answerer is named. Absent on answers from before it was kept.
+   */
+  readonly owner?: true | undefined;
 }
 
 export interface OwnerItem {
@@ -607,11 +613,20 @@ function approvalStatus(record: SharedApprovalRecord): OwnerItemStatus {
 
 function approvalDetail(record: SharedApprovalRecord): string {
   const { request } = record;
+  // A call whose tool words its own risk (capability_run: the capability's declared risk) says that, or nothing when it
+  // declares none; any other call its reading's level.
+  const worded = toolAskWords(request.tool, request.args ?? {});
+  const risk = worded?.risk === null ? undefined : worded?.risk ?? `Risk: ${request.analysis.riskLevel}`;
   const lines = [
-    `Risk: ${request.analysis.riskLevel}`,
+    // What the call does with its values, in the tool's own words ("kitchen-laptop is removed from the group: ..."),
+    // and each value given: the card says which machine, setting or item, not only the action's name.
+    ...(worded?.lines ?? []),
+    ...(risk && !(worded?.lines ?? []).includes(risk) ? [risk] : []),
     ...request.analysis.reasons.map((reason) => `- ${reason}`),
-    ...(request.workingDirectory ? [`In: ${request.workingDirectory}`] : []),
-    ...(record.requiresOwnerDecision ? ['Approve it on the device that raised it; it can be denied from here.'] : []),
+    // An outside caller's call (a paired device, a member) is not made in a folder of this computer: no "In" line.
+    ...(request.workingDirectory && request.attribution?.kind !== 'outside-caller' ? [`In: ${request.workingDirectory}`] : []),
+    // A call that words itself says where it is approved in its own reasons (a held Telegram message: the Telegram list).
+    ...(record.requiresOwnerDecision && worded === undefined ? ['Approve it on the device that raised it; it can be denied from here.'] : []),
   ];
   return clip(lines.join('\n'), OWNER_ITEM_LIMITS.detailChars);
 }
@@ -644,6 +659,8 @@ function projectApproval(record: SharedApprovalRecord, reading?: ApprovalReading
     ...(record.sessionId !== undefined ? { sessionId: record.sessionId } : {}),
     title: clip(`${record.request.tool}: ${record.request.analysis.summary}`, OWNER_ITEM_LIMITS.titleChars),
     detail: approvalDetail(record),
+    // An outside caller's call (a paired device, a signed-in user) names who asks, as the daemon's gate named it.
+    ...(record.request.attribution?.kind === 'outside-caller' ? { askedBy: clip(record.request.attribution.name, 200) } : {}),
     options,
     createdAt: record.createdAt,
     ...(record.expiresAt !== undefined ? { expiresAt: record.expiresAt } : {}),
@@ -1049,7 +1066,7 @@ export class OwnerInbox implements RevisionSource, OwnerInboxPort, OwnerAnswerRe
    * with `applied: false` and a refusal saying why. Nothing is answered by a
    * timeout or on the owner's behalf.
    */
-  async answer(id: string, answer: OwnerAnswer, by: OwnerAnswerSource = { actor: 'owner', surface: 'local' }, viewer?: ApprovalViewer): Promise<OwnerAnswerOutcome> {
+  async answer(id: string, answer: OwnerAnswer, by: OwnerAnswerSource = { actor: 'owner', surface: 'local', owner: true }, viewer?: ApprovalViewer): Promise<OwnerAnswerOutcome> {
     const now = this.#now();
     const entry = this.#questions.get(id);
     if (entry) {

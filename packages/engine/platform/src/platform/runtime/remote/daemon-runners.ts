@@ -12,9 +12,11 @@
  * announced as the list `remote-runners`; a runner starting, ending or failing
  * is announced on the `agents` domain by the ACP connection itself.
  */
+import { randomUUID } from 'node:crypto';
 import { mkdirSync, readFileSync, renameSync, writeFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { AcpManager } from '../../acp/manager.js';
+import { withUntrustedContentScope } from '../../security/untrusted-content.js';
 import type { AgentManager } from '../../tools/agent/index.js';
 import { AGENT_TEMPLATES } from '../../tools/agent/manager.js';
 import type { RuntimeEventBus } from '../events/index.js';
@@ -43,6 +45,8 @@ export interface DaemonRemoteRunnerSources {
   readonly permissionHost: () => Omit<ExternalPermissionHost, 'signal'> | undefined;
   /** The daemon's own home folder (`~/.goodvibes/daemon`), where the runner file is kept. */
   readonly daemonHome: string;
+  /** The daemon's sessions: each runner is one, titled by its task, so its questions and rules name it in words. */
+  readonly sessionBroker?: Pick<import('../../control-plane/session-broker.js').SharedSessionBroker, 'register'> | undefined;
 }
 
 /** Everything a place, a script or a model reads about the runners, in one answer. */
@@ -83,7 +87,23 @@ export class DaemonRemoteRunners {
       const event = envelope.payload as { readonly transportId?: unknown };
       if (typeof event.transportId !== 'string' || !event.transportId.startsWith('acp:')) return;
       dispatch.dispatchTransportEvent(envelope.payload);
-      noteListChanged({ list: 'remote-runners', change: 'changed', id: event.transportId.slice('acp:'.length) });
+      const runnerId = event.transportId.slice('acp:'.length);
+      // The runner's contract says the state its connection is in, so the two never say different things.
+      const contract = sources.remoteRunnerRegistry.getContract(runnerId);
+      const connection = sources.runtimeStore.getState().acp.connections.get(runnerId);
+      if (contract && connection && (contract.transport?.state !== connection.transportState || contract.transport?.errorCount !== connection.errorCount)) {
+        sources.remoteRunnerRegistry.registerContract(Object.freeze({
+          ...contract,
+          lastUpdatedAt: Date.now(),
+          transport: Object.freeze({
+            state: connection.transportState, errorCount: connection.errorCount,
+            ...(connection.connectedAt !== undefined ? { connectedAt: connection.connectedAt } : {}),
+            ...(connection.lastError !== undefined ? { lastError: connection.lastError } : {}),
+          }),
+        }));
+        return;
+      }
+      noteListChanged({ list: 'remote-runners', change: 'changed', id: runnerId });
     });
     this.lifetime.signal.addEventListener('abort', () => stop(), { once: true });
   }
@@ -155,19 +175,36 @@ export class DaemonRemoteRunners {
     const template = isAgentTemplate(input.template) ? input.template : 'general';
     const templateDef = { defaultTools: [...templateTools(template)] };
     const goal = Object.freeze({ goal: input.task, criteria: Object.freeze([] as string[]) });
-    const runnerId = await this.manager().spawn({
+    // The gate's check reads the untrusted-content window of the scope an ask is decided in and fails if that window
+    // moves while the owner is being asked. Started from a request, the runner would ask in its starter's scope, and
+    // the owner's answer from the same credential starts a new turn in exactly that scope: every answer, yes or no,
+    // then failed with "untrusted content evidence changed during comparison". A runner's task is the person's own
+    // words and what it reads stays in its own process, never in this daemon's ledger, so it runs, and its asks are
+    // decided, in a window of its own, which only it can move.
+    // Each runner is a session of its own: "allow for this session" given to one runner is that runner's alone, and
+    // two runners' identical asks are two questions (its asks are also decided for its own project, acp/connection.ts).
+    const session = `remote-runner:${randomUUID()}`;
+    // Registered before it starts, titled by its task, so its first question already names it ("Runner: <task>").
+    const title = `Runner: ${input.task.length > 60 ? `${input.task.slice(0, 59)}…` : input.task}`;
+    await this.sources.sessionBroker?.register({ sessionId: session, kind: 'acp', title, project: input.workingDirectory,
+      participant: { surfaceKind: 'service', surfaceId: 'remote-runner', lastSeenAt: Date.now() } })
+      .catch((error: unknown) => { logger.warn('Remote runner session could not be registered; its questions name no runner', { error: summarizeError(error) }); });
+    const runnerId = await withUntrustedContentScope(session, () => this.manager().spawn({
       description: input.task,
       context: `Self-hosted remote runner started by the daemon${input.pool ? ` from pool ${input.pool.id}` : ''}. Follow ${template} discipline and return concise evidence.`,
       tools: [...templateDef.defaultTools],
       workingDirectory: input.workingDirectory,
-      sessionId: 'daemon-remote-runners',
-    }, { sourceOf: () => goal, assertCurrent() {}, signal: this.lifetime.signal });
+      sessionId: session,
+    }, { sourceOf: () => goal, assertCurrent() {}, signal: this.lifetime.signal }));
     const now = Date.now();
+    // Its connection may have moved on while it started: the contract starts from the state the connection is in.
+    const connection = this.sources.runtimeStore.getState().acp.connections.get(runnerId);
     this.registry.registerContract({
       id: `runner:${runnerId}`,
       runnerId,
       ...(input.pool ? { poolId: input.pool.id } : {}),
-      label: `${template} remote runner`,
+      // Named by its task: two runners of one template are told apart by what they were started on.
+      label: input.task.length > 60 ? `${input.task.slice(0, 59)}…` : input.task,
       sourceTransport: 'acp',
       trustClass: !input.pool || input.pool.trustClass === 'mixed' ? 'self-hosted-acp' : input.pool.trustClass,
       template,
@@ -185,7 +222,9 @@ export class DaemonRemoteRunners {
       workspaceRoot: input.workingDirectory,
       createdAt: now,
       lastUpdatedAt: now,
-      transport: Object.freeze({ state: 'initializing', errorCount: 0 }),
+      transport: Object.freeze(connection
+        ? { state: connection.transportState, errorCount: connection.errorCount, ...(connection.connectedAt !== undefined ? { connectedAt: connection.connectedAt } : {}), ...(connection.lastError !== undefined ? { lastError: connection.lastError } : {}) }
+        : { state: 'initializing' as const, errorCount: 0 }),
     });
     const inPool = input.pool ? this.registry.assignRunnerToPool(input.pool.id, runnerId) !== null : false;
     return { runnerId, template, tools: [...templateDef.defaultTools], inPool };

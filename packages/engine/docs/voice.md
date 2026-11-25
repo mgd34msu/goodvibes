@@ -55,7 +55,7 @@ Spoken-output clients use these config keys:
 | `tts.voice` | empty | Default voice id when a request omits `voiceId`; providers may still apply their own fallback. |
 | `tts.llmProvider` | empty | Optional future override for spoken-output generation; empty means use the active chat provider. |
 | `tts.llmModel` | empty | Optional future override for spoken-output generation; empty means use the active chat model. |
-| `tts.speed` | `1.0` | Default speed multiplier used by the platform's spoken-turn (live `/voice speak`) controller when a turn omits speed. |
+| `tts.speed` | `1.0` | Default speed multiplier used by the platform's spoken-turn (live "ask and hear it") controller when a turn omits speed. |
 
 The config keys are defaults, not locks. Clients can pass `providerId`,
 `voiceId`, `modelId`, `format`, and `speed` on individual requests. `tts.speed`
@@ -184,7 +184,7 @@ the provider's realtime endpoint using the returned transport details.
 
 ## TUI contract
 
-For a live `/voice speak <message>` command, the TUI should submit a normal chat turn
+For a live spoken turn ("ask and hear it", the `voice.speak` capability), the TUI should submit a normal chat turn
 with spoken-output intent. Text should continue rendering through the normal
 transcript path. The TUI should listen to assistant deltas for that marked turn,
 chunk text at sentence or phrase boundaries, and call

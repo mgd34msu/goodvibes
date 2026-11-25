@@ -74,28 +74,16 @@ interface CuratedEntry {
  * The curated groups, by command name. A name that is not registered in this
  * build is skipped, so the table never shows a command that does not exist.
  */
+// Only commands that remain (the others' actions are in the places). Every row comes from the registry, so a command
+// that is not registered is never listed, whatever this table names.
 const CURATED: ReadonlyArray<readonly [string, CuratedEntry]> = [
   ['resume', { title: 'Resume a session', group: 'Session', keywords: ['open', 'load'] }],
-  ['session', { title: 'Sessions', group: 'Session', keywords: ['saved', 'hosted', 'history'] }],
   ['clear', { title: 'Clear the conversation', group: 'Session', keywords: ['new', 'reset'] }],
   ['compact', { title: 'Compact context', group: 'Session', keywords: ['summarize', 'tokens'] }],
-  ['bookmarks', { title: 'Bookmarks', group: 'Session' }],
-  ['replay', { title: 'Replay a session', group: 'Session' }],
   ['agents', { title: 'Agents', group: 'Views', keywords: ['hosted', 'acp', 'claude code', 'codex', 'opencode', 'steer', 'stop'] }],
-  ['usage', { title: 'Usage', group: 'Views', keywords: ['budget', 'compact', 'price'] }],
   ['changes', { title: 'See changes', group: 'Views', keywords: ['files', 'stage', 'commit', 'hunk'] }],
-  ['notifications', { title: 'Notifications', group: 'Views', keywords: ['notifications', 'alerts', 'messages', 'history', 'notices'] }],
-  ['context', { title: 'See what fills the context', group: 'Views', keywords: ['tokens', 'window'] }],
-  ['work-plan', { title: 'Work plan', group: 'Views', keywords: ['todo', 'plan'] }],
-  ['hosted', { title: 'Hosted sessions', group: 'Views', keywords: ['daemon'] }],
-  ['health', { title: 'Health', group: 'Views', keywords: ['doctor'] }],
   ['settings', { title: 'Settings', group: 'Settings', keywords: ['preferences', 'options', 'theme'] }],
   ['model', { title: 'Switch model', group: 'Settings', keywords: ['provider', 'llm'] }],
-  ['effort', { title: 'Reasoning effort', group: 'Settings', keywords: ['thinking'] }],
-  ['verbosity', { title: 'How much the app prints', group: 'Settings', keywords: ['quiet', 'notifications', 'print'] }],
-  ['profiles', { title: 'Profiles', group: 'Settings' }],
-  ['local-auth', { title: 'Local accounts', group: 'Settings', keywords: ['accounts', 'users', 'auth', 'password', 'local-auth'] }],
-  ['tts', { title: 'Voice and speech', group: 'Settings', keywords: ['voice'] }],
 ];
 
 /** Rows that run a command with words already given, placed in a curated group. */

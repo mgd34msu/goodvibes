@@ -90,6 +90,9 @@ export interface ListenerAdmissionInput {
   readonly outsideConfiguredHost?: string | undefined;
 }
 
+/** Where a person lets this daemon answer other machines and phones: the control, on the daemon's machine. */
+const SERVE_OTHER_MACHINES_NEXT = 'On the daemon\'s machine, open Settings, then Secure address, and choose "Serve other machines"';
+
 /** The refusal for a request this listener does not serve, or null to let it through. */
 export function refuseUnservedListenerRequest(req: Request, input: ListenerAdmissionInput): Response | null {
   // The URL is parsed only when a decision needs the path, and at most once.
@@ -103,9 +106,8 @@ export function refuseUnservedListenerRequest(req: Request, input: ListenerAdmis
       error: 'This daemon serves only its own machine',
       code: 'CONTROL_PLANE_LOCAL_ONLY',
       state: `the control plane is set to listen on ${input.outsideConfiguredHost}, so a request from ${input.clientAddress} is not served`,
-      next: [
-        'On the daemon machine run `goodvibes-daemon webui enable --lan` or `goodvibes-daemon config set controlPlane.hostMode network` to serve other machines',
-      ],
+      // The control a person uses, where it is: never a command to type.
+      next: [SERVE_OTHER_MACHINES_NEXT],
     }, { status: 403 });
   }
   // Both the socket and a trusted forwarded client must be this machine: a
@@ -116,8 +118,8 @@ export function refuseUnservedListenerRequest(req: Request, input: ListenerAdmis
       code: 'CONTROL_PLANE_LOCAL_ONLY',
       state: `controlPlane.enabled is off, so a request from ${input.clientAddress} is not served`,
       next: [
-        'On the daemon machine run `goodvibes-daemon config set controlPlane.enabled true` to serve other machines',
-        'Or reach the daemon through the relay (relay.enabled), which needs no inbound connection',
+        SERVE_OTHER_MACHINES_NEXT,
+        'Or reach it through the relay (Devices and network, Relay on the daemon\'s machine), which needs no inbound connection',
       ],
     }, { status: 403 });
   }

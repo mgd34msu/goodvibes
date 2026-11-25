@@ -8,7 +8,14 @@ export interface ShellPathService {
   readonly userGoodVibesRoot: string;
   expandHomePath(path: string): string;
   resolveWorkspacePath(path: string): string;
+  /** This host's own records: under the working directory's `.goodvibes/`, or the daemon's records folder (`recordsRoot`). */
   resolveProjectPath(...segments: string[]): string;
+  /**
+   * The folder whose `.goodvibes/` holds this host's own records (`resolveProjectPath`): the working directory, or
+   * the daemon's records folder. A store that is given a folder and keeps its file under `<folder>/.goodvibes/` is
+   * given this one.
+   */
+  readonly recordsRoot: string;
   resolveUserPath(...segments: string[]): string;
   isWithinWorkingDirectory(path: string): boolean;
 }
@@ -16,6 +23,15 @@ export interface ShellPathService {
 export interface CreateShellPathServiceOptions {
   readonly workingDirectory: string;
   readonly homeDirectory: string;
+  /**
+   * Where `resolveProjectPath` puts this host's own records instead of the
+   * working directory's `.goodvibes/`: the daemon gives its home's records
+   * folder (`<daemon home>/records`, see daemon-records-root.ts), so its
+   * sessions, devices, cluster identity, approvals, channel offsets and the
+   * rest are the same whatever folder it was started in. `<recordsRoot>/.goodvibes/<segments>`.
+   * Absent (a terminal program): `<working directory>/.goodvibes/<segments>`.
+   */
+  readonly recordsRoot?: string | undefined;
 }
 
 function requireAbsoluteOwnedRoot(path: string, name: string): string {
@@ -68,6 +84,8 @@ export function createShellPathService(
   const homeDirectory = requireAbsoluteOwnedRoot(options.homeDirectory, 'homeDirectory');
   const projectGoodVibesRoot = join(workingDirectory, '.goodvibes');
   const userGoodVibesRoot = join(homeDirectory, '.goodvibes');
+  const recordsRoot = options.recordsRoot === undefined ? workingDirectory : requireAbsoluteOwnedRoot(options.recordsRoot, 'recordsRoot');
+  const recordsGoodVibesRoot = join(recordsRoot, '.goodvibes');
 
   const expandHomePath = (path: string): string => {
     if (path === '~') return homeDirectory;
@@ -91,7 +109,8 @@ export function createShellPathService(
     userGoodVibesRoot,
     expandHomePath,
     resolveWorkspacePath,
-    resolveProjectPath: (...segments) => join(projectGoodVibesRoot, ...segments),
+    resolveProjectPath: (...segments) => join(recordsGoodVibesRoot, ...segments),
+    recordsRoot,
     resolveUserPath: (...segments) => join(userGoodVibesRoot, ...segments),
     isWithinWorkingDirectory,
   };

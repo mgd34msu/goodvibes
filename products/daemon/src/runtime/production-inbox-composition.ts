@@ -25,8 +25,16 @@ const fields: Record<Provider, readonly string[]> = {
     'surfaces.email.user', 'surfaces.email.imap.user', 'surfaces.email.imap.password'],
 };
 
-/** No source or provider network request is made while determining absence. */
-function assertUnconfigured(provider: Provider, context: Parameters<DaemonInboxFactory>[0]): void {
+const PROVIDER_NAMES: Record<Provider, string> = { slack: 'Slack', discord: 'Discord', email: 'Mail' };
+
+/**
+ * No source or provider network request is made while determining absence.
+ * A set-up that is only partly there (a stored password and nothing else, an
+ * account switched on that this daemon cannot read) is a mailbox that is not
+ * set up: the answer says what is there and what is missing, and the daemon
+ * starts. Only an unreadable configuration or secret store refuses.
+ */
+function unconfiguredReason(provider: Provider, context: Parameters<DaemonInboxFactory>[0]): string | undefined {
   const prefix = `surfaces.${provider}`;
   const quarantine = context.configManager.getIngestionQuarantine?.();
   if (!quarantine || quarantine.some(entry => entry.key === '(whole file)'
@@ -34,17 +42,18 @@ function assertUnconfigured(provider: Provider, context: Parameters<DaemonInboxF
     throw new Error('Inbox configuration admission is unavailable');
   }
   const config: { get(key: string): unknown } = context.configManager;
-  if (provider !== 'email' && config.get(`surfaces.${provider}.enabled`) === true) {
-    throw new Error(`Configured ${provider} inbox requires an admitted account and screening authority`);
-  }
+  const name = PROVIDER_NAMES[provider];
+  const switchedOn = provider !== 'email' && config.get(`surfaces.${provider}.enabled`) === true;
+  const stored: string[] = [];
   for (const field of fields[provider]) {
     const setting = config.get(field);
     const presence = context.credentials.inspectConfigSecret?.(field);
     if (presence === undefined || presence === 'unavailable') throw new Error('Inbox credential admission is unavailable');
-    if ((typeof setting === 'string' && setting.trim()) || presence === 'present') {
-      throw new Error(`Configured ${provider} inbox requires an admitted account and screening authority`);
-    }
+    if ((typeof setting === 'string' && setting.trim()) || presence === 'present') stored.push(field);
   }
+  if (!switchedOn && stored.length === 0) return undefined;
+  const what = stored.length === 0 ? 'it is switched on' : `${stored.join(', ')} ${stored.length === 1 ? 'is' : 'are'} stored`;
+  return `${name} is not set up: ${what}, but the account is not complete or not switched on, so no messages are read. Finish it in Settings, Notifications, or remove what is stored.`;
 }
 
 /**
@@ -60,18 +69,20 @@ function unconfiguredSource(provider: Provider): DaemonInboxSourceFactory {
     let generation = 0;
     let established = -1;
     let closed = false;
+    let notSetUp: string | undefined;
     const unsubscribe = controls.onAccountInvalidation(() => { generation++; });
     const active = new Set<Promise<void>>();
     const assertCurrent = () => {
       if (closed) throw new Error('Inbox source is retired');
     };
-    /** Read absence once per invalidation notice; a configured provider refuses until it is rebuilt. */
+    /** Read absence once per invalidation notice; a part-made set-up is said on the status, never served as mail. */
     const establish = () => {
       assertCurrent();
       if (established === generation) return;
       const captured = generation;
-      assertUnconfigured(provider, context);
+      const reason = unconfiguredReason(provider, context);
       if (captured !== generation) throw new Error('Inbox configuration changed during admission');
+      notSetUp = reason;
       established = captured;
     };
     try { establish(); } catch (error) { unsubscribe(); throw error; }
@@ -101,7 +112,8 @@ function unconfiguredSource(provider: Provider): DaemonInboxSourceFactory {
           sources: {
             store: { listItems: () => [], countItems: () => 0, countItemsByProvider: () => new Map(),
               maxSequence: () => 0 },
-            poller: { snapshotStatuses: selected => !selected || selected.includes(provider) ? [{ ...status }] : [],
+            poller: { snapshotStatuses: selected => !selected || selected.includes(provider)
+              ? [{ ...status, ...(notSetUp ? { error: notSetUp } : {}) }] : [],
               isProviderRunning: () => false },
           },
         };

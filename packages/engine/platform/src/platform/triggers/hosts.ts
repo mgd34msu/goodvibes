@@ -191,7 +191,7 @@ export function createProcessManagerCommandRunner(processManager: ProcessManager
 
 /** What a fired trigger needs in order to actually start an agent turn and read its answer. */
 export interface TriggerAgentSpawner {
-  spawn(input: { mode: 'spawn'; task: string; model?: string | undefined; tools?: string[] | undefined }): { id: string };
+  spawn(input: { mode: 'spawn'; task: string; model?: string | undefined; tools?: string[] | undefined; workingDirectory?: string | undefined }): { id: string };
   /** Settles once the agent's work (and its cleanup) is done. */
   join(agentId: string): Promise<void>;
   getStatus(agentId: string): Pick<AgentRecord, 'status' | 'fullOutput' | 'progress' | 'error'> | null;
@@ -219,15 +219,19 @@ export function createTriggerActionExecutor(deps: {
   readonly grantTimeoutMs?: number | undefined;
   /** Where the turn's answer goes and which connected tools (mail, calendar) the turn gets. */
   readonly unattendedRuns?: UnattendedRuns | undefined;
+  /** The tools a conversation's turn is offered: a fired turn is a turn like any other. */
+  readonly conversationTools?: (() => readonly string[]) | undefined;
 }): TriggerActionExecutor {
   return {
     runAgentTurn(input) {
-      const tools = deps.unattendedRuns?.connectedTools() ?? [];
+      const tools = [...(deps.unattendedRuns?.connectedTools() ?? []), ...(deps.conversationTools?.() ?? [])];
       const record = deps.agents.spawn({
         mode: 'spawn',
         task: input.prompt,
         ...(input.model !== undefined ? { model: input.model } : {}),
         ...(tools.length > 0 ? { tools: [...tools] } : {}),
+        // It works in its trigger's project, never the daemon's own folder.
+        ...(input.workingDirectory !== undefined ? { workingDirectory: input.workingDirectory } : {}),
       });
       // The firing is recorded once the turn has started; its answer is
       // delivered when the turn ends: to the channel the action names, else

@@ -183,7 +183,7 @@ function brandingRunner(deps: GoogleSetupActionDeps, state: GcloudState): Google
     return needsHuman(
       'The OAuth consent screen needs filling in.',
       'Google exposes no API for the consent screen, so it has to be completed in the browser once.',
-      `The browser is open at ${spec.url ?? 'the branding page'}. Fill in the app name and your support email, choose the "External" audience and click "Create". Then re-run: the consent screen is recognised from the console and the run carries on. If you create the Desktop client yourself at ${AUTH_CLIENTS_URL}, enter it with /google client <client-id> <client-secret> instead.`,
+      `The browser is open at ${spec.url ?? 'the branding page'}. Fill in the app name and your support email, choose the "External" audience and click "Create". Then press "connect" again: the consent screen is recognised from the console and the run carries on. If you create the Desktop client yourself at ${AUTH_CLIENTS_URL}, hand it over with "use your client id and secret" on the Google tab of Mail, calendar and channels instead.`,
     );
   };
 }

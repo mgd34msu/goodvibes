@@ -1,5 +1,6 @@
 export * from './daemon-home.js';
-export * from './workspace-swap-manager.js';
+// Which project a folder belongs to: the one answer every per-project record is keyed by.
+export { projectIdentityOf, registeredWorkspaceRoots } from './project-identity.js';
 export * from './registration/index.js';
 export {
   WorkspaceCheckpointManager,

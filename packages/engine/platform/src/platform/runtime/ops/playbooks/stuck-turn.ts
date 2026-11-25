@@ -121,13 +121,13 @@ export const stuckTurnPlaybook: Playbook = {
   steps: [
     { step: 1, title: 'Answer what is waiting on you', action: 'If an approval is waiting, open Waiting for you from the menu and answer it; the call that asked continues at once.', kind: 'observe', expectedOutcome: 'The held call runs or is refused and the turn moves on.', automatable: false },
     { step: 2, title: 'Stop the turn', action: 'Press Esc (or Ctrl+C) to cancel the turn in flight; tool calls in flight are cancelled with it.', kind: 'command', command: 'Esc', expectedOutcome: 'The turn ends as cancelled and the composer is free.', automatable: false },
-    { step: 3, title: 'Look at the provider', action: 'Run /health check provider to see whether the model provider is degraded, and switch with /model if it is.', kind: 'command', command: '/health check provider', expectedOutcome: 'A healthy provider is selected.', automatable: false },
+    { step: 3, title: 'Look at the provider', action: 'In the System place, Health, check one area: Model providers, to see whether the model provider is degraded, and switch with /model if it is.', kind: 'observe', expectedOutcome: 'A healthy provider is selected.', automatable: false },
     { step: 4, title: 'Retry the turn', action: 'Run /retry to send the last message again.', kind: 'command', command: '/retry', expectedOutcome: 'The turn completes or fails with a clear error.', automatable: false },
   ],
   escalationCriteria: [
     'Several turns in a row stall after cancel and retry',
     'No runtime activity for more than 60 s with a turn in flight',
-    'Memory keeps growing while no turn completes (/health check memory)',
+    'Memory keeps growing while no turn completes (System, Health, check one area: Memory use)',
   ],
   tags: ['turn', 'task', 'stuck', 'timeout', 'hang', 'llm'],
 };

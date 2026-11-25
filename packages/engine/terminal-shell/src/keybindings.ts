@@ -446,7 +446,11 @@ export class KeybindingsManager<Action extends string> {
           const id = `${context.id}.${action.name}`;
           const first = program.actions.find((owner) => !Object.hasOwn(NAVIGATION_KEYS, owner));
           if (!first) continue;
-          const before = first === LEADER_ACTION || first === 'clear-cancel';
+          // A context read in the composer (`global`) gives way to the program's own key there.
+          const before = first === LEADER_ACTION || first === 'clear-cancel' || context.global === true;
+          // A program key the screen's key shadows only while the screen is open is no conflict: each works where it
+          // is read. Only a key read before the screen (the leader, Ctrl+C, a context read in the composer) is one.
+          if (!before) continue;
           const label = this.formatCombo(combo);
           const responds = before ? first : id;
           conflicts.push({ label, actions: [first, id], responds,
@@ -553,6 +557,11 @@ export class KeybindingsManager<Action extends string> {
   getComboLabel(action: string): string {
     const first = this.isAction(action) ? this.bindings[action][0] : this.contextBindings.get(action)?.[0];
     return first ? this.formatCombo(first) : '(unbound)';
+  }
+  /** Every key bound to an action (a table action or a place's context entry), as the table prints each; [] when unbound. */
+  getComboLabels(action: string): readonly string[] {
+    const combos = this.isAction(action) ? this.bindings[action] : this.contextBindings.get(action) ?? [];
+    return combos.map((combo) => this.formatCombo(combo));
   }
   /** The key after the leader as a keycap shows it: `m`, `shift+y`, `up`. */
   formatFollowKey(combo: KeyCombo): string {

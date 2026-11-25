@@ -57,7 +57,7 @@ export const compactionFailurePlaybook: Playbook = {
   ],
   steps: [
     { step: 1, title: 'Compact now', action: 'Run /compact to summarise the conversation and free the context window.', kind: 'command', command: '/compact', expectedOutcome: 'Compaction succeeds and context use drops.', automatable: false },
-    { step: 2, title: 'Keep a copy and start over', action: 'If compaction keeps failing, save the transcript with /session save-file and start a new session with /clear.', kind: 'command', command: '/session save-file', expectedOutcome: 'Work continues in a fresh session.', automatable: false },
+    { step: 2, title: 'Keep a copy and start over', action: 'If compaction keeps failing, save the transcript with This conversation, "Save or export this conversation as a file", and start a new session with /clear.', kind: 'command', command: '/clear', expectedOutcome: 'Work continues in a fresh session.', automatable: false },
     { step: 3, title: 'Use a larger window', action: 'Switch to a model with a larger context window with /model.', kind: 'command', command: '/model', expectedOutcome: 'The conversation fits.', automatable: false },
   ],
   escalationCriteria: [

@@ -330,6 +330,11 @@ export interface BudgetNotificationFacts {
   readonly budgetUsd: number;
   readonly sessionId: string;
   readonly turnName?: string | null | undefined;
+  /**
+   * Whose cost passed the alert: a conversation (the default), or what the daemon's own runs (schedules, work, web
+   * chat, shared sessions) cost in the last 24 hours (`sessionCostUsd` is then that total; Money, Spending).
+   */
+  readonly of?: 'conversation' | 'daemon-runs' | undefined;
 }
 
 /** Typed facts supplied by a producer; delivery snapshots these before awaiting. */
@@ -347,6 +352,12 @@ export function buildBudgetNotification(facts: BudgetNotificationFacts, options:
   try {
     const cost = `$${notificationNumber(facts.sessionCostUsd).toFixed(2)}`;
     const budget = `$${notificationNumber(facts.budgetUsd).toFixed(2)}`;
+    // The daemon's own runs: numbers only either way, as no conversation or turn is named.
+    if (facts.of === 'daemon-runs') {
+      // Under a dollar the cents alone can make the two look equal ($0.02 past $0.02): four places then.
+      const usd = (value: number): string => `$${value < 1 ? value.toFixed(4) : value.toFixed(2)}`;
+      return { title: 'GoodVibes: spending alert passed', body: `The daemon's own runs cost ${usd(notificationNumber(facts.sessionCostUsd))} in the last 24 hours, past the ${usd(notificationNumber(facts.budgetUsd))} spending alert` };
+    }
     if (metadataOnly(options)) {
       return {
         title: 'GoodVibes: budget passed',

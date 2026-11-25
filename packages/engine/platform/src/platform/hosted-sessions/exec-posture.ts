@@ -13,6 +13,25 @@
  * conversational turn used that path to reach the whole process table, the
  * owner's `/proc`, and their tmux session, where it typed.
  *
+ * ── Where the boundary is held now ─────────────────────────────────────────
+ *
+ * What made that turn dangerous was not that the daemon hosted it but whose
+ * input drove it: nobody the owner vouched for was behind it. So the boundary
+ * is decided per turn from who its input came from, in one place
+ * (security/turn-input-party.ts), and applied at each command and file write
+ * (tools/exec/containment.ts `containmentForTurn`, `foreignInputWriteRefusal`):
+ * a turn acting on someone else's input (a channel message, a guest, a device
+ * or person who is not the owner, a webhook, input an outside caller put into a
+ * hosted session) runs no command outside a real sandbox and writes no file,
+ * whatever the mode. The owner's own turns, wherever they run (his terminal, his
+ * web chat, his schedules, his approved work, a hosted session he typed into),
+ * run commands by the one rule (`TURN_EXEC_CONTAINMENT`): the shared sandbox
+ * setting and his mode, an ask nobody is present for waiting in Waiting for you.
+ *
+ * The postures below remain the per-session statement a composition can make;
+ * the hosted compositions state `TURN_EXEC_CONTAINMENT` and leave the boundary
+ * to the turn's party.
+ *
  * ── The two postures ───────────────────────────────────────────────────────
  *
  * `conversational` is the default and the only one reachable over the wire. The

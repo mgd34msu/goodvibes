@@ -23,7 +23,9 @@ import { startExternalServices } from '@/runtime/index.ts';
 import {
   autostartInstalledDaemon,
   createDaemonServiceControl,
+  DAEMON_PROGRAM_STARTED_LINE,
   daemonNotInstalledNotice,
+  daemonProgramStartFailedLine,
   waitForStartingDaemon,
   type DaemonServiceControl,
 } from '@goodvibes/engine/platform/platform/runtime/client';
@@ -221,7 +223,7 @@ export function wireAgentExternalServices(options: {
       detail: `Connected host is installed but not answering, and starting it did not succeed: service "${serviceName}" stopped before the daemon answered (the service manager no longer reports it running), check its logs. Start it with: ${DAEMON_START_COMMAND}`,
     };
   };
-  const adoptStarted = async (outcome: { readonly action: 'started' | 'came-online'; readonly serviceName: string }): Promise<DaemonBringUpResult & { readonly level: 'low' | 'high' | null }> => {
+  const adoptStarted = async (outcome: { readonly action: 'started' | 'came-online'; readonly serviceName: string } | { readonly action: 'program-started'; readonly command: string }): Promise<DaemonBringUpResult & { readonly level: 'low' | 'high' | null }> => {
     const settled = await replaceExternalServices();
     requestRender();
     const adopted = settled.daemonStatus.mode === 'external';
@@ -231,9 +233,11 @@ export function wireAgentExternalServices(options: {
     return {
       answered: adopted,
       level: 'low',
-      detail: outcome.action === 'started'
-        ? `Connected host was installed but stopped; started it (service "${outcome.serviceName}")${suffix}`
-        : `Connected host service "${outcome.serviceName}" was already starting; connected once it answered${suffix}`,
+      detail: outcome.action === 'program-started'
+        ? `Started the GoodVibes daemon${suffix}`
+        : outcome.action === 'started'
+          ? `Connected host was installed but stopped; started it (service "${outcome.serviceName}")${suffix}`
+          : `Connected host service "${outcome.serviceName}" was already starting; connected once it answered${suffix}`,
     };
   };
   const reportBringUp = (result: DaemonBringUpResult & { readonly level: 'low' | 'high' | null }): void => {
@@ -267,6 +271,15 @@ export function wireAgentExternalServices(options: {
       case 'started':
       case 'came-online':
         return adoptStarted(outcome);
+      case 'program-started': {
+        // No service is installed: the daemon program here was started in the background. Said in one line, here and
+        // (missingDaemon) on a headless run's standard error.
+        missingDaemonLine = DAEMON_PROGRAM_STARTED_LINE;
+        return adoptStarted(outcome);
+      }
+      case 'program-start-failed':
+        missingDaemonLine = daemonProgramStartFailedLine(outcome.reason);
+        return { answered: false, level: 'high', detail: missingDaemonLine };
       case 'starting':
         if (whenStarting === 'await') return adoptOnceAnswered(outcome.serviceName, outcome.since);
         void adoptOnceAnswered(outcome.serviceName, outcome.since)

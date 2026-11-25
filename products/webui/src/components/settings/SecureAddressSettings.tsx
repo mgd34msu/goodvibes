@@ -53,6 +53,8 @@ interface SecureAddressStatus {
     readonly on: boolean; readonly certificate: 'local-authority' | 'own-files' | 'lets-encrypt'; readonly servedToNetwork: boolean;
     readonly serving: boolean; readonly port?: number; readonly address?: string; readonly names?: readonly string[];
     readonly notAfter?: number; readonly problem?: string; readonly from?: 'this-machine' | 'group';
+    /** Other machines are not served: why a phone cannot open the address yet, in the daemon's words. */
+    readonly reach?: string;
   };
   readonly letsEncrypt: {
     readonly domain: string; readonly tokenStored: boolean; readonly tokenUnreadable?: string; readonly issuing: boolean;
@@ -68,10 +70,14 @@ interface SecureAddressStatus {
   readonly group: {
     readonly following?: { readonly name: string };
     readonly received?: { readonly leadName: string; readonly names: readonly string[]; readonly notAfter: number; readonly receivedAt: number };
-    readonly followers: readonly { readonly name: string; readonly address: string; readonly covered: boolean; readonly needs?: string }[];
+    readonly followers: readonly { readonly name: string; readonly address: string; readonly port?: number; readonly covered: boolean; readonly needs?: string }[];
   };
   /** "Issue a new certificate now" (secureAddress.reissue), in the daemon's words; available where it can act. */
   readonly reissue: { readonly title: string; readonly line: string; readonly available: boolean };
+  /** "Replace the authority" (secureAddress.replaceAuthority): asked first, opening on No. */
+  readonly replaceAuthority?: { readonly title: string; readonly line: string; readonly question: string; readonly available: boolean };
+  /** "Serve other machines" (secureAddress.serve): while phones cannot reach the address. */
+  readonly serve?: { readonly title: string; readonly line: string; readonly available: boolean };
 }
 
 /** The answer of secureAddress.reissue. */
@@ -125,8 +131,21 @@ export function SecureAddressSettings() {
     mutationFn: () => invokeMethod('secureAddress.reissue', {}) as Promise<SecureAddressReissue>,
     onSuccess: (answer) => { queryClient.setQueryData(SECURE_ADDRESS_KEY, answer.status); },
   });
+  // "Replace the authority" asks first, opening on No; "Serve other machines" acts at once.
+  const [asking, setAsking] = useState(false);
+  // "No, keep the authority" says in one line that nothing changed.
+  const [kept, setKept] = useState(false);
+  const replace = useMutation({
+    mutationFn: () => invokeMethod('secureAddress.replaceAuthority', {}) as Promise<SecureAddressReissue>,
+    onSuccess: (answer) => { setAsking(false); queryClient.setQueryData(SECURE_ADDRESS_KEY, answer.status); },
+  });
+  const serve = useMutation({
+    mutationFn: () => invokeMethod('secureAddress.serve', {}) as Promise<SecureAddressReissue>,
+    onSuccess: (answer) => { queryClient.setQueryData(SECURE_ADDRESS_KEY, answer.status); },
+  });
 
-  const data = (reissue.data && reissue.submittedAt > change.submittedAt ? reissue.data.status : undefined) ?? change.data ?? status.data;
+  // Every answer lands in the one query (the daemon's change events read it again too): it is the one shown.
+  const data = status.data ?? change.data;
   // The daemon marks a notice given once an answer carried it: kept here for as long as this screen is open.
   const arrivedNotice = data?.notice;
   useEffect(() => { if (arrivedNotice) setShownNotice(arrivedNotice); }, [arrivedNotice]);
@@ -135,9 +154,11 @@ export function SecureAddressSettings() {
 
   const words = (id: ChoiceWords['id']) => data.choices.find((choice) => choice.id === id);
   const force = data.inForce;
-  const busy = change.isPending || reissue.isPending;
+  const busy = change.isPending || reissue.isPending || replace.isPending || serve.isPending;
   const inForceLine = force.serving
-    ? `Phones open ${force.address ?? 'the https address'}${force.notAfter ? `, with a certificate valid until ${day(force.notAfter)}` : ''}. The plain http address keeps working.`
+    ? force.reach
+      ? `This computer serves ${force.address ?? 'the https address'}${force.notAfter ? `, with a certificate valid until ${day(force.notAfter)}` : ''}. ${force.reach}`
+      : `Phones open ${force.address ?? 'the https address'}${force.notAfter ? `, with a certificate valid until ${day(force.notAfter)}` : ''}. The plain http address keeps working.`
     : force.on
       ? `https is switched on but not served: ${force.problem ?? 'no reason given'}`
       : 'https is off: phones use the plain http address, with chat and little else.';
@@ -147,18 +168,51 @@ export function SecureAddressSettings() {
       {shownNotice && <div className="banner info" role="status">{shownNotice}</div>}
       <SettingsBlock title="In force now" description={data.intro}>
         <div className="secure-address__status" role="status">
-          <StatusDot tone={force.serving ? 'ok' : force.on ? 'bad' : 'idle'} />
+          <StatusDot tone={force.serving && !force.reach ? 'ok' : force.on ? 'bad' : 'idle'} />
           <span>{inForceLine}</span>
         </div>
+        {/* Phones cannot reach the address while other machines are not served: the control that serves them. */}
+        {force.on && data.serve?.available && (
+          <div className="secure-address__reissue">
+            <div className="settings-rows">
+              <Button disabled={busy} onClick={() => serve.mutate()}>{serve.isPending ? 'Serving other machines…' : data.serve.title}</Button>
+            </div>
+            <p className="settings-empty">{data.serve.line}</p>
+            {serve.isError && <div className="banner warning" role="alert">{formatError(serve.error)}</div>}
+          </div>
+        )}
+        {serve.data && <p className="settings-empty" role="status">{serve.data.words}</p>}
         {data.groupLines.map((line) => <p key={line} className="settings-empty">{line}</p>)}
         {data.group.followers.length > 0 && (
           <ul className="secure-address__list">
             {data.group.followers.map((follower) => (
               <li key={follower.name}>
-                <strong>{follower.name}</strong>: {follower.covered ? `opened at https://${follower.address}` : follower.needs ?? 'not covered by the certificate here'}
+                <strong>{follower.name}</strong>: {follower.covered ? `opened at https://${follower.address}${follower.port !== undefined ? `:${follower.port}` : ''}` : follower.needs ?? 'not covered by the certificate here'}
               </li>
             ))}
           </ul>
+        )}
+        {/* "Replace the authority": it cannot be undone, so it asks first, opening on No. */}
+        {force.on && !data.node && data.replaceAuthority?.available && (
+          <div className="secure-address__reissue">
+            {asking ? (
+              <div role="alertdialog" aria-label={data.replaceAuthority.title}>
+                <p className="settings-empty"><strong>{data.replaceAuthority.question}</strong></p>
+                <div className="settings-rows">
+                  <Button variant="primary" autoFocus disabled={busy} onClick={() => { setAsking(false); setKept(true); }}>No, keep the authority</Button>
+                  <Button disabled={busy} onClick={() => replace.mutate()}>{replace.isPending ? 'Replacing the authority…' : 'Yes, replace the authority'}</Button>
+                </div>
+              </div>
+            ) : (
+              <div className="settings-rows">
+                <Button disabled={busy} onClick={() => { setKept(false); setAsking(true); }}>{data.replaceAuthority.title}</Button>
+              </div>
+            )}
+            <p className="settings-empty">{data.replaceAuthority.line}</p>
+            {kept && !replace.data && <p className="settings-empty" role="status">The authority was kept: nothing changed here or on any phone.</p>}
+            {replace.data && <p className="settings-empty" role="status">{replace.data.words}</p>}
+            {replace.isError && <div className="banner warning" role="alert">{formatError(replace.error)}</div>}
+          </div>
         )}
         {/* "Issue a new certificate now" with its own line and outcome, apart from "Switch https off". */}
         {force.on && !data.node && data.reissue.available && (
@@ -182,7 +236,7 @@ export function SecureAddressSettings() {
         <SettingsBlock title="From the lead of your group" description={data.groupLines[0]}>
           {data.group.received ? (
             <p className="settings-empty">
-              Received from {data.group.received.leadName}: a certificate for {data.group.received.names.join(', ')}, valid until {day(data.group.received.notAfter)}.
+              Received from {data.group.received.leadName} on {day(data.group.received.receivedAt)} at {new Date(data.group.received.receivedAt).toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit' })}: a certificate for {data.group.received.names.join(', ')}, valid until {day(data.group.received.notAfter)}.
               It is renewed there and sent here by itself.
             </p>
           ) : <p className="settings-empty">Nothing received yet.</p>}

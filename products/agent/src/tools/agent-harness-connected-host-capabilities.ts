@@ -11,6 +11,7 @@ import { selectHarnessCatalog } from './agent-harness-catalog-selection.ts';
  * agent-harness-connected-host-status.ts already owned the status half.
  */
 import type { ToolRegistry } from '@goodvibes/engine/platform/platform/tools';
+import { movedCapabilityEntries } from '@goodvibes/engine/platform/platform/capabilities';
 import type { CommandContext } from '../input/command-registry.ts';
 import { resolveAgentConnectedHostConnection } from '@goodvibes/engine/terminal-shell/agent-turn/routine-schedules';
 import { previewHarnessText } from '@goodvibes/engine/terminal-shell/agent-turn/preview-text';
@@ -47,6 +48,15 @@ function connectedHostCapabilityModelRoute(capability: Record<string, unknown>):
   return 'host action:"capability"';
 }
 
+/**
+ * The capabilities a model reaches the same things through (capability_find / capability_run), read from the
+ * capability registry: every moved capability filed under those actions' families. A family no capability carries
+ * adds nothing, and no slash command is named (most are gone; a person uses the places).
+ */
+function registryCapabilities(families: readonly string[]): readonly string[] {
+  return [...new Set(movedCapabilityEntries().filter((entry) => families.includes(entry.command)).map((entry) => entry.id))];
+}
+
 function blockedConnectedHostModelRoute(): string {
   return hostActions('services', 'status');
 }
@@ -73,7 +83,7 @@ export function connectedHostCapabilityMap(toolRegistry: ToolRegistry, registere
       effect: 'read-only-network',
       modelTools: ['agent_operator_briefing'],
       workspaceCategories: ['home', 'host', 'automation'],
-      slashCommandFamilies: ['approval', 'automation', 'schedule'],
+      capabilities: registryCapabilities(['approval', 'automation', 'schedule']),
       purpose: 'Read pending work, approvals, automation, schedules, and scheduler capacity from public operator routes.',
     }),
     withAvailability({
@@ -89,7 +99,7 @@ export function connectedHostCapabilityMap(toolRegistry: ToolRegistry, registere
       effect: 'admitted-connected-host-state',
       modelTools: ['schedule', 'agent_schedule_edit'],
       workspaceCategories: ['automation', 'personal-ops'],
-      slashCommandFamilies: ['schedule'],
+      capabilities: registryCapabilities(['schedule']),
       methodIds: ['automation.jobs.update'],
       purpose: 'Edit one explicit connected schedule name, cadence, or prompt.',
     }),
@@ -98,7 +108,7 @@ export function connectedHostCapabilityMap(toolRegistry: ToolRegistry, registere
       effect: 'read-only-network',
       modelTools: ['agent_knowledge'],
       workspaceCategories: ['knowledge', 'research'],
-      slashCommandFamilies: ['knowledge'],
+      capabilities: registryCapabilities(['knowledge']),
       allowedActions: [
         'status',
         'ask',
@@ -119,7 +129,7 @@ export function connectedHostCapabilityMap(toolRegistry: ToolRegistry, registere
       effect: 'confirmed-agent-knowledge-write',
       modelTools: ['agent_knowledge_ingest'],
       workspaceCategories: ['knowledge', 'research'],
-      slashCommandFamilies: ['knowledge'],
+      capabilities: registryCapabilities(['knowledge']),
       sourceKinds: SOURCE_KINDS,
       purpose: 'Ingest explicit user-approved sources into isolated Agent Knowledge.',
     }),
@@ -128,7 +138,7 @@ export function connectedHostCapabilityMap(toolRegistry: ToolRegistry, registere
       effect: 'confirmed-external-delivery',
       modelTools: ['agent_channel_send'],
       workspaceCategories: ['onboarding-channels'],
-      slashCommandFamilies: ['channels', 'channel'],
+      capabilities: registryCapabilities(['channels', 'channel']),
       targetKinds: ['channel', 'route', 'webhook', 'link'],
       purpose: 'Send one explicit message through a configured Agent delivery target.',
     }),
@@ -137,7 +147,7 @@ export function connectedHostCapabilityMap(toolRegistry: ToolRegistry, registere
       effect: 'confirmed-external-delivery',
       modelTools: ['agent_notify'],
       workspaceCategories: ['onboarding-channels'],
-      slashCommandFamilies: ['notify'],
+      capabilities: registryCapabilities(['notify']),
       purpose: 'Send one explicit notification using configured notification routes.',
     }),
     withAvailability({
@@ -145,7 +155,7 @@ export function connectedHostCapabilityMap(toolRegistry: ToolRegistry, registere
       effect: 'admitted-connected-host-state',
       modelTools: ['schedule', 'agent_autonomy_schedule', 'agent_reminder_schedule'],
       workspaceCategories: ['automation', 'routines'],
-      slashCommandFamilies: ['schedule', 'reminder'],
+      capabilities: registryCapabilities(['schedule', 'reminder']),
       scheduleKinds: ['at', 'every', 'cron'],
       purpose: 'Create one connected reminder or autonomous Agent schedule from a direct user request.',
     }),
@@ -154,7 +164,7 @@ export function connectedHostCapabilityMap(toolRegistry: ToolRegistry, registere
       effect: 'provider-network-and-artifacts',
       modelTools: ['agent_media_generate'],
       workspaceCategories: ['onboarding-voice-media', 'documents'],
-      slashCommandFamilies: ['media', 'image'],
+      capabilities: registryCapabilities(['media', 'image']),
       purpose: 'Generate media through configured Agent media providers and normal artifact storage.',
     }),
   ];
@@ -257,7 +267,7 @@ function connectedHostCapabilityDetail(entry: CapabilityEntry): Record<string, u
       operatorMethodMode: 'Use host action:"methods" for the public operator and Agent Knowledge method catalog. Use action:"method" for one method.',
       servicePostureMode: 'Use host action:"services" for endpoint binding, network-facing posture, issue, and redacted-log diagnostics. Use action:"service" for one endpoint.',
       statusMode: 'Use host action:"status" for live read-only reachability, token posture, and Agent Knowledge route readiness.',
-      boundary: 'Use only the listed first-class model tools, slash-command families, and workspace categories. Mutations still require explicit confirmation through those tools or command routes.',
+      boundary: 'Use only the listed first-class model tools, capabilities (capability_find / capability_run) and workspace categories. Mutations still go through the permission gate of those tools.',
     };
   }
   if (entry.access === 'gated') {

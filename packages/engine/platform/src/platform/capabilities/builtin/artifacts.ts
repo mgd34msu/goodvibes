@@ -80,4 +80,31 @@ export const ARTIFACTS_PACKAGE = storeCapability({
   sentence: 'Artifacts {artifacts} are copied into {path}, with a list of what is in it, until you change it.', example: { artifacts: 'artifact-1,artifact-2', path: 'exports/package' },
 });
 
-export const ARTIFACTS_CAPABILITIES = [ARTIFACTS_LIST_ALL, ARTIFACTS_SHOW, ARTIFACTS_EXPORT, ARTIFACTS_PACKAGE] as const;
+/**
+ * A turn's artifact saved in the daemon's one store: what a terminal program's turn makes (generated media, a model
+ * comparison, a research report) is saved through this, so the daemon holds it and announces it (an open Artifacts list
+ * follows with no key), and the program takes it up from the same folder (ArtifactStore `routeCreate`, `takeUp`).
+ */
+export const ARTIFACTS_SAVE = storeCapability({
+  id: 'artifacts.save', actionId: 'save', label: 'Save an artifact', word: 'save',
+  inputs: [
+    { id: 'content', label: 'Content', help: 'What to keep: text, or base64 for anything else', kind: 'long-text', freeTextReason: 'what is kept', required: true, typed: { tail: true } },
+    fixedInput({
+      id: 'encoding', label: 'Written as', help: 'Whether the content is plain text or base64',
+      choices: [{ value: 'text', label: 'Plain text' }, { value: 'base64', label: 'Base64' }], typed: { flag: '--encoding' }, optional: { default: 'text', means: 'plain text' },
+    }),
+    wordsInput({ id: 'filename', label: 'Name', help: 'The file name it is kept under', why: 'a file name', typed: { flag: '--name' }, optional: optional('a name made from its kind') }),
+    wordsInput({ id: 'mimeType', label: 'File type', help: 'Its type, such as text/markdown or image/png', why: 'a file type', typed: { flag: '--type' }, optional: optional('read from the content') }),
+    fixedInput({
+      id: 'kind', label: 'Kind', help: 'What kind of artifact it is',
+      choices: ['file', 'image', 'audio', 'video', 'document', 'archive', 'data'].map((kind) => ({ value: kind, label: kind[0]!.toUpperCase() + kind.slice(1) })),
+      typed: { flag: '--kind' }, optional: optional('read from its type'),
+    }),
+    wordsInput({ id: 'source', label: 'Came from', help: 'Where it came from (a web address or a source name)', why: 'a source', typed: { flag: '--source' }, optional: optional('nowhere named') }),
+    wordsInput({ id: 'metadata', label: 'Details', help: 'Its details as JSON (what it was made for, what it belongs to)', why: 'JSON details', typed: { flag: '--details' }, optional: optional('none') }),
+    countInput('retention', 'Kept for', 'How long to keep it, in milliseconds', '--keep-ms', '', 'the store\'s usual time'),
+  ],
+  sentence: 'The content is saved as one of your artifacts, in the daemon\'s store, until it expires or you delete it.', example: { content: '# Report', filename: 'report.md', mimeType: 'text/markdown' },
+});
+
+export const ARTIFACTS_CAPABILITIES = [ARTIFACTS_LIST_ALL, ARTIFACTS_SHOW, ARTIFACTS_EXPORT, ARTIFACTS_PACKAGE, ARTIFACTS_SAVE] as const;

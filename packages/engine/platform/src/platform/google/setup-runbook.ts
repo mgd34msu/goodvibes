@@ -5,8 +5,8 @@
  * `setup-plan.ts`, so they cannot drift. `packages/engine/docs/google-setup-runbook.md`
  * is the one checked-in output of `renderGoogleSetupRunbook()` (regenerate it
  * with `bun packages/engine/scripts/generate-google-runbook.ts`), and a test
- * fails if the committed copy is stale. `/google runbook` prints the same
- * text. When automation gives up, its error message points at the anchor for
+ * fails if the committed copy is stale. "The written steps" on the Google tab
+ * of Mail, calendar and channels (capability `google.runbook`) shows the same text. When automation gives up, its error message points at the anchor for
  * the step that stopped.
  */
 
@@ -103,20 +103,18 @@ export function renderGoogleSetupRunbook(): string {
   );
   lines.push('');
   lines.push(
-    'Where a step needs a value only you can see, it says how to hand it over: the private calendar address with `/google calendar-address <url>`, and an OAuth client (the id and secret Google shows once when you create it) with `/google client <client-id> <client-secret>` or by naming the downloaded client JSON. Each goes straight to the encrypted store; a client secret never passes through the model.',
+    'Where a step needs a value only you can see, it says how to hand it over, on the Google tab of Mail, calendar and channels: the private calendar address with "calendar by private address", and an OAuth client (the id and secret Google shows once when you create it) with "use your client id and secret" or "use your client file". Each goes straight to the encrypted store; a client secret never passes through the model.',
   );
   lines.push('');
   lines.push('<details><summary>Self-service equivalents</summary>');
   lines.push('');
   lines.push(
-    'These exist for anyone who prefers driving it themselves. They are not the intended route, and nothing in the flow will tell you to run one.',
+    'These exist for anyone who prefers driving it themselves, on the Google tab of Mail, calendar and channels (in the terminal app, the Agent or the web UI). They are not the intended route, and nothing in the flow will tell you to use one.',
   );
   lines.push('');
-  lines.push('```');
-  lines.push('/google connect     # work out the route and connect');
-  lines.push('/google status      # what is connected, proven by use');
-  lines.push('/google reauthorize # a fresh consent covering every scope');
-  lines.push('```');
+  lines.push('- **connect**: work out the route and connect');
+  lines.push('- **check it**: what is connected, proven by use');
+  lines.push('- **ask for consent again**: a fresh consent covering every scope');
   lines.push('');
   lines.push('</details>');
   lines.push('');
@@ -152,7 +150,7 @@ export function renderGoogleSetupRunbook(): string {
   lines.push(renderPathSection('oauth', 'Path B: OAuth (full Gmail and Calendar APIs)', OAUTH_PREAMBLE));
   lines.push('## If something goes wrong');
   lines.push('');
-  lines.push('**Re-run the command.** Each step first checks what already exists (a stored credential, the Cloud project, the enabled APIs, a consent screen the Google Auth Platform console shows) and skips it, so re-running after fixing something never duplicates work or creates a second project, client, or app password. If you already have a Desktop OAuth client, hand it over with `/google client <client-id> <client-secret>` and only the consent is left.');
+  lines.push('**Connect again.** Each step first checks what already exists (a stored credential, the Cloud project, the enabled APIs, a consent screen the Google Auth Platform console shows) and skips it, so connecting again after fixing something never duplicates work or creates a second project, client, or app password. If you already have a Desktop OAuth client, hand it over with "use your client id and secret" on the Google tab and only the consent is left.');
   lines.push('');
   lines.push('**"This browser or app may not be secure"**: Google is refusing the automated browser at sign-in. Sign in by hand in the window that opened, then re-run. The session persists after that.');
   lines.push('');

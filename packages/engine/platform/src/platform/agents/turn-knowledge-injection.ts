@@ -191,6 +191,11 @@ export type TurnKnowledgeRegistrySource = {
 
 export interface BuildPerTurnKnowledgeInjectionInput {
   readonly memoryRegistry: TurnKnowledgeRegistrySource;
+  /**
+   * The project the turn works in (memoryProjectIdentity of its folder): its "this project" records and the
+   * person's own are given; another project's never. Unknown: only the person's own.
+   */
+  readonly project?: string | undefined;
   /** The agent's (possibly frozen) task text, always included in the derived query. */
   readonly task: string;
   readonly writeScope?: readonly string[] | undefined;
@@ -446,7 +451,7 @@ export async function buildPerTurnKnowledgeInjection(
   }
 
   // Already-injected records are left out before anything is asked about them.
-  const scored = await selectKnowledgeForTaskScored(memoryRegistry, query, writeScope, limit, { excludeIds: alreadyInjectedIdSet });
+  const scored = await selectKnowledgeForTaskScored(memoryRegistry, query, writeScope, limit, { excludeIds: alreadyInjectedIdSet, project: input.project });
   const embeddingBackend = resolveEmbeddingBackend(memoryRegistry);
   const candidatesConsidered = scored.length;
   const memoryCleared: MergedCandidate[] = scored

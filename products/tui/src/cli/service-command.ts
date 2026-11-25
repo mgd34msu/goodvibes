@@ -1,12 +1,7 @@
 import { spawnSync } from 'node:child_process';
 import type { CliCommandOutput, CliCommandRuntime } from '@goodvibes/engine/terminal-shell';
-import {
-  buildCliServicePosture,
-  createPlatformServiceManager,
-  formatCliServicePosture,
-  probeServiceReadiness,
-  resolveGoodVibesDaemonExecutable,
-} from './service-posture.ts';
+import { formatCliServicePosture, probeServiceReadiness } from '@goodvibes/engine/platform/platform/support/service-manager-posture';
+import { buildCliServicePosture, createPlatformServiceManager, resolveGoodVibesDaemonExecutable } from './service-posture.ts';
 
 /**
  * How long `start` and `restart` wait for the daemon to run and answer on its

@@ -1,18 +1,22 @@
 /**
  * Calls Jev decided for the owner at the permission gate (permissions.mode
  * jev-decides or just-vibes), kept so the owner can see each one and reverse
- * it: `/decisions` in both terminal apps and the web UI list them, with undo,
- * never (again), always and ask (always ask me), or keep.
+ * it: Waiting for you's Decisions list in both terminal apps and the web UI,
+ * with never (again), always and ask (always ask me), or keep.
  *
  * The gate records every Jev decision here (PermissionManager). The process
  * that holds the gate posts each one to the owner inbox, the home's one store,
  * as a `decision` item, and carries out the owner's choice on it there:
  * never, always and ask save a standing rule for calls like it in the same
- * rule store the gate reads (the one a remembered answer is written to), and
- * undo restores the files the call changed when its tool recorded them for
- * undo. A choice is carried out before it is recorded, so the item's answer
- * says what was done; a choice that cannot be done is refused and the item
- * stays open.
+ * rule store the gate reads (the one a remembered answer is written to). A
+ * choice is carried out before it is recorded, so the item's answer says what
+ * was done; a choice that cannot be done is refused and the item stays open.
+ *
+ * No decision can be undone from here: it is posted when the gate makes it,
+ * before its call runs, and the gate never puts a change the program records
+ * for undo to Jev (a recoverable write inside the project is allowed by code,
+ * gate/classify.ts; one outside it is refused by the tool,
+ * utils/path-safety.ts). A change is taken back with /undo.
  *
  * One ledger per process, like the process's gate. Bounded: the oldest
  * decision is dropped past JEV_DECISIONS_CAPACITY, and its item says so when
@@ -30,14 +34,14 @@ export interface JevDecisionRecord {
   readonly toolName: string;
   /** What the call would do, as the gate summarized it. */
   readonly summary: string;
+  /** What the call does, in the words its ask would have used ("Change notes.md"); the decision is said in them. */
+  readonly act?: string | undefined;
   readonly approved: boolean;
   /** Jev's reason, in its words. */
   readonly reason: string;
   /** The decision log row. */
   readonly decisionId: string;
   readonly decidedAt: number;
-  /** The absolute paths the call changes, when its tool records every change for undo. */
-  readonly undoPaths?: readonly string[] | undefined;
   /** What a standing rule made from this call covers, in words; absent when none can be made. */
   readonly scope?: string | undefined;
 }
@@ -96,7 +100,7 @@ function viewOf(entry: Entry): JevDecisionRecord {
   return {
     id: entry.id, toolName: entry.toolName, summary: entry.summary, approved: entry.approved, reason: entry.reason,
     decisionId: entry.decisionId, decidedAt: entry.decidedAt,
-    ...(entry.undoPaths ? { undoPaths: entry.undoPaths } : {}),
+    ...(entry.act !== undefined ? { act: entry.act } : {}),
     ...(entry.scope !== undefined ? { scope: entry.scope } : {}),
   };
 }
@@ -118,15 +122,9 @@ export interface JevDecisionInbox {
   withdraw(id: string, reason: string): unknown;
 }
 
-/** Restores the files of the call a decision let run (state/file-undo.ts `undoCallAfter`). */
-export interface JevDecisionUndo {
-  undoCallAfter(since: number, paths: readonly string[]): { readonly paths: readonly string[] } | null;
-}
-
 /** The choices on a decision item, as the owner types them. */
 export const JEV_DECISION_CHOICES = Object.freeze({
   keep: 'keep',
-  undo: 'undo',
   never: 'never',
   always: 'always',
   ask: 'ask',
@@ -138,6 +136,12 @@ const DECISION_KEY_PREFIX = 'jev:';
 
 function clip(text: string, max: number): string {
   return text.length <= max ? text : `${text.slice(0, max - 1)}…`;
+}
+
+/** "Jev allowed this for you: change notes.md": what was decided, in the words of the call's own ask. */
+function decisionSentence(decision: Pick<JevDecisionRecord, 'approved' | 'act' | 'summary'>): string {
+  const act = decision.act ?? decision.summary.replace(/[.\s]+$/, '');
+  return `Jev ${decision.approved ? 'allowed' : 'refused'} this for you: ${act.charAt(0).toLowerCase()}${act.slice(1)}`;
 }
 
 /**
@@ -154,7 +158,6 @@ export function bridgeJevDecisionsToInbox(
   options: {
     readonly surface: string;
     readonly handle: (keyPrefix: string, handler: (item: { readonly key?: string | undefined }, option: string) => Promise<string>) => () => void;
-    readonly undo?: JevDecisionUndo | undefined;
   },
 ): () => void {
   const prefix = `${DECISION_KEY_PREFIX}${options.surface}:${Date.now().toString(36)}${Math.random().toString(36).slice(2, 8)}:`;
@@ -172,15 +175,6 @@ export function bridgeJevDecisionsToInbox(
         return `Always: ${await ledger.remember(id, 'allow')}.`;
       case JEV_DECISION_CHOICES.ask:
         return `Always ask you: ${await ledger.remember(id, 'ask')}.`;
-      case JEV_DECISION_CHOICES.undo: {
-        if (!decision.approved) throw new Error('Jev refused this call, so it never ran and there is nothing to undo.');
-        if (!decision.undoPaths || !options.undo) {
-          throw new Error(`The ${decision.toolName} call's changes are not recorded for undo, so they cannot be reversed from here. Choose never or ask to stop calls like it.`);
-        }
-        const undone = options.undo.undoCallAfter(decision.decidedAt, decision.undoPaths);
-        if (!undone) throw new Error('The call changed no recorded file, or its changes are no longer in the undo history.');
-        return `Undone: restored ${undone.paths.join(', ')}.`;
-      }
       default:
         throw new Error(`"${option}" is not a choice on a decision.`);
     }
@@ -188,18 +182,18 @@ export function bridgeJevDecisionsToInbox(
   const stopListening = ledger.subscribe((decision) => {
     const choices = [
       JEV_DECISION_CHOICES.keep,
-      ...(decision.approved && decision.undoPaths ? [JEV_DECISION_CHOICES.undo] : []),
       ...(decision.scope !== undefined ? [JEV_DECISION_CHOICES.never, JEV_DECISION_CHOICES.always, JEV_DECISION_CHOICES.ask] : []),
     ];
     try {
       const { item } = inbox.postNow({
         kind: 'decision',
         key: `${prefix}${decision.id}`,
-        title: clip(`Jev ${decision.approved ? 'allowed' : 'refused'} ${decision.toolName}: ${decision.summary}`, 200),
+        // One sentence, the same on every surface: what Jev allowed or refused, in the words the ask would have used.
+        title: clip(decisionSentence(decision), 200),
         detail: clip([
           `Why: ${decision.reason}`,
-          ...(decision.scope !== undefined ? [`A standing rule from it would cover ${decision.scope}.`] : []),
-          'keep leaves it as decided; undo restores the files the call changed; never, always and ask set a standing rule for calls like it.',
+          ...(decision.scope !== undefined ? [`A standing rule from it would cover ${decision.scope.charAt(0).toLowerCase()}${decision.scope.slice(1)}.`] : []),
+          'keep leaves it as decided; never, always and ask set a standing rule for calls like it.',
         ].join('\n'), 4000),
         options: choices,
         askedBy: 'Jev',

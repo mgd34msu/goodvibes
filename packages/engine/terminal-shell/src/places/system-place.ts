@@ -23,6 +23,7 @@
  */
 // The words from their own module (no handler reaches a Node module): the web UI draws this declaration too (places/browser.ts).
 import { daemonUpdateWords, keepAwakeWords, voiceRuntimeWords } from '@goodvibes/engine/platform/platform/capabilities/system';
+import { registeredWorkspaces, type RegisteredWorkspaceFacts } from '@goodvibes/engine/platform/platform/capabilities/workspaces';
 import type { SystemSessionServices } from '@goodvibes/engine/platform/platform/capabilities';
 import type { SetupPlaceHooks, SetupPlaceItem } from '../setup-command.js';
 import type { PlacePrograms } from './place-host.js';
@@ -45,6 +46,9 @@ interface StateItem extends PlaceItem {
   readonly mark: 'ok' | 'paused' | 'attention' | 'running';
   readonly lines: readonly string[];
   readonly facts?: readonly PlaceDetailLine[] | undefined;
+  /** On the Support folder row: what only this program knows, filled into the capability's context inputs. */
+  readonly helpers?: string | undefined;
+  readonly links?: string | undefined;
 }
 
 type Item = SetupItem | StateItem;
@@ -72,12 +76,44 @@ function sleepItems(output: unknown): readonly StateItem[] {
   const words = keepAwakeWords(state);
   return [{
     // Not "keep-awake": the place names an item by its title wherever its id is a word of a line, and that one is.
-    kind: 'state', id: 'sleep-hold', state: words.state, title: 'Keep this computer awake',
+    // Short enough to fit beside its state word at 80 columns; the lines say what it is.
+    kind: 'state', id: 'sleep-hold', state: words.state, title: 'Keep awake',
     // One short word: a long one squeezes the title at 80 columns; the detail says why.
     right: words.state === 'off' ? 'off' : words.state === 'refused' ? 'refused' : 'on',
     mark: words.state === 'refused' ? 'attention' : words.state === 'off' ? 'paused' : 'ok',
     lines: words.lines,
   }];
+}
+
+/**
+ * The Updates tab, from `update.review` through `capabilities.run` (capabilities/builtin/system-updates.ts): this
+ * install (installed and newest version, the copy kept for going back), then the daemon's own update loop.
+ */
+function updatesTabItems(output: unknown): readonly StateItem[] {
+  const data = record(record(output).data);
+  const review = record(data.review);
+  const latest = record(review.latest);
+  const items: StateItem[] = [];
+  if (typeof review.appVersion === 'string') {
+    const tag = text(latest.tag);
+    const state = !tag ? 'unknown' : latest.isCurrent === true ? 'current' : 'newer';
+    const kept = review.rollbackRetained === true;
+    items.push({
+      kind: 'state', id: 'this-install', state: kept ? `${state}-kept` : state, title: 'This install',
+      right: state === 'newer' ? `${tag} is out` : state === 'current' ? 'current' : 'unknown',
+      mark: state === 'newer' ? 'attention' : state === 'unknown' ? 'paused' : 'ok',
+      lines: [
+        state === 'newer' ? `A newer release is out: ${tag}.` : state === 'current' ? 'This is the newest release.' : `The newest release could not be read: ${text(latest.unknown)}.`,
+        kept ? 'The version the last update replaced is kept, so you can go back to it.' : 'No earlier version is kept; an update keeps one.',
+      ],
+      facts: [
+        { label: 'Installed', text: review.appVersion },
+        ...(tag ? [{ label: 'Newest', text: tag }] : []),
+        { label: 'Installed as', text: ({ binary: 'installed release files', 'bun-global-package': 'a bun or npm package', source: 'running from source' } as Readonly<Record<string, string>>)[text(review.installKind)] ?? text(review.installKind) },
+      ],
+    });
+  }
+  return [...items, ...updateItems(data.status)];
 }
 
 function updateItems(output: unknown): readonly StateItem[] {
@@ -91,7 +127,7 @@ function updateItems(output: unknown): readonly StateItem[] {
     recovery: 'stopped', installing: 'installing', failing: 'checks failing', pending: `${text(status.pendingVersion)} waiting`, on: 'on', off: 'off',
   };
   return [{
-    kind: 'state', id: 'daemon-updates', state, title: 'The daemon keeps itself up to date', right: right[state],
+    kind: 'state', id: 'daemon-updates', state, title: 'Daemon updates', right: right[state],
     mark: recovery || failed ? 'attention' : installing ? 'running' : state === 'off' ? 'paused' : 'ok',
     lines: daemonUpdateWords(status),
     facts: text(status.currentVersion) ? [{ label: 'Version now', text: text(status.currentVersion) }] : [],
@@ -108,7 +144,7 @@ function voiceItems(output: unknown): readonly StateItem[] {
   const installing = Object.keys(record(status.installInProgress)).length > 0;
   const state = installing ? 'installing' : text(status.state) || 'not-provisioned';
   return [{
-    kind: 'state', id: 'voice-runtime', state, title: 'The voice runtime (speaking and listening)', right: VOICE_RIGHT[state],
+    kind: 'state', id: 'voice-runtime', state, title: 'Voice runtime', right: VOICE_RIGHT[state],
     mark: state === 'provisioned' ? 'ok' : installing ? 'running' : state === 'partial' ? 'attention' : 'paused',
     lines: voiceRuntimeWords(status),
   }];
@@ -120,7 +156,7 @@ function signInItems(output: unknown): readonly StateItem[] {
   const present = status.bootstrapCredentialPresent;
   const users = typeof status.userCount === 'number' ? status.userCount : 0;
   return [{
-    kind: 'state', id: 'first-run-file', state: present ? 'present' : 'removed', title: 'The first-run sign-in file', right: present ? 'still here' : 'removed',
+    kind: 'state', id: 'first-run-file', state: present ? 'present' : 'removed', title: 'First sign-in file', right: present ? 'still here' : 'removed',
     mark: present ? 'attention' : 'ok',
     lines: present
       ? [`It still holds the first sign-in to the web app${users === 0 ? '; no user has been added yet, so removing it leaves nobody who can sign in' : ''}.`]
@@ -130,6 +166,30 @@ function signInItems(output: unknown): readonly StateItem[] {
       { label: 'People who may sign in', text: String(users) },
     ],
   }];
+}
+
+const REGISTERED_BY: Readonly<Record<RegisteredWorkspaceFacts['by'], string>> = {
+  agent: 'the Agent, started in it', tui: 'the terminal app, trusted there', other: 'another program or a script',
+};
+
+/** Workspaces: the folders in the one shared register (`workspaces.registrations.list`), each a folder the Agent works in. */
+function workspaceItems(output: unknown): readonly StateItem[] {
+  return registeredWorkspaces(output).map((workspace): StateItem => {
+    const name = workspace.root.split('/').filter(Boolean).at(-1) ?? workspace.root;
+    return {
+      kind: 'state', id: workspace.root, state: 'registered', title: workspace.label ?? name, mark: 'ok',
+      ...(workspace.checkpoints ? {} : { right: 'no checkpoints' }),
+      lines: [
+        `The Agent works in ${workspace.root}${workspace.checkpoints ? ' and keeps automatic checkpoints there' : ''}.`,
+        'Unregistering it stops that; starting the Agent there registers it again.',
+      ],
+      facts: [
+        { label: 'Folder', text: workspace.root },
+        { label: 'Registered by', text: REGISTERED_BY[workspace.by], tone: 'muted' },
+        ...(workspace.registeredAt ? [{ label: 'When', text: new Date(workspace.registeredAt).toLocaleString(), tone: 'muted' as const }] : []),
+      ],
+    };
+  });
 }
 
 function stateList(id: string, label: string, noun: string, method: string, items: (output: unknown) => readonly StateItem[], empty: string,
@@ -196,8 +256,8 @@ export function systemSessionSource(read: SystemSessionReader): { read(): unknow
         const preset = level.getHITLPreset();
         const overrides = Object.entries(level.getDomainOverrides());
         items.push({
-          kind: 'state', id: 'print-level', state: level.getHITLMode(), title: 'How much the app prints', right: level.getHITLMode(), mark: 'ok',
-          lines: [preset.description],
+          kind: 'state', id: 'print-level', state: level.getHITLMode(), title: 'Print level', right: level.getHITLMode(), mark: 'ok',
+          lines: ['How much the app prints, and where notices go.', preset.description],
           facts: overrides.length > 0 ? overrides.map(([domain, verbosity]) => ({ label: domain, text: `${verbosity}, for this session` })) : [{ text: 'No kind of notification is set on its own.', tone: 'muted' }],
         });
       }
@@ -205,15 +265,8 @@ export function systemSessionSource(read: SystemSessionReader): { read(): unknow
       if (speech) {
         const on = speech.alwaysSpeaks();
         items.push({
-          kind: 'state', id: 'speaking', state: on ? 'speaking' : 'silent', title: 'Speak every answer aloud', right: on ? 'on' : 'off', mark: on ? 'ok' : 'paused',
+          kind: 'state', id: 'speaking', state: on ? 'speaking' : 'silent', title: 'Speak answers aloud', right: on ? 'on' : 'off', mark: on ? 'ok' : 'paused',
           lines: [on ? 'Every answer is played aloud on this computer.' : 'Answers are not played aloud.', 'The voice runtime that speaks is on the Voice tab.'],
-        });
-      }
-      if (system.viewLinks) {
-        const links = system.viewLinks();
-        items.push({
-          kind: 'state', id: 'view-links', state: 'links', title: 'Links to this program\'s views', right: `${links.length}`, mark: 'ok',
-          lines: ['A goodvibes://open link opens one view of this program.', ...links],
         });
       }
       if (system.help) {
@@ -255,12 +308,12 @@ export function systemHealthSource(read: SystemSessionReader): { read(): Promise
         const lines = linesOf(report);
         const ok = lines[0]?.startsWith('✓') === true && lines.length === 1;
         items.push({
-          kind: 'state', id: 'health-report', state: ok ? 'working' : 'attention', title: 'Whether everything is working',
-          right: ok ? 'working' : 'needs a look', mark: ok ? 'ok' : 'attention', lines,
+          kind: 'state', id: 'health-report', state: ok ? 'working' : 'attention', title: 'Everything working?',
+          right: ok ? 'yes' : 'no', mark: ok ? 'ok' : 'attention', lines,
         });
         if (health.failures) {
           items.push({
-            kind: 'state', id: 'failure-reports', state: 'failures', title: 'Failure reports of this session', mark: 'ok',
+            kind: 'state', id: 'failure-reports', state: 'failures', title: 'This session\'s failures', mark: 'ok',
             lines: ['What failed in this session, why, and the evidence; see one, save one as a file, or keep one in memory.'],
           });
         }
@@ -269,7 +322,7 @@ export function systemHealthSource(read: SystemSessionReader): { read(): Promise
       if (startup) {
         let review: string;
         try { review = await startup.review(); } catch (error) { review = failed('What this program started with', error); }
-        items.push({ kind: 'state', id: 'start', state: 'started', title: 'What this program started with', mark: 'ok', lines: linesOf(review) });
+        items.push({ kind: 'state', id: 'start', state: 'started', title: 'What it started with', mark: 'ok', lines: linesOf(review) });
       }
       return items;
     },
@@ -278,14 +331,14 @@ export function systemHealthSource(read: SystemSessionReader): { read(): Promise
 }
 
 /** The Release list's program source (`release.*`): this project's release readiness, from this session. */
-export function systemReleaseSource(read: SystemSessionReader): { read(): unknown; subscribe(onChange: () => void): () => void } {
+export function systemReleaseSource(read: SystemSessionReader): { read(): Promise<unknown>; subscribe(onChange: () => void): () => void } {
   return {
-    read: () => {
+    read: async () => {
       const release = read()?.release;
       if (!release) return [];
       let review: string;
-      try { review = release.review(); } catch (error) { review = failed('Release readiness', error); }
-      return [{ kind: 'state', id: 'release', state: 'release', title: 'Release readiness of this project', mark: 'ok', lines: linesOf(review) } satisfies StateItem];
+      try { review = await release.review(); } catch (error) { review = failed('Release readiness', error); }
+      return [{ kind: 'state', id: 'release', state: 'release', title: 'Release readiness', mark: 'ok', lines: linesOf(review) } satisfies StateItem];
     },
     subscribe: () => () => {},
   };
@@ -295,23 +348,92 @@ export function systemReleaseSource(read: SystemSessionReader): { read(): unknow
 const plain = (value: string): string => value.replace(/[\u0000-\u0008\u000b-\u001f\u007f-\u009f]/g, '');
 
 /** The Notices list's program source: every notice and notification this program collected, newest first, followed as they arrive. */
-export function systemNoticesSource(read: SystemSessionReader): { read(): unknown; subscribe(onChange: () => void): () => void } {
+export function systemNoticesSource(read: SystemSessionReader): { read(): unknown; subscribe(onChange: () => void): () => void; shown(): void } {
   return {
     read: () => {
       const notices = read()?.notices;
       if (!notices) return [];
-      const entries = [...notices.list()];
-      // Shown here is seen: the status bar's unread count goes, as the old history view did.
-      notices.markSeen();
-      return entries.sort((a, b) => b.timestamp - a.timestamp).map((entry): StateItem => ({
+      // A read (the menu's count, a find, a refresh) leaves them unseen; drawing the Notices tab marks them seen (`shown`).
+      // One row per notice: the same words said again (a carried-forward notice announced at the start and again when
+      // its receipt is read, or by both programs) are one row, the newest kept.
+      const seenWords = new Set<string>();
+      const entries = [...notices.list()].sort((a, b) => b.timestamp - a.timestamp).filter((entry) => {
+        const words = `${entry.domain}\n${plain(entry.title)}\n${plain(entry.body ?? '')}`;
+        if (seenWords.has(words)) return false;
+        seenWords.add(words);
+        return true;
+      });
+      return entries.map((entry): StateItem => ({
         kind: 'state', id: entry.key, state: entry.level ?? 'info', title: plain(entry.title),
-        right: `${entry.collapsedCount > 1 ? `×${entry.collapsedCount} · ` : ''}${new Date(entry.timestamp).toLocaleTimeString()}`,
+        // The time is in the detail; the row keeps its room for the title.
+        ...(entry.collapsedCount > 1 ? { right: `×${entry.collapsedCount}` } : {}),
         mark: entry.level === 'critical' || entry.level === 'warning' ? 'attention' : 'ok',
         lines: entry.body ? linesOf(plain(entry.body)) : [],
         facts: [{ label: 'Kind', text: entry.domain, tone: 'muted' }, { label: 'When', text: new Date(entry.timestamp).toLocaleString(), tone: 'muted' }],
       }));
     },
     subscribe: (onChange) => read()?.notices?.subscribe(onChange) ?? (() => {}),
+    // Shown to a person is seen: the status bar's unread count goes, as the old history view did.
+    shown: () => read()?.notices?.markSeen(),
+  };
+}
+
+/** The Links list's program source (`deeplink.review`): one row per view of this program with its goodvibes://open link. */
+export function systemLinksSource(read: SystemSessionReader): { read(): unknown; subscribe(onChange: () => void): () => void } {
+  return {
+    read: () => {
+      const links = read()?.viewLinks?.() ?? [];
+      return links.map((link): StateItem => {
+        const view = decodeURIComponent(link.replace(/^goodvibes:\/\/open\//, '').replace(/\?.*$/, ''));
+        return { kind: 'state', id: view, state: 'view', title: view, mark: 'ok', lines: [link, 'Enter opens this view; the link opens it from a terminal or another program.'] };
+      });
+    },
+    subscribe: () => () => {},
+  };
+}
+
+/**
+ * The Support and transfer list's program source: what this program's settings and setup can be written as for
+ * someone else, each row the thing its actions act on (capabilities/builtin/system-bundles.ts; the daemon writes and
+ * reads them, for this program: each action's `program` is filled by the program asking). The Support folder row
+ * carries what only this program knows (its integration helpers' interfaces, the links to its views), which the save
+ * fills into the capability's context inputs.
+ */
+export function systemSupportSource(program: 'tui' | 'agent' | undefined, read?: SystemSessionReader): { read(): unknown; subscribe(onChange: () => void): () => void } {
+  const whose = program === 'agent' ? 'the Agent\'s' : 'the terminal app\'s';
+  const known = (): { readonly helpers?: string; readonly links?: string } => {
+    const system = read?.();
+    let helpers: string | undefined;
+    try { const review = system?.integrationHelpers?.(); helpers = review ? JSON.stringify(review) : undefined; } catch { helpers = undefined; }
+    const links = system?.viewLinks?.() ?? [];
+    return { ...(helpers ? { helpers } : {}), ...(links.length > 0 ? { links: links.join('\n') } : {}) };
+  };
+  return {
+    read: (): readonly StateItem[] => [
+      {
+        kind: 'state', id: 'support-bundle', state: 'bundle', title: 'Support bundle', mark: 'ok',
+        lines: [
+          `One file holding ${whose} settings and setup, with every secret taken out, for someone helping you.`,
+          'Loading one back changes only the settings that differ; security settings stay as they are unless you choose to load them too.',
+        ],
+      },
+      {
+        kind: 'state', id: 'support-folder', state: 'folder', title: 'Support folder', mark: 'ok',
+        lines: [
+          `A folder for a support thread: ${whose} setup review, the platform facts, the services and hooks files and the remote runners.`,
+          'Credentials in it are masked.',
+        ],
+        ...known(),
+      },
+      {
+        kind: 'state', id: 'move-setup', state: 'move', title: 'Move this setup', mark: 'ok',
+        lines: [
+          `One file with ${whose} settings, services, plugins and skills; literal credentials are left out, secret-store references travel.`,
+          'Reading a file first shows what bringing it in would change and replace.',
+        ],
+      },
+    ],
+    subscribe: () => () => {},
   };
 }
 
@@ -331,7 +453,9 @@ const programList = (id: string, label: string, noun: string, name: string, empt
 
 const HEALTH_LIST = programList('health', 'Health', 'whether this program is working', 'system-health', 'This program does not check its own health.');
 const RELEASE_LIST = programList('release', 'Release', 'release readiness', 'system-release', 'Release readiness is read in the terminal app.');
+const LINKS_LIST = programList('links', 'Links', 'the links to this program\'s views', 'system-links', 'This program has no views with links.');
 const NOTICES_LIST = programList('notices', 'Notices', 'the notices and notifications', 'system-notices', 'No notice or notification yet.');
+const SUPPORT_LIST = programList('support', 'Support and transfer', 'support bundles and moving this setup', 'system-support', 'This program writes no support bundle.');
 
 const SESSION_LIST: PlaceList<Item> = {
   id: 'session',
@@ -364,13 +488,28 @@ export const SYSTEM_PLACE = definePlace<Item>({
     NOTICES_LIST,
     stateList('sleep', 'Sleep', 'whether this computer may sleep', 'power.status.get', sleepItems, 'The daemon did not say whether this computer may sleep.',
       { domains: ['ops'], events: [] }),
-    stateList('updates', 'Updates', 'the daemon\'s updates', 'update.status', updateItems, 'The daemon did not say how it updates itself.'),
-    stateList('voice', 'Voice', 'the voice runtime', 'voice.local.status', voiceItems, 'The daemon did not say whether the voice runtime is installed.'),
+    {
+      ...stateList('updates', 'Updates', 'the updates of this install', 'capabilities.run', updatesTabItems, 'The daemon did not say how this install is updated.',
+        // A change in the daemon's update state (a check ended, an install began or ended, a recovery) is LIST_CHANGED `system-updates`.
+        { domains: [], events: [], lists: ['system-updates'] }),
+      source: { kind: 'daemon', method: 'capabilities.run', input: { id: 'update.review', inputs: {} }, items: updatesTabItems },
+    },
+    // An install starting and ending anywhere (here, the web UI, a model) is LIST_CHANGED `voice` (runtime/voice-setup.ts).
+    stateList('voice', 'Voice', 'the voice runtime', 'voice.local.status', voiceItems, 'The daemon did not say whether the voice runtime is installed.',
+      { domains: [], events: [], lists: ['voice'] }),
     stateList('sign-in', 'Sign-in', 'the first-run sign-in file', 'local_auth.status', signInItems, 'The daemon did not say whether the first-run sign-in file is there.'),
+    // The register is read as the place opens and after each act here; the Agent's own registration at its start writes
+    // the shared file itself, so this tab reads it again on `r` or the next open.
+    stateList('workspaces', 'Workspaces', 'the registered workspaces', 'workspaces.registrations.list', workspaceItems,
+      'No folder is registered as a workspace yet: the Agent registers the folder it is started in.'),
+    SUPPORT_LIST,
     RELEASE_LIST,
+    LINKS_LIST,
     ...(KEYS_PLACE.lists as unknown as readonly PlaceList<Item>[]),
   ],
   actions: [
+    // Settings: the one settings screen, opened from here on its first topic (the menu finds it as "System: settings").
+    { key: 'S', id: 'open-settings', capability: 'settings.open', label: 'settings', fill: { where: () => '' } },
     { key: 'enter', id: 'close-program', list: 'session', states: ['close'], capability: 'system.quit', label: 'close this program' },
     { key: 'v', id: 'print-level', list: 'session', states: ['quiet', 'balanced', 'operator'], capability: 'verbosity.set', label: 'change' },
     { key: 'n', id: 'one-kind', list: 'session', states: ['quiet', 'balanced', 'operator'], capability: 'verbosity.set-domain', label: 'one kind of notification' },
@@ -384,11 +523,24 @@ export const SYSTEM_PLACE = definePlace<Item>({
     { key: 'k', id: 'keep-awake', list: 'sleep', states: ['off'], capability: 'power.on', label: 'keep awake' },
     { key: 'k', id: 'let-sleep', list: 'sleep', states: ['held', 'held-partial', 'refused'], capability: 'power.off', label: 'let it sleep' },
     { key: 'c', id: 'check-now', list: 'updates', states: ['on', 'off', 'failing', 'pending'], capability: 'update.daemon', label: 'check now', fill: { now: () => 'yes' } },
+    // This install: install the newer release, go back to the kept one, keep or read its update state as a file.
+    { key: 'i', id: 'install-update', list: 'updates', states: ['newer', 'newer-kept'], capability: 'update.apply', label: 'install it' },
+    { key: 'b', id: 'go-back', list: 'updates', states: ['current-kept', 'newer-kept', 'unknown-kept'], capability: 'update.rollback', label: 'go back' },
+    { key: 'c', id: 'check-release', list: 'updates', states: ['current', 'newer', 'unknown', 'current-kept', 'newer-kept', 'unknown-kept'], capability: 'update.check', label: 'check again' },
+    { key: 'v', id: 'install-review', list: 'updates', states: ['current', 'newer', 'unknown', 'current-kept', 'newer-kept', 'unknown-kept'], capability: 'update.review', label: 'the whole review' },
+    { key: 's', id: 'save-update-state', list: 'updates', states: ['current', 'newer', 'unknown', 'current-kept', 'newer-kept', 'unknown-kept'], capability: 'update.save-review', label: 'save it as a file' },
+    { key: 'o', id: 'read-update-state', list: 'updates', states: ['current', 'newer', 'unknown', 'current-kept', 'newer-kept', 'unknown-kept'], capability: 'update.read-review', label: 'read a saved one' },
     { key: 'i', id: 'install', list: 'voice', states: ['not-provisioned', 'partial'], capability: 'voice.setup', label: 'install' },
+    // Workspaces (capabilities/builtin/workspaces.ts): the Agent registers the folder it starts in; here one is undone.
+    { key: 'x', id: 'unregister-workspace', list: 'workspaces', states: ['registered'], capability: 'workspaces.unregister', label: 'unregister', fill: { root: 'id' } },
+    { key: 'a', id: 'register-workspace', list: 'workspaces', whole: true, capability: 'workspaces.register', label: 'register a folder' },
     { key: 'x', id: 'remove-file', list: 'sign-in', states: ['present'], capability: 'local-auth.remove-first-run-file', label: 'remove it' },
     // This session: links to this program's views, and its help (capabilities/builtin/system-program.ts).
-    { key: 'l', id: 'make-link', list: 'session', states: ['links'], capability: 'startup.link', label: 'make a link' },
-    { key: 'g', id: 'open-link', list: 'session', states: ['links'], capability: 'startup.open-link', label: 'open a link' },
+    // Links: open a view, a link for one item, a link someone gave you, a file of links saved earlier.
+    { key: 'enter', id: 'open-view', list: 'links', states: ['view'], capability: 'deeplink.open', label: 'open it', fill: { view: 'id' } },
+    { key: 'l', id: 'make-link', list: 'links', states: ['view'], capability: 'startup.link', label: 'a link to one item', fill: { surface: 'id' } },
+    { key: 'g', id: 'open-link', list: 'links', capability: 'startup.open-link', label: 'open a link' },
+    { key: 'i', id: 'read-links', list: 'links', capability: 'deeplink.inspect', label: 'read a saved file of links' },
     { key: 'enter', id: 'help', list: 'session', states: ['help'], capability: 'system.help', label: 'open the list', fill: { about: () => '' } },
     // Health: whether this program is working, its failure reports, and what it started with.
     { key: 'a', id: 'check-area', list: 'health', states: ['working', 'attention'], capability: 'health.check', label: 'check one area' },
@@ -405,6 +557,22 @@ export const SYSTEM_PLACE = definePlace<Item>({
     { key: 't', id: 'stop-spoken', list: 'voice', capability: 'voice.stop', label: 'stop speaking' },
     { key: 'v', id: 'wake-status', list: 'voice', capability: 'voice.wake-status', label: 'the wake word' },
     { key: 'w', id: 'wake-setup', list: 'voice', capability: 'voice.wake-setup', label: 'set up the wake word' },
+    // The voice settings as a file (the daemon keeps them for this program: capabilities/builtin/system-settings.ts).
+    // Whose settings: this program's own (empty is the program asking, which the place's call names).
+    { key: 'e', id: 'voice-export', list: 'voice', capability: 'voice.export', label: 'save the voice settings to a file', fill: { program: () => '' } },
+    { key: 'o', id: 'voice-inspect', list: 'voice', capability: 'voice.inspect', label: 'read a voice settings file' },
+    { key: 'm', id: 'voice-import', list: 'voice', capability: 'voice.import', label: 'apply one', fill: { program: () => '' } },
+    // Support and transfer (capabilities/builtin/system-bundles.ts): this program's settings and setup for someone else,
+    // written and read by the daemon; `program` is this program's own (empty: the program asking, which the call names).
+    { key: 'p', id: 'bundle-preview', list: 'support', states: ['bundle'], capability: 'bundle.preview', label: 'see what one would hold', fill: { program: () => '' } },
+    { key: 's', id: 'bundle-save', list: 'support', states: ['bundle'], capability: 'bundle.export', label: 'save one', fill: { program: () => '' } },
+    { key: 'c', id: 'bundle-check', list: 'support', states: ['bundle'], capability: 'bundle.inspect', label: 'check one', fill: { program: () => '' } },
+    { key: 'l', id: 'bundle-load', list: 'support', states: ['bundle'], capability: 'bundle.import', label: 'load settings from one', fill: { program: () => '' } },
+    { key: 's', id: 'folder-save', list: 'support', states: ['folder'], capability: 'startup.support-bundle', label: 'save one', fill: { program: () => '', helpers: 'helpers', links: 'links' } },
+    { key: 'o', id: 'folder-read', list: 'support', states: ['folder'], capability: 'startup.support-bundle-inspect', label: 'read one' },
+    { key: 's', id: 'move-save', list: 'support', states: ['move'], capability: 'startup.transfer-export', label: 'save this setup', fill: { program: () => '' } },
+    { key: 'o', id: 'move-read', list: 'support', states: ['move'], capability: 'startup.transfer-inspect', label: 'read one, and what it would change', fill: { program: () => '' } },
+    { key: 'm', id: 'move-bring-in', list: 'support', states: ['move'], capability: 'startup.transfer-import', label: 'bring one in', fill: { program: () => '' } },
     // Release: this project's release readiness.
     { key: 'l', id: 'release-checklist', list: 'release', states: ['release'], capability: 'release.checklist', label: 'the checklist' },
     { key: 's', id: 'save-release', list: 'release', states: ['release'], capability: 'release.save', label: 'save the evidence' },

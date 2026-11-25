@@ -60,6 +60,8 @@ import {
 import { builtinGatewaySecureAddressMethodDescriptors } from './method-catalog-secure-address.js';
 import { builtinGatewayCapabilityMethodDescriptors } from './method-catalog-capabilities.js';
 import { builtinGatewayHookTraceMethodDescriptors } from './method-catalog-hooks.js';
+import { builtinGatewayContextWindowMethodDescriptors } from './method-catalog-context-windows.js';
+import { builtinGatewayPolicyAuditMethodDescriptors } from './method-catalog-policy-audit.js';
 import {
   builtinGatewayAcpMethodDescriptors,
 } from './method-catalog-acp.js';
@@ -194,6 +196,9 @@ export const BUILTIN_GATEWAY_METHODS: readonly GatewayMethodDescriptor[] = [
   ...builtinGatewayCapabilityMethodDescriptors,
   // The hook trace: each terminal program posts the hooks it ran (method-catalog-hooks.ts).
   ...builtinGatewayHookTraceMethodDescriptors,
+  ...builtinGatewayContextWindowMethodDescriptors,
+  // The permission audit: each terminal program posts the calls its gate decided (method-catalog-policy-audit.ts).
+  ...builtinGatewayPolicyAuditMethodDescriptors,
   ...builtinGatewayAcpMethodDescriptors,
   ...builtinGatewaySkillsMethodDescriptors,
   ...builtinGatewayPrincipalsMethodDescriptors,

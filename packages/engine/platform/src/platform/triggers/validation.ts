@@ -562,6 +562,7 @@ function validateDefinitionFields(input: unknown): TriggerDefinition {
   requireString(definition.label, 'definition.label');
   optionalString(definition.description, 'definition.description');
   optionalString(definition.ownerSessionId, 'definition.ownerSessionId');
+  optionalString(definition.workingDirectory, 'definition.workingDirectory');
   validateSpec(definition.spec);
   validateAction(definition.action);
   // The whole definition is saved as JSON, so a non-finite number in createdAt or any extra top-level field must be refused here, not at save.

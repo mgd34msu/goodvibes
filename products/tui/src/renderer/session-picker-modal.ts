@@ -159,7 +159,7 @@ function hostedRows(modal: SessionPickerModal): KitRow[] {
   }
   if (roster.sessions.length > MAX_HOSTED_ROWS)
     rows.push({ label: `showing ${MAX_HOSTED_ROWS} of ${roster.sessions.length}`, labelFg: t.textFaint });
-  if (roster.sessions.length > 0) rows.push({ label: 'Join one with /hosted attach <id>', labelFg: t.textFaint });
+  if (roster.sessions.length > 0) rows.push({ label: 'Join one in the Sessions place, under Hosted', labelFg: t.textFaint });
   return rows;
 }
 

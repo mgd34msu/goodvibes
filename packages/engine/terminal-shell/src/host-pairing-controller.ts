@@ -218,7 +218,7 @@ export class TerminalHostPairingController<
       this.ui.print(this.policy.format(result));
     } catch {
       if (this.current(operation))
-        this.ui.print(`Pairing interrupted. Run ${this.policy.command} to see where it got to before doing anything else.`);
+        this.ui.print(`Pairing interrupted. Use ${this.policy.command} to see where it got to before doing anything else.`);
     } finally {
       this.finish(operation);
     }
@@ -261,7 +261,7 @@ export class TerminalHostPairingController<
     } else {
       this.ui.print(
         operation.phase === 'applying'
-          ? `Pairing interrupted. Run ${this.policy.command} to see where it got to before doing anything else; it is not retried on its own.`
+          ? `Pairing interrupted. Use ${this.policy.command} to see where it got to before doing anything else; it is not retried on its own.`
           : 'Pairing cancelled. Nothing was sent to the host.',
       );
     }

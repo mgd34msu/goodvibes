@@ -9,12 +9,14 @@
  * topics it can open (its own form for each) and any actions only it has; a
  * topic a program does not pass is not listed there.
  */
-import type { ActionDescription, ActionValues, CommandDescription, CommandReport, FirstScreenGroup, InputDescription } from './command-actions/types.js';
+import type { ActionDescription, ActionValues, CommandActionContext, CommandDescription, CommandReport, FirstScreenGroup, InputDescription } from './command-actions/types.js';
 import { doAction, readAction } from './described-command-kit.js';
+import {
+  DEVICES_PAIR, DEVICES_UNPAIR_HOST, SETUP_TOPIC_CAPABILITIES, SETUP_TOPIC_WORDS, readSetupState, type SystemSessionServices,
+} from '@goodvibes/engine/platform/platform/capabilities';
+import { runDaemonCapability, sessionCapabilityAction, type DaemonCapabilityBinding } from './command-actions/capability-actions.js';
 import type { ConfigManager } from '@goodvibes/engine/platform/platform/config';
 import { gatePresetLabel } from '@goodvibes/engine/platform/platform/gate/presets';
-import { writeFileAtomic } from '@goodvibes/engine/platform/platform/utils';
-import { readFileSync } from 'node:fs';
 
 export type SetupTopicId =
   | 'model'
@@ -48,32 +50,24 @@ interface SetupTopicWords {
   readonly sentence: string;
 }
 
-/** Every topic's words, in list order. */
+/** Every topic's words, in list order: the capabilities' own (capabilities/builtin/system-program.ts `setup.<topic>`). */
+const { model: MODEL_TOPIC, 'sign-in': SIGN_IN_TOPIC, ...FORM_TOPICS_REST } = SETUP_TOPIC_WORDS;
 export const SETUP_TOPICS: Readonly<Record<SetupTopicId, SetupTopicWords>> = {
-  'model': { label: 'Choose a model', word: 'model', sentence: 'Opens the form for the model new turns use and how hard it thinks.' },
-  'sign-in': { label: 'Sign in or out of a provider', word: 'sign-in', sentence: 'Opens the form for signing in to a provider with your browser, finishing a sign-in, or signing out.' },
+  'model': MODEL_TOPIC,
+  'sign-in': SIGN_IN_TOPIC,
   'add-provider': { label: 'Add a provider of your own', word: 'add-provider', sentence: 'Opens the form for adding an OpenAI-compatible provider of your own.' },
-  'store-key': { label: 'Store a password or key', word: 'store-key', sentence: 'Opens the form for storing a provider or channel key, and how keys are stored.' },
-  'local-only': { label: 'Keep everything on this computer', word: 'local-only', sentence: 'Opens the form that turns off the browser, network and webhook access.' },
-  'browser': { label: 'Open GoodVibes in a browser', word: 'browser', sentence: 'Opens the form for using GoodVibes from a web browser on this computer or your network.' },
-  'other-devices': { label: 'Use it from other devices', word: 'other-devices', sentence: 'Opens the form for letting your other devices reach GoodVibes: addresses and ports.' },
-  'connect-daemon': { label: 'Use a daemon on another computer', word: 'connect-daemon', sentence: 'Opens the form for pointing this program at a GoodVibes daemon already running on another computer; nothing on this computer is opened to the network.' },
-  'webhooks': { label: 'Receive webhooks', word: 'webhooks', sentence: 'Opens the form for receiving webhooks and events from other tools.' },
-  'chat-apps': { label: 'Connect chat apps and services', word: 'chat-apps', sentence: 'Opens the form for connecting Slack, Discord, Telegram and the other chat apps and services.' },
-  'cloudflare': { label: 'Use Cloudflare', word: 'cloudflare', sentence: 'Opens the form for using Cloudflare for batch and remote work.' },
-  'who-signs-in': { label: 'Who can sign in here', word: 'who-signs-in', sentence: 'Opens the form for the account that signs in to this GoodVibes from other devices.' },
-  'how-it-works': { label: 'How GoodVibes works with you', word: 'how-it-works', sentence: 'Opens the form for how much GoodVibes tells you, how much guidance it gives, and when it asks.' },
-  'safety': { label: 'Safety and sandboxing', word: 'safety', sentence: 'Opens the form for the sandbox and the other safety features.' },
-  'memory': { label: 'Memory and context', word: 'memory', sentence: 'Opens the form for memory and how a long conversation is kept in context.' },
-  'telemetry': { label: 'Record traces of what GoodVibes does', word: 'telemetry', sentence: 'Opens the form for tracing what GoodVibes does.' },
-  'automation': { label: 'Scheduled routines, watchers and triggers', word: 'automation', sentence: 'Opens the form for scheduled routines, watchers and triggers.' },
-  'devices-voice': { label: 'Paired devices and voice', word: 'devices-voice', sentence: 'Opens the form for paired phones and voice.' },
-  'provider-behaviour': { label: 'Provider behaviour', word: 'provider-behaviour', sentence: 'Opens the form for how GoodVibes chooses and talks to providers.' },
-  'advanced': { label: 'Advanced switches', word: 'advanced', sentence: 'Opens the form for the advanced runtime switches.' },
-  'history': { label: 'History and privacy', word: 'history', sentence: 'Opens the setting for whether conversations are saved on this computer.' },
-  'import-settings': { label: 'Bring over settings from the terminal app', word: 'import-settings', sentence: 'Copies the settings the Agent shares with the terminal app into the Agent.' },
-  'first-run': { label: 'Run first-run again', word: 'first-run', sentence: 'Opens the three-step first run: choose a provider, sign in, start.' },
+  ...FORM_TOPICS_REST,
 };
+
+/** This program's `/setup` topic runs as the capabilities `setup.<topic>` take them (system-session.ts `setupTopic`). */
+export function setupTopicOf<Ctx>(options: SetupCommandOptions<Ctx>, ctx: Ctx): (topic: string) => Promise<string | void> {
+  return async (topic) => {
+    const id = topic as SetupTopicId;
+    const run = options.runs[id];
+    if (!run) return options.elsewhere(id, SETUP_TOPICS[id]?.label ?? topic);
+    return run({}, ctx);
+  };
+}
 
 /** The topics gathered under one row of the first screen, so the list stays short. */
 const REACH_GROUP: readonly SetupTopicId[] = ['local-only', 'browser', 'other-devices', 'connect-daemon', 'webhooks', 'cloudflare'];
@@ -99,13 +93,15 @@ export interface SetupCommandOptions<Ctx> {
   /** This program's settings, read when the list opens: the checklist's done marks and count. */
   readonly settings?: ((ctx: Ctx) => SetupSettings | undefined) | undefined;
   /** The recommended topics the person chose to skip for now, kept by the program. */
-  readonly skipped?: { read(ctx: Ctx): ReadonlySet<string>; skip(ctx: Ctx, id: SetupTopicId): void; unskip(ctx: Ctx, id: SetupTopicId): void } | undefined;
+  readonly skipped?: { read(ctx: Ctx): ReadonlySet<string>; skip(ctx: Ctx, id: SetupTopicId): void | Promise<void>; unskip(ctx: Ctx, id: SetupTopicId): void | Promise<void> } | undefined;
   /**
    * First run's "Who decides" step as the checklist reads it: not done while
    * the mode lets a decision model decide and none can be asked (put off at
    * first run, or never answered); done once Ask me is chosen or one answers.
    */
   readonly whoDecides?: ((ctx: Ctx) => Promise<WhoDecidesState>) | undefined;
+  /** This program's services: a topic's action is the capability `setup.<topic>`, run with them (its `setupTopic` runs `runs`). */
+  readonly services?: ((ctx: Ctx) => SystemSessionServices) | undefined;
 }
 
 /** "Who decides" on the checklist: whether it is settled, and what is in force or missing. */
@@ -132,28 +128,20 @@ export interface SetupChecklistItem {
 export const RECOMMENDED_SETUP_TOPICS: readonly SetupTopicId[] = ['model', 'how-it-works', 'safety', 'history'];
 
 /**
- * The skipped topics kept in one small JSON file (`setup-skipped.json` beside
- * the program's input history): read when `/setup` opens, written on a skip
- * and when a skipped topic is brought back (the checklist's `s` key).
+ * The skipped topics in the daemon's one setup record (capabilities/builtin/system-setup.ts): read from it, changed
+ * through `setup.skip` as the person's own press, so a topic skipped in one program is skipped in the other.
  */
-export function setupSkipFile<Ctx>(pathOf: (ctx: Ctx) => string | undefined): NonNullable<SetupCommandOptions<Ctx>['skipped']> {
-  const read = (ctx: Ctx): ReadonlySet<string> => {
-    const path = pathOf(ctx);
-    if (!path) return new Set();
-    try {
-      const parsed: unknown = JSON.parse(readFileSync(path, 'utf-8'));
-      return new Set(Array.isArray(parsed) ? parsed.filter((id): id is string => typeof id === 'string') : []);
-    } catch { return new Set(); }
-  };
-  const write = (ctx: Ctx, ids: Iterable<string>): void => {
-    const path = pathOf(ctx);
-    if (!path) return;
-    writeFileAtomic(path, `${JSON.stringify([...new Set(ids)])}\n`, { mkdirp: true });
+export function daemonSetupSkips<Ctx extends CommandActionContext>(
+  homeOf: (ctx: Ctx) => string | undefined,
+  binding: DaemonCapabilityBinding<Ctx>,
+): NonNullable<SetupCommandOptions<Ctx>['skipped']> {
+  const change = async (ctx: Ctx, id: SetupTopicId, back: boolean): Promise<void> => {
+    await runDaemonCapability('setup.skip', { topic: id, back: back ? 'yes' : 'no' }, ctx, binding);
   };
   return {
-    read,
-    skip(ctx, id) { write(ctx, [...read(ctx), id]); },
-    unskip(ctx, id) { write(ctx, [...read(ctx)].filter((kept) => kept !== id)); },
+    read: (ctx) => { const home = homeOf(ctx); return new Set(home ? readSetupState(home).skipped : []); },
+    skip: (ctx, id) => change(ctx, id, false),
+    unskip: (ctx, id) => change(ctx, id, true),
   };
 }
 
@@ -167,7 +155,10 @@ export function readSetupChecklist(settings: SetupSettings): SetupChecklistItem[
     { id: 'model', done: model.length > 0, note: model || 'no model chosen yet' },
     { id: 'how-it-works', done: modeChosen, note: modeChosen ? `${gatePresetLabel(text('permissions.mode'))}, chosen` : 'when GoodVibes asks: the default, not chosen yet' },
     { id: 'safety', done: flag('sandbox.enabled'), note: flag('sandbox.enabled') ? 'sandbox on' : 'sandbox off' },
-    { id: 'history', done: settings.isExplicitlySet?.('behavior.saveHistory') === true, note: flag('behavior.saveHistory') ? 'conversations are saved' : 'conversations are not saved' },
+    { id: 'history', done: settings.isExplicitlySet?.('behavior.saveHistory') === true,
+      note: settings.isExplicitlySet?.('behavior.saveHistory') === true
+        ? (flag('behavior.saveHistory') ? 'conversations are saved' : 'conversations are not saved')
+        : `not chosen yet (conversations are ${flag('behavior.saveHistory') ? '' : 'not '}saved)` },
   ];
 }
 
@@ -189,7 +180,7 @@ const ADD_PROVIDER_INPUTS: readonly InputDescription[] = [
 ];
 
 /** `/setup`'s description, the same in both programs; only what each action runs differs. */
-export function setupCommandDescription<Ctx>(options: SetupCommandOptions<Ctx>): CommandDescription<Ctx> {
+export function setupCommandDescription<Ctx extends CommandActionContext>(options: SetupCommandOptions<Ctx>): CommandDescription<Ctx> {
   const runOf = (id: SetupTopicId | SetupExtraId, label: string): SetupRun<Ctx> =>
     options.runs[id] ?? (async () => options.elsewhere(id, label));
   const checklist = (ctx: Ctx): SetupChecklistItem[] => {
@@ -248,20 +239,35 @@ export function setupCommandDescription<Ctx>(options: SetupCommandOptions<Ctx>):
       });
       continue;
     }
+    // The topic is the capability setup.<topic> (capabilities/builtin/system-program.ts): find, a model and other places reach it by id.
+    const capability = SETUP_TOPIC_CAPABILITIES.find((definition) => definition.capability.id === `setup.${id}`);
+    if (capability && options.services) {
+      actions.push({ ...sessionCapabilityAction<Ctx, SystemSessionServices>(capability, options.services, { terminalOnly: 'It opens a form of the terminal program you are using.' }), rowValue: rowValue(id) });
+      continue;
+    }
     actions.push(doAction<Ctx>({ id, label: words.label, word: words.word, sentence: words.sentence, run: runOf(id, words.label), rowValue: rowValue(id) }));
   }
+  // Pairing this program with its daemon and forgetting that pairing are the Devices and network place's two session
+  // capabilities (platform builtin/devices-session.ts): these rows are the same capabilities, not second ones, so find
+  // and run reach one of each (a described action carrying a moved capability's id is never a second catalog entry).
   actions.push(
-    doAction<Ctx>({
-      id: 'pair', label: 'Pair the Agent with a GoodVibes host', word: 'pair', touches: 'another-machine', inputs: PAIR_INPUTS,
-      sentence: 'This Agent pairs with your GoodVibes host as {name}, after you confirm in this terminal.', example: {},
-      run: runOf('pair', 'Pair the Agent with a GoodVibes host'), rowValue: rowValue('pair'),
-    }),
-    doAction<Ctx>({
-      id: 'unpair', label: 'Unpair the Agent from the GoodVibes host', word: 'unpair', touches: 'credential',
-      sentence: 'This Agent forgets its GoodVibes host credential and stops reaching that host.',
-      ownerOnly: { reason: 'It takes this Agent\'s access to your GoodVibes host away.', instead: 'The owner types /setup unpair in the live Agent terminal.' },
-      run: runOf('unpair', 'Unpair the Agent from the GoodVibes host'), rowValue: rowValue('unpair'),
-    }),
+    {
+      ...doAction<Ctx>({
+        id: 'pair', label: EXTRA_WORDS.pair.label, word: 'pair', touches: 'another-machine', inputs: PAIR_INPUTS,
+        sentence: 'This Agent pairs with your GoodVibes host as {name}, after you confirm in this terminal.', example: {},
+        run: runOf('pair', EXTRA_WORDS.pair.label), rowValue: rowValue('pair'),
+      }),
+      capability: DEVICES_PAIR.capability,
+    },
+    {
+      ...doAction<Ctx>({
+        id: 'unpair', label: EXTRA_WORDS.unpair.label, word: 'unpair', touches: 'credential',
+        sentence: 'This Agent forgets its GoodVibes host credential and stops reaching that host.',
+        ownerOnly: { reason: 'It takes this Agent\'s access to your GoodVibes host away.', instead: 'Forget this terminal\'s daemon pairing, in the Devices and network place.' },
+        run: runOf('unpair', EXTRA_WORDS.unpair.label), rowValue: rowValue('unpair'),
+      }),
+      capability: DEVICES_UNPAIR_HOST.capability,
+    },
   );
   const rows: (string | FirstScreenGroup)[] = [
     ...(options.settings ? ['checklist'] : []),
@@ -294,8 +300,9 @@ export function setupCommandDescription<Ctx>(options: SetupCommandOptions<Ctx>):
       },
       press: (id, ctx) => {
         const state = skippable(id, ctx);
-        if (state === 'skip') options.skipped!.skip(ctx, id as SetupTopicId);
-        else if (state === 'bring-back') options.skipped!.unskip(ctx, id as SetupTopicId);
+        const done = state === 'skip' ? options.skipped!.skip(ctx, id as SetupTopicId) : state === 'bring-back' ? options.skipped!.unskip(ctx, id as SetupTopicId) : undefined;
+        // A refusal is the daemon's own words; the list shows the record as it is either way.
+        void Promise.resolve(done).catch(() => undefined);
       },
     },
     actions,
@@ -326,12 +333,13 @@ export interface SetupPlaceItem {
 
 /** The topics of System the Setup list offers after the checklist (the others are in their own places). */
 const SYSTEM_SETUP_TOPICS: readonly (SetupTopicId | SetupExtraId)[] = [
-  'local-only', 'browser', 'connect-daemon', 'who-signs-in', 'telemetry', 'provider-behaviour', 'advanced', 'import-settings', 'pair', 'unpair', 'first-run',
+  'local-only', 'browser', 'connect-daemon', 'webhooks', 'who-signs-in', 'telemetry', 'provider-behaviour', 'advanced', 'import-settings', 'pair', 'unpair', 'first-run',
 ];
 
 const EXTRA_WORDS: Readonly<Record<SetupExtraId, SetupTopicWords>> = {
-  pair: { label: 'Pair the Agent with a GoodVibes host', word: 'pair', sentence: 'Pairs this Agent with your GoodVibes host, after you confirm here.' },
-  unpair: { label: 'Unpair the Agent from the GoodVibes host', word: 'unpair', sentence: 'This Agent forgets its GoodVibes host credential and stops reaching that host.' },
+  // Short enough to stand whole in the Setup list at 80 columns; the sentence says the rest.
+  pair: { label: 'Pair with a host', word: 'pair', sentence: 'Pairs this Agent with your GoodVibes host, after you confirm here.' },
+  unpair: { label: 'Unpair from the host', word: 'unpair', sentence: 'This Agent forgets its GoodVibes host credential and stops reaching that host.' },
 };
 
 /** What the Setup list does with one program's `/setup` options and its live context. */
@@ -340,8 +348,8 @@ export interface SetupPlaceHooks {
   readonly source: { read(): unknown; subscribe(onChange: () => void): () => void };
   /** Open a row: "Who decides" itself, or the topic's own action run as the owner's press; what to say, if anything. */
   open(id: string, runTopic: (capabilityId: string) => Promise<{ readonly ok: true; readonly lines: readonly string[] } | { readonly ok: false; readonly reason: string }>): Promise<string | undefined>;
-  /** Skip a checklist topic for now, or bring a skipped one back. */
-  skip(id: string, back: boolean): string;
+  /** Skip a checklist topic for now, or bring a skipped one back (in the daemon's one setup record). */
+  skip(id: string, back: boolean): Promise<string>;
 }
 
 export function setupPlaceHooks<Ctx>(options: SetupCommandOptions<Ctx>, ctx: Ctx, program: {
@@ -370,8 +378,9 @@ export function setupPlaceHooks<Ctx>(options: SetupCommandOptions<Ctx>, ctx: Ctx
     }
     if (!decides) return rest;
     return [{
-      id: 'who-decides', state: decides.done ? 'done' : 'undecided', label: WHO_DECIDES_LABEL, note: decides.note,
-      sentence: 'Opens first run\'s "Who decides" step: a decision model (Jev) decides, or GoodVibes asks you.',
+      // A short row title (it fits beside "not done" at 80 columns); the sentence under it says what is decided.
+      id: 'who-decides', state: decides.done ? 'done' : 'undecided', label: 'Who decides', note: decides.note,
+      sentence: `${WHO_DECIDES_LABEL}: opens first run's "Who decides" step, where a decision model (Jev) decides or GoodVibes asks you.`,
     }, ...rest];
   };
   // Read when the list is first read, not when the program wires its places.
@@ -410,12 +419,12 @@ export function setupPlaceHooks<Ctx>(options: SetupCommandOptions<Ctx>, ctx: Ctx
       if (!outcome.ok) throw new Error(outcome.reason);
       return outcome.lines.join(' ') || undefined;
     },
-    skip(id, back) {
+    async skip(id, back) {
       if (!options.skipped) throw new Error('this program keeps no list of skipped topics');
       const known = RECOMMENDED_SETUP_TOPICS.find((topic) => topic === id);
       if (!known) throw new Error('only a topic of the checklist can be skipped');
-      if (back) options.skipped.unskip(ctx, known);
-      else options.skipped.skip(ctx, known);
+      if (back) await options.skipped.unskip(ctx, known);
+      else await options.skipped.skip(ctx, known);
       refresh();
       return back ? `${SETUP_TOPICS[known].label} is back on the checklist.` : `${SETUP_TOPICS[known].label} is skipped for now; it stays on the list as skipped.`;
     },

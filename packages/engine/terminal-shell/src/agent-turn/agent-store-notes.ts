@@ -4,6 +4,7 @@
  */
 import { CapabilityRefusal, type ActionValues } from '@goodvibes/engine/platform/platform/capabilities';
 import type { MemoryClass, MemoryScope } from '@goodvibes/engine/platform/platform/state';
+import { memoryProjectIdentity } from '@goodvibes/engine/platform/platform/state';
 import { AgentNoteRegistry, type AgentNoteRecord } from './note-registry.js';
 import { AgentPersonaRegistry } from './persona-registry.js';
 import { AgentSkillRegistry } from './skill-registry.js';
@@ -123,8 +124,15 @@ export const NOTE_ACTS: Readonly<Record<string, StoreAct>> = {
     refuseIfMade(note, 'memory');
     const memory = context.memory;
     if (!memory) throw new CapabilityRefusal('Memory is not available in this daemon; nothing was kept.');
+    const scope = (values.scope || 'project') as MemoryScope;
+    // "This project" is the asking project's (the folder the request came with), never the daemon's own.
+    if (scope === 'project' && !context.projectGiven) {
+      throw new CapabilityRefusal('"This project" needs the project, and no project folder came with the request; nothing was kept.',
+        'Ask from the project\'s folder, or keep it "Shared with the team" so every project is given it.');
+    }
     const record = await storeStepAsync(async () => memory.add({
-      scope: (values.scope || 'project') as MemoryScope, cls: (values.class || 'fact') as MemoryClass, summary: note.title,
+      scope, ...(scope === 'project' ? { project: memoryProjectIdentity(context.shellPaths.workingDirectory) } : {}),
+      cls: (values.class || 'fact') as MemoryClass, summary: note.title,
       detail: note.sourceUrl ? `${note.body}\n\nOrigin URL: ${note.sourceUrl}` : note.body, tags: noteTags(note), provenance: [],
     }));
     recordMade(context, note, 'memory', record.id);

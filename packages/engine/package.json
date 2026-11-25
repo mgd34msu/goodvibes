@@ -798,6 +798,26 @@
       "types": "./platform/dist/platform/capabilities/builtin/system.d.ts",
       "import": "./platform/dist/platform/capabilities/builtin/system.js"
     },
+    "./platform/platform/capabilities/workspaces": {
+      "bun": "./platform/src/platform/capabilities/builtin/workspaces.ts",
+      "types": "./platform/dist/platform/capabilities/builtin/workspaces.d.ts",
+      "import": "./platform/dist/platform/capabilities/builtin/workspaces.js"
+    },
+    "./platform/platform/support/config-redaction": {
+      "bun": "./platform/src/platform/support/config-redaction.ts",
+      "types": "./platform/dist/platform/support/config-redaction.d.ts",
+      "import": "./platform/dist/platform/support/config-redaction.js"
+    },
+    "./platform/platform/support/service-posture": {
+      "bun": "./platform/src/platform/support/service-posture.ts",
+      "types": "./platform/dist/platform/support/service-posture.d.ts",
+      "import": "./platform/dist/platform/support/service-posture.js"
+    },
+    "./platform/platform/support/support-bundle": {
+      "bun": "./platform/src/platform/support/support-bundle.ts",
+      "types": "./platform/dist/platform/support/support-bundle.d.ts",
+      "import": "./platform/dist/platform/support/support-bundle.js"
+    },
     "./platform/platform/capabilities/automation-words": {
       "bun": "./platform/src/platform/capabilities/builtin/automation-words.ts",
       "types": "./platform/dist/platform/capabilities/builtin/automation-words.d.ts",
@@ -1143,6 +1163,16 @@
       "types": "./platform/dist/platform/daemon/service-manager.d.ts",
       "import": "./platform/dist/platform/daemon/service-manager.js"
     },
+    "./platform/platform/daemon/managed-daemon-service": {
+      "bun": "./platform/src/platform/daemon/managed-daemon-service.ts",
+      "types": "./platform/dist/platform/daemon/managed-daemon-service.d.ts",
+      "import": "./platform/dist/platform/daemon/managed-daemon-service.js"
+    },
+    "./platform/platform/support/service-manager-posture": {
+      "bun": "./platform/src/platform/support/service-manager-posture.ts",
+      "types": "./platform/dist/platform/support/service-manager-posture.d.ts",
+      "import": "./platform/dist/platform/support/service-manager-posture.js"
+    },
     "./platform/platform/runtime/workspace-registration": {
       "bun": "./platform/src/platform/runtime/workspace-registration.ts",
       "types": "./platform/dist/platform/runtime/workspace-registration.d.ts",
@@ -1152,6 +1182,11 @@
       "bun": "./platform/src/platform/mcp/config.ts",
       "types": "./platform/dist/platform/mcp/config.d.ts",
       "import": "./platform/dist/platform/mcp/config.js"
+    },
+    "./platform/platform/mcp/trust-words": {
+      "bun": "./platform/src/platform/mcp/trust-words.ts",
+      "types": "./platform/dist/platform/mcp/trust-words.d.ts",
+      "import": "./platform/dist/platform/mcp/trust-words.js"
     },
     "./platform/platform/workspace/checkpoint/root-guard": {
       "bun": "./platform/src/platform/workspace/checkpoint/root-guard.ts",
@@ -1247,6 +1282,16 @@
       "bun": "./platform/src/platform/runtime/notification-privacy.ts",
       "types": "./platform/dist/platform/runtime/notification-privacy.d.ts",
       "import": "./platform/dist/platform/runtime/notification-privacy.js"
+    },
+    "./platform/platform/runtime/program-host-settings": {
+      "bun": "./platform/src/platform/runtime/program-host-settings.ts",
+      "types": "./platform/dist/platform/runtime/program-host-settings.d.ts",
+      "import": "./platform/dist/platform/runtime/program-host-settings.js"
+    },
+    "./platform/platform/runtime/program-settings-watch": {
+      "bun": "./platform/src/platform/runtime/program-settings-watch.ts",
+      "types": "./platform/dist/platform/runtime/program-settings-watch.d.ts",
+      "import": "./platform/dist/platform/runtime/program-settings-watch.js"
     },
     "./platform/platform/types/errors": {
       "bun": "./platform/src/platform/types/errors.ts",
@@ -1813,11 +1858,6 @@
       "import": "./transport-realtime/dist/relay-transport.js"
     },
     "./package.json": "./package.json",
-    "./terminal-shell/legacy-work-ledger-import": {
-      "bun": "./terminal-shell/src/legacy-work-ledger-import.ts",
-      "types": "./terminal-shell/dist/legacy-work-ledger-import.d.ts",
-      "import": "./terminal-shell/dist/legacy-work-ledger-import.js"
-    },
     "./platform/platform/workflow/work-ledger/native-intake-client": {
       "bun": "./platform/src/platform/workflow/work-ledger/native-intake-client.ts",
       "types": "./platform/dist/platform/workflow/work-ledger/native-intake-client.d.ts",
@@ -2087,16 +2127,6 @@
       "bun": "./terminal-shell/src/surface-modal-host.ts",
       "types": "./terminal-shell/dist/surface-modal-host.d.ts",
       "import": "./terminal-shell/dist/surface-modal-host.js"
-    },
-    "./terminal-shell/notifications-modal": {
-      "bun": "./terminal-shell/src/renderer/notifications-modal.ts",
-      "types": "./terminal-shell/dist/renderer/notifications-modal.d.ts",
-      "import": "./terminal-shell/dist/renderer/notifications-modal.js"
-    },
-    "./terminal-shell/notification-history": {
-      "bun": "./terminal-shell/src/notifications-modal.ts",
-      "types": "./terminal-shell/dist/notifications-modal.d.ts",
-      "import": "./terminal-shell/dist/notifications-modal.js"
     },
     "./terminal-shell/waiting-lists": {
       "bun": "./terminal-shell/src/waiting-lists.ts",
@@ -2398,6 +2428,11 @@
       "types": "./terminal-shell/dist/decision-router-settings-actions.d.ts",
       "import": "./terminal-shell/dist/decision-router-settings-actions.js"
     },
+    "./terminal-shell/settings-writes": {
+      "bun": "./terminal-shell/src/settings-writes.ts",
+      "types": "./terminal-shell/dist/settings-writes.d.ts",
+      "import": "./terminal-shell/dist/settings-writes.js"
+    },
     "./terminal-shell/settings-choice-actions": {
       "bun": "./terminal-shell/src/settings-choice-actions.ts",
       "types": "./terminal-shell/dist/settings-choice-actions.d.ts",
@@ -2417,11 +2452,6 @@
       "bun": "./terminal-shell/src/conversation-rewind-port.ts",
       "types": "./terminal-shell/dist/conversation-rewind-port.d.ts",
       "import": "./terminal-shell/dist/conversation-rewind-port.js"
-    },
-    "./terminal-shell/managed-daemon-service": {
-      "bun": "./terminal-shell/src/managed-daemon-service.ts",
-      "types": "./terminal-shell/dist/managed-daemon-service.d.ts",
-      "import": "./terminal-shell/dist/managed-daemon-service.js"
     },
     "./terminal-shell/conversation-event-navigation": {
       "bun": "./terminal-shell/src/conversation-event-navigation.ts",
@@ -2713,11 +2743,6 @@
       "types": "./terminal-shell/dist/payments-settings.d.ts",
       "import": "./terminal-shell/dist/payments-settings.js"
     },
-    "./terminal-shell/trust-review": {
-      "bun": "./terminal-shell/src/trust-review.ts",
-      "types": "./terminal-shell/dist/trust-review.d.ts",
-      "import": "./terminal-shell/dist/trust-review.js"
-    },
     "./terminal-shell/onboarding-values": {
       "bun": "./terminal-shell/src/onboarding-values.ts",
       "types": "./terminal-shell/dist/onboarding-values.d.ts",
@@ -2762,11 +2787,6 @@
       "bun": "./terminal-shell/src/transcript-kinds.ts",
       "types": "./terminal-shell/dist/transcript-kinds.d.ts",
       "import": "./terminal-shell/dist/transcript-kinds.js"
-    },
-    "./terminal-shell/support-bundle-inspection": {
-      "bun": "./terminal-shell/src/support-bundle-inspection.ts",
-      "types": "./terminal-shell/dist/support-bundle-inspection.d.ts",
-      "import": "./terminal-shell/dist/support-bundle-inspection.js"
     },
     "./terminal-shell/model-picker": {
       "bun": "./terminal-shell/src/model-picker.ts",
@@ -2848,11 +2868,6 @@
       "types": "./terminal-shell/dist/renderer/mcp-form-rows.d.ts",
       "import": "./terminal-shell/dist/renderer/mcp-form-rows.js"
     },
-    "./terminal-shell/settings-secret-writes": {
-      "bun": "./terminal-shell/src/settings-secret-writes.ts",
-      "types": "./terminal-shell/dist/settings-secret-writes.d.ts",
-      "import": "./terminal-shell/dist/settings-secret-writes.js"
-    },
     "./terminal-shell/service-io": {
       "bun": "./terminal-shell/src/service-io.ts",
       "types": "./terminal-shell/dist/service-io.d.ts",
@@ -2868,20 +2883,10 @@
       "types": "./terminal-shell/dist/payment-window-command.d.ts",
       "import": "./terminal-shell/dist/payment-window-command.js"
     },
-    "./terminal-shell/payments-command": {
-      "bun": "./terminal-shell/src/payments-command.ts",
-      "types": "./terminal-shell/dist/payments-command.d.ts",
-      "import": "./terminal-shell/dist/payments-command.js"
-    },
     "./terminal-shell/automation-lists": {
       "bun": "./terminal-shell/src/automation-lists.ts",
       "types": "./terminal-shell/dist/automation-lists.d.ts",
       "import": "./terminal-shell/dist/automation-lists.js"
-    },
-    "./terminal-shell/telegram-cursor-command": {
-      "bun": "./terminal-shell/src/telegram-cursor-command.ts",
-      "types": "./terminal-shell/dist/telegram-cursor-command.d.ts",
-      "import": "./terminal-shell/dist/telegram-cursor-command.js"
     },
     "./terminal-shell/bookmark-command": {
       "bun": "./terminal-shell/src/bookmark-command.ts",
@@ -2937,11 +2942,6 @@
       "bun": "./terminal-shell/src/task-presentation.ts",
       "types": "./terminal-shell/dist/task-presentation.d.ts",
       "import": "./terminal-shell/dist/task-presentation.js"
-    },
-    "./terminal-shell/voice-settings-review": {
-      "bun": "./terminal-shell/src/voice-settings-review.ts",
-      "types": "./terminal-shell/dist/voice-settings-review.d.ts",
-      "import": "./terminal-shell/dist/voice-settings-review.js"
     },
     "./terminal-shell/question-card": {
       "bun": "./terminal-shell/src/question-card.ts",
@@ -3018,20 +3018,20 @@
       "types": "./terminal-shell/dist/principals-command.d.ts",
       "import": "./terminal-shell/dist/principals-command.js"
     },
-    "./terminal-shell/channels-command": {
-      "bun": "./terminal-shell/src/channels-command.ts",
-      "types": "./terminal-shell/dist/channels-command.d.ts",
-      "import": "./terminal-shell/dist/channels-command.js"
+    "./terminal-shell/channel-lists": {
+      "bun": "./terminal-shell/src/channel-lists.ts",
+      "types": "./terminal-shell/dist/channel-lists.d.ts",
+      "import": "./terminal-shell/dist/channel-lists.js"
     },
     "./terminal-shell/mail-lists": {
       "bun": "./terminal-shell/src/mail-lists.ts",
       "types": "./terminal-shell/dist/mail-lists.d.ts",
       "import": "./terminal-shell/dist/mail-lists.js"
     },
-    "./terminal-shell/calendar-command": {
-      "bun": "./terminal-shell/src/calendar-command.ts",
-      "types": "./terminal-shell/dist/calendar-command.d.ts",
-      "import": "./terminal-shell/dist/calendar-command.js"
+    "./terminal-shell/calendar-lists": {
+      "bun": "./terminal-shell/src/calendar-lists.ts",
+      "types": "./terminal-shell/dist/calendar-lists.d.ts",
+      "import": "./terminal-shell/dist/calendar-lists.js"
     },
     "./terminal-shell/devices-command": {
       "bun": "./terminal-shell/src/devices-command.ts",
@@ -3072,11 +3072,6 @@
       "bun": "./terminal-shell/src/checkpoint-command.ts",
       "types": "./terminal-shell/dist/checkpoint-command.d.ts",
       "import": "./terminal-shell/dist/checkpoint-command.js"
-    },
-    "./terminal-shell/media-command": {
-      "bun": "./terminal-shell/src/media-command.ts",
-      "types": "./terminal-shell/dist/media-command.d.ts",
-      "import": "./terminal-shell/dist/media-command.js"
     },
     "./terminal-shell/health-command": {
       "bun": "./terminal-shell/src/health-command.ts",
@@ -3172,11 +3167,6 @@
       "bun": "./terminal-shell/src/command-service-access.ts",
       "types": "./terminal-shell/dist/command-service-access.d.ts",
       "import": "./terminal-shell/dist/command-service-access.js"
-    },
-    "./terminal-shell/support-bundle-command": {
-      "bun": "./terminal-shell/src/support-bundle-command.ts",
-      "types": "./terminal-shell/dist/support-bundle-command.d.ts",
-      "import": "./terminal-shell/dist/support-bundle-command.js"
     },
     "./terminal-shell/onboarding-snapshot-collector": {
       "bun": "./terminal-shell/src/onboarding-snapshot-collector.ts",
@@ -3302,11 +3292,6 @@
       "bun": "./terminal-shell/src/renderer/mcp-workspace.ts",
       "types": "./terminal-shell/dist/renderer/mcp-workspace.d.ts",
       "import": "./terminal-shell/dist/renderer/mcp-workspace.js"
-    },
-    "./terminal-shell/settings-modal-route": {
-      "bun": "./terminal-shell/src/settings-modal-route.ts",
-      "types": "./terminal-shell/dist/settings-modal-route.d.ts",
-      "import": "./terminal-shell/dist/settings-modal-route.js"
     },
     "./terminal-shell/searchable-modal-route": {
       "bun": "./terminal-shell/src/searchable-modal-route.ts",
@@ -3458,11 +3443,6 @@
       "types": "./terminal-shell/dist/onboarding-apply-pipeline.d.ts",
       "import": "./terminal-shell/dist/onboarding-apply-pipeline.js"
     },
-    "./terminal-shell/service-posture": {
-      "bun": "./terminal-shell/src/service-posture.ts",
-      "types": "./terminal-shell/dist/service-posture.d.ts",
-      "import": "./terminal-shell/dist/service-posture.js"
-    },
     "./terminal-shell/tasks-runtime-commands": {
       "bun": "./terminal-shell/src/tasks-runtime-commands.ts",
       "types": "./terminal-shell/dist/tasks-runtime-commands.d.ts",
@@ -3537,11 +3517,6 @@
       "bun": "./terminal-shell/src/settings-navigation.ts",
       "types": "./terminal-shell/dist/settings-navigation.d.ts",
       "import": "./terminal-shell/dist/settings-navigation.js"
-    },
-    "./terminal-shell/settings-modal-state": {
-      "bun": "./terminal-shell/src/settings-modal-state.ts",
-      "types": "./terminal-shell/dist/settings-modal-state.d.ts",
-      "import": "./terminal-shell/dist/settings-modal-state.js"
     },
     "./terminal-shell/audio/wake-provision-presentation": {
       "bun": "./terminal-shell/src/audio/wake-provision-presentation.ts",
@@ -3638,16 +3613,6 @@
       "types": "./terminal-shell/dist/onboarding-config-apply.d.ts",
       "import": "./terminal-shell/dist/onboarding-config-apply.js"
     },
-    "./terminal-shell/native/work-ledger-projection": {
-      "bun": "./terminal-shell/src/native/work-ledger-projection.ts",
-      "types": "./terminal-shell/dist/native/work-ledger-projection.d.ts",
-      "import": "./terminal-shell/dist/native/work-ledger-projection.js"
-    },
-    "./terminal-shell/native/bound-work-ledger": {
-      "bun": "./terminal-shell/src/native/bound-work-ledger.ts",
-      "types": "./terminal-shell/dist/native/bound-work-ledger.d.ts",
-      "import": "./terminal-shell/dist/native/bound-work-ledger.js"
-    },
     "./terminal-shell/shell-footer": {
       "bun": "./terminal-shell/src/renderer/shell-footer.ts",
       "types": "./terminal-shell/dist/renderer/shell-footer.d.ts",
@@ -3708,11 +3673,6 @@
       "types": "./terminal-shell/dist/native/work-ledger-view.d.ts",
       "import": "./terminal-shell/dist/native/work-ledger-view.js"
     },
-    "./terminal-shell/native/work-ledger-binding": {
-      "bun": "./terminal-shell/src/native/work-ledger-binding.ts",
-      "types": "./terminal-shell/dist/native/work-ledger-binding.d.ts",
-      "import": "./terminal-shell/dist/native/work-ledger-binding.js"
-    },
     "./terminal-shell/native/bound-work-ledger-host": {
       "bun": "./terminal-shell/src/native/bound-work-ledger-host.ts",
       "types": "./terminal-shell/dist/native/bound-work-ledger-host.d.ts",
@@ -3738,30 +3698,10 @@
       "types": "./terminal-shell/dist/cli-catalog-types.d.ts",
       "import": "./terminal-shell/dist/cli-catalog-types.js"
     },
-    "./terminal-shell/cli-redaction": {
-      "bun": "./terminal-shell/src/cli-redaction.ts",
-      "types": "./terminal-shell/dist/cli-redaction.d.ts",
-      "import": "./terminal-shell/dist/cli-redaction.js"
-    },
-    "./terminal-shell/cli-network-posture": {
-      "bun": "./terminal-shell/src/cli-network-posture.ts",
-      "types": "./terminal-shell/dist/cli-network-posture.d.ts",
-      "import": "./terminal-shell/dist/cli-network-posture.js"
-    },
-    "./terminal-shell/cli-endpoints": {
-      "bun": "./terminal-shell/src/cli-endpoints.ts",
-      "types": "./terminal-shell/dist/cli-endpoints.d.ts",
-      "import": "./terminal-shell/dist/cli-endpoints.js"
-    },
     "./terminal-shell/cluster-commands": {
       "bun": "./terminal-shell/src/cluster-commands.ts",
       "types": "./terminal-shell/dist/cluster-commands.d.ts",
       "import": "./terminal-shell/dist/cluster-commands.js"
-    },
-    "./terminal-shell/cli-config-owner": {
-      "bun": "./terminal-shell/src/cli-config-owner.ts",
-      "types": "./terminal-shell/dist/cli-config-owner.d.ts",
-      "import": "./terminal-shell/dist/cli-config-owner.js"
     },
     "./terminal-shell/cli-parser": {
       "bun": "./terminal-shell/src/cli-parser.ts",
@@ -3843,11 +3783,6 @@
       "types": "./terminal-shell/dist/plugin-bundles-command.d.ts",
       "import": "./terminal-shell/dist/plugin-bundles-command.js"
     },
-    "./terminal-shell/security-command": {
-      "bun": "./terminal-shell/src/security-command.ts",
-      "types": "./terminal-shell/dist/security-command.d.ts",
-      "import": "./terminal-shell/dist/security-command.js"
-    },
     "./terminal-shell/native/work-command": {
       "bun": "./terminal-shell/src/native/work-command.ts",
       "types": "./terminal-shell/dist/native/work-command.d.ts",
@@ -3893,6 +3828,31 @@
       "types": "./terminal-shell/dist/agent-turn/agent-store-runner.d.ts",
       "import": "./terminal-shell/dist/agent-turn/agent-store-runner.js"
     },
+    "./terminal-shell/agent-turn/model-compare-runner": {
+      "bun": "./terminal-shell/src/agent-turn/model-compare-runner.ts",
+      "types": "./terminal-shell/dist/agent-turn/model-compare-runner.d.ts",
+      "import": "./terminal-shell/dist/agent-turn/model-compare-runner.js"
+    },
+    "./terminal-shell/agent-turn/agent-homes": {
+      "bun": "./terminal-shell/src/agent-turn/agent-homes.ts",
+      "types": "./terminal-shell/dist/agent-turn/agent-homes.d.ts",
+      "import": "./terminal-shell/dist/agent-turn/agent-homes.js"
+    },
+    "./terminal-shell/agent-turn/agent-home-starters": {
+      "bun": "./terminal-shell/src/agent-turn/agent-home-starters.ts",
+      "types": "./terminal-shell/dist/agent-turn/agent-home-starters.d.ts",
+      "import": "./terminal-shell/dist/agent-turn/agent-home-starters.js"
+    },
+    "./terminal-shell/agent-turn/review-packet-utils": {
+      "bun": "./terminal-shell/src/agent-turn/review-packet-utils.ts",
+      "types": "./terminal-shell/dist/agent-turn/review-packet-utils.d.ts",
+      "import": "./terminal-shell/dist/agent-turn/review-packet-utils.js"
+    },
+    "./terminal-shell/agent-turn/review-packet-report": {
+      "bun": "./terminal-shell/src/agent-turn/review-packet-report.ts",
+      "types": "./terminal-shell/dist/agent-turn/review-packet-report.d.ts",
+      "import": "./terminal-shell/dist/agent-turn/review-packet-report.js"
+    },
     "./terminal-shell/agent-turn/routine-schedules": {
       "bun": "./terminal-shell/src/agent-turn/routine-schedules.ts",
       "types": "./terminal-shell/dist/agent-turn/routine-schedules.d.ts",
@@ -3927,11 +3887,6 @@
       "bun": "./terminal-shell/src/agent-turn/browser-tool.ts",
       "types": "./terminal-shell/dist/agent-turn/browser-tool.d.ts",
       "import": "./terminal-shell/dist/agent-turn/browser-tool.js"
-    },
-    "./terminal-shell/agent-turn/calendar-oauth-service": {
-      "bun": "./terminal-shell/src/agent-turn/calendar-oauth-service.ts",
-      "types": "./terminal-shell/dist/agent-turn/calendar-oauth-service.d.ts",
-      "import": "./terminal-shell/dist/agent-turn/calendar-oauth-service.js"
     },
     "./terminal-shell/agent-turn/capability-summary-prompt": {
       "bun": "./terminal-shell/src/agent-turn/capability-summary-prompt.ts",
@@ -4268,6 +4223,16 @@
       "types": "./terminal-shell/dist/agent-turn/capability-tools.d.ts",
       "import": "./terminal-shell/dist/agent-turn/capability-tools.js"
     },
+    "./terminal-shell/agent-turn/artifact-saves-through-daemon": {
+      "bun": "./terminal-shell/src/agent-turn/artifact-saves-through-daemon.ts",
+      "types": "./terminal-shell/dist/agent-turn/artifact-saves-through-daemon.d.ts",
+      "import": "./terminal-shell/dist/agent-turn/artifact-saves-through-daemon.js"
+    },
+    "./terminal-shell/agent-turn/daemon-work-delegation": {
+      "bun": "./terminal-shell/src/agent-turn/daemon-work-delegation.ts",
+      "types": "./terminal-shell/dist/agent-turn/daemon-work-delegation.d.ts",
+      "import": "./terminal-shell/dist/agent-turn/daemon-work-delegation.js"
+    },
     "./terminal-shell/capability-host": {
       "bun": "./terminal-shell/src/capability-host.ts",
       "types": "./terminal-shell/dist/capability-host.d.ts",
@@ -4287,6 +4252,11 @@
       "bun": "./terminal-shell/src/capability-cli.ts",
       "types": "./terminal-shell/dist/capability-cli.d.ts",
       "import": "./terminal-shell/dist/capability-cli.js"
+    },
+    "./terminal-shell/support-bundle-cli": {
+      "bun": "./terminal-shell/src/support-bundle-cli.ts",
+      "types": "./terminal-shell/dist/support-bundle-cli.d.ts",
+      "import": "./terminal-shell/dist/support-bundle-cli.js"
     },
     "./terminal-shell/agent-turn/operator-policy": {
       "bun": "./terminal-shell/src/agent-turn/operator-policy.ts",

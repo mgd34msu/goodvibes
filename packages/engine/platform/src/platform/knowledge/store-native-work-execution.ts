@@ -7,8 +7,9 @@ import { nativeSettlementDigest, nativeWorkSettlementSchema, nativeSettlementSto
 import type { SQLiteStore, SqlDatabase } from '../state/sqlite-store.js';
 import { readKnowledgeWorkLedgerImage, writeKnowledgeWorkLedger } from './store-work-ledger.js';
 import { durableKeyIdentity, durableKeyHash, durablePayloadRevision, sameDurableRequest, type DurableContractKey, type DurableContractRequest, type DurableContractReceipt } from '../contract/durable-admission.js';
-import { readWorkLedgerState, createEmptyWorkLedgerState, reduceWorkLedgerSettlement } from '../workflow/work-ledger/service.js';
+import { readWorkLedgerState, createEmptyWorkLedgerState, reduceWorkLedgerFailure, reduceWorkLedgerSettlement } from '../workflow/work-ledger/service.js';
 import type { WorkLedgerState } from '../workflow/work-ledger/types.js';
+import { isNativeWorkSession } from '../workflow/work-ledger/native-work-session.js';
 import { NativeWorkExecutionError, nativeExecutionOriginalFor, parseNativeWorkExecutionRecord, parseNativeWorkExecutionIntent, parseNativeWorkExecutionRecordJson, parseNativeWorkExecutionIntentJson, nativeExecutionStorageKey, type NativeExecutionOriginal, type NativeWorkExecutionIntent, type NativeWorkExecutionRecord, type NativeWorkExecutionMutation, type NativeWorkExecutionStorage, type NativeWorkExecutionTransaction } from '../workflow/work-ledger/native-execution-types.js';
 
 type Lookup = DurableContractKey | { readonly attemptId: string };
@@ -246,7 +247,9 @@ function assertCurrentTarget(current: NativeWorkExecutionTransaction, intent: Na
     || JSON.stringify(work.criteria) !== JSON.stringify(intent.request.input.nativeSource.criteria)
     || (work.source !== null && (work.source.sourceId !== intent.request.input.nativeSource.sourceId
       || work.source.sourceRevision !== intent.request.input.nativeSource.sourceRevision
-      || work.source.sessionId !== intent.request.input.sessionId))) throw new NativeWorkExecutionError('stale');
+      // The work's own session (`<asking session>:<work id>`), or the asking session itself for a request kept before;
+      // never another work's or another asking session's (workflow/work-ledger/native-work-session.ts).
+      || !isNativeWorkSession(intent.request.input.sessionId, work.source.sessionId, work.id)))) throw new NativeWorkExecutionError('stale');
 }
 function validateIntentTransition(current: NativeWorkExecutionTransaction, next: NativeWorkExecutionIntent): void {
   try { checkIntentTransition(current, next); }
@@ -392,6 +395,26 @@ export function createNativeWorkExecutionStorage(sqlite: SQLiteStore, projectId:
           settlementApply(settlementSet, settlementSources, [confirmed.record.request, candidate]);
         }
       }).then(result => { if (result.kind !== 'completed') throw new NativeWorkExecutionError('unavailable'); return result.value; });
+      pending.add(operation); void operation.then(() => pending.delete(operation), () => pending.delete(operation)); return operation;
+    },
+    reportFailed(key, reason, original) {
+      if (closed) return Promise.reject(new NativeWorkExecutionError('closed'));
+      const lookup = { ...key }; durableKeyIdentity(lookup);
+      const operation = sqlite.transactPersisted(db => {
+        const current = read(db, projectId, lookup, original, undefined, undefined, ledgerCache);
+        const record = current.record;
+        // Only a launched run with no settlement, at its own target, while its work still reads in progress.
+        if (!record?.receipt || current.settlement) return { changed: false, value: false };
+        const work = current.ledger.works.find(item => item.id === record.target.workId);
+        const attempt = current.ledger.attempts.find(item => item.id === record.target.attemptId);
+        if (!work || !attempt || work.currentAttemptId !== attempt.id || work.reportedState === 'blocked' || work.reportedState === 'complete' || work.reportedState === 'cancelled'
+          || work.revision !== record.target.workRevision || work.criteriaRevision !== record.target.criteriaRevision || attempt.revision !== record.target.attemptRevision) return { changed: false, value: false };
+        const at = Math.max(Date.now(), current.ledger.history.at(-1)?.at ?? 0);
+        const reduced = reduceWorkLedgerFailure(current.ledger, { target: record.target, actorId: attempt.ownerId, reason: reason.slice(0, 2000),
+          requestId: `native-failed:${durableKeyIdentity(record.request.key)}` }, { now: () => at, newId: () => crypto.randomUUID() });
+        writeKnowledgeWorkLedger(db, reduced.state);
+        return { changed: true, value: true };
+      }, refresh).then(result => { if (result.kind !== 'completed') throw new NativeWorkExecutionError('unavailable'); return result.value; });
       pending.add(operation); void operation.then(() => pending.delete(operation), () => pending.delete(operation)); return operation;
     },
     close() { closed = true; return closing ??= Promise.allSettled([...pending]).then(() => {}); },

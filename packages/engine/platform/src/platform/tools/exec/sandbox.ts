@@ -37,7 +37,7 @@ import { join } from 'node:path';
 import { decideSandboxedExec, egressAllowed, readCommandNeeds } from '../../runtime/permissions/sandbox-policy.js';
 import { DEFAULT_CONTROL_PLANE_PORT } from '../../config/control-plane-base-url.js';
 import type { ExecCommandResult } from './schema.js';
-import { hiddenHomePathHint, sandboxHomeBindArgs, sandboxHomeCoverArgs, sandboxHomeView } from './sandbox-home.js';
+import { goodVibesStateCoverArgs, hiddenHomePathHint, sandboxHomeBindArgs, sandboxHomeCoverArgs, sandboxHomeView } from './sandbox-home.js';
 
 // The one reading of the text an exec entry runs; an approval reader judges the same text.
 export { execCommandText } from './schema.js';
@@ -228,6 +228,9 @@ export function buildBwrapArgv(input: BwrapArgvInput): string[] {
   }
   // … and cover the secrets inside any shown home folder again, last, so no bind above exposes them.
   if (homeView) argv.push(...sandboxHomeCoverArgs(homeView));
+  // … and the GoodVibes state and the daemon's home wherever they are (outside $HOME, inside the workspace or a bound
+  // folder), keeping only the folders this boundary must show.
+  argv.push(...goodVibesStateCoverArgs([input.workspaceDir, input.cwd, ...input.writableExtras]));
   if (!input.networkEnabled) {
     argv.push('--unshare-net');
   }

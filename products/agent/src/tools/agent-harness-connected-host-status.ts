@@ -1,4 +1,4 @@
-import { resolveWebSurfaceExposure } from '@goodvibes/engine/terminal-shell/cli-network-posture';
+import { resolveWebSurfaceExposure } from '@goodvibes/engine/platform/platform/support/service-posture';
 import { resolveConnectedHostAddress } from '@goodvibes/engine/terminal-shell/agent-turn/connected-host-dial';
 import type { ToolRegistry } from '@goodvibes/engine/platform/platform/tools';
 import { resolveRuntimeEndpointBinding } from '../cli/endpoints.ts';
@@ -180,7 +180,7 @@ export async function connectedHostStatusSummary(
       daemonAliases: 'mode:"daemon_status" is an alias for mode:"connected_host_status"; mode:"daemon" is an alias for mode:"connected_host".',
       lifecycle: `Use setup or agent_operator_method for supported daemon service methods. ${EFFECT_ADMISSION_SENTENCE}`,
       cliMirrors: ['goodvibes-agent status --json', 'goodvibes-agent doctor', 'goodvibes-agent compat'],
-      tuiMirrors: ['/health', '/health compat', 'Agent Workspace -> Connected Host'],
+      tuiMirrors: ['System place, Health', 'Agent Workspace -> Connected Host'],
     },
     routeFamilies: connectedHostRouteFamilies(),
     capabilities: connectedHostCapabilityMap(toolRegistry),

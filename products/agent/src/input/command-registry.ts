@@ -42,9 +42,7 @@ import type { ApprovalsView } from '../runtime/client/approvals-view.ts';
 import type { CommandWorkspaceShellServices } from '@/runtime/index.ts';
 import type { CommandPlatformShellServices } from '@/runtime/index.ts';
 import type { CommandExtensionShellServices } from '@/runtime/index.ts';
-import type { CommandOpsShellServices, RemoteCommandService } from '@/runtime/index.ts';
-
-export type { RemoteCommandService } from '@/runtime/index.ts';
+import type { CommandOpsShellServices } from '@/runtime/index.ts';
 
 export interface CommandRuntimeState extends TerminalCommandRuntimeState {}
 
@@ -127,7 +125,8 @@ export interface CommandShellUiOpeners extends TerminalCommandShellUiOpeners<imp
   /** The model list's grouping, while the list is open (model-picker-token-route.ts). */
   cycleModelPickerGroup?: () => void;
 
-  openAgentWorkspace?: (categoryId?: string) => void;
+  /** Opens a workspace area on top; resolves when it closes. */
+  openAgentWorkspace?: (categoryId?: string) => Promise<void> | void;
   /** Opens the form of one `/setup` topic: these rows of the setup category, and nothing else. */
   openAgentSetupRows?: (actionIds: readonly string[]) => void;
   dismissAgentWorkspace?: () => boolean;
@@ -196,7 +195,7 @@ export interface CommandPlatformConfigServices extends TerminalCommandPlatformCo
   readonly voiceSetup?: AgentVoiceSetupService;
   /** This app's runtime store, read by `/state`. */
   readonly runtimeStore?: { getState(): object };
-  /** Live memory-governance snapshot source (/health memory); absent against an older host build. */
+  /** Live memory-governance snapshot source (the Health tab's memory check); absent against an older host build. */
   readonly memoryGovernor?: AgentMemoryDiagnostics;
   readonly mediaProviderRegistry?: MediaProviderRegistry;
   readonly artifactStore?: Pick<ArtifactStore, 'create'> & Partial<Pick<ArtifactStore, 'get' | 'list' | 'readContent' | 'storagePath'>>;
@@ -214,7 +213,7 @@ export interface CommandOpsServices extends CommandOpsShellServices {
    * unioned with the asks this process still holds, plus the honest reason
    * when the daemon's record could not be read. Optional because a narrow
    * command context (a one-shot subcommand, a test double) may carry no
-   * runtime graph, `/health approvals` says so rather than rendering zero.
+   * runtime graph, the Health tab's `approvals` check says so rather than rendering zero.
    */
   readonly approvalsView?: ApprovalsView;
 }

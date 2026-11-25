@@ -132,9 +132,9 @@ export class MemoryRegistry {
     return this.store.exportBundle(filter, options);
   }
 
-  async importBundle(bundle: MemoryBundle, options?: MemoryOperationOptions): Promise<MemoryImportResult> {
+  async importBundle(bundle: MemoryBundle, options?: MemoryOperationOptions, intoProject?: string): Promise<MemoryImportResult> {
     const operation = captureMemoryOperation(options);
-    const result = await this.store.importBundle(bundle, operation);
+    const result = await this.store.importBundle(bundle, operation, intoProject);
     this.notify();
     return result;
   }
@@ -154,7 +154,7 @@ export class MemoryRegistry {
     return this.store.linksFor(id, options);
   }
 
-  update(id: string, patch: { cls?: MemoryClass; scope?: MemoryScope; summary?: string; detail?: string; tags?: string[]; validFrom?: number | null; validUntil?: number | null; resetReview?: true }, options?: MemoryOperationOptions): MemoryRecord | null {
+  update(id: string, patch: { cls?: MemoryClass; scope?: MemoryScope; project?: string | undefined; summary?: string; detail?: string; tags?: string[]; validFrom?: number | null; validUntil?: number | null; resetReview?: true }, options?: MemoryOperationOptions): MemoryRecord | null {
     const operation = captureMemoryOperation(options);
     const record = this.store.update(id, patch, operation);
     if (record) this.notify();
@@ -242,6 +242,13 @@ export class MemoryRegistry {
 
   writeStoreMeta(key: string, value: string): void {
     this.store.writeMeta(key, value);
+  }
+
+  /** Once per store: 3.5.0 "this project" records given the project they were saved in (MemoryStore.attributeOldProjectRecords). */
+  attributeOldProjectRecords(attribute: (record: MemoryRecord) => string | undefined): ReturnType<MemoryStore['attributeOldProjectRecords']> {
+    const done = this.store.attributeOldProjectRecords(attribute);
+    if (done && done.attributed.size > 0) this.notify();
+    return done;
   }
 
   /** Keeps consolidation proposals once each; returns the ones that were not already standing. */

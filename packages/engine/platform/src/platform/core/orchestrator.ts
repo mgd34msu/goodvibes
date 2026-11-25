@@ -18,7 +18,7 @@ import type { ConversationManager } from './conversation.js';
 import { resolveCompactionStrategy } from './conversation-compaction.js';
 import type { ToolRegistry } from '../tools/registry.js';
 import type { ToolCall, ToolResult } from '../types/tools.js';
-import { AppError, ProviderError } from '../types/errors.js';
+import { AppError, isContextRefusalCode, ProviderError } from '../types/errors.js';
 import type { HookEvent, HookResult } from '../hooks/types.js';
 import { formatError, readFormattedError, summarizeError } from '../utils/error-display.js';
 import type { ModelDefinition } from '../providers/registry.js';
@@ -112,11 +112,13 @@ interface HookDispatcherLike {
 const MAX_TURN_ERROR_TEXT = 2_000;
 
 /** The HTTP status and connection errno of a provider failure, for the TURN_ERROR payload. */
-function providerFailureFacts(err: ProviderError): { status?: number; code?: string } {
+function providerFailureFacts(err: ProviderError): { status?: number; code?: string; providerCode?: string } {
   const cause = err.cause && typeof err.cause === 'object' ? (err.cause as { code?: unknown }).code : undefined;
   return {
     ...(typeof err.statusCode === 'number' ? { status: err.statusCode } : {}),
     ...(typeof cause === 'string' ? { code: cause } : {}),
+    // The provider's own code (never its message text): what the refusal was, read the same by every reader of TURN_ERROR.
+    ...(typeof err.providerCode === 'string' && err.providerCode ? { providerCode: err.providerCode } : {}),
   };
 }
 /** Refused before any request: the selected model cannot be asked (core/turn-failure.ts words it). */
@@ -328,6 +330,11 @@ export class Orchestrator {
   public messageQueue: { id: string; queuedAt: number; text: string; content?: ContentPart[] | undefined; options?: OrchestratorUserInputOptions | undefined; nativeTurn?: NativeConversationTurnAdmission | undefined; settlement?: QueuedInputSettlement | undefined;
     /** The channel guest the message was sent by, taken when it was queued. */
     guest?: GuestCaller | undefined }[] = [];
+  /**
+   * Messages sent into the running turn (`steerRunningTurn`): the turn adds them to its conversation before its next
+   * request to the model. One the turn had no next request for runs as the next turn (`requeueUntakenSteers`).
+   */
+  private turnSteers: { readonly text: string; readonly options?: OrchestratorUserInputOptions | undefined }[] = [];
 
   private animInterval: ReturnType<typeof setInterval> | null = null;
   private abortController: AbortController | null = null;
@@ -919,12 +926,41 @@ export class Orchestrator {
   }
 
   /**
+   * Put a message into the turn running now: it is added to the conversation before the turn's next request to the
+   * model (after the tool calls running finish or are stopped). False when no turn runs, and the caller starts one
+   * with it instead (`handleUserInput`). A turn that makes no further request leaves it to run as the next turn.
+   */
+  public steerRunningTurn(text: string, options?: OrchestratorUserInputOptions | undefined): boolean {
+    if (this.disposed || !text.trim() || !this.isTurnInFlight) return false;
+    this.turnSteers.push({ text, ...(options ? { options } : {}) });
+    this.requestRender();
+    return true;
+  }
+
+  /** The messages sent into the running turn since its last request, for the turn loop to add before its next one. */
+  private takeTurnSteers(): readonly string[] {
+    return this.turnSteers.splice(0).map((steer) => steer.text);
+  }
+
+  /** A message sent into a turn that ended before its next request runs as the next turn, ahead of the queue. */
+  private requeueUntakenSteers(): void {
+    if (this.isTurnInFlight) return;
+    for (const steer of this.turnSteers.splice(0).reverse()) {
+      this.queuedMessageSeq += 1;
+      const id = `qm-${this.queuedMessageSeq}`;
+      this.messageQueue.unshift({ id, queuedAt: Date.now(), text: steer.text, options: steer.options });
+      this.emitQueueChange('enqueued', id);
+    }
+  }
+
+  /**
    * Drain queued user messages sequentially while nothing occupies a turn.
    * Compaction only ever runs inside a turn, so the turn that owns it drains
    * the queue when it ends.
    */
   private async drainMessageQueue(): Promise<void> {
     let failure: unknown;
+    this.requeueUntakenSteers();
     while (!this.disposed && this.messageQueue.length > 0 && !this.isTurnOccupied) {
       const next = this.messageQueue.shift()!;
       this.emitQueueChange('delivered', next.id);
@@ -935,6 +971,7 @@ export class Orchestrator {
         next.settlement?.reject(error);
         failure ??= error;
       }
+      this.requeueUntakenSteers();
     }
     this.followUpRuntime.scheduleFlush();
     if (failure !== undefined) throw failure;
@@ -1338,6 +1375,7 @@ export class Orchestrator {
       estimateFreshTurnInputTokens: (currentEstimatedTokens, nextText, nextContent) =>
         estimateFreshTurnInputTokens(this.lastInputTokens, currentEstimatedTokens, nextText, nextContent),
       getMessageQueueLength: () => this.messageQueue.length,
+      takeSteers: () => this.takeTurnSteers(),
       isReconciliationEnabled: () => this.isReconciliationEnabled(),
       setPendingToolCalls: (calls) => { this._pendingToolCalls = calls; },
       setStreamingActive: (value) => { this.phase = phaseWithStreaming(this.phase, value); },
@@ -1519,7 +1557,9 @@ export class Orchestrator {
       ...(err instanceof ProviderError ? providerFailureFacts(err) : {}),
       ...this.failureFactsOf(providerRegistry, err instanceof ProviderError),
     };
-    this.conversation.addTurnFailure(readTurnFailure(facts));
+    // A refusal whose code says the conversation is too long for the model is worded as that, with shortening it next.
+    const contextTooLong = err instanceof ProviderError && isContextRefusalCode(err.providerCode);
+    this.conversation.addTurnFailure(readTurnFailure(contextTooLong ? { ...facts, contextTooLong } : facts));
     this.requestRender();
     this._turnFailed = true;
     this.turnCancellation.end(turnId);

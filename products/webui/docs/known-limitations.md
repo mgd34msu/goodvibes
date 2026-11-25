@@ -44,7 +44,7 @@ mistaken for hidden contracts.
 
 - The Calendar view shows what the daemon's calendar reads: a CalDAV server
   when one is set, otherwise the machine's one Google connection (the account
-  connected with the Agent's `/calendar connect google`, `/google connect` or
+  connected with the Agent's `/calendar connect google`, "connect" on the Google tab of Mail, calendar and channels, or
   the model's `google` tool; they are the same connection), and beside either
   a Microsoft Outlook account connected with the Agent's `/calendar connect
   outlook` (the same connection the Agent's `/calendar` uses). Outlook's

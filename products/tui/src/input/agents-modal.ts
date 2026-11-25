@@ -71,7 +71,7 @@ export interface AgentsModalDeps {
   readonly configManager?: ConfigManager | null;
   readonly hosted?: HostedSessionFeed;
   /**
-   * Send a line to the hosted session (/hosted send). A returned promise is
+   * Send a line to the hosted session (hosted.send). A returned promise is
    * awaited: `{ ok: false }` or a rejection keeps the draft and shows the
    * error; a plain return (nothing to await) counts as sent.
    */
@@ -89,7 +89,7 @@ export interface AgentsModalDeps {
 }
 
 const HOSTED_ID = 'hosted-session';
-const HOSTED_END_HINT = 'The hosted session ends with /hosted end; /hosted leave keeps or ends it, as its setting says.';
+const HOSTED_END_HINT = 'The Sessions place ends a hosted session (Hosted, end) or leaves it (Joined here, leave: it keeps running or ends, as its setting says).';
 
 /** One key in the vocabulary the fleet controllers (acts, spawn) take. */
 function keyName(token: InputToken): string | null {

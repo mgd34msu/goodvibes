@@ -1,5 +1,5 @@
 import { assertAgentLocalRegistryWrite, assertAgentLocalRegistryEffectCurrent, createAgentLocalRegistryWriteLifecycle, createAgentLocalRegistryInputProjector } from './local-registry-admission.js';
-import type { Tool } from '@goodvibes/engine/platform/platform/types';
+import type { Tool, ToolExecuteOptions } from '@goodvibes/engine/platform/platform/types';
 import { assertCurrentToolExecution, type ToolRegistry } from '@goodvibes/engine/platform/platform/tools';
 import type { ShellPathService } from '@goodvibes/engine/platform/platform/runtime/shell';
 import { MemoryRegistry } from '@goodvibes/engine/platform/platform/state';
@@ -12,9 +12,7 @@ import type { DaemonCapabilityAnswer } from './capability-tools.js';
 import { formatAgentRecordOrigin, formatAgentRecordReviewState } from './record-labels.js';
 import { assertActorMayEnable, assertActorMayMarkReviewed } from './review-authority.js';
 import { formatRefusal, readRefusal } from '@goodvibes/engine/errors';
-import { buildAgentLocalRequirements } from './local-registry-requirements.js';
 import {
-  AGENT_TOOL_PROVENANCE,
   type AgentLocalRegistryToolArgs,
   readActivation,
   readString,
@@ -38,6 +36,8 @@ export type { AgentLocalRegistryToolArgs } from './local-registry-args.js';
 
 const DOMAINS: readonly AgentLocalRegistryDomain[] = ['memory', 'note', 'persona', 'skill', 'skill_bundle', 'routine'];
 const ACTIONS: readonly AgentLocalRegistryAction[] = ['list', 'search', 'get', 'create', 'update', 'enable', 'disable', 'review', 'stale', 'use', 'clear_active', 'start', 'delete'];
+/** The domains whose every write is the daemon's capability (run nested), never this process's own. */
+const ROUTED_DOMAINS: readonly AgentLocalRegistryDomain[] = ['note', 'persona', 'skill', 'skill_bundle', 'routine'];
 
 function isDomain(value: unknown): value is AgentLocalRegistryDomain {
   return typeof value === 'string' && DOMAINS.includes(value as AgentLocalRegistryDomain);
@@ -52,20 +52,6 @@ function unknownRecord(kind: string, domain: AgentLocalRegistryDomain, args: Age
   return new Error(`Unknown Agent-local ${kind} ${readString(args.id)}. Nothing was changed; find ids with domain:"${domain}" action:"list" or action:"search".`);
 }
 
-/**
- * A field edit carries `enabled` in the same registry write. `enabled` alone is
- * the registry's own enable/disable, which leaves the review state as it is.
- */
-function updateOrSetEnabled<R>(
-  fieldsGiven: boolean,
-  enabled: unknown,
-  update: (enabled: boolean | undefined) => R,
-  setEnabled: (enabled: boolean) => R,
-): R {
-  const flag = typeof enabled === 'boolean' ? enabled : undefined;
-  return fieldsGiven || flag === undefined ? update(flag) : setEnabled(flag);
-}
-
 function formatNote(note: AgentNoteRecord): string {
   const tags = note.tags.length > 0 ? ` tags ${note.tags.join(', ')}` : '';
   const sourceUrl = note.sourceUrl ? ` source ${note.sourceUrl}` : '';
@@ -78,7 +64,31 @@ function listNotes(records: readonly AgentNoteRecord[], title: string): string {
     : [title, ...records.map(formatNote)].join('\n');
 }
 
-function handleNote(shellPaths: ShellPathService, action: AgentLocalRegistryAction, args: AgentLocalRegistryToolArgs, effects: ReturnType<typeof createAgentLocalRegistryWriteLifecycle>): string {
+/** A reason the model gave, or the words that say it gave none (the capability needs one). */
+const reasonOf = (args: AgentLocalRegistryToolArgs): string => readString(args.reason) || 'the model gave no reason';
+
+/** Note reads stay in this process (the same file); every write is the daemon's note capability, so every open list follows it. */
+async function handleNote(shellPaths: ShellPathService, action: AgentLocalRegistryAction, args: AgentLocalRegistryToolArgs, effects: ReturnType<typeof createAgentLocalRegistryWriteLifecycle>, run: SkillCapabilityRun): Promise<string> {
+  if (action === 'create') {
+    return skillWrite(run, effects, 'notes.create', {
+      title: readString(args.title ?? args.name ?? args.summary), body: requireTextField(args.body ?? args.detail ?? args.description, 'body'),
+      tags: listInput(args.tags), url: readString(args.sourceUrl),
+    }, 'note');
+  }
+  if (action === 'update') {
+    requireUpdateFields('note', { title: args.title ?? args.name ?? args.summary, body: args.body ?? args.detail ?? args.description, tags: args.tags, sourceUrl: args.sourceUrl === undefined ? undefined : true });
+    return skillWrite(run, effects, 'notes.edit', {
+      note: requireId(args), title: readString(args.title ?? args.name ?? args.summary), body: readString(args.body ?? args.detail ?? args.description),
+      tags: listInput(args.tags), url: readString(args.sourceUrl),
+    }, 'note');
+  }
+  if (action === 'review') assertActorMayMarkReviewed('model', 'note', requireId(args));
+  if (action === 'stale') return skillWrite(run, effects, 'notes.stale', { note: requireId(args), reason: reasonOf(args) }, 'note');
+  if (action === 'delete') return skillWrite(run, effects, 'notes.delete', { note: requireId(args) }, 'note');
+  return readNote(shellPaths, action, args, effects);
+}
+
+function readNote(shellPaths: ShellPathService, action: AgentLocalRegistryAction, args: AgentLocalRegistryToolArgs, effects: ReturnType<typeof createAgentLocalRegistryWriteLifecycle>): string {
   const registry = AgentNoteRegistry.fromShellPaths(shellPaths, effects);
   if (action === 'list') return listNotes(registry.list(), 'Agent-local notes');
   if (action === 'search') return listNotes(registry.search(readString(args.query)), 'Agent-local notes search');
@@ -92,54 +102,6 @@ function handleNote(shellPaths: ShellPathService, action: AgentLocalRegistryActi
       `origin ${formatAgentRecordOrigin(note.source, note.provenance)}`,
       '',
       note.body,
-    ].join('\n');
-  }
-  if (action === 'create') {
-    const note = registry.create({
-      title: requireTextField(args.title ?? args.name ?? args.summary, 'title'),
-      body: requireTextField(args.body ?? args.detail ?? args.description, 'body'),
-      tags: readStringList(args.tags),
-      sourceUrl: readString(args.sourceUrl) || undefined,
-      source: 'agent',
-      provenance: readString(args.provenance) || AGENT_TOOL_PROVENANCE,
-    });
-    return [
-      'Created Agent-local note',
-      `  id ${note.id}`,
-      `  title ${note.title}`,
-    ].join('\n');
-  }
-  if (action === 'update') {
-    requireUpdateFields('note', { title: args.title ?? args.name ?? args.summary, body: args.body ?? args.detail ?? args.description, tags: args.tags, sourceUrl: args.sourceUrl === undefined ? undefined : true });
-    const note = registry.update(requireId(args), {
-      title: readString(args.title ?? args.name ?? args.summary) || undefined,
-      body: readString(args.body ?? args.detail ?? args.description) || undefined,
-      tags: args.tags === undefined ? undefined : readStringList(args.tags),
-      sourceUrl: args.sourceUrl === undefined ? undefined : readString(args.sourceUrl),
-      provenance: readString(args.provenance) || AGENT_TOOL_PROVENANCE,
-    });
-    return [
-      'Updated Agent-local note',
-      `  id ${note.id}`,
-      `  title ${note.title}`,
-    ].join('\n');
-  }
-  if (action === 'review') {
-    assertActorMayMarkReviewed('model', 'note', requireId(args));
-  }
-  if (action === 'stale') {
-    const note = registry.markStale(requireId(args), readString(args.reason));
-    return [
-      'Marked Agent-local note stale',
-      `  id ${note.id}`,
-    ].join('\n');
-  }
-  if (action === 'delete') {
-    const note = registry.deleteNote(requireId(args));
-    return [
-      'Deleted Agent-local note',
-      `  id ${note.id}`,
-      `  title ${note.title}`,
     ].join('\n');
   }
   throw new Error(invalidAction(action, 'notes', 'note'));
@@ -190,7 +152,43 @@ function listRoutines(records: readonly AgentRoutineRecord[], title: string): st
     : [title, ...records.map(formatRoutine)].join('\n');
 }
 
-function handlePersona(shellPaths: ShellPathService, action: AgentLocalRegistryAction, args: AgentLocalRegistryToolArgs, effects: ReturnType<typeof createAgentLocalRegistryWriteLifecycle>): string {
+/** Persona reads stay in this process; every write is the daemon's persona capability, so every open list follows it. */
+async function handlePersona(shellPaths: ShellPathService, action: AgentLocalRegistryAction, args: AgentLocalRegistryToolArgs, effects: ReturnType<typeof createAgentLocalRegistryWriteLifecycle>, run: SkillCapabilityRun): Promise<string> {
+  if (action === 'create') {
+    const activate = readActivation(args.activate);
+    const made = await skillWrite(run, effects, 'personas.create', {
+      name: requireName(args), description: requireDescription(args), body: requireTextField(args.body, 'body'), tags: listInput(args.tags), triggers: listInput(args.triggers),
+    }, 'persona');
+    const id = made.match(/^ {2}id (.+)$/m)?.[1];
+    return activate === true && id ? [made, await skillWrite(run, effects, 'personas.use', { persona: id }, 'persona')].join('\n') : made;
+  }
+  if (action === 'update') {
+    const activate = readActivation(args.activate);
+    requireUpdateFields('persona', { name: args.name, description: args.description, body: args.body, tags: args.tags, triggers: args.triggers, activate: activate });
+    const id = requireId(args);
+    const said: string[] = [];
+    if ([args.name, args.description, args.body, args.tags, args.triggers].some((value) => value !== undefined)) {
+      said.push(await skillWrite(run, effects, 'personas.update', {
+        persona: id, name: readString(args.name), description: readString(args.description), body: readString(args.body), tags: listInput(args.tags), triggers: listInput(args.triggers),
+      }, 'persona'));
+    }
+    if (activate === true) said.push(await skillWrite(run, effects, 'personas.use', { persona: id }, 'persona'));
+    // false clears it only when it is the one in use.
+    if (activate === false && AgentPersonaRegistry.fromShellPaths(shellPaths, effects).snapshot().activePersonaId === id) said.push(await skillWrite(run, effects, 'personas.stop-using', {}, 'persona'));
+    return said.join('\n');
+  }
+  if (action === 'use') return skillWrite(run, effects, 'personas.use', { persona: requireId(args) }, 'persona');
+  if (action === 'clear_active') return skillWrite(run, effects, 'personas.stop-using', {}, 'persona');
+  if (action === 'review') {
+    assertActorMayMarkReviewed('model', 'persona', requireId(args));
+    return skillWrite(run, effects, 'personas.review', { persona: requireId(args) }, 'persona');
+  }
+  if (action === 'stale') return skillWrite(run, effects, 'personas.stale', { persona: requireId(args), reason: reasonOf(args) }, 'persona');
+  if (action === 'delete') return skillWrite(run, effects, 'personas.delete', { persona: requireId(args) }, 'persona');
+  return readPersona(shellPaths, action, args, effects);
+}
+
+function readPersona(shellPaths: ShellPathService, action: AgentLocalRegistryAction, args: AgentLocalRegistryToolArgs, effects: ReturnType<typeof createAgentLocalRegistryWriteLifecycle>): string {
   const registry = AgentPersonaRegistry.fromShellPaths(shellPaths, effects);
   if (action === 'list') return listPersonas(registry, registry.list(), 'Agent-local personas');
   if (action === 'search') return listPersonas(registry, registry.search(readString(args.query)), 'Agent-local personas search');
@@ -206,79 +204,6 @@ function handlePersona(shellPaths: ShellPathService, action: AgentLocalRegistryA
       persona.body,
     ].join('\n');
   }
-  if (action === 'create') {
-    const activate = readActivation(args.activate);
-    // Saved and, when asked, made active in one write.
-    const persona = registry.create({
-      name: requireName(args),
-      description: requireDescription(args),
-      body: requireTextField(args.body, 'body'),
-      tags: readStringList(args.tags),
-      triggers: readStringList(args.triggers),
-      source: 'agent',
-      provenance: readString(args.provenance) || AGENT_TOOL_PROVENANCE,
-      ...(activate === true ? { active: true } : {}),
-    });
-    return [
-      'Created Agent-local persona',
-      `  id ${persona.id}`,
-      `  name ${persona.name}`,
-    ].join('\n');
-  }
-  if (action === 'update') {
-    const activate = readActivation(args.activate);
-    requireUpdateFields('persona', { name: args.name, description: args.description, body: args.body, tags: args.tags, triggers: args.triggers, activate: activate });
-    // The edit and the active-state change are one write.
-    const persona = registry.update(requireId(args), {
-      name: readString(args.name) || undefined,
-      description: readString(args.description) || undefined,
-      body: readString(args.body) || undefined,
-      tags: args.tags === undefined ? undefined : readStringList(args.tags),
-      triggers: args.triggers === undefined ? undefined : readStringList(args.triggers),
-      provenance: readString(args.provenance) || AGENT_TOOL_PROVENANCE,
-      ...(activate === undefined ? {} : { active: activate }),
-    });
-    return [
-      'Updated Agent-local persona',
-      `  id ${persona.id}`,
-      `  name ${persona.name}`,
-    ].join('\n');
-  }
-  if (action === 'use') {
-    const persona = registry.setActive(requireId(args));
-    return [
-      'Active Agent-local persona set',
-      `  id ${persona.id}`,
-      `  name ${persona.name}`,
-    ].join('\n');
-  }
-  if (action === 'clear_active') {
-    registry.clearActive();
-    return 'Cleared active Agent-local persona.';
-  }
-  if (action === 'review') {
-    assertActorMayMarkReviewed('model', 'persona', requireId(args));
-    const persona = registry.markReviewed(requireId(args));
-    return [
-      'Reviewed Agent-local persona',
-      `  id ${persona.id}`,
-    ].join('\n');
-  }
-  if (action === 'stale') {
-    const persona = registry.markStale(requireId(args), readString(args.reason));
-    return [
-      'Marked Agent-local persona stale',
-      `  id ${persona.id}`,
-    ].join('\n');
-  }
-  if (action === 'delete') {
-    const persona = registry.deletePersona(requireId(args));
-    return [
-      'Deleted Agent-local persona',
-      `  id ${persona.id}`,
-      `  name ${persona.name}`,
-    ].join('\n');
-  }
   throw new Error(invalidAction(action, 'personas', 'persona'));
 }
 
@@ -289,7 +214,7 @@ type SkillCapabilityRun = (id: string, inputs: Readonly<Record<string, string>>)
  * A skill or bundle write, made by the daemon's skills capability (the one the Skills tab runs), so every program's
  * list follows it. The call's own checks hold before it is sent, and the store's change is accepted as this call's.
  */
-async function skillWrite(run: SkillCapabilityRun, effects: ReturnType<typeof createAgentLocalRegistryWriteLifecycle>, id: string, inputs: Readonly<Record<string, string | undefined>>, kind: 'skill' | 'bundle'): Promise<string> {
+async function skillWrite(run: SkillCapabilityRun, effects: ReturnType<typeof createAgentLocalRegistryWriteLifecycle>, id: string, inputs: Readonly<Record<string, string | undefined>>, kind: 'skill' | 'bundle' | 'note' | 'persona' | 'routine'): Promise<string> {
   effects.assertCurrent();
   const given = Object.fromEntries(Object.entries(inputs).filter((entry): entry is [string, string] => typeof entry[1] === 'string' && entry[1] !== ''));
   const answer = await run(id, given);
@@ -437,7 +362,61 @@ async function handleSkillBundle(shellPaths: ShellPathService, action: AgentLoca
   throw new Error(invalidAction(action, 'skill bundles', 'skill_bundle'));
 }
 
-function handleRoutine(shellPaths: ShellPathService, action: AgentLocalRegistryAction, args: AgentLocalRegistryToolArgs, effects: ReturnType<typeof createAgentLocalRegistryWriteLifecycle>): string {
+/** Routine reads stay in this process; every write (a start's count too) is the daemon's routine capability. */
+async function handleRoutine(shellPaths: ShellPathService, action: AgentLocalRegistryAction, args: AgentLocalRegistryToolArgs, effects: ReturnType<typeof createAgentLocalRegistryWriteLifecycle>, run: SkillCapabilityRun): Promise<string> {
+  const requirements = { env: listInput(args.requiresEnv), commands: listInput(args.requiresCommands) };
+  if (action === 'create') {
+    if (args.enabled === true) assertActorMayEnable('model', 'routine', requireName(args), 'fresh');
+    return skillWrite(run, effects, 'routines.create', {
+      name: requireName(args), description: requireDescription(args), steps: requireTextField(args.steps, 'steps'),
+      triggers: listInput(args.triggers), tags: listInput(args.tags), ...requirements, enabled: args.enabled === true ? 'yes' : 'no',
+    }, 'routine');
+  }
+  if (action === 'update') {
+    const id = requireId(args);
+    const fieldsGiven = [args.name, args.description, args.steps, args.triggers, args.tags, args.requiresEnv, args.requiresCommands].some((value) => value !== undefined);
+    if (args.enabled === true) assertActorMayEnable('model', 'routine', id, fieldsGiven ? 'fresh' : AgentRoutineRegistry.fromShellPaths(shellPaths, effects).get(id)?.reviewState);
+    requireUpdateFields('routine', { name: args.name, description: args.description, steps: args.steps, triggers: args.triggers, tags: args.tags,
+      requiresEnv: args.requiresEnv, requiresCommands: args.requiresCommands, enabled: typeof args.enabled === 'boolean' ? args.enabled : undefined });
+    const said: string[] = [];
+    if (fieldsGiven) {
+      said.push(await skillWrite(run, effects, 'routines.update', {
+        routine: id, name: readString(args.name), description: readString(args.description), steps: readString(args.steps),
+        triggers: listInput(args.triggers), tags: listInput(args.tags), ...requirements,
+      }, 'routine'));
+    }
+    if (typeof args.enabled === 'boolean') said.push(await skillWrite(run, effects, args.enabled ? 'routines.enable' : 'routines.disable', { routine: id }, 'routine'));
+    return said.join('\n');
+  }
+  if (action === 'enable' || action === 'disable') {
+    if (action === 'enable') assertActorMayEnable('model', 'routine', requireId(args), AgentRoutineRegistry.fromShellPaths(shellPaths, effects).get(requireId(args))?.reviewState);
+    return skillWrite(run, effects, action === 'enable' ? 'routines.enable' : 'routines.disable', { routine: requireId(args) }, 'routine');
+  }
+  if (action === 'start') {
+    effects.assertCurrent();
+    const answer = await run('routines.count-start', { routine: requireId(args) });
+    if (!answer.ok) throw new Error(answer.error);
+    effects.onEffect();
+    const started = answer.data['routine'] as { readonly id?: string; readonly name?: string; readonly steps?: string } | undefined;
+    return [
+      'Started Agent-local routine',
+      `  id ${started?.id ?? requireId(args)}`,
+      `  name ${started?.name ?? ''}`,
+      'Policy: same main conversation; no hidden background job, connected-host mutation, or external side effect was started.',
+      '',
+      started?.steps ?? '',
+    ].join('\n');
+  }
+  if (action === 'review') {
+    assertActorMayMarkReviewed('model', 'routine', requireId(args));
+    return skillWrite(run, effects, 'routines.review', { routine: requireId(args) }, 'routine');
+  }
+  if (action === 'stale') return skillWrite(run, effects, 'routines.stale', { routine: requireId(args), reason: reasonOf(args) }, 'routine');
+  if (action === 'delete') return skillWrite(run, effects, 'routines.delete', { routine: requireId(args) }, 'routine');
+  return readRoutine(shellPaths, action, args, effects);
+}
+
+function readRoutine(shellPaths: ShellPathService, action: AgentLocalRegistryAction, args: AgentLocalRegistryToolArgs, effects: ReturnType<typeof createAgentLocalRegistryWriteLifecycle>): string {
   const registry = AgentRoutineRegistry.fromShellPaths(shellPaths, effects);
   if (action === 'list') return listRoutines(registry.list(), 'Agent-local routines');
   if (action === 'search') return listRoutines(registry.search(readString(args.query)), 'Agent-local routines search');
@@ -453,96 +432,15 @@ function handleRoutine(shellPaths: ShellPathService, action: AgentLocalRegistryA
       routine.steps,
     ].join('\n');
   }
-  if (action === 'create') {
-    if (args.enabled === true) assertActorMayEnable('model', 'routine', requireName(args), 'fresh');
-    const routine = registry.create({
-      name: requireName(args),
-      description: requireDescription(args),
-      steps: requireTextField(args.steps, 'steps'),
-      triggers: readStringList(args.triggers),
-      tags: readStringList(args.tags),
-      requirements: buildAgentLocalRequirements(args.requiresEnv, args.requiresCommands),
-      enabled: args.enabled === true,
-      source: 'agent',
-      provenance: readString(args.provenance) || AGENT_TOOL_PROVENANCE,
-    });
-    return [
-      'Created Agent-local routine',
-      `  id ${routine.id}`,
-      `  name ${routine.name}`,
-    ].join('\n');
-  }
-  if (action === 'update') {
-    const id = requireId(args);
-    if (args.enabled === true) assertActorMayEnable('model', 'routine', id, [args.name, args.description, args.steps, args.triggers, args.tags,
-      args.requiresEnv, args.requiresCommands].some((value) => value !== undefined) ? 'fresh' : registry.get(id)?.reviewState);
-    requireUpdateFields('routine', { name: args.name, description: args.description, steps: args.steps, triggers: args.triggers, tags: args.tags,
-      requiresEnv: args.requiresEnv, requiresCommands: args.requiresCommands, enabled: typeof args.enabled === 'boolean' ? args.enabled : undefined });
-    const fieldsGiven = [args.name, args.description, args.steps, args.triggers, args.tags, args.requiresEnv, args.requiresCommands].some((value) => value !== undefined);
-    const routine = updateOrSetEnabled(fieldsGiven, args.enabled, (enabled) => registry.update(id, {
-      name: readString(args.name) || undefined,
-      description: readString(args.description) || undefined,
-      steps: readString(args.steps) || undefined,
-      triggers: args.triggers === undefined ? undefined : readStringList(args.triggers),
-      tags: args.tags === undefined ? undefined : readStringList(args.tags),
-      requirements: buildAgentLocalRequirements(args.requiresEnv, args.requiresCommands, registry.get(id)?.requirements),
-      provenance: readString(args.provenance) || AGENT_TOOL_PROVENANCE,
-      enabled,
-    }), (enabled) => registry.setEnabled(id, enabled));
-    return [
-      'Updated Agent-local routine',
-      `  id ${routine.id}`,
-      `  name ${routine.name}`,
-    ].join('\n');
-  }
-  if (action === 'enable' || action === 'disable') {
-    if (action === 'enable') assertActorMayEnable('model', 'routine', requireId(args), registry.get(requireId(args))?.reviewState);
-    const routine = registry.setEnabled(requireId(args), action === 'enable');
-    return [
-      `${action === 'enable' ? 'Enabled' : 'Disabled'} Agent-local routine`,
-      `  id ${routine.id}`,
-      `  name ${routine.name}`,
-    ].join('\n');
-  }
-  if (action === 'start') {
-    const routine = registry.markStarted(requireId(args));
-    return [
-      'Started Agent-local routine',
-      `  id ${routine.id}`,
-      `  name ${routine.name}`,
-      'Policy: same main conversation; no hidden background job, connected-host mutation, or external side effect was started.',
-      '',
-      routine.steps,
-    ].join('\n');
-  }
-  if (action === 'review') {
-    assertActorMayMarkReviewed('model', 'routine', requireId(args));
-    const routine = registry.markReviewed(requireId(args));
-    return [
-      'Reviewed Agent-local routine',
-      `  id ${routine.id}`,
-    ].join('\n');
-  }
-  if (action === 'stale') {
-    const routine = registry.markStale(requireId(args), readString(args.reason));
-    return [
-      'Marked Agent-local routine stale',
-      `  id ${routine.id}`,
-    ].join('\n');
-  }
-  if (action === 'delete') {
-    const routine = registry.deleteRoutine(requireId(args));
-    return [
-      'Deleted Agent-local routine',
-      `  id ${routine.id}`,
-      `  name ${routine.name}`,
-    ].join('\n');
-  }
   throw new Error(invalidAction(action, 'routines', 'routine'));
 }
 
-/** How the tool runs a daemon capability (capability-tools.ts `daemonCapabilityRunner`): skill and bundle writes go there. */
-export type AgentLocalRegistryCapabilityRun = (id: string, inputs: Readonly<Record<string, string>>, signal?: AbortSignal) => Promise<DaemonCapabilityAnswer>;
+/**
+ * How the tool runs a daemon capability (capability-tools.ts `daemonCapabilityRunner`): every write goes there, as a
+ * nested `capability_run` call of this tool call, judged by that capability's own risk (a delete that cannot be undone
+ * is asked as capability_run asks it).
+ */
+export type AgentLocalRegistryCapabilityRun = (id: string, inputs: Readonly<Record<string, string>>, options?: ToolExecuteOptions) => Promise<DaemonCapabilityAnswer>;
 
 export function createAgentLocalRegistryTool(shellPaths: ShellPathService, memoryRegistry: MemoryRegistry, memorySpine: MemoryAccess, runCapability: AgentLocalRegistryCapabilityRun): Tool {
   return {
@@ -595,6 +493,10 @@ export function createAgentLocalRegistryTool(shellPaths: ShellPathService, memor
         additionalProperties: false,
       },
       sideEffects: ['state'],
+      // Every call outside the memory domain reads in this process or routes one daemon capability, which runs as a
+      // nested capability_run call judged by its own risk: this call is classed a read, so the capability's question is
+      // the only one. A memory write is this process's own and is decided as itself.
+      readModes: { field: 'domain', values: ROUTED_DOMAINS },
     },
     execute: async (rawArgs, options) => {
       const args: AgentLocalRegistryToolArgs = rawArgs;
@@ -603,7 +505,9 @@ export function createAgentLocalRegistryTool(shellPaths: ShellPathService, memor
       const action = args.action;
       try {
         options?.signal?.throwIfAborted(); assertCurrentToolExecution(rawArgs, options);
-        if (!['list', 'search', 'get'].includes(args.action)) assertAgentLocalRegistryWrite(rawArgs, options);
+        // A routed write is the nested capability_run call's to decide and admit: this call only holds its own currency.
+        const routed = args.domain !== 'memory';
+        if (!['list', 'search', 'get'].includes(args.action)) assertAgentLocalRegistryWrite(rawArgs, options, routed);
         if (args.domain === 'memory') {
           const result = await handleMemory(memoryRegistry, memorySpine, args.action, args, {
             signal: options?.signal,
@@ -616,14 +520,14 @@ export function createAgentLocalRegistryTool(shellPaths: ShellPathService, memor
           options?.signal?.throwIfAborted(); assertCurrentToolExecution(rawArgs, options);
           return registryOutput(result);
         }
-        const effects = createAgentLocalRegistryWriteLifecycle(rawArgs, options);
-        if (args.domain === 'note') return registryOutput(handleNote(shellPaths, args.action, args, effects));
-        if (args.domain === 'persona') return registryOutput(handlePersona(shellPaths, args.action, args, effects));
-        // Skill and bundle writes are the daemon's capabilities (the Skills tab's), so every program's list follows them.
-        const run: SkillCapabilityRun = (id, inputs) => runCapability(id, inputs, options?.signal);
+        const effects = createAgentLocalRegistryWriteLifecycle(rawArgs, options, routed);
+        // Every write is the daemon's capability (the one the place runs), so every program's open list follows it.
+        const run: SkillCapabilityRun = (id, inputs) => runCapability(id, inputs, options);
+        if (args.domain === 'note') return registryOutput(await handleNote(shellPaths, args.action, args, effects, run));
+        if (args.domain === 'persona') return registryOutput(await handlePersona(shellPaths, args.action, args, effects, run));
         if (args.domain === 'skill') return registryOutput(await handleSkill(shellPaths, args.action, args, effects, run));
         if (args.domain === 'skill_bundle') return registryOutput(await handleSkillBundle(shellPaths, args.action, args, effects, run));
-        return registryOutput(handleRoutine(shellPaths, args.action, args, effects));
+        return registryOutput(await handleRoutine(shellPaths, args.action, args, effects, run));
       } catch (error) {
         // An admission problem or a cancelled call is rethrown for the tool runtime to report.
         const text = toolErrorText(error, options?.signal);

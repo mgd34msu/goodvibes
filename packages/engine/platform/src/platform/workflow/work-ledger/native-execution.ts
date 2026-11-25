@@ -29,6 +29,7 @@ import { isTerminalContractStatus, type ContractView, type StartContractInput } 
 import type { NativeContractCompositionOwner } from '../../runtime/contract-composition.js';
 import { NativeWorkExecutionError, parseNativeWorkExecutionRecord, parseNativeWorkExecutionIntent, nativeExecutionOwnerMatches, nativeExecutionTargetRevision, bindNativeExecutionRequest, type NativeExecutionOwnerFacts, type NativeWorkExecutionIntent, type NativeWorkExecutionRecord, type NativeWorkExecutionStorage, type NativeWorkExecutionTarget, type NativeWorkExecutionTransaction } from './native-execution-types.js';
 import { missingScopes } from '@goodvibes/engine/daemon-api/route-helpers';
+import { isNativeWorkSession, nativeWorkSessionId } from './native-work-session.js';
 
 export interface NativePairedExecutionSnapshot {
   /** `local`: the owner's own machine, whose apps use the operator token they already hold. */
@@ -264,6 +265,11 @@ export function createNativeWorkExecutionHost(deps: {
       });
     });
   }
+  /**
+   * The session that asked for a piece of work: its source's (what the store checks a run against), else (work with
+   * no source) this project's work session.
+   */
+  function askingSession(work: { readonly source: { readonly sessionId: string } | null }): string { return work.source?.sessionId ?? deps.sessionId; }
   function requestFor(current: NativeWorkExecutionTransaction, target: NativeWorkExecutionTarget, expected: NativePairedExecutionSnapshot, expectedScope: NativeExecutionScope, taskEvidence?: string, sourceActionId?: string, draftPlan?: import('../../contract/types.js').DraftedPlan): DurableContractRequest {
     const work = workFor(current, target, expected.principalId), selectedModel = deps.getSelectedModel?.();
     const model = selectedModel === undefined ? undefined : { id: selectedModel.id, provider: selectedModel.provider, registryKey: selectedModel.registryKey, displayName: selectedModel.displayName };
@@ -271,7 +277,8 @@ export function createNativeWorkExecutionHost(deps: {
     if (previous) {
       const request = previous.request, source = request.input.nativeSource!;
       if (!equalTarget(previous.target, target) || !nativeExecutionOwnerMatches(previous, ownerFacts(expected, expectedScope)) || !equalScopes(previous.authorityScopes, expected.scopes)
-        || request.input.projectRoot !== projectRoot || request.input.sessionId !== deps.sessionId || request.input.ask !== work.title
+        // Its own session (a request kept before each piece of work had one names the project's shared session).
+        || request.input.projectRoot !== projectRoot || !isNativeWorkSession(request.input.sessionId, askingSession(work), target.workId) || request.input.ask !== work.title
         || !isDeepStrictEqual(request.input.selectedModel, model) || source.goal !== work.goal || !isDeepStrictEqual(source.criteria, work.criteria)
         || (work.source !== null && (source.sourceId !== work.source.sourceId || source.sourceRevision !== work.source.sourceRevision
           || !isDeepStrictEqual(source.continuation, work.source.version === 2 ? work.source.continuation : undefined)
@@ -291,7 +298,9 @@ export function createNativeWorkExecutionHost(deps: {
     if (sourceActionId !== undefined && !/^[0-9a-f]{64}$/.test(sourceActionId)) throw new NativeWorkExecutionError('invalid');
     const binding = { sourceId: source.sourceId, inputRevision: source.inputRevision, actionId: sourceActionId ?? randomBytes(32).toString('hex'), actionRevision: randomUUID(),
       authorityId: randomUUID(), authorityRevision: 'owner-commitment-pending', scopeId: randomUUID(), scopeRevision: randomUUID() };
-    return bindNativeExecutionRequest({ key, binding, input: { ask: work.title, nativeSource: source, projectRoot, sessionId: deps.sessionId, origin: 'external', isolation: 'auto',
+    // Each piece of work runs in a session of its own: an answer given "for this session" to one piece of work is never
+    // an answer for another.
+    return bindNativeExecutionRequest({ key, binding, input: { ask: work.title, nativeSource: source, projectRoot, sessionId: nativeWorkSessionId(askingSession(work), target.workId), origin: 'external', isolation: 'auto',
       ...(model === undefined ? {} : { selectedModel: model }), ...(taskEvidence ? { taskEvidence } : {}),
       // The plan the owner approved before it ran: the contract keeps exactly its steps.
       ...(draftPlan ? { draftPlan } : {}) } }, deps.projectId, ownerFacts(expected, expectedScope), expected.scopes);
@@ -439,7 +448,11 @@ export function createNativeWorkExecutionHost(deps: {
     const assertCurrent = () => {
       signal.throwIfAborted(); const latest = deps.storage.current(key, record);
       if (!latest.record || !isDeepStrictEqual(latest.record, expectedRecord)) throw new NativeWorkExecutionError('stale');
-      assertRecord(latest, record, owner); signal.throwIfAborted();
+      // Once the settlement is in the ledger (the last check runs inside the very transaction that wrote it), the work
+      // reads complete and its attempt moved on by that report: that is this settlement, not a stale one. Before, every
+      // settlement failed at that last check ("stale"), so the ledger said "in progress" for work that was done.
+      if (latest.settlement === undefined) assertRecord(latest, record, owner);
+      signal.throwIfAborted();
     };
     const promise = track(async () => {
       assertCurrent();
@@ -471,8 +484,17 @@ export function createNativeWorkExecutionHost(deps: {
       if (settlements.get(id) === owned) settlements.delete(id);
       const code = settlementFailureCode(error);
       settlementFailures.set(id, code);
-      logger.warn('Native work settlement failed', { attemptId: key.attemptId, reason: code, error: summarizeError(error) });
-    });
+      // A run that ended failed is never left reading "in progress" in the ledger: its attempt is reported blocked,
+      // with the failure in words (a run stopped at a failed step is not ended: it waits at that step, live).
+      let ended: ContractView | null = null;
+      try { ended = closed ? null : currentContract(record); } catch { ended = null; }
+      if (ended?.status === 'failed' && deps.storage.reportFailed) {
+        const reason = (ended.statusLine ?? ended.error ?? 'the work failed').replace(/\s+/g, ' ').trim().replace(/^(?:The work failed:\s*)+/iu, '');
+        void deps.storage.reportFailed(key, `The work failed: ${reason}`, record).catch((reportError: unknown) => {
+          logger.warn('Native work failure was not written to the ledger', { attemptId: key.attemptId, error: summarizeError(reportError) });
+        });
+      }
+      logger.warn('Native work settlement failed', { attemptId: key.attemptId, reason: code, error: summarizeError(error) });    });
     return promise;
   }
   function settleAfterCompletion(result: DurableStartedContract, authority: NativePairedExecutionAuthority): void {
@@ -726,9 +748,15 @@ export function createNativeWorkExecutionHost(deps: {
     settle,
     close() {
       if (closing) return closing; closed = true; const continuationDrain = continuations.close(); lifetime.abort();
-      const contracts = runner?.list({ includeTerminal: false }) ?? [];
-      for (const contract of contracts) if (contract.durableAdmission && active.has(contract.durableAdmission.key.attemptId)) runner?.cancel(contract.id, 'Native work host closed');
-      closing = Promise.allSettled([continuationDrain, ...pending, ...contracts.map(contract => runner?.join(contract.id))]).then(() => { active.clear(); }); return closing;
+      // A restart of the daemon never fails or stops a piece of work: nothing of it is cancelled here. The runner's own
+      // disposal keeps a restart checkpoint of every run (contract/runner.ts `dispose`); the parts that were running end
+      // with the daemon, and at the next start the work stands as interrupted (routes/work.ts) until the person goes
+      // on with it (`work.resume`), which runs those parts again with fresh agents (contract/resume.ts) and keeps every
+      // finished one. Work stopped at a failed step is found still stopped there.
+      // A settlement waits for its run to end, which it no longer does here: it is not waited for (the lifetime's
+      // abort ends it), and the next start settles the work once it is done.
+      const settling = new Set<Promise<unknown>>([...settlements.values()].map(entry => entry.promise));
+      closing = Promise.allSettled([continuationDrain, ...[...pending].filter(promise => !settling.has(promise))]).then(() => { active.clear(); }); return closing;
     },
   };
   return host;

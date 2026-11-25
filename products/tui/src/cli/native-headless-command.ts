@@ -11,6 +11,7 @@ import { summarizeError } from '@goodvibes/engine/platform/platform/utils/native
 import type { NativeHeadlessMode } from '@goodvibes/engine/terminal-shell/native-headless-options';
 import { resolveGoodVibesDaemonHome } from '@goodvibes/engine/platform/platform/config/goodvibes-home';
 import { resolveNativeHostCredential } from '../runtime/client/native-host-credential.ts';
+import { createDaemonVerbCaller } from '../runtime/client/operator-endpoint.ts';
 import { claimHeadlessSession, restoreHeadlessSession } from '@goodvibes/engine/terminal-shell/startup-lifecycle';
 import { closeSessionHere, createSessionSurface } from '@goodvibes/engine/platform/platform/runtime/operations';
 import { GOODVIBES_TUI_SURFACE_ROOT } from '../config/surface.ts';
@@ -92,7 +93,13 @@ export async function runNativeHeadlessCommand(runtime: HeadlessCommandRuntime, 
           const missing = ctx.daemonMissing?.();
           if (missing) process.stderr.write(`${missing}\n`);
           sessionReady = true;
-          const result = await executeHeadlessTurn(ctx, input, signal, cli.flags.outputFormat, { ...limits, settings: configManager });
+          // The hooks this run fires reach the daemon's one hook trace (Tools and extensions, Hook runs), and its notices the
+          // daemon's webhook list and Slack and Discord notifier, as the interactive app's do.
+          const verbs = createDaemonVerbCaller({ configManager, homeDirectory });
+          const result = await executeHeadlessTurn(ctx, input, signal, cli.flags.outputFormat, {
+            ...limits, settings: configManager,
+            daemon: { program: 'tui', invoke: (method, input) => verbs.invoke(method, input) },
+          });
           return recovery ? { ...result, recovery } : result;
         }, {
           shutdown: async () => {

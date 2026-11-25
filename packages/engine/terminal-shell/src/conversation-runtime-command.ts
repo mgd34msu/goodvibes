@@ -80,8 +80,7 @@ async function buildConversationRestoreReview(ctx: Context, source: ReturnType<t
     `  restore-relevant events: ${events.length}`,
     ...events.slice(0, 16).map((event) => `  #${String(event.messageIndex).padStart(3)}  ${event.kind.padEnd(20)} ${event.title} - ${event.detail}`),
     ...(events.length > 16 ? [`  ... ${events.length - 16} more restore event(s)`] : []),
-    '  next: /session hotspots',
-    '  next: /session list',
+    '  next: Sessions, Record, "Where it spent most"; or Sessions for your saved sessions',
   ];
 }
 
@@ -116,7 +115,7 @@ async function buildConversationRestoreReview(ctx: Context, source: ReturnType<t
       source.assertPublishable();
       if (targetLine < 0) throw commandRefusal(`No ${kind === 'all' ? '' : `${kind} `}entries ${direction === 'next' ? 'after' : 'before'} this point.`);
       ctx.scrollToLine?.(targetLine);
-      ctx.print(`Jumped to ${kind === 'all' ? 'the next entry' : `a ${kind} entry`} at line ${targetLine + 1}.`);
+      ctx.print(`Jumped to ${kind === 'all' ? `the ${direction === 'next' ? 'next' : 'previous'} entry` : `a ${kind} entry`} at line ${targetLine + 1}.`);
     },
   };
 }

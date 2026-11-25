@@ -41,7 +41,7 @@ export async function pairRelay(ctx: CommandContext, name: string | undefined): 
       ? `Relay pairing could not be minted: the daemon could not be asked (${reading.reason}). Check the daemon with /status.`
       : reading.status === 'disabled'
         ? 'No relay pairing was made: the relay is off on the daemon, and it was left off.'
-        : `Relay pairing could not be minted: the relay ${reading.status === 'refused' ? 'refused the daemon\'s registration' : 'registration did not succeed'} (state: ${reading.status}). The Devices place's Relay tab says why.`);
+        : `Relay pairing could not be minted: the relay ${reading.status === 'refused' ? 'refused the daemon\'s registration' : 'registration did not succeed'} (state: ${reading.status}). The Relay tab of Devices and network says why.`);
   }
   const qrMatrix = generateQrMatrix(reading.minted.encoded);
   return [
@@ -52,7 +52,7 @@ export async function pairRelay(ctx: CommandContext, name: string | undefined): 
     renderQrToString(qrMatrix),
     '',
     `It carries a relay code for one device${reading.minted.codeName ? `, "${reading.minted.codeName}"` : ''}${reading.minted.codeId ? ` (${reading.minted.codeId})` : ''}.`,
-    'Pair each device with its own code. The Devices place\'s Relay tab lists them and cuts one device off the relay at its next request.',
+    'Pair each device with its own code. The Relay tab of Devices and network lists them and cuts one device off the relay at its next request.',
   ].join('\n');
 }
 

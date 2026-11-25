@@ -936,9 +936,16 @@ export class AutomationManager {
       this.jobStore.load(),
       this.runStore.load(),
     ]);
+    // A schedule kept by 3.5.0 names no project: its runs keep working in the folder the daemon used then (this one),
+    // recorded on it once now. A 3.5.0 binary after a rollback reads the job as before and ignores the field.
+    const daemonFolder = this.configManager.getWorkingDirectory();
+    let carried = false;
     for (const job of jobSnapshot.jobs) {
       const normalizedJob = normalizeJobRecord(job, this.configManager);
-      this.jobs.restore({ ...normalizedJob, mutationRevision: automationJobRevision(job) });
+      const needsProject = normalizedJob.kind !== 'checkin' && !normalizedJob.execution.workingDirectory && daemonFolder;
+      const withProject = needsProject ? { ...normalizedJob, execution: { ...normalizedJob.execution, workingDirectory: daemonFolder } } : normalizedJob;
+      if (needsProject) carried = true;
+      this.jobs.restore({ ...withProject, mutationRevision: automationJobRevision(needsProject ? withProject : job) });
     }
     for (const run of runSnapshot.runs) {
       const normalizedRun = normalizeRunRecord(run, this.jobs.get(run.jobId));
@@ -949,6 +956,7 @@ export class AutomationManager {
     this.pruneRunHistory();
     this.syncRuntimeSnapshot();
     this.takeFromGroup();
+    if (carried) await this.saveJobs();
   }
 
   private scheduleJob(job: AutomationJob): void {

@@ -34,6 +34,7 @@
  *  - SECURE_ADDRESS_CERT, lead to one node: the sealed certificate, after each
  *    issue or renewal and when the node reports.
  */
+import { X509Certificate } from 'node:crypto';
 import { openSealedEnvelope, sealForMember, type NodeKeyPairMaterial } from '../../cluster/group-crypto.js';
 import type { GroupTenantHost } from '../../cluster/group-tenants.js';
 import { logger } from '../../utils/logger.js';
@@ -42,7 +43,10 @@ import { lanHostName, lanServerNames } from './authority.js';
 import { machineLabel, type GroupFollower, type HttpsCertificateSource, type SecureAddressGroupLink, type SecureAddressService } from './secure-address.js';
 
 const SEAL_CONTEXT = 'goodvibes-secure-address-v1';
-export const SECURE_ADDRESS_MESSAGE_TYPES = ['SECURE_ADDRESS_LEAD', 'SECURE_ADDRESS_REPORT', 'SECURE_ADDRESS_CERT'] as const;
+/** SECURE_ADDRESS_LEFT, a member to the group as it leaves (while it still holds the keys): its lead stops sharing with it. */
+export const SECURE_ADDRESS_MESSAGE_TYPES = ['SECURE_ADDRESS_LEAD', 'SECURE_ADDRESS_REPORT', 'SECURE_ADDRESS_CERT', 'SECURE_ADDRESS_LEFT'] as const;
+/** The most an authority certificate sent with the group's certificate may be (a PEM certificate is about 1 KB). */
+const MAX_AUTHORITY_PEM = 8192;
 
 /** What this needs from the group runtime (cluster/group-runtime.ts). */
 export interface SecureAddressGroupAccess {
@@ -57,6 +61,10 @@ export interface SecureAddressGroupAccess {
   signingGeneration(): number | null;
   /** Called at once when this machine stops being a member (left, forgotten, removed). */
   onMembershipCleared(listener: () => void): () => void;
+  /** Called just before this machine leaves its group, while it still holds the keys (absent: an older runtime). */
+  onLeaving?(listener: () => Promise<void>): () => void;
+  /** Called when the group's machines, name or key changed, here or on another machine (absent: an older runtime). */
+  onGroupChanged?(listener: () => void): () => void;
 }
 
 /** The access, read from the group's own runtime. */
@@ -65,6 +73,8 @@ export function secureAddressGroupAccess(runtime: {
   readonly groupState: { readonly members: readonly { readonly nodeId: string; readonly displayName: string; readonly agreementKey: string; readonly admittedAt: number }[] } | null;
   readonly keyMaterial: { readonly groupId: string; readonly node: { readonly agreement: NodeKeyPairMaterial }; readonly groupSigning: { readonly generation: number } } | null;
   onMembershipCleared(listener: () => void): () => void;
+  onLeaving?(listener: () => Promise<void>): () => void;
+  onGroupChanged?(listener: () => void): () => void;
 }): SecureAddressGroupAccess {
   return {
     host: runtime.tenantHost(),
@@ -73,11 +83,26 @@ export function secureAddressGroupAccess(runtime: {
     selfAgreement: () => runtime.keyMaterial?.node.agreement ?? null,
     signingGeneration: () => runtime.keyMaterial?.groupSigning.generation ?? null,
     onMembershipCleared: (listener) => runtime.onMembershipCleared(listener),
+    ...(runtime.onLeaving ? { onLeaving: (listener: () => Promise<void>) => runtime.onLeaving!(listener) } : {}),
+    ...(runtime.onGroupChanged ? { onGroupChanged: (listener: () => void) => runtime.onGroupChanged!(listener) } : {}),
   };
 }
 
+/**
+ * The authority certificate the lead sent, kept only when it is a certificate authority that signed the leaf it came
+ * with: what a member's page offers phones must be the one that vouches for what that member serves.
+ */
+function issuingAuthority(raw: unknown, leafPem: string): string | undefined {
+  if (typeof raw !== 'string' || raw.length > MAX_AUTHORITY_PEM || !raw.includes('-----BEGIN CERTIFICATE-----')) return undefined;
+  try {
+    const authority = new X509Certificate(raw);
+    const leaf = new X509Certificate(leafPem);
+    return authority.ca && leaf.checkIssued(authority) && leaf.verify(authority.publicKey) ? raw : undefined;
+  } catch { return undefined; }
+}
+
 interface Announcement { readonly nodeId: string; readonly on: boolean; readonly source: HttpsCertificateSource; readonly groupName: string }
-interface Report { readonly hostName: string; readonly addresses: readonly string[] }
+interface Report { readonly hostName: string; readonly addresses: readonly string[]; readonly port?: number | undefined }
 
 export class SecureAddressGroupShare implements SecureAddressGroupLink {
   private readonly announcements = new Map<string, Announcement>();
@@ -97,6 +122,18 @@ export class SecureAddressGroupShare implements SecureAddressGroupLink {
       this.reports.clear();
       void this.service.dropGroupCopy().catch((error: unknown) => logger.warn('secure address: the group copy could not be dropped', { error: summarizeError(error) }));
     }));
+    // Leaving: the lead is told while this machine still holds the keys, so it stops sharing its certificate with it and
+    // makes a new one with a new key (the roster keeps this machine until a member removes it).
+    const leaving = this.access.onLeaving?.(async () => {
+      if (!this.following()) return;
+      try { await this.access.host.send('SECURE_ADDRESS_LEFT', {}); } catch { /* a lead that missed it reissues once this machine is removed */ }
+    });
+    if (leaving) this.disposers.push(leaving);
+    // A machine joined, left or was removed (here or on another machine): the lead's certificate is compared at once,
+    // not at the next heartbeat, so a machine no longer in the group stops holding a current one.
+    // A machine that joined (or joined again) learns at once which machine leads: this one says so again.
+    const changed = this.access.onGroupChanged?.(() => { this.service.checkDue(); if (this.selfOn && !this.following()) void this.announce(); });
+    if (changed) this.disposers.push(changed);
     this.service.attachGroup(this);
     return () => { for (const stop of this.disposers.splice(0)) stop(); this.service.attachGroup(null); };
   }
@@ -124,14 +161,17 @@ export class SecureAddressGroupShare implements SecureAddressGroupLink {
   }
 
   followers(): readonly GroupFollower[] {
-    if (!this.access.groupId() || this.following() || !this.selfOn) return [];
+    const groupId = this.access.groupId();
+    if (!groupId || this.following() || !this.selfOn) return [];
     const used = new Set<string>();
-    return this.access.members().filter((member) => member.nodeId !== this.self()).map((member) => {
+    // A member that said it left follows no more, although the roster keeps it until a member removes it.
+    const left = new Set(this.service.leftNodes(groupId));
+    return this.access.members().filter((member) => member.nodeId !== this.self() && !left.has(member.nodeId)).map((member) => {
       const report = this.reports.get(member.nodeId);
       let label = machineLabel(report?.hostName ?? member.displayName, member.nodeId);
       if (used.has(label)) label = `${label}-${member.nodeId.slice(0, 4).toLowerCase()}`;
       used.add(label);
-      return { nodeId: member.nodeId, name: member.displayName, label, hostName: report?.hostName ?? '', addresses: report?.addresses ?? [] };
+      return { nodeId: member.nodeId, name: member.displayName, label, hostName: report?.hostName ?? '', addresses: report?.addresses ?? [], ...(report?.port !== undefined ? { port: report.port } : {}) };
     });
   }
 
@@ -147,7 +187,11 @@ export class SecureAddressGroupShare implements SecureAddressGroupLink {
     const facts = this.groupFacts();
     if (!served || served.from !== 'this-machine' || !facts || this.following()) return;
     const leadName = this.member(this.self())?.displayName ?? this.self();
-    const sent: string[] = [];
+    // GoodVibes' own certificate: its authority's certificate (public, never its key) goes with it, so the member's page
+    // /lan-https offers phones the authority that signed what that member serves.
+    const authorityPem = served.source === 'local-authority' ? await this.service.ownAuthorityPem() : null;
+    const authority = authorityPem ? new X509Certificate(authorityPem).fingerprint256 : undefined;
+    const sent: { nodeId: string; name: string }[] = [];
     for (const follower of this.followers()) {
       const member = this.member(follower.nodeId);
       const name = this.service.followerName(follower);
@@ -157,13 +201,18 @@ export class SecureAddressGroupShare implements SecureAddressGroupLink {
         await this.access.host.send('SECURE_ADDRESS_CERT', {
           groupId: facts.groupId, leadName, source: served.source, names: [...served.names], notAfter: served.notAfter,
           ...(name && served.source !== 'local-authority' ? { hostName: name } : {}), sealed: { ...sealed },
+          ...(authorityPem ? { authorityPem } : {}),
         }, follower.nodeId);
-        sent.push(follower.nodeId);
+        sent.push({ nodeId: follower.nodeId, name: follower.name });
       } catch (error) {
         logger.warn('secure address: the group certificate could not be sent to a node', { node: follower.nodeId, error: summarizeError(error) });
       }
     }
-    if (sent.length > 0) this.service.noteShared(facts.groupId, facts.generation, sent);
+    if (sent.length > 0) {
+      this.service.noteShared(facts.groupId, facts.generation, sent.map((node) => node.nodeId));
+      // What each one now holds and until when: said on the screen if it stops following before its copy ends.
+      this.service.noteHolders(sent, served, authority);
+    }
   }
 
   // ── announcements and reports ─────────────────────────────────────────────
@@ -188,7 +237,9 @@ export class SecureAddressGroupShare implements SecureAddressGroupLink {
 
   private async report(lead: string): Promise<void> {
     const names = lanServerNames();
-    try { await this.access.host.send('SECURE_ADDRESS_REPORT', { hostName: lanHostName(), addresses: names.addresses.filter((address) => address !== '127.0.0.1') }, lead); } catch { /* the next bind reports again */ }
+    // Its own https port too: each machine has its own setting, which the lead's screen shows with its address.
+    const port = this.service.httpsPort();
+    try { await this.access.host.send('SECURE_ADDRESS_REPORT', { hostName: lanHostName(), addresses: names.addresses.filter((address) => address !== '127.0.0.1'), ...(port !== undefined ? { port } : {}) }, lead); } catch { /* the next bind reports again */ }
   }
 
   private async handle(type: string, body: Readonly<Record<string, unknown>>, from: string): Promise<void> {
@@ -197,6 +248,9 @@ export class SecureAddressGroupShare implements SecureAddressGroupLink {
       const source = body['source'] === 'own-files' || body['source'] === 'lets-encrypt' ? body['source'] : 'local-authority';
       this.announcements.set(from, { nodeId: from, on: body['on'] === true, source, groupName: typeof body['groupName'] === 'string' ? body['groupName'] : '' });
       const now = this.following()?.nodeId ?? null;
+      // A member announcing its own https while this machine leads (it joined again before hearing this one): told who
+      // leads, once; once it follows it announces "off" and nothing is answered.
+      if (body['on'] === true && now === null && this.selfOn) await this.announce();
       if (now !== wasFollowing) {
         // The lead changed or stopped: the old copy is not served any more.
         if (wasFollowing) await this.service.dropGroupCopy();
@@ -210,12 +264,25 @@ export class SecureAddressGroupShare implements SecureAddressGroupLink {
       if (this.following() || !this.selfOn) return;
       const hostName = typeof body['hostName'] === 'string' ? body['hostName'].toLowerCase().replace(/[^a-z0-9-]/g, '').slice(0, 63) : '';
       const addresses = Array.isArray(body['addresses']) ? body['addresses'].filter((value): value is string => typeof value === 'string').slice(0, 16) : [];
+      const port = typeof body['port'] === 'number' && Number.isInteger(body['port']) && body['port'] > 0 && body['port'] < 65536 ? body['port'] : undefined;
+      // A member that said it left and reports again joined again: it follows once more.
+      this.service.clearLeft(from);
       const before = this.reports.get(from);
-      this.reports.set(from, { hostName, addresses });
+      this.reports.set(from, { hostName, addresses, ...(port !== undefined ? { port } : {}) });
       const changed = !before || before.hostName !== hostName || before.addresses.join(',') !== addresses.join(',');
       // A new or moved node: the local authority's one certificate is made again to cover it; its address record follows.
       if (changed) await this.service.refreshForGroup();
       await this.share();
+      return;
+    }
+    if (type === 'SECURE_ADDRESS_LEFT') {
+      // A member leaving by itself: it is no longer a follower here, and the certificate is made again with a new key
+      // (a lead only; anyone else has nothing it shared).
+      const groupId = this.access.groupId();
+      if (this.following() || !this.selfOn || !groupId) return;
+      this.service.noteLeft(groupId, from);
+      this.reports.delete(from);
+      this.service.checkDue();
       return;
     }
     if (type === 'SECURE_ADDRESS_CERT') {
@@ -232,12 +299,14 @@ export class SecureAddressGroupShare implements SecureAddressGroupLink {
       try { pair = JSON.parse(opened) as typeof pair; } catch { return; }
       if (typeof pair.certPem !== 'string' || typeof pair.keyPem !== 'string') return;
       const source = body['source'] === 'own-files' || body['source'] === 'lets-encrypt' ? body['source'] : 'local-authority';
+      const authorityPem = source === 'local-authority' ? issuingAuthority(body['authorityPem'], pair.certPem) : undefined;
       const kept = await this.service.keepGroupCopy({
         groupId, lead: from, leadName: typeof body['leadName'] === 'string' ? body['leadName'] : lead.name, source,
         certPem: pair.certPem, keyPem: pair.keyPem,
         names: Array.isArray(body['names']) ? body['names'].filter((value): value is string => typeof value === 'string') : [],
         notAfter: typeof body['notAfter'] === 'number' ? body['notAfter'] : 0,
         ...(typeof body['hostName'] === 'string' ? { hostName: body['hostName'] } : {}),
+        ...(authorityPem ? { authorityPem } : {}),
       });
       if (!kept.ok) logger.warn('secure address: the certificate from the lead was not kept', { reason: kept.problem });
     }

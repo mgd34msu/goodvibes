@@ -146,7 +146,8 @@ export async function approveDistributedPairRequest(
   const replaces = [...state.peers.values()].find((peer) => peer.requestedId === request.requestedId);
   if (replaces && request.status !== 'approved' && !input.confirmReplace) {
     throw new DistributedRuntimeRefusalError(
-      `This request names the existing peer ${replaces.id} (${replaces.label}). Verifying it replaces that peer's capabilities, commands and tokens. Approve again with confirmReplace: true only if this is the same device re-pairing.`,
+      // Plain words for the person who left Replace at No; a script reads the code (its meaning names confirmReplace).
+      `Approving this ends the pairing of ${replaces.label}, so it still waits. Approve it as the same device pairing again only if it is ${replaces.label}.`,
       'REMOTE_PAIR_REPLACES_PEER',
     );
   }

@@ -18,6 +18,16 @@ export interface BookmarkCommandContext {
       ) => void)
     | undefined;
 }
+/** Move the conversation to one bookmarked block (the Sessions place's Record list, or the model naming its key). */
+export function jumpToBookmarkedBlock(ctx: BookmarkCommandContext, getManager: () => Pick<BookmarkManager, 'list'>, key: string): void {
+  const entry = getManager().list().find((candidate) => candidate.key === key);
+  if (!entry) throw new Error(`No bookmarked block is ${key}; the conversation stays where it is.`);
+  if (!ctx.jumpToBookmark) throw new Error('This screen cannot move the conversation; it stays where it is.');
+  ctx.jumpToBookmark(entry.key);
+  // The label starts with the block's kind as stored (`assistant_turn: `), said again in words after it.
+  ctx.print(`The conversation is at the bookmarked block "${entry.label.replace(/^[a-z]+(?:_[a-z]+)+:\s*/, '')}" now.`);
+}
+
 /** One command behavior whether a product exposes it directly or hides it behind a modal. */
 export function handleBookmarks(ctx: BookmarkCommandContext, getManager: () => Pick<BookmarkManager, 'list' | 'toggle'>): void {
   if (ctx.openBookmarkModal) {

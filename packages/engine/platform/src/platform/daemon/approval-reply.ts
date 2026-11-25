@@ -13,6 +13,7 @@ import { channelApprovalTarget } from './batteries/approval-reply.js';
 import { isClassicOperation } from '../runtime/decision-policy.js';
 import { readInboundMessage, type InboundReading } from './inbound-reading.js';
 import { isOwnerConversation } from './owner-alert.js';
+import { isChannelSurfaceKind } from '../../events/surfaces.js';
 import { approvalGuestChannel } from '../control-plane/approval-broker-raise.js';
 
 export type ApprovalReplyBroker = Pick<ApprovalBroker, 'listApprovals' | 'resolveApproval'>;
@@ -62,9 +63,10 @@ interface ApprovalReplyDeps {
  * The asks a reply may answer, decided in code before anything is read: the
  * sender may answer an approval (`approval.answer`: the channel's owner; an
  * allowlisted guest cannot approve tool use), and the ask was delivered to the conversation the reply
- * arrived in (same surface, channel and thread), or, for an ask a guest's turn
- * raised, the reply came from one of the owner's own conversations, where it
- * was delivered. Empty when there is none.
+ * arrived in (same surface, channel and thread, proven the owner's alone), or,
+ * for an ask a guest's turn raised or one about a conversation that is not the
+ * owner's alone (a group), the reply came from one of the owner's own
+ * conversations, where it was delivered. Empty when there is none.
  */
 export function approvalReplyCandidates(
   input: ChannelIngressPolicyInput,
@@ -92,20 +94,16 @@ export function approvalReplyCandidates(
     if (approvalGuestChannel(record) !== undefined) return input.channelId !== undefined && repliedInOwnConversation();
     const routeId = approvalDeliveryRouteId(record, deps.sessions);
     const binding = routeId ? deps.routeBindings.getBinding(routeId) : undefined;
-    return binding !== undefined && binding.surfaceKind === surface
+    if (binding === undefined) return false;
+    const sameConversation = binding.surfaceKind === surface
       && (binding.channelId ?? binding.externalId) === input.channelId && binding.threadId === input.threadId;
+    // An ask is shown only in a conversation proven to be the owner's alone
+    // (surface-delivery.ts); one about any other conversation (a group, a
+    // shared channel) is shown in his own, and answered from there.
+    if (sameConversation) return isOwnerConversation(binding, decision.policy.ownerId);
+    const ownersAlone = binding.surfaceKind === surface && isOwnerConversation(binding, decision.policy.ownerId);
+    return !ownersAlone && isChannelSurfaceKind(binding.surfaceKind) && input.channelId !== undefined && repliedInOwnConversation();
   });
-}
-
-/**
- * The line a channel prompt carries saying how to answer it, from the same
- * grammar {@link tryResolveApprovalReplyFromChannel} reads: without a decision
- * model only `/approve <id>` or `/deny <id>` resolves an ask; with one, a plain reply does.
- */
-export function approvalReplyHint(approval: Pick<SharedApprovalRecord, 'id'>): string {
-  return isClassicOperation()
-    ? `Reply /approve ${approval.id} or /deny ${approval.id}.`
-    : 'Reply yes or no, or say what to change.';
 }
 
 /**

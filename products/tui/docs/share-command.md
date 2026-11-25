@@ -1,14 +1,20 @@
 # Saving and uploading a session
 
-`/session save-file` writes the current session to a local file; `/session upload`
-also uploads it as a secret GitHub Gist and prints the link.
+"Save or export this conversation as a file", in This conversation (the menu, then "This
+conversation"), writes the current session to a local file; "Upload this conversation and get a
+link", `u` on this conversation in the Sessions place, also uploads it as a secret GitHub Gist and
+prints the link. Both open a form; the model runs the same as `session.save-file` and
+`session.upload`.
 
-## Syntax
+## The form
 
-```
-/session save-file [markdown|text|html|json] [path] [--keep-secrets] [--replace] [--then open|copy]
-/session upload [html|md|json] [--keep-secrets] [--then open|copy]
-```
+| Field | Choices |
+|-------|---------|
+| As | Markdown, Plain text (save only), A web page, JSON |
+| File | save only: where to write it; blank is the default path below |
+| Keys and paths | Hide them (the default), or keep them as stored |
+| If the file exists | save only: keep it and stop (the default), or write over it |
+| Then | Nothing more, Open it in the browser, Copy its path |
 
 ## Formats
 
@@ -19,23 +25,19 @@ also uploads it as a secret GitHub Gist and prints the link.
 | `markdown` (`md` for an upload) | Markdown, portable plain-text format |
 | `text` | Plain text (save-file only; always redacted) |
 
-## Options
+Keeping keys and paths keeps API keys, tokens, and this account's home-directory path and login
+name as stored; hidden is the default, in a local file and in an upload alike. Writing over a file
+does not keep the old one. "Copy its path" uses OSC 52 (the terminal must support it); "Open it in
+the browser" opens a web page with `xdg-open` / `open` / `start`.
 
-| Option | Description |
-|------------|-------------|
-| `--keep-secrets` | Keep API keys, tokens, and this account's home-directory path and login name as stored. Without it they are hidden, in a local file and in an upload alike |
-| `--replace` | save-file only: write over a file already at the path (the old file is not kept); without it an existing file is kept and nothing is written |
-| `--then copy` | Copy the output file path to the clipboard (OSC 52; terminal must support it) |
-| `--then open` | Open an HTML export in the default browser (`xdg-open` / `open` / `start`) |
+The upload sends something outside this machine, so it is the owner's own act (a model cannot run it); pressed, it uploads at once and prints the link, and deleting the Gist on GitHub takes it down.
 
-`upload` sends something outside this machine, so it only counts when you type it (a model cannot run it); typed, it uploads at once and prints the link, and deleting the Gist on GitHub takes it down.
-
-The result line says which happened: `(redacted before upload)` or `(uploaded unredacted, as stored)` when the upload returned a share link; otherwise `(sensitive data redacted)` or `(not redacted)` for the local file, after `(not uploaded)` or `(upload unconfirmed)` when an upload was asked for. `--then copy` adds `(path copied to clipboard)`, or `(could not copy the path)` when the copy failed.
+The result line says which happened: `(redacted before upload)` or `(uploaded unredacted, as stored)` when the upload returned a share link; otherwise `(sensitive data redacted)` or `(not redacted)` for the local file, after `(not uploaded)` or `(upload unconfirmed)` when an upload was asked for. "Copy its path" adds `(path copied to clipboard)`, or `(could not copy the path)` when the copy failed.
 
 ## Cost summary
 
 Every export includes a token-usage summary derived from the live session. Cost is
-computed with the same pricing formula the Usage modal uses (USD per 1M
+computed with the same pricing formula Money, Spending uses (USD per 1M
 tokens), applied to the session's accumulated input, output, and cache token counts.
 
 When the active model has no pricing data, cost is left out entirely rather than
@@ -50,7 +52,7 @@ is greater than $0.
 
 ## Redaction guarantees
 
-Unless `--keep-secrets` is given, the exporter applies server-side redaction patterns to every message
+Unless keys and paths are kept, the exporter applies server-side redaction patterns to every message
 before serialising. Each pattern class is replaced with its own typed placeholder, so
 a redacted export still shows what kind of value was removed:
 
@@ -79,11 +81,7 @@ conversation is never modified.
 
 Gist upload creates a **secret** (unlisted) Gist. It is not indexed by GitHub search
 and is not shown on your profile. However, **anyone with the URL can view it**. Do not
-upload sessions containing secrets with `--keep-secrets`.
-
-## Option checking
-
-An option the command does not know is refused before anything is written or uploaded, and so is more than one path.
+upload sessions containing secrets with keys and paths kept.
 
 ## Upload receipt and unconfirmed uploads
 
@@ -96,14 +94,14 @@ instead.
 If GitHub's answer is lost or not OK, the command prints
 `Upload unconfirmed: ... GitHub may have received it; check before retrying.` The
 gist may exist even though no link was returned. Check your gists at
-`gist.github.com` before running `/session upload` again, otherwise you can create a duplicate
+`gist.github.com` before uploading again, otherwise you can create a duplicate
 secret gist with the same content. The local export is kept either way.
 
 ## Token resolution for an upload
 
 The uploader looks for a GitHub PAT in this order:
 
-1. Service registry `github` entry (configured via `/services` or `~/.goodvibes/tui/services.json`
+1. Service registry `github` entry (seen and tested on the Services tab of Models and providers, written in `~/.goodvibes/tui/services.json`
    with `tokenKey: GITHUB_TOKEN` and `authType: bearer`).
 2. `GITHUB_TOKEN` environment variable.
 
@@ -122,17 +120,17 @@ The directory is created automatically.
 
 ## Examples
 
-```
-/session save-file html                          # web page at the default path, keys and paths hidden
-/session save-file html /tmp/session.html        # to an explicit path
-/session save-file json --keep-secrets           # JSON as stored
-/session upload html                             # redacted Gist link
-/session upload html --then open                 # link, then open the local copy
-/session upload md --keep-secrets                # unredacted Markdown Gist
-```
+| Form | Result |
+|------|--------|
+| Save, As: A web page | web page at the default path, keys and paths hidden |
+| Save, As: A web page, File: /tmp/session.html | to an explicit path |
+| Save, As: JSON, Keys and paths: kept | JSON as stored |
+| Upload, As: A web page | redacted Gist link |
+| Upload, As: A web page, Then: Open it in the browser | link, then open the local copy |
+| Upload, As: Markdown, Keys and paths: kept | unredacted Markdown Gist |
 
 ## Related
 
-- `/plugin`: manage plugins
-- `/services`: configure external service credentials (including GitHub PAT for upload)
+- Tools and extensions (the menu): manage plugins, hooks, tool servers and the marketplace
+- Models and providers, Services (the menu): your external services and their credentials (including the GitHub PAT for upload)
 - [Deployment and services](deployment-and-services.md)

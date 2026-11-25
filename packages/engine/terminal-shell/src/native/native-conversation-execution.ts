@@ -11,7 +11,6 @@ export const sameNativeExecutionIntent = (left: NativeIntakeExecutionIntent, rig
 const notFound = (error: unknown): boolean => !!error && typeof error === 'object' && 'code' in error && error.code === 'NATIVE_EXECUTION_NOT_FOUND';
 
 const sameRevisions = (left: NativeWorkExecutionIdentity['expectedRevision'], right: NativeWorkExecutionIdentity['expectedRevision']): boolean => left.work === right.work && left.criteria === right.criteria && left.attempt === right.attempt;
-const describeRevisions = (value: NativeWorkExecutionIdentity['expectedRevision']): string => `work r${value.work}, criteria r${value.criteria}, attempt r${value.attempt}`;
 
 function validate(snapshot: NativeWorkExecutionSnapshot, projectId: string, target: NativeWorkExecutionIdentity, action: 'status' | 'start'): NativeWorkExecutionSnapshot {
   const result = nativeWorkExecutionSnapshotSchema.parse(snapshot);
@@ -22,18 +21,18 @@ function validate(snapshot: NativeWorkExecutionSnapshot, projectId: string, targ
 function observed(snapshot: NativeWorkExecutionSnapshot, action: 'status' | 'start', target: NativeWorkExecutionIdentity): NativeWorkExecutionState {
   return { workId: snapshot.workId, action, busy: false, snapshot,
     message: !sameRevisions(snapshot.expectedRevision, target.expectedRevision)
-      ? `Recorded native revisions differ: saved ${describeRevisions(target.expectedRevision)}; recorded ${describeRevisions(snapshot.expectedRevision)}. The saved dispatch target is unchanged; this status check does not start or resume execution.`
-      : snapshot.recovery === 'required' ? 'Native execution requires explicit recovery. Inspect /work and use its Resume control only if appropriate.'
-      : snapshot.kind === 'pending-intent' ? 'Native execution admission is recorded and pending. Status checks will not resume it.'
-      : 'Native execution is recorded on the original work and attempt. Completion still requires native verification.' };
+      ? 'The work changed since your message made it, so nothing was started or resumed from here. Look at it in Work.'
+      : snapshot.recovery === 'required' ? 'The work stopped halfway. Look at it in Work, where you can go on with it.'
+      : snapshot.kind === 'pending-intent' ? 'The work is starting.'
+      : 'The work runs; its results are checked when it ends. Follow it in Work.' };
 }
 
 /** Read-only reconciliation cannot create, resume or rewrite an execution. */
 export async function inspectNativeConversationExecution(client: OperatorNativeWorkExecutionClient, projectId: string, intent: NativeIntakeExecutionIntent, signal: AbortSignal): Promise<NativeWorkExecutionState> {
   try { return observed(validate(await client.status(intent.target, { signal }), projectId, intent.target, 'status'), 'status', intent.target); }
   catch (error) { return { workId: intent.target.workId, action: 'status', busy: false,
-    message: notFound(error) ? 'Native work is admitted, but execution has not been found. Use /work intake-retry to reconcile the same original target.'
-      : 'Native execution status is unknown or unavailable. Its original dispatch intent is retained; no new execution was requested.' };
+    message: notFound(error) ? 'Your message became work that has not started. Try it again in Work, under Unanswered, to start it.'
+      : 'Whether the work runs could not be read; nothing was started again. Look at it in Work.' };
   }
 }
 
@@ -41,14 +40,14 @@ export async function inspectNativeConversationExecution(client: OperatorNativeW
 export async function dispatchNativeConversationExecution(client: OperatorNativeWorkExecutionClient, projectId: string, intent: NativeIntakeExecutionIntent, signal: AbortSignal): Promise<NativeWorkExecutionState> {
   try { return observed(validate(await client.status(intent.target, { signal }), projectId, intent.target, 'status'), 'status', intent.target); }
   catch (error) {
-    if (!notFound(error) || signal.aborted) return { workId: intent.target.workId, action: 'status', busy: false, message: 'Native execution could not be reconciled. The durable target is retained; no start or resume was requested.' };
+    if (!notFound(error) || signal.aborted) return { workId: intent.target.workId, action: 'status', busy: false, message: 'Whether the work runs could not be read, so it was not started. Look at it in Work.' };
   }
   try { return observed(validate(await client.start(intent.target, { signal }), projectId, intent.target, 'start'), 'start', intent.target); }
   catch {
-    if (signal.aborted) return { workId: intent.target.workId, action: 'start', busy: false, message: 'Native execution start detached. The original dispatch intent is retained; inspect its status before explicit recovery.' };
+    if (signal.aborted) return { workId: intent.target.workId, action: 'start', busy: false, message: 'The work\'s start was interrupted. Look at it in Work before starting it again.' };
     // A lost acknowledgement may already have committed the same host intent.
     // Reconcile once by reading; never send an automatic second start.
     const status = await inspectNativeConversationExecution(client, projectId, intent, signal);
-    return { ...status, message: status.snapshot ? status.message : 'Native execution start outcome is unknown. The original work, attempt and revisions are retained. Inspect status before explicit recovery.' };
+    return { ...status, message: status.snapshot ? status.message : 'Whether the work started is not known. Look at it in Work before starting it again.' };
   }
 }

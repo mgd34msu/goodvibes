@@ -80,7 +80,7 @@ export class LocalStreamingAudioPlayer implements StreamingAudioPlayer {
 
   async play(chunks: AsyncIterable<VoiceAudioChunk>, options: StreamingAudioPlaybackOptions = {}): Promise<void> {
     if (!this.command) {
-      throw new Error('No streaming audio player found. Install mpv or ffplay to hear answers spoken (/voice).');
+      throw new Error('No streaming audio player found. Install mpv or ffplay to hear answers spoken.');
     }
     if (options.signal?.aborted) return;
 

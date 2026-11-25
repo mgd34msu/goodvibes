@@ -8,7 +8,6 @@ import type { SessionCapabilityServices } from '@goodvibes/engine/terminal-shell
 import { tasksServices } from '@goodvibes/engine/terminal-shell/tasks-runtime-commands';
 import { workIntakeServices } from '@goodvibes/engine/terminal-shell/native/work-command';
 import type { ConfigKey } from '@goodvibes/engine/platform/platform/config';
-import { CapabilityRefusal } from '@goodvibes/engine/platform/platform/capabilities';
 import { switchAlwaysSpeak } from '@goodvibes/engine/terminal-shell/tts-runtime-commands';
 import { keysServices } from '@goodvibes/engine/terminal-shell/keys-capabilities';
 import { hooksReloadServices } from '@goodvibes/engine/terminal-shell/hooks-command';
@@ -18,8 +17,8 @@ import type { CommandContext } from '../command-registry.ts';
 import { startFreshConversation } from './fresh-conversation.ts';
 import { CompactBusyError, compactConversation } from './runtime-services.ts';
 import { redoLastRewind, undoLastRewind } from './rewind-runtime.ts';
-import type { ConversationControlServices, RoutineStartServices } from '@goodvibes/engine/platform/platform/capabilities';
-import { startRoutineFor } from '@goodvibes/engine/terminal-shell/agent-turn/agent-store-runner';
+import { CapabilityRefusal, type ConversationControlServices, type PinnedLinesServices, type RoutineStartServices, type StartedRoutine } from '@goodvibes/engine/platform/platform/capabilities';
+import { runDaemonCapability } from '@goodvibes/engine/terminal-shell/command-actions';
 import { composerOf, queueOf, turnsOf } from '@goodvibes/engine/terminal-shell/conversation-controls';
 import { conversationContextOf } from '@goodvibes/engine/terminal-shell/context-inspection-command';
 import { checkpointsOf } from '@goodvibes/engine/terminal-shell/checkpoint-command';
@@ -33,20 +32,22 @@ import { buildCompactionAfterNotice, buildCompactionPreview } from '../../render
 import { publishNotice } from '../../core/notices.ts';
 import { getSharedNotificationFeed } from '../../views/notifications-feed.ts';
 import { liveSessions } from './session.ts';
-import { hostedJoinOf } from './hosted-runtime.ts';
+import { hostedJoinOf, hostedToolStopOf } from './hosted-runtime.ts';
 import { terminalOwnerInbox } from '../../runtime/client/owner-questions.ts';
 import { codeOf } from './code-runtime.ts';
 import { permissionsHereOf } from '@goodvibes/engine/terminal-shell/permissions-command';
 import { secretsSessionServices } from '@goodvibes/engine/terminal-shell/secrets-command';
 import { permissionsDeps } from './permissions-runtime.ts';
 import { planModeServices } from './planning-runtime.ts';
-import { requireShellPaths } from './runtime-services.ts';
+import { requireReadModels, requireShellPaths, requireSubscriptionManager } from './runtime-services.ts';
+import { securityHereServices } from '@goodvibes/engine/terminal-shell/places';
+import { capabilityBinding } from './capability-binding.ts';
 import { serviceSessionsOf } from './platform-access-runtime.ts';
 import { pairingServices } from '@goodvibes/engine/terminal-shell/devices-command';
 import { TUI_PAIRING } from './devices-runtime.ts';
 import { memorySessionServices } from '@goodvibes/engine/terminal-shell/memory-command';
 import { templateSessionServices } from '@goodvibes/engine/terminal-shell/template-session';
-import { deepLinksOf } from './platform-services-runtime.ts';
+import { deepLinksOf, integrationHelpersOf, viewLinkFileOf } from './platform-services-runtime.ts';
 import { teamHost } from './teamwork-runtime.ts';
 import { contractsHost } from './control-room-runtime.ts';
 import { evalSuitesOf } from './eval.ts';
@@ -57,6 +58,8 @@ import { startupOf } from './local-setup.ts';
 import { voiceWakeOf } from './experience-runtime.ts';
 import { helpServicesOf } from './shell-core.ts';
 import { DEEP_LINK_SURFACES, buildDeepLink } from './deep-link.ts';
+import { setupTopicsOf } from './onboarding-runtime.ts';
+import { writeSetting, type SettingWriteContext } from '@goodvibes/engine/terminal-shell/settings-writes';
 
 /** Work and agents (builtin/agents.ts): this app's team modes, recipes and archetypes, bound to this conversation. */
 function agentTeamOf(ctx: CommandContext): NonNullable<SessionCapabilityServices['agentTeam']> {
@@ -68,11 +71,12 @@ function agentTeamOf(ctx: CommandContext): NonNullable<SessionCapabilityServices
   };
 }
 
-/** Work and agents (builtin/agents.ts): this app's work contracts and the agents running them. */
+/** Work and agents (builtin/agents.ts): the agents this app started, and stopping them. */
 function agentContractsOf(ctx: CommandContext): NonNullable<SessionCapabilityServices['agentContracts']> {
   const contracts = contractsHost();
   return {
-    list: () => contracts.list(ctx), show: (id) => contracts.show(ctx, id), running: () => contracts.running(ctx),
+    running: () => contracts.running(ctx), started: () => contracts.started(ctx),
+    stop: (id, note) => contracts.stop(ctx, id, note),
     stopGroup: (id) => contracts.stopGroup(ctx, id), stopBranch: (id) => contracts.stopBranch(ctx, id),
   };
 }
@@ -147,6 +151,12 @@ export function sessionCapabilityServices(ctx: CommandContext): SessionCapabilit
     mcpLive: mcpLiveServices(ctx),
     // The plugins this app runs (builtin/plugins.ts).
     pluginsLive: { manager: ctx.extensions.pluginManager },
+    // What the marketplace has that fits this project, ranked by the decision model when one is set (builtin/marketplace.ts).
+    ...(ctx.platform.readModels ? { marketplaceRecommend: { recommend: () => ctx.platform.readModels!.marketplace.recommend() } } : {}),
+    // Its helper interfaces, its view links saved to a file, the tool running in the hosted session it joined (builtin/tools-extras.ts).
+    ...(integrationHelpersOf(ctx) ? { integrationHelpers: integrationHelpersOf(ctx) } : {}),
+    viewLinkFile: viewLinkFileOf(ctx),
+    hostedToolStop: hostedToolStopOf(ctx),
     // The controls on the conversation itself (builtin/conversation-controls.ts).
     ...conversationControlsOf(ctx),
     // Work and agents: the runs this app recorded of its turns (builtin/replay.ts).
@@ -174,13 +184,29 @@ export function sessionCapabilityServices(ctx: CommandContext): SessionCapabilit
         registry: ctx.workspace.sandboxSessionRegistry,
         config: { get: (key: string) => ctx.platform.configManager.get(key as ConfigKey) },
         resolvePath: (path: string) => requireShellPaths(ctx).resolveWorkspacePath(path),
-        // The model asked: it writes a record only inside the working folder.
-        insideOnly: true,
+        // A model writes a record only inside the working folder.
+        insideOnly: ctx.invokedByModel === true,
       },
     } : {}),
+    // What needs attention, the whole review and risky MCP routes, from this app's MCP servers and plugins with the
+    // daemon's facts, and the sandbox probe on this terminal (builtin/security-review.ts).
+    ...securityHereServices(ctx, capabilityBinding, {
+      mcp: () => {
+        const snapshot = requireReadModels(ctx).security.getSnapshot();
+        return { servers: snapshot.mcpServers, recentDecisions: snapshot.recentMcpDecisions };
+      },
+      plugins: () => ctx.extensions.pluginManager?.list() ?? [],
+      subscriptions: () => {
+        const subscriptions = requireSubscriptionManager(ctx);
+        return { active: subscriptions.list().length, pending: subscriptions.listPending().length };
+      },
+      sandboxConfig: { get: (key: string) => ctx.platform.configManager.get(key as ConfigKey) },
+    }),
     // Memory and knowledge (builtin/routines.ts): a routine started here, its steps sent as the owner's next message
     // (a model's start reads them as its answer: capability_run leaves `send` out).
     ...routineStartServices(ctx),
+    // This conversation: the lines pinned in it (builtin/pinned-lines.ts), the program's own session memory store.
+    ...pinnedLinesServices(ctx),
     // Models and providers (builtin/service-sessions.ts): this terminal's own sign-in to a daemon or listener.
     serviceSessions: serviceSessionsOf(ctx),
     // Devices and network (builtin/devices-session.ts): pairing on this terminal's screen, and its own credential for its daemon.
@@ -192,9 +218,30 @@ export function sessionCapabilityServices(ctx: CommandContext): SessionCapabilit
  * Starting a routine in this conversation (builtin/routines.ts): the routine marked started in the owner's routine
  * store, and its steps sent as the owner's next message (`send`, given only for the owner's own press or line).
  */
+/** The lines pinned in this conversation (`!#` / `#`), as This conversation lists, changes and removes them. */
+export function pinnedLinesServices(ctx: CommandContext): PinnedLinesServices {
+  const store = ctx.session.sessionMemoryStore;
+  if (!store) return {};
+  return {
+    pinned: {
+      list: () => store.list().map((line) => ({ id: line.id, text: line.text, createdAt: line.createdAt })),
+      change: (id, text) => { const changed = store.update(id, text); if (changed) ctx.renderRequest(); return changed; },
+      remove: (id) => { const removed = store.remove(id); if (removed) ctx.renderRequest(); return removed; },
+    },
+  };
+}
+
 export function routineStartServices(ctx: CommandContext): RoutineStartServices {
   return {
-    routines: { start: async (routine) => startRoutineFor(requireShellPaths(ctx), routine) },
+    // Counted by the daemon, the one count every program shows; its steps come back to run here.
+    routines: {
+      start: async (routine) => {
+        const answer = await runDaemonCapability('routines.count-start', { routine }, ctx, capabilityBinding);
+        const started = (answer.data as { readonly routine?: StartedRoutine } | undefined)?.routine;
+        if (!started) throw new CapabilityRefusal(`Not started: the daemon did not give back routine ${routine}'s steps.`);
+        return started;
+      },
+    },
     ...(ctx.invokedByModel !== true && ctx.submitTurn ? { send: (message: string) => { ctx.submitTurn!(message); } } : {}),
   };
 }
@@ -203,12 +250,24 @@ export function routineStartServices(ctx: CommandContext): RoutineStartServices 
 export function systemSessionOf(ctx: CommandContext): NonNullable<SessionCapabilityServices['systemSession']> {
   return {
     status: () => {
-      if (!ctx.describeStatus) throw new CapabilityRefusal('Status is not available in this session.');
-      return ctx.describeStatus();
+      if (ctx.describeStatus) return ctx.describeStatus();
+      // A run with no screen (headless): the run's real state, from what it holds.
+      const config = ctx.platform.configManager;
+      const runtime = ctx.session.runtime;
+      const daemonUrl = String(config.get('daemon.connectedHost.url' as ConfigKey) ?? '').trim();
+      return [
+        'Status',
+        `  model        ${runtime.model ? `${runtime.model} (${runtime.provider})` : 'none chosen'}`,
+        `  mode         ${String(config.get('permissions.mode' as ConfigKey) ?? '')}`,
+        `  folder       ${ctx.workspace.shellPaths?.workingDirectory ?? 'not known'}`,
+        `  daemon       ${daemonUrl || 'this computer\'s daemon'}`,
+        '  run          headless (no screen)',
+      ].join('\n');
     },
     quit: () => { ctx.exit(); },
     ...(ctx.ops.modeManager ? { printLevel: ctx.ops.modeManager } : {}),
-    savePrintLevel: (level) => { ctx.platform.configManager.setDynamic('behavior.hitlMode' as ConfigKey, level as never); },
+    // Through the daemon's settings.set (settings-writes.ts); a refusal is said there.
+    savePrintLevel: (level) => { void writeSetting(ctx as unknown as SettingWriteContext, 'behavior.hitlMode', level).catch(() => {}); },
     redraw: () => { ctx.renderRequest(); },
     // Speaking answers aloud and listening for the wake word, on this terminal.
     speech: {
@@ -224,12 +283,24 @@ export function systemSessionOf(ctx: CommandContext): NonNullable<SessionCapabil
     release: releaseOf(ctx),
     startup: startupOf(ctx),
     viewLinks: () => DEEP_LINK_SURFACES.map((surface) => buildDeepLink(surface)),
+    // What a support folder records of this app's integration helpers (System, Support and transfer).
+    ...(ctx.extensions.integrationHelpers ? {
+      integrationHelpers: () => {
+        const review = ctx.extensions.integrationHelpers!.buildReview();
+        return { apiFamilies: review.apiFamilies, routes: review.routes };
+      },
+    } : {}),
     // The notices and notifications this app collected: the System place's Notices list.
     notices: {
       list: () => getSharedNotificationFeed().list(), subscribe: (onChange) => getSharedNotificationFeed().subscribe(onChange),
       markSeen: () => { getSharedNotificationFeed().markAllSeen(); },
+      record: (notice) => {
+        getSharedNotificationFeed().recordNotice({ domain: notice.domain ?? 'payments', title: notice.title, body: notice.body, timestamp: notice.timestamp, eventKey: notice.key, level: 'info' });
+      },
     },
     help: helpServicesOf(ctx),
+    // The setup forms (builtin/system-program.ts setup.<topic>).
+    setupTopic: setupTopicsOf(ctx),
   };
 }
 

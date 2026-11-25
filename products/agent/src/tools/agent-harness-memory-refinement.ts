@@ -5,6 +5,7 @@ import {
   type KnowledgeSemanticSelfImproveResult,
 } from '@goodvibes/engine/platform/platform/knowledge';
 import type { CommandContext } from '../input/command-registry.ts';
+import { capabilityBinding } from '../input/commands/capability-binding.ts';
 import { previewHarnessText } from '@goodvibes/engine/terminal-shell/agent-turn/preview-text';
 import { readString } from '@goodvibes/engine/terminal-shell/agent-turn/tool-args';
 
@@ -282,12 +283,15 @@ export function memoryRefinementSummary(context: CommandContext, args: AgentHarn
 }
 
 export async function runMemoryRefinement(context: CommandContext, args: AgentHarnessMemoryRefinementArgs): Promise<EffectResult> {
-  const service = knowledgeService(context);
-  if (!service?.runRefinement) {
+  // ONE knowledge store, the daemon's: the run goes to the daemon (its `knowledge.refinement.run`), never into the
+  // Agent's own 3.5.0 file, which was carried into the daemon's store once. A model's call: decided under the mode there.
+  const daemon = capabilityBinding.daemon(context);
+  const reachable = daemon.probe();
+  if (!reachable.available) {
     return {
       status: 'unavailable',
       done: false,
-      error: 'Agent Knowledge semantic refinement runner is not available in this runtime.',
+      error: `Knowledge refinement runs in the daemon, which cannot be reached: ${reachable.reason}. Nothing was run.`,
       inspectRoute: 'memory action:"refinement" includeParameters:true',
     };
   }
@@ -296,14 +300,14 @@ export async function runMemoryRefinement(context: CommandContext, args: AgentHa
   const knowledgeSpaceId = readString(args.knowledgeSpaceId);
   const limit = readLimit(args.limit, 12, 24);
   const maxRunMs = readRunBudgetMs(args.maxRunMs) ?? readRunBudgetMs(args.timeoutMs);
-  const run = await service.runRefinement({
+  const run = await daemon.invoke<KnowledgeSemanticSelfImproveResult>('knowledge.refinement.run', {
     ...(knowledgeSpaceId ? { knowledgeSpaceId } : {}),
     ...(sourceIds.length > 0 ? { sourceIds } : {}),
     ...(gapIds.length > 0 ? { gapIds } : {}),
     limit,
     ...(maxRunMs ? { maxRunMs } : {}),
     ...(args.force === true ? { force: true } : {}),
-  });
+  }, { explicitUserRequest: false });
   const partial = Boolean(run.truncated) || Boolean(run.budgetExhausted);
   return {
     status: run.errors.length > 0 || run.blockedGaps > 0 || partial ? 'completed-with-attention' : 'completed',
@@ -352,6 +356,6 @@ export async function runMemoryRefinement(context: CommandContext, args: AgentHa
       tasks: run.taskIds.map((taskId) => `memory action:"refinement" query:${routeValue(taskId)} includeParameters:true`).slice(0, 8),
       knowledgeStatus: 'agent_knowledge action:"status"',
     },
-    policy: 'Confirmed semantic refinement updates only Agent Knowledge semantic gaps/refinement tasks and source-backed repair evidence through KnowledgeService.runRefinement. It does not write Agent-local prompt memory, external memory providers, channel messages, or reports.',
+    policy: 'Confirmed semantic refinement updates only the daemon\'s knowledge (its semantic gaps, refinement tasks and source-backed repair evidence) through the daemon\'s knowledge.refinement.run. It does not write Agent-local prompt memory, external memory providers, channel messages, or reports.',
   };
 }

@@ -3,7 +3,11 @@
  * the same declarations (`@goodvibes/engine/terminal-shell/places/browser`).
  *
  * The navigation lists the fourteen function groups in their order, each with
- * its count where something is waiting or wrong (the place's own `count`).
+ * its count where something is waiting or wrong (the place's own `count`, made
+ * by the daemon for every place in one call, `places.counts`), under the
+ * project chooser: every read and act bound to a project is for the project
+ * chosen there (lib/place-project.ts). An action that runs only in a terminal
+ * program is shown greyed with one line saying where it runs.
  * A place shows its lists as tabs, each read by itself from the daemon and
  * kept current by the event stream (hooks/usePlaceLists); the selected item's
  * detail; and its actions as buttons, only those that apply to the item in its
@@ -17,7 +21,7 @@
  * URL: `?view=places&tab=<place id>`; `filter[list]=<list id>` keeps the tab.
  */
 import { ArrowLeft, Compass, Inbox, RefreshCw, TriangleAlert } from 'lucide-react';
-import { useCallback, useMemo, useRef, useState, type KeyboardEvent, type ReactNode } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState, type KeyboardEvent, type ReactNode } from 'react';
 import type { ActionValues } from '@goodvibes/engine/terminal-shell/command-actions/data';
 import { DataPage, DetailPane, EmptyState, ListDetail, SkeletonRows } from '../../components/data-view/DataView';
 import { Button } from '../../components/ui/Button';
@@ -27,15 +31,15 @@ import { Row, RowList } from '../../components/ui/Row';
 import { Select } from '../../components/ui/Select';
 import { StatusDot, type StatusTone } from '../../components/ui/StatusDot';
 import { usePlaceLists, type PlaceListState } from '../../hooks/usePlaceLists';
-import { useCommandCatalog } from '../../lib/command-catalog';
 import { formatError } from '../../lib/errors';
 import { useEventStreamState } from '../../lib/event-stream';
 import {
-  asksFirst, capabilityButton, capabilityRiskWords, capabilitySentence, displayValues, opensForm, outcomeLine, resolvePlaceCapability, runPlaceCapability,
-  type CapabilityReveal, type PlaceCapability,
+  asksFirst, capabilityButton, capabilityRiskSentences, capabilitySentence, displayValues, loadCapabilities, opensForm, outcomeLine, resolvePlaceCapability,
+  runPlaceCapability, useCapabilityIndex, type CapabilityReveal, type PlaceCapability,
 } from '../../lib/place-capabilities';
+import { projectName, usePlaceProjects, type PlaceProjects } from '../../lib/place-project';
 import {
-  PLACE_GROUPS, RICHER_VIEWS, answersItem, filledFrom, itemActions, paneOf, placeActions, placeById, plainText, undoActionOf, webListsOf, wholeActions,
+  PLACE_GROUPS, RICHER_VIEWS, allActionsOf, answersItem, elsewhereOf, filledFrom, itemActions, paneOf, placeActions, placeById, plainText, undoActionOf, webListsOf, wholeActions,
   type AnyPlace, type PlaceAnswer, type PlaceCapabilityAction, type PlaceCount, type PlaceDetailLine, type PlaceItem, type PlaceList, type PlaceRow,
   type RicherView,
 } from '../../lib/places';
@@ -43,6 +47,7 @@ import type { ViewId } from '../../lib/router';
 import { PlaceForm, type PlaceFormRequest } from './PlaceForm';
 import { PLACE_PANES } from './place-panes';
 import { RevealPane } from './RevealPane';
+import { ResultPane, type PlaceResult } from './ResultPane';
 import '../../styles/components/places.css';
 
 export interface PlacesViewProps {
@@ -63,14 +68,31 @@ const MARK_WORDS: Readonly<Record<NonNullable<PlaceRow['mark']>, string>> = {
   ok: 'fine', paused: 'paused', attention: 'needs a look', running: 'running', waiting: 'waiting on you',
 };
 
-/** A place's count, read from its lists; nothing when its declaration has none or it cannot be made. */
-function countOf(place: AnyPlace, lists: Readonly<Record<string, readonly PlaceItem[]>>): PlaceCount | undefined {
-  try { return place.count?.(lists); } catch { return undefined; }
+/** The project chooser: the projects the daemon knows, opening on the one last chosen in this browser. */
+function ProjectChooser({ projects }: { readonly projects: PlaceProjects }) {
+  if (projects.status === 'failed') return <p className="place-project__note" role="status">{`Could not read the projects the daemon knows: ${projects.reason ?? 'no reason was given'}. They are read again by themselves when the daemon answers.`}</p>;
+  if (projects.projects.length === 0) return null;
+  return (
+    <label className="place-project">
+      <span className="place-project__label">Project</span>
+      <Select
+        aria-label="Project"
+        value={projects.project ?? ''}
+        onChange={projects.choose}
+        options={projects.projects.map((project) => ({ value: project, label: projectName(project) }))}
+      />
+    </label>
+  );
 }
 
 /** A row as its declaration draws it; an item whose data the row cannot read is named by its id. */
 function rowOf(list: PlaceList<PlaceItem>, item: PlaceItem): PlaceRow {
   try { return list.row(item); } catch { return { title: item.id }; }
+}
+
+/** A tab's number, as the terminal's place counts it: an item marked `uncounted` ("not set up", a repeat's later occurrence) is left out. */
+function countedItems(items: readonly PlaceItem[]): number {
+  return items.filter((item) => item.uncounted !== true).length;
 }
 
 function detailOf(list: PlaceList<PlaceItem>, item: PlaceItem): readonly PlaceDetailLine[] {
@@ -122,17 +144,21 @@ export function PlacesView({ tab, list: listParam, onOpenPlace, onOpenList, onNa
   const phone = useMediaQuery(PHONE_QUERY);
   const place = tab ? placeById(tab) : undefined;
   const elsewhere = tab && !place ? PLACE_GROUPS.find((row) => row.group === tab && row.elsewhere) : undefined;
-  const lists = usePlaceLists(place);
+  const projects = usePlaceProjects();
+  // A project-bound place's lists wait for the projects to be read, so nothing is read for a folder not chosen.
+  const lists = usePlaceLists(place, projects.status === 'reading' ? null : projects.project);
   const showRail = !phone || (!place && !elsewhere);
   return (
     <div className="places" data-phone={phone ? '' : undefined}>
       {showRail && (
         <nav className="places-rail" aria-label="Places">
           {phone && <h2 className="places-rail__title">Places</h2>}
+          <ProjectChooser projects={projects} />
+          {lists.countsFailed ? <p className="place-project__note" role="status">{`What waits in each place could not be read: ${lists.countsFailed}. It is read again by itself when the daemon answers.`}</p> : null}
           <ul className="places-rail__list">
             {PLACE_GROUPS.map((row) => {
               const target = row.place?.id ?? row.group;
-              const count = row.place ? countOf(row.place, lists.itemsOf(row.place)) : undefined;
+              const count: PlaceCount | undefined = row.place ? lists.counts[row.place.id]?.count : undefined;
               const current = target === tab;
               return (
                 <li key={row.group}>
@@ -167,6 +193,7 @@ export function PlacesView({ tab, list: listParam, onOpenPlace, onOpenList, onNa
           place={place}
           listParam={listParam}
           lists={lists}
+          projects={projects}
           onOpenList={onOpenList}
           onBack={phone ? () => onOpenPlace('') : undefined}
           onNavigate={onNavigate}
@@ -214,10 +241,11 @@ function RicherLinks({ views, onNavigate, onOpenSettings }: {
   );
 }
 
-function PlaceScreen({ place, listParam, lists, onOpenList, onBack, onNavigate, onOpenSettings }: {
+function PlaceScreen({ place, listParam, lists, projects, onOpenList, onBack, onNavigate, onOpenSettings }: {
   readonly place: AnyPlace;
   readonly listParam: string | undefined;
   readonly lists: ReturnType<typeof usePlaceLists>;
+  readonly projects: PlaceProjects;
   readonly onOpenList: (listId: string) => void;
   readonly onBack: (() => void) | undefined;
   readonly onNavigate: PlacesViewProps['onNavigate'];
@@ -227,28 +255,44 @@ function PlaceScreen({ place, listParam, lists, onOpenList, onBack, onNavigate, 
   const { shown, elsewhere } = useMemo(() => webListsOf(place), [place]);
   const list = shown.find((candidate) => candidate.id === listParam) ?? shown[0];
   const state: PlaceListState | undefined = list ? lists.stateOf(place, list) : undefined;
-  const catalog = useCommandCatalog(true);
-  const snapshot = catalog?.actions ?? null;
+  // What each action's capability is and where it runs: the daemon's own registry, read at run time.
+  const capabilities = useCapabilityIndex();
   const stream = useEventStreamState('app');
+  // A read of the registry that failed (the daemon was down) is made again when the daemon's stream is live.
+  useEffect(() => {
+    if (stream.status === 'live' && !capabilities) void loadCapabilities().catch(() => undefined);
+  }, [stream.status, capabilities]);
   const confirm = useConfirm();
   const [selected, setSelected] = useState<Readonly<Record<string, string | undefined>>>({});
   const [detailOpen, setDetailOpen] = useState(false);
   const [outcome, setOutcome] = useState<Outcome | undefined>();
   const [busy, setBusy] = useState(false);
   const [reveal, setReveal] = useState<CapabilityReveal | undefined>();
+  const [result, setResult] = useState<PlaceResult | undefined>();
   const [form, setForm] = useState<{ readonly request: PlaceFormRequest; readonly action: PlaceCapabilityAction<PlaceItem>; readonly item?: PlaceItem | undefined } | undefined>();
+  /** An act whose result shows on another list (`doneOn`): that list's rows before it, so its next read selects the row it added. */
+  const [afterAct, setAfterAct] = useState<{ readonly list: string; readonly before: ReadonlySet<string> } | undefined>();
   const listRef = useRef<HTMLDivElement | null>(null);
 
   const items = state?.items ?? [];
+  // The list an act opened on (`doneOn`) selects the row the act added once it is read with it.
+  useEffect(() => {
+    if (!afterAct || list?.id !== afterAct.list) return;
+    const added = items.find((candidate) => !afterAct.before.has(candidate.id));
+    if (!added) return;
+    setSelected((now) => ({ ...now, [afterAct.list]: added.id }));
+    setDetailOpen(true);
+    setAfterAct(undefined);
+  }, [afterAct, items, list?.id]);
   const selectedId = list ? selected[list.id] : undefined;
   // The selection stays on the same item across reads; a desktop opens on the first one, a phone on the list.
   const item = items.find((candidate) => candidate.id === selectedId) ?? (phone ? undefined : items[0]);
   const open = phone ? detailOpen && item !== undefined : item !== undefined;
 
   const resolve = useCallback((action: PlaceCapabilityAction<PlaceItem>): PlaceCapability | undefined => {
-    const capability = resolvePlaceCapability(snapshot, action.capability);
+    const capability = resolvePlaceCapability(capabilities, action.capability);
     return capability?.runsOnDaemon ? capability : undefined;
-  }, [snapshot]);
+  }, [capabilities]);
   const labelOf = useCallback((action: PlaceCapabilityAction<PlaceItem>, capability: PlaceCapability) => upperFirst(action.label ?? capability.action.label.toLowerCase()), []);
 
   const titleOf = useCallback((target: PlaceItem | undefined): string | undefined => {
@@ -266,7 +310,7 @@ function PlaceScreen({ place, listParam, lists, onOpenList, onBack, onNavigate, 
     if (risk) {
       const yes = await confirm.ask({
         title: `${capability.action.label}?`,
-        description: `${capabilitySentence(capability, shownValues)} This ${capabilityRiskWords(risk)}.`,
+        description: `${capabilitySentence(capability, shownValues)} ${capabilityRiskSentences(capability, values)}`,
         confirmLabel: capabilityButton(capability),
         tone: 'danger',
       });
@@ -275,27 +319,70 @@ function PlaceScreen({ place, listParam, lists, onOpenList, onBack, onNavigate, 
     setBusy(true);
     setOutcome({ text: `${capability.action.label}…`, tone: 'plain' });
     try {
-      const answered = await runPlaceCapability(capability.id, values);
+      const answered = await runPlaceCapability(capability.id, values, projects.project);
       const title = titleOf(target);
       const line = outcomeLine(capability, values, shownValues, answered, target && title ? { id: target.id, title } : undefined,
         answer ? { said: answer.said ?? answer.label, values: answer.values } : undefined);
       // A value the person must see once goes to its own pane, never into the line.
       if (answered.reveal) setReveal(answered.reveal);
+      // An answer longer than the line holds (its done line and two more sentences) opens whole in the result pane;
+      // the line then says in one sentence what was done.
+      const whole = (answered.detail ?? answered.text).trim();
+      const sentences = whole.split(/(?<=[.!?:])\s+|\n+/).filter((part) => part.trim() !== '').length;
+      const long = !answered.reveal && (sentences > 3 || whole.length > 400);
+      if (long) setResult({ title: capability.action.label, text: whole });
       // How to undo it: the place's action whose capability is the one that undoes this.
       const undoneBy = capability.action.undoneBy;
       const undoAction = undoneBy ? undoActionOf(place, action.list, undoneBy, (candidate) => resolve(candidate)?.action.id) : undefined;
       const undoCapability = undoAction ? resolve(undoAction) : undefined;
       setOutcome({
-        text: line, tone: 'plain',
+        text: long ? `${capability.action.label}: the whole answer is shown in its own pane.` : line, tone: 'plain',
         ...(undoAction && undoCapability ? { undo: { action: undoAction, label: labelOf(undoAction, undoCapability), item: target } } : {}),
       });
+      // What it made shows on another list (`doneOn`, as the terminal place does): that list opens, on the row it added.
+      // A list not read yet has no rows to tell the new one from: it opens without moving the selection.
+      const doneOn = action.doneOn !== undefined ? shown.find((candidate) => candidate.id === action.doneOn) : undefined;
+      if (doneOn) {
+        const before = lists.stateOf(place, doneOn);
+        if (before.read) setAfterAct({ list: doneOn.id, before: new Set(before.items.map((entry) => entry.id)) });
+        if (doneOn.id !== list?.id) onOpenList(doneOn.id);
+      }
     } catch (error) {
       setOutcome({ text: `Not done: ${formatError(error)}`, tone: 'warning' });
     } finally {
       setBusy(false);
       lists.readPlace(place);
     }
-  }, [confirm, labelOf, lists, place, resolve, titleOf]);
+  }, [confirm, labelOf, list?.id, lists, onOpenList, place, projects.project, resolve, shown, titleOf]);
+
+  /**
+   * The actions here that run only in a terminal program: shown greyed, never hidden, each group with the one line
+   * that says where it runs.
+   */
+  const greyed = (scope: 'place' | 'whole' | 'item', target?: PlaceItem): ReactNode => {
+    const actions = allActionsOf(place).filter((action) => (scope === 'place' ? action.list === undefined
+      : action.list === list?.id && (scope === 'whole'
+        ? action.kind !== 'program' && action.whole === true
+        : (action.kind === 'program' || action.whole !== true) && target !== undefined && (!action.states || action.states.includes(target.state)))));
+    const byWhere = new Map<string, string[]>();
+    for (const action of actions) {
+      const capability = action.kind === 'program' ? undefined : resolvePlaceCapability(capabilities, action.capability);
+      if (action.kind !== 'program' && !capability) continue;
+      const where = elsewhereOf(action, capability?.runsIn, capability?.group);
+      if (!where) continue;
+      const label = upperFirst(action.label ?? capability?.action.label.toLowerCase() ?? '');
+      byWhere.set(where, [...(byWhere.get(where) ?? []), label]);
+    }
+    if (byWhere.size === 0) return null;
+    return [...byWhere.entries()].map(([where, labels]) => (
+      <div key={where} className="place-elsewhere-actions">
+        <div className="place-elsewhere-actions__buttons">
+          {labels.map((label) => <Button key={label} size="sm" variant="secondary" disabled title={where}>{label}</Button>)}
+        </div>
+        <p className="place-elsewhere-actions__where">{where}</p>
+      </div>
+    ));
+  };
 
   /** A pressed button: the item fills what it gives, a form asks for the rest, then it runs. */
   const press = useCallback((action: PlaceCapabilityAction<PlaceItem>, target: PlaceItem | undefined, answer?: PlaceAnswer) => {
@@ -351,6 +438,7 @@ function PlaceScreen({ place, listParam, lists, onOpenList, onBack, onNavigate, 
   const placeWide = buttonsFor(placeActions(place), undefined);
   const whole = list ? buttonsFor(wholeActions(place, list.id), undefined) : [];
   const forItem = list && item ? buttonsFor(itemActions(place, list.id, item), item) : [];
+  const greyedItem = item ? greyed('item', item) : null;
   const pane = list ? paneOf(list) : undefined;
   const Twin = pane ? PLACE_PANES[pane] : undefined;
 
@@ -360,12 +448,12 @@ function PlaceScreen({ place, listParam, lists, onOpenList, onBack, onNavigate, 
         aria-label={`${place.title}: lists`}
         value={list?.id ?? ''}
         onChange={onOpenList}
-        options={shown.map((candidate) => ({ value: candidate.id, label: `${candidate.label} (${lists.stateOf(place, candidate).items.length})` }))}
+        options={shown.map((candidate) => ({ value: candidate.id, label: `${candidate.label} (${countedItems(lists.stateOf(place, candidate).items)})` }))}
       />
     ) : (
       <div className="place-tabs" role="tablist" aria-label={`${place.title}: lists`}>
         {shown.map((candidate) => {
-          const count = lists.stateOf(place, candidate).items.length;
+          const count = countedItems(lists.stateOf(place, candidate).items);
           return (
             <button
               key={candidate.id}
@@ -386,13 +474,16 @@ function PlaceScreen({ place, listParam, lists, onOpenList, onBack, onNavigate, 
 
   const listPane = list && state ? (
     <div ref={listRef} className="place-list" onKeyDown={onListKey}>
-      {whole.length > 0 ? <div className="place-toolbar">{whole}</div> : null}
+      {/* The place's own actions, then the ones on this tab's kind of thing: a row that wraps, never the page title's. */}
+      {placeWide.length + whole.length > 0 ? <div className="place-toolbar" aria-label="Actions">{placeWide}{whole}</div> : null}
+      {greyed('place')}
+      {greyed('whole')}
       {state.status === 'failed' ? (
         <div className="dv-notice dv-notice--warn place-notice" role="alert">
           <TriangleAlert aria-hidden="true" />
           <div>
             <p>{`Could not read ${list.noun}: ${state.reason ?? 'no reason was given'}.`.replace(/\.\.$/, '.')}</p>
-            <p>It is read again by itself when the daemon answers.</p>
+            <p>{state.unreachable ? 'It is read again by itself when the daemon answers.' : 'It is read again by itself when it changes.'}</p>
             <Button size="sm" variant="ghost" icon={<RefreshCw aria-hidden="true" />} onClick={() => lists.readPlace(place)}>Read again</Button>
           </div>
         </div>
@@ -430,7 +521,12 @@ function PlaceScreen({ place, listParam, lists, onOpenList, onBack, onNavigate, 
       title={plainText(rowOf(list, item).title)}
       meta={rowOf(list, item).right ? plainText(rowOf(list, item).right ?? '') : undefined}
       onClose={() => { setSelected((now) => ({ ...now, [list.id]: undefined })); setDetailOpen(false); }}
-      footer={forItem.length > 0 ? <div className="place-actions" aria-label="Actions">{forItem}</div> : undefined}
+      footer={forItem.length > 0 || greyedItem ? (
+        <>
+          {forItem.length > 0 ? <div className="place-actions" aria-label="Actions">{forItem}</div> : null}
+          {greyedItem}
+        </>
+      ) : undefined}
     >
       {Twin ? <Twin item={item} /> : <DetailLines lines={detailOf(list, item)} />}
     </DetailPane>
@@ -441,14 +537,10 @@ function PlaceScreen({ place, listParam, lists, onOpenList, onBack, onNavigate, 
       <DataPage
         title={place.title}
         description={PLACE_GROUPS.find((row) => row.group === place.group)?.line}
-        action={(
-          <>
-            {onBack ? <BackButton onBack={onBack} /> : null}
-            {placeWide}
-          </>
-        )}
+        action={onBack ? <BackButton onBack={onBack} /> : undefined}
         filters={(
           <>
+            {phone ? <ProjectChooser projects={projects} /> : null}
             {tabs}
             <RicherLinks views={RICHER_VIEWS[place.id] ?? []} onNavigate={onNavigate} onOpenSettings={onOpenSettings} />
           </>
@@ -494,6 +586,7 @@ function PlaceScreen({ place, listParam, lists, onOpenList, onBack, onNavigate, 
         />
       ) : null}
       {reveal ? <RevealPane reveal={reveal} onClose={() => setReveal(undefined)} /> : null}
+      {result && !reveal ? <ResultPane result={result} onClose={() => setResult(undefined)} /> : null}
       {confirm.element}
     </div>
   );

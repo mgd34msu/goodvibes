@@ -15,6 +15,7 @@ import { ONCE_LABEL, type AskPresentation } from '../../permissions/ask-presenta
 import type { BuiltinChannelRuntimeDeps } from './shared.js';
 import { isManagedSurface } from './surfaces.js';
 import { isTruncatedDirectory } from './targets.js';
+import { isClassicOperation } from '../../runtime/decision-policy.js';
 
 interface BuiltinRenderingContext {
   readonly deps: BuiltinChannelRuntimeDeps;
@@ -209,33 +210,70 @@ function renderStatus(request: ChannelRenderRequest): string {
 }
 
 /**
- * The ask as a chat message: what it acts on, what it will do, and how to
- * answer (a reply; no channel offers "don't ask again": a channel's ask is
- * answered one call at a time). Once decided: who decided it, and how.
+ * Where an ask delivered to the owner's own chat is answered. A reply there
+ * decides it (daemon/approval-reply.ts reads it: a plain yes or no with a
+ * decision model, `/approve <id>` or `/deny <id>` without one), except for an
+ * ask only the owner's own decision can approve (`requiresOwnerDecision`: a
+ * held message let in from the Telegram list), which is answered in Waiting
+ * for you. The same words on every channel kind.
  */
-export function formatApprovalMessage(approval: SharedApprovalRecord, presentation: AskPresentation): string {
+export function approvalAnswerLine(approval: Pick<SharedApprovalRecord, 'id' | 'requiresOwnerDecision'>): string {
+  if (approval.requiresOwnerDecision === true) return 'Answer it in Waiting for you.';
+  return isClassicOperation()
+    ? `Reply /approve ${approval.id} or /deny ${approval.id}, or answer it in Waiting for you.`
+    : 'Reply yes or no, or say what to change; or answer it in Waiting for you.';
+}
+
+/** The principals that are the owner's own credentials by their nature (daemon-api actor.ts: the operator token, the local one). */
+const OWNERS_OWN: ReadonlySet<string> = new Set(['owner', 'shared-token', 'local', 'local-owner']);
+
+/** Who decided, as a person reads it; nothing for an actor known only by an internal id. */
+function deciderWords(actor: string | undefined): string | undefined {
+  if (!actor) return undefined;
+  if (OWNERS_OWN.has(actor)) return 'you';
+  if (actor.startsWith('pairing:')) return `the paired device ${actor.slice('pairing:'.length)}`;
+  return undefined;
+}
+
+/** A line that is data rather than words (a call's arguments as JSON): never put in a message. */
+function isDataLine(line: string): boolean {
+  return /^[[{]/.test(line.trim());
+}
+
+/**
+ * The ask as a chat message, in the words every other surface shows it
+ * (permissions/ask-presentation.ts): what is waiting, what it acts on, what it
+ * will do, and where it is answered (approvalAnswerLine; no channel offers
+ * "don't ask again": a channel's ask is answered one call at a time). Never
+ * the arguments as JSON or an internal id. Once decided: how, and by whom
+ * when that is a name a person knows.
+ */
+export function formatApprovalMessage(approval: SharedApprovalRecord, presentation: AskPresentation, options: { readonly withTitle?: boolean } = {}): string {
   const subject = presentation.subject;
   const lines = [
-    ...(subject ? subject.lines.map((line) => (subject.kind === 'command' ? `$ ${line}` : line)) : []),
+    // A surface that shows a title of its own (ntfy) leaves it out of the body.
+    ...(options.withTitle === false ? [] : [presentation.title]),
+    ...(subject ? subject.lines.filter((line) => !isDataLine(line)).map((line) => (subject.kind === 'command' ? `$ ${line}` : line)) : []),
     ...(presentation.consequence ? [presentation.consequence.text] : []),
   ];
-  const by = approval.resolvedBy;
+  const decider = deciderWords(approval.resolvedBy);
+  const by = decider ? ` by ${decider}` : '';
   const reason = approval.decision?.reason;
   switch (approval.status) {
     case 'pending':
     case 'claimed':
-      lines.push('Reply yes or no.');
+      lines.push(approvalAnswerLine(approval));
       break;
     case 'approved': {
       // "once" only for a call that keeps nothing in force; a standing change's consequence above says how long it lasts.
       const actsOnce = presentation.choices.some((choice) => choice.id === 'once' && choice.label === ONCE_LABEL);
       lines.push(approval.decision?.rememberTier !== undefined || approval.decision?.remember === true
-        ? `Approved${by ? ` by ${by}` : ''}, and remembered.`
-        : `Approved${actsOnce ? ' once' : ''}${by ? ` by ${by}` : ''}.`);
+        ? `Approved${by}, and remembered.`
+        : `Approved${actsOnce ? ' once' : ''}${by}.`);
       break;
     }
     case 'denied':
-      lines.push(`Refused${by ? ` by ${by}` : ''}${reason ? `: ${reason}` : '.'}`);
+      lines.push(`Refused${by}${reason ? `: ${reason}` : '.'}`);
       break;
     case 'expired':
       lines.push('Nobody answered in time, so it was not done.');

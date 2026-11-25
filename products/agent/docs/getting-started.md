@@ -54,7 +54,7 @@ runs the three steps again).
 
 ## The Agent workspace
 
-`Ctrl+G` then `w` (or `/agent`) opens the Agent workspace; `Ctrl+G` then `m`
+`Ctrl+G` then `w` opens the Agent workspace; `Ctrl+G` then `m`
 (or a click on `ctrl+g m menu` at the right end of the status bar) opens the
 menu of every place; `Ctrl+P`, `?` and `/help` open the list of every command
 and key instead. `Ctrl+G` is the leader: after it the screen lists every key
@@ -231,7 +231,7 @@ Source queue records keep credibility, score, report-ready source lines, source 
 
 Use `research action:"report_artifact" artifactId:"..."` to inspect one saved report before export, archive, share, or Knowledge promotion. The visual-report contract names required sections, citation/source-map acceptance criteria, report save, review-packet, ZIP archive routes, and certified browser/PWA render read models with render route, redacted render URL, source-map count, citation coverage, visual sections, publication, and receipt evidence so richer rendering stays tied to the same reviewed artifacts. Use confirmed Agent Knowledge ingest actions when a reviewed source should become durable.
 
-Use the Drafts and Artifacts tabs of Memory and knowledge (the menu), `/documents` for the review packet reports, and `/compare` when a document needs:
+Use the Drafts and Artifacts tabs of Memory and knowledge (the menu; the review packet reports are on the Drafts tab) and the Comparisons tab of Models and providers when a document needs:
 
 - a versioned markdown draft
 - review comments
@@ -239,7 +239,7 @@ Use the Drafts and Artifacts tabs of Memory and knowledge (the menu), `/document
 - review status
 - reviewer-ready document artifact export
 - chronological review packet timeline with stale-preset attention
-- the review packet steps (`/documents packet-steps`): what is ready, what is missing and the line that fixes it
+- the review packet steps (`t` on the Drafts tab): what is ready, what is missing and the line that fixes it
 - reviewer-readiness preflight for unresolved comments/suggestions/source artifacts/comparison reveal/route decisions/handoff evidence
 - inline readiness badges at export/archive/apply points
 - packet-default prefill for the next export/handoff/archive/apply/leave-unchanged/save-preset/share form
@@ -264,7 +264,7 @@ Use the Drafts and Artifacts tabs of Memory and knowledge (the menu), `/document
   - one-click reviewer handoff ZIP archives with matching route-decision receipt evidence
 - confirmed packet share through `agent_review_packet_share` when the user wants to send the archive to a configured channel, a bound route or a webhook
 
-Use the Artifacts tab of Memory and knowledge for saved images, source files, generated media and exported sessions, and `/media make` to make an image or video. Generated media returns artifact ids and metadata, not inline base64.
+Use the Artifacts tab of Memory and knowledge for saved images, source files, generated media and exported sessions, and `M` on the Tools tab of Tools and extensions to make an image or video. Generated media returns artifact ids and metadata, not inline base64.
 
 ## Connected host
 
@@ -288,9 +288,9 @@ export GOODVIBES_AGENT_RUNTIME_URL=https://host:port
 
 Host diagnostics:
 
-- `/health compat`: the connected host's compatibility
-- `/health`: what needs attention, with the line that fixes each problem
-- `/health check <area>`: one area in detail
+- System, Health, "Check the connected host's compatibility": the connected host's compatibility
+- System, Health, "See what needs attention": what needs attention, with what fixes each problem
+- System, Health, "Check one area": one area in detail
 - `goodvibes-agent status --json`
 - `goodvibes-agent doctor`
 - `goodvibes-agent compat`
@@ -317,7 +317,7 @@ The same mode carries auto-attached remote artifact review routes matched by run
 
 Checklist items are the project's running list of things to do: they record work and its status and do not run it. The project has one checklist, kept in `~/.goodvibes/work-plans.sqlite`, the same list the terminal app, the daemon and the web UI show and edit; in the Agent it is the Work place's Checklist list. Finished (done or cancelled) items are removed automatically once untouched for 30 days or outside the 200 most recently touched finished items, by the edit that finishes an item. Work from a file, in the Work place, sends owner-written JSON with the same checks and the journal that makes a lost answer safe to send again; sending it does not start it, and a lost answer can be seen, sent again or dropped there.
 
-Delegation is reserved for isolation, parallelism, remote execution, separate worktrees, or user-requested delegated review. `delegation action:"status|routes"` exposes local-first, TUI handoff, delegated-review, remote-inspection, and hidden-fanout-blocked decision cards; `delegation action:"route"` rows show required fields, success evidence, status routes, and recovery routes, while lower-level `agent_harness mode:"delegation_posture|delegation_route"` remains available for detailed compatibility inspection. The confirmed `/agents hand-off` and Agent Workspace handoff form preserve the original ask plus delegation reason, success criteria, workspace/worktree hint, priority, and explicit review intent.
+Delegation is reserved for isolation, parallelism, remote execution, separate worktrees, or user-requested delegated review. `delegation action:"status|routes"` exposes local-first, TUI handoff, delegated-review, remote-inspection, and hidden-fanout-blocked decision cards; `delegation action:"route"` rows show required fields, success evidence, status routes, and recovery routes, while lower-level `agent_harness mode:"delegation_posture|delegation_route"` remains available for detailed compatibility inspection. Handing work on from Handed off in the Work place (`h`, or typed `/agents hand-off`) preserves the original ask plus delegation reason, success criteria, workspace/worktree hint, priority, and explicit review intent.
 
 The active autonomy policy is visible autonomy. Long-running work must have a user-readable task, status/progress, cancellation route, success criteria, and confirmation gates for external or daemon-mutating effects. Use `autonomy action:"intake"` to turn an ongoing-work request into the safest visible route and missing fields; webhook/event-trigger requests expose trigger workflow posture and route applicable incoming watcher setup to the published `watchers.create` operator method, with trusted source/scope, task or run target, success criteria, `confirm:true`, and `explicitUserRequest` required.
 

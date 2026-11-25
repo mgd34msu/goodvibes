@@ -115,7 +115,7 @@ export function checkPaymentGates(input: GateInput): GateRefusal | null {
         'Refused: payments.cvvHandling is set to prompt, so the card verification value is not '
         + 'stored, and this payment host has no way to ask you for it when a purchase reaches payment. '
         + 'Set payments.cvvHandling to stored (add the card again if it was created under prompt), '
-        + 'or buy through the daemon your terminal app is paired with, where /payments pending asks for the code.',
+        + 'or buy through the daemon your terminal app is paired with, where Waiting for you, under Purchases, asks for the code.',
     };
   }
   if (!input.hasUsableCard) {

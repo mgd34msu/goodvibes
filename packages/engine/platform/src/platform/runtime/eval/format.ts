@@ -7,7 +7,8 @@
 
 import type { EvalSuiteResult, EvalGateResult } from './types.js';
 
-const HR = '-'.repeat(72);
+/** Parts of a report are parted by a blank line: a 72-dash rule wrapped into a second line of dashes at 80 columns. */
+const HR = '';
 
 /**
  * Format an EvalSuiteResult as a multi-line string for console output.
@@ -42,20 +43,17 @@ export function formatGateResult(gate: EvalGateResult): string {
   const lines: string[] = [];
 
   lines.push(HR);
-  lines.push(`Gate: ${gate.suite}`);
-  lines.push(`Result: ${gate.passed ? 'PASSED' : 'FAILED'}`);
-  lines.push(`Regression threshold: ${gate.regressionThreshold} points`);
+  lines.push(`The gate for ${gate.suite} ${gate.passed ? 'passed' : 'failed'}.`);
+  lines.push(`A task fails it by scoring ${gate.regressionThreshold} points or more below the baseline.`);
   lines.push(
-    `Baseline: ${gate.baseline ? `${gate.baseline.label} (${new Date(gate.baseline.capturedAt).toISOString()})` : 'none (first run)'}`,
+    gate.baseline ? `Baseline: ${gate.baseline.label}, saved ${new Date(gate.baseline.capturedAt).toLocaleString()}.` : 'There was no baseline yet: this is the first run.',
   );
   lines.push(HR);
 
   if (gate.floorFailures.length > 0) {
-    lines.push('Absolute floor failures (fail the gate regardless of baseline):');
+    lines.push('Tasks that failed outright (these fail the gate with or without a baseline):');
     for (const f of gate.floorFailures) {
-      lines.push(
-        `  ${f.scenarioName.slice(0, 44).padEnd(44)} fresh=${f.freshScore.toFixed(1).padStart(5)}`,
-      );
+      lines.push(`  ${f.scenarioName}: scored ${f.freshScore.toFixed(1)}`);
       for (const dim of f.failingDimensions) {
         lines.push(`      - ${dim}`);
       }
@@ -64,18 +62,13 @@ export function formatGateResult(gate: EvalGateResult): string {
   }
 
   if (gate.regressions.length > 0) {
-    lines.push('Regressions:');
+    lines.push('Tasks that scored lower than the baseline:');
     for (const r of gate.regressions) {
-      lines.push(
-        `  ${r.scenarioName.slice(0, 44).padEnd(44)} ` +
-        `baseline=${r.baselineScore.toFixed(1).padStart(5)} ` +
-        `fresh=${r.freshScore.toFixed(1).padStart(5)} ` +
-        `delta=${r.delta.toFixed(1).padStart(6)}`,
-      );
+      lines.push(`  ${r.scenarioName}: ${r.freshScore.toFixed(1)} now, ${r.baselineScore.toFixed(1)} in the baseline (${r.delta.toFixed(1)})`);
     }
     lines.push(HR);
   } else if (!gate.baseline) {
-    lines.push('No baseline to compare against: nothing was saved. Create one with `/eval gate [suite-dir] --save-baseline`.');
+    lines.push('There was no baseline to compare against, so no regression check was made.');
     lines.push(HR);
   } else if (gate.baseline.suites[gate.suite] === undefined) {
     lines.push(`The baseline holds no scores for suite "${gate.suite}", so no regression check was made.`);
@@ -86,19 +79,15 @@ export function formatGateResult(gate: EvalGateResult): string {
   }
 
   if (gate.missingFromRun.length > 0) {
-    lines.push('Baseline scenarios missing from this run (not regression-checked):');
+    lines.push('Tasks in the baseline that this run did not have (not checked):');
     for (const id of gate.missingFromRun) lines.push(`  ${id}`);
     lines.push(HR);
   }
 
   if (gate.unbaselined.length > 0) {
-    lines.push('Unbaselined scenarios (floor-checked only; save a new baseline with `/eval gate [suite-dir] --save-baseline` to regression-check them):');
+    lines.push('Tasks the baseline does not hold (checked against the floor only; gate the suite on the Evaluations tab of the Work place with "Save this run as the baseline" to check them for regressions):');
     for (const u of gate.unbaselined) {
-      lines.push(
-        `  ${u.scenarioName.slice(0, 44).padEnd(44)} ` +
-        `fresh=${u.freshScore.toFixed(1).padStart(5)} ` +
-        `floor=${u.floorPassed ? 'PASS' : 'FAIL'}`,
-      );
+      lines.push(`  ${u.scenarioName}: scored ${u.freshScore.toFixed(1)}, ${u.floorPassed ? 'passed' : 'failed'}`);
     }
     lines.push(HR);
   }

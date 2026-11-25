@@ -29,6 +29,7 @@ import {
   type ThemeChoice,
 } from './renderer/theme.js';
 import { getTerminalPalette } from './terminal-palette-store.js';
+import { writeSetting, type SettingWriteContext } from './settings-writes.js';
 
 function variantText(choice: ThemeChoice): string {
   return choice.variants.length > 1 ? `${choice.variants.join(' + ')}` : `${choice.variants[0] ?? 'dark'} only`;
@@ -84,7 +85,8 @@ export function openThemePicker(ctx: ThemePickerContext, presentation: ThemePick
       }
       return;
     }
-    ctx.platform.configManager.setDynamic(THEME_NAME_CONFIG_KEY, result.item.id);
+    // Through the daemon's settings.set (settings-writes.ts); the theme is applied here at once either way.
+    void writeSetting(ctx as unknown as SettingWriteContext, THEME_NAME_CONFIG_KEY, result.item.id).catch(() => {});
     const applied = setActiveThemeName(result.item.id);
     ctx.print(`Theme set to ${applied}.`);
     repaint();

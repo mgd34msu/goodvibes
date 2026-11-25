@@ -256,7 +256,7 @@ export const RESTART_READABLE_CHANNELS: readonly CommandAuthorityChannel[] = Obj
  *     refusal ends it. Silence counts only where the archive proves every reply
  *     up to the deadline was received; a recipient that is not proven gets the
  *     notice again and a renewed deadline. An approval that expired unanswered
- *     is still denied. `/payments pending` answers a resumed window too.
+ *     is still denied. Waiting for you, under Purchases, answers a resumed window too.
  *  3. A channel the notice reached keeps no replies across a restart (`end`):
  *     a reply there may have been lost, and a lost objection must not become a
  *     veto's silence. The purchase ends unbought and the owner is told.

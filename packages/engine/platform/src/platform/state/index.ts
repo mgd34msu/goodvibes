@@ -57,6 +57,7 @@ export {
   describeMemoryIndexCaveat,
   runHonestMemorySearch,
 } from './memory-recall-contract.js';
+export { memoryProjectIdentity, memoryProjectOf, isMemoryForProject, attributeOldProjectRecord, knownProjectFolders } from './memory-project.js';
 export type {
   MemoryPromptEligibility,
   HonestSearchStore,

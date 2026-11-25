@@ -65,6 +65,21 @@ function currentOf(rows: readonly MemoryRecord[]): MemoryRecord | undefined {
   return current;
 }
 
+/**
+ * The state tool's memory for one project: its keys are this project's (and the person's own), and a key it saves is
+ * for this project, so a key saved in one project is never read or overwritten from another.
+ */
+export function projectStateMemory(store: StateMemoryStore, project: string): StateMemoryStore {
+  return {
+    add: (opts, operation) => store.add((opts.scope ?? 'project') === 'project' && opts.project === undefined ? { ...opts, project } : opts, operation),
+    list: (filter, operation) => store.list({ ...(filter ?? {}), project }, operation),
+    update: (id, patch, operation) => store.update(id, patch, operation),
+    updateReview: (id, patch, operation) => store.updateReview(id, patch, operation),
+    delete: (id, operation) => store.delete(id, operation),
+    get: (id, operation) => store.get(id, operation),
+  };
+}
+
 /** Every state-tool memory row, one per key: the current row when a key holds two. */
 export async function listMemoryRecords(store: StateMemoryStore, signal?: AbortSignal): Promise<Map<string, MemoryRecord>> {
   const rows = await store.list({ tags: [KEY_TAG] }, signal ? { signal } : undefined);

@@ -128,16 +128,11 @@ export function handleBlockingShellInput(options: BlockingInputHandlerOptions): 
     // are not an answer: they reach the composer and the offer stays open.
     if (data.startsWith('\x1b')) return { handled: false, pendingPermission: null, recoveryPending };
 
-    // Typing means "not now": the offer closes for this launch and the snapshot
-    // stays on disk, so the next launch offers it again.
-    systemMessageRouter.userAction('[Recovery] Left the unsaved session on disk; it is offered again at the next launch.');
-    render();
+    // Typing starts a new conversation, as the offer's one line said: the offer
+    // closes for this launch, quietly, and the snapshot stays on disk, so the
+    // next launch offers it again.
     return { handled: false, pendingPermission: null, recoveryPending: null };
   }
 
-  // The first-start workspace question and the daemon repair question are
-  // selection modals (shell/workspace-registration-question.ts,
-  // shell/daemon-repair-prompt.ts): they receive only the keys aimed at them,
-  // so nothing here waits on a question the screen does not show.
   return { handled: false, pendingPermission, recoveryPending };
 }

@@ -17,7 +17,6 @@ import { publishDaemonRuntimeRecord, type PublishedDaemonRuntimeRecord } from '@
 import { isKnownConfigKey } from '../config/config-key-guard.js';
 import { getPackageVersion, renderDaemonBoundEndpoint, renderDaemonStartupBanner } from './help.js';
 import { createDaemonHost, type DaemonHostSnapshot } from '../runtime/daemon-host.js';
-import { writeDaemonSetting } from '@goodvibes/engine/platform/platform/workspace/daemon-home';
 import { summarizeError } from '@goodvibes/engine/platform/platform/utils';
 import { resolveInstalledDaemonUpdateArtifact } from '../daemon/lifecycle.js';
 import type { RuntimeServicesOptions } from '../runtime/services.js';
@@ -28,21 +27,6 @@ import { clearDerivedPublicBaseUrl, pruneDaemonStartupTokens, sweepDaemonWorktre
 import { renderDaemonStartupPairing } from './startup-pairing.js';
 import { readEnvDaemonToken, readEnvHttpListenerToken } from './daemon-tokens.js';
 import { registerDaemonAcpAgentCommand } from './self-acp-command.js';
-
-/** How long a working-directory move waits for the answer to the request that asked for it to reach the caller. */
-const MOVE_ANSWER_GRACE_MS = 100;
-/** How often a move that found a turn running (or could not tell) looks again before it stops the host. */
-const MOVE_IDLE_POLL_MS = 1_000;
-
-/** Wait `ms`, or until `signal` aborts (at once when it already has), so a stop never waits out a move's pause. */
-function waitOrAbort(ms: number, signal: AbortSignal): Promise<void> {
-  return new Promise<void>((resolve) => {
-    if (signal.aborted) { resolve(); return; }
-    const timer = setTimeout(done, ms);
-    function done(): void { clearTimeout(timer); signal.removeEventListener('abort', done); resolve(); }
-    signal.addEventListener('abort', done, { once: true });
-  });
-}
 
 /** The launcher supplies real inbox composition and explicitly chooses host-only capabilities. */
 export type DaemonCliRuntime = Pick<RuntimeServicesOptions,
@@ -82,13 +66,6 @@ export function runConfiguredDaemonCli(
   activateConfiguration?: ((signal: AbortSignal) => Promise<DaemonCliConfiguration | null>) | undefined,
   createHost: typeof createDaemonHost = createDaemonHost,
   sweepWorktrees: typeof sweepDaemonWorktrees = sweepDaemonWorktrees,
-  /**
-   * The serving configuration for another working directory, with the same
-   * homes and command-line settings. Given, the daemon moves in this process
-   * when its working directory is changed: the host stops and every service
-   * starts again on the new root. Absent, a change applies at the next start.
-   */
-  configureAt?: ((workingDirectory: string) => DaemonCliConfiguration) | undefined,
 ) {
   // The remote runners this daemon starts are the terminal app run as an ACP agent.
   registerDaemonAcpAgentCommand();
@@ -110,10 +87,6 @@ export function runConfiguredDaemonCli(
     const maintenance = new AbortController();
     let configurationWork: Promise<DaemonCliConfiguration | null> | undefined;
     let worktreeSweep: Promise<void> | undefined;
-    // The configuration the serving host was built from, and a working-directory move in progress.
-    let active: DaemonCliConfiguration | undefined;
-    let moveTarget: string | undefined;
-    let moving: Promise<void> | undefined;
     let pairingShown = false;
 
     /**
@@ -134,92 +107,8 @@ export function runConfiguredDaemonCli(
       return stored.token;
     };
 
-    const moveWorkspace = (workingDirectory: string): void => {
-      moveTarget = workingDirectory;
-      // Begins once the request that asked has been answered: stopping the
-      // listener closes its open connections, the asking one included.
-      moving ??= waitOrAbort(MOVE_ANSWER_GRACE_MS, maintenance.signal)
-        .then(runMoves)
-        .catch((error: unknown) => { stderr(`[goodvibes-daemon] the working-directory move stopped: ${summarizeError(error)}`); void processHandle.shutdown(true); })
-        .finally(() => { moving = undefined; });
-    };
-
-    /** Stop the serving host and what it published, so another can take its address. */
-    async function retireHost(): Promise<void> {
-      const retiring = host;
-      host = undefined;
-      try { await retiring?.close(); }
-      finally {
-        published?.remove();
-        published = null;
-        await (worktreeSweep ?? Promise.resolve());
-        worktreeSweep = undefined;
-      }
-    }
-
-    async function runMoves(): Promise<void> {
-      while (moveTarget !== undefined && !closed && active) {
-        const target = moveTarget;
-        moveTarget = undefined;
-        const from = active;
-        let next: DaemonCliConfiguration;
-        try {
-          next = configureAt!(target);
-        } catch (error) {
-          const reason = `the settings for '${target}' could not be read (${summarizeError(error)})`;
-          stderr(`[goodvibes-daemon] not moving to ${target}: ${reason}; still serving ${from.workingDirectory}.`);
-          host?.services?.workspaceSwap?.abandonMove(reason);
-          continue;
-        }
-        // A turn that started during the grace period is not cut off: the host
-        // stops only once the probe sees no busy session (a failed probe waits).
-        const swap = host?.services?.workspaceSwap;
-        for (let busy = swap?.busySessions(); busy !== undefined && (busy.kind !== 'present' || busy.value > 0); busy = swap?.busySessions()) {
-          if (closed) return;
-          await waitOrAbort(MOVE_IDLE_POLL_MS, maintenance.signal);
-        }
-        if (closed) return;
-        // A newer move asked while this one waited replaces it.
-        if (moveTarget !== undefined) continue;
-        stdout(`goodvibes-daemon moving from ${from.workingDirectory} to ${target}`);
-        await retireHost();
-        if (closed) return;
-        let failure: string;
-        try {
-          const settled = await serveAt(next);
-          if (closed) return;
-          if (settled === handedOver) { void processHandle.shutdown(); return; }
-          if (settled && (settled.state === 'ready' || settled.state === 'degraded')) {
-            active = next;
-            host?.services?.workspaceSwap?.announceArrival(from.workingDirectory);
-            continue;
-          }
-          failure = `its services did not start there (${settled?.state ?? 'stopped'})`;
-        } catch (error) {
-          failure = summarizeError(error);
-        }
-        // Back to the root it left, with the saved setting put back, so the daemon keeps serving.
-        stderr(`[goodvibes-daemon] the daemon could not start in ${target}: ${failure}. Starting again in ${from.workingDirectory}.`);
-        await retireHost().catch(() => undefined);
-        if (closed) return;
-        let savedRestored = true;
-        try { writeDaemonSetting(from.daemonHomeDirectory, 'runtime.workingDir', from.workingDirectory); }
-        catch {
-          savedRestored = false;
-          stderr(`[goodvibes-daemon] warning: the saved working directory could not be put back to ${from.workingDirectory}; the next start uses ${target}.`);
-        }
-        const back = configureAt!(from.workingDirectory);
-        const settled = await serveAt(back);
-        if (closed) return;
-        if (settled === handedOver) { void processHandle.shutdown(); return; }
-        if (!settled || (settled.state !== 'ready' && settled.state !== 'degraded')) throw new Error(`the daemon could not start again in ${from.workingDirectory}`);
-        active = back;
-        host?.services?.workspaceSwap?.announceReturn(target, failure, savedRestored);
-      }
-    }
-
     async function serveAt(selected: DaemonCliConfiguration): Promise<DaemonHostSnapshot | typeof handedOver | undefined> {
-      const { config, homeDirectory, daemonHomeDirectory, workingDirectory, workingDirectoryOverride, isOverridden } = selected;
+      const { config, homeDirectory, daemonHomeDirectory, workingDirectory, isOverridden } = selected;
       const version = getPackageVersion();
       const intended = resolveHostBinding(config.get('controlPlane.hostMode'), config.get('controlPlane.host'),
         config.get('controlPlane.port'), 'controlPlane');
@@ -252,11 +141,9 @@ export function runConfiguredDaemonCli(
           ...runtime, configManager: config, homeDirectory, daemonHomeDirectory, workingDir: workingDirectory,
           runtimeBus: new RuntimeEventBus(runtimeEventBusOptionsFrom((key) => config.get(key))),
           runtimeStore: createRuntimeStore(),
-          ...(configureAt ? { moveWorkspace } : {}),
         },
         daemon: { token },
         hasOverriddenHome: isOverridden,
-        ...(workingDirectoryOverride ? { workingDirectoryOverride } : {}),
         ...(updateArtifact ? { updateArtifact } : {}),
         ...(listenerToken !== undefined ? { httpListener: { token: listenerToken } } : {}),
         // A handover that stopped the runtime and then could not complete
@@ -324,7 +211,6 @@ export function runConfiguredDaemonCli(
           if (chosen === null) return restarted;
           selected = chosen;
         }
-        active = selected;
         return serveAt(selected);
       },
       async close() {
@@ -332,9 +218,7 @@ export function runConfiguredDaemonCli(
         maintenance.abort();
         // Fence the live host synchronously, then drain both original owners.
         const closing = host?.close() ?? Promise.resolve();
-        const results = await Promise.allSettled([configurationWork ?? Promise.resolve(), closing, worktreeSweep ?? Promise.resolve(),
-          // A move under way sees `closed` at its next step; a host it built meanwhile is closed after it.
-          (moving ?? Promise.resolve()).then(() => host?.close())]);
+        const results = await Promise.allSettled([configurationWork ?? Promise.resolve(), closing, worktreeSweep ?? Promise.resolve()]);
         published?.remove();
         // Startup's own original promise already reports its rejection. A
         // separate host cleanup failure must still fail the process drain.

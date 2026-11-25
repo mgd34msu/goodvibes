@@ -1,23 +1,17 @@
 /**
- * /replay command handler.
- *
- * Handles the subcommands of the /replay slash command:
- *   /replay runs            , list the recorded runs
- *   /replay load <runId>    , load a recorded run by ID
- *   /replay step [n]        , advance n steps (default 1)
- *   /replay seek <rev>      , jump to a specific revision
- *   /replay diff <runId>    , compare the loaded run with another recorded run
- *   /replay export <path>   , export replay report to a JSON file
+ * The recorded-run actions (builtin/replay.ts, the Recorded runs tab of the
+ * Work place): load a run, step through it, jump to an event, compare it with
+ * another run and save the report.
  *
  * The handler delegates to an injected `DeterministicReplayEngine`
  * and an optional ledger reader for run access and for the runtime state
  * snapshot stored when each run started.
  *
- * Returns a human-readable result string to display in the conversation.
+ * Returns the words a person reads.
  */
 
 import { mkdirSync } from 'node:fs';
-import { join } from 'node:path';
+import { dirname, join } from 'node:path';
 import type { DeterministicReplayEngine } from './deterministic-replay.js';
 import { logger } from '../utils/logger.js';
 import { summarizeError } from '../utils/error-display.js';
@@ -26,10 +20,12 @@ import type { RuntimeStateSnapshot } from '../runtime/diagnostics/types.js';
 import type { RuntimeEventBus } from '../runtime/events/index.js';
 import { resolveAtRestPolicy } from '../runtime/at-rest-persistence.js';
 
-/** What /replay reads recorded runs from (a LocalLedgerExporter satisfies it). */
+/** What the replay actions read recorded runs from (a LocalLedgerExporter satisfies it). */
 export interface ReplayLedgerReader {
   readRunEntries: (runId: string) => LedgerEntry[];
   listRunIds: () => string[];
+  /** When each run started and how many events it holds, so a run is named by its time and not its id. */
+  listRunStarts?: () => ReadonlyMap<string, { readonly startedAt: number; readonly events: number }>;
   /** The runtime state snapshot stored when the run started, or null if none was stored. */
   readRunSnapshot: (runId: string) => RuntimeStateSnapshot | null;
 }
@@ -151,6 +147,11 @@ export function replayLedgerOf(engine: DeterministicReplayEngine): ReplayLedgerR
   return ledgerOfEngine.get(engine);
 }
 
+/** A recorded event's name as words ("TURN_SUBMITTED" is "turn submitted"). */
+function eventWords(name: string): string {
+  return name.replace(/[_.:-]+/g, ' ').trim().toLowerCase();
+}
+
 
 export interface ReplayCommandResult {
   /** Human-readable output to show the user. */
@@ -188,20 +189,20 @@ export async function handleReplayCommand(
         if (!ledger) {
           return {
             ok: false,
-            output: 'Usage: /replay load <runId>\n\nThis runtime does not record runs, so there is nothing to list.',
+            output: 'Name the run to load. This program does not record runs, so there is nothing to list.',
           };
         }
         const ids = ledger.listRunIds();
         if (ids.length === 0) {
           return {
             ok: true,
-            output: 'No recorded runs yet.\n\nEvery turn is recorded as a run once it starts; send a message, then run /replay runs again.',
+            output: 'No recorded runs yet.\n\nEvery turn is recorded as a run once it starts; send a message, and it shows in Recorded runs, in the Work place.',
           };
         }
         const list = ids.map((id, i) => `  ${i + 1}. ${id}`).join('\n');
         return {
           ok: true,
-          output: `Available runs (${ids.length}):\n${list}\n\nUse /replay load <runId> to load a run.`,
+          output: `Available runs (${ids.length}):\n${list}\n\nLoad one with Enter on it in Recorded runs, in the Work place.`,
         };
       }
 
@@ -216,7 +217,7 @@ export async function handleReplayCommand(
       if (entries.length === 0) {
         return {
           ok: false,
-          output: `No ledger entries found for run "${runId}".\n\n/replay runs lists the recorded runs.`,
+          output: `No ledger entries found for run "${runId}".\n\nRecorded runs, in the Work place, lists the runs there are.`,
         };
       }
 
@@ -245,18 +246,15 @@ export async function handleReplayCommand(
       return {
         ok: true,
         output: [
-          `Run "${runId}" loaded.`,
-          `  Events: ${entries.length}`,
-          `  First: ${new Date(entries[0]?.ts ?? Date.now()).toISOString()}`,
-          `  Last:  ${new Date(entries[entries.length - 1]?.ts ?? Date.now()).toISOString()}`,
+          ((first, last) => `Loaded the turn of ${runId}: ${entries.length} event${entries.length === 1 ? '' : 's'}, ${first === last ? `at ${first}` : `from ${first} to ${last}`}.`)(
+            new Date(entries[0]?.ts ?? Date.now()).toLocaleString(), new Date(entries[entries.length - 1]?.ts ?? Date.now()).toLocaleString()),
           storedSnapshot
-            ? `  Baseline: state snapshot from run start (${storedSnapshot.domains.length} domain${storedSnapshot.domains.length === 1 ? '' : 's'}, ${new Date(storedSnapshot.capturedAt).toISOString()})`
-            : '  Baseline: empty (no runtime state snapshot was stored when this run started)',
+            ? 'It starts from the state saved when the run began.'
+            : 'It starts from an empty state: none was saved when this run began.',
           ...(redacted
-            ? ['', 'Note: some records were redacted at rest, secrets appear as [REDACTED_*] markers; the content shown is post-redaction.']
+            ? ['Some records had secrets masked when they were saved; they show as [REDACTED_*] markers, not as missing data.']
             : []),
-          '',
-          'Use /replay step to advance, /replay seek <rev> to jump, /replay diff <runId> to compare with another run.',
+          'In Recorded runs, in the Work place: step through it, jump to an event, or compare it with another run.',
         ].join('\n'),
       };
     }
@@ -266,13 +264,13 @@ export async function handleReplayCommand(
       if (snap.status === 'idle') {
         return {
           ok: false,
-          output: 'No run loaded. Use /replay load <runId> first.',
+          output: 'No run loaded. Load one first: Enter on it in Recorded runs, in the Work place.',
         };
       }
       if (snap.status === 'exhausted') {
         return {
           ok: true,
-          output: `Replay exhausted at rev ${snap.currentRev} / ${snap.totalRevisions}. Use /replay seek to reposition.`,
+          output: `This run is at its end, event ${snap.currentRev} of ${snap.totalRevisions}. Jump to an earlier event to go on.`,
         };
       }
 
@@ -280,7 +278,7 @@ export async function handleReplayCommand(
       if (isNaN(n) || n < 1) {
         return {
           ok: false,
-          output: `Invalid step count "${args[0]!}". Must be a positive integer.`,
+          output: `"${args[0]!}" is not a number of steps: give a whole number from 1.`,
         };
       }
 
@@ -290,19 +288,19 @@ export async function handleReplayCommand(
       if (stepped.length === 0) {
         return {
           ok: true,
-          output: `No steps taken. Already at rev ${after.currentRev} / ${after.totalRevisions}.`,
+          output: `Nothing to step: the run is already at event ${after.currentRev} of ${after.totalRevisions}.`,
         };
       }
 
-      const lines: string[] = [
-        `Stepped ${stepped.length} event${stepped.length === 1 ? '' : 's'} (rev ${after.currentRev} / ${after.totalRevisions}).`,
-      ];
-      for (const frame of stepped) {
-        const eventName = frame.entry?.eventName ?? 'snapshot';
-        lines.push(`  [rev ${frame.rev}] ${eventName}`);
-      }
+      const said = (frame: (typeof stepped)[number]): string => frame.entry?.eventName ? eventWords(frame.entry.eventName) : 'the state at the start';
+      const lines: string[] = stepped.length === 1
+        ? [`Went forward to event ${after.currentRev} of ${after.totalRevisions}: ${said(stepped[0]!)}.`]
+        : [
+          `Went forward ${stepped.length} events, to event ${after.currentRev} of ${after.totalRevisions}:`,
+          ...stepped.map((frame) => `  event ${frame.rev}: ${said(frame)}`),
+        ];
       if (after.status === 'exhausted') {
-        lines.push('\nReplay exhausted - all events have been replayed.');
+        lines.push('That was the last event of the run.');
       }
 
       return { ok: true, output: lines.join('\n') };
@@ -313,7 +311,7 @@ export async function handleReplayCommand(
       if (snap.status === 'idle') {
         return {
           ok: false,
-          output: 'No run loaded. Use /replay load <runId> first.',
+          output: 'No run loaded. Load one first: Enter on it in Recorded runs, in the Work place.',
         };
       }
 
@@ -321,18 +319,18 @@ export async function handleReplayCommand(
       if (isNaN(rev) || rev < 0) {
         return {
           ok: false,
-          output: `Usage: /replay seek <rev>\nValid range: 0 - ${snap.totalRevisions}.`,
+          output: `Give an event number from 0 to ${snap.totalRevisions}.`,
         };
       }
 
       engine.seek(rev);
       const after = engine.getSnapshot();
       const frame = after.currentFrame;
-      const eventLabel = frame?.entry?.eventName ? `event "${frame.entry.eventName}"` : 'initial snapshot';
+      const eventLabel = frame?.entry?.eventName ? eventWords(frame.entry.eventName) : 'the state at the start';
 
       return {
         ok: true,
-        output: `Seeked to rev ${after.currentRev} / ${after.totalRevisions} (${eventLabel}).`,
+        output: `Now at event ${after.currentRev} of ${after.totalRevisions}: ${eventLabel}.`,
       };
     }
 
@@ -341,7 +339,7 @@ export async function handleReplayCommand(
       if (snap.status === 'idle') {
         return {
           ok: false,
-          output: 'No run loaded. Use /replay load <runId> first.',
+          output: 'No run loaded. Load one first: Enter on it in Recorded runs, in the Work place.',
         };
       }
 
@@ -349,13 +347,13 @@ export async function handleReplayCommand(
       if (!otherRunId) {
         return {
           ok: false,
-          output: `Usage: /replay diff <runId>\n\nCompares the loaded run "${snap.runId}" with another recorded run, event by event. /replay runs lists the recorded runs.`,
+          output: `Name the run to compare the loaded run "${snap.runId}" with, event by event; Recorded runs, in the Work place, lists them.`,
         };
       }
       if (otherRunId === snap.runId) {
         return {
           ok: false,
-          output: `Run "${otherRunId}" is the loaded run; nothing was compared. Name a different recorded run (/replay runs lists them).`,
+          output: `Run "${otherRunId}" is the loaded run; nothing was compared. Name a different recorded run (Recorded runs, in the Work place, lists them).`,
         };
       }
       if (!ledger) {
@@ -368,7 +366,7 @@ export async function handleReplayCommand(
       if (otherEntries.length === 0) {
         return {
           ok: false,
-          output: `No ledger entries found for run "${otherRunId}"; nothing was compared.\n\n/replay runs lists the recorded runs.`,
+          output: `No ledger entries found for run "${otherRunId}"; nothing was compared.\n\nRecorded runs, in the Work place, lists the runs there are.`,
         };
       }
 
@@ -377,21 +375,31 @@ export async function handleReplayCommand(
       if (mismatches.length === 0) {
         return {
           ok: true,
-          output: `Runs "${snap.runId}" and "${otherRunId}" match: the same ${snap.totalRevisions} event${snap.totalRevisions === 1 ? '' : 's'} in the same order, with the same payload fields and turn outcomes.`,
+          output: `The loaded run and the other match: the same ${snap.totalRevisions} event${snap.totalRevisions === 1 ? '' : 's'} in the same order, with the same fields and turn endings.`,
         };
       }
 
-      const lines: string[] = [
-        `Compared run "${snap.runId}" with "${otherRunId}": ${mismatches.length} difference${mismatches.length === 1 ? '' : 's'} found.`,
-        '',
-      ];
-      for (const m of mismatches) {
-        const tagParts = [m.kind, m.failureMode, m.ownerDomain].filter(Boolean);
-        const tag = `[${tagParts.join('/')}]`.padEnd(40);
-        lines.push(`  ${tag} ${m.description}`);
+      // Two turns always carry different turn ids, so those differences say nothing and are left to the saved report.
+      const told = mismatches.filter((m) => !/field "turnId" value differs/.test(m.description));
+      const idsOnly = mismatches.length - told.length;
+      if (told.length === 0) {
+        return {
+          ok: true,
+          output: `The loaded run and the other differ only in their turn ids (${idsOnly} event${idsOnly === 1 ? '' : 's'}); everything else matches.`,
+        };
       }
-      lines.push('');
-      lines.push('Use /replay export <path> to write the full report.');
+      // Each difference in words: "Event 2, preflight ok: ..." (the kinds and domains are in the saved report).
+      const lines: string[] = [
+        `The loaded run and the other differ in ${told.length} place${told.length === 1 ? '' : 's'}${idsOnly > 0 ? `, besides their turn ids` : ''}:`,
+      ];
+      for (const m of told) {
+        lines.push(`  ${m.description
+          .replace(/^Rev (\d+)(?: "([^"]+)")?:?/, (_all, rev: string, name?: string) => `Event ${rev}${name ? `, ${eventWords(name)}` : ''}:`)
+          // "Recorded" is the loaded run and "Replayed" the one compared with it.
+          .replace(/field "([^"]+)" value differs\. Recorded: (.*)\. Replayed: (.*)\.$/, 'field "$1" differs: "$2" in the loaded run, "$3" in the other.')
+          .replace(/\(recorded: ([^,]+), replayed: ([^)]+)\)/, '($1 in the loaded run, $2 in the other)')}`);
+      }
+      lines.push('Save the full report from Recorded runs, in the Work place ("save the report").');
 
       return { ok: true, output: lines.join('\n') };
     }
@@ -401,7 +409,7 @@ export async function handleReplayCommand(
       if (snap.status === 'idle') {
         return {
           ok: false,
-          output: 'No run loaded. Use /replay load <runId> first.',
+          output: 'No run loaded. Load one first: Enter on it in Recorded runs, in the Work place.',
         };
       }
 
@@ -409,24 +417,26 @@ export async function handleReplayCommand(
       if (!filePath) {
         return {
           ok: false,
-          output: 'Usage: /replay export <path>\n\nExample: /replay export replay-report.json',
+          output: 'Name the file to write the report to, such as replay-report.json.',
         };
       }
 
       try {
+        // A folder named in the path that is not there yet is made, as any other save does.
+        mkdirSync(dirname(filePath), { recursive: true });
         await engine.export(filePath);
       } catch (err: unknown) {
         logger.warn('[ReplayCommandHandler] export failed', { filePath, err: summarizeError(err) });
         return {
           ok: false,
-          output: `Report export failed, no file was written: ${summarizeError(err)}\n  Path: ${filePath}\n  Use a path inside the project directory or the temp directory.`,
+          output: `The report was not saved to ${filePath}: ${summarizeError(err)}.`,
         };
       }
       logger.info('[ReplayCommandHandler] export written', { filePath, runId: snap.runId });
 
       return {
         ok: true,
-        output: `Report exported: ${filePath}\n  Run: ${snap.runId}\n  Revisions: ${snap.totalRevisions}\n  Mismatches: ${snap.mismatches.length}`,
+        output: `Saved the report of the loaded run to ${filePath}: ${snap.totalRevisions} event${snap.totalRevisions === 1 ? '' : 's'}, ${snap.mismatches.length} difference${snap.mismatches.length === 1 ? '' : 's'} found.`,
       };
     }
 
@@ -434,20 +444,14 @@ export async function handleReplayCommand(
       const snap = engine.getSnapshot();
       const statusLine = snap.status === 'idle'
         ? 'No run loaded.'
-        : `Current run: ${snap.runId} | rev ${snap.currentRev} / ${snap.totalRevisions} | status: ${snap.status}`;
+        : `Run ${snap.runId} is loaded, at event ${snap.currentRev} of ${snap.totalRevisions}.`;
 
       return {
         ok: false,
         output: [
-          `Unknown /replay subcommand: '${subcommand}'.`,
+          `"${subcommand}" is not something a recorded run does.`,
           '',
-          'Available commands:',
-          '  /replay runs              - list the recorded runs',
-          '  /replay load <runId>      - load a recorded run',
-          '  /replay step [n]          - advance n steps (default 1)',
-          '  /replay seek <rev>        - jump to a specific revision',
-          '  /replay diff <runId>      - compare the loaded run with another recorded run',
-          '  /replay export <path>     - export report to JSON file',
+          'Recorded runs, in the Work place, lists the runs, loads one, steps through it, jumps to an event, compares two and saves the report.',
           '',
           statusLine,
         ].join('\n'),

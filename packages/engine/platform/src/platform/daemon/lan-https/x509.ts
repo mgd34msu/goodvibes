@@ -114,6 +114,12 @@ const DAY_MS = 86_400_000;
 export const LAN_AUTHORITY_DAYS = 1095;
 /** How long a server certificate lasts, under the 398 days browsers accept. */
 export const LAN_SERVER_DAYS = 397;
+/**
+ * How long a server certificate lasts when a group's lead shares it with the group's machines: a machine that leaves or
+ * is removed keeps its copy and key, and a phone that trusts the authority trusts it until it ends, so it ends sooner.
+ * It is renewed by itself a month before (secure-address.ts).
+ */
+export const GROUP_SERVER_DAYS = 90;
 
 /**
  * A new certificate authority for this machine. `hostName` (when it is a local
@@ -153,6 +159,8 @@ export function issueLanServerCertificate(
   authority: Pick<LanAuthority, 'certPem' | 'keyPem'>,
   names: { readonly dnsNames: readonly string[]; readonly addresses: readonly string[] },
   now = Date.now(),
+  /** How long it lasts: LAN_SERVER_DAYS for a machine of its own, GROUP_SERVER_DAYS when a group's machines hold it too. */
+  days = LAN_SERVER_DAYS,
 ): LanServerCertificate {
   for (const value of names.dnsNames) if (!isLanHostName(value)) throw new LanCertificateRefusedError(value);
   for (const value of names.addresses) if (!isLanAddress(value)) throw new LanCertificateRefusedError(value);
@@ -161,7 +169,7 @@ export function issueLanServerCertificate(
   const issuerPublic = createPublicKey(issuerKey);
   const issuer = new X509Certificate(authority.certPem);
   const { privateKey, publicKey } = generateKeyPairSync('ec', { namedCurve: 'prime256v1' });
-  const notAfter = now + LAN_SERVER_DAYS * DAY_MS;
+  const notAfter = now + days * DAY_MS;
   const alt = seq(...names.dnsNames.map((value) => dnsName(value.toLowerCase())), ...names.addresses.map((value) => ipName(ipBytes(value))));
   const extensions = seq(
     extension(OID.basicConstraints, true, seq()),

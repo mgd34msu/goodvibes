@@ -176,6 +176,12 @@ export interface CompanionChatSession {
   /** Requested session override; absent historical records and null use provider defaults. */
   readonly reasoningEffort?: string | null | undefined;
   readonly systemPrompt: string | null;
+  /**
+   * The project folder the chat works in (the web UI's chosen project, given at create): its tools are rooted there,
+   * with that project's tool servers, hooks, checkpoints and rules. Absent: a chat made before projects, or with none
+   * chosen, works in the daemon's own folder as before.
+   */
+  readonly project?: string | undefined;
   readonly status: CompanionChatSessionStatus;
   readonly createdAt: number;
   readonly updatedAt: number;
@@ -193,6 +199,8 @@ export interface CreateCompanionChatSessionInput {
   readonly provider?: string | undefined;
   readonly reasoningEffort?: string | null | undefined;
   readonly systemPrompt?: string | undefined;
+  /** The project folder the chat works in (absolute); see CompanionChatSession.project. */
+  readonly project?: string | undefined;
 }
 
 export interface ListCompanionChatSessionsInput {

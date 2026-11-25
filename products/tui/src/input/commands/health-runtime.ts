@@ -11,11 +11,10 @@ import { probeTermCaps } from '../../renderer/term-caps.ts';
 import { evaluateSessionMaintenance, formatSessionMaintenanceLines } from '@/runtime/index.ts';
 import { estimateConversationTokens } from '@goodvibes/engine/platform/platform/core';
 import { formatDoctorReport } from '@goodvibes/engine/platform/platform/runtime/operations';
-import type { CommandContext, CommandRegistry } from '../command-registry.ts';
+import type { CommandContext } from '../command-registry.ts';
 import { dirname } from 'node:path';
 import { existsSync, mkdirSync, writeFileSync } from 'node:fs';
-import { createHealthCommand, readRemoteRunnersHealth, type HealthArea, type HealthCommandPolicy, type FailureReportView } from '@goodvibes/engine/terminal-shell/health-command';
-import { systemSessionOf } from './session-capabilities.ts';
+import { readRemoteRunnersHealth, type HealthArea, type HealthCommandPolicy, type FailureReportView } from '@goodvibes/engine/terminal-shell/health-command';
 import type { CommandReport } from '@goodvibes/engine/terminal-shell/command-actions';
 import { commandRefusal } from '@goodvibes/engine/terminal-shell/command-confirmation';
 import { isSetupIssue } from '@goodvibes/engine/terminal-shell/setup-review';
@@ -50,7 +49,7 @@ function maintenanceOf(ctx: CommandContext) {
   const providerRegistry = ctx.provider.providerRegistry;
   const llmMessages =
     typeof ctx.session.conversationManager.getMessagesForLLM === 'function' ? ctx.session.conversationManager.getMessagesForLLM() : [];
-  // Resolve the context window the same way the Usage modal does so the
+  // Resolve the context window the same way Money, Spending does so the
   // maintenance usage %/remaining agree across every diagnostics surface.
   const contextWindow = providerRegistry.getKnownContextWindowForModel(providerRegistry.getCurrentModel()) ?? 0; // 0: unknown window, no usage percentage
   return evaluateSessionMaintenance({
@@ -64,7 +63,7 @@ function maintenanceOf(ctx: CommandContext) {
 }
 
 /**
- * The short status `/health` prints bare: one line when everything works, or
+ * The short status (the System place, Health, "See what needs attention"): one line when everything works, or
  * each thing that does not with the command that fixes it. Reads the same
  * snapshots the area checks read; no model request, no daemon write.
  */
@@ -76,12 +75,13 @@ async function healthReport(ctx: CommandContext): Promise<CommandReport> {
   const items: { sentence: string; fix?: { label: string; line: string } }[] = [];
   const fixFor: Readonly<Record<string, { label: string; line: string }>> = {
     providers: { label: 'Sign in to a provider', line: '/setup sign-in' },
-    services: { label: 'See which services are not ready', line: '/health check services' },
-    plugins: { label: 'See the held-back plugins', line: '/plugin' },
+    services: { label: 'In System, Health, check one area: Services', line: '/setup' },
     mcp: { label: 'See which servers need attention', line: '/mcp review' },
   };
+  // The held-back plugins are the Plugins tab of Tools and extensions: a control, not a line to type.
+  const placeFor: Readonly<Record<string, string>> = { plugins: ' The Plugins tab of Tools and extensions shows each one and why.' };
   for (const check of snapshot.checks.filter(isSetupIssue)) {
-    items.push({ sentence: `${check.area}: ${check.message}.`, ...(fixFor[check.area] ? { fix: fixFor[check.area] } : {}) });
+    items.push({ sentence: `${check.area}: ${check.message}.${placeFor[check.area] ?? ''}`, ...(fixFor[check.area] ? { fix: fixFor[check.area] } : {}) });
   }
   for (const provider of accounts.providers) {
     // What fixes it is a control on the provider in Models and providers ("how to fix it"), not a line to type.
@@ -92,7 +92,8 @@ async function healthReport(ctx: CommandContext): Promise<CommandReport> {
     items.push({ sentence: `Settings: ${issue}. The Devices and network place's Settings sync tab lists the settings that disagree.` });
   }
   if (readModels.localAuth.getSnapshot().bootstrapCredentialPresent) {
-    items.push({ sentence: 'The first-run sign-in file is still on disk.', fix: { label: 'Remove it once you have signed in', line: '/local-auth' } });
+    // What removes it is "Remove the first-run sign-in file" in the System place, not a line to type.
+    items.push({ sentence: 'The first-run sign-in file is still on disk. Once you have signed in, "Remove the first-run sign-in file" in System removes it.' });
   }
   const mcp = readModels.mcp.getSnapshot();
   for (const issue of collectMcpLifecycleIssues(mcp.servers, (id, kind, value) => `${id}: ${kind === 'error' ? value : `${kind} ${value}`}`)) {
@@ -175,7 +176,7 @@ async function checkArea(ctx: CommandContext, area: HealthArea, providerArg: str
         'Local sign-in',
         `  users: ${auth.userCount}`,
         `  sessions: ${auth.sessionCount}`,
-        `  first-run sign-in file: ${auth.bootstrapCredentialPresent ? 'present (remove it with /local-auth once you have signed in)' : 'removed'}`,
+        `  first-run sign-in file: ${auth.bootstrapCredentialPresent ? 'present (remove it with "Remove the first-run sign-in file" in System once you have signed in)' : 'removed'}`,
       ].join('\n');
     }
     case 'settings': {
@@ -262,7 +263,7 @@ async function checkArea(ctx: CommandContext, area: HealthArea, providerArg: str
           lines.push(scopeLine ?? `  quota (${provider}): ${describeOperatorRpcError(error)}`);
         }
       } else {
-        lines.push('  quota: no provider in use (name one: /health check metrics --provider <id>).');
+        lines.push('  quota: no provider in use (name one in the Provider blank of "Check one area").');
       }
       return lines.join('\n');
     }
@@ -321,7 +322,7 @@ function failureReport(ctx: CommandContext, id: string) {
   const registry = ctx.extensions.forensicsRegistry;
   if (!registry) throw commandRefusal('Failure reports are not recorded in this session.');
   const report = id === 'latest' ? registry.latest() : registry.getById(id);
-  if (!report) throw commandRefusal(id === 'latest' ? 'No failure report was recorded this session.' : `No failure report is ${id}.`, '/health failure lists them.');
+  if (!report) throw commandRefusal(id === 'latest' ? 'No failure report was recorded this session.' : `No failure report is ${id}.`, 'This session\'s failures, on the Health tab of System, lists them.');
   return { registry, report };
 }
 
@@ -364,7 +365,7 @@ function saveFailure(ctx: CommandContext, input: { readonly report: string; read
   if (!json) throw commandRefusal(`The bundle of ${report.id} could not be built; nothing was written.`);
   const targetPath = requireShellPaths(ctx).resolveWorkspacePath(input.path);
   if (existsSync(targetPath) && !input.replace) {
-    throw commandRefusal(`${targetPath} already exists; nothing was written.`, `Write over it: /health save-failure ${input.path} --report ${report.id} --replace`);
+    throw commandRefusal(`${targetPath} already exists; nothing was written.`, 'Choose another file, or choose to replace it.');
   }
   mkdirSync(dirname(targetPath), { recursive: true });
   writeFileSync(targetPath, `${json}\n`, 'utf-8');
@@ -386,9 +387,6 @@ async function keepFailure(ctx: CommandContext, id: string): Promise<string> {
   return `Kept failure report ${report.id} in memory as ${record.id}.`;
 }
 
-export function registerHealthRuntimeCommands(registry: CommandRegistry): void {
-  registry.register(createHealthCommand<CommandContext>(healthPolicy, (ctx) => ({ systemSession: systemSessionOf(ctx) })));
-}
 
 /** This app's health, as the `health.*` capabilities read it (session-capabilities.ts binds it with `healthServicesOf`). */
 export const healthPolicy: HealthCommandPolicy<CommandContext> = {

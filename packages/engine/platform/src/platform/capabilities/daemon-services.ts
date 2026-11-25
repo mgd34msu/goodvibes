@@ -21,10 +21,13 @@ import { WorkspaceTrustManager } from '../runtime/workspace-trust.js';
 import { createShellPathService } from '../runtime/shell-paths.js';
 import type { SecretsView } from './builtin/secrets.js';
 import { ConfigManager } from '../config/manager.js';
+import { PROGRAM_HOST_SETTINGS, TERMINAL_PROGRAM_DEFAULTS } from '../runtime/program-host-settings.js';
 import { SecretsManager } from '../config/secrets.js';
 import { SkillLibrary } from '../skills/library.js';
 import { ProfileManager } from '../profiles/manager.js';
 import { resolveCallerPath } from './builtin/skills.js';
+import { describePermissionModeInForce } from '../permissions/decision-model-readiness.js';
+import { carriedPolicyNote } from '../runtime/permissions/policy-config-loader.js';
 import { createHookApi, createHookApiDispatcher, type HookApi } from '../hooks/hook-api.js';
 import { listHookPointContracts } from '../hooks/contracts.js';
 import type { HookDispatcher } from '../hooks/dispatcher.js';
@@ -33,6 +36,8 @@ import type { HookActivityTracker } from '../hooks/activity.js';
 import { HookTraceStore, hookTraceRecordOf } from '../hooks/trace.js';
 import type { WebSearchCapabilityServices } from './builtin/tools.js';
 import { createMcpCapabilityServices, type McpServiceSources } from './mcp-services.js';
+import { requireCallerProject } from './caller-project.js';
+import { projectIdentityOf } from '../workspace/project-identity.js';
 import { createPluginCapabilityServices, type PluginServiceSources } from './plugins-services.js';
 import { controlPlaneStorePath } from '../control-plane/control-plane-store-paths.js';
 import { DAEMON_STATE_SURFACE_ROOT } from '../daemon/lifecycle-marker.js';
@@ -43,7 +48,25 @@ import { TemplateManager } from '../templates/manager.js';
 import type { MemoryRegistry } from '../state/memory-registry.js';
 import type { DaemonCapabilityServices } from './builtin/index.js';
 import type { AgentStoreRunner } from './builtin/agent-stores.js';
+import type { ModelComparisonRunner } from './builtin/compare.js';
 import { mailboxServices } from './builtin/messages.js';
+import type { NotifyCapabilityServices } from './builtin/notify.js';
+import type { GoogleCapabilityServices } from './builtin/google.js';
+import type { ChannelSendCapabilityServices } from './builtin/channel-send.js';
+import type { CalendarHereCapabilityServices } from './builtin/calendar.js';
+import { daemonLocalCalendar } from '../calendar/local-calendar.js';
+import { daemonCalendarAccounts } from '../calendar/daemon-accounts.js';
+import { revealOrNull } from '../security/secret.js';
+import { resolveSecretWriteScope } from '../config/secrets.js';
+import { unreadableSecretStore, type StoredSecretReader } from '../config/secret-store-unreadable.js';
+import { persistSecretBackedConfigValue } from '../config/secret-backed-config.js';
+import { getProcessUntrustedContentLedger } from '../security/untrusted-content.js';
+import { daemonGoogleWork } from '../google/daemon-work.js';
+import { EmailService } from '../email/email-service.js';
+import { withSurfaceEmailConfig } from '../email/surface-config.js';
+import { describeSenderClaimNeutrally } from '../email/sender-claim.js';
+import { nodeEmailTransport } from '../email/node.js';
+import { NOTIFICATIONS_METADATA_ONLY_KEY, readNotificationsMetadataOnly } from '../runtime/notification-privacy.js';
 import type { ConfigKey } from '../config/schema-types.js';
 import { resolveGoodVibesDaemonHome, resolveGoodVibesHome } from '../config/goodvibes-home.js';
 import type { RemoteRunnerRegistry } from '../runtime/remote/runner-registry.js';
@@ -57,13 +80,20 @@ import type { PermissionManager } from '../permissions/manager.js';
 import { CapabilityRefusal, type CapabilityCaller } from './types.js';
 import type { RemoteCapabilityServices } from './builtin/remote.js';
 import { createModelsCapabilityServices, type ModelsServiceSources } from './models-services.js';
+import { createSupportCapabilityServices } from './support-services.js';
 import { persistProviders, scan } from '../discovery/scanner.js';
 import { loadPersistedProviders } from '../discovery/persisted-providers.js';
 import { NETWORK_SCAN_SURFACE_ROOT } from '../discovery/network-scan.js';
 import type { NetworkScanCapabilityServices } from './builtin/network-scan.js';
 
 export interface DaemonCapabilityServiceSources {
-  readonly configManager: Pick<ConfigManager, 'get' | 'getWorkingDirectory' | 'setDynamic' | 'validateDynamic'>;
+  readonly configManager: Pick<ConfigManager, 'get' | 'getWorkingDirectory' | 'setDynamic' | 'validateDynamic' | 'getCategory' | 'mergeCategory'>;
+  /** The daemon's sessions: a runner it starts is registered as a session titled by its task (builtin/remote.ts). */
+  readonly sessionBroker?: Pick<import('../control-plane/session-broker.js').SharedSessionBroker, 'register'> | undefined;
+  /** The daemon's webhook notifier (builtin/notify.ts); absent, the notify capabilities say so. */
+  readonly webhookNotifier?: NotifyCapabilityServices['notify']['notifier'] | undefined;
+  /** The daemon's channel router and the sends it keeps receipts of (builtin/channel-send.ts); absent, a send says so. */
+  readonly channelSends?: ChannelSendCapabilityServices['channelSends'] | undefined;
   readonly hookDispatcher: HookDispatcher;
   readonly hookWorkbench: HookWorkbench;
   readonly secretsManager: SecretsManager;
@@ -80,6 +110,15 @@ export interface DaemonCapabilityServiceSources {
   readonly pluginManager?: PluginServiceSources['pluginManager'];
   /** The Agent's own stores (notes, personas, routines, drafts, artifacts), run by the daemon (builtin/agent-stores.ts). */
   readonly agentStores?: AgentStoreRunner | undefined;
+  /** Work and agents (builtin/media-collect.ts): the daemon's artifact store, which a collected image or video is read from. */
+  readonly artifactStore?: {
+    readContent(id: string): Promise<{ readonly buffer: Buffer }>;
+    /** Memory and knowledge (builtin/knowledge.ts): a file's content sent by the program that read it is kept here, then added. */
+    create?(input: { readonly dataBase64: string; readonly filename: string; readonly acquisitionMode: 'inline-data'; readonly fetchMode: 'not-applicable' }): Promise<{ readonly id: string }>;
+    delete?(id: string): unknown;
+  } | undefined;
+  /** Models and providers: blind model comparisons, run by the daemon (builtin/compare.ts). */
+  readonly modelComparisons?: ModelComparisonRunner | undefined;
   /**
    * The daemon's remote runners (builtin/remote.ts, runtime/remote/daemon-runners.ts): its runner registry and
    * supervisor, the store and bus a runner reports to, the agent manager a local rerun starts in, and the gate a
@@ -102,6 +141,8 @@ export interface DaemonCapabilityServiceSources {
   readonly userPermissionRuleStore?: Pick<import('../permissions/user-rule-store.js').UserPermissionRuleStore, 'add'> | undefined;
   readonly tokenAuditor?: Pick<import('../security/token-audit.js').ApiTokenAuditor, 'auditAll'> | undefined;
   readonly workspaceTrustManager?: import('../runtime/workspace-trust.js').WorkspaceTrustManager | undefined;
+  /** Permissions and safety (builtin/security-review.ts): the daemon's policy state, which writes the one activation record. */
+  readonly policyRuntimeState?: import('../runtime/permissions/policy-runtime.js').PolicyRuntimeState | undefined;
   /** Memory and knowledge (builtin/knowledge.ts): the daemon's one knowledge store. */
   readonly knowledgeService?: import('../knowledge/service.js').KnowledgeService | undefined;
   /** Models and providers (builtin/models.ts, services.ts): the daemon's provider stack, sign-ins and services file (models-services.ts). */
@@ -112,6 +153,10 @@ export interface DaemonCapabilityServiceSources {
   readonly subscriptionManager?: ModelsServiceSources['subscriptionManager'];
   readonly serviceRegistry?: ModelsServiceSources['serviceRegistry'];
   readonly mediaProviders?: ModelsServiceSources['mediaProviders'];
+  /** Work (builtin/work.ts): the daemon's plans before they run, where a proposed piece of work waits. */
+  readonly workPlans?: Pick<import('../workflow/work-ledger/work-plans.js').WorkPlans, 'propose'> | undefined;
+  /** A project's own plans before they run (the daemon keeps Work per project), made on its first use. */
+  readonly workPlansFor?: ((project: string) => Promise<Pick<import('../workflow/work-ledger/work-plans.js').WorkPlans, 'propose'>>) | undefined;
 }
 
 /** Something this daemon was composed without: every use of it says so, in one sentence. */
@@ -122,10 +167,18 @@ function absent<T extends object>(what: string): T {
 }
 
 /** Memory and knowledge (builtin/memory.ts, knowledge.ts, templates.ts): the copies of memory, the one knowledge store, the template files. */
-function memoryAndKnowledgeServices(sources: DaemonCapabilityServiceSources): Pick<DaemonCapabilityServices, 'memoryCopies' | 'knowledge' | 'knowledgeAsk' | 'templates'> {
+function memoryAndKnowledgeServices(sources: DaemonCapabilityServiceSources): Pick<DaemonCapabilityServices, 'memoryCopies' | 'knowledge' | 'knowledgeAsk' | 'knowledgeFiles' | 'templates'> {
   const knowledgeService = sources.knowledgeService;
   const homeDirectory = sources.homeDirectory ?? (sources.shellPaths as Partial<Pick<ShellPathService, 'homeDirectory'>> | undefined)?.homeDirectory ?? resolveGoodVibesHome();
+  const store = sources.artifactStore;
   return {
+    // A file's content sent from the machine it is on, kept as an artifact so it is added as a saved artifact is.
+    ...(store?.create ? { knowledgeFiles: {
+      async keep(input: { readonly bytes: Buffer; readonly filename: string }) {
+        const saved = await store.create!({ dataBase64: input.bytes.toString('base64'), filename: input.filename, acquisitionMode: 'inline-data', fetchMode: 'not-applicable' });
+        return { artifactId: saved.id, discard: () => { try { store.delete?.(saved.id); } catch { /* the store's own sweep retires it */ } } };
+      },
+    } } : {}),
     memoryCopies: sources.memoryRegistry,
     knowledge: knowledgeService ? createKnowledgeApi(knowledgeService) : absent<KnowledgeApi>('its knowledge store'),
     knowledgeAsk: (input, options) => {
@@ -144,9 +197,12 @@ function memoryAndKnowledgeServices(sources: DaemonCapabilityServiceSources): Pi
 
 /** The asking program's view of the secret stores: the daemon's, then its own and its project's (as it reads them). */
 function secretsViewFor(sources: DaemonCapabilityServiceSources, caller: CapabilityCaller): SecretsView {
-  if (!caller.program) return sources.secretsManager;
-  const projectRoot = caller.workingDirectory ? resolve(caller.workingDirectory) : sources.configManager.getWorkingDirectory() ?? process.cwd();
-  return new SecretsManager({ projectRoot, globalHome: sources.secretsManager.getGlobalHome(), surfaceRoot: caller.program, configManager: sources.configManager });
+  // A caller that named no folder reads the daemon's own stores. One that named its project reads that project's store
+  // (as the terminal app keeps it when no program is named, the store "This project" writes: writerFor below), never
+  // the store of the folder the daemon started in.
+  if (!caller.workingDirectory) return sources.secretsManager;
+  const projectRoot = resolve(caller.workingDirectory);
+  return new SecretsManager({ projectRoot, globalHome: sources.secretsManager.getGlobalHome(), surfaceRoot: caller.program ?? 'tui', configManager: sources.configManager });
 }
 
 /** One folder trust per folder, on the shared register; the daemon's own folder is the daemon's own manager. */
@@ -204,6 +260,7 @@ function remoteServices(sources: DaemonCapabilityServiceSources): RemoteCapabili
           ? { port: judgment.port, permissionManager, config: { onDidInvalidate: (listener: () => void) => configManager.onDidInvalidate!(listener) } }
           : undefined),
         daemonHome: resolveGoodVibesDaemonHome(sources.homeDirectory ?? (sources.shellPaths as Partial<Pick<ShellPathService, 'homeDirectory'>> | undefined)?.homeDirectory ?? resolveGoodVibesHome()),
+        ...(sources.sessionBroker ? { sessionBroker: sources.sessionBroker } : {}),
       });
     },
     setup: () => ({
@@ -244,6 +301,28 @@ function daemonHookTrace(sources: DaemonCapabilityServiceSources): HookTraceStor
 }
 
 /**
+ * The hook runs of the daemon's own turns in one project (that project's hooks file, fired by its dispatcher), added
+ * to the one hook trace stamped with that project, so `hooks.trace` from the project shows them and no other does.
+ */
+export function traceProjectHookRuns(shellPaths: ShellPathService | undefined, project: string, tracker: Pick<HookActivityTracker, 'onRecord'>): void {
+  const path = shellPaths
+    ? controlPlaneStorePath(shellPaths, DAEMON_STATE_SURFACE_ROOT, 'hook-trace.json')
+    : join(resolveGoodVibesTreeDirectory(), DAEMON_STATE_SURFACE_ROOT, 'control-plane', 'hook-trace.json');
+  let store = HOOK_TRACES.get(path);
+  if (!store) {
+    store = new HookTraceStore(path);
+    HOOK_TRACES.set(path, store);
+  }
+  if (TRACED.has(tracker)) return;
+  TRACED.add(tracker);
+  const kept = store;
+  const folder = resolve(project);
+  tracker.onRecord((record) => {
+    kept.add([hookTraceRecordOf(record, { id: `daemon:${process.pid}:${TRACE_STARTED}:${++traceSequence}`, program: 'daemon', project: folder })]);
+  });
+}
+
+/**
  * Tools and extensions (builtin/skills.ts, program-settings.ts): the one skill store as the asking program's
  * turns read it (its project's skill folders and the home's, its own surface folder), its curated catalog, and
  * its own settings and presets, read fresh for each call so a change the program made since is never undone.
@@ -273,10 +352,14 @@ function programFilesServices(sources: DaemonCapabilityServiceSources): Pick<Dae
         const daemonTierPath = config.getDaemonTierPath?.() ?? undefined;
         const project = projectOf(caller);
         // The program's own settings files, as that program reads them; the daemon's file for a daemon-owned setting.
-        return new ConfigManager({
+        // Its own settings beyond the schema and the defaults it sets are known, so they read and change here as there.
+        const manager = new ConfigManager({
           homeDir: homeOf(), ...(project ? { workingDir: project } : {}), surfaceRoot: programOf(caller),
           ...(daemonTierPath ? { daemonTierPath, ownsDaemonTier: true } : {}),
+          hostSettings: PROGRAM_HOST_SETTINGS[programOf(caller)],
         });
+        for (const [key, value] of TERMINAL_PROGRAM_DEFAULTS) manager.setRuntimeDefault(key as ConfigKey, value as never);
+        return manager;
       },
       presets: (caller) => new ProfileManager(join(goodvibesRoot(), programOf(caller), 'profiles')),
       resolvePath,
@@ -292,6 +375,100 @@ const DETACHED_DISPATCHER = {
   getChains: () => [],
 };
 
+/**
+ * builtin/google.ts: the daemon's one Google connection (google/daemon-work.ts), on its own settings and secret store,
+ * announced as the `google` list changing; a consent link nobody is sitting at goes to the owner inbox.
+ */
+function googleServices(sources: DaemonCapabilityServiceSources): GoogleCapabilityServices['google'] {
+  const homeDirectory = sources.homeDirectory ?? (sources.shellPaths as Partial<Pick<ShellPathService, 'homeDirectory'>> | undefined)?.homeDirectory ?? dirname(resolveGoodVibesHome());
+  // The daemon hands its whole owner inbox; this source names only its reads, so its posting is looked for.
+  const inbox = sources.ownerInbox as unknown as Partial<Pick<import('../control-plane/owner-inbox.js').OwnerInbox, 'postNow' | 'withdraw'>> | undefined;
+  return daemonGoogleWork({
+    config: { get: (key) => sources.configManager.get(key as ConfigKey), setDynamic: (key, value) => sources.configManager.setDynamic(key as ConfigKey, value as never) },
+    secrets: sources.secretsManager,
+    homeDirectory,
+    changed: () => noteListChanged({ list: 'google', change: 'changed' }),
+    ...(inbox?.postNow && inbox.withdraw ? {
+      postConsent: (link: string) => {
+        const posted = inbox.postNow!({ kind: 'report', key: 'google-consent', askedBy: 'google', title: 'Approve Google access',
+          detail: `Open this link in a browser signed in to the Google account to connect, and approve it (it asks for mail and calendar together):\n${link}` }, 'google');
+        const id = posted.item.id;
+        return () => { try { inbox.withdraw!(id, 'The Google consent ended.'); } catch { /* answered or gone already */ } };
+      },
+    } : {}),
+  });
+}
+
+/**
+ * builtin/calendar.ts: the daemon's calendar on this computer (calendar/local-calendar.ts, the same one the calendar
+ * methods serve) and its calendar accounts (calendar/daemon-accounts.ts), over its own settings and secret store.
+ */
+function calendarHereServices(sources: DaemonCapabilityServiceSources): CalendarHereCapabilityServices['calendarHere'] {
+  const homeOf = (): string => sources.homeDirectory ?? (sources.shellPaths as Partial<Pick<ShellPathService, 'homeDirectory'>> | undefined)?.homeDirectory ?? resolveGoodVibesHome();
+  const secretsManager = sources.secretsManager;
+  const secrets = {
+    get: async (key: string) => revealOrNull(await secretsManager.get(key), 'dispatch'),
+    set: (key: string, value: string) => secretsManager.set(key, value, { scope: resolveSecretWriteScope(key) }),
+    delete: (key: string) => secretsManager.delete(key),
+    unreadable: (key: string) => unreadableSecretStore(secretsManager as unknown as StoredSecretReader, key, 'the calendar connection'),
+  };
+  const ledger = getProcessUntrustedContentLedger();
+  const changed = (): void => noteListChanged({ list: 'calendar', change: 'changed' });
+  const configString = (key: string): string => {
+    try { const value = sources.configManager.get(key as ConfigKey); return typeof value === 'string' ? value.trim() : ''; } catch { return ''; }
+  };
+  // A sign-in link for a run nobody is sitting at goes to the owner inbox, as the Google connection's consent link does.
+  const inbox = sources.ownerInbox as unknown as Partial<Pick<import('../control-plane/owner-inbox.js').OwnerInbox, 'postNow' | 'withdraw'>> | undefined;
+  return {
+    ...(inbox?.postNow && inbox.withdraw ? {
+      postSignIn: (title: string, detail: string) => {
+        const posted = inbox.postNow!({ kind: 'report', key: 'calendar-sign-in', askedBy: 'calendar', title, detail }, 'calendar');
+        const id = posted.item.id;
+        return () => { try { inbox.withdraw!(id, 'The calendar sign-in ended.'); } catch { /* answered or gone already */ } };
+      },
+    } : {}),
+    local: () => daemonLocalCalendar(homeOf(), secrets, (ingest) => { ledger.record(ingest); }),
+    accounts: () => daemonCalendarAccounts(homeOf(), {
+      get: (key) => sources.configManager.get(key as ConfigKey),
+      set: (key, value) => {
+        sources.configManager.validateDynamic(key as ConfigKey, value);
+        sources.configManager.setDynamic(key as ConfigKey, value);
+      },
+      storeClientSecret: async (configKey, value) => {
+        await persistSecretBackedConfigValue(sources.configManager as unknown as Parameters<typeof persistSecretBackedConfigValue>[0], secretsManager, configKey as ConfigKey, value);
+      },
+      secrets,
+      changed,
+    }),
+    caldavSet: () => configString('surfaces.calendar.caldavUrl').length > 0 && configString('surfaces.calendar.caldavUser').length > 0,
+    resolvePath: (caller, path) => resolveCallerPath(
+      caller.workingDirectory ? resolve(caller.workingDirectory) : sources.configManager.getWorkingDirectory() ?? homeOf(), path),
+    changed,
+  };
+}
+
+/** builtin/notify.ts: the daemon's list of webhook addresses as stored, written back to its settings and handed to its notifier. */
+function notifyServices(sources: DaemonCapabilityServiceSources): NotifyCapabilityServices['notify'] {
+  const notifier = (): NotifyCapabilityServices['notify']['notifier'] => {
+    if (!sources.webhookNotifier) throw new CapabilityRefusal('This daemon was started without its notifier; nothing was sent or changed.', undefined, 'UNAVAILABLE');
+    return sources.webhookNotifier;
+  };
+  return {
+    addresses: () => {
+      const stored = sources.configManager.getCategory('notifications').webhookUrls;
+      return Array.isArray(stored) ? stored.filter((entry): entry is string => typeof entry === 'string') : [];
+    },
+    keep: (addresses) => {
+      sources.configManager.mergeCategory('notifications', { webhookUrls: [...addresses] });
+      sources.webhookNotifier?.setUrls([...addresses]);
+    },
+    secrets: sources.secretsManager,
+    get notifier() { return notifier(); },
+    // The same reading the daemon's notifier makes at each delivery (runtime-graph.ts).
+    metadataOnly: () => readNotificationsMetadataOnly(() => sources.configManager.get(NOTIFICATIONS_METADATA_ONLY_KEY as ConfigKey)),
+  };
+}
+
 export function createDaemonCapabilityServices(sources: DaemonCapabilityServiceSources): DaemonCapabilityServices {
   const own = createHookApi({
     dispatcher: createHookApiDispatcher(sources.hookDispatcher),
@@ -306,13 +483,25 @@ export function createDaemonCapabilityServices(sources: DaemonCapabilityServiceS
     ...(sources.webSearchService ? { webSearch: sources.webSearchService } : {}),
     ...createMcpCapabilityServices(sources),
     ...createPluginCapabilityServices(sources),
+    // System (builtin/system-setup.ts): the home folder the one setup record is under (`~/.goodvibes/daemon/setup-state.json`).
+    setupHome: () => sources.homeDirectory ?? (sources.shellPaths as Partial<Pick<ShellPathService, 'homeDirectory'>> | undefined)?.homeDirectory ?? resolveGoodVibesHome(),
+    // System (builtin/system-updates.ts): the daemon's settings and sign-ins an update review names, and where a file goes.
+    systemUpdates: {
+      get: (key) => sources.configManager.get(key as ConfigKey),
+      subscriptionProviders: () => {
+        try { return sources.subscriptionManager?.list().map((entry) => entry.provider) ?? []; } catch { return []; }
+      },
+      resolvePath: (caller, path) => resolveCallerPath(
+        caller.workingDirectory ? resolve(caller.workingDirectory) : sources.configManager.getWorkingDirectory() ?? sources.homeDirectory ?? resolveGoodVibesHome(), path),
+    },
     hooks: {
       trace: (options) => hookTrace.list(options),
       record: (runs) => hookTrace.add(runs),
       forProject(workingDirectory) {
         const daemonDirectory = sources.configManager.getWorkingDirectory();
-        if (!workingDirectory || (daemonDirectory && resolve(workingDirectory) === resolve(daemonDirectory))) return own;
-        const directory = resolve(workingDirectory);
+        // The caller's project only: with none named, nothing reads or writes the daemon folder's hooks file (caller-project.ts).
+        const directory = requireCallerProject(workingDirectory, 'the hooks file');
+        if (daemonDirectory && directory === projectIdentityOf(daemonDirectory)) return own;
         let api = projects.get(directory);
         if (!api) {
           const workbench = new HookWorkbench(DETACHED_DISPATCHER, () => hooksFileOf(directory));
@@ -333,8 +522,12 @@ export function createDaemonCapabilityServices(sources: DaemonCapabilityServiceS
             where: 'the daemon\'s secret store, which every GoodVibes program on this machine reads first',
           };
         }
-        const projectRoot = caller.workingDirectory ? resolve(caller.workingDirectory) : sources.configManager.getWorkingDirectory();
-        if (!projectRoot) throw new Error('no project folder was given for a project secret');
+        // "This project" is the caller's project, never the folder the daemon started in: no folder, nothing kept.
+        const projectRoot = caller.workingDirectory ? resolve(caller.workingDirectory) : undefined;
+        if (!projectRoot) {
+          throw new CapabilityRefusal('Nothing was kept: "This project" needs the project\'s folder, and none was named.',
+            'Send it from the project (its folder), or keep it for every project.');
+        }
         const program = caller.program ?? 'tui';
         const store = new SecretsManager({
           projectRoot, globalHome: sources.secretsManager.getGlobalHome(), surfaceRoot: program,
@@ -355,16 +548,39 @@ export function createDaemonCapabilityServices(sources: DaemonCapabilityServiceS
     ...programFilesServices(sources),
     // The Agent's own stores: the daemon's runner over them, absent where this daemon was composed without it.
     ...(sources.agentStores ? { agentStores: sources.agentStores } : {}),
+    // Work and agents (builtin/media-collect.ts): a collected image or video, read to be written into the asking program's project.
+    ...(sources.artifactStore ? { artifactContent: async (id: string) => (await sources.artifactStore!.readContent(id)).buffer } : {}),
+    // Models and providers: the daemon's model comparison runner (builtin/compare.ts), absent where it was composed without it.
+    ...(sources.modelComparisons ? { modelComparisons: sources.modelComparisons } : {}),
     // The daemon's own mailbox settings (`surfaces.email.*`, the daemon's) and its secret store.
-    mailbox: mailboxServices({
-      get: (key) => sources.configManager.get(key as ConfigKey),
-      setDynamic: (key, value) => sources.configManager.setDynamic(key as ConfigKey, value),
-      validateDynamic: (key, value) => sources.configManager.validateDynamic(key as ConfigKey, value),
-    }, sources.secretsManager),
+    mailbox: {
+      ...mailboxServices({
+        get: (key) => sources.configManager.get(key as ConfigKey),
+        setDynamic: (key, value) => sources.configManager.setDynamic(key as ConfigKey, value),
+        validateDynamic: (key, value) => sources.configManager.validateDynamic(key as ConfigKey, value),
+      }, sources.secretsManager),
+      // "Set up mail" checks the mailbox once with what it set: each half signed in to, nothing read or sent.
+      test: () => new EmailService(withSurfaceEmailConfig({
+        getConfig: (key: string) => sources.configManager.get(key as ConfigKey),
+        secretsManager: { get: (key: string) => sources.secretsManager.get(key) },
+        transport: nodeEmailTransport,
+        describeSenderClaim: describeSenderClaimNeutrally,
+      })).testEach(),
+    },
+    // The daemon's one list of webhook addresses (`notifications.webhookUrls`, the daemon's), its secret store and notifier.
+    notify: notifyServices(sources),
+    // The calendar on this computer, its feeds and the calendar accounts (builtin/calendar.ts).
+    calendarHere: calendarHereServices(sources),
+    // The daemon's channel router and the sends it keeps (builtin/channel-send.ts).
+    channelSends: sources.channelSends ?? absent<ChannelSendCapabilityServices['channelSends']>('its channel router'),
+    // The daemon's one Google connection (builtin/google.ts): connected, checked and disconnected as the daemon's work.
+    google: googleServices(sources),
     // The daemon's remote runners (builtin/remote.ts): one holder per registry, made on first use.
     remote: remoteServices(sources),
     // Models and providers (builtin/models.ts, services.ts): the daemon's provider stack, sign-ins and services file.
     ...createModelsCapabilityServices(sources),
+    // System (builtin/system-bundles.ts): a program's support bundle, support folder and setup moved to another computer.
+    ...createSupportCapabilityServices(sources),
     // The daemon's machine group (builtin/cluster.ts), read on each call: the group runtime is composed after the router.
     cluster: { verbs: () => sources.clusterVerbs?.() ?? null },
     // Devices and network (builtin/network-scan.ts): the one network-scan decision and the daemon's own scan.
@@ -373,11 +589,18 @@ export function createDaemonCapabilityServices(sources: DaemonCapabilityServiceS
     settingsSync: { daemon: () => sources.configManager as ConfigManager },
     // The daemon's one owner inbox (builtin/waiting.ts): what waits on the owner, and what was decided for him.
     ...(sources.ownerInbox ? { ownerInbox: sources.ownerInbox } : {}),
+    // Work (builtin/work.ts): a piece of work proposed with its plan waits among the daemon's plans before they run.
+    // Kept per project: the caller's project's plans when the daemon keeps Work per project, else its one set.
+    ...(sources.workPlans ? { workProposals: { propose: async (proposal, project) => (project && sources.workPlansFor ? await sources.workPlansFor(project) : sources.workPlans!).propose(proposal) } } : {}),
     // Permissions and safety (builtin/permissions.ts, security.ts): the one rule store, the token audit, folder trust.
     permissionRules: {
       add: (record) => {
         if (!sources.userPermissionRuleStore) throw new CapabilityRefusal('This daemon was started without the permission rule store; no rule was added.', undefined, 'UNAVAILABLE');
         return sources.userPermissionRuleStore.add(record);
+      },
+      list: () => {
+        if (!sources.userPermissionRuleStore) throw new CapabilityRefusal('This daemon was started without the permission rule store; no rule was read.', undefined, 'UNAVAILABLE');
+        return sources.userPermissionRuleStore.list();
       },
     },
     security: {
@@ -390,5 +613,43 @@ export function createDaemonCapabilityServices(sources: DaemonCapabilityServiceS
       folder: folderTrustServices(sources),
       changed: () => safetyChanged(),
     },
+    // Permissions and safety (builtin/security-review.ts): the one policy record, the trust summary, the sandbox setting.
+    securityReview: securityReviewServices(sources),
+  };
+}
+
+/**
+ * The policy bundles (the daemon's policy state writes the one activation record every program follows), what is
+ * trusted, and the sandbox setting (`sandbox.mcpIsolation` on the daemon's settings, which every program follows).
+ */
+function securityReviewServices(sources: DaemonCapabilityServiceSources): DaemonCapabilityServices['securityReview'] {
+  const config = sources.configManager as DaemonCapabilityServiceSources['configManager'] & Partial<Pick<ConfigManager, 'getAll' | 'getControlPlaneConfigDir'>>;
+  return {
+    policy: () => {
+      if (!sources.policyRuntimeState) throw new CapabilityRefusal('This daemon was started without its policy state; no policy was read or changed.', undefined, 'UNAVAILABLE');
+      return sources.policyRuntimeState;
+    },
+    config: () => {
+      if (!config.getAll) throw new CapabilityRefusal('This daemon cannot read its settings whole for the review; nothing was reviewed.', undefined, 'UNAVAILABLE');
+      return config.getAll();
+    },
+    mcpServers: () => sources.mcpRegistry?.listServerSecurity() ?? [],
+    plugins: () => {
+      try { return sources.pluginManager?.list() ?? []; } catch { return []; }
+    },
+    serviceNames: () => {
+      try { return Object.keys(sources.serviceRegistry?.getAll() ?? {}); } catch { return []; }
+    },
+    permissionMode: () => describePermissionModeInForce(sources.configManager),
+    sandboxConfig: () => ({ get: (key) => sources.configManager.get(key as ConfigKey) }),
+    setMcpIsolation: (mode) => { sources.configManager.setDynamic('sandbox.mcpIsolation' as ConfigKey, mode as never); },
+    setSandboxEnabled: (on) => { sources.configManager.setDynamic('sandbox.enabled' as ConfigKey, on as never); },
+    carriedNote: () => {
+      const dir = config.getControlPlaneConfigDir?.();
+      return dir ? carriedPolicyNote(dir) : null;
+    },
+    resolvePath: (caller, path) => resolveCallerPath(
+      caller.workingDirectory ? resolve(caller.workingDirectory) : sources.configManager.getWorkingDirectory() ?? sources.homeDirectory ?? resolveGoodVibesHome(), path),
+    changed: () => safetyChanged('changed', 'policy'),
   };
 }

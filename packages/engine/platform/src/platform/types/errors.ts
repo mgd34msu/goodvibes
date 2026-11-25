@@ -13,6 +13,7 @@ import {
   type FailureEvidence,
 } from '@goodvibes/engine/errors';
 import { readRetryWaitMs } from './batteries/retry-wait.js';
+import { CONTENT_FILTER_CODES, CONTEXT_REFUSAL_CODES, isContextRefusalCode, MODEL_NOT_FOUND_CODE } from '../core/provider-refusal-codes.js';
 
 export { RETRYABLE_STATUS_CODES };
 
@@ -20,7 +21,31 @@ export interface ProviderErrorOptions extends AppErrorOptions {
   readonly statusCode?: number | undefined;
 }
 
-function inferProviderGuidance(category: PlatformErrorCategory, statusCode?: number): string | undefined {
+/**
+ * What to do next for a conversation a model refused as too long for its context window: shorten it. Said in place of
+ * the request-shape hint a 400 would otherwise get, which points at the model id and the tool schema instead.
+ */
+export const CONTEXT_REFUSAL_GUIDANCE = 'The conversation is too long for this model. Shorten it with "Compact the conversation now" in This conversation (or /compact), then send again; or start a fresh conversation.';
+
+/**
+ * Guidance for a 400-class refusal whose provider code names its cause, when that cause is not the request's shape.
+ * Each code here otherwise got "The provider rejected the request shape", which sends the person to the wrong place.
+ */
+function guidanceForProviderCode(providerCode: string | undefined): string | undefined {
+  if (providerCode === undefined) return undefined;
+  if (CONTEXT_REFUSAL_CODES.has(providerCode)) return CONTEXT_REFUSAL_GUIDANCE;
+  if (CONTENT_FILTER_CODES.has(providerCode)) {
+    return 'The provider\'s content filter refused this request. Rephrase what was asked, or choose another model.';
+  }
+  if (providerCode === MODEL_NOT_FOUND_CODE) return 'The provider does not have this model. Check the model id and the provider it is chosen from.';
+  return undefined;
+}
+
+function inferProviderGuidance(category: PlatformErrorCategory, statusCode?: number, providerCode?: string): string | undefined {
+  if (category === 'bad_request' || category === 'not_found') {
+    const named = guidanceForProviderCode(providerCode);
+    if (named !== undefined) return named;
+  }
   switch (category) {
     case 'rate_limit':
       return 'The provider rate limited this request. GoodVibes will retry automatically when the caller supports retries. If this keeps happening, wait, reduce request volume, or switch models/providers.';
@@ -79,7 +104,7 @@ export class ProviderError extends AppError {
     // The status fixes a provisional category; whether a 400 or 429 is really a
     // spent account is read from the wording where it matters (readProviderFailure).
     const category = options.category ?? categoryForStatus(statusCode) ?? 'unknown';
-    const guidance = options.guidance ?? inferProviderGuidance(category, statusCode);
+    const guidance = options.guidance ?? inferProviderGuidance(category, statusCode, options.providerCode);
 
     // Whether a retry can clear it is the structure's answer (status, the
     // cause's connection code, category), not a rule of this class; a failure
@@ -240,8 +265,8 @@ export async function isRateLimitOrQuotaError(err: unknown, site = 'types.errors
 
 /** Statuses a context-window refusal comes back with; any other status answers no without a reading. */
 const CONTEXT_REFUSAL_STATUS: ReadonlySet<number> = new Set([400, 413, 422]);
-/** Provider codes that name a context-window refusal outright. */
-const CONTEXT_REFUSAL_CODES: ReadonlySet<string> = new Set(['context_length_exceeded', 'request_too_large', 'string_above_max_length']);
+// The codes themselves are in core/provider-refusal-codes.ts, the one list the failure reading reads too.
+export { isContextRefusalCode };
 
 /**
  * Whether the error says the model's context window was exceeded. Structure

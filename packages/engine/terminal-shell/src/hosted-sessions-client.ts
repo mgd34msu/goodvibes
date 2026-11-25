@@ -70,10 +70,13 @@ export interface HostedSessionsClient {
   attach(sessionId: string): Promise<HostedSessionAttachment>;
   detach(sessionId: string): Promise<HostedSessionRecord>;
   kill(sessionId: string): Promise<HostedSessionRecord>;
-  /** Send a message into a running hosted session, the ordinary steer verb. */
-  steer(sessionId: string, body: string): Promise<void>;
-  /** Queue a message for after the current turn, the ordinary follow-up verb. */
-  followUp(sessionId: string, body: string): Promise<void>;
+  /**
+   * Send a message into a running hosted session, the ordinary steer verb. `personAsked`: the person typed it himself;
+   * only then does the call carry a person's claim (the daemon then runs it as his own turn in the session's project).
+   */
+  steer(sessionId: string, body: string, personAsked?: boolean): Promise<void>;
+  /** Queue a message for after the current turn, the ordinary follow-up verb (`personAsked` as for `steer`). */
+  followUp(sessionId: string, body: string, personAsked?: boolean): Promise<void>;
   /** Cancel one in-flight tool call, the ordinary live-turn verb. */
   cancelToolCall(sessionId: string, callId: string): Promise<boolean>;
 }
@@ -141,11 +144,11 @@ export function createHostedSessionsClient(
       }>('sessions.hosted.kill', { sessionId });
       return result.session;
     },
-    async steer(sessionId, body): Promise<void> {
-      await verbs.invoke('sessions.steer', { sessionId, body, surfaceKind });
+    async steer(sessionId, body, personAsked): Promise<void> {
+      await verbs.invoke('sessions.steer', { sessionId, body, surfaceKind }, personAsked === true ? { explicitUserRequest: true } : undefined);
     },
-    async followUp(sessionId, body): Promise<void> {
-      await verbs.invoke('sessions.followUp', { sessionId, body, surfaceKind });
+    async followUp(sessionId, body, personAsked): Promise<void> {
+      await verbs.invoke('sessions.followUp', { sessionId, body, surfaceKind }, personAsked === true ? { explicitUserRequest: true } : undefined);
     },
     async cancelToolCall(sessionId, callId): Promise<boolean> {
       const result = await verbs.invoke<{
@@ -165,10 +168,13 @@ export function createHostedSessionsClient(
  * here is how a user learns the wrong thing about a quit.
  */
 export function describeDetachEffect(record: HostedSessionRecord): string {
-  const source = record.detachPolicy === null ? 'the hostedSessions.detachPolicy setting' : "this session's own override";
+  // In words, never a setting key: the setting is named by its label in Settings.
+  const source = record.detachPolicy === null
+    ? 'as Settings says ("What happens to a daemon session when its last window closes")'
+    : 'as this session was started to do';
   return record.effectiveDetachPolicy === 'survive'
-    ? `leaving keeps it running (survive, from ${source})`
-    : `leaving ends it (kill, from ${source})`;
+    ? `when this terminal leaves, it keeps running in the daemon and can be joined again, ${source}`
+    : `when this terminal leaves and no other window has it open, it ends, ${source}`;
 }
 /** A short, stable label for a record in a list. Never invents a title. */
 export function hostedSessionLabel(record: HostedSessionRecord): string {

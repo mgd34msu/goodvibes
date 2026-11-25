@@ -37,8 +37,8 @@ export const SETTING_DOMAIN_VOCABULARY: Readonly<Record<string, SettingDomainVoc
       'price', 'cost', 'charge', 'refund', 'cvv', 'expiry', 'approval window', 'veto window',
     ],
     relatedCommand: {
-      command: '/payments add-card',
-      why: 'The card number, expiry and verification code are never settings, they are typed at a local terminal through a masked prompt ("Add a card" in the Money place). The Money place also sets the two addresses and shows what is set.',
+      command: 'payments.add-card',
+      why: 'The card number, expiry and verification code are never settings: the owner types them, hidden, in "Add a card" on the Money place\'s Cards tab (the capability payments.add-card, the owner\'s own act). The Money place also sets the two addresses and shows what is set.',
     },
   },
   occasions: {

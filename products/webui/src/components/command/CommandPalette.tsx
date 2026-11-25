@@ -115,10 +115,13 @@ export function CommandPalette({ open, onClose, initialQuery = '', onRunCapabili
     }));
   }, [answer, findNeed, need, onRunCapability]);
   // Matching runs here on every keystroke: title, id, group and keywords, no request.
-  const visibleCommands = useMemo(
-    () => (searching ? [...classicCommandIndices(query, commands).map((index) => commands[index]!), ...foundRows] : commands),
-    [commands, query, searching, foundRows],
-  );
+  const visibleCommands = useMemo(() => {
+    if (!searching) return commands;
+    const matched = classicCommandIndices(query, commands).map((index) => commands[index]!);
+    // A capability found that a row above already opens is not listed twice.
+    const shown = new Set(matched.map((command) => command.title.toLowerCase()));
+    return [...matched, ...foundRows.filter((row) => !shown.has(row.title.toLowerCase()))];
+  }, [commands, query, searching, foundRows]);
   const sections = useMemo(() => buildPaletteSections(visibleCommands), [visibleCommands]);
   // The keyboard order is the on-screen order: section by section.
   const ordered = useMemo(() => sections.flatMap((group) => group.commands), [sections]);

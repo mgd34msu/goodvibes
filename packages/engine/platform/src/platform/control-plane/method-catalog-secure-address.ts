@@ -25,7 +25,7 @@ const STATUS_SCHEMA = objectSchema({
   inForce: objectSchema({
     on: BOOLEAN_SCHEMA, certificate: SOURCE, servedToNetwork: BOOLEAN_SCHEMA, serving: BOOLEAN_SCHEMA, port: NUMBER_SCHEMA,
     address: STRING_SCHEMA, names: STRINGS, notAfter: NUMBER_SCHEMA, problem: STRING_SCHEMA,
-    from: stringEnumSchema(['this-machine', 'group']), servedSource: SOURCE,
+    from: stringEnumSchema(['this-machine', 'group']), servedSource: SOURCE, reach: STRING_SCHEMA,
   }, ['on', 'certificate', 'servedToNetwork', 'serving']),
   letsEncrypt: objectSchema({
     domain: STRING_SCHEMA, tokenStored: BOOLEAN_SCHEMA, tokenUnreadable: STRING_SCHEMA, issuing: BOOLEAN_SCHEMA,
@@ -44,14 +44,17 @@ const STATUS_SCHEMA = objectSchema({
   group: objectSchema({
     following: objectSchema({ nodeId: STRING_SCHEMA, name: STRING_SCHEMA }, ['nodeId', 'name']),
     received: objectSchema({ leadName: STRING_SCHEMA, names: STRINGS, notAfter: NUMBER_SCHEMA, receivedAt: NUMBER_SCHEMA, source: SOURCE }, ['leadName', 'names', 'notAfter', 'receivedAt', 'source']),
-    followers: arraySchema(objectSchema({ name: STRING_SCHEMA, address: STRING_SCHEMA, covered: BOOLEAN_SCHEMA, needs: STRING_SCHEMA }, ['name', 'address', 'covered'])),
+    followers: arraySchema(objectSchema({ name: STRING_SCHEMA, address: STRING_SCHEMA, port: NUMBER_SCHEMA, covered: BOOLEAN_SCHEMA, needs: STRING_SCHEMA }, ['name', 'address', 'covered'])),
+    formerHolders: arraySchema(objectSchema({ name: STRING_SCHEMA, at: NUMBER_SCHEMA, until: NUMBER_SCHEMA, source: SOURCE }, ['name', 'at', 'until', 'source'])),
   }, ['followers']),
   reissue: objectSchema({ title: STRING_SCHEMA, line: STRING_SCHEMA, available: BOOLEAN_SCHEMA }, ['title', 'line', 'available']),
+  replaceAuthority: objectSchema({ title: STRING_SCHEMA, line: STRING_SCHEMA, question: STRING_SCHEMA, available: BOOLEAN_SCHEMA }, ['title', 'line', 'question', 'available']),
+  serve: objectSchema({ title: STRING_SCHEMA, line: STRING_SCHEMA, available: BOOLEAN_SCHEMA }, ['title', 'line', 'available']),
 }, ['intro', 'choices', 'groupLines', 'node', 'inForce', 'letsEncrypt', 'ownFiles', 'localAuthority', 'tailscale', 'group', 'reissue']);
 
 const INVALID: ContractErrorCode = { code: 'SECURE_ADDRESS_INVALID', status: 400, meaning: 'The change could not be made as given (a name that is not a domain name, a token Cloudflare refused for the name\'s zone, certificate files that are not a valid pair in force); the message says what to change, and nothing was written.' };
 const UNAVAILABLE: ContractErrorCode = { code: 'SECURE_ADDRESS_UNAVAILABLE', status: 409, meaning: 'There is no certificate GoodVibes can issue here now: the https address is off, or it serves a certificate the person made (they renew it themselves); nothing changed.' };
-const NODE: ContractErrorCode ={ code: 'SECURE_ADDRESS_NODE', status: 409, meaning: 'This machine is a node of a group whose lead has a secure address: it comes from the lead, and nothing is set here.' };
+const NODE: ContractErrorCode ={ code: 'SECURE_ADDRESS_NODE', status: 409, meaning: 'This machine is a member of a group whose lead has a secure address: it comes from the lead, and nothing is set here.' };
 
 export const builtinGatewaySecureAddressMethodDescriptors: readonly GatewayMethodDescriptor[] = [
   methodDescriptor({
@@ -95,5 +98,29 @@ export const builtinGatewaySecureAddressMethodDescriptors: readonly GatewayMetho
     inputSchema: objectSchema({}, []),
     outputSchema: objectSchema({ ok: BOOLEAN_SCHEMA, words: STRING_SCHEMA, status: STATUS_SCHEMA }, ['ok', 'words', 'status']),
     errorCodes: [UNAVAILABLE, NODE],
+  }),
+  methodDescriptor({
+    id: 'secureAddress.replaceAuthority',
+    repeat: 'unsafe',
+    title: 'Replace The Secure Address Authority',
+    description: 'The Secure address screen\'s "Replace the authority", where this computer serves GoodVibes\' own certificate: its certificate authority is removed and a new one made, and a new server certificate signed by it is served here and sent, sealed, to the machines that follow this computer. Every phone must then remove the old GoodVibes certificate and install the new one from the page /lan-https; until it does it shows a warning for the address. It is what ends, at once, the trust a phone gives a machine that left the group or was removed and still holds a certificate the old authority signed. It cannot be undone: the screens ask first, opening on No. No input. The answer is ok, one line of words (with the new authority\'s fingerprint) and the screen as secureAddress.get returns it; never a key. Refused 409 SECURE_ADDRESS_NODE on a member of a group, and 409 SECURE_ADDRESS_UNAVAILABLE when https is off or the certificate in force is not GoodVibes\' own.',
+    category: 'remote-access',
+    effects: ['control-plane.administer'],
+    transport: ['ws'],
+    inputSchema: objectSchema({}, []),
+    outputSchema: objectSchema({ ok: BOOLEAN_SCHEMA, words: STRING_SCHEMA, status: STATUS_SCHEMA }, ['ok', 'words', 'status']),
+    errorCodes: [UNAVAILABLE, NODE],
+  }),
+  methodDescriptor({
+    id: 'secureAddress.serve',
+    repeat: 'safe',
+    title: 'Serve Other Machines For The Secure Address',
+    description: 'The Secure address screen\'s "Serve other machines", offered while other machines are not served (controlPlane.enabled off, or the daemon listening on this computer only), when a phone cannot open the https address: what goodvibes-daemon webui enable --lan writes, so the daemon listens on the network and answers other machines; each still needs its own pairing or sign-in. The answer comes once the listener is bound again: ok, one line of words and the screen as secureAddress.get returns it. Refused 409 SECURE_ADDRESS_UNAVAILABLE when this daemon cannot change it from here.',
+    category: 'remote-access',
+    effects: ['control-plane.administer'],
+    transport: ['ws'],
+    inputSchema: objectSchema({}, []),
+    outputSchema: objectSchema({ ok: BOOLEAN_SCHEMA, words: STRING_SCHEMA, status: STATUS_SCHEMA }, ['ok', 'words', 'status']),
+    errorCodes: [UNAVAILABLE],
   }),
 ];

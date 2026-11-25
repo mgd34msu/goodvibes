@@ -19,9 +19,11 @@
  * and opens no second one. The link is the person's one act; approving it in
  * their browser is the real decision and stays theirs.
  *
- * The person sees the link through the listeners a process adds (the daemon's
- * owner inbox, the Agent's own screen); a tool result tells the model the
- * consent is already open and what the person sees.
+ * The repair is the daemon's alone (products/daemon google-repair-composition.ts):
+ * the person sees the link in the owner inbox, and a tool result tells the
+ * model the consent is already open and what the person sees. A terminal
+ * program's own process installs none, and a check (`google.status`) reads with
+ * a client that has no repair, so neither connects nor waits on a consent.
  */
 
 import { judgmentPort } from '@goodvibes/engine/errors';
@@ -171,7 +173,7 @@ export async function decideGoogleApiEnable(decider: GoogleApiEnableDecider, req
 
 export interface GoogleConnectionRepairDeps {
   readonly config: Pick<GoogleConfigPort, 'get'>;
-  /** The process's own secret store: the new grant is written here, as `/google reauthorize` writes it. */
+  /** The process's own secret store: the new grant is written here, as asking for consent again (`google.reauthorize`) writes it. */
   readonly secrets: GoogleSecretPort;
   readonly loopback: GoogleLoopbackListenerFactory;
   readonly fetchPort: GoogleFetchPort;
@@ -240,7 +242,7 @@ export class GoogleConnectionRepair {
       return {
         started: false,
         problem: `${CONSENT_REASON_WORDS[reason]} No Google OAuth client is stored on this machine, so no consent link can be made.`,
-        fix: 'Creating an OAuth client is the one step Google offers only in its console: /google connect walks through it and then shows the consent link.',
+        fix: 'Creating an OAuth client is the one step Google offers only in its console: "connect" on the Google tab of Mail, calendar and channels walks through it and then shows the consent link.',
       };
     }
     const loginHint = safeConfigString(this.#deps.config, GOOGLE_CONFIG_KEYS.emailUsername)
@@ -348,7 +350,7 @@ export class GoogleConnectionRepair {
     const request: GoogleApiEnableRequest = { services, project, account: signedIn.account };
     const decider = this.#deps.decider;
     if (decider === undefined) {
-      return { repaired: false, problem: `${failure.problem} This program has no one to decide turning on ${what}, so nothing was changed.`, fix: 'Make the request from the Agent or the web app, where the decision is put under your mode.' };
+      return { repaired: false, problem: `${failure.problem} Nothing was changed.`, fix: '"enable it" on the Google tab of Mail, calendar and channels turns it on.' };
     }
     // The decision's owning signal: the repair's lifetime (closed with the process's composition).
     const decision = await decideGoogleApiEnable(decider, request, this.#lifetime.signal);

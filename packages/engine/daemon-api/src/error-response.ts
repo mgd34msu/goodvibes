@@ -177,12 +177,34 @@ function isProviderAttributed(fields: {
     || fields.providerType !== undefined;
 }
 
+/**
+ * A 400-class provider refusal whose code (or Jev's reading) names a cause other than the request's shape gets the
+ * words for that cause, never "Check model id, parameters, message format, and tool schema". Kept in step with
+ * guidanceForProviderCode in platform types/errors.ts.
+ */
+function namedCauseHint(providerCode: string | undefined, contextExceeded: boolean): string | undefined {
+  if (contextExceeded || providerCode === 'context_length_exceeded' || providerCode === 'request_too_large' || providerCode === 'string_above_max_length') {
+    return 'The conversation is too long for this model. Shorten it with "Compact the conversation now" in This conversation (or /compact), then send again; or start a fresh conversation.';
+  }
+  if (providerCode === 'content_filter' || providerCode === 'content_policy_violation') {
+    return 'The provider\'s content filter refused this request. Rephrase what was asked, or choose another model.';
+  }
+  if (providerCode === 'model_not_found') return 'The provider does not have this model. Check the model id and the provider it is chosen from.';
+  return undefined;
+}
+
 function inferHint(
   category: DaemonErrorCategory,
   status: number | undefined,
   providerAttributed: boolean,
+  providerCode?: string | undefined,
+  contextExceeded = false,
 ): string | undefined {
   if (!providerAttributed && category !== 'network' && category !== 'protocol') return undefined;
+  if (category === 'bad_request' || category === 'not_found') {
+    const named = namedCauseHint(providerCode, contextExceeded);
+    if (named !== undefined) return named;
+  }
   switch (category) {
     case 'rate_limit':
       return 'The caller may retry automatically. If this persists, wait, lower request volume, or switch models/providers.';
@@ -404,7 +426,7 @@ function buildUnreferencedErrorResponseBody(error: unknown, options: JsonErrorRe
     // A reading that turned a provisional category into billing replaces the
     // hint the error carried for that provisional category.
     const ownHint = category === fixed ? (error instanceof GoodVibesError ? error.hint : error.hint ?? error.guidance) ?? refused.next?.[0] : undefined;
-    const hint = ownHint ?? inferHint(category, status, providerAttributed);
+    const hint = ownHint ?? inferHint(category, status, providerAttributed, providerCode, options.failure?.contextExceeded === true);
     const summary = buildSummary(message, {
       requestId,
       providerCode,
@@ -457,7 +479,7 @@ function buildUnreferencedErrorResponseBody(error: unknown, options: JsonErrorRe
     const providerAttributed = isProviderAttributed({ source: source ?? options.source, provider, providerCode, providerType });
     const category = settleCategory(fixed, status, providerAttributed, options.failure);
     const ownHint = category === fixed ? readStringProperty(error.hint) ?? readStringProperty(error.guidance) ?? refused.next?.[0] : undefined;
-    const hint = ownHint ?? inferHint(category, status, providerAttributed);
+    const hint = ownHint ?? inferHint(category, status, providerAttributed, providerCode, options.failure?.contextExceeded === true);
     return {
       error: buildSummary(message, { requestId, providerCode, phase }),
       ...refused,

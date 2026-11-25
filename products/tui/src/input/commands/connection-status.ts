@@ -107,15 +107,15 @@ const SETUP_STEPS: Readonly<Record<string, readonly string[]>> = {
   EMAIL_NOT_CONFIGURED: [
     '/settings set surfaces.email.host imap.example.com',
     '/settings set surfaces.email.user you@example.com',
-    `/secrets set GOODVIBES_SURFACES_EMAIL_PASSWORD <password>. ${DAEMON_TIER_NOTE}`,
+    `"Store a secret" GOODVIBES_SURFACES_EMAIL_PASSWORD in Permissions and safety, Secrets. ${DAEMON_TIER_NOTE}`,
   ],
   EMAIL_CREDENTIALS_MISSING: [
-    `/secrets set GOODVIBES_SURFACES_EMAIL_PASSWORD <password>. ${DAEMON_TIER_NOTE}`,
+    `"Store a secret" GOODVIBES_SURFACES_EMAIL_PASSWORD in Permissions and safety, Secrets. ${DAEMON_TIER_NOTE}`,
   ],
   CALENDAR_NOT_CONFIGURED: [
     '/settings set surfaces.calendar.caldavUrl https://example.com/dav/',
     '/settings set surfaces.calendar.caldavUser you@example.com',
-    `/secrets set GOODVIBES_SURFACES_CALENDAR_CALDAV_PASSWORD <password>. ${DAEMON_TIER_NOTE}`,
+    `"Store a secret" GOODVIBES_SURFACES_CALENDAR_CALDAV_PASSWORD in Permissions and safety, Secrets. ${DAEMON_TIER_NOTE}`,
   ],
 };
 
@@ -202,7 +202,7 @@ export function describeConnectionProbe(
     surface,
     state: 'unreachable',
     detail: `${label} could not be checked: ${errorText(error)}`,
-    nextActions: ['Check that the daemon is running and reachable: /health'],
+    nextActions: ['Check that the daemon is running and reachable: System, Health, "See what needs attention"'],
   };
 }
 

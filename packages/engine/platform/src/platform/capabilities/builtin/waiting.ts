@@ -12,16 +12,18 @@
  * and an approval is decided at the revision shown.
  *
  * Home `session` (held by the program whose gate made them): a choice on a
- * call Jev decided (it is carried out where the decision was made: undo puts
- * back that program's files; never, always and ask save a standing rule), the
- * calls just-vibes held in this program's session, and the sends the content
- * check refused in this program.
+ * call Jev decided (it is carried out where the decision was made: keep, or
+ * never, always and ask, which save a standing rule), and
+ * the calls just-vibes held in this program's session.
+ *
+ * The sends the Agent's content check refused are in the inbox too (posted by
+ * the Agent, answered there): seeing them is the daemon's `google.waiting`.
  */
 import { formatRefusal } from '@goodvibes/engine/errors';
 import {
   listEveryOwnerItem, type OwnerAnswerDelivery, type OwnerAnswerOutcome, type OwnerInboxPort, type OwnerItem,
 } from '../../control-plane/owner-inbox.js';
-import { processHeldForOwner } from '../../permissions/held-for-owner.js';
+import { HELD_SEND_METADATA, processHeldForOwner } from '../../permissions/held-for-owner.js';
 import { JEV_DECISION_CHOICES } from '../../permissions/jev-decisions.js';
 import { CapabilityRefusal, type CapabilityDefinition, type CapabilityResult, type FixedChoice, type InputDescription, type ListName } from '../types.js';
 
@@ -34,19 +36,6 @@ export interface WaitingCapabilityServices {
 /** What a choice on a decision needs: the program's own inbox, which carries out a choice on a decision its gate made. */
 export interface DecisionsCapabilityServices {
   readonly ownerInbox?: Pick<OwnerInboxPort, 'list' | 'find' | 'answer'> | undefined;
-}
-
-/** A send the content check refused in this program, as the owner is shown it. */
-export interface HeldSend {
-  readonly id: number;
-  readonly description: string;
-  readonly content: Readonly<Record<string, string | undefined>>;
-  readonly at: number;
-}
-
-/** What "see the sends waiting" needs: this program's refused sends (only the Agent makes them). */
-export interface HeldSendsCapabilityServices {
-  readonly heldSends?: { list(): readonly HeldSend[] } | undefined;
 }
 
 /** The live lists the inputs choose from (registered in terminal-shell's waiting-lists.ts). */
@@ -125,7 +114,9 @@ export function formatOwnerItemDetail(item: OwnerItem): string {
     ...(item.expiresAt !== undefined ? [`${item.status === 'open' ? 'Expires' : 'Expired'}: ${when(item.expiresAt)}`] : []),
   ];
   if (item.status === 'open') {
-    lines.push(item.options.length > 0 ? `Its answers: ${item.options.join(', ')}.` : 'It takes an answer in your own words.');
+    // A report is a notice: it needs no answer, only to be marked read.
+    lines.push(item.kind === 'report' ? 'A notice: it needs no answer; mark it read once you have seen it.'
+      : item.options.length > 0 ? `Its answers: ${item.options.join(', ')}.` : 'It takes an answer in your own words.');
   } else if (item.status === 'answered') {
     lines.push(`Answered: ${answerText(item)}${item.answeredBy ? ` by ${plainInboxText(item.answeredBy.actor)} from ${plainInboxText(item.answeredBy.surface)}` : ''}${item.closedAt ? ` at ${when(item.closedAt)}` : ''}`);
     if (item.delivery) {
@@ -416,7 +407,7 @@ export const DECISIONS_LIST: CapabilityDefinition<WaitingCapabilityServices> = {
           `Jev decided${period}, and you can still change (${open.length}, newest first):`,
           ...open.map((item) => `  ${when(item.createdAt)}  ${formatOwnerItemLine(item)}`),
           '',
-          'Each can be kept, undone (the files the call changed are put back), or made a standing rule for calls like it (never, always, ask): decisions.keep, decisions.undo, decisions.never, decisions.always, decisions.ask.',
+          'Each can be kept, or made a standing rule for calls like it (never, always, ask): decisions.keep, decisions.never, decisions.always, decisions.ask.',
           '',
         ] : []),
         ...(closed.length > 0 ? [`Decided${period} (${closed.length}, newest first):`, ...closed.map((item) => `  ${item.closedAt !== undefined ? `${when(item.closedAt)}  ` : ''}${formatOwnerItemLine(item)}`)] : []),
@@ -435,7 +426,6 @@ type DecisionWord = keyof typeof JEV_DECISION_CHOICES;
 
 const DECISION_ACTIONS: readonly { readonly word: DecisionWord; readonly label: string; readonly sentence: string; readonly risk: 'none' | 'loosens-a-protection' }[] = [
   { word: 'keep', label: 'Leave a decision as Jev made it', sentence: '{decision} stays as Jev decided it, and nothing changes until you change it.', risk: 'none' },
-  { word: 'undo', label: 'Undo what a decision did', sentence: 'The files the call in {decision} changed are put back as they were before it, until you change it.', risk: 'none' },
   { word: 'never', label: 'Never allow calls like a decision\'s', sentence: 'Calls like the one in {decision} are refused from now on, until you change it.', risk: 'none' },
   { word: 'always', label: 'Always allow calls like a decision\'s without asking', sentence: 'Calls like the one in {decision} run without asking from now on, until you change it.', risk: 'loosens-a-protection' },
   { word: 'ask', label: 'Ask me every time about calls like a decision\'s', sentence: 'Calls like the one in {decision} are asked of you each time, before they run, from now on, until you change it.', risk: 'none' },
@@ -443,7 +433,7 @@ const DECISION_ACTIONS: readonly { readonly word: DecisionWord; readonly label: 
 
 function decisionChoice(choice: (typeof DECISION_ACTIONS)[number]): CapabilityDefinition<DecisionsCapabilityServices> {
   return {
-    // A decision is carried out by the program whose gate made it (undo puts back that program's files), so it runs there.
+    // A decision is carried out by the program whose gate made it (its rule store, its ledger), so it runs there.
     capability: { id: `decisions.${choice.word}`, group: 'waiting', home: 'session', repeat: 'safe' },
     actionId: choice.word, label: choice.label, word: choice.word, inputs: [DECISION],
     sentence: choice.sentence, done: '',
@@ -473,8 +463,8 @@ function decisionChoice(choice: (typeof DECISION_ACTIONS)[number]): CapabilityDe
   };
 }
 
-export const [DECISIONS_KEEP, DECISIONS_UNDO, DECISIONS_NEVER, DECISIONS_ALWAYS, DECISIONS_ASK] = DECISION_ACTIONS.map(decisionChoice) as [
-  CapabilityDefinition<DecisionsCapabilityServices>, CapabilityDefinition<DecisionsCapabilityServices>, CapabilityDefinition<DecisionsCapabilityServices>,
+export const [DECISIONS_KEEP, DECISIONS_NEVER, DECISIONS_ALWAYS, DECISIONS_ASK] = DECISION_ACTIONS.map(decisionChoice) as [
+  CapabilityDefinition<DecisionsCapabilityServices>, CapabilityDefinition<DecisionsCapabilityServices>,
   CapabilityDefinition<DecisionsCapabilityServices>, CapabilityDefinition<DecisionsCapabilityServices>,
 ];
 
@@ -541,22 +531,28 @@ export const HELD_DISMISS = heldAnswer('dismiss');
 // ---------------------------------------------------------------------------
 // The sends the content check refused
 
-export const GOOGLE_WAITING: CapabilityDefinition<HeldSendsCapabilityServices> = {
-  capability: { id: 'google.waiting', group: 'waiting', home: 'session', repeat: 'safe' },
-  actionId: 'waiting', label: 'See sends waiting for your approval', word: 'waiting', inputs: [],
-  sentence: 'Shows each send the content check refused, exactly as it would go out.', done: '',
+/** Whether an inbox item is a send the Agent's content check refused (posted by terminal-shell places/held-sends-inbox.ts). */
+export function isHeldSend(item: Pick<OwnerItem, 'kind' | 'metadata'>): boolean {
+  return item.kind === 'queued-action' && item.metadata?.[HELD_SEND_METADATA] === true;
+}
+
+/**
+ * The sends the Agent's content check refused, from the owner inbox, where the Agent posts each one with exactly
+ * what would go out: every program, the web UI and a phone show them, and the answer there sends or drops it.
+ */
+export const GOOGLE_WAITING: CapabilityDefinition<WaitingCapabilityServices> = {
+  capability: { id: 'google.waiting', group: 'waiting', home: 'daemon', repeat: 'safe' },
+  actionId: 'waiting', label: 'See the refused emails and invitations waiting for you', word: 'waiting', inputs: [],
+  sentence: 'Shows each email or calendar invitation the content check refused to send, exactly as it would go out, waiting for you to send it or drop it.', done: '',
   touches: 'reads', lasts: 'not-a-change', risk: 'none', example: {},
   async run(_values, services) {
-    const sends = services.heldSends?.list() ?? [];
-    const data = { sends: sends.map((send) => ({ id: send.id, description: plainInboxText(send.description), at: send.at })) };
-    if (sends.length === 0) return { text: 'Nothing is waiting for approval. A refused send stays waiting for five minutes.', data };
+    const sends = (await listEveryOwnerItem(inboxOf(services), { status: 'open', kinds: ['queued-action'] })).filter(isHeldSend);
+    const data = { sends: sends.map((send) => ({ ...itemData(send), detail: plainInboxText(send.detail) })) };
+    if (sends.length === 0) return { text: 'No send is waiting for your approval. A refused send waits five minutes.', data };
     return {
       text: [
-        'Refused by the content check, waiting for your approval:',
-        ...sends.flatMap((send) => [
-          `  ${send.id}. ${plainInboxText(send.description)}`,
-          ...Object.entries(send.content).flatMap(([field, value]) => value === undefined ? [] : [`       ${field}: ${plainInboxText(value)}`]),
-        ]),
+        `Refused by the content check, waiting for you to send it as shown or drop it, in ${PLACE} under Sends (${sends.length}):`,
+        ...sends.flatMap((send) => [`  ${shortInboxId(send.id)}  ${titleOf(send)}`, ...plainInboxText(send.detail).split('\n').map((line) => `       ${line}`)]),
       ].join('\n'),
       data,
     };

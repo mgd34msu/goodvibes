@@ -37,6 +37,8 @@ export interface AgentOrchestratorRunContext {
   /** Durable owner storage, independent of an execution worktree's lifetime. */
   readonly journalRoot?: string | undefined;
   readonly surfaceRoot?: string | undefined;
+  /** The run has no terminal screen (the daemon's own runs): the model is told so in one line (core/environment-block.ts). */
+  readonly screenless?: boolean | undefined;
   /** At-rest journal redaction + retention policy; undefined -> honest default (redaction on). */
   readonly atRestPolicy?: import('../runtime/at-rest-persistence.js').AtRestPolicy | undefined;
   readonly runtimeBus: RuntimeEventBus | null;

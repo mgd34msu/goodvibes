@@ -107,12 +107,6 @@ async function exportSessionTranscript(
   ctx.print(`Exported session ${title || sessionId} (${messages.length} messages, keys and paths hidden) to a file.\n${target}`);
 }
 
-// session-mgmt / smgmt was removed in TASK-032.
-// All session lifecycle operations are now first-class subcommands of /session.
-// Use /session list, /session resume, /session save, etc.
-//
-// CommandRegistry.register() throws on duplicate names/aliases, so this
-// registration was intentionally deleted rather than left as dead code.
 
 interface SessionExportData {
   readonly messages: object[];
@@ -142,7 +136,6 @@ export const sessionWorkflow = createSessionWorkflowCommands<CommandContext>(req
           };
     return (labels[key] ?? '') + value;
   },
-  renamed: (name) => 'Session renamed to: ' + name,
   deleted: (name, title) => 'Session deleted: ' + name + (title ? ' (' + title + ')' : ''),
   failed: (action, error) => 'Failed to ' + (action === 'rename' ? 'rename' : action + ' session') + ': ' + summarizeError(error),
   captureSession(ctx) {
@@ -292,7 +285,7 @@ export async function exportSavedSession(ctx: CommandContext, input: { readonly 
         try {
           loaded = sm.load(sessionId);
         } catch {
-          throw commandRefusal(`Session not found: ${sessionId}`, 'Use /session list to see available sessions.');
+          throw commandRefusal(`Session not found: ${sessionId}`, 'The Sessions place lists your saved sessions.');
         }
         try {
           await exportSessionTranscript(ctx, sessionId, loaded.meta.title, loaded.messages as Array<Record<string, unknown>>, format, output);

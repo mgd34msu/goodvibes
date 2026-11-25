@@ -24,7 +24,8 @@ import { CapabilityRefusal, type CapabilityCaller, type CapabilityDefinition, ty
 export interface ContextWindowsCapabilityServices {
   readonly models: {
     readonly providerRegistry: Pick<ProviderRegistry, 'getCurrentModel' | 'listModels' | 'getKnownContextWindowForModel'
-      | 'getModelContextCap' | 'getObservedContextWindow' | 'setModelContextCap' | 'clearModelContextCap'>;
+      | 'getModelContextCap' | 'getObservedContextWindow' | 'setModelContextCap' | 'clearModelContextCap'
+      | 'recordContextWindowRejection' | 'recordContextWindowAccepted'>;
   };
 }
 
@@ -138,13 +139,38 @@ export const CONTEXT_CLEAR_WINDOW: CapabilityDefinition<ContextWindowsCapability
     const registry = services.models.providerRegistry;
     const { key, definition } = modelOf(registry, values.model, caller);
     const existed = registry.clearModelContextCap(key);
-    const known = definition ? registry.getKnownContextWindowForModel(definition) : null;
+    // The model as it resolves now that the size is gone (the definition read before still carries the old size).
+    const now = findModelDefinition(key, registry.listModels()) ?? definition;
+    const known = now ? registry.getKnownContextWindowForModel(now) : null;
     const automatic = known === null ? 'unknown' : tokens(known);
     if (!existed) return { text: `${nameOf(key, definition)} had no size set and no learned limit; its window is automatic (${automatic}).`, data: { model: key, cleared: false } };
     changed(key);
     return { text: `The size set and any learned limit for ${nameOf(key, definition)} are cleared; its window is automatic again (${automatic}), in every program from its next turn.`, data: { model: key, cleared: true } };
   },
 };
+
+/**
+ * What a provider taught a program's own turn about a model's window, posted to the daemon by that program
+ * (`context.windows.learned.post`, terminal-shell context-windows-follow.ts): kept in the one file, announced, and
+ * every program reads it again, so a limit is learned once for all of them. Raise-only and lower-only by the store's
+ * own rules. Not a capability: nobody chooses it, so nobody is asked about it (as a program's hook runs are posted).
+ * True when the file changed.
+ */
+export function keepLearnedContextWindow(registry: Registry, learned: { readonly model: string; readonly tokens: number; readonly outcome: 'refused' | 'accepted' }): boolean {
+  const count = Math.floor(learned.tokens);
+  const key = learned.model.trim();
+  if (!key || !Number.isFinite(count) || count <= 0 || count > MAX_CONTEXT_WINDOW_OVERRIDE) return false;
+  if (learned.outcome === 'accepted') {
+    if (!registry.recordContextWindowAccepted(key, count)) return false;
+    changed(key);
+    return true;
+  }
+  const before = registry.getObservedContextWindow(key);
+  registry.recordContextWindowRejection(key, count);
+  if (registry.getObservedContextWindow(key) === before) return false;
+  changed(key);
+  return true;
+}
 
 /** The context window capabilities, in the order This conversation lists them. */
 export const CONTEXT_WINDOW_CAPABILITIES = [CONTEXT_WINDOW, CONTEXT_SET_WINDOW, CONTEXT_CLEAR_WINDOW] as const;

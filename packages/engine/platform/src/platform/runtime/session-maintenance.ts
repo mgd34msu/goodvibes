@@ -7,6 +7,8 @@ export type GuidanceMode = 'off' | 'minimal' | 'guided';
 
 /** The control that shows what fills the context (This conversation), named where a next step is said. */
 const SEE_CONTEXT = '"See what fills the context" in This conversation';
+/** Where this conversation's context, tokens and cost are shown (the Usage view's place now). */
+const SEE_SPENDING = 'This conversation at the top of Money, Spending';
 export type SessionMaintenanceLevel =
   | 'stable'
   | 'watch'
@@ -95,7 +97,7 @@ export function evaluateSessionMaintenance(input: SessionMaintenanceInput): Sess
       lastCompactedAt,
       summary: usagePct === null ? 'Context window unavailable.' : 'No context counted yet.',
       reasons: [usagePct === null ? 'Current model does not expose a known context limit yet.' : 'Context usage is known after the first model response.'],
-      nextSteps: guidanceMode === 'off' ? [] : ['/provider', SEE_CONTEXT],
+      nextSteps: guidanceMode === 'off' ? [] : ['the model\'s context size on the Models tab of Models and providers', SEE_CONTEXT],
     };
   }
 
@@ -120,7 +122,7 @@ export function evaluateSessionMaintenance(input: SessionMaintenanceInput): Sess
   if (input.session?.compactionState === 'failed') {
     level = 'needs-repair';
     reasons.push('Compaction failed and the session may need manual recovery.');
-    nextSteps.push('/compact', '/health check maintenance');
+    nextSteps.push('/compact', 'System, Health: check one area, Conversation size');
   } else if (compactStateIsActive(input.session?.compactionState)) {
     level = 'compacting';
     reasons.push('Compaction is currently running.');
@@ -131,7 +133,7 @@ export function evaluateSessionMaintenance(input: SessionMaintenanceInput): Sess
       reasons.push(`Only ${remainingTokens.toLocaleString()} tokens remain before the window edge.`);
     }
     if (autoCompactEnabled) reasons.push('Auto-compact runs before the next turn.');
-    nextSteps.push('/compact', '/usage');
+    nextSteps.push('/compact', SEE_SPENDING);
   } else if ((warningsEnabled && usagePct >= Math.max(70, autoCompactEnabled ? thresholdPct - 10 : 70)) || staleByMessageGrowth) {
     level = 'watch';
     reasons.push(staleByMessageGrowth
@@ -139,7 +141,7 @@ export function evaluateSessionMaintenance(input: SessionMaintenanceInput): Sess
       : autoCompactEnabled
         ? `Context usage is climbing toward the ${thresholdPct}% auto-compact threshold.`
         : `Context usage is high (${usagePct}%) and auto-compaction is off.`);
-    nextSteps.push('/usage');
+    nextSteps.push(SEE_SPENDING);
     if (guidanceMode === 'guided') nextSteps.push(SEE_CONTEXT);
   } else {
     reasons.push('Context pressure is currently within the stable operating band.');

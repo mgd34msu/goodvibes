@@ -188,6 +188,11 @@ export type TurnEvent =
     status?: number | undefined;
     /** Machine code of the failure (a connection errno such as ECONNREFUSED), when it had one. */
     code?: string | undefined;
+    /**
+     * The provider's own error code for a refusal (`context_length_exceeded`, `content_filter`, `model_not_found`),
+     * never its text: lets every reader say a conversation too long for the model as that.
+     */
+    providerCode?: string | undefined;
     /** Requests made to the provider that failed last, for the request that failed (retries included). */
     attempts?: number | undefined;
     /** When each of those requests was sent, epoch ms. */

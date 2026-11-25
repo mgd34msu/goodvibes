@@ -12,31 +12,31 @@ import { useState } from 'react';
 import { Dialog } from '../../components/ui/Dialog';
 import { Button } from '../../components/ui/Button';
 import { useConfirm } from '../../components/ui/ConfirmDialog';
-import { useCommandCatalog } from '../../lib/command-catalog';
 import { formatError } from '../../lib/errors';
 import {
-  asksFirst, capabilityButton, capabilityRiskWords, capabilitySentence, displayValues, outcomeLine, resolvePlaceCapability, runPlaceCapability,
-  type CapabilityReveal,
+  asksFirst, capabilityButton, capabilityRiskSentences, capabilitySentence, displayValues, outcomeLine, resolvePlaceCapability, runPlaceCapability,
+  useCapabilityIndex, type CapabilityReveal,
 } from '../../lib/place-capabilities';
 import { useToast } from '../../lib/toast';
+import { lastChosenProject } from '../../lib/place-project';
 import { PlaceForm } from './PlaceForm';
 import { RevealPane } from './RevealPane';
 
 export function CapabilityRunner({ id, onClose }: { readonly id: string; readonly onClose: () => void }) {
-  const catalog = useCommandCatalog(true);
+  const capabilities = useCapabilityIndex();
   const { toast } = useToast();
   const confirm = useConfirm();
   const [formOpen, setFormOpen] = useState(true);
   const [reveal, setReveal] = useState<CapabilityReveal | undefined>();
-  if (!catalog) return null;
-  const capability = resolvePlaceCapability(catalog.actions, id);
+  if (!capabilities) return null;
+  const capability = resolvePlaceCapability(capabilities, id);
   if (!capability || !capability.runsOnDaemon) {
     return (
       <Dialog open onClose={onClose} title={capability?.action.label ?? id} size="confirm" footer={<Button onClick={onClose}>Close</Button>}>
         <p>
           {capability
             ? 'It acts on a conversation or on what a terminal program holds, so it is done in the terminal app or the Agent.'
-            : 'This web UI does not know it yet: it is done in the terminal app or the Agent, or by a script with goodvibes do.'}
+            : 'This daemon does not know it: it may be a capability of a newer GoodVibes.'}
         </p>
       </Dialog>
     );
@@ -47,7 +47,7 @@ export function CapabilityRunner({ id, onClose }: { readonly id: string; readonl
     if (risk) {
       const yes = await confirm.ask({
         title: `${capability.action.label}?`,
-        description: `${capabilitySentence(capability, shown)} This ${capabilityRiskWords(risk)}.`,
+        description: `${capabilitySentence(capability, shown)} ${capabilityRiskSentences(capability, values)}`,
         confirmLabel: capabilityButton(capability),
         tone: 'danger',
       });
@@ -55,7 +55,8 @@ export function CapabilityRunner({ id, onClose }: { readonly id: string; readonl
     }
     setFormOpen(false);
     try {
-      const answer = await runPlaceCapability(capability.id, values);
+      // The project last chosen in the places (place-project.ts); none chosen yet, none is sent.
+      const answer = await runPlaceCapability(capability.id, values, lastChosenProject());
       toast({ title: outcomeLine(capability, values, shown, answer, undefined), tone: 'success' });
       if (answer.reveal) { setReveal(answer.reveal); return; }
     } catch (error) {

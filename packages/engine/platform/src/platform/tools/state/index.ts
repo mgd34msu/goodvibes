@@ -46,15 +46,6 @@ function sanitizeMemoryKey(key: string): string | null {
   return key;
 }
 
-/** The slice of the workspace swap manager the state tool uses. */
-export interface StateSwapManager {
-  requestSwap(newDir: string): Promise<{
-    ok: boolean; reason?: string; code?: string; current?: string; previous?: string;
-    moving?: boolean; waitingForSessions?: number;
-    restartRequired?: boolean; requiresRestart?: readonly string[] | undefined; note?: string;
-  }>;
-}
-
 /** A change to the registered hooks, shown to the approval gate before it is made. */
 export interface HookChangeRequest {
   readonly action: 'add' | 'enable' | 'disable' | 'remove';
@@ -82,9 +73,10 @@ export interface StateToolOptions {
   /** The process's tool-call log (state/telemetry.ts), fed where tools run. Absent: `mode=analytics` is not offered. */
   readonly telemetryDB?: TelemetryDB | undefined;
   /**
-   * Current working directory at session start. Exposed as the well-known
-   * read-only key `runtime.workingDir` via `mode=get`.
-   * The directory this host runs in; a saved change applies at the next start.
+   * The folder this session works in (its project). Exposed as the well-known
+   * read-only key `runtime.workingDir` via `mode=get`. It is this session's
+   * own and never changes during it: no turn moves the daemon or another
+   * session (a session in another folder is started there).
    */
   readonly workingDir?: string | (() => string | undefined) | undefined;
   /**
@@ -92,13 +84,6 @@ export interface StateToolOptions {
    * read-only key `daemon.homeDir` via `mode=get`.
    */
   readonly daemonHomeDir?: string | (() => string | undefined) | undefined;
-  /**
-   * Workspace swap manager. When provided, `set({values: {'runtime.workingDir': '/new/path'}})`
-   * saves the new working directory via `requestSwap()`, and a daemon that can move moves
-   * there once no session is mid-turn (otherwise at its next start), instead of
-   * returning an error. Failures are surfaced as `success: false` with the error reason.
-   */
-  readonly swapManager?: StateSwapManager;
   /**
    * The project memory store `mode=memory` reads and writes: the host's memory
    * spine (which reaches a connected host when it serves memory), or a local
@@ -137,7 +122,6 @@ export function createStateTool(
   // A getter reads the host's working directory each call; a plain string is a fixed answer.
   const workingDir = (): string | undefined => typeof options.workingDir === 'function' ? options.workingDir() : options.workingDir;
   const daemonHomeDir = (): string | undefined => typeof options.daemonHomeDir === 'function' ? options.daemonHomeDir() : options.daemonHomeDir;
-  const swapManager = options.swapManager;
   // Session start time and telemetry are scoped per-instance so multiple
   // createStateTool() calls don't share state.
   const SESSION_START_MS = Date.now();
@@ -211,7 +195,7 @@ export function createStateTool(
 
       switch (mode) {
         case 'get':   return await runGet(input, kvState, workingDir(), daemonHomeDir());
-        case 'set':   return await runSet(input, kvState, swapManager);
+        case 'set':   return await runSet(input, kvState, workingDir());
         case 'list':  return await runList(input, kvState);
         case 'clear': return await runClear(input, kvState);
         case 'budget': return runBudget(kvState, projectIndex, options.contextAccounting?.getSource() ?? null);
@@ -582,47 +566,20 @@ async function runGet(
 async function runSet(
   input: StateInput,
   kvState: KVState,
-  swapManager?: StateSwapManager,
+  workingDir: string | undefined,
 ): Promise<{ success: boolean; output?: string; error?: string }> {
   const values = input.values;
   if (!values || typeof values !== 'object') {
     return { success: false, error: 'mode "set" requires a "values" object' };
   }
 
-  // Handle runtime.workingDir specially, delegate to swap manager if available.
+  // The folder a session works in is its own and is fixed for the session: no turn moves the daemon, which serves
+  // every project at once, or any other session.
   if ('runtime.workingDir' in values) {
-    const others = Object.keys(values).filter((key) => key !== 'runtime.workingDir');
-    if (others.length > 0) {
-      return {
-        success: false,
-        error: `runtime.workingDir changes the workspace and must be set on its own; it was sent together with ${others.join(', ')}. Nothing was changed. Send the working directory in one call and the other keys in another.`,
-      };
-    }
-    const newDir = values['runtime.workingDir'];
-    if (typeof newDir !== 'string' || !newDir.trim()) {
-      return { success: false, error: 'runtime.workingDir must be a non-empty string.' };
-    }
-    if (!swapManager) {
-      return {
-        success: false,
-        error: 'Cannot write to runtime.workingDir: this session runs without a daemon that can save a working-directory change. Nothing was changed; do not retry. To work in another directory, start goodvibes in that directory, or restart the daemon with --working-dir <path> (or GOODVIBES_WORKING_DIR), or set runtime.workingDir in settings.json in the daemon home and restart the daemon.',
-      };
-    }
-    const result = await swapManager.requestSwap(newDir);
-    if (!result.ok) {
-      return { success: false, error: `Working directory not changed (${result.code ?? 'UNKNOWN'}): ${result.reason ?? 'unknown error'}` };
-    }
-    // Saved. A host that can move does so once no session is mid-turn (this one's
-    // included); any other keeps its directory until its next start.
-    return { success: true, output: JSON.stringify({
-      mode: 'set', saved: true,
-      workingDir: result.previous, savedWorkingDir: result.current ?? newDir,
-      moving: result.moving ?? false,
-      ...(result.waitingForSessions ? { waitingForSessions: result.waitingForSessions } : {}),
-      restartRequired: result.restartRequired ?? false,
-      ...(result.requiresRestart?.length ? { movesOnRestart: result.requiresRestart } : {}),
-      ...(result.note ? { note: result.note } : {}),
-    }) };
+    return {
+      success: false,
+      error: `runtime.workingDir is the folder this session works in${workingDir ? ` (${workingDir})` : ''}, and it does not change during the session; nothing was changed, so do not retry. To work in another folder, that work is started there: open GoodVibes in that folder, or start a runner or a hosted session with that folder.`,
+    };
   }
 
   // Reject writes to other read-only well-known keys

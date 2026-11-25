@@ -195,6 +195,8 @@ export class ConversationRewindHostBroker implements RewindConversationPort {
   private readonly hostPrincipals = new Map<string, string>();
   /** Resolvers for `take` calls waiting on work, keyed by host id. */
   private readonly waiters = new Map<string, Array<() => void>>();
+  /** Set by shutdown(): no take waits any more. */
+  private stopped = false;
   /** Hosts replaced by another surface, so the replaced one can be told why instead of "unknown". Bounded. */
   private readonly takenOverHosts = new Map<string, string>();
   private readonly fallback: RewindConversationPort | null;
@@ -329,6 +331,8 @@ export class ConversationRewindHostBroker implements RewindConversationPort {
     readonly hostId: string;
     readonly waitMs?: number | undefined;
     readonly limit?: number | undefined;
+    /** The asking client's request: when it goes away (a program that crashed), the wait ends at once. */
+    readonly signal?: AbortSignal | undefined;
   }): Promise<{ readonly host: ConversationRewindHost; readonly requests: readonly ConversationRewindRequest[] }> {
     let host = this.renewByPolling(input.hostId);
     const limit = input.limit && input.limit > 0 ? Math.floor(input.limit) : CONVERSATION_HOST_MAX_PENDING;
@@ -342,11 +346,13 @@ export class ConversationRewindHostBroker implements RewindConversationPort {
       const deadline = this.now() + waitMs;
       for (;;) {
         const remaining = deadline - this.now();
-        if (remaining <= 0) break;
+        // Nobody is listening any more (the client went away) or the daemon is stopping: end the wait now.
+        if (remaining <= 0 || input.signal?.aborted || this.stopped) break;
         // A preview already taken becomes collectable again with no new event
         // to wake this call, so the wait ends when it does rather than at waitMs.
         const redeliverIn = this.untilRedelivery(host.hostId);
-        await this.waitForWork(host.hostId, redeliverIn === undefined ? remaining : Math.min(remaining, redeliverIn));
+        await this.waitForWork(host.hostId, redeliverIn === undefined ? remaining : Math.min(remaining, redeliverIn), input.signal);
+        if (input.signal?.aborted || this.stopped) break;
         // The lease is renewed again on the way out: the host was here for the
         // whole wait, and charging it for the time it spent waiting for us would
         // expire a surface that did exactly what it was asked to do.
@@ -404,6 +410,8 @@ export class ConversationRewindHostBroker implements RewindConversationPort {
 
   /** Answer everything outstanding and forget every registration. */
   shutdown(): void {
+    // A take that is waiting ends now and none waits again (the daemon closes its listener only once every call returned).
+    this.stopped = true;
     for (const requestId of [...this.pending.keys()]) {
       this.settle(requestId, { kind: 'unavailable', reason: 'the daemon stopped serving conversation rewind' });
     }
@@ -608,13 +616,14 @@ export class ConversationRewindHostBroker implements RewindConversationPort {
     return soonest;
   }
 
-  private waitForWork(hostId: string, waitMs: number): Promise<void> {
+  private waitForWork(hostId: string, waitMs: number, signal?: AbortSignal): Promise<void> {
     return new Promise<void>((resolve) => {
       let settled = false;
       const finish = (): void => {
         if (settled) return;
         settled = true;
         clearTimeout(timer);
+        signal?.removeEventListener('abort', finish);
         const resolvers = this.waiters.get(hostId);
         if (resolvers) {
           const index = resolvers.indexOf(finish);
@@ -628,6 +637,8 @@ export class ConversationRewindHostBroker implements RewindConversationPort {
       const resolvers = this.waiters.get(hostId) ?? [];
       resolvers.push(finish);
       this.waiters.set(hostId, resolvers);
+      signal?.addEventListener('abort', finish, { once: true });
+      if (signal?.aborted) finish();
     });
   }
 

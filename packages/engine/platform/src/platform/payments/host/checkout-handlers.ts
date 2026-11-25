@@ -757,7 +757,7 @@ export function checkoutApproveHandler(deps: PaymentsHandlerDeps): TypedHandler<
  * merchant, item and `requestedMax` is spent at admission, after the
  * read-only steps and immediately before the durable admission write, and a
  * final total within it needs no window. With `payments.confirmEveryPurchase`
- * on, a begin with no matching approval is refused naming `/payments approve`.
+ * on, a begin with no matching approval is refused naming "Approve one purchase ahead of time" in the Money place.
  *
  * A begin that names a `standingId` is a purchase the owner authorised in
  * advance (standing-store.ts) and needs no explicit request in the moment: a

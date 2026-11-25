@@ -4,7 +4,10 @@ import type { InputHandler } from '../input/handler.ts';
 // Startup diagnostics must not initialize the Agent runtime/onboarding barrels:
 // they pull in feature-enablement's eager metadata lookups before boot begins.
 import { isOnboardingComplete } from '../runtime/onboarding/completion.ts';
-import { readWhoDecidesAsked, writeOnboardingCheckMarker, writeWhoDecidesAsked } from '../runtime/onboarding/markers.ts';
+import { writeOnboardingCheckMarker } from '../runtime/onboarding/markers.ts';
+import { readSetupState } from '@goodvibes/engine/platform/platform/capabilities';
+import { runDaemonCapability } from '@goodvibes/engine/terminal-shell/command-actions';
+import { capabilityBinding } from '../input/commands/capability-binding.ts';
 import { FirstRunModal, firstRunDecisionModel, installSplashAdditions, openWhoDecides, setSplashImportCommand, startFirstRun, type FirstRunDeps } from '@goodvibes/engine/terminal-shell/first-run';
 import { requireSecretsManager, requireServiceRegistry, requireSubscriptionManager } from '../input/commands/runtime-services.ts';
 import { scanThisComputerNow } from '../runtime/lan-scan-consent.ts';
@@ -158,7 +161,7 @@ export function applyInitialTuiCliState(options: {
   // `/setup` → Run first-run again: the three steps, whether or not a model is ready.
   commandContext.openFirstRun = () => {
     // Asked for: "Who decides" follows the model whenever it is needed, answered before or not.
-    const deps = { ...firstRunDeps(commandContext, shellPaths, render, true, () => { input.conversationManager?.invalidateRenderedLines(); }), whoDecidesAsked: () => false };
+    const deps = { ...firstRunDeps(commandContext, shellPaths, render, true, () => { input.conversationManager?.invalidateRenderedLines(); }), whoDecidesAsked: () => false, includeWhoDecides: true };
     if (!deps.pushSurfaceModal) return;
     const modal = new FirstRunModal(deps);
     deps.pushSurfaceModal(modal);
@@ -166,8 +169,8 @@ export function applyInitialTuiCliState(options: {
       logger.warn('First run could not start', { error: summarizeError(error) });
     });
   };
-  // The status line's mode segment, while no decision model can be asked: "Who decides", whenever the person wants it.
-  commandContext.openWhoDecides = () => openWhoDecides(firstRunDeps(commandContext, shellPaths, render, true, () => { input.conversationManager?.invalidateRenderedLines(); }));
+  // The status line's mode segment, while no decision model can be asked, and the Setup list's row (always): "Who decides".
+  commandContext.openWhoDecides = (whoOptions) => openWhoDecides(firstRunDeps(commandContext, shellPaths, render, true, () => { input.conversationManager?.invalidateRenderedLines(); }), whoOptions);
   if (cli.command === 'onboarding') {
     // The setup topics, over the empty conversation.
     void commandContext.executeCommand?.('setup', []);
@@ -182,7 +185,7 @@ export function applyInitialTuiCliState(options: {
     } else {
       // Nothing to continue: say so, then start as a plain launch would, so a
       // new user who starts with --resume still gets setup.
-      commandContext.print('No previous conversation to continue. This is a new one; /session list shows saved ones.');
+      commandContext.print('No previous conversation to continue. This is a new one; the Sessions place lists saved ones.');
       runFirstRun();
     }
   } else {
@@ -262,7 +265,15 @@ function firstRunDeps(
     decisionModel: firstRunDecisionModel(commandContext.platform.configManager, requireSecretsManager(commandContext)),
     // "Another decision model…": Settings, on the decision model.
     openDecisionModelSettings: () => { commandContext.openSettingsModal?.('judgment.model'); },
-    whoDecidesAsked: () => readWhoDecidesAsked(shellPaths),
-    recordWhoDecides: (how) => { writeWhoDecidesAsked(shellPaths, how); },
+    // "Who decides" asked once for both programs: the daemon's one setup record (capabilities/builtin/system-setup.ts).
+    whoDecidesAsked: () => {
+      const home = commandContext.workspace?.shellPaths?.homeDirectory;
+      return home ? readSetupState(home).whoDecides !== null : false;
+    },
+    recordWhoDecides: (how) => {
+      void runDaemonCapability('setup.who-decides-asked', { how }, commandContext, capabilityBinding).catch((error: unknown) => {
+        commandContext.print(`"Who decides" could not be recorded with the daemon, so first run may ask it again: ${error instanceof Error ? error.message : String(error)}`);
+      });
+    },
   };
 }

@@ -8,9 +8,9 @@ import { FeatureAnnouncementStore, featureAnnouncementsPath } from '@goodvibes/e
 import type { NoticeLevel } from '@goodvibes/engine/platform/platform/core';
 import { featureEnablementWrite, getFeatureSetting } from './cli-feature-settings.js';
 import { FEATURE_SETTINGS } from '@goodvibes/engine/platform/platform/runtime/feature-flags/feature-settings';
+import { TERMINAL_PROGRAM_DEFAULTS } from '@goodvibes/engine/platform/platform/runtime/program-host-settings';
 import type { GoodVibesCliCommand, GoodVibesCliFlags } from './cli-types.js';
-import { RUNTIME_ENDPOINT_CONFIG_KEYS, hostModeForHostname } from './cli-endpoints.js';
-import type { RuntimeEndpointId } from './cli-endpoints.js';
+import { RUNTIME_ENDPOINT_CONFIG_KEYS, hostModeForHostname, type RuntimeEndpointId } from '@goodvibes/engine/platform/platform/support/service-posture';
 import type { ModeManager, PrintLevelRouter } from '@goodvibes/engine/platform/platform/state';
 import { logger, summarizeError } from '@goodvibes/engine/platform/platform/utils';
 
@@ -56,9 +56,8 @@ export function applyRuntimeConfigDefault(configManager: ConfigManager, key: Con
  * overrides, independent of registration order. No disk read or write.
  */
 export function applyTerminalRuntimeConfigDefaults(configManager: ConfigManager): void {
-  applyRuntimeConfigDefault(configManager, 'display.showTokenSpeed', true);
-  applyRuntimeConfigDefault(configManager, 'ui.systemMessages', 'conversation');
-  applyRuntimeConfigDefault(configManager, 'ui.operationalMessages', 'conversation');
+  // One list (platform runtime/program-host-settings.ts), so the daemon reading a program's settings reads these too.
+  for (const [key, value] of TERMINAL_PROGRAM_DEFAULTS) applyRuntimeConfigDefault(configManager, key as ConfigKey, value);
 }
 
 /**

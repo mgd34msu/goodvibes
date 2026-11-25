@@ -85,13 +85,13 @@ export function describeSecretsCarryForward(result: SecretsCarryForward): string
     lines.push(`Your stored secrets (${result.carried.map((entry) => entry.key).join(', ')}) are now kept in the daemon's secret store, which every GoodVibes program reads; the programs' own copies were left as they were.`);
   }
   if (result.differing.length > 0) {
-    lines.push(`The terminal app and the Agent hold different values for ${result.differing.join(', ')}, so each keeps its own; store the one you want with /secrets set <name> --scope user and both use it.`);
+    lines.push(`The terminal app and the Agent hold different values for ${result.differing.join(', ')}, so each keeps its own; store the one you want with "Store a secret" (Permissions and safety, Secrets) for all your projects and both use it.`);
   }
   if ((result.changed ?? []).length > 0) {
     lines.push(`${result.changed!.join(', ')} ${result.changed!.length === 1 ? 'was' : 'were'} changed while an earlier GoodVibes version was running; every program now uses the new value.`);
   }
   if ((result.changedApart ?? []).length > 0) {
-    lines.push(`${result.changedApart!.join(', ')} ${result.changedApart!.length === 1 ? 'was' : 'were'} changed to different values in the terminal app and the Agent while an earlier version was running; each program now uses the value stored before. Store the one you want with /secrets set <name> --scope user.`);
+    lines.push(`${result.changedApart!.join(', ')} ${result.changedApart!.length === 1 ? 'was' : 'were'} changed to different values in the terminal app and the Agent while an earlier version was running; each program now uses the value stored before. Store the one you want with "Store a secret" (Permissions and safety, Secrets) for all your projects.`);
   }
   if (result.unreadable.length > 0) lines.push(`A secret store could not be read (${result.unreadable.join(', ')}); nothing in it was moved.`);
   return lines.length > 0 ? lines.join(' ') : undefined;

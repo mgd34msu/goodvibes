@@ -24,6 +24,7 @@ import { captureOwnedJson, snapshotJudgmentInput } from '../gate/judgment-input.
 import { assertAutonomousConfigTransition, completeAutonomousConfigTransition, bindAutonomousNestedAdmission, readAutonomousSettingsPresentation, readAutonomousWorkspaceConstraint, readAutonomousEffectConstraint, readAutonomousNestedOwner, consumeAutonomousAdmission, type AutonomousNestedOwner, type AutonomousPermissionAdmission, type PermissionManager } from '../permissions/manager.js';
 import type { AutonomousChoiceProjection } from '../permissions/autonomous-input-projection.js';
 import { captureAutonomousSource } from '../permissions/autonomous.js';
+import { toolAskWords } from '../permissions/tool-ask-words.js';
 import { buildDenialErrorMessage, toolDecisionOf } from '../permissions/denial.js';
 import { withAdmittedToolDecision } from '../gate/admitted-decision.js';
 import type { PreparedConfigMutationReceipt } from '../config/manager.js';
@@ -214,6 +215,15 @@ function retiredSettingsResult(callId: string, receipt: PreparedConfigMutationRe
 // creates authority, and cannot be cleared or replaced by a tool argument.
 const executingContext = new AsyncLocalStorage<{ readonly proof: CurrentToolExecution; readonly options: ToolExecuteOptions } | undefined>();
 
+/**
+ * The options of the admitted tool call executing now, the ones a nested call on its behalf is made with
+ * (`runRegisteredTool`); undefined outside a tool's body. Carries no authority of its own: a nested call made with them
+ * is admitted by the registry's own gate.
+ */
+export function currentToolExecuteOptions(): ToolExecuteOptions | undefined {
+  return executingContext.getStore()?.options;
+}
+
 /** True only for the exact currently executing tool and its owned arguments. */
 export function isInvocationAdmitted(toolName: string, args: Record<string, unknown>): boolean {
   const current = executingContext.getStore();
@@ -312,6 +322,16 @@ function verifyToolExecution(args: Record<string, unknown>, options: ToolExecute
  * refused when the registry has none. Undefined when the registry running this
  * call is not known or has no tool of that name.
  */
+/**
+ * What the permission owner of the registry running the call `options` belongs to would decide for `name` with
+ * `args`, without asking or running anything (ToolRegistry.previewDecision): undefined when that registry is not
+ * known or has no permission owner.
+ */
+export function previewRegisteredTool(name: string, args: Record<string, unknown>, options: ToolExecuteOptions | undefined): ReturnType<PermissionManager['previewDecision']> | undefined {
+  const registry = options ? currentToolExecutions.get(options)?.registry ?? ordinaryCallRegistries.get(options) : undefined;
+  return registry?.previewDecision(name, args, options?.signal);
+}
+
 export async function runRegisteredTool(callId: string, name: string, args: Record<string, unknown>, options?: ToolExecuteOptions): Promise<ToolResult | undefined> {
   const proof = options && currentToolExecutions.get(options);
   if (proof) return proof.registry.has(name) ? proof.registry.executeNested(callId, name, args, options) : undefined;
@@ -329,7 +349,7 @@ export async function runRegisteredTool(callId: string, name: string, args: Reco
   const verdict = await owner.checkDetailed(name, hooked.args, undefined, { definition, ...(signal ? { signal } : {}), ...(hooked.ask !== undefined ? { ownerAsk: hooked.ask } : {}) });
   if (!verdict.approved) {
     const source = { reasonCode: verdict.reasonCode, sourceLayer: verdict.sourceLayer, userReason: verdict.userReason, detail: verdict.detail, decision: verdict.decision };
-    return { callId, success: false, error: buildDenialErrorMessage(name, source), decision: toolDecisionOf({ ...source, approved: false }, name) };
+    return { callId, success: false, error: buildDenialErrorMessage(name, source, hooked.args), decision: toolDecisionOf({ ...source, approved: false }, name, hooked.args) };
   }
   const admitted = toolDecisionOf({ reasonCode: verdict.reasonCode, sourceLayer: verdict.sourceLayer, userReason: verdict.userReason,
     detail: verdict.detail, decision: verdict.decision, approved: true }, name);
@@ -530,10 +550,12 @@ export class ToolRegistry {
    * reading are made (a camelCase or alias name, JSON text for an object),
    * runs as usual (the tool is loaded from now on) and its result names the
    * repair, so a model that knew the parameters is not made to send the same
-   * call twice. One that does not fit is not run, and is refused with the
-   * tool's full definition so the model can send it again with real
-   * parameters. Undefined for any call that runs as usual. A lookup, the
-   * format repairs and a schema check; no model request.
+   * call twice. One that does not fit is not run: it is held to load
+   * (`heldToLoad`), answered with what did not fit and the tool's full
+   * definition so the model can send it again with real parameters. That is
+   * not a refusal of the call: the turn loop does not block its retry or count
+   * it as a failed round or a repeat. Undefined for any call that runs as
+   * usual. A lookup, the format repairs and a schema check; no model request.
    */
   deferredCallRefusal(callId: string, name: string, args?: Record<string, unknown>): ToolResult | undefined {
     const away = this.tools.has(name) ? undefined : this.elsewhere.get(name);
@@ -549,8 +571,9 @@ export class ToolRegistry {
     if (!definition || name === TOOL_SCHEMA_TOOL_NAME || this.sentInFull(definition)) return undefined;
     this.loadedTools.add(name);
     const full = this.fullDefinitionOf?.(name) ?? definition;
-    if (args !== undefined && fitsOnceFormatRepaired(name, args, full)) return undefined;
-    return deferredToolRefusal(callId, full);
+    const misfit = args === undefined ? 'no arguments were sent' : misfitOnceFormatRepaired(name, args, full);
+    if (misfit === undefined) return undefined;
+    return deferredToolRefusal(callId, full, misfit);
   }
 
   /**
@@ -989,6 +1012,20 @@ export class ToolRegistry {
   }
 
   /**
+   * The tool's own refusal of a call for a reason known before the gate decides it (`Tool.refuseBeforeGate`): the
+   * words, or undefined when the gate decides it. A check that fails is no refusal.
+   */
+  async refusalBeforeGate(name: string, args: Record<string, unknown>, signal?: AbortSignal): Promise<string | undefined> {
+    const refuse = this.tools.get(name)?.refuseBeforeGate;
+    if (!refuse) return undefined;
+    try {
+      return await refuse(args, { signal });
+    } catch {
+      return undefined;
+    }
+  }
+
+  /**
    * How this registry's permission owner would decide one call now, without
    * running it: `PermissionManager.previewDecision` with the tool's registered
    * definition. Undefined for a registry bound to no permission owner.
@@ -1372,8 +1409,15 @@ export class ToolRegistry {
           call = await prepare(revision.toolName, revision.args);
           continue;
         }
-        if (!admission.result.approved) return { callId, success: false,
-          error: `Nested tool admission ${admission.result.autonomousDecision?.outcome ?? 'held'}: ${admission.result.reasonCode}` };
+        if (!admission.result.approved) {
+          // Plan mode in plain words, naming what was asked; any other refusal by its reason.
+          if (admission.result.reasonCode === 'plan_mode') {
+            const asked = toolAskWords(current.name, current.args)?.question.replace(/\?$/, '') ?? `${current.name} was not run`;
+            return { callId, success: false, error: `Plan mode is on, so nothing was changed: ${asked}.` };
+          }
+          return { callId, success: false,
+            error: `Nested tool admission ${admission.result.autonomousDecision?.outcome ?? 'held'}: ${admission.result.reasonCode}` };
+        }
         bindAutonomousNestedAdmission(parent.admissionGuard, admission);
         const childOptions: ToolExecuteOptions = { signal, assertCurrent: assertParent };
         nestedCallOptions.add(childOptions);
@@ -1677,16 +1721,27 @@ function valueAtSchemaPath(args: Record<string, unknown>, path: string): string 
 }
 
 /**
- * Whether a call fits the tool's full schema as sent or once the format repairs are made.
- * The execution path makes the same repairs again and notes them in the result.
+ * What does not fit when a call does not fit the tool's full schema, as sent nor once the format repairs are made;
+ * undefined when it fits (the execution path makes the same repairs again and notes them in the result). A string
+ * pattern this thread may not run (one only the isolated validator evaluates) is no misfit here: the call runs, and
+ * the execution path's full validation answers it.
  */
-function fitsOnceFormatRepaired(name: string, args: Record<string, unknown>, full: ToolDefinition): boolean {
-  if (firstJsonSchemaFailure(full.parameters, args) === undefined) return true;
+function misfitOnceFormatRepaired(name: string, args: Record<string, unknown>, full: ToolDefinition): string | undefined {
+  const misfit = (value: Record<string, unknown>): string | undefined => {
+    const failure = firstJsonSchemaFailure(full.parameters, value);
+    if (failure === undefined || (failure.expected.startsWith('pattern ') && failure.received !== 'non-matching string')) return undefined;
+    const where = failure.path.replace(/^\$\.?/, '') || 'the arguments';
+    if (failure.expected === 'required field') return `${where} is required and was not sent`;
+    if (failure.expected === 'no additional property') return `${where} is not one of its parameters`;
+    return `${where} should be ${failure.expected}, not ${failure.received}`;
+  };
+  const asSent = misfit(args);
+  if (asSent === undefined) return undefined;
   try {
     const { fixed, repairs } = formatRepairs(name, args, full);
-    return repairs.length > 0 && firstJsonSchemaFailure(full.parameters, fixed) === undefined;
+    return repairs.length > 0 && misfit(fixed) === undefined ? undefined : asSent;
   } catch {
-    return false;
+    return asSent;
   }
 }
 

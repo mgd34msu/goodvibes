@@ -1,7 +1,6 @@
 import type { ConfigManager } from '@goodvibes/engine/platform/platform/config';
 import type { OnboardingCheckMarkerState } from './onboarding-state-types.js';
-import { resolveRuntimeEndpointBinding } from './cli-endpoints.js';
-import { resolveWebSurfaceExposure } from './cli-network-posture.js';
+import { resolveRuntimeEndpointBinding, resolveWebSurfaceExposure } from '@goodvibes/engine/platform/platform/support/service-posture';
 import { DEFAULT_DECISION_MODEL_POLICY, decisionModelPolicyLabel, decisionModelUse, parseDecisionModelPolicy, type DecisionModelPolicy } from '@goodvibes/engine/errors';
 import { SubscriptionManager, decisionModelSet, decisionModelSettings, getBuiltinSubscriptionProvider, sharedSubscriptionsPath, type SubscriptionShellPaths } from '@goodvibes/engine/platform/platform/config';
 import { getBuiltinProviderEnvVars } from '@goodvibes/engine/platform/platform/config/provider-credential-catalog';
@@ -242,6 +241,6 @@ export function describeCliSignIns(facts: CliProviderSignInFacts): string {
   const variable = facts.apiKeyEnvVars?.[0];
   const provider = facts.providerId ?? 'the provider';
   return variable
-    ? `no subscription and no ${variable} in the environment. If you saved a key with /secrets, the app uses it (this report does not read stored keys); otherwise sign in with: export ${variable}=<key>, or /secrets in the app`
-    : `no subscription found for ${provider}. If you saved a key with /secrets, the app uses it (this report does not read stored keys); otherwise sign in with /secrets in the app`;
+    ? `no subscription and no ${variable} in the environment. If you stored a key as a secret, the app uses it (this report does not read stored keys); otherwise sign in with: export ${variable}=<key>, or store it with "Store a secret" in the app (Permissions and safety, Secrets)`
+    : `no subscription found for ${provider}. If you stored a key as a secret, the app uses it (this report does not read stored keys); otherwise store it with "Store a secret" in the app (Permissions and safety, Secrets)`;
 }

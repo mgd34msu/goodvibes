@@ -6,7 +6,7 @@ import type { SessionManager } from '@goodvibes/engine/platform/platform/session
  * The dogfood finding: relaunching the agent after a normal (non-crash) exit
  * silently starts fresh with no offer or notice about the prior session, the
  * only way back was knowing the exact `goodvibes-agent sessions resume <id>`
- * command, or digging into `/health continuity`. This module builds an
+ * command, or digging into the Health tab's `continuity` check. This module builds an
  * honest, one-line boot notice that surfaces the resume affordance without
  * ever auto-resuming or blocking startup.
  *
@@ -77,7 +77,7 @@ export function buildResumeRelaunchNotice(input: ResumeRelaunchNoticeInput): str
   if (!input.session) {
     return [
       '[Resume] Your last session pointer is unavailable (the saved session may have been moved, renamed, or deleted).',
-      '  Starting fresh. Run /session list to see any sessions that are still on disk.',
+      '  Starting fresh. The Sessions place lists the sessions that are still on disk.',
     ].join('\n');
   }
 
@@ -95,7 +95,7 @@ export function buildResumeRelaunchNotice(input: ResumeRelaunchNoticeInput): str
 
   return [
     `[Resume] Your last session is available: "${label}", ${age} ago, ${session.messageCount} ${messageWord}.`,
-    `  Resume it: /session resume ${session.sessionId}`,
+    `  Resume it: /resume ${session.sessionId}`,
     '  Or just start typing to begin a new session, the saved one stays put.',
   ].join('\n');
 }

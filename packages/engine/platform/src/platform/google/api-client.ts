@@ -1122,14 +1122,14 @@ function describeHttpFailure(status: number, parsed: unknown): Pick<GoogleApiFai
   if (cause === 'missing-scopes') return {
     reason: cause,
     problem: 'Google refused the request because the credential lacks the required OAuth permissions.',
-    fix: 'A fresh consent asking for every scope this product needs is what renews it; this program has no consent owner running, so none was started.',
+    fix: 'Ask Google for consent again ("ask for consent again" on the Google tab of Mail, calendar and channels): one consent asks for mail and calendar together.',
   };
   if (cause === 'api-disabled') {
     const disabledService = disabledServiceOf(parsed);
     return {
       reason: cause,
       problem: `The ${disabledService.service ?? 'required'} Google API is not enabled for this project.`,
-      fix: 'Enabling it is decided under your mode and run with gcloud; this program has no one to decide it, so nothing was changed.',
+      fix: '"enable it" on the Google tab of Mail, calendar and channels turns it on (a check there names the API); nothing was changed yet.',
       disabledService,
     };
   }

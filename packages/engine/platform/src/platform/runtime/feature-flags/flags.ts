@@ -426,10 +426,10 @@ export const FEATURE_FLAGS: FeatureFlag[] = [
     name: 'Policy-as-Code',
     description:
       'Enables the versioned policy bundle registry with promote/rollback semantics. '
-      + 'Before enforcement, /security simulate-policy shows the rule diff and the calls this installation recorded '
-      + 'that the bundle would decide differently, and /security enforce-policy confirms them. '
-      + 'Exposes /security load-policy, simulate-policy, compare-policy, enforce-policy '
-      + 'and restore-policy.',
+      + 'Before enforcement, "See what the candidate policy changes" shows the rule diff and the calls this installation recorded '
+      + 'that the bundle would decide differently, and "Enforce the candidate policy" confirms them '
+      + '(Permissions and safety, Policy; the capabilities security.load-policy, simulate-policy, compare-policy, '
+      + 'enforce-policy and restore-policy).',
     tier: 5,
     runtimeToggleable: true,
     settings: { key: 'policy.registryEnabled', kind: 'boolean' },
@@ -462,7 +462,7 @@ export const FEATURE_FLAGS: FeatureFlag[] = [
       + '(Slack, Discord, webhooks): failures are classified as retryable or terminal, '
       + 'retried with exponential backoff, and dead-letter events are logged at error '
       + 'level and surfaced in integration diagnostics. Failed webhook notifications are listed '
-      + 'with /notify failed and sent again with /notify resend <id|all>. It runs alongside '
+      + 'under Failed notifications in Mail, calendar and channels, where each, or all, is sent again. It runs alongside '
       + 'the channel family it belongs to; disable to keep warn-level logging without '
       + 'DLQ tracking.',
     tier: 6,

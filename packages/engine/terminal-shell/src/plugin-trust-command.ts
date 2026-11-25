@@ -116,7 +116,7 @@ export function pluginCapabilitiesText(manager: PluginTrustControls, name: strin
   if (!info) throw commandRefusal(`Plugin '${name}' not found.`);
   const lines: string[] = [`Plugin: ${name}`, `Trust tier: ${info.tier} (${PLUGIN_TIER_EFFECT[info.tier]})`];
   if (info.unappliedTier !== undefined) {
-    const sentence = describeUnappliedTier(name, info.unappliedTier, command);
+    const sentence = describeUnappliedTier(name, info.unappliedTier, `goodvibes ${command}`);
     lines.push(`${sentence.charAt(0).toUpperCase()}${sentence.slice(1)}.`);
   }
   lines.push('', `Declared capabilities (${info.requested.length}):`);
@@ -223,8 +223,9 @@ programSideOf('plugin.enable', {
   },
 });
 programSideOf('plugin.disable', {
-  // Stopped here first (which also switches it off in the one state file); the daemon then finds it off and stops its own.
-  async before(values, ctx) {
+  // Switched off by the daemon in the one state file (its answer says so), then stopped here too. Stopping here first
+  // switched it off before the daemon looked, so the daemon answered "was already switched off" to a plugin that was on.
+  async after(values, ctx) {
     const plugins = runningIn(ctx);
     const name = values.plugin ?? '';
     if (!plugins?.list().find((plugin) => plugin.name === name)?.active) return;

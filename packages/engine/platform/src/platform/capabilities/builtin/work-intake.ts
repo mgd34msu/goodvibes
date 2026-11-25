@@ -1,10 +1,12 @@
 /**
- * Asking for work: in your own words (the host decides whether it is an answer
- * or a piece of work), as a goal with what done means, or from a file; and the
- * journal that makes a lost answer safe to send again (a submission, input
- * waiting to be admitted). The program holding the conversation keeps that
- * journal and sends through its own link to the host, so these run there (home
- * `session`); the work itself is the daemon's.
+ * Asking for work: in your own words (the daemon decides whether it is an
+ * answer or a piece of work), or as new work with what done means, written
+ * here or read from a file; and what has no answer yet. The program holding
+ * the conversation keeps a copy of what it sent until the daemon answers, so a
+ * lost answer is safe to send again: the work you asked for, and the message
+ * you typed. Both wait in the Work place's Unanswered list, where each is
+ * checked, sent again, gone on with or dropped. These run in that program
+ * (home `session`); the work itself is the daemon's.
  */
 import { CapabilityRefusal, type CapabilityDefinition, type InputDescription } from '../types.js';
 
@@ -12,10 +14,12 @@ import { CapabilityRefusal, type CapabilityDefinition, type InputDescription } f
 export interface WorkIntakeCapabilityServices {
   readonly workIntake?: {
     request(goal: string): Promise<string>;
-    newWork(goal: string, criteria: string): Promise<string>;
-    submitFile(path: string): Promise<string>;
-    submission(act: 'status' | 'retry' | 'discard'): Promise<string>;
-    intake(act: 'status' | 'retry' | 'resume' | 'cancel'): Promise<string>;
+    /** New work: from a file when `file` is given, else from what you want done and its results. */
+    newWork(input: { readonly goal?: string | undefined; readonly criteria?: string | undefined; readonly file?: string | undefined }): Promise<string>;
+    /** The work you asked for that has no answer yet. */
+    sent(act: 'status' | 'retry' | 'discard'): Promise<string>;
+    /** The message you typed that has no answer yet. */
+    typed(act: 'status' | 'retry' | 'resume' | 'cancel'): Promise<string>;
   } | undefined;
 }
 
@@ -30,7 +34,7 @@ const GOAL: InputDescription = { id: 'goal', label: 'What you want done', help: 
 
 function act(id: string, actionId: string, label: string, sentence: string, inputs: readonly InputDescription[], example: Record<string, string>,
   run: (intake: NonNullable<WorkIntakeCapabilityServices['workIntake']>, values: Readonly<Record<string, string>>) => Promise<string>,
-  extra: Partial<Pick<Intake, 'risk' | 'touches'>> & { readonly repeat?: 'safe' | 'unsafe' } = {}): Intake {
+  extra: Partial<Pick<Intake, 'risk' | 'touches' | 'button'>> & { readonly repeat?: 'safe' | 'unsafe' } = {}): Intake {
   const { repeat, ...rest } = extra;
   return {
     capability: { id, group: 'work', home: 'session', repeat: repeat ?? 'safe' }, actionId, label, word: actionId, inputs, sentence, done: '',
@@ -39,31 +43,37 @@ function act(id: string, actionId: string, label: string, sentence: string, inpu
   };
 }
 
+const blank = (value: string | undefined): boolean => value === undefined || value.trim() === '';
+
 export const WORK_INTAKE_CAPABILITIES: readonly Intake[] = [
-  act('work.request', 'request', 'Ask for work in your own words', '"{goal}" is sent to the host, which answers it or makes it a piece of work.',
+  act('work.request', 'request', 'Ask for work in your own words', '"{goal}" is sent to the daemon, which answers it or makes it a piece of work.',
     [GOAL], { goal: 'add retries to the uploader' }, (intake, values) => intake.request(values.goal!), { repeat: 'unsafe' }),
   act('work.new', 'new', 'Ask for new work, and say what done means',
-    '"{goal}" is sent to the host as new work, done when: {criteria}. It is kept here until the host has it.',
+    'New work is sent to the daemon: what you want done and the results that mean it is done, written here or read from a file. A copy is kept here until the daemon answers.',
     [
-      { id: 'criteria', label: 'Done when', help: 'What must be true when it is done, one per line (1 to 100)', kind: 'long-text', freeTextReason: 'what done means', required: true, typed: { flag: '--done-when' } },
-      { ...GOAL, help: 'In your own words' },
+      { ...GOAL, help: 'In your own words (leave it empty when the work comes from a file)', required: false },
+      { id: 'criteria', label: 'Done when', help: 'The results that mean it is done, one per line (1 to 100; empty when the work comes from a file)', kind: 'long-text', freeTextReason: 'what done means', required: false, typed: { flag: '--done-when' } },
+      { id: 'file', label: 'From a file', help: 'A JSON file on this computer with "goal" and "criteria", in place of the two above', kind: 'path', freeTextReason: 'a file on this computer', required: false, typed: { flag: '--file' } },
     ], { goal: 'add retries to the uploader', criteria: 'an upload that fails twice still finishes' },
-    (intake, values) => intake.newWork(values.goal ?? '', values.criteria ?? ''), { repeat: 'unsafe' }),
-  act('work.submit-file', 'submit-file', 'Submit work from a file', 'The work described in {path} is sent to the host; it is kept here until the host has it.',
-    [{ id: 'path', label: 'File', help: 'A JSON file with "goal" and "criteria"', kind: 'path', freeTextReason: 'a file on this machine', required: true, typed: { tail: true } }],
-    { path: 'work.json' }, (intake, values) => intake.submitFile(values.path ?? ''), { repeat: 'unsafe' }),
-  act('work.submission', 'submission', 'See the submitted file\'s state', 'Shows whether the work last submitted from a file reached the host.', [], {},
-    (intake) => intake.submission('status'), { touches: 'reads' }),
-  act('work.submission-retry', 'submission-retry', 'Send the submitted file again', 'The work last submitted from a file is sent to the host again; the host keeps it once.', [], {},
-    (intake) => intake.submission('retry')),
-  act('work.submission-discard', 'submission-discard', 'Drop the submitted file', 'The saved submission the host has no record of is dropped, so a corrected one can be sent.', [], {},
-    (intake) => intake.submission('discard'), { risk: 'cannot-be-undone' }),
-  act('work.intake', 'intake', 'See input waiting to be admitted', 'Shows the input you typed that waits for the host to admit it, and what happens next.', [], {},
-    (intake) => intake.intake('status'), { touches: 'reads' }),
-  act('work.intake-retry', 'intake-retry', 'Try admitting the input again', 'The waiting input is sent to the host again; the host admits it once.', [], {},
-    (intake) => intake.intake('retry')),
-  act('work.intake-resume', 'intake-resume', 'Go on with the admitted input', 'The input the host admitted goes on to its turn.', [], {},
-    (intake) => intake.intake('resume'), { repeat: 'unsafe' }),
-  act('work.intake-cancel', 'intake-cancel', 'Drop the input waiting to be admitted', 'The waiting input is dropped and nothing starts from it.', [], {},
-    (intake) => intake.intake('cancel'), { risk: 'cannot-be-undone' }),
+    (intake, values) => {
+      if (blank(values.file) && (blank(values.goal) || blank(values.criteria))) {
+        throw new CapabilityRefusal('Nothing was sent: say what you want done and when it is done, or name a file that says both.');
+      }
+      return intake.newWork({ goal: values.goal, criteria: values.criteria, file: values.file });
+    }, { repeat: 'unsafe' }),
+  act('work.submission', 'submission', 'Check work you asked for that has no answer', 'Asks the daemon whether the work you asked for from this folder reached it, while that request has no answer yet.', [], {},
+    (intake) => intake.sent('status'), { touches: 'reads' }),
+  act('work.submission-retry', 'submission-retry', 'Send work you asked for again', 'The work you asked for that has no answer is sent to the daemon again, exactly as before; the daemon keeps it once.', [], {},
+    (intake) => intake.sent('retry')),
+  act('work.submission-discard', 'submission-discard', 'Drop work you asked for that has no answer', 'The work you asked for that the daemon has no record of is dropped here, so you can ask again.', [], {},
+    // The confirming button reads whole in a narrow window.
+    (intake) => intake.sent('discard'), { risk: 'cannot-be-undone', button: 'Drop it' }),
+  act('work.intake', 'intake', 'Check a message that has no answer', 'Asks the daemon what became of the message you typed that has no answer yet.', [], {},
+    (intake) => intake.typed('status'), { touches: 'reads' }),
+  act('work.intake-retry', 'intake-retry', 'Try a message again', 'The message you typed that has no answer is sent to the daemon again; the daemon takes it once.', [], {},
+    (intake) => intake.typed('retry')),
+  act('work.intake-resume', 'intake-resume', 'Go on with a message', 'The message the daemon was taking when it was interrupted goes on to its answer.', [], {},
+    (intake) => intake.typed('resume'), { repeat: 'unsafe' }),
+  act('work.intake-cancel', 'intake-cancel', 'Drop a message that has no answer', 'The message you typed that has no answer is dropped and nothing starts from it.', [], {},
+    (intake) => intake.typed('cancel'), { risk: 'cannot-be-undone', button: 'Drop it' }),
 ];

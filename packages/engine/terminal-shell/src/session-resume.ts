@@ -522,7 +522,7 @@ export async function loadSavedSessionIntoLive(
   const surface = deps.surface;
   const openElsewhere = (): Error => new Error(
     `Session ${name} is open in another running terminal: loading it here would fork its live state. `
-      + `Continue it there, or run \`/session resume ${name} --force\` to have that terminal save it and hand it over to this one.`,
+      + `Continue it there, or run \`/resume ${name} --force\` to have that terminal save it and hand it over to this one.`,
   );
   // Two terminals saving one session overwrite each other's turns. The quick probe refuses without waiting; the
   // claim then takes the session's lock before anything is installed, so two terminals loading it at once cannot

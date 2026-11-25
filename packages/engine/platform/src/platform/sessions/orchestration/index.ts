@@ -16,3 +16,4 @@ export { makeRefKey, VALID_SCOPES } from './types.js';
 export { SessionTaskGraph } from './graph.js';
 export { CrossSessionTaskRegistry, CrossSessionGraphUnavailableError, describeAwaitingHandoffs } from './registry.js';
 export type { HandoffWithdrawal } from './registry.js';
+export { carryTaskGraphsOnce, projectTaskGraphPath } from './shared-graph.js';

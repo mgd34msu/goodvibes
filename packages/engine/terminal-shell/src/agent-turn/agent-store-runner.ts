@@ -38,9 +38,10 @@ import { registerAgentDocumentsTool } from './documents-tool.js';
 import { registerAgentReviewPacketPresetsTool } from './review-packet-presets-tool.js';
 import { registerAgentReviewPacketShareTool, type AgentReviewPacketShareChannelRouter } from './review-packet-share-tool.js';
 import { NOTE_ACTS } from './agent-store-notes.js';
-import { PERSONA_ACTS, ROUTINE_ACTS, startRoutine } from './agent-store-library.js';
+import { PERSONA_ACTS, ROUTINE_ACTS } from './agent-store-library.js';
 import { DRAFT_ACTS } from './agent-store-drafts.js';
 import { SCHEDULE_ACTS } from './agent-store-schedules.js';
+import { HOME_ACTS } from './agent-store-homes.js';
 import { resolveAgentConnectedHostConnection, type AgentConnectedHostConfigReader } from './routine-schedules.js';
 import type { StoreAct, StoreActContext } from './agent-store-common.js';
 
@@ -67,16 +68,29 @@ export interface AgentStoreRunnerDeps {
   readonly sessions?: HandOffSessions | undefined;
 }
 
-const ACTS: Readonly<Record<string, StoreAct>> = { ...NOTE_ACTS, ...PERSONA_ACTS, ...ROUTINE_ACTS, ...SCHEDULE_ACTS, ...DRAFT_ACTS, ...RESEARCH_ACTS };
+const ACTS: Readonly<Record<string, StoreAct>> = { ...NOTE_ACTS, ...PERSONA_ACTS, ...ROUTINE_ACTS, ...SCHEDULE_ACTS, ...DRAFT_ACTS, ...RESEARCH_ACTS, ...HOME_ACTS };
 
 /** The list a capability changes, by its command; reads change none. */
-const LIST_OF: Readonly<Record<string, ChangedList>> = { notes: 'notes', personas: 'personas', routines: 'routines', documents: 'documents', artifacts: 'artifacts', research: 'research' };
-const READS = new Set(['list', 'show', 'search', 'active', 'discover', 'vibe', 'vibe-show', 'receipts', 'receipt', 'runs', 'handed-off']);
+const LIST_OF: Readonly<Record<string, ChangedList>> = {
+  notes: 'notes', personas: 'personas', routines: 'routines', documents: 'documents', artifacts: 'artifacts', research: 'research', 'agent-home': 'agent-homes',
+};
+const READS = new Set(['list', 'show', 'search', 'active', 'discover', 'vibe', 'vibe-show', 'receipts', 'receipt', 'runs', 'handed-off', 'readiness', 'packet-steps', 'timeline',
+  'next', 'starters', 'starter', 'guide']);
+
+/**
+ * The acts that read or write a project's own folder (its drafts, a copy into it, the persona, routine, skill and VIBE.md
+ * files found in it).
+ */
+const PROJECT_ACTS = new Set(['artifacts.export', 'personas.discover', 'personas.import', 'personas.vibe', 'personas.vibe-show', 'personas.vibe-create', 'personas.vibe-import', 'routines.discover', 'routines.import',
+  'agent-home.create-learned', 'agent-home.starter-learned']);
+function needsProject(id: string): boolean {
+  return id.startsWith('documents.') || PROJECT_ACTS.has(id);
+}
 
 /** What a change does to its list, for the notice. */
 function changeOf(word: string): 'created' | 'changed' | 'deleted' {
   if (word === 'delete') return 'deleted';
-  if (word === 'create' || word === 'import' || word === 'vibe-import' || word.startsWith('to-') || word === 'save-preset' || word === 'refresh-preset' || word === 'export') return 'created';
+  if (word === 'create' || word === 'save' || word === 'import' || word === 'vibe-import' || word.startsWith('to-') || word === 'save-preset' || word === 'refresh-preset' || word === 'export') return 'created';
   return 'changed';
 }
 
@@ -145,11 +159,18 @@ export function createAgentStoreRunner(deps: AgentStoreRunnerDeps): AgentStoreRu
     async run(id, values, caller) {
       const act = acts[id];
       if (!act) throw new CapabilityRefusal(`${id} is not an act on the Agent's stores; nothing was done.`);
+      // Drafts, a copy into a folder and the files found to import are a project's: the caller names it (a terminal
+      // program sends its own; another caller sends one), and the daemon's own folder is never taken in its place.
+      if (!caller.workingDirectory && needsProject(id)) {
+        throw new CapabilityRefusal('No project folder came with the request, so nothing was done.', 'Ask from the project\'s folder, or send workingDirectory with the request', 'NO_PROJECT');
+      }
       const workingDirectory = caller.workingDirectory ? resolve(caller.workingDirectory) : deps.workingDirectory();
       const shellPaths = createShellPathService({ workingDirectory, homeDirectory: deps.homeDirectory });
       const context: StoreActContext = {
         shellPaths,
         artifacts: deps.artifactStore,
+        personAsked: caller.personAsked === true,
+        projectGiven: Boolean(caller.workingDirectory),
         ...(deps.memory ? { memory: deps.memory } : {}),
         ...(deps.ingestUrl ? { ingestUrl: deps.ingestUrl } : {}),
         ...(deps.config ? { scheduleHost: () => resolveAgentConnectedHostConnection(deps.config!, deps.homeDirectory) } : {}),
@@ -158,7 +179,7 @@ export function createAgentStoreRunner(deps: AgentStoreRunnerDeps): AgentStoreRu
             goal: `The owner asked for this: ${what}.`,
             criteria: [`Run ${name} with exactly the values the owner gave.`],
           });
-          if (!result.success) throw new CapabilityRefusal(`Not done: ${result.error ?? `${name} did not succeed and gave no reason.`}`);
+          if (!result.success) throw new CapabilityRefusal(`Not done: ${(result.error ?? `${name} did not succeed and gave no reason.`).replace(/^Not done:\s*/i, '')}`);
           return result.output?.trim() || `${what}: done.`;
         },
         // Work and agents: a kept research run's sources are collected here, in the daemon, while the answer goes back;
@@ -192,9 +213,3 @@ export function createAgentStoreRunner(deps: AgentStoreRunnerDeps): AgentStoreRu
   };
 }
 
-/** Starting a routine in a conversation: the routine marked started in the owner's routine store, with its steps. */
-export function startRoutineFor(shellPaths: ShellPathService, idOrName: string) {
-  const started = startRoutine(shellPaths, idOrName);
-  noteListChanged({ list: 'routines', change: 'changed', id: started.id });
-  return started;
-}

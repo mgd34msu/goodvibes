@@ -54,12 +54,15 @@ export function createWorkPlanTool(store: WorkPlanToolStore, options: WorkPlanTo
   return {
     definition: {
       name: 'work_plan',
-      description: 'Keep the project work plan: a checklist of work items with status, owner and notes that the user sees in the work plan view and that lasts across sessions.'
-        + ' Use it to plan multi-step work and to track who is doing what (owner: an agent id, a cohort name or the user); give spawned workers their brief through the agent tool (context and successCriteria).'
+      description: 'Keep the project checklist: your running list of items with status, owner and notes that the user sees under Checklist in the Work place and that lasts across sessions.'
+        + ' Use it to lay out multi-step work and to track who is doing what (owner: an agent id, a cohort name or the user); give spawned workers their brief through the agent tool (context and successCriteria).'
+        + ' Writing it is never asked about: it is your own working list.'
         + ` Statuses: ${WORK_PLAN_TASK_STATUSES.join(', ')}.`,
       parameters: toRecord(WORK_PLAN_TOOL_SCHEMA),
       category: 'write',
       readModes: { field: 'action', values: ['list'] },
+      // The model's own checklist: its working state, not the person's things. The gate allows every call in every mode.
+      ownWorkingState: true,
       sideEffects: ['workflow', 'state'],
       concurrency: 'serial',
     },

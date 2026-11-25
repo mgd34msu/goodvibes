@@ -57,7 +57,7 @@ export function resolveItemIndex(items: readonly WorkItemSpec[], ref: string): n
 }
 
 function unresolvedError(items: readonly WorkItemSpec[], ref: string): string {
-  return `No single draft item matches "${ref}" (an empty reference, or a number that is also another item's id, is ambiguous). Use a number from 1 to ${items.length}, or an item id.`;
+  return `No one step of the plan matches "${ref}". Choose a step by its number, from 1 to ${items.length}.`;
 }
 
 /** Rewrite one item's brief (its `task`). Empty/whitespace briefs are refused. */
@@ -65,7 +65,7 @@ export function editItemBrief(spec: CreateWorkstreamInput, ref: string, brief: s
   const index = resolveItemIndex(spec.items, ref);
   if (index === undefined) return { error: unresolvedError(spec.items, ref) };
   const trimmed = brief.trim();
-  if (!trimmed) return { error: 'A new brief cannot be empty.' };
+  if (!trimmed) return { error: 'Say what the step does: it cannot be empty.' };
   const items = spec.items.map((item, i) => (i === index ? { ...item, task: trimmed } : item));
   return { spec: { ...spec, items } };
 }
@@ -74,7 +74,7 @@ export function editItemBrief(spec: CreateWorkstreamInput, ref: string, brief: s
 export function removeItemFromSpec(spec: CreateWorkstreamInput, ref: string): DraftEditResult {
   const index = resolveItemIndex(spec.items, ref);
   if (index === undefined) return { error: unresolvedError(spec.items, ref) };
-  if (spec.items.length <= 1) return { error: 'Cannot remove the last item, a workstream needs at least one.' };
+  if (spec.items.length <= 1) return { error: 'The last step stays: a plan needs at least one step.' };
   const removedId = spec.items[index]!.id;
   const items = spec.items
     .filter((_, i) => i !== index)
@@ -91,7 +91,7 @@ export function moveItemInSpec(spec: CreateWorkstreamInput, ref: string, toPosit
   const index = resolveItemIndex(spec.items, ref);
   if (index === undefined) return { error: unresolvedError(spec.items, ref) };
   if (!Number.isInteger(toPosition) || toPosition < 1 || toPosition > spec.items.length) {
-    return { error: `Position must be a whole number from 1 to ${spec.items.length}.` };
+    return { error: `The new place must be a whole number from 1 to ${spec.items.length}.` };
   }
   const items = [...spec.items];
   const [moved] = items.splice(index, 1);

@@ -194,7 +194,7 @@ function createMarketplaceReadModel(runtimeServices: RuntimeServices): UiMarketp
       return { startupIssues, recommendations: unranked, ranking: 'off' };
     }
     if (ranking === 'failed' && failureMessage) {
-      startupIssues.push(`Marketplace recommendations could not be ranked (${failureMessage}); /marketplace recommend tries again.`);
+      startupIssues.push(`Marketplace recommendations could not be ranked (${failureMessage}); "what fits this project" on the Marketplace tab of Tools and extensions tries again.`);
     }
     return { startupIssues, recommendations, ranking };
   };

@@ -260,7 +260,7 @@ const COMMAND_HELP: Record<string, CommandHelp> = {
   'support-bundle': {
     usage: ['support-bundle export [path]', 'support-bundle inspect <path>', 'support-bundle import <path> [--include-security] [--yes]'],
     summary:
-      'Export, inspect, or import a support snapshot (redacted config + diagnostics + posture). Import applies only the config values: it refuses a bundle from another product or format version, imports only values that differ from your settings, holds back permission, sandbox, listener, service and storage settings unless --include-security is given, applies all or nothing, and without --yes lists each change as current -> new and changes nothing (exit 2). Aliases: bundle, bundles. Distinct from `plugin bundles` (capability bundles).',
+      'Export, inspect, or import a support snapshot (redacted config + diagnostics + posture); the daemon writes and reads it for the terminal app, and is started first when its service is installed and stopped. Import applies only the config values: it refuses a bundle from another product or format version, imports only values that differ from your settings, holds back permission, sandbox, listener, service and storage settings unless --include-security is given, applies all or nothing, and without --yes says what it would change and changes nothing (exit 2). Aliases: bundle, bundles. Distinct from `plugin bundles` (capability bundles).',
     line: 'Move a support snapshot (config + diagnostics + posture)',
     examples: ['support-bundle export goodvibes-bundle.json', 'support-bundle inspect goodvibes-bundle.json'],
   },

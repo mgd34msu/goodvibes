@@ -85,10 +85,45 @@ export interface InputDescription {
     | { readonly tail: true };
   /** The form step it is asked in (1, 2, ...); inputs of one step are shown together as one page. */
   readonly step?: number | undefined;
-  /** Shown and needed only while another input holds a value ("Command" when it starts as a command). */
-  readonly showWhen?: { readonly input: string; readonly is: string } | undefined;
+  /**
+   * When it is shown and needed, declared as data every form reads the same way (the terminal places, the web form,
+   * `capabilities.list`, the daemon's own check): see {@link InputShowWhen}.
+   */
+  readonly showWhen?: InputShowWhen | undefined;
   /** A value to offer from what is filled in so far, marked "suggested from ..." until the person changes it. */
   readonly suggest?: ((earlier: ActionValues) => { readonly value: string; readonly from: string } | undefined) | undefined;
+  /**
+   * A secret input whose value is not secret for what is filled in so far (a setting that holds no password or key):
+   * the form shows it as typed. It stays a secret everywhere else (never printed, kept or sent in clear).
+   */
+  readonly plainWhen?: ((earlier: ActionValues) => boolean) | undefined;
+}
+
+/**
+ * When an input is shown and needed, as data (never a function, so it travels in `capabilities.list` and the
+ * generated command actions, and a form reads it without the platform's code):
+ *
+ *  - `{ input, is }`: while that input holds this value ("Command" when it starts as a command).
+ *  - `{ input, isOneOf }`: while that input holds one of these values.
+ *  - `{ input, isNoneOf }`: once that input holds a value, and it is none of these (a program asked only for a setting
+ *    a program holds: none of the daemon's own settings).
+ *  - `{ suppliedBy }`: never shown or asked: the program or the place asking fills it from what it knows (the row
+ *    pressed on, the program's own view links); the words say from what. A caller with nothing to fill leaves it out.
+ */
+export type InputShowWhen =
+  | { readonly input: string; readonly is: string }
+  | { readonly input: string; readonly isOneOf: readonly string[] }
+  | { readonly input: string; readonly isNoneOf: readonly string[] }
+  | { readonly suppliedBy: string };
+
+/** Whether an input with this `showWhen` is shown and needed, given the values filled in so far. */
+export function showWhenHolds(when: InputShowWhen | undefined, values: ActionValues): boolean {
+  if (!when) return true;
+  if ('suppliedBy' in when) return false;
+  const value = values[when.input];
+  if ('is' in when) return value === when.is;
+  if ('isOneOf' in when) return value !== undefined && when.isOneOf.includes(value);
+  return value !== undefined && value !== '' && !when.isNoneOf.includes(value);
 }
 
 /** The sentence ending for each lifetime, the same everywhere. */
@@ -144,7 +179,11 @@ export interface CapabilityDeclaration {
 
 /** A refusal a capability throws when it did not do what was asked: what is true, and what to do instead. */
 export class CapabilityRefusal extends Error {
-  constructor(message: string, readonly next?: string | undefined, readonly code: string = 'CAPABILITY_REFUSED') {
+  /**
+   * `code` names what refused it (NOT_FOUND, INVALID_ARGUMENT, UNAVAILABLE, a method's own code); `capabilities.run`
+   * answers with the status that code stands for (routes/capabilities.ts `refusalStatus`), or `status` when given.
+   */
+  constructor(message: string, readonly next?: string | undefined, readonly code: string = 'CAPABILITY_REFUSED', readonly status?: number | undefined) {
     super(message);
     this.name = 'CapabilityRefusal';
   }
@@ -189,14 +228,35 @@ export interface CapabilityCaller {
    * on "the model of this conversation" (its context window size) acts on it unless the call names another.
    */
   readonly model?: string | undefined;
+  /** The asking program's conversation, when a terminal program asked: what a capability records as where a thing came from. */
+  readonly sessionId?: string | undefined;
   /** The person asked it himself (a key pressed, a form submitted, a line typed): not a model, not another agent. */
   readonly personAsked?: boolean | undefined;
+  /**
+   * The call came from another machine (the listener saw it arrive over the network, not over loopback): a path it
+   * names is on that machine, and the daemon reads by path only what is on its own machine and was named by a caller
+   * there. Set by the daemon's `capabilities.run`; absent for a caller on this machine or in process.
+   */
+  readonly elsewhere?: boolean | undefined;
   /**
    * Run a daemon method as this same caller (its own admission applies; the person's claim travels with it only as
    * the daemon kept it): a handler whose act a daemon method already does calls that method and words its answer.
    * Set by the daemon's `capabilities.run`; absent where no daemon dispatch runs the handler.
    */
   readonly method?: ((methodId: string, body: Record<string, unknown>) => Promise<unknown>) | undefined;
+}
+
+/** The sentence a capability says when one input holds one of `values` (CapabilityDefinition `sentenceWhen`). */
+export interface CapabilitySentenceWhen {
+  readonly input: string;
+  readonly values: readonly string[];
+  readonly sentence: string;
+}
+
+/** The chosen values of one input with which a capability only tightens a protection (CapabilityDefinition `tightens`). */
+export interface CapabilityTightensWhen {
+  readonly input: string;
+  readonly values: readonly string[];
 }
 
 /**
@@ -217,6 +277,11 @@ export interface CapabilityDefinition<Services> {
   readonly sentence: string;
   /** What happened, with `{input}` blanks; `''` when the result's own text says it. */
   readonly done: string;
+  /**
+   * What happened, said only by a place (the press's outcome line), for a control whose typed line prints nothing on
+   * purpose (`/clear` keeps the empty conversation's splash): "Started a fresh conversation." Absent: `done`.
+   */
+  readonly doneInPlace?: string | undefined;
   readonly touches: ActionTouches;
   readonly lasts: ActionLasts | 'not-a-change';
   readonly risk: ActionRisk;
@@ -247,6 +312,45 @@ export interface CapabilityDefinition<Services> {
    * pane, with the copy key, until he leaves it; `capabilities.run` returns it only to the person who asked.
    */
   readonly reveals?: CapabilityReveal | undefined;
+  /**
+   * It only tightens a protection (plan mode on, a folder restricted, a "never" rule added, a protection switched on):
+   * a model's call of it is never refused or asked about, in any mode and any folder (tools/capability/definitions.ts
+   * classes it so). `true` for every run; `{ input, values }` when only those chosen values tighten (a rule that
+   * refuses or asks, not one that allows).
+   */
+  readonly tightens?: true | CapabilityTightensWhen | undefined;
+  /**
+   * It writes only the model's own working state (the running checklist), not the person's things: a model's call of
+   * it is never held or asked about, in any mode, with or without a decision model (tools/capability/definitions.ts
+   * classes it so, as the `work_plan` tool is).
+   */
+  readonly ownWorkingState?: true | undefined;
+  /**
+   * Whether a run with these values loosens a protection although its own risk is `none` (a setting changed in the
+   * direction that loosens it: settings.set, settings.reset): such a run asks first, opening on No (risk.ts
+   * `effectiveRisk`); a change the other way applies at once. A model's call is classed by the gate from the setting's
+   * current value (permissions/manager.ts `settingsWriteLoosens`).
+   */
+  readonly loosensIf?: ((values: ActionValues) => boolean) | undefined;
+  /**
+   * The chosen values of one input with which a run cannot be undone although the action's own risk is `none` (a
+   * reset of a setting that holds a credential removes the stored secret): such a run is `cannot-be-undone` (risk.ts
+   * `effectiveRisk`), and a model's or an outside caller's is put to the owner, opening on No (the gate reads the same
+   * list: tools/capability/definitions.ts `irreversibleWhen`).
+   */
+  readonly irreversibleWhen?: CapabilityTightensWhen | undefined;
+  /**
+   * The sentence said in place of `sentence` when one input holds one of these values (a reset of a setting that holds
+   * a credential removes the stored secret; any other goes back to its default): the card a model's call is put to the
+   * owner with says what will really happen. `{input}` blanks as in `sentence`.
+   */
+  readonly sentenceWhen?: CapabilitySentenceWhen | undefined;
+  /**
+   * The question a place asks before a run that cannot be undone or loosens a protection, with `{input}` blanks
+   * ("Set {key} to {value}?"); absent, the label with a question mark. It names the change, where the form's title
+   * names the act.
+   */
+  readonly question?: string | undefined;
   readonly example: ActionValues;
   /**
    * Whether the program holding the conversation can run it with the services it has (a session capability whose
@@ -254,5 +358,18 @@ export interface CapabilityDefinition<Services> {
    * one that is not available, and the model's run refuses it in words.
    */
   readonly available?: ((services: Services) => boolean) | undefined;
+  /**
+   * What its caller must send for it to run at all, each with the sentence that says what to name: `project`, the
+   * project folder it acts in (`workingDirectory`); `program`, the terminal program asking. `capabilities.run` refuses a
+   * call without it at once, before the owner is asked anything about a call that would then be refused.
+   */
+  readonly callerNeeds?: { readonly project?: string | undefined; readonly program?: string | undefined } | undefined;
+  /**
+   * Its preview check: what refuses a call for a reason its values and its caller alone show (a file outside the
+   * project named by a caller who is not the person). Run before anything is asked, at every door: `capabilities.run`
+   * refuses before the owner is put the question, the model's `capability_run` before its program's gate decides it.
+   * The handler keeps its own check. Returns the refusal, or undefined when the call may go on.
+   */
+  readonly check?: ((values: ActionValues, caller: CapabilityCaller) => CapabilityRefusal | undefined) | undefined;
   readonly run:(values: ActionValues, services: Services, caller: CapabilityCaller) => Promise<CapabilityResult>;
 }

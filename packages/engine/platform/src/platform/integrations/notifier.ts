@@ -423,7 +423,7 @@ export class Notifier implements NotificationDeadLetterSource {
           (attempt) => this.sendToDestination(envelope, transport.channel, transport.destination, attempt.id),
           { target: encodeDestination(transport.destination), repeatSafe: transport.repeatSafe });
         if (outcome === 'dead_letter') {
-          failures.push(new DeliveryError(`The ${transport.channel} notification could not be delivered and was moved to the failed-notification list; resend it with /notify resend or notifications.deadLetters.replay.`, 'terminal'));
+          failures.push(new DeliveryError(`The ${transport.channel} notification could not be delivered and was moved to the failed-notification list; send it again from Failed notifications in Mail, calendar and channels, or with notifications.deadLetters.replay.`, 'terminal'));
         }
       } catch (error) { failures.push(error); }
     }
@@ -452,6 +452,14 @@ export class Notifier implements NotificationDeadLetterSource {
    */
   persistDeadLetters(path: string): void {
     this._queue.persistDeadLetters(path, notificationDeadLetterCodec(this.metadataOnly));
+  }
+
+  /**
+   * Take in the failed notifications another file holds (a terminal program's own Slack and Discord list, 3.5.0),
+   * kept in this notifier's file from now on; that file is only read. Returns how many were taken in.
+   */
+  adoptDeadLetters(path: string): number {
+    return this._queue.adoptDeadLetters(path, notificationDeadLetterCodec(this.metadataOnly));
   }
 
   /** The failed notifications, oldest first, in their metadata-only form. */
@@ -526,7 +534,7 @@ export class Notifier implements NotificationDeadLetterSource {
     const transport = this.transports.find((candidate) => candidate.channel === channel);
     const changes = destinationChanges(channel, reviewed, transport);
     if (changes.length > 0 || !transport) {
-      throw new DeliveryError(`${describeChanges(channel, changes)}; the notification was not sent. Resend it with /notify resend <id> --to-current to send it there.`, 'terminal');
+      throw new DeliveryError(`${describeChanges(channel, changes)}; the notification was not sent. Send it there with "send it where the channel posts now" on Failed notifications in Mail, calendar and channels.`, 'terminal');
     }
     await this.postEnvelope(envelope, (text) => transport.send(text, id));
   }

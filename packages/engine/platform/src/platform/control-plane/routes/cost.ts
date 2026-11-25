@@ -18,7 +18,7 @@ import { GatewayVerbError } from './gateway-verb-error.js';
 import { readInvocationParams, requireStringValue } from './invocation-params.js';
 
 const COST_WINDOWS: readonly CostWindow[] = ['24h', '7d'];
-const COST_DIMENSIONS: readonly CostDimension[] = ['agent', 'tool', 'hook', 'mcp', 'model', 'provider', 'session'];
+const COST_DIMENSIONS: readonly CostDimension[] = ['agent', 'tool', 'hook', 'mcp', 'model', 'provider', 'session', 'source'];
 
 function requireEnum<T extends string>(value: unknown, allowed: readonly T[], field: string): T {
   if (typeof value !== 'string' || !allowed.includes(value as T)) {

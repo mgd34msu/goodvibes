@@ -285,7 +285,16 @@ export class AgentWorkspace {
     this.clampSelection();
   }
 
+  /** Told once each when the workspace closes. */
+  private closeWaiters: Array<() => void> = [];
+
+  /** Resolves when the workspace now open closes (left, or done with). */
+  whenClosed(): Promise<void> {
+    return new Promise((resolve) => { this.closeWaiters.push(resolve); });
+  }
+
   close(): void {
+    for (const tell of this.closeWaiters.splice(0)) tell();
     this.active = false;
     this.actionSearchActive = false;
     this.actionSearchQuery = '';

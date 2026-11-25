@@ -86,6 +86,8 @@ function definiteHostRefusal(error: unknown): string | undefined {
 }
 /** The one step that moves an earlier, unresolved input forward, decided from its recorded state. */
 export type NativeIntakeNextStep = 'retry' | 'resume' | 'inspect' | 'cancel';
+/** The answer when no message typed in this folder waits: not a failure to read. */
+export const NO_TYPED_MESSAGE_WAITS = 'No message you typed in this folder waits for an answer.';
 export interface NativeConversationIntakeState {
     readonly status: 'pending' | 'recorded' | 'unknown' | 'invalid' | 'unavailable';
     readonly message: string;
@@ -98,7 +100,8 @@ export interface NativeConversationIntakeState {
      * sent and may be handed back to the person. `request` then names the earlier input, not this one.
      */
     readonly notSent?: true | undefined;
-    readonly request?: Readonly<Pick<NativeConversationIntakeCaptureRequest, 'requestId' | 'inputId'>> | undefined;
+    /** The message's identity and the words typed (what the Work place's Unanswered list shows it by). */
+    readonly request?: Readonly<Pick<NativeConversationIntakeCaptureRequest, 'requestId' | 'inputId'> & Partial<Pick<NativeConversationIntakeCaptureRequest, 'text'>>> | undefined;
     readonly result?: NativeConversationIntakeResult | undefined;
     /** Durable local dispatch claim acquired by this call only, never get/status. */
     readonly turnReady?: boolean | undefined;
@@ -203,11 +206,11 @@ export class NativeConversationIntakeControls implements NativeConversationIntak
             }
             if (mode === 'cancel') {
                 if (expected && (!this.active.request || expected.inputId !== this.active.request.inputId || expected.requestId !== this.active.request.requestId))
-                    return { status: 'invalid', message: 'Another input is active. The retained input was not detached or cancelled.' };
+                    return { status: 'invalid', message: 'Another message is being sent now, so the saved one was not dropped.' };
                 this.close();
             }
             else
-                return { status: 'pending', message: 'Native intake is already pending. No second input or dispatch was created.' };
+                return { status: 'pending', message: 'Your message is still being sent; nothing was sent twice.' };
         }
         if (!selected.available)
             return { status: 'unavailable', message: selected.reason };
@@ -215,7 +218,7 @@ export class NativeConversationIntakeControls implements NativeConversationIntak
         if (source && ((!this.policy.allowHosted && options?.delivery !== undefined) || (options?.continuationSessionId !== undefined && options.delivery !== 'hosted')
             || (options?.delivery !== undefined && options.delivery !== 'hosted')
             || !nativeConversationIntakeCaptureRequestSchema.safeParse({ requestId: 'validation', inputId: 'validation', text: source.text, unsupportedSources: source.unsupportedSources, ...(options?.continuationSessionId !== undefined ? { continuation: { sessionId: options.continuationSessionId } } : {}) }).success)) {
-            return { status: 'invalid', message: 'Native intake requires complete bounded original text and at most 100 source references.' };
+            return { status: 'invalid', message: 'This message is too long, or names more than 100 files or attachments, to be sent whole.' };
         }
         const epoch = ++this.epoch;
         const lifetime = this.selectionLifetime;
@@ -243,7 +246,8 @@ export class NativeConversationIntakeControls implements NativeConversationIntak
         const detach = () => { controller.abort(); dispose(); };
         // Selection is checked at every await below; nothing polls it in between.
         this.active = { identity: selected.identity, detach };
-        const request = () => command ? { requestId: command.requestId, inputId: command.inputId } : undefined;
+        // The words typed travel with the identity, so the Work place's Unanswered list names the message by them.
+        const request = () => command ? { requestId: command.requestId, inputId: command.inputId, text: command.text } : undefined;
         const validate = (result: NativeConversationIntakeResult): NativeConversationIntakeResult => {
             const parsed = nativeConversationIntakeResultSchema.parse(result);
             if (!command || parsed.projectId !== selected.projectId || parsed.requestId !== command.requestId || parsed.sourceRef.inputId !== command.inputId
@@ -377,11 +381,11 @@ export class NativeConversationIntakeControls implements NativeConversationIntak
                         if (this.retained?.command.requestId === command.requestId)
                             this.retained = undefined;
                         return { status: 'unavailable', ...(principal ? { cause: 'principal' as const } : {}), message: removeFailed
-                                ? `The host refused to look up the earlier message, so it is not running: ${refused} Its saved copy could not be removed now; run /work intake-cancel again.`
-                                : `The host refused to look up the earlier message, so it is not running: ${refused} Its saved copy was dropped.` };
+                                ? `The daemon refused to look up the earlier message, so it is not running: ${refused} Its saved copy could not be removed now; drop it again in Work, under Unanswered.`
+                                : `The daemon refused to look up the earlier message, so it is not running: ${refused} Its saved copy was dropped.` };
                     }
                     return { status: 'unavailable', ...(principal ? { cause: 'principal' as const } : {}), request: request(), nextStep: 'cancel',
-                        message: `The host refused this: ${refused} Your earlier message is still saved here; drop it with /work intake-cancel, or send it with /work intake-retry once that is fixed.${mode === 'submit' ? ' This new message was not sent.' : ''}`,
+                        message: `The daemon refused this: ${refused} Your earlier message is still saved here; once that is fixed, try it again or drop it in Work, under Unanswered.${mode === 'submit' ? ' This new message was not sent.' : ''}`,
                         ...(mode === 'submit' ? { notSent: true as const } : {}) };
                 }
                 if (!current())
@@ -396,14 +400,14 @@ export class NativeConversationIntakeControls implements NativeConversationIntak
                     if (!current())
                         return;
                     if (!('kind' in hostedTurn) && hostedTurn.state === 'failed' && hostedTurn.failure?.retryable === true)
-                        return { status: 'recorded', message: `Your previous message failed on the host before changing anything${hostedTurn.failure?.summary ? ` (${hostedTurn.failure.summary})` : ''}. Send it again with /work intake-retry, or drop it with /work intake-cancel. This new message was not sent.`, request: request(), result, hostedTurn, hostedCurrent, nextStep: 'retry', notSent: true };
+                        return { status: 'recorded', message: `Your previous message failed on the daemon before changing anything${hostedTurn.failure?.summary ? ` (${hostedTurn.failure.summary})` : ''}. Try it again or drop it in Work, under Unanswered. This new message was not sent.`, request: request(), result, hostedTurn, hostedCurrent, nextStep: 'retry', notSent: true };
                     if ('kind' in hostedTurn || !hostedTurnEnded(hostedTurn))
-                        return { status: 'recorded', message: 'Your previous message is still running on the host. Check it with /work intake, or stop it with /work intake-cancel. This new message was not sent.', request: request(), result, hostedTurn, hostedCurrent, nextStep: 'inspect', notSent: true };
+                        return { status: 'recorded', message: 'Your previous message is still running on the daemon. Check it or drop it in Work, under Unanswered. This new message was not sent.', request: request(), result, hostedTurn, hostedCurrent, nextStep: 'inspect', notSent: true };
                     if (options?.delivery === 'hosted' && nextContinuation === undefined && hostedTurn.sessionId)
                         nextContinuation = hostedTurn.sessionId;
                 }
                 else if (options?.delivery === 'hosted')
-                    return { status: 'unknown', message: 'Your previous message ran in this process and its end was never confirmed, so the host cannot take the next one. Check it with /work intake. This new message was not sent.', request: request(), result, nextStep: 'inspect', notSent: true };
+                    return { status: 'unknown', message: 'Your previous message ran in this program and its end was never confirmed, so the daemon cannot take the next one. Check it in Work, under Unanswered. This new message was not sent.', request: request(), result, nextStep: 'inspect', notSent: true };
             }
             if (mode === 'submit' && command && result?.kind === 'work') {
                 const intent = nativeConversationExecutionIntent(result.receipt);
@@ -414,16 +418,16 @@ export class NativeConversationIntakeControls implements NativeConversationIntak
                 if (!current())
                     return;
                 if (delivery !== options?.delivery && execution.snapshot && !['terminal', 'cancelled'].includes(execution.snapshot.recovery))
-                    return { status: 'recorded', message: 'Your previous message became work that is still running. Follow it in /work; the next message can be sent once that work has ended. This new message was not sent.', request: request(), result, execution, nextStep: 'inspect', notSent: true };
+                    return { status: 'recorded', message: 'Your previous message became work that is still running. Follow it in Work; the next message can be sent once that work has ended. This new message was not sent.', request: request(), result, execution, nextStep: 'inspect', notSent: true };
                 if (!execution.snapshot)
-                    return { status: 'recorded', message: 'Your previous message became work whose start was never confirmed. Start it with /work intake-retry, or drop this message with /work intake-cancel (the work stays in /work). This new message was not sent.', request: request(), result, execution, nextStep: 'retry', notSent: true };
+                    return { status: 'recorded', message: 'Your previous message became work whose start was never confirmed. Try it again in Work, under Unanswered, to start it, or drop the message there (the work stays in Work). This new message was not sent.', request: request(), result, execution, nextStep: 'retry', notSent: true };
             }
             const unsaved = !result && command !== undefined && retained !== undefined && !retained.persisted && sameCommand(command, retained.command) && stored?.command.requestId !== command.requestId;
             if (mode === 'submit') {
                 if (command && (!result || !terminal(result))) {
                     const next = unresolvedNextStep(result);
                     return { status: 'unknown', message: unsaved
-                            ? 'Your previous message was never saved and the host has no record of it. Send it with /work intake-retry, or drop it with /work intake-cancel. This new message was not sent.'
+                            ? 'Your previous message was never saved and the daemon has no record of it. Try it again or drop it in Work, under Unanswered. This new message was not sent.'
                             : unresolvedMessage(next), request: request(), ...(result ? { result } : {}), nextStep: next, notSent: true };
                 }
                 command = nativeConversationIntakeCaptureRequestSchema.parse({ requestId: this.newId(), inputId: this.newId(), text: source!.text, unsupportedSources: source!.unsupportedSources, ...(nextContinuation !== undefined ? { continuation: { sessionId: nextContinuation } } : {}) });
@@ -440,7 +444,7 @@ export class NativeConversationIntakeControls implements NativeConversationIntak
                 result = undefined;
             }
             else if (!command)
-                return { status: 'unavailable', message: 'No retained ordinary input exists for this host, project, workspace and verified principal.' };
+                return { status: 'unavailable', message: NO_TYPED_MESSAGE_WAITS };
             if (!command)
                 throw new Error('Missing original source');
             // A definite pre-publication failure can be repaired by explicit retry,
@@ -480,7 +484,7 @@ export class NativeConversationIntakeControls implements NativeConversationIntak
                     // A 403 reads as an authentication failure by kind; only the principal codes say it is one.
                     const principal = PRINCIPAL_CODES.has((error as { readonly code?: unknown }).code);
                     return { status: 'unavailable', ...(principal ? { cause: 'principal' as const } : {}), request: request(),
-                        message: `The host refused this input, so nothing was captured or run. ${refused}` };
+                        message: `The daemon refused this message, so nothing was kept or run. ${refused}` };
                 }
                 result = validate(captured);
                 if (!current())
@@ -491,7 +495,7 @@ export class NativeConversationIntakeControls implements NativeConversationIntak
                 // Never saved and never captured, so nothing exists anywhere that could still run or be replayed.
                 if (this.retained === retained)
                     this.retained = undefined;
-                return { status: 'unavailable', message: 'The earlier input was never saved to the intake journal and the host has no record of it. It was discarded and nothing ran; submit a new input.' };
+                return { status: 'unavailable', message: 'The earlier message was never saved here and the daemon has no record of it. It was dropped and nothing ran; you can send a new message.' };
             }
             if (mode === 'cancel' && !result && retained && !retained.persisted && sameCommand(command, retained.command)
                 && stored?.command.requestId === command.requestId && selected.journal.discardUncaptured) {
@@ -503,7 +507,7 @@ export class NativeConversationIntakeControls implements NativeConversationIntak
                     return;
                 if (this.retained === retained)
                     this.retained = undefined;
-                return { status: 'unavailable', message: 'The earlier input was written to the intake journal but never sent to the host. It was removed from the journal and nothing ran; submit a new input.' };
+                return { status: 'unavailable', message: 'The earlier message was saved here but never sent to the daemon. Its saved copy was dropped and nothing ran; you can send a new message.' };
             }
             if (!result && mode === 'cancel') {
                 // The host has no record of it, so nothing ran and nothing can: a capture still on its
@@ -515,11 +519,11 @@ export class NativeConversationIntakeControls implements NativeConversationIntak
                 if (this.retained?.command.requestId === command.requestId)
                     this.retained = undefined;
                 return { status: 'unavailable', message: removeFailed
-                        ? 'The earlier message never reached the host, so nothing ran, but its saved copy could not be removed now. Run /work intake-cancel again.'
-                        : 'The earlier message never reached the host, so nothing ran. Its saved copy was dropped; send a new message.' };
+                        ? 'The earlier message never reached the daemon, so nothing ran, but its saved copy could not be removed now. Drop it again in Work, under Unanswered.'
+                        : 'The earlier message never reached the daemon, so nothing ran. Its saved copy was dropped; you can send a new message.' };
             }
             if (!result)
-                return { status: 'unknown', message: 'The host has no record of the earlier message, so nothing ran. Send it with /work intake-retry, or drop it with /work intake-cancel.', request: request(), nextStep: 'retry' };
+                return { status: 'unknown', message: 'The daemon has no record of the earlier message, so nothing ran. Try it again or drop it in Work, under Unanswered.', request: request(), nextStep: 'retry' };
             if (mode !== 'status') {
                 await preserveHostedSource();
                 if (!current())
@@ -652,23 +656,23 @@ export class NativeConversationIntakeControls implements NativeConversationIntak
                 catch { /* the next save under this binding replaces the record */ }
             };
             const message = mode === 'cancel' && result.kind === 'work'
-                ? 'This message already became work, so it was not cancelled here; its intake record was dropped and the work stays in /work, where it can be started or cancelled.'
-                : hostedTurn ? (result.sourceRef.classic ? 'Owner-authorized conversation without a decision model recorded for host-owned delivery; no decision-model receipt.' : 'Native conversational decision recorded for host-owned delivery.') : describeResult(result, turnReady, Boolean(stored?.dispatch));
-            return { status: 'recorded', message: removeFailed ? `${message} Its journal record could not be removed now; the next input replaces it.` : message, request: request(), result, ...(hostedTurn ? { hostedTurn, hostedCurrent } : {}), ...(execution ? { execution } : {}), ...(turnReady ? { turnReady: true, turnPermit, releaseTurnClaim: releaseClaim, finishTurn } : {}) };
+                ? 'This message already became work, so the work was not stopped; the message was dropped and the work stays in Work, where it can be started or stopped.'
+                : hostedTurn ? 'The daemon took your message as part of the conversation and answers it there.' : describeResult(result, turnReady, Boolean(stored?.dispatch));
+            return { status: 'recorded', message: removeFailed ? `${message} Its saved copy could not be removed now; the next message replaces it.` : message, request: request(), result, ...(hostedTurn ? { hostedTurn, hostedCurrent } : {}), ...(execution ? { execution } : {}), ...(turnReady ? { turnReady: true, turnPermit, releaseTurnClaim: releaseClaim, finishTurn } : {}) };
         }
         catch (error) {
             if (!current())
                 return;
             const cause = nativeIntakeFailureCause(error);
             return { status: command ? 'unknown' : 'unavailable', cause, request: request(), message: isJournalPhase(phase)
-                    ? 'The durable intake journal could not be confirmed. No further request or ordinary turn was sent. The visible original input and dispatch claim are preserved.'
+                    ? 'Your message could not be saved on this computer, so nothing more was sent. What was saved before is kept.'
                     : !command && cause === 'principal'
-                    ? 'This terminal is not paired with the connected host, so nothing was sent to it. Pair it (/setup pair in the Agent, /devices pair host in the terminal app) to use it.'
+                    ? 'This terminal is not paired with the daemon, so nothing was sent to it. Pair it in Devices and network to use it.'
                     : !command && (cause === 'network' || cause === 'host_changed')
-                    ? 'The connected host could not be reached, so nothing was sent to it.'
+                    ? 'The daemon could not be reached, so nothing was sent to it.'
                     : !command
-                    ? `The connected host's answer could not be used (${cause}), so nothing was sent to it.`
-                    : 'Native intake outcome is unknown or unavailable. Inspect /work intake before retrying the same input; an interrupted request may already have taken effect.',
+                    ? `The daemon's answer could not be used (${cause}), so nothing was sent to it.`
+                    : 'Whether the daemon took your message is not known; it may already have. Check it in Work, under Unanswered, before trying it again.',
                 ...(command ? { nextStep: 'inspect' as const } : {}) };
         }
         finally {
@@ -688,10 +692,10 @@ function unresolvedNextStep(result: NativeConversationIntakeResult | undefined):
 }
 function unresolvedMessage(next: NativeIntakeNextStep): string {
     switch (next) {
-        case 'retry': return 'Your previous message was saved but its admission never finished. Send it with /work intake-retry, or drop it with /work intake-cancel. This new message was not sent.';
-        case 'resume': return 'Your previous message was interrupted while the host was admitting it. Continue it with /work intake-resume, or drop it with /work intake-cancel. This new message was not sent.';
-        case 'cancel': return 'Your previous message cannot continue. Drop it with /work intake-cancel. This new message was not sent.';
-        case 'inspect': return 'Your previous message has not settled. Check it with /work intake, or drop it with /work intake-cancel. This new message was not sent.';
+        case 'retry': return 'Your previous message was saved but the daemon never finished taking it. Try it again or drop it in Work, under Unanswered. This new message was not sent.';
+        case 'resume': return 'Your previous message was interrupted while the daemon was taking it. Go on with it or drop it in Work, under Unanswered. This new message was not sent.';
+        case 'cancel': return 'Your previous message cannot go on. Drop it in Work, under Unanswered. This new message was not sent.';
+        case 'inspect': return 'Your previous message has no answer yet. Check it or drop it in Work, under Unanswered. This new message was not sent.';
     }
 }
 /**
@@ -709,25 +713,19 @@ export function nativeConversationIntakeAccepted(state: NativeConversationIntake
 }
 function describeResult(result: NativeConversationIntakeResult, turnReady: boolean, dispatched: boolean): string {
     switch (result.kind) {
-        case 'captured': return 'Original text is durably captured. Use /work intake-retry to request admission.';
-        case 'processing': return `Native intake is ${result.stage}. Use /work intake to inspect or /work intake-resume for explicit recovery.`;
-        case 'turn': return turnReady ? result.sourceRef.classic ? 'Owner-authorized conversation without a decision model recorded; original turn dispatch claimed without a decision-model receipt.' : `Native ${result.route} decision recorded; original turn dispatch claimed.` : dispatched ? 'Recovery required: this original turn already has a durable dispatch claim and may have run. Inspect the conversation before submitting a new input; it will not be automatically replayed.' : result.sourceRef.classic ? 'Conversation without a decision model is recorded. This lookup did not dispatch it. Use /work intake-retry for explicit recovery.' : 'Native conversational decision is recorded. This lookup did not dispatch it. Use /work intake-retry for explicit recovery.';
-        case 'blocked': return `Native intake blocked: ${result.reason}. This input is unchanged; submit a new complete input to proceed.`;
-        case 'refused': return `Native intake refused: ${result.reason}. This input cannot be retried into new work.`;
-        case 'cancelled': return 'Native intake cancelled. No ordinary turn or work execution was started.';
-        case 'work': return 'Native work admission recorded against the original source. Execution status is shown separately.';
+        case 'captured': return 'The daemon has your message but has not taken it yet. Try it again in Work, under Unanswered.';
+        case 'processing': return 'The daemon is still taking your message. Check it or go on with it in Work, under Unanswered.';
+        case 'turn': return turnReady ? 'Your message is answered here, in the conversation.' : dispatched ? 'This message may already have been answered, so it is not sent again. Look at the conversation before sending a new message.' : 'The daemon took your message as part of the conversation, but it was not answered yet. Try it again in Work, under Unanswered.';
+        case 'blocked': return `Your message was not taken: ${result.reason}. Nothing changed; send a new message.`;
+        case 'refused': return `Your message was refused: ${result.reason}. It cannot become work.`;
+        case 'cancelled': return 'Your message was dropped. Nothing was run.';
+        case 'work': return 'Your message became a piece of work: it is in Work.';
     }
 }
 export function nativeConversationIntakeLines(state: NativeConversationIntakeState | undefined): string[] {
     if (!state)
-        return ['Native intake detached because its host, credentials or workspace changed. No stale turn was dispatched.'];
+        return ['The daemon or this folder changed while your message was sent, so its answer was set aside. Nothing was run from it.'];
     const lines = [state.message];
-    if (state.request)
-        lines.push(`requestId ${state.request.requestId} · inputId ${state.request.inputId}`);
-    if (state.result?.kind === 'work') {
-        const receipt = state.result.receipt;
-        lines.push(`Native target: work ${receipt.workId} · attempt ${receipt.attemptId} · ledger revision ${receipt.ledgerRevision}`, `Inspect /work for native status and explicit recovery controls. Source ${receipt.source.sourceId} revision ${receipt.source.sourceRevision}.`);
-    }
     if (state.hostedTurn)
         lines.push(...nativeHostedTurnLines(state.hostedTurn));
     if (state.execution)

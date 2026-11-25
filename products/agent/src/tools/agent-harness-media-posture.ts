@@ -169,10 +169,10 @@ async function buildVoiceInteractionWorkflows(
           : 'Voice input needs the voice surface plus a ready STT or realtime provider.',
       nextStep: pushToTalkReady
         ? 'Use the visible voice surface when the user asks to speak to the assistant.'
-        : 'Review /voice and media provider posture before presenting push-to-talk as available.',
+        : 'Review the voice posture (capability_run voice.review) and the media providers before presenting push-to-talk as available.',
       capabilities: ['push-to-talk', 'speech input', 'stt', 'realtime voice'],
       modelRoute: 'agent_harness mode:"media_posture" query:"push to talk" includeParameters:true',
-      userRoute: '/voice review',
+      userRoute: 'System place, This session: "Speak every answer aloud" (capability voice.review)',
       setupRoutes: [
         'settings action:"get" query:"ui.voiceEnabled" includeParameters:true',
         'agent_harness mode:"media_posture" query:"stt realtime" includeParameters:true',
@@ -224,15 +224,15 @@ async function buildVoiceInteractionWorkflows(
             ? 'Spoken-turn runtime and provider are ready, but the exact voice is not configured.'
             : 'Spoken responses need a ready selected TTS provider and runtime spoken-turn route.',
       nextStep: spokenReady
-        ? 'Use /voice speak only when the user asks for spoken output.'
+        ? 'Use capability_run voice.speak only when the user asks for spoken output.'
         : spokenAttention && ttsKeyInAgentOnly
-          ? `Tell the user the provider key must be stored where the host reads it: they type /secrets set ${selectedTtsKeys[0] ?? '<KEY>'} and enter the value (a credential is theirs to enter), which files it where the host reads it.`
+          ? `Tell the user the provider key must be stored where the host reads it: they store ${selectedTtsKeys[0] ?? '<KEY>'} with "Store a secret" (Permissions and safety, Secrets) and enter the value (a credential is theirs to enter), which files it where the host reads it.`
           : spokenAttention
             ? 'When the user asks, open the tts-voice-picker surface (setupRoutes) so they can pick the voice.'
             : 'Choose a ready TTS provider and voice, then verify the runtime exposes submitSpokenInput.',
       capabilities: ['tts', 'spoken answer', 'stop spoken output'],
       modelRoute: 'agent_harness mode:"media_posture" query:"spoken responses" includeParameters:true',
-      userRoute: '/voice speak <message>',
+      userRoute: 'System place, This session: "ask and hear it" (capability voice.speak)',
       setupRoutes: [
         'agent_harness mode:"open_ui_surface" surfaceId:"tts-provider-picker" explicitUserRequest:"<the user request, in their own words>"',
         'agent_harness mode:"open_ui_surface" surfaceId:"tts-voice-picker" explicitUserRequest:"<the user request, in their own words>"',
@@ -270,13 +270,13 @@ async function buildVoiceInteractionWorkflows(
       nextStep: wake.blockers.length > 0
         ? `Tell the user which row refuses to start wake capture: ${wake.blockers[0]?.key ?? 'the blocking row'}. Its written reason is in blockedRowDetails; changing that setting is their decision.`
         : wake.active
-          ? 'Wake capture is live; run agent_harness mode:"run_command" command:"/voice wake-status" to confirm the pinned models verify on disk, and report its result rather than asking anyone to check.'
-          : 'Ask the user whether to turn wake capture on; it keeps the microphone listening. Only on their request set voice.wake.enabled (the first setupRoutes entry; the surface row moves with it). Turning it on runs the voice setup: missing wake models are fetched and verified, and the setup plan is shown, proposing speech-to-text when it is missing (agent_harness mode:"run_command" command:"/voice wake-setup --with-speech-to-text" installs it). agent_harness mode:"run_command" command:"/voice wake-status" then reports what is on disk.',
+          ? 'Wake capture is live; run capability_run voice.wake-status to confirm the pinned models verify on disk, and report its result rather than asking anyone to check.'
+          : 'Ask the user whether to turn wake capture on; it keeps the microphone listening. Only on their request set voice.wake.enabled (the first setupRoutes entry; the surface row moves with it). Turning it on runs the voice setup: missing wake models are fetched and verified, and the setup plan is shown, proposing speech-to-text when it is missing (capability_run voice.wake-setup with stt "yes" installs it). capability_run voice.wake-status then reports what is on disk.',
       capabilities: ['wake word', 'always listening', 'permission repair'],
       modelRoute: 'agent_harness mode:"media_posture" query:"wake word" includeParameters:true',
       setupRoutes: [
         'settings action:"set" key:"voice.wake.enabled" value:"true" explicitUserRequest:"<the user request, in their own words>"',
-        'agent_harness mode:"run_command" command:"/voice wake-status"',
+        'capability_run voice.wake-status',
         'agent_harness mode:"media_posture" query:"push to talk" includeParameters:true',
         'agent_harness mode:"pairing_posture" query:"device" includeParameters:true',
       ],
@@ -482,7 +482,7 @@ export async function mediaPostureSummary(context: CommandContext, rawArgs: Agen
           ttsProviderPicker: 'agent_harness mode:"open_ui_surface" surfaceId:"tts-provider-picker" explicitUserRequest:"<the user request, in their own words>"',
           ttsVoicePicker: 'agent_harness mode:"open_ui_surface" surfaceId:"tts-voice-picker" explicitUserRequest:"<the user request, in their own words>"',
           voiceWorkflowPosture: 'agent_harness mode:"media_posture" query:"push to talk" includeParameters:true',
-          commands: ['/media providers', '/voice review', '/voice speak <message>'],
+          commands: ['capability_run media.providers', 'capability_run voice.review', 'capability_run voice.speak'],
           // Sending an image file with a message is the conversation's own control: the capability conversation.image.
           imageCapability: 'conversation.image',
         } } : {}),

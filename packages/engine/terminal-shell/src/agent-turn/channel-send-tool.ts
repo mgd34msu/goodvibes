@@ -13,7 +13,7 @@ import {
   formatAgentChannelDeliveryPreview,
   formatAgentChannelDeliveryResult,
 } from './channel-delivery.js';
-import { agentChannelDeliveryReceiptPath, recordAgentChannelDeliveryReceipt } from './channel-delivery-receipts.js';
+import { daemonChannelDeliveryReceiptPath, recordAgentChannelDeliveryReceipt } from './channel-delivery-receipts.js';
 import { confirmParameter, requestParameter } from './effect-admission.js';
 import { toolErrorText } from './tool-error-text.js';
 import { readFlag } from './tool-args.js';
@@ -134,7 +134,7 @@ export function createAgentChannelSendTool(
       const ledgerSnapshot = () => JSON.stringify([ledger.taintOriginsThisTurn(), ledger.exposuresThisTurn(), ledger.taintSourcesThisTurn()]);
       const sources = ledgerSnapshot();
       const receiptPaths = options.shellPaths, receiptResolver = receiptPaths?.resolveUserPath, receiptHome = receiptPaths?.homeDirectory;
-      const receiptPath = receiptPaths && agentChannelDeliveryReceiptPath(receiptPaths);
+      const receiptPath = receiptPaths && daemonChannelDeliveryReceiptPath(receiptPaths);
       let receiptRoot: string | undefined;
       try {
         receiptRoot = receiptHome ? realpathSync(receiptHome) : undefined;
@@ -213,14 +213,15 @@ export function createAgentChannelSendTool(
             assertCurrent();
             if (!receiptPaths || !receiptHome || !receiptRoot || !receiptPath || options.shellPaths !== receiptPaths
               || receiptPaths.resolveUserPath !== receiptResolver || receiptPaths.homeDirectory !== receiptHome
-              || realpathSync(receiptHome) !== receiptRoot || agentChannelDeliveryReceiptPath(receiptPaths) !== receiptPath) throw new ToolInputProjectionError('held');
+              || realpathSync(receiptHome) !== receiptRoot || daemonChannelDeliveryReceiptPath(receiptPaths) !== receiptPath) throw new ToolInputProjectionError('held');
             resolveAndValidatePath(receiptPath, receiptHome);
             if (lstatSync(receiptPath, { throwIfNoEntry: false })?.isSymbolicLink()) realpathSync(receiptPath);
+            // Kept in the daemon's one sends store, beside the sends a person made (channel-send.ts).
             const receipt = recordAgentChannelDeliveryReceipt(receiptPaths, {
               source: 'model-tool',
               deliveryInput: input,
               result,
-            });
+            }, receiptPath);
             lines.push(`  receipt ${receipt.id}`);
             if (receipt.storeNote) lines.push(`  ${receipt.storeNote}`);
           } catch (receiptError) {

@@ -13,7 +13,7 @@ import {
   effectiveRisk,
   linePattern,
   parseTypedLine,
-  riskWords,
+  riskSentences,
   singleAction,
 } from './typed-line.js';
 import type { ActionDescription, ActionValues, CommandDescription, InputDescription } from './types.js';
@@ -124,7 +124,7 @@ export function generatedConfirm(description: CommandDescription<never>) {
     if (risk === 'none' || parsed.action.asksItself) return undefined;
     return {
       title: `${parsed.action.label}?`,
-      detail: `${actionSentence(parsed.action, parsed.values)} This ${riskWords(risk)}.`,
+      detail: `${actionSentence(parsed.action, parsed.values)} ${riskSentences(parsed.action, parsed.values)}`,
       confirmLabel: actionButton(parsed.action),
     };
   };

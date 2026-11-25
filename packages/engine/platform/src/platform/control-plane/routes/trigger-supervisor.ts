@@ -1,4 +1,5 @@
 import { readRefusal } from '@goodvibes/engine/errors';
+import { isAbsolute, resolve } from 'node:path';
 import type { GatewayMethodCatalog } from '../method-catalog.js';
 import { builtinTriggerOperationMethodDescriptors, builtinTriggerSupervisorMethodDescriptors } from '../method-catalog-trigger-supervisor.js';
 import { triggerOperatorStatus, TriggerOperatorError, type TriggerOperatorSupervisor } from '../../triggers/operator.js';
@@ -55,7 +56,14 @@ export function registerTriggerSupervisorGatewayMethods(
     'watchers.triggers.create': async (_invocation, params) => {
       const definition = params['definition'];
       if (!definition || typeof definition !== 'object' || Array.isArray(definition)) throw new GatewayVerbError('definition is required: { id, label, spec, action? }', 'INVALID_ARGUMENT', 400, 'definition');
-      return { trigger: await operations.create(definition as Record<string, unknown>) };
+      // It works in a project: the folder of the program or caller that makes it (sent beside the definition or in it).
+      const given = typeof params['workingDirectory'] === 'string' ? params['workingDirectory'].trim()
+        : typeof (definition as Record<string, unknown>)['workingDirectory'] === 'string' ? String((definition as Record<string, unknown>)['workingDirectory']).trim() : '';
+      if (!given || !isAbsolute(given)) {
+        throw new GatewayVerbError('Nothing was set up: no project folder came with the request, and a trigger\'s turns and commands work in a project. Send workingDirectory, the absolute path of the project folder.',
+          'TRIGGER_PROJECT_REQUIRED', 422, 'workingDirectory');
+      }
+      return { trigger: await operations.create({ ...(definition as Record<string, unknown>), workingDirectory: resolve(given) }) };
     },
     'watchers.triggers.preview': async (_invocation, params) => {
       const values: Record<string, string> = {};

@@ -16,7 +16,7 @@
  */
 import { hostname } from 'node:os';
 import { HELD_OWNER_ONLY_METADATA, processHeldForOwner, type HeldForOwnerCall } from '@goodvibes/engine/platform/platform/permissions';
-import { subscribeDaemonEventFrames } from '@goodvibes/engine/platform/platform/runtime/client';
+import { programCallContextNow, subscribeDaemonEventFrames } from '@goodvibes/engine/platform/platform/runtime/client';
 import { logger, summarizeError } from '@goodvibes/engine/platform/platform/utils';
 
 /** How long a held call waits in the inbox: as long as the daemon's own (held-for-owner.ts). */
@@ -24,6 +24,8 @@ const HELD_ITEM_LIFETIME_MS = 7 * 24 * 60 * 60 * 1000;
 const HELD_PROGRAM = 'heldProgram';
 const HELD_HOST = 'heldHost';
 const HELD_PID = 'heldPid';
+/** The project folder the call was held in (call-context.ts). */
+const HELD_PROJECT = 'heldProject';
 
 export interface HeldCallsInboxOptions {
   readonly invoke: (method: string, input: Readonly<Record<string, unknown>>) => Promise<unknown>;
@@ -89,18 +91,27 @@ export function bridgeHeldCallsToDaemonInbox(options: HeldCallsInboxOptions): ()
     unfollowWhenIdle();
   };
 
+  /** Where each held call was held (the program's project and conversation then), so its item names them. */
+  const heldWhere = new Map<string, { readonly project?: string; readonly sessionId?: string }>();
   const post = async (call: HeldForOwnerCall): Promise<void> => {
+    // The gate's own record of where it was held first (held-for-owner.ts), else this program's context when it was held.
+    const kept = heldWhere.get(call.id) ?? programCallContextNow() ?? {};
+    const where = { project: call.project ?? kept.project, sessionId: call.sessionId ?? kept.sessionId };
     try {
       const output = await options.invoke('inbox.post', {
         kind: 'queued-action',
         // Not the daemon's `held:` prefix: the daemon withdraws its own earlier run's items at its start, never a terminal's.
         key: `terminal-held:${options.program}:${host}:${process.pid}:${call.id}`,
         title: `Held for you: ${call.toolName}`,
-        detail: `${call.summary}\n${call.reason}\nApprove to allow this exact call for the session; it runs when the work carries on.`,
+        // Whose call it is: the project and the conversation it was held in, so three projects' same call are three
+        // questions the owner can tell apart (an approval says "In:" the same way, owner-inbox.ts).
+        detail: `${call.summary}\n${call.reason}\n${where.project ? `In: ${where.project.split(/[\\/]/).filter(Boolean).pop() ?? where.project} (${where.project})\n` : ''}Approve to allow this exact call for the session; it runs when the work carries on.`,
         options: ['approve', 'dismiss'],
         expiresAt: Date.now() + HELD_ITEM_LIFETIME_MS,
+        ...(where.sessionId ? { sessionId: where.sessionId } : {}),
         metadata: {
           [HELD_PROGRAM]: options.program, [HELD_HOST]: host, [HELD_PID]: process.pid,
+          ...(where.project ? { [HELD_PROJECT]: where.project } : {}),
           ...(call.ownerOnly !== undefined ? { [HELD_OWNER_ONLY_METADATA]: call.ownerOnly } : {}),
         },
       });
@@ -138,7 +149,13 @@ export function bridgeHeldCallsToDaemonInbox(options: HeldCallsInboxOptions): ()
 
   const unsubscribe = ledger.subscribe((event) => {
     if (stopped) return;
-    if (event.type === 'held') { void post(event.call); return; }
+    if (event.type === 'held') {
+      const where = programCallContextNow();
+      if (where) heldWhere.set(event.call.id, where);
+      void post(event.call);
+      return;
+    }
+    heldWhere.delete(event.id);
     waiting.delete(event.id);
     const itemId = posted.get(event.id);
     if (!itemId) return;

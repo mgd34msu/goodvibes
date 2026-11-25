@@ -26,6 +26,8 @@ import { copyToClipboard } from '../clipboard.js';
 import { runPickedCommand } from '../command-registry.js';
 import { choosableProviderIds, readFirstRunOffers, readUsableProvider, FIRST_SCREEN_PROVIDERS, INTERNAL_PROVIDER_IDS, LOCAL_OFFER_NAME, type DiscoveryView, type FirstRunOffers, type ProviderFact, type ProviderOffer, type ProviderRegistryView, type UsableProvider } from './offers.js';
 import { setFirstRunScreen } from './splash-state.js';
+import { GATE_PRESETS, gatePresetLabel, normalizePermissionMode, type PermissionModeValue } from '@goodvibes/engine/platform/platform/gate/presets';
+import { describeModeInForceWords } from '@goodvibes/engine/platform/platform/permissions';
 
 /** How often first run looks again for a model server on this computer while it has found none. */
 const LOOK_AGAIN_EVERY_MS = 2_000;
@@ -71,24 +73,86 @@ export interface FirstRunDeps {
   readonly whoDecidesAsked: () => boolean;
   /** Record that "Who decides" was answered, or put off for now. */
   readonly recordWhoDecides: (how: 'answered' | 'put-off') => void;
+  /**
+   * First run was asked for (Setup's "Run first-run again"): "Who decides" follows the model when it is
+   * needed. Otherwise first run never asks it: the program starts usable in the mode it can support and
+   * one line under the splash names that mode and where to choose (whoDecidesLine).
+   */
+  readonly includeWhoDecides?: boolean | undefined;
 }
 
-/** "Who decides" opens by itself: it is needed now and was never answered or put off. */
+/** "Who decides" follows the model in a first run that was asked for: it is needed now and was never answered or put off. */
 async function whoDecidesDue(deps: FirstRunDeps): Promise<boolean> {
   if (!deps.decisionModel || deps.whoDecidesAsked()) return false;
   try { return await deps.decisionModel.needsChoice(); } catch { return true; }
 }
 
+/** Where "Who decides" is chosen, in the words of the place that holds it. */
+const WHO_DECIDES_WHERE = 'To choose who decides: System, Setup, Who decides.';
+
 /**
- * Open "Who decides" alone, for the model in use, when it is needed now (the
- * status line's mode segment; first start). False when it is not needed or
- * cannot open here.
+ * The one line a first launch says instead of asking "Who decides": the mode in force now and where to
+ * choose. Jev decides while a decision model answers (first run takes one from a provider key in the
+ * environment); while none can, Jev decides waits and GoodVibes asks, which is Ask me in force.
+ * Undefined when this program has no "Who decides" (no decision model source).
  */
-export async function openWhoDecides(deps: FirstRunDeps): Promise<boolean> {
+export async function whoDecidesLine(deps: Pick<FirstRunDeps, 'decisionModel' | 'configManager'>): Promise<string | undefined> {
+  if (!deps.decisionModel) return undefined;
+  return `${modeInForceWords(deps.configManager)}. ${WHO_DECIDES_WHERE}`;
+}
+
+/**
+ * The mode in force in words, read as the status line reads it (permissions/decision-model-readiness.ts): the
+ * chosen mode while it is in force, or "Ask me is in force for now" with why while Jev decides waits for a
+ * decision model that is not set, not measured yet or failing.
+ */
+function modeInForceWords(config: Pick<ConfigManager, 'get'> & Partial<Pick<ConfigManager, 'isExplicitlySet'>>): string {
+  const words = describeModeInForceWords(config);
+  if (words.inForce === 'asking you, for now') {
+    return `Ask me is in force for now, so GoodVibes asks you before anything risky (${words.chosen}: ${words.because ?? 'no decision model can answer yet'})`;
+  }
+  if (words.inForce) return `${words.inForce} (${words.because ?? words.chosen})`;
+  const mode = normalizePermissionMode(config.get('permissions.mode') as PermissionModeValue | undefined);
+  return `${words.chosen} is in force: ${GATE_PRESETS[mode].short}`;
+}
+
+/**
+ * "Who decides" on the Setup checklist, the same in both programs: done once the person chose (answered in
+ * "Who decides", the daemon's one setup record, or a mode set by them in Settings); until then not done, its
+ * note naming the mode in force. First run never asks it, so a fresh home lists it as not done.
+ */
+export async function whoDecidesOnChecklist(
+  decision: Pick<FirstRunDecisionModel, 'needsChoice'>,
+  config: Pick<ConfigManager, 'get'> & Partial<Pick<ConfigManager, 'isExplicitlySet'>>,
+  record: { readonly how: 'answered' | 'put-off' } | null,
+): Promise<{ readonly done: boolean; readonly note: string }> {
+  let waits: boolean;
+  try { waits = await decision.needsChoice(); } catch { waits = true; }
+  const mode = normalizePermissionMode(config.get('permissions.mode') as PermissionModeValue | undefined);
+  // What is in force, as the status line says it (short: the note stands beside the row at 80 columns).
+  const words = describeModeInForceWords(config);
+  const inForce = words.inForce === 'asking you, for now' ? `Ask me is in force for now (${words.chosen}: ${words.because ?? 'no decision model'})`
+    : `${words.inForce ?? words.chosen} is in force`;
+  if (record?.how === 'answered' || config.isExplicitlySet?.('permissions.mode') === true) {
+    const modelDecides = mode === 'jev-decides' || mode === 'just-vibes';
+    const how = !modelDecides ? (mode === 'ask-me' ? 'GoodVibes asks you' : GATE_PRESETS[mode].short) : waits ? 'GoodVibes asks you until a decision model can answer' : 'a decision model answers';
+    return { done: true, note: `${gatePresetLabel(mode)}: ${how}` };
+  }
+  return { done: false, note: record?.how === 'put-off' ? `put off at first run: ${inForce}` : `not chosen yet: ${inForce}` };
+}
+
+/**
+ * Open "Who decides" alone, for the model in use. The status line's mode segment opens it only when it
+ * is needed now (no decision model can answer); the Setup list's "Who decides" row (`always`) opens it
+ * whenever the person asks, to choose. False when it is not opened.
+ */
+export async function openWhoDecides(deps: FirstRunDeps, options: { readonly always?: boolean | undefined } = {}): Promise<boolean> {
   if (!deps.decisionModel || !deps.pushSurfaceModal) return false;
-  let needed: boolean;
-  try { needed = await deps.decisionModel.needsChoice(); } catch { needed = true; }
-  if (!needed) return false;
+  if (!options.always) {
+    let needed: boolean;
+    try { needed = await deps.decisionModel.needsChoice(); } catch { needed = true; }
+    if (!needed) return false;
+  }
   pushWhoDecides(deps, deps.pushSurfaceModal);
   return true;
 }
@@ -279,6 +343,8 @@ export class FirstRunModal implements SurfaceModal {
   private settingsChecking = false;
   /** First run shows only "Who decides" (the model was ready, or taken without asking). */
   private readonly decideOnly: boolean;
+  /** The line naming the mode in force and where to choose who decides, read in load() (whoDecidesLine). */
+  private decidesLine: string | undefined;
 
   /**
    * `decideFor`: the session's model is ready already, so first run is only
@@ -302,8 +368,10 @@ export class FirstRunModal implements SurfaceModal {
     } catch {
       this.facts = { providers: [] };
     }
-    // A local read: when no decision model can be asked and "Who decides" was never answered or put off, the model is followed by it.
-    if (this.deps.decisionModel && this.step.kind !== 'decide') this.deciderNeeded = await whoDecidesDue(this.deps);
+    // A first run that was asked for: when no decision model can be asked and "Who decides" was never answered
+    // or put off, the model is followed by it. Otherwise it is never asked; the line under the splash names the mode.
+    if (this.deps.decisionModel && this.deps.includeWhoDecides && this.step.kind !== 'decide') this.deciderNeeded = await whoDecidesDue(this.deps);
+    if (!this.deciderNeeded) this.decidesLine = await whoDecidesLine(this.deps);
     if (this.resumeProvider) {
       const offer = this.offers()?.rows.find((row) => row.providerId === this.resumeProvider && row.route !== 'local');
       if (offer) this.openStep2(offer);
@@ -348,7 +416,10 @@ export class FirstRunModal implements SurfaceModal {
     // Answered or put off: "Who decides" is not opened again by itself (the status line's mode segment opens it).
     if (this.deciderNeeded) this.deps.recordWhoDecides(this.decideAnswer);
     this.deps.markDone();
-    setFirstRunScreen({ kind: 'set', model: model.displayName || model.id, signIn, steps: this.deciderNeeded ? 4 : 3, ...(this.using ? { using: this.using } : {}) });
+    setFirstRunScreen({
+      kind: 'set', model: model.displayName || model.id, signIn, steps: this.deciderNeeded ? 4 : 3,
+      ...(this.using ? { using: this.using } : {}), ...(this.decidesLine && !this.decideOnly ? { decides: this.decidesLine } : {}),
+    });
     this.deps.redrawConversation?.();
     this.stopSpinner();
     this.stopLookingAgain();
@@ -679,7 +750,9 @@ export class FirstRunModal implements SurfaceModal {
   private decide(step: Extract<Step, { kind: 'decide' }>): void {
     const row = DECIDE_ROWS[step.selected];
     if (row === 'jev') {
-      this.step = { kind: 'jev-key', model: step.model, signIn: step.signIn, typed: '', busy: false };
+      // A decision model that answers already (one taken from the environment, or set in Settings): chosen
+      // as it is; the key step only while none can be asked.
+      void this.chooseJevOrAskKey(step);
       return;
     }
     if (row === 'other') {
@@ -694,6 +767,21 @@ export class FirstRunModal implements SurfaceModal {
     this.deps.decisionModel?.askMe();
     this.decided = true;
     this.finish(step.model, step.signIn);
+  }
+
+  private async chooseJevOrAskKey(step: Extract<Step, { kind: 'decide' }>): Promise<void> {
+    const decision = this.deps.decisionModel;
+    let usable = false;
+    try { usable = decision ? (await decision.readiness()).usable : false; } catch { usable = false; }
+    if (this.step !== step || this.finished) return;
+    if (usable && decision) {
+      decision.chooseJevDecides();
+      this.decided = true;
+      this.finish(step.model, step.signIn);
+      return;
+    }
+    this.step = { kind: 'jev-key', model: step.model, signIn: step.signIn, typed: '', busy: false };
+    this.deps.renderRequest();
   }
 
   /** Store the pasted key, then one request checks it; a refusal says what failed and the key can be pasted again. */
@@ -821,11 +909,10 @@ export class FirstRunModal implements SurfaceModal {
  * First run with a usable provider already there (a key in the environment, a
  * stored key or a sign-in): the first one in the order step 1 lists them is
  * used with its own model, and the choice is said in one line under the
- * splash, never asked. "Who decides" follows when it is still needed.
- * 'opened' when that step opened, 'used' when first run is done, undefined
- * when no provider is usable.
+ * splash, never asked; so is the mode in force (whoDecidesLine). 'used' when
+ * first run is done, undefined when no provider is usable.
  */
-async function useUsableProvider(deps: FirstRunDeps): Promise<'opened' | 'used' | undefined> {
+async function useUsableProvider(deps: FirstRunDeps): Promise<'used' | undefined> {
   let usable: UsableProvider | undefined;
   try {
     usable = readUsableProvider(await gatherProviderFacts(deps.providerRegistry), { isSet: (name) => typeof process.env[name] === 'string' && process.env[name] !== '' });
@@ -839,13 +926,9 @@ async function useUsableProvider(deps: FirstRunDeps): Promise<'opened' | 'used' 
   const using = `Using ${usable.name} (${model.displayName || model.id}) from ${usable.from}; change it with the model control.`;
   const effort = deps.configManager.get('provider.reasoningEffort');
   deps.completeModelSelection?.({ model, effort: typeof effort === 'string' ? effort : '', quiet: true });
-  if (deps.pushSurfaceModal && await whoDecidesDue(deps)) {
-    setFirstRunScreen({ kind: 'pending' });
-    deps.pushSurfaceModal(new FirstRunModal(deps, undefined, model, using));
-    return 'opened';
-  }
+  const decides = await whoDecidesLine(deps);
   deps.markDone();
-  setFirstRunScreen({ kind: 'set', model: model.displayName || model.id, signIn: 'signed in', using });
+  setFirstRunScreen({ kind: 'set', model: model.displayName || model.id, signIn: 'signed in', using, ...(decides ? { decides } : {}) });
   deps.redrawConversation?.();
   deps.renderRequest();
   return 'used';
@@ -865,18 +948,18 @@ export async function startFirstRun(deps: FirstRunDeps): Promise<boolean> {
     // A first launch whose model is ready only as the product's default: the usable providers are
     // taken in the order step 1 lists them, and the choice is said in one line, as below.
     if (!deps.isMarkedDone() && !deps.configManager.isExplicitlySet('provider.model')) {
-      const used = await useUsableProvider(deps);
-      if (used !== undefined) return used === 'opened';
+      if (await useUsableProvider(deps) !== undefined) return false;
     }
-    // A ready model with no decision model to ask, and "Who decides" never answered or put off: it opens alone,
-    // once (on a first launch, and on a home that first ran before this step existed).
-    if (deps.pushSurfaceModal && await whoDecidesDue(deps)) {
-      setFirstRunScreen({ kind: 'pending' });
-      pushWhoDecides(deps, deps.pushSurfaceModal);
-      return true;
+    // A ready model: nothing is asked. "Who decides" is never opened by itself (it is on the Setup list, not
+    // done until the person chooses); a first launch says the mode in force and where to choose, in one line.
+    if (!deps.isMarkedDone()) {
+      deps.markDone();
+      const decides = await whoDecidesLine(deps);
+      setFirstRunScreen(decides ? { kind: 'decides', decides } : undefined);
+      deps.redrawConversation?.();
+      deps.renderRequest();
+      return false;
     }
-    // A ready model on a first launch, and a decision model that can be asked: nothing to ask; recorded as done.
-    if (!deps.isMarkedDone()) deps.markDone();
     setFirstRunScreen(undefined);
     return false;
   }
@@ -888,10 +971,7 @@ export async function startFirstRun(deps: FirstRunDeps): Promise<boolean> {
     : undefined;
   // Otherwise a provider key in the environment, a stored key or a sign-in is a choice already made:
   // it is used with its own model and nothing is asked about it; the card shows only when none is usable.
-  if (chosen === undefined) {
-    const used = await useUsableProvider(deps);
-    if (used !== undefined) return used === 'opened';
-  }
+  if (chosen === undefined && await useUsableProvider(deps) !== undefined) return false;
   if (!deps.pushSurfaceModal) {
     setFirstRunScreen({ kind: 'not-ready' });
     return false;

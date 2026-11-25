@@ -85,7 +85,8 @@ export function trustGatedAsk(
   return async (request, execution) => {
     const signal = execution?.signal;
     assertPermissionActive(signal);
-    if (manager.isCategoryAllowed(request.category)) return ask(request, execution);
+    // A call on what the daemon holds (a daemon capability) works in no project folder: the folder neither refuses nor asks.
+    if (request.outsideFolder === true || manager.isCategoryAllowed(request.category)) return ask(request, execution);
     if (manager.isDecided()) return { approved: false };
     // A headless run in a folder that brings hooks or tool servers of its own: refused at once, no question.
     const refusal = manager.refusalForThisRun?.() ?? null;
@@ -105,7 +106,7 @@ export function trustGatedAsk(
       approved: false,
       reason: `Workspace trust${where} is undecided and the trust question was not answered here, so the workspace stays undecided. `
         + 'Reads keep working; writes, commands and delegation are refused until it is trusted '
-        + '(/security trust-folder, or answer the workspace-trust prompt of a run started with --answer-permissions).',
+        + '("Trust this folder" in Permissions and safety, This folder, or answer the workspace-trust prompt of a run started with --answer-permissions).',
     } as const;
     if (options.waitMs === undefined) {
       try {
@@ -148,6 +149,9 @@ export type WorkspaceTrustLevel = 'trusted' | 'restricted';
  */
 export class WorkspaceRestrictedError extends Error {
   readonly ownerLine: string;
+  /** Read by shape where it reaches the operator API: a refusal (403), never the daemon's own fault (a 500). */
+  readonly code = 'WORKSPACE_RESTRICTED';
+  readonly status = 403;
   constructor(message: string, ownerLine: string) {
     super(message);
     this.name = 'WorkspaceRestrictedError';
@@ -269,7 +273,7 @@ export function repositoryFileGate(trust: RepositoryTrust, homeDirectory: string
 }
 
 /** The words every surface uses when what a repository brings is waiting on the owner's trust. */
-export const REPOSITORY_TRUST_NEXT_STEP = 'Run /security trust-folder to turn them on, or leave the workspace untrusted to keep them off.';
+export const REPOSITORY_TRUST_NEXT_STEP = '"Trust this folder" in Permissions and safety, This folder, turns them on; leave the workspace untrusted to keep them off.';
 
 /**
  * The one notice a terminal app shows when what the workspace's repository
@@ -382,6 +386,11 @@ export interface PersistedWorkspaceTrustView {
    * nobody ever deciding: a report should say the record is damaged.
    */
   readonly fault?: string | undefined;
+  /**
+   * True when the folder is trusted only for having had nothing of its own to run when it was opened
+   * (NOTHING_OF_ITS_OWN_TO_RUN): that trust does not cover a file of its own it has since.
+   */
+  readonly forNothingToRun?: boolean | undefined;
 }
 
 /**
@@ -403,7 +412,7 @@ export function readPersistedWorkspaceTrust(
   const row = read.state === 'ok' ? read.trust.find((entry) => entry.root === root) : undefined;
   if (row) return { level: row.level, legacyIgnored: false };
   // Trusted for having nothing of its own to run (its own file, beside the register).
-  if (readNothingToRun(nothingToRunPath(registerPath)).roots.some((entry) => entry.root === root)) return { level: 'trusted', legacyIgnored: false };
+  if (readNothingToRun(nothingToRunPath(registerPath)).roots.some((entry) => entry.root === root)) return { level: 'trusted', legacyIgnored: false, forNothingToRun: true };
   return { level: 'undecided', legacyIgnored: legacyIgnored() };
 }
 
@@ -587,10 +596,10 @@ export class WorkspaceTrustManager {
       if (this.loadFault !== null && !this.isDecided() && !this.isCategoryAllowed(category)) {
         throw new WorkspaceRestrictedError(
           `${RESTRICTED_FOR_MODEL} (Its saved trust decision cannot be read: ${this.loadFault}. The owner chooses a trust level to replace it.)`,
-          'Not run: this folder\'s trust record cannot be read, so it counts as restricted (/security trust-folder).');
+          'Not run: this folder\'s trust record cannot be read, so it counts as restricted (Permissions and safety, This folder, decides it again).');
       }
       if (this.isDecided() && !this.isCategoryAllowed(category)) {
-        throw new WorkspaceRestrictedError(RESTRICTED_FOR_MODEL, 'Not run: this folder is restricted (/security trust-folder trusts it).');
+        throw new WorkspaceRestrictedError(RESTRICTED_FOR_MODEL, 'Not run: this folder is restricted ("Trust this folder" in Permissions and safety, This folder, trusts it).');
       }
       // A headless run in an undecided folder that brings hooks or tool servers of its own: not trusted here.
       const refusal = this.runRefusal;

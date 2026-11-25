@@ -171,7 +171,7 @@ export class DaemonConfigOwnerApprovalPendingError extends Error {
   readonly key: string;
   readonly approvalId: string;
   constructor(key: string, approvalId: string) {
-    super(`Changing ${key} is waiting for the owner's approval (approval ${approvalId}): it loosens a setting only the owner changes, and this app's credential is a token minted for automation. Nothing has changed yet; it is applied when he approves it from his own app.`);
+    super(`Changing ${key} is waiting for the owner's approval (approval ${approvalId}): it loosens a setting only the owner changes, and this app's credential is a token minted for automation. Nothing has changed yet; it is applied when the owner approves it from the owner's own app.`);
     this.name = 'DaemonConfigOwnerApprovalPendingError';
     this.key = key;
     this.approvalId = approvalId;

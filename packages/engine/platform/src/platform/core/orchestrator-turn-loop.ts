@@ -1,4 +1,5 @@
 import { selectedRoutingFiles } from '../providers/decision-router-context.js';
+import { memoryProjectOf } from '../state/memory-project.js';
 import { prepareDecisionRouterTurn, describeDecisionRoute, chatWithDecisionRoute } from '../providers/decision-router.js';
 import { ProviderAttemptDeniedError, revalidateProviderAttempt } from '../providers/attempt-guard.js';
 import { captureAutonomousSource, type AutonomousToolSource } from '../permissions/autonomous.js';
@@ -164,7 +165,7 @@ export interface OrchestratorTurnLoopContext {
   readonly requestRender: () => void;
   readonly setCompletionActivity?: ((phase: 'checking' | 'waiting' | null) => void) | undefined;
   readonly runtimeBus: RuntimeEventBus | null;
-  readonly agentManager: Pick<AgentManager, 'list' | 'spawn'> & Partial<Pick<AgentManager, 'getConversationSnapshot' | 'join'>>;
+  readonly agentManager: Pick<AgentManager, 'list' | 'spawn'> & Partial<Pick<AgentManager, 'getConversationSnapshot' | 'join' | 'getStatus'>>;
   readonly configManager: Pick<ConfigManager, 'get'> & Partial<Pick<ConfigManager, 'getWorkingDirectory'>>;
   readonly providerRegistry: Pick<ProviderRegistry, 'require' | 'getCurrentModel' | 'getForModel' | 'listModels' | 'tryGet' | 'resolveProviderReference' | 'getTokenLimitsForModel' | 'getContextWindowForModel' | 'recordContextWindowRejection' | 'reconcileObservedContextWindow' | 'resolveModelPricing' | 'cacheRatios'>;
   readonly favoritesStore?: Pick<FavoritesStore, 'recordUsage'> | undefined;
@@ -186,6 +187,8 @@ export interface OrchestratorTurnLoopContext {
     content?: ContentPart[],
   ) => number;
   readonly getMessageQueueLength: () => number;
+  /** Messages sent into this turn while it ran (Orchestrator.steerRunningTurn), taken once each; added before the next request. */
+  readonly takeSteers?: (() => readonly string[]) | undefined;
   readonly isReconciliationEnabled: () => boolean;
   readonly setPendingToolCalls: (calls: ToolCall[]) => void;
   readonly setStreamingActive: (value: boolean) => void;
@@ -424,9 +427,10 @@ export async function executeOrchestratorTurnLoop(context: OrchestratorTurnLoopC
   const intakeAgentIds: string[] = [];
   // The last successfully-built per-turn knowledge block, built on the turn's
   // first request (the human message that started it) and reused verbatim on
-  // its tool-continuation requests, where nothing new arrived. The main session
-  // never drains new human input mid-turn (handleUserInput queues a second
-  // message until this turn completes, see orchestrator.ts). It is sent in the
+  // its tool-continuation requests. The main session never drains typed input
+  // mid-turn (handleUserInput queues a second message until this turn
+  // completes, see orchestrator.ts); a message sent into the running turn on
+  // purpose (steerRunningTurn) joins it after a tool round. It is sent in the
   // host channel after the history, re-checked before each request, and never
   // written into the system prompt.
   let turnKnowledgeBlock: string | null = null;
@@ -685,6 +689,9 @@ export async function executeOrchestratorTurnLoop(context: OrchestratorTurnLoopC
         const codeInjectionEnabled = !!context.codeIndex && context.isPassiveCodeInjectionEnabled();
         const injection = await buildPerTurnKnowledgeInjection({
           memoryRegistry: context.memoryRegistry,
+          // The folder the session works in (the one its environment block names): its "this project" records and
+          // the person's own, never another project's.
+          project: memoryProjectOf(context.configManager.getWorkingDirectory?.() ?? process.cwd()),
           // The main session has no frozen "task" distinct from the live conversation:
           // context.text (this turn's originating human message) is this turn's task, and
           // is also the latest user-role message already appended to the conversation
@@ -1107,6 +1114,9 @@ export async function executeOrchestratorTurnLoop(context: OrchestratorTurnLoopC
         if (held?.state !== 'queued-for-owner' || !held.heldId) continue;
         heldThisTurn.set(held.heldId, { tool: response.toolCalls.find((call) => call.id === result.callId)?.name ?? 'a tool', reason: held.reason });
       }
+      // A message sent into this turn while its tools ran (Orchestrator.steerRunningTurn) goes in after their
+      // results, so the next request carries it.
+      for (const steer of context.takeSteers?.() ?? []) context.conversation.addUserMessage(steer);
       return round.results;
     },
     checkProgress: (text, progressSignal) => completionGuard.checkProgress({ request: context.text, response: text,
@@ -1170,7 +1180,11 @@ export async function executeOrchestratorTurnLoop(context: OrchestratorTurnLoopC
             const stopStatus = bus.on<Extract<ContractEvent, { type: 'CONTRACT_STATUS_CHANGED' }>>('CONTRACT_STATUS_CHANGED', ({ payload }) => { if (payload.to === 'awaiting-owner') notify(); });
             const stopWaiting = bus.on<Extract<ContractEvent, { type: 'CONTRACT_WAITING' }>>('CONTRACT_WAITING', () => notify());
             const stopRunning = bus.on<Extract<AgentEvent, { type: 'AGENT_RUNNING' }>>('AGENT_RUNNING', () => notify());
-            return () => { stopStatus(); stopWaiting(); stopRunning(); };
+            // A piece of work handed to the daemon that comes to wait on the owner says so on its record's progress.
+            const stopProgress = bus.on<Extract<AgentEvent, { type: 'AGENT_PROGRESS' }>>('AGENT_PROGRESS', ({ payload }) => {
+              if (context.agentManager.getStatus?.(payload.agentId)?.delegatedWorkWaiting !== undefined) notify();
+            });
+            return () => { stopStatus(); stopWaiting(); stopRunning(); stopProgress(); };
           });
         if (ended) delegatedWorkEnded = true;
         return ended;

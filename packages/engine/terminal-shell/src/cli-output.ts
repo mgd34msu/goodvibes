@@ -1,12 +1,12 @@
 import { formatRefusal, type CommandResult } from '@goodvibes/engine/errors';
-import { formatJsonOrText as formatOutput } from './support-bundle-inspection.js';
 export function yesNo(value: unknown): string {
   return value === true ? 'yes' : 'no';
 }
+/** The value as JSON when `--output json` was asked for, else the text. */
 export function formatJsonOrText(cli: {
   readonly flags: { readonly outputFormat?: string | undefined };
 }): (value: unknown, text: string) => string {
-  return (value, text) => formatOutput({ cli }, value, text);
+  return (value, text) => (cli.flags.outputFormat === 'json' ? JSON.stringify(value, null, 2) : text);
 }
 
 /** A refusal code that means the command line itself was wrong; it exits 2. */
@@ -74,5 +74,5 @@ export function commandJsonOrText(
   value: unknown,
   text: string,
 ): string {
-  return runtime.cli.flags.outputFormat === 'json' ? JSON.stringify(value, null, 2) : text;
+  return formatJsonOrText(runtime.cli)(value, text);
 }

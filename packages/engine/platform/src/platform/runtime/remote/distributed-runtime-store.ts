@@ -596,21 +596,46 @@ export async function waitForDistributedWork(
   state: DistributedRuntimeManagerState,
   workId: string,
   timeoutMs: number,
+  /** The asking client's request: when it goes away the wait ends at once (answered as a wait that ran out). */
+  signal?: AbortSignal,
 ): Promise<DistributedPendingWork | null> {
   const existing = state.work.get(workId);
   if (existing && existing.status !== 'queued' && existing.status !== 'claimed') {
     return existing;
   }
+  if (signal?.aborted) return null;
   return await new Promise<DistributedPendingWork | null>((resolve) => {
-    const timer = setTimeout(() => {
-      removeDistributedRuntimeWaiter(state, workId, resolve);
+    const onAbort = (): void => {
+      clearTimeout(timer);
+      removeDistributedRuntimeWaiter(state, workId, done);
       resolve(null);
+    };
+    const done = (work: DistributedPendingWork | null): void => {
+      signal?.removeEventListener('abort', onAbort);
+      resolve(work);
+    };
+    const timer = setTimeout(() => {
+      removeDistributedRuntimeWaiter(state, workId, done);
+      done(null);
     }, timeoutMs);
     timer.unref?.();
     const bucket = state.waiters.get(workId) ?? [];
-    bucket.push({ resolve, timer });
+    bucket.push({ resolve: done, timer });
     state.waiters.set(workId, bucket);
+    signal?.addEventListener('abort', onAbort, { once: true });
   });
+}
+
+/** End every wait for a peer's work now (the daemon is stopping): each answers as a wait that ran out. */
+export function endDistributedRuntimeWaiters(state: DistributedRuntimeManagerState): void {
+  const buckets = [...state.waiters.values()];
+  state.waiters.clear();
+  for (const bucket of buckets) {
+    for (const waiter of bucket) {
+      if (waiter.timer) clearTimeout(waiter.timer);
+      waiter.resolve(null);
+    }
+  }
 }
 
 export function resolveDistributedRuntimeWaiters(state: DistributedRuntimeManagerState, work: DistributedPendingWork): void {

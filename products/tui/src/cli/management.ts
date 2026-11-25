@@ -1,13 +1,11 @@
 import { createCliProviderViews } from '@goodvibes/engine/terminal-shell/cli-provider-views';
 export { buildSyntheticChainEntries, formatSyntheticChainText } from '@goodvibes/engine/terminal-shell/cli-provider-views';
-import { UserAuthManager } from '@goodvibes/engine/platform/platform/security';
-import { openAuthorityRecordFile } from '@goodvibes/engine/platform/platform/cluster';
-import { dirname, join } from 'node:path';
+import { autostartInstalledDaemon, createDaemonServiceControl } from '@goodvibes/engine/platform/platform/runtime/client';
 import { deriveControlPlaneBaseUrl, readControlPlaneBinding } from '@goodvibes/engine/platform/platform/config/control-plane-base-url';
 import { resolveGoodVibesDaemonHome } from '@goodvibes/engine/platform/platform/config/goodvibes-home';
 import { createNetworkFetch } from '@goodvibes/engine/platform/platform/runtime/network/outbound';
 import { resolveRemoteDaemonTarget, type DaemonFailure, type RemoteDaemonTarget } from '@goodvibes/engine/terminal-shell/cluster-remote-daemon-target';
-import { callDaemonMethod, callDaemonRoute } from '@goodvibes/engine/terminal-shell/raw-reply-route';
+import { callDaemonMethod } from '@goodvibes/engine/terminal-shell/raw-reply-route';
 import { withProviderServices, type OneShotProviderServices } from './one-shot-services.ts';
 import { daemonTargetInvoke, runCapabilityCommand } from '@goodvibes/engine/terminal-shell/capability-cli';
 
@@ -17,7 +15,7 @@ import type { CliCommandRuntime } from '@goodvibes/engine/terminal-shell';
 import { formatProviderAuthRoute } from './provider-auth-routes.ts';
 
 import { handleServiceCommand } from './service-command.ts';
-import { handleBundleCommand } from './bundle-command.ts';
+import { daemonStartingInvoke, runSupportBundleCommand } from '@goodvibes/engine/terminal-shell/support-bundle-cli';
 import { handleHooksCommand } from './hooks-command.ts';
 import { handlePluginCommand } from './plugin-command.ts';
 import { buildListenerTestResult, formatListenerTestResult, handleSurfacesCommand } from './surface-command.ts';
@@ -76,9 +74,8 @@ export {
  * @internal exported for unit testing
  */
 
-// This command runs in its own short-lived process. The running daemon re-reads the user file at its next sign-in or session check, so a deleted user or changed password reaches its accounts, and ends that user's sessions, without a restart. Sign-in sessions live in the daemon's memory, so listing and revoking them is asked of the daemon on this machine, with its operator token.
-const HOST_RESTART_NOTE = 'A running host picks this up at its next sign-in or session check (within a few seconds) and ends that user\'s sessions then; no restart is needed.';
-
+// Who may sign in is the daemon's: `goodvibes auth` asks the daemon on this machine through its local sign-in methods
+// (`local_auth.*`), with its operator token, and never writes the user file itself.
 interface DaemonAuthSession { readonly id: string; readonly username: string; readonly expiresAt: number }
 
 /**
@@ -97,35 +94,26 @@ function localDaemonAuthTarget(runtime: CliCommandRuntime): { readonly ok: true;
   return { ok: true, target: resolved.target, fetchImpl: createNetworkFetch(globalThis.fetch, runtime.configManager) };
 }
 
-async function listDaemonAuthSessions(runtime: CliCommandRuntime): Promise<{ readonly ok: true; readonly sessions: readonly DaemonAuthSession[] } | DaemonFailure> {
+/** One local sign-in method of the daemon on this machine, a write sent as the person's own request. */
+async function callLocalAuth<T>(runtime: CliCommandRuntime, methodId: string, input: Record<string, unknown>, write: boolean): Promise<{ readonly ok: true; readonly data: T } | DaemonFailure> {
   const daemon = localDaemonAuthTarget(runtime);
   if (!daemon.ok) return daemon;
-  const answer = await callDaemonRoute<{ readonly sessions?: readonly DaemonAuthSession[] }>(
-    daemon.target, '/api/local-auth', { method: 'GET', envelope: 'raw' }, daemon.fetchImpl,
-  );
-  return answer.ok ? { ok: true, sessions: answer.data.sessions ?? [] } : sessionCallFailure(daemon.target, answer);
-}
-
-async function revokeDaemonAuthSession(runtime: CliCommandRuntime, sessionIdOrToken: string): Promise<{ readonly ok: true } | DaemonFailure> {
-  const daemon = localDaemonAuthTarget(runtime);
-  if (!daemon.ok) return daemon;
-  const answer = await callDaemonMethod<{ readonly revoked?: boolean }>(
-    daemon.target, 'local_auth.sessions.delete', { input: { sessionId: sessionIdOrToken } }, daemon.fetchImpl,
-  );
-  return answer.ok ? { ok: true } : sessionCallFailure(daemon.target, answer);
+  const fetchImpl: typeof fetch = write
+    ? ((url, init) => daemon.fetchImpl(url, { ...init, headers: { ...(init?.headers as Record<string, string> | undefined), 'x-goodvibes-explicit-user-request': 'true' } })) as typeof fetch
+    : daemon.fetchImpl;
+  const answer = await callDaemonMethod<T>(daemon.target, methodId, { input, ...(write ? {} : { readOnly: true }) }, fetchImpl);
+  return answer.ok ? { ok: true, data: answer.data } : signInCallFailure(daemon.target, answer);
 }
 
 /**
- * A failed sign-in-session call in words that fit it: sessions live only in
- * the running daemon, so an unanswered call means that daemon is not running
- * or not reachable at its address, and nothing was changed. The shared
- * reader's wording is for cluster verbs.
+ * A failed call in words that fit it: who may sign in and their sessions are the daemon's, so an unanswered call
+ * means the daemon on this machine is not running (and could not be started) or not reachable, and nothing changed.
  */
-function sessionCallFailure(target: RemoteDaemonTarget, failure: DaemonFailure): DaemonFailure {
+function signInCallFailure(target: RemoteDaemonTarget, failure: DaemonFailure): DaemonFailure {
   if (failure.code !== 'unreachable') return failure;
   return {
     ...failure,
-    error: `the daemon on this machine is not running or not reachable at ${target.baseUrl}, so no sign-in session was read or ended (its sessions end with it)`,
+    error: `the daemon on this machine is not running or not reachable at ${target.baseUrl}, so nothing was read or changed: who may sign in is the daemon's`,
     fix: 'start it with goodvibes service start (or goodvibes-daemon serve), then run this again; goodvibes-daemon status shows the address it listens on',
   };
 }
@@ -139,31 +127,42 @@ interface AuthCommandResult {
   readonly exitCode: number;
 }
 
-async function renderAuth(runtime: CliCommandRuntime): Promise<AuthCommandResult> {
-  const pending: UserAuthManager[] = [];
-  try { return await renderAuthCommand(runtime, pending); }
-  // A user change is written to the authority record before the command exits.
-  finally { for (const manager of pending) await manager.settled(); }
+/** One local sign-in method of the daemon on this machine; a write goes as the person's own request. */
+type AuthCall = <T>(methodId: string, input: Record<string, unknown>, write: boolean) => Promise<{ readonly ok: true; readonly data: T } | DaemonFailure>;
+
+/**
+ * The daemon's local sign-in methods (`local_auth.*`), as `goodvibes auth` calls them. Who may sign in is the
+ * daemon's: this command never writes the user file itself. A daemon that is installed and stopped is started once
+ * and waited for, as the terminal programs do at start (runtime/client/daemon-autostart.ts); one that cannot be
+ * reached then says so, and nothing is changed.
+ */
+function localAuthCaller(runtime: CliCommandRuntime): AuthCall {
+  let started = false;
+  const call = async <T>(methodId: string, input: Record<string, unknown>, write: boolean): Promise<{ readonly ok: true; readonly data: T } | DaemonFailure> => {
+    const answer = await callLocalAuth<T>(runtime, methodId, input, write);
+    if (answer.ok || answer.code !== 'unreachable' || started) return answer;
+    started = true;
+    const control = createDaemonServiceControl({ configManager: runtime.configManager, workingDirectory: runtime.workingDirectory });
+    const outcome = await autostartInstalledDaemon({
+      daemonMode: 'unavailable', control,
+      isReachable: async () => (await callLocalAuth(runtime, 'local_auth.status', {}, false)).ok,
+    });
+    if (outcome.action !== 'started' && outcome.action !== 'came-online' && outcome.action !== 'program-started') return answer;
+    return callLocalAuth<T>(runtime, methodId, input, write);
+  };
+  return call;
 }
 
-async function renderAuthCommand(runtime: CliCommandRuntime, pending: UserAuthManager[]): Promise<AuthCommandResult> {
+interface LocalAuthStatus {
+  readonly users?: readonly { readonly username: string; readonly roles?: readonly string[] }[];
+  readonly sessions?: readonly DaemonAuthSession[];
+}
+
+async function renderAuth(runtime: CliCommandRuntime): Promise<AuthCommandResult> {
   const ok = (output: string): AuthCommandResult => ({ output, exitCode: 0 });
   const notFound = (output: string): AuthCommandResult => ({ output, exitCode: 1 });
   const usage = (output: string): AuthCommandResult => ({ output, exitCode: 2 });
-  // The local user file and the setup credential are this user's own files: the
-  // command opens them alone, not the whole runtime of the folder it was typed in.
-  const authPaths = readAuthPaths(runtime);
-  // The authority record beside the user file: a user changed here is the
-  // daemon's and, in a group, every machine's (security/user-auth.ts).
-  const authorityPath = join(dirname(authPaths.userStorePath), 'control-plane', 'authority-record.json');
-  const services = {
-    localUserAuthManager: new UserAuthManager({
-      bootstrapFilePath: authPaths.userStorePath,
-      bootstrapCredentialPath: authPaths.bootstrapCredentialPath,
-      authority: openAuthorityRecordFile(authorityPath, () => runtime.configManager.getCategory('cluster')),
-    }),
-  };
-  pending.push(services.localUserAuthManager);
+  const call = localAuthCaller(runtime);
   {
     const [sub = 'status', ...rawRest] = runtime.cli.commandArgs;
     const rest = commandValues(rawRest);
@@ -173,37 +172,39 @@ async function renderAuthCommand(runtime: CliCommandRuntime, pending: UserAuthMa
       const password = readPassword(rawRest);
       if (!password) return usage('Usage: goodvibes auth add-user <username> [--password <value>|--password-stdin] [--role <role>]');
       const roles = readOptionValues(rawRest, '--role').filter((role) => role.length > 0);
-      const user = services.localUserAuthManager.addUser(username, password, roles.length > 0 ? roles : ['user']);
-      return ok(`Auth user added: ${user.username} (${user.roles.join(', ') || 'no roles'})`);
+      const added = await call('local_auth.users.create', { username, password, roles: roles.length > 0 ? roles : ['user'] }, true);
+      return added.ok ? ok(`Auth user added: ${username} (${(roles.length > 0 ? roles : ['user']).join(', ')})`) : notFound(daemonFailureText(added));
     }
     if (sub === 'delete-user' || sub === 'remove-user') {
       const username = rest[0];
       if (!username) return usage('Usage: goodvibes auth delete-user <username>');
-      return services.localUserAuthManager.deleteUser(username) ? ok(`Auth user deleted: ${username}\n${HOST_RESTART_NOTE}`) : notFound(`No auth user found: ${username}`);
+      const deleted = await call<{ readonly deleted?: boolean }>('local_auth.users.delete', { username }, true);
+      if (!deleted.ok) return notFound(daemonFailureText(deleted));
+      return deleted.data?.deleted === false ? notFound(`No auth user found: ${username}`) : ok(`Auth user deleted: ${username}; their sign-in sessions ended with it.`);
     }
     if (sub === 'rotate-password' || sub === 'passwd') {
       const username = rest[0];
       if (!username) return usage('Usage: goodvibes auth rotate-password <username> [--password <value>|--password-stdin]');
       const password = readPassword(rawRest);
       if (!password) return usage('Usage: goodvibes auth rotate-password <username> [--password <value>|--password-stdin]');
-      services.localUserAuthManager.rotatePassword(username, password);
-      return ok(`Auth password rotated: ${username}\n${HOST_RESTART_NOTE}`);
+      const rotated = await call('local_auth.users.password.rotate', { username, password }, true);
+      return rotated.ok ? ok(`Auth password rotated: ${username}`) : notFound(daemonFailureText(rotated));
     }
     if (sub === 'revoke-session') {
       const token = rest[0];
       if (!token) return usage('Usage: goodvibes auth revoke-session <session-id-or-token>');
-      const revoked = await revokeDaemonAuthSession(runtime, token);
+      const revoked = await call('local_auth.sessions.delete', { sessionId: token }, true);
       return revoked.ok ? ok('Auth session revoked on the running daemon.') : notFound(daemonFailureText(revoked));
     }
     if (sub === 'revoke-sessions') {
       const username = rest[0];
       if (!username) return usage('Usage: goodvibes auth revoke-sessions <username>');
-      const listed = await listDaemonAuthSessions(runtime);
+      const listed = await call<LocalAuthStatus>('local_auth.status', {}, false);
       if (!listed.ok) return notFound(daemonFailureText(listed));
-      const owned = listed.sessions.filter((session) => session.username === username);
+      const owned = (listed.data?.sessions ?? []).filter((session) => session.username === username);
       let count = 0;
       for (const session of owned) {
-        const revoked = await revokeDaemonAuthSession(runtime, session.id);
+        const revoked = await call('local_auth.sessions.delete', { sessionId: session.id }, true);
         // A session that ended between the list and the revoke is gone either way.
         if (revoked.ok || revoked.code === 'refused') count += 1;
         else return notFound(`Auth sessions revoked for ${username} before the daemon stopped answering: ${count} of ${owned.length}\n${daemonFailureText(revoked)}`);
@@ -211,27 +212,23 @@ async function renderAuthCommand(runtime: CliCommandRuntime, pending: UserAuthMa
       return count > 0 ? ok(`Auth sessions revoked for ${username} on the running daemon: ${count}`) : notFound(`The running daemon holds no auth sessions for ${username}.`);
     }
     if (sub === 'clear-bootstrap') {
-      return ok(services.localUserAuthManager.clearBootstrapCredentialFile()
-        ? 'Bootstrap credential file removed.'
-        : 'Bootstrap credential file was already absent.');
+      const cleared = await call<{ readonly removed?: boolean }>('local_auth.bootstrap.delete', {}, true);
+      if (!cleared.ok) return notFound(daemonFailureText(cleared));
+      return ok(cleared.data?.removed === false ? 'Bootstrap credential file was already absent.' : 'Bootstrap credential file removed.');
     }
     if (sub !== 'status' && sub !== 'list' && sub !== 'users' && sub !== 'sessions') {
       return usage('Usage: goodvibes auth [status|users|sessions|add-user|delete-user|rotate-password|revoke-session|revoke-sessions|clear-bootstrap]');
     }
-    const snapshot = services.localUserAuthManager.inspect();
     const paths = readAuthPaths(runtime);
-    // The sessions are the running daemon's; one loopback request, and only for the forms that show them.
-    const daemonSessions = sub === 'users' ? null : await listDaemonAuthSessions(runtime);
-    const sessionLines = daemonSessions === null ? []
-      : daemonSessions.ok
-        ? daemonSessions.sessions.map((session) => `  ${session.username} expires=${new Date(session.expiresAt).toISOString()} id=${session.id}`)
-        : [];
-    const sessionsUnavailable = daemonSessions !== null && !daemonSessions.ok ? `not read: ${daemonSessions.error}` : undefined;
+    // Users and sessions are the daemon's: one request answers both.
+    const status = await call<LocalAuthStatus>('local_auth.status', {}, false);
+    if (!status.ok) return notFound(daemonFailureText(status));
+    const daemonSessions = { ok: true as const, sessions: status.data?.sessions ?? [] };
+    const sessionLines = daemonSessions.sessions.map((session) => `  ${session.username} expires=${new Date(session.expiresAt).toISOString()} id=${session.id}`);
     const value = {
       ...paths,
-      users: snapshot.users.map((user) => ({ username: user.username, roles: user.roles })),
-      sessions: daemonSessions?.ok ? daemonSessions.sessions.length : null,
-      ...(sessionsUnavailable !== undefined ? { sessionsUnavailable } : {}),
+      users: (status.data?.users ?? []).map((user) => ({ username: user.username, roles: [...(user.roles ?? [])] })),
+      sessions: daemonSessions.sessions.length,
       permissionMode: runtime.configManager.get('permissions.mode'),
     };
     if (sub === 'users') {
@@ -244,7 +241,6 @@ async function renderAuthCommand(runtime: CliCommandRuntime, pending: UserAuthMa
       ));
     }
     if (sub === 'sessions') {
-      if (daemonSessions === null || !daemonSessions.ok) return notFound(daemonSessions === null ? '' : daemonFailureText(daemonSessions));
       return ok(formatJsonOrText(runtime.cli)(
         daemonSessions.sessions,
         [`GoodVibes auth sessions on the running daemon (${daemonSessions.sessions.length})`, ...sessionLines].join('\n'),
@@ -257,7 +253,7 @@ async function renderAuthCommand(runtime: CliCommandRuntime, pending: UserAuthMa
         `  permission mode: ${String(value.permissionMode)}`,
         `  users: ${value.users.length}`,
         ...value.users.map((user) => `    ${user.username} (${user.roles.join(', ') || 'no roles'})`),
-        `  sessions on the running daemon: ${value.sessions ?? sessionsUnavailable}`,
+        `  sessions on the running daemon: ${value.sessions}`,
         `  user store: ${paths.userStorePresent ? 'present' : 'missing'} (${paths.userStorePath})`,
         `  bootstrap credential: ${paths.bootstrapCredentialPresent ? 'present' : 'missing'} (${paths.bootstrapCredentialPath})`,
         `  operator tokens: ${paths.operatorTokenPresent ? 'present' : 'missing'} (${paths.operatorTokenPath})`,
@@ -276,7 +272,8 @@ export async function handleGoodVibesCliCommand(runtime: CliCommandRuntime): Pro
       case 'find':
         return { handled: true, exitCode: await runCapabilityCommand({
           program: 'goodvibes', verb: runtime.cli.command, args: runtime.cli.commandArgs, json: runtime.cli.flags.outputFormat === 'json', caller: 'tui',
-          invoke: daemonTargetInvoke(runtime), workingDirectory: runtime.workingDirectory,
+          // The daemon on this machine is started first when it is stopped, as the programs and the bundle forms do.
+          invoke: daemonStartingInvoke(daemonTargetInvoke(runtime), runtime), workingDirectory: runtime.workingDirectory,
         }) };
       case 'web':
         console.log(renderWeb(runtime));
@@ -342,11 +339,13 @@ export async function handleGoodVibesCliCommand(runtime: CliCommandRuntime): Pro
         console.log(result.output);
         return { handled: true, exitCode: result.exitCode };
       }
-      case 'support-bundle': {
-        const result = await handleBundleCommand(runtime);
-        console.log(result.output);
-        return { handled: true, exitCode: result.exitCode };
-      }
+      // The support bundle is the daemon's: bundle.export, bundle.inspect and bundle.import, as `do` runs them.
+      case 'support-bundle':
+        return { handled: true, exitCode: await runSupportBundleCommand({
+          binary: 'goodvibes', command: 'support-bundle', caller: 'tui', args: runtime.cli.commandArgs,
+          json: runtime.cli.flags.outputFormat === 'json', yes: runtime.cli.flags.yes === true,
+          invoke: daemonTargetInvoke(runtime), configManager: runtime.configManager, workingDirectory: runtime.workingDirectory,
+        }) };
       case 'hooks': {
         const result = await handleHooksCommand(runtime);
         console.log(result.output);

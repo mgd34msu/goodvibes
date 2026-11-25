@@ -28,8 +28,20 @@ const steps = (value: unknown): string[] => {
 
 /** The daemon method, as the same caller. */
 async function call(caller: CapabilityCaller, methodId: string, body: Record<string, unknown>): Promise<Record<string, unknown>> {
-  if (!caller.method) throw new CapabilityRefusal('Cloudflare is set up through the daemon\'s own methods, which this run cannot reach.', 'Run it from the Devices place, the web UI or goodvibes do.');
-  const answer = await caller.method(methodId, body);
+  if (!caller.method) throw new CapabilityRefusal('Cloudflare is set up through the daemon\'s own methods, which this run cannot reach.', 'Run it from the Devices and network place, the web UI or goodvibes do.');
+  let answer: unknown;
+  try {
+    answer = await caller.method(methodId, body);
+  } catch (error) {
+    // The daemon names its environment variable and field for a script; a person gives the token in this form.
+    if (/API token is required/.test(error instanceof Error ? error.message : String(error))) {
+      throw new CapabilityRefusal('Nothing was asked of Cloudflare: no API token is stored and none was given. Give one under API token (typed hidden), or create it first with Create the token.', 'See what the API token needs says which permissions it takes.');
+    }
+    if (/account id is required/.test(error instanceof Error ? error.message : String(error))) {
+      throw new CapabilityRefusal('Nothing was asked of Cloudflare: no account is set and none was given. Give it under Account; Find accounts lists the ones your token sees.', 'Find your Cloudflare accounts and resources lists them.');
+    }
+    throw error;
+  }
   return answer !== null && typeof answer === 'object' && !Array.isArray(answer) ? answer as Record<string, unknown> : {};
 }
 
@@ -69,7 +81,7 @@ function credentials(values: ActionValues): Record<string, string> {
 }
 const zoneOf = (values: ActionValues): Record<string, string> => ({ ...given('zoneId', values.zoneId), ...given('zoneName', values.zone) });
 const OUTWARD = 'it acts on the owner\'s Cloudflare account';
-const DEVICES_PLACE = 'The Devices place shows whether Cloudflare is set up.';
+const DEVICES_PLACE = 'The Cloudflare tab of Devices and network shows whether Cloudflare is set up.';
 
 function cloudflare(fields: Omit<Definition, 'capability' | 'done' | 'example'> & { readonly id: string; readonly repeat: 'safe' | 'unsafe'; readonly example?: ActionValues }): Definition {
   const { id, repeat, example, ...rest } = fields;
@@ -113,7 +125,10 @@ export const CLOUDFLARE_REQUIREMENTS = cloudflare({
       text: [
         'The API token needs:',
         ...permissions.map((permission) => `  ${str(permission.scope)}: ${str(permission.permission)} (${str(permission.component)}) - ${str(permission.reason)}`),
-        ...(Array.isArray(bootstrap) && bootstrap.length > 0 ? ['To make the bootstrap token:', ...bootstrap.map((line) => `  ${str(line)}`)] : []),
+        // The daemon's instructions name its HTTP route for a script; a person gives the token to Create the token.
+        ...(Array.isArray(bootstrap) && bootstrap.length > 0 ? ['To make the bootstrap token:', ...bootstrap.map((line) => /\/api\/cloudflare\/token\/create/.test(str(line))
+          ? '  Then give it to Create the token (Bootstrap token, typed hidden) on the Cloudflare tab of Devices and network.'
+          : `  ${str(line)}`)] : []),
       ].join('\n'),
       data: { permissions },
     };
@@ -291,9 +306,8 @@ export const CLOUDFLARE_DISABLE = cloudflare({
     toggle('keepSubdomain', 'The workers.dev address', 'Whether the worker keeps answering on workers.dev', 'Turn it off', 'Keep it', 2),
   ],
   sentence: 'The integration is turned off here, its worker schedule and workers.dev address are turned off at Cloudflare and the worker\'s daemon credential is removed, until you change it; with a bootstrap token the operational token this daemon made is revoked, which cannot be undone.',
-  // Not the owner's own act: its method lets a model ask for it (cloudflare.administer), so a model's call is put to
-  // the owner as one that cannot be undone, opening on No.
   touches: 'another-machine', lasts: 'kept', risk: 'cannot-be-undone', undoneBy: 'provision',
+  ownerOnly: { reason: `${OUTWARD} and can revoke its token`, instead: DEVICES_PLACE },
   example: { keepCron: 'yes' },
   async run(values, _services, caller) {
     const result = await call(caller, 'cloudflare.disable', {

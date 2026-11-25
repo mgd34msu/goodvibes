@@ -20,7 +20,7 @@ import { realpathSync } from 'node:fs';
 import { isAbsolute, relative, resolve, sep } from 'node:path';
 import type { CapturedExecAuthority } from './captured-exec.js';
 import type { ExecCommandResult } from './schema.js';
-import { decideExecContainment, type ExecContainmentRequirement } from './containment.js';
+import { containmentForTurn, decideExecContainment, type ExecContainmentRequirement } from './containment.js';
 import type { ExecSandboxPlan, ExecSandboxRuntime } from './sandbox.js';
 import type { ExecInteractionRuntime } from './interactive.js';
 
@@ -59,7 +59,7 @@ export function containmentRefusal(
   cmdStr: string,
   plan: ExecSandboxPlan | null,
 ): ExecCommandResult | null {
-  const decision = decideExecContainment(policy.containment, plan);
+  const decision = decideExecContainment(containmentForTurn(policy.containment), plan);
   if (decision.allowed) return null;
   return refusedResult(cmdStr, decision.refusal ?? 'Command refused: the exec boundary is required here.');
 }
@@ -104,12 +104,13 @@ export function sandboxWorkspaceRefusal(
  * gets a contained turn onto the host.
  */
 export function backgroundContainmentRefusal(policy: ExecRunPolicy, cmdStr: string): ExecCommandResult | null {
-  if (policy.containment?.posture !== 'required') return null;
+  const containment = containmentForTurn(policy.containment);
+  if (containment?.posture !== 'required') return null;
   return refusedResult(
     cmdStr,
     'Command refused: a background command cannot run inside the exec boundary '
     + '(the boundary dies with this tool call, which would defeat the detach), and this '
-    + `session requires containment, ${policy.containment.reason}\n`
+    + `session requires containment, ${containment.reason}\n`
     + 'Run it in the foreground, or report what you would need instead.',
   );
 }

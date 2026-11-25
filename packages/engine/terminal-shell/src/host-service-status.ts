@@ -1,6 +1,6 @@
 import type { HostServiceStatus, HostServicesHandle } from '@goodvibes/engine/platform/platform/runtime/bootstrap';
 import { deriveControlPlaneBaseUrl } from '@goodvibes/engine/platform/platform/config/control-plane-base-url';
-import { resolveRuntimeEndpointBinding, type RuntimeEndpointSettingKey } from './cli-endpoints.js';
+import { resolveRuntimeEndpointBinding, type RuntimeEndpointSettingKey } from '@goodvibes/engine/platform/platform/support/service-posture';
 export type HostServiceName = 'daemon' | 'httpListener';
 /** The settings the pending status reads: the daemon's and the listener's endpoint keys and the control plane's TLS mode. */
 type PendingStatusConfigKey = RuntimeEndpointSettingKey<'controlPlane' | 'httpListener'> | 'controlPlane.tls.mode';

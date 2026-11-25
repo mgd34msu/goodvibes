@@ -380,7 +380,7 @@ export function hookPatternProblem(pattern: string): string | null {
     return `"${pattern}" is not a recognized hook event point: a key has exactly three parts, Phase:Category:Specific`;
   }
   if (CONTRACTS.some((contract) => patternsOverlap(pattern, contract.pattern))) return null;
-  return `"${pattern}" is not a recognized hook event point: no registered hook point matches it (phases are Pre, Post, Fail, Change and Lifecycle, and case matters); /hooks contracts lists them`;
+  return `"${pattern}" is not a recognized hook event point: no registered hook point matches it (phases are Pre, Post, Fail, Change and Lifecycle, and case matters); the Hook points tab of Tools and extensions lists them`;
 }
 
 /**

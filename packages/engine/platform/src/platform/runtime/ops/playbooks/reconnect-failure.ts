@@ -76,7 +76,7 @@ export const reconnectFailurePlaybook: Playbook = {
     { step: 1, title: 'Repair the server', action: 'Run /mcp repair <server> to see what stops it and the steps that fix it (a sign-in, a command or address), then /mcp reload.', kind: 'command', command: '/mcp repair <server>', expectedOutcome: 'The server is connected and its tools are offered.', automatable: false },
     { step: 2, title: 'Review held tools', action: 'Run /mcp review to approve or reject the changed tools of a held server.', kind: 'command', command: '/mcp review', expectedOutcome: 'The server\'s tools are offered again.', automatable: false },
     { step: 3, title: 'Reload the configuration', action: 'After fixing a server\'s command or address, run /mcp reload.', kind: 'command', command: '/mcp reload', expectedOutcome: 'Every configured server is started again.', automatable: false },
-    { step: 4, title: 'Check the daemon', action: 'Run /health check services to see whether the daemon is running and reachable.', kind: 'command', command: '/health check services', expectedOutcome: 'The daemon is reachable.', automatable: false },
+    { step: 4, title: 'Check the daemon', action: 'In the System place, Health, check one area: Services, to see whether the daemon is running and reachable.', kind: 'observe', expectedOutcome: 'The daemon is reachable.', automatable: false },
   ],
   escalationCriteria: [
     'A server keeps failing after repair and reload',

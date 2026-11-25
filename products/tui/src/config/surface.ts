@@ -21,7 +21,7 @@ export { GOODVIBES_TUI_SURFACE_ROOT } from '@goodvibes/engine/platform/platform/
 
 /**
  * Which servers the terminal app's saved scan (`discovered-providers.json`)
- * registers in every composition: all of them, since each was found by the
- * owner's own /scan, which may reach the local network.
+ * registers in every composition: all of them, since each was found by a
+ * scan the owner asked for, which may have reached the local network.
  */
 export const TUI_TRUSTS_SAVED_SCANNED_SERVERS = (): boolean => true;

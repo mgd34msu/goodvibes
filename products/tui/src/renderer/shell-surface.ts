@@ -37,7 +37,7 @@ import { wrapText } from '../utils/terminal-width.ts';
  * back-to-bottom pill. The input area holds only input (its placeholder,
  * even while the keyboard is in the work tree). Token totals, the per-turn
  * history, tool count, notification mode, the session spine and the web
- * surface address live in the Usage modal and /status, not on the main
+ * surface address live in Money, Spending, and /status, not on the main
  * screen. What stays always visible is safety: the approval mode and the
  * auto-approve warning, the live microphone and the sleep-disabled chip (the
  * left end of the status line), the failover marker (the header, after the

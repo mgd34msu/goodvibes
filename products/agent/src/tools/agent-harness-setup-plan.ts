@@ -63,7 +63,7 @@ export async function buildSetupPlan(
         blocksAutonomy: true,
         reason: 'Daemon-backed automation, Agent Knowledge, channels, and companion routes need a reachable compatible GoodVibes host.',
         nextAction: 'Run connected-host status, then start, update, or repair the owning GoodVibes host if the live check reports a gap.',
-        userRoute: 'Agent Workspace -> Connected Host; /health compat',
+        userRoute: 'Agent Workspace -> Connected Host; System place, Health: check the connected host\'s compatibility',
         modelRoute: 'host action:"status"',
         relatedSetupItemId: 'operator-terminal',
         signals: [

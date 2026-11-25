@@ -28,31 +28,29 @@ export function buildPaymentsCardsRow(): PaymentsSettingEntry {
       label: 'Cards on file',
       type: 'string',
       default: '',
-      description: 'Cards purchases can use. Enter closes Settings, lists the cards on the daemon, and starts "Add a card" (Esc stops it); the Money place removes one. Settings never takes a card number.',
+      description: 'Cards purchases can use. Enter closes Settings and opens Money on its Cards tab, which lists the cards on the daemon and adds or removes one. Settings never takes a card number.',
     },
-    currentValue: 'Enter: list cards and add one',
+    currentValue: 'Enter: open Money, Cards',
     isDefault: true,
     locked: true,
     lockReason: 'Cards are managed in the Money place or the web UI.',
   };
 }
 
-/** What the cards row needs from the command context: the command runner the composer uses. */
+/** What the cards row needs from the command context: the program's way to open a place. */
 export interface PaymentsCardsRowContext {
   readonly print: (message: string) => void;
-  readonly executeCommand?: ((name: string, args: string[]) => Promise<boolean>) | undefined;
+  readonly openPlace?: ((id: string, start?: { readonly list?: string | undefined }) => void) | undefined;
 }
 
 /**
- * Enter on the cards row, after Settings has closed: list the cards the daemon
- * holds (with their count, from `payments.cards.list`), then start the masked
- * card entry, exactly as `/payments cards` and `/payments add-card` do.
+ * Enter on the cards row, after Settings has closed: Money opens on its Cards tab (the cards the daemon holds, read
+ * by themselves; `n` adds one in its hidden form, `x` removes one).
  */
 export async function openPaymentsCardsFromSettings(context: PaymentsCardsRowContext): Promise<void> {
-  if (!context.executeCommand) {
-    context.print('The Money place lists your cards and adds one.');
+  if (!context.openPlace) {
+    context.print('Money, Cards, in the menu of places, lists your cards and adds one.');
     return;
   }
-  await context.executeCommand('payments', ['cards']);
-  await context.executeCommand('payments', ['add-card']);
+  context.openPlace('money', { list: 'cards' });
 }

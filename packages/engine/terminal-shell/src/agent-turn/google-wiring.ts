@@ -17,7 +17,6 @@ import { revealOrNull } from '@goodvibes/engine/platform/platform/security';
 import type { ToolRegistry } from '@goodvibes/engine/platform/platform/tools';
 import { registerAgentGoogleTool, type GoogleCalendarHost } from './google-tool.js';
 import type { DaemonExpectationClient } from './session-expectations.js';
-import { startLoopbackListener } from '@goodvibes/engine/platform/platform/google/node';
 import type { ConfigManager, SecretsManager } from '@goodvibes/engine/platform/platform/config';
 import type { ArtifactStore } from '@goodvibes/engine/platform/platform/artifacts';
 import type { OwnerApprovalStore } from '@goodvibes/engine/platform/platform/security';
@@ -34,7 +33,7 @@ export interface GoogleToolWiringDeps {
   readonly calendarHost?: (() => GoogleCalendarHost | null) | undefined;
   /**
    * Where approvals the owner answers are held, and the gesture that answers
-   * one on this surface (the Agent's `/google approve`). Absent where no
+   * one on this surface (the owner's "approve" on the send in Waiting for you). Absent where no
    * approval prompt is wired, and the refusal then says so.
    */
   readonly approvals?: { readonly store: OwnerApprovalStore; readonly gesture: string } | undefined;
@@ -69,12 +68,6 @@ export function wireAgentGoogleTool(registry: ToolRegistry, deps: GoogleToolWiri
     secretGet: async (key: string) => revealOrNull(await deps.secretsManager.get(key), 'dispatch'),
     captureConnectionCurrent: () => captureGoogleConnectionCurrent(deps),
     artifactStore: deps.artifactStore,
-
-    // Exact config and credential plans publish into their native owning stores.
-
-    // Binding the port Google redirects back to is real machine I/O, so the
-    // connector takes it as a port and the concrete listener is named here.
-    loopback: startLoopbackListener,
 
     // Existing native approval records remain exact and one-use. Model refusal
     // text does not turn this separate control into a runtime fallback.

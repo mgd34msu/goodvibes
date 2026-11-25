@@ -41,7 +41,8 @@ Nothing in a lane is decided by a model:
 - A connected Google account makes the inbox and calendar lanes `ready`, with
   the built-in `google` tool as their route (`google action:"mail.list"`,
   `google action:"calendar.list"`). The account's granted scopes decide which
-  of the two it serves; without one the lanes name `/google connect`.
+  of the two it serves; without one the lanes name "connect" on the Google tab
+  of Mail, calendar and channels (capability `google.connect`).
 - An MCP tool belongs to the inbox or calendar lane by the words of its name
   (else its server's name). It is a read when the server marks it
   `readOnlyHint`, or when its name starts with a read verb (`list`, `get`,

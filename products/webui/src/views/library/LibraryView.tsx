@@ -1,6 +1,6 @@
 /**
- * Library: Memory, Knowledge, Review, About you and Templates on one page (design doc "Data views"), the web view of
- * the Memory and knowledge place (terminal-shell places/memory-place.ts).
+ * Library: Memory, Knowledge and Review on one page (design doc "Data views"), linked from the Memory and knowledge
+ * place (views/places), which holds the place's other lists (About you, Templates, ...).
  * One search field serves the Memory and Knowledge tabs (and narrows the Review rows);
  * a Segmented switch carries the tab and the Review count; Add memory is the page's
  * primary action and opens a dialog. Record detail opens in the right-hand pane.
@@ -21,8 +21,6 @@ import { AddMemoryDialog } from '../memory/AddMemoryDialog';
 import { MemoryView } from '../memory/MemoryView';
 import { useDebouncedValue, useReviewTally } from './library-data';
 import { ReviewTab } from './ReviewTab';
-import { AboutYouTab } from './AboutYouTab';
-import { TemplatesTab } from './TemplatesTab';
 import '../../styles/components/library.css';
 
 export interface LibraryViewProps {
@@ -129,8 +127,6 @@ export function LibraryView({ tab, onTabChange }: LibraryViewProps) {
         {current === 'memory' && <MemoryView query={query} onAddMemory={openAdd} onServedChange={setMemoryServed} showCopies={showCopies} />}
         {current === 'knowledge' && <KnowledgeView query={query} />}
         {current === 'review' && <ReviewTab query={query} />}
-        {current === 'about-you' && <AboutYouTab />}
-        {current === 'templates' && <TemplatesTab />}
       </DataPage>
 
       <AddMemoryDialog

@@ -9,6 +9,7 @@ import type { MemoryRecord, MemoryRegistry, MemoryVectorStats } from '@goodvibes
 import {
   MIN_PROMPT_MEMORY_CONFIDENCE,
   describeMemoryPromptEligibility,
+  isMemoryForProject,
   isPromptActiveMemory,
 } from '@goodvibes/engine/platform/platform/state';
 import type { MemoryPromptEligibility } from '@goodvibes/engine/platform/platform/state';
@@ -165,13 +166,16 @@ export interface BuildReviewedMemoryPromptOptions {
    * derived from the exact same record set instead of two independent reads.
    */
   readonly records?: readonly MemoryRecord[] | undefined;
+  /** The project the turn works in (memoryProjectIdentity): its records and the person's own; unknown, the person's own only. */
+  readonly project?: string | undefined;
 }
 
 export async function buildReviewedMemoryPrompt(memoryRegistry: MemoryRegistry, options: BuildReviewedMemoryPromptOptions = {}): Promise<string | null> {
   const limit = options.limit ?? DEFAULT_LIMIT;
   // Bound to one arg, see prompt-context-receipts.ts's resolveMemoryRecords
   // filter for why a bare `.filter(isPromptActiveMemory)` is unsafe here.
-  const eligible = (options.records ?? memoryRegistry.getAll()).filter((record) => isPromptActiveMemory(record));
+  const eligible = (options.records ?? memoryRegistry.getAll())
+    .filter((record) => isMemoryForProject(record, options.project) && isPromptActiveMemory(record));
   const ranking = await rankMemoryForTurn(memoryRegistry, eligible, options.turnText);
   return renderReviewedMemoryPrompt(ranking, limit);
 }

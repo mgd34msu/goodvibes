@@ -208,6 +208,9 @@ export const SECRETS_LINK: CapabilityDefinition<SecretsCapabilityServices> = {
   sentence: '{key} will be read from {reference}, kept in the {scope} secret store ({storage}), until you change it.',
   done: '{key} now reads from {reference}.',
   touches: 'credential', lasts: 'kept', risk: 'none', undoneBy: 'delete-secret',
+  // It writes the secret store (which value a key reads from), as storing a secret does: the owner decides it for a
+  // model, and it is his own act when a device asks.
+  effects: ['control-plane.write', 'secret.write'],
   example: { key: 'OPENAI_API_KEY', reference: 'goodvibes://secrets/env/OPENAI_API_KEY' },
   async run(values, services, caller) {
     const key = values.key!.trim();
@@ -329,6 +332,8 @@ export const SECRETS_TRUST: CapabilityDefinition<SecretsCapabilityServices> = {
   example: { key: 'OPENAI_API_KEY' },
   async run(values, services, caller) {
     const key = values.key!.trim();
+    // A project's store is the caller's project's: with no folder named, none is confirmed (never the daemon's folder's).
+    if (!caller.workingDirectory) throw new CapabilityRefusal(`Nothing was confirmed: "this project" needs the project's folder, and none was named.`, 'Send it from the project (its folder).');
     const confirmed = services.secrets.viewFor(caller).confirmProjectSecret(key);
     if (confirmed.length === 0) throw new CapabilityRefusal(`Nothing was confirmed: ${key} is not in this project's secret store.`, '"See your secrets" lists what is stored.');
     services.secrets.changed(key, 'changed');
@@ -355,6 +360,10 @@ export const SECRETS_DELETE: CapabilityDefinition<SecretsCapabilityServices> = {
   example: { key: 'OPENAI_API_KEY' },
   async run(values, services, caller) {
     const key = values.key!.trim();
+    // "This project" is the caller's project: with no folder named there is no project store to delete from.
+    if (values.scope === 'project' && !caller.workingDirectory) {
+      throw new CapabilityRefusal(`${key} was not deleted: "This project" needs the project's folder, and none was named.`, 'Send it from the project (its folder).');
+    }
     const view = services.secrets.viewFor(caller);
     const medium = values.storage === 'secure' || values.storage === 'plaintext' ? values.storage : undefined;
     // "All your projects" is the daemon's store and the program's own one before it (kept for a return to an earlier

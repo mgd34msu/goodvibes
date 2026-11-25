@@ -179,7 +179,7 @@ export interface RuntimeServices {
   /** Daemon-scoped credential writes: `credentials.set`/`delete` on the daemon, one verified sequence. */
   readonly daemonCredentials: DaemonCredentialsClient;
   /** The terminal prompt, late-bound, the UI layer patches the real one in after boot. */
-  readonly localPromptRef: { requestPermission: (request: PermissionPromptRequest) => Promise<PermissionPromptDecision> };
+  readonly localPromptRef: { requestPermission: (request: PermissionPromptRequest) => Promise<PermissionPromptDecision>; answersHere?: boolean };
   /** The live session id an ask belongs to; written by the bootstrap tail. */
   readonly liveSessionIdRef: { value: string | null };
   /** Loopback-fetch approval that rides the approval broker; shared by the tool registry and orchestrator so every surface asks the same way. */

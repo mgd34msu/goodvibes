@@ -14,7 +14,7 @@ import type { SecretsManager } from '../../config/secrets.js';
 import type { PermissionPromptDecision, PermissionPromptRequest } from '../../permissions/prompt.js';
 import { callingAgentId } from '../../agents/calling-agent.js';
 import type { GatePresetName } from '../../gate/presets.js';
-import { PermissionManager, createPermissionConfigReader } from '../../permissions/manager.js';
+import { PermissionManager, createPermissionConfigReader, sessionOfPermissionDecision } from '../../permissions/manager.js';
 import { ownerPermissionRulesPath, previousOwnerPermissionRuleFiles, UserPermissionRuleStore } from '../../permissions/user-rule-store.js';
 import type { HookDispatcher } from '../../hooks/index.js';
 import { isFeatureGateEnabled, type FeatureFlagManager } from '../feature-flags/index.js';
@@ -24,7 +24,7 @@ import {
 } from '../feature-announcements.js';
 import { PolicyRuntimeState } from './policy-runtime.js';
 import { PolicyRegistry } from './policy-registry.js';
-import { loadConfiguredPolicyBundle } from './policy-config-loader.js';
+import { carryProgramPolicyActivations, loadConfiguredPolicyBundle, sharedPolicyActivationPath } from './policy-config-loader.js';
 import { buildSandboxEscalationHandler, type ExecSandboxEscalationHandler } from './sandbox-escalation-wiring.js';
 import { buildExecPromptAnswerHandler, type ExecPromptAnswerHandler } from './exec-prompt-wiring.js';
 import { buildLocalhostFetchApproval, type LocalhostFetchApproval } from './localhost-fetch-approval.js';
@@ -93,8 +93,31 @@ export function createPolicyRuntimeState(
       homeDirectory: configManager.getHomeDirectory() ?? undefined,
     },
   }));
+  // One activation record for every program (the daemon's): each program's own, kept until 3.5.0, is carried into it
+  // once; the registry records there and follows it, so the bundle in force is the same in every program.
+  const configDir = (configManager as Partial<Pick<ConfigManager, 'getControlPlaneConfigDir'>>).getControlPlaneConfigDir?.();
+  if (configDir) {
+    carryProgramPolicyActivations(configDir);
+    policyRuntimeState.getRegistry().bindActivationRecord(sharedPolicyActivationPath(configDir));
+  }
   loadConfiguredPolicyBundle(configManager, featureFlags, policyRuntimeState);
+  followPolicyActivation(policyRuntimeState);
   return policyRuntimeState;
+}
+
+/**
+ * This program's copy of the policy in force, made the one the activation record names (at start, and each time the
+ * daemon announces a change: terminal-shell policy-follow.ts). Never throws; a record it cannot follow is said on the
+ * policy state, where "See the policy in force" and the place read it, and the bundle in force here stays as it was.
+ */
+export function followPolicyActivation(policyRuntimeState: PolicyRuntimeState): void {
+  const followed = policyRuntimeState.getRegistry().followActivation();
+  if (followed.problem) {
+    logger.warn('[policy-as-code] the policy in force could not be followed', { problem: followed.problem });
+    policyRuntimeState.recordConfiguredBundleFailure(followed.problem);
+  } else if (followed.changed) {
+    policyRuntimeState.notify();
+  }
 }
 
 export interface BrokeredPermissionManagerOptions {
@@ -107,8 +130,16 @@ export interface BrokeredPermissionManagerOptions {
   readonly userRuleStore: UserPermissionRuleAccess | null;
   /** Reads what the owner's stored webhook destinations name, for the recipient check. */
   readonly secretsManager?: Pick<SecretsManager, 'resolveLocalSecretSync'> | null | undefined;
-  /** The session the call being checked belongs to, read when it asks: the approval is raised under that session. */
+  /** The session the call being checked belongs to, read when it asks: the approval is raised under that session. Absent: the session the decision was made for. */
   readonly sessionOfAsk?: (() => string | undefined) | undefined;
+  /**
+   * The project this manager decides for when it is not the settings owner's
+   * folder: a session the daemon hosts in a project (permissions/manager.ts
+   * createPermissionConfigReader). Absent: the settings owner's folder.
+   */
+  readonly project?: string | undefined;
+  /** The folder trust of another project, for a decision made for it (permissions/call-project.ts); absent: `workspaceTrust` for all. */
+  readonly workspaceTrustFor?: ((projectRoot: string) => AutonomousToolPromptHost['workspaceTrust']) | undefined;
 }
 
 /**
@@ -129,7 +160,8 @@ export function createBrokeredPermissionManager(options: BrokeredPermissionManag
       const request: PermissionPromptRequest = callingAgent === undefined
         ? asked
         : { ...asked, attribution: { kind: 'background-agent', agentId: callingAgent } };
-      const sessionId = options.sessionOfAsk?.();
+      // An ask carries its session: two sessions' identical asks are two questions, each answered on its own.
+      const sessionId = options.sessionOfAsk?.() ?? sessionOfPermissionDecision();
       return options.requestApproval({
         request,
         ...(execution?.signal === undefined ? {} : { signal: execution.signal }),
@@ -146,12 +178,12 @@ export function createBrokeredPermissionManager(options: BrokeredPermissionManag
           : {}),
       });
     },
-    createPermissionConfigReader(options.configManager, options.secretsManager ?? null),
+    createPermissionConfigReader(options.configManager, options.secretsManager ?? null, options.project),
     options.policyRuntimeState,
     options.hookDispatcher,
     options.featureFlags,
     options.userRuleStore,
-    { workspaceTrust: options.workspaceTrust },
+    { workspaceTrust: options.workspaceTrust, ...(options.workspaceTrustFor ? { workspaceTrustFor: options.workspaceTrustFor } : {}) },
   );
 }
 

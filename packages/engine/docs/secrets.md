@@ -98,7 +98,7 @@ Hosts can provide:
 
 The credential store resolves a password-manager reference once and keeps the
 value until a credential is set, deleted or imported, or a store file changes;
-`/secrets test <secret-ref>` always asks the password manager.
+"Test a secret reference" (the capability `secrets.test`) always asks the password manager.
 
 CLI-backed refs support timeouts. Command
 execution is host-owned so embedders can apply their own permission prompts,
@@ -115,11 +115,12 @@ provider. A setting that holds a credential (a channel token, `cluster.secret`,
 a Cloudflare token reference, the ntfy topic names, an incoming or outbound
 webhook URL, the notification webhook URLs and the rest of the declared list)
 takes only a `goodvibes://secrets/` reference: a plain value is refused with the
-command that stores it (`/secrets set <KEY> <value>`, `/notify add <url>` for a
-notification webhook, or the settings screen, which stores the value and writes
+control that stores it ("Store a secret" on the Secrets tab of Permissions and safety, "add an address" on the
+Notifications tab of Mail, calendar and channels for a notification webhook, or
+the settings screen, which stores the value and writes
 the reference for you). Card number, expiry, CVV and cardholder
 name are never settings; cards are kept in the daemon's card store through
-`/payments add-card` or the web UI.
+"Add a card" in Money (its Cards tab) or the web UI.
 
 ## Where stored secrets are read from
 
@@ -128,15 +129,15 @@ A lookup reads the environment, then the daemon's store, then your own store
 store of the project you opened (`<project>/.goodvibes/<surface>/secrets.enc`).
 Directories above the project are never read. A project's store is part of the
 checkout, so a key in it is used only after you stored it there yourself or
-confirmed it once with `/secrets trust <KEY>`; until then `/secrets list` marks
-it "not used until confirmed". The confirmation is kept beside your own store,
+confirmed it once with "Use a secret from this project's store"; until then the
+Secrets tab marks it "waits for you". The confirmation is kept beside your own store,
 outside every checkout. A reference found in a project's store is followed only
 when it names a key in your store (`goodvibes://secrets/goodvibes/<KEY>`).
 
 A value you store is the credential itself, even when its text looks like a
 reference (`op://...`, a JSON reference): it is stored wrapped and handed back
-as typed. Only `/secrets link` (a `goodvibes://secrets/` reference) stores a
-pointer.
+as typed. Only "Point a secret at a password manager" (`secrets.link`, a
+`goodvibes://secrets/` reference) stores a pointer.
 
 Each store file is read once and kept until it changes; a lookup costs one
 `stat` per store file, and a change another process makes is noticed by that

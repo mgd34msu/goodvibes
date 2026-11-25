@@ -223,7 +223,8 @@ export class ProjectWorkPlan implements RevisionSource {
 
   toMarkdown(snapshot: ProjectWorkPlanSnapshot): string {
     const lines = [
-      '# Work Plan',
+      // The model's running checklist, called a checklist (a plan is a piece of work's own).
+      '# Checklist',
       '',
       `Project: ${this.projectRoot}`,
       `Project ID: ${this.projectId}`,

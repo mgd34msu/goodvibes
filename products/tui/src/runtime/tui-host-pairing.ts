@@ -28,7 +28,11 @@ export interface TuiHostPairingOptions extends NativeHostCredentialOptions {
   readonly fetchImpl?: typeof fetch;
 }
 const unavailable = (): TuiHostPairingResult => ({ status: 'blocked', message: 'Pairing could not be verified. Check the selected host and safe local credential store, then preview again.' });
-const unknown = (host: string): TuiHostPairingResult => ({ status: 'unknown', host, message: 'The reply to a pairing request was lost, so this terminal does not know whether the host created its credential. Run /devices pair host --bootstrap-shared (or /work on this machine) to repeat the same request: the host answers it with that credential, never a second one.' });
+/** How a lost pairing reply is repeated: the same request again, from the shared token (the place's Pair something form). */
+export const REPEAT_LOST_REQUEST = 'In Devices and network, press Pair something, This program with its daemon, with Shared token set to Yes, to repeat the same request: the host answers it with the credential it made, never a second one.';
+/** Pairing this terminal with its daemon, as the place's control names it. */
+export const PAIR_HOST_CONTROL = 'Devices and network, Pair something, This program with its daemon';
+const unknown = (host: string): TuiHostPairingResult => ({ status: 'unknown', host, message: `The reply to a pairing request was lost, so this terminal does not know whether the host created its credential. ${REPEAT_LOST_REQUEST} (Opening /work on this machine repeats it too.)` });
 const refused = (host: string, status: number): TuiHostPairingResult => ({ status: 'blocked', host, message: `The host refused the pairing request (HTTP ${status}), so no credential was created and nothing was saved. Preview again to retry.` });
 const changed = (): TuiHostPairingResult => ({ status: 'changed', message: 'The selected host, home, bootstrap credential, authority or local pairing state changed. Preview again before confirming.' });
 const cancelled = (): TuiHostPairingResult => ({ status: 'cancelled', message: 'Pairing cancelled before the migration request.' });
@@ -120,7 +124,7 @@ async function mintTuiDevicePairing(input: {
 function forgotten(result: RemoveTuiHostPairingResult, host: string, tokenId: string): TuiHostPairingResult {
   if (result.status === 'unavailable') return { status: 'blocked', host, message: `${result.reason} Nothing was forgotten.` };
   if (result.status === 'conflict') return changed();
-  return { status: 'cleared', host, message: `The stored device credential (token ${tokenId}) was forgotten. It stays valid on the host until it is revoked there. Pair again with /devices pair host --bootstrap-shared --apply.` };
+  return { status: 'cleared', host, message: `The stored device credential (token ${tokenId}) was forgotten. It stays valid on the host until it is revoked there. Pair again with ${PAIR_HOST_CONTROL}, Shared token: Yes, Apply: Review and confirm it.` };
 }
 
 /**
@@ -135,7 +139,7 @@ function forgetPreview(home: string, host: string, tokenId: string): TuiHostPair
     result: {
       status: 'credential-rejected', host, confirmation,
       confirmationPrompt: 'forget the stored credential so this terminal can pair again',
-      message: `The host at ${host} no longer accepts the stored device credential (it was revoked, or the daemon there was reset). Run /devices pair host --apply and confirm to forget it, then pair again with /devices pair host --bootstrap-shared --apply.`,
+      message: `The host at ${host} no longer accepts the stored device credential (it was revoked, or the daemon there was reset). Use ${PAIR_HOST_CONTROL} with Apply: Review and confirm it, and confirm, to forget it; then pair again the same way with Shared token: Yes.`,
     },
     async confirm(answer) {
       if (consumed || answer !== confirmation) return cancelled();
@@ -156,7 +160,7 @@ export async function unpairTuiHost(options: NativeHostCredentialOptions): Promi
   const state = readTuiHostPairing(home, host);
   if (state.status === 'unavailable') return { status: 'blocked', host, message: `${state.reason} Nothing was forgotten.` };
   if (state.status === 'missing') return { status: 'blocked', host, message: 'No device credential is stored for this host; nothing to forget.' };
-  if (state.status === 'unknown') return { ...unknown(host), message: `${unknown(host).message} Run /devices pair host --apply to review the unresolved attempt and forget it.` };
+  if (state.status === 'unknown') return { ...unknown(host), message: `${unknown(host).message} Use ${PAIR_HOST_CONTROL} with Apply: Review and confirm it, to review the unresolved attempt and forget it.` };
   return forgotten(await removeTuiHostPairing(home, host, state.tokenId), host, state.tokenId);
 }
 
@@ -175,7 +179,7 @@ export async function previewTuiHostPairing(options: TuiHostPairingOptions, name
     const home = homeNow(); const host = resolveTuiHostOrigin(options.configManager);
     if (!host || !resolveDaemonEnabled(options.configManager)) return { result: unavailable() };
     const state = readTuiHostPairing(home, host);
-    if (state.status === 'unavailable') return { result: { status: 'blocked', host, message: `${state.reason} Then run /devices pair host again.` } };
+    if (state.status === 'unavailable') return { result: { status: 'blocked', host, message: `${state.reason} Then use ${PAIR_HOST_CONTROL} again.` } };
     const sameSelection = () => homeNow() === home && resolveDaemonEnabled(options.configManager) && resolveTuiHostOrigin(options.configManager) === host;
     // The flow carries the record it read; the store's compare-and-swap on begin
     // and complete refuses a record another process changed meanwhile.
@@ -243,9 +247,9 @@ export async function previewTuiHostPairing(options: TuiHostPairingOptions, name
         return { result: unverified(host) };
       }
       if (signal?.aborted || !sameSelection() || !isNativePairedPrincipal(live, `pairing:${state.tokenId}`)) return { result: unverified(host) };
-      return { result: { status: 'already-paired', host, message: 'This TUI host credential is saved and its expected native principal is verified. No credential will be minted or replaced. To forget it, run /devices unpair-host.' } };
+      return { result: { status: 'already-paired', host, message: 'This TUI host credential is saved and its expected native principal is verified. No credential will be minted or replaced. To forget it: Devices and network, Paired tab, Forget its daemon pairing.' } };
     }
-    if (!options.bootstrapShared) return { result: { status: 'blocked', host, message: 'No device credential is bound to this origin. For the daemon on this machine, /work creates one on first use. Select --bootstrap-shared to create it now with the daemon operator token.' } };
+    if (!options.bootstrapShared) return { result: { status: 'blocked', host, message: 'No device credential is bound to this origin. For the daemon on this machine, /work creates one on first use. Set Shared token to Yes to create it now with the daemon operator token.' } };
     const token = readTuiLegacyPairingBootstrap(home);
     if (!token) return { result: { status: 'blocked', host, message: 'The selected legacy bootstrap is missing or unsafe. It must be an owned, private regular daemon operator-tokens.json file; this command never creates or repairs it.' } };
     const current = () => sameSelection() && readTuiLegacyPairingBootstrap(home) === token;

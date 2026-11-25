@@ -20,7 +20,7 @@ export const builtinGatewayFlagsMethodDescriptors: readonly GatewayMethodDescrip
     id: 'flags.graduation.report',
     title: 'Feature Defaults Report',
     description:
-      'Return the feature defaults report: every platform capability with its current default, default-disposition state (dark = default-off with no evidence, soaking = accumulating evidence, graduate-candidate = judged ready and awaiting a release decision, graduated = default on, blocked = held off with a dated reason), and its validation evidence. The daemon collects no validation readings, so every entry\'s evidence says "no evidence collected"; the only instrumentation, the permissions divergence simulation, runs in the terminal app with /security simulate-policy and reports there. releaseBlockers lists every graduate-candidate entry: capabilities judged ready that are neither on by default nor held with a dated reason.',
+      'Return the feature defaults report: every platform capability with its current default, default-disposition state (dark = default-off with no evidence, soaking = accumulating evidence, graduate-candidate = judged ready and awaiting a release decision, graduated = default on, blocked = held off with a dated reason), and its validation evidence. The daemon collects no validation readings, so every entry\'s evidence says "no evidence collected"; the only instrumentation, the permissions divergence simulation, runs with "See what the candidate policy changes" (the capability security.simulate-policy) and reports there. releaseBlockers lists every graduate-candidate entry: capabilities judged ready that are neither on by default nor held with a dated reason.',
     category: 'flags',
     effects: ['config.read'],
     transport: ['ws'],

@@ -38,7 +38,7 @@ import { awaitNativeResumeConditions, nativeDecisionState } from './native-decis
 import { logger } from '../utils/logger.js';
 import { refusal, type Refusal } from '@goodvibes/engine/errors';
 import { queueSessionNudge, type UnitCheckLoop } from './agent-hooks.js';
-import { engineItem, type GroupRunner } from './group-runner.js';
+import { engineItem, wentOnWithout, type GroupRunner } from './group-runner.js';
 import type { ContractRun } from './run-context.js';
 import type { ContractStepsWithReplies } from './steps.js';
 import type { ContractStore } from './store.js';
@@ -297,7 +297,7 @@ export function createContractResume(deps: ContractResumeDeps): ContractResume {
           code: 'CONTRACT_NOT_RESUMED',
           state: `contract ${contractId} is left on disk unchanged`,
           reason: `Contract ${contractId} could not be resumed at start-up (${detail}).`,
-          next: [`See it with /agents contract ${contractId}, then restart to try again.`, `Or cancel it: goodvibes-contract cancel ${contractId}.`],
+          next: ['See it in the Work place, then restart to try again.', `Or cancel it: goodvibes-contract cancel ${contractId}.`],
           retryable: true,
         }) });
       }
@@ -468,8 +468,8 @@ export function createContractResume(deps: ContractResumeDeps): ContractResume {
     for (const group of contract.groups) {
       if (group.status === 'judging') void deps.steps.judgeGroup(run, group.id, 'resume');
       if (group.status !== 'running') continue;
-      const units = contract.units.filter((unit) => unit.groupId === group.id);
-      const last = units.at(-1);
+      const units = contract.units.filter((unit) => unit.groupId === group.id && !wentOnWithout(contract, unit));
+      const last = units.at(-1) ?? contract.units.find((unit) => unit.groupId === group.id);
       if (last === undefined || !units.every((unit) => unit.status === 'passed')) continue;
       if (contract.sessionMode === true) deps.sessionUnitPassed(run, last);
       else deps.groups.unitPassed(run, last);

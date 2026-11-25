@@ -16,6 +16,7 @@
  */
 import { randomUUID } from 'node:crypto';
 import type { CardMaterialStore } from './card-material.js';
+import { noteListChanged } from '../runtime/list-changes.js';
 
 /**
  * The code the owner typed, sealed: the only thing it can do is complete one
@@ -113,6 +114,8 @@ export class SecurityCodeRequests {
         input.signal?.removeEventListener('abort', onAbort);
         if (this.#pending.get(input.purchaseId) === entry) this.#pending.delete(input.purchaseId);
         awaitedCodes -= 1;
+        // Waiting for you's Purchases reads again: the code was given, or the purchase stopped waiting for it.
+        noteListChanged({ list: 'payments', change: 'changed', id: input.purchaseId });
         resolve(code === null ? null : sealed(code));
       };
       const entry: Pending = Object.freeze({
@@ -122,6 +125,8 @@ export class SecurityCodeRequests {
       awaitedCodes += 1;
       this.#pending.set(input.purchaseId, entry);
       if (input.signal?.aborted) { finish(null); return; }
+      // Waiting for you's Purchases reads again: a purchase now waits for its code.
+      noteListChanged({ list: 'payments', change: 'created', id: input.purchaseId });
       input.signal?.addEventListener('abort', onAbort, { once: true });
     });
   }

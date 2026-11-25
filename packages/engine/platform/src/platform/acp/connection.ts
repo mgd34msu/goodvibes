@@ -186,6 +186,8 @@ export class AcpConnection {
 
       // 1. Spawn child process with piped stdio
       const spawned = Bun.spawn(this.spawnCmd, {
+        // In the runner's project folder, never the folder the starting process runs in.
+        ...(this.task.workingDirectory ? { cwd: this.task.workingDirectory } : {}),
         stdin: 'pipe',
         stdout: 'pipe',
         stderr: 'pipe',
@@ -433,9 +435,13 @@ export class AcpConnection {
 
   /** Why an ask was refused without a decision on its merits: logged once and kept on the run's info. */
   private refuse(reason: string): RequestPermissionResponse {
+    this.noteRefusal(reason);
+    return { outcome: { outcome: 'cancelled' } };
+  }
+
+  private noteRefusal(reason: string): void {
     this.info.lastRefusal = { at: Date.now(), reason };
     logger.warn('AcpConnection: permission ask refused', { id: this.id, reason });
-    return { outcome: { outcome: 'cancelled' } };
   }
 
   private buildClientImpl(): Client {
@@ -443,9 +449,11 @@ export class AcpConnection {
       /** same recorded autonomous owner and final wire fence as host ACP. */
       requestPermission: async (params: RequestPermissionRequest): Promise<RequestPermissionResponse> => {
         const cancelled: RequestPermissionResponse = { outcome: { outcome: 'cancelled' } };
-        let binding: ReturnType<AcpPermissionWire['binding']>;
+        let binding: ReturnType<AcpPermissionWire['binding']> = undefined;
         let admission: Awaited<ReturnType<typeof admitExternalRequest>> | undefined;
         let deferred = false;
+        /** The options of a well-formed ask: a refusal then goes back as the runner's own reject option. */
+        let offered: RequestPermissionRequest['options'] | undefined;
         try {
           if (isProxy(params)) return this.refuse('the permission ask could not be read');
           const call = Object.getOwnPropertyDescriptor(params, 'toolCall')?.value as unknown;
@@ -462,6 +470,7 @@ export class AcpConnection {
           if (!binding || !owned || !protocolSubject) return this.refuse('the permission ask was not a well-formed ACP request');
           if (!this.sessionId || owned.sessionId !== this.sessionId || !owned.toolCall.toolCallId || !wellFormedPermissionOptions(owned.options))
             return this.refuse('the permission ask named another session or offered malformed options');
+          offered = owned.options;
           // The runner's ceiling is a fact of the task: a call outside it is refused here, before anyone is asked.
           const outside = runnerCeilingRefusal(this.task, owned.toolCall);
           if (outside) {
@@ -478,7 +487,8 @@ export class AcpConnection {
           const assertCurrent = () => { signal.throwIfAborted(); wire.assertCurrent(); operation.assertCurrent(); };
           assertCurrent();
           // Capture the actual originating goal, never the child tool title or generated task prose.
-          admission = await admitExternalRequest(host, { connectionId: this.id, destination: this.spawnCmd[0] ?? '', signal, assertCurrent, sessionId: this.task.sessionId },
+          // Decided for the runner's own project and session: its folder's rules, trust and answers, no other's.
+          admission = await admitExternalRequest(host, { connectionId: this.id, destination: this.spawnCmd[0] ?? '', signal, assertCurrent, sessionId: this.task.sessionId, workingDirectory: this.task.workingDirectory },
             { ...operation, assertCurrent: () => {} }, {
               tool: owned.toolCall.title ?? 'ACP action', protocolSubject,
               args: { ...(owned.toolCall.rawInput && typeof owned.toolCall.rawInput === 'object' && !Array.isArray(owned.toolCall.rawInput)
@@ -491,7 +501,20 @@ export class AcpConnection {
           return response;
         } catch (error) {
           if (this.lifetime.signal.aborted) return cancelled;
-          return this.refuse(`the permission ask could not be decided: ${summarizeError(error)}`);
+          const reason = `the permission ask could not be decided: ${summarizeError(error)}`;
+          // An ask that could not be decided is refused, and a refusal reaches the runner as its own reject option when
+          // it offered one (the wire still checks it before it is written); otherwise as cancelled.
+          if (offered && binding && !deferred) {
+            try {
+              const refusal = permissionOutcomeFor(offered, { approved: false, remember: false });
+              if (refusal.outcome.outcome === 'selected') {
+                binding.defer(refusal, undefined, false, () => {});
+                this.noteRefusal(reason);
+                return refusal;
+              }
+            } catch { /* the ask moved on meanwhile: refused as cancelled below */ }
+          }
+          return this.refuse(reason);
         } finally { if (!deferred) admission?.close(); }
       },
 

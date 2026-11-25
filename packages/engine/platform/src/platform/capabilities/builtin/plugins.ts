@@ -74,9 +74,9 @@ const PLUGIN: InputDescription = {
   id: 'plugin', label: 'Plugin', help: 'Plugins found on this machine', kind: 'choice', choices: { list: PLUGINS_LIST }, required: true, typed: { position: 1 },
 };
 
-/** Why a tier set for a plugin is not applied, in the words of a sentence (the trust file's reason, with no command named). */
+/** Why a tier set for a plugin is not applied, in the words of a sentence (the trust file's reason, and the control that sets it again). */
 function unappliedWords(name: string, unapplied: Parameters<typeof describeUnappliedTier>[1]): string {
-  return describeUnappliedTier(name, unapplied, 'plugin').replace(/[;,]?\s*(run|use)?\s*\/plugin [^.;]*/g, '').trim();
+  return describeUnappliedTier(name, unapplied).trim();
 }
 
 function projectOf(services: PluginsCapabilityServices, caller: CapabilityCaller): PluginProject {
@@ -132,21 +132,22 @@ function onOff(on: boolean): CapabilityDefinition<PluginsCapabilityServices> {
     capability: { id: on ? 'plugin.enable' : 'plugin.disable', group: 'tools', home: 'daemon', repeat: 'safe' },
     actionId: on ? 'enable' : 'disable', label: on ? 'Switch a plugin on' : 'Switch a plugin off', word: on ? 'enable' : 'disable', inputs: [PLUGIN],
     sentence: on ? '{plugin} is switched on and starts in every program, under its trust tier, until you change it.' : '{plugin} is switched off and stops in every program, until you change it.', done: '',
-    touches: 'this-machine', lasts: 'kept', risk: 'none', undoneBy: on ? 'disable' : 'enable', example: { plugin: 'jira' },
+    // Switching a plugin on makes its code start in every program by itself: it loosens a protection. Off does not.
+    touches: 'this-machine', lasts: 'kept', risk: on ? 'loosens-a-protection' : 'none', undoneBy: on ? 'disable' : 'enable', example: { plugin: 'jira' },
     async run(values, services, caller) {
       const project = projectOf(services, caller);
       const name = values.plugin!;
       const status = statusOf(project, name);
-      if (status.enabled === on) return { text: `Plugin '${name}' was already switched ${on ? 'on' : 'off'}.`, data: { plugin: name, enabled: on } };
+      if (status.enabled === on) return { text: `Plugin ${name} was already switched ${on ? 'on' : 'off'}.`, data: { plugin: name, enabled: on } };
       // A refusal by the plugin's tier keeps it recorded as switched on: setting the tier then starts it.
       const result = on ? await project.manager.enable(name) : await project.manager.disable(name);
       const now = project.manager.list().find((plugin) => plugin.name === name);
       changed();
-      if (!result.ok && now?.enabled !== on) throw new CapabilityRefusal(result.error ?? `Plugin '${name}' was not switched ${on ? 'on' : 'off'}.`, 'The Plugins list shows each plugin and its state.', 'NOT_DONE');
+      if (!result.ok && now?.enabled !== on) throw new CapabilityRefusal(result.error ?? `Plugin ${name} was not switched ${on ? 'on' : 'off'}.`, 'The Plugins list shows each plugin and its state.', 'NOT_DONE');
       return {
         text: on
-          ? `Plugin '${name}' switched on.${result.ok ? '' : ` ${result.error}.`}`
-          : `Plugin '${name}' switched off.`,
+          ? `Plugin ${name} switched on.${result.ok ? '' : ` ${result.error}.`}`
+          : `Plugin ${name} switched off.`,
         data: { plugin: name, enabled: on },
       };
     },
@@ -172,7 +173,7 @@ export const PLUGIN_TRUST: CapabilityDefinition<PluginsCapabilityServices> = {
       const signed = project.manager.trustSigned(name);
       if (signed.ok) {
         changed();
-        return { text: `Plugin '${name}' is trusted by its signed manifest${signed.fingerprint ? ` (fingerprint: ${signed.fingerprint})` : ''}: ${PLUGIN_TIER_WORDS.trusted}. Every program applies it the next time it starts the plugin.`, data: { plugin: name, tier, signed: true } };
+        return { text: `Plugin ${name} is trusted by its signed manifest${signed.fingerprint ? ` (fingerprint: ${signed.fingerprint})` : ''}: ${PLUGIN_TIER_WORDS.trusted}. Every program applies it the next time it starts the plugin.`, data: { plugin: name, tier, signed: true } };
       }
       // The owner's own choice covers a signature that does not verify; a closed manager or an unsaved record does not.
       if (signed.signatureRejected !== true) throw new CapabilityRefusal(signed.error ?? `The trust tier of '${name}' was not saved.`, 'Nothing changed; fix the reason and try again.');
@@ -182,7 +183,7 @@ export const PLUGIN_TRUST: CapabilityDefinition<PluginsCapabilityServices> = {
     if (!result.ok) throw new CapabilityRefusal(result.error ?? `The trust tier of '${name}' was not saved.`, 'Nothing changed; fix the reason and try again.');
     changed();
     return {
-      text: `Plugin '${name}' trust tier set to '${tier}'${note && tier === 'trusted' ? ' (signature not verified; recorded in the trust note)' : ''}: ${PLUGIN_TIER_WORDS[tier]}. Every program applies it the next time it starts the plugin.`,
+      text: `Plugin ${name} trust tier set to '${tier}'${note && tier === 'trusted' ? ' (signature not verified; recorded in the trust note)' : ''}: ${PLUGIN_TIER_WORDS[tier]}. Every program applies it the next time it starts the plugin.`,
       data: { plugin: name, tier, signed: false },
     };
   },
@@ -193,7 +194,9 @@ export const PLUGIN_TRUST_KEY: CapabilityDefinition<PluginsCapabilityServices> =
   actionId: 'trust-key', label: 'Save a plugin publisher\'s key', word: 'trust-key',
   inputs: [PLUGIN, { id: 'key', label: 'Key file', help: 'The publisher\'s Ed25519 public key (.pem)', kind: 'path', freeTextReason: 'a file path on this machine', required: true, typed: { position: 2 } }],
   sentence: 'The key in {key} is saved as {plugin}\'s publisher key, until you change it, so its signature can be checked.', done: '',
-  touches: 'credential', lasts: 'kept', risk: 'none', example: { plugin: 'jira', key: 'keys/acme.pem' },
+  // A publisher key is what a plugin's signature is trusted by: saving one lets that publisher's code be trusted. It
+  // loosens a protection.
+  touches: 'credential', lasts: 'kept', risk: 'loosens-a-protection', example: { plugin: 'jira', key: 'keys/acme.pem' },
   async run(values, services, caller) {
     const project = projectOf(services, caller);
     const name = values.plugin!;
@@ -207,9 +210,11 @@ export const PLUGIN_TRUST_KEY: CapabilityDefinition<PluginsCapabilityServices> =
     const check = project.manager.verify(name);
     changed();
     return {
-      text: `Publisher key saved for '${name}'. ${check.valid
-        ? 'Its manifest signature verifies with it; setting it to trusted now records the signed grant.'
-        : `Its manifest signature does not verify with it (${check.reason ?? 'unknown reason'}); the tier is unchanged.`}`,
+      text: `Publisher key saved for ${name}. ${check.valid
+        ? 'Its signature checks out with it; setting it to trusted now records the signed grant.'
+        : /no signature field/i.test(check.reason ?? '')
+          ? 'It is not signed, so the key checks nothing yet; what it may do is unchanged.'
+          : `Its signature does not check out with it (${(check.reason ?? 'no reason was given').replace(/\.$/, '')}); what it may do is unchanged.`}`,
       data: { plugin: name, verifies: check.valid === true },
     };
   },
@@ -224,11 +229,13 @@ export const PLUGIN_VERIFY: CapabilityDefinition<PluginsCapabilityServices> = {
     const project = projectOf(services, caller);
     const name = values.plugin!;
     const result = project.manager.verify(name);
-    if (!result.ok && result.reason?.includes('not found')) throw new CapabilityRefusal(result.reason ?? `Plugin '${name}' not found.`, 'The Plugins list shows the installed plugins.', 'NOT_FOUND');
+    if (!result.ok && result.reason?.includes('not found')) throw new CapabilityRefusal(result.reason ?? `Plugin ${name} not found.`, 'The Plugins list shows the installed plugins.', 'NOT_FOUND');
     return {
       text: result.valid
-        ? `Plugin '${name}' manifest signature is VALID.${result.fingerprint ? `\nFingerprint: ${result.fingerprint}` : ''}`
-        : `Plugin '${name}' manifest signature is INVALID.\nReason: ${result.reason ?? 'Unknown'}`,
+        ? `Plugin ${name}'s signature checks out with its publisher's key.${result.fingerprint ? `\nFingerprint: ${result.fingerprint}` : ''}`
+        : /no signature field/i.test(result.reason ?? '')
+          ? `Plugin ${name} is not signed: its manifest carries no signature, so who made it cannot be checked.`
+          : `Plugin ${name}'s signature does not check out: ${(result.reason ?? 'no reason was given').replace(/\.$/, '')}.`,
       data: { plugin: name, valid: result.valid === true, ...(result.fingerprint ? { fingerprint: result.fingerprint } : {}), ...(result.reason ? { reason: result.reason } : {}) },
     };
   },
@@ -243,7 +250,7 @@ export const PLUGIN_CAPABILITIES: CapabilityDefinition<PluginsCapabilityServices
     const project = projectOf(services, caller);
     const name = values.plugin!;
     const info = project.manager.capabilities(name);
-    if (!info) throw new CapabilityRefusal(`Plugin '${name}' not found.`, 'The Plugins list shows the installed plugins.', 'NOT_FOUND');
+    if (!info) throw new CapabilityRefusal(`Plugin ${name} not found.`, 'The Plugins list shows the installed plugins.', 'NOT_FOUND');
     const lines: string[] = [`Plugin: ${name}`, `Trust tier: ${info.tier} (${PLUGIN_TIER_WORDS[info.tier as TierName] ?? info.tier})`];
     if (info.unappliedTier !== undefined) {
       const sentence = unappliedWords(name, info.unappliedTier);
@@ -280,17 +287,15 @@ export const PLUGIN_INSPECT: CapabilityDefinition<PluginsCapabilityServices> = {
     const trust = project.manager.getTrustRecord(name);
     const quarantine = project.manager.getQuarantineRecord(name);
     return {
+      // In words, one fact a line: what a person reads in the result pane.
       text: [
-        `Plugin ${name}`,
-        `  version: ${status.version}`,
-        `  state: ${status.enabled ? 'switched on' : 'switched off'}`,
-        `  trustTier: ${status.trustTier}`,
-        `  quarantined: ${status.quarantined ? 'yes' : 'no'}`,
-        `  requestedCapabilities: ${capabilities?.requested.length ?? 0}`,
-        `  highRiskCapabilities: ${capabilities?.highRisk.length ?? 0}`,
-        `  withheldByTier: ${capabilities?.blocked.join(', ') || 'none'}`,
-        `  signedFingerprint: ${trust?.signatureFingerprint ?? 'n/a'}`,
-        `  quarantineReason: ${quarantine?.reason ?? 'n/a'}`,
+        `Plugin ${name}, version ${status.version}`,
+        `State: ${status.quarantined ? `quarantined, so it does not load${quarantine?.reason ? ` (${quarantine.reason})` : ''}` : status.enabled ? 'switched on' : 'switched off'}`,
+        `May do: ${status.trustTier}`,
+        `Asks to do: ${capabilities?.requested.length ? capabilities.requested.join(', ') : 'nothing beyond panels, commands and reading files'}`,
+        ...(capabilities?.highRisk.length ? [`High-risk among them: ${capabilities.highRisk.join(', ')}`] : []),
+        `Held back by what it may do: ${capabilities?.blocked.join(', ') || 'nothing'}`,
+        `Signature: ${trust?.signatureFingerprint ? `signed, fingerprint ${trust.signatureFingerprint}` : 'not signed'}`,
       ].join('\n'),
       data: { ...pluginFacts(status), fingerprint: trust?.signatureFingerprint ?? null, quarantineReason: quarantine?.reason ?? null },
     };
@@ -310,15 +315,12 @@ export const PLUGIN_REVIEW: CapabilityDefinition<PluginsCapabilityServices> = {
       untrusted: count((plugin) => plugin.trustTier === 'untrusted'), limited: count((plugin) => plugin.trustTier === 'limited'), trusted: count((plugin) => plugin.trustTier === 'trusted'),
     };
     return {
+      // Each tier is enforced at start: untrusted may not register tools, providers or hooks; only trusted may declare high-risk capabilities.
       text: [
-        'Plugin Security Review',
-        `  total: ${data.total}`,
-        `  switched on: ${data.on}`,
-        `  quarantined (will not load): ${data.quarantined}`,
-        // Each tier is enforced at start: untrusted may not register tools, providers or hooks; only trusted may declare high-risk capabilities.
-        `  untrusted (panels and reads only): ${data.untrusted}`,
-        `  limited (declared tools, providers, hooks): ${data.limited}`,
-        `  trusted (also high-risk): ${data.trusted}`,
+        `You have ${data.total} plugin${data.total === 1 ? '' : 's'}: ${data.on} switched on, ${data.quarantined} quarantined (they do not load).`,
+        `Untrusted (panels, commands and reading files only): ${data.untrusted}`,
+        `Limited (also the tools, providers and hooks they declare): ${data.limited}`,
+        `Trusted (also high-risk abilities): ${data.trusted}`,
       ].join('\n'),
       data,
     };
@@ -334,7 +336,7 @@ export const PLUGIN_DIRS: CapabilityDefinition<PluginsCapabilityServices> = {
     const project = projectOf(services, caller);
     const folders = getPluginDirectories(project.paths);
     const own = getUserPluginDirectory(project.paths);
-    return { text: ['Plugin Search Directories', ...folders.map((dir) => `  ${dir}`), '', `User plugin directory: ${own}`].join('\n'), data: { folders, own } };
+    return { text: ['Plugins are looked for in these folders, in this order:', ...folders.map((dir) => `  ${dir}`), '', `Your own plugins go in ${own}.`].join('\n'), data: { folders, own } };
   },
 };
 
@@ -413,11 +415,13 @@ export const PLUGIN_RELOAD: CapabilityDefinition<PluginsSessionServices> = {
   touches: 'this-machine', lasts: 'not-a-change', risk: 'none', example: {},
   async run(_values, services) {
     const summary = await runningOf(services).reload();
-    const lines = [`Done. ${summary.reloaded} plugin(s) reloaded${summary.failed > 0 ? `, ${summary.failed} failed` : ''}.`];
-    for (const { name: failed, reason } of summary.loadFailed ?? []) lines.push(`  ${failed}: did not start, ${reason}`);
-    for (const busy of summary.notDrained) lines.push(`  ${busy}: not reloaded, calls into it were still running; it keeps its current version. Load the plugins again once they finish.`);
-    for (const held of summary.quarantined ?? []) lines.push(`  ${held}: not loaded, it is quarantined. Lifting its quarantine starts it.`);
-    for (const stuck of summary.cleanupFailed ?? []) lines.push(`  ${stuck}: stopping its earlier copy reported an error; restart to clear anything that copy left behind.`);
+    const lines = [summary.reloaded === 0 && summary.failed === 0
+      ? 'No plugin is switched on here, so none was loaded again.'
+      : `Loaded ${summary.reloaded} plugin${summary.reloaded === 1 ? '' : 's'} again${summary.failed > 0 ? `; ${summary.failed} did not start` : ''}.`];
+    for (const { name: failed, reason } of summary.loadFailed ?? []) lines.push(`${failed} did not start: ${reason}`);
+    for (const busy of summary.notDrained) lines.push(`${busy} was not loaded again: calls into it were still running, so it keeps its current version. Load the plugins again once they finish.`);
+    for (const held of summary.quarantined ?? []) lines.push(`${held} was not loaded: it is quarantined. Lifting its quarantine starts it.`);
+    for (const stuck of summary.cleanupFailed ?? []) lines.push(`${stuck}: stopping its earlier copy reported an error; restart to clear anything that copy left behind.`);
     return { text: lines.join('\n'), data: { reloaded: summary.reloaded, failed: summary.failed } };
   },
 };
@@ -425,21 +429,21 @@ export const PLUGIN_RELOAD: CapabilityDefinition<PluginsSessionServices> = {
 export const PLUGIN_QUARANTINE: CapabilityDefinition<PluginsSessionServices> = {
   capability: { id: 'plugin.quarantine', group: 'tools', home: 'session', repeat: 'safe' },
   actionId: 'quarantine', label: 'Quarantine a plugin', word: 'quarantine',
-  inputs: [PLUGIN, { id: 'reason', label: 'Why', help: 'A note you will see when you look at it', kind: 'text', freeTextReason: 'your own words', required: { default: 'quarantined by operator', defaultMeans: 'no note' }, typed: { tail: true } }],
+  inputs: [PLUGIN, { id: 'reason', label: 'Why', help: 'A note you will see when you look at it', kind: 'text', freeTextReason: 'your own words', required: { default: 'quarantined by you', defaultMeans: 'no note' }, typed: { tail: true } }],
   sentence: '{plugin} is stopped and blocked from loading until you change it (lift the quarantine).', done: '',
   touches: 'this-machine', lasts: 'kept', risk: 'none', undoneBy: 'lift', example: { plugin: 'jira', reason: 'it changed unexpectedly' },
   async run(values, services) {
     const name = values.plugin!;
-    const reason = values.reason || 'quarantined by operator';
+    const reason = values.reason || 'quarantined by you';
     const result = runningOf(services).quarantine(name, reason);
-    if (!result.ok) throw new CapabilityRefusal(result.error ?? `Plugin '${name}' was not quarantined.`, undefined, 'NOT_DONE');
+    if (!result.ok) throw new CapabilityRefusal(result.error ?? `Plugin ${name} was not quarantined.`, undefined, 'NOT_DONE');
     try {
       await result.unloading;
     } catch (error) {
-      throw new CapabilityRefusal(`Plugin '${name}' is quarantined and will not load again, but stopping the running instance reported an error: ${error instanceof Error ? error.message : String(error)}`, 'Restart to clear anything the running instance left behind.', 'PLUGIN_STOP_FAILED');
+      throw new CapabilityRefusal(`Plugin ${name} is quarantined and will not load again, but stopping the running instance reported an error: ${error instanceof Error ? error.message : String(error)}`, 'Restart to clear anything the running instance left behind.', 'PLUGIN_STOP_FAILED');
     }
     noteListChanged({ list: 'tools', change: 'changed' });
-    return { text: `Plugin '${name}' quarantined and stopped.\nReason: ${reason}\nIt will not load until you lift its quarantine, which starts it again.`, data: { plugin: name } };
+    return { text: `Plugin ${name} quarantined and stopped.\nReason: ${reason}\nIt will not load until you lift its quarantine, which starts it again.`, data: { plugin: name } };
   },
 };
 
@@ -454,14 +458,14 @@ export const PLUGIN_LIFT: CapabilityDefinition<PluginsSessionServices> = {
     const plugins = runningOf(services);
     const name = values.plugin!;
     const result = plugins.liftQuarantine(name);
-    if (!result.ok) throw new CapabilityRefusal(result.error ?? `Plugin '${name}' quarantine was not lifted.`, undefined, 'NOT_DONE');
+    if (!result.ok) throw new CapabilityRefusal(result.error ?? `Plugin ${name} quarantine was not lifted.`, undefined, 'NOT_DONE');
     noteListChanged({ list: 'tools', change: 'changed' });
     const status = plugins.list().find((plugin) => plugin.name === name);
-    if (!status?.enabled) return { text: `Plugin '${name}' quarantine lifted. It is switched off, so it was not started; switching it on starts it.`, data: { plugin: name, started: false } };
-    if (status.active) return { text: `Plugin '${name}' quarantine lifted; it is running.`, data: { plugin: name, started: true } };
+    if (!status?.enabled) return { text: `Plugin ${name} quarantine lifted. It is switched off, so it was not started; switching it on starts it.`, data: { plugin: name, started: false } };
+    if (status.active) return { text: `Plugin ${name} quarantine lifted; it is running.`, data: { plugin: name, started: true } };
     const started = await plugins.enable(name);
     return {
-      text: started.ok ? `Plugin '${name}' quarantine lifted and the plugin started.` : `Plugin '${name}' quarantine lifted, but it did not start: ${started.error ?? 'unknown reason'}`,
+      text: started.ok ? `Plugin ${name} quarantine lifted and the plugin started.` : `Plugin ${name} quarantine lifted, but it did not start: ${started.error ?? 'unknown reason'}`,
       data: { plugin: name, started: started.ok },
     };
   },

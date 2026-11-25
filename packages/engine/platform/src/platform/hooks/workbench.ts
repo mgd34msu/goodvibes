@@ -10,6 +10,7 @@ import type { HookChain, HookDefinition, HookEvent, HookResult, HookType, HooksC
 import type { ConfigManager } from '../config/manager.js';
 import type { RepositoryFileGate } from '../runtime/workspace-trust.js';
 import { summarizeError } from '../utils/error-display.js';
+import { projectIdentityOf } from '../workspace/project-identity.js';
 
 export interface HookAuthoringAction {
   readonly kind: 'load' | 'save' | 'reload' | 'scaffold-hook' | 'scaffold-chain' | 'remove' | 'toggle' | 'simulate' | 'export' | 'import' | 'inspect';
@@ -68,7 +69,7 @@ export type HooksFileTrustGate = RepositoryFileGate;
 /** The hooks file was not loaded because the workspace it sits in is not trusted yet. */
 export class HooksFileAwaitingTrustError extends Error {
   constructor(readonly path: string) {
-    super(`The hooks file ${path} is in this workspace, which you have not trusted, so its hooks are not loaded and run nothing. Run /security trust-folder to load them.`);
+    super(`The hooks file ${path} is in this workspace, which you have not trusted, so its hooks are not loaded and run nothing. "Trust this folder" in Permissions and safety, This folder, loads them.`);
     this.name = 'HooksFileAwaitingTrustError';
   }
 }
@@ -432,7 +433,7 @@ export class HookWorkbench {
     const refusal = hooksFileRefusal(path);
     if (refusal !== null) return { path, exists: true, hookCount, chainCount, problem: refusal };
     if (this.awaitingTrust === path || (this.trustGate?.holds(path) ?? false)) {
-      return { path, exists: true, hookCount, chainCount, problem: 'it is in this workspace, which you have not trusted (run /security trust-folder to load it)' };
+      return { path, exists: true, hookCount, chainCount, problem: 'it is in this workspace, which you have not trusted ("Trust this folder" in Permissions and safety, This folder, loads it)' };
     }
     return { path, exists: true, hookCount, chainCount, problem: null };
   }
@@ -553,7 +554,8 @@ export function createHookWorkbench(options: HookWorkbenchOptions): HookWorkbenc
     if (!workingDirectory) {
       throw new Error('createHookWorkbench requires configManager.getWorkingDirectory() when no hooksFilePathResolver is provided');
     }
-    return resolve(workingDirectory, options.configManager.get('tools.hooksFile') as string);
+    // The project's hooks file: a program opened in a subfolder of a project reads the one at the project's root.
+    return resolve(projectIdentityOf(workingDirectory), options.configManager.get('tools.hooksFile') as string);
   });
   return new HookWorkbench(
     options.hookDispatcher,

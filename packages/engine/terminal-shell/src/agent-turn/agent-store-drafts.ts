@@ -12,6 +12,9 @@ import type { ArtifactDescriptor } from '@goodvibes/engine/platform/platform/art
 import { AgentDocumentRegistry } from './document-registry.js';
 import type { AgentDocumentRecord } from './document-registry-types.js';
 import { given, positiveNumber, splitWords, storeStep, type StoreAct, type StoreActContext } from './agent-store-common.js';
+import {
+  formatReviewPacketSteps, formatReviewPacketTimeline, formatReviewReadiness, readPacketArtifacts, readPacketDocuments, reviewPacketOf,
+} from './review-packet-report.js';
 
 function artifactFacts(artifact: ArtifactDescriptor) {
   const purpose = typeof artifact.metadata?.['purpose'] === 'string' ? artifact.metadata['purpose'] as string : undefined;
@@ -46,6 +49,15 @@ function documentFacts(document: AgentDocumentRecord) {
   };
 }
 
+/** The review packet of the asking program's project: its drafts and the daemon's saved artifacts. */
+function packetOf(context: StoreActContext) {
+  return reviewPacketOf({
+    documents: readPacketDocuments(() => documentsOf(context).list()),
+    artifacts: readPacketArtifacts({ list: (limit?: number) => context.artifacts.list(limit) }),
+    artifactsListable: true,
+  });
+}
+
 /** One tool call; its printed answer is the act's words. */
 async function tool(context: StoreActContext, name: string, args: Record<string, unknown>, what: string, data?: Readonly<Record<string, unknown>>) {
   const text = await context.tool(name, args, what);
@@ -75,6 +87,27 @@ export const DRAFT_ACTS: Readonly<Record<string, StoreAct>> = {
     const found = storeStep(() => context.artifacts.list(Number.MAX_SAFE_INTEGER)).find((artifact) => artifact.id === values.artifact);
     return tool(context, 'agent_artifacts', { mode: 'show', artifactId: values.artifact!, includeContent: values.preview !== 'no', ...(previewBytes ? { previewBytes } : {}) },
       `show artifact ${values.artifact}`, found ? { artifact: artifactFacts(found) } : undefined);
+  },
+  /** A turn's artifact (media, a comparison, a research report) saved by the daemon in its one store. */
+  async 'artifacts.save'(values, context) {
+    let metadata: Record<string, unknown> | undefined;
+    if (values.metadata) {
+      try {
+        const parsed: unknown = JSON.parse(values.metadata);
+        if (parsed !== null && typeof parsed === 'object' && !Array.isArray(parsed)) metadata = parsed as Record<string, unknown>;
+      } catch { throw new CapabilityRefusal('The artifact\'s details are not JSON; nothing was saved.'); }
+    }
+    const retention = values.retention ? Number(values.retention) : Number.NaN;
+    const created = await context.artifacts.create({
+      ...(values.encoding === 'base64' ? { dataBase64: values.content ?? '' } : { text: values.content ?? '' }),
+      ...(values.kind ? { kind: values.kind as ArtifactDescriptor['kind'] } : {}),
+      ...(values.mimeType ? { mimeType: values.mimeType } : {}),
+      ...(values.filename ? { filename: values.filename } : {}),
+      ...(values.source ? { sourceUri: values.source } : {}),
+      ...(Number.isFinite(retention) && retention > 0 ? { retentionMs: retention } : {}),
+      ...(metadata ? { metadata } : {}),
+    });
+    return { text: `Saved ${created.filename ?? created.id} (${created.mimeType}, ${created.sizeBytes} bytes) as artifact ${created.id}.`, data: { artifact: created } };
   },
   async 'artifacts.export'(values, context) {
     return tool(context, 'agent_artifacts', { mode: 'export', artifactId: values.artifact!, destinationPath: values.path!, overwrite: values.overwrite === 'yes', confirm: true, explicitUserRequest: `Copy artifact ${values.artifact} to ${values.path}.` },
@@ -140,6 +173,19 @@ export const DRAFT_ACTS: Readonly<Record<string, StoreAct>> = {
     return tool(context, 'agent_review_packet_presets', {
       mode: 'refresh', artifactId: values.preset, ...given(values, 'name', 'summary'), confirm: true, explicitUserRequest: `Refresh review packet preset ${values.preset}.`,
     }, `refresh review packet preset ${values.preset}`);
+  },
+  // The review packet, from this project's drafts and the daemon's saved artifacts, each read once.
+  async 'documents.readiness'(_values, context) {
+    const packet = packetOf(context);
+    return { text: formatReviewReadiness(packet.readiness), data: { readiness: packet.readiness } };
+  },
+  async 'documents.packet-steps'(_values, context) {
+    const packet = packetOf(context);
+    return { text: formatReviewPacketSteps(packet.wizard), data: { steps: packet.wizard } };
+  },
+  async 'documents.timeline'(_values, context) {
+    const packet = packetOf(context);
+    return { text: formatReviewPacketTimeline(packet.timeline), data: { timeline: packet.timeline } };
   },
   async 'documents.share-packet'(values, context) {
     return tool(context, 'agent_review_packet_share', {

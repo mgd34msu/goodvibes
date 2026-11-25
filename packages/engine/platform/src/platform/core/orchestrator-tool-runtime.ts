@@ -337,6 +337,30 @@ export function capToolResultOutput(toolName: string, args: Record<string, unkno
 /** The human-readable per-call cancellation message the model sees. */
 export const TOOL_CALL_CANCELLED_MESSAGE = 'cancelled by user';
 export const TOOL_CALL_CANCELLED_AFTER_COMPLETION_MESSAGE = 'cancelled by user, but the call had already finished; its action may have taken effect, so check the result before repeating it';
+/** A call the person stopped that had not finished: the turn went on at once, without waiting for the tool to let go. */
+export const TOOL_CALL_CANCELLED_UNFINISHED_MESSAGE = 'cancelled by user; the turn went on without waiting for the tool to finish, so check whether its action took effect before repeating it';
+
+/**
+ * The call's own promise, or `stopped` as soon as the person stops this call: a tool that does not hear its stop (a
+ * read blocked in the file system) does not hold the turn. Its signal is aborted already, so a process the product
+ * started for it is ended by the tool; whatever it still does is abandoned, and its late answer or failure is dropped.
+ */
+type StopOutcome<T> = { readonly stopped: true } | { readonly stopped: false; readonly value: T };
+async function untilStopped<T>(work: Promise<T>, stop: AbortSignal | undefined): Promise<StopOutcome<T>> {
+  if (!stop) return { stopped: false, value: await work };
+  return new Promise((resolve, reject) => {
+    const onStop = () => {
+      work.catch(() => { /* abandoned: the person stopped it and the turn went on */ });
+      resolve({ stopped: true });
+    };
+    if (stop.aborted) { onStop(); return; }
+    stop.addEventListener('abort', onStop, { once: true });
+    work.then(
+      (value) => { stop.removeEventListener('abort', onStop); resolve({ stopped: false, value }); },
+      (error: unknown) => { stop.removeEventListener('abort', onStop); reject(error); },
+    );
+  });
+}
 
 /**
  * Normalize a settled (or thrown-through) result of a call whose per-call
@@ -500,11 +524,20 @@ async function executeToolCallsInMode(
     // definition is the answer (refused, with the next step) and it is sent in full from now on.
     const deferred = typeof deps.toolRegistry.deferredCallRefusal === 'function' ? deps.toolRegistry.deferredCallRefusal(call.id, call.name, call.arguments) : undefined;
     if (deferred) {
-      if (deps.runtimeBus) emitToolFailed(deps.runtimeBus, deps.emitterContext(turnId), {
-        callId: call.id, turnId, tool: call.name, error: redactDiagnosticText(deferred.error ?? ''),
-        durationMs: 0, result: redactedToolResultSummary(deferred),
-      });
-      appendResult(deferred);
+      // Held only to load its parameters (`heldToLoad`): nothing failed, so a person reads that its details were
+      // loaded and no failure is counted; the model still reads why it did not run, and sends the call again.
+      const loaded = deferred.heldToLoad === true;
+      if (deps.runtimeBus && loaded) {
+        emitToolSucceeded(deps.runtimeBus, deps.emitterContext(turnId), {
+          callId: call.id, turnId, tool: call.name, durationMs: 0, result: redactedToolResultSummary(deferred),
+        });
+      } else if (deps.runtimeBus) {
+        emitToolFailed(deps.runtimeBus, deps.emitterContext(turnId), {
+          callId: call.id, turnId, tool: call.name, error: redactDiagnosticText(deferred.error ?? ''),
+          durationMs: 0, result: redactedToolResultSummary(deferred),
+        });
+      }
+      appendResult(loaded ? { ...deferred, ownerLine: deferred.ownerLine ?? `Loaded the details of ${call.name}; nothing ran yet, the next call runs it.` } : deferred);
       continue;
     }
     // The owner's Pre:tool hooks run before admission, on the call the model made, in every
@@ -630,6 +663,22 @@ async function executeToolCallsInMode(
           args: call.arguments,
         });
       }
+      // What the tool knows refuses the call before anyone decides it (its inputs, its preview: a described time with
+      // no decision model, a target that is not there): answered now, so nobody is asked about a call that would fail.
+      const knownRefusal = typeof deps.toolRegistry.refusalBeforeGate === 'function'
+        ? await deps.toolRegistry.refusalBeforeGate(call.name, call.arguments, admissionSignal) : undefined;
+      assertTurnActive();
+      if (knownRefusal !== undefined) {
+        const refusedResult: ToolResult = { callId: call.id, success: false, error: knownRefusal };
+        appendResult(refusedResult);
+        if (deps.runtimeBus) {
+          emitToolFailed(deps.runtimeBus, deps.emitterContext(turnId), {
+            callId: call.id, turnId, tool: call.name, error: redactDiagnosticText(knownRefusal),
+            durationMs: 0, result: redactedToolResultSummary(redactedErrorResult(refusedResult)),
+          });
+        }
+        continue;
+      }
 
       // The gate's own pair of events: requested before any owner prompt, decided once it settles.
       const requestedCategory = gateCategory(deps.permissionManager, call.name, call.arguments, deps.toolRegistry);
@@ -709,13 +758,14 @@ async function executeToolCallsInMode(
         // what next, and Jev's decision log id when Jev decided) on the failed result and can
         // continue honestly. Plan-mode refusals carry plan-steering text.
         const denialSource = { reasonCode: checkResult.reasonCode, sourceLayer: checkResult.sourceLayer, userReason: checkResult.userReason, detail: checkResult.detail, decision: checkResult.decision };
-        const err = new PermissionError(buildDenialErrorMessage(call.name, denialSource));
+        // A capability_run call is named to the model by the capability it runs, never by the tool (denial.ts).
+        const err = new PermissionError(buildDenialErrorMessage(call.name, denialSource, call.arguments));
         const deniedResult: ToolResult = {
           callId: call.id,
           success: false,
           error: err.message,
           decision: toolDecisionOf({ ...denialSource, approved: false,
-            ...(checkResult.autonomousDecision ? { autonomousDecision: checkResult.autonomousDecision } : {}) }),
+            ...(checkResult.autonomousDecision ? { autonomousDecision: checkResult.autonomousDecision } : {}) }, call.name, call.arguments),
         };
         appendResult(deniedResult);
         if (deps.runtimeBus) {
@@ -769,8 +819,10 @@ async function executeToolCallsInMode(
         // In a group that runs side by side, the call waits for any running call its admitted lane conflicts with.
         const lanes = ADMITTED_LANES.get(deps);
         const leaveLane = lanes ? await lanes.enter(admittedLane(deps, prepared?.name ?? call.name, prepared?.args ?? checkResult.modifiedArgs ?? call.arguments)) : undefined;
+        let outcome: StopOutcome<ToolResult>;
         try {
-        result = await withAdmittedToolDecision(admittedDecision, () => withExternalOperationSource(sourceOf && autonomous ? {
+        // The person's stop of this call ends the wait at once (untilStopped); the time limit and the turn's cancel do not.
+        outcome = await untilStopped(withAdmittedToolDecision(admittedDecision, () => withExternalOperationSource(sourceOf && autonomous ? {
           sourceOf, signal: callSignal, assertCurrent: () => { assertTurnActive(); callSignal?.throwIfAborted(); },
           inputFacts: [prepared?.args ?? call.arguments],
         } : undefined, () => withCostOriginAsync(
@@ -790,22 +842,24 @@ async function executeToolCallsInMode(
               ? admission : admission.claim;
             return deps.toolRegistry.executePrepared(prepared, preparedAdmission, executeOptions);
           },
-        )));
+        ))), perCallSignal);
         } finally {
           leaveLane?.();
         }
-        if (stoppedByBudget()) {
+        // Stopped by the person before the tool let go: reported as stopped, and the turn goes on now.
+        result = outcome.stopped ? { callId: call.id, success: false, error: TOOL_CALL_CANCELLED_UNFINISHED_MESSAGE, cancelled: true } : outcome.value;
+        if (!outcome.stopped && stoppedByBudget()) {
           // A call that ignored its time limit and finished its action succeeded; only a failed one was stopped.
           const elapsedMs = Math.max(performance.now() - executeStartedAt, (budget!.maxMs ?? 0) + 1);
           budgetOutcome = { phase: result.success ? 'completed' : 'executing', elapsedMs, result };
           result = result.success
             ? applyToolBudget(budget, call.name, elapsedMs, result)
             : toolBudgetStoppedResult(call.id, call.name, budget!, result);
-        } else if (callSignal?.aborted) {
+        } else if (!outcome.stopped && callSignal?.aborted) {
           // The user cancelled THIS call mid-flight: the model sees a structured
           // cancelled result and the turn continues.
           result = toCancelledResult(call.id, result);
-        } else if (budget && result.success) {
+        } else if (!outcome.stopped && budget && result.success) {
           const elapsedMs = performance.now() - executeStartedAt;
           budgetOutcome = { phase: 'completed', elapsedMs, result };
           result = applyToolBudget(budget, call.name, elapsedMs, result);

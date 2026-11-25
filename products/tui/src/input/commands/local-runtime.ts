@@ -1,4 +1,4 @@
-import { createSecretsCommand } from '@goodvibes/engine/terminal-shell/secrets-command';
+import { wireSecretsLists } from '@goodvibes/engine/terminal-shell/secrets-command';
 import { createLocalCommandActions } from '@goodvibes/engine/terminal-shell/local-command-actions';
 import type { CommandRegistry, CommandContext } from '../command-registry.ts';
 import { capabilityBinding } from './capability-binding.ts';
@@ -17,9 +17,8 @@ export const localActions = createLocalCommandActions<CommandContext>(requirePro
   noteTouch: (conversation, key) => conversation.searchExpansion.noteUserTouch(key),
 });
 
-// `/secrets` is one description shared with the other terminal app (terminal-shell/secrets-command.ts); the daemon keeps every secret.
-const secretsCommand = createSecretsCommand<CommandContext>(capabilityBinding);
-
-export function registerLocalRuntimeCommands(registry: CommandRegistry): void {
-  registry.register(secretsCommand);
+// Secrets are the daemon's, kept and changed in Permissions and safety (no slash command carries them): the lists a
+// secret input chooses from read the daemon through this app's binding (terminal-shell/secrets-command.ts).
+export function registerLocalRuntimeCommands(_registry: CommandRegistry): void {
+  wireSecretsLists<CommandContext>(capabilityBinding);
 }

@@ -1,5 +1,5 @@
 import { REGULAR_KNOWLEDGE_DB_FILE, prepareConfiguredProjectContext } from '@goodvibes/engine/platform/platform/knowledge';
-import { initialTerminalRuntimeFields, keepTerminalDeadLetters } from '@goodvibes/engine/terminal-shell/bootstrap-primitives';
+import { initialTerminalRuntimeFields } from '@goodvibes/engine/terminal-shell/bootstrap-primitives';
 import { projectAgentToolDependencies } from '@goodvibes/engine/terminal-shell/bootstrap-command-context';
 import {
   createTerminalFeatureFlags,
@@ -17,7 +17,6 @@ import { createTerminalRenderScheduler } from '@goodvibes/engine/terminal-shell/
 import { createTuiTurnPermissionManager, registerTuiTurnTools } from './turn-tool-composition.ts';
 import { terminalOwnerQuestions, wireOwnerQuestionSessions } from './client/owner-questions.ts';
 import { readDaemonOperatorToken } from './daemon-operator-token.ts';
-import { readTuiNotificationsMetadataOnly } from '../config/host-settings.ts';
 import { ConversationManager } from '../core/conversation';
 import { createShellNoticeSink } from './notification-dispatch.ts';
 import { getSharedNotificationFeed } from '../views/notifications-feed.ts';
@@ -50,7 +49,7 @@ import {
   registerBootstrapRuntimeEvents,
 } from '@/runtime/index.ts';
 import { createRuntimeServices, type RuntimeServices } from './services.ts';
-import { registerClientPhoneTool } from '@goodvibes/engine/platform/platform/runtime/client';
+import { registerClientPhoneTool, setProgramCallContext } from '@goodvibes/engine/platform/platform/runtime/client';
 import { createHostPowerSeam } from '@goodvibes/engine/platform/platform/power';
 import { createUiRuntimeServices, type UiRuntimeServices } from './ui-services.ts';
 import { join } from 'node:path';
@@ -61,7 +60,8 @@ import { handOverLiveSession } from '@goodvibes/engine/terminal-shell/session-ha
 import type { OwnerInputRoute } from '@goodvibes/engine/terminal-shell/companion-input';
 import { repositoryTrustNotice, type WorkspaceTrustLevel } from '@goodvibes/engine/platform/platform/runtime/operations';
 import { HooksFileAwaitingTrustError } from '@goodvibes/engine/platform/platform/hooks';
-import { createRuntimeNotifier, syncNotifierQueueIntegrations } from './bootstrap-notifier-sync.ts';
+import { attachRuntimeNotifications } from '@goodvibes/engine/platform/platform/integrations';
+import { programNotices } from '@goodvibes/engine/terminal-shell/places';
 
 // --- Pre-router buffer ---
 
@@ -373,34 +373,6 @@ export async function initializeBootstrapCore(
 
   providerRegistry.startWatching(runtimeBus);
 
-  // attach the SAME WebhookNotifier instance that `/notify add|remove|clear`
-  // (notify-runtime.ts) keeps live via ctx.services.webhookNotifier, rather than
-  // constructing a second, boot-time-only instance here. Before this fix, a
-  // webhook URL added mid-session reached long-task notifications (which read
-  // ctx.services.webhookNotifier directly) but never reached this instance's
-  // AGENT_FAILED/CONTRACT_FAILED/CONTRACT_PASSED runtime-bus
-  // listeners until restart, and if the session started with zero URLs
-  // configured, no event adapter was ever attached, so those listeners
-  // never existed at all for the rest of the session. Always attaching
-  // (regardless of initial URL count) and seeding the shared instance fixes
-  // both: `sendNotification()` is already a safe no-op with zero URLs configured.
-  const webhookUrls = (configManager.getCategory('notifications') as { webhookUrls?: string[] }).webhookUrls ?? [];
-  if (webhookUrls.length > 0) {
-    services.webhookNotifier.setUrls(webhookUrls);
-    domainDispatch.syncIntegration(
-      {
-        id: 'webhooks',
-        displayName: 'Webhooks',
-        category: 'communication',
-        status: 'healthy',
-        enabled: true,
-        successCount: 0,
-        errorCount: 0,
-        meta: { urlCount: webhookUrls.length },
-      },
-      'bootstrap.webhooks',
-    );
-  }
   // A workstream's start and ask come from its own record, so one started
   // before a restart is still announced by its request and real duration.
   const runtimeNotifications = {
@@ -409,20 +381,14 @@ export async function initializeBootstrapCore(
       return contract ? { startedAt: contract.createdAt, name: contract.ask } : undefined;
     },
   };
-  // Failed notifications are kept on disk, so /notify failed and /notify resend
-  // still list them after a restart.
-  const deadLetterDirectory = services.shellPaths.resolveUserPath(services.surface.surfaceRoot, 'notification-dead-letters');
-  runtimeUnsubs.push(keepTerminalDeadLetters(services.webhookNotifier, deadLetterDirectory, 'webhooks'));
-  services.webhookNotifier.attachToRuntimeBus(runtimeBus, runtimeNotifications);
-  runtimeUnsubs.push(() => services.webhookNotifier.detach());
+  // This program's agents and work that end are announced through the daemon: its one webhook list and its Slack and
+  // Discord notifier; a notice that fails lands in the daemon's failed list (program-notices.ts). This program keeps
+  // no notifier and no failed list of its own.
+  runtimeUnsubs.push(attachRuntimeNotifications(runtimeBus, (delivery, event) => programNotices.sendNotification(delivery, event), runtimeNotifications));
 
   // Requests to the daemon's Access-protected Cloudflare hostname present the
   // stored Access service token, so turning Access on does not lock this app out.
   runtimeUnsubs.push(installCloudflareAccessFetch(configManager, services.secretsManager));
-
-  const notifier = await createRuntimeNotifier(services.serviceRegistry, () => readTuiNotificationsMetadataOnly(configManager), configManager, services.secretsManager);
-  runtimeUnsubs.push(keepTerminalDeadLetters(notifier, deadLetterDirectory, 'chat'));
-  runtimeUnsubs.push(syncNotifierQueueIntegrations(notifier, runtimeBus, domainDispatch, runtimeNotifications));
 
   await syncConfiguredServices(domainDispatch.syncIntegration, services.serviceRegistry);
 
@@ -466,6 +432,9 @@ export async function initializeBootstrapCore(
   };
   runtimeSessionIdRef.value = runtime.sessionId;
   services.liveSessionIdRef.value = runtime.sessionId; // the session an ask raised on the daemon belongs to
+  // This app's call context, carried on every call it makes to the daemon: its project folder and the conversation it
+  // holds now (call-context.ts). The daemon never takes its own folder for a call that names none.
+  setProgramCallContext({ program: 'tui', project: () => services.shellPaths.workingDirectory, sessionId: () => runtimeSessionIdRef.value });
   // The live conversation, for this process's own /checkpoint rewind AND for the daemon's
   // questions about it, only the process holding the messages can count or
   // drop them (conversation-rewind-port.ts, the platform's client/conversation-rewind-host.ts).

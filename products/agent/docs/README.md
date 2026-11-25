@@ -14,7 +14,7 @@ These are the package-facing docs for the GoodVibes Agent `3.3.x` release line.
 - [Channels, remote access, and API](channels-remote-and-api.md)
 - [Providers and routing](providers-and-routing.md)
 - [Voice and live TTS](voice-and-live-tts.md)
-- [Google setup runbook](../../../packages/engine/docs/google-setup-runbook.md) (also printed by `/google runbook`)
+- [Google setup runbook](../../../packages/engine/docs/google-setup-runbook.md) (also shown by "the written steps" on the Google tab of Mail, calendar and channels)
 - [Google scope strategy](google-scope-strategy.md)
 - [Model catalog search](model-catalog-search.md)
 - [Personal operations and routing](personal-operations-and-routing.md)
@@ -27,7 +27,7 @@ These are the package-facing docs for the GoodVibes Agent `3.3.x` release line.
 - Install: the [suite installer](../../../docs/installation.md); the installed program needs no Bun or Node.
 - Version: `goodvibes-agent --version`; the suite shares one version.
 - Connected-host compatibility: public Agent routes report readiness through the `compat` and `status` CLI commands plus `host action:"status"`.
-- Connected host: owned outside Agent; Agent reports and uses it and does not manage its lifecycle, with two exceptions: the boot-time start of an installed but stopped host, and the daemon repair the person chooses in a question at start (see [Connected host](connected-host.md)).
+- Connected host: owned outside Agent; Agent reports and uses it and does not manage its lifecycle, with two exceptions: the boot-time start of an installed but stopped host, and the daemon repair at start, made with nothing asked and said in one line (see [Connected host](connected-host.md)).
 - Agent Knowledge: only `/api/goodvibes-agent/knowledge/*`; no default knowledge fallback.
 - Local state: VIBE.md personality, project context files, memory, notes, personas, skills, routines, sessions, setup, and profiles live under the Agent home or current project.
 - Computer work: local read/edit/exec routes are allowed when the current Agent workspace and permissions are sufficient; process monitor/live tail/tool inspector supervision and local file edit/write recovery are inspectable and confirmation-gated; delegation is for isolation, parallelism, remote execution, separate worktrees, or user-requested delegated review.

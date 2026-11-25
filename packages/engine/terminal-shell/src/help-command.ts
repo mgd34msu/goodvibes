@@ -53,7 +53,8 @@ export function helpOf<Context extends HelpContext>(sources: HelpSources<Context
     }
     if (context.openCommandPalette && context.invokedByModel !== true) {
       context.openCommandPalette();
-      return '';
+      // Said where the list was opened from (a place's line under its list): what happened, never a bare "Done.".
+      return 'Opened the list of every command and every key.';
     }
     return commandListText(sources.commands());
   };

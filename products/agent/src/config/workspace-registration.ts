@@ -194,44 +194,37 @@ export async function registerWorkspaceForCheckpoints(
 }
 
 // ---------------------------------------------------------------------------
-// First-start registration prompt support
+// Registration at start: starting the Agent in a folder is the request to work there
 // ---------------------------------------------------------------------------
 
 /**
- * Would the shared store refuse to register `root` as too broad? The store's
- * own rule, asked before OFFERING registration in the first-start prompt; the
- * store's add() remains the guard at write time.
+ * Would the shared store refuse to register `root` as too broad (the home
+ * folder, the file system's root, GoodVibes' own state)? The store's own rule,
+ * asked before registering at start; the store's add() remains the guard at
+ * write time.
  */
 export function isBroadWorkspaceRoot(shellPaths: StoreShellPaths, root: string): boolean {
   return broadRootReason(root, shellPaths.homeDirectory, shellPaths.resolveUserPath()) !== null;
 }
 
-/** What answering the first-start question actually did. */
-export type WorkspaceRegistrationAnswer =
-  | { readonly outcome: 'registered' }
-  | { readonly outcome: 'declined' }
+/** What registering the folder the Agent started in did. */
+export type StartedWorkspaceRegistration =
+  | { readonly outcome: 'registered'; readonly root: string; readonly overDecline: boolean }
   /** The store refused or could not write; `reason` is its own message. */
-  | { readonly outcome: 'not-saved'; readonly reason: string };
+  | { readonly outcome: 'not-saved'; readonly root: string; readonly reason: string };
 
 /**
- * Resolve a first-start registration prompt's answer against the shared
- * store, and say what happened: registered, declined, or not saved with the
- * store's reason (a root it refuses, a locked or unwritable register). Never
- * rejects.
+ * Register the folder the Agent was started in, as the person's own request:
+ * it registers AND stamps checkpoint eligibility (registerWorkspaceForCheckpoints),
+ * and clears a "Not here" an earlier build's start question recorded at exactly
+ * this root. Never rejects.
  */
-export function answerWorkspaceRegistrationPrompt(shellPaths: StoreShellPaths, root: string, accepted: boolean): Promise<WorkspaceRegistrationAnswer> {
-  // Accepting the first-start prompt is an EXPLICIT owner opt-in, so it goes
-  // through registerWorkspaceForCheckpoints (registers AND stamps eligibility),
-  // not a plain store.add, which would register without making the workspace
-  // checkpoint-eligible. Declining stays a plain decline.
-  const outcome: Promise<unknown> = accepted
-    ? registerWorkspaceForCheckpoints(shellPaths, root)
-    : createWorkspaceRegistrationStore(shellPaths).decline(root);
-  return outcome.then(
-    (): WorkspaceRegistrationAnswer => (accepted ? { outcome: 'registered' } : { outcome: 'declined' }),
-    (error: unknown): WorkspaceRegistrationAnswer => {
-      logger.error('Failed to persist workspace registration prompt answer', { root, accepted, error: summarizeError(error) });
-      return { outcome: 'not-saved', reason: summarizeError(error) };
+export function registerStartedWorkspace(shellPaths: StoreShellPaths, root: string, overDecline: boolean): Promise<StartedWorkspaceRegistration> {
+  return registerWorkspaceForCheckpoints(shellPaths, root).then(
+    (result): StartedWorkspaceRegistration => ({ outcome: 'registered', root: result.record.root, overDecline }),
+    (error: unknown): StartedWorkspaceRegistration => {
+      logger.error('The folder the Agent started in could not be registered', { root, error: summarizeError(error) });
+      return { outcome: 'not-saved', root, reason: summarizeError(error) };
     },
   );
 }

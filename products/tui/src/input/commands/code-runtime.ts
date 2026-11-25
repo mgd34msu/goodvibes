@@ -65,5 +65,7 @@ export function codeOf(ctx: CommandContext): CodeServices | undefined {
       commitAll: () => printedBy((print) => executeCommitAll({ print, workspace: ctx.workspace }, ['--yes'])),
     },
     results: codeResults,
+    // A turn's file writes reach the place's lists as they land, as in the Agent (no wait for the turn's checkpoint).
+    ...(ctx.session.changeTracker ? { turnChanges: ctx.session.changeTracker } : {}),
   });
 }

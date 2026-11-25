@@ -7,6 +7,8 @@
  *   a  You're set.  Answering with rt-1 · signed in       3 of 3
  *   b  The terminal app on this computer has settings.  ⏎  brings them over, ... (later: /setup import-settings)
  *   c  GoodVibes asks before ...  shift+tab  changes when GoodVibes asks. ...
+ *   d  Ask me is in force: no decision model can answer yet ... To choose who decides: System, Setup, Who decides.
+ *   r  [Recovery] "<title>" stopped before it was saved (...): Ctrl+R restores it, ... (while that offer stands)
  *
  * All are drawn only on first run (b only when the app was given an import
  * command: the Agent's first launch where the terminal app has settings). The blocks are packed with no blank row
@@ -21,13 +23,13 @@ import { getDisplayWidth } from '@goodvibes/engine/platform/platform/utils/termi
 import { SurfaceCanvas } from './surface-kit.js';
 import { activeTokens } from './theme.js';
 import { drawSegments, wrapSegments, type StyledSegment } from './first-run.js';
-import { readSplashAdditions, requestSplashRender, takeSetFlash } from '../first-run/splash-state.js';
+import { readSplashAdditions, requestSplashRender, takeDroppedLineFlash, takeSetFlash } from '../first-run/splash-state.js';
 import { getSharedModeFlash } from '../session-permission-mode.js';
 
 const isBlank = (line: Line): boolean => line.every((cell) => cell.char === ' ' || cell.char === '');
 
 interface Block {
-  readonly kind: 'a' | 'b' | 'c';
+  readonly kind: 'a' | 'b' | 'c' | 'd' | 'r';
   readonly rows: readonly { readonly segments: readonly StyledSegment[]; readonly right?: string | undefined }[];
 }
 
@@ -55,6 +57,8 @@ export function drawSplashAdditions(viewport: readonly Line[], height: number, w
 
   const blocks: Block[] = [];
   const firstRun = view.firstRun;
+  // The crash-recovery offer, first: the one line naming the key that restores the last conversation.
+  if (view.recoveryLine) blocks.push({ kind: 'r', rows: wrapSegments([{ text: view.recoveryLine }], sentenceWidth).map((segments) => ({ segments })) });
   if (firstRun?.kind === 'set' && firstRun.using) {
     // Taken without asking: the one line that says which provider and model, and from where; no step count.
     const rows = wrapSegments([{ text: firstRun.using }], sentenceWidth);
@@ -76,6 +80,9 @@ export function drawSplashAdditions(viewport: readonly Line[], height: number, w
     ], blockWidth);
     blocks.push({ kind: 'a', rows: rows.map((segments) => ({ segments })) });
   }
+  // The mode in force and where "Who decides" is chosen: first run never asks it over the composer.
+  const decides = firstRun?.kind === 'decides' || firstRun?.kind === 'set' ? firstRun.decides : undefined;
+  if (decides) blocks.push({ kind: 'd', rows: wrapSegments([{ text: decides }], sentenceWidth).map((segments) => ({ segments })) });
   if (view.importCommand && firstRun?.kind !== 'pending') {
     // One key where it is offered: Enter on the empty composer; the command is named for later.
     const rows = wrapSegments(view.importOnEnter ? [
@@ -107,15 +114,24 @@ export function drawSplashAdditions(viewport: readonly Line[], height: number, w
   // Free rows: every row under the splash's last row (the composer is below the viewport).
   const free = height - 1 - last;
   const rowsOf = (list: readonly Block[]): number => list.reduce((sum, block) => sum + block.rows.length, 0);
-  // Too short for every block: the sentence goes first, then the import line; block a goes last.
+  // Too short for every block: the sentence goes first, then the import line, then block a, then the mode line (d);
+  // the recovery offer's line (r) goes last.
   let shown: Block[] = blocks;
-  for (const drop of ['c', 'b', 'a'] as const) {
+  for (const drop of ['c', 'b', 'a', 'd', 'r'] as const) {
     if (rowsOf(shown) <= free) break;
     shown = shown.filter((block) => block.kind !== drop);
   }
   if (firstRun?.kind === 'set' && !shown.some((block) => block.kind === 'a')) {
     // "You're set" left out: the status bar says it once instead (the mode segment's flash).
     const message = takeSetFlash();
+    if (message) { getSharedModeFlash().start(message); requestSplashRender(); }
+  }
+  // The recovery offer's line, or else the mode line, left out (a short screen): the status bar says it once instead,
+  // in words short enough for its mode segment (the whole line is in System, Notices, or on the Setup list).
+  const dropped = view.recoveryLine && !shown.some((block) => block.kind === 'r') ? 'Not saved before it stopped: Ctrl+R restores it'
+    : decides && !shown.some((block) => block.kind === 'd') ? `${decides.split(/[,:(]/)[0]!.trim()} · who decides: System, Setup` : undefined;
+  if (dropped) {
+    const message = takeDroppedLineFlash(dropped);
     if (message) { getSharedModeFlash().start(message); requestSplashRender(); }
   }
   // Rows to spare become blank rows: under the splash, then above the composer, then between blocks.

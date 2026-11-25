@@ -10,6 +10,15 @@
 export interface ToolAskWords {
   readonly question: string;
   readonly lines: readonly string[];
+  /** What the call is to, as a person names it ("Keep this computer awake"): a remembered answer is named by it. */
+  readonly subject?: string | undefined;
+  /** The same as an act under way, as a sentence starts ("Keeping this computer awake"): what a model is told was held or refused. */
+  readonly doing?: string | undefined;
+  /**
+   * The call's risk as the tool declares it, in plain words ("This cannot be undone."), already among `lines`: `null`
+   * when it declares none (no risk line is shown anywhere), absent when the presenter does not know it.
+   */
+  readonly risk?: string | null | undefined;
 }
 
 export type ToolAskPresenter = (args: Readonly<Record<string, unknown>>) => ToolAskWords | undefined;

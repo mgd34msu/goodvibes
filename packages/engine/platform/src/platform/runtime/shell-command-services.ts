@@ -8,7 +8,7 @@ import type { ShellPathService } from './shell-paths.js';
 import type { WorktreeRegistry } from './worktree/registry.js';
 import type { SandboxSessionRegistry } from './sandbox/session-registry.js';
 import type { CommandExtensionShellServices } from './shell-command-extensions.js';
-import type { CommandOpsShellServices, RemoteCommandService } from './shell-command-ops.js';
+import type { CommandOpsShellServices } from './shell-command-ops.js';
 import type { CommandPlatformShellServices } from './shell-command-platform.js';
 import type { CommandWorkspaceShellServices } from './shell-command-workspace.js';
 
@@ -23,7 +23,7 @@ export type {
   ShellPlanManagerService,
   ShellSessionOrchestrationService,
 } from './shell-command-ops.js';
-export type { CommandOpsShellServices, RemoteCommandService } from './shell-command-ops.js';
+export type { CommandOpsShellServices } from './shell-command-ops.js';
 export type { CommandExtensionShellServices } from './shell-command-extensions.js';
 
 export interface BootstrapCommandShellServices {
@@ -51,7 +51,6 @@ export interface CreateBootstrapCommandShellServicesOptions {
   readonly tokenAuditor?: import('../security/token-audit.js').ApiTokenAuditor | undefined;
   readonly replayEngine?: import('../core/deterministic-replay.js').DeterministicReplayEngine | undefined;
   readonly webhookNotifier?: import('../integrations/webhooks.js').WebhookNotifier | undefined;
-  readonly remoteRuntime?: RemoteCommandService | undefined;
   readonly forensicsRegistry: ForensicsRegistry;
   readonly policyRuntimeState: PolicyRuntimeState;
   readonly memoryRegistry?: import('../state/memory-store.js').MemoryRegistry | undefined;
@@ -91,7 +90,6 @@ export function createBootstrapCommandShellServices(
     modeManager: options.modeManager,
     planManager: options.planManager,
     sessionOrchestration: options.sessionOrchestration,
-    remoteRuntime: options.remoteRuntime,
   };
   const extensions: CommandExtensionShellServices = {
     forensicsRegistry: options.forensicsRegistry,
@@ -104,5 +102,3 @@ export function createBootstrapCommandShellServices(
   };
   return { workspace, platform, ops, extensions };
 }
-
-export { createShellRemoteCommandService } from './shell-command-ops.js';

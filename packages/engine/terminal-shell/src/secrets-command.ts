@@ -1,22 +1,16 @@
 /**
- * `/secrets`, described once (command-actions/): store, point at, check, test,
- * confirm and delete secrets and see how they are kept (the daemon does each:
- * capabilities/builtin/secrets.ts), and use one for this session only (this
- * program's own environment). Both terminal apps register this one
- * description with how they reach the daemon.
+ * Secrets, as a terminal program reaches them: the lists a secret input chooses from (the stored secrets by name,
+ * and this project's own copies that wait for the owner), read from the daemon, which keeps every stored secret
+ * (capabilities/builtin/secrets.ts); and a secret used for this session only (this program's own environment). No
+ * slash command carries them: Permissions and safety, Secrets, is where a person stores, points, checks, tests,
+ * confirms and deletes them; a model, an outside agent and a script run the same capabilities by find and run.
  */
-import {
-  SECRETS_DELETE, SECRETS_GET, SECRETS_LINK, SECRETS_LIST, SECRETS_PROVIDERS, SECRETS_SET, SECRETS_STORAGE, SECRETS_TEST, SECRETS_TRUST, SECRETS_USE,
-  type SecretsSessionServices,
-} from '@goodvibes/engine/platform/platform/capabilities';
-import { defineCommand, type DescribedCommand } from './command-actions/define.js';
+import type { SecretsSessionServices } from '@goodvibes/engine/platform/platform/capabilities';
 import { defineList, type ListRow } from './command-actions/lists.js';
-import { daemonCapabilityAction, runDaemonCapability, sessionCapabilityAction, type DaemonCapabilityBinding } from './command-actions/capability-actions.js';
-import type { CommandActionContext, CommandDescription } from './command-actions/types.js';
+import { runDaemonCapability, type DaemonCapabilityBinding } from './command-actions/capability-actions.js';
+import type { CommandActionContext } from './command-actions/types.js';
 
-export type SecretsCommandContext = CommandActionContext;
-
-/** How the lists reach the daemon: set when a program registers the command. */
+/** How the lists reach the daemon: set when a program wires them. */
 let listBinding: DaemonCapabilityBinding<CommandActionContext> | undefined;
 
 interface ListedSecret { readonly key?: unknown; readonly detail?: unknown; readonly path?: unknown }
@@ -50,38 +44,15 @@ defineList<CommandActionContext>({
   operator: { method: 'capabilities.run', input: { id: 'secrets.list' }, rows: { from: 'data.waiting', value: 'key', label: 'key', detail: 'path' } },
 });
 
+/** Wire the secret lists of one program to its daemon (each program does this once, as it registers its commands). */
+export function wireSecretsLists<Ctx extends CommandActionContext>(binding: DaemonCapabilityBinding<Ctx>): void {
+  listBinding = binding as DaemonCapabilityBinding<CommandActionContext>;
+}
+
 /** Using a secret for this session: this program's own environment, which the commands it runs inherit. */
 const SESSION_ENVIRONMENT: SecretsSessionServices = { environment: { set: (name, value) => { process.env[name] = value; } } };
 
-function describeSecrets<Ctx extends SecretsCommandContext>(binding: DaemonCapabilityBinding<Ctx>): CommandDescription<Ctx> {
-  return {
-    name: 'secrets',
-    title: 'Secrets',
-    summary: 'Keep passwords and keys where programs can read them, without showing them',
-    group: 'Setup',
-    report: 'see-secrets',
-    actions: [
-      daemonCapabilityAction<Ctx>(SECRETS_LIST, binding),
-      daemonCapabilityAction<Ctx>(SECRETS_SET, binding),
-      daemonCapabilityAction<Ctx>(SECRETS_LINK, binding),
-      daemonCapabilityAction<Ctx>(SECRETS_GET, binding),
-      daemonCapabilityAction<Ctx>(SECRETS_TEST, binding),
-      daemonCapabilityAction<Ctx>(SECRETS_PROVIDERS, binding),
-      daemonCapabilityAction<Ctx>(SECRETS_STORAGE, binding),
-      daemonCapabilityAction<Ctx>(SECRETS_TRUST, binding),
-      daemonCapabilityAction<Ctx>(SECRETS_DELETE, binding),
-      sessionCapabilityAction<Ctx, SecretsSessionServices>(SECRETS_USE, () => SESSION_ENVIRONMENT, { terminalOnly: 'It is set in the terminal app\'s own session.' }),
-    ],
-  };
-}
-
-/** `/secrets` for one app, with how it reaches the daemon (every stored secret is the daemon's to keep). */
-export function createSecretsCommand<Ctx extends SecretsCommandContext>(binding: DaemonCapabilityBinding<Ctx>): DescribedCommand<Ctx> {
-  listBinding = binding as DaemonCapabilityBinding<CommandActionContext>;
-  return defineCommand(describeSecrets<Ctx>(binding));
-}
-
-/** This program's environment, as the model's `capability_run` of "Use a secret for this session only" takes it. */
+/** This program's environment, as "Use a secret for this session only" takes it (the place and the model's `capability_run`). */
 export function secretsSessionServices(): SecretsSessionServices {
   return SESSION_ENVIRONMENT;
 }

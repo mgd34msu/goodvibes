@@ -31,7 +31,7 @@ import { NEW_CHAT_KEYS } from '../../lib/shortcut-keys';
 import { CommandPalette } from './CommandPalette';
 import { ShortcutCheatsheet } from './ShortcutCheatsheet';
 import { COMMAND_SCREEN_LIST } from './screens/command-screen-list';
-import { daemonCapabilities } from '../../lib/place-capabilities';
+import { daemonCapabilities, useCapabilityIndex } from '../../lib/place-capabilities';
 
 // An action's sheet and a command's screen load when one is opened.
 const ActionSheet = lazy(() => import('./ActionSheet').then((module) => ({ default: module.ActionSheet })));
@@ -76,6 +76,8 @@ export default function CommandProvider({ onNavigate, onOpenSettings, children }
   const [capability, setCapability] = useState<string | null>(null);
   // The slash commands' actions and the settings sections: loaded the first time the palette opens.
   const catalog = useCommandCatalog(paletteOpen);
+  // Every capability the daemon can run, read from it when the palette first opens.
+  const capabilities = useCapabilityIndex(paletteOpen);
 
   const openPalette = useCallback(() => { setPaletteQuery(''); setPaletteOpen(true); }, []);
   const closePalette = useCallback(() => { setPaletteOpen(false); setPaletteQuery(''); }, []);
@@ -129,11 +131,12 @@ export default function CommandProvider({ onNavigate, onOpenSettings, children }
       },
       {
         id: 'nav.providers',
-        title: 'Models and providers',
-        group: 'settings',
-        keywords: ['providers', 'models', 'llm', 'ai', 'settings'],
+        title: 'Go to Models and providers',
+        group: 'navigation',
+        keywords: ['models and providers', 'providers', 'models', 'llm', 'ai'],
         shortcut: 'g p',
-        run: () => onOpenSettings?.('models'),
+        // The Models and providers place (its lists and controls); the place links to its settings section.
+        run: () => onNavigate?.('places', { tab: 'models' }),
       },
       {
         id: 'nav.admin',
@@ -193,9 +196,12 @@ export default function CommandProvider({ onNavigate, onOpenSettings, children }
     // Every other capability the daemon can run (one moved beside its handler and run through capabilities.run, a
     // read, one no slash command carries) is one entry too; it opens its form and runs as a place runs it. The
     // palette's search also asks capabilities.find for what does a need in words (CommandPalette, onRunCapability).
-    if (catalog) {
-      for (const found of daemonCapabilities(catalog.actions)) {
-        if ('method' in found.action.operator && found.action.touches !== 'reads' && catalog.actions.commands.includes(found.command)) continue;
+    if (capabilities) {
+      // The ones a slash command's sheet already offers (above) are not listed twice.
+      const sheeted = new Set((catalog?.actions.commands ?? []).flatMap((command) => command.actions
+        .filter((action) => 'method' in action.operator && action.touches !== 'reads').map((action) => `${command.name} ${action.id}`)));
+      for (const found of daemonCapabilities(capabilities)) {
+        if (sheeted.has(`${found.command.name} ${found.action.id}`)) continue;
         defs.push({
           id: `capability.${found.id}`,
           title: found.action.label,
@@ -225,13 +231,12 @@ export default function CommandProvider({ onNavigate, onOpenSettings, children }
         run: place ? () => onNavigate?.('places', { tab: place }) : () => setScreen(entry.id),
       });
     }
-    // Every other settings section is one command in the palette's Settings group
-    // ("Models and providers" is nav.providers above).
+    // Every settings section is one command in the palette's Settings group ("Models and providers" itself opens the
+    // place, nav.providers above, so its settings section is named as settings).
     for (const section of catalog?.settingsSections ?? []) {
-      if (section.id === 'models') continue;
       defs.push({
         id: `settings.${section.id}`,
-        title: section.label,
+        title: section.id === 'models' ? `${section.label} settings` : section.label,
         group: 'settings',
         keywords: ['settings', ...section.keywords],
         ...(section.id === 'account' ? { shortcut: 'g a' } : {}),
@@ -239,7 +244,7 @@ export default function CommandProvider({ onNavigate, onOpenSettings, children }
       });
     }
     return defs;
-  }, [onNavigate, onOpenSettings, openPalette, openCheatsheet, catalog]);
+  }, [onNavigate, onOpenSettings, openPalette, openCheatsheet, catalog, capabilities]);
 
   // Registered before any passive effect of the same render runs, so a slash command that
   // waited for the catalog (ChatView) finds its palette command when it runs.

@@ -1,4 +1,5 @@
 import { formRows, maskLaunchArgs } from './mcp-form-rows.js';
+import { mcpTrustWords } from '@goodvibes/engine/platform/platform/mcp/trust-words';
 import type { RegisteredTool } from '@goodvibes/engine/platform/platform/mcp';
 import type { McpWorkspaceRow, McpWorkspaceServerRow, McpWorkspaceFormField } from '../mcp-workspace-model.js';
 import { activeTokens } from './theme.js';
@@ -172,12 +173,12 @@ export function createMcpWorkspaceRenderer(policy: {
         },
         ...(server.connectionDetail ? [body(server.connectionDetail)] : []),
         { text: '' },
-        body(`Role ${server.role} · trust ${server.trustMode}`),
+        body(`Role ${server.role} · it ${mcpTrustWords(server.trustMode)}`),
         body(
           `Command ${server.command ? `${server.command}${server.args?.length ? ` ${maskLaunchArgs(server.args).join(' ')}` : ''}` : '(runtime only; no launch config found)'}`,
         ),
-        body(`Allowed paths ${server.allowedPaths.length > 0 ? server.allowedPaths.join(', ') : '(none)'}`),
-        body(`Allowed hosts ${server.allowedHosts.length > 0 ? server.allowedHosts.join(', ') : '(none)'}`),
+        body(`Allowed paths ${server.allowedPaths.length > 0 ? server.allowedPaths.join(', ') : 'any (none set, so paths are not checked)'}`),
+        body(`Allowed hosts ${server.allowedHosts.length > 0 ? server.allowedHosts.join(', ') : 'any (none set, so addresses are not checked)'}`),
         body(`Tool rules ${server.toolRules?.length
           ? server.toolRules.map((rule) => `${rule.rule} ${rule.toolName} (${rule.source === 'session' ? 'this session' : 'config'}${rule.inEffect ? '' : ', overridden by a deny'})`).join(', ')
           : '(none)'}`),

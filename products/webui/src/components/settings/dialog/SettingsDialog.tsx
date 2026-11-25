@@ -112,8 +112,8 @@ export interface SettingsDialogProps {
   section: string;
   onSectionChange: (section: SettingsSectionId) => void;
   onClose: () => void;
-  /** Leave the dialog for a page (the phone node). */
-  onOpenView: (view: ViewId) => void;
+  /** Leave the dialog for a page (the phone node, a place on its tab). */
+  onOpenView: (view: ViewId, options?: { readonly tab?: string }) => void;
   realtimeError?: string | null;
 }
 
@@ -377,7 +377,7 @@ function SectionContent({
   realtimeError,
 }: {
   id: SettingsSectionId;
-  onOpenView: (view: ViewId) => void;
+  onOpenView: (view: ViewId, options?: { readonly tab?: string }) => void;
   realtimeError?: string | null;
 }) {
   switch (id) {
@@ -392,7 +392,7 @@ function SectionContent({
     case 'voice': return <VoiceSection />;
     case 'notifications': return <NotificationsSection />;
     case 'memory': return <MemorySection />;
-    case 'permissions': return <PermissionsSection />;
+    case 'permissions': return <PermissionsSection onOpenView={onOpenView} />;
     case 'network': return <NetworkSection />;
     case 'secure-address': return <SecureAddressSection />;
     case 'all': return <AllSettingsSection />;

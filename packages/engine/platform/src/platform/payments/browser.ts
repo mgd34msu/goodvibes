@@ -34,7 +34,7 @@ export type { PaymentWindowView, PaymentWindowAnswer, PaymentPurchaseStatus, Pay
 export const CVV_PROMPT_TRADEOFF_WARNING =
   'Choosing "prompt" stops unattended purchasing. The card verification value will not be '
   + 'stored: when a purchase is approved and reaches payment, you are asked to type the code in '
-  + 'the terminal app (/payments pending) or the local web UI, and the purchase waits for it as long '
+  + 'the terminal app or the Agent (Waiting for you, under Purchases) or the local web UI, and the purchase waits for it as long '
   + 'as an approval window. If it is not typed in time, nothing is bought, including purchases that '
   + 'are within budget and would otherwise have gone ahead on their own. Never send the code in a chat.';
 

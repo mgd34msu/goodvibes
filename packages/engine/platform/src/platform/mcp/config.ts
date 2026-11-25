@@ -9,6 +9,7 @@ import { logger } from '../utils/logger.js';
 import type { ShellPathService } from '../runtime/shell-paths.js';
 import { summarizeError } from '../utils/error-display.js';
 import { isRecord } from '../utils/record-coerce.js';
+import { projectIdentityOf } from '../workspace/project-identity.js';
 
 export interface McpServerConfig {
   /** Unique server name, used as namespace prefix: mcp:<name>:<tool> */
@@ -184,7 +185,8 @@ function normalizeServerConfig(name: string, raw: Record<string, unknown>): McpS
 }
 
 export function getMcpConfigLocations(roots: McpConfigRoots): readonly McpConfigLocation[] {
-  const cwd = roots.workingDirectory;
+  // The project's files: from a subfolder of a project, the ones at the project's root (workspace/project-identity.ts).
+  const cwd = projectIdentityOf(roots.workingDirectory);
   const home = roots.homeDirectory;
   return [
     {

@@ -141,6 +141,8 @@ function widensList(loosening: string): Loosening {
 /** Switches that open a listener or a destination; turning one on loosens security. */
 const OPENING_SWITCHES: readonly string[] = [
   'danger.httpListener', 'controlPlane.trustProxy', 'fetch.allowLocalhost',
+  // Switches whose direction the value says: on trusts forwarded headers or reaches private hosts; off puts it back.
+  'httpListener.trustProxy', 'httpListener.trustCloudflare', 'network.remoteFetch.allowPrivateHosts',
 ];
 
 /**
@@ -153,9 +155,9 @@ const PINNED_SAFETY_GATE: readonly string[] = SAFETY_GATE_CONFIG_PREFIXES.filter
 
 /** Network, listener, sandbox and background-agent keys that widen what the process reaches or accepts. */
 const PINNED_NETWORK: readonly string[] = [
-  'network.remoteFetch.allowPrivateHosts', 'network.outboundTls.', 'fetch.trustedHosts', 'fetch.sanitizeMode',
+  'network.outboundTls.', 'fetch.trustedHosts', 'fetch.sanitizeMode',
   'controlPlane.host', 'controlPlane.hostMode', 'controlPlane.cors.allowedOrigins',
-  'httpListener.host', 'httpListener.hostMode', 'httpListener.trustProxy', 'httpListener.trustCloudflare',
+  'httpListener.host', 'httpListener.hostMode',
 ];
 /** An enum value that hands a decision the owner would make to code or a model. */
 const becomes = (value: string): ((prev: unknown, next: unknown) => boolean) => (prev, next) => next === value && prev !== value;

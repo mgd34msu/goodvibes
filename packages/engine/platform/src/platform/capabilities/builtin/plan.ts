@@ -48,7 +48,7 @@ export const PLAN_ON: CapabilityDefinition<PlanModeSessionServices> = {
   capability: { id: 'plan.on', group: 'safety', home: 'session', repeat: 'safe' }, available: hasPlanMode,
   actionId: 'on', label: 'Turn plan mode on', word: 'on', inputs: [],
   sentence: 'Writes, commands and network calls are blocked for this session only; your saved mode is not changed.', done: '',
-  touches: 'this-machine', lasts: 'session', risk: 'none', undoneBy: 'off', example: {},
+  touches: 'this-machine', lasts: 'session', risk: 'none', undoneBy: 'off', tightens: true, example: {},
   async run(_values, services) {
     const plan = planMode(services);
     if (plan.isOn()) return { text: 'Plan mode is already on; nothing changed.', data: { on: true } };

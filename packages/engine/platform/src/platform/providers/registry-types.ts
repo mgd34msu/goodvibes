@@ -95,6 +95,11 @@ export interface ModelDefinition {
    * provider/catalog sources or honest unknown.
    */
   pricing?: ManualModelPrice | undefined;
+  /**
+   * Served by a server on this computer or your own network (a discovered server, a provider of your own at a local
+   * or private address): nothing is charged per token, so a picker never calls it paid (modelPriceTier).
+   */
+  local?: boolean | undefined;
 }
 
 export interface RuntimeProviderRegistration {

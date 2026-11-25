@@ -17,16 +17,16 @@ Two list settings adjust the boundary:
 
 `sandbox.judgment` (`off`, `annotate`, `auto-approve`) controls whether a model-judgment reading annotates, or with explicit opt-in settles, the ask raised when a sandboxed command needs host access. It never auto-denies.
 
-Review the current state with `/security sandbox` and the live sessions with `/security sandbox-sessions`.
+Review the current state on the Sandbox setting tab of Permissions and safety (the menu, `Ctrl+G` then `m`) and the live sessions on its Sandbox sessions tab.
 
 ## REPL and MCP isolation
 
 The `repl` tool is registered only where the exec sandbox is available, and each evaluation is one fresh command through the exec path (`bun -e` for JavaScript, TypeScript and SQL, `python3 -I -c` for Python), so it runs inside the same boundary as any command. A GraphQL evaluation only parses and validates, in process; nothing is executed.
 
-`sandbox.mcpIsolation` decides how stdio MCP servers start. `disabled` (the default) runs each as a host process. `contained` runs each inside its own bubblewrap boundary: the workspace and `sandbox.workspaceWritable` paths writable, system files and the server's own install (the directory its executable lives in, and any absolute path in its arguments) read-only, `$HOME` and `/tmp` private, its own process namespace, and the host network shared, since most servers call out. On a host without bubblewrap a contained server is not started, and `/mcp` shows why. A change restarts the running stdio servers under it: at once when idle, and a server in the middle of a call as soon as that call ends. `/security contain-mcp` and `/security host-mcp` set it and say which servers were restarted (`Restarted now: <names>.`) and which restart after their call (`Restarted as soon as the call in progress ends: <names>.`).
+`sandbox.mcpIsolation` decides how stdio MCP servers start. `disabled` (the default) runs each as a host process. `contained` runs each inside its own bubblewrap boundary: the workspace and `sandbox.workspaceWritable` paths writable, system files and the server's own install (the directory its executable lives in, and any absolute path in its arguments) read-only, `$HOME` and `/tmp` private, its own process namespace, and the host network shared, since most servers call out. On a host without bubblewrap a contained server is not started, and `/mcp` shows why. It is one value for every program on this machine, kept in the daemon's settings: "Run MCP servers inside the sandbox" and "Run MCP servers as host processes" on the Sandbox setting tab set it, and each program restarts its running stdio servers under it: at once when idle, and a server in the middle of a call as soon as that call ends.
 
-`/security start-sandbox <command|mcp-server>` opens a session whose commands (`/security run-in-sandbox`) start inside the same boundary, with the network off for `command`.
+"Start a sandbox session" on the Sandbox sessions tab opens a session (the form opens on Contained commands, network off) whose commands ("Run a command in a sandbox session") start inside the same boundary.
 
 On native Windows there is no boundary; run GoodVibes inside WSL 2 with bubblewrap installed to contain commands and MCP servers.
 
-The QEMU backend was retired, and with it the settings that chose a VM: on load, `sandbox.qemu*`, `sandbox.vmBackend`, `sandbox.replIsolation` and `sandbox.windowsMode` are removed from a settings file, and a VM `sandbox.mcpIsolation` mode (`shared-vm`, `hybrid`, `per-server-vm`) becomes `contained`, with one receipt. Nothing in `/security` offers it.
+The QEMU backend was retired, and with it the settings that chose a VM: on load, `sandbox.qemu*`, `sandbox.vmBackend`, `sandbox.replIsolation` and `sandbox.windowsMode` are removed from a settings file, and a VM `sandbox.mcpIsolation` mode (`shared-vm`, `hybrid`, `per-server-vm`) becomes `contained`, with one receipt. Nothing in Permissions and safety offers it.

@@ -46,10 +46,13 @@ defineList<{ readonly extensions?: { readonly toolRegistry?: Registry | undefine
   operator: { terminalOnly: 'The tools are the terminal program\'s own.' },
 });
 
-/** The Tools and extensions place's list of this program's tools (a session source: the web UI has none). */
-export function toolsPlaceSource(registry: () => Registry | undefined): { read(): unknown; subscribe(onChange: () => void): () => void } {
+/**
+ * The Tools and extensions place's list of this program's tools (a session source: the web UI has none), read from
+ * the tool services this program's session capabilities already built (`toolRegistryServices` above).
+ */
+export function toolsPlaceSource(tools: () => ToolRegistryCapabilityServices['toolRegistry'] | undefined): { read(): unknown; subscribe(onChange: () => void): () => void } {
   return {
-    read: () => toolRegistryServices(registry()).list(),
+    read: () => tools()?.list() ?? [],
     // The registry changes when a plugin or a tool server comes or goes; the place reads it again on its own reads.
     subscribe: () => () => {},
   };

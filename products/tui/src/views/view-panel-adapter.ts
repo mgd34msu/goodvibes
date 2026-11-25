@@ -29,7 +29,6 @@ type PanelRegistrationLike = ReturnType<PanelManagerLike['getRegisteredTypes']>[
 
 const VIEWS: readonly PanelRegistrationLike[] = [
   { id: 'agents', name: 'Agents', category: 'views', description: 'Running and finished agents, chains, workflows and hosted sessions; steer, stop, open a transcript' },
-  { id: 'usage', name: 'Usage', category: 'views', description: 'Context pressure, session tokens and cost, per-turn history, per-agent costs, budget alert' },
   { id: 'changes', name: 'Changes', category: 'views', description: 'Changed files with a tinted diff, semantic summary, hunk staging, review comments and recent commits' },
   { id: 'notifications', name: 'Notifications', category: 'views', description: 'Everything the notification feed collected, newest first' },
   { id: 'sessions', name: 'Sessions', category: 'views', description: 'Saved, hosted and cross-surface sessions' },

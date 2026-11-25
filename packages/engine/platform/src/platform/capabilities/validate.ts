@@ -6,7 +6,7 @@
  * is checked by the handler that reads the list.
  */
 import { withDefaults, type CapabilityEntry } from './catalog.js';
-import type { FixedChoice } from './types.js';
+import { showWhenHolds, type FixedChoice } from './types.js';
 
 export type CapabilityInputCheck =
   | { readonly ok: true; readonly values: Readonly<Record<string, string>> }
@@ -38,7 +38,7 @@ export function checkCapabilityInputs(entry: Pick<CapabilityEntry, 'id' | 'input
   for (const input of entry.inputs) {
     const value = values[input.id];
     if (value === undefined || value === '') {
-      if (input.required === true && !(input.showWhen && values[input.showWhen.input] !== input.showWhen.is)) {
+      if (input.required === true && showWhenHolds(input.showWhen, values)) {
         return { ok: false, input: input.id, problem: `${entry.id} needs ${input.id} (${input.label}): ${input.help}.` };
       }
       continue;

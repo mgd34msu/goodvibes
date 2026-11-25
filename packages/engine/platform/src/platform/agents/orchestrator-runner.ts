@@ -1,9 +1,11 @@
 import type { ChatRequest } from '../providers/interface.js';
+import { memoryProjectOf } from '../state/memory-project.js';
 import { buildProviderUserContent } from '../companion/companion-chat-attachments.js';
 import { decisionModelUse, withDecisionModelPolicy } from '../runtime/decision-policy.js';
 import { prepareDecisionRouterTurn, describeDecisionRoute, chatWithDecisionRoute } from '../providers/decision-router.js';
 import { assertDecisionAvailable } from '../routing/decision-availability.js';
 import { hasContractPlanConsumer } from '../tools/agent/contract-binding.js';
+import { getContractInputAuthority, noteContractInputCallHeld } from '../contract/input-authority.js';
 import { REPEATED_CALL, prepareProjectFramework, readRepeatStuck, OrchestratorObservationHeldError } from './orchestrator-observations.js';
 import { captureAutonomousSource } from '../permissions/autonomous.js';
 // OrchestratorRunner, single-agent turn loop coordinator.
@@ -13,6 +15,7 @@ import { captureAutonomousSource } from '../permissions/autonomous.js';
 // collaborators (ConversationManager, ToolRegistry, AgentSession, etc.).
 // It does not own any state beyond the duration of a single runAgentLoop() call.
 import { ConversationManager } from '../core/conversation.js';
+import { SCREENLESS_TURN_LINE, environmentBlock, readSessionEnvironment } from '../core/environment-block.js';
 import { attachToolResultImages } from '../core/tool-result-images.js';
 import { executeToolCalls as executeAutonomousToolCalls, toolBudgetFromConfig } from '../core/orchestrator-tool-runtime.js';
 import { captureToolInputCalls, projectToolInputBatch } from '../core/tool-input-ingress.js';
@@ -62,6 +65,7 @@ import { createTurnFailover } from '../providers/failover.js';
 import { findModelDefinition } from '../providers/registry-models.js';
 import { resolveTurnBudget, formatTurnLimitError, formatTurnLimitWarning, turnLimitWarningTurn, TURN_BUDGET_EXHAUSTED, type ResolvedTurnBudget } from './turn-budget.js';
 import { toolFormatTelemetry } from '../runtime/telemetry/tool-format-telemetry.js';
+import { noteModelUsage, spendingName } from '../runtime/cost/model-usage.js';
 import {
   applyContextWindowAwareness,
   providerQualifiedRouteLabel,
@@ -255,6 +259,12 @@ async function executeToolCalls(
         if (files.changed > 0) record.filesChanged = (record.filesChanged ?? 0) + files.changed;
       }
       if (record.activeCall?.id === call.id) record.activeCall = undefined;
+      // A step's call the permission gate refused (a never-run or deny rule, plan mode, the owner's no, the folder's
+      // trust): the work says it too, with what to do, not only this step's model (contract/group-runner.ts).
+      const authority = result.success === false && result.decision?.state === 'refused' ? getContractInputAuthority(record) : undefined;
+      if (authority && result.decision) {
+        noteContractInputCallHeld(authority, { gate: { tool: toolName, decidedBy: result.decision.decidedBy, reason: result.decision.reason, ...(result.decision.next ? { next: result.decision.next } : {}) } });
+      }
       session.appendMessage({
         type: 'tool_execution',
         turn,
@@ -492,6 +502,8 @@ export async function runAgentTask(
 }
 
 async function runAgentTaskWithPolicy(context: AgentOrchestratorRunContext, record: AgentRecord): Promise<void> {
+  // The run's environment facts (one `git status` in its folder) are read while the run is set up, not before it.
+  const environmentFacts = readSessionEnvironment(context.workingDirectory);
   // A cancel that lands while the run context is being built has already
   // settled the record and published AGENT_CANCELLED; starting the loop would
   // relabel a cancelled run running and then failed.
@@ -593,6 +605,10 @@ async function runAgentTaskWithPolicy(context: AgentOrchestratorRunContext, reco
     // closure's type is non-nullable without a runtime assertion.
     const activeConversation = conversation;
     context.registerConversationSource?.(record.id, (last) => (last === undefined ? activeConversation.getMessageSnapshot() : activeConversation.getRecentMessageSnapshot(last)));
+    // The facts every turn is told, in the same host channel a terminal turn uses (core/environment-block.ts): its
+    // folder, the system, today's date and the repository there. Read once per run (one `git status`).
+    const facts = environmentBlock(await environmentFacts, new Date());
+    activeConversation.hostInstructions.set('environment', context.screenless ? `${facts}\n${SCREENLESS_TURN_LINE}` : facts);
     // The owner's answer to a question this agent asked reaches it on its next request. A woken run
     // takes what waited for it; a channel's turn takes answers an earlier turn of its session asked for.
     const answersSession = sharedSessionOfContext(record.context);
@@ -837,6 +853,8 @@ async function runAgentTaskWithPolicy(context: AgentOrchestratorRunContext, reco
             && (context.isCodeInjectionSettingEnabled?.() ?? true);
           return buildPerTurnKnowledgeInjection({
             memoryRegistry: turnInjectionRegistry,
+            // The agent's own project: its records and the person's own, never another project's.
+            project: memoryProjectOf(context.workingDirectory),
             task: record.task,
             writeScope: record.writeScope ?? [],
             conversationTail: activeConversation.getMessagesForLLM(),
@@ -1136,6 +1154,15 @@ async function runAgentTaskWithPolicy(context: AgentOrchestratorRunContext, reco
         turnCount: (record.usage?.turnCount ?? 0) + 1,
         reasoningSummaryCount: (record.usage?.reasoningSummaryCount ?? 0) + (response.reasoningSummary ? 1 : 0),
       };
+      // What this request cost, recorded by the daemon with what the run is for (a schedule, a piece of work, a shared
+      // session's answer: runtime/cost/model-usage.ts); a terminal program's own agents are counted by its own rows.
+      noteModelUsage({
+        at: Date.now(), provider: activeRoute.provider.name, model: activeRoute.modelId, agentId: record.id,
+        ...(record.sessionId ? { sessionId: record.sessionId } : {}),
+        source: record.spendingSource ?? `agent "${spendingName(record.task)}"`,
+        inputTokens: response.usage.inputTokens, outputTokens: response.usage.outputTokens,
+        cacheReadTokens: response.usage.cacheReadTokens ?? 0, cacheWriteTokens: response.usage.cacheWriteTokens ?? 0,
+      });
 
       maybeCompactAfterModelContextWarning({
         response, conversation: activeConversation, record, turn,

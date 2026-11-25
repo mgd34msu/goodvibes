@@ -38,7 +38,7 @@ import type {
   ShellPlanManagerService,
   ShellSessionOrchestrationService,
 } from '@/runtime/index.ts';
-import { createBootstrapCommandShellServices, type RemoteCommandService } from '@/runtime/index.ts';
+import { createBootstrapCommandShellServices } from '@/runtime/index.ts';
 import type { OperatorClient } from '@/runtime/index.ts';
 import type { PeerClient } from '@/runtime/index.ts';
 import type { DirectTransport } from '@/runtime/index.ts';
@@ -81,7 +81,6 @@ export type CreateBootstrapCommandContextOptions = {
   shellPaths: ShellPathService;
   /** The runtime's declare-once session-storage handle (runtime/services.ts). */
   surface: SessionSurface;
-  remoteRuntime?: RemoteCommandService;
   fileUndoManager: FileUndoManager;
   workspaceCheckpointManager?: WorkspaceCheckpointManager;
   gatewayMethods?: GatewayMethodCatalog;

@@ -135,7 +135,6 @@ export type {
   WatcherSnapshotSaveFailure,
   WatcherSourceKind,
   WatcherSourceRecord,
-  WorkspaceSwapManagerLike,
 } from './system-route-types.js';
 export type {
   AuthenticatedPrincipalLike,
@@ -242,7 +241,7 @@ export type {
   SharedSessionRoutingIntent,
 } from './runtime-route-types.js';
 export { createDaemonRuntimeAutomationRouteHandlers } from './runtime-automation-routes.js';
-export { createDaemonRuntimeSessionRouteHandlers } from './runtime-session-routes.js';
+export { createDaemonRuntimeSessionRouteHandlers, OWNER_TYPED_METADATA_KEY } from './runtime-session-routes.js';
 export { createDaemonRuntimeRouteHandlers } from './runtime-routes.js';
 export {
   createDaemonRemoteRouteHandlers,

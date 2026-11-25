@@ -3,23 +3,16 @@ import { statSync } from 'node:fs';
 import { decisionModelPolicyState } from '@goodvibes/engine/errors';
 import { createClassicProtectedSourceOwner } from '@goodvibes/engine/platform/platform/security/source-screening/classic-owner';
 import { ConfigManager, SecretsManager, isSecretRefInput, normalizeSecretRef, resolveGoodVibesDaemonHome,
-  type HostBooleanSetting, type SecretStorageMode } from '@goodvibes/engine/platform/platform/config';
+  type SecretStorageMode } from '@goodvibes/engine/platform/platform/config';
 import { createProtectedSourceOwner } from '@goodvibes/engine/platform/platform/security/source-screening/owner';
 import type { ProtectedSourceOwner, ProtectedSource, ProtectedResearchReference, SourceScreeningReceipt, ResearchReferenceScreeningReceipt } from '@goodvibes/engine/platform/platform/security';
 import { ToolInputProjectionError } from '@goodvibes/engine/platform/platform/tools/input-projection';
+import { AGENT_HOSTED_RESEARCH_SCREENING_KEY, AGENT_HOSTED_RESEARCH_SCREENING_SETTING } from '@goodvibes/engine/platform/platform/runtime/program-host-settings';
 import { GOODVIBES_AGENT_SURFACE_ROOT } from './surface.js';
 
-/** The Agent's consent to screen raw report text with the hosted screening providers. */
-export const AGENT_HOSTED_RESEARCH_SCREENING_KEY = 'tools.hostedResearchScreening';
-
-/** The consent as a host setting; registered on every manager that reads the Agent's settings. */
-export const AGENT_HOSTED_RESEARCH_SCREENING_SETTING: HostBooleanSetting = Object.freeze({
-  key: AGENT_HOSTED_RESEARCH_SCREENING_KEY,
-  label: 'Let hosted models screen research sources',
-  type: 'boolean',
-  default: false,
-  description: 'Explicitly allow raw research report text and source URLs to be screened by Abacus route-llm and TypeSafe Jev. Providers manage retention; zero retention is unverified. Requires native ABACUSAI_API_KEY and TYPESAFE_API_KEY credentials. Covers research report preview, save, and the research editor only.',
-});
+// The consent and its setting are declared once in the platform (runtime/program-host-settings.ts), so the daemon and
+// the settings screen of either program know the Agent's setting too.
+export { AGENT_HOSTED_RESEARCH_SCREENING_KEY, AGENT_HOSTED_RESEARCH_SCREENING_SETTING };
 
 /** The settings a screening owner reads: the consent, the quarantine and the change signals. */
 export type AgentResearchScreeningConfig = Pick<ConfigManager, 'getHostBooleanSetting' | 'getIngestionQuarantine' | 'getConfigurationIncarnation'

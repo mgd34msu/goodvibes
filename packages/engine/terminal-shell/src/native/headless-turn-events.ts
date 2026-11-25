@@ -1,6 +1,6 @@
 import type { RuntimeEventBus } from '@goodvibes/engine/platform/platform/runtime/state';
 import type { AgentEvent, ContractEvent, GateEvent, ToolEvent, TurnEvent } from '@goodvibes/engine/platform/events';
-import type { PermissionExecutionOptions, PermissionPromptDecision, PermissionPromptRequest } from '@goodvibes/engine/platform/platform/permissions';
+import { toolAskWords, type PermissionExecutionOptions, type PermissionPromptDecision, type PermissionPromptRequest } from '@goodvibes/engine/platform/platform/permissions';
 import { redactDiagnosticText } from '@goodvibes/engine/platform/platform/utils';
 import {
   exitCodeOfSettlement, readTurnSettlement, stopReasonOfSettlement, TURN_SETTLING_EVENTS,
@@ -392,13 +392,18 @@ export function createHeadlessPermissionInput(options: HeadlessPermissionInputOp
       });
       options.signal.addEventListener('abort', cancel, { once: true });
       executionSignal?.addEventListener('abort', cancel, { once: true });
+      // A call its program words itself (a capability: its label as the question, its sentence and each input on a
+      // labelled line, a secret one hidden) is asked in those words, as the owner's card asks it; never the tool's
+      // generic reading ("Delegate work through capability_run").
+      const words = toolAskWords(request.tool, request.args);
       options.emit({
         type: 'PERMISSION_PROMPT',
         callId,
         tool: request.tool,
         category: request.category,
         riskLevel: request.analysis.riskLevel,
-        summary: forwardedText(request.analysis.summary),
+        summary: forwardedText(words?.question ?? request.analysis.summary),
+        ...(words && words.lines.length > 0 ? { lines: words.lines.map((line) => forwardedText(line)) } : {}),
         answer: `Write one line to stdin: {"type":"PERMISSION_ANSWER","callId":"${callId}","approved":true} (or false).`,
       });
     });

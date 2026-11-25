@@ -23,6 +23,9 @@ import type {
   NodesResult,
   RenameGroupResult,
   SettingDecisionResult,
+  SharingOnResult,
+  MemberViewResult,
+  SettingDifference,
 } from '../../cluster/group-operations.js';
 import type { DiscoveredGroup } from '../../cluster/group-runtime.js';
 
@@ -44,6 +47,12 @@ export interface ClusterGroupVerbs {
   publish(path: string, options?: { turnOnSharing?: boolean }): Promise<GroupOperationResult<SettingDecisionResult>>;
   /** Take the group's value of such a setting here. */
   accept(path: string, options?: { turnOnSharing?: boolean }): Promise<GroupOperationResult<SettingDecisionResult>>;
+  /** Turn sharing with your other machines on (the daemon restarts to bring the group layer up). */
+  sharingOn?(): Promise<GroupOperationResult<SharingOnResult>>;
+  /** Another member's own view of the group, asked of it over the group's channel. */
+  view?(nodeId: string): Promise<GroupOperationResult<MemberViewResult>>;
+  /** The shared settings that differ between this machine and the group, with both values. */
+  differences?(): GroupOperationResult<readonly SettingDifference[]>;
 }
 
 /** The router services this dispatcher needs. */

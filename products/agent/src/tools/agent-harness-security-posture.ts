@@ -53,23 +53,24 @@ const SUPPORT_BUNDLE_ROUTES: readonly SupportBundleRoute[] = [
   {
     bundleType: 'support',
     defaultPath: 'goodvibes-agent-bundle.json',
-    inspectCommand: '/bundle inspect <path>',
-    exportCommand: '/bundle export [path]',
-    importCommand: '/bundle import <path>',
+    // The support bundle is the daemon's: run by capability_run (System, Support and transfer, for a person).
+    inspectCommand: 'capability_run id:"bundle.inspect" inputs:{"path"}',
+    exportCommand: 'capability_run id:"bundle.export" inputs:{"path"}',
+    importCommand: 'capability_run id:"bundle.import" inputs:{"path"} (loading security settings too is put to the owner)',
     workspaceActionIds: ['support-bundle-export', 'support-bundle-inspect', 'support-bundle-import'],
   },
   {
     bundleType: 'auth',
     defaultPath: 'auth-review-bundle.json',
-    inspectCommand: '/auth inspect <path>',
-    exportCommand: '/auth export <path>',
+    inspectCommand: 'capability_run id:"auth.inspect" inputs:{"path"}',
+    exportCommand: 'capability_run id:"auth.export" inputs:{"path"}',
     workspaceActionIds: ['auth-bundle-export', 'auth-bundle-inspect'],
   },
   {
     bundleType: 'trust',
     defaultPath: 'trust-review-bundle.json',
-    inspectCommand: '/security read-trust <path>',
-    exportCommand: '/security save-trust <path>',
+    inspectCommand: 'capability_run security.read-trust with inputs.path',
+    exportCommand: 'capability_run security.save-trust with inputs.path',
     workspaceActionIds: ['trust-bundle-export', 'trust-bundle-inspect'],
   },
   {
@@ -82,8 +83,8 @@ const SUPPORT_BUNDLE_ROUTES: readonly SupportBundleRoute[] = [
   {
     bundleType: 'voice',
     defaultPath: 'voice-bundle.json',
-    inspectCommand: '/voice inspect <file>',
-    exportCommand: '/voice export <file>',
+    inspectCommand: 'capability_run id:"voice.inspect" inputs:{"path"}',
+    exportCommand: 'capability_run id:"voice.export" inputs:{"path"}',
     workspaceActionIds: ['voice-bundle-export', 'voice-bundle-inspect'],
   },
 ];
@@ -204,7 +205,7 @@ function buildTokenFindings(securitySnapshot: Record<string, unknown> | null): r
         severity,
         title: `Token ${label || 'without a label'}`,
         summary: `Scope ${scopeOutcome}; rotation ${rotationOutcome}; blocked ${blocked ? 'yes' : 'no'}.`,
-        route: '/security tokens',
+        route: 'capability_run security.tokens (Permissions and safety, Device tokens)',
         detail: {
           tokenLabel: label || 'n/a',
           policyId: safeText(scope.policyId),
@@ -232,7 +233,7 @@ function buildPolicyFindings(policySnapshot: unknown): readonly SecurityFinding[
       severity,
       title: `Policy ${rule || 'lint'}`,
       summary: message,
-      route: '/security review',
+      route: 'capability_run security.review (Permissions and safety, This conversation)',
       detail: {
         rule,
         message,
@@ -250,7 +251,7 @@ function buildPolicyFindings(policySnapshot: unknown): readonly SecurityFinding[
       severity: safeText(preflight.status) === 'blocked' ? 'blocker' : 'warn',
       title: 'Policy preflight',
       summary: `Preflight ${safeText(preflight.status)} with ${safeText(preflight.issueCount, '0')} issue(s).`,
-      route: '/security review',
+      route: 'capability_run security.review (Permissions and safety, This conversation)',
       detail: {
         status: safeText(preflight.status),
         issueCount: typeof preflight.issueCount === 'number' ? preflight.issueCount : 0,
@@ -282,7 +283,7 @@ function buildMcpFindings(securitySnapshot: Record<string, unknown> | null, atta
       severity,
       title: `MCP attack path ${serverName}`,
       summary: untrustedText(finding.reason, 'MCP attack-path finding'),
-      route: '/security attack-paths',
+      route: 'capability_run security.attack-paths (Permissions and safety, This conversation)',
       detail: {
         serverName,
         route: untrustedText(finding.route),
@@ -346,7 +347,7 @@ function buildPluginFindings(securitySnapshot: Record<string, unknown> | null): 
         severity: quarantined ? 'blocker' : 'warn',
         title: `Plugin ${name}`,
         summary: quarantined ? 'Plugin is quarantined.' : 'Plugin is untrusted.',
-        route: '/security trust',
+        route: 'capability_run security.trust (Permissions and safety, Policy)',
         detail: {
           name,
           version: safeText(plugin.version),
@@ -369,7 +370,7 @@ function buildIncidentFindings(securitySnapshot: Record<string, unknown> | null)
       severity: 'warn',
       title: `Security incident ${id}`,
       summary: safeText(incident.title ?? incident.summary ?? incident.kind, 'Security incident recorded.'),
-      route: '/security review',
+      route: 'capability_run security.review (Permissions and safety, This conversation)',
       detail: {
         id,
         kind: safeText(incident.kind),
@@ -542,11 +543,11 @@ export async function securityPostureSummary(context: CommandContext, args: Agen
     total: findings.length,
     policy: 'Read-only security posture. Token rotation, policy changes, MCP trust changes, bundle export/import, auth repair, and voice enable/disable remain confirmation-gated workspace or slash-command flows.',
     ...(args.includeParameters === true ? { modelAccess: {
-      reviewCommand: '/security review',
-      tokensCommand: '/security tokens',
-      attackPathsCommand: '/security attack-paths',
-      trustReviewCommand: '/security trust',
-      authReviewCommand: '/auth review',
+      reviewCommand: 'capability_run security.review (Permissions and safety, This conversation)',
+      tokensCommand: 'capability_run security.tokens (Permissions and safety, Device tokens)',
+      attackPathsCommand: 'capability_run security.attack-paths (Permissions and safety, This conversation)',
+      trustReviewCommand: 'capability_run security.trust (Permissions and safety, Policy)',
+      authReviewCommand: 'capability_run auth.review (Models and providers, Providers)',
       bundleCatalogMode: 'support_bundles',
       singleFindingMode: 'security_finding',
     } } : {}),

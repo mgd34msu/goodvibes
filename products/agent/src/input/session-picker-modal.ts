@@ -8,7 +8,6 @@ import { SavedSessionPickerState } from '@goodvibes/engine/terminal-shell/sessio
 
 import type { SessionInfo, SessionManager } from '@goodvibes/engine/platform/platform/sessions';
 import { summarizeError } from '@goodvibes/engine/platform/platform/utils';
-import { quoteSlashCommandArg } from './slash-command-parser.ts';
 import type { CommandContext } from './command-registry.ts';
 import { loadSavedSessionIntoLive } from './commands/session-load.ts';
 
@@ -17,14 +16,14 @@ function sessionLoadedMessage(name: string, messageCount: number): string {
 }
 
 function sessionDeletionCommandRequiredMessage(name: string): string {
-  return `Deletion requires an explicit command: /session delete ${quoteSlashCommandArg(name)} --yes`;
+  return `Session ${name} is deleted in the Sessions place: select it there and press its delete key.`;
 }
 
 export function renderSessionPickerStatePackageText(): string {
   return [
     'Loaded session <session> (<count> messages)',
     'Error',
-    'Deletion requires an explicit command: /session delete <session> --yes',
+    'Session <session> is deleted in the Sessions place: select it there and press its delete key.',
   ].join('\n');
 }
 

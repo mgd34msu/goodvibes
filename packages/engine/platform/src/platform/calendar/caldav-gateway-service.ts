@@ -203,6 +203,8 @@ function toSummary(event: CalDavEvent): CalendarGatewayEventSummary {
   const attendees = displayAttendees(event);
   return {
     id: eventIdOf(event),
+    // Every occurrence of a series is one resource (one UID): a list counts it once.
+    seriesId: event.href || event.uid,
     title: event.summary,
     start: event.start,
     end: event.end,

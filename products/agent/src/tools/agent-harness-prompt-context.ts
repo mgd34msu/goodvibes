@@ -3,6 +3,7 @@ import { factsFor } from '@goodvibes/engine/platform/platform/routing';
 import type { MemoryApi } from '@goodvibes/engine/platform/platform/knowledge';
 import { readTierPromptSupplement } from '@goodvibes/engine/platform/platform/providers';
 import type { MemoryRecord } from '@goodvibes/engine/platform/platform/state';
+import { isMemoryForProject, memoryProjectOf } from '@goodvibes/engine/platform/platform/state';
 import { describeMemoryPromptEligibility, isPromptActiveMemory, MIN_PROMPT_MEMORY_CONFIDENCE } from '@goodvibes/engine/terminal-shell/agent-turn/memory-prompt';
 import { AgentPersonaRegistry, buildActivePersonaPrompt } from '@goodvibes/engine/terminal-shell/agent-turn/persona-registry';
 import { buildProjectContextPrompt, discoverProjectContextFiles } from '@goodvibes/engine/terminal-shell/agent-turn/project-context-files';
@@ -159,10 +160,13 @@ function promptModelInfo(context: CommandContext): PromptModelInfo {
  * local registry. Naming the source keeps the segment from describing a copy
  * the turn does not use.
  */
-function promptMemorySource(context: CommandContext): { readonly memory: PromptMemoryApi | undefined; readonly fromSpine: boolean } {
+function promptMemorySource(context: CommandContext, project: string | undefined): { readonly memory: PromptMemoryApi | undefined; readonly fromSpine: boolean } {
+  // Memory is one store for every project: this project's records and the person's own, never another project's.
+  const forProject = (records: readonly MemoryRecord[]): MemoryRecord[] => records.filter((record) => isMemoryForProject(record, project));
   const spine = context.clients?.memorySpine;
-  if (spine && typeof spine.recallSnapshot === 'function') return { memory: { getAll: () => spine.recallSnapshot().records }, fromSpine: true };
-  return { memory: promptMemoryApi(context.clients?.agentKnowledgeApi?.memory), fromSpine: false };
+  if (spine && typeof spine.recallSnapshot === 'function') return { memory: { getAll: () => forProject(spine.recallSnapshot().records) }, fromSpine: true };
+  const local = promptMemoryApi(context.clients?.agentKnowledgeApi?.memory);
+  return { memory: local ? { getAll: () => forProject(local.getAll()) } : undefined, fromSpine: false };
 }
 
 function promptMemoryApi(value: unknown): PromptMemoryApi | undefined {
@@ -454,7 +458,7 @@ async function promptContextSegments(context: CommandContext, includeParameters:
   const suppressedSkills = skillSnapshot.skills.filter((skill) => candidateSkillIds.has(skill.id) && !activeSkills.some((active) => active.id === skill.id));
   const suppressedBundles = skillSnapshot.enabledBundles.filter((bundle) => !activeBundles.some((active) => active.id === bundle.id));
   const skillPrompt = buildEnabledSkillsPrompt(shellPaths, skillSnapshot) ?? '';
-  const { memory, fromSpine: memoryFromSpine } = promptMemorySource(context);
+  const { memory, fromSpine: memoryFromSpine } = promptMemorySource(context, memoryProjectOf(shellPaths.workingDirectory));
 
   const capabilityIndex = capabilitySnapshot();
   const capabilityText = buildCapabilitySummaryPrompt(capabilityIndex) ?? '';

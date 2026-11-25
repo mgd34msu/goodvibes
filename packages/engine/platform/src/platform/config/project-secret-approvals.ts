@@ -94,7 +94,7 @@ export class ProjectSecretApprovals {
       if (parsed.version !== 2) {
         // An earlier record named keys without their values: it cannot say what
         // the user confirmed, so those keys are confirmed again before use.
-        logger.warn('Project secret confirmations from an earlier version are not bound to a value; confirm the keys again with /secrets trust', { path: this.#file });
+        logger.warn('Project secret confirmations from an earlier version are not bound to a value; confirm the keys again with "Use a secret from this project\'s store" (Permissions and safety, Secrets)', { path: this.#file });
         return;
       }
       for (const [path, keys] of Object.entries(parsed.stores ?? {})) {

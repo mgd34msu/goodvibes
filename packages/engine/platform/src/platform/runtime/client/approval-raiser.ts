@@ -156,6 +156,14 @@ export interface ClientApprovalRaiserOptions {
   readonly raiseTimeoutMs?: number;
   /** How long a local answer waits for the daemon's final record (tests). */
   readonly arbiterWaitMs?: number;
+  /**
+   * True while this process's asks have their one answerer here and nowhere
+   * else (a headless run: the script answering `--answer-permissions`, or
+   * nobody, when the call is held for the owner): the ask is not raised on the
+   * daemon, so it is never shown in a second list where answering it would
+   * decide nothing.
+   */
+  readonly answersHere?: (() => boolean) | undefined;
 }
 
 /**
@@ -278,8 +286,10 @@ export function createClientApprovalRaiser(options: ClientApprovalRaiserOptions)
     }
     const sessionId = options.sessionId?.() ?? undefined;
     try {
+      // `outsideFolder` is the gate's in-process word to this program's folder trust: it does not travel.
+      const { outsideFolder: _inProcess, ...request } = input.request;
       const raised = await options.verbs.invoke<{ approvalId?: unknown; approval?: RaisedRecord; coalesced?: unknown; holdId?: unknown }>('approvals.raise', {
-        request: input.request,
+        request,
         ...(sessionId ? { sessionId } : {}),
         ...(input.routeId === undefined ? {} : { routeId: input.routeId }),
         ...(input.metadata === undefined ? {} : { metadata: input.metadata }),
@@ -525,6 +535,12 @@ export function createClientApprovalRaiser(options: ClientApprovalRaiserOptions)
   return async (input) => {
     const signal = input.signal;
     assertPermissionActive(signal);
+    // One answerer, here: asked here only (the decision fields are kept as given, a hold for the owner included).
+    if (options.answersHere?.() === true) {
+      const decision = await options.localPrompt()(input.request, signal ? { signal } : {});
+      assertPermissionActive(signal);
+      return { ...localDecisionSnapshot(decision), ...(decision.heldForOwner === true ? { heldForOwner: true } : {}) };
+    }
     const observations = new AbortController();
     const abort = (): void => observations.abort();
     signal?.addEventListener('abort', abort, { once: true });

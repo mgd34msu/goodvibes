@@ -543,7 +543,8 @@ function recordRefusals(refused: Map<string, RefusedCall>, calls: readonly ToolC
   const byId = new Map(results.map((result) => [result.callId, result] as const));
   for (const call of calls) {
     const result = byId.get(call.id);
-    if (!result || result.success || result.cancelled === true || result.decision?.state !== 'refused') continue;
+    // A call held back only to load its tool's parameters was never refused: its retry runs.
+    if (!result || result.success || result.cancelled === true || result.heldToLoad === true || result.decision?.state !== 'refused') continue;
     const text = [result.error, result.output].filter((part): part is string => typeof part === 'string' && part.length > 0).join('\n') || result.decision.reason;
     refused.set(callSignature(call), { toolName: call.name, reason: result.decision.reason, text });
   }
@@ -585,8 +586,12 @@ function blockRefusedRepeats(ctx: TurnContext, sink: TurnSink, refused: Readonly
  */
 function applyStopRules(ctx: TurnContext, turnSignal: AbortSignal, sink: TurnSink, breaker: ConsecutiveErrorBreaker, history: TurnCallObservation[],
   repeatReading: { pending: boolean }, malformed: { signature: string; count: number },
-  calls: readonly ToolCall[], results: readonly ToolResult[]): { readonly note: string; readonly stop: NonNullable<TurnOutcome['stop']> } | undefined {
+  roundCalls: readonly ToolCall[], roundResults: readonly ToolResult[]): { readonly note: string; readonly stop: NonNullable<TurnOutcome['stop']> } | undefined {
   const tell = (text: string): void => ctx.hostInstructions?.set('breaker', text, { once: true, append: true });
+  // A call held back only to load its tool's parameters never ran: it is no failed round, no repeat and no malformed call.
+  const held = new Set(roundResults.filter((result) => result.heldToLoad === true).map((result) => result.callId));
+  const calls = held.size === 0 ? roundCalls : roundCalls.filter((call) => !held.has(call.id));
+  const results = held.size === 0 ? roundResults : roundResults.filter((result) => !held.has(result.callId));
   const finalReply = 'You have one final reply. Tools are no longer available and any tool call in it will not run. ';
 
   const byId = new Map(results.map((result) => [result.callId, result] as const));

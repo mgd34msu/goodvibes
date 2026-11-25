@@ -43,6 +43,22 @@ function createListHandler(service: WorkspacesGatewayService): GatewayMethodHand
   };
 }
 
+/**
+ * The projects a caller can choose: each registered root once. The daemon's own working folder is a folder of its own
+ * in its home, never a project (products/daemon cli/configuration.ts `daemonOwnFolder`), so it is not offered.
+ */
+function createProjectsHandler(service: WorkspacesGatewayService, daemonFolder: string | undefined): GatewayMethodHandler {
+  return async () => {
+    const snapshot = await service.snapshot();
+    const projects: { root: string; label?: string; daemonFolder: boolean }[] = [];
+    for (const workspace of snapshot.workspaces) {
+      if (workspace.root === daemonFolder || projects.some((project) => project.root === workspace.root)) continue;
+      projects.push({ root: workspace.root, ...(workspace.label ? { label: workspace.label } : {}), daemonFolder: false });
+    }
+    return { projects };
+  };
+}
+
 function createAddHandler(service: WorkspacesGatewayService): GatewayMethodHandler {
   return async (invocation) => {
     const params = readInvocationParams(invocation);
@@ -105,9 +121,12 @@ function createResolveHandler(service: WorkspacesGatewayService): GatewayMethodH
 export function registerWorkspacesGatewayMethods(
   catalog: GatewayMethodCatalog,
   service: WorkspacesGatewayService,
+  /** The daemon's own working folder, listed first by workspaces.projects.list. */
+  daemonFolder?: string | undefined,
 ): void {
   const attach = (id: string, handler: GatewayMethodHandler): void => { attachHandler(catalog, id, handler); };
   attach('workspaces.registrations.list', createListHandler(service));
+  attach('workspaces.projects.list', createProjectsHandler(service, daemonFolder));
   attach('workspaces.registrations.add', createAddHandler(service));
   attach('workspaces.registrations.remove', createRemoveHandler(service));
   attach('workspaces.resolve', createResolveHandler(service));

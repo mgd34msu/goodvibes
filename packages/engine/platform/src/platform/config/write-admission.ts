@@ -76,18 +76,18 @@ export function credentialValueRefusal(key: string, value: unknown): { readonly 
     .some((member) => isSecretReferenceValue(member) && !isValidSecretReference(member));
   if (malformed) {
     return { code: 'CONFIG_SECRET_REFERENCE_INVALID', reason: `${key} holds a goodvibes://secrets/ reference that is not well formed.`,
-      next: `Write the reference as goodvibes://secrets/goodvibes/<KEY>, naming a key saved with /secrets set <KEY> <value>.` };
+      next: `Write the reference as goodvibes://secrets/goodvibes/<KEY>, naming a key saved with "Store a secret" (Permissions and safety, Secrets, or the capability secrets.set).` };
   }
   if (facts.secret && typeof value === 'string' && value.trim() !== '' && !isSecretReferenceValue(value)) {
     return { code: 'CONFIG_SECRET_LITERAL', reason: `${key} holds a credential, and a settings file keeps only a reference to it.`,
-      next: `Save the credential with /secrets set <KEY> <value> (or the credentials route), then set ${key} to goodvibes://secrets/goodvibes/<KEY>.` };
+      next: `Save the credential with "Store a secret" (Permissions and safety, Secrets, the capability secrets.set, or the credentials route), then set ${key} to goodvibes://secrets/goodvibes/<KEY>.` };
   }
   // A list of credentials (notifications.webhookUrls): every member is a reference.
   if (facts.secret && Array.isArray(value) && value.some((member) => typeof member === 'string' && member.trim() !== '' && !isSecretReferenceValue(member))) {
     return { code: 'CONFIG_SECRET_LITERAL', reason: `${key} is a list of credentials, and a settings file keeps only a reference to each.`,
       next: key === 'notifications.webhookUrls'
-        ? 'Add each URL with /notify add <url>, which stores it in the secret store and saves its reference.'
-        : `Save each credential with /secrets set <KEY> <value>, then list goodvibes://secrets/goodvibes/<KEY> in ${key}.` };
+        ? 'Add each URL with "add an address" on the Notifications tab of Mail, calendar and channels (or the capability notify.add), which stores it in the secret store and saves its reference.'
+        : `Save each credential with "Store a secret" (Permissions and safety, Secrets, or the capability secrets.set), then list goodvibes://secrets/goodvibes/<KEY> in ${key}.` };
   }
   return null;
 }

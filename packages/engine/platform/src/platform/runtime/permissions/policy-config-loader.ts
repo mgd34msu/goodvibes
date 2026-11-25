@@ -16,8 +16,11 @@
  * policy runtime state as the reason the configured bundle is not loaded, and skipped
  * (registry stays empty).
  */
-import { readFileSync } from 'node:fs';
-import { isAbsolute, join, resolve } from 'node:path';
+import { existsSync, readFileSync } from 'node:fs';
+import { dirname, isAbsolute, join, resolve } from 'node:path';
+import { DAEMON_STATE_SURFACE_ROOT } from '../../daemon/lifecycle-marker.js';
+import { writeDocument } from '../../utils/atomic-json-store.js';
+import { FeatureAnnouncementStore } from '../feature-announcements.js';
 import type { ConfigManager } from '../../config/manager.js';
 import type { FeatureFlagReader } from '../feature-flags/index.js';
 import { isFeatureGateEnabled } from '../feature-flags/index.js';
@@ -46,7 +49,8 @@ export function loadConfiguredPolicyBundle(
   // enforced; it may have come from another file than the configured one.
   const registry = policyRuntimeState.getRegistry();
   const configDir = configManager.getControlPlaneConfigDir?.();
-  if (configDir) registry.bindActivationRecord(join(configDir, POLICY_ACTIVATION_FILE));
+  // The one activation record every program follows: the daemon's (sharedPolicyActivationPath).
+  if (configDir) registry.bindActivationRecord(sharedPolicyActivationPath(configDir));
   const activation = registry.readActivationRecord();
   const recordedPath = activation !== null && activation !== 'unreadable' ? activation.bundlePath : undefined;
   const activePath = recordedPath && recordedPath !== configuredBundlePath ? recordedPath : undefined;
@@ -120,3 +124,97 @@ function loadBundleCandidate(
 
 /** The record of which bundle is active, kept beside permission-rules.json. */
 export const POLICY_ACTIVATION_FILE = 'policy-activation.json';
+
+/**
+ * The one activation record every program on this machine follows: the daemon's, in its settings folder
+ * (`~/.goodvibes/tui/policy-activation.json`, the folder the daemon and the terminal app share). The daemon writes it
+ * when a policy is enforced or restored and announces the change; each program keeps its own copy of the bundle in
+ * force (its registry) and reads this record again at start and on each announcement, so the gate in a running turn
+ * reads its copy and never asks the daemon. `configDir`: any program's settings folder (`~/.goodvibes/<program>`).
+ */
+export function sharedPolicyActivationPath(configDir: string): string {
+  return join(dirname(configDir), DAEMON_STATE_SURFACE_ROOT, POLICY_ACTIVATION_FILE);
+}
+
+/** The programs that kept an activation record of their own until 3.5.0, beside their settings: the Agent's. */
+const PROGRAM_ACTIVATION_ROOTS: readonly string[] = ['agent'];
+
+/** Where carrying the programs' own records into the one record is noted as done, beside it. */
+const CARRIED_FILE = 'policy-activation-carried.json';
+
+/** Which of two bundles refuses or asks more: its refusing rules, then its asking ones. Ties keep the first. */
+function stricterOf(first: SignedPolicyBundle<PolicyBundlePayload> | null, second: SignedPolicyBundle<PolicyBundlePayload> | null): 'first' | 'second' {
+  const weight = (bundle: SignedPolicyBundle<PolicyBundlePayload> | null): [number, number] => {
+    const rules = Array.isArray(bundle?.payload?.rules) ? bundle.payload.rules as readonly { readonly effect?: unknown }[] : [];
+    return [rules.filter((rule) => rule.effect === 'deny').length, rules.filter((rule) => rule.effect === 'prompt' || rule.effect === 'ask').length];
+  };
+  const [firstDeny, firstAsk] = weight(first);
+  const [secondDeny, secondAsk] = weight(second);
+  if (secondDeny !== firstDeny) return secondDeny > firstDeny ? 'second' : 'first';
+  return secondAsk > firstAsk ? 'second' : 'first';
+}
+
+function readRecord(path: string): { readonly bundleId: string; readonly payloadHash: string; readonly bundlePath?: string | undefined } | null {
+  try {
+    const parsed = JSON.parse(readFileSync(path, 'utf-8')) as { bundleId?: unknown; payloadHash?: unknown; bundlePath?: unknown } | null;
+    if (parsed && typeof parsed.bundleId === 'string' && typeof parsed.payloadHash === 'string') {
+      return { bundleId: parsed.bundleId, payloadHash: parsed.payloadHash, ...(typeof parsed.bundlePath === 'string' ? { bundlePath: parsed.bundlePath } : {}) };
+    }
+  } catch { /* absent or unreadable: nothing to carry */ }
+  return null;
+}
+
+function readBundle(path: string | undefined): SignedPolicyBundle<PolicyBundlePayload> | null {
+  if (!path) return null;
+  try { return JSON.parse(readFileSync(path, 'utf-8')) as SignedPolicyBundle<PolicyBundlePayload>; } catch { return null; }
+}
+
+/**
+ * Once, at the first start of this version: the policy each program enforced on its own until 3.5.0 (the Agent kept
+ * its own record) is carried into the one record. Where only one program enforced a policy, that one is kept; where
+ * two enforced different policies, the stricter (more refusing rules, then more asking ones) is kept, and the owner is
+ * told once which (an announce-once line every program shows). The program's own record is left as it was, so a 3.5.0
+ * binary after a rollback still enforces what it did. Never throws: a record that cannot be read is not carried.
+ */
+export function carryProgramPolicyActivations(configDir: string): void {
+  const goodvibesRoot = dirname(configDir);
+  const shared = sharedPolicyActivationPath(configDir);
+  const marker = join(dirname(shared), CARRIED_FILE);
+  if (existsSync(marker)) return;
+  let note: string | null = null;
+  try {
+    for (const program of PROGRAM_ACTIVATION_ROOTS) {
+      const own = readRecord(join(goodvibesRoot, program, POLICY_ACTIVATION_FILE));
+      if (!own) continue;
+      const held = readRecord(shared);
+      if (held && held.bundleId === own.bundleId && held.payloadHash === own.payloadHash) continue;
+      const keepOwn = !held || stricterOf(readBundle(held.bundlePath), readBundle(own.bundlePath)) === 'second';
+      if (keepOwn) writeDocument(shared, JSON.parse(readFileSync(join(goodvibesRoot, program, POLICY_ACTIVATION_FILE), 'utf-8')) as Record<string, unknown>);
+      note = !held
+        ? `The policy the Agent enforced ("${own.bundleId}") is now the one every program on this machine follows.`
+        : keepOwn
+          ? `The terminal app enforced policy "${held.bundleId}" and the Agent "${own.bundleId}"; "${own.bundleId}" refuses more, so it is now the one every program on this machine follows.`
+          : `The terminal app enforced policy "${held.bundleId}" and the Agent "${own.bundleId}"; "${held.bundleId}" refuses more, so it is now the one every program on this machine follows.`;
+    }
+    writeDocument(marker, { carriedAt: new Date().toISOString(), ...(note ? { note } : {}) });
+  } catch (error) {
+    logger.warn('[policy-as-code] the programs\' policy records could not be carried into the one record; tried again at the next start', { error: summarizeError(error) });
+    return;
+  }
+  if (note) {
+    logger.info(`[policy-as-code] ${note}`);
+    try {
+      new FeatureAnnouncementStore(join(dirname(shared), 'control-plane', 'feature-announcements.json')).record('policy-activation-carried', note);
+    } catch { /* the line is in the log and in "See the policy in force" */ }
+  }
+}
+
+/** What carrying the programs' records said, for "See the policy in force"; null when nothing was carried or noted. */
+export function carriedPolicyNote(configDir: string): string | null {
+  try {
+    const parsed = JSON.parse(readFileSync(join(dirname(sharedPolicyActivationPath(configDir)), CARRIED_FILE), 'utf-8')) as { note?: unknown };
+    return typeof parsed.note === 'string' ? parsed.note : null;
+  } catch {
+    return null;
+  }
+}

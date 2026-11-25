@@ -40,6 +40,11 @@ export interface OwnerSubmissionPorts {
   readonly answerOptions: () => { readonly answersContractQuestion?: string };
   /** Starts the turn (or routes it to the connected host). */
   readonly sendTurn: (text: string, options: ProductInputContext, turnOptions: OrchestratorUserInputOptions | undefined, how: OwnerTurnHow) => Promise<boolean>;
+  /**
+   * Runs a turn that carries an image in this process, with the image (the conversation's image control): the
+   * connected host and the native intake take text only.
+   */
+  readonly sendImageTurn: (text: string, content: ContentPart[]) => void;
   /** A refused, unsent prompt goes back into an empty composer. */
   readonly restoreDraft: (text: string) => void;
   /** How many `!` commands are running, after each start and finish. */
@@ -132,6 +137,11 @@ export function createOwnerSubmission(ports: OwnerSubmissionPorts): OwnerSubmiss
 
   const submitTurn = (text: string, content?: ContentPart[], options: ProductInputContext = {}): void => {
     ports.prepare();
+    // An image sent by the conversation's image control goes with its message, in a turn of this process.
+    if (content?.some((part) => part.type === 'image') && !options.source) {
+      shellCommands.afterShellCommands(() => { ports.sendImageTurn(text, content); });
+      return;
+    }
     if (ports.refuseUnsendable(text, options.source, content)) return;
     shellCommands.afterShellCommands(() => ports.sendTurn(text, options, undefined, { attachShellOutput: true }));
   };

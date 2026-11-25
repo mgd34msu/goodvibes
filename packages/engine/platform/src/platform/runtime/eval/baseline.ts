@@ -115,46 +115,32 @@ export function formatBaselineComparison(
   fresh: EvalSuiteResult,
 ): string {
   const lines: string[] = [];
-  const hr = '-'.repeat(72);
+  // A blank line parts the report (a dash rule wrapped at 80 columns).
+  const hr = '';
+
+  const signed = (value: number): string => `${value >= 0 ? '+' : ''}${value.toFixed(1)}`;
 
   lines.push(hr);
-  lines.push(`Baseline Comparison: ${fresh.suite}`);
-  lines.push(`Baseline: ${baseline.label} (captured ${new Date(baseline.capturedAt).toISOString()})`);
-  lines.push(`Fresh run: ${new Date(fresh.startedAt).toISOString()}`);
+  lines.push(`The run of ${fresh.suite} at ${new Date(fresh.startedAt).toLocaleString()}, against the baseline ${baseline.label} saved ${new Date(baseline.capturedAt).toLocaleString()}:`);
   lines.push(hr);
 
   const baselineSuite = baseline.suites[fresh.suite];
   if (!baselineSuite) {
-    lines.push(`No baseline data for suite "${fresh.suite}".`);
+    lines.push(`The baseline holds no scores for suite "${fresh.suite}".`);
     lines.push(hr);
     return lines.join('\n');
   }
 
-  lines.push(
-    `${'Scenario'.padEnd(48)} ${'Baseline'.padEnd(10)} ${'Fresh'.padEnd(10)} Delta`,
-  );
-  lines.push(hr);
-
   for (const result of fresh.results) {
     const baseScore = baselineSuite.scenarioScores[result.scenario.id];
-    const freshScore = result.scorecard.compositeScore;
-    const baseStr = baseScore !== undefined ? baseScore.toFixed(1) : 'N/A';
-    const delta =
-      baseScore !== undefined
-        ? `${freshScore - baseScore >= 0 ? '+' : ''}${(freshScore - baseScore).toFixed(1)}`
-        : 'new';
-    const name = result.scenario.name.slice(0, 46).padEnd(48);
-    lines.push(
-      `${name} ${baseStr.padEnd(10)} ${freshScore.toFixed(1).padEnd(10)} ${delta}`,
-    );
+    const score = result.scorecard.compositeScore;
+    lines.push(baseScore !== undefined
+      ? `  ${result.scenario.name}: ${score.toFixed(1)} now, ${baseScore.toFixed(1)} in the baseline (${signed(score - baseScore)})`
+      : `  ${result.scenario.name}: ${score.toFixed(1)} now, not in the baseline`);
   }
 
   lines.push(hr);
-  lines.push(
-    `Suite mean: baseline=${baselineSuite.meanScore.toFixed(1)}, ` +
-    `fresh=${fresh.meanScore.toFixed(1)}, ` +
-    `delta=${(fresh.meanScore - baselineSuite.meanScore >= 0 ? '+' : '') + (fresh.meanScore - baselineSuite.meanScore).toFixed(1)}`,
-  );
+  lines.push(`On average ${fresh.meanScore.toFixed(1)} now, ${baselineSuite.meanScore.toFixed(1)} in the baseline (${signed(fresh.meanScore - baselineSuite.meanScore)}).`);
   lines.push(hr);
 
   return lines.join('\n');

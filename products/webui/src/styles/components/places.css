@@ -259,6 +259,71 @@
   margin: 0 0 4px;
 }
 
+/* A long answer, whole and scrollable. */
+.place-result {
+  max-height: 60vh;
+  overflow: auto;
+}
+
+.place-result__block {
+  margin: 0 0 12px;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+/* The project the places read and act in: chosen from the projects the daemon knows. */
+.place-project {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+}
+
+.places-rail .place-project {
+  margin: 0 0 12px;
+  padding: 0 8px;
+}
+
+.place-project__label {
+  flex: none;
+  color: var(--text-2);
+  font-size: var(--text-meta);
+}
+
+.place-project__note {
+  margin: 0 0 12px;
+  padding: 0 8px;
+  color: var(--text-2);
+  font-size: var(--text-meta);
+  line-height: var(--leading-meta);
+}
+
+/* Actions that run only in a terminal program: greyed, with the one line that says where. */
+.place-elsewhere-actions {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  min-width: 0;
+}
+
+.place-elsewhere-actions + .place-elsewhere-actions,
+.place-actions + .place-elsewhere-actions {
+  margin-top: 8px;
+}
+
+.place-elsewhere-actions__buttons {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.place-elsewhere-actions__where {
+  margin: 0;
+  color: var(--text-3);
+  font-size: var(--text-meta);
+  line-height: var(--leading-meta);
+}
+
 .place-row__right {
   color: var(--text-2);
   font-size: var(--text-sm);

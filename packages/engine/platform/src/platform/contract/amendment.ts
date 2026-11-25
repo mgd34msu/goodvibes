@@ -225,6 +225,7 @@ export async function amendTarget(run: ContractRun, escalation: Escalation, inst
       attempt: attempt === 0 ? 'initial' : 'repair',
       route,
       signal: run.abort.signal,
+      forAgentId: contract.ownerAgentId,
     }, authority)));
     run.abort.signal.throwIfAborted();
     if (authority) await assertContractInputAuthority(authority, workingDirectory, run.abort.signal);

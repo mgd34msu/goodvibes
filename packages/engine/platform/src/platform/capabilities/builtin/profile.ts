@@ -15,6 +15,7 @@
  * counts them, and "See what is known about a person" is the way through.
  */
 import { CapabilityRefusal, type CapabilityCaller, type CapabilityDefinition, type InputDescription, type ListName } from '../types.js';
+import { PROFILE_FIELDS } from '../../owner-profile/fields.js';
 
 type ProfileDefinition = CapabilityDefinition<unknown>;
 
@@ -57,6 +58,14 @@ function written(answer: Record<string, unknown>, target: string, done: string):
 const FIELD: InputDescription = {
   id: 'field', label: 'Fact', help: 'The facts recorded about you: your shipping address, birthday, phone number and the like', kind: 'choice',
   choices: { list: 'about-me.fields' as ListName, allowOther: { reason: 'a field id such as commerce.shippingAddress' } }, required: true, typed: { position: 1 },
+};
+/**
+ * The fact to record: every kind of fact a profile holds (owner-profile/fields.ts), set or not, by its label, so an
+ * empty profile offers them all; the facts already recorded are the ones the other actions choose from (`FIELD`).
+ */
+const FIELD_TO_RECORD: InputDescription = {
+  id: 'field', label: 'Fact', help: 'The kind of fact: your shipping address, birthday, phone number and the like', kind: 'choice',
+  choices: PROFILE_FIELDS.map((field) => ({ value: field.id, label: `${field.label} (${field.section})` })), required: true, typed: { position: 1 },
 };
 const SECTION = (position?: 1): InputDescription => ({
   id: 'section', label: 'Section', help: position ? 'The section the line is in' : 'Where the line goes', kind: 'choice',
@@ -102,7 +111,7 @@ export const PROFILE_SHOW = read({
 
 export const PROFILE_FIELD = read({
   capability: daemon('about-me.field', 'safe'), actionId: 'field', label: 'See one fact about you', word: 'field', inputs: [FIELD],
-  sentence: 'Shows fact {field}, its value and where it came from.', example: { field: 'commerce.shippingAddress' },
+  sentence: 'Shows what GoodVibes knows of fact {field} (your shipping address, birthday, phone number and the like): its value and where it came from.', example: { field: 'commerce.shippingAddress' },
   async run(values, _services, caller) {
     const response = await call(caller, 'profile.get', { fieldId: values.field! });
     const field = record(response.field);
@@ -156,7 +165,7 @@ export const PROFILE_WHERE = read({
 
 export const PROFILE_STATUS = read({
   capability: daemon('about-me.status', 'safe'), actionId: 'status', label: 'Check that your profile loads', word: 'status',
-  sentence: 'Says whether your profile loaded, from where, and which facts did not parse.',
+  sentence: 'Says whether your profile (what GoodVibes knows about you) loaded, from where, and which facts did not parse.',
   async run(_values, _services, caller) {
     const response = await call(caller, 'profile.status', {});
     const invalid = list(response.invalidFields);
@@ -179,22 +188,24 @@ export const PROFILE_STATUS = read({
 
 export const PROFILE_SET = change({
   capability: daemon('about-me.set', 'safe'), actionId: 'set', label: 'Set a fact about you', word: 'set',
-  inputs: [FIELD, { id: 'value', label: 'Value', help: 'What it is now', kind: 'text', freeTextReason: 'your own words for the fact', required: true, typed: { tail: true } }],
-  sentence: 'Fact {field} is recorded as "{value}" in your own words, until you change it.', example: { field: 'commerce.shippingAddress', value: '1 Main St' },
+  inputs: [FIELD_TO_RECORD, { id: 'value', label: 'Value', help: 'What it is now', kind: 'text', freeTextReason: 'your own words for the fact', required: true, typed: { tail: true } }],
+  sentence: 'Fact {field} is recorded as "{value}" in your own words, and GoodVibes knows it until you change it.', example: { field: 'commerce.shippingAddress', value: '1 Main St' },
   undoneBy: 'undo',
   async run(values, _services, caller) {
     // The person's own request, typed or submitted: his words are what he gave (the trust gate's verbatim quote).
     const answer = await call(caller, 'profile.set', {
       fieldId: values.field!, value: values.value!, surface: surfaceOf(caller), said: `${values.field} is ${values.value}`, authority: 'owner-direct',
     });
-    return written(answer, `${values.field} was not recorded`, `Saved ${values.field} to your profile.`);
+    // The fact by its label, as the form and the question showed it.
+    const label = PROFILE_FIELDS.find((field) => field.id === values.field)?.label ?? values.field;
+    return written(answer, `${label} was not recorded`, `Saved ${label} to your profile.`);
   },
 });
 
 export const PROFILE_NOTE = change({
   capability: daemon('about-me.note', 'unsafe'), actionId: 'note', label: 'Add a line about you', word: 'note',
   inputs: [SECTION(), { id: 'text', label: 'Line', help: 'The line, in your words', kind: 'long-text', freeTextReason: 'your own words', required: true, typed: { tail: true } }],
-  sentence: 'The line "{text}" is added to your profile, until you change it.', example: { section: 'Work', text: 'I work from Vienna on Fridays' },
+  sentence: 'The line "{text}" is added to what GoodVibes knows about you, until you change it.', example: { section: 'Work', text: 'I work from Vienna on Fridays' },
   undoneBy: 'forget-line',
   async run(values, _services, caller) {
     const section = values.section || 'Notes';
@@ -214,7 +225,7 @@ export const PROFILE_UNDO = change({
 
 export const PROFILE_FORGET = change({
   capability: daemon('about-me.forget', 'safe'), actionId: 'forget', label: 'Forget a fact', word: 'forget', inputs: [FIELD],
-  sentence: 'Fact {field} and every earlier value kept for it are deleted from your profile.', example: { field: 'commerce.shippingAddress' },
+  sentence: 'Fact {field} and every earlier value kept for it are deleted from your profile: GoodVibes no longer knows it.', example: { field: 'commerce.shippingAddress' },
   risk: 'cannot-be-undone',
   async run(values, _services, caller) {
     const answer = await call(caller, 'profile.forget', { fieldId: values.field!, authority: 'owner-direct' });

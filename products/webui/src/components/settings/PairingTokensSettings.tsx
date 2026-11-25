@@ -218,7 +218,14 @@ export function PairingTokensSettings() {
     mutationFn: ({ id, confirmReplace }: { id: string; confirmReplace: boolean }) => platformClient.operator.remote.pairRequests.approve(id, confirmReplace),
     onSuccess: async (result) => {
       await queryClient.invalidateQueries({ queryKey: queryKeys.remotePairRequests });
-      toast({ title: 'Device approved', description: `Press Finish pairing on "${result.request.label}" to complete it.`, tone: 'success' });
+      // Another machine's daemon finishes by itself; a phone finishes when Finish pairing is pressed on it.
+      toast({
+        title: 'Device approved',
+        description: result.request.peerKind === 'node'
+          ? `"${result.request.label}" finishes pairing by itself.`
+          : `Press Finish pairing on "${result.request.label}" to complete it.`,
+        tone: 'success',
+      });
     },
   });
   const rejectPairRequest = useMutation({
@@ -314,7 +321,7 @@ export function PairingTokensSettings() {
         <SettingsBlock
           testId="remote-pair-requests"
           title="Waiting to pair"
-          description="A device asked to pair as a node of this daemon. Approve only a device you recognise, then press Finish pairing on it."
+          description="A device asked to pair with this daemon. Approve only a device you recognise: a phone then finishes when Finish pairing is pressed on it; another machine's daemon finishes by itself."
         >
           <RowList aria-label="Waiting to pair">
             {pendingPairRequests.map((request) => (
@@ -326,6 +333,7 @@ export function PairingTokensSettings() {
                   [request.platform, request.deviceFamily].filter(Boolean).join(', '),
                   request.capabilities.length > 0 ? `offers ${request.capabilities.join(', ')}` : 'offers nothing yet',
                   `pairs as ${request.requestedId}`,
+                  request.remoteAddress && `asked from ${request.remoteAddress}`,
                   whenLabel(request.createdAt) && `asked ${whenLabel(request.createdAt)}`,
                 ].filter(Boolean).join(' · ')}
                 trailing={(

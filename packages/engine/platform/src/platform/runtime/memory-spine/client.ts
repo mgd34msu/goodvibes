@@ -275,6 +275,12 @@ export interface MemorySpineClientOptions {
    */
   readonly recallSnapshotStaleAfterMs?: number | undefined;
   readonly log?: SpineLogger;
+  /**
+   * The project this program works in (memoryProjectIdentity of its folder): a "this project" record it adds with
+   * no project is for this one, so it is given only to work here. Absent (the daemon, which serves every project):
+   * an add names its project itself.
+   */
+  readonly project?: string | undefined;
 }
 
 export type { MemoryRecallSnapshot, MemoryRecallRefreshOptions } from './recall-snapshot.js';
@@ -300,7 +306,11 @@ export class MemorySpineClient implements MemoryAccess {
   /** The local reload started by deactivate(); local operations wait for it. */
   private localReload: Promise<void> | null = null;
 
+  /** The project a "this project" add with none is for (MemorySpineClientOptions.project). */
+  private readonly project: string | undefined;
+
   constructor(options: MemorySpineClientOptions) {
+    this.project = options.project;
     this.local = options.local;
     this.transport = options.transport ?? null;
     this.log = options.log ?? logger;
@@ -381,9 +391,12 @@ export class MemorySpineClient implements MemoryAccess {
   }
 
   add(opts: MemoryAddOptions, options?: MemoryOperationOptions): Promise<MemoryRecord> {
+    // A "this project" record from this program is for this program's project.
+    const stamped: MemoryAddOptions = (opts.scope ?? 'project') === 'project' && opts.project === undefined && this.project !== undefined
+      ? { ...opts, project: this.project } : opts;
     return this.afterLocalReload(() => {
       const operation = this.operation(options), route = this.route();
-      return awaitMemoryOperation(() => route.add(opts, operation), operation);
+      return awaitMemoryOperation(() => route.add(stamped, operation), operation);
     });
   }
 

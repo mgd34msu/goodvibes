@@ -8,7 +8,7 @@
  * No command is executed: the real registry/admission path ends at a counter.
  */
 import { afterAll, describe, expect, test } from 'bun:test';
-import { mkdtempSync, rmSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { useGateReadings } from './_helpers/gate-readings.ts';
@@ -128,6 +128,10 @@ describe('remembered rules stay in their project', () => {
       const store = new UserPermissionRuleStore(join(dir, 'rules.json'));
       await store.init();
       const [projectA, projectB] = [join(dir, 'project-a'), join(dir, 'cloned-b')];
+      // project-a is a repository: a program opened in its subfolder is in project-a; a repository nested inside it is
+      // a project of its own (workspace/project-identity.ts).
+      const [inSubfolder, nestedRepository] = [join(projectA, 'src', 'deep'), join(projectA, 'vendor', 'nested')];
+      for (const folder of [join(projectA, '.git'), inSubfolder, join(nestedRepository, '.git'), projectB]) mkdirSync(folder, { recursive: true });
       // The owner's remembered answer to a forced push, a deletion only he decides: the grant that must never leak to another project.
       const forcePush = execArgs('git push --force origin');
       const grant = buildDurableRuleForDecision({ toolName: 'exec', args: forcePush, tier: 'command-class', effect: 'allow', ownerOnly: 'unrecoverable-delete' })!;
@@ -144,10 +148,14 @@ describe('remembered rules stay in their project', () => {
       const inProjectB = await inB.checkDetailed('exec', forcePush);
       expect(inProjectB.sourceLayer).not.toBe('user_rule');
       expect(inProjectB.approved).toBe(false);
+      // The same project from its subfolder; not in the repository nested inside it.
+      expect(await managerIn(inSubfolder).checkDetailed('exec', forcePush)).toMatchObject({ approved: true, sourceLayer: 'user_rule' });
+      const inNested = await managerIn(nestedRepository).checkDetailed('exec', forcePush);
+      expect(`${inNested.sourceLayer === 'user_rule' ? 'rule' : 'no rule'} ${inNested.approved}`).toBe('no rule false');
       for (const consumer of [inA, inB]) {
         expect(await consumer.checkDetailed('exec', execArgs('npm test'))).toMatchObject({ approved: true, sourceLayer: 'user_rule' });
       }
-      expect(asks).toBe(1);
+      expect(asks).toBe(2);
     } finally { rmSync(dir, { recursive: true, force: true }); }
   });
 });

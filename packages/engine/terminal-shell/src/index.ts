@@ -189,9 +189,9 @@ export {
   redactSerializedSecrets,
   type RedactedConfigResult,
   type PreparedConfigRedaction,
-} from './cli-redaction.js';
+} from '@goodvibes/engine/platform/platform/support/config-redaction';
 
-export { retainCliConfig } from './cli-config-owner.js';
+export { retainCliConfig } from '@goodvibes/engine/platform/platform/support/service-posture';
 
 export {
   RUNTIME_ENDPOINT_DEFAULT_PORTS,
@@ -202,7 +202,7 @@ export {
   type RuntimeEndpointId,
   type RuntimeHostMode,
   type RuntimeEndpointBinding,
-} from './cli-endpoints.js';
+} from '@goodvibes/engine/platform/platform/support/service-posture';
 
 export {
   FEATURE_SETTINGS_BY_ID,
@@ -246,7 +246,7 @@ export {
   resolveWebSurfaceExposure,
   type BindPosture,
   type BindPostureKind,
-} from './cli-network-posture.js';
+} from '@goodvibes/engine/platform/platform/support/service-posture';
 
 export {
   SYNC_BEGIN,

@@ -58,7 +58,7 @@ The TUI normally adopts a compatible GoodVibes daemon it finds already listening
 
 Two ways to point a TUI instance at a daemon it did not start itself:
 
-**Interactive.** In `/setup connect-daemon` (Use a daemon on another computer), set "GoodVibes daemon source" to "Connect to an existing running daemon," fill in that daemon's host, port, and token, and select "Connect to this daemon now." This saves the token beside that daemon's address in the terminal's own connected-daemon credentials (`~/.goodvibes/tui/connected-daemons.json`; the local daemon's `operator-tokens.json` is not touched), saves the address as `daemon.connectedHost.url`, and restarts the external-services controller immediately so you see whether the connection succeeded before you save the form. Nothing on this computer is opened to the network, and the local bind and service settings (`controlPlane.*`, `service.*`) are left alone, so saving keeps the connection, and opening the form again starts from it. Choosing "Start a new daemon" clears `daemon.connectedHost.url` and the TUI goes back to the daemon on this machine.
+**Interactive.** In `/setup connect-daemon` (A daemon elsewhere), set "GoodVibes daemon source" to "Connect to an existing running daemon," fill in that daemon's host, port, and token, and select "Connect to this daemon now." This saves the token beside that daemon's address in the terminal's own connected-daemon credentials (`~/.goodvibes/tui/connected-daemons.json`; the local daemon's `operator-tokens.json` is not touched), saves the address as `daemon.connectedHost.url`, and restarts the external-services controller immediately so you see whether the connection succeeded before you save the form. Nothing on this computer is opened to the network, and the local bind and service settings (`controlPlane.*`, `service.*`) are left alone, so saving keeps the connection, and opening the form again starts from it. Choosing "Start a new daemon" clears `daemon.connectedHost.url` and the TUI goes back to the daemon on this machine.
 
 **Non-interactive.** Set the `GOODVIBES_DAEMON_TOKEN` environment variable to run the daemon with a fixed, known token, and point the TUI at the same host/port and token:
 
@@ -234,9 +234,9 @@ Key commands:
 
 | Command | Does |
 | --- | --- |
-| `/services list\|show\|check\|test\|check-auth\|trust\|export\|import\|open` | See, check and move your API services, and use one a project defines |
+| Models and providers, Services and Move (the menu) | See, test and check your API services, use one a project defines, and save or replace the list from a file |
 | Tools and extensions, Presets (the menu) | Load and save presets (display, model and behaviour settings), and save, check or add them as a file |
-| `/startup transfer-export\|transfer-inspect\|transfer-import` | Move setup-transfer bundles between environments |
+| System place, Support and transfer: "Move this setup to another computer" (`s` save, `o` read, `m` bring in) | Move setup-transfer bundles between environments |
 
 Service entries can use an existing `tokenKey` field, a SecretRef in the key field, or explicit `tokenRef` / `passwordRef` / `webhookUrlRef` / `signingSecretRef` / `publicKeyRef` / `appTokenRef` fields:
 
@@ -289,7 +289,7 @@ GoodVibes exposes integration-helper and control/state APIs for external clients
 
 The front doors into this layer cover provider login/logout flows, install and update posture review, trust review bundles, bridge status/review/export/import paths, setup deep links, and portable install/update/auth review bundles with deeplink review and bundle packaging for operator surfaces.
 
-The setup surface is broader than a single readiness screen. It also covers the `/setup` topics, `/startup` checks, review of services, hooks, remote, and sandbox posture, support-bundle export, setup-transfer export/inspect/import, and deep links into the cockpit, security, remote, knowledge, incident, hooks, orchestration, and tasks operator surfaces.
+The setup surface is broader than a single readiness screen. It also covers the `/setup` topics, the setup checks on the Health tab of the System place, review of services, hooks, remote, and sandbox posture, support-bundle export, setup-transfer export/inspect/import, and deep links into the cockpit, security, remote, knowledge, incident, hooks, orchestration, and tasks operator surfaces.
 
 ## Core control-plane entrypoints
 

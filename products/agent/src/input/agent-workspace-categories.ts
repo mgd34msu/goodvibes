@@ -77,7 +77,6 @@ export const AGENT_WORKSPACE_CATEGORIES: readonly AgentWorkspaceCategory[] = fre
       { id: 'account-tts-llm-provider', label: 'Choose the model for spoken replies', detail: 'Opens the model picker for the model that answers when you talk to the assistant.', kind: 'model-picker', modelPickerFlow: 'providerModel', modelPickerTarget: 'tts', safety: 'safe' },
       // System prompt + custom provider plumbing
       settingAction({ id: 'account-system-prompt', label: 'Custom system prompt file', detail: 'Optional local file used as the system prompt for every assistant turn.', key: 'provider.systemPromptFile' }),
-      actRow('account-run-local-model-benchmark', 'compare benchmark'),
       // Prompt cache controls (advanced, most users leave defaults)
       settingAction({ id: 'account-cache-enabled', label: 'Prompt cache', detail: 'Toggle prompt caching for eligible providers.', key: 'cache.enabled' }),
       settingAction({ id: 'account-cache-ttl', label: 'Cache TTL', detail: 'Cycle ephemeral or persistent cache TTL for stable content.', key: 'cache.stableTtl', visibleWhenKey: 'cache.enabled', visibleWhenValue: true }),
@@ -162,15 +161,7 @@ export const AGENT_WORKSPACE_CATEGORIES: readonly AgentWorkspaceCategory[] = fre
       { id: 'personal-ops-queue', label: 'Review queue', detail: 'The inbox threads and calendar events saved for review, and what each still needs from you. Ask in the conversation: "What is waiting for my review?"', kind: 'guidance', safety: 'read-only' },
       { id: 'personal-ops-intake', label: 'Request planner', detail: 'Type an inbox, agenda, task, reminder, note, routine or delivery request in the conversation, for example "remind me to water the tomatoes on Friday". The Agent plans it and asks before it changes anything.', kind: 'guidance', safety: 'read-only' },
       actRow('personal-ops-inbox', 'mail set'),
-      actRow('personal-ops-google-connect', 'google connect'),
-      actRow('personal-ops-google-status', 'google status'),
-      actRow('personal-ops-google-reauthorize', 'google reauthorize'),
-      actRow('personal-ops-google-forget', 'google forget'),
-      actRow('personal-ops-google-app-password', 'google setup', { path: 'app-password' }, 'Connect Google with an app password'),
-      actRow('personal-ops-google-oauth', 'google setup', { path: 'oauth' }, 'Connect Google with a new OAuth client'),
-      actRow('personal-ops-google-adopt', 'google adopt'),
-      actRow('personal-ops-google-client-file', 'google client-file'),
-      actRow('personal-ops-google-client-manual', 'google client'),
+      // Google is connected, checked and disconnected on the Google tab of Mail, calendar and channels.
       actRow('personal-ops-calendar', 'calendar subscribe'),
       actRow('personal-ops-calendar-add', 'calendar add'),
       actRow('personal-ops-calendar-google', 'calendar use-app', { provider: 'google' }, 'Use your own Google Calendar app'),
@@ -217,8 +208,8 @@ export const AGENT_WORKSPACE_CATEGORIES: readonly AgentWorkspaceCategory[] = fre
     id: 'documents',
     group: 'DAY-TO-DAY',
     label: 'Documents & Files',
-    summary: 'Write and review documents, keep saved files, and compare models on the same task.',
-    detail: 'Use this workspace when the user is producing or evaluating a document. Versioned drafts, review comments, AI suggestion review, artifact insertion/export, upload, source, artifact browsing, media, and blind comparison routes stay visible here.',
+    summary: 'Write and review documents, and keep saved files.',
+    detail: 'Use this workspace when the user is producing or evaluating a document. Versioned drafts, review comments, AI suggestion review, artifact insertion/export, upload, source, artifact browsing and media stay visible here.',
     actions: [
       { id: 'document-ops-map', label: 'Readiness map', detail: 'Shows what is ready for documents here: writing, review, upload, export, sources, media and comparing drafts. Ask in the conversation: "What can you do with documents here?"', kind: 'guidance', safety: 'read-only' },
       actRow('document-browse-drafts', 'documents list'),
@@ -254,14 +245,7 @@ export const AGENT_WORKSPACE_CATEGORIES: readonly AgentWorkspaceCategory[] = fre
       actRow('document-promote-artifact', 'knowledge ingest-artifact'),
       actRow('document-generate-media', 'media make'),
       { id: 'document-model-routing', label: 'Models', detail: 'Choose the model the assistant answers with.', targetCategoryId: 'account-model', kind: 'workspace', safety: 'safe' },
-      actRow('document-run-compare', 'compare run'),
-      actRow('document-review-compare', 'compare review'),
-      actRow('document-diff-handoffs', 'compare diff-handoffs'),
-      actRow('document-judge-compare', 'compare judge'),
-      actRow('document-compare-analytics', 'compare analytics'),
-      actRow('document-apply-compare', 'compare apply'),
-      actRow('document-record-route-decision', 'compare record-decision'),
-      actRow('document-export-compare', 'compare export'),
+      // Comparing models on the same task is the Comparisons tab of Models and providers.
     ],
   },
   {
@@ -313,7 +297,7 @@ export const AGENT_WORKSPACE_CATEGORIES: readonly AgentWorkspaceCategory[] = fre
     group: 'CAPABILITIES',
     label: 'Knowledge',
     summary: 'What the assistant knows from the pages, files and bookmarks you added.',
-    detail: 'Agent knowledge calls use the isolated Agent Knowledge route family only. Default knowledge and non-Agent knowledge segments are not the Agent knowledge environment.',
+    detail: 'One knowledge store, the daemon\'s: what you add here is what the terminal app and the web app see, in Memory and knowledge.',
     actions: [
       actRow('knowledge-search', 'knowledge search'),
       actRow('knowledge-ingest-url', 'knowledge ingest-url'),

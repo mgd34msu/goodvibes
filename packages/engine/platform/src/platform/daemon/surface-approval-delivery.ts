@@ -2,7 +2,7 @@
  * surface-approval-delivery.ts, per-surface rendering of an approval update.
  *
  * Split out of surface-delivery.ts, which was over the 800-line cap. These
- * four are a cohesive block: each takes the same approval + route binding and
+ * three (Slack, Discord, ntfy) are a cohesive block: each takes the same approval + route binding and
  * differs only in how that surface expresses "approve / deny / here is the
  * console link". Nothing here decides WHICH surface to use, that stays in
  * DaemonSurfaceDeliveryHelper.notifyApprovalUpdate, the one router. Each one
@@ -20,14 +20,20 @@ import type { SharedApprovalRecord } from '../control-plane/index.js';
 import { isOpenApprovalStatus } from '../control-plane/approval-lifecycle.js';
 import { SlackIntegration, DiscordIntegration, NtfyIntegration, ntfyBaseUrl, resolveNtfyDefaultPriority } from '../integrations/index.js';
 import { logger } from '../utils/logger.js';
-import { postToPublicWebhook, validatePublicWebhookUrl } from '../utils/url-safety.js';
+import { postToPublicWebhook } from '../utils/url-safety.js';
 import type { HostResolver } from '../runtime/network/destination.js';
 import { summarizeError } from '../utils/error-display.js';
 import { resolveSurfaceSecret } from '../channels/builtin/surface-secrets.js';
 import type { SurfaceNoticeDelivery } from './types.js';
-import { approvalReplyHint } from './approval-reply.js';
+import { formatApprovalMessage } from '../channels/builtin/rendering.js';
+import { hostApprovalPresentation } from '../permissions/ask-facts-host.js';
 
 type RouteBinding = import('../automation/routes.js').AutomationRouteBinding;
+
+/** The ask as a message on a chat channel, in the words every surface shows it (channels/builtin/rendering.ts). */
+function approvalMessage(deps: Pick<SurfaceApprovalDeliveryDeps, 'configManager'>, approval: SharedApprovalRecord): string {
+  return formatApprovalMessage(approval, hostApprovalPresentation({ configManager: deps.configManager }, approval.request, approval.sessionId));
+}
 
 export interface SurfaceApprovalDeliveryDeps {
   readonly serviceRegistry: Pick<ServiceRegistry, 'resolveSecret'>;
@@ -41,7 +47,6 @@ export interface SurfaceApprovalDeliveryDeps {
   readonly resolveNtfyToken?: (() => Promise<string | null>) | undefined;
   /** The Discord bot token; the setup schema's reader (registry, `surfaces.discord.botToken`, environment) when absent. */
   readonly resolveDiscordBotToken?: (() => Promise<string | null>) | undefined;
-  readonly signWebhookPayload: (body: string, secret: string) => string;
   /** Resolves a delivery host before posting; the system resolver when absent (utils/url-safety.ts). */
   readonly resolveHost?: HostResolver | undefined;
 }
@@ -57,24 +62,25 @@ export async function deliverSlackApprovalUpdate(
 ): Promise<SurfaceNoticeDelivery> {
   const webUrl = deps.controlPlaneWebUrl({ approvalId: approval.id, sessionId: approval.sessionId });
   const isPending = isOpenApprovalStatus(approval.status);
-  const summary = approval.request.analysis.summary;
   const webhookUrl = await deps.resolveSlackWebhookUrl();
   const botToken = await deps.resolveSlackBotToken();
   const slack = new SlackIntegration(webhookUrl ?? undefined, botToken ?? undefined);
+  // The ask's own words (formatApprovalMessage); the buttons only where a press decides it.
+  const text = approvalMessage(deps, approval);
+  const answers = approval.requiresOwnerDecision !== true;
+  const elements = [
+    ...(answers ? [
+      { type: 'button', style: 'primary', text: { type: 'plain_text', text: 'Approve' }, action_id: `gv:approval:approve:${approval.id}` },
+      { type: 'button', style: 'danger', text: { type: 'plain_text', text: 'Deny' }, action_id: `gv:approval:deny:${approval.id}` },
+    ] : []),
+    ...(webUrl ? [{ type: 'button', text: { type: 'plain_text', text: 'Review in the app' }, url: webUrl }] : []),
+  ];
   const blocks = isPending
     ? [
-        { type: 'section', text: { type: 'mrkdwn', text: `*Approval required* for \`${approval.request.tool}\`\n${summary}` } },
-        {
-          type: 'actions',
-          elements: [
-            { type: 'button', style: 'primary', text: { type: 'plain_text', text: 'Approve' }, action_id: `gv:approval:approve:${approval.id}` },
-            { type: 'button', style: 'danger', text: { type: 'plain_text', text: 'Deny' }, action_id: `gv:approval:deny:${approval.id}` },
-            ...(webUrl ? [{ type: 'button', text: { type: 'plain_text', text: 'Review in the app' }, url: webUrl }] : []),
-          ],
-        },
+        { type: 'section', text: { type: 'mrkdwn', text } },
+        ...(elements.length > 0 ? [{ type: 'actions', elements }] : []),
       ]
     : undefined;
-  const text = isPending ? `Approval required: ${summary}` : `Approval ${approval.status}: ${summary}`;
   if (typeof binding.metadata.responseUrl === 'string' && binding.metadata.responseUrl.startsWith('https://')) {
     // Held to the webhook rules: resolved, every answer checked, pinned, no redirects.
     const delivered = await postToPublicWebhook(binding.metadata.responseUrl, {
@@ -111,16 +117,12 @@ export async function deliverDiscordApprovalUpdate(
   binding: RouteBinding,
 ): Promise<SurfaceNoticeDelivery> {
   const webUrl = deps.controlPlaneWebUrl({ approvalId: approval.id, sessionId: approval.sessionId });
-  const isPending = isOpenApprovalStatus(approval.status);
-  const summary = approval.request.analysis.summary;
   const webhookUrl = await resolveSurfaceSecret(deps, 'discord', 'webhookUrl');
   const botToken = deps.resolveDiscordBotToken
     ? await deps.resolveDiscordBotToken() ?? undefined
     : await resolveSurfaceSecret(deps, 'discord', 'primary') ?? undefined;
   const discord = new DiscordIntegration(webhookUrl ?? undefined, botToken ?? undefined);
-  const content = isPending
-    ? `Approval required for \`${approval.request.tool}\`: ${summary}\n${approvalReplyHint(approval)}${webUrl ? `\n${webUrl}` : ''}`
-    : `Approval ${approval.status} for \`${approval.request.tool}\`: ${summary}${webUrl ? `\n${webUrl}` : ''}`;
+  const content = `${approvalMessage(deps, approval)}${webUrl ? `\n${webUrl}` : ''}`;
   const applicationId = typeof binding.metadata.applicationId === 'string' ? binding.metadata.applicationId : undefined;
   const interactionToken = typeof binding.metadata.interactionToken === 'string' ? binding.metadata.interactionToken : undefined;
   if (applicationId && interactionToken) {
@@ -158,8 +160,7 @@ export async function deliverNtfyApprovalUpdate(
   const topic = binding.channelId ?? binding.externalId;
   if (!topic) return { delivered: false, reason: 'no-deliverable-target' };
   const webUrl = deps.controlPlaneWebUrl({ approvalId: approval.id, sessionId: approval.sessionId });
-  const isPending = isOpenApprovalStatus(approval.status);
-  const summary = approval.request.analysis.summary;
+  const presentation = hostApprovalPresentation({ configManager: deps.configManager }, approval.request, approval.sessionId);
   const ntfy = new NtfyIntegration(
     ntfyBaseUrl(deps.configManager),
     deps.resolveNtfyToken
@@ -170,8 +171,9 @@ export async function deliverNtfyApprovalUpdate(
   try {
     // Suppressed only as a repeat of this approval at this status: two
     // approvals with the same tool and summary are two notifications.
-    const outcome = await ntfy.publish(topic, isPending ? `Approval required: ${summary}\n${approvalReplyHint(approval)}` : `Approval ${approval.status}: ${summary}`, {
-      title: approval.request.tool,
+    // The notification's title is the ask's own line; its body the rest of the ask's words.
+    const outcome = await ntfy.publish(topic, formatApprovalMessage(approval, presentation, { withTitle: false }), {
+      title: presentation.title,
       ...(priority === undefined ? {} : { priority }),
       ...(webUrl ? { click: webUrl } : {}),
       announces: `approval:${approval.id}:${approval.status}`,
@@ -184,40 +186,3 @@ export async function deliverNtfyApprovalUpdate(
   }
 }
 
-export async function deliverWebhookApprovalUpdate(
-  deps: SurfaceApprovalDeliveryDeps,
-  approval: SharedApprovalRecord,
-  binding: RouteBinding,
-): Promise<SurfaceNoticeDelivery> {
-  if (typeof binding.metadata.callbackUrl !== 'string') return { delivered: false, reason: 'no-deliverable-target' };
-  const validation = validatePublicWebhookUrl(binding.metadata.callbackUrl);
-  if (!validation.ok) {
-    logger.warn('DaemonServer: refusing unsafe webhook approval callback URL', {
-      approvalId: approval.id,
-      reason: validation.error,
-    });
-    return { delivered: false, reason: 'no-deliverable-target', error: validation.error };
-  }
-  const payload = JSON.stringify({
-    type: 'approval',
-    approval,
-    webUrl: deps.controlPlaneWebUrl({ approvalId: approval.id, sessionId: approval.sessionId }) ?? null,
-  });
-  const headers = new Headers({ 'Content-Type': 'application/json' });
-  const secret = String(deps.configManager.get('surfaces.webhook.secret') ?? '');
-  if (secret) {
-    headers.set('X-Goodvibes-Signature', deps.signWebhookPayload(payload, secret));
-  }
-  // Resolved, every answer checked, pinned to a checked address (utils/url-safety.ts).
-  try {
-    await postToPublicWebhook(validation.url, {
-      method: 'POST',
-      headers,
-      body: payload,
-    }, { resolveHost: deps.resolveHost });
-    return { delivered: true };
-  } catch (error) {
-    logger.warn('Webhook approval update failed', { approvalId: approval.id, error: summarizeError(error) });
-    return failed(error);
-  }
-}

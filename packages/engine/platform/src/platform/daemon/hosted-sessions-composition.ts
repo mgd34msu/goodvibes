@@ -1,6 +1,7 @@
 import type { FailureReadOptions } from '@goodvibes/engine/errors';
 import { createNativeHostedTurnHost, type NativeHostedTurnDependencies, type NativeHostedTurnHost } from '../hosted-sessions/native-turn-host.js';
 import { registerNativeHostedTurnGatewayMethods } from '../control-plane/routes/native-hosted-turn.js';
+import { projectProxy } from '../control-plane/project-routing.js';
 import type { SharedSessionBroker } from '../control-plane/session-broker.js';
 import { hostedSessionPresence } from '../agents/agent-owner-questions.js';
 /**
@@ -63,6 +64,15 @@ import { CONVERSATIONAL_DIAGNOSIS_SECTION } from '../agents/conversational-contr
 export interface DaemonHostedSessionsOptions {
   /** Host-private owner supplied by product composition, never wire data. */
   readonly nativeConversation?: NativeHostedTurnDependencies | undefined;
+  /**
+   * Native turns per project: the catalog the native turn methods are registered on, which runs each request in the
+   * project it names (control-plane/project-routing.ts), and that project's turn dependencies (its intake, its
+   * journal), made once. A request that names no project is the daemon's own folder's (`nativeConversation`).
+   */
+  readonly nativeConversationProjects?: {
+    readonly route: (catalog: import('../control-plane/method-catalog.js').GatewayMethodCatalog) => import('../control-plane/method-catalog.js').GatewayMethodCatalog;
+    readonly forProject: (folder: string) => NativeHostedTurnDependencies;
+  } | undefined;
   /**
    * How a workspace floor is built. Required, see the module header for why
    * there is no default.
@@ -157,9 +167,11 @@ export function composeHostedSessions(input: HostedSessionCompositionInput): Hos
     },
   );
   let native: NativeHostedTurnHost | undefined;
+  /** The other projects' native turn hosts, closed with the daemon's own. */
+  const projectNative: NativeHostedTurnHost[] = [];
   const manager = new HostedSessionManager({
     failureReading: input.failureReading,
-    closeNativeTurns: () => native?.close() ?? Promise.resolve(),
+    closeNativeTurns: async () => { await Promise.all([native?.close(), ...projectNative.map((host) => host.close())]); },
     floorFactory: input.options.floorFactory,
     store,
     // Read live on every use: a policy change applies to the next detach, not
@@ -190,8 +202,26 @@ export function composeHostedSessions(input: HostedSessionCompositionInput): Hos
   if (input.options.nativeConversation) {
     const broker = input.spine as SharedSessionBroker | undefined;
     if (!broker || typeof broker.reserveNativeTurnInput !== 'function') throw new Error('Native hosted delivery requires the canonical session broker');
-    native = createNativeHostedTurnHost({ ...input.options.nativeConversation, manager, broker });
-    registerNativeHostedTurnGatewayMethods(input.gatewayMethods, native);
+    const own = createNativeHostedTurnHost({ ...input.options.nativeConversation, manager, broker });
+    const projects = input.options.nativeConversationProjects;
+    native = own;
+    if (!projects) {
+      registerNativeHostedTurnGatewayMethods(input.gatewayMethods, own);
+    } else {
+      // Each project's turns: its own host over its own intake and journal, made on its first request.
+      const hosts = new Map<string, NativeHostedTurnHost>();
+      const hostFor = (folder: string | undefined): NativeHostedTurnHost => {
+        if (folder === undefined) return own;
+        let host = hosts.get(folder);
+        if (!host) {
+          host = createNativeHostedTurnHost({ ...projects.forProject(folder), manager, broker });
+          hosts.set(folder, host);
+          projectNative.push(host);
+        }
+        return host;
+      };
+      registerNativeHostedTurnGatewayMethods(projects.route(input.gatewayMethods), projectProxy(hostFor));
+    }
   }
   manager.setEventPublisher(input.eventPublisher);
   // The live-turn verbs (cancel, queued messages) admit a caller on a hosted session's owners.

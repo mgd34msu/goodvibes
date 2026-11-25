@@ -26,7 +26,6 @@ import { BlockActionsMenu } from '../renderer/block-actions.ts';
 import { ContextInspectorModal } from '../renderer/context-inspector.ts';
 import type { SurfaceModalHost } from '@goodvibes/engine/terminal-shell/surface-modal-host';
 import { BookmarkModal } from './bookmark-modal.ts';
-import { SettingsModal } from './settings-modal.ts';
 import type { McpWorkspace } from './mcp-workspace.ts';
 import type { AgentWorkspace } from './agent-workspace.ts';
 import { SessionPickerModal } from './session-picker-modal.ts';
@@ -78,7 +77,7 @@ import type { FocusTracker } from '@/runtime/index.ts';
  *     terminal focus from `\x1b[I`/`\x1b[O` tokens (DECSET ?1004h, enabled in
  *     main.ts). Shared instance from RuntimeServices, threaded via
  *     uiServices.platform.focusTracker (mirrors the TUI's own wiring).
- *   - `selectionModal`, `bookmarkModal`, `settingsModal`, `sessionPickerModal`,
+ *   - `selectionModal`, `bookmarkModal`, `sessionPickerModal`,
  *     `profilePickerModal`, modal objects constructed once in InputHandler constructor
  *   - `filePicker`, `modelPicker`, `processModal`, `liveTailModal`,
  *     `contextInspectorModal`, `blockActionsMenu`, `searchManager`, `historySearch`,
@@ -116,7 +115,6 @@ export interface InputFeedContext {
   readonly selectionModal: SelectionModal;
   selectionCallback: ((result: SelectionResult | null) => void) | null;
   readonly bookmarkModal: BookmarkModal;
-  readonly settingsModal: SettingsModal;
   readonly mcpWorkspace: McpWorkspace;
   readonly agentWorkspace: AgentWorkspace;
   readonly sessionPickerModal: SessionPickerModal;

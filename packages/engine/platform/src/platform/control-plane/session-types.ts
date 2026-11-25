@@ -311,6 +311,12 @@ export interface RegisterSharedSessionInput {
    * conflict marker. Pass `true` to reopen as part of the register.
    */
   readonly reopen?: boolean | undefined;
+  /**
+   * The principal registering it (from the credential, never the body). Kept on a session this registration makes
+   * (`SESSION_REGISTERED_BY_METADATA_KEY`) and never changed by a later one: only that principal may name the
+   * session as a question's asker.
+   */
+  readonly registeredBy?: string | undefined;
 }
 
 /**

@@ -8,7 +8,7 @@
  * tool reads the same files).
  */
 import { copyFileSync, existsSync, readFileSync } from 'node:fs';
-import { resolve } from 'node:path';
+import { isAbsolute, resolve } from 'node:path';
 import { atomicWriteFileSync } from '../../config/atomic-write.js';
 import { describePendingProjectService, pendingProjectServiceLines, type ServiceRegistry } from '../../config/service-registry.js';
 import { summarizeError } from '../../utils/error-display.js';
@@ -51,8 +51,12 @@ function readable(services: ServicesCapabilityServices, caller: CapabilityCaller
   return registry;
 }
 
-function filePath(services: ServicesCapabilityServices, caller: CapabilityCaller, path: string): string {
-  return resolve(caller.workingDirectory ?? services.apiServices.workingDirectory(), path);
+/** A full path as given, a relative one in the caller's project; never in the daemon's own folder (caller-project.ts). */
+function filePath(_services: ServicesCapabilityServices, caller: CapabilityCaller, path: string): string {
+  if (isAbsolute(path)) return resolve(path);
+  if (caller.workingDirectory) return resolve(caller.workingDirectory, path);
+  throw new CapabilityRefusal(`${path} is a relative path and no project folder came with the request, so it was not read or written. Nothing was changed.`,
+    'Give the full path of the file, or send workingDirectory, the project folder, with the request.', 'NO_PROJECT', 422);
 }
 
 /** Why `parsed` cannot be a services.json: a name-to-service object whose entries each name an auth type and a token key. */
@@ -231,7 +235,15 @@ export const SERVICES_CHECK_AUTH: CapabilityDefinition<ServicesCapabilityService
 export const SERVICES_TRUST: CapabilityDefinition<ServicesCapabilityServices> = {
   capability: { id: 'services.trust', group: 'models', home: 'daemon', repeat: 'safe' },
   actionId: 'trust', label: 'Use a service this project defines', word: 'trust',
-  inputs: [{ id: 'service', label: 'Service', help: 'Services from this project\'s services file that wait for you', kind: 'choice', choices: { list: PENDING_SERVICES_LIST }, required: true, typed: { position: 1 } }],
+  inputs: [
+    { id: 'service', label: 'Service', help: 'Services from this project\'s services file that wait for you', kind: 'choice', choices: { list: PENDING_SERVICES_LIST }, required: true, typed: { position: 1 } },
+    // The entry as the person was shown it (its digest in the services list), filled by the place from the row he
+    // pressed on, never asked: an entry the repository changed after he looked is not approved.
+    {
+      id: 'shown', label: 'As shown', help: 'The entry as it read when it was shown to you', kind: 'text', freeTextReason: 'filled from the row you pressed on',
+      required: { default: '', defaultMeans: 'the entry as it reads when it runs' }, typed: { flag: '--shown' }, showWhen: { suppliedBy: 'the row you pressed on' },
+    },
+  ],
   sentence: '{service} from this project\'s services file is used, sending the stored key it names to the address it names, {lasts}; this loosens a protection, and only that entry, as it reads now, is approved.', done: '',
   touches: 'credential', lasts: 'kept', risk: 'loosens-a-protection',
   ownerOnly: { reason: 'whoever wrote the repository chose which of your stored keys it sends and where', instead: 'Ask the owner to use it from Models and providers.' },
@@ -243,10 +255,14 @@ export const SERVICES_TRUST: CapabilityDefinition<ServicesCapabilityServices> = 
     if (!pending) {
       throw new CapabilityRefusal(`No service from this project's services file named ${name} waits for you; nothing was confirmed.`, pendingProjectServiceLines(registry.pendingProjectServices()).join('\n') || 'The Services list in Models and providers shows your services.', 'NOT_FOUND');
     }
+    const shown = (values.shown ?? '').trim();
+    if (shown && shown !== pending.digest) {
+      throw new CapabilityRefusal(`Nothing was confirmed: ${name} changed since you looked. It now reads: ${describePendingProjectService(pending)}.`, 'Use it again from the Services list to approve it as it reads now.', 'TARGET_CHANGED');
+    }
     let result;
     try {
-      // What the person was shown (the entry as it reads now) is what is approved.
-      result = registry.confirmProjectService(name, pending.digest);
+      // What the person was shown (the entry as the row he pressed on read, else as it reads now) is what is approved.
+      result = registry.confirmProjectService(name, shown || pending.digest);
     } catch (error) {
       throw new CapabilityRefusal(`Nothing was confirmed: the confirmation could not be saved (${summarizeError(error)}).`);
     }

@@ -7,7 +7,6 @@ import type { ContractView } from '@goodvibes/engine/platform/platform/contract'
 import type { SetupPairingController } from './setup-pairing-controller.ts';
 import type { InputHandler } from '../input/handler.ts';
 import type { PendingPermissionState } from './blocking-input.ts';
-import type { DaemonRepairPrompt } from './daemon-repair-prompt.ts';
 
 /** Project lifecycle facts only. Prompt contents never leave the Agent. */
 export function buildAgentHerdrSessionUpdate(state: {
@@ -21,8 +20,6 @@ export function buildAgentHerdrSessionUpdate(state: {
   readonly setupPairing?: Pick<SetupPairingController, 'waitingForOwner'> | null;
   readonly contracts?: readonly { readonly status: ContractView['status']; readonly groups: readonly Pick<ContractView['groups'][number], 'status'>[]; readonly units: readonly Pick<ContractView['units'][number], 'status'>[] }[];
   readonly pendingPermission?: PendingPermissionState | null;
-  readonly recoveryPending?: string | null;
-  readonly daemonRepairPrompt?: Pick<DaemonRepairPrompt, 'pending'> | null;
 }): HerdrSessionUpdate {
   const { input, runtime } = state;
   return {
@@ -33,8 +30,8 @@ export function buildAgentHerdrSessionUpdate(state: {
       || state.contracts?.some(contract => !['passed', 'failed', 'cancelled', 'awaiting-owner'].includes(contract.status)) === true
       || state.fleetNodes?.some(node => node.kind === 'agent' && node.sessionRef?.sessionId === runtime.sessionId
         && ['queued', 'thinking', 'executing-tool', 'streaming', 'stalled', 'retrying'].includes(node.state)) === true,
-    waitingForOwner: state.pendingPermission != null || state.recoveryPending != null
-      || state.daemonRepairPrompt?.pending() === true || state.setupPairing?.waitingForOwner === true
+    // A crash snapshot offered for restoring waits on no one: typing starts a new conversation.
+    waitingForOwner: state.pendingPermission != null || state.setupPairing?.waitingForOwner === true
       || state.fleetNodes?.some(node => node.kind === 'agent' && node.sessionRef?.sessionId === runtime.sessionId
         && node.state === 'awaiting-approval') === true
       || state.contracts?.some(contract => contract.status === 'awaiting-owner'

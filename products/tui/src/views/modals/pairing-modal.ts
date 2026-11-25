@@ -508,7 +508,7 @@ class PairingModalSurface implements ConfigModalSurface {
         return;
       }
       this.requestRender();
-      ctx.setStatus(`New device token${fresh.thisMachineOnly ? '' : ' and QR'} shown. The previous one no longer works unless a device already paired with it; paired devices are listed by /devices, and in the web UI under Settings, Devices and pairing.`);
+      ctx.setStatus(`New device token${fresh.thisMachineOnly ? '' : ' and QR'} shown. The previous one no longer works unless a device already paired with it; paired devices are listed in Devices and network, on its Paired tab (also in the web UI).`);
       return;
     }
   }

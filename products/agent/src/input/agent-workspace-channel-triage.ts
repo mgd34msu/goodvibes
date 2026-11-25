@@ -1,4 +1,4 @@
-import { formatAgentChannelDeliveryReceiptLine, readAgentChannelDeliveryReceipts } from '@goodvibes/engine/terminal-shell/agent-turn/channel-delivery-receipts';
+import { daemonChannelDeliveryReceiptPath, formatAgentChannelDeliveryReceiptLine, readAgentChannelDeliveryReceipts } from '@goodvibes/engine/terminal-shell/agent-turn/channel-delivery-receipts';
 import type { CommandContext } from './command-registry.ts';
 import {
   readConnectedHostMethod,
@@ -189,13 +189,13 @@ function channelTriageReadiness(channels: readonly AgentWorkspaceChannelStatus[]
       setupState: channel.setupState,
       delivery: channel.delivery,
       nextStep: channel.nextStep,
-      userRoute: `/channels configured ${channel.id}`,
+      userRoute: `Mail, calendar and channels, Channels: select ${channel.label}, "how it is configured" (channels.configured)`,
       modelRoute: `channels action:"channel" channelId:"${channel.id}"`,
     })),
     routes: {
-      readiness: '/channels readiness',
-      attention: '/channels readiness --show attention',
-      guide: '/channels guide',
+      readiness: 'Mail, calendar and channels, Channels: "which are set up" (channels.readiness)',
+      attention: 'Mail, calendar and channels, Channels: "which are set up" (channels.readiness)',
+      guide: 'Mail, calendar and channels, Channels: "what to set up next" (channels.guide)',
     },
   };
 }
@@ -353,7 +353,8 @@ function receiptTriage(context: CommandContext, limit: number): Record<string, u
       reason: 'Agent shell paths unavailable.',
     };
   }
-  const snapshot = readAgentChannelDeliveryReceipts(shellPaths);
+  // The sends are the daemon's now (its receipts store; the Agent's own were carried into it once).
+  const snapshot = readAgentChannelDeliveryReceipts(shellPaths, daemonChannelDeliveryReceiptPath(shellPaths));
   return {
     state: snapshot.parseError ? 'attention' : snapshot.exists ? 'ready' : 'empty',
     path: snapshot.path,
@@ -429,12 +430,12 @@ export async function buildAgentWorkspaceChannelTriage(
       failures: [deliveriesResult, messagesResult, bindingsResult].filter((result): result is ConnectedHostRouteFailure => !result.ok).map(routeFailureView),
     },
     routes: {
-      command: '/channels triage',
-      deliveries: '/channels deliveries',
-      readiness: '/channels readiness --show attention',
-      status: '/channels status',
-      policies: '/channels rules',
-      setupGuide: '/channels guide',
+      command: 'Mail, calendar and channels, Channels: "what came in" (channels.triage)',
+      deliveries: 'Mail, calendar and channels, Channels: "what was sent" (channels.deliveries)',
+      readiness: 'Mail, calendar and channels, Channels: "which are set up" (channels.readiness)',
+      status: 'Mail, calendar and channels, Channels (channels.status)',
+      policies: 'Mail, calendar and channels, Channels: "who may write" (channels.rules)',
+      setupGuide: 'Mail, calendar and channels, Channels: "what to set up next" (channels.guide)',
       modelRoute: 'channels action:"triage"',
       deliveryReceipts: 'channels action:"deliveries"',
       sendTool: 'agent_channel_send',
@@ -528,9 +529,7 @@ export function formatAgentWorkspaceChannelTriage(triage: AgentWorkspaceChannelT
   }
 
   lines.push('', '  Next Routes');
-  lines.push('  /channels readiness --show attention');
-  lines.push('  /channels deliveries');
-  lines.push('  /channels status');
+  lines.push('  Mail, calendar and channels, the Channels tab: which are set up, what was sent, what came in');
   lines.push('  channels action:"triage"');
   return lines.join('\n');
 }

@@ -163,6 +163,8 @@ function hostedTurnFailure(payload: Record<string, unknown> | undefined, turnId:
     stopReason: readString(payload, 'stopReason'),
     status: readNumber(payload, 'status'),
     code: readString(payload, 'code'),
+    // The provider's own code: a conversation too long for the model is said as that, with shortening it next.
+    providerCode: readString(payload, 'providerCode'),
     attempts: readNumber(payload, 'attempts'),
     attemptTimes: Array.isArray(times) ? times.filter((entry): entry is number => typeof entry === 'number') : undefined,
     providerName: readString(payload, 'providerName'),

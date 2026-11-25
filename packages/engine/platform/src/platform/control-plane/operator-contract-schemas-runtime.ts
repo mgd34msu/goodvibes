@@ -182,6 +182,8 @@ export const COMPANION_CHAT_SESSION_SCHEMA = objectSchema({
   model: nullableSchema(STRING_SCHEMA),
   provider: nullableSchema(STRING_SCHEMA),
   systemPrompt: nullableSchema(STRING_SCHEMA),
+  /** The project folder the chat works in, when one was chosen. */
+  project: STRING_SCHEMA,
   status: COMPANION_CHAT_SESSION_STATUS_SCHEMA,
   createdAt: NUMBER_SCHEMA,
   updatedAt: NUMBER_SCHEMA,
@@ -748,6 +750,8 @@ export const MEMORY_PROVENANCE_LINK_SCHEMA = objectSchema({
 export const MEMORY_RECORD_SCHEMA = objectSchema({
   id: STRING_SCHEMA,
   scope: MEMORY_SCOPE_SCHEMA,
+  /** The project a "this project" record is for (its resolved folder); absent, the person's own, given everywhere. */
+  project: STRING_SCHEMA,
   cls: MEMORY_CLASS_SCHEMA,
   summary: STRING_SCHEMA,
   detail: STRING_SCHEMA,

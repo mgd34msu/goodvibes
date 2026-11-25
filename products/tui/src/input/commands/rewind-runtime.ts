@@ -250,7 +250,7 @@ async function undoLastRewindNow(ctx: CommandContext): Promise<RewindReversalRes
   const since = receipt.undo.conversation ? state.convPort.messagesSinceRewind(receipt.undo.conversation.undoSnapshotId) : 0;
   if (since !== null && since !== 0) {
     state.undo.push(receipt);
-    return { handled: true, message: `Undo rewind refused: the conversation has ${since > 0 ? `${since} newer message${since === 1 ? '' : 's'}` : 'changed'} since the rewind, and restoring the earlier copy would discard ${since > 0 ? 'them' : 'that change'}. Nothing was changed. Copy what you need, or use /session fork to keep this conversation, before rewinding again.` };
+    return { handled: true, message: `Undo rewind refused: the conversation has ${since > 0 ? `${since} newer message${since === 1 ? '' : 's'}` : 'changed'} since the rewind, and restoring the earlier copy would discard ${since > 0 ? 'them' : 'that change'}. Nothing was changed. Copy what you need, or use /fork to keep this conversation, before rewinding again.` };
   }
 
   const mgr = ctx.workspace.workspaceCheckpointManager;
@@ -344,7 +344,7 @@ async function redoLastRewindNow(ctx: CommandContext): Promise<RewindReversalRes
   const sinceUndo = (): number | null => receipt.undo.conversation ? state.convPort.messagesSinceUndo(receipt.undo.conversation.undoSnapshotId) : 0;
   const refusedSince = (since: number): RewindReversalResult => {
     state.redo.push(receipt);
-    return { handled: true, message: `Redo rewind refused: the conversation has ${since > 0 ? `${since} newer message${since === 1 ? '' : 's'}` : 'changed'} since the rewind was undone, and re-applying it would discard ${since > 0 ? 'them' : 'that change'}. Nothing was changed. Use /session fork to keep this conversation, then rewind again.` };
+    return { handled: true, message: `Redo rewind refused: the conversation has ${since > 0 ? `${since} newer message${since === 1 ? '' : 's'}` : 'changed'} since the rewind was undone, and re-applying it would discard ${since > 0 ? 'them' : 'that change'}. Nothing was changed. Use /fork to keep this conversation, then rewind again.` };
   };
   const before = sinceUndo();
   if (before !== null && before !== 0) return refusedSince(before);

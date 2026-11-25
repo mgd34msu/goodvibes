@@ -119,7 +119,7 @@ export function createAgentAccountsTool(options: AgentAccountsToolOptions): Tool
           if (!serviceDomain) return failure('accounts action:"alias" needs the serviceDomain you are signing up at.');
           const base = options.baseAddress?.() ?? null;
           if (!base) {
-            return failure('No mailbox is connected to mint a signup alias from. Connect one with: /google connect');
+            return failure('No mailbox is connected to mint a signup alias from. The owner connects Google with "connect" on the Google tab of Mail, calendar and channels (capability google.connect).');
           }
           const alias = mintAddressFor(base, serviceDomain);
           const purpose = readString(rawArgs.purpose) || `signing up at ${alias.serviceDomain}`;

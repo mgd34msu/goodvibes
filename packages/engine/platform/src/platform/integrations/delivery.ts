@@ -514,6 +514,30 @@ export class DeliveryQueue<TPayload = string> {
    * caller must not discard another copy of these entries (an adopted file)
    * on the strength of a write that did not happen.
    */
+  /**
+   * Take in the entries another file holds (an earlier program's own failed list), kept in this queue's file from
+   * now on; that file itself is only read, never written. Returns how many entries were taken in.
+   */
+  adoptDeadLetters(path: string, codec: DeadLetterCodec<TPayload>): number {
+    const stored = readDocument(path, {
+      label: 'integrations/dead-letters',
+      validate: readStoredDeadLetters,
+      recovery: 'The failed notifications that file held are not carried.',
+    }) ?? [];
+    const known = new Set(this._dlq.map((entry) => entry.id));
+    let taken = 0;
+    for (const row of stored) {
+      if (known.has(row.id)) continue;
+      const payload = codec.decode(row.payload);
+      if (payload === undefined) continue;
+      const { payload: _encoded, ...rest } = row;
+      this._retainDeadLetter({ ...rest, payload }, false);
+      taken += 1;
+    }
+    if (taken > 0) this._writeDeadLetters(this._dlq);
+    return taken;
+  }
+
   persistDeadLetters(path: string, codec: DeadLetterCodec<TPayload>): void {
     this._store = { path, codec };
     const stored = readDocument(path, {

@@ -331,7 +331,7 @@ export class PolicyRegistry {
       return {
         ok: false,
         error:
-          'Candidate has not been reviewed. Run `/security simulate-policy` first to see which recorded calls it would decide differently.',
+          'The candidate has not been reviewed. "See what the candidate policy changes" (Permissions and safety, Policy) shows which recorded calls it would decide differently first.',
       };
     }
 
@@ -339,7 +339,7 @@ export class PolicyRegistry {
       return {
         ok: false,
         error:
-          'Simulation is in progress. Wait for `/security simulate-policy` to finish, then promote.',
+          'The candidate is still being reviewed. Enforce it once "See what the candidate policy changes" has finished.',
       };
     }
 
@@ -397,19 +397,54 @@ export class PolicyRegistry {
     if (!path || !candidate || this._current) return { restored: false };
     const record = this.readActivationRecord();
     if (record === 'unreadable') {
-      return { restored: false, reason: `the record of which policy bundle was active (${path}) could not be read, so "${candidate.bundle.bundleId}" is loaded as a candidate only. Run /security simulate-policy, then /security enforce-policy, to enforce it.` };
+      return { restored: false, reason: `the record of which policy bundle was active (${path}) could not be read, so "${candidate.bundle.bundleId}" is loaded as a candidate only. To enforce it, "See what the candidate policy changes", then "Enforce the candidate policy" (Permissions and safety, Policy).` };
     }
     if (!record) return { restored: false };
     if (record.bundleId !== candidate.bundle.bundleId) {
       return { restored: false, reason: `policy bundle "${record.bundleId}" was the active one${record.bundlePath ? ` (${record.bundlePath})` : ''}, but "${candidate.bundle.bundleId}" was loaded at start; it is a candidate only and "${record.bundleId}" is not enforced. Load and promote the bundle you want enforced.` };
     }
     if (record.payloadHash !== payloadHash(candidate.bundle)) {
-      return { restored: false, reason: `policy bundle "${record.bundleId}" was promoted, but its rules changed on disk since; it is loaded as a candidate only. Run /security simulate-policy, then /security enforce-policy, to enforce it again.` };
+      return { restored: false, reason: `policy bundle "${record.bundleId}" was promoted, but its rules changed on disk since; it is loaded as a candidate only. To enforce it again, "See what the candidate policy changes", then "Enforce the candidate policy" (Permissions and safety, Policy).` };
     }
     this._current = { ...candidate, state: 'active', activatedAt: typeof record.activatedAt === 'string' ? record.activatedAt : new Date().toISOString() };
     this._candidate = null;
     this._publicationRevision++;
     return { restored: true };
+  }
+
+  /**
+   * A program's copy of the one activation record (the daemon's, every program follows it): when the record names a
+   * bundle other than the one in force here, that bundle, read from the file the record names and unchanged since,
+   * becomes the one this registry enforces. The candidate and the history are the daemon's and are not touched. Read
+   * at start and again each time the daemon announces a change; nothing waits on a clock. Answers whether the bundle
+   * in force changed, and a sentence when the record could not be followed (the bundle in force stays as it was).
+   */
+  public followActivation(): { readonly changed: boolean; readonly problem?: string | undefined } {
+    const path = this._activationRecordPath;
+    if (!path) return { changed: false };
+    const record = this.readActivationRecord();
+    if (record === null) return { changed: false };
+    if (record === 'unreadable') return { changed: false, problem: `the record of which policy is in force (${path}) could not be read; the policy in force here is unchanged` };
+    const current = this._current;
+    if (current && current.bundle.bundleId === record.bundleId && payloadHash(current.bundle) === record.payloadHash) return { changed: false };
+    if (!record.bundlePath) return { changed: false, problem: `policy bundle "${record.bundleId}" is in force, but the record names no file to read it from; the policy in force here is unchanged` };
+    let bundle: SignedPolicyBundle<PolicyBundlePayload>;
+    try {
+      bundle = JSON.parse(readFileSync(record.bundlePath, 'utf-8')) as SignedPolicyBundle<PolicyBundlePayload>;
+    } catch (error) {
+      return { changed: false, problem: `policy bundle "${record.bundleId}" is in force, but its file ${record.bundlePath} could not be read (${summarizeError(error)}); the policy in force here is unchanged` };
+    }
+    if (bundle?.bundleId !== record.bundleId || payloadHash(bundle) !== record.payloadHash) {
+      return { changed: false, problem: `policy bundle "${record.bundleId}" is in force, but its file ${record.bundlePath} changed since it was enforced; the policy in force here is unchanged` };
+    }
+    const loaded = loadPolicyBundle(bundle, this._loaderOptions);
+    if (!loaded.ok) return { changed: false, problem: `policy bundle "${record.bundleId}" could not be loaded here (${loaded.error ?? 'no reason given'}); the policy in force here is unchanged` };
+    this._current = {
+      bundle, provenance: loaded.provenance, rules: loaded.rules ?? [], state: 'active', loadedAt: new Date().toISOString(),
+      activatedAt: typeof record.activatedAt === 'string' ? record.activatedAt : new Date().toISOString(), sourcePath: record.bundlePath,
+    };
+    this._publicationRevision++;
+    return { changed: true };
   }
 
   /**

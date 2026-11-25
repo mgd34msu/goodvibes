@@ -33,15 +33,9 @@ const LANE_IDS: readonly DocumentOpsLaneId[] = [
   'model_compare',
 ];
 
+// Comparing, judging and switching to a winner are capabilities of Models and providers (capability_run compare.*),
+// controls on its Comparisons tab; no workspace row runs them.
 const MODEL_COMPARE_ACTION_IDS = [
-  'document-run-compare',
-  'document-review-compare',
-  'document-diff-handoffs',
-  'document-judge-compare',
-  'document-compare-analytics',
-  'document-apply-compare',
-  'document-record-route-decision',
-  'document-export-compare',
   'document-model-routing',
 ] as const;
 
@@ -123,7 +117,7 @@ export function describeReviewPacketWizardStep(step: AgentWorkspaceReviewPacketW
     detail: previewHarnessText(step.detail, includeParameters ? 180 : 96),
     userRoute: previewHarnessText(step.userRoute, includeParameters ? 180 : 96),
     modelRoute: step.modelRoute,
-    actionId: step.actionId,
+    ...(step.actionId === null ? {} : { actionId: step.actionId }),
     ...(step.backtrackRoute ? { backtrackRoute: step.backtrackRoute } : {}),
   };
 }
@@ -212,7 +206,7 @@ const ARTIFACT_BROWSER_ACTIONS = ['document-browse-artifacts', 'document-show-ar
   'document-promote-artifact', 'document-insert-artifact', 'document-attach-artifact'] as const;
 const REVIEW_DOCUMENT_ACTIONS = ['document-show-draft', 'document-reviewer-readiness', 'document-resolve-comment', 'document-accept-suggestion',
   'document-reject-suggestion', 'document-attach-artifact', 'document-export-draft'] as const;
-const REVIEW_COMPARE_ACTIONS = ['document-review-compare', 'document-diff-handoffs', 'document-judge-compare', 'document-apply-compare', 'document-export-compare'] as const;
+const REVIEW_COMPARE_ACTIONS: readonly string[] = [];
 
 /**
  * The lanes, built once per call from run-time facts only: which tools are
@@ -377,8 +371,8 @@ function buildLanes(context: CommandContext): readonly DocumentOpsLane[] {
         `Final review ${snapshot.reviewPacketWizard.finalReview}`,
         ...snapshot.reviewPacketWizard.steps.map((step) => `${step.status}: ${step.label} -> ${step.modelRoute}`),
       ],
-      actionIds: [...new Set(['document-review-packet-wizard', 'document-share-review-packet', 'document-record-route-decision',
-        ...snapshot.reviewPacketWizard.steps.map((step) => step.actionId)])],
+      actionIds: [...new Set(['document-review-packet-wizard', 'document-share-review-packet',
+        ...snapshot.reviewPacketWizard.steps.flatMap((step) => (step.actionId === null ? [] : [step.actionId]))])],
       reviewPacketWizard: snapshot.reviewPacketWizard,
     },
     {
@@ -449,7 +443,7 @@ function buildLanes(context: CommandContext): readonly DocumentOpsLane[] {
         : hasTool(context, 'agent_model_compare')
           ? 'The artifact store is not writable here, so a comparison could not be saved; check the connected host.'
           : 'This session has no agent_model_compare tool; inspect models with models action:"status".',
-      userRoute: 'Agent Workspace -> Documents & Files -> Run blind compare',
+      userRoute: 'Models and providers -> Comparisons',
       modelRoute: modelCompareReady ? 'agent_model_compare' : 'models action:"status"',
       signals: [
         `Current model ${snapshot.provider} / ${snapshot.modelDisplayName}`,
@@ -471,7 +465,7 @@ function nextActions(lanes: readonly DocumentOpsLane[]): readonly string[] {
   return [...urgent, ...partial].slice(0, 5);
 }
 
-/** One lane as built, for the owner's own report of it (`/documents readiness`, `packet-steps`, `timeline`). */
+/** One lane as built (the daemon reports the same packet in plain words: documents.readiness, packet-steps, timeline). */
 export function readDocumentOpsLane(context: CommandContext, laneId: DocumentOpsLaneId): DocumentOpsLane | undefined {
   return buildLanes(context).find((lane) => lane.id === laneId);
 }

@@ -70,4 +70,9 @@ export interface AutomationExecutionPolicy {
   readonly allowUnsafeExternalContent?: boolean | undefined;
   readonly externalContentSource?: AutomationExternalContentSource | undefined;
   readonly lightContext?: boolean | undefined;
+  /**
+   * The project folder its runs work in: the folder of the program or caller that made it. Absent only on a job kept
+   * by 3.5.0, which is given the daemon's folder of that time once, at the first start of this version.
+   */
+  readonly workingDirectory?: string | undefined;
 }

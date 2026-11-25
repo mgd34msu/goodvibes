@@ -180,8 +180,37 @@ export interface SecureAddressRow {
   readonly label: string;
   readonly state: string;
   readonly detail: readonly string[];
-  /** Enter on this row runs the daemon method (only "Issue a new certificate now": secureAddress.reissue). */
-  readonly action?: 'reissue' | undefined;
+  /**
+   * Enter on this row: `reissue` "Issue a new certificate now" (secureAddress.reissue); `serve` "Serve other machines"
+   * (secureAddress.serve); `replace-authority` asks first, its two answers in its place opening on No:
+   * `keep-authority` (No) and `confirm-replace-authority` (secureAddress.replaceAuthority).
+   */
+  readonly action?: 'reissue' | 'serve' | 'replace-authority' | 'keep-authority' | 'confirm-replace-authority' | undefined;
+  /** What Enter does here, for the key hints ("issue a new certificate"). */
+  readonly hint?: string | undefined;
+  /** The question an act that cannot be undone is asked with first (the daemon's words). */
+  readonly question?: string | undefined;
+  /** The outcome of the last act pressed here: kept when the rows are read again (a rebind or the daemon back). */
+  readonly outcome?: true | undefined;
+}
+
+/** The rows read again, with the outcome of the last act still said (second, after "In force now") when it is not there. */
+export function keepSecureAddressOutcome(before: readonly SecureAddressRow[], rows: readonly SecureAddressRow[]): SecureAddressRow[] {
+  const outcome = before.find((row) => row.outcome === true);
+  if (!outcome || rows.length === 0 || rows.some((row) => row.outcome === true)) return [...rows];
+  const at = rows.findIndex((row) => row.label === outcome.label);
+  if (at >= 0) return rows.map((row, index) => index === at ? { ...outcome, ...(row.action ? { action: row.action, hint: row.hint, question: row.question } : { action: undefined, hint: undefined }) } : row);
+  return [rows[0]!, { ...outcome, action: undefined, hint: undefined }, ...rows.slice(1)];
+}
+
+/** The method each acting row runs; `replace-authority` and `keep-authority` run none. */
+const ROW_METHODS: Readonly<Partial<Record<NonNullable<SecureAddressRow['action']>, string>>> = {
+  reissue: 'secureAddress.reissue', serve: 'secureAddress.serve', 'confirm-replace-authority': 'secureAddress.replaceAuthority',
+};
+
+/** A date and time in the local form, month in words: when a certificate was received. */
+function atTime(ms: unknown): string {
+  return typeof ms === 'number' && ms > 0 ? `${untilDay(ms)} at ${new Date(ms).toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit' })}` : '';
 }
 
 /** The rows before the daemon answers: stated as asking, never as a guess. */
@@ -207,16 +236,18 @@ interface SecureAddressAnswer {
   readonly node?: boolean;
   readonly groupLines?: readonly string[];
   readonly choices?: readonly { readonly id: string; readonly title: string; readonly does: string; readonly needs: string; readonly phoneGains: string; readonly sends: string; readonly caution?: string }[];
-  readonly inForce?: { readonly on?: boolean; readonly certificate?: string; readonly serving?: boolean; readonly address?: string; readonly notAfter?: number; readonly problem?: string };
+  readonly inForce?: { readonly on?: boolean; readonly certificate?: string; readonly serving?: boolean; readonly address?: string; readonly notAfter?: number; readonly problem?: string; readonly reach?: string };
   readonly letsEncrypt?: { readonly tokenStored?: boolean; readonly tokenUnreadable?: string; readonly lastAttempt?: { readonly words: string }; readonly addressProblem?: string; readonly routerCheck?: { readonly words: string } };
   readonly ownFiles?: { readonly check?: { readonly ok: boolean; readonly problem?: string; readonly names?: readonly string[]; readonly notAfter?: number } };
   readonly localAuthority?: { readonly page?: string; readonly fingerprint?: string };
   readonly tailscale?: { readonly address?: string };
   readonly group?: {
-    readonly received?: { readonly leadName: string; readonly names?: readonly string[]; readonly notAfter?: number };
-    readonly followers?: readonly { readonly name: string; readonly address: string; readonly covered: boolean; readonly needs?: string }[];
+    readonly received?: { readonly leadName: string; readonly names?: readonly string[]; readonly notAfter?: number; readonly receivedAt?: number };
+    readonly followers?: readonly { readonly name: string; readonly address: string; readonly port?: number; readonly covered: boolean; readonly needs?: string }[];
   };
   readonly reissue?: { readonly title: string; readonly line: string; readonly available: boolean };
+  readonly replaceAuthority?: { readonly title: string; readonly line: string; readonly question?: string; readonly available: boolean };
+  readonly serve?: { readonly title: string; readonly line: string; readonly available: boolean };
 }
 
 export function secureAddressRows(answer: unknown): SecureAddressRow[] {
@@ -224,19 +255,24 @@ export function secureAddressRows(answer: unknown): SecureAddressRow[] {
   const force = a.inForce ?? {};
   const rows: SecureAddressRow[] = [];
   if (a.notice) rows.push({ label: 'Notice', state: 'new', detail: [a.notice] });
-  const intro = a.intro ? [a.intro] : [];
+  // The intro asks the person to pick one way: a node picks none (its address comes from its lead), so it is not said there.
+  const intro = a.intro && a.node !== true ? [a.intro] : [];
+  // Served on https, but other machines are not answered: phones cannot open it yet (said, with the control that serves them).
+  const reach = force.reach ? [force.reach] : [];
   rows.push(force.serving
-    ? { label: 'In force now', state: 'https on', detail: [`Phones open ${force.address ?? 'the https address'}${force.notAfter ? `, certificate valid until ${untilDay(force.notAfter)}` : ''}. The plain http address keeps working.`, ...intro] }
+    ? { label: 'In force now', state: reach.length > 0 ? 'phones cannot reach it' : 'https on', detail: [reach.length > 0 ? `This computer serves ${force.address ?? 'the https address'}${force.notAfter ? `, certificate valid until ${untilDay(force.notAfter)}` : ''}.` : `Phones open ${force.address ?? 'the https address'}${force.notAfter ? `, certificate valid until ${untilDay(force.notAfter)}` : ''}.${intro.length > 0 ? '' : ' The plain http address keeps working.'}`, ...reach, ...intro] }
     : force.on
-      ? { label: 'In force now', state: 'not served', detail: [`https is switched on but not served: ${force.problem ?? 'no reason given'}`, ...intro] }
+      ? { label: 'In force now', state: 'not served', detail: [`https is switched on but not served: ${force.problem ?? 'no reason given'}`, ...reach, ...intro] }
       : { label: 'In force now', state: 'https off', detail: ['Phones use the plain http address, with chat and little else.', ...intro] });
+  if (a.serve?.available && force.on) rows.push({ label: a.serve.title, state: 'Enter serves them', detail: [a.serve.line, ...reach], action: 'serve', hint: 'serve other machines' });
   const groupLines = a.groupLines ?? [];
   const group = a.group ?? {};
   if (a.node === true) {
     const received = group.received;
     rows.push({ label: 'From the lead of your group', state: received ? 'received' : 'waiting', detail: [
       ...groupLines,
-      received ? `Received from ${received.leadName}: a certificate for ${(received.names ?? []).join(', ')}, valid until ${untilDay(received.notAfter)}; renewed there and sent here by itself.` : 'Nothing received yet.',
+      // When it came: a new certificate is told from the old one on screen.
+      received ? `Received from ${received.leadName}${received.receivedAt ? ` on ${atTime(received.receivedAt)}` : ''}: a certificate for ${(received.names ?? []).join(', ')}, valid until ${untilDay(received.notAfter)}; renewed there and sent here by itself.` : 'Nothing received yet.',
       'Nothing is set on this machine.',
     ] });
     return rows;
@@ -245,10 +281,13 @@ export function secureAddressRows(answer: unknown): SecureAddressRow[] {
   if (groupLines.length > 0 || followers.length > 0) {
     rows.push({ label: 'Your group', state: `${followers.length} following`, detail: [
       ...groupLines,
-      ...followers.map((follower) => `${follower.name}: ${follower.covered ? `opened at https://${follower.address}` : follower.needs ?? 'not covered by the certificate here'}`),
+      ...followers.map((follower) => `${follower.name}: ${follower.covered ? `opened at https://${follower.address}${follower.port !== undefined ? `:${follower.port}` : ''}` : follower.needs ?? 'not covered by the certificate here'}`),
     ] });
   }
-  if (a.reissue?.available) rows.push({ label: a.reissue.title, state: 'Enter issues it', detail: [a.reissue.line], action: 'reissue' });
+  if (a.reissue?.available) rows.push({ label: a.reissue.title, state: 'Enter issues it', detail: [a.reissue.line], action: 'reissue', hint: 'issue a new certificate' });
+  if (a.replaceAuthority?.available) {
+    rows.push({ label: a.replaceAuthority.title, state: 'Enter asks first', detail: [a.replaceAuthority.line], action: 'replace-authority', hint: 'replace the authority', ...(a.replaceAuthority.question ? { question: a.replaceAuthority.question } : {}) });
+  }
   const choices = new Map((a.choices ?? []).map((choice) => [choice.id, choice]));
   const explain = (id: string): string[] => {
     const words = choices.get(id);
@@ -294,18 +333,55 @@ export function secureAddressRows(answer: unknown): SecureAddressRow[] {
 export async function runSecureAddressRowAction(
   invoke: ((method: string, input: Record<string, unknown>) => Promise<unknown>) | null,
   row: SecureAddressRow | undefined,
+  /** The rows shown now: "Replace the authority" puts its question in its own place, opening on No. */
+  shown: readonly SecureAddressRow[] = [],
 ): Promise<SecureAddressRow[] | null> {
   if (!row?.action || !invoke) return null;
+  // Asked first: the row becomes the question's two answers, No where the cursor is (it stays on this index).
+  if (row.action === 'replace-authority') {
+    const at = shown.indexOf(row);
+    const question = row.question ?? 'Replace the authority?';
+    const answers: SecureAddressRow[] = [
+      { label: 'No, keep the authority', state: 'Enter keeps it', detail: [question, ...row.detail], action: 'keep-authority', hint: 'keep it' },
+      { label: 'Yes, replace the authority', state: 'Enter replaces it', detail: [question, ...row.detail], action: 'confirm-replace-authority', hint: 'replace it' },
+    ];
+    return at >= 0 ? [...shown.slice(0, at), ...answers, ...shown.slice(at + 1)] : [...shown, ...answers];
+  }
+  if (row.action === 'keep-authority') {
+    // No: nothing changes, and the row says so in one line (kept when the rows are read again).
+    const rows = await readSecureAddressRows(invoke);
+    const at = rows.findIndex((candidate) => candidate.action === 'replace-authority');
+    const kept: SecureAddressRow = {
+      label: 'Replace the authority', state: 'kept', outcome: true,
+      detail: ['The authority was kept: nothing changed here or on any phone.', ...(at >= 0 ? rows[at]!.detail : [])],
+      ...(at >= 0 ? { action: rows[at]!.action, hint: rows[at]!.hint, question: rows[at]!.question } : {}),
+    };
+    if (at >= 0) rows[at] = kept; else rows.splice(1, 0, kept);
+    return rows;
+  }
+  const method = ROW_METHODS[row.action];
+  if (!method) return null;
+  const doneWord = row.action === 'serve' ? ['served', 'not served'] : row.action === 'reissue' ? ['issued', 'not issued'] : ['replaced', 'not replaced'];
   try {
-    const answer = (await invoke('secureAddress.reissue', {})) as { readonly ok?: boolean; readonly words?: string; readonly status?: unknown } | null;
+    const answer = (await invoke(method, {})) as { readonly ok?: boolean; readonly words?: string; readonly status?: unknown } | null;
     const rows = secureAddressRows(answer?.status);
     const words = answer?.words ?? 'The daemon gave no answer.';
-    const at = rows.findIndex((candidate) => candidate.action === row.action);
-    const done: SecureAddressRow = { label: row.label, state: answer?.ok ? 'issued' : 'not issued', detail: [words, ...row.detail], action: row.action };
-    if (at >= 0) rows[at] = done; else rows.splice(1, 0, { ...done, action: undefined });
+    const same = row.action === 'confirm-replace-authority' ? 'replace-authority' : row.action;
+    const at = rows.findIndex((candidate) => candidate.action === same);
+    const label = row.action === 'confirm-replace-authority' ? 'Replace the authority' : row.label;
+    const done: SecureAddressRow = { label, state: answer?.ok ? doneWord[0]! : doneWord[1]!, detail: [words, ...(at >= 0 ? rows[at]!.detail : [])], outcome: true, ...(at >= 0 ? { action: rows[at]!.action, hint: rows[at]!.hint } : {}) };
+    if (at >= 0) rows[at] = done; else rows.splice(1, 0, done);
     return rows;
   } catch (error) {
-    return [{ label: row.label, state: 'not issued', detail: [`The daemon refused: ${error instanceof Error ? error.message : String(error)}`] }];
+    // Serving other machines moves the daemon's listener, which can cut its own answer off: what it serves is read again.
+    if (row.action === 'serve') {
+      const rows = await readSecureAddressRows(invoke);
+      if (rows[0]?.state !== 'phones cannot reach it' && rows[0]?.state !== 'unknown') {
+        return keepSecureAddressOutcome([{ label: row.label, state: doneWord[0]!, outcome: true,
+          detail: ['This daemon now answers your other machines and phones on the network: phones can open the https address. Its listener moved to do so, so its answer was read again here.'] }], rows);
+      }
+    }
+    return [{ label: row.label, state: doneWord[1]!, outcome: true, detail: [`The daemon refused: ${error instanceof Error ? error.message : String(error)}`] }];
   }
 }
 

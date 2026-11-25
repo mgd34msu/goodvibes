@@ -62,7 +62,7 @@ function formatRuntimeActiveFailureMessage(
   const binding = getRuntimeEndpointBinding(handler, request, endpoint);
   const portInUse = endpoint === 'daemon' ? state?.daemonPortInUse : state?.httpListenerPortInUse;
   const status = getRuntimeEndpointStatus(state, endpoint);
-  // What the person loses and what to do, in plain words; the endpoint's diagnostics stay in /health.
+  // What the person loses and what to do, in plain words; the endpoint's diagnostics stay on the System place's Health tab.
   const where = `${binding.host}:${binding.port}`;
   const taken = portInUse === true || status?.mode === 'blocked' || status?.mode === 'incompatible';
   if (endpoint === 'daemon') {
@@ -746,7 +746,7 @@ export function verifyOnboardingRuntimePostureForHandler(handler: InputHandler, 
       message: hasLocalAuth && !auth.bootstrapCredentialPresent
         ? 'Local auth is configured and bootstrap credentials are not present.'
         : hasLocalAuth
-          ? 'The first-run sign-in file is still on this computer: remove it with /local-auth once you have signed in, so other devices can only sign in with your account.'
+          ? 'The first-run sign-in file is still on this computer: remove it with "Remove the first-run sign-in file" in System once you have signed in, so other devices can only sign in with your account.'
           : 'Other devices can reach GoodVibes, but no account is set up to sign in with yet: create one in /setup, "Who can sign in here".',
       target: 'auth',
     });

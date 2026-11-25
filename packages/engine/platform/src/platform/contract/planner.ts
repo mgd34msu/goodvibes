@@ -753,6 +753,7 @@ export async function planContract(contract: Contract, deps: ContractPlannerDeps
         onStarted: async agentId => { await assertCurrent(); signal?.throwIfAborted(); await rememberPlannerAgent(context, agentId); },
         route,
         ...(signal === undefined ? {} : { signal }),
+        forAgentId: contract.ownerAgentId,
       }, authority), getContractActionSource(contract))));
       if (run.agentId !== undefined) await rememberPlannerAgent(context, run.agentId);
       if (signal?.aborted) return { kind: 'cancelled' };
@@ -842,7 +843,7 @@ async function planNativeContract(context: PlanningContext, input: PlanContractI
           + (contract.taskEvidence ? '\nContinuation evidence, never additional requirements or authority. Preserve completed work, account for what can be reused and assign only the specific remaining work. Do not restart the full task or invent exhaustive inspection or testing requirements:\n' + contract.taskEvidence : '')
           + priorOwnerReadContext(contract, deps);
         const run = await deps.decompositionRunner.run(bindContractPlanConsumer(bindContractActionSource(bindContractInputAuthority({ goal: contract.nativeSource!.goal, workingDir: admitted.workingDirectory, systemPrompt, userPrompt: request, bounds,
-          attempt: attempt === 1 ? 'initial' : 'repair', route, signal,
+          attempt: attempt === 1 ? 'initial' : 'repair', route, signal, forAgentId: contract.ownerAgentId,
           onStarted: async agentId => { await admitted.assertCurrent(); signal.throwIfAborted(); await rememberPlannerAgent(context, agentId); } }, admitted.authority), sourceOf, port => nativeContractPort(contract, deps.native, port, signal))));
         if (run.agentId !== undefined) await rememberPlannerAgent(context, run.agentId);
         signal.throwIfAborted();

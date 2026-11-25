@@ -22,11 +22,18 @@ import { Row, RowList } from '../ui/Row';
 import { StatusDot } from '../ui/StatusDot';
 import { SettingsBlock } from './dialog/parts';
 import { whenLabel } from '../../lib/when-label';
+import { projectName } from '../../lib/place-project';
 
 /** One-line reading of a rule: effect, tier, tool. */
 export function ruleSummary(rule: PermissionRuleRecord): string {
   const effect = rule.effect === 'deny' ? 'Deny' : 'Allow';
   return `${effect} · ${rule.tier} · ${rule.tool}`;
+}
+
+/** The release a refusing rule was carried from to every project (`carried`), read before the client types know the field. */
+function carriedFrom(rule: PermissionRuleRecord): string | undefined {
+  const carried = (rule as Readonly<Record<string, unknown>>)['carried'];
+  return typeof carried === 'string' && carried ? carried : undefined;
 }
 
 export function PermissionRules() {
@@ -86,7 +93,8 @@ export function PermissionRules() {
               className="permission-rule-row"
               leading={<StatusDot tone={rule.effect === 'deny' ? 'bad' : 'ok'} srLabel={rule.effect} />}
               title={ruleSummary(rule)}
-              meta={[rule.description ?? '', whenLabel(rule.createdAt) && `created ${whenLabel(rule.createdAt)}`].filter(Boolean).join(' · ')}
+              // Where it is in force: the project by its name, or every project.
+              meta={[rule.description ?? '', rule.project ? `in ${projectName(rule.project)}` : carriedFrom(rule) ? `Every project (carried from ${carriedFrom(rule)})` : 'every project', whenLabel(rule.createdAt) && `created ${whenLabel(rule.createdAt)}`].filter(Boolean).join(' · ')}
               trailing={(
                 <Button
                   size="sm"

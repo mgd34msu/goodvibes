@@ -848,7 +848,7 @@ export async function resetHarnessSetting(
       // Store errors may echo credential material, so none is included.
       return {
         ...result,
-        secretNotDeleted: `${setting.key} was reset, but its stored secret ${secretKey} could not be deleted. Remove it with /secrets delete ${secretKey}.`,
+        secretNotDeleted: `${setting.key} was reset, but its stored secret ${secretKey} could not be deleted. Remove ${secretKey} with "Delete a secret" (Permissions and safety, Secrets).`,
       };
     }
   }

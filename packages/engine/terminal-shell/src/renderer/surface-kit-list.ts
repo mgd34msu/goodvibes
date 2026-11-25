@@ -36,6 +36,8 @@ export interface KitRow {
   readonly selectable?: (boolean) | undefined;
   readonly onClick?: (() => void) | undefined;
   readonly header?: (string) | undefined;
+  /** The header is drawn as written (its own capitals: the settings screen's section titles), not in lower case. */
+  readonly headerAsWritten?: true | undefined;
   readonly headerRight?: (string) | undefined;
   readonly label?: (string) | undefined;
   /** Custom label spans; replaces `label` when set. */
@@ -202,9 +204,14 @@ function rowPieces(row: KitRow): Piece[] {
   return pieces;
 }
 
+/** A group header's words: lower case, as the kit draws them, unless the row keeps them as written. */
+function headerText(row: KitRow): string {
+  return row.headerAsWritten === true ? row.header! : row.header!.toLowerCase();
+}
+
 function layoutRow(row: KitRow, x0: number, x1: number): RowLayout {
   const width = Math.max(1, x1 - x0 + 1);
-  if (isHeader(row)) return { lines: [[{ text: row.header!.toLowerCase(), style: {} }]], right: row.headerRight, main: 1 };
+  if (isHeader(row)) return { lines: [[{ text: headerText(row), style: {} }]], right: row.headerRight, main: 1 };
   const rightW = row.right ? getDisplayWidth(row.right) + 2 : 0;
   const textW = Math.max(4, width - rightW);
   const lines = wrapSpans(rowPieces(row), textW);
@@ -227,7 +234,7 @@ export function drawRow(canvas: SurfaceCanvas, y: number, row: KitRow, x0: numbe
   const layout = layoutRow(row, x0, x1);
   if (isHeader(row)) {
     canvas.put(x0 - MODAL_MARK_INSET, y, '✦', { fg: t.brandEnd });
-    canvas.put(x0, y, row.header!.toLowerCase(), { fg: t.accent, bold: true });
+    canvas.put(x0, y, headerText(row), { fg: t.accent, bold: true });
     if (row.headerRight) canvas.right(x1, y, row.headerRight, { fg: t.textFaint });
     return 1;
   }

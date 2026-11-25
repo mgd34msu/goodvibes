@@ -32,6 +32,9 @@ export function createAutomationSpawnTask(
       ...(input.toolAllowlist?.length ? { tools: [...input.toolAllowlist], restrictTools: true } : extra.length > 0 ? { tools: [...extra] } : {}),
       ...(input.context ? { context: input.context } : {}),
       ...(input.sessionId ? { sessionId: input.sessionId } : {}),
+      ...(input.spendingSource ? { spendingSource: input.spendingSource } : {}),
+      // The run works in its schedule's project, never the daemon's own folder.
+      ...(input.workingDirectory ? { workingDirectory: input.workingDirectory } : {}),
     }, automationActionBinding(input));
     return record.id;
   };

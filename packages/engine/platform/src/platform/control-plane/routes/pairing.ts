@@ -16,7 +16,7 @@ import type { GatewayMethodCatalog } from '../method-catalog.js';
 import type { GatewayMethodHandler, GatewayMethodInvocation } from '../method-catalog-shared.js';
 import type { PairingTokenManager } from '../../pairing/pairing-token-store.js';
 import { PairingLimitReachedError, PairingMinterRevokedError, SharedTokenNotReplaceableError, isPairingAttemptId } from '../../pairing/pairing-token-store.js';
-import { pairingTokenIdOfPrincipal } from '../../pairing/principal-ids.js';
+import { pairingTokenIdOfCaller } from '../../pairing/principal-ids.js';
 import { GatewayVerbError } from './gateway-verb-error.js';
 import { readInvocationParams, requireStringValue } from './invocation-params.js';
 import { systemActor } from '@goodvibes/engine/daemon-api/http-policy';
@@ -104,7 +104,7 @@ function createMintHandler(service: PairingGatewayService): GatewayMethodHandler
     }
     const scopes = mintedPairingScopes(invocation.context, params.scopes);
     try {
-      return { token: service.mint({ name, mintedBy: pairingTokenIdOfPrincipal(invocation.context.principalId),
+      return { token: service.mint({ name, mintedBy: pairingTokenIdOfCaller(invocation.context),
         ...(attemptId !== undefined ? { attemptId } : {}), ...(params.client === 'agent' ? { client: 'agent' as const } : {}),
         ...(scopes !== undefined ? { scopes } : {}) }) };
     } catch (error) {
@@ -128,7 +128,7 @@ function createMigrateHandler(service: PairingGatewayService): GatewayMethodHand
       const scopes = mintedPairingScopes(invocation.context, undefined);
       return { token: service.mintForMigration({
         name,
-        mintedBy: pairingTokenIdOfPrincipal(invocation.context.principalId),
+        mintedBy: pairingTokenIdOfCaller(invocation.context),
         ...(attemptId !== undefined ? { attemptId } : {}),
         ...(scopes !== undefined ? { scopes } : {}),
       }) };
@@ -180,7 +180,8 @@ function createRevokeHandler(service: PairingGatewayService, onRevoked?: Pairing
     const token = service.list().find((entry) => entry.id === id);
     if (!token) throw new GatewayVerbError('Unknown pairing token', 'PAIRING_TOKEN_NOT_FOUND', 404);
     // A token the caller holds or minted is the caller's to revoke (control-plane.write, checked by the catalog).
-    const callerTokenId = pairingTokenIdOfPrincipal(invocation.context.principalId);
+    // Told by the kind of credential: a sign-in user named like a device's principal is never that device.
+    const callerTokenId = pairingTokenIdOfCaller(invocation.context);
     if (callerTokenId !== undefined && (token.id === callerTokenId || token.mintedBy === callerTokenId)) return revoke();
     // Any other token is access the owner granted: withdrawing it is his own act.
     const admission = admitEffects(invocation.context.actor ?? systemActor('in-process'), ['access.withdraw']);
@@ -202,7 +203,7 @@ function createRevokeHandler(service: PairingGatewayService, onRevoked?: Pairing
       code: 'OWNER_APPROVAL_PENDING',
       approvalId,
       followable: admitEffects(invocation.context.actor ?? systemActor('in-process'), ['approvals.read']).kind === 'allowed',
-      state: `nothing was revoked yet; revoking ${token.name} withdraws access only the owner withdraws, so it was put to him and is done when he approves it`,
+      state: `nothing was revoked yet; revoking ${token.name} withdraws access only the owner withdraws, so it was put to the owner and is done when the owner approves it`,
       next: [`Watch approval ${approvalId} (approvals.list with approvalId, or the approval-update event).`],
     }, { status: 202 });
   };

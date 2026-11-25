@@ -36,7 +36,8 @@
  */
 import { useQuery } from '@tanstack/react-query';
 import { CalendarDays, Mail } from 'lucide-react';
-import { client as platformClient } from '../../lib/goodvibes';
+import { client as platformClient, invokeOwnerMethod } from '../../lib/goodvibes';
+import { asRecord } from '../../lib/object';
 import { queryKeys } from '../../lib/queries';
 import { formatError } from '../../lib/errors';
 import {
@@ -54,13 +55,14 @@ import { SettingsBlock } from './dialog/parts';
 const STATE_TONE: Record<SurfaceState, StatusTone> = {
   ready: 'ok',
   'needs-setup': 'warn',
+  'not-set-up': 'idle',
   'not-available': 'idle',
   'auth-failed': 'bad',
   'store-unreadable': 'bad',
   error: 'warn',
 };
 
-type SurfaceState = 'ready' | 'needs-setup' | 'not-available' | 'auth-failed' | 'store-unreadable' | 'error';
+type SurfaceState = 'ready' | 'needs-setup' | 'not-set-up' | 'not-available' | 'auth-failed' | 'store-unreadable' | 'error';
 
 interface SurfaceStatus {
   readonly state: SurfaceState;
@@ -71,6 +73,7 @@ interface SurfaceStatus {
 const STATE_LABEL: Record<SurfaceState, string> = {
   ready: 'Ready',
   'needs-setup': 'Needs setup',
+  'not-set-up': 'Not set up',
   'not-available': 'Not on this daemon',
   'auth-failed': 'Credentials rejected',
   'store-unreadable': 'Secret store could not be read',
@@ -86,9 +89,17 @@ function mailStatus(error: unknown, ok: boolean): SurfaceStatus {
     return { state: 'ready', label: STATE_LABEL.ready, detail: 'The account answered a live inbox read.' };
   }
   const note = mailRefusalNote(error);
+  // This panel is in Settings already: the fields that set mail up are named, never "in Settings".
+  if (note?.kind === 'needs-setup') return { state: note.kind, label: STATE_LABEL[note.kind], detail: MAIL_SETUP_HERE };
+  if (note?.kind === 'auth-failed') return { state: note.kind, label: STATE_LABEL[note.kind], detail: MAIL_PASSWORD_HERE };
   if (note) return { state: note.kind, label: STATE_LABEL[note.kind], detail: note.description };
   return { state: 'error', label: STATE_LABEL.error, detail: formatError(error) };
 }
+
+/** Where on this page mail is set up: the Surfaces settings of Devices and pairing. */
+const MAIL_SETUP_HERE = 'No mail account is set up. Fill in Mail server, Mail account and Mail password in Surfaces, under Devices and pairing on this page, and your inbox shows up here.';
+const MAIL_PASSWORD_HERE = 'The mail server refused the saved password: replace Mail password in Surfaces, under Devices and pairing on this page.';
+const CALENDAR_SETUP_HERE = 'No calendar is set up, so new events are kept on this computer only. Fill in Calendar server, Calendar account and Calendar password in Surfaces, under Devices and pairing on this page, to use a CalDAV calendar.';
 
 /**
  * Calendar status from the calendar surface's own error helpers. Kept separate from
@@ -97,8 +108,11 @@ function mailStatus(error: unknown, ok: boolean): SurfaceStatus {
  * them into one matcher would mean one surface silently inheriting the other's
  * assumptions the first time either changes.
  */
-function calendarStatus(error: unknown, ok: boolean): SurfaceStatus {
-  if (ok) {
+function calendarStatus(error: unknown, setUp: boolean | undefined): SurfaceStatus {
+  if (!error && setUp === false) {
+    return { state: 'not-set-up', label: STATE_LABEL['not-set-up'], detail: CALENDAR_SETUP_HERE };
+  }
+  if (!error) {
     return { state: 'ready', label: STATE_LABEL.ready, detail: 'The endpoint answered a live event query.' };
   }
   if (isMethodUnavailableError(error) || isMethodNotInvokableError(error)) {
@@ -157,18 +171,36 @@ function SurfaceRow({
 }
 
 export function MailAccountSettings() {
-  // The lightest real read each surface publishes. limit:1 rather than a bare list so
-  // a working account is not made to page its whole inbox just to answer "are you
-  // reachable"; both verbs are read-only (BODY.PEEK / EXAMINE), so probing cannot
-  // change mailbox or calendar state.
+  // Mail: the capability mail.status, which answers either way (reachable, or why not by the refusal's own code), so
+  // opening Settings with no mailbox set up draws no refused inbox read. The daemon reads one message summary to
+  // answer it (read-only). Calendar: the lightest real read it publishes, limit:1 (EXAMINE), which cannot change state.
   const mailProbe = useQuery({
-    queryKey: queryKeys.emailInbox(1, false, ''),
-    queryFn: () => platformClient.operator.email.inbox.list({ limit: 1 }),
+    queryKey: queryKeys.mailStatusDetail,
+    queryFn: async () => {
+      const data = asRecord(asRecord(await invokeOwnerMethod('capabilities.run', { id: 'mail.status', inputs: {} })).data);
+      // Not reachable: the refusal the daemon met, shaped as the error the inbox read would have thrown.
+      if (data.reachable !== true) {
+        const failure = asRecord(data.failure);
+        throw Object.assign(new Error(typeof failure.message === 'string' ? failure.message : 'The mailbox did not answer.'), failure);
+      }
+      return true;
+    },
     retry: false,
   });
+  // Calendar: the capability calendar.status first, which says whether any calendar is set up (a CalDAV server, a
+  // signed-in Google or Outlook account, a subscribed feed); with none, the panel says so and reads no events (the
+  // events list answers even with none, which is not "Ready"). With one, the lightest real event read.
   const calendarProbe = useQuery({
-    queryKey: queryKeys.calendarProbe,
-    queryFn: () => platformClient.operator.calendar.events.list({ limit: 1 }),
+    queryKey: queryKeys.calendarSetUp,
+    queryFn: async () => {
+      const data = asRecord(asRecord(await invokeOwnerMethod('capabilities.run', { id: 'calendar.status', inputs: {} })).data);
+      const accounts = Array.isArray(data.accounts) ? data.accounts.map(asRecord) : [];
+      const signedIn = accounts.some((row) => row.state === 'connected' || row.state === 'refresh-due');
+      const setUp = data.caldav === true || signedIn || (typeof data.feeds === 'number' && data.feeds > 0);
+      if (!setUp) return { setUp: false };
+      await platformClient.operator.calendar.events.list({ limit: 1 });
+      return { setUp: true };
+    },
     retry: false,
   });
 
@@ -176,7 +208,7 @@ export function MailAccountSettings() {
   if (mailProbe.isPending || calendarProbe.isPending) return null;
 
   const mail = mailStatus(mailProbe.error, !mailProbe.error);
-  const calendar = calendarStatus(calendarProbe.error, !calendarProbe.error);
+  const calendar = calendarStatus(calendarProbe.error, calendarProbe.data?.setUp);
 
   return (
     <SettingsBlock

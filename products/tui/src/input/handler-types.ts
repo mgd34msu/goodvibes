@@ -24,7 +24,6 @@ import type { SelectionManager } from '@goodvibes/engine/terminal-shell';
 import type { InfiniteBuffer } from '@goodvibes/engine/terminal-shell';
 import type { AutocompleteEngine } from './autocomplete.ts';
 import type { BookmarkModal } from './bookmark-modal.ts';
-import type { SettingsModal } from './settings-modal.ts';
 import type { McpWorkspace } from './mcp-workspace.ts';
 import type { SessionPickerModal } from './session-picker-modal.ts';
 import type { ConfigModal } from './config-modal.ts';
@@ -103,7 +102,6 @@ export interface InputHandlerLike {
 
   // ── Modal objects ─────────────────────────────────────────────────────────
   bookmarkModal: BookmarkModal;
-  settingsModal: SettingsModal;
   mcpWorkspace: McpWorkspace;
   sessionPickerModal: SessionPickerModal;
   profilePickerModal: ProfilePickerModal;

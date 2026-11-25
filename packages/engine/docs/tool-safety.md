@@ -187,11 +187,12 @@ refusal names each problem.
 
 A tool's permission category is one field on its definition (`category`); an
 engine tool's comes from one table (`ENGINE_TOOL_CATEGORIES`), and a tool that
-declares none is classed `delegate`. The gate, `/tools verify` and the policy
+declares none is classed `delegate`. The gate, `tools.verify` and the policy
 evaluators read that one value.
 
-`/tools verify-all` runs the code checks over every registered tool and asks no
-decision model. `/tools verify <name>` also asks whether that one tool's
+`tools.verify-all` ("check every tool", `K` on the Tools tab of Tools and
+extensions) runs the code checks over every registered tool and asks no
+decision model. `tools.verify` (`k` on a tool) also asks whether that one tool's
 description explains what it does and when to use it (one reading per distinct
 description, remembered). The timeout, output-policy and idempotency checks
 apply only to a tool object that declares that metadata (`category`,

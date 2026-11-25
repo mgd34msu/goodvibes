@@ -366,14 +366,12 @@ export async function runTaskSuite(suiteDir: string, options: RunTaskSuiteOption
   };
 }
 
-/** Format a task-suite result as a per-task, one-line-each report. */
+/** Format a task-suite result as sentences, one per task, that wrap at any width. */
 export function formatTaskSuiteResult(result: TaskSuiteResult): string {
-  const hr = '-'.repeat(72);
-  const lines: string[] = [hr, `Task suite: ${result.suiteDir}`, `Tasks: ${result.passedCount}/${result.total} passed`, hr];
+  const lines: string[] = [`The task suite in ${result.suiteDir}: ${result.passedCount} of ${result.total} task${result.total === 1 ? '' : 's'} passed.`];
   for (const r of result.results) {
-    lines.push(`  [${r.passed ? 'PASS' : 'FAIL'}] ${r.taskId.padEnd(40)} ${r.reason}`);
+    lines.push(`  ${r.taskId} ${r.passed ? 'passed' : 'failed'}${r.reason ? `: ${r.reason}` : ''}.`.replace(/\.\.$/, '.'));
   }
-  lines.push(hr);
   return lines.join('\n');
 }
 

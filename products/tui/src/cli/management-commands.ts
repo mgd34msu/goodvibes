@@ -230,7 +230,7 @@ export async function renderPairing(runtime: CliCommandRuntime): Promise<{ reado
         '',
         `  ${link}`,
       ];
-    lines.push(`  Token name: ${result.token.name}  (rename or revoke later with /devices in the terminal app, or in the web UI under Settings, Devices and pairing)`);
+    lines.push(`  Token name: ${result.token.name}  (rename or revoke it later on the Paired tab of Devices and network, in the terminal app or the web UI)`);
     // A device that cannot resolve the name in the link (no mDNS, not on the
     // tailnet) can still use the routable address with the same one-time token.
     if (webOrigin?.alternateOrigin && link.startsWith(`${webOrigin.origin}/`)) {

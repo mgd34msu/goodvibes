@@ -6,7 +6,8 @@ import type { JudgmentReadingOptions } from '@goodvibes/engine/errors';
  *   - 'exact'        , this exact command (exec)
  *   - 'command-class', this command class, e.g. every `git ...` (exec)
  *   - 'path'         , edits/writes under the asked path's directory
- *   - 'tool'         , always allow/deny this tool in this project
+ *   - 'tool'         , always allow/deny this tool in this project; for `capability_run`,
+ *                      this one capability (keyed by its id), never every capability
  *   - 'session'      , the classic in-memory session cache only
  *
  * A tiered decision becomes a durable user-origin PolicyRule (the same shape
@@ -29,6 +30,7 @@ import {
 import { execContextOf, extractCommandArgs, splitShellCommand } from '../runtime/permissions/rules/prefix.js';
 import { extractPathArgs } from '../runtime/permissions/rules/path-scope.js';
 import { execShellCommands } from '../runtime/permissions/exec-command-text.js';
+import { toolAskWords } from './tool-ask-words.js';
 
 /** How far a remembered approval decision reaches. */
 export type RememberTier = 'session' | 'exact' | 'command-class' | 'path' | 'tool';
@@ -88,7 +90,8 @@ export function buildRememberOptions(toolName: string, args: Record<string, unkn
     const dirs = uniqueSorted(paths.map((path) => dirname(path)));
     options.push({
       tier: 'path',
-      label: dirs.length === 1 ? `Edits under ${dirs[0]} in this project` : 'Edits under these folders in this project',
+      // The rule is kept for the project it was made in; the folder may be outside it, so the label says where it applies, not where the folder is.
+      label: dirs.length === 1 ? `Edits under ${dirs[0]}, while you work in this project` : 'Edits under these folders, while you work in this project',
       detail: dirs.map((dir) => `everything under ${dir}/`).join(' ; '),
     });
   }
@@ -101,6 +104,20 @@ export function buildRememberOptions(toolName: string, args: Record<string, unkn
     label: `${session}, this session only`,
     detail: 'forgotten when this session ends',
   });
+  // A capability call is remembered for that one capability, named by its label: no tier covers every capability
+  // (one answer to an outside caller's call would otherwise let every later one in the project run unasked).
+  if (toolName === CAPABILITY_RUN_TOOL_NAME) {
+    const capability = capabilityOfCall(args);
+    // An outside caller's call (the daemon's gate names who asks, `askedBy`): kept for that caller only, named by its name.
+    const from = askedByOf(args) !== undefined ? ` from ${askedByNameOf(args) ?? 'this caller'}` : '';
+    if (capability) options.push({
+      tier: 'tool',
+      label: `Any call to ${capability.name}${from} in this project`,
+      detail: from ? 'this capability only, asked by this same caller, whatever its inputs, until you remove the rule'
+        : 'this capability only, whatever its inputs, until you remove the rule',
+    });
+    return options;
+  }
   // The broadest tier is always last.
   options.push({
     tier: 'tool',
@@ -108,6 +125,35 @@ export function buildRememberOptions(toolName: string, args: Record<string, unkn
     detail: 'whatever it names, until you remove the rule',
   });
   return options;
+}
+
+/** The tool through which a model, an outside caller or a script runs a capability (tools/capability/definitions.ts). */
+const CAPABILITY_RUN_TOOL_NAME = 'capability_run';
+
+/**
+ * Who asked for a `capability_run` call, when the daemon's gate decides an outside caller's call (daemon/
+ * capability-owner-gate.ts adds it: the kind of door and the principal). A remembered answer to such a call is kept
+ * for that caller only, and never settles another's.
+ */
+function askedByOf(args: Record<string, unknown>): string | undefined {
+  const value = args['askedBy'];
+  return typeof value === 'string' && value.trim() ? value.trim() : undefined;
+}
+
+/**
+ * That caller as the owner reads it (`the paired device "build bot"`, `you, on this machine`), which the daemon's gate
+ * adds beside `askedBy`: a rule kept for the caller is described by it, never by the key it is matched on.
+ */
+function askedByNameOf(args: Record<string, unknown>): string | undefined {
+  const value = args['askedByName'];
+  return typeof value === 'string' && value.trim() ? value.trim() : undefined;
+}
+
+/** The capability a `capability_run` call is to: its id (what a remembered answer is keyed by) and its label. */
+function capabilityOfCall(args: Record<string, unknown>): { readonly id: string; readonly name: string } | undefined {
+  const id = typeof args['id'] === 'string' ? args['id'].trim() : '';
+  if (!id) return undefined;
+  return { id, name: toolAskWords(CAPABILITY_RUN_TOOL_NAME, args)?.subject ?? id };
 }
 
 /** What one call of a tool is, as a person names it: never the tool's id ("the exec tool"). */
@@ -186,6 +232,7 @@ export function ruleCovers(broader: PolicyRule, narrower: PolicyRule): boolean {
  * class, the touched paths, one command, or the whole tool.
  */
 function sessionScope(toolName: string, args: Record<string, unknown>): string {
+  if (toolName === CAPABILITY_RUN_TOOL_NAME) return `Any call to ${capabilityOfCall(args)?.name ?? 'this capability'}${askedByOf(args) !== undefined ? ` from ${askedByNameOf(args) ?? 'this caller'}` : ''}`;
   const commands = extractCommandArgs(args);
   if (toolName === 'exec' && commands.length > 0) {
     if (commands.some(isCompound)) return commands.length === 1 ? 'This exact command' : 'These exact commands';
@@ -214,6 +261,11 @@ function isCompound(command: string): boolean {
  * covered by an answer about `git status`.
  */
 export function sessionApprovalKey(toolName: string, args: Record<string, unknown>): string {
+  // One capability's calls, never every capability_run call.
+  if (toolName === CAPABILITY_RUN_TOOL_NAME) {
+    const askedBy = askedByOf(args);
+    return `${toolName}:capability:${capabilityOfCall(args)?.id ?? ''}${askedBy !== undefined ? `:asked-by:${askedBy}` : ''}`;
+  }
   const commands = extractCommandArgs(args);
   if (toolName === 'exec' && commands.length > 0) {
     if (commands.some(isCompound)) return `${toolName}:exact:${JSON.stringify(commands)}`;
@@ -301,7 +353,23 @@ function durableRuleFor(input: Parameters<typeof buildDurableRuleForDecision>[0]
         description: `${effect} edits under ${dirs.join(', ')}`,
       };
     }
-    case 'tool':
+    case 'tool': {
+      if (toolName === CAPABILITY_RUN_TOOL_NAME) {
+        // Keyed by the capability's id: every call to that one capability, whatever its inputs; no rule covers them all.
+        const capability = capabilityOfCall(args);
+        if (!capability) return null;
+        // An outside caller's answer names that caller: it never matches another's call (nor the owner's model's).
+        const askedBy = askedByOf(args);
+        return {
+          type: 'arg-shape',
+          id,
+          origin: 'user',
+          effect,
+          toolPattern: toolName,
+          argMatchers: { id: capability.id, ...(askedBy !== undefined ? { askedBy } : {}) },
+          description: `${effect} every call to ${capability.name}${askedBy !== undefined ? ` from ${askedByNameOf(args) ?? 'one outside caller'}` : ''} in this project`,
+        };
+      }
       return {
         type: 'prefix',
         id,
@@ -310,6 +378,7 @@ function durableRuleFor(input: Parameters<typeof buildDurableRuleForDecision>[0]
         toolPattern: toolName,
         description: `${effect} every ${toolName} call in this project`,
       };
+    }
     default:
       return null;
   }

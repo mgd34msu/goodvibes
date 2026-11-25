@@ -49,6 +49,7 @@ import { daemonSecretKeyFor } from '../config/daemon-secret-keys.js';
 import { grantGeneration, type AdmissionFailure } from './group-admissions.js';
 import { authorityKey, emptyAuthorityRecord, type AnyAuthorityEntry } from './authority-record.js';
 import type { AdmissionGrant } from './group-membership.js';
+import type { MemberGroupView, MemberViewOutcome } from './group-view.js';
 import { ClusterMembershipOperationError, type ClusterMembershipOperation, type MembershipOperationFailure } from './membership-operation.js';
 
 /** How long a join or a rejoin waits for the group to answer. */
@@ -142,6 +143,8 @@ export interface GroupStatusReport {
   /** Null when the per-surface layer has not supplied it, never a fabricated empty list. */
   readonly surfaces: readonly SurfaceHolding[] | null;
   readonly keyGeneration: number | null;
+  /** When the key in force was made (the group's start for generation 0); null outside a group. */
+  readonly keyChangedAt: number | null;
   readonly keyGenerationsHeld: number;
   readonly keyGenerationCap: number;
   readonly acceptedGenerations: readonly number[];
@@ -197,6 +200,11 @@ export interface GroupStatusReport {
   readonly electionAuthentication: 'group-key' | 'secret' | 'none' | 'unavailable';
   /** One plain sentence naming what to do, when there is something to do. */
   readonly advice: string | null;
+  /**
+   * Whether sharing with your other machines (`cluster.enabled`) is on here. Off, this machine is not on the group's
+   * network at all: it neither hears the groups announced on it nor takes part in its own.
+   */
+  readonly sharing: 'on' | 'off' | 'next-start';
 }
 
 export interface GroupOperationsContext {
@@ -213,6 +221,10 @@ export interface GroupOperationsContext {
   readonly authorityRecord?: AuthorityRecordFile | undefined;
   /** Saves `cluster.enabled` true, for a join the owner said yes to while sharing was off; applied at the next start. */
   readonly enableSharing?: (() => void) | undefined;
+  /** Whether `cluster.enabled` is saved on now (it takes effect at the daemon's start). */
+  readonly sharingSaved?: (() => boolean) | undefined;
+  /** Asks another member for its own view of the group over the group's channel (group-view.ts). */
+  readonly askMember?: ((nodeId: string) => Promise<MemberViewOutcome>) | undefined;
 }
 
 /**
@@ -251,6 +263,7 @@ export function groupStatus(context: GroupOperationsContext): GroupOperationResu
       memberCount: state?.members.length ?? 0,
       surfaces: runtime.surfaceHoldings(),
       keyGeneration: material ? runtime.keyring().currentGeneration : null,
+      keyChangedAt: material ? material.keys.find((key) => key.generation === runtime.keyring().currentGeneration)?.createdAt ?? null : null,
       keyGenerationsHeld: material?.keys.length ?? 0,
       keyGenerationCap: MAX_KEY_GENERATIONS,
       acceptedGenerations: runtime.keyring().acceptedGenerations(),
@@ -263,8 +276,63 @@ export function groupStatus(context: GroupOperationsContext): GroupOperationResu
       authority: runtime.authorityStatus(),
       electionAuthentication,
       advice,
+      // `next-start`: turned on and saved, in force once the daemon starts again.
+      sharing: context.settings.enabled ? 'on' : context.sharingSaved?.() === true ? 'next-start' : 'off',
     },
   };
+}
+
+/** What turning sharing on answers: already on, or saved and waiting for the daemon's next start. */
+export interface SharingOnResult extends PendingRestartFields {
+  readonly already: boolean;
+}
+
+/**
+ * Turn sharing with your other machines on (`cluster.enabled`), the control
+ * Nearby groups offers while it is off: saved now, in force from the daemon's
+ * next start (the daemon wrapping these verbs restarts itself to bring the
+ * group layer up). Already on, nothing changes.
+ */
+export async function turnSharingOn(context: GroupOperationsContext): Promise<GroupOperationResult<SharingOnResult>> {
+  if (context.settings.enabled) return { ok: true, data: { already: true } };
+  // Already turned on and waiting for the start: the restart is asked again (a daemon started by hand says so again).
+  if (!context.enableSharing) return failed('sharing cannot be turned on from here', 'set cluster.enabled to true in Settings, then restart the daemon');
+  context.enableSharing();
+  return { ok: true, data: { already: false, pending: true } };
+}
+
+/** This machine's own view of its group, as it answers another member's "see its group"; null outside a group. */
+export function ownGroupView(context: GroupOperationsContext): MemberGroupView | null {
+  const status = groupStatus(context);
+  const nodes = groupNodes(context);
+  if (!status.ok || !nodes.ok || status.data.membership !== 'member') return null;
+  return {
+    nodeName: context.nodeDisplayName,
+    groupName: nodes.data.groupName,
+    keyGeneration: status.data.keyGeneration,
+    awaitingSync: status.data.replication?.awaitingSync === true,
+    machines: nodes.data.members.map((member) => ({ name: member.displayName, thisMachine: member.isThisMachine, heard: member.heardSinceStart, lastSeenAt: member.lastSeenAt })),
+    at: context.now(),
+  };
+}
+
+/** Another member's own view of the group (`cluster view`), or why it could not be had. */
+export interface MemberViewResult {
+  readonly nodeId: string;
+  readonly displayName: string;
+  readonly outcome: MemberViewOutcome;
+}
+
+/** Ask one member of this machine's group for its own view of the group, over the group's channel. */
+export async function memberGroupView(context: GroupOperationsContext, nodeId: string): Promise<GroupOperationResult<MemberViewResult>> {
+  const state = context.runtime.groupState;
+  if (!state || !context.runtime.keyMaterial) return failed('this machine is not in a group', 'join one from Nearby groups, or start one');
+  const member = state.members.find((entry) => entry.nodeId === nodeId) ?? state.members.find((entry) => entry.displayName === nodeId);
+  if (!member) return failed(`no machine called '${nodeId}' is in this group`, 'the Machines tab lists the machines in it');
+  if (member.nodeId === context.nodeId) return failed('that is this machine', 'the Machine group tab shows this machine\'s own view');
+  if (!context.settings.enabled) return failed(SHARING_OFF_FOR_JOIN, 'turn sharing on to reach the other machines', { failure: 'sharing-off' });
+  if (!context.askMember) return failed('this daemon cannot ask another machine for its view', 'restart the daemon');
+  return { ok: true, data: { nodeId: member.nodeId, displayName: member.displayName, outcome: await context.askMember(member.nodeId) } };
 }
 
 export interface CreateGroupInput {
@@ -902,6 +970,9 @@ async function leaveGroupOwned(context: GroupOperationsContext, owner: ClusterMe
     return failed('this machine is not in a group', 'there is nothing to leave');
   }
   const result = { groupId: material.groupId, groupName: state.displayName };
+  // Told to the other members while this machine still holds the group's keys (the secure address's lead stops
+  // sharing its certificate with it and issues a new one); its roster entry stays until a member removes it.
+  await context.runtime.noteLeaving();
   await context.runtime.leaveMembership(owner);
   return { ok: true, data: result };
 }
@@ -995,6 +1066,33 @@ export async function decideLocalSetting(
     }
     throw error;
   }
+}
+
+/** One shared setting that differs between this machine and the group, with both values (never a secret). */
+export interface SettingDifference {
+  /** The setting's key, or `user:<name>` for a person's account held separately here and in the group. */
+  readonly path: string;
+  /** This machine's value; for an account, absent (an account has no value to show). */
+  readonly here?: unknown;
+  /** The group's value, as the machine that wrote it last holds it; absent for an account. */
+  readonly group?: unknown;
+  /** The machine whose value the group holds, by name when it is a member. */
+  readonly groupFrom: string;
+}
+
+/**
+ * The shared settings that differ between this machine and the group: what the "share a setting" and "take the
+ * group's setting" forms offer, each with both values, and the usernames held by separate accounts.
+ */
+export function settingDifferences(context: GroupOperationsContext): GroupOperationResult<readonly SettingDifference[]> {
+  const state = context.runtime.groupState;
+  if (!state || !context.runtime.keyMaterial) return failed('this machine is not in a group', 'there is no group setting to share or take; start or join a group first');
+  const nameOf = (nodeId: string): string => state.members.find((member) => member.nodeId === nodeId)?.displayName ?? 'another machine';
+  const settings = context.runtime.settingDifferences().map((difference): SettingDifference => ({
+    path: difference.path, here: difference.here, group: difference.group, groupFrom: nameOf(difference.origin),
+  }));
+  const accounts = (context.runtime.authorityStatus()?.userConflicts ?? []).map((name): SettingDifference => ({ path: `user:${name}`, groupFrom: 'the group' }));
+  return { ok: true, data: [...settings, ...accounts] };
 }
 
 /** Groups seen advertising themselves on this network that this machine is not in. */
@@ -1118,6 +1216,12 @@ export interface ClusterGroupVerbSurface {
   publish(path: string, options?: { turnOnSharing?: boolean }): Promise<GroupOperationResult<SettingDecisionResult>>;
   /** Take the group's value of a shared setting here. */
   accept(path: string, options?: { turnOnSharing?: boolean }): Promise<GroupOperationResult<SettingDecisionResult>>;
+  /** Turn sharing with your other machines on; in force from the daemon's next start. */
+  sharingOn(): Promise<GroupOperationResult<SharingOnResult>>;
+  /** Another member's own view of the group, asked of it over the group's channel. */
+  view(nodeId: string): Promise<GroupOperationResult<MemberViewResult>>;
+  /** The shared settings that differ between this machine and the group, with both values. */
+  differences(): GroupOperationResult<readonly SettingDifference[]>;
 }
 
 /**
@@ -1144,5 +1248,8 @@ export function createClusterGroupVerbs(context: GroupOperationsContext): Cluste
     rename: (name, options) => renameGroupTo(context, name, options),
     publish: (path, options) => decideLocalSetting(context, path, 'publish', options),
     accept: (path, options) => decideLocalSetting(context, path, 'accept', options),
+    sharingOn: () => turnSharingOn(context),
+    view: (nodeId) => memberGroupView(context, nodeId),
+    differences: () => settingDifferences(context),
   };
 }

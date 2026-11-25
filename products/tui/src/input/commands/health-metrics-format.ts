@@ -1,5 +1,5 @@
 /**
- * Pure formatters for the `/health metrics` surface (daemon runtime.metrics.get
+ * Pure formatters for the Health tab's `metrics` check (daemon runtime.metrics.get
  * and quota.snapshot.get). Kept separate from the command wiring so the honesty
  * bars are unit-testable without a live daemon: scope refusals are named, empty
  * maps say "none reported" rather than showing zeros, and an unobserved quota

@@ -42,10 +42,12 @@ export interface GrantDiagnosisInput {
 
 /**
  * The one action that renews a grant: a fresh consent asking for every scope,
- * started by the request that met the dead grant (connection-repair.ts); that
- * request is sent again once the person approves.
+ * the daemon's (`google.reauthorize`, the control "ask for consent again"). A
+ * request made in a turn the daemon hosts starts it itself (connection-repair.ts)
+ * and says so in its own words; this is what a check or a program's own
+ * request says.
  */
-const REAUTHORIZE_OFFER = 'A fresh consent asking for every scope starts at once: approve the link it shows, and the request continues';
+const REAUTHORIZE_OFFER = 'Ask Google for consent again ("ask for consent again" on the Google tab of Mail, calendar and channels) and approve the link it shows';
 
 function normalize(account: string | null): string | null {
   const trimmed = account?.trim().toLowerCase();
@@ -120,7 +122,7 @@ async function diagnoseOwnedInvalidGrant(original: GrantDiagnosisInput): Promise
         'Google attributes this credential’s expiry to the Testing app token lifetime.',
       fix:
         'Check the app at https://console.cloud.google.com/auth/audience. If it is still in Testing, set publishing status to "In production", '
-        + 'then approve the fresh consent link that starts at once; the request continues after it.',
+        + 'then ask Google for consent again ("ask for consent again" on the Google tab of Mail, calendar and channels) and approve its link.',
       needsReauthorization: true,
     };
   }

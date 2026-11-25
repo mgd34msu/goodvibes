@@ -24,6 +24,13 @@ const record = (value: unknown): Record<string, unknown> => value !== null && ty
 /** Names and reasons another device or machine chose, without control characters. */
 const plain = (value: unknown): string => text(value).replace(/[\x00-\x08\x0b-\x1f\x7f-\x9f]/g, ' ').replace(/\x1b\[[0-9;?]*[A-Za-z]/g, '').trim();
 const when = (at: number | undefined): string => at ? new Date(at).toISOString().slice(0, 16).replace('T', ' ') : 'never';
+/** The group key in plain words: how often it changed and when it last did (each change is one generation). */
+function keyChangedWords(generation: number, changedAt: number | undefined): string {
+  const on = changedAt ? `, last on ${when(changedAt)}` : '';
+  if (generation <= 0) return changedAt ? `not changed since the group started on ${when(changedAt)}` : 'not changed since the group started';
+  const times = generation === 1 ? 'once' : generation === 2 ? 'twice' : `${generation} times`;
+  return `changed ${times}${on}`;
+}
 /** A capability's answer, as `capabilities.run` gives it: its `data`. */
 const dataOf = (output: unknown): Record<string, unknown> => record(record(output).data);
 
@@ -35,14 +42,18 @@ interface DeviceItem extends PlaceItem {
   readonly owner?: boolean | undefined;
   readonly scopes: readonly string[];
 }
-interface RequestItem extends PlaceItem { readonly state: 'pending'; readonly label: string; readonly requestedId: string; readonly about: string; readonly offers: readonly string[]; readonly createdAt?: number | undefined; readonly expiresAt?: number | undefined }
+/** `replaces`: the request names a device already paired (the daemon's `replacesPeerId`); approving it needs Replace. */
+/** `daemon`: another machine's daemon asking (it finishes pairing by itself once approved); a phone presses Finish pairing. */
+interface RequestItem extends PlaceItem { readonly state: 'pending' | 'replaces'; readonly label: string; readonly requestedId: string; readonly about: string; readonly offers: readonly string[]; readonly createdAt?: number | undefined; readonly expiresAt?: number | undefined; readonly replaces?: string | undefined; readonly from?: string | undefined; readonly daemon: boolean }
 interface PhoneItem extends PlaceItem { readonly state: 'ready' | 'out-of-date'; readonly label: string; readonly kind: string; readonly platform: string; readonly supported: readonly string[]; readonly gated: readonly string[] }
 interface GrantItem extends PlaceItem { readonly state: 'allowed'; readonly what: string; readonly node: string; readonly grantedAt?: number | undefined; readonly expiresAt?: number | undefined; readonly lastUsedAt?: number | undefined; readonly uses: number }
 interface CaptureItem extends PlaceItem { readonly state: 'kept'; readonly what: string; readonly node: string; readonly capturedAt?: number | undefined; readonly expiresAt?: number | undefined; readonly bytes: number; readonly reason: string }
 interface RelayItem extends PlaceItem { readonly state: 'paired'; readonly name: string; readonly createdAt?: number | undefined; readonly lastSeenAt?: number | undefined }
-interface GroupItem extends PlaceItem { readonly state: 'no-group' | 'member' | 'unreadable'; readonly name: string; readonly machine: string; readonly members: number; readonly keyGeneration?: number | undefined; readonly awaitingSync: boolean }
+/** `removedFrom`: the group another machine removed this one from (the daemon's report), shown while it is in none. */
+interface GroupItem extends PlaceItem { readonly state: 'no-group' | 'member' | 'unreadable'; readonly name: string; readonly machine: string; readonly members: number; readonly keyGeneration?: number | undefined; readonly keyChangedAt?: number | undefined; readonly awaitingSync: boolean; readonly removedFrom?: string | undefined; readonly sharing: boolean }
 interface MachineItem extends PlaceItem { readonly state: 'member' | 'this-machine'; readonly name: string; readonly lastSeenAt?: number | undefined; readonly heard: boolean }
-interface NearbyItem extends PlaceItem { readonly state: 'announced'; readonly name: string; readonly machines: number; readonly lastSeenAt?: number | undefined }
+/** `sharing-off`: this machine is not on the group's network, so it hears no group: said, with the control that turns sharing on. */
+interface NearbyItem extends PlaceItem { readonly state: 'announced' | 'sharing-off' | 'sharing-next-start'; readonly name: string; readonly machines: number; readonly lastSeenAt?: number | undefined }
 interface CloudflareItem extends PlaceItem { readonly state: 'on' | 'off'; readonly ready: boolean; readonly deployed: readonly string[]; readonly warnings: readonly string[] }
 
 /** The network-scan decision (one item), then each model server the daemon's scans kept. */
@@ -54,7 +65,7 @@ interface SyncItem extends PlaceItem { readonly state: 'settings' | 'conflict'; 
 type Item = DeviceItem | RequestItem | PhoneItem | GrantItem | CaptureItem | RelayItem | GroupItem | MachineItem | NearbyItem | CloudflareItem | ScanItem | SyncItem | SettingItem;
 
 /** One setting shown where the thing it sets is (the Cloudflare tab's, the addresses phones use, the phones'). */
-interface SettingItem extends PlaceItem { readonly state: 'setting'; readonly value: string }
+interface SettingItem extends PlaceItem { readonly state: 'setting'; readonly label: string; readonly value: string }
 
 /** The daemon's settings (`config.get`), flat by key whether the answer is flat or nested. */
 function flatSettings(output: unknown): ReadonlyMap<string, unknown> {
@@ -69,16 +80,33 @@ function flatSettings(output: unknown): ReadonlyMap<string, unknown> {
   return flat;
 }
 
-/** The settings a tab shows, by key or key prefix, each with its value as words (never a secret: these hold references). */
-function settingsOf(match: (key: string) => boolean) {
+/**
+ * The settings a tab shows, by key or key prefix, each with its value as words (never a secret: these hold references).
+ * The row names a setting by its key less the domain the tab already says (`capture.retentionHours` on Phone and voice
+ * settings), so it is not cut to "device.capab…" at 80 columns; the detail gives the whole key. This declaration is
+ * loaded by the web UI too, so it holds data only: no settings table is imported here.
+ */
+/** The listeners the Addresses and ports tab shows, each said by what it serves, so "host" and "port" stay told apart. */
+const LISTENER_WORDS: Readonly<Record<string, string>> = { controlPlane: 'Daemon', httpListener: 'Webhooks', web: 'Web UI' };
+
+function settingsOf(match: (key: string) => boolean, said?: string) {
   return (output: unknown): readonly SettingItem[] => [...flatSettings(output)].filter(([key]) => match(key)).sort(([a], [b]) => a.localeCompare(b)).map(([key, value]): SettingItem => ({
+    // Only the one domain the tab is named for is left out: two domains' "host" or "enabled" must stay told apart.
     id: key, state: 'setting',
+    label: said && key.startsWith(said) ? key.slice(said.length)
+      : LISTENER_WORDS[key.split('.')[0]!] && ADDRESS_KEYS.test(key) ? `${LISTENER_WORDS[key.split('.')[0]!]} ${key.slice(key.indexOf('.') + 1)}` : key,
     value: value === undefined || value === null || value === '' ? 'not set' : typeof value === 'string' ? plain(value) : plain(JSON.stringify(value)),
   }));
 }
 const ADDRESS_KEYS = /^(controlPlane|httpListener|web)\.(hostMode|host|port|trustProxy|trustCloudflare)$/;
-const settingRow = (item: PlaceItem) => ({ title: item.id, right: (item as SettingItem).value.slice(0, 24) });
-const settingDetail = (item: PlaceItem) => [{ label: 'Value', text: (item as SettingItem).value }, { text: 'Change it here; Settings shows what it does.', tone: 'muted' as const }];
+/** A setting named by its whole key wherever the action says it (the form, the question, the done line). */
+const SETTING_KEY_SHOWN = { key: (item: PlaceItem): string => `"${item.id}"` };
+const settingRow = (item: PlaceItem) => ({ title: (item as SettingItem).label, right: (item as SettingItem).value.slice(0, 18) });
+const settingDetail = (item: PlaceItem) => [
+  { label: 'Setting', text: item.id },
+  { label: 'Value', text: (item as SettingItem).value },
+  { text: 'Enter changes it; Settings shows what it does.', tone: 'muted' as const },
+];
 
 const OWNER_WORDS: Readonly<Record<string, string>> = { daemon: 'the daemon\'s', tui: 'the terminal app\'s', agent: 'the Agent\'s' };
 
@@ -103,8 +131,10 @@ function devices(output: unknown): readonly DeviceItem[] {
     owner: token.origin === 'owner-pairing',
     scopes: strings(token.scopes),
   }));
+  // Shown and acted on (retire it, give a device its own token), but no device: the Paired tab counts devices only.
   const shared: DeviceItem = {
     id: SHARED_TOKEN_ID, state: body.legacySharedRevoked === true ? 'shared-retired' : 'shared-active', name: 'The old shared token', scopes: [],
+    uncounted: true,
   };
   return [...tokens, shared];
 }
@@ -112,13 +142,16 @@ function devices(output: unknown): readonly DeviceItem[] {
 function requests(output: unknown): readonly RequestItem[] {
   return list(record(output).requests).filter((request) => text(request.id) && request.status === 'pending').map((request): RequestItem => ({
     id: text(request.id),
-    state: 'pending',
+    state: text(request.replacesPeerId) ? 'replaces' : 'pending',
     label: plain(request.label) || text(request.id),
     requestedId: plain(request.requestedId),
     about: [plain(request.platform), plain(request.deviceFamily)].filter(Boolean).join(', '),
     offers: strings(request.capabilities).map(plain),
     createdAt: time(request.createdAt),
     expiresAt: time(request.expiresAt),
+    replaces: text(request.replacesPeerId) || undefined,
+    from: plain(request.remoteAddress) || undefined,
+    daemon: request.peerKind === 'node',
   }));
 }
 
@@ -177,7 +210,13 @@ function group(output: unknown): readonly GroupItem[] {
     machine: plain(report.nodeName),
     members: typeof report.memberCount === 'number' ? report.memberCount : 0,
     keyGeneration: typeof report.keyGeneration === 'number' ? report.keyGeneration : undefined,
+    keyChangedAt: typeof report.keyChangedAt === 'number' ? report.keyChangedAt : undefined,
     awaitingSync: record(report.replication).awaitingSync === true,
+    ...(state === 'no-group' && report.removedFrom ? { removedFrom: plain(record(report.removedFrom).groupName) || 'its group' } : {}),
+    // An older daemon that does not say is taken as on (it said "no group is announced" either way).
+    sharing: report.sharing !== 'off',
+    // One row, this machine's group (or none): there is nothing to count, so the tab says no number.
+    uncounted: true,
   }];
 }
 
@@ -191,7 +230,13 @@ function machines(output: unknown): readonly MachineItem[] {
   }));
 }
 
+/** The one Nearby groups row while sharing is off: the daemon's own words, and the control that turns sharing on. */
+const SHARING_OFF_ID = 'sharing-off';
+
 function nearby(output: unknown): readonly NearbyItem[] {
+  if (dataOf(output).sharing === 'off') return [{ id: SHARING_OFF_ID, state: 'sharing-off', name: 'Sharing is off', machines: 0, uncounted: true }];
+  // Turned on, in force when the daemon starts again (one started by hand is restarted by the person).
+  if (dataOf(output).sharing === 'next-start') return [{ id: SHARING_OFF_ID, state: 'sharing-next-start', name: 'Sharing turned on', machines: 0, uncounted: true }];
   return list(dataOf(output).groups).filter((found) => text(found.groupId)).map((found): NearbyItem => ({
     id: text(found.groupId), state: 'announced', name: plain(found.displayName) || text(found.groupId),
     machines: typeof found.nodeCount === 'number' ? found.nodeCount : 0, lastSeenAt: time(found.lastSeenAt),
@@ -209,7 +254,8 @@ function cloudflare(output: unknown): readonly CloudflareItem[] {
     id: 'cloudflare',
     state: data.enabled === true ? 'on' : 'off',
     ready: data.ready === true,
-    deployed: Object.entries(configured).filter(([, on]) => on === true).map(([part]) => PART_WORDS[part] ?? part),
+    // Only the parts Cloudflare holds count as deployed: a token the daemon stores (workerToken, ...) is not a part.
+    deployed: Object.entries(configured).filter(([part, on]) => on === true && PART_WORDS[part] !== undefined).map(([part]) => PART_WORDS[part]!),
     warnings: strings(data.warnings).map(plain),
   }];
 }
@@ -236,6 +282,8 @@ const NETWORK_SCAN_EVENTS = { domains: ['workspace'], events: [], lists: ['netwo
 /** A device asked to pair, was approved, rejected or finished pairing: the daemon's remote pairing events. */
 const PAIR_REQUEST_EVENTS = { domains: ['workspace'], events: ['remote-pair-requested', 'remote-pair-approved', 'remote-pair-rejected', 'remote-pair-verified', 'remote-peer-disconnected'], lists: ['paired-devices'] } as const;
 const RELAY_EVENTS = { domains: ['workspace'], events: [], lists: ['relay'] } as const;
+/** This machine's group changed (here or on another machine), or a group was heard nearby: the daemon's LIST_CHANGED. */
+const GROUP_LISTS: readonly string[] = ['machine-group'];
 
 const run = (id: string) => ({ id, inputs: {} });
 
@@ -280,17 +328,21 @@ export const DEVICES_PLACE = definePlace<Item>({
       noun: 'the devices waiting to pair',
       source: { kind: 'daemon', method: 'remote.pair.requests.list', input: {}, items: requests },
       follows: PAIR_REQUEST_EVENTS,
-      empty: 'No device is waiting to pair. A phone asks from its own screen (the web UI\'s Pair this phone).',
-      row: (item) => ({ title: (item as RequestItem).label, right: 'waiting', mark: 'waiting' }),
+      empty: 'No device is waiting to pair. A phone asks from its own screen (the web UI\'s Pair this phone); another machine\'s daemon asks by itself when it pairs.',
+      row: (item) => ({ title: (item as RequestItem).label, right: (item as RequestItem).replaces ? 'already paired' : 'waiting', mark: (item as RequestItem).replaces ? 'attention' : 'waiting' }),
       detail: (item) => {
         const request = item as RequestItem;
         return [
           ...(request.about ? [{ label: 'Device', text: request.about }] : []),
           { label: 'Offers', text: request.offers.length > 0 ? request.offers.join(', ') : 'nothing yet' },
           { label: 'Pairs as', text: request.requestedId || 'not said' },
+          // Anyone on the network can name a paired device's id: said before approving, with where the request came from.
+          ...(request.replaces ? [{ label: 'Already paired', text: `a device is paired as ${request.requestedId}; approving this one as that same device pairing again ends the old pairing`, tone: 'warning' as const }] : []),
+          ...(request.from ? [{ label: 'Asked from', text: request.from }] : []),
           { label: 'Asked', text: when(request.createdAt) },
           { label: 'Expires', text: when(request.expiresAt) },
-          { text: 'Approve it only if you recognise it; then press Finish pairing on that device.', tone: 'muted' },
+          // Another machine's daemon finishes by itself once approved; a phone needs Finish pairing pressed on it.
+          { text: request.daemon ? 'Approve it only if you recognise it; that machine\'s daemon then finishes pairing by itself.' : 'Approve it only if you recognise it; then press Finish pairing on that device.', tone: 'muted' },
         ];
       },
     },
@@ -368,6 +420,9 @@ export const DEVICES_PLACE = definePlace<Item>({
       label: 'Machine group',
       noun: 'this machine\'s group',
       source: { kind: 'daemon', method: 'capabilities.run', input: run('cluster.status'), items: group },
+      // Its own actions, the other tabs' (joining from Nearby groups, removing or leaving from Machines), and every change
+      // of the group made on another machine (a join, a removal, a rename, a new key): the daemon's `machine-group` list.
+      follows: { domains: ['workspace'], events: [], lists: GROUP_LISTS, capabilities: ['cluster.join', 'cluster.forget', 'cluster.leave', 'cluster.sharing-on'] },
       empty: 'This daemon runs no machine group.',
       row: (item) => {
         const own = item as GroupItem;
@@ -380,6 +435,7 @@ export const DEVICES_PLACE = definePlace<Item>({
         if (own.state === 'no-group') {
           return [
             { label: 'This machine', text: own.machine || 'not named' },
+            ...(own.removedFrom ? [{ label: 'Removed', text: `another machine removed this one from ${own.removedFrom === 'its group' ? own.removedFrom : `"${own.removedFrom}"`}; to be in it again, join it from Nearby groups with its key`, tone: 'warning' as const }] : []),
             { text: 'A group shares inbound channel work and a few settings with your other GoodVibes machines on this network. Start one here, or join one from Nearby groups.' },
           ];
         }
@@ -387,8 +443,9 @@ export const DEVICES_PLACE = definePlace<Item>({
         return [
           { label: 'This machine', text: own.machine || 'not named' },
           { label: 'Machines', text: String(own.members) },
-          ...(own.keyGeneration !== undefined ? [{ label: 'Key', text: `generation ${own.keyGeneration}` }] : []),
+          ...(own.keyGeneration !== undefined ? [{ label: 'Group key', text: keyChangedWords(own.keyGeneration, own.keyChangedAt) }] : []),
           ...(own.awaitingSync ? [{ label: 'Needs a look', text: 'this machine does not hold the group\'s settings yet', tone: 'warning' as const }] : []),
+          ...(own.sharing ? [] : [{ label: 'Sharing', text: 'off on this computer, so it is not on the group\'s network: nothing reaches the other machines from it until sharing is on', tone: 'warning' as const }]),
         ];
       },
     },
@@ -397,14 +454,24 @@ export const DEVICES_PLACE = definePlace<Item>({
       label: 'Machines',
       noun: 'the machines in your group',
       source: { kind: 'daemon', method: 'capabilities.run', input: run('cluster.nodes'), items: machines },
+      // Starting, joining, leaving or renaming the group changes who is in it (the other tabs' actions), and so does what
+      // another machine does (it joined, it was removed): the daemon's `machine-group` list.
+      follows: { domains: ['workspace'], events: [], lists: GROUP_LISTS, capabilities: ['cluster.create', 'cluster.join', 'cluster.leave', 'cluster.rename', 'cluster.forget'] },
       empty: 'No machine group yet: start or join one under Machine group.',
       row: (item) => {
         const machine = item as MachineItem;
-        return { title: machine.name, ...(machine.state === 'this-machine' ? { right: 'this machine' } : machine.heard ? {} : { right: 'not heard' }), mark: machine.heard || machine.state === 'this-machine' ? 'ok' : 'attention' };
+        // "this one", short, so a machine's name is not cut at 80 columns beside it.
+        return { title: machine.name, ...(machine.state === 'this-machine' ? { right: 'this one' } : machine.heard ? {} : { right: 'not heard' }), mark: machine.heard || machine.state === 'this-machine' ? 'ok' : 'attention' };
       },
       detail: (item) => {
         const machine = item as MachineItem;
-        return [{ label: 'Last heard', text: machine.state === 'this-machine' ? 'this is the machine you are on' : machine.heard ? when(machine.lastSeenAt) : 'nothing since this machine started' }];
+        return [
+          machine.state === 'this-machine'
+            ? { text: 'This is the machine you are on.' }
+            : { label: 'Last heard', text: machine.heard ? when(machine.lastSeenAt) : 'nothing since this machine started' },
+          // One control per act: another machine's row removes it or shows its own view; this machine's row leaves.
+          { text: machine.state === 'this-machine' ? 'Leaving takes this machine out of the group until it joins again with the key.' : 'Its own view of the group is asked of it over the group\'s channel.', tone: 'muted' as const },
+        ];
       },
     },
     {
@@ -412,19 +479,41 @@ export const DEVICES_PLACE = definePlace<Item>({
       label: 'Nearby groups',
       noun: 'the groups announced on this network',
       source: { kind: 'daemon', method: 'capabilities.run', input: run('cluster.groups'), items: nearby },
+      // Starting, joining or leaving a group here changes what is listed; a group newly heard on the network, renamed or
+      // grown comes as the daemon's `machine-group` list.
+      follows: { domains: ['workspace'], events: [], lists: GROUP_LISTS, capabilities: ['cluster.create', 'cluster.join', 'cluster.leave', 'cluster.sharing-on'] },
       empty: 'No group is announced on this network.',
-      row: (item) => ({ title: (item as NearbyItem).name, right: `${(item as NearbyItem).machines} machine${(item as NearbyItem).machines === 1 ? '' : 's'}`, mark: 'ok' }),
-      detail: (item) => [
-        { label: 'Group id', text: item.id },
-        { label: 'Last heard', text: when((item as NearbyItem).lastSeenAt) },
-        { text: 'Joining needs the key a machine already in the group shows.', tone: 'muted' },
-      ],
+      row: (item) => {
+        const found = item as NearbyItem;
+        if (found.state === 'sharing-off') return { title: found.name, right: 'hears no group', mark: 'paused' };
+        if (found.state === 'sharing-next-start') return { title: found.name, right: 'at next start', mark: 'waiting' };
+        return { title: found.name, right: `${found.machines} machine${found.machines === 1 ? '' : 's'}`, mark: 'ok' };
+      },
+      detail: (item) => {
+        if ((item as NearbyItem).state === 'sharing-next-start') {
+          return [
+            { text: 'Sharing is turned on and takes effect when the daemon starts again; until then this computer cannot see groups on the network.' },
+            { text: 'A daemon a service manager runs restarts by itself; one started by hand is restarted by you. The groups announced here are listed once it is back.', tone: 'muted' },
+          ];
+        }
+        if ((item as NearbyItem).state === 'sharing-off') {
+          return [
+            { text: 'Sharing is off on this computer, so it cannot see groups on the network.' },
+            { text: 'Turning sharing on restarts the daemon to bring this machine onto the network; then the groups announced here are listed, to join one. Joining a group turns sharing on too.', tone: 'muted' },
+          ];
+        }
+        return [
+          { label: 'Group id', text: item.id },
+          { label: 'Last heard', text: when((item as NearbyItem).lastSeenAt) },
+          { text: 'Joining needs the key a machine already in the group shows.', tone: 'muted' },
+        ];
+      },
     },
     {
       id: 'cloudflare-settings',
       label: 'Cloudflare settings',
       noun: 'the Cloudflare settings',
-      source: { kind: 'daemon', method: 'config.get', input: {}, items: settingsOf((key) => key.startsWith('cloudflare.')) },
+      source: { kind: 'daemon', method: 'config.get', input: {}, items: settingsOf((key) => key.startsWith('cloudflare.'), 'cloudflare.') },
       follows: { domains: ['config'], events: [] },
       empty: 'No Cloudflare setting is known to this daemon.',
       row: settingRow,
@@ -444,7 +533,7 @@ export const DEVICES_PLACE = definePlace<Item>({
       id: 'phone-settings',
       label: 'Phone and voice settings',
       noun: 'the settings for paired phones and voice',
-      source: { kind: 'daemon', method: 'config.get', input: {}, items: settingsOf((key) => key.startsWith('device.') || /^(voice|tts|stt)\./.test(key)) },
+      source: { kind: 'daemon', method: 'config.get', input: {}, items: settingsOf((key) => key.startsWith('device.') || /^(voice|tts|stt)\./.test(key), 'device.') },
       follows: { domains: ['config'], events: [] },
       empty: 'No phone or voice setting is known to this daemon.',
       row: settingRow,
@@ -498,6 +587,8 @@ export const DEVICES_PLACE = definePlace<Item>({
       label: 'Cloudflare',
       noun: 'the Cloudflare integration',
       source: { kind: 'daemon', method: 'capabilities.run', input: run('cloudflare.status'), items: cloudflare },
+      // Its own actions, and its settings changed anywhere (the `config` frames, as Cloudflare settings hears them).
+      follows: { domains: ['config'], events: [] },
       empty: 'Cloudflare could not be described.',
       row: (item) => {
         const cf = item as CloudflareItem;
@@ -515,9 +606,10 @@ export const DEVICES_PLACE = definePlace<Item>({
   ],
   actions: [
     // A setting shown where its thing is, changed in place through Settings' own capability (the key given by the row).
-    { key: 'enter', id: 'change-setting', list: 'addresses', states: ['setting'], capability: 'settings.set', label: 'change', fill: { key: 'id' } },
-    { key: 'enter', id: 'change-phone-setting', list: 'phone-settings', states: ['setting'], capability: 'settings.set', label: 'change', fill: { key: 'id' } },
-    { key: 'enter', id: 'change-cloudflare-setting', list: 'cloudflare-settings', states: ['setting'], capability: 'settings.set', label: 'change', fill: { key: 'id' } },
+    // The form names the setting by its whole key (the row shows it less the tab's domain).
+    { key: 'enter', id: 'change-setting', list: 'addresses', states: ['setting'], capability: 'settings.set', label: 'change', fill: { key: 'id' }, shownAs: SETTING_KEY_SHOWN },
+    { key: 'enter', id: 'change-phone-setting', list: 'phone-settings', states: ['setting'], capability: 'settings.set', label: 'change', fill: { key: 'id' }, shownAs: SETTING_KEY_SHOWN },
+    { key: 'enter', id: 'change-cloudflare-setting', list: 'cloudflare-settings', states: ['setting'], capability: 'settings.set', label: 'change', fill: { key: 'id' }, shownAs: SETTING_KEY_SHOWN },
     // Pairing something new keeps its own screen: the QR code, and the other ways to sign in.
     { key: 'p', capability: 'devices.pair', label: 'pair something' },
     { key: 'n', list: 'devices', states: ['paired', 'agent'], capability: 'devices.rename', label: 'rename', fill: { device: 'id' } },
@@ -528,23 +620,39 @@ export const DEVICES_PLACE = definePlace<Item>({
     // This program's own credential for its daemon (builtin/devices-session.ts): how it reaches it, and forgetting it.
     { key: 'h', id: 'host-status', list: 'devices', whole: true, capability: 'devices.host-status', label: 'how this terminal connects' },
     { key: 'U', id: 'unpair-host', list: 'devices', whole: true, capability: 'devices.unpair-host', label: 'forget its daemon pairing' },
+    // Signing this program in to another daemon or a listener with a user name and password, and out again
+    // (builtin/service-sessions.ts; Models and providers' capabilities, offered only by a program that keeps such sessions).
+    { key: 'i', id: 'service-sign-in', list: 'devices', whole: true, capability: 'accounts.sign-in', label: 'sign in to a daemon or listener' },
+    { key: 'o', id: 'service-sign-out', list: 'devices', whole: true, capability: 'accounts.sign-out', label: 'sign out of a daemon or listener' },
     // The Secure address screen in Settings, as it is: an https address for phones.
     { key: 's', id: 'secure-address', list: 'devices', capability: 'settings.open', label: 'secure address', fill: { where: () => 'secure address' } },
     { key: 'a', list: 'waiting', states: ['pending'], capability: 'devices.approve', label: 'approve', fill: { request: 'id' } },
-    { key: 'x', list: 'waiting', states: ['pending'], capability: 'devices.reject', label: 'reject', fill: { request: 'id' } },
+    // A request naming a device already paired: its form opens, so Replace ("Yes, it is the same device pairing again")
+    // is the person's own choice; pressed alone it was refused in the daemon's words (confirmReplace).
+    { key: 'a', id: 'approve-replacing', list: 'waiting', states: ['replaces'], capability: 'devices.approve', label: 'approve', fill: { request: 'id' }, form: true },
+    { key: 'x', list: 'waiting', states: ['pending', 'replaces'], capability: 'devices.reject', label: 'reject', fill: { request: 'id' } },
     { key: 'x', list: 'grants', states: ['allowed'], capability: 'devices.revoke-grant', label: 'stop allowing', fill: { grant: 'id' } },
     { key: 'x', list: 'captures', states: ['kept'], capability: 'devices.delete-capture', label: 'delete now', fill: { capture: 'id' } },
     { key: 'x', list: 'relay', states: ['paired'], capability: 'devices.relay-revoke', label: 'cut off', fill: { code: 'id' } },
-    { key: 'y', list: 'relay', capability: 'devices.relay-status', label: 'is the relay reachable' },
+    // The relay itself, not a device on it: offered with no device paired through it too.
+    { key: 'y', id: 'relay-status', list: 'relay', whole: true, capability: 'devices.relay-status', label: 'is the relay reachable' },
     { key: 'c', list: 'group', states: ['no-group'], capability: 'cluster.create', label: 'start a group' },
     { key: 'k', list: 'group', states: ['member'], capability: 'cluster.key', label: 'join key' },
     { key: 'n', list: 'group', states: ['member'], capability: 'cluster.rename', label: 'rename' },
-    { key: 'o', list: 'group', states: ['member'], capability: 'cluster.rotate', label: 'new key' },
+    // Its form opens so whether the old key keeps working can be chosen (it has a usual answer).
+    { key: 'o', list: 'group', states: ['member'], capability: 'cluster.rotate', label: 'new key', form: true },
     { key: 'u', list: 'group', states: ['member'], capability: 'cluster.publish', label: 'share a setting' },
     { key: 't', list: 'group', states: ['member'], capability: 'cluster.accept', label: 'take the group\'s setting' },
-    { key: 'l', list: 'group', states: ['member', 'unreadable'], capability: 'cluster.leave', label: 'leave' },
-    { key: 'x', list: 'machines', states: ['member'], capability: 'cluster.forget', label: 'remove', fill: { node: 'id' } },
+    // Leaving is on this machine's own row in Machines; here only when the key cannot be read (Machines cannot list then).
+    { key: 'l', list: 'group', states: ['unreadable'], capability: 'cluster.leave', label: 'leave the group' },
+    // One control per act: another machine's row removes it from the group or shows its own view (asked of it); this
+    // machine's own row leaves. The group's key and a new key are the group's acts, on the Machine group tab.
+    { key: 'x', list: 'machines', states: ['member'], capability: 'cluster.forget', label: 'remove from the group', fill: { node: 'id' } },
+    { key: 's', id: 'member-view', list: 'machines', states: ['member'], capability: 'cluster.view', label: 'see its group', fill: { node: 'id' } },
+    { key: 'l', id: 'leave-own', list: 'machines', states: ['this-machine'], capability: 'cluster.leave', label: 'leave the group' },
     { key: 'j', list: 'nearby', states: ['announced'], capability: 'cluster.join', label: 'join', fill: { group: 'id' } },
+    // Its outcome ("restarting", or "restart it by hand") stays only until the daemon is back with sharing on.
+    { key: 'o', id: 'sharing-on', list: 'nearby', states: ['sharing-off'], capability: 'cluster.sharing-on', label: 'turn sharing on', outcomeFollowsItem: true },
     { key: 'o', list: 'network-scan', states: ['off', 'unreadable'], capability: 'network-scan.on', label: 'turn on' },
     { key: 'o', list: 'network-scan', states: ['on'], capability: 'network-scan.off', label: 'turn off' },
     { key: 'v', list: 'settings-sync', states: ['settings'], capability: 'settings-sync.review', label: 'where they come from' },
@@ -557,9 +665,11 @@ export const DEVICES_PLACE = definePlace<Item>({
     { key: 'w', id: 'show-conflict', list: 'settings-sync', states: ['conflict'], capability: 'settings-sync.show', label: 'where its value comes from', fill: { key: 'id' } },
     { key: 'q', list: 'cloudflare', capability: 'cloudflare.requirements', label: 'what the token needs' },
     { key: 't', list: 'cloudflare', capability: 'cloudflare.create-token', label: 'create the token' },
-    { key: 'd', list: 'cloudflare', capability: 'cloudflare.discover', label: 'find accounts' },
-    { key: 'v', list: 'cloudflare', capability: 'cloudflare.validate', label: 'check a token' },
-    { key: 'e', list: 'cloudflare', capability: 'cloudflare.provision', label: 'deploy' },
+    // Both open their form: the token to use is typed there (hidden) when none is stored.
+    { key: 'd', list: 'cloudflare', capability: 'cloudflare.discover', label: 'find accounts', form: true },
+    { key: 'v', list: 'cloudflare', capability: 'cloudflare.validate', label: 'check a token', form: true },
+    // Deploying always opens its form: what is deployed, on which account, is chosen there before anything runs.
+    { key: 'e', list: 'cloudflare', capability: 'cloudflare.provision', label: 'deploy', form: true },
     { key: 'k', list: 'cloudflare', states: ['on'], capability: 'cloudflare.verify', label: 'check the worker' },
     { key: 'x', list: 'cloudflare', states: ['on'], capability: 'cloudflare.disable', label: 'turn off' },
   ],

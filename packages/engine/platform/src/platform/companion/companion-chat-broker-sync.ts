@@ -58,7 +58,8 @@ export class CompanionBrokerSync {
       await broker.register({
         sessionId: meta.id,
         kind: 'companion-chat',
-        project: 'unknown',
+        // The chat's project when one was chosen; the session list and its checkpoints name it.
+        project: meta.project ?? 'unknown',
         title: meta.title,
         participant: { surfaceKind: 'companion', surfaceId: meta.id, lastSeenAt: Date.now() },
       });

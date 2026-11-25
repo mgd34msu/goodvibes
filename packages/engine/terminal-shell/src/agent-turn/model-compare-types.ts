@@ -72,6 +72,12 @@ export interface AgentModelCompareToolDeps {
   /** Random source for the blind-label order; tests fix it. Defaults to Math.random. */
   readonly random?: (() => number) | undefined;
   readonly applyModelRoute?: ((registryKey: string, options?: ToolExecuteOptions, ownership?: Pick<ToolExecuteOptions, 'signal' | 'assertCurrent'>) => AgentModelCompareRouteUpdateResult | Promise<AgentModelCompareRouteUpdateResult>) | undefined;
+  /**
+   * How each candidate's metered call is run when the comparison itself is the owner's confirmed act (the daemon's
+   * comparison runner): each candidate admitted as his too, under the same gate. Absent: a candidate is a nested call
+   * of the comparison, admitted on its own (a model's comparison in a turn).
+   */
+  readonly dispatchCandidate?: ((name: string, args: Record<string, unknown>) => Promise<{ readonly success: boolean; readonly output?: string | undefined; readonly error?: string | undefined }>) | undefined;
 }
 
 export interface ResolvedCompareModel {

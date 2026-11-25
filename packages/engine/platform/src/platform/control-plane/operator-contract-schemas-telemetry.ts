@@ -380,11 +380,16 @@ const COST_ATTRIBUTION_ROW_SCHEMA = objectSchema({
   pricedRecordCount: NUMBER_SCHEMA,
   unpricedRecordCount: NUMBER_SCHEMA,
   tokens: COST_TOKENS_SCHEMA,
+  // The models that spent it (`provider:model`, the key a price of your own is set under), each with whether it has a price.
+  models: arraySchema(objectSchema({ key: STRING_SCHEMA, priced: BOOLEAN_SCHEMA }, ['key', 'priced'])),
 }, ['key', 'costUsd', 'costState', 'costSource', 'pricingAsOf', 'pricedRecordCount', 'unpricedRecordCount', 'tokens']);
+
+/** `source`: what the spending was for (a schedule, a piece of work, a web chat, a shared session, a conversation). */
+const COST_DIMENSION_SCHEMA = enumSchema(['agent', 'tool', 'hook', 'mcp', 'model', 'provider', 'session', 'source']);
 
 export const COST_ATTRIBUTION_GET_INPUT_SCHEMA = objectSchema({
   window: enumSchema(['24h', '7d']),
-  dimension: enumSchema(['agent', 'tool', 'hook', 'mcp', 'model', 'provider', 'session']),
+  dimension: COST_DIMENSION_SCHEMA,
 }, ['window', 'dimension']);
 
 /**
@@ -396,7 +401,7 @@ export const COST_ATTRIBUTION_GET_INPUT_SCHEMA = objectSchema({
 export const COST_ATTRIBUTION_GET_OUTPUT_SCHEMA = objectSchema({
   window: enumSchema(['24h', '7d']),
   windowStartMs: NUMBER_SCHEMA,
-  dimension: enumSchema(['agent', 'tool', 'hook', 'mcp', 'model', 'provider', 'session']),
+  dimension: COST_DIMENSION_SCHEMA,
   totalCostUsd: nullableSchema(NUMBER_SCHEMA),
   costState: COST_STATE_SCHEMA,
   costSource: COST_SOURCE_SCHEMA,

@@ -97,7 +97,7 @@ export function resumeSessionAndRender<Context>(
   context: Context,
   render: () => void,
 ): Promise<void> {
-  return registry.execute('session', ['resume', target], context).then(() => render());
+  return registry.execute('resume', [target], context).then(() => render());
 }
 
 /** The refusal code of a run resuming a session another running copy has open. */

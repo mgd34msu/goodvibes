@@ -175,8 +175,27 @@ export const DOCUMENTS_SHARE_PACKET = storeCapability({
   touches: 'another-machine', lasts: 'not-a-change', risk: 'sends-out',
 });
 
+// The review packet of your drafts, computed by the daemon from the drafts and the saved artifacts themselves.
+export const DOCUMENTS_READINESS = storeRead({
+  id: 'documents.readiness', actionId: 'readiness', label: 'Check a draft is ready for review', word: 'readiness', inputs: [],
+  sentence: 'Lists what still stands in the way of review (open comments, suggestions waiting, missing sources, hidden comparisons, the handoff), each with what settles it.',
+  example: {},
+});
+
+export const DOCUMENTS_PACKET_STEPS = storeRead({
+  id: 'documents.packet-steps', actionId: 'packet-steps', label: 'See the review packet steps', word: 'packet-steps', inputs: [],
+  sentence: 'Shows the review packet\'s steps in order (review, export, compare and judge, hand off, decide, archive), which are done, and what to do next.',
+  example: {},
+});
+
+export const DOCUMENTS_TIMELINE = storeRead({
+  id: 'documents.timeline', actionId: 'timeline', label: 'See the review packet timeline', word: 'timeline', inputs: [],
+  sentence: 'Lists, oldest first and dated, what happened to the review packet: drafts, comments, suggestions, attachments, exports, comparisons, judgments, model decisions, presets and handoffs.',
+  example: {},
+});
+
 export const DOCUMENTS_CAPABILITIES = [
   DOCUMENTS_LIST_ALL, DOCUMENTS_SHOW, DOCUMENTS_CREATE, DOCUMENTS_REVISE, DOCUMENTS_MARK_REVIEWED, DOCUMENTS_COMMENT, DOCUMENTS_RESOLVE_COMMENT,
   DOCUMENTS_SUGGEST, DOCUMENTS_ACCEPT_SUGGESTION, DOCUMENTS_REJECT_SUGGESTION, DOCUMENTS_INSERT_ARTIFACT, DOCUMENTS_ATTACH_ARTIFACT, DOCUMENTS_EXPORT,
-  DOCUMENTS_SAVE_PRESET, DOCUMENTS_REFRESH_PRESET, DOCUMENTS_SHARE_PACKET,
+  DOCUMENTS_SAVE_PRESET, DOCUMENTS_REFRESH_PRESET, DOCUMENTS_SHARE_PACKET, DOCUMENTS_READINESS, DOCUMENTS_PACKET_STEPS, DOCUMENTS_TIMELINE,
 ] as const;

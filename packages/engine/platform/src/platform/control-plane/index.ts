@@ -186,6 +186,8 @@ export type { OwnerAskerKind } from './owner-asker-liveness.js';
 export type { QuestionAskerScope, StoredAnswerDelivery, StoredOwnerEntry, StoredOwnerItem, StoredOwnerItemKind } from './question-store.js';
 export { registerOwnerInboxGatewayMethods } from './routes/owner-inbox.js';
 export { registerNotificationDeadLetterGatewayMethods, listNotificationDeadLetters, replayNotificationDeadLetters } from './routes/notification-dead-letters.js';
+// A terminal program's notices of its own events, sent through the daemon's one webhook list.
+export { registerNotificationsSendGatewayMethod, type ProgramNoticeNotifier } from './routes/notification-dead-letters.js';
 export type { NotificationDeadLetterSources } from './routes/notification-dead-letters.js';
 export { registerFlagsStatusGatewayMethods } from './routes/flags-status.js';
 export { registerAuthorityStatusGatewayMethods, type AuthorityStatusPeers } from './routes/authority-status.js';
@@ -277,9 +279,9 @@ export * from './host-handlers.js';
 export { registerWorkLedgerGatewayMethods } from './routes/work-ledger.js';
 export { registerNativeWorkExecutionGatewayMethods } from './routes/native-work-execution.js';
 export { registerWorkGatewayMethods, type WorkItemView, type WorkRunView, type WorkState, type WorkStepView, type WorkQuestionView } from './routes/work.js';
+export { inProject, projectKey, projectProxy, requestProject, routeByProject } from './project-routing.js';
 export { registerNativeWorkSubmissionGatewayMethods } from './routes/native-work-submission.js';
 
-export { registerWorkLedgerImportGatewayMethods } from './routes/work-ledger-import.js';
 
 export { registerNativeConversationIntakeGatewayMethods } from './routes/native-intake.js';
 

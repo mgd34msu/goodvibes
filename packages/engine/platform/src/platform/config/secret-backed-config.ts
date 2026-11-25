@@ -171,7 +171,7 @@ export function createSecretBackedConfigWriter(route?: SecretBackedConfigRoute |
             }
             catch {
                 // Store errors may echo credential material, so none is included.
-                throw new Error('The credential reference was cleared, but its stored value could not be removed. Remove it with /secrets delete.');
+                throw new Error('The credential reference was cleared, but its stored value could not be removed. Remove it with "Delete a secret" (Permissions and safety, Secrets).');
             }
         }
         return update.configValue;

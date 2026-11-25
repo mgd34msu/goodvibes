@@ -1454,6 +1454,29 @@ export class BrowserEngine {
     });
   }
 
+  /**
+   * The page a submitted checkout landed on, read by the daemon's own code (payments/checkout-landing.ts) for the
+   * order number the shop gave it, never handed to a model or a person. The card typed for the order may still be
+   * registered on the page (it stays so until the page's owner confirms it is gone), so `readText` refuses it; here the
+   * main frame's body text and the title are read and every live card value is scrubbed out before anything leaves
+   * this class, as every value, name and body text leaving it is. Frames are not read and nothing is recorded as
+   * content a model was given.
+   */
+  async readCheckoutLandingText(target: BrowserTarget, args: { readonly maxChars?: number | undefined } = {}): Promise<{ readonly title: string; readonly content: string }> {
+    target = { ...target }; args = { ...args };
+    return this.withTarget(target, async ({ sessionId, pageId, page, current, signal }) => {
+      const limit = Math.max(200, Math.min(200_000, args.maxChars ?? DEFAULT_TEXT_LIMIT));
+      await this.requireReadableAddress(sessionId, pageId, page.url()); current();
+      const body = await boundedBrowserCall({
+        action: 'read_text', deadlineMs: deadlineFor(undefined, DEFAULT_ACTION_TIMEOUT_MS), signal, next: 'The landing page is not answering.',
+      }, () => page.evaluate(() => document.body?.innerText ?? ''));
+      current();
+      const content = this.scrub(sessionId, pageId, body.replace(/\n{3,}/g, '\n\n').trim()).slice(0, limit);
+      const title = this.scrub(sessionId, pageId, await page.title().catch(() => '')); current();
+      return { title, content };
+    });
+  }
+
   async readText(target: BrowserTarget, args: { readonly maxChars?: number | undefined; readonly timeoutMs?: number | undefined } = {}): Promise<Record<string, unknown>> {
     target = { ...target }; args = { ...args };
     return this.withTarget(target, async ({ sessionId, pageId, page, current, signal }) => {

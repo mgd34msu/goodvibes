@@ -37,6 +37,7 @@ export class PolicyRuntimeState {
   private _lastSimulationSummary: PolicySimulationSummary | null = null;
   private _lastPreflightReview: PolicyPreflightReview | null = null;
   private readonly _subscribers = new Set<() => void>();
+  private readonly _decisionListeners = new Set<(entry: PermissionAuditEntry) => void>();
   /** The findings of the last lint read of the loaded bundles (refreshLint). */
   private _lintFindings: readonly PolicyLintFinding[] = [];
   /** Why the bundle named by `policy.bundlePath` did not load, or null when it loaded or none is configured. */
@@ -155,7 +156,7 @@ export class PolicyRuntimeState {
     category: string;
     result: PermissionCheckResult;
   }): void {
-    this._upsertPermissionAudit({
+    const entry: PermissionAuditEntry = {
       callId: params.callId,
       tool: params.tool,
       category: params.category,
@@ -172,8 +173,31 @@ export class PolicyRuntimeState {
       requestedAt: Date.now(),
       decidedAt: Date.now(),
       persisted: params.result.persisted,
-    });
+    };
+    this._upsertPermissionAudit(entry);
+    for (const listener of this._decisionListeners) {
+      try { listener(entry); } catch { /* a listener never breaks the audit */ }
+    }
     this.notify();
+  }
+
+  /**
+   * Told of each call this gate decides, as it is recorded: a terminal program posts them to the daemon's audit
+   * (permissions.audit.post), where a candidate policy is reviewed against every program's calls. Returns the stop.
+   */
+  public onDecision(listener: (entry: PermissionAuditEntry) => void): () => void {
+    this._decisionListeners.add(listener);
+    return () => { this._decisionListeners.delete(listener); };
+  }
+
+  /**
+   * The calls a terminal program's gate decided, posted to the daemon (routes/policy-audit.ts): kept beside the
+   * daemon's own, each once by its id, so reviewing a candidate decides them again too. Returns how many were kept.
+   */
+  public recordReportedDecisions(entries: readonly PermissionAuditEntry[]): number {
+    for (const entry of entries) this._upsertPermissionAudit(entry);
+    if (entries.length > 0) this.notify();
+    return entries.length;
   }
 
   public subscribe(callback: () => void): () => void {

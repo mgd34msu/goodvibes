@@ -86,14 +86,21 @@ export const MAIL_STATUS: CapabilityDefinition<MessagesCapabilityServices> = {
     // Reachable: the daemon reads one message summary from the inbox (read-only), and says why when it cannot.
     let reachable = false;
     let said: string;
+    // Why it is not reachable, by the refusal's own code and status, so a screen names the next step (set it up, replace
+    // the password, the store could not be read) without reading the inbox itself and drawing that refusal.
+    let failure: { code?: string; status?: number; message: string } | undefined;
     try {
       await methodOf(caller)('email.inbox.list', { limit: 1 });
       reachable = true;
       said = 'Reachable: yes, the inbox answered.';
     } catch (error) {
-      said = `Reachable: no. ${error instanceof Error ? error.message : String(error)}`;
+      const message = error instanceof Error ? error.message : String(error);
+      const code = (error as { readonly code?: unknown } | null)?.code;
+      const status = (error as { readonly status?: unknown } | null)?.status;
+      failure = { message, ...(typeof code === 'string' ? { code } : {}), ...(typeof status === 'number' ? { status } : {}) };
+      said = `Reachable: no. ${message}`;
     }
-    return { text: `${settings.text}\n${said}`, data: { ...(settings.data ?? {}), reachable } };
+    return { text: `${settings.text}\n${said}`, data: { ...(settings.data ?? {}), reachable, ...(failure ? { failure } : {}) } };
   },
 };
 
@@ -102,10 +109,23 @@ export const MAIL_LIST: CapabilityDefinition<MessagesCapabilityServices> = {
   actionId: 'list', word: 'list', label: 'Check your email inbox', ...READ,
   inputs: [{ id: 'count', label: 'How many', help: 'How many of the newest messages', kind: 'number', required: { default: '15', defaultMeans: 'the newest 15' }, typed: { position: 1 } }],
   sentence: 'Lists the newest email in your inbox, who it is from and its subject; nothing is marked read.', example: { count: '30' },
-  async run(values, _services, caller) {
+  async run(values, services, caller) {
     const count = Number(values.count ?? '15');
     if (!Number.isFinite(count) || count <= 0) throw new CapabilityRefusal(`How many: "${values.count}" is not a number of messages.`);
-    const answer = await methodOf(caller)('email.inbox.list', { limit: Math.min(100, Math.floor(count)) });
+    let answer: unknown;
+    try {
+      answer = await methodOf(caller)('email.inbox.list', { limit: Math.min(100, Math.floor(count)) });
+    } catch (error) {
+      // A mailbox never set up is not a failed read: it says so, and what it still needs, naming no setting.
+      const code = (error as { readonly code?: unknown } | null)?.code;
+      if (code === 'EMAIL_NOT_CONFIGURED') return { text: 'Mail is not set up: no mail server and user name are set.', data: { setUp: false, missing: 'mailbox', messages: [] } };
+      if (code === 'EMAIL_CREDENTIALS_MISSING') {
+        // The server and user name set already, so setting mail up asks only for the password.
+        const settings = readSurfaceEmailSettings((key) => services.mailbox.get(key));
+        return { text: 'Mail is not set up: its password is not stored.', data: { setUp: false, missing: 'password', server: settings.imapHost ?? '', user: settings.username ?? '', messages: [] } };
+      }
+      throw error;
+    }
     const body = isRecord(answer) ? answer : {};
     const listed = Array.isArray(body['messages']) ? body['messages'].filter(isRecord) : [];
     const unreadable = Array.isArray(body['unreadable']) ? body['unreadable'].filter(isRecord) : [];
@@ -118,7 +138,14 @@ export const MAIL_LIST: CapabilityDefinition<MessagesCapabilityServices> = {
     return {
       text: lines.join('\n'),
       data: {
-        messages: listed.map((message) => ({ uid: message['uid'], from: plainMail(message['from']), subject: plainMail(message['subject']), date: plainMail(message['date']), unread: message['unread'] === true })),
+        setUp: true,
+        messages: listed.map((message) => ({
+          uid: message['uid'], from: plainMail(message['from']), subject: plainMail(message['subject']), date: plainMail(message['date']), unread: message['unread'] === true,
+          // What the place's inbox shows of a message (messages-place.ts): its preview and the daemon's labels.
+          ...(typeof message['bodyPreview'] === 'string' ? { bodyPreview: plainMail(message['bodyPreview']) } : {}),
+          ...(typeof message['triageLabel'] === 'string' ? { triageLabel: message['triageLabel'] } : {}),
+          ...(message['screening'] === 'not-screened' ? { screening: 'not-screened', screeningReason: plainMail(message['screeningReason']) } : {}),
+        })),
         ...(total !== undefined ? { total } : {}), unreadable: unreadable.length,
       },
     };
@@ -205,7 +232,15 @@ export const MAIL_SEND: CapabilityDefinition<MessagesCapabilityServices> = {
       throw error;
     }
     const result = isRecord(answer) ? answer : {};
-    return { text: `Sent to ${values.to} at ${String(result['sentAt'] ?? 'now')}.`, data: { messageId: result['messageId'], sentAt: result['sentAt'] } };
+    // The time it went, as a person reads it (a repeat within ten minutes answers with the first send's time).
+    const at = new Date(String(result['sentAt'] ?? ''));
+    const when = Number.isNaN(at.getTime()) ? '' : ` at ${at.toLocaleTimeString(undefined, { hour: '2-digit', minute: '2-digit', hourCycle: 'h23' })}`;
+    // A repeat inside the window: the daemon answered with the first send and nothing left this machine now, so no
+    // line says something was sent.
+    if (result['repeated'] === true) {
+      return { text: `Already sent to ${values.to}${when}; nothing was sent again.`, riskDone: '', data: { messageId: result['messageId'], sentAt: result['sentAt'], repeated: true } };
+    }
+    return { text: `Sent to ${values.to}${when}.`, data: { messageId: result['messageId'], sentAt: result['sentAt'] } };
   },
 };
 
@@ -251,7 +286,27 @@ export interface MessagesCapabilityServices {
     set(key: string, value: unknown): void;
     /** Keep the mailbox password in the daemon's secret store; the setting holds only its reference. */
     storePassword(password: string): Promise<void>;
+    /**
+     * Sign in once over IMAP and over SMTP with what is set now, each whatever the other answered; nothing is read or
+     * sent (email-service.ts `testEach`). Absent where the daemon was composed without mail.
+     */
+    test?: (() => Promise<MailboxCheck>) | undefined;
   };
+}
+
+/** One half of a mailbox check: it worked, or why not (`failure` when a person acts on it differently). */
+export interface MailboxCheckHalf {
+  readonly ok: boolean;
+  readonly error?: string | undefined;
+  readonly failure?: 'credentials-rejected' | 'unreachable' | undefined;
+  readonly server?: string | undefined;
+}
+
+/** A mailbox checked once: a setting problem before anything was tried, or reading and sending each. */
+export interface MailboxCheck {
+  readonly config?: string | undefined;
+  readonly reading?: MailboxCheckHalf | undefined;
+  readonly sending?: MailboxCheckHalf | 'not-configured' | undefined;
 }
 
 /** A setting's stored form, or why it is not valid: a port is a whole number, a TLS answer true or false. */
@@ -346,6 +401,69 @@ export const MAIL_PASSWORD: CapabilityDefinition<MessagesCapabilityServices> = {
   },
 };
 
+/** Why a half did not work, as one clause: the server's own words, or what is known when it said nothing. */
+function mailboxReason(half: MailboxCheckHalf): string {
+  const said = (half.error ?? '').trim().replace(/\.+$/, '');
+  if (said) return said;
+  return half.failure === 'credentials-rejected' ? 'the server refused the user name and password' : half.failure === 'unreachable' ? 'the server could not be reached' : 'the server gave no reason';
+}
+
+/** What to do for a half that did not work, by what failed. */
+function mailboxFix(half: MailboxCheckHalf, what: 'reading' | 'sending'): string {
+  if (half.failure === 'credentials-rejected') return 'Check the user name and the password (an account with two-step sign-in, Gmail among them, needs an app password), then set up mail again.';
+  if (half.failure === 'unreachable') return `Check the server's name, and that it takes ${what === 'reading' ? 'IMAP (port 993 with TLS)' : 'SMTP (port 465 with TLS, or 587)'}; a port or TLS other than the usual is changed with "change a setting".`;
+  return 'Check the server, the user name and the password; "mailbox settings" shows each setting and "change a setting" changes one.';
+}
+
+export const MAIL_SETUP: CapabilityDefinition<MessagesCapabilityServices> = {
+  capability: { id: 'mail.setup', group: 'messages', home: 'daemon', repeat: 'safe' },
+  actionId: 'setup', word: 'setup', label: 'Set up mail',
+  inputs: [
+    text('server', 'Mail server', 'The server for reading and sending (imap.example.com, or one name for both)', 'a server name', { position: 1 }),
+    text('user', 'User name', 'The account\'s user name, usually its address', 'an address or user name', { position: 2 }),
+    { id: 'password', label: 'Password', help: 'The account\'s password (an app password for Gmail); it goes to the secret store and is never shown', kind: 'secret', required: true, typed: { flag: '--password' } },
+    text('from', 'From address', 'The address your mail is sent from', 'an email address', { flag: '--from' }, { optional: { default: '', means: 'the user name, when it is an address' } }),
+  ],
+  sentence: 'Mail is read and sent through {server} as {user}, the password kept in the secret store; the mailbox is checked once (nothing is read or sent), until you change it.', done: '',
+  touches: 'credential', lasts: 'kept', risk: 'none',
+  // Writing a credential: a model's call is put to the owner, opening on No, and a password it leaves out is typed by
+  // the person on the hidden line.
+  effects: ['control-plane.write', 'secret.write'],
+  example: { server: 'mail.example.com', user: 'sam@example.com' },
+  async run(values, services) {
+    const server = (values.server ?? '').trim();
+    const user = (values.user ?? '').trim();
+    const password = values.password ?? '';
+    if (!server) throw new CapabilityRefusal('Nothing was set: the mail server is empty.');
+    if (!user) throw new CapabilityRefusal('Nothing was set: the user name is empty.');
+    if (password.length === 0) throw new CapabilityRefusal('Nothing was set: no password was given.');
+    const from = (values.from ?? '').trim() || (user.includes('@') ? user : '');
+    services.mailbox.set(MAILBOX_FIELDS.host, mailboxValue('host', server));
+    services.mailbox.set(MAILBOX_FIELDS.user, mailboxValue('user', user));
+    if (from) services.mailbox.set(MAILBOX_FIELDS.from, mailboxValue('from', from));
+    await services.mailbox.storePassword(password);
+    const lines = [`Set: the mail server ${server}, the user name ${user}${from ? `, the from address ${from}` : ''}, and the password (in the secret store).`];
+    const check = services.mailbox.test ? await services.mailbox.test() : undefined;
+    const data: Record<string, unknown> = { server, user, from: from || null };
+    if (!check) {
+      lines.push('The mailbox was not checked: this daemon reads no mail. "is it connected" checks it.');
+    } else if (check.config) {
+      lines.push(`It was not checked yet: ${check.config.replace(/\.$/, '')}. "change a setting" sets what is missing.`);
+      data['checked'] = false;
+    } else {
+      const reading = check.reading;
+      if (reading) lines.push(reading.ok ? 'Reading mail: works.' : `Reading mail${reading.server ? ` (${reading.server})` : ''} did not work: ${mailboxReason(reading)}. ${mailboxFix(reading, 'reading')}`);
+      const sending = check.sending;
+      if (sending === 'not-configured') lines.push('Sending mail: no sending server is set, so it was not checked.');
+      else if (sending) lines.push(sending.ok ? 'Sending mail: works.' : `Sending mail${sending.server ? ` (${sending.server})` : ''} did not work: ${mailboxReason(sending)}. ${mailboxFix(sending, 'sending')}`);
+      data['reading'] = reading?.ok === true ? 'works' : 'failed';
+      data['sending'] = sending === 'not-configured' ? 'not-set' : sending?.ok === true ? 'works' : 'failed';
+      data['checked'] = true;
+    }
+    return { text: lines.join('\n'), data };
+  },
+};
+
 /** The daemon's mailbox services, over its own settings and secret store. */
 export function mailboxServices(configManager: { get(key: string): unknown; setDynamic(key: string, value: unknown): void; validateDynamic?: ((key: string, value: unknown) => void) | undefined },
   secretsManager: Parameters<typeof persistSecretBackedConfigValue>[1]): MessagesCapabilityServices['mailbox'] {
@@ -371,7 +489,8 @@ function eventWhen(value: unknown, allDay: unknown): string {
   const raw = word(value);
   if (!raw) return 'no time given';
   if (allDay === true || !raw.includes('T')) return raw.slice(0, 10);
-  return raw.replace('T', ' ').replace(/:\d\d(\.\d+)?(Z|[+-]\d\d:?\d\d)?$/, '$2');
+  // The seconds go (the hour and minute stay, with a zone when one is written).
+  return raw.replace('T', ' ').replace(/(\d\d:\d\d):\d\d(\.\d+)?(Z|[+-]\d\d:?\d\d)?$/, '$1$3');
 }
 
 function eventsSaid(answer: Readonly<Record<string, unknown>>): string {
@@ -490,12 +609,16 @@ export const CALENDAR_ADD: MethodCapabilityDefinition = {
     { id: 'again', label: 'Already added', help: 'Whether to add it when this exact event was already added from this session', kind: 'choice',
       choices: [{ value: 'no', label: 'Do not add it twice' }, { value: 'yes', label: 'Add it again' }],
       required: { default: 'no', defaultMeans: 'do not add it twice' }, typed: { flag: '--again', switchOn: 'yes' } },
+    { id: 'where', label: 'Which calendar', help: 'Your connected calendar (Google, Outlook or CalDAV), or the one on this computer', kind: 'choice',
+      choices: [{ value: 'connected', label: 'My connected calendar (this computer\'s when none is connected)' }, { value: 'local', label: 'The calendar on this computer' }],
+      required: { default: 'connected', defaultMeans: 'the connected calendar, else this computer\'s' }, typed: { flag: '--calendar' } },
   ],
   sentence: 'The appointment or meeting "{title}" starting {start} is added to your calendar, until you change it; a shared calendar tells its guests.', done: '',
   touches: 'another-machine', lasts: 'kept', risk: 'none', undoneBy: 'delete',
   example: { title: 'Design review', start: '2026-08-01T14:00', end: '2026-08-01T15:00' },
-  method: { id: 'calendar.events.create', fields: { title: 'title', start: 'start', end: 'end', location: 'location', description: 'notes', confirm: '=true' } },
-  said: (answer, values) => `"${values.title}" is on the calendar (event ${word(answer['eventId'])}).`,
+  method: { id: 'calendar.events.create', fields: { title: 'title', start: 'start', end: 'end', location: 'location', description: 'notes', calendarId: 'where:except:connected', confirm: '=true' } },
+  // Named by its title, never by its id (the id is the answer's `eventId`).
+  said: (answer, values) => `"${values.title}" is on ${word(answer['eventId']).startsWith('local:') ? 'the calendar on this computer' : 'your connected calendar'}.`,
 };
 
 export const CALENDAR_CHANGE: MethodCapabilityDefinition = {
@@ -511,7 +634,9 @@ export const CALENDAR_CHANGE: MethodCapabilityDefinition = {
   touches: 'another-machine', lasts: 'kept', risk: 'sends-out',
   example: { event: 'evt-42', start: '2026-08-01T15:00' },
   method: { id: 'calendar.events.update', fields: { eventId: 'event', title: 'title', start: 'start', end: 'end', confirm: '=true' } },
-  said: (answer) => `Event ${word(answer['eventId'])} is changed.`,
+  said: () => 'The event is changed.',
+  // An event kept on this computer told no one.
+  did: (answer) => (word(answer['eventId']).startsWith('local:') ? '' : undefined),
 };
 
 export const CALENDAR_DELETE: MethodCapabilityDefinition = {
@@ -522,8 +647,8 @@ export const CALENDAR_DELETE: MethodCapabilityDefinition = {
   example: { event: 'evt-42' },
   method: { id: 'calendar.events.delete', fields: { eventId: 'event', confirm: '=true' } },
   said: (answer) => (answer['deleted'] === false
-    ? `Event ${word(answer['eventId'])} was no longer on the calendar; nothing changed.`
-    : `Event ${word(answer['eventId'])} is removed from the calendar.`),
+    ? 'The event was no longer on the calendar; nothing changed.'
+    : 'The event is removed from the calendar.'),
 };
 
 // ── Channels ─────────────────────────────────────────────────────────────────
@@ -722,7 +847,7 @@ export const CHANNELS_REMOVE_PROFILE: MethodCapabilityDefinition = {
 
 /** The mailbox's capabilities, each a handler (the act is a daemon method's; the handler says what it came to). */
 export const MAIL_CAPABILITIES: readonly CapabilityDefinition<MessagesCapabilityServices>[] = [
-  MAIL_STATUS, MAIL_LIST, MAIL_READ, MAIL_DRAFT, MAIL_SEND, MAIL_SETTINGS, MAIL_SET, MAIL_PASSWORD,
+  MAIL_STATUS, MAIL_LIST, MAIL_READ, MAIL_DRAFT, MAIL_SEND, MAIL_SETTINGS, MAIL_SET, MAIL_PASSWORD, MAIL_SETUP,
 ];
 
 /** The calendar's handler capabilities (the window of days ahead is the handler's; the act is calendar.events.list). */

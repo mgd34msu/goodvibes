@@ -306,7 +306,7 @@ export function createCliProviderViews<Runtime extends CliProviderRuntime, Servi
           if (canonicalKey === null) {
             const known = services.providerRegistry.listProviders().map((candidate) => candidate.name).filter((name) => name !== 'decision-router');
             return cliCommandRefusal(runtime.cli, 'provider_not_found',
-              `Unknown provider: ${named} (in ${modelKey}). Nothing was changed. Registered providers: ${known.join(', ') || 'none'}. A local server is registered by a scan (/scan).`,
+              `Unknown provider: ${named} (in ${modelKey}). Nothing was changed. Registered providers: ${known.join(', ') || 'none'}. A model server on this computer is added by finding it: \`${policy.binary(runtime)} do models.scan\`, or "Find model servers on this computer" in Models and providers.`,
               [`${policy.binary(runtime)} providers list`, `${policy.binary(runtime)} models`]);
           }
           const provider = canonicalKey.slice(0, canonicalKey.indexOf(':'));

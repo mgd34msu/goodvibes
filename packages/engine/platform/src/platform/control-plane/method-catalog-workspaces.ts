@@ -18,6 +18,8 @@
 import type { GatewayMethodDescriptor } from './method-catalog-shared.js';
 import { methodDescriptor } from './method-catalog-shared.js';
 import {
+  WORKSPACES_PROJECTS_LIST_INPUT_SCHEMA,
+  WORKSPACES_PROJECTS_LIST_OUTPUT_SCHEMA,
   WORKSPACES_REGISTRATIONS_LIST_INPUT_SCHEMA,
   WORKSPACES_REGISTRATIONS_LIST_OUTPUT_SCHEMA,
   WORKSPACES_REGISTRATIONS_ADD_INPUT_SCHEMA,
@@ -39,6 +41,17 @@ export const builtinGatewayWorkspacesMethodDescriptors: readonly GatewayMethodDe
     http: { method: 'GET', path: '/api/workspaces/registrations' },
     inputSchema: WORKSPACES_REGISTRATIONS_LIST_INPUT_SCHEMA,
     outputSchema: WORKSPACES_REGISTRATIONS_LIST_OUTPUT_SCHEMA,
+  }),
+  methodDescriptor({
+    id: 'workspaces.projects.list',
+    title: 'List the Projects the Daemon Knows',
+    description:
+      'The projects a caller with no folder of its own (the web UI, a script) can choose to act in: the daemon\'s own working folder (daemonFolder: true), then every registered workspace root with its label, each once. A capability bound to a project takes the chosen one as workingDirectory (capabilities.run, places.counts) or project (worktrees.snapshot); nothing picks one for the caller. Read-only.',
+    category: 'workspaces',
+    effects: ['workspaces.read'],
+    transport: ['ws'],
+    inputSchema: WORKSPACES_PROJECTS_LIST_INPUT_SCHEMA,
+    outputSchema: WORKSPACES_PROJECTS_LIST_OUTPUT_SCHEMA,
   }),
   methodDescriptor({
     id: 'workspaces.registrations.add',

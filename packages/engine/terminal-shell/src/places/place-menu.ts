@@ -25,7 +25,13 @@ import { drawList, type KitRow } from '../renderer/surface-kit-list.js';
 import { activeTokens } from '../renderer/theme.js';
 import { keycapOf, type PlaceHost } from './place-host.js';
 import { followPlace, readListItems, type PlaceReadMemo } from './place-modal.js';
-import type { AnyPlace, PlaceCount, PlaceItem } from './place-types.js';
+import type { AnyPlace, PlaceCapabilityAction, PlaceCount, PlaceItem } from './place-types.js';
+import { ENDS_THE_PROGRAM, placeActionName } from './place-keys.js';
+
+/** The lists a place's count reads (`countFrom`), every list when it names none: only these are read and followed here. */
+function countedLists(place: AnyPlace): AnyPlace['lists'] {
+  return place.countFrom ? place.lists.filter((list) => place.countFrom!.includes(list.id)) : place.lists;
+}
 
 interface MenuRow {
   readonly group: string;
@@ -34,6 +40,8 @@ interface MenuRow {
   readonly place: AnyPlace | undefined;
   /** A row for one tab of the place, found by its name: the place opens on it. */
   readonly list?: string | undefined;
+  /** A row for one action of the place, found by its words: Enter runs it (it opens or shows something). */
+  readonly action?: PlaceCapabilityAction<PlaceItem> | undefined;
 }
 
 export class PlaceMenu implements SurfaceModal {
@@ -47,20 +55,66 @@ export class PlaceMenu implements SurfaceModal {
   private followStops: Array<() => void> = [];
   private host: SurfaceModalHost | undefined;
 
-  constructor(private readonly places: readonly AnyPlace[], private readonly placeHost: PlaceHost) {
+  private counting = false;
+  private countAgain = false;
+
+  constructor(
+    private readonly places: readonly AnyPlace[],
+    private readonly placeHost: PlaceHost,
+    /** The program counted (its view of each place) and its project, for the daemon's one count of every place. */
+    private readonly asker: { readonly program?: 'tui' | 'agent' | undefined; readonly workingDirectory?: string | undefined } = {},
+  ) {
     this.follow();
     // The program's daemon connection back: every count is read and followed again, with no key pressed.
     this.stops.push(placeHost.onDaemonBack(() => { if (!this.closed) this.follow(); }));
   }
 
-  /** One event stream per place: any change reads the place's count again. Each count is read now. */
+  /**
+   * Each count read now, and again on the change events its lists follow. A place whose lists (as this program shows
+   * it) are all the daemon's is counted by the daemon, every such place in one call (`places.counts`, the place's own
+   * count over its own lists); one with a list this program keeps is counted here, from its lists.
+   */
   private follow(): void {
     for (const stop of this.followStops.splice(0)) stop();
-    for (const place of this.places) {
-      if (!place.count) continue;
+    const counted = this.places.filter((place) => place.count !== undefined);
+    const byDaemon = counted.filter((place) => place.lists.every((list) => list.source.kind === 'daemon'));
+    if (byDaemon.length > 0) {
+      const read = (): void => { void this.countByDaemon(byDaemon); };
+      read();
+      this.followStops.push(...followPlace(byDaemon.flatMap(countedLists), this.placeHost, read, undefined, byDaemon.flatMap((place) => place.actions)));
+    }
+    for (const place of counted.filter((candidate) => !byDaemon.includes(candidate))) {
       const read = (): void => { void this.count(place); };
       read();
-      this.followStops.push(...followPlace(place.lists, this.placeHost, read));
+      this.followStops.push(...followPlace(countedLists(place), this.placeHost, read, undefined, place.actions));
+    }
+  }
+
+  /** The daemon's count of these places, in one call; a change heard while it is read reads once more after it. */
+  private async countByDaemon(places: readonly AnyPlace[]): Promise<void> {
+    if (this.counting) { this.countAgain = true; return; }
+    this.counting = true;
+    try {
+      const answer = await this.placeHost.invoke('places.counts', {
+        ...(this.asker.program ? { program: this.asker.program } : {}),
+        ...(this.asker.workingDirectory ? { workingDirectory: this.asker.workingDirectory } : {}),
+      });
+      const rows = answer !== null && typeof answer === 'object' && Array.isArray((answer as { places?: unknown }).places)
+        ? (answer as { places: readonly unknown[] }).places : [];
+      if (this.closed) return;
+      for (const place of places) {
+        const row = rows.find((entry) => entry !== null && typeof entry === 'object' && (entry as { place?: unknown }).place === place.id) as
+          { count?: unknown; words?: unknown; tone?: unknown } | undefined;
+        const tone = row?.tone === 'wrong' ? 'wrong' : 'waiting';
+        this.counts.set(place.id, row && typeof row.count === 'number' && row.count > 0 && typeof row.words === 'string'
+          ? { count: row.count, words: row.words, tone } : undefined);
+      }
+      this.placeHost.requestRender();
+    } catch {
+      // A daemon that does not answer counts nothing now; the counts are read again when it is back.
+    } finally {
+      this.counting = false;
+      if (this.countAgain && !this.closed) { this.countAgain = false; void this.countByDaemon(places); }
     }
   }
 
@@ -69,7 +123,7 @@ export class PlaceMenu implements SurfaceModal {
     const lists: Record<string, readonly PlaceItem[]> = {};
     // Lists of one method and input are one call.
     const memo: PlaceReadMemo = new Map();
-    await Promise.all(place.lists.map(async (list) => {
+    await Promise.all(countedLists(place).map(async (list) => {
       try { lists[list.id] = await readListItems(list, this.placeHost, memo); } catch { lists[list.id] = []; }
     }));
     if (this.closed) return;
@@ -93,17 +147,67 @@ export class PlaceMenu implements SurfaceModal {
     if (words.length === 0) return all;
     const has = (text: string): boolean => words.every((word) => text.toLowerCase().includes(word));
     const byName = all.filter((row) => has(row.title));
+    // A tab whose name is what was typed first, then a tab whose name holds it, then one whose noun does.
+    const typed = words.join(' ');
+    const tabRank = (list: { readonly label: string; readonly noun: string }): number =>
+      list.label.toLowerCase() === typed ? 0 : has(list.label) ? 1 : has(list.noun) ? 2 : 3;
     const byTab = all.flatMap((row) => (row.place?.lists ?? [])
-      .filter((list) => has(list.label) || has(list.noun))
-      .map((list): MenuRow => ({ ...row, title: `${row.title}: ${list.label}`, list: list.id })));
-    const found = new Set([...byName, ...byTab].map((row) => row.group));
+      .filter((list) => tabRank(list) < 3)
+      .map((list) => ({ rank: tabRank(list), row: { ...row, title: `${row.title}: ${list.label}`, list: list.id } as MenuRow })))
+      .sort((left, right) => left.rank - right.rank)
+      .map(({ row }) => row);
+    // A place's action that opens or shows something, needing nothing from a selected item ("secure address": Settings
+    // on Secure address), found by its words: Enter runs it from the menu.
+    const byAction = all.flatMap((row) => (row.place?.actions ?? [])
+      .filter((action): action is PlaceCapabilityAction<PlaceItem> => action.kind !== 'program' && action.label !== undefined && has(action.label) && this.runsFromMenu(action))
+      .map((action): MenuRow => ({ ...row, title: `${row.title}: ${action.label!}`, action })));
+    const found = new Set([...byName, ...byTab, ...byAction].map((row) => row.group));
     const byLine = all.filter((row) => !found.has(row.group) && has(row.line));
-    return [...byName, ...byTab, ...byLine];
+    // An entry whose own name is the typed word comes first ("settings" opens Settings on Enter).
+    const ownName = (row: MenuRow): string => (row.action?.label ?? (row.list ? row.title.slice(row.title.indexOf(': ') + 2) : row.title)).toLowerCase();
+    const rows = [...byName, ...byTab, ...byAction, ...byLine];
+    return [...rows.filter((row) => ownName(row) === typed), ...rows.filter((row) => ownName(row) !== typed)];
+  }
+
+  /**
+   * An action the menu may run: one that needs no selected item (a place-wide action, one on a tab's kind of thing,
+   * or one whose every filled input takes nothing from an item, `() => 'secure address'`), whether or not it changes
+   * something; not an answer to a waiting item, not one that ends the program, and a control in this program.
+   */
+  private runsFromMenu(action: PlaceCapabilityAction<PlaceItem>): boolean {
+    if (action.answers || action.answersItem) return false;
+    if (ENDS_THE_PROGRAM.has(action.capability)) return false;
+    if (action.programs !== undefined && this.asker.program !== undefined && !action.programs.includes(this.asker.program)) return false;
+    const itemless = action.list === undefined || action.whole === true
+      || Object.values(action.fill ?? {}).every((from) => typeof from === 'function' && from.length === 0);
+    return itemless && this.placeHost.capability(action.capability) !== undefined;
+  }
+
+  /** Run at once from the menu: it changes nothing and every input it needs is filled (Settings opened at a section). */
+  private runsAtOnce(action: PlaceCapabilityAction<PlaceItem>): boolean {
+    const resolved = this.placeHost.capability(action.capability);
+    if (!resolved || resolved.action.lasts !== 'not-a-change' || action.form === true) return false;
+    const given = Object.keys(action.fill ?? {});
+    return resolved.action.inputs.every((input) => input.required !== true || given.includes(input.id));
+  }
+
+  /** Run a place's action from the menu: the menu closes for what it opens, or says why it did not run. */
+  private async runAction(action: PlaceCapabilityAction<PlaceItem>): Promise<void> {
+    const none: PlaceItem = { id: '', state: '' };
+    const values = Object.fromEntries(Object.entries(action.fill ?? {}).map(([input, from]) => [input, typeof from === 'function' ? from(none) : '']));
+    const outcome = await this.placeHost.runCapability(action.capability, values);
+    if (this.closed) return;
+    if (!outcome.ok) { this.note = `Not done: ${outcome.reason}`; this.placeHost.requestRender(); return; }
+    this.dismiss();
   }
 
   private open(row: MenuRow | undefined): void {
     if (!row) return;
     if (!row.place) { this.note = `${row.title} has no place in this program yet.`; return; }
+    if (row.action && this.runsAtOnce(row.action)) { void this.runAction(row.action); return; }
+    // An action that changes something, or asks for more: its place opens on its tab and it is pressed there, as its key
+    // would be (its form, its question when it asks first, and the outcome on its tab).
+    if (row.action) { this.placeHost.openPlace(row.place.id, { ...(row.action.list ? { list: row.action.list } : {}), action: placeActionName(row.action) }); return; }
     this.placeHost.openPlace(row.place.id, row.list ? { list: row.list } : undefined);
   }
 
@@ -146,8 +250,9 @@ export class PlaceMenu implements SurfaceModal {
     searchRow(f, f.top, this.query, 'type to filter');
     const x0 = f.l + 1 + MODAL_MARK_INSET;
     const x1 = f.r - MODAL_MARK_INSET;
-    // A tab's row ("System: Keys") may be longer than a group's name: the column fits it, never more than half the row.
-    const titleWidth = Math.min(Math.max(...CAPABILITY_GROUPS.map((group) => group.title.length), ...rows.map((row) => row.title.length)) + 3, Math.floor((x1 - x0 + 1) / 2));
+    // A tab's or an action's row ("Devices and network: secure address") may be longer than a group's name: the column
+    // fits it whole while the row keeps room for a short count; the group's line gives way first.
+    const titleWidth = Math.min(Math.max(...CAPABILITY_GROUPS.map((group) => group.title.length), ...rows.map((row) => row.title.length)) + 3, Math.max(10, x1 - x0 + 1 - 16));
     const kitRows: KitRow[] = rows.map((row, index) => {
       const count = row.place ? this.counts.get(row.place.id) : undefined;
       const right = count ? count.words : row.place ? '' : 'not here yet';

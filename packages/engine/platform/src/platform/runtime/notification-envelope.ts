@@ -55,6 +55,8 @@ function snapshot(delivery: NotificationDelivery, restricted: boolean): Notifica
           // No generated-ID provenance is present in this contract. The builders
           // retain the source-compatible field but never disclose it.
           sessionId: '',
+          // Whose cost passed it (turn-notification.ts): the daemon's own runs are said as such.
+          ...(facts.of === 'daemon-runs' ? { of: 'daemon-runs' as const } : {}),
           ...(restricted ? {} : { turnName: optionalString(facts.turnName) }),
         }) });
       }

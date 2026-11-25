@@ -99,11 +99,15 @@ export const TUI_PAIRING: DevicesPairingHost<CommandContext> = {
   async unpairHost(ctx) {
     // Forgetting the credential cuts this terminal off from its host until the owner pairs again: only the owner's own press.
     if (ctx.invokedByModel === true) throw commandRefusal('Only you can make this terminal forget its daemon pairing, from the Devices and network place. Nothing was forgotten.');
+    let result: Awaited<ReturnType<typeof unpairTuiHost>>;
     try {
-      return formatTuiHostPairing(await unpairTuiHost({ configManager: ctx.platform.configManager, homeDirectory: requireShellPaths(ctx).homeDirectory }));
+      result = await unpairTuiHost({ configManager: ctx.platform.configManager, homeDirectory: requireShellPaths(ctx).homeDirectory });
     } catch {
       throw commandRefusal('This terminal\'s host credentials are unavailable here.', 'Use goodvibes host unpair in an owner terminal');
     }
+    // Nothing forgotten (none stored, or it could not be read) is said as a refusal: no "To undo" follows it.
+    if (result.status === 'blocked') throw commandRefusal(result.message ?? 'Nothing was forgotten.');
+    return formatTuiHostPairing(result);
   },
   pairRelay: (ctx, name) => pairRelay(ctx, name || undefined),
   async pairChannel(ctx, channel) { await runChannelPairing(channel, ctx); },

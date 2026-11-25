@@ -1344,7 +1344,8 @@ export const MOCK_DAEMON_FIXTURES: MockDaemonFixtureMap = {
         },
         "answeredBy": {
           "actor": "sample",
-          "surface": "sample"
+          "surface": "sample",
+          "owner": false
         },
         "closedAt": 0,
         "withdrawnReason": "sample",
@@ -1521,7 +1522,8 @@ export const MOCK_DAEMON_FIXTURES: MockDaemonFixtureMap = {
         },
         "answeredBy": {
           "actor": "sample",
-          "surface": "sample"
+          "surface": "sample",
+          "owner": false
         },
         "closedAt": 0,
         "withdrawnReason": "sample",
@@ -1698,7 +1700,8 @@ export const MOCK_DAEMON_FIXTURES: MockDaemonFixtureMap = {
           },
           "answeredBy": {
             "actor": "sample",
-            "surface": "sample"
+            "surface": "sample",
+            "owner": false
           },
           "closedAt": 0,
           "withdrawnReason": "sample",
@@ -1863,7 +1866,8 @@ export const MOCK_DAEMON_FIXTURES: MockDaemonFixtureMap = {
         },
         "answeredBy": {
           "actor": "sample",
-          "surface": "sample"
+          "surface": "sample",
+          "owner": false
         },
         "closedAt": 0,
         "withdrawnReason": "sample",
@@ -2024,7 +2028,8 @@ export const MOCK_DAEMON_FIXTURES: MockDaemonFixtureMap = {
         },
         "answeredBy": {
           "actor": "sample",
-          "surface": "sample"
+          "surface": "sample",
+          "owner": false
         },
         "closedAt": 0,
         "withdrawnReason": "sample",
@@ -5373,7 +5378,8 @@ export const MOCK_DAEMON_FIXTURES: MockDaemonFixtureMap = {
           "description": "sample",
           "attendees": [
             "sample"
-          ]
+          ],
+          "seriesId": "sample"
         }
       ],
       "more": false
@@ -5463,6 +5469,46 @@ export const MOCK_DAEMON_FIXTURES: MockDaemonFixtureMap = {
       ]
     }
   },
+  "capabilities.list": {
+    "methodId": "capabilities.list",
+    "http": null,
+    "status": 200,
+    "body": {
+      "capabilities": [
+        {
+          "id": "sample",
+          "group": "conversation",
+          "runsIn": "daemon",
+          "repeat": "safe",
+          "command": "sample",
+          "commandTitle": "sample",
+          "actionId": "sample",
+          "word": "sample",
+          "label": "sample",
+          "sentence": "sample",
+          "done": "sample",
+          "risk": "sample",
+          "riskDone": "sample",
+          "touches": "sample",
+          "lasts": "sample",
+          "ownerOnly": {},
+          "undoneBy": "sample",
+          "button": "sample",
+          "asksItself": false,
+          "stepTitles": [
+            "sample"
+          ],
+          "reveals": {
+            "label": "sample",
+            "note": "sample"
+          },
+          "inputs": [
+            {}
+          ]
+        }
+      ]
+    }
+  },
   "capabilities.run": {
     "methodId": "capabilities.run",
     "http": null,
@@ -5475,7 +5521,31 @@ export const MOCK_DAEMON_FIXTURES: MockDaemonFixtureMap = {
       "data": {},
       "risk": "sample",
       "repeat": "safe",
-      "method": "sample"
+      "method": "sample",
+      "reveal": {
+        "label": "sample",
+        "note": "sample",
+        "value": "sample",
+        "qr": "sample"
+      }
+    }
+  },
+  "places.counts": {
+    "methodId": "places.counts",
+    "http": null,
+    "status": 200,
+    "body": {
+      "places": [
+        {
+          "place": "sample",
+          "count": 0,
+          "words": "sample",
+          "tone": "waiting",
+          "unread": [
+            "sample"
+          ]
+        }
+      ]
     }
   },
   "channels.accounts.action.default": {
@@ -6079,6 +6149,13 @@ export const MOCK_DAEMON_FIXTURES: MockDaemonFixtureMap = {
       "surface": "sample",
       "accountId": "sample",
       "state": "sample",
+      "runtime": {
+        "observable": false,
+        "running": false,
+        "reason": "sample",
+        "lastError": "sample",
+        "observedAt": 0
+      },
       "summary": "sample",
       "checkedAt": 0,
       "checks": [
@@ -7897,6 +7974,7 @@ export const MOCK_DAEMON_FIXTURES: MockDaemonFixtureMap = {
         "model": "sample",
         "provider": "sample",
         "systemPrompt": "sample",
+        "project": "sample",
         "status": "active",
         "createdAt": 0,
         "updatedAt": 0,
@@ -7933,6 +8011,7 @@ export const MOCK_DAEMON_FIXTURES: MockDaemonFixtureMap = {
         "model": "sample",
         "provider": "sample",
         "systemPrompt": "sample",
+        "project": "sample",
         "status": "active",
         "createdAt": 0,
         "updatedAt": 0,
@@ -8037,6 +8116,7 @@ export const MOCK_DAEMON_FIXTURES: MockDaemonFixtureMap = {
           "model": "sample",
           "provider": "sample",
           "systemPrompt": "sample",
+          "project": "sample",
           "status": "active",
           "createdAt": 0,
           "updatedAt": 0,
@@ -8082,6 +8162,7 @@ export const MOCK_DAEMON_FIXTURES: MockDaemonFixtureMap = {
         "model": "sample",
         "provider": "sample",
         "systemPrompt": "sample",
+        "project": "sample",
         "status": "active",
         "createdAt": 0,
         "updatedAt": 0,
@@ -14236,7 +14317,13 @@ export const MOCK_DAEMON_FIXTURES: MockDaemonFixtureMap = {
             "outputTokens": 0,
             "cacheReadTokens": 0,
             "cacheWriteTokens": 0
-          }
+          },
+          "models": [
+            {
+              "key": "sample",
+              "priced": false
+            }
+          ]
         }
       ]
     }
@@ -14350,6 +14437,29 @@ export const MOCK_DAEMON_FIXTURES: MockDaemonFixtureMap = {
       "failed": 0,
       "notFound": 0,
       "destinationChanged": 0
+    }
+  },
+  "notifications.send": {
+    "methodId": "notifications.send",
+    "http": null,
+    "status": 200,
+    "body": {
+      "attempted": 0,
+      "delivered": 0,
+      "failed": 0,
+      "textSent": false,
+      "results": [
+        {
+          "ok": false,
+          "error": "sample",
+          "status": 0,
+          "outcome": "sample"
+        }
+      ],
+      "chat": {
+        "attempted": 0,
+        "failed": 0
+      }
     }
   },
   "email.attachment.get": {
@@ -14690,7 +14800,8 @@ export const MOCK_DAEMON_FIXTURES: MockDaemonFixtureMap = {
     "status": 200,
     "body": {
       "messageId": "sample",
-      "sentAt": "sample"
+      "sentAt": "sample",
+      "repeated": false
     }
   },
   "flags.graduation.report": {
@@ -15946,6 +16057,16 @@ export const MOCK_DAEMON_FIXTURES: MockDaemonFixtureMap = {
       "recallIsSyntheticOnly": false
     }
   },
+  "hooks.trace.post": {
+    "methodId": "hooks.trace.post",
+    "http": null,
+    "status": 200,
+    "body": {
+      "recorded": 0,
+      "refused": 0,
+      "detail": {}
+    }
+  },
   "inbound.telegram.cancel": {
     "methodId": "inbound.telegram.cancel",
     "http": {
@@ -16066,6 +16187,12 @@ export const MOCK_DAEMON_FIXTURES: MockDaemonFixtureMap = {
           "approvalId": "sample",
           "sourceExpiresAt": 0,
           "outcome": "awaiting-owner"
+        }
+      ],
+      "chats": [
+        {
+          "configurationId": "sample",
+          "keepsNewMessages": false
         }
       ]
     }
@@ -22544,6 +22671,7 @@ export const MOCK_DAEMON_FIXTURES: MockDaemonFixtureMap = {
       ],
       "pendingProposals": [
         {
+          "id": "sample",
           "kind": "contradiction",
           "ids": [
             "sample"
@@ -22551,7 +22679,8 @@ export const MOCK_DAEMON_FIXTURES: MockDaemonFixtureMap = {
           "route": "sample",
           "reason": "sample"
         }
-      ]
+      ],
+      "decidedProposalCount": 0
     }
   },
   "memory.doctor": {
@@ -22716,6 +22845,7 @@ export const MOCK_DAEMON_FIXTURES: MockDaemonFixtureMap = {
       "record": {
         "id": "sample",
         "scope": "session",
+        "project": "sample",
         "cls": "decision",
         "summary": "sample",
         "detail": "sample",
@@ -22769,6 +22899,7 @@ export const MOCK_DAEMON_FIXTURES: MockDaemonFixtureMap = {
           {
             "id": "sample",
             "scope": "session",
+            "project": "sample",
             "cls": "decision",
             "summary": "sample",
             "detail": "sample",
@@ -22813,6 +22944,7 @@ export const MOCK_DAEMON_FIXTURES: MockDaemonFixtureMap = {
       "record": {
         "id": "sample",
         "scope": "session",
+        "project": "sample",
         "cls": "decision",
         "summary": "sample",
         "detail": "sample",
@@ -22897,6 +23029,7 @@ export const MOCK_DAEMON_FIXTURES: MockDaemonFixtureMap = {
         {
           "id": "sample",
           "scope": "session",
+          "project": "sample",
           "cls": "decision",
           "summary": "sample",
           "detail": "sample",
@@ -22933,6 +23066,7 @@ export const MOCK_DAEMON_FIXTURES: MockDaemonFixtureMap = {
         {
           "id": "sample",
           "scope": "session",
+          "project": "sample",
           "cls": "decision",
           "summary": "sample",
           "detail": "sample",
@@ -22979,6 +23113,7 @@ export const MOCK_DAEMON_FIXTURES: MockDaemonFixtureMap = {
           "record": {
             "id": "sample",
             "scope": "session",
+            "project": "sample",
             "cls": "decision",
             "summary": "sample",
             "detail": "sample",
@@ -23018,6 +23153,7 @@ export const MOCK_DAEMON_FIXTURES: MockDaemonFixtureMap = {
       "record": {
         "id": "sample",
         "scope": "session",
+        "project": "sample",
         "cls": "decision",
         "summary": "sample",
         "detail": "sample",
@@ -23052,6 +23188,7 @@ export const MOCK_DAEMON_FIXTURES: MockDaemonFixtureMap = {
       "record": {
         "id": "sample",
         "scope": "session",
+        "project": "sample",
         "cls": "decision",
         "summary": "sample",
         "detail": "sample",
@@ -24436,6 +24573,15 @@ export const MOCK_DAEMON_FIXTURES: MockDaemonFixtureMap = {
       ]
     }
   },
+  "permissions.audit.post": {
+    "methodId": "permissions.audit.post",
+    "http": null,
+    "status": 200,
+    "body": {
+      "recorded": 0,
+      "refused": 0
+    }
+  },
   "permissions.rules.delete": {
     "methodId": "permissions.rules.delete",
     "http": null,
@@ -24456,7 +24602,10 @@ export const MOCK_DAEMON_FIXTURES: MockDaemonFixtureMap = {
           "tier": "exact",
           "tool": "sample",
           "description": "sample",
-          "createdAt": 0
+          "createdAt": 0,
+          "project": "sample",
+          "carried": "sample",
+          "madeIn": "sample"
         }
       ]
     }
@@ -24894,6 +25043,14 @@ export const MOCK_DAEMON_FIXTURES: MockDaemonFixtureMap = {
         }
       ],
       "disclosure": "sample"
+    }
+  },
+  "context.windows.learned.post": {
+    "methodId": "context.windows.learned.post",
+    "http": null,
+    "status": 200,
+    "body": {
+      "kept": false
     }
   },
   "models.current.get": {
@@ -26547,7 +26704,8 @@ export const MOCK_DAEMON_FIXTURES: MockDaemonFixtureMap = {
         "notAfter": 0,
         "problem": "sample",
         "from": "this-machine",
-        "servedSource": "local-authority"
+        "servedSource": "local-authority",
+        "reach": "sample"
       },
       "letsEncrypt": {
         "domain": "sample",
@@ -26612,12 +26770,32 @@ export const MOCK_DAEMON_FIXTURES: MockDaemonFixtureMap = {
           {
             "name": "sample",
             "address": "sample",
+            "port": 0,
             "covered": false,
             "needs": "sample"
+          }
+        ],
+        "formerHolders": [
+          {
+            "name": "sample",
+            "at": 0,
+            "until": 0,
+            "source": "local-authority"
           }
         ]
       },
       "reissue": {
+        "title": "sample",
+        "line": "sample",
+        "available": false
+      },
+      "replaceAuthority": {
+        "title": "sample",
+        "line": "sample",
+        "question": "sample",
+        "available": false
+      },
+      "serve": {
         "title": "sample",
         "line": "sample",
         "available": false
@@ -26662,7 +26840,8 @@ export const MOCK_DAEMON_FIXTURES: MockDaemonFixtureMap = {
           "notAfter": 0,
           "problem": "sample",
           "from": "this-machine",
-          "servedSource": "local-authority"
+          "servedSource": "local-authority",
+          "reach": "sample"
         },
         "letsEncrypt": {
           "domain": "sample",
@@ -26727,12 +26906,306 @@ export const MOCK_DAEMON_FIXTURES: MockDaemonFixtureMap = {
             {
               "name": "sample",
               "address": "sample",
+              "port": 0,
               "covered": false,
               "needs": "sample"
+            }
+          ],
+          "formerHolders": [
+            {
+              "name": "sample",
+              "at": 0,
+              "until": 0,
+              "source": "local-authority"
             }
           ]
         },
         "reissue": {
+          "title": "sample",
+          "line": "sample",
+          "available": false
+        },
+        "replaceAuthority": {
+          "title": "sample",
+          "line": "sample",
+          "question": "sample",
+          "available": false
+        },
+        "serve": {
+          "title": "sample",
+          "line": "sample",
+          "available": false
+        }
+      }
+    }
+  },
+  "secureAddress.replaceAuthority": {
+    "methodId": "secureAddress.replaceAuthority",
+    "http": null,
+    "status": 200,
+    "body": {
+      "ok": false,
+      "words": "sample",
+      "status": {
+        "notice": "sample",
+        "intro": "sample",
+        "choices": [
+          {
+            "id": "lets-encrypt",
+            "title": "sample",
+            "does": "sample",
+            "needs": "sample",
+            "phoneGains": "sample",
+            "sends": "sample",
+            "caution": "sample"
+          }
+        ],
+        "groupLines": [
+          "sample"
+        ],
+        "node": false,
+        "inForce": {
+          "on": false,
+          "certificate": "local-authority",
+          "servedToNetwork": false,
+          "serving": false,
+          "port": 0,
+          "address": "sample",
+          "names": [
+            "sample"
+          ],
+          "notAfter": 0,
+          "problem": "sample",
+          "from": "this-machine",
+          "servedSource": "local-authority",
+          "reach": "sample"
+        },
+        "letsEncrypt": {
+          "domain": "sample",
+          "tokenStored": false,
+          "tokenUnreadable": "sample",
+          "issuing": false,
+          "certificate": {
+            "names": [
+              "sample"
+            ],
+            "notAfter": 0,
+            "issuedAt": 0
+          },
+          "lastAttempt": {
+            "at": 0,
+            "ok": false,
+            "words": "sample"
+          },
+          "addressProblem": "sample",
+          "routerCheck": {
+            "name": "sample",
+            "ok": false,
+            "words": "sample"
+          },
+          "addressRecords": {}
+        },
+        "ownFiles": {
+          "certFile": "sample",
+          "keyFile": "sample",
+          "check": {
+            "ok": false,
+            "problem": "sample",
+            "names": [
+              "sample"
+            ],
+            "notAfter": 0
+          }
+        },
+        "localAuthority": {
+          "made": false,
+          "fingerprint": "sample",
+          "page": "sample"
+        },
+        "tailscale": {
+          "address": "sample"
+        },
+        "group": {
+          "following": {
+            "nodeId": "sample",
+            "name": "sample"
+          },
+          "received": {
+            "leadName": "sample",
+            "names": [
+              "sample"
+            ],
+            "notAfter": 0,
+            "receivedAt": 0,
+            "source": "local-authority"
+          },
+          "followers": [
+            {
+              "name": "sample",
+              "address": "sample",
+              "port": 0,
+              "covered": false,
+              "needs": "sample"
+            }
+          ],
+          "formerHolders": [
+            {
+              "name": "sample",
+              "at": 0,
+              "until": 0,
+              "source": "local-authority"
+            }
+          ]
+        },
+        "reissue": {
+          "title": "sample",
+          "line": "sample",
+          "available": false
+        },
+        "replaceAuthority": {
+          "title": "sample",
+          "line": "sample",
+          "question": "sample",
+          "available": false
+        },
+        "serve": {
+          "title": "sample",
+          "line": "sample",
+          "available": false
+        }
+      }
+    }
+  },
+  "secureAddress.serve": {
+    "methodId": "secureAddress.serve",
+    "http": null,
+    "status": 200,
+    "body": {
+      "ok": false,
+      "words": "sample",
+      "status": {
+        "notice": "sample",
+        "intro": "sample",
+        "choices": [
+          {
+            "id": "lets-encrypt",
+            "title": "sample",
+            "does": "sample",
+            "needs": "sample",
+            "phoneGains": "sample",
+            "sends": "sample",
+            "caution": "sample"
+          }
+        ],
+        "groupLines": [
+          "sample"
+        ],
+        "node": false,
+        "inForce": {
+          "on": false,
+          "certificate": "local-authority",
+          "servedToNetwork": false,
+          "serving": false,
+          "port": 0,
+          "address": "sample",
+          "names": [
+            "sample"
+          ],
+          "notAfter": 0,
+          "problem": "sample",
+          "from": "this-machine",
+          "servedSource": "local-authority",
+          "reach": "sample"
+        },
+        "letsEncrypt": {
+          "domain": "sample",
+          "tokenStored": false,
+          "tokenUnreadable": "sample",
+          "issuing": false,
+          "certificate": {
+            "names": [
+              "sample"
+            ],
+            "notAfter": 0,
+            "issuedAt": 0
+          },
+          "lastAttempt": {
+            "at": 0,
+            "ok": false,
+            "words": "sample"
+          },
+          "addressProblem": "sample",
+          "routerCheck": {
+            "name": "sample",
+            "ok": false,
+            "words": "sample"
+          },
+          "addressRecords": {}
+        },
+        "ownFiles": {
+          "certFile": "sample",
+          "keyFile": "sample",
+          "check": {
+            "ok": false,
+            "problem": "sample",
+            "names": [
+              "sample"
+            ],
+            "notAfter": 0
+          }
+        },
+        "localAuthority": {
+          "made": false,
+          "fingerprint": "sample",
+          "page": "sample"
+        },
+        "tailscale": {
+          "address": "sample"
+        },
+        "group": {
+          "following": {
+            "nodeId": "sample",
+            "name": "sample"
+          },
+          "received": {
+            "leadName": "sample",
+            "names": [
+              "sample"
+            ],
+            "notAfter": 0,
+            "receivedAt": 0,
+            "source": "local-authority"
+          },
+          "followers": [
+            {
+              "name": "sample",
+              "address": "sample",
+              "port": 0,
+              "covered": false,
+              "needs": "sample"
+            }
+          ],
+          "formerHolders": [
+            {
+              "name": "sample",
+              "at": 0,
+              "until": 0,
+              "source": "local-authority"
+            }
+          ]
+        },
+        "reissue": {
+          "title": "sample",
+          "line": "sample",
+          "available": false
+        },
+        "replaceAuthority": {
+          "title": "sample",
+          "line": "sample",
+          "question": "sample",
+          "available": false
+        },
+        "serve": {
           "title": "sample",
           "line": "sample",
           "available": false
@@ -26775,7 +27248,8 @@ export const MOCK_DAEMON_FIXTURES: MockDaemonFixtureMap = {
         "notAfter": 0,
         "problem": "sample",
         "from": "this-machine",
-        "servedSource": "local-authority"
+        "servedSource": "local-authority",
+        "reach": "sample"
       },
       "letsEncrypt": {
         "domain": "sample",
@@ -26840,12 +27314,32 @@ export const MOCK_DAEMON_FIXTURES: MockDaemonFixtureMap = {
           {
             "name": "sample",
             "address": "sample",
+            "port": 0,
             "covered": false,
             "needs": "sample"
+          }
+        ],
+        "formerHolders": [
+          {
+            "name": "sample",
+            "at": 0,
+            "until": 0,
+            "source": "local-authority"
           }
         ]
       },
       "reissue": {
+        "title": "sample",
+        "line": "sample",
+        "available": false
+      },
+      "replaceAuthority": {
+        "title": "sample",
+        "line": "sample",
+        "question": "sample",
+        "available": false
+      },
+      "serve": {
         "title": "sample",
         "line": "sample",
         "available": false
@@ -30929,6 +31423,107 @@ export const MOCK_DAEMON_FIXTURES: MockDaemonFixtureMap = {
       "metadata": {}
     }
   },
+  "work.list": {
+    "methodId": "work.list",
+    "http": {
+      "method": "GET",
+      "path": "/api/work"
+    },
+    "status": 200,
+    "body": {
+      "projectId": "sample",
+      "works": [
+        {
+          "id": "sample",
+          "title": "sample",
+          "goal": "sample",
+          "state": "sample",
+          "criteria": [
+            "sample"
+          ]
+        }
+      ]
+    }
+  },
+  "work.plan.approve": {
+    "methodId": "work.plan.approve",
+    "http": {
+      "method": "POST",
+      "path": "/api/work/plan/approve"
+    },
+    "status": 200,
+    "body": {
+      "title": "sample"
+    }
+  },
+  "work.plan.discard": {
+    "methodId": "work.plan.discard",
+    "http": {
+      "method": "POST",
+      "path": "/api/work/plan/discard"
+    },
+    "status": 200,
+    "body": {
+      "title": "sample"
+    }
+  },
+  "work.plan.redo": {
+    "methodId": "work.plan.redo",
+    "http": {
+      "method": "POST",
+      "path": "/api/work/plan/redo"
+    },
+    "status": 200,
+    "body": {
+      "title": "sample"
+    }
+  },
+  "work.plan.step.drop": {
+    "methodId": "work.plan.step.drop",
+    "http": {
+      "method": "POST",
+      "path": "/api/work/plan/step/drop"
+    },
+    "status": 200,
+    "body": {
+      "title": "sample"
+    }
+  },
+  "work.plan.step.edit": {
+    "methodId": "work.plan.step.edit",
+    "http": {
+      "method": "POST",
+      "path": "/api/work/plan/step/edit"
+    },
+    "status": 200,
+    "body": {
+      "title": "sample"
+    }
+  },
+  "work.plan.step.move": {
+    "methodId": "work.plan.step.move",
+    "http": {
+      "method": "POST",
+      "path": "/api/work/plan/step/move"
+    },
+    "status": 200,
+    "body": {
+      "title": "sample"
+    }
+  },
+  "work.target": {
+    "methodId": "work.target",
+    "http": {
+      "method": "POST",
+      "path": "/api/work/target"
+    },
+    "status": 200,
+    "body": {
+      "summary": "sample",
+      "title": "sample",
+      "input": {}
+    }
+  },
   "workLedger.execution.cancel": {
     "methodId": "workLedger.execution.cancel",
     "http": {
@@ -31383,94 +31978,6 @@ export const MOCK_DAEMON_FIXTURES: MockDaemonFixtureMap = {
       ]
     }
   },
-  "workLedger.importLegacy": {
-    "methodId": "workLedger.importLegacy",
-    "http": {
-      "method": "POST",
-      "path": "/api/work-ledger/legacy-import"
-    },
-    "status": 200,
-    "body": {
-      "kind": "accepted",
-      "replayed": false,
-      "event": {
-        "sequence": 0,
-        "type": "create",
-        "actorId": "sample",
-        "requestId": "sample",
-        "workId": "sample",
-        "attemptId": "sample",
-        "at": 0,
-        "work": {
-          "id": "sample",
-          "title": "sample",
-          "goal": "sample",
-          "criteria": [
-            "sample"
-          ],
-          "source": {
-            "version": 1,
-            "sourceId": "sample",
-            "sourceRevision": "sample",
-            "inputId": "sample",
-            "sessionId": "sample"
-          },
-          "revision": 0,
-          "criteriaRevision": 0,
-          "reportedState": "pending",
-          "currentAttemptId": "sample",
-          "createdAt": 0,
-          "updatedAt": 0
-        },
-        "attempts": [
-          {
-            "id": "sample",
-            "workId": "sample",
-            "predecessorId": "sample",
-            "ownerId": "sample",
-            "revision": 0,
-            "state": "active",
-            "report": "sample",
-            "blocker": "sample",
-            "createdAt": 0,
-            "updatedAt": 0
-          }
-        ],
-        "evidence": {
-          "id": "sample",
-          "target": {
-            "workId": "sample",
-            "workRevision": 0,
-            "criteriaRevision": 0,
-            "attemptId": "sample",
-            "attemptRevision": 0
-          },
-          "outcome": "verified",
-          "reason": "sample",
-          "references": [
-            {
-              "kind": "decision",
-              "ref": "sample",
-              "digest": "sample"
-            }
-          ],
-          "source": "host_check",
-          "criteriaResults": [
-            {
-              "criterionIndex": 0,
-              "status": "satisfied",
-              "references": [
-                "sample"
-              ]
-            }
-          ],
-          "actorId": "sample",
-          "at": 0
-        },
-        "reason": "sample"
-      }
-    }
-  },
   "workLedger.intake.admit": {
     "methodId": "workLedger.intake.admit",
     "http": {
@@ -31649,18 +32156,6 @@ export const MOCK_DAEMON_FIXTURES: MockDaemonFixtureMap = {
           }
         }
       }
-    }
-  },
-  "workLedger.prepareLegacyImport": {
-    "methodId": "workLedger.prepareLegacyImport",
-    "http": {
-      "method": "POST",
-      "path": "/api/work-ledger/legacy-import/prepare"
-    },
-    "status": 200,
-    "body": {
-      "kind": "prepared",
-      "manifest": {}
     }
   },
   "workLedger.project": {
@@ -31934,6 +32429,20 @@ export const MOCK_DAEMON_FIXTURES: MockDaemonFixtureMap = {
       }
     }
   },
+  "workspaces.projects.list": {
+    "methodId": "workspaces.projects.list",
+    "http": null,
+    "status": 200,
+    "body": {
+      "projects": [
+        {
+          "root": "sample",
+          "label": "sample",
+          "daemonFolder": false
+        }
+      ]
+    }
+  },
   "workspaces.registrations.add": {
     "methodId": "workspaces.registrations.add",
     "http": {
@@ -31947,7 +32456,12 @@ export const MOCK_DAEMON_FIXTURES: MockDaemonFixtureMap = {
         "registeredAt": "sample",
         "label": "sample",
         "origin": "sample",
-        "checkpointEligible": false
+        "checkpointEligible": false,
+        "nativeScope": {
+          "id": "sample",
+          "canonicalRoot": "sample",
+          "generation": 0
+        }
       },
       "alreadyRegistered": false,
       "nativeScopeGranted": false
@@ -31967,7 +32481,12 @@ export const MOCK_DAEMON_FIXTURES: MockDaemonFixtureMap = {
           "registeredAt": "sample",
           "label": "sample",
           "origin": "sample",
-          "checkpointEligible": false
+          "checkpointEligible": false,
+          "nativeScope": {
+            "id": "sample",
+            "canonicalRoot": "sample",
+            "generation": 0
+          }
         }
       ],
       "declines": [
@@ -32039,7 +32558,8 @@ export const MOCK_DAEMON_FIXTURES: MockDaemonFixtureMap = {
           }
         ],
         "error": "sample"
-      }
+      },
+      "projectCommandsNotUsed": "sample"
     }
   },
   "worktrees.snapshot": {

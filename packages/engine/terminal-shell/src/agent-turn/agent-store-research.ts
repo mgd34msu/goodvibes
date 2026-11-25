@@ -94,6 +94,9 @@ export const RESEARCH_ACTS: Readonly<Record<string, StoreAct>> = {
   },
   async 'research.save-report'(values, context) {
     const findings = lines(values.findings); const gaps = lines(values.gaps); const recommendations = lines(values.recommendations);
+    if (!values.report?.trim() && !values.summary?.trim() && findings.length === 0) {
+      throw new CapabilityRefusal('a report needs something to say (the report itself, a summary or findings), so nothing was saved', 'give at least one of them.');
+    }
     await context.tool('agent_research_report', {
       title: values.title, question: values.question, sources: values.sources,
       ...(values.report ? { reportMarkdown: values.report } : {}), ...given(values, 'summary', 'confidence'), ...(values.method ? { methodology: values.method } : {}),

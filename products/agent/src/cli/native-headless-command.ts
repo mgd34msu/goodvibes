@@ -17,6 +17,7 @@ import { closeSessionHere, createSessionSurface } from '@goodvibes/engine/platfo
 import { GOODVIBES_AGENT_SURFACE_ROOT } from '../config/surface.ts';
 import { announceHeadlessRecovery, announceHeadlessSession, readFolderTrustFacts, refusedHeadlessRun, settleHeadlessFolderTrust } from '@goodvibes/engine/terminal-shell/headless-command';
 import { keepHeadlessSessionRecoverable } from '@goodvibes/engine/terminal-shell/session-crash-recovery';
+import { createConnectedHost } from '@goodvibes/engine/terminal-shell/agent-turn/connected-host-client';
 
 /**
  * A run that could not start (for example `--resume` named a session that is not
@@ -125,7 +126,13 @@ export async function runNativeHeadlessCommand(runtime: HeadlessCommandRuntime, 
               const missing = ctx.daemonMissing();
               if (missing) process.stderr.write(`${missing}\n`);
               sessionReady = true;
-              const result = await executeAdmittedHeadlessTurn(ctx, state, signal, cli.flags.outputFormat, { ...limits, settings: configManager });
+              // The hooks this run fires reach the daemon's one hook trace (Tools and extensions, Hook runs), and its notices the
+              // daemon's webhook list and Slack and Discord notifier, as the interactive Agent's do.
+              const host = createConnectedHost({ configManager, homeDirectory });
+              const result = await executeAdmittedHeadlessTurn(ctx, state, signal, cli.flags.outputFormat, {
+                ...limits, settings: configManager,
+                daemon: { program: 'agent', invoke: (method, input) => host.invoke(method as never, input as never) },
+              });
               return recovery ? { ...result, recovery } : result;
             }, {
               shutdown: async () => {

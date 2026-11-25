@@ -89,8 +89,10 @@ goodvibes
    in your environment already makes a provider usable, `a` uses it and skips
    the sign-in step; with `OPENROUTER_API_KEY` set (the default model is
    OpenRouter's free one), it asks nothing and opens the conversation. `/setup`
-   sets up the rest one topic at a time, `/model` switches models and `/scan`
-   finds model servers on your machine and network.
+   sets up the rest one topic at a time, `/model` switches this conversation's
+   model, and Models and providers (in the menu, `Ctrl+G` then `m`) holds the
+   default model, your providers and sign-ins, and finds model servers on your
+   machine.
 2. **Ask about the project.** Type `What does this project do, and how do I run
    its tests?` and press Enter. It reads the files it needs and answers.
 3. **Ask for a change.** Type `Add a --verbose flag to the CLI and run the
@@ -124,12 +126,13 @@ run.
 - **Reach it from your phone or a chat app.** `goodvibes pair` prints a QR
   code that signs your phone in to the web app (run
   `goodvibes-daemon webui enable --lan` first so your phone can reach it).
-  `/devices pair channel telegram` connects a Telegram bot; Slack, Discord, Signal,
+  In Devices and network, Pair something, A chat channel, Telegram connects a Telegram bot; Slack, Discord, Signal,
   WhatsApp, Matrix and others work the same way.
   ([web app](products/webui/docs/operator-guide.md#signing-in-and-pairing),
-  [channels](products/tui/docs/channels-remote-and-api.md#channels-command))
-- **Mail and calendar.** In `goodvibes-agent`, `/google connect` links Gmail and
-  Google Calendar. Then ask `what's on my calendar tomorrow?`.
+  [channels](products/tui/docs/channels-remote-and-api.md#channels-in-mail-calendar-and-channels))
+- **Mail and calendar.** In Mail, calendar and channels (the menu, `Ctrl+G` then `m`),
+  "connect" on the Google tab links Gmail and Google Calendar, in either terminal
+  program. Then ask `what's on my calendar tomorrow?`.
   ([Google setup](packages/engine/docs/google-setup-runbook.md))
 - **Search what it knows.** In Memory and knowledge (the menu, `Ctrl+G` then `m`,
   or `/memory`), "add a page" saves a web page, and "search" or "ask your
@@ -137,7 +140,7 @@ run.
   Library share one knowledge store: `goodvibes-agent search "release checklist"`.
   ([knowledge](products/tui/docs/knowledge-artifacts-and-multimodal.md))
 - **Buy something within limits.** Purchases are off until you set
-  `payments.enabled`. Add a card with `/payments add-card`, then set your limits:
+  `payments.enabled`. Add a card in Money, on its Cards tab, then set your limits:
   a daily budget for item prices (`payments.budget.dailyItem`), a ceiling per
   purchase (`payments.budget.perPurchaseCeiling`) and a daily allowance for
   tax, fees and delivery (`payments.budget.dailyOverage`). All three start at

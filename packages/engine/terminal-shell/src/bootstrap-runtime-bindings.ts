@@ -7,7 +7,7 @@ import type { AutomationManager, AutomationDeliveryManager } from '@goodvibes/en
 import type { ControlSurfaceEntry, ControlToolOptions } from '@goodvibes/engine/platform/platform/tools';
 import type { MemoryRegistry } from '@goodvibes/engine/platform/platform/state';
 import type { DomainDispatch, RuntimeEventBus, RuntimeStore } from '@goodvibes/engine/platform/platform/runtime/state';
-import { resolveRuntimeEndpointBinding } from './cli-endpoints.js';
+import { resolveRuntimeEndpointBinding } from '@goodvibes/engine/platform/platform/support/service-posture';
 export function initializeTerminalCatalog(
   provider: ProviderRegistry,
   benchmarks: BenchmarkStore,

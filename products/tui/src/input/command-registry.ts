@@ -40,9 +40,7 @@ import type { UiPlatformServices } from '../runtime/ui-services.ts';
 import type { CommandWorkspaceShellServices } from '@/runtime/index.ts';
 import type { CommandPlatformShellServices } from '@/runtime/index.ts';
 import type { CommandExtensionShellServices } from '@/runtime/index.ts';
-import type { CommandOpsShellServices, RemoteCommandService } from '@/runtime/index.ts';
-
-export type { RemoteCommandService } from '@/runtime/index.ts';
+import type { CommandOpsShellServices } from '@/runtime/index.ts';
 
 export interface CommandRuntimeState extends TerminalCommandRuntimeState {
   /**
@@ -149,7 +147,8 @@ export interface CommandUiActions extends TerminalCommandUiActions<import('./mod
 }
 
 export interface CommandShellUiOpeners extends TerminalCommandShellUiOpeners<import('./model-picker.ts').ModelPickerTarget> {
-  openOnboardingWizard?: (modeOrOptions?: OnboardingWizardMode | OpenOnboardingWizardOptions) => void;
+  /** Opens a setup form on top; resolves when it is submitted or left, with what it set up. */
+  openOnboardingWizard?: (modeOrOptions?: OnboardingWizardMode | OpenOnboardingWizardOptions) => Promise<import('./onboarding/onboarding-wizard.ts').OnboardingFormOutcome> | void;
 
   /** Toggle the transcript search overlay (same action as Ctrl+F), backs /session find. */
   openTranscriptSearch?: () => void;
@@ -231,8 +230,6 @@ export interface CommandShellUiOpeners extends TerminalCommandShellUiOpeners<imp
    * False when it is not known here (the caller keeps its own fallback).
    */
 
-  /** The Usage modal (`tab: 'agents'` opens on the per-agent cost ledger). */
-  openUsage?: (options?: { readonly tab?: 'overview' | 'turns' | 'agents' }) => void;
   /** The Changes modal over the repository (this session's files, not staged, staged or vs HEAD). */
   openChanges?: (options?: { readonly source?: import('./changes-git.ts').ChangesSource }) => void;
   /**
@@ -406,8 +403,8 @@ export interface CommandContext extends CommandUiActions, CommandShellUiOpeners 
  * before; this only reorders the empty-query case. Curated for breadth across
  * the product's main workflows rather than raw usage frequency: help/settings
  * (orientation), model (workspace + provider), memory/knowledge/codebase
- * (knowledge), workstream/checkpoint (control-plane), media (generation),
- * session (continuity), quit (exit). Every name is a registered command's;
+ * (knowledge), workstream/checkpoint (control-plane), session (continuity),
+ * quit (exit). Every name is a registered command's;
  * the registry keeps only the names it has (createTerminalCommandRegistry).
  */
 export const COMMON_COMMAND_NAMES: ReadonlySet<string> = new Set([
@@ -418,7 +415,6 @@ export const COMMON_COMMAND_NAMES: ReadonlySet<string> = new Set([
   'knowledge',
   'workstream',
   'checkpoint',
-  'media',
   'session',
   'quit',
 ]);

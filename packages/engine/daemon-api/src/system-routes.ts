@@ -334,7 +334,7 @@ export function createDaemonSystemRouteHandlers(
         return jsonErrorResponse({ error: 'Missing or invalid key' }, { status: 400 });
       }
       if (key === 'runtime.workingDir') {
-        return handleWorkingDirectoryConfig(context, key, value);
+        return handleWorkingDirectoryConfig();
       }
       if (!context.isValidConfigKey(key)) {
         return jsonErrorResponse({ error: 'Invalid config key' }, { status: 400 });
@@ -425,11 +425,8 @@ export function createDaemonSystemRouteHandlers(
           return jsonErrorResponse({ error: 'Every entry needs a key and a value.', code: 'INVALID_ARGUMENT', state: unchanged,
             next: ['Send each entry as { "key": "<config key>", "value": <value> }.'] }, { status: 400 });
         }
-        // The workspace root moves through the swap manager, one move per request.
-        if (key === 'runtime.workingDir') {
-          return jsonErrorResponse({ error: 'runtime.workingDir moves the workspace and is not part of a multi-setting update.', code: 'INVALID_ARGUMENT',
-            state: unchanged, next: ['Set runtime.workingDir on its own with config.set, and send the other settings without it.'] }, { status: 400 });
-        }
+        // No caller moves the daemon: it serves every project at once.
+        if (key === 'runtime.workingDir') return handleWorkingDirectoryConfig();
         if (!context.isValidConfigKey(key)) {
           return jsonErrorResponse({ error: `${key} is not a config key this daemon knows.`, code: 'INVALID_ARGUMENT', state: unchanged,
             next: ['Check the key name; config.get lists the keys.'] }, { status: 400 });
@@ -524,10 +521,9 @@ export function createDaemonSystemRouteHandlers(
         return jsonErrorResponse({ error: 'The request names no config key.', code: 'INVALID_ARGUMENT', state: unchanged,
           next: ['Send { "key": "<config key>" }; config.get lists the keys.'] }, { status: 400 });
       }
-      // The workspace root moves through the swap manager, which config.set drives; a reset here would skip it.
+      // No caller moves the daemon: it serves every project at once.
       if (key === 'runtime.workingDir') {
-        return jsonErrorResponse({ error: 'runtime.workingDir is not reset; the workspace is moved by a swap.', code: 'INVALID_ARGUMENT', state: unchanged,
-          next: ['Set runtime.workingDir to the directory you want with config.set.'] }, { status: 400 });
+        return handleWorkingDirectoryConfig();
       }
       if (!context.isValidConfigKey(key)) {
         return jsonErrorResponse({ error: `${key} is not a config key this daemon knows.`, code: 'INVALID_ARGUMENT', state: unchanged,
@@ -711,51 +707,16 @@ async function handleRegisterWatcher(context: DaemonSystemRouteContext, req: Req
   return watcherResponse(context, record, 201);
 }
 
-async function handleWorkingDirectoryConfig(
-  context: DaemonSystemRouteContext,
-  key: string,
-  value: unknown,
-): Promise<Response> {
-  if (!context.swapManager) {
-    return jsonErrorResponse({
-      error: 'This daemon cannot save a working-directory change', code: 'WORKSPACE_CHANGE_UNAVAILABLE',
-      state: 'the program embedding this daemon did not give it a place to save runtime.workingDir',
-      next: ['Restart the daemon with --working-dir <path> (or GOODVIBES_WORKING_DIR) to work in another directory'],
-    }, { status: 409 });
-  }
-  if (typeof value !== 'string' || !value.trim()) {
-    return jsonErrorResponse({ error: 'runtime.workingDir value must be a non-empty string path.', code: 'INVALID_PATH' }, { status: 400 });
-  }
-  const result = await context.swapManager.requestSwap(value);
-  if (result.ok) {
-    return Response.json({
-      success: true, key, value: result.current, previous: result.previous,
-      // The directory serving this answer; a move (`moving`) starts every service again on `value` right after.
-      workingDir: result.previous,
-      ...(result.moving !== undefined ? { moving: result.moving } : {}),
-      ...(result.waitingForSessions ? { waitingForSessions: result.waitingForSessions } : {}),
-      ...(result.restartRequired !== undefined ? { restartRequired: result.restartRequired } : {}),
-      ...(result.note !== undefined ? { note: result.note } : {}),
-      ...(result.persisted !== undefined ? { persisted: result.persisted } : {}),
-      ...(result.requiresRestart?.length ? { requiresRestart: result.requiresRestart } : {}),
-    });
-  }
-  if (result.code === 'WORKSPACE_BUSY') {
-    const busy = jsonErrorResponse({
-      error: result.reason, code: result.code, state: 'the daemon is moving to another working directory',
-      next: [`Retry in ${result.retryAfter} seconds, once the daemon serves again`],
-    }, { status: 409 });
-    busy.headers.set('Retry-After', String(result.retryAfter));
-    return busy;
-  }
-  return jsonErrorResponse(
-    {
-      error: result.reason,
-      code: result.code,
-    },
-    // REROOT_FAILED is the daemon failing to save its own setting, not a bad request.
-    { status: result.code === 'REROOT_FAILED' ? 500 : 400 },
-  );
+/**
+ * The daemon serves every project at once and keeps its own records in its home, so it has no working folder a
+ * caller can change: each session, runner and program works in its own project, named on each call.
+ */
+function handleWorkingDirectoryConfig(): Response {
+  return jsonErrorResponse({
+    error: 'runtime.workingDir is not a daemon setting: the daemon serves every project at once and no caller moves it',
+    code: 'WORKSPACE_CHANGE_UNAVAILABLE', state: 'nothing was changed',
+    next: ['Name the project on each call (workingDirectory), or open GoodVibes in that folder; a runner or hosted session is started with its own folder.'],
+  }, { status: 409 });
 }
 
 function readWatcherKind(kind: unknown, sourceKind: unknown, fallback: WatcherKind): WatcherKind {

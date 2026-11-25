@@ -342,5 +342,5 @@ export type {
 
 export { learningProposalQuality } from './learning-proposal.js';
 
-export { prepareConfiguredProjectContext, assertConfiguredProjectContextReady, createConfiguredPlanningStore } from './project-planning/configured-project.js';
+export { prepareConfiguredProjectContext, assertConfiguredProjectContextReady, createConfiguredPlanningStore, projectIdentityOfFolder } from './project-planning/configured-project.js';
 export type { ConfiguredProjectInspection } from './project-planning/configured-project.js';

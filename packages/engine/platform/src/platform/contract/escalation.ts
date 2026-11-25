@@ -41,6 +41,7 @@ import { acceptEscalatedPlan, planContract, withOwnerWritingDecision } from './p
 import { failureFromError, isAbortError, type ContractRun } from './run-context.js';
 import type { StepContext } from './steps.js';
 import {
+  isTerminalUnitStatus,
   type AttemptSelectionRecord,
   type Contract,
   type ContractStatus,
@@ -156,26 +157,48 @@ export function readFailurePauseAnswer(text: string): FailurePauseAnswer | undef
 export function buildFailurePauseQuestion(contract: Contract, unit: Pick<ContractUnit, 'title'>, input: FailurePauseInput): string {
   const what = titleOf(input.what).slice(0, 400);
   return [
-    `Contract ${contract.id} is paused: its work on unit "${titleOf(unit.title)}" failed after ${input.attempts} attempt${input.attempts === 1 ? '' : 's'}.`,
+    `The work is paused: its step "${titleOf(unit.title)}" failed after ${input.attempts} tr${input.attempts === 1 ? 'y' : 'ies'}.`,
     `What failed: ${what}`,
-    'The work done so far is kept in the project tree. Nothing was approved and no criterion changed.',
-    'Reply "retry" to run the turn again with a fresh set of attempts, or "cancel" to stop the contract. No other answer is accepted.',
+    'What it did so far is kept in the project. Nothing was approved and no result changed.',
+    'Retry to run the step again, or cancel to stop the work. No other answer is accepted.',
   ].join('\n');
 }
 
 /** The question a failed unit asks (`pauseFailedUnit`), built in code. */
 export function buildUnitFailureQuestion(contract: Contract, unit: Pick<ContractUnit, 'id' | 'title'>, reason: string): string {
+  const goOn = canGoOnWithout(contract, unit.id) ? ', go on without it,' : '';
   return [
-    `Contract ${contract.id} is paused: unit ${unit.id} ("${titleOf(unit.title)}") failed.`,
+    `Step "${titleOf(unit.title)}" failed, so the work stopped at that step.`,
     `What failed: ${titleOf(reason).slice(0, 400)}`,
-    'The work the other units finished is kept, and the units that wait on this one are held, not skipped. Nothing was approved and no criterion changed.',
-    'Reply "retry" to run the unit again with a fresh agent (its dependents then run as usual), or "cancel" to stop the contract. No other answer is accepted.',
+    'The steps that finished are kept, and the steps that wait on this one have not run. Nothing was approved and no result changed.',
+    `Run the step again (the steps waiting on it then run as usual)${goOn} or stop the work.`,
   ].join('\n');
 }
 
-/** Whether an escalation is the retry-or-cancel question of a failed unit of an agent-run contract. */
+/**
+ * Whether an escalation is a failed unit's pause in an agent-run contract (the daemon's Work included): the unit waits,
+ * nothing else is held, and the owner runs it again, goes on without it, or stops the contract.
+ */
 function isUnitFailurePause(run: ContractRun, escalation: Pick<Escalation, 'failurePause' | 'scope'>): boolean {
-  return escalation.failurePause === true && escalation.scope === 'unit' && run.contract.nativeSource === undefined && run.contract.sessionMode !== true;
+  return escalation.failurePause === true && escalation.scope === 'unit' && run.contract.sessionMode !== true;
+}
+
+/** The answer that goes on without a failed unit, where the plan lets the rest run without its result. */
+export const GO_ON_WITHOUT_ANSWER = 'go on';
+
+/**
+ * Whether the contract can go on without this unit: nothing that has not ended waits on it, neither a unit (its
+ * `dependsOn`) nor a group (a group that waits on the unit's group takes that group's results).
+ */
+export function canGoOnWithout(contract: {
+  readonly units: readonly { readonly id: string; readonly groupId: string; readonly dependsOn: readonly string[]; readonly status: ContractUnit['status'] }[];
+  readonly groups: readonly { readonly id: string; readonly dependsOn: readonly string[]; readonly status: string }[];
+}, unitId: string): boolean {
+  const unit = contract.units.find((candidate) => candidate.id === unitId);
+  if (unit === undefined) return false;
+  const waitingUnit = contract.units.some((candidate) => candidate.id !== unitId && candidate.dependsOn.includes(unitId) && !isTerminalUnitStatus(candidate.status));
+  const waitingGroup = contract.groups.some((group) => group.id !== unit.groupId && group.dependsOn.includes(unit.groupId) && group.status !== 'passed' && group.status !== 'failed' && group.status !== 'cancelled');
+  return !waitingUnit && !waitingGroup;
 }
 
 export type { OwnerReplyAction };
@@ -245,11 +268,11 @@ export interface PublicationPauseInput {
 /** The publication-pause question, built in code: the obstacle, where the result is, and the two answers. */
 export function buildPublicationPauseQuestion(contract: Contract, input: PublicationPauseInput): string {
   return [
-    `Contract ${contract.id} passed its checks, but its result could not be published to the project: ${titleOf(input.note).slice(0, 400)}`,
+    `The work "${titleOf(contract.goal || contract.ask)}" passed its checks, but its result could not be put in the project: ${titleOf(input.note).slice(0, 400)}`,
     input.branch === undefined
       ? 'The checked changes are kept in the working tree.'
-      : `The checked result is kept on branch ${input.branch}; you can also apply it yourself with: git merge ${input.branch}`,
-    'Clear what blocks it (finish or abort your own merge or rebase, or commit or stash edits to the same files), then reply "retry" to publish it again; or reply "cancel" to stop the contract. Resuming the contracts also retries it.',
+      : `The checked result is kept on a branch of its own, made for "${titleOf(contract.goal || contract.ask)}" (to apply it yourself: git merge ${input.branch}).`,
+    'Clear what blocks it (finish or abort your own merge or rebase, or commit or stash edits to the same files), then retry to put it in again, or cancel to stop the work. Going on with the work also retries it.',
   ].join('\n');
 }
 
@@ -290,15 +313,16 @@ export function buildOwnerAcceptanceQuestion(contract: Contract, input: OwnerAcc
   const answer = input.answer.replace(/\s+/g, ' ').trim();
   return [
     input.notJudged === undefined
-      ? `Contract ${contract.id} finished "${titleOf(contract.goal || contract.ask)}", but no decision model is in use, so the result was not independently checked against what you asked for.`
-      : `Contract ${contract.id} finished "${titleOf(contract.goal || contract.ask)}", but the decision model could not check the result against what you asked for (${input.notJudged}).`,
+      ? `The work "${titleOf(contract.goal || contract.ask)}" finished, but no decision model is in use, so its result was not checked against what you asked for.`
+      : `The work "${titleOf(contract.goal || contract.ask)}" finished, but the decision model could not check its result against what you asked for (${input.notJudged}).`,
     ...unitCheckingLines(contract),
     input.gates.length === 0 ? 'No required checks are configured for this project.' : `Required checks that passed: ${input.gates.join(', ')}.`,
     ...(answer.length === 0 ? [] : [`Its answer begins: ${answer.length <= 400 ? answer : `${answer.slice(0, 397)}...`}`]),
     input.branch === undefined
       ? 'Its changes are in the working tree.'
-      : `Its changes are on branch ${input.branch}; you can inspect them with: git diff HEAD...${input.branch}`,
-    'Reply "accept" to publish the result to the project, or "cancel" to stop the contract. Nothing is published until you accept.',
+      // Named by the work it is for, never by its id: what a person can use when he answers.
+      : `Its changes are kept on a branch of their own, made for "${titleOf(contract.goal || contract.ask)}"; none of them is in your files until you accept.`,
+    'Accept it to put the result in the project, or cancel to stop the work. Nothing is put in until you accept.',
   ].join('\n');
 }
 
@@ -605,7 +629,8 @@ export function createEscalations(context: StepContext, rejudge: Rejudge): Escal
 
   function pauseFailedUnit(run: ContractRun, unit: ContractUnit, reason: string): Escalation | null {
     const { contract } = run;
-    if (run.terminal || contract.nativeSource !== undefined || contract.sessionMode === true) return null;
+    // A unit of the daemon's Work (a native contract run by agents) waits too: the work stops at that step, it does not end.
+    if (run.terminal || contract.sessionMode === true) return null;
     if (unit.attemptOf !== undefined || unit.attemptUnits !== undefined) return null;
     const asked = open(run).find((escalation) => escalation.failurePause === true && escalation.scope === 'unit' && escalation.targetId === unit.id);
     if (asked !== undefined) return asked;
@@ -889,24 +914,33 @@ export function createEscalations(context: StepContext, rejudge: Rejudge): Escal
    * reply takes anything (the shared tree) and again where the answer is applied.
    */
   function failurePauseAnswer(run: ContractRun, escalation: Escalation, text: string):
-    { readonly kind: 'acceptance'; readonly answer: 'accept' | 'cancel' } | { readonly kind: 'failure'; readonly answer: FailurePauseAnswer; readonly publication: boolean; readonly unitFailure: boolean } {
+    { readonly kind: 'acceptance'; readonly answer: 'accept' | 'cancel' } | { readonly kind: 'go-on' } | { readonly kind: 'failure'; readonly answer: FailurePauseAnswer; readonly publication: boolean; readonly unitFailure: boolean } {
+    if (isUnitFailurePause(run, escalation) && text.trim().replace(/[.!]+$/, '').toLowerCase() === GO_ON_WITHOUT_ANSWER) {
+      const unit = run.unit(escalation.targetId);
+      if (unit === undefined || unit.status !== 'awaiting-owner') throw new OwnerReplyRefusedError(`step "${titleOf(unit?.title ?? escalation.targetId)}" no longer waits`, 'not-open');
+      if (!canGoOnWithout(run.contract, unit.id)) {
+        throw new OwnerReplyRefusedError(`the work cannot go on without step "${titleOf(unit.title)}": the steps after it need its result; run it again or stop the work`, 'not-an-answer');
+      }
+      return { kind: 'go-on' };
+    }
     if (isOwnerAcceptance(escalation)) {
       const answer = readAcceptanceAnswer(text);
       if (answer === undefined) {
-        throw new OwnerReplyRefusedError(`"${titleOf(text)}" is not an answer to ${escalation.id}: it only accepts "accept" (publish the result that was not independently checked) or "cancel" (stop the contract); the question is still open`, 'not-an-answer');
+        throw new OwnerReplyRefusedError(`"${titleOf(text)}" is not an answer here: it takes "accept" (put in the result that was not checked) or "cancel" (stop the work); the question is still open`, 'not-an-answer');
       }
       return { kind: 'acceptance', answer };
     }
     const publication = isPublicationPause(escalation);
     const unitFailure = isUnitFailurePause(run, escalation);
-    if (!publication && !unitFailure && (run.contract.nativeSource === undefined || run.contract.sessionMode !== true)) throw new OwnerReplyRefusedError(`${escalation.id} is not a failure pause of a native session contract`, 'unsupported');
+    if (!publication && !unitFailure && (run.contract.nativeSource === undefined || run.contract.sessionMode !== true)) throw new OwnerReplyRefusedError('this work takes no answer to that question', 'unsupported');
     const answer = readFailurePauseAnswer(text);
     if (answer === undefined) {
-      throw new OwnerReplyRefusedError(`"${titleOf(text)}" is not an answer to ${escalation.id}: it only accepts ${FAILURE_PAUSE_ANSWERS.map((word) => `"${word}"`).join(' or ')} ("retry" runs the failed work again, "cancel" stops the contract), and nothing here approves the work; the question is still open`, 'not-an-answer');
+      const goOn = unitFailure && canGoOnWithout(run.contract, escalation.targetId) ? ', or "go on" (go on without the failed step)' : '';
+      throw new OwnerReplyRefusedError(`"${titleOf(text)}" is not an answer here: it takes ${FAILURE_PAUSE_ANSWERS.map((word) => `"${word}"`).join(' or ')} ("retry" runs the failed step again, "cancel" stops the work)${goOn}, and nothing here approves the work; it still waits`, 'not-an-answer');
     }
     if (unitFailure && answer === 'retry') {
       const unit = run.unit(escalation.targetId);
-      if (unit === undefined || unit.status !== 'awaiting-owner') throw new OwnerReplyRefusedError(`unit ${escalation.targetId} no longer waits on ${escalation.id}`, 'not-open');
+      if (unit === undefined || unit.status !== 'awaiting-owner') throw new OwnerReplyRefusedError(`step "${titleOf(unit?.title ?? escalation.targetId)}" is no longer waiting to run again`, 'not-open');
     }
     return { kind: 'failure', answer, publication, unitFailure };
   }
@@ -915,6 +949,7 @@ export function createEscalations(context: StepContext, rejudge: Rejudge): Escal
   function replyToFailurePause(run: ContractRun, escalation: Escalation, text: string): OwnerReplyOutcome {
     const checked = failurePauseAnswer(run, escalation, text);
     if (checked.kind === 'acceptance') return replyToOwnerAcceptance(run, escalation, text, checked.answer);
+    if (checked.kind === 'go-on') return goOnWithoutUnit(run, escalation);
     const { answer, publication, unitFailure } = checked;
     const { contract } = run;
     if (publication && answer === 'retry') {
@@ -956,12 +991,36 @@ export function createEscalations(context: StepContext, rejudge: Rejudge): Escal
       contract.failureKind = 'owner-rejected';
       const unitReason = unitFailure ? run.unit(escalation.targetId)?.failureReason : undefined;
       run.control.cancel(publication ? 'stopped by the owner after its checked result could not be published'
-        : unitFailure ? `stopped by the owner after unit ${escalation.targetId} failed${unitReason === undefined ? '' : `: ${unitReason}`}`
+        : unitFailure ? `stopped by you after step "${titleOf(run.unit(escalation.targetId)?.title ?? escalation.targetId)}" failed${unitReason === undefined ? '' : `: ${unitReason}`}`
           : 'stopped by the owner after its turn kept failing');
     } else {
       context.ownerProgress(run);
       context.checkpoint?.(run);
     }
+    return { escalationId: escalation.id, reading, outcome: 'act', action };
+  }
+
+  /**
+   * Go on without a failed unit, where nothing still to run waits on it: the unit ends set aside (cancelled, its pause
+   * answered "go on"), its group finishes with the units that passed, and the work goes on to what follows and to
+   * the check of its results, which the missing step's result may leave unmet.
+   */
+  function goOnWithoutUnit(run: ContractRun, escalation: Escalation): OwnerReplyOutcome {
+    const unit = run.unit(escalation.targetId)!;
+    const reading: OwnerReplyReading = 'amend';
+    const action: OwnerReplyAction = 'amended';
+    escalation.reply = { text: GO_ON_WITHOUT_ANSWER, reading, outcome: 'act', decisionId: undefined };
+    escalation.resolvedAt = run.env.now();
+    run.releaseHold(unit);
+    run.moveUnit(unit, 'cancelled');
+    run.settle(unit, 'cancelled');
+    run.decide('owner-replied', unit.id, `${escalation.id}: go on, step "${titleOf(unit.title)}" is left out and the work goes on without its result`);
+    run.emit({ type: 'CONTRACT_OWNER_REPLIED', contractId: run.id, escalationId: escalation.id, reading, outcome: 'act', action });
+    resume(run);
+    // The unit's group may now hold only passed units and this one: it finishes as if the unit had passed.
+    context.groups().unitPassed(run, unit);
+    context.ownerProgress(run);
+    try { context.checkpoint?.(run); } catch { /* the contract is held and its write is scheduled */ }
     return { escalationId: escalation.id, reading, outcome: 'act', action };
   }
 

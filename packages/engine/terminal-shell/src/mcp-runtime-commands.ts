@@ -18,7 +18,7 @@
 import {
   MCP_ACCEPT_TOOLS, MCP_ADD, MCP_BLOCK, MCP_BLOCKED_TOOLS_LIST, MCP_EXEMPT, MCP_EXEMPT_TOOLS_LIST, MCP_FILES, MCP_HELD_BACK_LIST, MCP_HOLD_BACK,
   MCP_RELOAD, MCP_REMOVE, MCP_REPAIR, MCP_RESTORE_ROLE, MCP_RESTORE_TRUST, MCP_REVIEW, MCP_ROLE, MCP_SERVERS, MCP_SERVERS_LIST, MCP_TOOLS,
-  MCP_TOOLS_LIST, MCP_TRUST, MCP_UNBLOCK, MCP_UNEXEMPT, mcpRoleWords, mcpServerState, mcpTrustWords,
+  MCP_TOOLS_LIST, MCP_TRUST, MCP_UNBLOCK, MCP_UNEXEMPT, mcpLimitWords, mcpRoleWords, mcpServerState, mcpTrustWords,
   type CapabilityDefinition, type McpSessionServices,
 } from '@goodvibes/engine/platform/platform/capabilities';
 import type { McpApi } from '@goodvibes/engine/platform/platform/mcp';
@@ -29,14 +29,11 @@ import { defineCommand } from './command-actions/define.js';
 import { defineList, type ListRow } from './command-actions/lists.js';
 import { daemonCapabilityAction, sessionCapabilityAction, type DaemonCapabilityBinding } from './command-actions/capability-actions.js';
 import type { ActionDescription, CommandActionContext, CommandDescription } from './command-actions/types.js';
-import { doAction } from './described-command-kit.js';
 
 export interface McpCommandContext extends CommandActionContext {
   readonly renderRequest: () => void;
   readonly clients?: { readonly mcpApi?: McpApi | undefined } | undefined;
   readonly workspace: { readonly shellPaths?: ShellPathService | null | undefined };
-  /** Opens a place by id (Tools and extensions is `tools`). */
-  readonly openPlace?: ((placeId: string) => void) | undefined;
 }
 
 type McpSecurityServer = ReturnType<McpApi['listServerSecurity']>[number];
@@ -55,7 +52,7 @@ defineList<McpCommandContext>({
     const running = api.listServerSecurity().map((server): ListRow => ({
       value: server.name,
       label: server.name,
-      detail: `Trust: ${mcpTrustWords(server.trustMode)}; role: ${mcpRoleWords(server.role)}.`,
+      detail: `Trust: ${mcpTrustWords(server.trustMode)}; limits: ${mcpLimitWords(server)}; role: ${mcpRoleWords(server.role)}.`,
       state: mcpServerState(server),
     }));
     // A configured server that has not started yet (it starts when first used) is still one you have.
@@ -181,7 +178,7 @@ export function mcpServersPlaceSource(ctx: () => McpCommandContext | undefined):
       return [
         ...servers.map((server: McpSecurityServer) => ({
           name: server.name, connected: server.connected, phase: server.phase ?? '', state: mcpServerState(server),
-          trust: server.trustMode, trustWords: mcpTrustWords(server.trustMode), sessionTrust: server.sessionTrustMode !== undefined,
+          trust: server.trustMode, trustWords: mcpTrustWords(server.trustMode), limitWords: mcpLimitWords(server), sessionTrust: server.sessionTrustMode !== undefined,
           role: server.role, roleWords: mcpRoleWords(server.role), sessionRole: server.sessionRole !== undefined,
           heldBack: server.schemaFreshness === 'quarantined', heldBackBecause: server.quarantineReason ?? '',
           folders: server.allowedPaths.length, sites: server.allowedHosts.length,
@@ -189,7 +186,8 @@ export function mcpServersPlaceSource(ctx: () => McpCommandContext | undefined):
           lastError: server.connected ? '' : (server.lastError ?? server.reconnect?.stoppedReason ?? ''),
         })),
         ...notStarted.map((entry) => ({
-          name: entry.server.name, connected: false, phase: 'not-started', state: 'not started yet', trust: entry.server.trustMode ?? '', trustWords: entry.server.trustMode ? mcpTrustWords(entry.server.trustMode) : 'asks outside its limits',
+          name: entry.server.name, connected: false, phase: 'not-started', state: 'not started yet', trust: entry.server.trustMode ?? '', trustWords: mcpTrustWords(entry.server.trustMode ?? 'ask-on-risk'),
+          limitWords: mcpLimitWords({ allowedPaths: entry.server.allowedPaths ?? [], allowedHosts: entry.server.allowedHosts ?? [] }),
           sessionTrust: false, role: entry.server.role ?? 'general', roleWords: mcpRoleWords(entry.server.role ?? 'general'), sessionRole: false, heldBack: false, heldBackBecause: '',
           folders: entry.server.allowedPaths?.length ?? 0, sites: entry.server.allowedHosts?.length ?? 0, rules: [], lastError: '', from: entry.source.path,
         })),
@@ -212,20 +210,12 @@ function describeMcp<Ctx extends McpCommandContext>(binding: DaemonCapabilityBin
     title: 'MCP servers and tools',
     summary: 'Opens Tools and extensions, where your tool servers (MCP) are',
     group: 'Tools',
-    // Unlisted: typed bare, it opens the place; the menu reaches the place too.
+    // Unlisted: typed bare by a person, it opens Tools and extensions on its Servers tab (the command-level `opens`);
+    // from a model or a script, bare, it is the servers report. Every action is a control in that place.
     firstScreen: false,
-    bareOpens: 'open',
-    report: 'open',
+    opens: 'tools/servers',
+    report: 'see-servers',
     actions: [
-      doAction<Ctx>({
-        id: 'open', label: 'Open Tools and extensions', word: 'open', touches: 'reads',
-        sentence: 'Opens Tools and extensions: your tool servers, hooks, plugins and the tools the model can call.',
-        operator: { terminalOnly: 'It is a terminal screen.' },
-        async run(_values, ctx) {
-          if (!ctx.openPlace) throw commandRefusal('This program has no screens to open.');
-          ctx.openPlace('tools');
-        },
-      }),
       sessionAction<Ctx>(MCP_SERVERS),
       sessionAction<Ctx>(MCP_TOOLS),
       daemonAction<Ctx>(MCP_ADD as CapabilityDefinition<never>, binding, { stepTitles: ['', 'What may it do?'] }),

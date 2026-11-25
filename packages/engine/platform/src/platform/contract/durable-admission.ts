@@ -27,6 +27,15 @@ export interface DurableContractKey {
   readonly attemptId: string;
 }
 
+/**
+ * The untrusted-content window one attempt of daemon work runs in (security/untrusted-content.ts): its own, so what
+ * the work's steps read is judged for the work's own effects, and a request a program makes meanwhile (a fresh
+ * request of the person's starts a turn in its own window) cannot change what a step's admitted call was judged on.
+ */
+export function nativeWorkContentScope(key: Pick<DurableContractKey, 'workId' | 'attemptId'>): string {
+  return `work:${key.workId}:${key.attemptId}`;
+}
+
 export interface DurableContractRequest {
   readonly key: DurableContractKey;
   readonly binding: JevDecisionBinding;

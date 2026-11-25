@@ -609,6 +609,11 @@ export interface Contract {
   agentUsage?: Record<string, KnownAgentUsage> | undefined;
   answer?: string | undefined;
   statusLine?: string | undefined;
+  /**
+   * The last change of a step that was held back (a write its view refused), in words with what to do, said on the
+   * work (routes/work.ts) so a step that cannot change its files never fails in silence.
+   */
+  heldChange?: { readonly at: number; readonly step?: string | undefined; readonly said: string } | undefined;
   commit?: { readonly status: 'committed' | 'applied' | 'skipped' | 'failed'; readonly hash?: string | undefined; readonly note: string } | undefined;
   failureKind?: ContractFailureKind | undefined;
   error?: string | undefined;

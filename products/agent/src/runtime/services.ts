@@ -66,6 +66,7 @@ import type { RuntimeEventBus } from '@/runtime/index.ts';
 import type { DomainDispatch, RuntimeStore } from '@goodvibes/engine/platform/platform/runtime/state';
 import { DistributedRuntimeManager } from '@/runtime/index.ts';
 import type { RemoteBackendHost } from '@goodvibes/engine/platform/platform/runtime/operations';
+import { WorkspaceTrustDecisionUnsettledError, type WorkspaceTrustLevel } from '@goodvibes/engine/platform/platform/runtime/operations';
 import { RemoteRunnerRegistry, RemoteSupervisor } from '@/runtime/index.ts';
 import { IntegrationHelperService } from '@/runtime/index.ts';
 import { VoiceProviderRegistry, VoiceService } from '@goodvibes/engine/platform/platform/voice';
@@ -118,6 +119,8 @@ import { VERSION } from '../version.ts';
 import { ClientBuildGuard } from './client-build-compatibility.ts';
 import { AGENT_DAEMON_BUILD_FLOOR, DaemonBuildGuard, createDaemonAdoptionGate, readDaemonStatusPayload } from './daemon-build-compatibility.ts';
 import { composeRuntimeServices } from '@goodvibes/engine/platform/platform/runtime/bootstrap';
+import { routeArtifactSavesThroughDaemon } from '@goodvibes/engine/terminal-shell/agent-turn/artifact-saves-through-daemon';
+import { createDaemonWorkDelegation } from '@goodvibes/engine/terminal-shell/agent-turn/daemon-work-delegation';
 import { createShellPathService } from '@goodvibes/engine/platform/platform/runtime/shell-paths';
 
 type WorktreeRegistry = RuntimeShell.WorktreeRegistry;
@@ -141,11 +144,12 @@ type PlatformCompanionGraphService = NonNullable<PlatformRuntimeServices>['homeG
 // assignable to the platform's own RuntimeServices#homeGraphService slot.
 type _HomeGraphServicePin = AssertTrue<HomeGraphService extends PlatformCompanionGraphService ? true : false>;
 
+/**
+ * The project's one worktree register (the same file the terminal app and the daemon read), read as it is: the Agent
+ * lists the real worktrees. It does not change their state, ties or records (build and fix work is the terminal
+ * app's); re-running a setup and removing a worktree are the daemon's methods, which any program may ask for.
+ */
 class DisabledAgentWorktreeRegistry extends runtimeShell.WorktreeRegistry {
-  public override async list(): Promise<Awaited<ReturnType<WorktreeRegistry['list']>>> {
-    return [] as Awaited<ReturnType<WorktreeRegistry['list']>>;
-  }
-
   public override attach(_path: string, _target: { sessionId?: string; taskId?: string }): void {
     throw new Error('GoodVibes Agent does not own local worktree attachment. Delegate build, fix, and review work to GoodVibes TUI.');
   }
@@ -178,7 +182,7 @@ function createDisabledAgentWorktreeRegistry(workingDirectory: string): Worktree
 export type AgentVoiceSetupService = VoiceSetupService;
 
 /**
- * The narrow live-snapshot slice /health memory reads. A Pick over the platform's
+ * The narrow live-snapshot slice the Health tab's memory check reads. A Pick over the platform's
  * real MemoryGovernor so the command surface can be handed the composed
  * governor without gaining pause/exit authority.
  */
@@ -390,7 +394,11 @@ export interface RuntimeServices extends Omit<PlatformRuntimeServices,
    * `requestPermission` onto it once it can draw one; until then an ask is
    * denied locally and the daemon's answer still wins the race.
    */
-  readonly permissionPromptRef: { requestPermission: LocalPermissionPrompt };
+  readonly permissionPromptRef: { requestPermission: LocalPermissionPrompt; answersHere?: boolean };
+  /** The folder trust question's holder: the Agent's screen patches the trust card onto it (shell/ui-openers.ts). */
+  readonly trustPromptRef: { requestTrustDecision: () => Promise<WorkspaceTrustLevel>; awaitingOwner?: boolean };
+  /** Asks the folder trust question through `trustPromptRef`, one card at a time. */
+  readonly requestTrustDecision: () => Promise<WorkspaceTrustLevel>;
   /** The foreground permission gate for this surface's turns. */
   readonly permissionManager: PermissionManager;
   /** The sessions this process is running, and whether one is mid-turn. */
@@ -551,7 +559,7 @@ export interface RuntimeServices extends Omit<PlatformRuntimeServices,
    * daemon composition does (constructed and STARTED by default, it is a
    * safety feature): samples RSS/heap, sheds registered caches by tier,
    * pauses deferrable background jobs, and trips on a genuine leak before
-   * the OS OOM-kills the process. Serves ops.memory.get and /health memory.
+   * the OS OOM-kills the process. Serves ops.memory.get and the Health tab's memory check.
    */
   readonly memoryGovernor: MemoryGovernor;
   /** Registry of every retained cache the governor can observe and shrink. */
@@ -690,8 +698,42 @@ export function createRuntimeServices(options: RuntimeServicesOptions): RuntimeS
   const hostedSessions = createHostedSessionRegistry(runtimeBus);
   // The prompt this surface draws. Late-bound: the renderer patches it in after
   // boot, which is why the raiser takes a getter rather than the function.
-  const permissionPromptRef: { requestPermission: LocalPermissionPrompt } = {
+  // `answersHere`: set by a headless run, whose asks have their one answerer in the run (headless-turn.ts).
+  const permissionPromptRef: { requestPermission: LocalPermissionPrompt; answersHere?: boolean } = {
     requestPermission: async () => ({ approved: false, remember: false }),
+  };
+  // The folder trust question has one owner here, as in the terminal app: the Agent's screen patches
+  // `trustPromptRef` with the trust card (the same card, words and opening row as the terminal app's,
+  // terminal-shell native/folder-trust.ts) once it can draw one, and every trust gate asks through
+  // `requestTrustDecision`, which keeps one card open however many gates reach an undecided folder.
+  // Before the screen exists (and in a headless run, where it never does) the question goes to the
+  // permission prompt in words: a script answering `run --answer-permissions` sees it; otherwise nobody can
+  // answer, and the folder stays undecided rather than recording a choice nobody made.
+  const trustPromptRef: { requestTrustDecision: () => Promise<WorkspaceTrustLevel>; awaitingOwner?: boolean } = {
+    requestTrustDecision: async () => {
+      const decision = await permissionPromptRef.requestPermission({
+        callId: `workspace-trust-${randomUUID().slice(0, 8)}`,
+        tool: 'workspace-trust',
+        args: { workspace: workingDirectory },
+        category: 'read',
+        analysis: {
+          classification: 'workspace-trust',
+          riskLevel: 'high',
+          summary: `Trust the workspace ${workingDirectory}? Approving lets writes, commands and delegation run here and is remembered for this workspace.`,
+          reasons: [`${workingDirectory} has no trust decision recorded.`, 'Refusing leaves it undecided: reads keep working, and this request is refused.'],
+          target: workingDirectory,
+          targetKind: 'path',
+          blastRadius: 'local',
+        },
+      });
+      if (decision.approved) return 'trusted';
+      throw new WorkspaceTrustDecisionUnsettledError();
+    },
+  };
+  let pendingTrustDecision: Promise<WorkspaceTrustLevel> | null = null;
+  const requestTrustDecision = (): Promise<WorkspaceTrustLevel> => {
+    pendingTrustDecision ??= trustPromptRef.requestTrustDecision().finally(() => { pendingTrustDecision = null; });
+    return pendingTrustDecision;
   };
   // An ask is raised on the daemon AND prompted here, and the first real answer
   // wins. Raising it only into this process's own broker would leave it
@@ -701,6 +743,8 @@ export function createRuntimeServices(options: RuntimeServicesOptions): RuntimeS
     actor: 'agent',
     localPrompt: () => permissionPromptRef.requestPermission,
     sessionId: () => options.resolveSessionId?.({}),
+    // A headless run answers its own asks (its script), or holds them for the owner: never raised a second time on the daemon.
+    answersHere: () => permissionPromptRef.answersHere === true,
   });
   const keybindingsManager = new KeybindingsManager({
     configPath: shellPaths.resolveUserPath(GOODVIBES_AGENT_SURFACE_ROOT, 'keybindings.json'),
@@ -737,8 +781,11 @@ export function createRuntimeServices(options: RuntimeServicesOptions): RuntimeS
         telemetryDir: shellPaths.resolveProjectPath('telemetry'),
       },
       memoryStore: 'home',
-      // The Agent has no separate workspace trust policy.
-      workspaceTrust: 'none',
+      // This folder's trust gates the Agent's turns as it gates the terminal app's: the same decision (the user's
+      // workspace register, set in Permissions and safety, This folder), so a restricted folder refuses the Agent's
+      // writes, commands and agents too. An undecided folder is settled as the terminal app settles it: trusted
+      // without a question when it brings nothing of its own, otherwise asked once with the trust card.
+      workspaceTrust: { kind: 'surface', requestTrustDecision },
       permissionHost: { raiseApproval: () => requestApproval, personElicitation: true },
       hostSeams: {
         nativeDataWriter: configManager.getNativeDataWriter(),
@@ -804,11 +851,15 @@ export function createRuntimeServices(options: RuntimeServicesOptions): RuntimeS
       triggers: 'host',
       // Inbound continuations arrive over the wire dispatch below, not the register.
       continuationRunner: 'product',
+      // Work has one runner, the daemon's: the Agent resumes no contract of its own (its delegations are work there).
+      contractRecovery: 'product',
       taskGraphReaping: 'never',
       // The Agent's own profile tool reaches the daemon's owner-profile store.
       profileCapture: false,
       automationSurfaceKind: 'service',
-      knowledge: 'agent',
+      // The daemon's one knowledge store, opened where the daemon keeps it: planning, the knowledge service and its
+      // background work write there; the Agent's old `knowledge-agent.sqlite` (carried by the daemon) is never opened.
+      knowledge: 'daemon',
       // One live Agent per home: a second copy stops at the claim and names the holder's pid.
       homeSingleWriter: options.homeSingleWriter ?? 'claim',
       // A `type: 'agent'` hook answers "not configured in this runtime" and spawns nothing.
@@ -818,6 +869,8 @@ export function createRuntimeServices(options: RuntimeServicesOptions): RuntimeS
       pairingTokens: 'on-demand',
       extras: (base, scope) => {
         const { agentManager, providerRegistry, secretsManager, processRegistry, surface } = base;
+        // Every artifact this program's turns save goes through the daemon's `artifacts.save` (the daemon announces it).
+        routeArtifactSavesThroughDaemon(base.artifactStore, shellPaths, configManager, 'agent');
         // Inbound continuation dispatch over the wire. Inert until `activate`: an
         // agent with no adopted daemon holds its bound runner and dispatches nothing.
         const sessionDispatch: WireSessionDispatch = createWireSessionDispatch({
@@ -856,6 +909,13 @@ export function createRuntimeServices(options: RuntimeServicesOptions): RuntimeS
         const daemonCredentialsClient: DaemonCredentialsClient = createDaemonCredentialsClient(daemonVerbs);
         // The grants ledger and capture store are the daemon's; the phone tool reaches them over its verbs.
         const devicesClient: DevicesClient = createDevicesClient(daemonVerbs);
+        // Work has one runner, the daemon's: a delegation that would have been a contract here is handed to it as a piece
+        // of work for this project (daemon-work-delegation.ts), and the Agent starts no contract of its own. Closed
+        // first, so the Agent's own shutdown never stops a work it was following.
+        base.agentManager.setContractRunner(null);
+        const workDelegation = createDaemonWorkDelegation({ shellPaths, configManager, program: 'agent' });
+        base.agentManager.setWorkDelegation(workDelegation);
+        scope.registry.add('work delegation', () => workDelegation.close());
         const contractIntake = createContractIntake({ runner: base.contractRunner, projectRoot: workingDirectory });
         // The approvals list: the daemon's record over `approvals.list`, unioned with
         // the asks this broker still holds, and the reason when the daemon cannot be
@@ -1030,6 +1090,8 @@ export function createRuntimeServices(options: RuntimeServicesOptions): RuntimeS
           sessionBroker: sessionDispatch,
           automationSessionRegister: base.sessionBroker,
           permissionPromptRef,
+          trustPromptRef,
+          requestTrustDecision,
           hostedSessions,
           hostedHandoff,
           guardedCheckpoints,

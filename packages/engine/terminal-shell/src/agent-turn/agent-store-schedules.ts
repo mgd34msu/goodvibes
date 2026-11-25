@@ -73,10 +73,12 @@ export const SCHEDULE_ACTS: Readonly<Record<string, StoreAct>> = {
     const routine = routineOrRefuse(context, values.routine!);
     const blockers = routinePromotionBlockers(routine);
     if (blockers.length > 0) throw new CapabilityRefusal([`No schedule was made for routine ${routine.name}:`, ...blockers.map((blocker) => `  ${blocker}`)].join('\n'));
+    // Its runs work in the asking program's project; a caller that names none gets no schedule.
+    if (!context.projectGiven) throw new CapabilityRefusal(`No schedule was made for routine ${routine.name}: no project folder came with the request, and a schedule's runs work in a project.`, 'Send workingDirectory, the project folder its runs work in.');
     const preview = storeStep(() => buildRoutineSchedulePreview(routine, parsed));
     const connection = connectionOf(context);
     // A retry after a lost answer finds the schedule the first attempt made (promoteRoutineToConnectedSchedule), so none runs twice.
-    const result = await promoteRoutineToConnectedSchedule(connection, preview);
+    const result = await promoteRoutineToConnectedSchedule(connection, preview, { workingDirectory: context.shellPaths.workingDirectory });
     let receiptLine: string;
     try {
       receiptLine = `  receipt ${receiptsOf(context).append(connection, preview, result).id}`;

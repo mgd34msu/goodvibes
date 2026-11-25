@@ -25,15 +25,15 @@ export const CAPABILITY_MCP_TOOLS: readonly McpToolDefinition[] = [
   },
   {
     name: 'capability_run',
-    description: 'Run one GoodVibes capability by the id capability_find gave, with its inputs by name. The daemon checks the inputs and decides the call under the owner\'s permission mode; an act that loosens a protection or cannot be undone is put to the owner. The answer says what happened.',
+    description: 'Run one GoodVibes capability by the id capability_find gave, with its inputs by name. The daemon checks the inputs and decides the call under the owner\'s permission mode. A call that needs the owner\'s answer is answered at once with code OWNER_APPROVAL_PENDING and an approvalId, and waits for him in Waiting for you; call this tool again with only that approvalId to read what came of it (still waiting, the run\'s answer, or the refusal with his reason). The answer says what happened.',
     inputSchema: {
       type: 'object',
       properties: {
-        id: { type: 'string', description: 'The capability id (hooks.disable).' },
+        id: { type: 'string', description: 'The capability id (hooks.disable). Leave it out when reading the outcome of a call by its approvalId.' },
         inputs: { type: 'object', description: 'The inputs by name, as capability_find listed them.', additionalProperties: true },
         workingDirectory: { type: 'string', description: 'The project folder the capability acts on (a hooks file, a project secret); the folder this server was started in when absent.' },
+        approvalId: { type: 'string', description: 'The approvalId an earlier call\'s OWNER_APPROVAL_PENDING answer gave: send it alone to read what came of that call.' },
       },
-      required: ['id'],
       additionalProperties: false,
     },
     annotations: { readOnlyHint: false, destructiveHint: true, idempotentHint: false },

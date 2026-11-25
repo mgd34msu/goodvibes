@@ -14,7 +14,7 @@
  *      written back over them.
  *
  * The fallback is what makes the owner's machine work without a setup run. It
- * is not a substitute for connecting an account, `/google adopt` copies the
+ * is not a substitute for connecting an account, adopting them (`google.adopt`) copies the
  * credentials into the encrypted store so they survive the other tool being
  * removed, but it means the capability is genuinely usable rather than
  * merely explainable.

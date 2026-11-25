@@ -13,13 +13,13 @@ export interface SetupIncompleteHintResult {
 
 /**
  * Build a plain-language hint reminding the user that setup isn't finished
- * and pointing them at /agent.
+ * and pointing them at Setup, in the System place.
  *
  * Returns null when:
  * - phase === 'complete' , setup is done, no nag needed
  * - phase === 'fresh'    , first-run users get the full workspace, not a nag
  *
- * Only phase === 'in-progress' produces a hint (the user has opened /agent
+ * Only phase === 'in-progress' produces a hint (the user has started setup
  * at least once but hasn't finished).
  *
  * @param state     The current OnboardingState (from deriveOnboardingState).
@@ -37,7 +37,7 @@ export function buildSetupIncompleteHint(
   // ── Line 1: readiness / chat availability ────────────────────────────────
   if (!state.readyToChat) {
     // Model not configured, that's the most urgent thing.
-    lines.push('Pick a model to start, run /agent to continue setup.');
+    lines.push('Pick a model to start; Setup, in System in the menu (Ctrl+G then m), continues setup.');
   } else {
     // Chat works but setup isn't done.
     // NOTE: progressLabel is intentionally omitted here, the hint's plan may be
@@ -46,11 +46,11 @@ export function buildSetupIncompleteHint(
     const nextStep = pickNextStep(state);
     if (nextStep) {
       lines.push(
-        `You can chat now. Still finishing setup, ${nextStep}, run /agent to complete it.`,
+        `You can chat now. Still finishing setup, ${nextStep}: Setup, in System in the menu (Ctrl+G then m), completes it.`,
       );
     } else {
       lines.push(
-        'You can chat now. Some background features still need setup, run /agent to finish.',
+        'You can chat now. Some background features still need setup: Setup, in System in the menu (Ctrl+G then m), finishes it.',
       );
     }
   }

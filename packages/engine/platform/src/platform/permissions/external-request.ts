@@ -6,6 +6,7 @@ import type { JudgmentPort } from '@goodvibes/judgment';
 import { captureOwnedJson } from '../gate/judgment-input.js';
 import { captureCurrentAutonomousChoices, captureCurrentAutonomousSourceFrame, type AutonomousToolSource } from './autonomous.js';
 import { awaitPermission } from './cancellation.js';
+import { decideInProject } from './call-project.js';
 import { assertCurrentExternalAdmission, claimExternalAdmission, closeExternalAdmission, type PermissionManager } from './manager.js';
 import type { ToolExecutionEffect } from '../tools/registry.js';
 import type { WorkspaceTrustManager } from '../runtime/workspace-trust.js';
@@ -22,6 +23,12 @@ export interface ExternalRequestScope {
    * session-less key.
    */
   readonly sessionId?: string | undefined;
+  /**
+   * The folder the connection works in, set by the transport from what it
+   * started (never from the peer's words): the request is decided for that
+   * project (call-project.ts), its rules, its trust and its answers.
+   */
+  readonly workingDirectory?: string | undefined;
 }
 
 export interface ExternalPermissionHost {
@@ -58,7 +65,9 @@ export interface ExternalOperationSource {
 export async function admitExternalRequest(host: ExternalPermissionHost, transport: ExternalRequestScope,
   operation: ExternalOperationSource, input: { readonly tool: string; readonly args: Record<string, unknown>; readonly effect?: ToolExecutionEffect | undefined; readonly supportingDecisionIds?: readonly string[]; readonly serverPolicy?: Readonly<Record<string, unknown>>; readonly protocolSubject?: CapturedProtocolRequest;
     /** The owner's own rule asks him about this request (an `ask-on-risk` MCP server called outside its scope): one sentence, shown to him. */
-    readonly ownerAsk?: string | undefined },
+    readonly ownerAsk?: string | undefined;
+    /** The request's own sender put it to its answerer, who said yes: plan mode and deny rules still refuse it, nobody is asked. */
+    readonly ownerConfirmed?: boolean | undefined },
   opened?: { readonly signal: AbortSignal; readonly source: AutonomousToolSource }) {
   const externalRequestEvidence = captureExternalRequestEvidence({ destination: transport.destination, ...(input.serverPolicy ? { serverPolicy: input.serverPolicy } : {}) });
   let unsubscribe: () => void = () => {};
@@ -79,13 +88,14 @@ export async function admitExternalRequest(host: ExternalPermissionHost, transpo
     const args = captureOwnedJson(protocol ? { ...input.args, protocolRequest: protocol.meaning } : input.args) as Record<string, unknown>;
     const sourceOf = () => { assertCurrent(); return source; };
     const requestId = randomUUID();
-    const admission = await awaitPermission(() => host.permissionManager.admitAutonomous(requestId, input.tool, args, {
+    const admission = await awaitPermission(() => decideInProject(transport.workingDirectory, () => host.permissionManager.admitAutonomous(requestId, input.tool, args, {
       externalRequestEvidence, signal, sourceOf, assertPrepared: assertCurrent, ...(input.supportingDecisionIds ? { preparationDecisionIds: input.supportingDecisionIds } : {}),
       schemaRevision: protocol?.revision ?? requestId,
       decoratePort: () => host.port,
       sessionId: transport.sessionId,
       ...(input.ownerAsk !== undefined ? { ownerAsk: input.ownerAsk } : {}),
-    }), signal);
+      ...(input.ownerConfirmed === true ? { ownerConfirmed: true } : {}),
+    })), signal);
     assertCurrent();
     let finished = false, claimed = false;
     // Every request id is fresh, so nothing else ever releases what this admission recorded.

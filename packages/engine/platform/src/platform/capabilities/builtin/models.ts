@@ -9,7 +9,7 @@
  * conversation's own model and effort stay with the program holding it.
  */
 import { closeSync, fsyncSync, mkdirSync, openSync, readFileSync, rmSync, writeSync, existsSync, chmodSync, writeFileSync } from 'node:fs';
-import { dirname, resolve } from 'node:path';
+import { dirname, isAbsolute, resolve } from 'node:path';
 import type { ConfigManager } from '../../config/manager.js';
 import type { SecretsManager } from '../../config/secrets.js';
 import type { ServiceRegistry } from '../../config/service-registry.js';
@@ -43,6 +43,12 @@ export interface ModelsCapabilityServices {
     readonly configManager: Pick<ConfigManager, 'get' | 'set' | 'setDynamic' | 'getCustomProvidersDir' | 'getWorkingDirectory'>;
     /** The media providers the daemon makes images and video with. */
     readonly mediaProviders: { status(): Promise<readonly MediaProviderStatusLike[]> };
+    /** Look for model servers on this computer, add them to the providers and keep them for the next start. */
+    readonly scanThisComputer: () => Promise<{
+      readonly found: readonly { readonly name: string; readonly host: string; readonly port: number; readonly models: readonly string[] }[];
+      readonly skipped: readonly { readonly host: string; readonly port: number; readonly reason: string }[];
+      readonly durationMs: number;
+    }>;
     /** Tell every client the providers changed (PROVIDERS_CHANGED): a pin, a route or a sign-in was changed here. */
     readonly announce: (change: { readonly added?: readonly string[]; readonly removed?: readonly string[]; readonly updated?: readonly string[] }) => void;
   };
@@ -95,10 +101,15 @@ function iso(ms: number | undefined): string {
   return ms ? new Date(ms).toISOString().replace('T', ' ').slice(0, 16) + ' UTC' : 'no expiry';
 }
 
-/** A file path the person gave, read in the caller's project (or the daemon's folder). */
-function filePath(models: Models, caller: CapabilityCaller, path: string): string {
-  const base = caller.workingDirectory ?? models.configManager.getWorkingDirectory() ?? process.cwd();
-  return resolve(base, path);
+/**
+ * A file path the person gave: a full path as given, a relative one in the caller's project. A relative path from a
+ * caller that named no project is refused: the daemon's own folder is never taken in its place (caller-project.ts).
+ */
+function filePath(_models: Models, caller: CapabilityCaller, path: string): string {
+  if (isAbsolute(path)) return resolve(path);
+  if (caller.workingDirectory) return resolve(caller.workingDirectory, path);
+  throw new CapabilityRefusal(`${path} is a relative path and no project folder came with the request, so it was not read or written. Nothing was changed.`,
+    'Give the full path of the file, or send workingDirectory, the project folder, with the request.', 'NO_PROJECT', 422);
 }
 
 function stringList(value: unknown): string[] {
@@ -461,6 +472,8 @@ export const PROVIDER_LIST: CapabilityDefinition<ModelsCapabilityServices> = {
       label: model.displayName,
       provider: model.providerId,
       contextWindow: model.contextWindow,
+      // The model's own definition, as "why requests go there" reads it (the router's facts source).
+      reasoning: model.capabilities.reasoning,
       isDefault: model.registryKey === defaultModel,
       backup: backups.indexOf(model.registryKey) + 1,
       pinned: pinned.has(model.registryKey),
@@ -539,6 +552,8 @@ export const PROVIDER_FINISH: MethodCapabilityDefinition = {
   ],
   sentence: 'The sign-in to {provider} is finished with the code you give and kept for every program until you change it (signing out ends it).', done: '',
   touches: 'credential', lasts: 'kept', risk: 'none', undoneBy: 'sign-out', example: { provider: 'openai' },
+  // It stores a sign-in every program then sends its requests with: whose account it is, only the owner says.
+  ownerOnly: { reason: 'it stores the sign-in every program sends its requests with', instead: 'Ask the owner to finish it in Models and providers.' },
   method: { id: 'providers.subscription.signIn.finish', fields: { provider: 'provider', code: 'code' } },
   said: (answer, values) => {
     const expiresAt = typeof answer['expiresAt'] === 'number' ? answer['expiresAt'] : undefined;
@@ -1057,7 +1072,36 @@ export const MEDIA_PROVIDERS: CapabilityDefinition<ModelsCapabilityServices> = {
         const outputs = Array.isArray(status.metadata['outputs']) ? ` (makes ${(status.metadata['outputs'] as unknown[]).join(', ')})` : '';
         return `  ${status.id}: ${status.state}${status.configured ? '' : ', setup needed'}${outputs}; ${status.capabilities.join(', ')}${status.detail ? `; ${status.detail}` : ''}`;
       })].join('\n'),
-      data: { providers: statuses.map((status) => ({ id: status.id, state: status.state, configured: status.configured })) },
+      // With what each does and makes: a form choosing a provider that makes media lists only those (terminal-shell places/tools-lists.ts).
+      data: { providers: statuses.map((status) => ({ id: status.id, label: status.label, state: status.state, configured: status.configured, capabilities: [...status.capabilities],
+        ...(Array.isArray(status.metadata['outputs']) ? { outputs: (status.metadata['outputs'] as unknown[]).filter((output): output is string => typeof output === 'string') } : {}),
+        // The name its key is stored under (the Media tab's "store its key"); never the key.
+        ...(Array.isArray(status.metadata['keyNames']) && typeof status.metadata['keyNames'][0] === 'string' ? { keyName: status.metadata['keyNames'][0] } : {}) })) },
+    };
+  },
+};
+
+/** Model servers on this computer (Ollama, LM Studio and the like), found by the daemon and added to the providers. */
+export const MODELS_SCAN: CapabilityDefinition<ModelsCapabilityServices> = {
+  capability: { id: 'models.scan', group: 'models', home: 'daemon', repeat: 'safe' },
+  actionId: 'scan', label: 'Find model servers on this computer', word: 'scan', inputs: [],
+  sentence: 'Looks for model servers running on this computer (Ollama, LM Studio, a local llama server and the like) and adds each one found to your providers for every program, until you change it. Your local network is scanned from Devices and network.', done: '',
+  touches: 'this-machine', lasts: 'kept', risk: 'none', example: {},
+  async run(_values, services) {
+    const { found, skipped, durationMs } = await services.models.scanThisComputer();
+    const seconds = Math.max(1, Math.round(durationMs / 1000));
+    const lines = found.length === 0
+      ? [`No model server answered on this computer (looked for ${seconds}s).`]
+      : [
+          `Found ${found.length} model server${found.length === 1 ? '' : 's'} on this computer, added to your providers:`,
+          ...found.map((server) => `  ${server.name}: ${server.models.length} model${server.models.length === 1 ? '' : 's'} at port ${server.port}`),
+          'Their models are in the Models list of Models and providers.',
+        ];
+    if (skipped.length > 0) lines.push(`${skipped.length} answered but were left out:`, ...skipped.map((server) => `  port ${server.port}: ${server.reason}`));
+    if (found.length > 0) services.models.announce({ added: found.map((server) => server.name) });
+    return {
+      text: lines.join('\n'),
+      data: { found: found.map((server) => ({ name: server.name, port: server.port, models: server.models.length })), skipped: skipped.length },
     };
   },
 };
@@ -1139,6 +1183,7 @@ export const MODELS_CAPABILITIES: readonly { readonly definition: CapabilityDefi
     .map((definition) => ({ definition, command: { name: 'provider', title: 'Providers' } })),
   ...[AUTH_REVIEW, AUTH_SHOW, AUTH_REPAIR, AUTH_EXPORT, AUTH_INSPECT].map((definition) => ({ definition, command: { name: 'auth', title: 'Provider sign-ins' } })),
   { definition: MEDIA_PROVIDERS, command: { name: 'media', title: 'Images and video' } },
+  { definition: MODELS_SCAN, command: { name: 'scan', title: 'Find local model servers' } },
 ];
 
 /** The model and provider capabilities that run through a daemon method of their own (method-capability.ts). */

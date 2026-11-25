@@ -1,6 +1,6 @@
 import { nativeWorkExecutionIdentitySchema } from '@goodvibes/engine/platform/platform/workflow/work-ledger/native-execution-client';
 import { BoundedJsonFile, type BoundedJsonFileIO, type BoundedJsonFileTransaction } from '@goodvibes/engine/platform/platform/state/durable-file-io';
-import { nativeConversationIntakeCaptureRequestSchema, nativeConversationIntakeSourceRefSchema, type NativeConversationIntakeSourceRef, type NativeConversationIntakeCaptureRequest, } from '@goodvibes/engine/platform/platform/workflow/work-ledger/native-intake-client';
+import { nativeConversationIntakeCaptureRequestSchema, nativeConversationIntakeSourceRefSchema, sameNativeConversationSource, type NativeConversationIntakeSourceRef, type NativeConversationIntakeCaptureRequest, } from '@goodvibes/engine/platform/platform/workflow/work-ledger/native-intake-client';
 /**
  * A sanity bound on the file, not a capacity: the journal holds only inputs in
  * flight (one per host, project, workspace and principal), each bounded by the
@@ -242,10 +242,15 @@ export class NativeConversationIntakeJournal {
             if (!current || !sameCommand(current.command, expected) || current.delivery !== 'hosted' || current.dispatch)
                 throw new NativeIntakeJournalError('conflict');
             if (current.hostedSource) {
-                if (JSON.stringify(current.hostedSource) !== JSON.stringify(parsed.data))
+                if (JSON.stringify(current.hostedSource) === JSON.stringify(parsed.data)) {
+                    journal.confirm();
+                    return;
+                }
+                // The source recorded at capture gains the host's admission without a decision model (`classic`) when
+                // the host admits it as a turn: the same source, kept with that admission. Anything else is a conflict
+                // (a recorded admission is never removed or rewritten: sameNativeConversationSource).
+                if (current.hostedSource.classic || !sameNativeConversationSource(current.hostedSource, parsed.data, 'turn'))
                     throw new NativeIntakeJournalError('conflict');
-                journal.confirm();
-                return;
             }
             file.records[index] = { ...current, hostedSource: parsed.data };
             journal.write(file);

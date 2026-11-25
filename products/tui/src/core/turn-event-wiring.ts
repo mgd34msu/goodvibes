@@ -12,7 +12,7 @@ import type { HookDispatcher, HookPhase, HookCategory, HookEventPath } from '@go
 import type { ConversationManager } from './conversation.ts';
 import type { SessionSurface } from '@/runtime/index.ts';
 import { openSessionHere, writeCrashSnapshotAtTurnMoments } from '@goodvibes/engine/platform/platform/runtime/operations';
-import type { WebhookNotifier } from '@goodvibes/engine/platform/platform/integrations';
+import type { ProgramNotices } from '@goodvibes/engine/terminal-shell/places';
 import { notifyNow } from '@goodvibes/engine/platform/platform/utils';
 import { maybeNotifyLongTask, readNotifyAfterSeconds } from './long-task-notifier.ts';
 import type { FocusTracker } from '@goodvibes/engine/platform/platform/runtime/operations';
@@ -33,7 +33,7 @@ import { readBudgetAlertUsd, type SessionPricing } from '@goodvibes/engine/platf
 /** Minimal orchestrator surface required by turn-event wiring. */
 interface TurnOrchestrator {
   readonly lastInputTokens: number;
-  /** Cumulative session usage, same object the usage modal reads, used here for budget-breach checks. */
+  /** Cumulative session usage, same object Money's Spending tab reads, used here for budget-breach checks. */
   readonly usage: { readonly input: number; readonly output: number; readonly cacheRead: number; readonly cacheWrite: number };
   /**
    * The platform Orchestrator's own end-of-turn popup; handOff() silences it while
@@ -99,7 +99,7 @@ export interface WireTurnEventHandlersOptions {
    * endpoints after the configured threshold. Optional, silently skipped
    * when absent.
    */
-  readonly webhookNotifier?: WebhookNotifier | null;
+  readonly notices?: Pick<ProgramNotices, 'sendNotification'> | null;
   /**
    * Terminal focus tracker. Gates the long-task, budget-breach, and
    * agent/chain-failure desktop alerts wired in this module, see
@@ -205,7 +205,7 @@ export function wireTurnEventHandlers(options: WireTurnEventHandlersOptions): Wi
     lastGitInfoRef,
     buildSessionContinuityHints,
     render,
-    webhookNotifier,
+    notices,
     focusTracker,
     terminalNotifier,
     runtimeBus,
@@ -274,7 +274,7 @@ export function wireTurnEventHandlers(options: WireTurnEventHandlersOptions): Wi
     ? createBudgetBreachNotifier({
         focusTracker,
         configGet,
-        webhookNotifier: webhookNotifier ?? null,
+        notices: notices ?? null,
         sessionId: runtime.sessionId,
         pricing: providerRegistry,
         getSessionId: () => runtime.sessionId,
@@ -330,7 +330,7 @@ export function wireTurnEventHandlers(options: WireTurnEventHandlersOptions): Wi
       kind: 'turn',
       sessionId: runtime.sessionId,
       thresholdSeconds: readNotifyAfterSeconds(configGet),
-      webhookNotifier: webhookNotifier ?? null,
+      notices: notices ?? null,
       focusTracker,
       configGet,
       notifyDesktop,
@@ -424,7 +424,7 @@ export function wireTurnEventHandlers(options: WireTurnEventHandlersOptions): Wi
         logger.debug('auto-save on turn:complete failed', { error: summarizeError(e) });
         if (!autoSaveFailureShown) {
           autoSaveFailureShown = true;
-          systemMessageRouter.high(`[Warning] This session could not be saved (${summarizeError(e)}). /session save retries, and --continue may not include this turn.`);
+          systemMessageRouter.high(`[Warning] This session could not be saved (${summarizeError(e)}). This conversation, "Save this session under a name", tries again, and --continue may not include this turn.`);
         }
       }
       // Record this turn's rewind anchor: pair the turnId (shared with the

@@ -14,6 +14,7 @@ import type { RuntimeEventBus } from '../runtime/events/index.js';
 import { RouteBindingManager } from '../channels/index.js';
 import type { AutomationRouteBinding } from '../automation/routes.js';
 import type { ConversationGateConfigReader } from '../agents/conversation-gate.js';
+import { LOCAL_OWNER_PRINCIPAL } from '../pairing/principal-ids.js';
 import type {
   SharedSessionCompletion,
   SharedSessionContinuationRunner,
@@ -84,8 +85,10 @@ import {
   type AppendSharedSessionMessageInput,
 } from './session-broker-messages.js';
 import {
+  SESSION_REGISTERED_BY_METADATA_KEY,
   SESSION_SURFACE_MANAGED_METADATA_KEY,
   SURFACE_ROUTE_FRESHNESS_MS,
+  sessionRegistrant,
   attachSharedSessionParticipantAndRoute,
   bindSharedSessionAgent,
   closeSharedSessionRecord,
@@ -688,6 +691,15 @@ export class SharedSessionBroker {
     return session === undefined ? null : this.withExternalFacts(session);
   }
 
+  /**
+   * The principal that registered a session (session-broker-sessions.ts `sessionRegistrant`): the one kept when it was
+   * made, this machine's programs' (the operator token's principal) for one kept before that was recorded; undefined
+   * for a session this daemon does not hold.
+   */
+  registrantOf(sessionId: string): string | undefined {
+    return sessionRegistrant(this.sessions.get(sessionId), LOCAL_OWNER_PRINCIPAL);
+  }
+
   async findPreferredSession(options: FindSharedSessionOptions = {}): Promise<SharedSessionRecord | null> {
     await this.start();
     const candidates = this.listSessions(500).filter((session) => {
@@ -734,8 +746,11 @@ export class SharedSessionBroker {
     await this.start();
     // Two heartbeats for one new id would otherwise both see "absent" across the create's awaits.
     return this.serialized(`session:${input.sessionId}`, async () => {
+      // A session this registration makes is its registrant's from then on (only it names the session as an asker);
+      // a later registration of the same id, by anyone, changes nothing of that.
       const createManaged = (i: CreateSharedSessionInput) =>
-        this.createSession({ ...i, metadata: { ...i.metadata, [SESSION_SURFACE_MANAGED_METADATA_KEY]: true } });
+        this.createSession({ ...i, metadata: { ...i.metadata, [SESSION_SURFACE_MANAGED_METADATA_KEY]: true,
+          ...(input.registeredBy ? { [SESSION_REGISTERED_BY_METADATA_KEY]: input.registeredBy } : {}) } });
       const result = await registerSharedSession({
         getSession: (id) => this.sessions.get(id) ?? null,
         createSession: createManaged,

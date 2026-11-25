@@ -201,6 +201,18 @@ export async function verifyNativeWorkExecution(options: {
   const goalSourceCommitment = (): string => retainedGoalSourceDigest ??= hashState(goalObligationSource(contract));
   assertDurableCheckpoint(contract, admission); assertNativeContractSource(contract);
   if (contract.status !== 'passed') throw new Error('Native verifier requires the bound passed contract');
+  // Its result accepted by the owner with no decision model in use (the deliverable's check has no reading and asked
+  // him, contract/answer.ts `describeContractOutcome`): the work is done, and the ledger says so, with evidence that is
+  // honest about it, "unavailable" (never "verified"): nothing checked its results. Without this the ledger said "in
+  // progress" for ever for work that was done.
+  const last = contract.checks.at(-1);
+  if (last !== undefined && last.decisionIds.length === 0 && last.goal.outcome === 'confirm' && last.result === 'pass') {
+    current();
+    return { attestation: freeze({ outcome: 'unavailable' as const, reason: 'Done and accepted by the owner; no decision model was in use, so its results were not checked.', source: 'host_check' as const,
+      criteriaResults: source.criteria.map((_text, criterionIndex) => ({ criterionIndex, status: 'unknown' as const, references: [] })),
+      references: [{ kind: 'test' as const, ref: `check:${contract.id}:${last.id}` }, { kind: 'test' as const, ref: `execution:${contract.id}` }, { kind: 'test' as const, ref: `receipt:${contract.id}` }] }),
+    report: (contract.answer?.trim() || contract.statusLine?.trim() || 'The work is done, its result accepted by the owner.').slice(0, 20_000), assertCurrent: current };
+  }
   const units = contract.units.flatMap(unit => unit.attemptUnits?.length ? unit.attemptUnits.filter(attempt => attempt.status === 'passed') : [unit]);
   const object = (value: unknown): Record<string, unknown> | null => value !== null && typeof value === 'object' && !Array.isArray(value) ? value as Record<string, unknown> : null;
   const rawNo = (value: unknown, band: YesNoBand): number | null => {

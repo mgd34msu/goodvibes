@@ -15,7 +15,7 @@ export const { wireWakeRuntime, startWakeRuntime } = createTerminalWakeRuntime({
   provisionOnEnable: false,
   missingModels: (reason) =>
     `[Wake] Wake detection is on, but the wake models are not on this computer yet (${reason}), ` +
-    'so nothing is listening. The download has not succeeded yet; the daemon tries again at its next start, and /voice wake-setup fetches and checks them now.',
+    'so nothing is listening. The download has not succeeded yet; the daemon tries again at its next start, and setting up the wake word (System place, Voice) fetches and checks them now.',
   draftNotice: '[Wake] What you said was added to the composer; press Enter to send it ("Send a spoken request without review" is off).',
   captureFailure: (error, detail) => `[Wake] The capture stream ended (${error}): ${detail}.`,
   describeBlockers: describeWakeBlockers,

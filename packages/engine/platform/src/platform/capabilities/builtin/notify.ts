@@ -36,6 +36,8 @@ export interface NotifyCapabilityServices {
     keep(addresses: readonly string[]): void;
     readonly secrets: NotificationWebhookSecretStore;
     readonly notifier: Pick<WebhookNotifier, 'setUrls' | 'send' | 'test' | 'targetProblem'>;
+    /** Whether a notification carries only that something happened (`behavior.notificationsMetadataOnly`, read now). */
+    metadataOnly(): boolean;
   };
 }
 
@@ -200,12 +202,17 @@ export const NOTIFY_SEND: CapabilityDefinition<NotifyCapabilityServices> = {
     const entries = services.notify.addresses();
     if (entries.length === 0) return { text: `Nothing was sent. ${NONE_YET}`, data: { attempted: 0, delivered: 0 } };
     services.notify.notifier.setUrls([...entries]);
+    // Read before the send: what went out is what the setting said when it was sent.
+    const withoutText = services.notify.metadataOnly();
     const result = await services.notify.notifier.send(values.message ?? '');
-    const said = result.failed === 0 ? 'Sent' : result.delivered === 0 ? 'Not delivered' : 'Partly delivered';
-    return {
-      text: `${said}: delivered to ${result.delivered} of ${result.attempted} address${result.attempted === 1 ? '' : 'es'}${result.failed > 0 ? '; the ones that failed are in the failed notifications' : ''}.`,
-      data: { attempted: result.attempted, delivered: result.delivered, failed: result.failed },
-    };
+    // The words say what really went out: with "metadata only" on, a notice without the text.
+    const counted = `${result.delivered} of ${result.attempted} address${result.attempted === 1 ? '' : 'es'}${result.failed > 0 ? '; the ones that failed are in the failed notifications' : ''}`;
+    const text = result.delivered === 0
+      ? `Not delivered: delivered to ${counted}.`
+      : withoutText
+        ? `Sent a notice without the text (only the notice goes out while 'metadata only' is on). Delivered to ${counted}.`
+        : `${result.failed === 0 ? 'Sent' : 'Partly delivered'}: delivered to ${counted}.`;
+    return { text, data: { attempted: result.attempted, delivered: result.delivered, failed: result.failed, textSent: !withoutText } };
   },
 };
 

@@ -117,6 +117,8 @@ function toSummary(event: MergedCalendarEvent, attendees?: readonly string[]): C
   const id = event.sourceEventId ?? event.uid;
   return {
     id: `${OUTLOOK_ID_PREFIX}${id}`,
+    // Every occurrence of a series carries the series' iCalendar UID: a list counts it once.
+    seriesId: `${OUTLOOK_ID_PREFIX}${event.uid}`,
     title: event.summary,
     start: event.start.value,
     end: event.end?.value ?? event.start.value,

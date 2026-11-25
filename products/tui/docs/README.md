@@ -20,7 +20,7 @@ This directory contains the current product documentation for `goodvibes-tui`.
   Native providers, compatible/gateway providers, local discovery, synthetic failover, search providers, voice providers, and media providers.
 
 - [Voice and live TTS](voice-and-live-tts.md)
-  Live spoken answers (`/voice`), TTS provider/voice configuration, local player requirements, and streaming voice API behavior.
+  Live spoken answers (System place, This session and Voice), TTS provider/voice configuration, local player requirements, and streaming voice API behavior.
 
 - [Cloudflare batch and control plane](cloudflare-batch.md)
   Optional Workers/Queues batch setup, bootstrap-token flow, daemon routes, setup form fields, and the Cloudflare tab of Devices and network.
@@ -41,7 +41,7 @@ This directory contains the current product documentation for `goodvibes-tui`.
   The saved session written after every turn, and the crash snapshot written when a prompt is accepted and after tool batches (at most once every five seconds).
 
 - [Share command](share-command.md)
-  `/session save-file` and `/session upload`: session export to HTML/JSON/Markdown with redaction, a Gist link, clipboard, and open options.
+  saving this conversation as a file and uploading it for a link: session export to HTML/JSON/Markdown with redaction, a Gist link, clipboard, and open options.
 
 - [CLI flags](cli-flags.md)
   Global flags reference covering session lifecycle (`--continue`, `--resume`, `--fork`), the `-y`/`--non-interactive` commit gate for plugin bundle installs, output format consolidation, the `--host` alias, and all other startup and command-specific flags.

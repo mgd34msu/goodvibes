@@ -5,7 +5,6 @@ import {
   checkRecoveryFile,
   createShellPathService,
   deleteRecoveryFile,
-  formatReturnContextForDisplay,
   persistConversation,
   writeRecoveryFile,
 } from '@/runtime/index.ts';
@@ -14,12 +13,13 @@ import { closeSessionHere, crashSnapshotTurn, holdOfferedRecoverySnapshot, openS
 import { moveLiveSessionArtifacts } from '../core/session-resume-core.ts';
 import { readOnboardingCheckMarker } from '../runtime/onboarding/index.ts';
 import { deriveOnboardingState } from '../runtime/onboarding/onboarding-state.ts';
-import { isOnboardingComplete, readOnboardingDoneMarker } from '../runtime/onboarding/completion.ts';
+import { readOnboardingDoneMarker } from '../runtime/onboarding/completion.ts';
 import { buildSetupIncompleteHint } from '../core/setup-incomplete-hint.ts';
-import { answerWorkspaceRegistrationPrompt, isBroadWorkspaceRoot, normalizeWorkspaceRoot, resolveWorkspaceRegistrationSync } from '../config/workspace-registration.ts';
-import type { AskWorkspaceRegistration } from './workspace-registration-question.ts';
-import { createDaemonRepairPrompt, type AskDaemonRepair, type DaemonRepairPrompt } from './daemon-repair-prompt.ts';
-import { createDaemonRepairSessionMemory, diagnoseDaemonRepair, type DaemonHost, type DaemonRepairConfig, type DaemonRepairSessionMemory } from '../runtime/daemon-repair.ts';
+import { isBroadWorkspaceRoot, normalizeWorkspaceRoot, registerStartedWorkspace, resolveWorkspaceRegistrationSync } from '../config/workspace-registration.ts';
+import { repairDaemonConnection } from './daemon-repair-prompt.ts';
+import { recoveryOfferLine } from '@goodvibes/engine/terminal-shell/session-crash-recovery';
+import { setSplashRecoveryLine } from '@goodvibes/engine/terminal-shell/first-run';
+import { diagnoseDaemonRepair, type DaemonHost, type DaemonRepairConfig } from '../runtime/daemon-repair.ts';
 import type { DaemonCliRunner } from '../runtime/daemon-cli-service.ts';
 
 export interface SessionPersistenceAndRecoveryDeps {
@@ -52,27 +52,22 @@ export interface SessionPersistenceAndRecoveryDeps {
   /**
    * The wedged-machine check (runtime/daemon-repair.ts). Absent in the narrow
    * test fixtures that only exercise persistence/recovery; when present, a
-   * machine whose daemon is off in both places is offered the one-touch repair.
+   * machine whose daemon is off in both places is repaired at once, nothing
+   * asked, and the person told in one line (shell/daemon-repair-prompt.ts).
    */
   readonly daemonRepair?: {
     readonly config: DaemonRepairConfig;
-    /** Defaults to a fresh per-process memory; injected only by tests that assert re-offer behaviour. */
-    readonly session?: DaemonRepairSessionMemory | undefined;
-    /** Injectable so a test never spawns the real daemon CLI. */
+    /** Runs the daemon's own CLI for the install step. */
     readonly runDaemonCli?: DaemonCliRunner | undefined;
-    /** Injectable repair, so a test drives accept without touching a service manager. */
-    readonly repair?: Parameters<typeof createDaemonRepairPrompt>[0]['repair'];
-    /** Shows the repair question (a selection modal, shell/daemon-repair-prompt.ts). Absent, no repair is offered this launch. */
-    readonly ask?: AskDaemonRepair | undefined;
-    /** The connected-host controller's daemon, so an accepted repair adopts the daemon in this session. */
+    /** The connected-host controller's daemon, so the repair adopts the daemon in this session. */
     readonly host?: DaemonHost | undefined;
   } | undefined;
   /**
-   * Asks the first-start workspace question where the owner can see it (the
-   * shell passes a selection modal, workspace-registration-question.ts).
-   * Absent, the question is not asked this launch.
+   * Registers the folder this launch started in when it is not registered yet
+   * (the interactive shell sets it: starting the Agent there is the request to
+   * work there), and says so in one line. Absent, nothing is registered.
    */
-  readonly askWorkspaceRegistration?: AskWorkspaceRegistration | undefined;
+  readonly registersStartedWorkspace?: boolean | undefined;
 }
 
 export interface SessionPersistenceAndRecoveryResult {
@@ -84,30 +79,25 @@ export interface SessionPersistenceAndRecoveryResult {
    * snapshot exists on disk, see checkRecoveryFile's RecoveryFileInfo.sessionId.
    */
   recoveryPending: string | null;
-  /** The workspace root the first-start question was asked about this launch, null when it was not asked. */
-  workspaceRegistrationAsked: string | null;
-  /**
-   * The one-touch daemon repair controller when this launch offered a repair,
-   * null otherwise. Handed straight to handleBlockingShellInput; it owns its
-   * own awaiting-answer state, so the shell never reassigns it.
-   */
-  daemonRepairPrompt: DaemonRepairPrompt | null;
+  /** The workspace root this launch registered (started there, not registered before), null when it registered none. */
+  workspaceRegistered: string | null;
 }
 
 /**
- * Tell the person a crash snapshot can be restored: Ctrl+R restores it, Esc
- * discards it, typing leaves it for the next launch. The same lines at start-up
- * and when a session opened later turns out to have one.
+ * Tell the person, in one line, that a crash snapshot can be restored (an
+ * offer that blocks nothing: terminal-shell recoveryOfferLine): Ctrl+R restores
+ * it, Esc discards it, typing starts a new conversation and leaves it for the
+ * next launch. The same line at start-up and when a session opened later turns
+ * out to have one.
  */
 export function announceRecoveryOffer(
-  info: Pick<RecoveryFileInfo, 'timestamp' | 'title' | 'returnContext'>,
-  systemMessageRouter: { userAction(message: string, level?: NoticeLevel): void; low(message: string): void },
+  info: Pick<RecoveryFileInfo, 'timestamp' | 'title'>,
+  systemMessageRouter: { userAction(message: string, level?: NoticeLevel): void },
   render: () => void,
 ): void {
-  systemMessageRouter.userAction(`[Recovery] Found unsaved session from ${new Date(info.timestamp).toLocaleString()}. Title: "${info.title}". Press Ctrl+R to restore it or Esc to discard it. Typing leaves it saved for the next launch.`);
-  for (const line of formatReturnContextForDisplay(info.returnContext)) {
-    systemMessageRouter.low(`[Recovery] ${line}`);
-  }
+  // Drawn under the splash where the person is looking (cleared when the offer closes), and kept in System, Notices.
+  setSplashRecoveryLine(recoveryOfferLine(info));
+  systemMessageRouter.userAction(recoveryOfferLine(info));
   render();
 }
 
@@ -251,71 +241,53 @@ export function wireSessionPersistenceAndRecovery(
     holdOfferedRecoverySnapshot(surface, recoveryInfo.sessionId);
   }
 
-  // First-start registration prompt (owner-approved design): only when this
-  // directory resolves to unknown (not covered, not declined) AND it isn't a
-  // broad root the store would refuse anyway (see isBroadWorkspaceRoot's own
-  // doc comment on why an "offer" check is safe to keep separate from the
-  // store's authoritative write-time guard). Skipped when a recovery prompt
-  // already claimed this launch's ambient attention, and while onboarding is
-  // still incomplete, the full-screen onboarding wizard would otherwise
-  // compete with this prompt for the very next keypress the owner types.
-  const onboardingDone = isOnboardingComplete(shellPaths);
-
-  // One-touch daemon repair, offered before the workspace prompt below because
-  // the two compete for the very next keypress and this one is about a machine
-  // that cannot reach the platform at all. Same guards as that prompt: skipped
-  // when a recovery offer already claimed this launch's attention, and while
-  // onboarding is still incomplete. The check itself costs nothing on a healthy
-  // machine, it reads one setting and returns, and only consults the daemon's
-  // CLI once that setting is already false. See runtime/daemon-repair.ts.
-  let daemonRepairPrompt: DaemonRepairPrompt | null = null;
-  if (!recoveryPending && onboardingDone && daemonRepair?.ask) {
-    const daemonRepairSession = daemonRepair.session ?? createDaemonRepairSessionMemory();
-    const offer = diagnoseDaemonRepair({
-      config: daemonRepair.config,
-      session: daemonRepairSession,
-      host: daemonRepair.host,
-    });
+  // The connection to the daemon on this computer, repaired with nothing asked
+  // (as the boot-time autostart starts a stopped daemon): a machine whose
+  // "Use the background daemon" is off while no daemon runs gets it turned back
+  // on and its service started (installed first when there is none), and one
+  // line says what was done, or why it could not be and what to do. The check
+  // costs nothing on a healthy machine: it reads one setting and returns, and
+  // only consults the service manager once that setting is already false.
+  if (daemonRepair) {
+    const offer = diagnoseDaemonRepair({ config: daemonRepair.config, host: daemonRepair.host });
     if (offer) {
-      // One line: what is wrong, then the offer. Both come from the policy
-      // module so the interactive wording and headless run's stderr wording
-      // cannot drift apart.
-      systemMessageRouter.high(`[Daemon] ${offer.diagnosis} ${offer.offer}`, 'warning');
-      render();
-      daemonRepairPrompt = createDaemonRepairPrompt({
+      repairDaemonConnection({
         offer,
         config: daemonRepair.config,
-        session: daemonRepairSession,
         systemMessageRouter,
         render,
-        ask: daemonRepair.ask,
         host: daemonRepair.host,
         runDaemonCli: daemonRepair.runDaemonCli,
-        repair: daemonRepair.repair,
       });
     }
   }
 
-  let workspaceRegistrationAsked: string | null = null;
-  if (!recoveryPending && !daemonRepairPrompt && onboardingDone && deps.askWorkspaceRegistration) {
+  // Starting the Agent in a folder is the request to work there: a folder not
+  // registered yet (or one an earlier build's start question recorded "Not here"
+  // for) is registered now, with nothing asked, and the person is told in one
+  // line what was registered and where it is undone. A folder already covered
+  // (registered here, by the terminal app, or through a registered repository's
+  // worktree) is left as it is, and a folder too broad to be a workspace (the
+  // home folder, the file system's root) is never registered.
+  let workspaceRegistered: string | null = null;
+  if (deps.registersStartedWorkspace) {
     const resolution = resolveWorkspaceRegistrationSync(shellPaths, workingDir);
-    if (resolution.status === 'unknown' && !isBroadWorkspaceRoot(shellPaths, workingDir)) {
+    if ((resolution.status === 'unknown' || resolution.status === 'declined') && !isBroadWorkspaceRoot(shellPaths, workingDir)) {
       const root = normalizeWorkspaceRoot(workingDir);
-      workspaceRegistrationAsked = root;
-      deps.askWorkspaceRegistration(root, (accepted) => {
-        // The answer was saved as given (the question said what each answer does): nothing more to say.
-        // An answer the store could not take is said, with how to try again.
-        void answerWorkspaceRegistrationPrompt(shellPaths, root, accepted).then((answer) => {
-          if (answer.outcome !== 'registered' && answer.outcome !== 'declined') {
-            systemMessageRouter.userAction(`[Workspace] ${accepted ? 'Not registered' : 'Your answer was not saved'}: ${answer.reason}. Automatic checkpoints stay off here; run "goodvibes-agent workspaces register --yes" in this directory to try again.`, 'warning');
-          }
-          render();
-        });
+      workspaceRegistered = root;
+      void registerStartedWorkspace(shellPaths, root, resolution.status === 'declined').then((registered) => {
+        const name = registered.root.split('/').filter(Boolean).at(-1) ?? registered.root;
+        if (registered.outcome === 'registered') {
+          systemMessageRouter.userAction(`[Workspace] Registered ${name} (${registered.root}) as a workspace${registered.overDecline ? ', replacing the "Not here" answered before' : ''}: the Agent works here and keeps automatic checkpoints. To undo: System, Workspaces, unregister.`, 'info');
+        } else {
+          systemMessageRouter.userAction(`[Workspace] ${name} could not be registered as a workspace: ${registered.reason}. The Agent's work cannot run here until it is; System, Workspaces, "register a folder" tries again.`, 'warning');
+        }
+        render();
       });
     }
   }
 
-  return { recoveryPending, workspaceRegistrationAsked, daemonRepairPrompt };
+  return { recoveryPending, workspaceRegistered };
 }
 
 /**
@@ -392,7 +364,7 @@ export function wireSetupIncompleteHint(deps: SetupIncompleteHintDeps): void {
         priority: 25,
         blocksAutonomy: false,
         reason: '',
-        nextAction: 'Run /agent to set up a local model route.',
+        nextAction: 'Set up a local model route from Setup, in System in the menu.',
         userRoute: 'Agent Workspace -> Start -> Use a local model (no sign-in)',
         modelRoute: '',
       },

@@ -54,6 +54,8 @@ export interface ArtifactStoreConfig {
   readonly trustedHosts?: readonly string[] | undefined;
   readonly blockedHosts?: readonly string[] | undefined;
   readonly allowPrivateHostFetches?: boolean | undefined;
+  /** Told of each artifact this store wrote: the daemon announces its Artifacts list's change (LIST_CHANGED `artifacts`). */
+  readonly onCreated?: ((created: ArtifactDescriptor) => void) | undefined;
 }
 
 const DEFAULT_ARTIFACT_MAX_BYTES = 512 * 1024 * 1024;
@@ -551,9 +553,23 @@ export class ArtifactStore {
 
   async create(input: ArtifactCreateInput, ownership: ArtifactWriteOwnership = {}): Promise<ArtifactDescriptor> {
     ownership.signal?.throwIfAborted(); assertArtifactWriteCurrent(ownership); this.storageOwner.assertCurrent();
+    // A terminal program's save goes to the daemon (routeCreate): text or data held in the request, never a path or a fetch.
+    const route = this.#createRoute;
+    if (route && input.path === undefined && input.uri === undefined && (input.text !== undefined || input.dataBase64 !== undefined)) {
+      const saved = await route(input);
+      ownership.signal?.throwIfAborted();
+      return saved;
+    }
     const intent = resolveArtifactIntent(input);
     const resolved = await this.resolveInput(input, intent, ownership.signal);
-    return this.writeResolvedArtifact(input, intent, resolved, ownership);
+    const created = await this.writeResolvedArtifact(input, intent, resolved, ownership);
+    this.#tellCreated(created);
+    return created;
+  }
+
+  /** Told of each artifact this store wrote (the daemon announces its Artifacts list's change); never throws into the save. */
+  #tellCreated(created: ArtifactDescriptor): void {
+    try { this.config.onCreated?.(created); } catch { /* a listener cannot fail a save */ }
   }
 
   /** Atomic creation-to-publication handoff: the lock exists before the first
@@ -566,6 +582,7 @@ export class ArtifactStore {
       const artifact = await this.writeResolvedArtifact(input, intent, resolved, ownership, acquired => { lease = acquired; });
       if (!lease) throw new Error('Original artifact publication was not acquired.');
       const original = this.#captureOriginal(artifact.id); original.assertCurrent(); lease.assertCurrent();
+      this.#tellCreated(artifact);
       return Object.freeze({ artifact, original, lease });
     } catch (error) {
       try { lease?.release(); } catch { logger.warn('Original artifact publication release could not be confirmed; the primary creation failure was preserved.'); }
@@ -573,8 +590,10 @@ export class ArtifactStore {
     }
   }
 
-  createFromStream(input: ArtifactStreamCreateInput, ownership: ArtifactWriteOwnership = {}): Promise<ArtifactDescriptor> {
-    return this.#createFromStream(input, ownership);
+  async createFromStream(input: ArtifactStreamCreateInput, ownership: ArtifactWriteOwnership = {}): Promise<ArtifactDescriptor> {
+    const created = await this.#createFromStream(input, ownership);
+    this.#tellCreated(created);
+    return created;
   }
   async #createFromStream(input: ArtifactStreamCreateInput, ownership: ArtifactWriteOwnership, retainLease?: (lease: ArtifactPublicationLease) => void): Promise<ArtifactDescriptor> {
     const check = () => { ownership.signal?.throwIfAborted(); assertArtifactWriteCurrent(ownership); this.storageOwner.assertCurrent(); };
@@ -812,34 +831,63 @@ export class ArtifactStore {
     if (!existsSync(this.rootDir)) return;
     for (const entry of readdirSync(this.rootDir)) {
       if (!entry.endsWith('.json')) continue;
-      const metadataPath = join(this.rootDir, entry);
-      try {
-        const metadataStamp = this.storageOwner.importedStamp(metadataPath);
-        const parsed = freezeArtifactRecord(normalizeExistingRecord(JSON.parse(readFileSync(metadataPath, 'utf-8')) as ArtifactRecord));
-        this.storageOwner.assertImported(metadataPath, metadataStamp);
-        if (!parsed?.id || typeof parsed.contentPath !== 'string' || !existsSync(parsed.contentPath)) {
-          if (parsed?.id && !existsSync(join(this.rootDir, `${entry.slice(0, -5)}.data`))) this.#reclaimOrphanMetadata(entry);
-          continue;
-        }
-        if (parsed.id !== entry.slice(0, -5) || resolve(parsed.contentPath) !== join(this.rootDir, `${parsed.id}.data`)
-          || typeof parsed.metadataPath !== 'string' || resolve(parsed.metadataPath) !== metadataPath) throw new Error('Artifact metadata does not own this file pair');
-        const files = Object.freeze({ content: this.storageOwner.importedStamp(parsed.contentPath), metadata: metadataStamp });
-        nativeApply(nativeMapSet, this.recordFiles, [parsed.id, files]);
-        if (typeof parsed.expiresAt === 'number' && parsed.expiresAt <= Date.now()) {
-          this.#removeRecordFiles(parsed);
-          continue;
-        }
-        nativeApply(nativeWeakSet, this.#originalOwner.entries, [parsed, files]);
-        nativeApply(nativeMapSet, this.records, [parsed.id, parsed]);
-      } catch (error) {
-        logger.warn('[artifacts] skipping unreadable artifact metadata', {
-          path: metadataPath,
-          error: summarizeError(error),
-        });
-      }
+      this.#importEntry(entry);
     }
     this.#reclaimOrphanContent();
   }
+
+  /** One metadata file of the root taken into this store's records, as at load; false when it is not a live artifact. */
+  #importEntry(entry: string): boolean {
+    const metadataPath = join(this.rootDir, entry);
+    try {
+      const metadataStamp = this.storageOwner.importedStamp(metadataPath);
+      const parsed = freezeArtifactRecord(normalizeExistingRecord(JSON.parse(readFileSync(metadataPath, 'utf-8')) as ArtifactRecord));
+      this.storageOwner.assertImported(metadataPath, metadataStamp);
+      if (!parsed?.id || typeof parsed.contentPath !== 'string' || !existsSync(parsed.contentPath)) {
+        if (parsed?.id && !existsSync(join(this.rootDir, `${entry.slice(0, -5)}.data`))) this.#reclaimOrphanMetadata(entry);
+        return false;
+      }
+      if (parsed.id !== entry.slice(0, -5) || resolve(parsed.contentPath) !== join(this.rootDir, `${parsed.id}.data`)
+        || typeof parsed.metadataPath !== 'string' || resolve(parsed.metadataPath) !== metadataPath) throw new Error('Artifact metadata does not own this file pair');
+      const files = Object.freeze({ content: this.storageOwner.importedStamp(parsed.contentPath), metadata: metadataStamp });
+      nativeApply(nativeMapSet, this.recordFiles, [parsed.id, files]);
+      if (typeof parsed.expiresAt === 'number' && parsed.expiresAt <= Date.now()) {
+        this.#removeRecordFiles(parsed);
+        return false;
+      }
+      nativeApply(nativeWeakSet, this.#originalOwner.entries, [parsed, files]);
+      nativeApply(nativeMapSet, this.records, [parsed.id, parsed]);
+      return true;
+    } catch (error) {
+      logger.warn('[artifacts] skipping unreadable artifact metadata', {
+        path: metadataPath,
+        error: summarizeError(error),
+      });
+      return false;
+    }
+  }
+
+  /**
+   * An artifact another process saved into this same root (the daemon, through its `artifacts.save` capability) taken
+   * into this store's records, so this process reads it as its own. Null when no live artifact has that id there.
+   */
+  takeUp(id: string): ArtifactDescriptor | null {
+    if (!/^[A-Za-z0-9_-]+$/.test(id)) return null;
+    const known = this.liveRecord(id);
+    if (known) return this.toDescriptor(known);
+    return this.#importEntry(`${id}.json`) ? this.get(id) : null;
+  }
+
+  /**
+   * How a new artifact is saved instead of written here: a terminal program routes every save of its turns through the
+   * daemon's `artifacts.save` capability, so the daemon's store holds it and announces it (an open Artifacts list follows
+   * with no key), then takes it up (`takeUp`). Set once by the program; the daemon sets none.
+   */
+  routeCreate(route: (input: ArtifactCreateInput) => Promise<ArtifactDescriptor>): void {
+    this.#createRoute = route;
+  }
+
+  #createRoute: ((input: ArtifactCreateInput) => Promise<ArtifactDescriptor>) | undefined;
 
   /**
    * Remove a metadata file whose content file is gone, once it has sat idle for

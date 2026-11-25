@@ -128,9 +128,11 @@ read at an older revision is stale.
 | `WORK_PLAN_TASK_DELETED` | A task was removed, by delete or clear-completed |
 | `WORK_PLAN_SNAPSHOT_INVALIDATED` | Once after every committed edit |
 
-The work-ledger legacy import (`workLedger.prepareLegacyImport`) captures the
-project's work-plan tasks itself, each as one record of kind `work-plan-task`,
-in addition to the planning sources the client names.
+At the first start of this version the daemon carries the project's old
+planning records into Work by itself (`workflow/work-ledger/carry-old-records.ts`):
+the planning interview's sources (state, work plans, decisions), nothing dropped
+and the records left as they were. The work plan's task rows (the checklist)
+stay the checklist and are not carried.
 
 The contract runner keeps the work plan in step with each contract
 (`contract/plan-sync.ts`). Each contract gets a task `contract-<contractId>`

@@ -19,6 +19,7 @@
  */
 import type { McpConfigRoots, McpConfigScope, McpEffectiveConfig, McpServerConfig } from '../../mcp/config.js';
 import type { McpApi } from '../../mcp/mcp-api.js';
+import { MCP_TRUST_LEVEL_WORDS, mcpLimitWords, mcpTrustWords } from '../../mcp/trust-words.js';
 import { MCP_CREDENTIALS_REFUSED } from '../../runtime/mcp/manager.js';
 import { noteListChanged } from '../../runtime/list-changes.js';
 import { summarizeError } from '../../utils/error-display.js';
@@ -75,12 +76,10 @@ export const MCP_ROLES: readonly FixedChoice[] = [
   { value: 'ops', label: 'Operations' },
   { value: 'remote', label: 'Remote machines' },
 ];
-export const MCP_TRUST_MODES: readonly FixedChoice[] = [
-  { value: 'constrained', label: 'Ask before anything outside its limits', help: 'Calls inside its folders and sites run; anything else is put to you.' },
-  { value: 'ask-on-risk', label: 'Act inside its limits without asking', help: 'Calls inside its scope run without asking; a call outside is put to you.', risk: 'loosens-a-protection' },
-  { value: 'blocked', label: 'Refuse every call', help: 'No tool of the server runs.' },
-  { value: 'allow-all', label: 'Allow every call', help: 'Every call runs, inside its limits or not.', risk: 'loosens-a-protection' },
-];
+/** What each kept level does with a call (mcp/trust-words.ts, which reads the runtime's decision). */
+export const MCP_TRUST_MODES: readonly FixedChoice[] = MCP_TRUST_LEVEL_WORDS.map((level) => ({
+  value: level.value, label: level.label, help: level.help, ...(level.loosens ? { risk: 'loosens-a-protection' as const } : {}),
+}));
 const SCOPES: readonly FixedChoice[] = [
   { value: 'project', label: 'This project', help: 'Kept in this project\'s .goodvibes/mcp.json; it starts once this folder is trusted.' },
   { value: 'global', label: 'All your projects', help: 'Kept in ~/.config/mcp/mcp.json.' },
@@ -103,12 +102,11 @@ const SCOPE: InputDescription = {
 // Words
 // ---------------------------------------------------------------------------
 
-export function mcpTrustWords(mode: string): string {
-  if (mode === 'ask-on-risk') return 'acts inside its limits without asking';
-  if (mode === 'allow-all') return 'allows every call';
-  if (mode === 'constrained') return 'asks outside its limits';
-  return String(mode).replace(/[_-]+/g, ' ');
-}
+export { mcpLimitWords, mcpTrustWords };
+/** Why a server's tools are held back, in words (the runtime's quarantine reasons). */
+const HELD_BACK_REASON_WORDS: Readonly<Record<string, string>> = {
+  operator_flagged: 'you held them back', stale_threshold: 'its tool list could not be read again for too long', unsupported: 'its tool list is in a form this version does not take',
+};
 const freshnessWords = (value: McpSecurityServer['schemaFreshness']): string => value === 'quarantined' ? 'tools held back for review' : value.replace(/[_-]+/g, ' ');
 export const mcpRoleWords = (value: string): string => value.replace(/[_-]+/g, ' ');
 
@@ -232,17 +230,19 @@ export const MCP_ADD: CapabilityDefinition<McpCapabilityServices> = {
     { id: 'command', label: 'Command', help: 'The program to start and its own arguments, as you would type them', kind: 'list', freeTextReason: 'the program and its arguments', required: true, typed: { tail: true }, step: 1, showWhen: { input: 'start', is: 'command' } },
     { id: 'address', label: 'Address', help: 'The https:// address the server answers at', kind: 'text', freeTextReason: 'the address the server answers at', required: true, typed: { flag: '--url' }, step: 1, showWhen: { input: 'start', is: 'url' } },
     { id: 'name', label: 'Name', help: 'A short name you choose for it', kind: 'text', freeTextReason: 'a name you choose', required: true, typed: { position: 1 }, step: 1, suggest: suggestServerName },
-    { id: 'trust', label: 'Trust', help: 'What it may do without asking', kind: 'choice', choices: MCP_TRUST_MODES, required: { default: '', defaultMeans: 'ask before anything outside its limits' }, typed: { flag: '--trust' }, step: 2 },
+    { id: 'trust', label: 'Trust', help: 'What happens to a call outside its limits', kind: 'choice', choices: MCP_TRUST_MODES, required: { default: '', defaultMeans: 'ask me about calls outside its limits' }, typed: { flag: '--trust' }, step: 2 },
     { id: 'role', label: 'Role', help: 'What kind of server it is', kind: 'choice', choices: MCP_ROLES, required: { default: '', defaultMeans: 'general' }, typed: { flag: '--role' }, step: 2 },
     { ...SCOPE, step: 2 },
-    { id: 'path', label: 'Folders it may use', help: 'Folders, separated by commas', kind: 'path', freeTextReason: 'a folder on this machine', required: { default: '', defaultMeans: 'none besides the project' }, typed: { flag: '--path', repeats: true }, step: 2 },
-    { id: 'host', label: 'Sites it may reach', help: 'Host names, separated by commas', kind: 'text', freeTextReason: 'a host name such as api.github.com', required: { default: '', defaultMeans: 'none' }, typed: { flag: '--host', repeats: true }, step: 2 },
+    { id: 'path', label: 'Folders it may use', help: 'Folders, separated by commas', kind: 'path', freeTextReason: 'a folder on this machine', required: { default: '', defaultMeans: 'no folder limit: the folders it is called with are not checked' }, typed: { flag: '--path', repeats: true }, step: 2 },
+    { id: 'host', label: 'Sites it may reach', help: 'Host names, separated by commas', kind: 'text', freeTextReason: 'a host name such as api.github.com', required: { default: '', defaultMeans: 'no site limit: the addresses it is called with are not checked' }, typed: { flag: '--host', repeats: true }, step: 2 },
     { id: 'env', label: 'Environment', help: 'NAME=VALUE for a command, separated by commas; hidden as you type', kind: 'secret', required: { default: '', defaultMeans: 'none' }, typed: { flag: '--env', repeats: true }, step: 2, showWhen: { input: 'start', is: 'command' } },
     { id: 'header', label: 'Request header', help: 'Name=Value for a web address (an Authorization header); hidden as you type', kind: 'secret', required: { default: '', defaultMeans: 'none' }, typed: { flag: '--header', repeats: true }, step: 2, showWhen: { input: 'start', is: 'url' } },
   ],
   sentence: '{name} will be added to the {scope} MCP config and started, until you change it.',
   done: 'Added {name}.',
-  touches: 'this-machine', lasts: 'kept', risk: 'none', undoneBy: 'remove-server',
+  // Adding a server installs a program that each program starts by itself (a command on this computer, or an address
+  // its tools are fetched from): it loosens a protection, asked of the owner and opening on No.
+  touches: 'this-machine', lasts: 'kept', risk: 'loosens-a-protection', undoneBy: 'remove-server',
   example: { name: 'weather', command: 'npx\n-y\n@acme/weather-mcp' },
   async run(values, services, caller) {
     const config = services.mcp.forProject(caller.workingDirectory);
@@ -256,7 +256,7 @@ export const MCP_ADD: CapabilityDefinition<McpCapabilityServices> = {
     }
     changed();
     return {
-      text: [`Kept in ${scope} MCP config ${result.path}; ${result.connected === true ? 'connected' : 'each program starts it when it is first used'}.`, `  ${shownEndpoint(server)}`].join('\n'),
+      text: [`Kept in ${scope} MCP config ${result.path}; ${result.connected === true ? 'connected' : 'each program starts it when it is first used'}.`, `Starts with: ${shownEndpoint(server)}.`].join('\n'),
       data: { server: server.name, scope, path: result.path },
     };
   },
@@ -325,10 +325,11 @@ function policy(field: 'trust' | 'role'): CapabilityDefinition<McpCapabilityServ
     capability: { id: trust ? 'mcp.trust' : 'mcp.role', group: 'tools', home: 'daemon', repeat: 'safe' },
     actionId: trust ? 'set-trust' : 'set-role', label: trust ? 'Set a server\'s trust level' : 'Set a server\'s role', word: trust ? 'trust' : 'role',
     inputs: [SERVER, trust
-      ? { id: 'mode', label: 'Trust', help: 'What it may do without asking', kind: 'choice', choices: MCP_TRUST_MODES, required: true, typed: { position: 2 } }
+      ? { id: 'mode', label: 'Trust', help: 'What happens to a call outside its limits', kind: 'choice', choices: MCP_TRUST_MODES, required: true, typed: { position: 2 } }
       : { id: 'role', label: 'Role', help: 'What kind of server it is', kind: 'choice', choices: MCP_ROLES, required: true, typed: { position: 2 } }],
-    sentence: trust ? '{server} will be set to "{mode}" until you change it.' : '{server} will be treated as a {role} server until you change it.',
-    done: trust ? '{server} is set to "{mode}".' : '{server} is a {role} server.',
+    // The trust level in words in the answer (the value itself, "ask-on-risk", is the setting's, not a person's).
+    sentence: trust ? 'The trust level chosen is kept for {server} until you change it.' : '{server} will be treated as a {role} server until you change it.',
+    done: trust ? '' : '{server} is a {role} server.',
     touches: 'this-machine', lasts: 'kept', risk: 'none', undoneBy: trust ? 'restore-trust' : 'restore-role',
     example: trust ? { server: 'github', mode: 'constrained' } : { server: 'github', role: 'git' },
     async run(values, services, caller) {
@@ -343,7 +344,8 @@ function policy(field: 'trust' | 'role'): CapabilityDefinition<McpCapabilityServ
       changed();
       const where = `${result.scope} MCP config ${result.path}`;
       return {
-        text: result.changed ? `Kept in ${where}; it applies now and after a restart.` : `It was already kept in ${where}.`,
+        text: [...(trust ? [`${values.server} now ${mcpTrustWords(values.mode as McpTrustMode)}.`] : []),
+          result.changed ? `Kept in ${where}; it applies now and after a restart.` : `It was already kept in ${where}.`].join('\n'),
         data: { server: values.server, ...(trust ? { trustMode: values.mode } : { role: values.role }), ...result },
       };
     },
@@ -442,7 +444,7 @@ export const MCP_SERVERS: CapabilityDefinition<McpSessionServices> = {
       const rules = server.toolRules?.length
         ? `; ${server.toolRules.map((rule) => `${rule.rule === 'deny' ? 'blocked' : 'past its limits'} ${rule.toolName} (${rule.source === 'session' ? 'this session' : 'kept'}${rule.inEffect ? '' : ', a block wins'})`).join(', ')}`
         : '';
-      lines.push(`  ${server.name}: ${mcpServerState(server)}; trust: ${mcpTrustWords(server.trustMode)}${session}; role: ${mcpRoleWords(server.role)}${server.sessionRole !== undefined ? ' (this session)' : ''}${server.allowedPaths.length ? `; ${server.allowedPaths.length} folder(s)` : ''}${server.allowedHosts.length ? `; ${server.allowedHosts.length} site(s)` : ''}${rules}`);
+      lines.push(`  ${server.name}: ${mcpServerState(server)}; trust: ${mcpTrustWords(server.trustMode)}${session}; role: ${mcpRoleWords(server.role)}${server.sessionRole !== undefined ? ' (this session)' : ''}; limits: ${mcpLimitWords(server)}${rules}`);
       if (!server.connected && server.lastError) lines.push(`      last error: ${server.lastError}`);
       if (!server.connected && server.reconnect?.stoppedReason) {
         lines.push(server.reconnect.stoppedReason === MCP_CREDENTIALS_REFUSED
@@ -467,11 +469,12 @@ export const MCP_TOOLS: CapabilityDefinition<McpSessionServices> = {
     const tools = values.server ? all.filter((tool) => tool.serverName === values.server) : all;
     const data = { tools: tools.map((tool) => ({ server: tool.serverName, tool: tool.toolName, description: tool.description ?? '' })) };
     if (tools.length === 0) return { text: values.server ? `${values.server} offers no tools right now. Is it connected? The Servers list shows its state.` : 'No tool server tools are available. Add a server with "Add a server".', data };
-    const lines = [`Tool server tools (${tools.length}):`];
+    const lines = [values.server ? `${values.server} offers ${tools.length} tool${tools.length === 1 ? '' : 's'}:` : `Your tool servers offer ${tools.length} tool${tools.length === 1 ? '' : 's'}:`];
     let last = '';
     for (const tool of tools) {
-      if (tool.serverName !== last) { lines.push(`  ${tool.serverName}`); last = tool.serverName; }
-      lines.push(`    ${tool.toolName}${tool.description ? `: ${tool.description}` : ''}`);
+      // A heading per server only when more than one is listed.
+      if (!values.server && tool.serverName !== last) { lines.push(`${tool.serverName}:`); last = tool.serverName; }
+      lines.push(`${tool.toolName}${tool.description ? `: ${tool.description}` : ''}`);
     }
     return { text: lines.join('\n'), data };
   },
@@ -683,13 +686,13 @@ export const MCP_REPAIR: CapabilityDefinition<McpSessionServices> = {
     const steps = fixSteps(selected);
     return {
       text: [
-        `Tool server repair: ${selected.name}`,
-        `  ${mcpServerState(selected)}; trust: ${mcpTrustWords(selected.trustMode)}; role: ${mcpRoleWords(selected.role)}; ${freshnessWords(selected.schemaFreshness)}`,
-        ...(selected.quarantineReason ? [`  held back: ${selected.quarantineReason}`] : []),
-        ...(selected.quarantineDetail ? [`  detail: ${selected.quarantineDetail}`] : []),
-        ...(selected.lastError ? [`  last error: ${selected.lastError}`] : []),
-        steps.length > 0 ? '  next:' : '  nothing needs fixing.',
-        ...steps.map((step) => `    ${step}`),
+        `How to fix ${selected.name}`,
+        `State: ${mcpServerState(selected)}; trust: ${mcpTrustWords(selected.trustMode)}; role: ${mcpRoleWords(selected.role)}; ${freshnessWords(selected.schemaFreshness)}`,
+        ...(selected.quarantineReason || selected.quarantineDetail
+          ? [`Tools held back: ${selected.quarantineDetail || HELD_BACK_REASON_WORDS[selected.quarantineReason ?? ''] || selected.quarantineReason}`] : []),
+        ...(selected.lastError ? [`Last error: ${selected.lastError}`] : []),
+        steps.length > 0 ? 'What to do:' : 'Nothing needs fixing.',
+        ...steps.map((step) => `  ${step}`),
       ].join('\n'),
       data: { ...serverFacts(selected), fix: steps },
     };

@@ -105,6 +105,7 @@ import type { CodeInjectionAuthorityOptions } from './code-injection-ranking.js'
 import { rankLexicalChunks } from './code-index-lexical.js';
 import { logger } from '../utils/logger.js';
 import { summarizeError } from '../utils/error-display.js';
+import { noteListChanged } from '../runtime/list-changes.js';
 import { prepareAuthorizedCodeSnapshots, type AuthorizedCodePrepareInput, type AuthorizedCodeIndex } from './code-index-authorized.js';
 export type { AuthorizedCodePrepareInput, AuthorizedCodeSnapshot, AuthorizedIndexBoundary } from './code-index-authorized.js';
 // bun:sqlite is a Bun-only builtin; a static import makes this module unloadable
@@ -505,6 +506,8 @@ export class CodeIndexStore {
       this.buildStartedAtMs = Date.now();
       this.progress = { scanned: 0, total: 0 };
       this.lastBuildError = undefined;
+      // Announced as it begins and as it ends, so a list showing the index (Code and changes) reads it again by itself.
+      noteListChanged({ list: 'code-index', change: 'changed' });
       this.buildPromise = this.runBuild(buildEpoch).catch((error: unknown) => {
         if (this.epoch === buildEpoch) this.lastBuildError = `build failed: ${summarizeError(error)}`;
         throw error;
@@ -516,6 +519,7 @@ export class CodeIndexStore {
           this.buildStartedAtMs = null;
           this.buildPromise = null;
           this.progress = null;
+          noteListChanged({ list: 'code-index', change: 'changed' });
         }
       });
     }

@@ -313,7 +313,7 @@ const securityStatus: TaskRouteEntry = {
     why: 'The request asks what permissions, approvals, policies, or safety status are active.',
     modelRoute: `security action:"status" query:${quote(request)} includeParameters:true`,
     inspectRoute: 'security action:"status" includeParameters:true',
-    userRoute: '/security',
+    userRoute: 'Permissions and safety (Ctrl+G m)',
     requiresConfirmation: false,
     supportingRoutes: [
       'workspace action:"actions" categoryId:"tools-permissions"',
@@ -335,7 +335,7 @@ const securityFinding: TaskRouteEntry = {
     why: 'The request asks to inspect a security finding, incident, vulnerability, trust warning, or secret-leak issue.',
     modelRoute: `security action:"finding" target:${quote(request)} includeParameters:true`,
     inspectRoute: 'security action:"status" includeParameters:true',
-    userRoute: '/security',
+    userRoute: 'Permissions and safety (Ctrl+G m)',
     requiresConfirmation: false,
     supportingRoutes: [
       'security action:"status" includeParameters:true',
@@ -361,7 +361,7 @@ const securityPolicyExplanation: TaskRouteEntry = {
         ? `security action:"explain" target:${quote(explainTarget)} toolArgs:{...} includeParameters:true`
         : 'security action:"explain" toolName:"..." toolArgs:{...} includeParameters:true',
       inspectRoute: 'security action:"status" includeParameters:true',
-      userRoute: '/security',
+      userRoute: 'Permissions and safety (Ctrl+G m)',
       requiresConfirmation: false,
       missingFields: explainTarget ? ['arguments or action details to explain'] : ['tool name or route id', 'arguments or action details to explain'],
       supportingRoutes: [

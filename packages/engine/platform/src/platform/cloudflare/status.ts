@@ -48,14 +48,14 @@ export function buildCloudflareControlPlaneStatus(input: BuildCloudflareStatusIn
   if (input.config.enabled && !configured.daemonBaseUrl) warnings.push('Cloudflare is enabled but no daemonBaseUrl is configured for Worker-to-daemon calls.');
   if (input.config.enabled && !configured.workerToken && !unreadable) warnings.push('Cloudflare is enabled but no Worker-to-daemon operator token is configured.');
   if (input.config.enabled && !configured.workerClientToken) warnings.push('Cloudflare Worker client auth is not configured; provisioning will generate one.');
-  if (input.config.enabled && !configured.workerName) warnings.push('Cloudflare is enabled but no Worker has been provisioned from this daemon; run /cloudflare provision.');
+  if (input.config.enabled && !configured.workerName) warnings.push('Cloudflare is enabled but no Worker has been provisioned from this daemon; deploy it from the Cloudflare tab of Devices and network.');
   if (record?.worker?.daemonCredential === 'removed') warnings.push('The Worker no longer holds the daemon credential (it was disabled); provision again to restore it.');
   const connector = input.tunnelConnector;
   if (configured.tunnel && connector && connector.state !== 'connected') {
     warnings.push(`The Cloudflare Tunnel connector is ${connector.state}: ${connector.detail}${connector.next?.[0] ? ` Next: ${connector.next[0]}.` : ''}`);
   } else if (configured.tunnel && !connector) {
     // Only the daemon runs cloudflared; a reading made anywhere else cannot say the tunnel is served.
-    warnings.push('A Cloudflare Tunnel is provisioned, but this process does not run its connector, so it cannot tell whether the daemon hostname reaches the daemon. Ask the daemon (cloudflare.status, or /cloudflare status).');
+    warnings.push('A Cloudflare Tunnel is provisioned, but this process does not run its connector, so it cannot tell whether the daemon hostname reaches the daemon. Ask the daemon (cloudflare.status, or the Cloudflare tab of Devices and network).');
   }
   const ready = input.config.enabled &&
     configured.accountId &&

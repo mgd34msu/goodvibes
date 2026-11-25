@@ -14,8 +14,9 @@
 import { existsSync, realpathSync } from 'node:fs';
 import { isAbsolute, join, relative, sep } from 'node:path';
 import { loadMcpEffectiveConfig, ownerAddedServers } from '@goodvibes/engine/platform/platform/mcp';
-import { NOTHING_OF_ITS_OWN_TO_RUN, type WorkspaceTrustManager } from '@goodvibes/engine/platform/platform/runtime/operations';
+import { NOTHING_OF_ITS_OWN_TO_RUN, projectSetupCommandsFile, type WorkspaceTrustManager } from '@goodvibes/engine/platform/platform/runtime/operations';
 import { logger, summarizeError } from '@goodvibes/engine/platform/platform/utils';
+import type { SelectionItem } from '../selection-modal.js';
 
 /** What the trust prompt names: the folder (home shortened to ~) and the files of its own that trusting would let run. */
 export interface FolderTrustFacts {
@@ -26,7 +27,12 @@ export interface FolderTrustFacts {
   readonly mcpFiles: readonly string[];
   /** Those servers, by name: the ones the folder brought (a cloned file, a write from outside), never one you added with /mcp add. */
   readonly mcpServers: readonly string[];
-  /** True when it has a hooks file or MCP server files of its own. */
+  /**
+   * Its own settings file as shown (".goodvibes/daemon-host/settings.json") when it gives worktree setup commands, or
+   * null: the daemon runs those commands for this folder's worktrees only when the folder is trusted.
+   */
+  readonly setupCommandsFile: string | null;
+  /** True when it has a hooks file, MCP server files or a settings file with setup commands of its own. */
   readonly hasItsOwn: boolean;
 }
 
@@ -41,7 +47,11 @@ export function readFolderTrustFacts(workingDirectory: string, homeDirectory: st
   const brought = loadMcpEffectiveConfig({ workingDirectory, homeDirectory }, { holdProjectFile: () => true, ownerAdded: ownerAddedServers(homeDirectory) }).held ?? [];
   const mcpFiles = [...new Set(brought.map((entry) => relative(workingDirectory, entry.source.path)))];
   const mcpServers = [...new Set(brought.map((entry) => entry.server.name))];
-  return { shownPath, hooksFile: hooksShown, mcpFiles, mcpServers, hasItsOwn: hooksShown !== null || mcpFiles.length > 0 };
+  const setupCommandsFile = projectSetupCommandsFile(workingDirectory);
+  return {
+    shownPath, hooksFile: hooksShown, mcpFiles, mcpServers, setupCommandsFile,
+    hasItsOwn: hooksShown !== null || mcpFiles.length > 0 || setupCommandsFile !== null,
+  };
 }
 
 /** What a folder brings of its own, in words: "a hooks file (hooks.json) and tool servers (MCP) weather in .mcp.json". */
@@ -51,6 +61,7 @@ function broughtWords(folder: FolderTrustFacts): string {
     ...(folder.mcpFiles.length > 0
       ? [`tool ${folder.mcpServers.length === 1 ? 'server' : 'servers'} (MCP) ${folder.mcpServers.length > 0 ? `${folder.mcpServers.join(', ')} ` : ''}in ${folder.mcpFiles.join(', ')}`]
       : []),
+    ...(folder.setupCommandsFile !== null ? [`worktree setup commands (in ${folder.setupCommandsFile})`] : []),
   ];
   return parts.join(' and ');
 }
@@ -59,7 +70,7 @@ function broughtWords(folder: FolderTrustFacts): string {
 export function headlessUntrustedFolderSentence(folder: FolderTrustFacts): string {
   return `${folder.shownPath} brings ${broughtWords(folder)} of its own and has no trust decision, so this run does not trust it: `
     + 'no file is changed and no command runs there; reads still work. To trust it, open it in goodvibes and choose '
-    + '"Trust this workspace", or run /security trust-folder there, then run again.';
+    + '"Trust this workspace", or "Trust this folder" in Permissions and safety, This folder, then run again.';
 }
 
 /**
@@ -81,6 +92,86 @@ export async function settleHeadlessFolderTrust(
     if (!manager.isDecided() && facts.hasItsOwn) manager.refuseForThisRun(headlessUntrustedFolderSentence(facts));
   } catch (error) {
     logger.info('The headless trust refusal for a folder with files of its own was not set', { error: summarizeError(error) });
+  }
+}
+
+/** A trust decision the card records. */
+export type FolderTrustChoice = 'trusted' | 'restricted';
+
+/**
+ * The trust card both terminal programs show for a folder with no decision that
+ * brings hooks or tool servers of its own (and for one trusted for having
+ * nothing that has gained them since): the same title, rows and words in the
+ * terminal app and the Agent. It opens on "Keep restricted" (FOLDER_TRUST_OPENS_ON):
+ * Enter pressed straight away trusts nothing.
+ */
+export function folderTrustCard(folder: FolderTrustFacts): { readonly title: string; readonly items: SelectionItem[] } {
+  // What trusting lets run, named from what the folder has; never a sentence about things it does not have.
+  const runs = [
+    ...(folder.hooksFile !== null ? [`the hooks in ${folder.hooksFile} run`] : []),
+    ...(folder.mcpFiles.length > 0
+      ? [`the tool ${folder.mcpServers.length === 1 ? 'server' : 'servers'} (MCP) ${folder.mcpServers.length > 0 ? `${folder.mcpServers.join(', ')} ` : ''}in ${folder.mcpFiles.join(', ')} start`]
+      : []),
+    ...(folder.setupCommandsFile !== null ? [`the worktree setup commands in ${folder.setupCommandsFile} run when a worktree is set up`] : []),
+  ];
+  const lets = runs.length > 0
+    ? `Trusting it lets ${runs.join(' and ')}, and lets GoodVibes change files and run commands here.`
+    : 'Trusting it lets GoodVibes change files and run commands here.';
+  const undo = 'Change it later in Permissions and safety, This folder.';
+  return {
+    title: `Trust ${folder.shownPath}?`,
+    items: [
+      {
+        id: 'trusted',
+        label: 'Trust this workspace',
+        detail: `${lets} It approves nothing: each action still follows your setting for when GoodVibes asks. ${undo}`,
+        primaryAction: 'select',
+      },
+      {
+        id: 'restricted',
+        label: 'Keep restricted (read-only)',
+        detail: `GoodVibes reads this folder and changes nothing in it: no file is changed and no command runs, and the folder's own hooks, MCP servers and worktree setup commands stay off, until you trust it. ${undo}`,
+        primaryAction: 'select',
+      },
+    ],
+  };
+}
+
+/** The row the trust card opens on. */
+export const FOLDER_TRUST_OPENS_ON = 'restricted';
+
+/** The decision a chosen row records; null when no row was chosen (dismissed: nothing recorded, the folder stays undecided). */
+export function decodeFolderTrustChoice(id: string | null): FolderTrustChoice | null {
+  if (id === 'trusted') return 'trusted';
+  if (id === 'restricted') return 'restricted';
+  return null;
+}
+
+/**
+ * Settle the folder's trust as an interactive program opens (both terminal
+ * programs, the same rule): its saved decision read first; a folder with no
+ * decision and nothing of its own is trusted without a question
+ * (trustFolderWithNothingOfItsOwn); one with no decision that brings hooks or
+ * tool servers is asked with the trust card; one trusted for having nothing
+ * that has gained them since is asked now, before any of them runs; one that
+ * gains them later is asked when its hooks are about to fire or its servers to
+ * start. Resolves when settled: answered, dismissed (left as it was; a write or
+ * command asks again), or not needed. Never throws.
+ */
+export async function settleFolderTrustOnOpen(
+  manager: Pick<WorkspaceTrustManager, 'load' | 'isDecided' | 'trustQuestion' | 'setLevel' | 'trustedForNothingToRun' | 'askWhenRepositoryFilesAppear'> | undefined,
+  requestTrustDecision: (() => Promise<FolderTrustChoice>) | undefined,
+  folder: () => FolderTrustFacts,
+): Promise<void> {
+  if (!manager || !requestTrustDecision) return;
+  try {
+    await manager.load();
+    manager.askWhenRepositoryFilesAppear(requestTrustDecision);
+    const facts = folder();
+    if (await trustFolderWithNothingOfItsOwn(manager, () => facts)) return;
+    if (!manager.isDecided() || (manager.trustedForNothingToRun() && facts.hasItsOwn)) await manager.trustQuestion(requestTrustDecision).answer;
+  } catch (error) {
+    logger.info('The workspace trust question asked on opening was not answered', { error: summarizeError(error) });
   }
 }
 

@@ -3,7 +3,7 @@ import { createPortal } from 'react-dom';
 import { BookOpen, CalendarDays, Files, LayoutGrid, Mail } from 'lucide-react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { getClientLifetime, isClientLifetimeCurrent } from '../lib/client-lifetime';
-import { client as platformClient } from '../lib/goodvibes';
+import { client as platformClient, invokeOwnerMethod } from '../lib/goodvibes';
 import { copyOutcomeMessage, copyText } from '../lib/copy-text';
 import { REASONING_EFFORT_SEVERITY } from '@goodvibes/engine/platform/browser/reasoning-effort';
 import { asRecord, bestId, bestTitle, firstString } from '../lib/object';
@@ -1017,14 +1017,16 @@ export function ChatView({
     retry: false,
     ...STARTER_PROBE_FRESHNESS,
   });
+  // Mail: `mail.status` answers whether the mailbox is set up and reachable; listing the inbox with no mailbox set up
+  // was refused (400 EMAIL_NOT_CONFIGURED) on every new chat.
   const mailProbe = useQuery({
-    queryKey: queryKeys.emailInbox(1, false, ''),
-    queryFn: () => platformClient.operator.email.inbox.list({ limit: 1 }),
+    queryKey: queryKeys.mailStatus,
+    queryFn: async () => asRecord(asRecord(await invokeOwnerMethod('capabilities.run', { id: 'mail.status', inputs: {} })).data).reachable === true,
     enabled: isNewChat,
     retry: false,
     ...STARTER_PROBE_FRESHNESS,
   });
-  const suggestions = availableSuggestions({ calendar: calendarProbe.isSuccess, mail: mailProbe.isSuccess });
+  const suggestions = availableSuggestions({ calendar: calendarProbe.isSuccess, mail: mailProbe.data === true });
   const workingLabel = workingStatusLabel(
     turnState,
     activeToolCalls.filter((call) => !call.cancelled),

@@ -211,7 +211,7 @@ const REFUSAL_MESSAGES: Readonly<Record<RefusalCode | ExecutionRefusalCode | Ope
   'recurring-unconfirmed': 'The checkout could not be confirmed as a single payment. Nothing was bought. Start the purchase again with an order summary that holds only this order.',
   'not-checked-unapproved': 'No decision model was in use, so part of the checkout was not checked, and the purchase was not approved. Nothing was bought.',
   'held-reply-not-understood': 'Your reply to the purchase notice was not taken as a go-ahead, and the follow-up approval got no yes. Nothing was bought.',
-  'security-code-not-given': 'The card security code was not typed before the deadline, so nothing was bought. Start the purchase again and type the code with /payments pending when asked.',
+  'security-code-not-given': 'The card security code was not typed before the deadline, so nothing was bought. Start the purchase again and type the code in Waiting for you, under Purchases, when asked.',
   'daemon-stopped': 'The daemon stopped before this purchase was submitted. Nothing was sent to the merchant and it will not resume; start the purchase again if you still want it.',
   'reply-history-unavailable': 'The purchase reply could not be saved. Receiving stopped before confirming its cursor. Nothing was submitted. Inspect payment and channel status before starting another checkout.',
   'receive-uncovered': 'The purchase stopped because its original reply receive span could not be confirmed. Nothing was submitted. Check skipped updates, competing bot consumers and the system clock. Unattended expiry requires the native polling receiver; explicit owner replies remain separate.',
@@ -219,7 +219,7 @@ const REFUSAL_MESSAGES: Readonly<Record<RefusalCode | ExecutionRefusalCode | Ope
   'reply-unsettled': 'A reply arrived before the window closed but was still being read when it closed, so it was neither used nor treated as silence. Nothing was submitted. Start the purchase again if you still want it.',
   'reply-unreadable': 'A reply to the purchase notice could not be read, so it was neither used nor treated as silence. Nothing was submitted. Check decision model access, then start the purchase again if you still want it.',
   'clock-unavailable': 'The system clock could not be read while the purchase window was open, so the window could not be timed. Nothing was submitted. Check the host clock, then start the purchase again.',
-  'window-unavailable': 'The reply window for this purchase could not be opened, or another window replaced it, so you could not be asked. Nothing was submitted. Open /payments pending (or Purchases in the web UI settings) for any purchase already waiting for an answer, then start this one again.',
+  'window-unavailable': 'The reply window for this purchase could not be opened, or another window replaced it, so you could not be asked. Nothing was submitted. Look in Waiting for you, under Purchases, for any purchase already waiting for an answer, then start this one again.',
   'page-in-use': 'This browser page already has a checkout that is running or waiting for a merchant check. Nothing was submitted. Finish or reconcile that purchase, or open the checkout in a new tab.',
 };
 /** Processing stopped before a decision, for the cause named. */
@@ -246,10 +246,13 @@ export function paymentOperationDescription(operation: PaymentOperationView): st
   if (resumable) return 'This purchase is waiting for your answer to its notice. If the daemon restarted meanwhile, it resumes that window once the payment host has recovered, or ends unbought and tells you why.';
   switch (operation.state) {
     case 'accepted': return 'Accepted for processing. No purchase outcome has been recorded yet.';
-    case 'running': return 'The daemon is processing this checkout. Review any purchase notice before answering.';
+    // Where the checkout is: before the order goes to the shop, stopping sends nothing; once it is going, a stop is only a request.
+    case 'running': return operation.phase === 'submit-pending' || operation.phase === 'submitted'
+      ? 'The order is being sent to the shop now. Stopping asks the daemon to stop; an order the shop already took is not undone.'
+      : 'The daemon is working through this checkout: the page, the card, then the order. Stopped now, nothing is sent to the shop.';
     case 'cancelling': return 'Stopping was requested. Wait for final status; this does not undo a merchant submission.';
     case 'completed': return outcome.kind === 'submitted-unverified'
-      ? 'The merchant’s page showed no order confirmation after the submit, so the submission was recorded as unverified. A matching confirmation email from the shop marks it bought; otherwise check the merchant’s order history, then record what you found.' : 'The purchase outcome is recorded in purchase history.';
+      ? 'After the submit, the merchant’s page showed no order number or total that ties it to this purchase, so the submission was recorded as unverified. A matching confirmation email from the shop marks it bought; otherwise check the merchant’s order history, then record what you found.' : 'The purchase outcome is recorded in purchase history.';
     case 'refused': return outcomeMessage(outcome)
       ?? 'The checkout was refused. Review the checkout and payment settings before requesting another purchase.';
     case 'cancelled': return 'The checkout was stopped before submission. Nothing was sent to the merchant.';

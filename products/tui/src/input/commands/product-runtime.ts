@@ -6,6 +6,8 @@ import { discoverTasks } from '@/runtime/index.ts';
 import { DEFAULT_TASK_SUITE_DIR } from './eval.ts';
 import { requireEcosystemCatalogPaths, requireShellPaths } from './runtime-services.ts';
 import { CapabilityRefusal } from '@goodvibes/engine/platform/platform/capabilities';
+import { readRemoteRunnersHealth } from '@goodvibes/engine/terminal-shell/health-command';
+import { capabilityBinding } from './capability-binding.ts';
 
 interface ReleaseBundle {
   readonly version: 1;
@@ -15,13 +17,15 @@ interface ReleaseBundle {
     readonly model: string;
     readonly sessionId: string;
   };
-  /** The tasks in the project's eval task suite (/eval run). */
+  /** The tasks in the project's eval task suite (Work and agents, Evaluations). */
   readonly evalSuites: readonly string[];
   readonly incidentCount: number;
+  /** The daemon's remote runners; `unreadable` says why they could not be read (never counted as none). */
   readonly remote: {
     readonly pools: number;
     readonly contracts: number;
     readonly artifacts: number;
+    readonly unreadable?: string | undefined;
   };
   readonly ecosystem: {
     readonly pluginCatalog: number;
@@ -42,8 +46,9 @@ function projectEvalTasks(projectRoot: string): string[] {
   }
 }
 
-function buildReleaseBundle(ctx: CommandContext): ReleaseBundle {
-  const remoteRuntime = ctx.ops.remoteRuntime;
+async function buildReleaseBundle(ctx: CommandContext): Promise<ReleaseBundle> {
+  // The remote runners are the daemon's (runtime/remote/daemon-runners.ts), read through this app's binding.
+  const remote = await readRemoteRunnersHealth(ctx, capabilityBinding);
   const incidents = ctx.extensions.forensicsRegistry?.getAll() ?? [];
   const ecosystemPaths = requireEcosystemCatalogPaths(ctx);
   return {
@@ -56,11 +61,7 @@ function buildReleaseBundle(ctx: CommandContext): ReleaseBundle {
     },
     evalSuites: projectEvalTasks(requireShellPaths(ctx).workingDirectory),
     incidentCount: incidents.length,
-    remote: {
-      pools: remoteRuntime?.listPools().length ?? 0,
-      contracts: remoteRuntime?.listContracts().length ?? 0,
-      artifacts: remoteRuntime?.listArtifacts().length ?? 0,
-    },
+    remote: { pools: remote.pools, contracts: remote.runners.length, artifacts: remote.artifacts, ...(remote.unreadable ? { unreadable: remote.unreadable } : {}) },
     ecosystem: {
       pluginCatalog: loadEcosystemCatalog('plugin', ecosystemPaths).length,
       skillCatalog: loadEcosystemCatalog('skill', ecosystemPaths).length,
@@ -70,6 +71,12 @@ function buildReleaseBundle(ctx: CommandContext): ReleaseBundle {
   };
 }
 
+function remoteLine(remote: ReleaseBundle['remote']): string {
+  return remote.unreadable
+    ? `  remote runners: could not be read (${remote.unreadable})`
+    : `  remote runners: ${remote.contracts}, in ${remote.pools} pool${remote.pools === 1 ? '' : 's'}, ${remote.artifacts} handed back`;
+}
+
 function inspectReleaseBundle(path: string): string {
   const parsed = JSON.parse(readFileSync(path, 'utf-8')) as ReleaseBundle;
   return [
@@ -77,7 +84,7 @@ function inspectReleaseBundle(path: string): string {
     `  provider/model: ${parsed.runtime.provider || '(unset)'}/${parsed.runtime.model || '(unset)'}`,
     `  eval tasks: ${parsed.evalSuites.length}`,
     `  incidents: ${parsed.incidentCount}`,
-    `  remote pools/contracts/artifacts: ${parsed.remote.pools}/${parsed.remote.contracts}/${parsed.remote.artifacts}`,
+    remoteLine(parsed.remote),
     `  ecosystem catalog plugins/skills: ${parsed.ecosystem.pluginCatalog}/${parsed.ecosystem.skillCatalog}`,
   ].join('\n');
 }
@@ -88,7 +95,7 @@ function formatReleaseBundle(title: string, bundle: ReleaseBundle): string {
     `  provider/model: ${bundle.runtime.provider || '(unset)'}/${bundle.runtime.model || '(unset)'}`,
     `  eval tasks: ${bundle.evalSuites.length}`,
     `  failure reports: ${bundle.incidentCount}`,
-    `  remote pools/contracts/artifacts: ${bundle.remote.pools}/${bundle.remote.contracts}/${bundle.remote.artifacts}`,
+    remoteLine(bundle.remote),
     `  ecosystem catalog plugins/skills: ${bundle.ecosystem.pluginCatalog}/${bundle.ecosystem.skillCatalog}`,
     `  installed plugins/skills: ${bundle.ecosystem.installedPlugins}/${bundle.ecosystem.installedSkills}`,
   ].join('\n');
@@ -99,14 +106,15 @@ function formatReleaseBundle(title: string, bundle: ReleaseBundle): string {
  * (capabilities/builtin/system-program.ts; session-capabilities.ts `systemSessionOf`). No slash command carries them:
  * the System place's Release tab, a model and find reach them.
  */
-export function releaseOf(ctx: CommandContext): { review(): string; save(path: string, replace: boolean): string; read(path: string): string } {
+export function releaseOf(ctx: CommandContext): { review(): Promise<string>; save(path: string, replace: boolean): Promise<string>; read(path: string): string } {
   return {
-    review: () => formatReleaseBundle('Release readiness', buildReleaseBundle(ctx)),
-    save(path, replace) {
+    review: async () => formatReleaseBundle('Release readiness', await buildReleaseBundle(ctx)),
+    async save(path, replace) {
       const targetPath = requireShellPaths(ctx).resolveWorkspacePath(path);
       if (existsSync(targetPath) && !replace) throw new CapabilityRefusal(`${targetPath} already exists; nothing was written. Choose "Write over it" to replace it.`);
+      const bundle = await buildReleaseBundle(ctx);
       mkdirSync(dirname(targetPath), { recursive: true });
-      writeFileSync(targetPath, JSON.stringify(buildReleaseBundle(ctx), null, 2) + '\n', 'utf-8');
+      writeFileSync(targetPath, JSON.stringify(bundle, null, 2) + '\n', 'utf-8');
       return `Saved the release evidence to ${targetPath}.`;
     },
     read(path) {

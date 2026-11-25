@@ -644,7 +644,7 @@ function buildCandidates(request: string, schedule: ScheduleDetection, intents: 
       inspectRoute: 'google action:"status"',
       requiresConfirmation: false,
       missingFields: ['a connected Google account'],
-      userQuestion: 'Connect a Google account with /google connect, or take up credentials already on this machine with /google adopt, which would you like?',
+      userQuestion: 'Connect a Google account ("connect" on the Google tab of Mail, calendar and channels), or take up credentials already on this machine ("take up credentials on this machine" there): which would you like?',
     });
   }
 

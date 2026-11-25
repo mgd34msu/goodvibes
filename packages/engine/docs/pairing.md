@@ -11,7 +11,7 @@ The answer is a QR code (or a tappable deep link) displayed by the host surface 
 There are two token shapes in play, and both authenticate the same way at the network level:
 
 - **Per-device pairing tokens** (current). Every pairing mints its own named,
-  individually-revocable token. This is what a fresh `/devices pair device` scan, or a `pairing.handoff.create`
+  individually-revocable token. This is what a fresh scan from Pair something (Devices and network), or a `pairing.handoff.create`
   call, gives you today.
 - **The legacy shared token.** One bearer token every companion held before per-device
   pairing existed. It still authenticates until an operator explicitly turns it off, and
@@ -528,14 +528,12 @@ model:
 
 ## Integration examples
 
-### TUI `/devices pair device`
+### TUI: Pair something, A phone or another device
 
-In the TUI, `/devices pair device` (the "Pair something" action of `/devices`) opens the device-pairing modal:
-a QR of the `#pair=<token>` deep link plus the offer set.
-
-```
-/devices pair device
-```
+In the TUI, the Devices and network place (Ctrl+G, m) has Pair something on every tab; choosing A phone or another
+device opens the device-pairing modal: a QR of the `#pair=<token>` deep link plus the offer set. A script or a model
+reaches the same capability as `devices.pair`; it runs only in the program holding the conversation, and only when
+the owner presses it.
 
 The token the modal shows is an offer: no device is added until one uses it, and an unused
 offer stops working after 15 minutes. Reopening the modal shows the same offer while it is
@@ -582,7 +580,7 @@ it states the plan and asks for confirmation before acting (`-y`/`--yes` for the
 answer); an unreachable daemon, a rejected token, or a daemon too old to serve the mint verb are
 each refused by name.
 
-> **platform vs host wiring:** The TUI's `/devices pair device` and the `goodvibes-daemon pair` subcommand
+> **platform vs host wiring:** The TUI's Pair something (A phone or another device) and the `goodvibes-daemon pair` subcommand
 > are host-application wrappers, not platform exports. The primitives they compose,
 > `mintPairingHandoff`, `pairingQrContent`, `generateQrMatrix`, `renderQrToString`, and
 > `getOrCreateCompanionToken`, are all

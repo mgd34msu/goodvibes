@@ -129,52 +129,38 @@ Key remote API paths:
 
 ## High-signal commands
 
-`/remote` inspects, dispatches, and reviews self-hosted remote runners and artifacts. `/remote` alone opens its list of actions; each asks for what it needs, picking runners, pools and artifacts from lists. The actions most work reaches for:
+Self-hosted remote runners are the daemon's: it starts them, keeps their pools, contracts and what they hand back, and a runner goes on when the window that started it closes. The Work place (the menu, `Ctrl+G` then `m`) shows them on three tabs that read again by themselves; each control asks for what it needs, picking runners, pools and artifacts from lists. The controls most work reaches for:
 
-| Command | Does |
+| Control | Does |
 | --- | --- |
-| `/remote list` | List runners and their state |
-| `/remote show [connection]` | Show one connection in detail |
-| `/remote capabilities [runner]` | Show what a runner can execute and what holds it there: files, commands, approvals, artifacts, resume, and containment (an external runner is a host process held to its tools and write scope at each permission ask; nothing contains the process itself) |
-| `/remote recover [runner]` | Recover a runner's stalled work |
-| `/remote dispatch <task> [--template <kind>]` | Dispatch work to a runner |
-| `/remote dispatch-pool <pool> <task>` | Dispatch work to a runner pool |
-| `/remote export <runner>` | Export a runner's work record |
-| `/remote review <artifact>` | Show a produced artifact |
-| `/remote import <file>` | Import an exported record. Typed, it imports at once; it cannot be undone: a different artifact already held under the same id is replaced (`/remote artifact-export` it first to keep a copy). The model's import never replaces one: `Not imported: <path> would replace artifact <id>. Nothing was changed; run the import again with --yes to replace it.` |
-| `/remote setup`, `/remote setup-export <file>` | Review or export the remote setup |
+| Runners tab | List runners and their state |
+| Runners, `o` connection | Show one connection in detail |
+| Runners, `k` what it can do | Show what a runner can execute and what holds it there: files, commands, approvals, artifacts, resume, and containment (an external runner is a host process held to its tools and write scope at each permission ask; nothing contains the process itself) |
+| Runners, `h` how to recover | Recover a struggling runner's stalled work |
+| Runners, `d` start a runner | Start a runner on a task |
+| Runners, `D` start from a pool; Runner pools, `d` | Start a runner from a pool |
+| Runners, `e` save its work | Save a runner's work record |
+| Handed back, `Enter` review | Show a produced artifact |
+| Handed back, `i` bring one in | Bring in a saved record. It cannot be undone: a different artifact already held under the same id is replaced ("save to a file", `e`, keeps a copy first). The model's import never replaces one: `Not imported: <path> would replace artifact <id>. Nothing was changed; run the import again with --yes to replace it.` |
+| Runners, `u` setup, `U` save setup | Review or save the remote setup |
 
-A dispatched runner is an external agent that runs its own tools, so its tool ceiling is held at the one place this side decides: its permission asks. The runner is told its tools in its prompt, and an ask for a call outside them (a command from a runner without `exec`, an edit from a read-only one; a call of unknown kind counts as a command) is answered with a refusal before you or Jev are asked, and the reason is kept on the runner. A runner given a write scope has an edit outside it, or any command, refused the same way. `/remote contract <runner>` shows the tools and scope it is held to.
+A started runner is an external agent that runs its own tools, so its tool ceiling is held at the one place this side decides: its permission asks, which go through the daemon's gate under your mode. The runner is told its tools in its prompt, and an ask for a call outside them (a command from a runner without `exec`, an edit from a read-only one; a call of unknown kind counts as a command) is answered with a refusal before you or Jev are asked, and the reason is kept on the runner. A runner given a write scope has an edit outside it, or any command, refused the same way. Its contract (`Enter` on the runner) shows the tools and scope it is held to.
 
-## /channels command
+## Channels in Mail, calendar and channels
 
-`/channels` is one command in both terminal programs; `/channels` alone lists its actions, and a model or script running it bare gets "See your channels". In this app:
+There is no `/channels` any more: the channels are the daemon's, on the Channels tab of **Mail, calendar and channels** (`Ctrl+G` then `m`), the same in both terminal programs. Each channel has one state (working, needs a look, not working, not set up, switched off, not known) and why under one that is not working. On a channel:
 
-| Line | What you get |
-|---|---|
-| `/channels status` | Each channel the daemon has, on or off, ready or not |
-| `/channels setup <channel>` | What a channel needs to be set up (no value shown) |
-| `/channels doctor <channel>` | The daemon's checks on a channel and the repairs it offers |
-| `/channels test <channel>` | A real test message through the daemon, with the delivered or error outcome (sent at once; it cannot be called back) |
-| `/channels accounts` | The channel accounts: configured, linked, signed in |
-| `/channels rules [<channel>]` | The daemon's rules for who may reach the assistant on each channel (direct messages, groups, threads, mention, lists, allowed commands), with whether the channel is on in settings |
-| `/channels set-rules <channel> [--enabled on\|off] [--require-mention on\|off] [--dm-policy allow\|deny\|inherit] [--group-policy allow\|deny\|inherit] [--allow-users a,b\|none] ...` | Change those rules through the daemon; asks once first, because it changes who has access, and counts only when the owner types it |
-| `/channels profiles`, `profile`, `set-profile`, `remove-profile` | Per-channel model, provider and permission mode |
-| `/channels overview` | What the channels carry: route families, sessions, tasks, waiting approvals, remote contracts |
-| `/channels routes` | The route binding snapshot |
-| `/channels delivery` | The delivery snapshot: per-route delivery counts and last-error state |
-| `/channels open` | Opens the Routes view |
-| `/channels telegram-cursor` | Recover the Telegram update cursor |
+| Key | What you get | Capability |
+|---|---|---|
+| `Enter` | What it needs to be set up (no value shown) | `channels.setup` |
+| `f` | How it is configured | `channels.configured` |
+| `k` | The daemon's checks on it and the repairs it offers | `channels.doctor` |
+| `t` | A real test message (sent at once; it cannot be called back) | `channels.test` |
+| `w`, `e` | Who may reach the assistant there, and changing it (asked first: it changes who has access) | `channels.rules`, `channels.set-rules` |
+| `p`, `g`, `u` | The model and permission mode its sessions get; give them; use the defaults | `channels.profile`, `channels.set-profile`, `channels.remove-profile` |
+| `s` | The form that sets it up, above the place; the place says what was set up when it is submitted or left | `setup.chat-apps` |
 
-The Agent's own actions (`readiness`, `configured`, `guide`, `triage`, `send`, `deliveries`) are refused here, saying so. Pairing a channel (asking for every missing required value, then switching it on) is "Pair something" under `/devices`: `/devices pair channel <channel>`.
-
-Examples:
-
-```
-/channels routes
-/channels rules slack
-/channels set-rules slack --require-mention on --allow-users U123,U456
-```
+And for the channels as a whole: `n` sends a message (to a channel, a route, an incoming webhook address or a link, through the daemon's router; a receipt is kept), `d` what was sent, `v` how sends went, `i` what came in, `b` the routes, `O` what the channels carry, `y` which are set up, `h` what to set up next, `a` the accounts, `o` every channel's profile, `c` Telegram's saved reading position. Pairing a channel (asking for every missing required value, then switching it on) is Pair something in the Devices and network place: choose A chat channel, then the channel.
 
 ## GitHub event narration
 
@@ -224,7 +210,7 @@ Set `behavior.notifyAfterSeconds` in `/settings open behavior` (or `settings.jso
 Notifications are delivered in this order:
 
 1. **Desktop notification.** `notify-send` on Linux, `osascript` on macOS. The platform handles platform detection; the call is a silent no-op when neither is available.
-2. **Outbound webhook / ntfy topic.** If you have webhook URLs configured (via `/notify add <url>`), the notification is also sent as a plain-text POST to all configured endpoints. This works with ntfy.sh topics and any service accepting a plain POST body. Each address carries its own key, so it is kept in the secret store and `notifications.webhookUrls` holds only a `goodvibes://secrets/` reference to it; screens show only the address's host.
+2. **Outbound webhook / ntfy topic.** If you have webhook URLs configured (the daemon's one list, on the Notifications tab of Mail, calendar and channels: `Ctrl+G` then `m`), the notification is also sent as a plain-text POST to all configured endpoints. This works with ntfy.sh topics and any service accepting a plain POST body. Each address carries its own key, so it is kept in the secret store and `notifications.webhookUrls` holds only a `goodvibes://secrets/` reference to it; screens show only the address's host.
 
 ### Notification content
 

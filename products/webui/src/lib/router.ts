@@ -34,8 +34,8 @@ export type ViewId =
 
 /** The Work view's kind filter, plus `waiting` (only what waits for you), `checkpoints` (a session's Checkpoints tab) and `plan` (the work plan). */
 export type WorkTab = 'all' | 'waiting' | 'sessions' | 'agents' | 'processes' | 'checkpoints' | 'plan';
-export type LibraryTab = 'memory' | 'knowledge' | 'review' | 'about-you' | 'templates';
-export type PersonalTab = 'calendar' | 'mail' | 'channels' | 'occasions';
+export type LibraryTab = 'memory' | 'knowledge' | 'review';
+export type PersonalTab = 'calendar' | 'mail' | 'occasions';
 
 export interface AppUrlState {
   view: ViewId;

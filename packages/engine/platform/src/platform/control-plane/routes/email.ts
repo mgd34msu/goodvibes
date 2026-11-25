@@ -618,7 +618,9 @@ export function createEmailSendHandler(
             'This clientSendId was already used for a different message, so nothing was sent. Use a new id for a new message.',
             'CLIENT_SEND_ID_REUSED', 409, 'clientSendId');
         }
-        return earlier.result;
+        // The first answer, marked: nothing went out this time, and the caller can say so.
+        return earlier.result.then((answer) => answer !== null && typeof answer === 'object' && !Array.isArray(answer)
+          ? { ...answer, repeated: true } : answer);
       }
       const result = sendOnce(to, subject, body, inReplyTo, clientSendId);
       recent.set(clientSendId, { fingerprint, at: now, result });

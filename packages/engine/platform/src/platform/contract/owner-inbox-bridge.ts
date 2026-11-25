@@ -74,11 +74,20 @@ function optionsFor(escalation: Escalation): readonly string[] {
   return isOwnerAcceptance(escalation) ? ACCEPTANCE_ANSWERS : FAILURE_ANSWERS;
 }
 
+/**
+ * A failed step of work run by agents (the daemon's Work, or a program's own agent contract): a state shown on the work
+ * with its controls, never posted as a question. Only a session-mode contract (its steps are the conversation's own
+ * turns) still asks.
+ */
+function isWorkStepFailure(contract: ContractView, escalation: Escalation): boolean {
+  return escalation.failurePause === true && escalation.scope === 'unit' && !isOwnerAcceptance(escalation) && contract.sessionMode !== true;
+}
+
 function titleFor(contract: ContractView, escalation: Escalation): string {
   const what = (contract.goal || contract.ask).replace(/\s+/g, ' ').trim();
-  const lead = escalation.failurePause !== true ? 'A contract needs your answer'
-    : isOwnerAcceptance(escalation) ? 'Accept a contract\'s unchecked result?'
-      : 'Retry or cancel a contract\'s failed work?';
+  const lead = escalation.failurePause !== true ? 'A piece of work needs your answer'
+    : isOwnerAcceptance(escalation) ? 'Accept a piece of work\'s result that was not checked?'
+      : 'Run again or stop a piece of work that failed?';
   const title = what.length > 0 ? `${lead}: ${what}` : lead;
   return title.length <= TITLE_CHARS ? title : `${title.slice(0, TITLE_CHARS - 3)}...`;
 }
@@ -130,6 +139,9 @@ export function bridgeContractQuestionsToInbox(
   };
 
   const post = (contract: ContractView, escalation: Escalation, note?: string): void => {
+    // A failed step of the daemon's Work is not a question: the work stops at that step and the Work place shows it,
+    // with its own controls (run it again, go on without it, stop the work). Nothing is asked of anyone.
+    if (isWorkStepFailure(contract, escalation)) return;
     try {
       inbox.postNow({
         kind: 'question',
@@ -137,7 +149,7 @@ export function bridgeContractQuestionsToInbox(
         title: titleFor(contract, escalation),
         detail: clipDetail(note === undefined ? escalation.question : `${note}\n\n${escalation.question}`),
         options: optionsFor(escalation),
-        askedBy: `contract ${contract.id}`,
+        askedBy: 'your work',
         metadata: { contractId: contract.id, escalationId: escalation.id },
       }, 'contracts');
     } catch (error) {

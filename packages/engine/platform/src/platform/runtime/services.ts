@@ -43,7 +43,7 @@ import type { FeatureAnnouncementStore } from './feature-announcements.js';
 import type { PowerManager, PowerPlatformSeam } from '../power/index.js';
 import type { AppendOnlyRetentionScheduler } from './retention/append-only-registry.js';
 import { assertConfiguredProjectContextReady } from '../knowledge/index.js';
-import { GOODVIBES_AGENT_KNOWLEDGE_DB_FILE, REGULAR_KNOWLEDGE_DB_FILE } from '../knowledge/store-config.js';
+import { REGULAR_KNOWLEDGE_DB_FILE } from '../knowledge/store-config.js';
 import { createRuntimeAcquisitionScope, type RuntimeAcquisitionScope } from './acquisition-scope.js';
 import { buildRuntimeGraph } from './runtime-graph.js';
 import type { JudgmentServices } from './judgment-services.js';
@@ -137,6 +137,13 @@ export interface SurfaceRoots {
    * user, for a product that runs once per home whatever directory it starts in).
    */
   readonly stateScope?: 'project' | 'home' | undefined;
+  /**
+   * The folder whose `.goodvibes/` holds this host's own records in place of the working directory's
+   * (ShellPathService `recordsRoot`): the daemon's records folder in its home, so the daemon keeps one set of
+   * sessions, approvals, devices, cluster identity and the rest whatever folder it was started in. Absent: the
+   * working directory (a terminal program).
+   */
+  readonly recordsRoot?: string | undefined;
   /** The activity-log directory the retention sweep prunes; default `<home>/.goodvibes/logs`. */
   readonly logDir?: string | undefined;
   /** The telemetry-ledger directory the retention sweep prunes; default `<home>/.goodvibes/telemetry`. */
@@ -303,11 +310,13 @@ export interface ProductComposition<X extends object = Record<never, never>> {
   /** `platform` resumes contracts left on disk once the graph is up; `product` resumes them itself, later in its boot. Default `platform`. */
   readonly contractRecovery?: 'platform' | 'product' | undefined;
   /**
-   * Which store holds the project's knowledge and plan. `wiki` (default): the project wiki, beside the
-   * agent's own knowledge and the home graph. `agent`: the agent's own knowledge store; there is no wiki
-   * store and `knowledgeService` is the agent's.
+   * Which knowledge files this program opens. `wiki` (default): the project wiki in this program's state folder
+   * (the daemon's one store, for the terminal app and the daemon), beside the agent-routes store and the home graph.
+   * `daemon`: only the daemon's one store, where the daemon keeps it (the project context prepared with
+   * `inDaemonStateFolder`); no knowledge file of this program's own is opened, and `agentKnowledgeService` is
+   * `knowledgeService`.
    */
-  readonly knowledge?: 'wiki' | 'agent' | undefined;
+  readonly knowledge?: 'wiki' | 'daemon' | undefined;
   /**
    * `claim` makes this graph the single live writer of `<home>/.goodvibes/<surface root>/`: a second
    * process composing over the same home is refused with the holder's pid. For a product that runs once
@@ -338,8 +347,17 @@ export interface RuntimeServices {
   readonly nativeDataWriter?: import('./native-reader-compatibility.js').NativeDataWriteOwner | undefined;
   /** The actual recorded autonomous host, borrowed by authenticated native HTTP writes. */
   readonly nativeMutationHost?: import('../permissions/external-request.js').ExternalPermissionHost | undefined;
+  /** The host a natively admitted daemon method is decided by: no folder trust (ComposedRuntimeServices). */
+  readonly daemonMethodHost?: import('../permissions/external-request.js').ExternalPermissionHost | undefined;
+  /** Raises an ask, behind the folder-trust question of the project the ask names (ComposedRuntimeServices). */
+  readonly requestApproval?: import('./permissions/permission-composition.js').ApprovalRaiser | undefined;
   readonly workingDirectory: string;
   readonly homeDirectory: string;
+  /**
+   * End every request the daemon holds open while it waits for something (a host's take of rewind questions), so its
+   * listener can close at once at stop: called by the daemon before it closes its listener, before the graph's own close.
+   */
+  readonly endLongWaits?: (() => void) | undefined;
   /**
    * The `.goodvibes/<surface root>/` segment this composition's own state lives
    * under. Already returned by createRuntimeServices; declaring it here is what
@@ -401,6 +419,14 @@ export interface RuntimeServices {
   readonly mailboxReaders?: import('../email/inbound/mailbox-consumers.js').MailboxReaders | undefined;
   /** The Agent's own stores (notes, personas, routines, drafts, artifacts) the capabilities that manage them run on (capabilities/builtin/agent-stores.ts); the daemon sets it. */
   readonly agentStores?: import('../capabilities/builtin/agent-stores.js').AgentStoreRunner | undefined;
+  /** Mail, calendar and channels: the daemon's channel router and the sends it keeps receipts of (capabilities/builtin/channel-send.ts). */
+  readonly channelSends?: import('../capabilities/builtin/channel-send.js').ChannelSendCapabilityServices['channelSends'] | undefined;
+  /** The daemon's plans before they run, where a piece of work proposed with its plan waits (workflow/work-ledger/work-plans.ts); the daemon sets it. */
+  readonly workPlans?: import('../workflow/work-ledger/work-plans.js').WorkPlans | undefined;
+  /** A project's own plans before they run (Work is kept per project), made on its first use. */
+  readonly workPlansFor?: ((project: string) => Promise<import('../workflow/work-ledger/work-plans.js').WorkPlans>) | undefined;
+  /** Blind model comparisons, run on the daemon's providers and kept in its artifact store (capabilities/builtin/compare.ts); the daemon sets it. */
+  readonly modelComparisons?: import('../capabilities/builtin/compare.js').ModelComparisonRunner | undefined;
   readonly userPermissionRuleStore: UserPermissionRuleStore; // durable user-origin permission rules (remembered approvals); permissions.rules.* surface
   readonly sessionBroker: SharedSessionBroker;
   readonly deliveryManager: AutomationDeliveryManager;
@@ -550,8 +576,14 @@ export {
  */
 export interface ComposedRuntimeServices extends RuntimeServices {
   readonly surface: SessionSurface;
-  /** The recorded autonomous host every protocol and native mutation ask in this graph goes through. */
+  /** The recorded autonomous host every protocol ask in this graph goes through (folder trust in front of it). */
   readonly nativeMutationHost: import('../permissions/external-request.js').ExternalPermissionHost;
+  /**
+   * The host a natively admitted daemon method is decided by (schedules and automation jobs, channel routing and
+   * drafts, the owner profile and occasions, a settings import): it acts on what the daemon keeps, so no folder's
+   * trust is asked or holds it; its one decision is the call's own (runtime-graph.ts).
+   */
+  readonly daemonMethodHost: import('../permissions/external-request.js').ExternalPermissionHost;
   /** The project's wiki store: planning, the work ledger and native intake read and write it. */
   readonly knowledgeStore: KnowledgeStore;
   readonly permissionManager: PermissionManager;
@@ -624,7 +656,7 @@ export function composeRuntimeServices<X extends object = Record<never, never>>(
   assertConfiguredProjectContextReady(
     product.hostSeams.configManager,
     product.roots.workingDir,
-    product.knowledge === 'agent' ? GOODVIBES_AGENT_KNOWLEDGE_DB_FILE : REGULAR_KNOWLEDGE_DB_FILE,
+    REGULAR_KNOWLEDGE_DB_FILE,
   );
   const scope = createRuntimeAcquisitionScope('RuntimeServices');
   // A constructor that throws part-way would otherwise leave every timer, watch and

@@ -41,10 +41,10 @@ export interface SystemSessionServices {
     } | undefined;
     /** Whether this program is working (system-program.ts `health.*`), in the program's own words. */
     readonly health?: SystemHealthServices | undefined;
-    /** Release readiness of this project, from this session (the terminal app's). */
+    /** Release readiness of this project, from this session (the terminal app's); the remote runners are the daemon's, read when asked. */
     readonly release?: {
-      review(): string;
-      save(path: string, replace: boolean): string;
+      review(): Promise<string>;
+      save(path: string, replace: boolean): Promise<string>;
       read(path: string): string;
     } | undefined;
     /** This program's own start: what its setup has, what is not working, its services, the review as a file, links to its views. */
@@ -65,9 +65,18 @@ export interface SystemSessionServices {
       subscribe(onChange: () => void): () => void;
       /** Every notice shown is seen: the status bar's unread count goes. */
       markSeen(): void;
+      /**
+       * Keep a notice the daemon told (a purchase notice, a report such as "This machine joined the group") in this
+       * program's notification history; `domain` is the kind it is listed as (`payments` for a purchase).
+       */
+      record?(notice: { readonly key: string; readonly title: string; readonly body: string; readonly timestamp: number; readonly domain?: string | undefined }): void;
     } | undefined;
+    /** Open one `/setup` topic's form in this program (its own form over the settings it reads); the line to show, if any. */
+    readonly setupTopic?: ((topic: string) => Promise<string | void>) | undefined;
     /** The goodvibes://open link of each of this program's views. */
     readonly viewLinks?: (() => readonly string[]) | undefined;
+    /** The interface families and routes this program's integration helpers serve: what a support folder records of them. */
+    readonly integrationHelpers?: (() => { readonly apiFamilies: readonly string[]; readonly routes: readonly string[] }) | undefined;
     /** Every command and key of this program as text, one command's actions, or the keys; opens the palette for a person. */
     readonly help?: ((about: string) => Promise<string>) | undefined;
   } | undefined;

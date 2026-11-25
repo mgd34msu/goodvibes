@@ -66,7 +66,7 @@ export function startFreshConversation(ctx: FreshConversationContext, surface?: 
       code: 'NO_SESSION_STORE',
       state: 'nothing was cleared',
       reason: 'This session has no session store, so the conversation on screen cannot be saved before it is cleared',
-      next: ['Keep a copy with /session save-file markdown <path>, then clear'],
+      next: ['Keep a copy with This conversation, "Save or export this conversation as a file", then clear'],
     }));
   }
   let savedAs: string | null = null;

@@ -77,7 +77,8 @@ export async function runDaemonBootGuarantees(
   configManager: ConfigManager,
   services: DaemonBootServices,
 ): Promise<void> {
-  ensureDaemonActivityLog(services.shellPaths.workingDirectory, configManager);
+  // The daemon's own log is one of its records: in its home's records folder when the host gave one.
+  ensureDaemonActivityLog(services.shellPaths.recordsRoot ?? services.shellPaths.workingDirectory, configManager);
   // What the upgrade steps carried forward from 3.3.1 is said once, as one receipt the next terminal or web UI shows.
   sayCarriedForwardThrough((text) => { daemonReceiptStoreAt(daemonReceiptsPath(configManager)).record(text); });
   await sweepPlaintextCredentialsOnBoot(configManager, services);
@@ -188,5 +189,5 @@ async function sweepPlaintextCredentialsOnBoot(
  */
 export interface DaemonBootServices {
   readonly secretsManager: SweepableSecrets & { delete(key: string): Promise<void> };
-  readonly shellPaths: { readonly workingDirectory: string; readonly homeDirectory: string };
+  readonly shellPaths: { readonly workingDirectory: string; readonly homeDirectory: string; readonly recordsRoot?: string | undefined };
 }

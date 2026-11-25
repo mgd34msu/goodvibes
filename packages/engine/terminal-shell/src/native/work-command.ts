@@ -7,25 +7,27 @@
  *    check, stop and resume a piece of work, answer what it asks, run a failed
  *    step again, change what it may spend. Each runs through its daemon method
  *    as the person's own request; nothing of it runs in this program.
- *  - asking for work: in your own words (the host decides whether it is an
- *    answer or a piece of work), as a goal with what done means, or from a
- *    file; this program keeps the journal that makes a lost answer safe to
- *    send again, and the input waiting to be admitted.
+ *  - asking for work: in your own words (the daemon decides whether it is an
+ *    answer or a piece of work), or as new work with what done means, written
+ *    in the form or read from a file; this program keeps a copy of the work
+ *    asked for and of the message typed until the daemon answers, shown in
+ *    the place's Unanswered list (`unansweredSource`).
  *  - the project's checklist (builtin/checklist.ts), kept by this program in
  *    the shared file.
  */
 import {
   CHECKLIST_CAPABILITIES, CHECKLIST_ITEMS_LIST, TASKS_CAPABILITIES, WORK_INTAKE_CAPABILITIES, WORK_ITEMS_LIST, WORK_METHOD_CAPABILITIES, WORK_QUESTIONS_LIST,
-  WORK_STEPS_LIST, checklistStateWords,
+  WORK_STEPS_LIST, WORK_FAILED_STEPS_LIST, checklistStateWords,
   type CapabilityDefinition, type ChecklistCapabilityServices, type TasksCapabilityServices, type WorkIntakeCapabilityServices,
 } from '@goodvibes/engine/platform/platform/capabilities';
 import { tasksServices } from '../tasks-runtime-commands.js';
 import {
+  NO_TYPED_MESSAGE_WAITS,
   nativeConversationIntakeLines,
   type NativeConversationIntakeActions,
   type NativeConversationIntakeState,
 } from './native-conversation-intake.js';
-import { nativeWorkSubmissionLines } from './native-work-submission.js';
+import { NO_SENT_WORK_WAITS, nativeWorkSubmissionLines } from './native-work-submission.js';
 import { NATIVE_SUBMISSION_MAX_BYTES, NativeWorkSourceError, validateNativeWorkSource, type NativeWorkSource } from './native-work-submission-source.js';
 import { randomUUID } from 'node:crypto';
 import { tmpdir } from 'node:os';
@@ -68,12 +70,20 @@ function requestsOf() {
 }
 const clean = (lines: readonly string[]): string => lines.map((line) => line.replace(/[\u0000-\u001f\u007f-\u009f‪-‮⁦-⁩]/g, ' ')).join('\n');
 
-async function submission(ctx: CommandActionContext, act: 'submit' | 'status' | 'retry' | 'discard', path: string): Promise<string> {
+/** This program's link to the daemon for work asked for, or why there is none. */
+function sentView(ctx: CommandActionContext): Required<Pick<NativeWorkLedgerView, 'submitFile' | 'submissionStatus' | 'retrySubmission' | 'discardSubmission'>> {
   const view = hostOf().view(ctx);
-  if (!view?.submitFile || !view.submissionStatus || !view.retrySubmission || !view.discardSubmission) throw commandRefusal('Submitting work from a file is not available in this shell.');
+  if (!view?.submitFile || !view.submissionStatus || !view.retrySubmission || !view.discardSubmission) throw commandRefusal('Asking for new work is not available in this program.');
+  return view as Required<Pick<NativeWorkLedgerView, 'submitFile' | 'submissionStatus' | 'retrySubmission' | 'discardSubmission'>>;
+}
+
+async function submission(ctx: CommandActionContext, act: 'submit' | 'status' | 'retry' | 'discard', path: string): Promise<string> {
+  const view = sentView(ctx);
   const result = act === 'submit' ? await view.submitFile(path)
     : act === 'status' ? await view.submissionStatus()
       : act === 'retry' ? await view.retrySubmission() : await view.discardSubmission();
+  // Told to every screen showing the Unanswered list: what waits here changed.
+  noteUnansweredChanged();
   return clean(nativeWorkSubmissionLines(result));
 }
 
@@ -105,29 +115,97 @@ async function submitNewWork(ctx: CommandActionContext, goal: string, criteriaTe
   }
 }
 
-/** Asking for work and its journal (builtin/work-intake.ts), over this program's host link, for one command context. */
+/** Asking for work and what has no answer yet (builtin/work-intake.ts), over this program's link to the daemon, for one command context. */
 export function workIntakeServices(ctx: CommandActionContext): NonNullable<WorkIntakeCapabilityServices['workIntake']> | undefined {
   if (!installed) return undefined;
   return {
     async request(goal) { await requestsOf().submit(ctx, goal); return ''; },
-    newWork: (goal, criteria) => submitNewWork(ctx, goal, criteria),
-    submitFile: (path) => submission(ctx, 'submit', unquote(path)),
-    submission: (act) => submission(ctx, act, ''),
-    async intake(act) { await intake(ctx, act); return ''; },
+    newWork: (input) => input.file !== undefined && input.file.trim() !== ''
+      ? submission(ctx, 'submit', unquote(input.file))
+      : submitNewWork(ctx, input.goal ?? '', input.criteria ?? ''),
+    sent: (act) => submission(ctx, act, ''),
+    typed: (act) => intake(ctx, act),
   };
 }
 
-async function intake(context: CommandActionContext, act: 'status' | 'retry' | 'resume' | 'cancel'): Promise<void> {
+async function intake(context: CommandActionContext, act: 'status' | 'retry' | 'resume' | 'cancel'): Promise<string> {
   const ctx = context as CommandActionContext & IntakeContext;
   const actions = ctx.nativeConversationIntake;
-  if (!actions) throw commandRefusal('Input admission is not available in this shell.');
+  if (!actions) throw commandRefusal('Messages are not sent through the daemon in this program.');
   const result = await (act === 'status' ? actions.status() : act === 'retry' ? actions.retry() : act === 'resume' ? actions.resume() : actions.cancel());
-  ctx.print(nativeConversationIntakeLines(result).join('\n'));
+  noteUnansweredChanged();
+  const said = clean(nativeConversationIntakeLines(result));
   if (result?.turnReady || (hostOf().allowHostedDispatch && result?.hostedTurn)) {
     await ctx.dispatchNativeIntakeTurn?.(result);
-    // A local turn dispatched here has ended: its intake record has nothing left to fence.
+    // A local turn dispatched here has ended: its saved copy has nothing left to guard.
     if (result.turnReady && ctx.dispatchNativeIntakeTurn) await result.finishTurn?.();
   }
+  return said;
+}
+
+// ---------------------------------------------------------------------------
+// Unanswered: the work you asked for and the message you typed that have no answer yet
+// ---------------------------------------------------------------------------
+
+/** One thing in the Unanswered list: its kind decides its controls. */
+export interface UnansweredItem {
+  readonly id: string;
+  /** `sent-work`: work you asked for; `typed-message`: a message you typed. */
+  readonly kind: 'sent-work' | 'typed-message';
+  readonly state: 'sent-work' | 'typed-message';
+  readonly title: string;
+  readonly said: string;
+}
+
+const unansweredListeners = new Set<() => void>();
+function noteUnansweredChanged(): void { for (const listener of unansweredListeners) listener(); }
+const firstLine = (text: string): string => {
+  const line = text.split('\n').map((part) => part.trim()).find(Boolean) ?? '';
+  return line.length > 72 ? `${line.slice(0, 69)}...` : line;
+};
+
+/**
+ * The Work place's Unanswered list (session source `unanswered`): read when the place opens and on `r`,
+ * and again after each of its controls. Each read asks the daemon once for each kind; work it already has
+ * is settled by that read and leaves the list (it is in Work).
+ */
+export function unansweredSource(ctx: CommandActionContext): { read(): Promise<readonly UnansweredItem[]>; subscribe(onChange: () => void): () => void } {
+  return {
+    async read() {
+      const items: UnansweredItem[] = [];
+      const view = installed ? hostOf().view(ctx) : undefined;
+      if (view?.submissionStatus) {
+        let state = await view.submissionStatus();
+        // Another act on the same request is in flight (check, send again, drop: one at a time): its answer carries
+        // no request, and read as such the kept request would vanish from the list. Wait for that act to end.
+        for (let tries = 0; tries < 40 && state?.status === 'pending' && !state.request; tries += 1) {
+          await new Promise<void>((resolve) => { setTimeout(resolve, 250); });
+          state = await view.submissionStatus();
+        }
+        if (state?.status === 'pending' && !state.request) throw new Error('Work you asked for is being checked; it is listed again once that is done.');
+        // What is kept here that could not be read is never shown as nothing waiting: the list says why.
+        if (state && !state.request && state.status === 'unavailable' && state.message !== NO_SENT_WORK_WAITS) throw new Error(state.message);
+        if (state?.request && state.status !== 'submitted' && state.status !== 'discarded') {
+          items.push({ id: `sent:${state.request.requestId}`, kind: 'sent-work', state: 'sent-work', title: firstLine(state.request.goal) || 'Work you asked for', said: state.message });
+        }
+      }
+      const intakeActions = (ctx as CommandActionContext & IntakeContext).nativeConversationIntake;
+      if (intakeActions) {
+        let state = await intakeActions.status();
+        // As above: an act in flight on the same message answers with no message; wait for it.
+        for (let tries = 0; tries < 40 && state?.status === 'pending' && !state.request; tries += 1) {
+          await new Promise<void>((resolve) => { setTimeout(resolve, 250); });
+          state = await intakeActions.status();
+        }
+        if (state && !state.request && state.status === 'unavailable' && state.message !== NO_TYPED_MESSAGE_WAITS) throw new Error(state.message);
+        if (state?.request && (state.status !== 'recorded' || state.nextStep !== undefined)) {
+          items.push({ id: `typed:${state.request.requestId}`, kind: 'typed-message', state: 'typed-message', title: firstLine(state.request.text ?? '') || 'A message you typed', said: state.message });
+        }
+      }
+      return items;
+    },
+    subscribe(onChange) { unansweredListeners.add(onChange); return () => { unansweredListeners.delete(onChange); }; },
+  };
 }
 
 // ---------------------------------------------------------------------------
@@ -136,7 +214,11 @@ async function intake(context: CommandActionContext, act: 'status' | 'retry' | '
 
 interface ListedWork {
   readonly id?: unknown; readonly title?: unknown; readonly state?: unknown;
-  readonly run?: { readonly questions?: readonly { readonly id?: unknown; readonly question?: unknown }[]; readonly steps?: readonly { readonly id?: unknown; readonly title?: unknown; readonly status?: unknown }[] } | null;
+  readonly run?: {
+    readonly questions?: readonly { readonly id?: unknown; readonly question?: unknown }[];
+    readonly steps?: readonly { readonly id?: unknown; readonly title?: unknown; readonly status?: unknown }[];
+    readonly failedSteps?: readonly { readonly id?: unknown; readonly title?: unknown }[];
+  } | null;
   readonly plan?: { readonly steps?: readonly { readonly id?: unknown; readonly title?: unknown }[] } | null;
 }
 const text = (value: unknown): string => typeof value === 'string' ? value : '';
@@ -174,6 +256,16 @@ defineList<CommandActionContext>({
   operator: { method: 'capabilities.run', input: { id: 'work.list' }, rows: { from: 'data.works', where: { field: 'id', equals: '{work}' }, each: 'run.steps', value: 'id', label: 'title', state: 'status' } },
 });
 defineList<CommandActionContext>({
+  name: WORK_FAILED_STEPS_LIST,
+  async read(ctx, earlier) {
+    const work = (await listedWork(ctx)).find((entry) => text(entry.id) === earlier.work);
+    // The step the work stopped at when it failed: what running a step again and going on without one choose from.
+    return (work?.run?.failedSteps ?? []).filter((entry) => text(entry.id))
+      .map((entry): ListRow => ({ value: text(entry.id), label: text(entry.title) || text(entry.id), state: 'failed' }));
+  },
+  operator: { method: 'capabilities.run', input: { id: 'work.list' }, rows: { from: 'data.works', where: { field: 'id', equals: '{work}' }, each: 'run.failedSteps', value: 'id', label: 'title' } },
+});
+defineList<CommandActionContext>({
   name: CHECKLIST_ITEMS_LIST,
   async read(ctx) {
     const store = (ctx as CommandActionContext & ChecklistContext).workspace?.workPlan;
@@ -194,7 +286,7 @@ type WorkAction = ActionDescription<CommandActionContext>;
 /** Asking for work and its journal, run here through this program's link to the host. */
 function onIntake(definition: CapabilityDefinition<WorkIntakeCapabilityServices>): WorkAction {
   return sessionCapabilityAction<CommandActionContext, WorkIntakeCapabilityServices>(definition, (ctx) => ({ workIntake: workIntakeServices(ctx) }),
-    { terminalOnly: 'It runs through this program\'s link to the host, which keeps the journal that makes a resend safe.' });
+    { terminalOnly: 'It runs in the program you typed in, which keeps a copy of what it sent until the daemon answers.' });
 }
 
 /** A Work capability that runs on the daemon: through `capabilities.run`, as the person's own request. */
@@ -225,16 +317,16 @@ export const WORK_COMMAND: CommandDescription<CommandActionContext> = {
   title: 'Work',
   // Bare `/work` opens the Work place; every action is a control there.
   opens: 'work',
-  summary: 'Your work: ask for it, start, check, stop or resume it, answer what it asks, run a failed step again, its spending limit, and the project\'s checklist',
+  summary: 'Your work: ask for it, start, check, stop or resume it, answer what it asks, run a failed step again or go on without it, its spending limit, and the project\'s checklist',
   group: 'Agents and work',
   firstScreenRows: [
     'list', 'new', 'request',
     { label: 'Start, check, stop or resume work…', actions: ['start', 'status', 'cancel', 'resume'] },
-    { label: 'Answer it, run a step again, its spending limit…', actions: ['answer', 'retry', 'budget'] },
+    { label: 'Answer it, run a failed step again or go on without it, its spending limit…', actions: ['answer', 'retry', 'go-on-without', 'budget'] },
     { label: 'A plan waiting for you…', actions: ['approve', 'step-edit', 'step-drop', 'step-move', 'plan-redo', 'plan-discard'] },
     { label: 'Tasks running in the background…', actions: TASKS_CAPABILITIES.map((definition) => definition.actionId) },
-    { label: 'Submit work from a file…', actions: ['submit-file', 'submission', 'submission-retry', 'submission-discard'] },
-    { label: 'Input waiting to be admitted…', actions: ['intake', 'intake-retry', 'intake-resume', 'intake-cancel'] },
+    { label: 'Work you asked for that has no answer…', actions: ['submission', 'submission-retry', 'submission-discard'] },
+    { label: 'A message that has no answer…', actions: ['intake', 'intake-retry', 'intake-resume', 'intake-cancel'] },
     { label: 'The checklist…', actions: CHECKLIST_CAPABILITIES.map((definition) => definition.actionId) },
   ],
   actions: [

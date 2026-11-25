@@ -77,7 +77,9 @@ export function deliverableOutput(contract: Pick<Contract, 'units' | 'groups'>):
   return parts.filter((part) => part.length > 0).join('\n\n');
 }
 
-const unitList = (ids: readonly string[]): string => `unit${ids.length === 1 ? '' : 's'} ${ids.join(', ')}`;
+/** Steps named by their titles, as a person reads them. */
+const unitList = (names: readonly string[]): string => `step${names.length === 1 ? '' : 's'} ${names.join(', ')}`;
+const stepName = (unit: Pick<Contract['units'][number], 'id' | 'title'>): string => `"${(unit.title || unit.id).replace(/\s+/g, ' ').trim()}"`;
 
 /**
  * How the units' work was checked, when the decision model could not judge
@@ -91,9 +93,9 @@ export function unitCheckingLines(contract: Pick<Contract, 'units' | 'isolation'
   const judged: string[] = [], undelivered: string[] = [];
   for (const unit of contract.units) {
     const last = unit.checks.findLast((check) => check.trigger !== 'turn-end');
-    if (last?.notJudged !== undefined) notJudged.set(last.notJudged, [...(notJudged.get(last.notJudged) ?? []), unit.id]);
-    else if ((unit.status === 'passed' || unit.status === 'held-merge') && (last?.decisionIds.length ?? 0) > 0) judged.push(unit.id);
-    else if (unit.status === 'failed' || unit.status === 'cancelled') undelivered.push(`${unit.id} (${unit.status}${unit.failureReason === undefined ? '' : `: ${unit.failureReason}`})`);
+    if (last?.notJudged !== undefined) notJudged.set(last.notJudged, [...(notJudged.get(last.notJudged) ?? []), stepName(unit)]);
+    else if ((unit.status === 'passed' || unit.status === 'held-merge') && (last?.decisionIds.length ?? 0) > 0) judged.push(stepName(unit));
+    else if (unit.status === 'failed' || unit.status === 'cancelled') undelivered.push(`${stepName(unit)} (${unit.status === 'failed' ? 'failed' : 'left out'}${unit.failureReason === undefined ? '' : `: ${unit.failureReason}`})`);
   }
   if (notJudged.size === 0) return [];
   return [
@@ -132,15 +134,15 @@ export function describeContractOutcome(contract: Pick<Contract, 'id' | 'criteri
   // A result no decision model read was accepted by the owner: its criteria were not checked.
   if (last !== undefined && last.decisionIds.length === 0 && last.goal.outcome === 'confirm') {
     const commit = contract.commit === undefined ? '' : `; ${contract.commit.note}`;
-    return `Contract ${contract.id} accepted by the owner (${judged.length} criteri${judged.length === 1 ? 'on' : 'a'} not independently checked: no decision model was in use)${commit}`;
+    return `The work is done, its result accepted by you (${judged.length} result${judged.length === 1 ? '' : 's'} not checked: no decision model was in use)${commit}`;
   }
   const nudges = contract.units.flatMap((unit) => [unit, ...(unit.attemptUnits ?? [])]).reduce((total, unit) => total + unit.nudges.length, 0);
   const excluded = contract.criteria.filter((criterion) => criterion.disposition === 'excluded').length;
   const parts = [
-    `${met} of ${judged.length} criteri${judged.length === 1 ? 'on' : 'a'} met`,
+    `${met} of ${judged.length} result${judged.length === 1 ? '' : 's'} met`,
     `${nudges} correction${nudges === 1 ? '' : 's'}`,
-    ...(excluded > 0 ? [`${excluded} excluded: requires an agent arrangement`] : []),
+    ...(excluded > 0 ? [`${excluded} left out: they need a different way of running the steps`] : []),
   ];
   const commit = contract.commit === undefined ? '' : `; ${contract.commit.note}`;
-  return `Contract ${contract.id} passed (${parts.join(', ')})${commit}`;
+  return `The work is done (${parts.join(', ')})${commit}`;
 }

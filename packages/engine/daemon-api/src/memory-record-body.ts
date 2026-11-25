@@ -162,11 +162,15 @@ export function parseMemoryRecordAddBody(body: JsonRecord): MemoryRecordAddInput
   const provenance = readProvenanceField(body);
   const id = readString(body, 'id');
   if (id instanceof Response) return id;
+  const project = readString(body, 'project');
+  if (project instanceof Response) return project;
   return {
     ...(id.value ? { id: id.value } : {}),
     cls: cls.value,
     summary: summary.value,
     ...(scope.value ? { scope: scope.value } : {}),
+    // Only a "this project" record is for a project.
+    ...(project.value && (scope.value ?? 'project') === 'project' ? { project: project.value } : {}),
     ...(detail.value ? { detail: detail.value } : {}),
     ...(tags.value && tags.value.length > 0 ? { tags: tags.value } : {}),
     ...(provenance ? { provenance } : {}),
@@ -203,8 +207,11 @@ export function parseMemoryRecordFilterBody(body: JsonRecord): MemoryRecordSearc
   // A negative limit would reach Array.prototype.slice(0, -n), which keeps all but the last n.
   const limit = readNumber(body, 'limit', (value) => Number.isInteger(value) && value >= 0, 'a whole number of at least 0');
   if (limit instanceof Response) return limit;
+  const project = readString(body, 'project');
+  if (project instanceof Response) return project;
   return {
     ...(scope.value ? { scope: scope.value } : {}),
+    ...(project.value ? { project: project.value } : {}),
     ...(cls.value ? { cls: cls.value } : {}),
     ...(tags.value && tags.value.length > 0 ? { tags: tags.value } : {}),
     ...(query.value ? { query: query.value } : {}),
@@ -260,9 +267,12 @@ export function parseMemoryRecordUpdateBody(body: JsonRecord): MemoryRecordUpdat
   if (validFrom instanceof Response) return validFrom;
   const validUntil = readNullableNumber(body, 'validUntil');
   if (validUntil instanceof Response) return validUntil;
+  const project = readString(body, 'project');
+  if (project instanceof Response) return project;
   return {
     ...(cls.value ? { cls: cls.value } : {}),
     ...(scope.value ? { scope: scope.value } : {}),
+    ...(project.value ? { project: project.value } : {}),
     ...(summary.value ? { summary: summary.value } : {}),
     ...(detail !== undefined ? { detail } : {}),
     ...(tags.value ? { tags: tags.value } : {}),

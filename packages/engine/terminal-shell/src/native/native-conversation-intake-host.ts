@@ -1,6 +1,7 @@
 import type { GatePresetName } from '@goodvibes/engine/platform/platform/gate/presets';
 import { createNativeHostFetch, NativeHostSelectionChangedError } from './native-host-fetch.js';
 import { createNativeHostedTurnClient } from './native-hosted-turn.js';
+import { inProjectFolder } from './native-project-folder.js';
 import { isNativeOwnerPrincipal } from './native-paired-principal.js';
 import { createOperatorNativeWorkExecutionClient } from '@goodvibes/engine/platform/platform/workflow/work-ledger/native-execution-client';
 import { createOperatorApiClient, type OperatorRemoteClient } from '@goodvibes/engine/operator-client';
@@ -16,7 +17,8 @@ export function createNativeConversationIntakeBinding(host: NativeSubmissionHost
     let disposed = false;
     // The engine may verify a queued permit after this intake operation has detached.
     // Each verification opens a fresh connection, fenced to the exact selected host.
-    const invoke = (async (...args: Parameters<OperatorRemoteClient['invoke']>) => {
+    // Each call names this program's project folder: the daemon serves it from that project's intake and ledger.
+    const invoke = inProjectFolder((async (...args: Parameters<OperatorRemoteClient['invoke']>) => {
         const available = () => current() && (!disposed || args[0] === 'workLedger.intake.get');
         if (!available())
             throw new NativeHostSelectionChangedError();
@@ -34,7 +36,7 @@ export function createNativeConversationIntakeBinding(host: NativeSubmissionHost
         finally {
             operator.dispose();
         }
-    }) as OperatorRemoteClient['invoke'];
+    }) as OperatorRemoteClient['invoke'], host.workspace);
     let principalId: string | undefined;
     const hostedInvoke = (async (...args: Parameters<OperatorRemoteClient['invoke']>) => {
         // Every hosted request names this project and the host refuses another
@@ -50,7 +52,7 @@ export function createNativeConversationIntakeBinding(host: NativeSubmissionHost
         async readPrincipal(signal) {
             const auth = await invoke('control.auth.current', {}, { signal });
             if (!isNativeOwnerPrincipal(auth, host.expectedPrincipalId)) {
-                throw new NativeIntakeFailure('principal', 'Native intake runs from the daemon\'s own machine or a paired device; pair this device (/devices migrate-shared), then retry');
+                throw new NativeIntakeFailure('principal', 'Native intake runs from the daemon\'s own machine or a paired device; pair this device (Devices and network, Pair something, This program with its daemon), then retry');
             }
             principalId = auth.principalId;
             return principalId;

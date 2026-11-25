@@ -90,8 +90,11 @@ export interface TerminalCommandShellUiOpeners<Target extends ModelPickerTarget>
   openSettingsModal?: (target?: string) => SettingsTargetOutcome | 'unreported' | void;
   /** Opens the three-step first run again (`/setup` → Run first-run again), whether or not a model is ready. */
   openFirstRun?: () => void;
-  /** Opens first run's "Who decides" step alone when no decision model can be asked now; false when it is not needed. */
-  openWhoDecides?: () => Promise<boolean>;
+  /**
+   * Opens first run's "Who decides" step alone when no decision model can be asked now, or with `always`
+   * (the Setup list's row: the person came to choose) whatever is in force; false when it was not opened.
+   */
+  openWhoDecides?: (options?: { readonly always?: boolean | undefined }) => Promise<boolean>;
   openSessionPicker?: () => void;
   openProfilePicker?: () => void;
   getScrollTop?: () => number;

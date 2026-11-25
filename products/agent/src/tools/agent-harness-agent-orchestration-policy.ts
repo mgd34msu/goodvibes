@@ -57,7 +57,7 @@ export function agentOrchestrationDecisionCards(agentToolAvailable: boolean): re
       status: agentToolAvailable ? 'ready' : 'unavailable',
       chooseWhen: ['A large task already has approval for parallel work and needs milestones, evidence, and cancellation routes.'],
       requiredFields: ['original user ask', 'lane reason', 'success criteria', 'per-runner evidence', 'cancel/recovery route'],
-      userRoute: 'Owner: /work submit-file <JSON-path> (submission only; no execution)',
+      userRoute: 'Owner: New work in the Work place, its "From a file" field naming a JSON file (asks for the work; nothing starts)',
       inspectRoute: 'agent_harness mode:"agent_orchestration"',
       policy: 'Read-only plan surface first; local todo labels and model confirmation fields never authorize native work. Native owner submission and execution remain separate.',
     },

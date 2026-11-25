@@ -1,5 +1,6 @@
 import { randomUUID } from 'node:crypto';
 import type { ArtifactStore } from '@goodvibes/engine/platform/platform/artifacts';
+import { asRecordOfDecidedCall, RECORD_NOT_SAVED } from './record-of-decided-call.js';
 
 /** The artifact purpose a Personal Ops effect receipt is saved under; the lanes list artifacts by it. */
 export const PERSONAL_OPS_EFFECT_RECEIPT_PURPOSE = 'personal-ops-effect-receipt';
@@ -30,11 +31,23 @@ export interface PersonalOpsEffectReceipt {
  * effect, so a failed write never changes the effect's own result; the caller
  * reports the effect as it happened either way.
  */
-export async function writePersonalOpsEffectReceipt(store: ArtifactStore | undefined, receipt: PersonalOpsEffectReceipt): Promise<string | null> {
-  if (!store) return null;
+export interface PersonalOpsReceiptWritten {
+  /** The saved receipt's artifact id; null when none was saved. */
+  readonly id: string | null;
+  /**
+   * Why the record was not saved, in words to say after the act's own result (the act already ran): a rule that
+   * refuses saves, or plan mode. Absent when it was saved, or when there was nowhere to save it.
+   */
+  readonly notSaved?: string | undefined;
+}
+
+export async function writePersonalOpsEffectReceipt(store: ArtifactStore | undefined, receipt: PersonalOpsEffectReceipt): Promise<PersonalOpsReceiptWritten> {
+  if (!store) return { id: null };
   const recordedAt = new Date().toISOString();
   try {
-    const descriptor = await store.create({
+    // The receipt is the record of the act it follows, written inside that act's tool call: part of the act the owner's
+    // gate decided, never a question of its own (record-of-decided-call.ts).
+    const descriptor = await asRecordOfDecidedCall(() => store.create({
       kind: 'data',
       mimeType: 'application/json',
       filename: `personal-ops-${receipt.laneId}-${receipt.operation.replace(/[^a-zA-Z0-9._-]+/g, '-')}-${randomUUID()}.json`,
@@ -52,10 +65,13 @@ export async function writePersonalOpsEffectReceipt(store: ArtifactStore | undef
         ...(receipt.failureReason ? { failureReason: receipt.failureReason } : {}),
         createdAt: recordedAt,
       },
-    });
-    return descriptor.id;
-  } catch {
+    }));
+    return { id: descriptor.id };
+  } catch (error) {
     // The effect already happened and its result stands; a receipt that could not be saved is only missing from the lane.
-    return null;
+    // One a rule or plan mode refused is said after the act's result, truthfully.
+    const message = error instanceof Error ? error.message : String(error);
+    const at = message.indexOf(RECORD_NOT_SAVED);
+    return at < 0 ? { id: null } : { id: null, notSaved: message.slice(at).replace(/\.+$/, '') };
   }
 }

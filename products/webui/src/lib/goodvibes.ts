@@ -349,6 +349,30 @@ async function authHeaders(): Promise<Record<string, string>> {
   return token ? { Authorization: `Bearer ${token}` } : {};
 }
 
+/**
+ * The project the person chose (place-project.ts), sent with every call as the call context's project
+ * (`x-goodvibes-project`, as a terminal program sends its folder): the daemon never takes its own folder for a call
+ * that names none, so a place, an action sheet, a chat, a piece of work or a session read is for the chosen project.
+ */
+let callProject: string | undefined;
+
+/** Set by the project chooser whenever the project in use changes. */
+export function setCallProject(project: string | undefined): void {
+  callProject = project && project.startsWith('/') ? project : undefined;
+}
+
+function callContextHeaders(): Record<string, string> {
+  return callProject ? { 'x-goodvibes-project': encodeURIComponent(callProject) } : {};
+}
+
+/** routedFetch with the call context's project added (the SDK's every operator call goes through it). */
+const projectRoutedFetch: typeof fetch = Object.assign((input: RequestInfo | URL, init?: RequestInit): Promise<Response> => {
+  if (!callProject) return routedFetch(input, init);
+  const headers = new Headers(init?.headers ?? (input instanceof Request ? input.headers : undefined));
+  if (!headers.has('x-goodvibes-project')) headers.set('x-goodvibes-project', encodeURIComponent(callProject));
+  return routedFetch(input, { ...(init ?? {}), headers });
+}, { preconnect: routedFetch.preconnect });
+
 async function requestJson<T = unknown>(path: string, options: RequestOptions = {}): Promise<T> {
   const failureLifetime = getClientLifetime();
   const lifetime = options.signal ? getClientLifetime() : undefined;
@@ -359,7 +383,7 @@ async function requestJson<T = unknown>(path: string, options: RequestOptions = 
   check();
   const method = options.method ?? 'GET';
   const headers: HeadersInit = {
-    ...(options.authenticated === false ? {} : await authHeaders()),
+    ...(options.authenticated === false ? {} : { ...(await authHeaders()), ...callContextHeaders() }),
     ...(method === 'GET' || options.body === undefined ? {} : { 'Content-Type': 'application/json' }),
     ...(options.explicitUserRequest === true ? { 'x-goodvibes-explicit-user-request': 'true' } : {}),
     ...(options.idempotencyKey ? { 'Idempotency-Key': options.idempotencyKey } : {}),
@@ -544,6 +568,14 @@ export async function invokeOwnerMethod(methodId: string, input: Readonly<Record
     return requestJson(path, { method: route.method, body: rest, signal, explicitUserRequest: true });
   }
   if (BROWSER_COVERED_METHOD_IDS.has(methodId)) return invokeOperator(methodId as OperatorMethodId, input as OperatorMethodInput<OperatorMethodId>, signal);
+  return requestJson(`/api/control-plane/methods/${methodId}/invoke`, { method: 'POST', body: { body: input }, signal, explicitUserRequest: true });
+}
+
+/**
+ * An operator method through the generic method invoke only (never its REST route), as the owner's own request: for
+ * a read whose input the REST route does not carry (a list bound to a project, `worktrees.snapshot { project }`).
+ */
+export async function invokeThroughMethod(methodId: string, input: Readonly<Record<string, unknown>>, signal?: AbortSignal): Promise<unknown> {
   return requestJson(`/api/control-plane/methods/${methodId}/invoke`, { method: 'POST', body: { body: input }, signal, explicitUserRequest: true });
 }
 
@@ -1205,8 +1237,8 @@ const scopedPlatform = createBrowserKnowledgePlatform({
   // relay pairing is stored. Stream requests are tunnelled too (the relay carries event
   // streams now), and a mutating call gated by the daemon's step-up requirement triggers
   // the inline passkey ceremony and is retried with the assertion attached (see that
-  // file's header).
-  fetch: routedFetch,
+  // file's header). Every call carries the project the person chose (`projectRoutedFetch`).
+  fetch: projectRoutedFetch,
   realtime: {
     sseReconnect: DEFAULT_SSE_RECONNECT,
   },

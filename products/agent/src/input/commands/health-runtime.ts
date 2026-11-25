@@ -8,9 +8,8 @@ import {
 import { evaluateSessionMaintenance, formatSessionMaintenanceLines } from '@/runtime/index.ts';
 import { estimateConversationTokens } from '@goodvibes/engine/platform/platform/core';
 import { formatDoctorReport } from '@goodvibes/engine/platform/platform/runtime/operations';
-import type { CommandContext, CommandRegistry } from '../command-registry.ts';
-import { createHealthCommand, readRemoteRunnersHealth, type HealthArea, type HealthCommandPolicy } from '@goodvibes/engine/terminal-shell/health-command';
-import { systemSessionOf } from './session-capabilities.ts';
+import type { CommandContext } from '../command-registry.ts';
+import { readRemoteRunnersHealth, type HealthArea, type HealthCommandPolicy } from '@goodvibes/engine/terminal-shell/health-command';
 import { capabilityBinding } from './capability-binding.ts';
 import type { CommandReport } from '@goodvibes/engine/terminal-shell/command-actions';
 import { isSetupIssue } from '@goodvibes/engine/terminal-shell/setup-review';
@@ -47,7 +46,7 @@ async function loadProviderAccountSnapshot(ctx: CommandContext) {
 }
 
 /**
- * `/health approvals`, the asks waiting for this owner, from the daemon's
+ * "Approvals waiting" (the System place, Health, "Check one area"), the asks waiting for this owner, from the daemon's
  * record unioned with whatever this process still holds.
  *
  * Written so an unreachable host and an empty list can never print the same
@@ -114,7 +113,7 @@ function maintenanceOf(ctx: CommandContext) {
 }
 
 /**
- * The short status `/health` prints bare: one line when everything works, or
+ * The short status (the System place, Health, "See what needs attention"): one line when everything works, or
  * each thing that does not with the command that fixes it. Reads the same
  * snapshots the area checks read; no model request, no host write.
  */
@@ -125,7 +124,7 @@ async function healthReport(ctx: CommandContext): Promise<CommandReport> {
   const items: { sentence: string; fix?: { label: string; line: string } }[] = [];
   const fixFor: Readonly<Record<string, { label: string; line: string }>> = {
     providers: { label: 'Sign in to a provider', line: '/setup sign-in' },
-    integrations: { label: 'See which integrations are not ready', line: '/health check services' },
+    integrations: { label: 'In System, Health, check one area: Services', line: '/setup' },
     mcp: { label: 'See which servers need attention', line: '/mcp review' },
   };
   for (const check of snapshot.checks.filter(isSetupIssue)) {
@@ -196,7 +195,7 @@ async function checkArea(ctx: CommandContext, area: HealthArea): Promise<string>
         'Connected host sign-in',
         `  users visible ${auth.userCount}`,
         `  sessions visible ${auth.sessionCount}`,
-        `  first-run sign-in file ${auth.bootstrapCredentialPresent ? 'present (the host removes it: goodvibes /local-auth)' : 'removed'}`,
+        `  first-run sign-in file ${auth.bootstrapCredentialPresent ? 'present (remove it with "Remove the first-run sign-in file" in System)' : 'removed'}`,
         '  The Agent reads the host\'s sign-in; its users and first-run file are changed on the host.',
       ].join('\n');
     }
@@ -298,12 +297,8 @@ async function checkArea(ctx: CommandContext, area: HealthArea): Promise<string>
     case 'worktrees':
     case 'sandbox':
     case 'terminal':
-      throw commandRefusal(`The Agent does not check ${area}; nothing was checked.`, `It is checked in the terminal app: goodvibes, /health check ${area}.`);
+      throw commandRefusal(`The Agent does not check ${area}; nothing was checked.`, `It is checked in the terminal app: the System place, Health, "Check one area".`);
   }
-}
-
-export function registerHealthRuntimeCommands(registry: CommandRegistry): void {
-  registry.register(createHealthCommand<CommandContext>(healthPolicy, (ctx) => ({ systemSession: systemSessionOf(ctx) })));
 }
 
 /** This Agent's health, as the `health.*` capabilities read it (session-capabilities.ts binds it with `healthServicesOf`). */

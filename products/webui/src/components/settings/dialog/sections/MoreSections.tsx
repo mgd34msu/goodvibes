@@ -24,7 +24,6 @@ import { StatusDot } from '../../../ui/StatusDot';
 import { Toggle } from '../../../ui/Toggle';
 import { MemoryDiagnostics } from '../../MemoryDiagnostics';
 import { PermissionRules } from '../../PermissionRules';
-import { McpServers } from '../../../command/screens/McpServers';
 import { PermissionModeCards } from '../../PermissionModeCards';
 import { NotificationSettings } from '../../NotificationSettings';
 import { PairingTokensSettings } from '../../PairingTokensSettings';
@@ -238,7 +237,7 @@ export function MemorySection() {
 }
 
 /** Opens with the four modes and what each means; everything else is under Advanced (ux A7.5). */
-export function PermissionsSection() {
+export function PermissionsSection({ onOpenView }: { onOpenView: (view: ViewId, options?: { readonly tab?: string }) => void }) {
   return (
     <>
       <PermissionModeCards />
@@ -246,7 +245,12 @@ export function PermissionsSection() {
         <summary className="dv-disclosure__summary">Advanced</summary>
         <div className="dv-disclosure__body">
           <PermissionRules />
-          <McpServers />
+          {/* The tool servers, their trust, roles and tool rules: the Tools and extensions place, the group's one web view. */}
+          <SettingRow
+            label="Tool servers (MCP)"
+            description="Their trust, role and which of their tools are blocked are kept in Tools and extensions."
+            control={<Button size="sm" onClick={() => onOpenView('places', { tab: 'tools' })}>Open Tools and extensions</Button>}
+          />
           <SectionConfig id="permissions" emptyText="No permission settings reported." />
         </div>
       </details>

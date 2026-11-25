@@ -14,7 +14,8 @@
  * back by the program working in that project).
  */
 import { existsSync, readFileSync } from 'node:fs';
-import { isAbsolute, relative, resolve } from 'node:path';
+import { basename, isAbsolute, relative, resolve } from 'node:path';
+import { isMemoryForProject, memoryProjectOf } from '../../state/memory-project.js';
 import { atomicWriteFileSync } from '../../config/atomic-write.js';
 import type { MemoryApi } from '../../knowledge/knowledge-api.js';
 import type { MemoryRegistry } from '../../state/memory-registry.js';
@@ -28,7 +29,7 @@ import { CapabilityRefusal, type CapabilityCaller, type CapabilityDefinition, ty
 export interface MemoryCapabilityServices {
   readonly memory: MemoryApi;
   /** The copies of memory taken each day, before a migration and before a restore. */
-  readonly memoryCopies: Pick<MemoryRegistry, 'listSnapshots' | 'restoreSnapshot'>;
+  readonly memoryCopies: Pick<MemoryRegistry, 'listSnapshots' | 'restoreSnapshot' | 'decideConsolidationProposal'>;
 }
 
 // ---------------------------------------------------------------------------
@@ -89,10 +90,27 @@ function temporalLabel(record: MemoryRecord): string {
   const status = memoryRecordTemporalStatus(record);
   return status === 'active' ? '' : ` [${status}]`;
 }
-/** One record on one line: its id, where it applies, its kind, its tags and its summary. */
+/** One record on one line: its id, where it applies (and for which project), its kind, its tags and its summary. */
 export function memoryRecordLine(record: MemoryRecord): string {
   const tags = record.tags.length ? ` [${record.tags.join(', ')}]` : '';
-  return `  ${record.id}  ${record.scope}/${record.cls}${tags}  ${record.summary}${temporalLabel(record)}`;
+  const where = record.scope === 'project' ? (record.project ? ` (${basename(record.project)})` : ' (every project)') : '';
+  return `  ${record.id}  ${record.scope}/${record.cls}${where}${tags}  ${record.summary}${temporalLabel(record)}`;
+}
+
+/** The asking project's identity: the folder the caller named. A caller with none sees and changes every record. */
+function callerProject(caller: CapabilityCaller): string | undefined {
+  return memoryProjectOf(caller.workingDirectory);
+}
+
+/** The project a record made or kept "this project" is for: the caller's; refused when the caller named none. */
+function projectFor(scope: string, caller: CapabilityCaller, what: string): string | undefined {
+  if (scope !== 'project') return undefined;
+  const project = callerProject(caller);
+  if (project === undefined) {
+    throw new CapabilityRefusal(`${what}: "This project" needs the project, and this call named no folder; nothing was changed.`,
+      'Send the project folder with the call (workingDirectory), or choose "Shared with the team" for a record every project is given.');
+  }
+  return project;
 }
 const plural = (count: number, one: string, many = `${one}s`): string => `${count} ${count === 1 ? one : many}`;
 
@@ -154,8 +172,13 @@ function formatVectorStats(stats: ReturnType<MemoryApi['vectorStats']>, title: s
   ].join('\n');
 }
 
-function filterOf(values: Readonly<Record<string, string>>): MemorySearchFilter {
-  return { ...(values.class ? { cls: values.class as MemoryClass } : {}), ...(values.scope ? { scope: values.scope as MemoryScope } : {}) };
+/** The values' filter, for the caller's project when it named one: its records and the person's own, never another project's. */
+function filterOf(values: Readonly<Record<string, string>>, caller?: CapabilityCaller): MemorySearchFilter {
+  const project = caller ? callerProject(caller) : undefined;
+  return {
+    ...(values.class ? { cls: values.class as MemoryClass } : {}), ...(values.scope ? { scope: values.scope as MemoryScope } : {}),
+    ...(project !== undefined ? { project } : {}),
+  };
 }
 
 type MemoryDefinition = CapabilityDefinition<MemoryCapabilityServices>;
@@ -170,8 +193,8 @@ export const MEMORY_LIST: MemoryDefinition = {
   actionId: 'see-memory', label: 'See your memory', word: 'list', inputs: [CLASS_FILTER, SCOPE_FILTER],
   sentence: 'Lists everything the project remembers, by kind, newest first, with where each applies.', done: '',
   touches: 'reads', lasts: 'not-a-change', risk: 'none', example: { class: 'decision' },
-  async run(values, services) {
-    const records = await services.memory.search(filterOf(values));
+  async run(values, services, caller) {
+    const records = await services.memory.search(filterOf(values, caller));
     if (records.length === 0) return { text: 'No memory records yet.', data: { records: [] } };
     const grouped = new Map<string, MemoryRecord[]>();
     for (const record of records) {
@@ -194,7 +217,7 @@ export const MEMORY_ADD: MemoryDefinition = {
     DETAIL,
     TAGS,
     { ...SCOPE_FILTER, help: 'Where it applies', required: { default: 'project', defaultMeans: 'this project' } },
-    { id: 'session', label: 'From session', help: 'The session it came from', kind: 'text', freeTextReason: 'a session id', required: { default: '', defaultMeans: 'none' }, typed: { flag: '--session' } },
+    { id: 'session', label: 'From session', help: 'The session it came from', kind: 'text', freeTextReason: 'a session id', required: { default: '', defaultMeans: 'the conversation you are in' }, typed: { flag: '--session' } },
     { id: 'task', label: 'From task', help: 'The task it came from', kind: 'text', freeTextReason: 'a task id', required: { default: '', defaultMeans: 'none' }, typed: { flag: '--task' } },
     { id: 'file', label: 'From file', help: 'The file it is about', kind: 'path', freeTextReason: 'a file path', required: { default: '', defaultMeans: 'none' }, typed: { flag: '--file' } },
   ],
@@ -202,15 +225,20 @@ export const MEMORY_ADD: MemoryDefinition = {
   done: 'Remembered "{summary}".',
   touches: 'this-machine', lasts: 'kept', risk: 'none', undoneBy: 'forget',
   example: { class: 'decision', summary: 'Use SQLite for local state' },
-  async run(values, services) {
+  async run(values, services, caller) {
     const summary = (values.summary ?? '').trim();
     if (!summary) throw new CapabilityRefusal('Nothing was remembered: the summary is empty.');
     const provenance: ProvenanceLink[] = [];
-    if (values.session) provenance.push({ kind: 'session', ref: values.session });
+    // The session it came from: the one named, else the asking program's conversation.
+    const session = values.session || caller.sessionId;
+    if (session) provenance.push({ kind: 'session', ref: session });
     if (values.task) provenance.push({ kind: 'task', ref: values.task });
     if (values.file) provenance.push({ kind: 'file', ref: values.file });
+    const scope = (values.scope || 'project') as MemoryScope;
+    // "This project" is the asking project's, and is given only to work there.
+    const project = projectFor(scope, caller, 'Nothing was remembered');
     const record = await services.memory.add({
-      scope: (values.scope || 'project') as MemoryScope, cls: values.class as MemoryClass, summary,
+      scope, ...(project !== undefined ? { project } : {}), cls: values.class as MemoryClass, summary,
       ...(values.detail ? { detail: values.detail } : {}), tags: splitTags(values.tags), provenance,
     });
     return { text: `Its id is ${record.id}.`, data: { record } };
@@ -229,8 +257,8 @@ export const MEMORY_SEARCH: MemoryDefinition = {
   ],
   sentence: 'Finds memory records that match {query}.', done: '',
   touches: 'reads', lasts: 'not-a-change', risk: 'none', example: { query: 'sqlite' },
-  async run(values, services) {
-    const filter: MemorySearchFilter = { ...(values.query ? { query: values.query } : {}), ...filterOf(values) };
+  async run(values, services, caller) {
+    const filter: MemorySearchFilter = { ...(values.query ? { query: values.query } : {}), ...filterOf(values, caller) };
     if (values.limit) {
       if (!/^[1-9]\d*$/.test(values.limit)) throw new CapabilityRefusal(`"At most" takes a positive whole number, not "${values.limit}".`);
       filter.limit = Number(values.limit);
@@ -289,12 +317,14 @@ export const MEMORY_EDIT: MemoryDefinition = {
   done: 'Corrected {record}.',
   touches: 'this-machine', lasts: 'kept', risk: 'none',
   example: { record: 'mem-1', summary: 'Use SQLite for all local state' },
-  async run(values, services) {
+  async run(values, services, caller) {
+    const project = values.scope ? projectFor(values.scope, caller, `Memory record ${values.record} is unchanged`) : undefined;
     const patch = {
       ...(values.summary ? { summary: values.summary.trim() } : {}),
       ...(values.detail ? { detail: values.detail.trim() } : {}),
       ...(values.tags ? { tags: splitTags(values.tags) } : {}),
       ...(values.scope ? { scope: values.scope as MemoryScope } : {}),
+      ...(project !== undefined ? { project } : {}),
     };
     if (Object.keys(patch).length === 0) throw new CapabilityRefusal('Nothing was changed: give a new summary, detail, tags or where it applies.');
     const record = services.memory.update(values.record!, patch);
@@ -342,8 +372,9 @@ export const MEMORY_PROMOTE: MemoryDefinition = {
   done: '{record} now applies to {scope}.',
   touches: 'this-machine', lasts: 'kept', risk: 'none',
   example: { record: 'mem-1', scope: 'team' },
-  async run(values, services) {
-    const record = services.memory.update(values.record!, { scope: values.scope as MemoryScope });
+  async run(values, services, caller) {
+    const project = projectFor(values.scope!, caller, `Memory record ${values.record} is unchanged`);
+    const record = services.memory.update(values.record!, { scope: values.scope as MemoryScope, ...(project !== undefined ? { project } : {}) });
     if (!record) throw missing(values.record!);
     return { text: '', data: { record } };
   },
@@ -389,9 +420,11 @@ export const MEMORY_QUEUE: MemoryDefinition = {
   ],
   sentence: 'Lists the records whose review is due, least sure first.', done: '',
   touches: 'reads', lasts: 'not-a-change', risk: 'none', example: { limit: '20', scope: 'team' },
-  async run(values, services) {
+  async run(values, services, caller) {
     if (!/^[1-9]\d*$/.test(values.limit || '10')) throw new CapabilityRefusal(`"At most" takes a positive whole number, not "${values.limit}".`);
-    const queue = await services.memory.reviewQueue(Number(values.limit || '10'), values.scope ? values.scope as MemoryScope : undefined);
+    const project = callerProject(caller);
+    const queue = (await services.memory.reviewQueue(Number(values.limit || '10'), values.scope ? values.scope as MemoryScope : undefined))
+      .filter((record) => project === undefined || isMemoryForProject(record, project));
     if (queue.length === 0) return { text: 'Nothing is waiting for review.', data: { records: [] } };
     return {
       text: [`Waiting for review (${queue.length}):`, ...queue.map((record) => `${memoryRecordLine(record)}  ${MEMORY_STATE_LABELS[record.reviewState] ?? record.reviewState}, ${record.confidence}%${record.staleReason ? `: ${record.staleReason}` : ''}`)].join('\n'),
@@ -410,9 +443,10 @@ export const MEMORY_EXPLAIN: MemoryDefinition = {
   ],
   sentence: 'Shows the reviewed memory that would be given to "{task}", and why.', done: '',
   touches: 'reads', lasts: 'not-a-change', risk: 'none', example: { task: 'add a login page' },
-  async run(values, services) {
+  async run(values, services, caller) {
     const paths = (values.paths ?? '').split('\n').flatMap((entry) => entry.split(',')).map((path) => path.trim()).filter(Boolean);
-    const explanation = await services.memory.explain(values.task!, paths);
+    // What a task in the asking project would be given: its records and the person's own.
+    const explanation = await services.memory.explain(values.task!, paths, undefined, callerProject(caller));
     const ids = explanation.injections.map((injection) => injection.id);
     if (explanation.injections.length === 0) return { text: 'No reviewed project memory would be given to that task.', data: { records: [] } };
     return { text: explanation.prompt ?? 'No reviewed project memory would be given to that task.', data: { records: ids } };
@@ -432,7 +466,7 @@ export const MEMORY_EXPORT: MemoryDefinition = {
   touches: 'this-machine', lasts: 'kept', risk: 'none', example: { path: 'team-memory.json', scope: 'team' },
   async run(values, services, caller) {
     const target = filePath(values.path!, caller);
-    const bundle = services.memory.exportBundle(filterOf(values));
+    const bundle = services.memory.exportBundle(filterOf(values, caller));
     atomicWriteFileSync(target, JSON.stringify(bundle, null, 2) + '\n', { mkdirp: true });
     return { text: `Saved ${plural(bundle.recordCount, 'record')} and ${plural(bundle.linkCount, 'link')} to ${target}.`, data: { path: target, records: bundle.recordCount, links: bundle.linkCount } };
   },
@@ -448,7 +482,8 @@ export const MEMORY_IMPORT: MemoryDefinition = {
     // The file is the caller's: its path is read in the caller's project (the folder comes from who asked).
     const target = filePath(values.path!, caller);
     if (!existsSync(target)) throw new CapabilityRefusal(`There is no file ${target}; nothing was loaded.`);
-    const result = await services.memory.importBundle(readBundle(target));
+    // A loaded "this project" record is for the project that loads it; loaded with no project, the person's own.
+    const result = await services.memory.importBundle(readBundle(target), callerProject(caller));
     return {
       text: `Loaded ${target}: ${plural(result.importedRecords, 'record')} added, ${result.skippedRecords} already there, ${plural(result.importedLinks, 'link')} added.`,
       data: { ...result },
@@ -518,8 +553,38 @@ export const MEMORY_REBUILD_INDEX: MemoryDefinition = {
   },
 };
 
+/** What answering a tidying proposal does, by the answer given (the store's own action names). */
+const PROPOSAL_ANSWERS: readonly FixedChoice[] = [
+  { value: 'keep-first', label: 'Keep the first, mark the second out of date', help: 'As proposed, for two records that disagree or repeat each other' },
+  { value: 'keep-second', label: 'Keep the second, mark the first out of date' },
+  { value: 'both-stand', label: 'Both are right', help: 'For two records that disagree: both are marked reviewed and the proposal is not raised again' },
+  { value: 'keep-both', label: 'Keep both', help: 'For the same record twice: both are marked reviewed and the proposal is not raised again' },
+  { value: 'delete', label: 'Delete the record', help: 'For a record out of date: it is removed', risk: 'cannot-be-undone' },
+  { value: 'keep', label: 'Keep the record', help: 'For a record out of date: it stays, and the proposal is not raised again' },
+];
+
+export const MEMORY_DECIDE_PROPOSAL: MemoryDefinition = {
+  capability: daemon('memory.decide-proposal', 'safe'),
+  actionId: 'decide-proposal', label: 'Answer a tidying proposal', word: 'decide-proposal',
+  inputs: [
+    { id: 'proposal', label: 'Proposal', help: 'What tidying memory proposed, as the Proposals tab lists it', kind: 'text', freeTextReason: 'a proposal id from the Proposals tab', required: true, typed: { position: 1 } },
+    { id: 'answer', label: 'Answer', help: 'What to do with it', kind: 'choice', choices: PROPOSAL_ANSWERS, required: true, typed: { position: 2 } },
+  ],
+  sentence: 'Tidying proposal {proposal} is answered: {answer}.', done: '',
+  touches: 'this-machine', lasts: 'kept', risk: 'none', example: { proposal: 'contradiction:mem_a,mem_b', answer: 'keep-first' },
+  async run(values, services) {
+    const decision = services.memoryCopies.decideConsolidationProposal(values.proposal!, values.answer as Parameters<MemoryRegistry['decideConsolidationProposal']>[1]);
+    if (!decision.decided) throw new CapabilityRefusal(`${decision.refusal.reason.replace(/\.$/, '')}. Nothing was changed.`, decision.refusal.next[0]);
+    const changed = decision.changed.length > 0 ? ` Changed: ${decision.changed.join(', ')}.` : '';
+    const removed = decision.removed.length > 0 ? ` Removed: ${decision.removed.join(', ')}.` : '';
+    const said = PROPOSAL_ANSWERS.find((choice) => choice.value === values.answer)?.label ?? values.answer;
+    return { text: `Answered the proposal: ${said}.${changed}${removed}`, data: { decision } };
+  },
+};
+
 /** Every memory capability that runs in the daemon, in the order a person meets them. */
 export const MEMORY_DAEMON_CAPABILITIES: readonly MemoryDefinition[] = [
   MEMORY_LIST, MEMORY_ADD, MEMORY_SEARCH, MEMORY_SHOW, MEMORY_EDIT, MEMORY_REVIEW, MEMORY_PROMOTE, MEMORY_LINK, MEMORY_REMOVE,
   MEMORY_QUEUE, MEMORY_EXPLAIN, MEMORY_EXPORT, MEMORY_INSPECT, MEMORY_IMPORT, MEMORY_SNAPSHOTS, MEMORY_RESTORE, MEMORY_INDEX, MEMORY_REBUILD_INDEX,
+  MEMORY_DECIDE_PROPOSAL,
 ];

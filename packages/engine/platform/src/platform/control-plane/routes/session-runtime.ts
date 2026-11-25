@@ -267,7 +267,7 @@ export function createSessionPermissionModeSetHandler(
         followable: admitEffects(invocation.context.actor ?? systemActor('in-process'), ['approvals.read']).kind === 'allowed',
         mode: previousMode,
         requestedMode: toOperatorPermissionMode(nextMode),
-        state: `nothing was changed yet; setting ${sessionId} to ${toOperatorPermissionMode(nextMode)} loosens the permission mode, which only the owner does, so it was put to him and changes when he approves it`,
+        state: `nothing was changed yet; setting ${sessionId} to ${toOperatorPermissionMode(nextMode)} loosens the permission mode, which only the owner does, so it was put to the owner and changes when the owner approves it`,
         next: [`Watch approval ${approvalId} (approvals.list with approvalId, or the approval-update event).`],
       }, { status: 202 });
     }

@@ -126,7 +126,7 @@ export class TerminalSystemMessageRouter<Feed extends SystemMessageActivityFeed 
   ): void {
     // Noise gate, keep first-run plumbing out of the Recent feed / transcript
     // while the information stays reachable via other live surfaces (activity
-    // log, /health, /model). Dropped noise is drop-from-the-feed, not delete.
+    // log, the Health tab, /model). Dropped noise is drop-from-the-feed, not delete.
     const verdict = classifyNoise(message, this.noiseDeps, this.presentation.suppressCapturedOutput);
     if (verdict.action === 'drop') return;
     if (verdict.action === 'foldProviderReplay') {
@@ -192,7 +192,7 @@ export class TerminalSystemMessageRouter<Feed extends SystemMessageActivityFeed 
    * Record the folded provider-replay summary to the activity log and reset the
    * buffer. The boot-only "— from last session" burst stays out of the Recent
    * feed; the persisted-provider set it summarizes is reachable on demand via
-   * /health and /model, and the fold line is logged for diagnosis. Only the
+   * the Health tab and /model, and the fold line is logged for diagnosis. Only the
    * boot burst folds, mid-session provider-discovery lines never match
    * PROVIDER_REPLAY_RE, so they still reach the feed as live product signal.
    */

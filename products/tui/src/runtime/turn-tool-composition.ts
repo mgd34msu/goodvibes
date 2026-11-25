@@ -40,6 +40,8 @@ export function registerTuiTurnTools(toolRegistry: ToolRegistry, services: Runti
     session: boundSessionCapabilities,
     program: 'tui',
     workingDirectory: () => services.workingDirectory,
+    // The live conversation: a record the model adds through capability_run names it.
+    sessionId: options.resolveSessionId,
     // The model this conversation uses: a capability on it (its context window size) acts on it.
     model: () => services.providerRegistry.getCurrentModel().registryKey,
   });

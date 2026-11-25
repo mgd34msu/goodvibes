@@ -22,7 +22,6 @@ import {
   type OwnerInboxClient,
 } from '@goodvibes/engine/platform/platform/runtime/client';
 import { OWNER_ASKER_SESSION_FILE_METADATA, handleOwnerDecisions } from '@goodvibes/engine/platform/platform/control-plane';
-import { bridgeContractQuestionsToInbox } from '@goodvibes/engine/platform/platform/contract';
 import { bridgeJevDecisionsToInbox, processJevDecisions } from '@goodvibes/engine/platform/platform/permissions';
 import { watchSessionAnswers, type SessionAnswerWatch } from '@goodvibes/engine/platform/platform/agents';
 import type { ConfigManager } from '@goodvibes/engine/platform/platform/config';
@@ -108,14 +107,11 @@ export function wireOwnerQuestionSessions(
   const inbox = (): AnswerDeliveringInbox => terminalOwnerQuestions(services, sessionId);
   const stopOpened = whenSessionOpens(conversation, (id) => inbox().openSession(id));
   const stopDeleted = services.sessionManager.onDeleted((id) => { void inbox().deleteSession(id); });
-  // What Jev decides in this terminal's turns is listed in /decisions here, in the Agent and in the web UI; a choice on it is carried out here.
+  // What Jev decides in this terminal's turns is listed in Waiting for you here, in the Agent and in the web UI; a choice on it is carried out here.
   const stopDecisions = bridgeJevDecisionsToInbox(processJevDecisions(), homeOwnerInbox(services.shellPaths),
-    { surface: 'tui', handle: handleOwnerDecisions, undo: services.fileUndoManager });
-  // What a contract this app runs asks its owner waits in the owner inbox too; an answer there is the contract's reply.
-  const stopContractQuestions = bridgeContractQuestionsToInbox(services.contractRunner,
-    (listener) => services.contractRunner.on(listener), homeOwnerInbox(services.shellPaths));
+    { surface: 'tui', handle: handleOwnerDecisions });
+  // What a piece of work asks waits in the owner inbox by the daemon's own bridge: this app runs no contract of its own.
   return () => {
-    stopContractQuestions();
     stopDecisions();
     stopOpened();
     stopDeleted();

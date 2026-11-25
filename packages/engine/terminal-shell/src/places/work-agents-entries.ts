@@ -21,8 +21,11 @@ import type { PlaceAction, PlaceDetailLine, PlaceFollow, PlaceItem, PlaceList } 
 /** A remote runner the daemon knows: one with a contract, or a live connection. */
 export interface RunnerItem extends PlaceItem {
   readonly kind: 'runner';
-  /** running: connected or connecting; degraded: its transport is struggling; ended: it finished, failed or stopped; local: no transport. */
-  readonly state: 'running' | 'degraded' | 'ended' | 'local';
+  /**
+   * running: connected or connecting; degraded: its transport is struggling; failed: its agent stopped answering and the
+   * connection was lost for good (it needs recovering); ended: it finished or was stopped; local: no transport.
+   */
+  readonly state: 'running' | 'degraded' | 'failed' | 'ended' | 'local';
   readonly label: string;
   readonly template: string;
   readonly transport: string;
@@ -42,6 +45,8 @@ export interface PoolItem extends PlaceItem {
   readonly state: 'empty' | 'holding' | 'full';
   readonly label: string;
   readonly runners: readonly string[];
+  /** The runners' names, in the order of `runners` (a runner no longer known keeps its id). */
+  readonly runnerNames: readonly string[];
   readonly limit?: number | undefined;
   readonly trust: string;
   readonly template?: string | undefined;
@@ -53,6 +58,8 @@ export interface HandedBackItem extends PlaceItem {
   /** The task's state when it was captured. */
   readonly state: 'completed' | 'failed' | 'cancelled' | 'running' | 'pending' | 'unknown';
   readonly runner: string;
+  /** The runner's name while the daemon still knows it, else its id. */
+  readonly runnerName: string;
   readonly task: string;
   readonly summary: string;
   readonly template: string;
@@ -69,22 +76,34 @@ export interface RecordedRunItem extends PlaceItem {
   readonly state: 'loaded' | 'recorded';
   readonly rev?: number | undefined;
   readonly total?: number | undefined;
+  /** When it started and how many events it holds, where the ledger says. */
+  readonly at?: number | undefined;
+  readonly events?: number | undefined;
 }
 
-/** An agent this program started (builtin/agents.ts); `in-group` is one running as part of a group of agents. */
+/**
+ * An agent this program started in this session (builtin/agents.ts); `in-group` is one running as part of a group of
+ * agents; `ended` one that finished, failed or was stopped, kept so its record can be read.
+ */
 export interface YourAgentItem extends PlaceItem {
   readonly kind: 'agent';
   readonly state: 'running' | 'in-group' | 'ended';
   readonly task: string;
   readonly status: string;
   readonly group?: string | undefined;
+  readonly progress?: string | undefined;
+  readonly error?: string | undefined;
 }
 
-/** A work contract this program keeps: what was asked and its state. */
-export interface ContractItem extends PlaceItem {
-  readonly kind: 'contract';
-  readonly state: string;
-  readonly ask: string;
+/**
+ * A group of agents in words, for the question that stops it: its recipe (a team group's id names it), how many of
+ * its agents still run, and the task of the one selected. Never the group's id.
+ */
+function groupWords(item: YourAgentItem, items: readonly YourAgentItem[]): string {
+  const running = items.filter((other) => other.group === item.group && other.state !== 'ended').length;
+  const recipe = /^cohort:[^:]+:([^:]+):\d+$/u.exec(item.group ?? '')?.[1]?.replace(/-/g, ' ');
+  const count = `${running} agent${running === 1 ? '' : 's'}`;
+  return recipe ? `of the recipe "${recipe}" (${count}, among them the one on "${item.task}")` : `of the agent on "${item.task}" (${count})`;
 }
 
 /** An agent archetype (built in, or in this project's agents folder). */
@@ -123,7 +142,7 @@ export interface ResearchRunItem extends PlaceItem {
 /** A source in this project's research queue. */
 export interface ResearchSourceItem extends PlaceItem {
   readonly kind: 'research-source';
-  /** Its review status: unreviewed, reviewed, used, rejected. */
+  /** Its review status: candidate (not reviewed yet), reviewed, used, rejected. */
   readonly state: string;
   readonly title: string;
   readonly question: string;
@@ -159,7 +178,7 @@ export interface EvaluationItem extends PlaceItem {
   readonly failed: readonly string[];
 }
 
-export type WorkAgentItem = RunnerItem | PoolItem | HandedBackItem | RecordedRunItem | YourAgentItem | ContractItem | ArchetypeItem | CodingAgentItem
+export type WorkAgentItem = RunnerItem | PoolItem | HandedBackItem | RecordedRunItem | YourAgentItem | ArchetypeItem | CodingAgentItem
   | ResearchRunItem | ResearchSourceItem | HandedOffItem | EvaluationItem;
 
 /** The session source a program that runs task suites supplies (work-agents-lists.ts `evaluationsPlaceSource`). */
@@ -175,7 +194,7 @@ export function researchRunItems(output: unknown): readonly ResearchRunItem[] {
 
 export function researchSourceItems(output: unknown): readonly ResearchSourceItem[] {
   return (Array.isArray(listed(output)['sources']) ? listed(output)['sources'] as unknown[] : []).map(record).filter((source) => text(source['id'])).map((source): ResearchSourceItem => ({
-    kind: 'research-source', id: text(source['id']), state: text(source['status']) || 'unreviewed', title: plain(source['title']) || text(source['id']),
+    kind: 'research-source', id: text(source['id']), state: text(source['status']) || 'candidate', title: plain(source['title']) || text(source['id']),
     question: plain(source['question']), summary: plain(source['summary']), credibility: text(source['credibility']) || 'unreviewed', score: count(source['score']),
     ...(plain(source['url']) ? { url: plain(source['url']) } : {}), ...(plain(source['publisher']) ? { publisher: plain(source['publisher']) } : {}),
   }));
@@ -203,7 +222,6 @@ export function evaluationItems(raw: unknown): readonly EvaluationItem[] {
 
 /** The session sources a program that runs its own agents supplies (work-agents-lists.ts `agentsPlaceSources`). */
 export const YOUR_AGENTS_SOURCE = 'agents-running';
-export const CONTRACTS_SOURCE = 'agents-contracts';
 export const ARCHETYPES_SOURCE = 'agents-archetypes';
 
 const ENDED_AGENT = new Set(['completed', 'failed', 'cancelled', 'done', 'stopped']);
@@ -214,13 +232,10 @@ export function yourAgentItems(raw: unknown): readonly YourAgentItem[] {
     const group = text(row['graphId']);
     return {
       kind: 'agent', id: text(row['id']), task: plain(row['task']), status, ...(group ? { group } : {}),
+      ...(plain(row['progress']) ? { progress: plain(row['progress']) } : {}), ...(plain(row['error']) ? { error: plain(row['error']) } : {}),
       state: ENDED_AGENT.has(status) ? 'ended' : group ? 'in-group' : 'running',
     };
   });
-}
-
-export function contractItems(raw: unknown): readonly ContractItem[] {
-  return (Array.isArray(raw) ? raw : []).map(record).filter((row) => text(row['id'])).map((row): ContractItem => ({ kind: 'contract', id: text(row['id']), state: text(row['status']) || 'unknown', ask: plain(row['ask']) }));
 }
 
 export function archetypeItems(raw: unknown): readonly ArchetypeItem[] {
@@ -243,8 +258,10 @@ export const RECORDED_RUNS_SOURCE = 'replay-runs';
 export function recordedRunItems(raw: unknown): readonly RecordedRunItem[] {
   const value = record(raw);
   const loaded = text(value['loaded']);
+  const started = record(value['started']);
   return strings(value['runs']).map((id): RecordedRunItem => ({
     kind: 'recorded-run', id, state: id === loaded ? 'loaded' : 'recorded',
+    ...(typeof record(started[id])['at'] === 'number' ? { at: record(started[id])['at'] as number, events: count(record(started[id])['events']) } : {}),
     ...(id === loaded && typeof value['rev'] === 'number' ? { rev: value['rev'] } : {}),
     ...(id === loaded && typeof value['total'] === 'number' ? { total: value['total'] } : {}),
   }));
@@ -267,6 +284,8 @@ const STRUGGLING = new Set(['degraded', 'reconnecting']);
 
 function runnerState(transport: string, live: boolean): RunnerItem['state'] {
   if (!transport) return 'local';
+  // Lost for good: its agent stopped answering or went away mid-task. It is not running, and it needs recovering.
+  if (transport === 'terminal_failure') return 'failed';
   if (!live) return 'ended';
   if (LIVE.has(transport)) return 'running';
   if (STRUGGLING.has(transport)) return 'degraded';
@@ -277,6 +296,8 @@ export function runnerItems(output: unknown): readonly RunnerItem[] {
   const data = listed(output);
   const connections = new Map((Array.isArray(data['connections']) ? data['connections'] : []).map((entry) => [text(record(entry)['id']), record(entry)]));
   const supervised = new Map((Array.isArray(data['supervised']) ? data['supervised'] : []).map((entry) => [text(record(entry)['runnerId']), record(entry)]));
+  // A runner's pool is named as the pool list names it.
+  const poolNames = new Map((Array.isArray(data['pools']) ? data['pools'] : []).map((entry) => [text(record(entry)['id']), plain(record(entry)['label']) || text(record(entry)['id'])]));
   const items: RunnerItem[] = [];
   const seen = new Set<string>();
   for (const raw of Array.isArray(data['contracts']) ? data['contracts'] : []) {
@@ -291,7 +312,7 @@ export function runnerItems(output: unknown): readonly RunnerItem[] {
     items.push({
       kind: 'runner', id, state: runnerState(transport, connection !== undefined),
       label: plain(contract['label']) || id, template: text(contract['template']) || 'general', transport,
-      ...(text(contract['poolId']) ? { pool: text(contract['poolId']) } : {}),
+      ...(text(contract['poolId']) ? { pool: poolNames.get(text(contract['poolId'])) ?? text(contract['poolId']) } : {}),
       trust: text(contract['trustClass']), tools: strings(ceiling['allowedTools']), writeScope: strings(ceiling['writeScope']),
       ...(text(contract['workspaceRoot']) ? { folder: text(contract['workspaceRoot']) } : {}),
       errors: count(connection?.['errorCount'] ?? record(contract['transport'])['errorCount']),
@@ -310,12 +331,14 @@ export function runnerItems(output: unknown): readonly RunnerItem[] {
 }
 
 export function poolItems(output: unknown): readonly PoolItem[] {
+  const names = new Map(runnerItems(output).map((runner) => [runner.id, runner.label]));
   return (Array.isArray(listed(output)['pools']) ? listed(output)['pools'] as unknown[] : []).map(record).filter((pool) => text(pool['id'])).map((pool): PoolItem => {
     const runners = strings(pool['runnerIds']);
     const limit = typeof pool['maxRunners'] === 'number' ? pool['maxRunners'] : undefined;
     return {
       kind: 'pool', id: text(pool['id']), state: runners.length === 0 ? 'empty' : limit !== undefined && runners.length >= limit ? 'full' : 'holding',
-      label: plain(pool['label']) || text(pool['id']), runners, ...(limit !== undefined ? { limit } : {}), trust: text(pool['trustClass']),
+      label: plain(pool['label']) || text(pool['id']), runners, runnerNames: runners.map((runnerId) => names.get(runnerId) ?? runnerId),
+      ...(limit !== undefined ? { limit } : {}), trust: text(pool['trustClass']),
       ...(text(pool['preferredTemplate']) ? { template: text(pool['preferredTemplate']) } : {}),
       ...(plain(pool['description']) ? { description: plain(pool['description']) } : {}),
     };
@@ -325,11 +348,12 @@ export function poolItems(output: unknown): readonly PoolItem[] {
 const HANDED_BACK_STATES = new Set<HandedBackItem['state']>(['completed', 'failed', 'cancelled', 'running', 'pending', 'unknown']);
 
 export function handedBackItems(output: unknown): readonly HandedBackItem[] {
+  const names = new Map(runnerItems(output).map((runner) => [runner.id, runner.label]));
   return (Array.isArray(listed(output)['artifacts']) ? listed(output)['artifacts'] as unknown[] : []).map(record).filter((artifact) => text(artifact['id'])).map((artifact): HandedBackItem => {
     const status = text(artifact['status']) as HandedBackItem['state'];
     return {
       kind: 'handed-back', id: text(artifact['id']), state: HANDED_BACK_STATES.has(status) ? status : 'unknown',
-      runner: text(artifact['runnerId']), task: plain(artifact['task']), summary: plain(artifact['summary']), template: text(artifact['template']),
+      runner: text(artifact['runnerId']), runnerName: names.get(text(artifact['runnerId'])) ?? text(artifact['runnerId']), task: plain(artifact['task']), summary: plain(artifact['summary']), template: text(artifact['template']),
       tools: strings(artifact['tools']), ...(typeof artifact['createdAt'] === 'number' ? { at: artifact['createdAt'] } : {}),
       ...(plain(artifact['error']) ? { error: plain(artifact['error']) } : {}),
       toolCalls: count(artifact['toolCallCount']), errors: count(artifact['errorCount']),
@@ -343,7 +367,13 @@ const RUNNERS_SOURCE = { kind: 'daemon', method: 'capabilities.run', input: { id
 /** A runner started, ended or stopped (agents events), and every change made to pools, contracts or artifacts. */
 const RUNNER_EVENTS: PlaceFollow = { domains: ['agents', 'workspace'], events: ['agents'], lists: ['remote-runners'] };
 
-const RUNNER_STATE_WORDS: Readonly<Record<RunnerItem['state'], string>> = { running: 'running', degraded: 'struggling', ended: 'ended', local: 'in the daemon' };
+const RUNNER_STATE_WORDS: Readonly<Record<RunnerItem['state'], string>> = { running: 'running', degraded: 'struggling', failed: 'failed', ended: 'ended', local: 'in the daemon' };
+/** How far a pool's runners are trusted, in words. */
+const TRUST_WORDS: Readonly<Record<string, string>> = {
+  'self-hosted-acp': 'runners this daemon starts on this machine', 'local-daemon': 'agents inside the daemon', mixed: 'runners of either kind',
+};
+/** A runner that needs recovering: struggling, or lost for good. */
+const NEEDS_RECOVERY: readonly RunnerItem['state'][] = ['degraded', 'failed'];
 
 function when(at: number | undefined): string {
   return at ? new Date(at).toLocaleString() : 'not known';
@@ -361,7 +391,7 @@ const runnersList: PlaceList<WorkAgentItem> = {
     return {
       title: runner.label,
       ...(runner.state === 'running' ? {} : { right: RUNNER_STATE_WORDS[runner.state] }),
-      mark: runner.state === 'running' ? 'running' : runner.state === 'degraded' ? 'attention' : runner.state === 'ended' ? 'paused' : 'ok',
+      mark: runner.state === 'running' ? 'running' : NEEDS_RECOVERY.includes(runner.state) ? 'attention' : runner.state === 'ended' ? 'paused' : 'ok',
     };
   },
   detail: (item) => {
@@ -373,10 +403,11 @@ const runnersList: PlaceList<WorkAgentItem> = {
       ...(runner.folder ? [{ label: 'Works in', text: runner.folder }] : []),
       { label: 'Tools', text: runner.tools.length > 0 ? runner.tools.join(', ') : 'none set' },
       { label: 'May write', text: runner.writeScope.length > 0 ? runner.writeScope.join(', ') : 'its folder, under the permission rules' },
-      ...(runner.heartbeat ? [{ label: 'Heartbeat', text: runner.heartbeat }] : []),
+      // A heartbeat and how to recover are a live runner's; an ended one has neither.
+      ...(runner.heartbeat && (LIVE_RUNNER.includes(runner.state) || runner.state === 'failed') ? [{ label: 'Heartbeat', text: runner.heartbeat }] : []),
       ...(runner.errors > 0 ? [{ label: 'Errors', text: String(runner.errors), tone: 'warning' as const }] : []),
       ...(runner.lastError ? [{ label: 'Last error', text: runner.lastError, tone: 'warning' as const }] : []),
-      ...runner.recovery.map((step) => ({ label: 'To recover', text: step })),
+      ...(NEEDS_RECOVERY.includes(runner.state) ? runner.recovery.map((step, index) => ({ label: index === 0 ? 'To recover' : '', text: step })) : []),
     ];
     return lines;
   },
@@ -396,16 +427,18 @@ const poolsList: PlaceList<WorkAgentItem> = {
   detail: (item) => {
     const pool = item as PoolItem;
     return [
-      { label: 'Runners', text: pool.runners.length > 0 ? pool.runners.join(', ') : 'none yet' },
+      { label: 'Runners', text: pool.runnerNames.length > 0 ? pool.runnerNames.join(', ') : 'none yet' },
       { label: 'Limit', text: pool.limit !== undefined ? String(pool.limit) : 'none' },
-      { label: 'Trust', text: pool.trust || 'not said' },
+      { label: 'Trust', text: TRUST_WORDS[pool.trust] ?? (pool.trust || 'not said') },
       { label: 'Usual agent', text: pool.template ?? 'general' },
       ...(pool.description ? [{ label: 'About', text: pool.description }] : []),
     ];
   },
 };
 
-const STATUS_WORDS: Readonly<Record<HandedBackItem['state'], string>> = { completed: 'finished', failed: 'failed', cancelled: 'stopped', running: 'still running when saved', pending: 'not started when saved', unknown: 'state not known' };
+const STATUS_WORDS: Readonly<Record<HandedBackItem['state'], string>> = { completed: 'finished', failed: 'failed', cancelled: 'stopped', running: 'still running when saved', pending: 'not started when saved', unknown: 'not known' };
+/** The same, short enough for a row's right side at 80 columns. */
+const STATUS_ROW_WORDS: Readonly<Record<HandedBackItem['state'], string>> = { completed: 'finished', failed: 'failed', cancelled: 'stopped', running: 'running', pending: 'not started', unknown: 'not known' };
 
 const handedBackList: PlaceList<WorkAgentItem> = {
   id: 'handed-back',
@@ -416,14 +449,15 @@ const handedBackList: PlaceList<WorkAgentItem> = {
   empty: 'Nothing handed back yet: save a runner\'s work to review it here.',
   row: (item) => {
     const artifact = item as HandedBackItem;
-    return { title: artifact.summary || artifact.task || artifact.id, right: STATUS_WORDS[artifact.state], mark: artifact.state === 'failed' ? 'attention' : artifact.state === 'completed' ? 'ok' : 'paused' };
+    return { title: artifact.task || artifact.summary || artifact.id, right: STATUS_ROW_WORDS[artifact.state], mark: artifact.state === 'failed' ? 'attention' : artifact.state === 'completed' ? 'ok' : 'paused' };
   },
   detail: (item) => {
     const artifact = item as HandedBackItem;
     return [
       { label: 'Task', text: artifact.task || 'not said' },
       { label: 'Result', text: STATUS_WORDS[artifact.state] },
-      { label: 'Runner', text: artifact.runner },
+      // A runner is named by its task, so it is named here only when that differs.
+      ...(artifact.runnerName !== artifact.task ? [{ label: 'Runner', text: artifact.runnerName }] : []),
       { label: 'Saved', text: when(artifact.at) },
       { label: 'Tools it had', text: artifact.tools.length > 0 ? artifact.tools.join(', ') : 'none' },
       { label: 'Evidence', text: `${artifact.toolCalls} tool call${artifact.toolCalls === 1 ? '' : 's'}, ${artifact.errors} error${artifact.errors === 1 ? '' : 's'}` },
@@ -444,11 +478,23 @@ const recordedRunsList: PlaceList<WorkAgentItem> = {
   empty: 'No runs recorded yet: each turn in this project is recorded as one.',
   row: (item) => {
     const run = item as RecordedRunItem;
-    return { title: run.id, ...(run.state === 'loaded' ? { right: run.total !== undefined ? `loaded, event ${run.rev ?? 0} of ${run.total}` : 'loaded', mark: 'running' as const } : { mark: 'ok' as const }) };
+    // A run is named by when it started; its id is no word a person reads.
+    // Short enough for a row at 80 columns: the time alone for a turn of today, the date and time otherwise;
+    // how many events it holds is in its detail.
+    const title = run.at === undefined ? run.id
+      : new Date(run.at).toDateString() === new Date().toDateString() ? new Date(run.at).toLocaleTimeString() : when(run.at);
+    return {
+      title,
+      ...(run.state === 'loaded'
+        ? { right: run.total !== undefined ? `at ${run.rev ?? 0} of ${run.total}` : 'loaded', mark: 'running' as const }
+        : { mark: 'ok' as const }),
+    };
   },
   detail: (item) => {
     const run = item as RecordedRunItem;
     return [
+      ...(run.at !== undefined ? [{ label: 'Started', text: when(run.at) }] : []),
+      ...(run.events !== undefined ? [{ label: 'Events', text: String(run.events) }] : []),
       { label: 'Run', text: run.id },
       { label: 'State', text: run.state === 'loaded' ? `loaded${run.total !== undefined ? `, at event ${run.rev ?? 0} of ${run.total}` : ''}` : 'recorded' },
     ];
@@ -456,6 +502,9 @@ const recordedRunsList: PlaceList<WorkAgentItem> = {
 };
 
 const AGENT_STATE_WORDS: Readonly<Record<YourAgentItem['state'], string>> = { running: 'running', 'in-group': 'running in a group', ended: 'ended' };
+const AGENT_STATUS_WORDS: Readonly<Record<string, string>> = {
+  pending: 'starting', running: 'running', completed: 'ended: finished', failed: 'ended: failed', cancelled: 'ended: stopped',
+};
 
 const yourAgentsList: PlaceList<WorkAgentItem> = {
   id: 'agents',
@@ -464,7 +513,7 @@ const yourAgentsList: PlaceList<WorkAgentItem> = {
   source: { kind: 'session', name: YOUR_AGENTS_SOURCE, items: yourAgentItems },
   // The terminal app runs agents of its own; the Agent hands work on instead.
   programs: ['tui'],
-  empty: 'No agents running: start one in a team mode, from a recipe or from an archetype.',
+  empty: 'No agents started in this session: start one in a team mode, from a recipe or from an archetype.',
   row: (item) => {
     const agent = item as YourAgentItem;
     return { title: agent.task || agent.id, ...(agent.state === 'running' ? {} : { right: AGENT_STATE_WORDS[agent.state] }), mark: agent.state === 'ended' ? 'paused' : 'running' };
@@ -473,26 +522,11 @@ const yourAgentsList: PlaceList<WorkAgentItem> = {
     const agent = item as YourAgentItem;
     return [
       { label: 'Task', text: agent.task || 'not said' },
-      { label: 'State', text: agent.status || AGENT_STATE_WORDS[agent.state] },
-      ...(agent.group ? [{ label: 'Group', text: agent.group }] : []),
+      { label: 'State', text: AGENT_STATUS_WORDS[agent.status] ?? (agent.status || AGENT_STATE_WORDS[agent.state]) },
+      ...(agent.group ? [{ label: 'Group', text: agent.state === 'ended' ? 'it ran in a group' : 'it runs in a group: stopping the group stops them all' }] : []),
+      ...(agent.progress ? [{ label: agent.state === 'ended' ? 'Last heard' : 'Now', text: agent.progress }] : []),
+      ...(agent.error ? [{ label: 'What went wrong', text: agent.error, tone: 'warning' as const }] : []),
     ];
-  },
-};
-
-const contractsList: PlaceList<WorkAgentItem> = {
-  id: 'contracts',
-  label: 'Work contracts',
-  noun: 'the work contracts here',
-  source: { kind: 'session', name: CONTRACTS_SOURCE, items: contractItems },
-  programs: ['tui'],
-  empty: 'No work contracts yet: one is kept for each piece of work agents take on here.',
-  row: (item) => {
-    const contract = item as ContractItem;
-    return { title: contract.ask || contract.id, right: contract.state, mark: contract.state === 'failed' ? 'attention' : contract.state === 'running' ? 'running' : 'ok' };
-  },
-  detail: (item) => {
-    const contract = item as ContractItem;
-    return [{ label: 'Asked', text: contract.ask || 'not said' }, { label: 'State', text: contract.state }, { label: 'Contract', text: contract.id }];
   },
 };
 
@@ -532,8 +566,12 @@ const RESEARCH_EVENTS: PlaceFollow = { domains: ['workspace'], events: [], lists
 const RESEARCH_STATE_WORDS: Readonly<Record<string, string>> = {
   planned: 'not started', running: 'collecting sources', paused: 'paused', blocked: 'stopped on a problem', completed: 'done', failed: 'failed', cancelled: 'stopped',
 };
+/** The one word a run's row has room for; the detail says it in full. */
+const RESEARCH_ROW_WORDS: Readonly<Record<string, string>> = {
+  planned: 'not started', running: 'collecting', paused: 'paused', blocked: 'stopped', completed: 'done', failed: 'failed', cancelled: 'stopped',
+};
 const CREDIBILITY_WORDS: Readonly<Record<string, string>> = { unreviewed: 'not judged yet', high: 'high', medium: 'medium', low: 'low', mixed: 'mixed' };
-const SOURCE_STATE_WORDS: Readonly<Record<string, string>> = { unreviewed: 'not reviewed', reviewed: 'reviewed', used: 'used in a report', rejected: 'set aside' };
+const SOURCE_STATE_WORDS: Readonly<Record<string, string>> = { candidate: 'not reviewed yet', reviewed: 'reviewed', used: 'used in a report', rejected: 'set aside' };
 
 const researchList: PlaceList<WorkAgentItem> = {
   id: 'research',
@@ -546,7 +584,7 @@ const researchList: PlaceList<WorkAgentItem> = {
     const run = item as ResearchRunItem;
     return {
       title: run.title,
-      right: `${RESEARCH_STATE_WORDS[run.state] ?? run.state}, ${run.sources} source${run.sources === 1 ? '' : 's'}`,
+      right: RESEARCH_ROW_WORDS[run.state] ?? run.state,
       mark: run.state === 'running' ? 'running' : run.state === 'blocked' || run.state === 'failed' ? 'attention' : run.state === 'completed' ? 'ok' : 'paused',
     };
   },
@@ -554,7 +592,7 @@ const researchList: PlaceList<WorkAgentItem> = {
     const run = item as ResearchRunItem;
     return [
       { label: 'Question', text: run.question || 'not said' },
-      { label: 'Where it stands', text: `${RESEARCH_STATE_WORDS[run.state] ?? run.state}, ${run.progress}% done` },
+      { label: 'Where it stands', text: `${RESEARCH_STATE_WORDS[run.state] ?? run.state}${run.state === 'running' ? `, ${run.progress}% done` : ''}` },
       { label: 'Sources', text: `${run.sources} collected` },
       ...(run.note ? [{ label: 'Last note', text: run.note }] : []),
       ...(run.error ? [{ label: 'What went wrong', text: run.error, tone: 'warning' as const }] : []),
@@ -573,7 +611,8 @@ const sourcesList: PlaceList<WorkAgentItem> = {
   empty: 'The research queue is empty: a research run fills it, and you can add a source of your own.',
   row: (item) => {
     const source = item as ResearchSourceItem;
-    return { title: source.title, right: CREDIBILITY_WORDS[source.credibility] ?? source.credibility, mark: source.state === 'rejected' ? 'paused' : source.state === 'used' ? 'ok' : 'waiting' };
+    // The row has room for one short word: "new" until it is judged, then how far it is trusted.
+    return { title: source.title, right: source.credibility === 'unreviewed' ? 'new' : CREDIBILITY_WORDS[source.credibility] ?? source.credibility, mark: source.state === 'rejected' ? 'paused' : source.state === 'used' ? 'ok' : 'waiting' };
   },
   detail: (item) => {
     const source = item as ResearchSourceItem;
@@ -594,6 +633,12 @@ const HANDED_OFF_WORDS: Readonly<Record<string, string>> = {
   gone: 'session gone', unreadable: 'could not be read', unknown: 'state not known', active: 'open', closed: 'closed',
 };
 
+/** The one word a hand-off's row has room for; the detail says it in full. */
+const HANDED_OFF_ROW_WORDS: Readonly<Record<string, string>> = {
+  answered: 'answered', queued: 'waiting', delivered: 'taken', running: 'working', failed: 'failed', cancelled: 'stopped',
+  gone: 'gone', unreadable: 'unreadable', unknown: 'not known', active: 'open', closed: 'closed',
+};
+
 const handedOffList: PlaceList<WorkAgentItem> = {
   id: 'handed-off',
   label: 'Handed off',
@@ -605,7 +650,7 @@ const handedOffList: PlaceList<WorkAgentItem> = {
   row: (item) => {
     const entry = item as HandedOffItem;
     return {
-      title: entry.task || entry.id, right: HANDED_OFF_WORDS[entry.state] ?? entry.state,
+      title: entry.task || entry.id, right: HANDED_OFF_ROW_WORDS[entry.state] ?? entry.state,
       mark: entry.state === 'answered' ? 'ok' : entry.state === 'failed' || entry.state === 'gone' || entry.state === 'unreadable' ? 'attention' : 'running',
     };
   },
@@ -647,7 +692,7 @@ const evaluationsList: PlaceList<WorkAgentItem> = {
 };
 
 export const WORK_AGENT_LISTS: readonly PlaceList<WorkAgentItem>[] = [
-  yourAgentsList, contractsList, archetypesList, codingAgentsList, handedOffList, researchList, sourcesList, evaluationsList,
+  yourAgentsList, archetypesList, codingAgentsList, handedOffList, researchList, sourcesList, evaluationsList,
   runnersList, poolsList, handedBackList, recordedRunsList,
 ];
 
@@ -658,10 +703,11 @@ export const WORK_AGENT_ACTIONS: readonly PlaceAction<WorkAgentItem>[] = [
   { key: 's', id: 'start-agent', list: 'agents', whole: true, capability: 'agents.start', label: 'start an agent' },
   { key: 'R', id: 'run-recipe', list: 'agents', whole: true, capability: 'agents.recipe', label: 'run a recipe' },
   { key: 't', id: 'team-modes', list: 'agents', whole: true, capability: 'agents.team', label: 'team modes and recipes' },
-  { key: 'x', id: 'stop-agent', list: 'agents', states: ['running', 'in-group'], capability: 'agents.stop-branch', label: 'stop it and what it started', fill: { agent: 'id' } },
-  { key: 'X', id: 'stop-group', list: 'agents', states: ['in-group'], capability: 'agents.stop-group', label: 'stop its group', fill: { group: (item) => (item as YourAgentItem).group ?? '' } },
-  // Work contracts.
-  { key: 'enter', id: 'contract', list: 'contracts', capability: 'agents.contract', label: 'see it', fill: { contract: 'id' } },
+  // Only a running agent has these; an ended one is listed for its record.
+  { key: 'x', id: 'stop-agent', list: 'agents', states: ['running', 'in-group'], capability: 'agents.stop', label: 'stop it', fill: { agent: 'id' } },
+  { key: 'b', id: 'stop-branch', list: 'agents', states: ['running', 'in-group'], capability: 'agents.stop-branch', label: 'stop it and what it started', fill: { agent: 'id' } },
+  { key: 'X', id: 'stop-group', list: 'agents', states: ['in-group'], capability: 'agents.stop-group', label: 'stop its group', fill: { group: (item) => (item as YourAgentItem).group ?? '' },
+    shownAs: { group: (item, items) => groupWords(item as YourAgentItem, items as readonly YourAgentItem[]) } },
   // Archetypes: see one, start an agent from one; the tab is the list of them.
   { key: 'enter', id: 'archetype', list: 'archetypes', capability: 'agents.archetype', label: 'see it', fill: { archetype: 'id' } },
   { key: 's', id: 'start-from-archetype', list: 'archetypes', capability: 'agents.start-archetype', label: 'start an agent from it', fill: { archetype: 'id' } },
@@ -672,29 +718,45 @@ export const WORK_AGENT_ACTIONS: readonly PlaceAction<WorkAgentItem>[] = [
   // A media job a provider was still making when its answer came back: collected by the daemon, from anywhere in the place.
   { key: 'J', id: 'collect-media-job', capability: 'media.collect', label: 'collect a media job' },
   // The Agent's briefing of its own state (the terminal app keeps none: the capability refuses there).
-  { key: 'O', id: 'briefing', capability: 'work.brief', label: 'your briefing' },
+  { key: 'O', id: 'briefing', capability: 'work.brief', label: 'your briefing', programs: ['agent'] },
+  // Web research: a question or a page goes to the Agent's conversation; runs, the queue and reports are the daemon's.
+  { key: 'Q', id: 'research-question', capability: 'research.ask', label: 'research a question', programs: ['agent'] },
+  { key: 'W', id: 'look-at-page', capability: 'research.inspect', label: 'look at a web page', programs: ['agent'] },
+  { key: 's', id: 'start-research', list: 'research', whole: true, capability: 'research.start-run', label: 'start a research run' },
+  { key: 'w', id: 'save-report', list: 'research', capability: 'research.save-report', label: 'save a sourced report', fill: { question: (item) => (item as ResearchRunItem).question, title: (item) => (item as ResearchRunItem).title } },
+  { key: 'a', id: 'add-source', list: 'sources', whole: true, capability: 'research.add-source', label: 'add a source' },
+  // Coding work handed to the terminal app, as a shared session it takes up: from every program, the terminal app too.
+  { key: 'h', id: 'hand-off', list: 'handed-off', whole: true, capability: 'agents.hand-off', label: 'hand coding work on' },
+  { key: 'enter', id: 'handed-off-detail', list: 'handed-off', capability: 'agents.handed-off', label: 'where it stands', fill: { session: 'id' } },
+  // Task suites run in the terminal app's project.
+  { key: 'l', id: 'suite-tasks', list: 'evaluations', whole: true, capability: 'eval.list', label: 'tasks in a suite' },
+  { key: 's', id: 'run-suite', list: 'evaluations', whole: true, capability: 'eval.run', label: 'run a suite' },
+  { key: 'c', id: 'compare-baseline', list: 'evaluations', whole: true, capability: 'eval.compare', label: 'compare with the baseline' },
+  { key: 'g', id: 'gate-suite', list: 'evaluations', whole: true, capability: 'eval.gate', label: 'run and stop on a regression' },
+  { key: 'enter', id: 'run-suite-again', list: 'evaluations', capability: 'eval.run', label: 'run it again', fill: { suite: 'id' } },
   // Runners: start one, look at one, stop one, save its work.
-  { key: 'd', id: 'start-runner', list: 'runners', capability: 'remote.dispatch', label: 'start a runner' },
-  { key: 'D', id: 'start-from-pool', list: 'runners', capability: 'remote.dispatch-pool', label: 'start from a pool' },
+  // What acts on the runners as a whole is on the tab whether or not a runner is selected (the first one is started here).
+  { key: 'd', id: 'start-runner', list: 'runners', whole: true, capability: 'remote.dispatch', label: 'start a runner' },
+  { key: 'D', id: 'start-from-pool', list: 'runners', whole: true, capability: 'remote.dispatch-pool', label: 'start from a pool' },
   { key: 'enter', id: 'runner-contract', list: 'runners', capability: 'remote.contract', label: 'contract', fill: { runner: 'id' } },
   { key: 'v', list: 'runners', states: LIVE_RUNNER, capability: 'remote.supervisor', label: 'supervisor', fill: { runner: 'id' } },
   { key: 'k', list: 'runners', states: LIVE_RUNNER, capability: 'remote.capabilities', label: 'what it can do', fill: { runner: 'id' } },
-  { key: 'h', list: 'runners', states: ['degraded'], capability: 'remote.recover', label: 'how to recover', fill: { runner: 'id' } },
+  { key: 'h', list: 'runners', states: [...NEEDS_RECOVERY], capability: 'remote.recover', label: 'how to recover', fill: { runner: 'id' } },
   { key: 'o', list: 'runners', states: LIVE_RUNNER, capability: 'remote.show', label: 'connection', fill: { connection: 'id' } },
   { key: 'x', id: 'stop-runner', list: 'runners', states: LIVE_RUNNER, capability: 'remote.stop', label: 'stop', fill: { connection: 'id' } },
   { key: 'e', id: 'save-work', list: 'runners', capability: 'remote.export', label: 'save its work', fill: { runner: 'id' } },
   { key: 'a', id: 'put-in-pool', list: 'runners', capability: 'remote.assign', label: 'put in a pool', fill: { runner: 'id' } },
-  { key: 'u', id: 'setup', list: 'runners', capability: 'remote.setup', label: 'setup' },
-  { key: 'U', id: 'save-setup', list: 'runners', capability: 'remote.setup-export', label: 'save setup' },
-  { key: 'E', id: 'environment', list: 'runners', capability: 'remote.env', label: 'environment' },
-  { key: 'w', id: 'save-environment', list: 'runners', capability: 'remote.env-export', label: 'save environment' },
-  { key: 'b', id: 'save-startup-bundle', list: 'runners', capability: 'remote.bootstrap-export', label: 'start-up bundle' },
-  { key: 'B', id: 'open-startup-bundle', list: 'runners', capability: 'remote.bootstrap-inspect', label: 'look in a start-up bundle' },
-  { key: 'S', id: 'save-runner-bundle', list: 'runners', capability: 'remote.session-export', label: 'save runners' },
-  { key: 'L', id: 'look-in-runner-bundle', list: 'runners', capability: 'remote.session-inspect', label: 'look in a runner bundle' },
-  { key: 'I', id: 'bring-in-runner-bundle', list: 'runners', capability: 'remote.session-import', label: 'bring in runners' },
+  { key: 'u', id: 'setup', list: 'runners', whole: true, capability: 'remote.setup', label: 'setup' },
+  { key: 'U', id: 'save-setup', list: 'runners', whole: true, capability: 'remote.setup-export', label: 'save setup' },
+  { key: 'E', id: 'environment', list: 'runners', whole: true, capability: 'remote.env', label: 'environment' },
+  { key: 'w', id: 'save-environment', list: 'runners', whole: true, capability: 'remote.env-export', label: 'save environment' },
+  { key: 'b', id: 'save-startup-bundle', list: 'runners', whole: true, capability: 'remote.bootstrap-export', label: 'start-up bundle' },
+  { key: 'B', id: 'open-startup-bundle', list: 'runners', whole: true, capability: 'remote.bootstrap-inspect', label: 'look in a start-up bundle' },
+  { key: 'S', id: 'save-runner-bundle', list: 'runners', whole: true, capability: 'remote.session-export', label: 'save runners' },
+  { key: 'L', id: 'look-in-runner-bundle', list: 'runners', whole: true, capability: 'remote.session-inspect', label: 'look in a runner bundle' },
+  { key: 'I', id: 'bring-in-runner-bundle', list: 'runners', whole: true, capability: 'remote.session-import', label: 'bring in runners' },
   // Pools.
-  { key: 'm', id: 'make-pool', list: 'pools', capability: 'remote.create-pool', label: 'make a pool' },
+  { key: 'm', id: 'make-pool', list: 'pools', whole: true, capability: 'remote.create-pool', label: 'make a pool' },
   { key: 'enter', id: 'pool-detail', list: 'pools', capability: 'remote.pool', label: 'pool', fill: { pool: 'id' } },
   { key: 'd', id: 'start-in-pool', list: 'pools', states: ['empty', 'holding'], capability: 'remote.dispatch-pool', label: 'start a runner here', fill: { pool: 'id' } },
   { key: 'a', id: 'add-runner', list: 'pools', states: ['empty', 'holding'], capability: 'remote.assign', label: 'add a runner', fill: { pool: 'id' } },
@@ -703,7 +765,7 @@ export const WORK_AGENT_ACTIONS: readonly PlaceAction<WorkAgentItem>[] = [
   { key: 'enter', id: 'review', list: 'handed-back', capability: 'remote.review', label: 'review', fill: { artifact: 'id' } },
   { key: 'e', id: 'save-artifact', list: 'handed-back', capability: 'remote.artifact-export', label: 'save to a file', fill: { artifact: 'id' } },
   { key: 'g', id: 'run-here', list: 'handed-back', capability: 'remote.rerun-local', label: 'run its task here', fill: { artifact: 'id' } },
-  { key: 'i', id: 'bring-in', list: 'handed-back', capability: 'remote.import', label: 'bring one in' },
+  { key: 'i', id: 'bring-in', list: 'handed-back', whole: true, capability: 'remote.import', label: 'bring one in' },
   // Recorded runs of this program's turns.
   { key: 'enter', id: 'load-run', list: 'recorded-runs', states: ['recorded'], capability: 'replay.load', label: 'load', fill: { run: 'id' } },
   { key: 'enter', id: 'run-status', list: 'recorded-runs', states: ['loaded'], capability: 'replay.status', label: 'where am I' },
@@ -711,7 +773,7 @@ export const WORK_AGENT_ACTIONS: readonly PlaceAction<WorkAgentItem>[] = [
   { key: 'j', id: 'jump-in-run', list: 'recorded-runs', states: ['loaded'], capability: 'replay.seek', label: 'jump to' },
   { key: 'c', id: 'compare-runs', list: 'recorded-runs', states: ['recorded'], capability: 'replay.diff', label: 'compare with the loaded one', fill: { run: 'id' } },
   { key: 'e', id: 'save-replay-report', list: 'recorded-runs', states: ['loaded'], capability: 'replay.export', label: 'save the report' },
-  { key: 'L', id: 'list-runs', list: 'recorded-runs', capability: 'replay.runs', label: 'list them' },
+  { key: 'L', id: 'list-runs', list: 'recorded-runs', whole: true, capability: 'replay.runs', label: 'list them' },
 ];
 
 /** What the terminal side of these lists reads (work-agents-lists.ts: the Recorded runs source, the forms' live lists). */

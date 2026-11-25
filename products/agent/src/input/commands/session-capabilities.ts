@@ -23,10 +23,11 @@ import { publishNotice } from '../../core/notices.ts';
 import { getSharedNotificationFeed } from '../../core/notifications-feed.ts';
 import { liveSessions } from './session.ts';
 import { agentOwnerInbox } from '../../runtime/client/owner-questions.ts';
-import { listRefusedOutwardActions } from '@goodvibes/engine/terminal-shell/agent-turn/outward-approvals';
-import type { ConversationControlServices, RoutineStartServices } from '@goodvibes/engine/platform/platform/capabilities';
-import { startRoutineFor } from '@goodvibes/engine/terminal-shell/agent-turn/agent-store-runner';
-import { requireShellPaths } from './runtime-services.ts';
+import { CapabilityRefusal, type ConversationControlServices, type PinnedLinesServices, type RoutineStartServices, type StartedRoutine } from '@goodvibes/engine/platform/platform/capabilities';
+import { runDaemonCapability } from '@goodvibes/engine/terminal-shell/command-actions';
+import { requireReadModels, requireSubscriptionManager } from './runtime-services.ts';
+import { securityHereServices } from '@goodvibes/engine/terminal-shell/places';
+import { capabilityBinding } from './capability-binding.ts';
 import { composerOf, queueOf, turnsOf } from '@goodvibes/engine/terminal-shell/conversation-controls';
 import { conversationContextOf } from '@goodvibes/engine/terminal-shell/context-inspection-command';
 import { checkpointsOf } from '@goodvibes/engine/terminal-shell/checkpoint-command';
@@ -48,6 +49,8 @@ import { healthServicesOf } from '@goodvibes/engine/terminal-shell/health-comman
 import { healthPolicy } from './health-runtime.ts';
 import { voiceWakeOf } from './experience-runtime.ts';
 import { helpServicesOf } from './shell-core.ts';
+import { setupTopicsOf } from './onboarding-runtime.ts';
+import { writeSetting, type SettingWriteContext } from '@goodvibes/engine/terminal-shell/settings-writes';
 
 export function conversationOf(ctx: CommandContext): SessionCapabilityServices['conversation'] {
   return {
@@ -93,8 +96,6 @@ export function sessionCapabilityServices(ctx: CommandContext): SessionCapabilit
     workIntake: workIntakeServices(ctx),
     // A choice on a call Jev decided here is carried out here (builtin/waiting.ts): the Agent's routed owner inbox.
     ...(ctx.workspace.shellPaths ? { ownerInbox: ownerInboxOf(ctx.workspace.shellPaths, ctx) } : {}),
-    // The sends the content check refused in this Agent, waiting for the owner (builtin/waiting.ts).
-    heldSends: { list: listRefusedOutwardActions },
     // Tools and extensions: the Agent's own dispatcher reads the hooks file again, and its tools (builtin/hooks.ts, tools.ts).
     hookFile: hooksReloadServices(ctx).hookFile,
     toolRegistry: toolRegistryServices(ctx.extensions.toolRegistry),
@@ -102,6 +103,8 @@ export function sessionCapabilityServices(ctx: CommandContext): SessionCapabilit
     mcpLive: mcpLiveServices(ctx),
     // The plugins this Agent runs (builtin/plugins.ts).
     pluginsLive: { manager: ctx.extensions.pluginManager },
+    // What the marketplace has that fits this project, ranked by the decision model when one is set (builtin/marketplace.ts).
+    ...(ctx.platform.readModels ? { marketplaceRecommend: { recommend: () => ctx.platform.readModels!.marketplace.recommend() } } : {}),
     // The controls on the conversation itself (builtin/conversation-controls.ts).
     ...conversationControlsOf(ctx),
     // System (builtin/system-session.ts): this session at a glance, closing the Agent, how much it prints.
@@ -111,6 +114,8 @@ export function sessionCapabilityServices(ctx: CommandContext): SessionCapabilit
     // Memory and knowledge (builtin/routines.ts): a routine started here, its steps sent as the owner's next message
     // (a model's start reads them as its answer: capability_run leaves `send` out).
     ...routineStartServices(ctx),
+    // This conversation: the lines pinned in it (builtin/pinned-lines.ts), the program's own session memory store.
+    ...pinnedLinesServices(ctx),
     // Memory and knowledge: what the Agent holds, memory files in its project, templates as the next message
     // (builtin/memory-session.ts, templates.ts); the Agent records no per-turn memory and has no views to link to.
     memorySession: memorySessionServices(ctx),
@@ -118,11 +123,29 @@ export function sessionCapabilityServices(ctx: CommandContext): SessionCapabilit
     // Permissions and safety: this conversation's permissions and a secret for this session (the Agent keeps no plan mode toggle or sandbox sessions).
     permissionsHere: permissionsHereOf(agentPermissionsDeps(ctx)),
     ...secretsSessionServices(),
+    // What needs attention, the whole review and risky MCP routes, from the Agent's MCP servers and plugins with the
+    // daemon's facts, and the sandbox probe on this terminal (builtin/security-review.ts).
+    ...securityHereServices(ctx, capabilityBinding, {
+      mcp: () => {
+        const snapshot = requireReadModels(ctx).security.getSnapshot();
+        return { servers: snapshot.mcpServers, recentDecisions: snapshot.recentMcpDecisions };
+      },
+      plugins: () => ctx.extensions.pluginManager?.list() ?? [],
+      subscriptions: () => {
+        const subscriptions = requireSubscriptionManager(ctx);
+        return { active: subscriptions.list().length, pending: subscriptions.listPending().length };
+      },
+      sandboxConfig: { get: (key: string) => ctx.platform.configManager.get(key as ConfigKey) },
+    }),
     // Work and agents (builtin/agents.ts `work.brief`): the Agent's briefing of its own state.
     briefing: { read: () => formatAgentOperatorBriefing(ctx) },
     // Work and agents (builtin/research.ts): a question or a page sent to this conversation as the owner's own message
     // (given only for the owner's own press: the model researches in its own turn).
-    ...(ctx.invokedByModel !== true && ctx.submitTurn ? { researchConversation: { send: (prompt: string) => { ctx.submitTurn!(prompt); } } } : {}),
+    // The message is the control's words, not the owner's: it does not rename the conversation.
+    ...(ctx.invokedByModel !== true && ctx.submitTurn ? { researchConversation: { send: (prompt: string) => {
+      ctx.session.conversationManager.leaveTitleFor(prompt);
+      ctx.submitTurn!(prompt);
+    } } } : {}),
     // Devices and network (builtin/devices-session.ts): pairing on the Agent's screen, and its own credential for its host.
     pairing: pairingServices(AGENT_PAIRING, ctx),
   };
@@ -132,9 +155,30 @@ export function sessionCapabilityServices(ctx: CommandContext): SessionCapabilit
  * Starting a routine in this conversation (builtin/routines.ts): the routine marked started in the owner's routine
  * store, and its steps sent as the owner's next message (`send`, given only for the owner's own press or line).
  */
+/** The lines pinned in this conversation (`!#` / `#`), as This conversation lists, changes and removes them. */
+export function pinnedLinesServices(ctx: CommandContext): PinnedLinesServices {
+  const store = ctx.session.sessionMemoryStore;
+  if (!store) return {};
+  return {
+    pinned: {
+      list: () => store.list().map((line) => ({ id: line.id, text: line.text, createdAt: line.createdAt })),
+      change: (id, text) => { const changed = store.update(id, text); if (changed) ctx.renderRequest(); return changed; },
+      remove: (id) => { const removed = store.remove(id); if (removed) ctx.renderRequest(); return removed; },
+    },
+  };
+}
+
 export function routineStartServices(ctx: CommandContext): RoutineStartServices {
   return {
-    routines: { start: async (routine) => startRoutineFor(requireShellPaths(ctx), routine) },
+    // Counted by the daemon, the one count every program shows; its steps come back to run here.
+    routines: {
+      start: async (routine) => {
+        const answer = await runDaemonCapability('routines.count-start', { routine }, ctx, capabilityBinding);
+        const started = (answer.data as { readonly routine?: StartedRoutine } | undefined)?.routine;
+        if (!started) throw new CapabilityRefusal(`Not started: the daemon did not give back routine ${routine}'s steps.`);
+        return started;
+      },
+    },
     ...(ctx.invokedByModel !== true && ctx.submitTurn ? { send: (message: string) => { ctx.submitTurn!(message); } } : {}),
   };
 }
@@ -145,7 +189,8 @@ export function systemSessionOf(ctx: CommandContext): NonNullable<SessionCapabil
     status: () => agentStatusText(ctx),
     quit: () => { ctx.exit(); },
     ...(ctx.ops.modeManager ? { printLevel: ctx.ops.modeManager } : {}),
-    savePrintLevel: (level) => { ctx.platform.configManager.setDynamic('behavior.hitlMode' as ConfigKey, level as never); },
+    // Through the daemon's settings.set (settings-writes.ts); a refusal is said there.
+    savePrintLevel: (level) => { void writeSetting(ctx as unknown as SettingWriteContext, 'behavior.hitlMode', level).catch(() => {}); },
     redraw: () => { ctx.renderRequest(); },
     // Speaking answers aloud and listening for the wake word, on this terminal.
     speech: {
@@ -160,11 +205,23 @@ export function systemSessionOf(ctx: CommandContext): NonNullable<SessionCapabil
     // the links to views are the terminal app's: the Agent has none, and those capabilities are no control here.
     health: healthServicesOf(healthPolicy, ctx),
     help: helpServicesOf(ctx),
+    // What a support folder records of the Agent's integration helpers (System, Support and transfer).
+    ...(ctx.extensions.integrationHelpers ? {
+      integrationHelpers: () => {
+        const review = ctx.extensions.integrationHelpers!.buildReview();
+        return { apiFamilies: review.apiFamilies, routes: review.routes };
+      },
+    } : {}),
     // The notices and notifications this Agent collected: the System place's Notices list.
     notices: {
       list: () => getSharedNotificationFeed().list(), subscribe: (onChange) => getSharedNotificationFeed().subscribe(onChange),
       markSeen: () => { getSharedNotificationFeed().markAllSeen(); },
+      record: (notice) => {
+        getSharedNotificationFeed().recordNotice({ domain: notice.domain ?? 'payments', title: notice.title, body: notice.body, timestamp: notice.timestamp, eventKey: notice.key, level: 'info' });
+      },
     },
+    // The setup rows (builtin/system-program.ts setup.<topic>).
+    setupTopic: setupTopicsOf(ctx),
   };
 }
 

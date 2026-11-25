@@ -267,9 +267,9 @@ function fileIdentity(stat: BigIntStats): string {
 
 const SCOPE_REFUSALS: Record<NativeWorkspaceScopeReason, (root: string, detail?: string) => { state: string; next: readonly string[] }> = {
   'not-registered': (root) => ({ state: `${root} is not a registered workspace`,
-    next: [`Register ${root}: run \`goodvibes-agent workspaces register --yes\` in that directory, or open it in goodvibes and choose Register. Then retry.`] }),
+    next: [`Register ${root}: start the Agent there (it registers the folder it starts in), or "register a folder" in System, on the Workspaces tab. Then retry.`] }),
   declined: (root, detail) => ({ state: `registration was declined at ${detail ?? root}`,
-    next: [`Register ${root} explicitly, which clears that decline: run \`goodvibes-agent workspaces register --yes\` in that directory. Then retry.`] }),
+    next: [`Register ${root}, which clears that decline: start the Agent there, or "register a folder" in System, on the Workspaces tab. Then retry.`] }),
   'registry-unreadable': (_root, detail) => ({ state: `the workspace register cannot be read${detail ? `: ${detail}` : ''}`,
     next: ['Repair or remove the bad entry in the workspace register (~/.goodvibes/shared), then retry.'] }),
   'root-missing': (root) => ({ state: `${root} is not an existing directory`,

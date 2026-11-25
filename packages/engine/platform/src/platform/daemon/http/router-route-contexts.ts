@@ -11,7 +11,6 @@ import type {
   RouteBindingManager,
   SurfaceRegistry,
 } from '../../channels/index.js';
-import { logger } from '../../utils/logger.js';
 import type { KnowledgeGraphqlService, KnowledgeService } from '../../knowledge/index.js';
 import type { ArtifactStore } from '../../artifacts/index.js';
 import type { MediaProviderRegistry } from '../../media/index.js';
@@ -174,8 +173,6 @@ export function buildChannelRouteContext(input: {
   };
 }
 
-/** Whether the missing working-directory saver was already logged in this process. */
-let missingSwapManagerReported = false;
 
 export function buildSystemRouteContext(input: {
   readonly settingsPrecondition?: DaemonSystemRouteContext['settingsPrecondition'] | undefined;
@@ -209,15 +206,8 @@ export function buildSystemRouteContext(input: {
   readonly requireAuthenticatedSession: (request: Request) => { username: string; roles: readonly string[] } | null;
   readonly resolveAuthenticatedPrincipal: (request: Request) => (NonNullable<ReturnType<NonNullable<DaemonSystemRouteContext['resolveAuthenticatedPrincipal']>>> & { readonly actor: Actor }) | null;
   readonly routeBindings: RouteBindingManager;
-  readonly swapManager: DaemonSystemRouteContext['swapManager'];
   readonly watcherRegistry: WatcherRegistry;
 }): DaemonSystemRouteContext {
-  if (!input.swapManager && !missingSwapManagerReported) {
-    // The route context is rebuilt when the router's inputs change; the fact is said once per process.
-    missingSwapManagerReported = true;
-    logger.warn('This daemon was started without a place to save a working-directory change; POST /config runtime.workingDir is refused with the restart step');
-  }
-
   return {
     // Every approval row and action outcome carries the reading for the caller.
     approvalBroker: localApprovalActions(input.approvalBroker),
@@ -253,7 +243,6 @@ export function buildSystemRouteContext(input: {
     requireAdmin: input.requireAdmin,
     requireAuthenticatedSession: input.requireAuthenticatedSession,
     resolveAuthenticatedPrincipal: input.resolveAuthenticatedPrincipal,
-    swapManager: input.swapManager,
     routeBindings: input.routeBindings,
     watcherRegistry: input.watcherRegistry,
   };

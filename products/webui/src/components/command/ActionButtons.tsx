@@ -13,6 +13,7 @@ import { Button } from '../ui/Button';
 import { IconButton } from '../ui/IconButton';
 import { Menu, MenuItem } from '../ui/Menu';
 import { ActionSheet, findCommandAction } from './ActionSheet';
+import { useCapabilityIndex } from '../../lib/place-capabilities';
 
 export interface ActionButtonsProps {
   readonly command: string;
@@ -39,6 +40,8 @@ function terminalOnly(action: ActionData): string | undefined {
 
 export function ActionButtons({ command, actions, menu = [], menuLabel, prefill = {}, current, short = false, primary = false, onDone }: ActionButtonsProps) {
   const [open, setOpen] = useState<string | null>(null);
+  // What each action is and where it runs is read from the daemon (lib/place-capabilities.ts); the row draws again then.
+  useCapabilityIndex();
   const needsMore = (action: ActionData) => action.inputs.some((input) => input.required === true && prefill[input.id] === undefined);
   const inMenu = menu.flatMap((id) => findCommandAction(command, id)?.action ?? []);
   return (

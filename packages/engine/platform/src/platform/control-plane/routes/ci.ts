@@ -3,7 +3,9 @@
  *
  * Handlers for the ci.* gateway verbs over the CiWatchService (../../ci-watch).
  * Thin verb registration: read params, call the service, map CiWatchError to an
- * honest wire status (INVALID_ARGUMENT -> 400, NOT_FOUND -> 404).
+ * honest wire status (INVALID_ARGUMENT -> 400, NOT_FOUND -> 404), a target gone
+ * on GitHub to 404 CI_TARGET_GONE and a refusal of gh itself to 424
+ * CI_SOURCE_REFUSED.
  */
 import type { GatewayMethodCatalog } from '../method-catalog.js';
 import type { GatewayMethodHandler } from '../method-catalog-shared.js';
@@ -11,6 +13,7 @@ import { GatewayVerbError } from './gateway-verb-error.js';
 import { readInvocationParams, requireString } from './invocation-params.js';
 import { attachHandler } from './attach-handler.js';
 import { CiWatchError, type CiWatchService } from '../../ci-watch/index.js';
+import { CiSourceError, CiTargetGoneError } from '../../ci-watch/types.js';
 
 export type CiWatchGatewayService = Pick<
   CiWatchService,
@@ -25,6 +28,18 @@ const ERROR_STATUS: Readonly<Record<string, number>> = {
 function rethrow(error: unknown): never {
   if (error instanceof CiWatchError) {
     throw new GatewayVerbError(error.message, error.code, ERROR_STATUS[error.code] ?? 400);
+  }
+  // The repository, branch or pull request is gone on GitHub, or this login cannot read it: no verdict will come.
+  if (error instanceof CiTargetGoneError) {
+    throw new GatewayVerbError(error.message, 'CI_TARGET_GONE', 404, 'repo', { next: ['Check the repository, branch or pull request named, and that gh is signed in to an account that can read it.'] });
+  }
+  // gh refused or could not answer (not signed in, no network, not installed): a refusal from outside this daemon,
+  // in gh's own words, never a daemon fault (a 500).
+  if (error instanceof CiSourceError) {
+    throw new GatewayVerbError(`GitHub could not be read: ${error.message}`, 'CI_SOURCE_REFUSED', 424, undefined, {
+      state: 'nothing was read from GitHub and nothing was changed',
+      next: ['Check that gh is installed and signed in (gh auth status, gh auth login) and that GitHub can be reached, then ask again.'],
+    });
   }
   throw error;
 }

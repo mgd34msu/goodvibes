@@ -39,7 +39,7 @@ import { applyConversationOverlays, buildConversationLayers } from './renderer/c
 import { WorkBoardModal, waitingAskOf } from '@goodvibes/engine/terminal-shell/work-board-input';
 import { createVerbSpawnGateway, FleetSpawn } from '@goodvibes/engine/terminal-shell/fleet-spawn';
 import { confirmThrough } from './input/confirm-dialog.ts';
-import { AgentCalendarRegistry } from './agent/calendar-registry.ts';
+import { LocalCalendarEvents, localCalendarPaths } from '@goodvibes/engine/platform/platform/calendar';
 import { envFlag, logger, summarizeError } from '@goodvibes/engine/platform/platform/utils';
 import { emitAgentAwaitingMessage, emitAgentAwaitingTool } from '@goodvibes/engine/platform/platform/runtime/emitters';
 import { bootstrapRuntime } from './runtime/bootstrap.ts';
@@ -47,7 +47,7 @@ import { readAgentHostSetting } from './config/host-settings.ts';
 import { createWorkspaceRegistrationLiveChecker } from './config/workspace-registration.ts';
 import { onDaemonAttached } from './runtime/daemon-attach-signal.ts';
 import type { BootstrapContext } from './runtime/bootstrap.ts';
-import { startFirstRenderFollowups, type DaemonRepairPrompt } from './shell/first-render-followups.ts';
+import { startFirstRenderFollowups } from './shell/first-render-followups.ts';
 import { deleteRecoveryFile, removeRecoveryPoint } from '@/runtime/index.ts';
 import type { SessionSnapshot } from '@/runtime/index.ts';
 import { buildAgentRecoveryApply } from './shell/recovery-apply.ts';
@@ -55,8 +55,8 @@ import { announceRecoveryOffer } from './shell/startup-wiring.ts';
 import { whenCrashSnapshotFound } from '@goodvibes/engine/terminal-shell/session-crash-recovery';
 import { handleBlockingShellInput, type PendingPermissionState } from './shell/blocking-input.ts';
 import { cardAwaitsTab } from '@goodvibes/engine/terminal-shell/blocking-permission-input';
-import { createWorkspaceRegistrationQuestion } from './shell/workspace-registration-question.ts';
-import { createDaemonRepairQuestion } from './shell/daemon-repair-prompt.ts';
+import { decodeFolderTrustChoice, FOLDER_TRUST_OPENS_ON, folderTrustCard, readFolderTrustFacts, settleFolderTrustOnOpen } from '@goodvibes/engine/terminal-shell/headless-command';
+import { WorkspaceTrustDecisionUnsettledError } from '@goodvibes/engine/platform/platform/runtime/operations';
 import { getTerminalSize } from './shell/terminal-size.ts';
 import { buildShellSessionContinuityHints } from './shell/session-continuity-hints.ts';
 import { wireShellUiOpeners } from './shell/ui-openers.ts';
@@ -67,7 +67,7 @@ import { terminalAskFacts, type TerminalAskContext } from '@goodvibes/engine/ter
 import { OwnerQuestionCard, ownerQuestionInbox, withOwnerQuestionCard } from '@goodvibes/engine/terminal-shell/question-card';
 import { keycapLabel } from '@goodvibes/engine/terminal-shell/status-line';
 import { newestUnreadNoticeTitle } from '@goodvibes/engine/terminal-shell/shell-footer';
-import { drawSplashAdditions, openModeSegment } from '@goodvibes/engine/terminal-shell/first-run';
+import { drawSplashAdditions, openModeSegment, setSplashRecoveryLine } from '@goodvibes/engine/terminal-shell/first-run';
 import { GitStatusProvider, type GitHeaderInfo } from '@goodvibes/engine/terminal-shell/git-status';
 import { describeExecutionModeWords } from './permissions/execution-mode.ts';
 import { footerTargetRows } from './renderer/footer-targets.ts';
@@ -99,7 +99,7 @@ import { createAutonomySurfacing, buildSkillDraftProposer } from './shell/autono
 import { bindApprovals } from './shell/approvals-binding.ts';
 import { listAutomationRunsSince } from './agent/automation-runs-source.ts';
 import { createConnectedHost, resolveConnectedHost } from '@goodvibes/engine/terminal-shell/agent-turn/connected-host-client';
-import { wirePlaces } from '@goodvibes/engine/terminal-shell/places';
+import { spendingAlertWatch, UsageTracker, wirePlaces } from '@goodvibes/engine/terminal-shell/places';
 import { sessionsPlaceSources } from '@goodvibes/engine/terminal-shell/places';
 import { sessionsPlaceHostOf } from './input/commands/sessions-place-host.ts';
 import { readApprovalPostureFromConfig } from './permissions/approval-posture.ts';
@@ -110,7 +110,7 @@ import { createTerminalPaintWindow } from './shell/terminal-paint-window.ts';
 import { createSessionContractViews, wireWorkTree } from './core/work-tree-wiring.ts';
 import { createContractQuestionComposer } from '@goodvibes/engine/terminal-shell/contract-question-composer';
 import { SessionViews } from './shell/session-views.ts';
-import { capabilityBinding } from './input/commands/capability-binding.ts';
+import { ownerPressBinding } from './input/commands/capability-binding.ts';
 import { setupPlace } from './input/commands/onboarding-runtime.ts';
 import { sessionCapabilityServices, systemSessionOf } from './input/commands/session-capabilities.ts';
 import { proposesSpeechToText, runWakeSetupPlan, wakeSetupRunning } from './core/wake-setup-plan.ts';
@@ -366,12 +366,10 @@ async function main(prepared: PreparedShellCliRuntime) {
             readExecutionMode: () => readInitialExecutionMode(configManager),
           };
     },
-    () => render(),
   );
   commandContext.nativeConversationIntake = commandContext.nativeWorkLedger.intake;
   unsubs.push(() => commandContext.nativeWorkLedger?.dispose());
   unsubs.push(() => shellPassthrough.cancelRunning());
-  unsubs.push(() => input.settingsModal.close());
   // The footer's power note: the adopted daemon's state (the daemon owns keep-awake), else this process's manager.
   // Read when the daemon says sleep ownership changed, when keep-awake changes here and when a turn ends.
   const powerNote = createPowerNoteSource({
@@ -473,8 +471,7 @@ async function main(prepared: PreparedShellCliRuntime) {
   }));
   let stopSpokenOutputForExit: (() => Promise<void>) | null = null;
   // sessionId of the offered recovery snapshot, or null when none is pending.
-  let recoveryPending: string | null = null,
-    daemonRepairPrompt: DaemonRepairPrompt | null = null;
+  let recoveryPending: string | null = null;
   /** True while $EDITOR owns the terminal: frames are held until it exits. */
   let externalEditorOpen = false;
   // The window in which this app owns the screen: opened by the enter sequence below, closed by exitApp before the terminal-restore write. render() paints only inside it, see shell/terminal-paint-window.ts for what the early frames did to the boot surface and to the shell's screen.
@@ -747,6 +744,14 @@ async function main(prepared: PreparedShellCliRuntime) {
     refuseUnsendable,
     answerOptions: () => contractQuestions.answerOptions(),
     sendTurn: (text, options, turnOptions, how) => ownerTurns.sendTurn(text, options, turnOptions, how),
+    // The image control's message runs here with its image (the connected host and the native intake carry text only),
+    // as the terminal app sends it; a turn that could not start says so in the conversation.
+    sendImageTurn: (text, content) => {
+      void ctx.daemonReady.then(() => orchestrator.handleUserInput(text, content, undefined)).catch((error: unknown) => {
+        systemMessageRouter.high(`Your message and its image were not sent: ${summarizeError(error)}`, 'error');
+      }).finally(() => render());
+      render();
+    },
     restoreDraft: (text) => restoreDraft(text),
     onShellCommandsRunning: (running) => { shellCommandsRunning = running; },
     notify: (message, level) => systemMessageRouter.high(message, level),
@@ -836,9 +841,13 @@ async function main(prepared: PreparedShellCliRuntime) {
         asks: () => waitingAskOf(pendingPermission),
         sessionStartedAt,
         // What the old "Coming up" showed from the calendar: today's events, one line under Scheduled.
-        eventsToday: () => AgentCalendarRegistry.fromShellPaths(ctx.services.shellPaths).upcoming(0).length,
+        // The calendar on this computer is the daemon's (calendar/local-calendar.ts): today's events read from its file.
+        eventsToday: () => {
+          const start = new Date();
+          return new LocalCalendarEvents(localCalendarPaths(ctx.services.shellPaths.homeDirectory).events).occurrences(start, start).length;
+        },
       },
-      openEventsToday: () => { void commandContext.executeCommand?.('calendar', ['upcoming', '--days', '1']).finally(() => render()); },
+      openEventsToday: () => { commandContext.openPlace?.('messages', { list: 'calendar' }); render(); },
       subscribe: (listener) => ctx.services.processRegistry.subscribe(() => listener()),
       requestRender: () => render(),
       openSessionView: (target) => {
@@ -950,7 +959,6 @@ async function main(prepared: PreparedShellCliRuntime) {
         return !exiting &&
           pendingPermission === null &&
           recoveryPending === null &&
-          !daemonRepairPrompt?.pending() &&
           !input.concealedInput &&
           !input.plainLineInput &&
           input.surfaceModals.modals().every((modal) => modal === input.modals.command) &&
@@ -980,6 +988,30 @@ async function main(prepared: PreparedShellCliRuntime) {
   orchestratorRefs.scrollToEnd = scrollToEnd;
 
   input.setCommandRegistry(commandRegistry, commandContext);
+  // What this conversation used and cost, collected from its first turn for the top of Money, Spending
+  // (terminal-shell places/conversation-spending.ts), and the daemon's spending alert checked at each turn's end.
+  const usageTracker = new UsageTracker({
+    turnEvents: uiServices.events.turns,
+    agentEvents: uiServices.events.agents,
+    getUsage: () => orchestrator.usage,
+    getContextTokens: () => orchestrator.lastInputTokens ?? 0,
+    getContextWindow: () => providerRegistry.getKnownContextWindowForModel(providerRegistry.getCurrentModel()) ?? 0,
+    getModelId: () => providerRegistry.getCurrentModel().id,
+    // The key a price of your own is set under (Money, Spending, "your price").
+    getModelKey: () => { const model = providerRegistry.getCurrentModel(); return `${model.provider}:${model.id}`; },
+    pricing: providerRegistry,
+    getAgentStatus: (id) => agentManager.getStatus(id),
+    configManager,
+    requestRender: () => render(),
+  });
+  const spendingAlert = spendingAlertWatch(usageTracker);
+  unsubs.push(() => usageTracker.dispose(), uiServices.events.turns.on('TURN_COMPLETED', () => {
+    const said = spendingAlert();
+    // Said in the conversation whatever the notice settings: it is the alert the person set.
+    if (said) { systemMessageRouter.userReceipt(said, 'warning'); render(); }
+  }));
+  // What the Agent gives the settings screen, set where the shell's openers are wired (wireShellUiOpeners below).
+  let settingsProgram: ReturnType<typeof wireShellUiOpeners>['settings'] | undefined;
   // The menu of every place and the places themselves (terminal-shell/places), on this program's
   // modal stack: their lists are the connected host's (the daemon) or this session's own.
   const places = wirePlaces({
@@ -988,8 +1020,9 @@ async function main(prepared: PreparedShellCliRuntime) {
     executeFromOwner: (name, args, context) => commandRegistry.executeFromOwner(name, args, context as typeof commandContext),
     keys: ctx.services.keybindingsManager,
     invoke: (method, input) => automationHost.invoke(method as never, input as never),
-    // A daemon capability no slash command here carries runs with this Agent's binding, as the owner's press.
-    capabilityBinding,
+    // A daemon capability no slash command here carries runs as the owner's press, with the credential that keeps his
+    // claim when the host is this machine (capability-binding.ts `ownerPressBinding`), never one the model calls with.
+    capabilityBinding: ownerPressBinding,
     // The System place's Setup list: this Agent's settings, skip file and "Who decides" record.
     setup: setupPlace(commandContext),
     // The System place's "This session" list: this Agent's status report and print level.
@@ -1009,10 +1042,16 @@ async function main(prepared: PreparedShellCliRuntime) {
     sources: sessionsPlaceSources(sessionsPlaceHostOf(commandContext)),
     // This Agent's turns read the daemon's context window sizes again whenever the daemon changes one.
     providerRegistry,
+    // Money, Spending: this conversation's usage and cost.
+    spending: () => usageTracker,
+    // Settings: the one settings screen both programs show; what the Agent keeps and the pickers it draws (ui-openers.ts).
+    settings: () => settingsProgram,
     modals: input.surfaceModals,
     requestRender: () => render(),
   });
   unsubs.push(() => places.stop());
+  // /settings, the System place, the menu and the Agent's workspace open the one settings screen (terminal-shell settings-screen).
+  commandContext.openSettingsModal = (target) => places.openSettings(target);
   commandContext.openPlaceMenu = places.openMenu;
   commandContext.openPlace = (id, start) => { places.openPlace(id, start); };
   // This conversation's controls a person bound to a key in the composer (Keys place, "This conversation, while writing a message").
@@ -1037,6 +1076,8 @@ async function main(prepared: PreparedShellCliRuntime) {
     else if (target === 'commands') commandContext.openCommandPalette?.();
     else if (target === 'workspace') commandContext.openWorkspacePicker?.();
     else if (target === 'places') commandContext.openPlaceMenu?.();
+    // The cost opens Money on Spending: this conversation's usage first.
+    else if (target === 'usage') commandContext.openPlace?.('money', { list: 'spending' });
     render();
   };
   input.sessionView = sessionViews;
@@ -1078,7 +1119,7 @@ async function main(prepared: PreparedShellCliRuntime) {
     void runWakeSetupPlan(ctx.services.voiceSetup).then(
       (outcome) => {
         systemMessageRouter.userAction(['Wake-Word Setup', outcome.rendered,
-          ...(proposesSpeechToText(outcome) ? ['(/voice wake-setup --with-speech-to-text installs it now)'] : [])].join('\n'));
+          ...(proposesSpeechToText(outcome) ? ['(Set up the wake word with "Install it too" in the System place, Voice, to install it now.)'] : [])].join('\n'));
         render();
       },
       (error: unknown) => {
@@ -1119,8 +1160,6 @@ async function main(prepared: PreparedShellCliRuntime) {
         workingDir,
         input,
         pendingPermission,
-        recoveryPending,
-        daemonRepairPrompt,
         setupPairing,
         contracts: sessionContractViews.active(),
       }),
@@ -1371,7 +1410,8 @@ async function main(prepared: PreparedShellCliRuntime) {
   setRenderRequest(render);
   orchestratorRefs.requestRender = render;
   commandContext.renderRequest = render;
-  wireShellUiOpeners({
+  // What the Agent gives the one settings screen (opened through the places wired above).
+  settingsProgram = wireShellUiOpeners({
     commandContext,
     input,
     conversation,
@@ -1390,7 +1430,7 @@ async function main(prepared: PreparedShellCliRuntime) {
     render,
     // The daemon reads every provider's list on start and says so: an open picker shows it then.
     onProvidersChanged: (listener) => uiServices.events.providers?.on('PROVIDERS_CHANGED', listener) ?? (() => {}),
-  });
+  }).settings;
 
   // Crash capture before raw mode and terminal entry, as in the TUI: a throw
   // anywhere from here on restores the terminal before its record is printed.
@@ -1439,7 +1479,7 @@ async function main(prepared: PreparedShellCliRuntime) {
     // The administrative gesture has one input owner throughout its I/O. A
     // new blocking prompt cancels it before that prompt may consume any key.
     if (setupPairing?.ownsInput) {
-      if (pendingPermission || recoveryPending || daemonRepairPrompt?.pending()) setupPairing.cancelForTakeover();
+      if (pendingPermission) setupPairing.cancelForTakeover();
       input.feed(data);
       return;
     }
@@ -1465,6 +1505,8 @@ async function main(prepared: PreparedShellCliRuntime) {
       },
     });
     ({ pendingPermission, recoveryPending } = blocking);
+    // The offer closed (restored, discarded, or typing started a new conversation): its line under the splash goes.
+    if (recoveryPending === null) setSplashRecoveryLine(undefined);
     if (blocking.handled) {
       render();
       return;
@@ -1489,6 +1531,24 @@ async function main(prepared: PreparedShellCliRuntime) {
 
   conversation.rebuildHistory();
   render();
+  // The folder trust question, as the terminal app asks it (terminal-shell native/folder-trust.ts): the same card,
+  // the same words, opening on "Keep restricted"; a dismissed card records nothing (a write or command asks again).
+  ctx.services.trustPromptRef.requestTrustDecision = () => new Promise((resolve, reject) => {
+    const { title, items } = folderTrustCard(readFolderTrustFacts(workingDir, homeDirectory, String(configManager.get('tools.hooksFile') ?? '')));
+    ctx.services.trustPromptRef.awaitingOwner = true;
+    // The key says "choose", as on the terminal app's card.
+    input.openSelection(title, items, { allowSearch: false, primaryVerbLabel: 'Choose', unprompted: true, preSelectId: FOLDER_TRUST_OPENS_ON }, (result) => {
+      ctx.services.trustPromptRef.awaitingOwner = false;
+      const level = decodeFolderTrustChoice(result?.item.id ?? null);
+      if (level === null) reject(new WorkspaceTrustDecisionUnsettledError());
+      else resolve(level);
+      render();
+    });
+  });
+  // Settled as the Agent opens, by the terminal app's rule: a folder with no decision that brings no hooks or tool
+  // servers of its own is trusted without a question; one that brings them is asked with the card above.
+  void settleFolderTrustOnOpen(commandContext.workspace?.workspaceTrustManager, ctx.services.requestTrustDecision,
+    () => readFolderTrustFacts(workingDir, homeDirectory, String(configManager.get('tools.hooksFile') ?? '')));
   // What is waiting (Home and Work & Approvals) is read in the background at every start, after the
   // first frame, so the workspace opens with it already read; one read per report, nothing on a timer.
   input.agentWorkspace.readAtStart(commandContext, () => render());
@@ -1498,9 +1558,10 @@ async function main(prepared: PreparedShellCliRuntime) {
     shellPaths: ctx.services.shellPaths,
     providerRegistry,
     commandContext,
-    // The connected-host controller's daemon: an accepted repair re-probes and adopts it in this session.
-    daemonRepair: { config: configManager, ask: createDaemonRepairQuestion(input), host: ctx.daemonHost },
-    askWorkspaceRegistration: createWorkspaceRegistrationQuestion(input),
+    // The connected-host controller's daemon: the repair (nothing asked) re-probes and adopts it in this session.
+    daemonRepair: { config: configManager, host: ctx.daemonHost },
+    // Starting the Agent here is the request to work here: the folder is registered with nothing asked.
+    registersStartedWorkspace: true,
     isHostedTurn: (turnId) => remoteConversation.isHostedTurn?.(turnId) ?? false,
     autonomy,
     buildCurrentSessionSnapshot,
@@ -1520,7 +1581,6 @@ async function main(prepared: PreparedShellCliRuntime) {
   });
   // A resume at start-up may already have offered its session's snapshot.
   recoveryPending = followups.recoveryPending ?? recoveryPending;
-  daemonRepairPrompt = followups.daemonRepairPrompt;
   render();
 }
 /** Runs the terminal UI for a command line that `prepareShellCliRuntime` left to it. */

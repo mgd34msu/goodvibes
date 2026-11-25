@@ -23,7 +23,7 @@
  */
 import { notifyNow } from '@goodvibes/engine/platform/platform/utils';
 import { logger } from '@goodvibes/engine/platform/platform/utils';
-import type { WebhookNotifier } from '@goodvibes/engine/platform/platform/integrations';
+import type { ProgramNotices } from '@goodvibes/engine/terminal-shell/places';
 import type { PermissionRequestHandler, PermissionPromptRequest } from '@goodvibes/engine/platform/platform/permissions';
 import type { FocusTracker } from '@goodvibes/engine/platform/platform/runtime/operations';
 import {
@@ -42,7 +42,8 @@ import type { TerminalNotifier } from './terminal-notifier.ts';
 export interface ApprovalAlertDeps {
   readonly focusTracker: Pick<FocusTracker, 'shouldAlertWhenUnfocused'>;
   readonly configGet: ConfigGet;
-  readonly webhookNotifier?: WebhookNotifier | null;
+  /** This program's notices, sent through the daemon's one webhook list (terminal-shell program-notices.ts). */
+  readonly notices?: Pick<ProgramNotices, 'sendNotification'> | null;
   /**
    * Optional in-terminal (OSC 9) notifier. When present, a permission prompt
    * appearing also emits an in-terminal notification, gated independently by
@@ -119,13 +120,8 @@ function fireApprovalAlert(request: PermissionPromptRequest, deps: ApprovalAlert
     logger.debug('approval-alert: desktop notify error', { error: String(err) });
   }
 
-  const webhookNotifier = deps.webhookNotifier;
-  if (webhookNotifier) {
-    const urls = webhookNotifier.getUrls();
-    if (urls.length > 0) {
-      webhookNotifier.sendNotification({ kind: 'approval', facts }).catch((err: unknown) => {
-        logger.debug('approval-alert: webhook send error', { error: String(err) });
-      });
-    }
-  }
+  // Through the daemon's one webhook list; it knows whether any address is set.
+  deps.notices?.sendNotification({ kind: 'approval', facts }, 'approval.requested').catch((err: unknown) => {
+    logger.debug('approval-alert: webhook send error', { error: String(err) });
+  });
 }

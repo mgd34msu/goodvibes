@@ -156,6 +156,19 @@ async function readGoogleGrant(get: (key: string) => Promise<string | null>): Pr
 }
 
 /**
+ * Whether the stored Google grant is the calendar's alone: its account record (written by a calendar sign-in)
+ * describes this grant and names only calendar scopes. False when no record describes it (the Google tab's own
+ * connection asks for mail and calendar together, and an adopted grant is read by its check), or nothing is stored.
+ */
+export async function googleGrantIsCalendarOnly(get: (key: string) => Promise<string | null>): Promise<boolean> {
+  const grant = await readGoogleGrant(get);
+  if (!grant) return false;
+  const account = await readGoogleAccountRecord(get, grant);
+  const scopes = Array.isArray(account?.scopes) ? account.scopes : [];
+  return scopes.length > 0 && scopes.every((scope) => scope.includes('/auth/calendar'));
+}
+
+/**
  * The calendar accounts on record on this machine, read without writing
  * anything and without any token in the answer: the one Google connection and
  * a Microsoft connection made with `/calendar connect outlook`. For a report of

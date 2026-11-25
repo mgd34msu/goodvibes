@@ -357,6 +357,39 @@ export class LocalLedgerExporter implements SpanExporter {
   }
 
   /**
+   * When each recorded run started (its first event's time) and how many events it holds.
+   */
+  listRunStarts(): ReadonlyMap<string, { readonly startedAt: number; readonly events: number }> {
+    const runs = new Map<string, { startedAt: number; events: number }>();
+    if (!existsSync(this.ledgerFilePath)) return runs;
+    let raw: string;
+    try {
+      raw = readFileSync(this.ledgerFilePath, 'utf8');
+    } catch (err) {
+      logger.warn('[local-ledger] ledger read failed', { error: summarizeError(err), ledgerFilePath: this.ledgerFilePath });
+      return runs;
+    }
+    for (const line of raw.split('\n')) {
+      if (!line.trim()) continue;
+      try {
+        const entry = JSON.parse(line) as LedgerEntry;
+        if (typeof entry.runId !== 'string') continue;
+        const at = typeof entry.ts === 'number' ? entry.ts : Number.POSITIVE_INFINITY;
+        const known = runs.get(entry.runId);
+        if (known) {
+          known.events += 1;
+          known.startedAt = Math.min(known.startedAt, at);
+        } else {
+          runs.set(entry.runId, { startedAt: at, events: 1 });
+        }
+      } catch {
+        // Skip malformed lines.
+      }
+    }
+    return runs;
+  }
+
+  /**
    * Read the runtime state snapshot stored when a run started.
    *
    * @param runId - The run to look up.

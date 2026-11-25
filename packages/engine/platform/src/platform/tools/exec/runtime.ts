@@ -19,6 +19,7 @@ import { execCommandText, type ExecInput, type ExecCommandInput, type ExecComman
 import { ProcessManager } from '../shared/process-manager.js';
 import { guardExecCommand, formatDenialResponse } from './ast-guard.js';
 import { executeFileOperations } from './file-ops.js';
+import { MODEL_COMMAND_MARK, withModelCommandMark } from './model-command-mark.js';
 import { DEFAULT_VALIDATOR_TIMEOUT_MS, validatorCommand, type ValidatorRunner } from '../shared/validators.js';
 import { formatResult } from './result-format.js';
 import type { FeatureFlagManager } from '../../runtime/feature-flags/index.js';
@@ -44,7 +45,7 @@ import {
   terminalRequiredNote,
   type ExecInteractionRuntime,
 } from './interactive.js';
-import type { ExecContainmentRequirement } from './containment.js';
+import { containmentForTurn, type ExecContainmentRequirement } from './containment.js';
 import {
   backgroundContainmentRefusal,
   containmentRefusal,
@@ -416,6 +417,7 @@ async function runAdmittedCommand(
     const plan = sandboxPlan;
     const scrubbed = await scrubCredentialEnv(buildCleanEnv(), scrub);
     signal?.throwIfAborted();
+    scrubbed.env[MODEL_COMMAND_MARK] = '1';
     const withheld = scrubbed.withheld.filter((name) => !(cmdInput.env && name in cmdInput.env));
     const network = !plan || plan.network === 'enabled' ? 'enabled' : 'disabled';
     const interactive = shouldRunInteractive(policy.interaction, cmdInput);
@@ -441,7 +443,8 @@ async function runAdmittedCommand(
   // withheld var is legitimately wanted). withheld_env reports only names the
   // command did NOT re-provide, by name only, never values.
   const scrubbed = await scrubCredentialEnv(buildCleanEnv(), scrub);
-  const mergedEnv = { ...scrubbed.env, ...cmdInput.env };
+  // Marked last, so the call's own environment cannot clear it: a GoodVibes program it starts knows a model ran it.
+  const mergedEnv = withModelCommandMark({ ...scrubbed.env, ...cmdInput.env });
   if (sandboxPlan?.sandboxed && cmdInput.env?.PATH === undefined)
     mergedEnv.PATH = `${SANDBOX_RUNTIME_BIN}:${mergedEnv.PATH ?? '/usr/bin:/bin'}`;
   const withheldEnv = scrubbed.withheld.filter((name) => !(cmdInput.env && name in cmdInput.env));
@@ -1403,9 +1406,10 @@ export function createExecTool(
         } else {
           // These operations run on the host with plain file calls, outside the
           // boundary, so a session that requires the boundary cannot have them.
-          if (input.file_ops?.length && policy.containment?.posture === 'required') {
+          const fileOpsContainment = containmentForTurn(policy.containment);
+          if (input.file_ops?.length && fileOpsContainment?.posture === 'required') {
             return { success: false, error: 'file_ops refused: they run on the host, outside the exec boundary, and this session requires containment '
-              + `(${policy.containment.reason}). Nothing was changed. Run the equivalent commands (cp, mv, rm) in the boundary instead.` };
+              + `(${fileOpsContainment.reason}). Nothing was changed. Run the equivalent commands (cp, mv, rm) in the boundary instead.` };
           }
           fileOperations = await executeFileOperations(input.file_ops, projectRoot, undefined, assertCurrent);
         }

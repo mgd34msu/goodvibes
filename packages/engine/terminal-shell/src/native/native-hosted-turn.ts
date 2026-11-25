@@ -43,19 +43,18 @@ export function createNativeHostedTurnClient(operator: Pick<OperatorRemoteClient
 }
 export function nativeHostedTurnLines(result: NativeHostedTurnLookup): string[] {
     if ('kind' in result)
-        return ['Native hosted turn has not started. Use /work intake-retry to request delivery of the saved original.'];
-    const lines = [`Native hosted turn: ${result.state}.`];
-    if (result.sessionId)
-        lines.push(`Native session: ${result.sessionId}`);
+        return ['The daemon has not started answering your message. Try it again in Work, under Unanswered.'];
+    const words: Readonly<Record<string, string>> = { 'recovery-required': 'stopped halfway', cancelled: 'stopped', failed: 'failed' };
+    const lines = [`The daemon's answer to your message: ${words[result.state] ?? result.state.replace(/-/g, ' ')}.`];
     if (result.state === 'recovery-required')
-        lines.push('Inspect the original hosted session; ambiguous dispatch will not be replayed.');
+        lines.push('Look at the conversation on the daemon; your message is not sent again, since it may already have been answered.');
     if (result.state === 'cancelled')
-        lines.push('This original hosted turn is cancelled. Effects already performed are not undone.');
+        lines.push('What it had already done is kept.');
     if (result.state === 'failed') {
         if (result.failure)
             lines.push(`What failed: ${result.failure.summary}`);
         lines.push(result.failure?.retryable
-            ? 'Nothing was changed. Send the same message again with /work intake-retry, or drop it with /work intake-cancel.'
+            ? 'Nothing was changed. Try the same message again or drop it in Work, under Unanswered.'
             : 'It will not be run again. Send a new message to continue; the session takes the next one.');
     }
     return lines;

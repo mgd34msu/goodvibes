@@ -39,6 +39,12 @@ import type { OnboardingWizardTopic, OnboardingWizardControllerLike, MutableMode
 export type { OnboardingWizardControllerLike, OnboardingWizardAcknowledgementFieldDefinition, OnboardingWizardAction, OnboardingWizardActionFieldDefinition, OnboardingWizardApplyFeedback, OnboardingWizardApplyFeedbackSeverity, OnboardingWizardChecklistFieldDefinition, OnboardingWizardExternalSurfaceStepId, OnboardingWizardFieldDefinition, OnboardingWizardFieldKind, OnboardingWizardFieldWindow, OnboardingWizardMaskedFieldDefinition, OnboardingWizardMode, OnboardingWizardModelPickerFieldDefinition, OnboardingWizardModelSelection, OnboardingWizardRadioFieldDefinition, OnboardingWizardRadioOption, OnboardingWizardRuntimeHydration, OnboardingWizardSnapshot, OnboardingWizardStatusFieldDefinition, OnboardingWizardStepDefinition, OnboardingWizardStepId, OnboardingWizardTextFieldDefinition } from './onboarding-wizard-types.ts';
 export { getOnboardingWizardBodyRows, getOnboardingWizardVisibleFieldCount } from './onboarding-wizard-helpers.ts';
 
+/** How a setup form ended: applied, with the titles of the pages it set up, or left with nothing set. */
+export interface OnboardingFormOutcome {
+  readonly applied: boolean;
+  readonly pages: readonly string[];
+}
+
 /**
  * The wizard's typed text. A value typed into a masked field (a key, a token, a
  * password) is held in a map of its own, decided when it is typed, while the
@@ -174,7 +180,21 @@ export class OnboardingWizardController implements OnboardingWizardControllerLik
     this.resetValuesFromCurrentDefinitions();
   }
 
+  /** Told once each when the form closes: whether it was applied, and the titles of the pages it set up. */
+  private closeWaiters: Array<(outcome: OnboardingFormOutcome) => void> = [];
+  /** The pages the last apply set up (read when the form closes). */
+  private appliedSteps: string[] | null = null;
+
+  /** Resolves when the form now open closes: submitted (with the pages it set up) or left. */
+  public whenClosed(): Promise<OnboardingFormOutcome> {
+    return new Promise((resolve) => { this.closeWaiters.push(resolve); });
+  }
+
   public close(): void {
+    const applied = this.appliedSteps;
+    this.appliedSteps = null;
+    const waiters = this.closeWaiters.splice(0);
+    for (const tell of waiters) tell(applied === null ? { applied: false, pages: [] } : { applied: true, pages: applied });
     this.active = false;
     this.hydrationPending = false;
     this.hydrationError = null;
@@ -707,6 +727,8 @@ export class OnboardingWizardController implements OnboardingWizardControllerLik
   }
 
   public markApplied(): void {
+    // What was set up, said when the form closes (the pages that held a change).
+    this.appliedSteps = this.steps.filter((step) => this.dirtyStepIds.has(step.id)).map((step) => step.title);
     // The secrets are stored now; keep none of them in memory. Dropping the entry
     // (not blanking it) makes the field read as untouched again.
     for (const step of this.steps) {

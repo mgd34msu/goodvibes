@@ -105,7 +105,7 @@ function placementLines(placement: PluginPlacement, name: string | undefined): s
       '  Move the folder into one of them, then enable it.',
     ];
   }
-  return [`  next: a plugin starts disabled. In the terminal app or the Agent run /plugin enable ${name ?? '<name>'} (no restart needed).`];
+  return [`  next: a plugin starts disabled. In the terminal app or the Agent, switch ${name ?? 'it'} on: o on it in the Plugins tab of Tools and extensions (no restart needed).`];
 }
 
 function renderValidation(result: PluginValidation, json: boolean, placement: PluginPlacement): CliCommandOutput {
@@ -233,7 +233,7 @@ async function handlePluginTrustCli(runtime: CliCommandRuntime, args: readonly s
     verify: (name, key = savedKey(name)) => manager.verify(name, key),
     trust: (name, tier, note) => manager.trust(name, tier, note),
     trustSigned: (name, key = savedKey(name)) => manager.trustSigned(name, key),
-    setPublisherKey: () => ({ ok: false, error: 'save a publisher key from the terminal or agent app: /plugin trust-key <name> <key.pem>' }),
+    setPublisherKey: () => ({ ok: false, error: 'save a publisher key from the terminal or agent app: k on the plugin in the Plugins tab of Tools and extensions' }),
   };
   const question = pluginTrustConfirmation(controls, args);
   if (question && !runtime.cli.flags.yes) {

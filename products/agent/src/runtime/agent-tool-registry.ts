@@ -21,6 +21,7 @@ import { agentOwnerQuestions } from './client/owner-questions.ts';
 import { createAgentDaemonVerbCaller } from './client/daemon-verbs.ts';
 import { remoteTriggerOperations } from '@goodvibes/engine/platform/platform/triggers';
 import type { ProtectedSourceOwner } from '@goodvibes/engine/platform/platform/security';
+import { programNotices } from '@goodvibes/engine/terminal-shell/places';
 
 /**
  * The main conversation's tool registry, composed exactly once, in one place:
@@ -150,12 +151,15 @@ export function composeAgentToolRegistry(deps: AgentToolRegistryDeps): AgentTool
   // hosts for the Agent registers (agent-turn's registerAgentTurnTools).
   registerAgentTurnTools(toolRegistry, {
     gatewayMethods: services.gatewayMethods,
+    // The live conversation: a record the model adds through capability_run names it.
+    sessionId: resolveSessionId,
     // The Agent's own calls: a write it makes for the owner presents its delegated credential.
     remote: connectedHostFamilyRemote({ configManager, homeDirectory: services.shellPaths.homeDirectory, actor: 'agent' }),
     shellPaths: services.shellPaths,
     artifactStore: services.artifactStore,
     notificationConfig: configManager,
-    webhookNotifier: services.webhookNotifier,
+    // The model's notify tool sends through the daemon's one webhook list (program-notices.ts), as the Agent's own notices do.
+    webhookNotifier: programNotices,
     mediaProviders: services.mediaProviders,
     channelDeliveryRouter: services.channelDeliveryRouter,
     workPlan: services.workPlan,
@@ -178,7 +182,7 @@ export function composeAgentToolRegistry(deps: AgentToolRegistryDeps): AgentTool
     },
     // The native Gmail/Calendar route (agent-turn's google-wiring.ts): this
     // process's stores, the adopted daemon's calendar when one is reachable, and
-    // the owner's /google approve gesture for a refused send.
+    // the owner's "approve" on a refused send (Waiting for you, Sends).
     google: {
       configManager: configManager as GoogleToolWiringDeps['configManager'],
       secretsManager: services.secretsManager,

@@ -26,6 +26,8 @@ const OWNER_ANSWER_SCHEMA = objectSchema({
 const OWNER_ANSWER_SOURCE_SCHEMA = objectSchema({
   actor: STRING_SCHEMA,
   surface: STRING_SCHEMA,
+  // The owner himself answered; absent for anyone else, and on answers from before it was kept.
+  owner: BOOLEAN_SCHEMA,
 }, ['actor', 'surface']);
 
 const REFUSAL_SCHEMA = objectSchema({

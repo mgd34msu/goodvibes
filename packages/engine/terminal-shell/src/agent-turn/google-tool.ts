@@ -15,9 +15,15 @@ import { readString } from './tool-args.js';
  * its own request path), so every surface uses one backend (the configured
  * CalDAV server or Google account), one confirmation rule and one set of
  * refusals. With no daemon, they run here on the in-process Google connector.
- * Mail and the connect actions always run here, on the connector that holds
- * the OAuth refresh (in a hosted session, the daemon's own credential store);
- * nothing to install and no MCP server.
+ * Mail always runs here, on the connector that holds the OAuth refresh (in a
+ * hosted session, the daemon's own credential store); nothing to install and
+ * no MCP server.
+ *
+ * Connecting is never done here. It is the daemon's work, reached like every
+ * other door through its capabilities (`google.connect`, `google.client`,
+ * `google.client-file`, `google.reauthorize`, run with `capability_run`, each
+ * decided once), so no consent, loopback listener or credential write runs in
+ * a program's own process.
  *
  * Two boundaries are structural rather than advisory:
  *
@@ -51,13 +57,13 @@ import { readString } from './tool-args.js';
  * around, and then there is no guard.
  */
 
-import { assertCurrentToolEffect, ToolInputProjectionError, type ToolRegistry } from '@goodvibes/engine/platform/platform/tools';
+import { assertCurrentToolEffect, assertCurrentToolInvocation, ToolInputProjectionError, type ToolInputProjector, type ToolRegistry } from '@goodvibes/engine/platform/platform/tools';
+import { runDaemonMethodNested } from './capability-tools.js';
 import type { Tool } from '@goodvibes/engine/platform/platform/types';
 import { captureStrictJudgmentJson, snapshotJudgmentInput } from '@goodvibes/engine/platform/platform/gate';
 import { CardMaterialRefusedError, screenOutboundForCardMaterial } from './payments-channel-guard.js';
 import { assertDeliveryCurrent } from '@goodvibes/engine/platform/platform/utils';
 import {
-  beginGoogleConsent,
   describeConsentForModel,
   GoogleApiClient,
   existingGoogleConnectionOwner,
@@ -67,16 +73,11 @@ import {
   subscribeGoogleCredentialChanges,
   summarizeCredentials,
   type GoogleConnectionSources,
-  type GoogleConsentSession,
-  type GoogleLoopbackListenerFactory,
   type GoogleRequestRepair,
 } from '@goodvibes/engine/platform/platform/google';
 import type { ConfigManager, SecretsManager } from '@goodvibes/engine/platform/platform/config';
-import { unreadableSecretStore } from '@goodvibes/engine/platform/platform/config';
-import { createGoogleSettingsProjector, commitGoogleSettings, NO_GOOGLE_CLIENT_SECRET, retainGoogleConnectionOwners, retainGoogleCredentials, retainGooglePreparedEffectSource, type GooglePendingCredential } from './google-admission.js';
+import { createGoogleSettingsProjector, retainGoogleConnectionOwners, retainGooglePreparedEffectSource } from './google-admission.js';
 import { nodeGoogleFilePort } from '@goodvibes/engine/platform/platform/google/node';
-import { GOOGLE_CONFIG_KEYS, GOOGLE_SECRET_KEYS } from '@goodvibes/engine/platform/platform/google';
-import { readSurfaceEmailSettings } from '@goodvibes/engine/platform/platform/email';
 import {
   evaluateOutwardEffect,
   getProcessUntrustedContentLedger as getSessionUntrustedContentLedger,
@@ -95,13 +96,8 @@ import { confirmParameter } from './effect-admission.js';
 
 const GOOGLE_ACTIONS = [
   'status',
-  // The two that let a conversation FINISH a connection instead of handing
-  // the owner a command. Before these existed the guided path had no honest
-  // ending: it had walked him to a dialog holding a client id and a secret,
-  // and the only thing it could say was "now go and type /google client ...".
-  'connect.client',
-  'connect.clientFile',
-  'connect.complete',
+  // Connecting is not an action of this tool: the model runs the daemon's capabilities for it (google.connect,
+  // google.client, google.client-file, google.reauthorize), so the connection is made in one place for every door.
   'mail.list',
   'mail.read',
   'mail.send',
@@ -112,9 +108,6 @@ const GOOGLE_ACTIONS = [
 
 /** Actions that only read. Everything else is an outward effect. */
 const READ_ONLY_ACTIONS = new Set<string>(['status', 'mail.list', 'mail.read', 'calendar.list', 'mail.verification']);
-
-/** Native setup resolves protected credential sources before ordinary Google calls. */
-const CONNECT_ACTIONS = new Set<string>(['connect.client', 'connect.clientFile']);
 
 type CalendarListInput = OperatorMethodInput<'calendar.events.list'>;
 type CalendarListOutput = OperatorMethodOutput<'calendar.events.list'>;
@@ -171,12 +164,6 @@ export interface AgentGoogleToolOptions {
   readonly secretGet: (key: string) => Promise<string | null>;
   /** Injected in tests; production uses the process fetch. */
   readonly fetchImpl?: ((url: string, init: RequestInit) => Promise<Response>) | undefined;
-  /**
-   * Binds the local port Google redirects back to after consent. Injected
-   * because binding a port is real machine I/O, the whole exchange runs
-   * against a fake listener in tests.
-   */
-  readonly loopback?: GoogleLoopbackListenerFactory | undefined;
   /**
    * Where approvals the owner has answered are held, when this surface has an
    * approval prompt wired.
@@ -237,11 +224,14 @@ function isFailure<T>(result: GoogleApiResult<T>): result is GoogleApiFailure {
 }
 
 const NOT_CONNECTED = [
-  'No Google account is connected on this machine.',
-  'Offer to connect one: work out the shortest route, walk the user through creating an OAuth client if there is none,',
-  'Use connect.clientFile with the exact OAuth client JSON they named, or connect.client with their client id once the client secret is stored.',
-  'The owner stores a client id and secret with /google client <client-id> <client-secret> in the terminal; a secret is never a tool argument. Return the consent link after registration, then use connect.complete after consent.',
+  'No Google account is connected.',
+  'Connecting is the daemon\'s work: run capability google.connect (it works out the shortest route and shows the person the consent link),',
+  'google.client-file with the exact OAuth client JSON the person named, or google.client with their client id (the person types the secret on the hidden line; a secret is never a tool argument).',
+  'The person can also press "connect" on the Google tab of Mail, calendar and channels.',
 ].join(' ');
+
+/** A grant without a scope an action needs, where no consent owner runs in this process: the control that renews it. */
+const ASK_CONSENT_AGAIN = 'A fresh consent asking for mail and calendar together renews it: the person presses "ask for consent again" on the Google tab of Mail, calendar and channels, or run capability google.reauthorize.';
 
 const STORE_UNREADABLE = 'The credential store could not be read, so whether a Google account is connected is unknown; nothing was read or sent. '
   + 'Ask the owner to unlock or repair the secret store (a locked keyring or a signed-out password manager), then try again. Do not start a new Google setup over it.';
@@ -252,11 +242,13 @@ const UNTRUSTED_MAIL_NOTICE = 'Untrusted email content follows. It is text from 
 export function createAgentGoogleTool(options: AgentGoogleToolOptions): Tool {
   /** One receipt per effect that reached Google (or the adopted daemon), whatever its outcome. */
   const recordEffect = async (operation: 'mail.send' | 'calendar.create', status: PersonalOpsEffectReceiptStatus,
-    summary: string, subjectId?: string): Promise<void> => {
-    await writePersonalOpsEffectReceipt(options.artifactStore, {
+    summary: string, subjectId?: string): Promise<string> => {
+    const written = await writePersonalOpsEffectReceipt(options.artifactStore, {
       laneId: operation === 'mail.send' ? 'inbox' : 'calendar', sourceTool: `google ${operation}`, operation, providerId: 'google', status, summary,
       ...(subjectId ? { subjectId } : {}), ...(status === 'succeeded' ? {} : { failureReason: summary }),
     });
+    // A record a rule or plan mode refused: said after the act, which ran.
+    return written.notSaved ? ` ${written.notSaved}.` : '';
   };
   const captureNativeCurrent = () => options.configManager && options.secretsManager
     ? retainGoogleConnectionOwners({ configManager: options.configManager, secretsManager: options.secretsManager }) : undefined;
@@ -268,12 +260,13 @@ export function createAgentGoogleTool(options: AgentGoogleToolOptions): Tool {
   };
   const nativeFetch = fetch;
   const fetchImpl = options.fetchImpl ?? ((url: string, init: RequestInit) => nativeFetch(url, init));
-  // One connection for the session, shared with the /google commands: calls
-  // reuse the access token and its scopes, refresh once between them, and a
-  // dead grant is latched instead of re-asked on every call.
-  // The process's connection repair (the daemon's, or the Agent's own): a missing
+  // One connection for the process's secret store: calls reuse the access
+  // token and its scopes, refresh once between them, and a dead grant is
+  // latched instead of re-asked on every call.
+  // The daemon's connection repair, in a turn the daemon hosts: a missing
   // connection, a missing scope, a dead grant or a disabled API is repaired from
   // the call that met it, and the call's request is sent again when it completes.
+  // A program's own process installs none: the call says which control renews it.
   const repair = () => (options.secretsManager ? googleConnectionRepairOf(options.secretsManager) : undefined);
   const connections = sharedGoogleConnectionOwner(options.secretsManager ?? options, () => new GoogleConnectionOwner({
     sources,
@@ -323,7 +316,7 @@ export function createAgentGoogleTool(options: AgentGoogleToolOptions): Tool {
   }
 
   /**
-   * Perform an action the owner approved with `/google approve`. It runs from
+   * Perform an action the owner approved in Waiting for you (Sends). It runs from
    * his keystrokes with the content he was shown, so it needs no admission of
    * a tool call and no re-issue by the model; card material is still screened.
    */
@@ -333,26 +326,26 @@ export function createAgentGoogleTool(options: AgentGoogleToolOptions): Tool {
    * in-process path; only the backend differs.
    */
   async function daemonCalendar(
-    host: GoogleCalendarHost,
     action: 'calendar.list' | 'calendar.create',
     args: Record<string, unknown>,
     rawArgs: Record<string, unknown>,
     executionOptions: Parameters<Tool['execute']>[1],
   ): Promise<ToolOutput> {
     const signal = executionOptions?.signal;
+    // Each calendar call is the daemon's `calendar.events.*` method, run as a nested capability_run call judged by the
+    // method's own declarations: the one gate a model's daemon call goes through. This call only routes it.
+    signal?.throwIfAborted();
+    if (!assertCurrentToolInvocation(rawArgs, executionOptions)) throw new ToolInputProjectionError('held');
     if (action === 'calendar.list') {
       const timeMin = readString(args.timeMin), timeMax = readString(args.timeMax);
       const limit = readNumber(args.maxResults, 10);
-      let events: readonly { readonly title: string; readonly start: string; readonly location?: string | undefined; readonly description?: string | undefined }[];
-      try {
-        ({ events } = await host.listEvents({
-          ...(timeMin ? { from: timeMin } : {}), ...(timeMax ? { to: timeMax } : {}), limit: limit + 1,
-        }, signal));
-      } catch (error) {
-        const hostFailure = host.failureOf(error);
-        if (hostFailure) return failure(hostFailure.message);
-        throw error;
-      }
+      const listed = await runDaemonMethodNested('calendar.events.list', {
+        ...(timeMin ? { from: timeMin } : {}), ...(timeMax ? { to: timeMax } : {}), limit: limit + 1,
+      }, executionOptions);
+      if (!listed.ok) return failure(listed.error);
+      const events = (Array.isArray((listed.body as { events?: unknown } | undefined)?.events) ? (listed.body as { events: unknown[] }).events : [])
+        .filter((event): event is { readonly title: string; readonly start: string; readonly location?: string | undefined; readonly description?: string | undefined } =>
+          event !== null && typeof event === 'object' && typeof (event as { title?: unknown }).title === 'string' && typeof (event as { start?: unknown }).start === 'string');
       if (events.length === 0) return ok('No events in that range.');
       const shown = events.slice(0, limit);
       // Event text is written by whoever sent the invitation; it is recorded so a later send cannot repeat it unasked.
@@ -368,29 +361,26 @@ export function createAgentGoogleTool(options: AgentGoogleToolOptions): Tool {
       ].join('\n'));
     }
 
-    if (!assertCurrentToolEffect(rawArgs, executionOptions, 'send') || !assertCurrentToolEffect(rawArgs, executionOptions, 'write')) {
-      throw new ToolInputProjectionError('held');
-    }
     const title = readString(args.summary), start = readString(args.start), end = readString(args.end);
     if (!title || !start || !end) return failure('google action:"calendar.create" needs summary, start and end.');
     const location = readString(args.location), description = readString(args.description);
     const create = async (): Promise<OutwardActionOutcome> => {
       const blocked = await screenOutboundForCardMaterial({ surface: 'calendar', message: [description, location].join('\n'), title });
       if (blocked) return { ok: false, text: new CardMaterialRefusedError(blocked).message };
-      try {
-        const made = await host.createEvent({
-          title, start, end, ...(location ? { location } : {}), ...(description ? { description } : {}), confirm: true,
-        });
-        const text = `Created "${title}" starting ${start} (event ${made.eventId}).`;
-        await recordEffect('calendar.create', 'succeeded', text, typeof made.eventId === 'string' ? made.eventId : undefined);
-        return { ok: true, text };
-      } catch (error) {
-        const hostFailure = host.failureOf(error);
-        if (hostFailure?.applied === 'no') return { ok: false, text: hostFailure.message };
+      const made = await runDaemonMethodNested('calendar.events.create', {
+        title, start, end, ...(location ? { location } : {}), ...(description ? { description } : {}), confirm: true,
+      }, executionOptions);
+      if (!made.ok) {
+        // Sent and no answer came back: whether it was created is not known.
+        if (!made.error.startsWith('outcome_unknown')) return { ok: false, text: made.error };
         const text = 'The calendar write could not be confirmed: the event may or may not have been created. Inspect the calendar before retrying.';
         await recordEffect('calendar.create', 'unknown', text);
         return { ok: false, text };
       }
+      const eventId = (made.body as { eventId?: unknown } | undefined)?.eventId;
+      const text = `Created "${title}" starting ${start}${typeof eventId === 'string' ? ` (event ${eventId})` : ''}.`;
+      const note = await recordEffect('calendar.create', 'succeeded', text, typeof eventId === 'string' ? eventId : undefined);
+      return { ok: true, text: `${text}${note}` };
     };
     const refused = await outwardAllowed('calendar.create', `creating the event "${title}"`, {
       summary: title, location: location || undefined, description: description || undefined,
@@ -418,107 +408,13 @@ export function createAgentGoogleTool(options: AgentGoogleToolOptions): Tool {
    * security/owner-identity.ts for what an attacker would have to control.
    */
 
-  /**
-   * The consent in flight, as one state. A second `connect.client` replaces the
-   * first and releases its listener; one connection at a time is the only
-   * sensible reading, a second paste replaces the first. The consent lives on
-   * its own controller, not on the call that started it, so it survives that
-   * call's turn ending and dies with a newer connect or the process.
-   */
-  type ConsentState =
-    | { readonly state: 'none' }
-    | { readonly state: 'pending'; readonly session: GoogleConsentSession; readonly credential: GooglePendingCredential; readonly controller: AbortController }
-    | { readonly state: 'approved'; readonly credential: GooglePendingCredential }
-    | { readonly state: 'failed'; readonly detail: string };
-  let consent: ConsentState = { state: 'none' };
-  const pendingCredential = (): GooglePendingCredential | null => consent.state === 'pending' || consent.state === 'approved' ? consent.credential : null;
-  const endConsent = () => {
-    if (consent.state === 'pending') { consent.controller.abort(); consent.session.cancel(); }
-    consent = { state: 'none' };
-  };
-
-  /** Registration + the consent link, in one answer. */
-  async function registerClient(rawArgs: Record<string, unknown>, executionOptions: Parameters<Tool['execute']>[1]): Promise<ToolOutput> {
-    const loopback = options.loopback;
-    if (!options.configManager || !options.secretsManager || loopback === undefined) {
-      // A surface with no writable store says so rather than reporting a
-      // success it did not perform, the same rule the approval path follows.
-      return failure(
-        'This surface cannot register a Google client: it was built without a writable credential store. '
-        + 'No client configuration or credential was stored.',
-      );
-    }
-
-    const committed = await commitGoogleSettings(rawArgs, executionOptions);
-    if (committed.receipt.status !== 'committed') return failure('Google registration has a partial or unknown storage outcome. No write was retried and no consent was started.');
-    if (!committed.sourceCurrent) return failure('The client was stored, but its connection owner changed before consent started. No consent was started.');
-    const storedClientId = committed.clientId, storedSecret = committed.clientSecret;
-    const config = { get: options.configGet, set: () => { throw new ToolInputProjectionError('held'); } };
-    const secrets = { get: options.secretGet, set: async () => { throw new ToolInputProjectionError('held'); } };
-
-    endConsent();
-    const controller = new AbortController();
-    const credentialsCurrent = retainGoogleCredentials(options.secretsManager);
-    const credential: GooglePendingCredential = { clientId: storedClientId, clientSecret: storedSecret, refreshToken: null, assertCurrent() {
-      controller.signal.throwIfAborted();
-      credentialsCurrent();
-    } };
-    const mailbox = readSurfaceEmailSettings(options.configGet);
-    const loginHint = mailbox.username ?? mailbox.fromAddress ?? '';
-    let session: GoogleConsentSession;
-    try {
-      session = beginGoogleConsent({
-        clientId: storedClientId,
-        clientSecret: storedSecret,
-        config,
-        secrets,
-        loopback,
-        fetchPort: { async fetch(url, init) {
-          credential.assertCurrent();
-          const response = await fetchImpl(url, { ...init, signal: init.signal ? AbortSignal.any([init.signal, controller.signal]) : controller.signal });
-          credential.assertCurrent(); return response;
-        } },
-        signal: controller.signal,
-        assertCurrent: credential.assertCurrent,
-        receiveRefreshToken(value) { credential.assertCurrent(); credential.refreshToken = value; },
-        ...(loginHint ? { loginHint } : {}),
-      });
-    } catch (error) {
-      // The client is stored, but no consent exists to complete.
-      if (executionOptions?.signal?.aborted) throw error;
-      if (error instanceof ToolInputProjectionError) throw error;
-      return failure('The client was stored, but the Google consent could not be started (the local approval port may be in use). No consent is pending. Call connect.client again once it is free.');
-    }
-    const started = { state: 'pending' as const, session, credential, controller };
-    consent = started;
-    // The exchange finishes whenever the person approves. Nothing awaits it
-    // here: this answer is due now, and a turn that blocked for the length of
-    // a consent screen would look broken.
-    void session.completed.then((outcome) => {
-      if (consent !== started) return outcome;
-      consent = credential.refreshToken ? { state: 'approved', credential } : { state: 'failed', detail: outcome.detail };
-      return outcome;
-    });
-
-    return ok([
-      `Registered the OAuth client ending ${storedClientId.slice(-12)}. The secret is in the encrypted store and is not shown again.`,
-      '',
-      'Open this link and approve it, it asks for mail and calendar together, so one approval covers both:',
-      session.consentUrl,
-      '',
-      ...(loginHint ? [`Approve as ${loginHint}, not a personal account.`] : []),
-      'Once Google approves, call connect.complete to store the returned credential through its current admitted action.',
-    ].filter((line, index, all) => !(line === '' && all[index - 1] === '')).join('\n'));
-  }
-
   const tool: Tool = {
     definition: {
       name: 'google',
       description:
         'Read and send Gmail; read and write Google Calendar. '
-        + 'connect.client uses the preconfigured stored OAuth client secret. connect.clientFile uses an exact named client JSON. '
-        + 'Both return a consent link. connect.complete stores the returned credential with fresh admission. '
-        + 'A client secret is never a tool argument: the owner stores it with /google client <client-id> <client-secret>.',
+        + 'Connecting Google is not done here: run capability google.connect (or google.client-file, google.client, google.reauthorize) with capability_run; '
+        + 'a client secret is never a tool argument.',
       parameters: {
         type: 'object',
         properties: {
@@ -541,15 +437,12 @@ export function createAgentGoogleTool(options: AgentGoogleToolOptions): Tool {
           timeMin: { type: 'string', description: 'RFC3339 lower bound for calendar.list. Defaults to now when neither bound is given.' },
           timeMax: { type: 'string', description: 'RFC3339 upper bound for calendar.list.' },
           maxResults: { type: 'number', description: 'How many items to return. Defaults to 10.' },
-          clientId: { type: 'string', description: 'OAuth client id the user pasted, for connect.client.' },
-          clientSecretRef: { type: 'string', description: 'Stored OAuth client-secret reference for connect.client; defaults to the native Google credential key.' },
-          path: { type: 'string', description: 'Path to an OAuth client JSON the user named, for connect.clientFile.' },
           confirm: confirmParameter(),
         },
         required: ['action'],
       },
-      // Gmail and Calendar over the network; connect.clientFile reads a file; the credential is stored.
-      sideEffects: ['network', 'read_fs', 'state'],
+      // Gmail and Calendar over the network; a sent mail or created event leaves its receipt.
+      sideEffects: ['network', 'state'],
       // Mail to an address that is not the owner's own and that he has not allowed is his to decide.
       ownerDecisions: { field: 'action', recipients: { 'mail.send': ['to'] } },
     },
@@ -559,8 +452,8 @@ export function createAgentGoogleTool(options: AgentGoogleToolOptions): Tool {
       if (!requested) return failure(`google needs an action. Use one of: ${GOOGLE_ACTIONS.join(', ')}.`);
       // Matched case-insensitively but resolved to the CANONICAL spelling.
       // Lowercasing in place used to be the whole normalisation, which quietly
-      // made every camelCase action unreachable, `connect.clientFile` arrived
-      // as `connect.clientfile` and matched nothing.
+      // made every camelCase action unreachable: a camelCase action arrived
+      // lowercased and matched nothing.
       const action = GOOGLE_ACTIONS.find((candidate) => candidate.toLowerCase() === requested.toLowerCase());
       if (action === undefined) {
         return failure(`Unknown google action "${requested}". Use one of: ${GOOGLE_ACTIONS.join(', ')}.`);
@@ -581,34 +474,13 @@ export function createAgentGoogleTool(options: AgentGoogleToolOptions): Tool {
         assertDecisionModelsEnabled('automatic verification artifact selection; use mail.read to inspect the message and complete verification manually');
       }
 
-      // Registration runs BEFORE the connection is opened, because a machine
-      // that needs it does not have one yet.
-      if (action === 'connect.client' && options.secretsManager
-        && options.secretsManager.resolveLocalCredentialSnapshot(GOOGLE_SECRET_KEYS.oauthClientSecret).state !== 'resolved') {
-        // A secret store this computer could not read is said as such: the owner is not asked for the secret again.
-        const unreadable = await unreadableSecretStore(options.secretsManager, GOOGLE_SECRET_KEYS.oauthClientSecret, 'the Google OAuth client secret');
-        return failure(unreadable ?? NO_GOOGLE_CLIENT_SECRET);
-      }
-      if (CONNECT_ACTIONS.has(action)) return await registerClient(rawArgs, executionOptions);
-      if (action === 'connect.complete') {
-        const credential = pendingCredential();
-        if (!credential?.refreshToken) {
-          if (consent.state === 'failed') return failure(consent.detail);
-          return failure(credential
-            ? 'Google consent is still pending: the owner has not approved the link from connect.client yet. Ask them to open it and approve, then call connect.complete again.'
-            : 'No Google consent is in progress in this session: none was started, it ended, or the process restarted. Call connect.client (or connect.clientFile) to get a new consent link.');
-        }
-        const committed = await commitGoogleSettings(rawArgs, executionOptions);
-        if (committed.receipt.status !== 'committed') return failure('Google credential storage has a partial or unknown outcome. No write was retried.');
-        const stillCurrent = committed.sourceCurrent && pendingCredential() === committed.pending;
-        credential.refreshToken = null; endConsent();
-        if (!stillCurrent) return failure('The Google credential was stored, but a newer connect replaced this consent meanwhile. Run google action:"status" to see which account is connected.');
-        return ok('Google approved. The credential is in the encrypted store.');
-      }
-
       if (action === 'calendar.list' || action === 'calendar.create') {
+        // Decided as a call that only routes to the daemon's calendar (calendarRouting): it is never run here instead.
+        const context = executionOptions?.inputProjectionContext;
+        const routed = context !== undefined && routedCalendarCalls.has(context);
         const host = options.calendarHost?.() ?? null;
-        if (host !== null) return await daemonCalendar(host, action, args, rawArgs, executionOptions);
+        if (routed && host === null) return failure('The daemon\'s calendar could not be reached as this call ran; nothing was read or created. Try again once the daemon is back.');
+        if (routed || host !== null) return await daemonCalendar(action, args, rawArgs, executionOptions);
       }
 
       const effect = !READ_ONLY_ACTIONS.has(action);
@@ -647,8 +519,9 @@ export function createAgentGoogleTool(options: AgentGoogleToolOptions): Tool {
       }
       assertCurrent();
       if (connection === null) {
-        // Not connected: the connection starts from this call. The person is shown the consent link (the owner
-        // inbox, or the Agent's screen); the model is told it is open and what the person sees.
+        // Not connected. In a turn the daemon hosts the daemon's repair starts the consent from this call (its link is in
+        // the owner inbox) and the model is told what the person sees; in a program's own process nothing connects
+        // here, and the model is told the daemon's capabilities that do.
         const owner = repair();
         if (owner === undefined) return failure(NOT_CONNECTED);
         return failure(describeConsentForModel(await owner.startConsent('not-connected'), `google action:"${action}"`));
@@ -701,7 +574,7 @@ export function createAgentGoogleTool(options: AgentGoogleToolOptions): Tool {
       /** A grant without the scope an action needs: the fresh consent starts, and the call continues on its grant. */
       const liveTokens = connection.tokens, liveCredentials = connection.credentials;
       const regrant = async (needed: string): Promise<ToolOutput | null> => {
-        if (callRepair === undefined) return failure(`The connected Google account was not granted a scope that permits ${needed}, and no consent owner runs in this program to ask for it.`);
+        if (callRepair === undefined) return failure(`The connected Google account was not granted a scope that permits ${needed}; nothing was sent. ${ASK_CONSENT_AGAIN}`);
         const repaired = await callRepair.repair({ ok: false, status: null, reason: 'missing-scopes', problem: `The connected Google account was not granted a scope that permits ${needed}.`, fix: '' }, liveTokens);
         if (!repaired.repaired) return failure(`${repaired.problem} ${repaired.fix}`);
         const again = await liveTokens.accessToken();
@@ -891,8 +764,8 @@ export function createAgentGoogleTool(options: AgentGoogleToolOptions): Tool {
               try {
                 const sent = await approvedClient.sendMessage({ to, subject, body });
                 if (isFailure(sent)) { await recordEffect('mail.send', 'failed', `${sent.problem} ${sent.fix}`); return { ok: false, text: `${sent.problem} ${sent.fix}` }; }
-                await recordEffect('mail.send', 'succeeded', `Sent to ${to}.`, sent.value.id);
-                return { ok: true, text: `Sent to ${to} (message ${sent.value.id}).` };
+                const note = await recordEffect('mail.send', 'succeeded', `Sent to ${to}.`, sent.value.id);
+                return { ok: true, text: `Sent to ${to} (message ${sent.value.id}).${note}` };
               } catch {
                 await recordEffect('mail.send', 'unknown', `The send to ${to} could not be confirmed.`);
                 return { ok: false, text: 'The Gmail send could not be confirmed: it may or may not have been sent. Inspect sent mail before retrying.' };
@@ -912,8 +785,8 @@ export function createAgentGoogleTool(options: AgentGoogleToolOptions): Tool {
           return failure('The Gmail send could not be confirmed: it may or may not have been sent. Inspect sent mail before retrying.');
         }
         if (isFailure(result)) { await recordEffect('mail.send', 'failed', `${result.problem} ${result.fix}`); return describeFailure(result); }
-        await recordEffect('mail.send', 'succeeded', `Sent to ${to}.`, result.value.id);
-        return ok(`Sent to ${to} (message ${result.value.id}).`);
+        const note = await recordEffect('mail.send', 'succeeded', `Sent to ${to}.`, result.value.id);
+        return ok(`Sent to ${to} (message ${result.value.id}).${note}`);
       }
 
       if (action === 'calendar.list') {
@@ -998,19 +871,40 @@ export function createAgentGoogleTool(options: AgentGoogleToolOptions): Tool {
       return ok(createdText);
     },
   };
-  if (options.configManager && options.secretsManager) googleProjectors.set(tool, createGoogleSettingsProjector({ configManager: options.configManager, secretsManager: options.secretsManager }, pendingCredential));
+  const settings = options.configManager && options.secretsManager ? createGoogleSettingsProjector({ configManager: options.configManager, secretsManager: options.secretsManager }) : undefined;
+  googleProjectors.set(tool, calendarRouting(() => options.calendarHost?.() ?? null, settings));
   return tool;
 }
 
-const googleProjectors = new WeakMap<Tool, ReturnType<typeof createGoogleSettingsProjector>>();
+const googleProjectors = new WeakMap<Tool, ToolInputProjector>();
+/** The projections of calendar calls decided as routing to the daemon's calendar (calendarRouting). */
+const routedCalendarCalls = new WeakSet<object>();
+
+/**
+ * A calendar call while the daemon's calendar is there only routes the daemon's `calendar.events.*` method, which runs
+ * as a nested capability_run call judged by the method's own declarations: this call is declared read-only, so the
+ * method's question is the only one. It is then run only that way (never here, if the daemon went away meanwhile).
+ * Every other call is projected as before.
+ */
+function calendarRouting(host: () => GoogleCalendarHost | null, settings: ToolInputProjector | undefined): ToolInputProjector {
+  return { async project(request) {
+    const action = typeof request.args['action'] === 'string' ? request.args['action'].toLowerCase() : '';
+    if ((action === 'calendar.list' || action === 'calendar.create') && host() !== null) {
+      const context = Object.freeze({});
+      routedCalendarCalls.add(context);
+      return { status: 'projected', args: request.args, executionContext: context, resultPublication: 'read-only' };
+    }
+    return settings ? settings.project(request) : { status: 'projected', args: request.args };
+  } };
+}
 /** Whether a Google account is connected for a session, and what its granted scopes permit when they are known. */
 export type AgentGoogleConnectionState =
   | { readonly status: 'connected'; readonly scopesKnown: boolean; readonly canReadMail: boolean; readonly canReadCalendar: boolean }
   | { readonly status: 'not-connected' | 'unreadable' | 'no-google-tool' };
 
 /**
- * The connection the `google` tool and the `/google` commands of a session
- * share (keyed by the session's secret store). After the first answer it is
+ * The connection the `google` tool of a session holds (keyed by the
+ * session's secret store). After the first answer it is
  * held until a Google credential or client setting changes, so this is an
  * in-memory read. Scopes are known once the token has been refreshed in this
  * session; until then a connected account is reported as connected with

@@ -1,8 +1,11 @@
 import { registerNotifyCommands } from '@goodvibes/engine/terminal-shell/notify-runtime-commands';
 import type { CommandContext, CommandRegistry } from '../command-registry.ts';
-import { requireWebhookNotifier } from './runtime-services.ts';
+import { capabilityBinding } from './capability-binding.ts';
 
-/** `/notify` and `/notifications`: one description shared with the terminal app (terminal-shell/notify-runtime-commands.ts). */
+/**
+ * `/notifications`, and the daemon's webhook addresses and failed notifications as the lists the notify capabilities
+ * choose from: one description shared with the terminal app (terminal-shell/notify-runtime-commands.ts).
+ */
 export function registerNotifyRuntimeCommands(registry: CommandRegistry): void {
-  registerNotifyCommands<CommandContext>(registry, { webhookNotifier: requireWebhookNotifier });
+  registerNotifyCommands<CommandContext>(registry, capabilityBinding);
 }

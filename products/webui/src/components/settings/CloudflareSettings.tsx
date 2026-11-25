@@ -167,7 +167,7 @@ export function CloudflareSettings() {
   async function handleDisable(): Promise<void> {
     const ok = await confirm.ask({
       title: 'Turn the Cloudflare integration off?',
-      description: 'The integration is switched off in config, the batch queue goes back to local, this daemon\'s tunnel connector stops, and the Worker loses its daemon credential, cron and workers.dev route. Nothing is deleted at Cloudflare; /cloudflare provision sets it up again.',
+      description: 'The integration is switched off in config, the batch queue goes back to local, this daemon\'s tunnel connector stops, and the Worker loses its daemon credential, cron and workers.dev route. Nothing is deleted at Cloudflare; Deploy, in Devices and network under Cloudflare, sets it up again.',
       confirmLabel: 'Turn off',
       tone: 'danger',
     });

@@ -32,13 +32,17 @@
  *   and stepping on either turns a transient state into an outage.
  * - A service the manager already reports ACTIVE gets a bounded wait, never a
  *   second start underneath it.
- * - A daemon that is genuinely NOT installed gets honest guidance and nothing
- *   else. A surface never spawns one.
+ * - With no service installed, the daemon program on this machine
+ *   (daemon-program.ts, the one lookup) is started in the background,
+ *   detached, and waited for; the program says so in one line. Where the
+ *   daemon program is not on this machine either, one line says so and names
+ *   the installer. Nothing is asked.
  * - Every failure is reported and none of them break boot. Discovery failing is
  *   a reason to say so, not a reason to refuse to start.
  */
-import { existsSync, mkdirSync, readFileSync, watch } from 'node:fs';
-import { basename, dirname, join } from 'node:path';
+import { mkdirSync, readFileSync, watch } from 'node:fs';
+import { basename, dirname } from 'node:path';
+import { findDaemonProgram, startDaemonProgram, type DaemonProgram, type DaemonProgramStart } from './daemon-program.js';
 import { PlatformServiceManager, resolveDaemonServiceDefault, resolveServiceUnitHome, type ManagedServiceActionResult, type ManagedServiceStatus } from '../../daemon/index.js';
 import { readLifecycleMarker } from '../../daemon/lifecycle-marker.js';
 import { logger, summarizeError } from '../../utils/index.js';
@@ -188,6 +192,10 @@ export type DaemonAutostartOutcome =
   | { readonly action: 'none'; readonly reason: DaemonAutostartInactionReason }
   /** No service entry to start; `program: false` when the daemon program itself is not on this machine either. */
   | { readonly action: 'not-installed'; readonly program?: boolean | undefined }
+  /** No service is installed, and the daemon program found here was started in the background and answers. */
+  | { readonly action: 'program-started'; readonly command: string }
+  /** No service is installed, and starting the daemon program found here did not bring a daemon that answers. */
+  | { readonly action: 'program-start-failed'; readonly reason: string }
   | { readonly action: 'started'; readonly serviceName: string }
   | { readonly action: 'came-online'; readonly serviceName: string }
   /**
@@ -208,21 +216,19 @@ export interface DaemonAutostartOptions {
   readonly pollIntervalMs?: number | undefined;
   /** Injectable so tests drive the wait loop deterministically. */
   readonly sleep?: ((ms: number) => Promise<void>) | undefined;
-  /** Whether the daemon program is on this machine (default {@link daemonProgramInstalled}). */
-  readonly programInstalled?: (() => boolean) | undefined;
+  /**
+   * The daemon program on this machine, started when no service is installed (default {@link findDaemonProgram}; the
+   * daemon's own `do` passes itself). Null: it is not here.
+   */
+  readonly program?: (() => DaemonProgram | null) | undefined;
+  /** Starts the daemon program (default {@link startDaemonProgram}). */
+  readonly startProgram?: ((program: DaemonProgram) => DaemonProgramStart) | undefined;
 }
 
-/** The daemon program's name, as the installer puts it beside the other programs. */
-const DAEMON_PROGRAM = 'goodvibes-daemon';
-
-/**
- * Whether the daemon program is on this machine: beside the program running now (the installers put the
- * programs in one directory) or on the PATH.
- */
+/** Whether the daemon program is on this machine ({@link findDaemonProgram}). */
 export function daemonProgramInstalled(): boolean {
   try {
-    if (existsSync(join(dirname(process.execPath), DAEMON_PROGRAM))) return true;
-    return typeof Bun !== 'undefined' && Bun.which(DAEMON_PROGRAM) !== null;
+    return findDaemonProgram() !== null;
   } catch {
     // Unknown is not "missing": the line then names the service step, which is right if the program is there.
     return true;
@@ -230,6 +236,8 @@ export function daemonProgramInstalled(): boolean {
 }
 
 const DEFAULT_WAIT_TIMEOUT_MS = 8_000;
+/** How long a daemon program started here is waited for: it opens every store before it answers. */
+const PROGRAM_WAIT_TIMEOUT_MS = 60_000;
 const DEFAULT_POLL_INTERVAL_MS = 400;
 
 /** Whether the service manager reports `serviceName` running now. */
@@ -395,7 +403,37 @@ export async function autostartInstalledDaemon(options: DaemonAutostartOptions):
   };
 
   const installedEntries = options.control.snapshot().filter((entry) => entry.installed);
-  if (installedEntries.length === 0) return { action: 'not-installed', program: (options.programInstalled ?? daemonProgramInstalled)() };
+  if (installedEntries.length === 0) {
+    // No service: the daemon program on this machine is started in the background and waited for; nothing is asked.
+    let program: DaemonProgram | null;
+    try {
+      program = (options.program ?? findDaemonProgram)();
+    } catch (error) {
+      logger.debug('[startup] looking for the daemon program failed', { error: summarizeError(error) });
+      program = null;
+    }
+    if (!program) return { action: 'not-installed', program: false };
+    const started = (options.startProgram ?? startDaemonProgram)(program);
+    if (!started.ok) return { action: 'program-start-failed', reason: started.error };
+    const programAttempts = Math.max(1, Math.ceil(Math.max(waitTimeoutMs, PROGRAM_WAIT_TIMEOUT_MS) / pollIntervalMs));
+    // A start that ended may have lost the port to another program's start at the same moment: a few more probes for that one.
+    let endedAt: number | undefined;
+    for (let attempt = 0; attempt < programAttempts; attempt += 1) {
+      if (attempt > 0) await sleep(pollIntervalMs);
+      try {
+        // A daemon that answers is the one asked for, whether this start or another program's at the same moment won the port.
+        if (await options.isReachable()) return { action: 'program-started', command: program.command };
+      } catch (error) {
+        logger.debug('[startup] re-probing the daemon failed', { error: summarizeError(error) });
+      }
+      const code = started.exited();
+      if (code !== null) endedAt ??= attempt;
+      if (code !== null && endedAt !== undefined && attempt - endedAt >= 10) {
+        return { action: 'program-start-failed', reason: `the daemon program ${program.command} ended (exit ${code}) before it answered; what it said is in ${started.logPath}` };
+      }
+    }
+    return { action: 'program-start-failed', reason: `the daemon program ${program.command} was started but did not answer within ${Math.round(PROGRAM_WAIT_TIMEOUT_MS / 1000)} s; what it said is in ${started.logPath}` };
+  }
   // Prefer a unit already running (wait only), then one this host can actually
   // start, and only then whatever is installed, so a machine carrying both a
   // startable unit and an unstartable one is not refused because of the latter.
@@ -434,8 +472,19 @@ export async function autostartInstalledDaemon(options: DaemonAutostartOptions):
 /** What a surface says when no daemon answers and no daemon service is installed to start. */
 export const DAEMON_NOT_INSTALLED_NOTICE = 'No GoodVibes daemon is running and none is installed on this machine, so shared sessions, the web UI, phone access, push and the relay are off. Install and start it with: goodvibes-daemon install-service';
 
+/** The GoodVibes installer, which puts the daemon program on this machine. */
+export const GOODVIBES_INSTALLER_COMMAND = 'curl -fsSL https://goodvibes.sh/install.sh | sh';
+
 /** What a surface says when the daemon program itself is not on this machine: the installer puts it there. */
-export const DAEMON_PROGRAM_MISSING_NOTICE = 'The GoodVibes daemon is not installed on this machine, so GoodVibes runs without it (no shared sessions, web UI, phone access or daemon capabilities). Install it with the GoodVibes installer: curl -fsSL https://goodvibes.sh/install.sh | sh';
+export const DAEMON_PROGRAM_MISSING_NOTICE = `The GoodVibes daemon is not installed on this machine, so GoodVibes runs without it (no shared sessions, web UI, phone access or daemon capabilities). Install it with the GoodVibes installer: ${GOODVIBES_INSTALLER_COMMAND}`;
+
+/** What every program says, in one line, when it started the daemon program itself. */
+export const DAEMON_PROGRAM_STARTED_LINE = 'Started the GoodVibes daemon.';
+
+/** What every program says when the daemon program it started did not answer. */
+export function daemonProgramStartFailedLine(reason: string): string {
+  return `The GoodVibes daemon could not be started: ${reason}.`;
+}
 
 /** The not-installed line for an outcome: the installer when the program is missing, the service step when only the service is. */
 export function daemonNotInstalledNotice(outcome: { readonly program?: boolean | undefined }): string {
@@ -455,6 +504,10 @@ export function describeDaemonAutostart(
 ): { readonly level: 'low' | 'high'; readonly text: string } | null {
   const suffix = adoptedAfterwards ? '' : `, but connecting to it still failed: ${adoptionFailureReason ?? 'no reason given'}`;
   switch (outcome.action) {
+    case 'program-started':
+      return { level: 'low', text: adoptedAfterwards ? `[Startup] ${DAEMON_PROGRAM_STARTED_LINE}` : `[Startup] Started the GoodVibes daemon${suffix}.` };
+    case 'program-start-failed':
+      return { level: 'high', text: `[Startup] ${daemonProgramStartFailedLine(outcome.reason)}` };
     case 'started':
       return { level: 'low', text: `[Startup] The GoodVibes daemon was stopped; GoodVibes started it${suffix}.` };
     case 'came-online':

@@ -6,6 +6,7 @@ import type { DelegatedReviewOwner } from '../control-plane/delegated-inbound-wi
 import type { TelegramSourceAccountReader, TelegramSourceAccountSnapshot, TelegramSourceAccountHandle } from '../channels/telegram/source-account.js';
 import type { NativeExecutionAuthority } from '../security/http-auth.js';
 import type { ApprovalBroker } from '../control-plane/approval-broker.js';
+import { APPROVAL_GUEST_CHANNEL_METADATA } from '../control-plane/approval-broker-raise.js';
 import type { SharedSessionBroker } from '../control-plane/session-broker.js';
 import type { AutomationRouteBinding } from '../automation/routes.js';
 import type { RouteBindingManager } from '../channels/route-manager.js';
@@ -19,6 +20,30 @@ import { defineLifecycle } from '../utils/lifecycle-machine.js';
 import { logger } from '../utils/logger.js';
 import { summarizeError } from '../utils/native-error-summary.js';
 import { noteListChanged } from '../runtime/list-changes.js';
+import { presentToolAskWith } from '../permissions/tool-ask-words.js';
+
+/** The tool name a held message's approval is raised under. */
+const REVIEW_TOOL = 'inbound.telegram.review';
+
+/**
+ * A held message's item in words, on every surface that shows it (Waiting
+ * for you, the owner's own chat): who wrote it, where, and the choice. Never
+ * its ids or its arguments.
+ */
+presentToolAskWith(REVIEW_TOOL, (args) => {
+  const named = (value: unknown) => (typeof value === 'string' && value.trim() !== '' ? value.trim() : undefined);
+  const who = named(args['externalAuthorName']) ?? 'someone who is not you';
+  const chat = named(args['chatTitle']);
+  return {
+    question: `Let this message from ${who} on Telegram in?`,
+    lines: [
+      `From ${who}${chat ? ` in "${chat}"` : ''} on Telegram. It is held for you, unread, until you decide.`,
+      'Let in, you can read it under Telegram in Waiting for you; nothing is done with it. Refused, it is let go unread.',
+    ],
+    subject: `a message from ${who} on Telegram`,
+    risk: null,
+  };
+});
 // Isolate the provider reader from the long-lived coordinator closure context.
 const sourceReader = (read: () => string) => () => ({ text: read(), unsupportedSources: [] });
 const routeKey = (chatId: string, threadId?: string) => JSON.stringify([chatId, threadId ?? null]);
@@ -49,6 +74,8 @@ interface Configuration {
 export interface DelegatedTelegramIngress {
   readonly binding: AutomationRouteBinding; readonly chatId: string; readonly threadId?: string | undefined;
   readonly senderId?: string | undefined; readonly edited?: boolean | undefined; readonly providerMessageId: string;
+  /** The sender and the chat as Telegram names them ("robin_sows", "Seed swap"): only the owner's item is worded with them. */
+  readonly senderName?: string | undefined; readonly chatTitle?: string | undefined;
   readonly account?: TelegramSourceAccountHandle | null | undefined;
   readonly readOriginal: () => string;
 }
@@ -358,12 +385,14 @@ export class DelegatedTelegramIntake implements DelegatedTelegramAdapter {
           ref = sources.producer.bind(handle, { sessionId: row.sessionId, inputId: row.id }); queuedRef = ref; return { ref, assertCurrent };
         });
       assertCurrent();
-      const approval = await this.deps.approvals.raiseOwnerApproval({ sessionId: ref.sessionId, signal: lifetime,
+      // About a message from someone who is not the owner: shown only in the owner's own places, never in that chat.
+      const approval = await this.deps.approvals.raiseOwnerApproval({ sessionId: ref.sessionId, signal: lifetime, metadata: { [APPROVAL_GUEST_CHANNEL_METADATA]: 'telegram' },
         timeoutMs: Math.max(1, sourceExpiresAt.value - Date.now()),
-        request: { callId: ref.requestId, tool: 'inbound.telegram.review', category: 'delegate', args: { ref, origin: { kind: 'external-original', accountId: config.account.id, accountRevision: config.account.revision, username: config.account.username, routeId: input.binding.id },
-          configurationId: config.id, providerMessageId: input.providerMessageId, chatId: input.chatId, ...(input.threadId ? { threadId: input.threadId } : {}), externalAuthorId: input.senderId ?? 'unknown-external-author', pendingSourceExpiresAt: sourceExpiresAt.value, requiredChoices: 'processingPurpose, sourceRetentionMs, derivedRecordRetentionMs, ownerMayReadOriginal=true, execution=none', decisionCommand: 'inbound.telegram.decide' },
+        request: { callId: ref.requestId, tool: REVIEW_TOOL, category: 'delegate', args: { ref, origin: { kind: 'external-original', accountId: config.account.id, accountRevision: config.account.revision, username: config.account.username, routeId: input.binding.id },
+          configurationId: config.id, providerMessageId: input.providerMessageId, chatId: input.chatId, ...(input.threadId ? { threadId: input.threadId } : {}), externalAuthorId: input.senderId ?? 'unknown-external-author',
+          ...(input.senderName ? { externalAuthorName: input.senderName } : {}), ...(input.chatTitle ? { chatTitle: input.chatTitle } : {}), pendingSourceExpiresAt: sourceExpiresAt.value, requiredChoices: 'processingPurpose, sourceRetentionMs, derivedRecordRetentionMs, ownerMayReadOriginal=true, execution=none', decisionCommand: 'inbound.telegram.decide' },
           analysis: { classification: 'external-message-review', riskLevel: 'high', summary: 'Approve one external Telegram message for owner review only. Choose a bounded original-memory lifetime and a metadata-only review-record lifetime. No work execution.',
-            reasons: ['Original content is not copied into this approval. Use the provider message identity to review the source.', 'Only the paired owner decision command can approve. Generic approve, remembered rules, and channel replies cannot.', 'Raw source is released at the chosen deadline or review cancellation. Persisted metadata expires while running, or is pruned at next startup.'] }, rememberOptions: [] },
+            reasons: ['Its text is not copied here; it stays with the held message.', 'Only you can let it in, from the Telegram list in Waiting for you. A reply, a remembered rule or a general yes cannot.', 'Its text is let go at the time you chose or when the review is closed; what is kept about it expires with it.'] }, rememberOptions: [] },
         requireOwnerDecision: { assertCurrent, validateDecision: decision => {
           if (!decision.approved) return;
           const parsed = delegatedTelegramDecisionSchema.parse(decision.modifiedArgs);
@@ -514,7 +543,10 @@ export class DelegatedTelegramIntake implements DelegatedTelegramAdapter {
     this.prune();
     const records = await this.receiver.list(); assertCurrent();
     return { outcome: 'listed', records: records.filter(delegatedReviewOwnership(owner)).map(reviewRecordView),
-      pending: [...this.pending.values()].filter(entry => isDeepStrictEqual(entry.configuration.expected, owner)).map(entry => ({ ref: entry.ref, approvalId: entry.approval.approval.id, sourceExpiresAt: entry.sourceExpiresAt.value, outcome: entry.sourceController.signal.aborted ? 'held' : entry.state })) };
+      pending: [...this.pending.values()].filter(entry => isDeepStrictEqual(entry.configuration.expected, owner)).map(entry => ({ ref: entry.ref, approvalId: entry.approval.approval.id, sourceExpiresAt: entry.sourceExpiresAt.value, outcome: entry.sourceController.signal.aborted ? 'held' : entry.state })),
+      // The owner's chats still held (a handed-back chat leaves the map), and whether each keeps new messages.
+      chats: [...this.configurations.values()].filter(config => isDeepStrictEqual(config.expected, owner))
+        .map(config => ({ configurationId: config.id, keepsNewMessages: !config.controller.signal.aborted })) };
   }
   async cancel(ref: NativeInboundSourceRef, authority: NativeExecutionAuthority): Promise<DelegatedTelegramResult<'cancel'>> {
     const { owner, assertCurrent } = this.captureOwner(authority);

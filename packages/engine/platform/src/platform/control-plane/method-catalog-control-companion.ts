@@ -85,7 +85,7 @@ export const builtinGatewayControlCompanionMethodDescriptors: readonly GatewayMe
     id: 'companion.chat.sessions.create',
     replay: IDEMPOTENCY_KEY_REPLAY,
     title: 'Create Companion Chat Session',
-    description: 'Create a new companion-chat session. Optional `provider` / `model` override the registry default. The session retains its requested `reasoningEffort`; null restores provider defaults. Title and system prompt are stored on the session record.',
+    description: 'Create a new companion-chat session. Optional `provider` / `model` override the registry default. The session retains its requested `reasoningEffort`; null restores provider defaults. Title and system prompt are stored on the session record. `workingDirectory` (absolute; else the `x-goodvibes-project` header) is the project the chat works in: its tools, tool servers, hooks, checkpoints and rules are that project\'s; without one the chat works in the daemon\'s own folder.',
     category: 'companion',
     effects: ['sessions.write'],
     http: { method: 'POST', path: '/api/companion/chat/sessions' },
@@ -95,6 +95,7 @@ export const builtinGatewayControlCompanionMethodDescriptors: readonly GatewayMe
       provider: STRING_SCHEMA,
       reasoningEffort: COMPANION_CHAT_REASONING_EFFORT_SCHEMA,
       systemPrompt: STRING_SCHEMA,
+      workingDirectory: STRING_SCHEMA,
     }, [], { dependentRequired: COMPANION_MODEL_ROUTE_DEPENDENCY }),
     outputSchema: objectSchema({
       sessionId: STRING_SCHEMA,

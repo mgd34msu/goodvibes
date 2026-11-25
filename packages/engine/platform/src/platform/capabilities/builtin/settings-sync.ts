@@ -15,8 +15,8 @@ import type { ConfigKey } from '../../config/schema-types.js';
 import { CONFIG_KEYS } from '../../config/schema.js';
 import { isDaemonOwnedConfigKey } from '../../config/config-ownership.js';
 import {
-  applySettingsSyncBundle, exportSettingsSyncBundle, formatResolvedSettingReview, formatSettingsControlPlaneReview,
-  getSettingsControlPlaneSnapshot, inspectSettingsSyncBundle, recordSettingsSyncEvent, recordSettingsSyncFailure, resolveSettingsSyncConflict,
+  applySettingsSyncBundle, exportSettingsSyncBundle, getResolvedSettingLookup,
+  getSettingsControlPlaneSnapshot, recordSettingsSyncEvent, recordSettingsSyncFailure, resolveSettingsSyncConflict,
   type SettingsSyncBundle,
 } from '../../runtime/settings/control-plane.js';
 import { CapabilityRefusal, type ActionValues, type CapabilityCaller, type CapabilityDefinition, type CapabilityResult, type InputDescription, type ListName } from '../types.js';
@@ -103,11 +103,26 @@ function conflictsOf(services: SettingsSyncCapabilityServices, caller: Capabilit
   return [...seen.values()];
 }
 
+/** One owner's settings, said in words: where their values come from, the sync and what is locked or staged. */
+function reviewWords(config: ConfigManager): string[] {
+  const snapshot = getSettingsControlPlaneSnapshot(config);
+  const counts = snapshot.resolvedCounts;
+  const last = snapshot.lastSync;
+  const plural = (count: number, noun: string): string => `${count} ${noun}${count === 1 ? '' : 's'}`;
+  return [
+    `${plural(snapshot.liveKeyCount, 'setting')}: ${counts.default} at their default, ${counts.local} set here, ${counts.synced} taken from a sync bundle, ${counts.managed} set by a managed bundle.`,
+    last ? `Last change from a bundle: ${({ pull: 'a sync bundle pulled', import: 'a bundle taken in', apply: 'a managed bundle applied', rollback: 'a managed bundle rolled back' } as Record<string, string>)[String(last.direction)] ?? String(last.direction)}, ${new Date(last.timestamp).toISOString().slice(0, 16).replace('T', ' ')}.` : 'No bundle has changed them yet.',
+    `${plural(snapshot.managedLockCount, 'setting')} locked as managed; ${plural(snapshot.profileCount, 'saved preset')}.`,
+    ...(snapshot.stagedManagedBundle ? [`A managed bundle is staged: ${snapshot.stagedManagedBundle.profileName}, ${plural(snapshot.stagedManagedBundle.changeCount, 'change')} (Tools and extensions, Managed settings).`] : []),
+    snapshot.conflicts.length > 0 ? `${plural(snapshot.conflicts.length, 'setting')} disagree with a pulled value: settle each on the Settings sync tab.` : 'No setting disagrees with a pulled value.',
+  ];
+}
+
 export const SETTINGS_SYNC_REVIEW = read({
   id: 'settings-sync.review', actionId: 'review', label: 'See where your settings come from', word: 'review', inputs: [], example: {},
   sentence: 'Shows which layers your settings come from, for the daemon\'s settings and this program\'s, with sync state, conflicts, locks and recent failures.',
   async run(_values, services, caller) {
-    const parts = bothOwners(services, caller).map(({ owner, config }) => [`${Whose(owner)} settings:`, ...formatSettingsControlPlaneReview(config).map((line) => `  ${line}`)].join('\n'));
+    const parts = bothOwners(services, caller).map(({ owner, config }) => [`${Whose(owner)} settings:`, ...reviewWords(config).map((line) => `  ${line}`)].join('\n'));
     return { text: parts.join('\n'), data: { conflicts: conflictsOf(services, caller) } };
   },
 });
@@ -119,7 +134,19 @@ export const SETTINGS_SYNC_SHOW = read({
     const key = values.key!.trim();
     if (!CONFIG_KEYS.has(key as ConfigKey)) throw new CapabilityRefusal(`Unknown setting key: ${key}.`, 'Settings shows every key.');
     const owner = ownerOfKey(key, caller);
-    return { text: `${key} is ${OWNER_WORDS[owner]}'s setting.\n${formatResolvedSettingReview(configOf(services, owner, caller), key as ConfigKey)}`, data: { key, owner } };
+    const lookup = getResolvedSettingLookup(configOf(services, owner, caller), key as ConfigKey);
+    if (!lookup) return { text: `${key} is ${OWNER_WORDS[owner]}'s setting; where its value comes from could not be read.`, data: { key, owner } };
+    const { entry } = lookup;
+    const value = (raw: unknown): string => raw === undefined ? 'none' : JSON.stringify(raw);
+    const FROM: Readonly<Record<string, string>> = { default: 'its default', local: 'the value set on this machine', synced: 'a pulled sync bundle', managed: 'a managed bundle' };
+    return {
+      text: [
+        `${key} is ${OWNER_WORDS[owner]}'s setting: ${value(entry.effectiveValue)}, from ${FROM[entry.effectiveSource] ?? entry.effectiveSource}.`,
+        `Default ${value(entry.defaultValue)}; set on this machine ${value(entry.localValue)}; pulled ${value(entry.syncedValue)}; managed ${value(entry.managedValue)}.`,
+        entry.locked ? 'It is locked as managed: unlock it in Tools and extensions, Managed settings, to change it.' : 'It is not locked.',
+      ].join('\n'),
+      data: { key, owner, value: entry.effectiveValue, source: entry.effectiveSource },
+    };
   },
 });
 
@@ -166,8 +193,8 @@ export const SETTINGS_SYNC_FAILURES = read({
 
 export const SETTINGS_SYNC_EXPORT: Definition = {
   capability: { id: 'settings-sync.export', group: 'devices', home: 'daemon', repeat: 'safe' },
-  actionId: 'export', label: 'Save your settings to a sync bundle', word: 'export', inputs: [{ ...PATH, help: 'Where to write the bundle, in your project folder unless the path says where' }],
-  sentence: 'The daemon\'s settings and this program\'s are written to {path}, each part labelled with its owner, for another machine to pull.', done: '',
+  actionId: 'export', label: 'Save your settings to a file for another machine', word: 'export', inputs: [{ ...PATH, help: 'Where to write the bundle, in your project folder unless the path says where' }],
+  sentence: 'The daemon\'s settings and this program\'s are written to the sync bundle file {path}, each part labelled with its owner, for another machine (a laptop, a second computer) to pull and use.', done: '',
   touches: 'this-machine', lasts: 'kept', risk: 'none', example: { path: 'settings-sync.json' },
   async run(values, services, caller) {
     const target = services.programSettings.resolvePath(caller, values.path!);
@@ -204,7 +231,8 @@ export const SETTINGS_SYNC_INSPECT = read({
     }
     const parts = partsOf(bundle, caller);
     return {
-      text: [inspectSettingsSyncBundle(bundle), ...parts.map((part) => `${Whose(part.owner)} part: ${Object.keys(part.settings).length} settings${part.owner !== 'daemon' && part.owner !== programOf(caller) ? ' (pulled from that program, not this one)' : ''}`)].join('\n'),
+      text: [`${path} was saved ${new Date(bundle.exportedAt).toISOString().slice(0, 16).replace('T', ' ')} and holds ${Object.keys(bundle.settings).length} settings${Array.isArray(bundle.parts) ? '' : ' (saved by GoodVibes 3.5.0: split here by whose each setting is)'}.`,
+        ...parts.map((part) => `${Whose(part.owner)} part: ${Object.keys(part.settings).length} setting${Object.keys(part.settings).length === 1 ? '' : 's'}${part.owner !== 'daemon' && part.owner !== programOf(caller) ? ' (pulled from that program, not this one)' : ''}`)].join('\n'),
       data: { path, parts: parts.map((part) => ({ owner: part.owner, count: Object.keys(part.settings).length })) },
     };
   },
@@ -234,7 +262,9 @@ export const SETTINGS_SYNC_PULL: Definition = {
       const own = Object.fromEntries(Object.entries(part.settings).filter(([key]) => ownerOfKey(key, caller) === part.owner));
       const config = configOf(services, part.owner, caller);
       const changes = Object.entries(own).filter(([key, next]) => CONFIG_KEYS.has(key as ConfigKey) && JSON.stringify(config.get(key as ConfigKey)) !== JSON.stringify(next));
-      const settingsPath = config.getConfigPath();
+      // The file these keys are written to: the daemon's part is daemon-owned keys, kept in the daemon's settings file
+      // (its tier), not in the file of the daemon's own program settings.
+      const settingsPath = part.owner === 'daemon' ? (config.getDaemonTierPath() ?? config.getConfigPath()) : config.getConfigPath();
       const before = `${settingsPath}.before-pull-${new Date().toISOString().replace(/[:.]/g, '-')}`;
       let kept: string | null = null;
       if (changes.length > 0 && existsSync(settingsPath)) {

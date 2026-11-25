@@ -470,7 +470,8 @@ async function handleRemoveRemoteBackend(context: DaemonRemoteRouteContext, peer
 }
 
 export async function handleRemotePairRequest(
-  context: Pick<DaemonRemoteRouteContext, 'parseJsonBody' | 'distributedRuntime'>,
+  /** `remoteAddress`: the address the request came from, as the daemon resolved it; kept with the request so the owner sees it. */
+  context: Pick<DaemonRemoteRouteContext, 'parseJsonBody' | 'distributedRuntime'> & { readonly remoteAddress?: string | undefined },
   req: Request,
 ): Promise<Response> {
   const body = await context.parseJsonBody(req);
@@ -481,6 +482,7 @@ export async function handleRemotePairRequest(
     ...input,
     metadata: readMetadataWithClientHintForwardedFor(req, input.metadata),
     requestedBy: 'remote',
+    ...(context.remoteAddress ? { remoteAddress: context.remoteAddress } : {}),
   });
   return Response.json(created, { status: 201 });
 }
@@ -844,6 +846,8 @@ async function handleInvokeRemotePeer(context: DaemonRemoteRouteContext, peerId:
       automationJobId: input.automationJobId,
       approvalId: input.approvalId,
       metadata: input.metadata,
+      // A caller that went away ends its wait for the result, as a wait that ran out.
+      signal: req.signal,
     });
     return Response.json(invoked, { status: 202 });
   } catch (error) {

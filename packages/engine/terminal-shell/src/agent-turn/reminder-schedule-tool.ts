@@ -184,9 +184,13 @@ export function createAgentReminderScheduleTool(
           return formatExistingScheduleResult(existing.id, 'GoodVibes schedule for Agent reminder');
         }
         const result = await effect.invoke('automation.schedules.create', payload);
-        if (result.success) await recordEffect('succeeded', `Reminder scheduled (${when}).`, createdScheduleId(result.output));
-        else await recordEffect('failed', result.error ?? 'The connected host refused the reminder schedule.');
-        return formatScheduleOperatorResult(result, 'Created GoodVibes schedule for Agent reminder');
+        const written = result.success
+          ? await recordEffect('succeeded', `Reminder scheduled (${when}).`, createdScheduleId(result.output))
+          : await recordEffect('failed', result.error ?? 'The connected host refused the reminder schedule.');
+        const formatted = formatScheduleOperatorResult(result, 'Created GoodVibes schedule for Agent reminder');
+        // A record a rule or plan mode refused: said after the act, which ran.
+        return written.notSaved && formatted.success && typeof formatted.output === 'string'
+          ? { ...formatted, output: `${formatted.output}\n${written.notSaved}.` } : formatted;
       } catch (error) {
         const message = error instanceof Error ? error.message : String(error);
         // Only a request already handed to the transport can have been applied.

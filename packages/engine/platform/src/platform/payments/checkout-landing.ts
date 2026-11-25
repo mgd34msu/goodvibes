@@ -63,6 +63,11 @@ export function readOrderConfirmation(text: string, navigated: boolean, total?: 
 
 /** The engine reads the landing page needs, beyond what the checkout driver uses. */
 export interface CheckoutLandingEngine extends CheckoutBrowserEngine {
+  /**
+   * The landing page's body text and title with every live card value scrubbed out, read for this code only
+   * (browser-engine.ts): the card typed for the order is still registered on the page, so `readText` refuses it.
+   */
+  readCheckoutLandingText?: ((target: CheckoutEngineTarget, args?: { readonly maxChars?: number | undefined }) => Promise<{ readonly title: string; readonly content: string }>) | undefined;
   readText: (target: CheckoutEngineTarget, args?: { readonly maxChars?: number | undefined }) => Promise<Record<string, unknown>>;
   snapshot: (target: CheckoutEngineTarget, args?: { readonly limit?: number | undefined }) => Promise<Record<string, unknown>>;
 }
@@ -75,9 +80,10 @@ function textOf(value: unknown): string {
 
 /**
  * The daemon's `describeSubmission`: one read of the landing page after the
- * submit. The page's body text when it may be read; while the card is still
- * on the page the body is withheld, so the page's headings and control names
- * from a snapshot are read instead. Any failure to read is "nothing found",
+ * submit. The page's body text with the card scrubbed out (the engine's landing
+ * read: the card typed for the order stays registered on the page, so the
+ * model's text read refuses it); an engine without that read gives its text read,
+ * else a snapshot's headings and control names. Any failure to read is "nothing found",
  * never a failed submit: the click has already happened.
  *
  * Cost: one page read per purchase.
@@ -90,13 +96,21 @@ export function describeCheckoutLanding(
       const engine = await engineFor();
       let text: string;
       try {
-        const read = await engine.readText(submission.target, { maxChars: 20_000 });
-        text = `${textOf(read['title'])}\n${textOf(read['content'])}`;
+        // The page's own words, the card scrubbed out: where the shop prints the order number ("Order number SH-4101"),
+        // which a snapshot's headings and control names leave out.
+        if (!engine.readCheckoutLandingText) throw new Error('no landing read');
+        const read = await engine.readCheckoutLandingText(submission.target, { maxChars: 20_000 });
+        text = `${read.title}\n${read.content}`;
       } catch {
-        const snapshot = await engine.snapshot(submission.target, { limit: 400 });
-        const elements: readonly unknown[] = Array.isArray(snapshot['elements']) ? snapshot['elements'] as unknown[] : [];
-        const names = elements.map((element) => (element && typeof element === 'object' ? textOf((element as { readonly name?: unknown }).name) : ''));
-        text = [textOf(snapshot['title']), ...names].join('\n');
+        try {
+          const read = await engine.readText(submission.target, { maxChars: 20_000 });
+          text = `${textOf(read['title'])}\n${textOf(read['content'])}`;
+        } catch {
+          const snapshot = await engine.snapshot(submission.target, { limit: 400 });
+          const elements: readonly unknown[] = Array.isArray(snapshot['elements']) ? snapshot['elements'] as unknown[] : [];
+          const names = elements.map((element) => (element && typeof element === 'object' ? textOf((element as { readonly name?: unknown }).name) : ''));
+          text = [textOf(snapshot['title']), ...names].join('\n');
+        }
       }
       return readOrderConfirmation(text, submission.navigated, submission.dispatch?.total);
     } catch {

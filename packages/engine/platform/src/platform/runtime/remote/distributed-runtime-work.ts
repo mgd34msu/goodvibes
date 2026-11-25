@@ -229,6 +229,8 @@ export async function invokeDistributedPeer(
     readonly automationJobId?: string | undefined;
     readonly approvalId?: string | undefined;
     readonly metadata?: Record<string, unknown> | undefined;
+    /** The asking client's request: when it goes away, the wait for the result ends. */
+    readonly signal?: AbortSignal | undefined;
   },
 ): Promise<{ work: DistributedPendingWork; completed: boolean }> {
   const work = await enqueueDistributedWork(state, {
@@ -250,7 +252,7 @@ export async function invokeDistributedPeer(
   if (!input.waitMs || input.waitMs <= 0) {
     return { work, completed: false };
   }
-  const settled = await waitForDistributedWork(state, work.id, input.waitMs);
+  const settled = await waitForDistributedWork(state, work.id, input.waitMs, input.signal);
   if (!settled && input.admission) {
     refuseAdmission(state, work.id); await persistDistributedRuntime(state);
     return { work: state.work.get(work.id) ?? work, completed: false };

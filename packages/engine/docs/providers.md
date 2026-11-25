@@ -64,8 +64,8 @@ configured only with a bearer token, a complete access-key pair or a profile:
 | `perplexity` | Perplexity | `PERPLEXITY_API_KEY` |
 | `deepgram` | Deepgram | `DEEPGRAM_API_KEY` |
 | `elevenlabs` | ElevenLabs | `ELEVENLABS_API_KEY` (or `XI_API_KEY`) |
-| `amazon-bedrock` | Amazon Bedrock | `AWS_BEARER_TOKEN_BEDROCK` (or `AWS_ACCESS_KEY_ID` + `AWS_SECRET_ACCESS_KEY`, or `AWS_PROFILE`). Only the bearer token can be kept in `/secrets`; the key pair and profile are read from the environment. |
-| `amazon-bedrock-mantle` | Amazon Bedrock (Mantle) | `AWS_BEARER_TOKEN_BEDROCK` (or `AWS_ACCESS_KEY_ID` + `AWS_SECRET_ACCESS_KEY`, or `AWS_PROFILE`). Only the bearer token can be kept in `/secrets`; the key pair and profile are read from the environment. |
+| `amazon-bedrock` | Amazon Bedrock | `AWS_BEARER_TOKEN_BEDROCK` (or `AWS_ACCESS_KEY_ID` + `AWS_SECRET_ACCESS_KEY`, or `AWS_PROFILE`). Only the bearer token can be kept as a secret; the key pair and profile are read from the environment. |
+| `amazon-bedrock-mantle` | Amazon Bedrock (Mantle) | `AWS_BEARER_TOKEN_BEDROCK` (or `AWS_ACCESS_KEY_ID` + `AWS_SECRET_ACCESS_KEY`, or `AWS_PROFILE`). Only the bearer token can be kept as a secret; the key pair and profile are read from the environment. |
 | `anthropic-vertex` | Anthropic (Vertex) | `GOOGLE_APPLICATION_CREDENTIALS`, `ANTHROPIC_VERTEX_PROJECT_ID` (or `GOOGLE_CLOUD_PROJECT`, `GOOGLE_CLOUD_PROJECT_ID`) |
 | `github-copilot` | GitHub Copilot | `COPILOT_GITHUB_TOKEN` (a repository token in `GH_TOKEN` or `GITHUB_TOKEN` is never used) |
 | `byteplus` | BytePlus | `BYTEPLUS_API_KEY` |

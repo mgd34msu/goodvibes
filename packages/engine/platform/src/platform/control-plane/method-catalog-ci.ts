@@ -8,6 +8,7 @@
  * conclusions with continue-on-error jobs flagged as violations.
  */
 import type { GatewayMethodDescriptor } from './method-catalog-shared.js';
+import type { ContractErrorCode } from '../types/foundation-contract.js';
 import { IDEMPOTENCY_KEY_REPLAY } from './idempotent-replay.js';
 import {
   BOOLEAN_SCHEMA,
@@ -114,6 +115,10 @@ export const CI_WATCHES_RUN_OUTPUT_SCHEMA = objectSchema({
   endedReason: STRING_SCHEMA,
 }, ['report', 'notified', 'fixSessionTriggered']);
 
+/** gh refused or could not answer (not signed in, no network, not installed): GitHub's refusal, not a daemon fault. */
+const CI_SOURCE_REFUSED: ContractErrorCode = { code: 'CI_SOURCE_REFUSED', status: 424, meaning: 'GitHub could not be read through gh (not signed in, unreachable, or gh is missing); the message carries gh\'s own words, and nothing was read or changed.' };
+const CI_TARGET_GONE: ContractErrorCode = { code: 'CI_TARGET_GONE', status: 404, meaning: 'GitHub has no such repository, branch or pull request that this login can read, so no verdict will come.' };
+
 export const builtinGatewayCiMethodDescriptors: readonly GatewayMethodDescriptor[] = [
   methodDescriptor({
     id: 'ci.status',
@@ -124,6 +129,7 @@ export const builtinGatewayCiMethodDescriptors: readonly GatewayMethodDescriptor
     http: { method: 'POST', path: '/api/ci/status' },
     inputSchema: CI_STATUS_INPUT_SCHEMA,
     outputSchema: CI_STATUS_OUTPUT_SCHEMA,
+    errorCodes: [CI_SOURCE_REFUSED, CI_TARGET_GONE],
   }),
   methodDescriptor({
     id: 'ci.watches.list',
@@ -168,5 +174,6 @@ export const builtinGatewayCiMethodDescriptors: readonly GatewayMethodDescriptor
     http: { method: 'POST', path: '/api/ci/watches/{watchId}/run' },
     inputSchema: CI_WATCHES_RUN_INPUT_SCHEMA,
     outputSchema: CI_WATCHES_RUN_OUTPUT_SCHEMA,
+    errorCodes: [CI_SOURCE_REFUSED, CI_TARGET_GONE],
   }),
 ];

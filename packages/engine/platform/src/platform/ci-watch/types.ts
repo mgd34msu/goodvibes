@@ -135,6 +135,20 @@ export class CiTargetGoneError extends Error {
   }
 }
 
+/**
+ * The program that reads CI state (gh) refused or could not answer: not signed in, no network, not installed.
+ * A refusal from outside this daemon, never the daemon's own fault; `forgeStatus` is the HTTP status the forge
+ * answered when it answered.
+ */
+export class CiSourceError extends Error {
+  readonly forgeStatus: number | undefined;
+  constructor(message: string, forgeStatus: number | undefined) {
+    super(message);
+    this.name = 'CiSourceError';
+    this.forgeStatus = forgeStatus;
+  }
+}
+
 /** The brief handed to a fix-session starter when a watched CI run fails. */
 export interface FixSessionBrief {
   readonly repo: string;

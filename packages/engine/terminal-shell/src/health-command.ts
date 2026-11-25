@@ -1,25 +1,20 @@
 /**
- * `/health` and `/status`, described once (command-actions/) for both
- * terminal apps.
+ * A program's health and `/status`, described once for both terminal apps.
  *
  * Whether this program is working is the System capabilities `health.*`
  * (capabilities/builtin/system-program.ts): what needs attention, one area in
  * detail, a problem described, this session's failure reports, the runtime
  * store and the connected host's compatibility. Each runs in the program with
  * its own services (`healthServicesOf` binds this program's policy), from the
- * System place's Health tab, a model's `capability_run` and the typed line.
- * Stopping a running agent stays here until Work and agents moves it.
+ * System place's Health tab and a model's `capability_run`.
  */
-import { commandRefusal } from './command-confirmation.js';
 import { defineCommand, type DescribedCommand } from './command-actions/define.js';
 import { defineList, type ListRow } from './command-actions/lists.js';
-import type { ActionDescription, CommandActionContext, CommandReport } from './command-actions/types.js';
-import { textInput } from './described-command-kit.js';
+import type { CommandActionContext, CommandReport } from './command-actions/types.js';
 import { sessionCapabilityAction } from './command-actions/capability-actions.js';
 import { renderCommandReport } from './command-actions/report.js';
 import {
-  HEALTH_CHECK, HEALTH_COMPAT, HEALTH_DIAGNOSE, HEALTH_FAILURE, HEALTH_KEEP_FAILURE, HEALTH_REPORT, HEALTH_SAVE_FAILURE, HEALTH_STATE,
-  SYSTEM_STATUS, type CapabilityDefinition, type FailureReportView, type HealthArea, type SystemHealthServices, type SystemSessionServices,
+  SYSTEM_STATUS, type FailureReportView, type HealthArea, type SystemHealthServices, type SystemSessionServices,
 } from '@goodvibes/engine/platform/platform/capabilities';
 // The remote runners as both programs' health and setup checks read them: the daemon's (remote-health.ts).
 export { readRemoteRunnersHealth, type RemoteRunnersHealth } from './remote-health.js';
@@ -52,9 +47,6 @@ interface FailureReportRecord {
 interface FailureReportsHolder {
   readonly extensions?: { readonly forensicsRegistry?: { getAll(): readonly FailureReportRecord[] } | null | undefined } | undefined;
 }
-interface RunningAgentsHolder {
-  readonly ops?: { readonly agentManager?: { list(): readonly { readonly id: string; readonly task: string; readonly status: string }[] } | null | undefined } | undefined;
-}
 
 // This session's failure reports, newest first: the list `health.failure-reports` the capabilities' report input names.
 defineList<CommandActionContext>({
@@ -70,17 +62,6 @@ defineList<CommandActionContext>({
   operator: { terminalOnly: 'Failure reports are kept by the terminal app for its own session.' },
 });
 
-const RUNNING_AGENTS = defineList<CommandActionContext>({
-  name: 'health.running-agents',
-  async read(ctx) {
-    const manager = (ctx as CommandActionContext & RunningAgentsHolder).ops?.agentManager;
-    if (!manager) return [];
-    return manager.list().filter((agent) => agent.status === 'running' || agent.status === 'pending').map((agent): ListRow => ({
-      value: agent.id, label: agent.task.length > 60 ? `${agent.task.slice(0, 57)}...` : agent.task, state: agent.status,
-    }));
-  },
-  operator: { terminalOnly: 'The agents are the terminal app\'s own.' },
-});
 
 /** What each app does for its health. An optional part an app does not have is refused with `elsewhere`. */
 export interface HealthCommandPolicy<Ctx> {
@@ -99,7 +80,6 @@ export interface HealthCommandPolicy<Ctx> {
     save(ctx: Ctx, input: { readonly report: string; readonly path: string; readonly replay: boolean; readonly replace: boolean }): string;
     keep(ctx: Ctx, report: string): Promise<string>;
   } | undefined;
-  readonly stopAgent?: ((ctx: Ctx, agentId: string, note: string) => Promise<string>) | undefined;
   /** Where the parts this app lacks are: "the terminal app (goodvibes)". */
   readonly elsewhere: string;
 }
@@ -109,7 +89,14 @@ export function healthServicesOf<Ctx>(policy: HealthCommandPolicy<Ctx>, ctx: Ctx
   const failures = policy.failures;
   const compat = policy.compat;
   return {
-    report: async () => renderCommandReport(await policy.report(ctx)),
+    // The fix in its own words, never a line to type: the controls are in the places.
+    report: async () => {
+      const report = await policy.report(ctx);
+      return renderCommandReport({
+        ...report,
+        items: report.items.map((item) => (item.fix && item.fix.line.startsWith('/') ? { sentence: item.fix.label ? `${item.sentence} ${item.fix.label}.` : item.sentence } : item)),
+      });
+    },
     check: (area, provider) => policy.check(ctx, area as HealthArea, provider),
     diagnose: (symptom) => policy.diagnose(ctx, symptom),
     state: (domains) => policy.runtimeState(ctx, domains),
@@ -125,66 +112,23 @@ export function healthServicesOf<Ctx>(policy: HealthCommandPolicy<Ctx>, ctx: Ctx
   };
 }
 
-const HERE = { terminalOnly: 'It reads the terminal program you are using.' } as const;
-
-/** `/health` for one app: the `health.*` capabilities run with this app's services, and stopping a running agent. */
-export function createHealthCommand<Ctx extends CommandActionContext>(
-  policy: HealthCommandPolicy<Ctx>,
-  services: (ctx: Ctx) => SystemSessionServices,
-): DescribedCommand<Ctx> {
-  const moved = (definition: CapabilityDefinition<SystemSessionServices>): ActionDescription<Ctx> =>
-    sessionCapabilityAction<Ctx, SystemSessionServices>(definition, services, HERE);
-  const stopAgent: ActionDescription<Ctx> = {
-    id: 'stop-agent', label: 'Stop a running agent', word: 'stop-agent',
-    inputs: [
-      { id: 'agent', label: 'Agent', help: 'The agents running now', kind: 'choice', choices: { list: RUNNING_AGENTS, allowOther: { reason: 'an agent id' } }, required: true, typed: { position: 1 } },
-      textInput({ id: 'note', label: 'Why', help: 'A note kept with the stop', why: 'your own words', kind: 'long-text', typed: { flag: '--note' }, optional: { default: '', means: 'no note' } }),
-    ],
-    sentence: 'Agent {agent} is stopped; what it has not finished is not done.',
-    done: '', touches: 'this-machine', lasts: 'kept', risk: 'cannot-be-undone',
-    operator: { terminalOnly: 'The agents are the terminal app\'s own.' },
-    example: { agent: 'agent-1a2b' },
-    async run(values, ctx) {
-      if (!policy.stopAgent) throw commandRefusal('Stopping an agent is not in this program; nothing was done.', `It is in ${policy.elsewhere}.`);
-      return policy.stopAgent(ctx, values.agent!, values.note ?? '');
-    },
-  };
-  return defineCommand<Ctx>({
-    name: 'health',
-    // --yes confirms only right after the action word: the same word in the text is text.
-    leadingFlagsOnly: true,
-    title: 'Health',
-    summary: 'See whether everything is working, check one area, or find the cause of a problem',
-    group: 'Health',
-    report: 'report',
-    actions: [
-      moved(HEALTH_REPORT), moved(HEALTH_CHECK), moved(HEALTH_DIAGNOSE), moved(HEALTH_FAILURE), moved(HEALTH_SAVE_FAILURE),
-      moved(HEALTH_KEEP_FAILURE), stopAgent, moved(HEALTH_STATE), moved(HEALTH_COMPAT),
-    ],
-  });
-}
+// `/health` is gone: the `health.*` capabilities are the System place's Health tab (run with `healthServicesOf`, from
+// each program's session-capabilities.ts), and stopping a running agent is Work and agents' Your agents (agents.stop).
 
 /**
  * `/status` for one app: the capability system.status (capabilities/builtin/system-session.ts), what each app
  * reports being its own. Typed by a person where the System place can open, it opens that place on "This
- * session"; from a model or a script it is the report as text. (A command of one action with no word is never
- * typed bare, so the command-level `opens` cannot carry this: the action opens the place itself.)
+ * session" (the command-level `opens`); from a model or a script it is the report as text.
  */
 export function createStatusCommand<Ctx extends CommandActionContext>(
   services: (ctx: Ctx) => SystemSessionServices,
 ): DescribedCommand<Ctx> {
-  const report = sessionCapabilityAction<Ctx, SystemSessionServices>(SYSTEM_STATUS, services, { terminalOnly: 'It reports the terminal program you are using.' });
   return defineCommand<Ctx>({
     name: 'status',
     title: 'Status',
     summary: 'See this session at a glance: model, context window and what is in force',
     group: 'Health',
-    actions: [{
-      ...report,
-      async run(values, ctx) {
-        if (ctx.invokedByModel !== true && ctx.openPlace) { ctx.openPlace('system'); return; }
-        return report.run(values, ctx);
-      },
-    }],
+    opens: 'system/session',
+    actions: [sessionCapabilityAction<Ctx, SystemSessionServices>(SYSTEM_STATUS, services, { terminalOnly: 'It reports the terminal program you are using.' })],
   });
 }

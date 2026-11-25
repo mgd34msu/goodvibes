@@ -1,23 +1,26 @@
 /**
  * PlaceForm: the form a place's action opens for the inputs the selected item
  * does not give, built from the capability's inputs with the same blanks as
- * the action sheets (choices as selects or radios, live choices read from
- * their source, a secret as a password field, long text as a text area). It
- * is titled with the action and names the place; the inputs the item gave are
- * shown by the item's title and never asked again. A secret value lives only
- * in this form's state while it is open: it is sent with the request and never
- * shown, kept or written anywhere in the browser.
+ * the action sheets (choices as selects or radios, live choices read from the
+ * method the daemon names for their list, a secret as a password field, long
+ * text as a text area), grouped by the same steps (a long step of usual
+ * settings folded under "More settings"). It is titled with the action and
+ * names the place; the inputs the item gave are shown by the item's title and
+ * never asked again. An input supplied from context (the program asking) is
+ * the person's to name here, with no default. A secret value lives only in this
+ * form's state while it is open: it is sent with the request and never shown,
+ * kept or written anywhere in the browser.
  */
 import { useMemo, useState } from 'react';
-import { isShown, type ActionValues, type InputDescription } from '@goodvibes/engine/terminal-shell/command-actions/data';
-import { Blank, initialValues, shownValues } from '../../components/command/ActionSheet';
+import { type ActionValues } from '@goodvibes/engine/terminal-shell/command-actions/data';
+import { Blank, initialValues, shownValues, stepGroups } from '../../components/command/ActionSheet';
 import { Facts } from '../../components/data-view/DataView';
 import { Button } from '../../components/ui/Button';
 import { Dialog } from '../../components/ui/Dialog';
-import { Field } from '../../components/ui/Field';
-import { Select } from '../../components/ui/Select';
 import type { InputData } from '../../lib/command-actions-types';
-import { capabilityButton, capabilityRisk, capabilityRiskWords, capabilitySentence, displayValues, type PlaceCapability } from '../../lib/place-capabilities';
+import {
+  capabilityButton, capabilityRisk, capabilityRiskWords, capabilitySentence, displayValues, namedByCaller, shownInBrowser, type PlaceCapability,
+} from '../../lib/place-capabilities';
 
 export interface PlaceFormRequest {
   readonly capability: PlaceCapability;
@@ -29,15 +32,6 @@ export interface PlaceFormRequest {
   readonly names: Readonly<Record<string, string>>;
 }
 
-const asInput = (input: InputData): InputDescription => input as unknown as InputDescription;
-
-/**
- * An input the program asking supplies from its own context (`fromContext: 'program'`): a caller with no program, as
- * the browser is, names it from the two programs, with no default.
- */
-const fromProgram = (input: InputData): boolean => (input as { readonly fromContext?: unknown }).fromContext === 'program';
-const PROGRAMS = [{ value: 'tui', label: 'The terminal app' }, { value: 'agent', label: 'The Agent' }] as const;
-
 export function PlaceForm({ request, onSubmit, onClose }: {
   readonly request: PlaceFormRequest;
   readonly onSubmit: (values: ActionValues, names: Readonly<Record<string, string>>) => void;
@@ -45,17 +39,15 @@ export function PlaceForm({ request, onSubmit, onClose }: {
 }) {
   const { capability, given, names } = request;
   const action = capability.action;
-  // A program-supplied input starts empty: the browser is neither program, so it is never guessed.
-  const [values, setValues] = useState<Record<string, string>>(() => Object.fromEntries(Object.entries(initialValues(action, given))
-    .filter(([id]) => given[id] !== undefined || !action.inputs.some((input) => input.id === id && fromProgram(input)))));
+  const [values, setValues] = useState<Record<string, string>>(() => initialValues(action, given));
   /** The names of things chosen from live lists, by value: the sentence says a schedule's name, not its id. */
   const [labels, setLabels] = useState<Record<string, string>>({});
   const asked = useMemo(() => action.inputs.filter((input) => given[input.id] === undefined
     && !('impliedBy' in input.typed && !Array.isArray(input.choices))
-    && isShown(asInput(input), values)), [action, given, values]);
+    && shownInBrowser(input, values)), [action, given, values]);
   const sent = useMemo(() => ({ ...shownValues(action, values), ...given }), [action, values, given]);
   const shownNames = useMemo(() => ({ ...names, ...labels }), [names, labels]);
-  const missing = asked.filter((input) => (input.required === true || fromProgram(input)) && !values[input.id]);
+  const missing = asked.filter((input) => (input.required === true || namedByCaller(input)) && !values[input.id]);
   const risk = capabilityRisk(capability, sent);
   const givenFacts = action.inputs.flatMap((input) => (given[input.id] !== undefined
     ? [{ label: input.label, value: input.kind === 'secret' ? 'given, not shown' : (names[given[input.id]!] ?? given[input.id]!) }]
@@ -66,6 +58,7 @@ export function PlaceForm({ request, onSubmit, onClose }: {
     if (value === undefined || label === undefined || now[value] === label) return now;
     return { ...now, [value]: label };
   });
+  const blank = (input: InputData) => <Blank key={input.id} action={action} input={input} values={values} onChange={set(input.id)} onLabel={labelFor(input.id)} />;
   return (
     <Dialog
       open
@@ -91,16 +84,17 @@ export function PlaceForm({ request, onSubmit, onClose }: {
         onSubmit={(event) => { event.preventDefault(); if (missing.length === 0) onSubmit(sent, shownNames); }}
       >
         {givenFacts.length > 0 ? <Facts items={givenFacts} /> : null}
-        <div className="gv-action-sheet__group">
-          {asked.map((input) => (fromProgram(input) ? (
-            // Supplied by the program asking; a browser is neither, so the person names the program, with no default.
-            <Field key={input.id} label={input.label} help={input.help}>
-              <Select aria-label={input.label} value={values[input.id] ?? ''} onChange={set(input.id)} placeholder="Choose the program" options={PROGRAMS} />
-            </Field>
-          ) : (
-            <Blank key={input.id} action={action} input={input} values={values} onChange={set(input.id)} onLabel={labelFor(input.id)} />
-          )))}
-        </div>
+        {stepGroups(action, asked).map((group) => (group.folded ? (
+          <details key={group.key} className="gv-action-sheet__more">
+            <summary>More settings{group.title ? <span className="gv-action-sheet__hint-inline"> · {group.title}</span> : null}</summary>
+            <div className="gv-action-sheet__group">{group.inputs.map(blank)}</div>
+          </details>
+        ) : (
+          <div key={group.key} className="gv-action-sheet__group">
+            {group.title ? <p className="gv-action-sheet__step">{group.title}</p> : null}
+            {group.inputs.map(blank)}
+          </div>
+        )))}
         <div className="gv-action-sheet__outcome">
           <p className="gv-action-sheet__sentence">{capabilitySentence(capability, displayValues(capability, sent, shownNames))}</p>
         </div>

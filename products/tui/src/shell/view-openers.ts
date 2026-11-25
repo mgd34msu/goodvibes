@@ -1,5 +1,5 @@
 /**
- * view-openers.ts, the openers for the built-in modals: Agents, Usage,
+ * view-openers.ts, the openers for the built-in modals: Agents,
  * Changes (and its previews), Notifications and the local-auth password
  * prompt, plus ctx.openView, which turns any current or old view name
  * ('fleet', 'cockpit', 'tokens', 'git', 'providers', …) into the modal that
@@ -13,17 +13,14 @@
 import type { CommandContext } from '../input/command-registry.ts';
 import type { InputHandler } from '../input/handler.ts';
 import type { SurfaceModal } from '@goodvibes/engine/terminal-shell/surface-modal-host';
-import { runPickedCommand } from '@goodvibes/engine/terminal-shell/command-registry';
 import { openModeSegment } from '@goodvibes/engine/terminal-shell/first-run';
 import type { ShellViews } from '../views/builtin-views.ts';
 import type { ViewPanelAdapter } from '../views/view-panel-adapter.ts';
 import { AgentsModal } from '../input/agents-modal.ts';
-import { UsageModal } from '../input/usage-modal.ts';
+import { PlaceModal } from '@goodvibes/engine/terminal-shell/places';
 import { ChangesModal, type ChangesDeps } from '../input/changes-modal.ts';
-import { NotificationsModal } from '../input/notifications-modal.ts';
 import { confirmThrough } from '../input/confirm-dialog.ts';
 import { resolveViewName, type ViewTarget } from '../input/views.ts';
-import { getSharedNotificationFeed } from '../views/notifications-feed.ts';
 import { getSharedHostedSessionFeed } from '../views/hosted-session-feed.ts';
 import { revertReviewHunk } from '../input/commands/review-runtime.ts';
 import { sayToHosted } from '../input/commands/hosted-runtime.ts';
@@ -79,7 +76,8 @@ export function wireViewOpeners(options: WireViewOpenersOptions): void {
       hosted: getSharedHostedSessionFeed(),
       // The outcome goes back to the modal so it never claims a send that did not happen.
       // The draft's own attachment travels with it: sent only to the session it was written for.
-      steerHosted: (text, binding) => sayToHosted(commandContext, text, undefined, binding),
+      // The person typed it into the Agents view: his own words, sent with his claim.
+      steerHosted: (text, binding) => sayToHosted(commandContext, text, undefined, binding, true),
       confirm: (confirmOptions) => confirmThrough(host, confirmOptions),
       requestRender: render,
       openSessionView: (target) => commandContext.openSessionView?.(target) ?? false,
@@ -92,24 +90,9 @@ export function wireViewOpeners(options: WireViewOpenersOptions): void {
     show(modal);
   };
 
-  // ── Usage ─────────────────────────────────────────────────────────────────
-  commandContext.openUsage = (opts = {}) => {
-    const existing = findOpen(UsageModal);
-    if (existing) {
-      if (opts.tab) existing.tab = opts.tab;
-      show(existing);
-      return;
-    }
-    show(new UsageModal({
-      tracker: views.usage,
-      tab: opts.tab,
-      compact: () => { void runPickedCommand(commandContext.executeCommand, 'compact', [], (message) => commandContext.print(message)).finally(render); },
-      requestRender: render,
-    }));
-  };
-  // A click on a status bar segment opens its view; elsewhere on the row, Usage.
+  // A click on a status bar segment opens its view; the cost opens Money on Spending (this conversation first).
   input.onFooterTarget = (target) => {
-    if (target === 'usage') commandContext.openUsage?.();
+    if (target === 'usage') commandContext.openPlace?.('money', { list: 'spending' });
     // The mode opens first run's "Who decides" while no decision model can be asked; otherwise /permissions:
     // what is in force and why on its first row, the fix and the mode setting below it.
     else if (target === 'mode') void openModeSegment(commandContext).finally(render);
@@ -186,13 +169,7 @@ export function wireViewOpeners(options: WireViewOpenersOptions): void {
   // ── Notifications ─────────────────────────────────────────────────────────
   const redirect = (name: string): string | undefined => views.modalSurfaces.getModalRedirect(name);
   // The notice history is the System place's Notices list (terminal-shell places/system-place.ts); Ctrl+N opens it there.
-  commandContext.openNotifications = () => {
-    if (commandContext.openPlace) { commandContext.openPlace('system', { list: 'notices' }); return; }
-    show(findOpen(NotificationsModal) ?? new NotificationsModal({
-      feed: getSharedNotificationFeed(),
-      resolveSubject: (subject) => (resolveViewName(subject, redirect) ? () => { openView(subject); } : null),
-    }));
-  };
+  commandContext.openNotifications = () => { commandContext.openPlace?.('system', { list: 'notices' }); };
 
   // ── Any view by name ──────────────────────────────────────────────────────
   const openView = (name: string, target?: ViewTarget): boolean => {
@@ -200,7 +177,14 @@ export function wireViewOpeners(options: WireViewOpenersOptions): void {
     const lowered = name.trim().toLowerCase();
     if ((lowered === 'memory' || lowered === 'knowledge') && commandContext.openPlace) { commandContext.openPlace('memory'); return true; }
     // Who may sign in is in Permissions and safety (terminal-shell places/safety-place.ts): the old screen's name opens it.
-    if (lowered === 'local-auth' && commandContext.openPlace) { commandContext.openPlace('safety'); return true; }
+    // So are security, the policy bundles and the sandbox: the old screens' names open it on their tab.
+    const safetyList = new Map([['local-auth', undefined], ['security', undefined], ['security-modal', undefined], ['policy', 'policy'], ['policy-modal', 'policy'],
+      ['sandbox', 'sandbox-setting'], ['sandbox-modal', 'sandbox-setting']]);
+    if (safetyList.has(lowered) && commandContext.openPlace) {
+      const list = safetyList.get(lowered);
+      commandContext.openPlace('safety', list ? { list } : undefined);
+      return true;
+    }
     // The remote runners are the daemon's, shown in the Work place (work-agents-entries.ts): the old screen's name opens it on Runners.
     if (lowered === 'remote' && commandContext.openPlace) { commandContext.openPlace('work', { list: 'runners' }); return true; }
     // Work is a place (terminal-shell places/work-place.ts): the old work, planning, to-do and tasks screens' names open it.
@@ -209,11 +193,18 @@ export function wireViewOpeners(options: WireViewOpenersOptions): void {
     // Models and providers is a place (terminal-shell places/models-place.ts): the old provider, sign-in and services screens' names open it.
     const modelsList = MODELS_PLACE_NAMES[lowered];
     if (modelsList && commandContext.openPlace) { commandContext.openPlace('models', { list: modelsList }); return true; }
+    // Tools and extensions is a place (terminal-shell places/tools-place.ts): the old hooks, plugins, marketplace and MCP screens' names open it.
+    const toolsList = new Map([['hooks', 'hooks'], ['plugins', 'plugins'], ['marketplace', 'marketplace'], ['mcp', 'servers']]).get(lowered);
+    if (toolsList && commandContext.openPlace) { commandContext.openPlace('tools', { list: toolsList }); return true; }
+    // Devices and network is a place (terminal-shell places/devices-place.ts): the old Paired Devices and settings sync screens' names open it on their tab.
+    const devicesList = new Map([['devices', 'devices'], ['devices-modal', 'devices'], ['settings-sync', 'settings-sync'], ['settings-sync-modal', 'settings-sync']]).get(lowered);
+    if (devicesList && commandContext.openPlace) { commandContext.openPlace('devices', { list: devicesList }); return true; }
     const route = resolveViewName(name, redirect);
     if (!route) return false;
     switch (route.kind) {
       case 'agents': commandContext.openAgents?.({ target, hosted: route.hosted }); break;
-      case 'usage': commandContext.openUsage?.({ tab: route.tab }); break;
+      // What this conversation used and cost is the top of Money, Spending (terminal-shell places/money-place.ts).
+      case 'usage': commandContext.openPlace?.('money', { list: 'spending' }); break;
       case 'changes': commandContext.openChanges?.({ source: route.mode === 'git' ? 'working' : 'session' }); break;
       case 'notifications': commandContext.openNotifications?.(); break;
       case 'sessions': commandContext.openSessionPicker?.(); break;
@@ -228,9 +219,9 @@ export function wireViewOpeners(options: WireViewOpenersOptions): void {
     const open: string[] = [];
     for (const modal of host.modals()) {
       if (modal instanceof AgentsModal) open.push('agents');
-      else if (modal instanceof UsageModal) open.push('usage');
       else if (modal === workspace) open.push('changes');
-      else if (modal instanceof NotificationsModal) open.push('notifications');
+      // The notice history is the System place open on Notices (terminal-shell places/system-place.ts).
+      else if (modal instanceof PlaceModal && modal.shownAt.place === 'system' && modal.shownAt.list === 'notices') open.push('notifications');
     }
     if (input.sessionPickerModal.active) open.push('sessions');
     return open;

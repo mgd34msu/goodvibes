@@ -1,8 +1,6 @@
-import { lstatSync, readFileSync, realpathSync, statSync } from 'node:fs';
-import { secretReferenceFor, type ConfigManager, type SecretsManager } from '@goodvibes/engine/platform/platform/config';
-import { GOOGLE_CONFIG_KEYS, GOOGLE_SECRET_KEYS, clientCredentialsFromInput, googleClientConfigEntries, readClientCredentialsFromJson } from '@goodvibes/engine/platform/platform/google';
-import { assertCurrentToolEffect, assertProjectionExecution, commitCurrentToolSettingsPlan, ToolInputProjectionError,
-  type ToolInputProjector, type ToolPreparedSettingsMutation } from '@goodvibes/engine/platform/platform/tools';
+import type { ConfigManager, SecretsManager } from '@goodvibes/engine/platform/platform/config';
+import { GOOGLE_SECRET_KEYS } from '@goodvibes/engine/platform/platform/google';
+import { assertProjectionExecution, ToolInputProjectionError, type ToolInputProjector } from '@goodvibes/engine/platform/platform/tools';
 import type { Tool } from '@goodvibes/engine/platform/platform/types';
 
 export interface GoogleAdmissionOwners {
@@ -26,159 +24,28 @@ export function retainGoogleConnectionOwners(owners: GoogleAdmissionOwners): () 
     if (owners.configManager !== config || owners.secretsManager !== secrets) throw new ToolInputProjectionError('stale');
   };
 }
-/** Where the owner enters a client secret; never the conversation. */
-export const GOOGLE_CLIENT_SECRET_ENTRY = 'The owner enters the client id and secret with /google client <client-id> <client-secret> in the terminal, or names the downloaded client JSON for connect.clientFile.';
-export const NO_GOOGLE_CLIENT_SECRET = `No OAuth client secret is stored, so connect.client has nothing to register. Nothing was stored. ${GOOGLE_CLIENT_SECRET_ENTRY}`;
 
-/**
- * A consent in flight depends on the two Google credentials only: it fails
- * when the client secret or the refresh token is replaced, and an unrelated
- * secret saved meanwhile leaves it alone.
- */
-export function retainGoogleCredentials(secrets: SecretsManager): () => void {
-  const keys = [GOOGLE_SECRET_KEYS.oauthClientSecret, GOOGLE_SECRET_KEYS.oauthRefreshToken];
-  // The stored value, not the store's revision: that revision moves on any
-  // credential write, and an unrelated one must not end the consent.
-  const revisionOf = (key: string) => { const snapshot = secrets.resolveLocalCredentialSnapshot(key); return snapshot.state === 'resolved' ? `resolved:${snapshot.value}` : snapshot.state; };
-  const revisions = keys.map(revisionOf);
-  return () => {
-    keys.forEach((key, index) => {
-      if (revisionOf(key) !== revisions[index]) {
-        throw new ToolInputProjectionError('stale', 'A Google credential was replaced while the consent was open. Call connect.client again for a new consent link.');
-      }
-    });
-  };
-}
-
-export interface GooglePendingCredential {
-  readonly clientId: string;
-  readonly clientSecret: string;
-  readonly assertCurrent: () => void;
-  refreshToken: string | null;
-}
-interface GoogleCapture {
-  readonly action: string;
-  readonly clientId: string;
-  readonly clientSecret: string;
-  readonly pending?: GooglePendingCredential | undefined;
-  readonly assertSourceCurrent: () => void;
-  readonly assertCompletedCurrent: () => void;
-  readonly mutation: ToolPreparedSettingsMutation;
-  readonly projectedJson: string;
-  spent: boolean;
-}
-const captures = new WeakMap<object, GoogleCapture>();
-let settingsProjectionSequence = 0;
 const effectSources = new WeakMap<object, { readonly argsJson: string; readonly assertCurrent: () => void }>();
 const text = (value: unknown) => typeof value === 'string' ? value.trim() : '';
 
-function fileObservation(path: string): { readonly raw: string; readonly target: string; readonly file: string; readonly link: string } {
-  const target = realpathSync(path);
-  const linkBefore = lstatSync(path, { bigint: true });
-  const before = statSync(path, { bigint: true });
-  const raw = readFileSync(path, 'utf8');
-  const after = statSync(path, { bigint: true });
-  const linkAfter = lstatSync(path, { bigint: true });
-  const identity = (value: typeof before) => [value.dev, value.ino, value.size, value.mtimeNs, value.ctimeNs].join(':');
-  if (identity(before) !== identity(after) || identity(linkBefore) !== identity(linkAfter) || realpathSync(path) !== target) throw new ToolInputProjectionError('stale');
-  return { raw, target, file: identity(after), link: identity(linkAfter) };
-}
-
-/** The registered owner prepares actual stores before any hosted reading. */
-export function createGoogleSettingsProjector(owners: GoogleAdmissionOwners, pending: () => GooglePendingCredential | null): ToolInputProjector {
-  const config = owners.configManager, secrets = owners.secretsManager;
+/**
+ * The `google` tool's input projection: a send or a calendar write is bound to
+ * the stores that admitted it. Connecting is not an action of the tool (it is
+ * the daemon's work, `capabilities/builtin/google.ts`), so nothing here stores
+ * a client or a credential.
+ */
+export function createGoogleSettingsProjector(owners: GoogleAdmissionOwners): ToolInputProjector {
   return { async project(request) {
     const action = text(request.args.action).toLowerCase();
-    if (action === 'mail.send' || action === 'calendar.create') {
-      request.assertCurrent(); request.signal?.throwIfAborted();
-      const nativeCurrent = retainGoogleConnectionOwners(owners);
-      const assertCurrent = () => { request.signal?.throwIfAborted(); nativeCurrent(); };
-      const context = Object.freeze({}), argsJson = JSON.stringify(request.args);
-      effectSources.set(context, { argsJson, assertCurrent });
-      return { status: 'projected', args: request.args, executionContext: context, assertCurrent,
-        assertRepairedArgs(next) { assertCurrent(); if (JSON.stringify(next) !== argsJson) throw new ToolInputProjectionError('binding-changed'); },
-        async release() { effectSources.delete(context); },
-      };
-    }
-    if (!['connect.client', 'connect.clientfile', 'connect.complete'].includes(action)) return { status: 'projected', args: request.args };
-    if (Object.hasOwn(request.args, 'clientSecret')) {
-      throw new ToolInputProjectionError('invalid', `A client secret is never taken as a tool argument, and the one sent was not stored. ${GOOGLE_CLIENT_SECRET_ENTRY}`);
-    }
+    if (action !== 'mail.send' && action !== 'calendar.create') return { status: 'projected', args: request.args };
     request.assertCurrent(); request.signal?.throwIfAborted();
-    let clientId: string, clientSecret: string;
-    let sourceCurrent: () => void;
-    let credential: GooglePendingCredential | undefined;
-    let importedSecret: { key: string; value: string; scope: 'daemon' } | undefined;
-    if (action === 'connect.complete') {
-      credential = pending() ?? undefined;
-      // No token yet: there is nothing to prepare, and the tool answers whether consent is pending, refused or was never started.
-      if (!credential?.refreshToken) return { status: 'projected', args: request.args };
-      credential.assertCurrent(); clientId = credential.clientId; clientSecret = credential.clientSecret;
-      const retained = credential, token = credential.refreshToken;
-      sourceCurrent = () => { if (pending() !== retained || retained.refreshToken !== token) throw new ToolInputProjectionError('stale'); };
-      importedSecret = { key: GOOGLE_SECRET_KEYS.oauthRefreshToken, value: token, scope: 'daemon' };
-    } else if (action === 'connect.clientfile') {
-      const path = text(request.args.path); if (!path) throw new ToolInputProjectionError('invalid');
-      const observation = fileObservation(path), parsed = readClientCredentialsFromJson(observation.raw);
-      if (!parsed.ok) throw new ToolInputProjectionError('invalid');
-      clientId = parsed.credentials.clientId; clientSecret = parsed.credentials.clientSecret;
-      sourceCurrent = () => {
-        const current = fileObservation(path);
-        if (current.raw !== observation.raw || current.target !== observation.target || current.file !== observation.file
-          || current.link !== observation.link) throw new ToolInputProjectionError('stale');
-      };
-      importedSecret = { key: GOOGLE_SECRET_KEYS.oauthClientSecret, value: clientSecret, scope: 'daemon' };
-    } else {
-      const reference = text(request.args.clientSecretRef) || secretReferenceFor(GOOGLE_SECRET_KEYS.oauthClientSecret);
-      if (reference !== secretReferenceFor(GOOGLE_SECRET_KEYS.oauthClientSecret)) {
-        throw new ToolInputProjectionError('invalid', 'clientSecretRef names a different secret; omit it so the stored Google client secret is used.');
-      }
-      const observation = secrets.resolveLocalCredentialSnapshot(GOOGLE_SECRET_KEYS.oauthClientSecret);
-      // No stored secret: nothing to prepare. The tool answers with where the
-      // owner enters one, instead of a refusal that reads as "no google tool".
-      if (observation.state !== 'resolved') return { status: 'projected', args: request.args };
-      const parsed = clientCredentialsFromInput({ clientId: text(request.args.clientId), clientSecret: observation.value.reveal('dispatch') });
-      if (!parsed.ok) throw new ToolInputProjectionError('invalid');
-      clientId = parsed.credentials.clientId; clientSecret = parsed.credentials.clientSecret;
-      sourceCurrent = () => {
-        const latest = secrets.resolveLocalCredentialSnapshot(GOOGLE_SECRET_KEYS.oauthClientSecret);
-        if (latest.state !== 'resolved' || latest.revision !== observation.revision || latest.value.reveal('dispatch') !== observation.value.reveal('dispatch')) throw new ToolInputProjectionError('stale');
-      };
-    }
-    const assertSourceCurrent = () => {
-      request.signal?.throwIfAborted();
-      if (owners.configManager !== config || owners.secretsManager !== secrets) throw new ToolInputProjectionError('stale');
-      sourceCurrent();
-    };
-    assertSourceCurrent();
-    // The same configuration every route that stores a client leaves (the platform's storeClientCredentials).
-    const mutation = config.prepareSettingMutationPlan(googleClientConfigEntries(clientId).map((entry) => ({ operation: 'set' as const, key: entry.key, value: entry.value })));
-    const secretImport = importedSecret ? { owner: secrets, mutation: secrets.prepareImport([importedSecret]) } : undefined;
-    const plan: ToolPreparedSettingsMutation = { owner: config, mutation, ...(secretImport ? { secretImport } : {}), assertSourceCurrent };
-    const facts = config.inspectPreparedMutation(mutation);
-    const effect = { operation: 'set', key: GOOGLE_CONFIG_KEYS.oauthClientId, action, clientId,
-      effects: facts.effects ?? [facts], ...(secretImport ? { credential: secrets.inspectPreparedImport(secretImport.mutation) } : {}),
-      credentialConfigured: true };
-    const projected = { ...request.args }; delete projected.clientSecret;
-    const context = Object.freeze({});
-    const assertCompletedCurrent = () => {
-      assertSourceCurrent(); config.assertCompletedMutation(mutation);
-      if (secretImport) secrets.assertCompletedImport(secretImport.mutation);
-    };
-    const capture: GoogleCapture = { action, clientId, clientSecret, pending: credential, assertSourceCurrent, assertCompletedCurrent, mutation: plan,
-      projectedJson: JSON.stringify(projected), spent: false };
-    const assertPrepared = () => {
-      assertSourceCurrent(); if (capture.spent) throw new ToolInputProjectionError('stale');
-      credential?.assertCurrent();
-      config.assertPreparedMutation(mutation); if (secretImport) secrets.assertPreparedImport(secretImport.mutation);
-    };
-    assertPrepared(); captures.set(context, capture);
-    return { status: 'projected', args: projected, executionContext: context, settingsMutation: plan,
-      settingsAdmissionEvidence: { kind: 'agent-settings', operation: 'set', key: GOOGLE_CONFIG_KEYS.oauthClientId, effect,
-        revision: `google-settings-${(++settingsProjectionSequence).toString(36)}` },
-      assertCurrent: assertPrepared,
-      assertRepairedArgs(next) { assertPrepared(); if (JSON.stringify(next) !== capture.projectedJson) throw new ToolInputProjectionError('binding-changed'); },
-      async release() { captures.delete(context); },
+    const nativeCurrent = retainGoogleConnectionOwners(owners);
+    const assertCurrent = () => { request.signal?.throwIfAborted(); nativeCurrent(); };
+    const context = Object.freeze({}), argsJson = JSON.stringify(request.args);
+    effectSources.set(context, { argsJson, assertCurrent });
+    return { status: 'projected', args: request.args, executionContext: context, assertCurrent,
+      assertRepairedArgs(next) { assertCurrent(); if (JSON.stringify(next) !== argsJson) throw new ToolInputProjectionError('binding-changed'); },
+      async release() { effectSources.delete(context); },
     };
   } };
 }
@@ -193,18 +60,4 @@ export function retainGooglePreparedEffectSource(args: Record<string, unknown>, 
     retained.assertCurrent();
   };
   assertCurrent(); return assertCurrent;
-}
-
-export async function commitGoogleSettings(args: Record<string, unknown>, options: Parameters<Tool['execute']>[1]) {
-  const context = options?.inputProjectionContext, capture = context && captures.get(context);
-  if (!context || !capture || !assertCurrentToolEffect(args, options, 'write')) throw new ToolInputProjectionError('held');
-  assertProjectionExecution(context, args); capture.assertSourceCurrent();
-  if (capture.spent || JSON.stringify(args) !== capture.projectedJson) throw new ToolInputProjectionError('stale');
-  capture.spent = true;
-  const receipt = await commitCurrentToolSettingsPlan(args, options);
-  let sourceCurrent = true;
-  if (receipt.status === 'committed') {
-    try { capture.assertCompletedCurrent(); } catch { sourceCurrent = false; }
-  }
-  return { receipt, sourceCurrent, clientId: capture.clientId, clientSecret: capture.clientSecret, pending: capture.pending, action: capture.action };
 }

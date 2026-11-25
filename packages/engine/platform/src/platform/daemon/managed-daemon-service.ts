@@ -1,0 +1,211 @@
+/**
+ * The managed daemon service definition every path installs: the daemon
+ * CLI's service subcommands, the terminal app's `service` commands and the
+ * daemon's own service facts (support/service-manager-posture.ts) build the one
+ * `PlatformServiceManager` here, under the platform's one unit name
+ * (daemon-service-default.ts), so every path installs, reports and starts the
+ * identical unit.
+ */
+import { existsSync, lstatSync, readFileSync, readdirSync } from 'node:fs';
+import { basename, dirname, isAbsolute, join } from 'node:path';
+import { fileURLToPath } from 'node:url';
+import { ConfigManager } from '../config/manager.js';
+import { resolveDaemonServiceDefault } from './daemon-service-default.js';
+import { MANAGED_SERVICE_DESCRIPTION as PLATFORM_SERVICE_DESCRIPTION, PlatformServiceManager, isProductServiceDefinition } from './service-manager.js';
+
+/** Structurally derived from `PlatformServiceManager`'s own constructor, the
+ * platform's public `platform/daemon` entry point only re-exports the class and
+ * `ManagedServiceStatus`, not the options/definition/action-runner interfaces
+ * by name, so we pull their shapes off the class itself rather than reaching
+ * past the package's declared export map. */
+type ManagedServiceManagerOptions = ConstructorParameters<typeof PlatformServiceManager>[1];
+export type ManagedServiceActionRunner = NonNullable<ManagedServiceManagerOptions['actionRunner']>;
+
+// The daemon's one unit name on this platform, owned by the platform
+// (daemon-service-default.ts). Any explicit stored name or invocation overlay
+// outranks this fallback.
+export const MANAGED_SERVICE_NAME = resolveDaemonServiceDefault();
+/** The description every GoodVibes-written definition carries (platform managed-service-definition.ts owns it). */
+export const MANAGED_SERVICE_DESCRIPTION = PLATFORM_SERVICE_DESCRIPTION;
+
+/**
+ * Who wrote the service definition at a path: `absent` (nothing there),
+ * `product` (this product's own definition: it names
+ * {@link MANAGED_SERVICE_DESCRIPTION}, or the description an earlier daemon wrote; a LaunchAgent carries it in its `GoodVibesManagedBy` key), `other` (anything
+ * else, a symlink included: a definition the owner keeps elsewhere is never
+ * written through), or `unreadable`.
+ */
+export type ManagedDefinitionOwner = 'absent' | 'product' | 'other' | 'unreadable';
+
+const XML_ENTITIES: Readonly<Record<string, string>> = { amp: '&', lt: '<', gt: '>', quot: '"', apos: "'" };
+
+function xmlUnescape(value: string): string {
+  return value.replace(/&(amp|lt|gt|quot|apos);/g, (_, name: string) => XML_ENTITIES[name] ?? '');
+}
+
+type DefinitionFile = { readonly contents: string } | { readonly state: Exclude<ManagedDefinitionOwner, 'product'> };
+
+function readDefinitionFile(path: string): DefinitionFile {
+  try {
+    const entry = lstatSync(path, { throwIfNoEntry: false });
+    if (entry === undefined) return { state: 'absent' };
+    if (!entry.isFile()) return { state: 'other' };
+    return { contents: readFileSync(path, 'utf-8') };
+  } catch {
+    return { state: 'unreadable' };
+  }
+}
+
+/** One read of the definition file; the service manager is not asked. */
+export function readManagedDefinitionOwner(path: string): ManagedDefinitionOwner {
+  const file = readDefinitionFile(path);
+  if ('state' in file) return file.state;
+  return isProductServiceDefinition(file.contents) ? 'product' : 'other';
+}
+
+/**
+ * Every daemon service definition GoodVibes wrote for this user on `platform`
+ * (systemd units in `~/.config/systemd/user`, LaunchAgents in
+ * `~/Library/LaunchAgents`), by service name: the default one and any second
+ * daemon installed under its own `service.serviceName`. One directory read and
+ * one read of each candidate file; nothing asks the service manager.
+ */
+export function listProductServiceNames(platform: string, unitHomeDir: string): string[] {
+  const location = platform === 'systemd' ? { dir: join(unitHomeDir, '.config', 'systemd', 'user'), suffix: '.service' }
+    : platform === 'launchd' ? { dir: join(unitHomeDir, 'Library', 'LaunchAgents'), suffix: '.plist' }
+      : undefined;
+  if (!location) return [];
+  let entries: string[];
+  try { entries = readdirSync(location.dir); } catch { return []; }
+  return entries
+    .filter((entry) => entry.endsWith(location.suffix) && /^[A-Za-z0-9_.@-]+$/.test(entry))
+    .filter((entry) => readManagedDefinitionOwner(join(location.dir, entry)) === 'product')
+    .map((entry) => entry.slice(0, -location.suffix.length))
+    .sort();
+}
+
+/**
+ * The absolute working directory an existing unit or plist names, or undefined
+ * when it names none or one this reader cannot take literally (a `-`/`~` prefixed systemd value).
+ */
+export function readDefinitionWorkingDirectory(path: string): string | undefined {
+  const file = readDefinitionFile(path);
+  if ('state' in file) return undefined;
+  const { contents } = file;
+  const systemd = /^WorkingDirectory=(.*)$/m.exec(contents)?.[1]?.replaceAll('%%', '%');
+  const launchd = /<key>WorkingDirectory<\/key>\s*<string>([^<]*)<\/string>/.exec(contents)?.[1];
+  const value = systemd ?? (launchd === undefined ? undefined : xmlUnescape(launchd));
+  return value !== undefined && isAbsolute(value) ? value : undefined;
+}
+
+export interface BuildManagedDaemonServiceManagerParams {
+  readonly binaryPath: string;
+  /**
+   * The GoodVibes tree home, GOODVIBES_HOME-overridable, used to root the
+   * ConfigManager and the daemon's own `--daemon-home` state directory. NEVER
+   * used for unit-file path resolution: see `unitHomeDir` for that. A unit
+   * path search rooted here would look for `~/.config/systemd/user/` under
+   * whatever GOODVIBES_HOME points at instead of the real login home systemd
+   * actually reads.
+   */
+  readonly homeDir: string;
+  /** Resolved identity/settings tier; independent of the tree and login homes. */
+  readonly daemonHomeDirectory?: string | undefined;
+  /**
+   * The LOGIN user's home, where `~/.config/systemd/user/` (or the launchd/
+   * Windows equivalent) actually lives, regardless of any GOODVIBES_HOME/
+   * GOODVIBES_DAEMON_HOME override in effect. Threaded through to
+   * `PlatformServiceManager`'s own `homeDirectory` option, which resolves the
+   * unit file PATH directly from it. Required (no default to `homeDir`) so a
+   * caller cannot silently reintroduce the GOODVIBES_HOME-rooted bug by
+   * omission.
+   */
+  readonly unitHomeDir: string;
+  /** Defaults to `homeDir`, overridable so tests can scope both to one tempdir. */
+  readonly workingDirectory?: string | undefined;
+  /** The caller's own settings; a read-only `ConfigManager` rooted at `homeDir` otherwise. */
+  readonly configManager?: ConfigManager | undefined;
+  /** The settings surface a default `ConfigManager` reads. Both products keep their state under `tui`. */
+  readonly surfaceRoot?: string | undefined;
+  /** Injectable systemctl/launchctl/schtasks runner so tests never touch the host. */
+  readonly actionRunner?: ManagedServiceActionRunner | undefined;
+  /** Optional retained executable restriction, checked by the native service owner. */
+  readonly assertCurrent?: (() => void) | undefined;
+}
+
+/**
+ * Build the ONE `PlatformServiceManager` this tool manages, the single
+ * source of truth for the unit's definition (`ExecStart` command/args, name,
+ * description). The daemon CLI and the terminal app's onboarding call this,
+ * so every path installs the identical unit.
+ */
+export function buildManagedDaemonServiceManager(params: BuildManagedDaemonServiceManagerParams): PlatformServiceManager {
+  const workingDirectory = params.workingDirectory ?? params.homeDir;
+  const configManager = params.configManager ?? new ConfigManager({
+    workingDir: workingDirectory,
+    homeDir: params.homeDir,
+    surfaceRoot: params.surfaceRoot ?? 'tui',
+    readOnly: true,
+  });
+  // The definition (no endpoint flags, `--daemon-home` only for a selected
+  // daemon home, `GOODVIBES_HOME` only for a moved tree, never a token) is
+  // built by the platform's one builder, the same one the daemon uses for its
+  // own install, so every writer produces the same file.
+  return new PlatformServiceManager(configManager, {
+    workingDirectory,
+    // Unit paths resolve from the LOGIN home, never the (possibly
+    // GOODVIBES_HOME-relocated) tree home above, see `unitHomeDir`'s doc.
+    homeDirectory: params.unitHomeDir,
+    launch: { command: params.binaryPath, homeDirectory: params.homeDir, daemonHomeDirectory: params.daemonHomeDirectory },
+    defaultServiceName: MANAGED_SERVICE_NAME,
+    actionRunner: params.actionRunner,
+    assertCurrent: params.assertCurrent,
+    // No `featureFlags` passed: `isFeatureGateEnabled` treats a missing reader
+    // as always-open. Both consumers here are the user's explicit request to
+    // manage the service, unlike the daemon's own HTTP /api/service/* routes
+    // (which gate on the real, config-backed 'service-management' flag).
+  });
+}
+
+export interface ResolveDaemonBinaryOptions {
+  readonly env?: NodeJS.ProcessEnv | undefined;
+  /** `import.meta.url` of the caller so the packaged `bin/goodvibes-daemon` can be located. */
+  readonly moduleUrl?: string | undefined;
+  readonly execPath?: string | undefined;
+  readonly fileExists?: ((path: string) => boolean) | undefined;
+}
+
+/**
+ * Resolve the absolute path to the installed daemon binary used for the unit's
+ * `ExecStart`. Preference order:
+ *   1. `GOODVIBES_DAEMON_BINARY` env override.
+ *   2. The packaged `bin/goodvibes-daemon` launcher next to this checkout.
+ *   3. `process.execPath` when this IS the compiled daemon binary.
+ *   4. Bare `goodvibes-daemon` (resolved on PATH by systemd's service environment).
+ *
+ * It carries no CLI-specific dependency: it only needs the CALLER's own
+ * `import.meta.url` to locate the packaged `bin/` directory two levels up
+ * from any `src/<layer>/*.ts` file of a product.
+ */
+export function resolveInstalledDaemonBinary(options: ResolveDaemonBinaryOptions = {}): string {
+  const env = options.env ?? process.env;
+  const override = env.GOODVIBES_DAEMON_BINARY?.trim();
+  if (override) return override;
+
+  const fileExists = options.fileExists ?? existsSync;
+  if (options.moduleUrl) {
+    try {
+      // e.g. src/daemon/service-commands.ts -> package root is two directories up.
+      const here = dirname(fileURLToPath(options.moduleUrl));
+      const launcher = join(here, '..', '..', 'bin', 'goodvibes-daemon');
+      if (fileExists(launcher)) return launcher;
+    } catch {
+      // fall through to execPath / PATH resolution
+    }
+  }
+
+  const execPath = options.execPath ?? process.execPath;
+  if (execPath && basename(execPath) === 'goodvibes-daemon') return execPath;
+
+  return 'goodvibes-daemon';
+}

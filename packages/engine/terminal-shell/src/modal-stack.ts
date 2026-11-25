@@ -17,10 +17,6 @@ export interface HandlerModalOwner {
     readonly autocomplete: {
         reset(): void;
     } | null;
-    readonly settingsModal: OwnModal & {
-        readonly editingMode: boolean;
-        cancelEdit(): void;
-    };
     readonly mcpWorkspace: OwnModal & {
         reopen(): void;
     };
@@ -52,7 +48,7 @@ export function ownModal(name: string, modal: () => OwnModal, reopen?: () => voi
  * back when the modal stacked above them closes. The rest cannot: closing them
  * discards what they showed (a selection's callback, a file picker's insert
  * position, the block a menu acted on). Command mode does not come back
- * either: it ends when its command runs, and the command's own modal (settings
+ * either: it ends when its command runs, and the command's own screen (Settings
  * from /settings) closing must leave an empty composer, not a fresh '/'.
  */
 export function createHandlerModals(owner: HandlerModalOwner, options: {
@@ -79,16 +75,7 @@ export function createHandlerModals(owner: HandlerModalOwner, options: {
                 }
             },
         },
-        settings: {
-            ...ownModal('settings', () => owner.settingsModal),
-            // An edit in progress is the settings modal's own level: Esc cancels it first.
-            escape: () => {
-                if (!owner.settingsModal.editingMode)
-                    return false;
-                owner.settingsModal.cancelEdit();
-                return true;
-            },
-        },
+        // The settings screen is a kit modal of its own (settings-screen/screen.ts), pushed by the places.
         mcpWorkspace: ownModal('mcpWorkspace', () => owner.mcpWorkspace, () => owner.mcpWorkspace.reopen()),
         sessionPicker: ownModal('sessionPicker', () => owner.sessionPickerModal),
         profilePicker: ownModal('profilePicker', () => owner.profilePickerModal),

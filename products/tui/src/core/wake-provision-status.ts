@@ -76,7 +76,7 @@ export const { wakeArtifactLine, describeWakeBlockers, describeWakeLimitations, 
     surface: 'tui',
     noun: 'terminal',
     formatBytes: formatVoiceBytes,
-    corruptSuffix: '; torn, truncated, or the wrong asset; /voice wake-setup replaces it',
+    corruptSuffix: '; torn, truncated, or the wrong asset; Set up the wake word (System place, Voice, w) replaces it',
     artifacts: (status, line) => [
       line('classifier', status.classifier),
       line('speech-embedding front end', status.embedding),
@@ -89,7 +89,7 @@ export const { wakeArtifactLine, describeWakeBlockers, describeWakeLimitations, 
     ],
     download: (status) => [
       `  a fresh provision would download ${formatVoiceBytes(status.downloadBytes)}. Installing goodvibes normally does this,`,
-      '  and a running daemon retries at every boot; /voice wake-setup fetches it now and turns the wake word on (nothing downloads otherwise).',
+      '  and a running daemon retries at every boot; Set up the wake word (System place, Voice, w) fetches it now and turns the wake word on (nothing downloads otherwise).',
     ],
     extraSettings: () => [],
     receiptHeader: (result) => [

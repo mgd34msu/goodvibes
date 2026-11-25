@@ -10,7 +10,10 @@ import { CapabilityRefusal, type ActionValues } from './types.js';
  * clears it). `input:yes` is `true` for the value `yes` and left out
  * otherwise (a switch). `input:only:a,b,c` is an object over the names a, b and
  * c, each `true` when it is one of the input's lines and `false` when not (the
- * parts chosen, out of every part). `=<json>` is a fixed value the method
+ * parts chosen, out of every part). `input:except:<value>` is the value as
+ * given, left out when it is `<value>` (a choice whose default means the
+ * method's own). This is the one reader of these shapes: the daemon's
+ * `capabilities.run`, the web UI's sheet and the model's tools all call it. `=<json>` is a fixed value the method
  * always takes (`=true` for its `confirm`). A blank value is left out, so the
  * method sees only what was given.
  */
@@ -19,6 +22,8 @@ export function operatorInputFromValues(fields: Readonly<Record<string, string>>
   for (const [field, spec] of Object.entries(fields)) {
     const [id, shape, universe] = spec.startsWith('=') ? ['', '=', undefined] as [string, string, undefined] : spec.split(':') as [string, string | undefined, string | undefined];
     if (shape === 'yes' && values[id] !== 'yes') continue;
+    // `input:except:<value>`: the value as given, left out when it is <value> (a choice whose default means "the method's own").
+    if (shape === 'except' && values[id] === universe) continue;
     const raw = shape === '=' ? spec.slice(1) : values[id];
     if (raw === undefined || raw === '') continue;
     const lines = raw.split('\n').map((line) => line.trim()).filter(Boolean);
@@ -88,6 +93,11 @@ export interface CapabilityMethod {
    * `automation.schedules.create`). The web UI's sheet runs the same two calls.
    */
   readonly preview?: string | undefined;
+  /**
+   * What it makes belongs to the caller's project (a schedule's runs work there): the caller's project folder goes
+   * with the body as `workingDirectory`, and a caller that names none is refused by the method.
+   */
+  readonly project?: true | undefined;
 }
 
 /**
@@ -95,9 +105,11 @@ export interface CapabilityMethod {
  * `input` its preview answers for them. `readPreview` makes that read call; nothing is kept by it.
  */
 export async function methodBodyOf(method: CapabilityMethod, values: ActionValues,
-  readPreview: (previewId: string, input: Record<string, unknown>) => Promise<unknown>): Promise<Record<string, unknown>> {
+  readPreview: (previewId: string, input: Record<string, unknown>) => Promise<unknown>, project?: string | undefined): Promise<Record<string, unknown>> {
+  const withProject = (body: Record<string, unknown>): Record<string, unknown> =>
+    method.project && project ? { ...body, workingDirectory: project } : body;
   const fields = operatorInputFromValues(method.fields, values);
-  if (!method.preview) return fields;
+  if (!method.preview) return withProject(fields);
   const zone = Intl.DateTimeFormat().resolvedOptions().timeZone;
   const read = await readPreview(method.preview, { ...fields, zone });
   const record = read !== null && typeof read === 'object' && !Array.isArray(read) ? read as Record<string, unknown> : {};
@@ -105,5 +117,5 @@ export async function methodBodyOf(method: CapabilityMethod, values: ActionValue
   if (input === null || typeof input !== 'object' || Array.isArray(input)) {
     throw new CapabilityRefusal(`Nothing was kept: ${method.preview} did not say what ${method.id} would keep.`);
   }
-  return input as Record<string, unknown>;
+  return withProject(input as Record<string, unknown>);
 }

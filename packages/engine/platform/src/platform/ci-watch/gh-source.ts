@@ -18,7 +18,7 @@
 import { execFile } from 'node:child_process';
 import { logger } from '../utils/logger.js';
 import { summarizeError } from '../utils/error-display.js';
-import { CiTargetGoneError, type CiJob, type CiStatusSource, type CiWorkflowRun } from './types.js';
+import { CiSourceError, CiTargetGoneError, type CiJob, type CiStatusSource, type CiWorkflowRun } from './types.js';
 
 const DEFAULT_TIMEOUT_MS = 30_000;
 
@@ -73,10 +73,10 @@ function parsePagedList<T>(out: string, list: string): T[] {
   });
 }
 
-/** A failed `gh api` call, with the HTTP status gh reports as `(HTTP nnn)` when the API answered. */
-class GhApiError extends Error {
+/** A failed `gh api` call, with the HTTP status gh reports as `(HTTP nnn)` when the API answered: gh refused, not this daemon. */
+class GhApiError extends CiSourceError {
   constructor(message: string, readonly status: number | undefined) {
-    super(message);
+    super(message, status);
     this.name = 'GhApiError';
   }
 }

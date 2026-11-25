@@ -20,6 +20,11 @@ export type PlaceGroupId = 'conversation' | 'sessions' | 'code' | 'work' | 'wait
 export interface PlaceItem {
   readonly id: string;
   readonly state: string;
+  /**
+   * Not counted in its tab's number: a line that says the thing is not set up (it is no item), or a second
+   * occurrence of a repeating event (the event counts once). Shown and acted on as any item.
+   */
+  readonly uncounted?: true | undefined;
 }
 
 /**
@@ -32,7 +37,15 @@ export interface PlaceItem {
  * - `program`: a source of the terminal program itself, by name (`keys`: its key table).
  */
 export type PlaceSource<Item extends PlaceItem> =
-  | { readonly kind: 'daemon'; readonly method: string; readonly input: Readonly<Record<string, unknown>>; readonly items: (output: unknown) => readonly Item[] }
+  | {
+    readonly kind: 'daemon'; readonly method: string; readonly input: Readonly<Record<string, unknown>>; readonly items: (output: unknown) => readonly Item[];
+    /**
+     * The input the caller's project is sent as, for a list bound to a project (`project`: the worktrees of that
+     * project's register). The web view sends the project the person chose, and the daemon's count the caller's; a
+     * read through `capabilities.run` always carries it as `workingDirectory` and needs no such field.
+     */
+    readonly projectAs?: string | undefined;
+  }
   | { readonly kind: 'session'; readonly name: string; readonly items: (raw: unknown) => readonly Item[] }
   | { readonly kind: 'program'; readonly name: string; readonly items: (raw: unknown) => readonly Item[] };
 
@@ -45,6 +58,11 @@ export interface PlaceFollow {
   readonly domains: readonly string[];
   readonly events: readonly string[];
   readonly lists?: readonly string[] | undefined;
+  /**
+   * Capabilities, by id, whose run changes this list though they are not its own actions (joining a group from the
+   * Nearby tab changes the Machine group tab): the daemon announces each as LIST_CHANGED `capabilities` with its id.
+   */
+  readonly capabilities?: readonly string[] | undefined;
 }
 
 /** How an item looks in its list: what it is called, a short state on the right, a mark. */
@@ -73,12 +91,33 @@ export interface PlaceList<Item extends PlaceItem> {
   /** What an empty list says: "No schedules yet." The place adds the action that makes one. */
   readonly empty: string;
   readonly row: (item: Item) => PlaceRow;
+  /**
+   * How a form, a question and an outcome name the item, when its row's title says more than the thing itself (a
+   * purchase's row "Security code needed: a packet of basil seeds ..." names the purchase "a packet of basil seeds
+   * ..."). Absent, or empty for an item: its row's title.
+   */
+  readonly name?: ((item: Item) => string) | undefined;
   readonly detail: (item: Item) => readonly PlaceDetailLine[];
   /**
    * The programs that have the thing this list shows (`['tui']`: only the terminal app records runs). A program not
    * named leaves the tab out, as the web view leaves out a list with no web side. Absent: every program has it.
    */
   readonly programs?: readonly PlaceProgramName[] | undefined;
+  /**
+   * Items the program holding the conversation supplies by name, listed above the source's own (Money's Spending:
+   * this conversation's usage above what the daemon recorded). Read with the list and followed through the program
+   * source's own notices; a program that does not supply it shows the source's items alone. `kind` says whose it is,
+   * as a list's own source does: a `session` (or `program`) source has no web side, so the web view draws the list
+   * from its daemon source alone, and the actions that apply only to these items' states are simply never shown there.
+   */
+  readonly before?: { readonly kind: 'session' | 'program'; readonly name: string; readonly items: (raw: unknown) => readonly Item[] } | undefined;
+  /**
+   * The list is searched in place as the person types: its key (a rebindable entry of the place's key context,
+   * `search-<list>`) starts typing, and the list shows only the items whose title holds the words or whose content
+   * does (the program source's `find`, place-host.ts), each with the line that holds them. Enter keeps the search and
+   * acts on what it found; Esc clears it.
+   */
+  readonly search?: { readonly key: string; readonly label: string } | undefined;
 }
 
 /** A program a place is drawn in: the terminal app, the Agent, the web UI. */
@@ -136,6 +175,34 @@ export interface PlaceCapabilityAction<Item extends PlaceItem> {
    */
   readonly answersItem?: true | undefined;
   /**
+   * It starts work that goes on after the press answers (connecting an account): its outcome line speaks for the item
+   * only as the press left it, so the line goes once the item's state moves on (the run finished, was stopped, or was
+   * changed elsewhere) and the list then says where things stand.
+   */
+  readonly outcomeFollowsItem?: true | undefined;
+  /**
+   * What an empty list names first as the way to begin it ("new message" on an empty inbox), even when it keeps
+   * nothing itself (a sent message is not a change here); without it an empty list names only actions that keep something.
+   */
+  readonly firstOnEmpty?: true | undefined;
+  /**
+   * An action on the whole list (`whole`) that means nothing while the list is empty (clearing its finished items,
+   * saving it as a file): not offered, and not named, on an empty list.
+   */
+  readonly notOnEmpty?: true | undefined;
+  /**
+   * Words for a value filled from the item, by input id, where the question names it (a group of agents by what it
+   * does and how many run in it): the value itself (an id) is what is sent, never what is shown. Given the item and
+   * the list it is on.
+   */
+  readonly shownAs?: Readonly<Record<string, (item: Item, items: readonly Item[]) => string>> | undefined;
+  /**
+   * What it makes is shown on another list of the place (an install made on Marketplace is a row of Installed): once it
+   * is done the place opens that list (its id) on the row it added, and says the outcome there, where the keys that act
+   * on what was made (its undo among them) apply.
+   */
+  readonly doneOn?: string | undefined;
+  /**
    * The programs that have this control (`['tui']`: the Agent keeps one line of conversation, so it has no "Branch this
    * conversation here"), as `PlaceList.programs` says for a list: a program not named shows no control for it.
    * Absent: every program that resolves the capability has it.
@@ -191,6 +258,12 @@ export interface PlaceDeclaration<Item extends PlaceItem = PlaceItem> {
   readonly actions: readonly PlaceAction<Item>[];
   /** From the lists as read: what waits or is wrong, for the menu. Undefined: nothing to count. */
   readonly count?: ((lists: Readonly<Record<string, readonly Item[]>>) => PlaceCount | undefined) | undefined;
+  /**
+   * The lists `count` reads, by id: only these are read for the menu's count (the daemon's `places.counts` and a
+   * program's own), and only their changes count it again. Absent: every list. Name them when the place has lists
+   * the count does not look at, so a change to those (a calendar read from Google) reads nothing for the menu.
+   */
+  readonly countFrom?: readonly string[] | undefined;
 }
 
 /** A declaration with its item type erased, for registries and the menu. */

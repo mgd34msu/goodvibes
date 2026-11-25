@@ -4,6 +4,7 @@ import { dirname } from 'node:path';
 import { runStoreFileUpdateSync, writeStoreFile } from './store-file.js';
 import { logger, summarizeError } from '@goodvibes/engine/platform/platform/utils';
 import type { MemoryRecord, MemoryRegistry } from '@goodvibes/engine/platform/platform/state';
+import { isMemoryForProject, memoryProjectOf } from '@goodvibes/engine/platform/platform/state';
 import type { MemoryRecallSnapshot } from '@goodvibes/engine/platform/platform/runtime/memory-spine';
 import type { ShellPathService } from '@goodvibes/engine/platform/platform/runtime/shell';
 import type { AgentSkillSnapshot } from './skill-registry-types.js';
@@ -541,7 +542,10 @@ function buildRuntimePromptReceiptSegments(
 export async function composeRuntimePromptWithReceipt(
   input: RuntimePromptCompositionInput,
 ): Promise<{ readonly prompt: string; readonly receipt: PromptContextReceiptDraft }> {
-  const memoryRecords = resolveMemoryRecords(input);
+  // Memory is one store for every project: this program's project's records and the person's own, never another
+  // project's (memory-project.ts). The prompt and the receipt are both derived from this set.
+  const project = memoryProjectOf(input.shellPaths.workingDirectory);
+  const memoryRecords = resolveMemoryRecords(input).filter((record) => isMemoryForProject(record, project));
   // Bound to one arg: Array.filter passes (element, index, array), and
   // isPromptActiveMemory's second param is `now`, passing the callback bare
   // would leak the array index in as `now`, breaking the temporal-validity

@@ -290,5 +290,11 @@ export interface NativeWorkExecutionStorage {
   /** Atomic report, evidence and native settlement publication in the existing ledger transaction. */
   settle?(key: DurableContractRequest['key'], decide: (current: NativeWorkExecutionTransaction) => NativeWorkSettlementPublication | null,
     assertCurrent: () => void, original?: NativeExecutionOriginal): Promise<NativeWorkSettlementReceipt>;
+  /**
+   * A launched run that ended failed: its attempt is reported `blocked` in the ledger with the reason, in one
+   * transaction, while the work is still in progress at the run's own target; false when there was nothing to say
+   * (no launched record, the work moved on, or it says so already).
+   */
+  reportFailed?(key: DurableContractRequest['key'], reason: string, original?: NativeExecutionOriginal): Promise<boolean>;
   close(): Promise<void>;
 }

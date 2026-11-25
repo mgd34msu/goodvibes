@@ -303,7 +303,7 @@ export function createTerminalWakeRuntime(policy: {
             deps.notify(
               restarting
                 ? policy.captureFailure(error.message, failureDetail)
-                : `[Wake] Listening for the wake word stopped: ${failureDetail}. It starts again by itself when this terminal regains focus or the wake microphone setting changes; /voice wake-again starts it now.`,
+                : `[Wake] Listening for the wake word stopped: ${failureDetail}. It starts again by itself when this terminal regains focus or the wake microphone setting changes; "listen for the wake word again" in the System place, This session, starts it now.`,
             );
             deps.render();
           },

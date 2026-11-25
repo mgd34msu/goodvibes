@@ -142,6 +142,19 @@ defineList<unknown>({
   operator: { method: 'capabilities.run', input: { id: 'settings-sync.conflicts' }, rows: { from: 'data.conflicts', value: 'key', label: 'key', detail: 'owner' } },
 });
 
+// The shared settings that differ between this machine and the group, each with both values (cluster.publish and
+// cluster.accept choose from it, filtered by typing): the daemon's capability, read from the daemon the screen talks to.
+defineList<unknown>({
+  name: 'cluster.setting-differences',
+  async read(ctx) {
+    if (!bindingOf) throw commandRefusal('The settings that differ from the group\'s are read from the daemon, which this program cannot reach here.');
+    const answer = await runDaemonCapability('cluster.differences', {}, ctx as CommandActionContext, bindingOf as DaemonCapabilityBinding<CommandActionContext>);
+    const settings = Array.isArray(answer.data?.settings) ? answer.data.settings as { path?: unknown; shown?: unknown }[] : [];
+    return settings.filter((setting) => typeof setting.path === 'string').map((setting): ListRow => ({ value: String(setting.path), label: String(setting.path), detail: typeof setting.shown === 'string' ? setting.shown : '' }));
+  },
+  operator: { method: 'capabilities.run', input: { id: 'cluster.differences' }, rows: { from: 'data.settings', value: 'path', label: 'path', detail: 'shown' } },
+});
+
 /** How one app pairs on its own screen and keeps its own credential for its daemon (each piece it has). */
 export interface DevicesPairingHost<Ctx> {
   readonly pairDevice: (ctx: Ctx, name: string) => Promise<string | void>;

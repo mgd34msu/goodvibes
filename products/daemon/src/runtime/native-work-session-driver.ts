@@ -2,9 +2,9 @@
 import { ConversationManager, Orchestrator } from '@goodvibes/engine/platform/platform/core';
 import { createContractIntake, isTerminalContractStatus, readContractConfig, TRANSPORT_RETRY_SITE, type ContractRunner, type ContractView } from '@goodvibes/engine/platform/platform/contract';
 import { readFailureTransience } from '@goodvibes/engine/errors';
-import type { AgentOrchestrator } from '@goodvibes/engine/platform/platform/agents';
-import { ToolRegistry, registerAllTools } from '@goodvibes/engine/platform/platform/tools';
-import { CONVERSATIONAL_CONTAINMENT, resolveHostedModelDefinition, withHostedSessionModel } from '@goodvibes/engine/platform/platform/hosted-sessions';
+import type { AgentOrchestrator, AgentTurnEnvironment } from '@goodvibes/engine/platform/platform/agents';
+import { ToolRegistry } from '@goodvibes/engine/platform/platform/tools';
+import { resolveHostedModelDefinition, withHostedSessionModel } from '@goodvibes/engine/platform/platform/hosted-sessions';
 import type { PermissionManager } from '@goodvibes/engine/platform/platform/permissions';
 import type { ConfigManager } from '@goodvibes/engine/platform/platform/config';
 import type { ProviderRegistry } from '@goodvibes/engine/platform/platform/providers';
@@ -23,8 +23,14 @@ export interface NativeSessionDriverOptions {
   readonly providerRegistry: ProviderRegistry;
   readonly runtimeBus: RuntimeEventBus;
   readonly featureFlags: FeatureFlagManager;
+  /** The daemon's dispatcher: used only when the project's own is not given by its environment. */
   readonly hookDispatcher: HookDispatcher;
   readonly toolDependencies: ToolDependencies;
+  /**
+   * The ONE way a turn gets its environment in a project (agents/orchestrator.ts `acquireTurnEnvironment`): the
+   * project's registry (its tool servers, checklist, changed-files record), its hooks and its checkpoint baseline.
+   */
+  readonly turnEnvironment: (folder: string) => AgentTurnEnvironment;
   /** The nonserialized native owner rechecks paired authority and workspace scope. */
   readonly assertCurrent: (contract: ContractView) => void;
   /** Told when a turn's work ends and its owner stops holding a fleet slot. */
@@ -58,8 +64,9 @@ function abortableSleep(ms: number, signal: AbortSignal): Promise<void> {
 const describeError = (error: unknown) => error instanceof Error ? error.message : String(error);
 
 // A session-mode unit cannot hand work to another agent, workflow, remote, or
-// registry-defined executor. All exposed tools retain the ordinary real gate.
-const SESSION_TOOLS = new Set(['read', 'find', 'repo_map', 'analyze', 'inspect', 'write', 'edit', 'exec']);
+// registry-defined executor. Beside its eight tools it has its project's tool
+// servers (`mcp`) and checklist (`work_plan`). All exposed tools retain the ordinary real gate.
+const SESSION_TOOLS = new Set(['read', 'find', 'repo_map', 'analyze', 'inspect', 'write', 'edit', 'exec', 'mcp', 'work_plan']);
 
 export function createNativeWorkSessionDriver(options: NativeSessionDriverOptions) {
   let closed = false;
@@ -67,7 +74,7 @@ export function createNativeWorkSessionDriver(options: NativeSessionDriverOption
   let active: { contractId: string; turn: Orchestrator; done: Promise<void>; backoff: AbortController } | undefined;
   const stopped = new Set<string>();
   const pending = new Map<Promise<void>, { readonly contractId: string; readonly ownerAgentId: string }>();
-  const sessions = new Map<string, { turn: Orchestrator; selectionChanged: boolean; opened: boolean; nudgeNext: boolean; nudged: boolean; failed: boolean; turnId: string | undefined; disposeTools: () => Promise<void> }>();
+  const sessions = new Map<string, { turn: Orchestrator; selectionChanged: boolean; opened: boolean; nudgeNext: boolean; nudged: boolean; failed: boolean; turnId: string | undefined; disposeTools: () => Promise<void>; ready: () => Promise<void> }>();
   /** Ends one session's turn and saves the tool state it held. */
   const endSession = (session: { turn: Orchestrator; disposeTools: () => Promise<void> }): void => {
     session.turn.dispose();
@@ -76,29 +83,28 @@ export function createNativeWorkSessionDriver(options: NativeSessionDriverOption
   const retries = options.retry?.limit ?? DEFAULT_TURN_RETRIES;
   const sleep = options.retry?.sleep ?? abortableSleep;
   const firstDelayMs = () => options.retry?.delayMs ?? readContractConfig(options.configManager).transportRetryDelayMs;
+  /** A contract of this project's work: the project's session, or a piece of work's own session under it. */
+  const ownSession = (sessionId: string | undefined): boolean => sessionId === options.sessionId || (sessionId?.startsWith(`${options.sessionId}:`) ?? false);
   const waitingUnit = (contract: ContractView) => contract.sessionMode === true && !isTerminalContractStatus(contract.status)
     ? contract.units.find(unit => unit.status === 'running' || unit.status === 'nudged') : undefined;
 
   function createTurn(contract: ContractView) {
     if (!contract.nativeSource) throw new Error('Native session work requires the complete original source');
     options.assertCurrent(contract);
+    // The piece of work's own session: what is allowed "for this session" holds for this work only.
+    const sessionId = contract.sessionId;
+    // Its environment is the project's, assembled the one way every turn's is: the project's registry (its commands
+    // under the one rule, tools/exec/containment.ts), tool servers, checklist, hooks and checkpoint store.
+    const environment = options.turnEnvironment(options.projectRoot);
     const registry = new ToolRegistry();
-    const tools = registerAllTools(registry, {
-      ...options.toolDependencies,
-      configManager: options.configManager,
-      runtimeBus: options.runtimeBus,
-      providerRegistry: options.providerRegistry,
-      contractRunner: options.runner,
-      projectRoot: options.projectRoot,
-      resolveSessionId: () => options.sessionId,
-      hookDispatcher: options.hookDispatcher,
-      hookChangeGate: (request, { signal }) => options.permissionManager.checkHookChange(request, { signal }),
-      readAccessFilter: async path => (await options.permissionManager.readAccess(path, options.sessionId)) === 'allow',
-      // Native admission does not grant a host-exec fallback or access to the
-      // owner's terminal. The daemon's contained posture remains explicit.
-      execContainment: CONVERSATIONAL_CONTAINMENT,
-    });
-    for (const tool of registry.list()) if (!SESSION_TOOLS.has(tool.definition.name)) registry.unregister(tool.definition.name);
+    for (const tool of environment.registry.list()) {
+      if (SESSION_TOOLS.has(tool.definition.name)) registry.register(tool, environment.registry.registrationOptionsFor(tool.definition.name));
+    }
+    const tools = { dispose: () => environment.release() };
+    const hookDispatcher = environment.hookDispatcher ?? options.hookDispatcher;
+    // Its turns end as every turn in the project does: its session is bound to the project's checkpoint store, which
+    // snapshots each TURN_COMPLETED of it (the project's files, when the unit changed them).
+    if (sessionId) options.toolDependencies.projectFacilities?.(options.projectRoot).bindSession?.(sessionId);
     const unit = waitingUnit(contract);
     const providerRegistry = unit?.route
       ? withHostedSessionModel(options.providerRegistry, resolveHostedModelDefinition(options.providerRegistry, unit.route.model))
@@ -107,8 +113,8 @@ export function createNativeWorkSessionDriver(options: NativeSessionDriverOption
       conversation: new ConversationManager(), toolRegistry: registry,
       getViewportHeight: () => 0, scrollToEnd: () => {},
       permissionManager: options.permissionManager,
-      hookDispatcher: options.hookDispatcher, flagManager: options.featureFlags,
-      runtimeBus: options.runtimeBus, sessionId: options.sessionId,
+      hookDispatcher, flagManager: options.featureFlags,
+      runtimeBus: options.runtimeBus, sessionId,
       getSystemPrompt: () => {
         const current = options.runner.get(contract.id);
         if (stopped.has(contract.id) || !current || isTerminalContractStatus(current.status)) throw new Error('Native session is no longer active');
@@ -127,7 +133,7 @@ export function createNativeWorkSessionDriver(options: NativeSessionDriverOption
     // `turnId` is the turn the current attempt is bound to; `failed` is set once an attempt of this
     // unit ended in an error, so the next message says it is a retry.
     const session = { turn, selectionChanged: false, opened: false, nudgeNext: false, nudged: false, failed: false,
-      turnId: undefined as string | undefined, disposeTools: tools.dispose };
+      turnId: undefined as string | undefined, disposeTools: tools.dispose, ready: () => environment.ready() };
     const assertCurrent = () => {
       const current = options.runner.get(contract.id);
       if (stopped.has(contract.id) || !current || isTerminalContractStatus(current.status)) throw new Error('Native session is no longer active');
@@ -213,7 +219,9 @@ export function createNativeWorkSessionDriver(options: NativeSessionDriverOption
     }
     // A unit whose cancellation is still in flight is skipped, not waited behind: the runner is told the same
     // fenced set when it binds the turn, so the next waiting contract in this shared session runs meanwhile.
-    const contract = options.runner.list({ sessionId: options.sessionId }).find(item => waitingUnit(item) && !stopped.has(item.id));
+    // Each piece of work has a session of its own under the project's (`<project session>:<work id>`); one kept before
+    // that names the project's session itself.
+    const contract = options.runner.list().filter(item => ownSession(item.sessionId)).find(item => waitingUnit(item) && !stopped.has(item.id));
     if (!contract) return;
     const unit = waitingUnit(contract)!;
     const checks = unit.checks.length;
@@ -242,14 +250,15 @@ export function createNativeWorkSessionDriver(options: NativeSessionDriverOption
       let reported: { readonly error: unknown; readonly provider: boolean } | undefined;
       session.turnId = undefined;
       const off = options.runtimeBus.on('TURN_ERROR', envelope => {
-        if (envelope.sessionId !== options.sessionId || envelope.payload.type !== 'TURN_ERROR') return;
+        if (envelope.sessionId !== contract.sessionId || envelope.payload.type !== 'TURN_ERROR') return;
         // Only this attempt's own turn: another turn of the shared session failing is not this attempt failing.
         if (session.turnId === undefined || envelope.payload.turnId !== session.turnId) return;
         const { stopReason, error } = envelope.payload;
         // Only failures a retry can clear; context overflow, hook denials and loop breakers repeat identically.
         if (stopReason === 'provider_error' || stopReason === 'unexpected_error') reported = { error: new Error(error), provider: stopReason === 'provider_error' };
       });
-      try { await turn.handleUserInput(textFor(), undefined, { origin: { source: 'native-work', surface: 'service' } }); }
+      // The project's hooks are read and its checkpoint baseline taken before the unit's first call changes anything.
+      try { await session.ready(); await turn.handleUserInput(textFor(), undefined, { origin: { source: 'native-work', surface: 'service' } }); }
       catch (error) { if (session.selectionChanged) return undefined; session.failed = true; return { error, provider: false }; }
       finally { off(); }
       if (reported) session.failed = true;

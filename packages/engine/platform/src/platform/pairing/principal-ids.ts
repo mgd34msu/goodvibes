@@ -21,6 +21,16 @@ export function pairingTokenIdOfPrincipal(principalId: string | undefined): stri
   return principalId?.startsWith(PAIRING_PRINCIPAL_PREFIX) ? principalId.slice(PAIRING_PRINCIPAL_PREFIX.length) : undefined;
 }
 
+/**
+ * The pairing id of a caller that authenticated with a device token, told by the kind of credential first: a sign-in
+ * user's name is its principal id, so a user named like `pairing:<id>` (one made before such names were refused) is
+ * never taken for that device. Undefined for a sign-in or any other principal.
+ */
+export function pairingTokenIdOfCaller(caller: { readonly principalId?: string | undefined; readonly principalKind?: string | undefined; readonly credentialKind?: string | undefined }): string | undefined {
+  if (caller.principalKind === 'user' || caller.credentialKind === 'user-session') return undefined;
+  return pairingTokenIdOfPrincipal(caller.principalId);
+}
+
 /** Principal ids a credential other than a sign-in user authenticates as (the in-process caller is `local`, one with no principal `unknown`). */
 const RESERVED_PRINCIPAL_IDS: readonly string[] = [LOCAL_OWNER_PRINCIPAL, 'local', 'unknown'];
 /** Prefixes of the principal ids of paired devices, chat senders, peers and the program itself. */

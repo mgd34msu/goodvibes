@@ -7,7 +7,7 @@ import { isPathWithinRoot } from '@goodvibes/engine/platform/platform/runtime/sh
  * "reason. next"; the model's command runner reports it as a failed call with
  * the same reason and next step. A handler that returns did what it says.
  */
-export function commandRefusal(text: string, next?: string, code?: string): RefusalError {
+export function commandRefusal(text: string, next?: string, code?: string, cause?: unknown): RefusalError {
   const trimmed = text.trim();
   const usage = /^Usage:/i.test(trimmed);
   return new RefusalError(refusal({
@@ -15,7 +15,8 @@ export function commandRefusal(text: string, next?: string, code?: string): Refu
     state: 'not done',
     reason: trimmed.replace(/^(Refused|Error):\s*/i, ''),
     next: next ? [next] : [],
-  }));
+    // The failure it was made from, kept so a caller can decide by its kind (settings-writes.ts: no daemon answered).
+  }), cause !== undefined ? { cause } : {});
 }
 
 /**
@@ -252,22 +253,11 @@ type SharedConfirm = (args: readonly string[], context: SharedConfirmationContex
 
 /**
  * The irreversible lines of the commands both terminal apps build from shared
- * shell code (`/notify`), by command name. (`/mcp`, `/provider` and the other
- * described commands ask from their descriptions, command-actions/.) Each app's
- * registry applies them through {@link withOwnerConfirmation}, so the two apps
- * answer the same line the same way; reversible lines are not listed and run
- * at once. (`/secrets` declares its own.)
+ * shell code, by command name. (Described commands ask from their
+ * descriptions, command-actions/.) Each app's registry applies them through
+ * {@link withOwnerConfirmation}, so the two apps answer the same line the same
+ * way; reversible lines are not listed and run at once. (`/secrets` declares
+ * its own.) None is left: removing every webhook address is the daemon's
+ * capability `notify.clear`, which asks from its own words (cannot be undone).
  */
-export const SHARED_COMMAND_CONFIRMATIONS: Readonly<Partial<Record<string, SharedConfirm>>> = {
-  notify(args, context) {
-    if (args[0] !== 'clear') return undefined;
-    const urls = context.platform.configManager.getCategory('notifications').webhookUrls;
-    const count = Array.isArray(urls) ? urls.length : 0;
-    if (count === 0) return undefined;
-    return {
-      title: `Remove all ${count} webhook URL${count === 1 ? '' : 's'}?`,
-      detail: 'Every webhook notification URL is removed. They are shown masked, so note any you need before clearing; /notify add <url> adds one back.',
-      confirmLabel: 'Clear',
-    };
-  },
-};
+export const SHARED_COMMAND_CONFIRMATIONS: Readonly<Partial<Record<string, SharedConfirm>>> = {};

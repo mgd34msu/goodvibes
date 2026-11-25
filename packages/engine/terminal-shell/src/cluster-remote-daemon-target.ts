@@ -24,8 +24,9 @@
  *                   local address at its port, or its declared public URL
  *                   once that proves it is this daemon), this machine's
  *                   operator token from <daemon home>/operator-tokens.json;
- *                   for any other daemon, the token or `/accounts sign-in daemon`
- *                   session stored for that exact origin, else a refusal.
+ *                   for any other daemon, the token, or the session "Sign in to
+ *                   a daemon or listener" (Devices and network) stored for
+ *                   that exact origin, else a refusal.
  *                   This machine's token is never sent to another daemon.
  *
  * Authentication is `Authorization: Bearer <token>` against the control
@@ -366,6 +367,19 @@ export type DaemonVerbOutcome<T> =
   | DaemonFailure;
 
 /**
+ * True when the request never left this machine: the connection was refused, the host name did not resolve, or no
+ * route to it exists (Node names these by errno, Bun by `ConnectionRefused` and the like, on the error or its cause).
+ */
+export function connectionNeverMade(error: unknown): boolean {
+  const NEVER_MADE = new Set(['ECONNREFUSED', 'ConnectionRefused', 'ENOTFOUND', 'EAI_AGAIN', 'EHOSTUNREACH', 'ENETUNREACH', 'FailedToOpenSocket']);
+  for (let value: unknown = error, depth = 0; value && depth < 3; value = (value as { cause?: unknown }).cause, depth += 1) {
+    const code = (value as { code?: unknown }).code;
+    if (typeof code === 'string' && NEVER_MADE.has(code)) return true;
+  }
+  return false;
+}
+
+/**
  * Call a daemon verb.
  *
  * Every failure shape becomes an `error`/`fix` pair in plain language, because
@@ -422,6 +436,9 @@ export async function callDaemonVerb<T>(
       aborted,
     ]);
   } catch (error) {
+    // A connection that was never made (refused, no such host, no route to it) sent nothing; only a request that was
+    // sent and then lost may have been applied.
+    const unsent = connectionNeverMade(error);
     return {
       ok: false,
       code: 'unreachable',
@@ -431,7 +448,7 @@ export async function callDaemonVerb<T>(
         : `check that machine is switched on and reachable, and that its daemon is listening on ${target.baseUrl} `
           + `(${error instanceof Error ? error.message : 'no further detail'})`)
         + (target.isLocal ? ` (${error instanceof Error ? error.message : 'no further detail'})` : '')
-        + mayHaveApplied,
+        + (unsent ? (mayHaveApplied ? ' Nothing was sent, so nothing was changed.' : '') : mayHaveApplied),
     };
   }
 
@@ -466,7 +483,10 @@ export async function callDaemonVerb<T>(
   if (response.status === 404) {
     // A verb's own "not found" (no such session) is the daemon's answer, not a missing route.
     const said = await readDaemonError(response);
-    if (said && said.daemonCode !== 'NOT_FOUND' && said.daemonCode !== 'METHOD_NOT_FOUND') {
+    // Through the method route, a bare NOT_FOUND is the method's own (no card, no job by that id): the route is there,
+    // and an unknown method answers METHOD_NOT_FOUND.
+    const viaMethodRoute = path.startsWith('/api/control-plane/methods/');
+    if (said && said.daemonCode !== 'METHOD_NOT_FOUND' && (said.daemonCode !== 'NOT_FOUND' || viaMethodRoute)) {
       return {
         ok: false,
         code: 'refused',

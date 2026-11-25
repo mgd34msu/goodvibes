@@ -199,6 +199,8 @@ export function createConversationRequestsTakeHandler(broker: ConversationRewind
     try {
       const taken = await broker.takeRequests({
         hostId,
+        // A client that went away (a program that crashed mid-wait) ends its wait, so nothing holds the daemon's stop.
+        ...(invocation.signal ? { signal: invocation.signal } : {}),
         ...(waitMs === undefined ? {} : { waitMs }),
         ...(limit === undefined ? {} : { limit }),
       });

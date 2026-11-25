@@ -84,7 +84,7 @@ export class SessionSavedElsewhereError extends Error {
   readonly code = 'SESSION_SAVED_ELSEWHERE';
   constructor(readonly sessionName: string) {
     super(`Session ${sessionName} was saved by another terminal since this one read it, so this save would have overwritten that one's turns; nothing was saved. `
-      + `Run \`/session resume ${sessionName}\` to continue from that save, or \`/session save <new name>\` to keep this conversation under another name.`);
+      + `Run \`/resume ${sessionName}\` to continue from that save, or keep this conversation under another name with This conversation, "Save this session under a name".`);
     this.name = 'SessionSavedElsewhereError';
   }
 }
@@ -96,7 +96,7 @@ export class SessionOpenElsewhereError extends Error {
     super(action === 'delete'
       ? `Session ${sessionName} is open in another terminal, so it was not deleted. Close it there, or switch that terminal to another session, then delete it.`
       : `Session ${sessionName} is open in another terminal, which writes it, so it was not opened here: two terminals writing one session would overwrite each other's turns. `
-        + `Continue it in that terminal, or close it there (or switch that terminal to another session) and run \`/session resume ${sessionName}\` here again. To keep working here, start a new session.`);
+        + `Continue it in that terminal, or close it there (or switch that terminal to another session) and run \`/resume ${sessionName}\` here again. To keep working here, start a new session.`);
     this.name = 'SessionOpenElsewhereError';
   }
 }
@@ -981,33 +981,23 @@ export class SessionManager {
    */
   search(query: string): Array<{ session: SessionInfo; matchCount: number; snippets: string[] }> {
     if (!query || !query.trim()) return [];
-    const q = query.toLowerCase();
-    const sessions = this.list();
-    const results: Array<{ session: SessionInfo; matchCount: number; snippets: string[] }> = [];
+    return searchSessionMessages(this.readSearchable(), query);
+  }
 
-    for (const session of sessions) {
+  /**
+   * Every saved session with the text of its messages, each file read once: what a search over them needs, so a
+   * search typed a character at a time (the Sessions place) reads the files when it opens and filters in memory.
+   */
+  readSearchable(): Array<{ session: SessionInfo; messages: string[] }> {
+    const out: Array<{ session: SessionInfo; messages: string[] }> = [];
+    for (const session of this.list()) {
       try {
-        const raw = readFileSync(session.filePath, 'utf-8');
-        const lines = raw.split('\n').filter(l => l.trim().length > 0);
-        let matchCount = 0;
-        const snippets: string[] = [];
-
+        const lines = readFileSync(session.filePath, 'utf-8').split('\n').filter(l => l.trim().length > 0);
+        const messages: string[] = [];
         for (const line of lines.slice(1)) { // skip meta line
           try {
             const record = JSON.parse(line) as Record<string, unknown>;
-            if (record.type !== 'message') continue;
-            const content = String(record.content ?? '');
-            const lower = content.toLowerCase();
-            const idx = lower.indexOf(q);
-            if (idx !== -1) {
-              matchCount++;
-              if (snippets.length < 3) {
-                const start = Math.max(0, idx - 40);
-                const end = Math.min(content.length, idx + q.length + 60);
-                const snippet = (start > 0 ? '...' : '') + content.slice(start, end).replace(/\n/g, ' ') + (end < content.length ? '...' : '');
-                snippets.push(snippet);
-              }
-            }
+            if (record.type === 'message') messages.push(String(record.content ?? ''));
           } catch (err: unknown) {
             // Malformed line in session during search: skip it.
             logger.warn('SessionManager: malformed line during search', {
@@ -1016,10 +1006,7 @@ export class SessionManager {
             });
           }
         }
-
-        if (matchCount > 0) {
-          results.push({ session, matchCount, snippets });
-        }
+        out.push({ session, messages });
       } catch (err: unknown) {
         // Session unreadable during search: skip it.
         logger.warn('SessionManager: unreadable session during search', {
@@ -1028,10 +1015,7 @@ export class SessionManager {
         });
       }
     }
-
-    // Sort by match count descending
-    results.sort((a, b) => b.matchCount - a.matchCount);
-    return results;
+    return out;
   }
 
   /** Whether a saved conversation exists under this name or id (the store file is present). */
@@ -1063,6 +1047,36 @@ export class SessionManager {
  * read; only a title or id prefix lists the directory. Callers must
  * disambiguate multiple matches.
  */
+/**
+ * The sessions whose messages hold the query (case-insensitive), most matches first, each with how many messages hold
+ * it and up to three lines around them: over sessions already read (`SessionManager.readSearchable`), no file read.
+ */
+export function searchSessionMessages<S>(
+  sessions: readonly { readonly session: S; readonly messages: readonly string[] }[], query: string,
+): Array<{ session: S; matchCount: number; snippets: string[] }> {
+  if (!query || !query.trim()) return [];
+  const q = query.toLowerCase();
+  const results: Array<{ session: S; matchCount: number; snippets: string[] }> = [];
+  for (const { session, messages } of sessions) {
+    let matchCount = 0;
+    const snippets: string[] = [];
+    for (const content of messages) {
+      const idx = content.toLowerCase().indexOf(q);
+      if (idx === -1) continue;
+      matchCount++;
+      if (snippets.length < 3) {
+        const start = Math.max(0, idx - 40);
+        const end = Math.min(content.length, idx + q.length + 60);
+        snippets.push((start > 0 ? '...' : '') + content.slice(start, end).replace(/\n/g, ' ') + (end < content.length ? '...' : ''));
+      }
+    }
+    if (matchCount > 0) results.push({ session, matchCount, snippets });
+  }
+  // Sort by match count descending
+  results.sort((a, b) => b.matchCount - a.matchCount);
+  return results;
+}
+
 export function resolveSessionTarget(manager: Pick<SessionManager, 'info' | 'list'>, target: string): SessionInfo[] {
   const exact = manager.info(target);
   return exact ? [exact] : findSessionCandidates(manager.list(), target);

@@ -32,6 +32,18 @@ export interface QueryToolOptions {
   readonly resolveSessionId?: (() => string | undefined) | undefined;
   /** Who is asking, shown to the owner beside the question. */
   readonly askedBy?: string | undefined;
+  /**
+   * The project folder the asking session works in, read per call: the question says it ("In: <name> (<folder>)"),
+   * as an item a program posts through the daemon does (routes/owner-inbox.ts). Set where the asker is not a program
+   * posting through the daemon, such as a session the daemon hosts.
+   */
+  readonly resolveProject?: (() => string | undefined) | undefined;
+}
+
+/** The line naming the project a question was asked in, the words routes/owner-inbox.ts gives a program's items. */
+function projectLine(project: string | undefined): string {
+  if (!project) return '';
+  return `In: ${project.split(/[\\/]/).filter(Boolean).pop() ?? project} (${project})`;
 }
 
 function view(item: OwnerItem) {
@@ -81,7 +93,8 @@ export function createQueryTool(options: QueryToolOptions): Tool {
           if (!question) return { success: false, error: 'ask needs question: one line the owner can answer. Nothing was posted.' };
           // A long question keeps its full text in the detail the owner opens.
           const title = question.length > OWNER_ITEM_LIMITS.titleChars ? `${question.slice(0, OWNER_ITEM_LIMITS.titleChars - 1)}…` : question;
-          const detail = [question.length > OWNER_ITEM_LIMITS.titleChars ? question : '', input.detail?.trim() ?? ''].filter(Boolean).join('\n\n');
+          const detail = [question.length > OWNER_ITEM_LIMITS.titleChars ? question : '', input.detail?.trim() ?? '', projectLine(options.resolveProject?.())]
+            .filter(Boolean).join('\n\n');
           const { created, item } = await inbox().post({
             kind: 'question',
             title,

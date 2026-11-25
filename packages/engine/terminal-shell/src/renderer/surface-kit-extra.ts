@@ -5,7 +5,7 @@
  *
  *   - legacy hint strings ("r refresh", "Enter repair", "←/→ tab") become
  *     KitHint keycaps; strings that are not a key plus an action (for example
- *     "/health for latency & routes") are returned as notes to show as text
+ *     "/model for latency & routes") are returned as notes to show as text
  *   - tab rows that wrap onto a second row instead of dropping tabs
  *   - content-sized modal heights (small dialogs grow to fit their body)
  *   - measuring a kit list's height, group spacing included

@@ -1,10 +1,9 @@
-import { directOwnerPlanningInput, isDirectOwnerCommandContext, type CommandContext, type CommandRegistry } from '../command-registry.ts';
+import { directOwnerPlanningInput, isDirectOwnerCommandContext, type CommandContext } from '../command-registry.ts';
 import { routeNativeConversationInput } from '../../runtime/native-conversation-ingress.ts';
 import { captureNativeConversationInput } from '@goodvibes/engine/terminal-shell/native';
 import type { WorkHost } from '@goodvibes/engine/terminal-shell/native/work-command';
 import { commandRefusal } from '@goodvibes/engine/terminal-shell/command-confirmation';
-import { defineCommand, sessionCapabilityAction } from '@goodvibes/engine/terminal-shell/command-actions';
-import { PLAN_OFF, PLAN_ON, PLAN_STATUS, type PlanModeSessionServices } from '@goodvibes/engine/platform/platform/capabilities';
+import type { PlanModeSessionServices } from '@goodvibes/engine/platform/platform/capabilities';
 import { isPlanMode, togglePlanMode, permissionModeLabel } from '@goodvibes/engine/platform/platform/gate/presets';
 import type { PermissionModeValue } from '../../core/permission-mode.ts';
 
@@ -76,16 +75,4 @@ export function planModeServices(ctx: CommandContext): PlanModeSessionServices {
       },
     },
   };
-}
-
-export function registerPlanningRuntimeCommands(registry: CommandRegistry): void {
-  const options = { terminalOnly: 'Plan mode belongs to the terminal app\'s session.' };
-  registry.register(defineCommand<CommandContext>({
-    name: 'plan',
-    title: 'Plan mode (nothing is changed)',
-    summary: 'Plan without changing anything: writes, commands and network calls are blocked for this session',
-    group: 'Permissions',
-    report: 'status',
-    actions: [PLAN_STATUS, PLAN_ON, PLAN_OFF].map((definition) => sessionCapabilityAction<CommandContext, PlanModeSessionServices>(definition, planModeServices, options)),
-  }));
 }

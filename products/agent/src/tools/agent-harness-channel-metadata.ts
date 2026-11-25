@@ -1,7 +1,7 @@
 import { harnessDisplayPath } from './agent-harness-display-path.ts';
 import type { CommandContext } from '../input/command-registry.ts';
 import type { AgentWorkspaceChannelStatus } from '../input/agent-workspace-channels.ts';
-import { readAgentChannelDeliveryReceipts } from '@goodvibes/engine/terminal-shell/agent-turn/channel-delivery-receipts';
+import { daemonChannelDeliveryReceiptPath, readAgentChannelDeliveryReceipts } from '@goodvibes/engine/terminal-shell/agent-turn/channel-delivery-receipts';
 import { buildAgentWorkspaceChannelTriage, type AgentWorkspaceChannelTriage } from '../input/agent-workspace-channel-triage.ts';
 import { buildAgentWorkspaceChannelSetupGuide, buildAgentWorkspaceChannels } from '../input/agent-workspace-channels.ts';
 import { previewHarnessText } from '@goodvibes/engine/terminal-shell/agent-turn/preview-text';
@@ -124,13 +124,13 @@ function describeChannel(
           sendTool: 'agent_channel_send',
           notificationTool: 'agent_notify',
           reminderTool: 'agent_reminder_schedule',
-          slashCommandDetail: `/channels configured ${channel.id}`,
+          slashCommandDetail: `capability_run channels.configured channel:"${channel.id}"`,
           readOnlyConnectedRoutes: [
-            '/channels accounts',
-            '/channels rules',
-            '/channels status',
-            `/channels doctor ${channel.id}`,
-            `/channels setup ${channel.id}`,
+            'capability_run channels.accounts',
+            'capability_run channels.rules',
+            'capability_run channels.status',
+            `capability_run channels.doctor channel:"${channel.id}"`,
+            `capability_run channels.setup channel:"${channel.id}"`,
           ],
           settingsFilter: `settings action:"list" prefix:"surfaces.${channel.id}" includeHidden:true`,
           connectedHostBoundary: 'host action:"capability" query:"delivery"',
@@ -343,7 +343,8 @@ export function describeHarnessChannelDeliveries(context: CommandContext, args: 
     };
   }
   const limit = readLimit(args.limit, 20);
-  const snapshot = readAgentChannelDeliveryReceipts(shellPaths);
+  // The sends are the daemon's now (its receipts store; the Agent's own were carried into it once).
+  const snapshot = readAgentChannelDeliveryReceipts(shellPaths, daemonChannelDeliveryReceiptPath(shellPaths));
   const receipts = snapshot.receipts.slice(0, limit).map((receipt) => ({
     receiptId: receipt.id,
     createdAt: receipt.createdAt,
@@ -367,7 +368,7 @@ export function describeHarnessChannelDeliveries(context: CommandContext, args: 
     returned: receipts.length,
     receipts,
     routes: {
-      command: '/channels deliveries',
+      command: 'capability_run channels.deliveries',
       sendTool: 'agent_channel_send',
       channels: 'channels action:"status"',
     },

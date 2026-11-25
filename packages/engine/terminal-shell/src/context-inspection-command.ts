@@ -35,8 +35,9 @@ export function conversationContextOf<Context extends ContextInspectionContext>(
   const files = policy.instructionFiles;
   const given = policy.lastTurns;
   return {
-    async show() {
-      if (context.openContextInspector) { context.openContextInspector(); return 'The context is shown on its own screen.'; }
+    async show(options) {
+      // Its own screen only for the person's press (a model's call opens nothing on his display).
+      if (options?.opensScreen !== false && context.openContextInspector) { context.openContextInspector(); return 'The context is shown on its own screen.'; }
       const messages = context.session.conversationManager.getMessagesForLLM();
       if (!messages.length) return 'The conversation has no messages yet.';
       const measured = messages.map((message) => ({ message, tokens: policy.estimate(message) }));

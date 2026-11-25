@@ -12,6 +12,7 @@ import type { AutomationRunTrigger } from './types.js';
 import type { ConfigManager } from '../config/manager.js';
 import { summarizeError } from '../utils/error-display.js';
 import { logger } from '../utils/logger.js';
+import { spendingName } from '../runtime/cost/model-usage.js';
 import { automationNoticeEffect, readAutomationRunTransience } from './manager-runtime-delivery.js';
 import {
   buildAutomationExecutionIntent,
@@ -301,6 +302,10 @@ export async function executeAutomationJob(
       toolAllowlist: effectiveJob.execution.toolAllowlist,
       ...(executionContext ? { context: executionContext } : {}),
       ...(resolved.session?.id ? { sessionId: resolved.session.id } : {}),
+      // Money, Spending: what this run cost is the schedule's.
+      spendingSource: `schedule "${spendingName(effectiveJob.name)}"`,
+      // Its project: the folder of the program or caller that made the schedule.
+      ...(effectiveJob.execution.workingDirectory ? { workingDirectory: effectiveJob.execution.workingDirectory } : {}),
     }, operation));
     spawnedAgentId = agentId;
     const runningRun: AutomationRun = {

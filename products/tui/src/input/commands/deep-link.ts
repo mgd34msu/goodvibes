@@ -27,6 +27,20 @@ export function parseDeepLink(value: string): { surface: string; target?: string
   }
 }
 
+/** The old screens' names a link may carry, and the place (and tab) that replaced each. */
+const PLACE_OF_OLD_VIEW: Readonly<Record<string, { readonly id: string; readonly list?: string; readonly title: string }>> = {
+  security: { id: 'safety', title: 'Permissions and safety' },
+  sandbox: { id: 'safety', title: 'Permissions and safety' },
+  marketplace: { id: 'tools', title: 'Tools and extensions' },
+  hooks: { id: 'tools', title: 'Tools and extensions' },
+  knowledge: { id: 'memory', title: 'Memory and knowledge' },
+  remote: { id: 'work', list: 'runners', title: 'Work and agents, Runners' },
+  incident: { id: 'system', list: 'health', title: 'System, Health' },
+  notifications: { id: 'system', list: 'notices', title: 'System, Notices' },
+  devices: { id: 'devices', list: 'devices', title: 'Devices and network, Paired' },
+  'settings-sync': { id: 'devices', list: 'settings-sync', title: 'Devices and network, Settings sync' },
+};
+
 /** True when the view selects a process by id (the Agents view and its old names). */
 function viewSelectsTarget(surface: string): boolean {
   const id = surface.trim().toLowerCase();
@@ -39,6 +53,12 @@ function viewSelectsTarget(surface: string): boolean {
  * that has no selection), or not opened and why.
  */
 export function openDeepLink(ctx: CommandContext, surface: string, target?: string): string {
+  // A screen a place replaced: its old name in a link opens that place (on the tab that holds what it showed).
+  const place = PLACE_OF_OLD_VIEW[surface.trim().toLowerCase()];
+  if (place && ctx.openPlace) {
+    ctx.openPlace(place.id, place.list ? { list: place.list } : undefined);
+    return `Opened ${place.title}${target !== undefined ? `; it has no selection, so the target ${target} was not used` : ''}.`;
+  }
   if (!ctx.openView) return `This surface cannot open views; ${buildDeepLink(surface, target)} opens in the terminal app.`;
   const selects = target !== undefined && viewSelectsTarget(surface);
   const viewTarget = selects ? parseViewTarget(target) : undefined;

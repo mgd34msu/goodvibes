@@ -32,9 +32,9 @@ The footer keeps an honest running total: fresh input tokens separated from cach
 
 ### Permissions and workspace trust
 
-<img src="docs/assets/workspace-trust.png" alt="A modal titled Trust ~/projects/garden-planner?, open over the dimmed start screen as the app opens. Its sentence describes the selected choice: GoodVibes reads this folder and changes nothing in it: no file is changed and no command runs, and the folder's own hooks and MCP servers stay off, until you trust it. Change it later with /security trust-folder or /security restrict-folder. Two options follow, Trust this workspace and Keep restricted (read-only) (selected), with the keys move, choose and details." width="820">
+<img src="docs/assets/workspace-trust.png" alt="A modal titled Trust ~/projects/garden-planner?, open over the dimmed start screen as the app opens. Its sentence describes the selected choice: GoodVibes reads this folder and changes nothing in it: no file is changed and no command runs, and the folder's own hooks and MCP servers stay off, until you trust it. Change it later in Permissions and safety, This folder. Two options follow, Trust this workspace and Keep restricted (read-only) (selected), with the keys move, choose and details." width="820">
 
-When you open a directory that brings hooks or tool servers (MCP) of its own, GoodVibes asks, as it opens and before anything runs, how much it is allowed to do there, with the cursor on "Keep restricted", so Enter pressed at once trusts nothing; a directory with none of its own is trusted without a question, since trusting it would let nothing run that your permission setting does not already govern. Restricted is read-only. The model can look around, but writes and commands are refused until you trust the workspace. Until then a `hooks.json` in the workspace is not loaded and the MCP servers its `.mcp/mcp.json` or `.goodvibes/mcp.json` name do not start. The decision is kept in your own workspace register; a project cannot mark itself trusted. The question names the folder and the hooks and tool-server files of its own it found; `/security trust-folder` or `/security restrict-folder` changes the answer later.
+When you open a directory that brings hooks or tool servers (MCP) of its own, GoodVibes asks, as it opens and before anything runs, how much it is allowed to do there, with the cursor on "Keep restricted", so Enter pressed at once trusts nothing; a directory with none of its own is trusted without a question, since trusting it would let nothing run that your permission setting does not already govern. Restricted is read-only. The model can look around, but writes and commands are refused until you trust the workspace. Until then a `hooks.json` in the workspace is not loaded and the MCP servers its `.mcp/mcp.json` or `.goodvibes/mcp.json` name do not start. The decision is kept in your own workspace register; a project cannot mark itself trusted. The question names the folder and the hooks and tool-server files of its own it found; This folder, in Permissions and safety, changes the answer later.
 
 <img src="docs/assets/permission-prompt.png" alt="An approval card over the dimmed conversation, headed Run this command? with the folder ~/projects/garden-planner on the right. It shows the command $ mkdir -p build, the line Why: Ask me: GoodVibes asks before it runs commands or changes things outside this folder, three buttons, Yes, once (selected), Yes, and remember (choose what) and No, and the keys y yes, a remember, n no, w say why and d details. Below it the turn reads Waiting for your approval · Running a command · mkdir -p build." width="900">
 
@@ -49,7 +49,7 @@ The other modes:
 
 Waiting for you, Decisions lists what Jev decided for you, with undo, never, always and ask. An explicit `permissions.tools.<name>` set to `deny` blocks that tool. Older saved values still load: `safe-owner`, `prompt`, `normal`, `accept-edits` and `custom` as `ask-me`, `safe-jev` and `auto` as `jev-decides`, `allow-all` as `yolo`. How the mode combines with the decision model setting is in [decision-model policies](../../docs/decision-model-policy.md#how-much-you-are-asked).
 
-`Shift+Tab` cycles the mode for the current session only, and asks before switching to `yolo`; the saved default is set in `/settings` (When GoodVibes asks), and `--just-vibes` or `--yolo` picks one for a single launch. `/plan` toggles plan mode directly.
+`Shift+Tab` cycles the mode for the current session only, and asks before switching to `yolo`; the saved default is set in `/settings` (When GoodVibes asks), and `--just-vibes` or `--yolo` picks one for a single launch. The Plan mode row of This conversation in Permissions and safety toggles plan mode directly.
 
 ### Models and providers
 
@@ -63,7 +63,7 @@ The `synthetic` provider groups the same model across every backend that serves 
 
 <img src="docs/assets/fleet-panel.png" alt="The Your agents panel over the conversation (behind it the session row main and general, with alt+n next and alt+p prev), headed 1 running · nothing waiting for you. A helper agent writing docs/usage.md has run 15 seconds and read 2 files; no agents finished this session; under Scheduled, Morning summary to Telegram runs daily at 8:00 and has not run yet; a line reads Background services 4 healthy. The detail pane shows the helper's task, model rtfake:rt-1, time, files read, tokens and Turn 1 · Thinking. The keys read open, s stop, n new agent and b background services." width="900">
 
-Work that is not conversation opens in modals instead of scrolling past in the transcript. Your agents, opened with `F2`, `Ctrl+O` or `/agents`, is the same panel in this app and in the Agent. It lists what is waiting for you first (the agent and what it asks; Enter brings its card to the front), then each running agent with what it is doing, the agents that finished this session, and what is scheduled, with the platform's own background services behind one line (`Background services  N healthy ›`) and an unhealthy one listed by itself. You can open a running agent to watch its live tail or steer it, back out with `Esc` without stopping it, stop it and what it started with `s` or `Ctrl+X` (it asks first), start a new one with `n`, pause or resume a schedule with `p`, and archive finished work. Usage (`/usage`) shows context pressure, tokens and cost; Changes (`/changes`) shows changed files with a tinted diff, a semantic summary, hunk staging and review comments; Notifications (`/notifications`, or `Ctrl+N`) keeps every notice. Notices no longer take over the status bar: they wait in a count there (`2 notices`).
+Work that is not conversation opens in modals instead of scrolling past in the transcript. Your agents, opened with `F2`, `Ctrl+O` or `/agents`, is the same panel in this app and in the Agent. It lists what is waiting for you first (the agent and what it asks; Enter brings its card to the front), then each running agent with what it is doing, the agents that finished this session, and what is scheduled, with the platform's own background services behind one line (`Background services  N healthy ›`) and an unhealthy one listed by itself. You can open a running agent to watch its live tail or steer it, back out with `Esc` without stopping it, stop it and what it started with `s` or `Ctrl+X` (it asks first), start a new one with `n`, pause or resume a schedule with `p`, and archive finished work. Money's Spending tab (the menu, `Ctrl+G` then `m`, or a click on the cost in the status bar) shows this conversation's context pressure, tokens, cost, turns and agents above what the daemon spent; Changes (`/changes`) shows changed files with a tinted diff, a semantic summary, hunk staging and review comments; the System place's Notices tab (`Ctrl+N`) keeps every notice. Notices no longer take over the status bar: they wait in a count there (`2 notices`).
 
 ### Everything else is a command
 
@@ -109,7 +109,7 @@ Each row links to the page that documents it. The product's own `?` list (`/help
 | Keyboard | The complete binding reference, and how to rebind | [tools-and-commands.md](docs/tools-and-commands.md) |
 | Agents and workflows | Built-in and custom archetypes, spawning, git worktree isolation, automation and scheduled jobs | [tools-and-commands.md](docs/tools-and-commands.md) |
 | Extending it | Hooks and hook chains, the plugin manifest and API, MCP servers, the curated marketplace | [tools-and-commands.md](docs/tools-and-commands.md) |
-| Diagnostics | Evaluation suites, deterministic replay, failure reports (`/health`), telemetry | [tools-and-commands.md](docs/tools-and-commands.md) |
+| Diagnostics | Evaluation suites, deterministic replay, failure reports (System, Health), telemetry | [tools-and-commands.md](docs/tools-and-commands.md) |
 | CLI flags | Session lifecycle (`--continue`, `--resume`, `--fork`), non-interactive mode, output formats, host selection | [cli-flags.md](docs/cli-flags.md) |
 | Knowledge and memory | Session and durable memory, a structured knowledge store with connectors and extractors, embeddings and retrieval, artifacts, multimodal analysis | [knowledge-artifacts-and-multimodal.md](docs/knowledge-artifacts-and-multimodal.md) |
 | Session durability | Saved session after every turn plus a crash snapshot at each turn moment, offered at the next start | [session-durability.md](docs/session-durability.md) |
@@ -118,7 +118,7 @@ Each row links to the page that documents it. The product's own `?` list (`/help
 | Daemon and services | Connecting to the standalone GoodVibes daemon, browser operator surface, background service and autostart, inbound TLS, outbound trust | [deployment-and-services.md](docs/deployment-and-services.md) |
 | Remote access | A worked home-server setup: always-on daemon, browser access, TUI over SSH, reachability and TLS | [remote-access.md](docs/remote-access.md) |
 | Channels and API | Slack, Discord, Telegram, Matrix, webhook and other surfaces; the shared reply pipeline; remote peers and node hosts; the control-plane HTTP and streaming API | [channels-remote-and-api.md](docs/channels-remote-and-api.md) |
-| Voice | Live spoken answers (`/voice`), TTS and STT providers, streaming voice API | [voice-and-live-tts.md](docs/voice-and-live-tts.md) |
+| Voice | Live spoken answers (System place, This session and Voice), TTS and STT providers, streaming voice API | [voice-and-live-tts.md](docs/voice-and-live-tts.md) |
 | Integrations | Home Assistant surface, Cloudflare Workers/Queues batch, GitHub Action | [homeassistant-surface.md](docs/homeassistant-surface.md) · [cloudflare-batch.md](docs/cloudflare-batch.md) · [github-action.md](docs/github-action.md) |
 
 Full index: [docs/README.md](docs/README.md).
@@ -189,18 +189,17 @@ The sections below describe specific commands in detail.
 
 ### Purchase approval and veto windows
 
-Type `/payments pending` in the owner terminal to read purchase notices from
-the selected paired daemon. Select a purchase, read its notice and deadline,
-then choose approve/deny or proceed-now/cancel. The menu retains that host and
-window reference; changing the connection requires reopening it. Escape closes
-the local view. An answer already sent may still complete on the host.
+The purchases waiting for you are on the Purchases tab of Waiting for you (the
+menu of places): select one, read its notice and deadline, then press the
+answer it offers (approve or deny, go ahead now or cancel), stop a checkout, or
+type a card's security code on the hidden line. An answer already sent may
+still complete on the host.
 
-This requires a paired administrative credential with `read:payments` and
-`write:payments`. `/payments` opens its list of actions. "Add a card" asks for
-the card field by field, each hidden, and sends it to the selected daemon in one
-`payments.cards.create` request; "See your cards" (`/payments cards`) lists the
-cards the daemon holds (label, kind, brand, last four digits, expiry; never the
-number, CVV or name).
+Cards, the billing and shipping addresses and the purchases you allow ahead of
+time are in Money. On its Cards tab, `n` ("Add a card") is a form with every
+card field hidden, sent to the daemon in one `payments.cards.create` request;
+the tab lists the cards the daemon holds (label, kind, brand, last four digits,
+expiry; never the number, CVV or name) and `x` removes one.
 
 ### Work on the host
 
@@ -231,7 +230,7 @@ can be seen, sent again, gone on with or dropped (see
 
 ### TUI host credentials
 
-Native `/work`, headless intake and legacy-import reads use a TUI-owned device credential bound to the exact configured daemon origin when there is one. For the daemon on this machine (a loopback origin whose operator token file is yours) no pairing is needed: the TUI presents the operator token it already holds, and the daemon treats it as the owner's own machine. For a daemon on another machine, review `goodvibes host pair --bootstrap-shared` in an owner terminal; add `--apply` only after reviewing the persistent administrative scope. Use `--url <origin>` for a one-command endpoint override. `/devices pair host` shows what that pairing would do, and with `--apply` reviews and confirms it in this terminal; companion pairing is `/devices pair device`. See [host pairing and recovery](docs/host-pairing.md).
+Native `/work`, headless intake and legacy-import reads use a TUI-owned device credential bound to the exact configured daemon origin when there is one. For the daemon on this machine (a loopback origin whose operator token file is yours) no pairing is needed: the TUI presents the operator token it already holds, and the daemon treats it as the owner's own machine. For a daemon on another machine, review `goodvibes host pair --bootstrap-shared` in an owner terminal; add `--apply` only after reviewing the persistent administrative scope. Use `--url <origin>` for a one-command endpoint override. In the Devices and network place, Pair something, This program with its daemon, shows what that pairing would do, and with Apply "Review and confirm it" reviews and confirms it in this terminal; companion pairing is Pair something, A phone or another device. See [host pairing and recovery](docs/host-pairing.md).
 
 ---
 

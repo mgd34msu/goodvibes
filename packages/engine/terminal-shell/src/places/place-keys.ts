@@ -30,6 +30,11 @@ const MORE_KEYS_DEFAULT = '?';
  */
 export const ENDS_THE_PROGRAM: ReadonlySet<string> = new Set(['system.quit']);
 
+/** The entry of a list's search key in its place's context (place-types.ts `search`). */
+export function searchActionName(listId: string): string {
+  return `search-${listId}`;
+}
+
 /** The context id of a place's keys. */
 export function placeKeyContextId(place: Pick<AnyPlace, 'id'>): string {
   return `place.${place.id}`;
@@ -74,6 +79,11 @@ export function placeKeyContext(place: AnyPlace): KeyContext {
       defaults: action.key === '' ? [] : [comboOf(action.key)],
       scope: { ...(action.list !== undefined ? { list: action.list } : {}), ...(action.states ? { states: action.states } : {}) },
     });
+  }
+  // A list searched in place as the person types (place-types.ts `search`): its key starts typing.
+  for (const list of place.lists) {
+    if (!list.search) continue;
+    actions.push({ name: searchActionName(list.id), description: list.search.label, defaults: [comboOf(list.search.key)], scope: { list: list.id } });
   }
   actions.push({ name: READ_AGAIN_ACTION, description: 'read every list again', defaults: [{ key: READ_AGAIN_DEFAULT }] });
   actions.push({ name: MORE_KEYS_ACTION, description: 'list every key of this place', defaults: [{ key: MORE_KEYS_DEFAULT }] });

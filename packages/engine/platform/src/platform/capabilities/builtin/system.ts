@@ -43,8 +43,10 @@ export function keepAwakeWords(state: Record<string, unknown>): { readonly state
   const denied = list(keepAwake.deniedClasses);
   const condition = !enabled ? 'off' : !held ? 'refused' : denied.length > 0 ? 'held-partial' : 'held';
   const reasons = list(work.reasons);
-  const note = text(keepAwake.note);
-  const edge = text(record(state.sleepEdge).note);
+  // The daemon's own words, as a sentence: they arrive starting lower-case and without a full stop.
+  const asSentence = (said: string): string => (said ? `${said.charAt(0).toUpperCase()}${said.slice(1)}${/[.!?]$/.test(said) ? '' : '.'}` : '');
+  const note = asSentence(text(keepAwake.note));
+  const edge = asSentence(text(record(state.sleepEdge).note));
   return {
     state: condition,
     lines: [
@@ -165,15 +167,62 @@ export function voiceRuntimeWords(status: Record<string, unknown>): readonly str
     `Speaking aloud (${text(tts.engine) || 'piper'}): ${tts.binaryPresent === true && tts.voicePresent === true ? 'installed' : 'not installed'}.`,
     `Listening (${text(stt.engine) || 'whisper.cpp'}): ${VOICE_STATE_WORDS[text(stt.state)] ?? 'not said'}${text(stt.reason) ? ` (${text(stt.reason)})` : ''}.`,
   ];
-  if (state === 'not-provisioned' && typeof status.offerBytes === 'number') lines.push(`Installing it downloads about ${Math.max(1, Math.round(status.offerBytes / 1_000_000))} MB.`);
-  if (Object.keys(record(status.installInProgress)).length > 0) lines.push('An install is running now.');
-  const last = record(status.lastInstall);
-  if (text(last.error)) lines.push(`The last install stopped: ${text(last.error)}.`);
-  else if (Object.keys(record(last.receipt)).length > 0) {
-    const proof = record(record(last.receipt).proof);
-    lines.push(`The last install finished${text(proof.summary) ? `: ${text(proof.summary)}` : ''}.`);
+  if ((state === 'not-provisioned' || state === 'partial') && typeof status.offerBytes === 'number') {
+    lines.push(`Installing it downloads about ${megabytes(status.offerBytes)}, each file checked against its pinned checksum; a stopped download goes on from where it stopped.`);
   }
+  // An install running (announced when it starts, at each step and when it ends: runtime/voice-setup.ts): each part and its step.
+  const running = record(status.installInProgress);
+  if (Object.keys(running).length > 0) {
+    lines.push('An install is running now:');
+    for (const part of Array.isArray(running.components) ? running.components as unknown[] : []) {
+      const component = record(part);
+      const total = typeof component.bytesTotal === 'number' ? component.bytesTotal : undefined;
+      const done = typeof component.bytesDone === 'number' ? component.bytesDone : undefined;
+      const size = total !== undefined ? ` (${done !== undefined ? `${megabytes(done)} of ` : ''}${megabytes(total)})` : '';
+      lines.push(`  ${text(component.component)}: ${PHASE_WORDS[text(component.phase)] ?? text(component.phase)}${size}${text(component.message) ? `: ${text(component.message)}` : ''}`);
+    }
+  }
+  const last = record(status.lastInstall);
+  if (text(last.error)) lines.push(`The last install stopped: ${text(last.error)}. Installing again fetches only what is missing.`);
+  else if (Object.keys(record(last.receipt)).length > 0) lines.push(...installReceiptWords(record(last.receipt)));
   return lines;
+}
+
+const PHASE_WORDS: Readonly<Record<string, string>> = {
+  skip: 'already here', download: 'downloading', verify: 'checking', extract: 'unpacking', done: 'done', error: 'failed',
+};
+
+const ENGINE_OUTCOME_WORDS: Readonly<Record<string, string>> = {
+  provisioned: 'installed',
+  'download-failed': 'the download failed; what was downloaded is kept, and installing again fetches the rest',
+  'checksum-mismatch': 'a downloaded file did not match its pinned checksum and was thrown away',
+  'unsupported-platform': 'not available on this computer',
+};
+
+function megabytes(bytes: number): string {
+  return `${Math.max(0.1, Math.round(bytes / 100_000) / 10)} MB`;
+}
+
+/** What the last install did: each engine, each part, and the settings it pointed at the runtime or left as you set them. */
+function installReceiptWords(receipt: Record<string, unknown>): string[] {
+  const proof = record(receipt.proof);
+  const engine = (label: string, value: unknown): string => {
+    const outcome = record(value);
+    const state = text(outcome.state);
+    return `  ${label}: ${ENGINE_OUTCOME_WORDS[state] ?? state}${text(outcome.reason) ? ` (${text(outcome.reason)})` : ''}.`;
+  };
+  const configured = record(receipt.configured);
+  const set = Array.isArray(configured.set) ? (configured.set as unknown[]).map(record) : [];
+  const skipped = Array.isArray(configured.skipped) ? (configured.skipped as unknown[]).map(record) : [];
+  const parts = Array.isArray(receipt.components) ? (receipt.components as unknown[]).map(record) : [];
+  return [
+    `The last install finished${text(proof.summary) ? `: ${text(proof.summary)}` : receipt.provisioned === true ? ': the voice runtime is installed' : ': the voice runtime is not installed'}.`,
+    engine(`Speaking aloud (${text(record(receipt.tts).engine) || 'piper'})`, receipt.tts),
+    engine(`Listening (${text(record(receipt.stt).engine) || 'whisper.cpp'})`, receipt.stt),
+    ...parts.map((part) => `  ${text(part.id)}: ${text(part.state) === 'skipped' ? 'already here' : text(part.state)}${typeof part.bytes === 'number' ? ` (${megabytes(part.bytes)})` : ''}${text(part.error) ? `: ${text(part.error)}` : ''}`),
+    ...(set.length > 0 ? [`  Settings pointed at it: ${set.map((entry) => `${text(entry.key)} = ${String(entry.value)}`).join(', ')}.`] : []),
+    ...(skipped.length > 0 ? [`  Settings left as you set them: ${skipped.map((entry) => `${text(entry.key)} (${text(entry.reason)})`).join(', ')}.`] : []),
+  ];
 }
 
 export const VOICE_STATUS: CapabilityDefinition<SystemCapabilityServices> = {

@@ -33,7 +33,8 @@ import type { ContractIntegrationInspection } from './integration-inspection-wir
  * turn to the unit and is held and nudged exactly as a sub-agent is); no
  * engine runs and no sub-agent is spawned.
  */
-import { assertDurableCheckpoint, DurableContractAdmissions, DurableContractAdmissionError, freezeDurableKey, durableKeyIdentity, durablePayloadRevision, sameDurableRequest, freezeDurableRequest, parseDurableAdmission, type DurableContractAdmission, type DurableContractBoundary, type DurableContractKey, type DurableContractRequest, type DurableStartedContract } from './durable-admission.js';
+import { withUntrustedContentScope } from '../security/untrusted-content.js';
+import { assertDurableCheckpoint, DurableContractAdmissions, DurableContractAdmissionError, freezeDurableKey, durableKeyIdentity, durablePayloadRevision, nativeWorkContentScope, sameDurableRequest, freezeDurableRequest, parseDurableAdmission, type DurableContractAdmission, type DurableContractBoundary, type DurableContractKey, type DurableContractRequest, type DurableStartedContract } from './durable-admission.js';
 import { resolveContractGitPlacement, resolveContractIsolation, resolveContractBase } from './git-placement.js';
 import { existsSync } from 'node:fs';
 import { isDeepStrictEqual } from 'node:util';
@@ -56,7 +57,7 @@ import { createUnitCheckLoop, queueSessionNudge, type ContractSessionHooks } fro
 import { contractGateProblems, readContractConfig, type ContractConfigReader } from './config.js';
 import { emitContractEvent } from './events.js';
 import { OwnerReplyRefusedError, type FailurePauseInput, type OwnerReplyOutcome } from './escalation.js';
-import { createGroupRunner, type ContractEngineInput } from './group-runner.js';
+import { createGroupRunner, wentOnWithout, type ContractEngineInput } from './group-runner.js';
 import { takeSharedTreeForGroup } from './workstreams.js';
 import { CONTRACT_RUNNER_AGENT_ID } from './nudge.js';
 import { captureContractInput, contractInputPath, materializeContractInput, assertContractInputView, assertContractExecutionView, prepareContractInputParent, restoreContractInput } from './input-snapshot.js';
@@ -86,6 +87,7 @@ import {
   newContractId,
   type Contract,
   type ContractFailureKind,
+  type ContractStatus,
   type ContractOwnership,
   type ContractRouteSelector,
   type ContractView,
@@ -386,6 +388,12 @@ export interface ContractRunner {
    * no run claim could be taken); null when it is not held. Optional for custom runners; the factory always supplies it.
    */
   held?(contractId: string): ContractHold | null;
+  /**
+   * The host is about to close (before its agents are cancelled): an agent ending from now on is neither a person
+   * stopping the work nor a step failing, so nothing is cancelled or failed for it; `dispose` keeps the restart
+   * checkpoint, and the work is gone on with at the next start.
+   */
+  prepareToClose?(): void;
   dispose(): void;
   /**
    * After `dispose`: resolves once every run's claim is released, each because its work drained or because it is
@@ -437,11 +445,23 @@ const FAILURE_CRITERIA_NAMED = 8;
  * the next step. The owner did not choose the failure, so the line must let
  * them find and use the work.
  */
+/** Where the work stands, in the words of a piece of work (its machine status stays in the record). */
+export function workStatusWords(status: ContractStatus): string {
+  const words: Readonly<Record<ContractStatus, string>> = {
+    queued: 'The work waits for its turn to run', shaping: 'The work is being read', planning: 'The plan of the work is being written',
+    'checking-plan': 'The plan of the work is being checked', running: 'The work is running', judging: 'The work\'s results are being checked',
+    fixing: 'The work is being fixed', committing: 'The work\'s result is being put in the project', 'awaiting-owner': 'The work waits for you',
+    passed: 'The work is done', failed: 'The work failed', cancelled: 'The work was stopped',
+  };
+  return words[status] ?? `The work is ${status}`;
+}
+
 export function failureStatusLine(contract: Pick<Contract, 'id' | 'units' | 'groups' | 'criteria' | 'isolation' | 'branch' | 'worktreePath' | 'failureKind'>, reason: string): string {
   const unmet = [...new Set([...contract.criteria, ...contract.groups.flatMap((group) => group.criteria), ...contract.units.flatMap((unit) => unit.criteria)]
     .filter((criterion) => criterion.disposition === 'judged' && (criterion.status === 'unmet' || criterion.status === 'unshown'))
-    .map((criterion) => criterion.id))];
-  const unmetPart = unmet.length === 0 ? '' : `; unmet criteria: ${unmet.slice(0, FAILURE_CRITERIA_NAMED).join(', ')}${unmet.length > FAILURE_CRITERIA_NAMED ? ` and ${unmet.length - FAILURE_CRITERIA_NAMED} more` : ''}`;
+    // Named by their words, as the person wrote them: an id ("c2") tells a person nothing.
+    .map((criterion) => `"${criterion.text.replace(/\s+/g, ' ').trim().slice(0, 80)}"`))];
+  const unmetPart = unmet.length === 0 ? '' : `; results not met: ${unmet.slice(0, FAILURE_CRITERIA_NAMED).join('; ')}${unmet.length > FAILURE_CRITERIA_NAMED ? ` and ${unmet.length - FAILURE_CRITERIA_NAMED} more` : ''}`;
   const count = filesModified(contract);
   const files = `${count} changed file${count === 1 ? '' : 's'}`;
   const onBranch = contract.isolation === 'worktree' && contract.branch !== undefined;
@@ -449,9 +469,9 @@ export function failureStatusLine(contract: Pick<Contract, 'id' | 'units' | 'gro
     : onBranch ? `${files} kept on branch ${contract.branch}${contract.worktreePath === undefined ? '' : ` (worktree ${contract.worktreePath})`}`
     : `${files} left in your working tree`;
   const retry = contract.failureKind === 'judgment-unavailable' || contract.failureKind === 'transport'
-    ? 'start the request again once the model is reachable' : 'start the request again, changed to address the reason above';
-  const next = count > 0 && onBranch ? `to keep the work, merge it with git merge ${contract.branch}; or ${retry}` : retry;
-  return `Contract ${contract.id} failed: ${reason}${unmetPart}. Kept: ${kept}. Next: ${next}.`;
+    ? 'ask for the work again once the model is reachable' : 'ask for the work again, changed to address the reason above';
+  const next = count > 0 && onBranch ? `to keep what it did, merge it with git merge ${contract.branch}; or ${retry}` : retry;
+  return `The work failed: ${reason}${unmetPart}. Kept: ${kept}. Next: ${next}.`;
 }
 
 export function createContractRunner(deps: ContractRunnerDeps): ContractRunner & Required<Pick<ContractRunner, 'inspectIntegration' | 'remove'>> {
@@ -632,6 +652,8 @@ export function createContractRunner(deps: ContractRunnerDeps): ContractRunner &
   const pricing = { priceUsage: deps.priceUsage, priceProvenance: deps.priceProvenance };
   const getStatus = (agentId: string): AgentRecord | null => deps.agentManager.getStatus(agentId);
   let disposed = false;
+  /** Set by `prepareToClose`: the host is closing, and its agents ending say nothing about the work. */
+  let hostClosing = false;
 
   function emit(contract: Contract, event: ContractEvent): void {
     const occurrence = emitContractEvent(deps.runtimeBus, contract.sessionId, event);
@@ -856,6 +878,7 @@ export function createContractRunner(deps: ContractRunnerDeps): ContractRunner &
 
   const failures = createUnitFailureHandling({
     runs: () => runs.values(),
+    hostClosing: () => hostClosing,
     agentManager: deps.agentManager,
     runtimeBus: deps.runtimeBus,
     checks,
@@ -890,7 +913,7 @@ export function createContractRunner(deps: ContractRunnerDeps): ContractRunner &
 
   function ownerProgress(contract: Contract): string {
     // A contract that waits (a budget, the shared tree, a route for its planner) says what for.
-    return contract.statusLine ?? `Contract ${contract.id}: ${contract.status}`;
+    return contract.statusLine ?? workStatusWords(contract.status);
   }
 
   function captureStartInput(input: StartContractInput, captureModel = true): StartContractInput {
@@ -961,7 +984,11 @@ export function createContractRunner(deps: ContractRunnerDeps): ContractRunner &
         }
         assertDurableCheckpoint(run.contract, admission);
         if (disposed || run.terminal || run.abort.signal.aborted) throw new DurableContractAdmissionError('boundary');
-        execution = execute();
+        // The work runs in a window of untrusted content of its own, never in the window of the request that started,
+        // resumed or answered it: a later request from the person's program (the Work place reading its lists is a
+        // fresh request of the person's) starts a new turn in that request's window, and a step's call admitted before
+        // it would be refused as "evidence changed" (permissions/manager.ts `assertOwners`).
+        execution = withUntrustedContentScope(nativeWorkContentScope(admission.key), execute);
         // Observe rejection immediately even when the host's lock-release promise is still pending.
         void execution.catch(() => undefined);
       });
@@ -1550,7 +1577,7 @@ export function createContractRunner(deps: ContractRunnerDeps): ContractRunner &
     } catch (error) {
       if (run.terminal) return;
       const failure = failureFromError(error);
-      fail(run, failure.kind, `contract ${contract.id} could not start: ${failure.reason}`);
+      fail(run, failure.kind, `it could not start: ${failure.reason}`);
     }
   }
 
@@ -1565,7 +1592,7 @@ export function createContractRunner(deps: ContractRunnerDeps): ContractRunner &
     } catch (error) {
       if (run.terminal) return;
       const failure = failureFromError(error);
-      fail(run, failure.kind, `contract ${run.id} could not plan again: ${failure.reason}`);
+      fail(run, failure.kind, `its plan could not be written again: ${failure.reason}`);
     }
   }
 
@@ -1591,7 +1618,7 @@ export function createContractRunner(deps: ContractRunnerDeps): ContractRunner &
     if (outcome.kind === 'failed') settleEnded(run);
     if (outcome.kind === 'cancelled' && run.contract.nativeSource !== undefined && !run.terminal) cancelRun(run, 'Native judgment was cancelled or superseded');
     // A planner stopped while the contract still runs leaves nothing to run: say so instead of waiting.
-    else if (outcome.kind === 'cancelled' && !run.terminal) fail(run, 'planning', `contract ${run.id} has no plan: its planner was stopped before it produced one`);
+    else if (outcome.kind === 'cancelled' && !run.terminal) fail(run, 'planning', 'it has no plan: the agent writing its plan was stopped before it wrote one');
     if (outcome.kind === 'awaiting-owner') updateOwnerProgress(run);
     return false;
   }
@@ -1693,7 +1720,7 @@ export function createContractRunner(deps: ContractRunnerDeps): ContractRunner &
       owner.usage = totals.usage;
       owner.toolCallCount = totals.toolCallCount;
       owner.completedAt = now();
-      const statusLine = contract.statusLine ?? `Contract ${contract.id} ${contract.status}${contract.error ? `: ${contract.error}` : ''}`;
+      const statusLine = contract.statusLine ?? `${workStatusWords(contract.status)}${contract.error ? `: ${contract.error}` : ''}`;
       contract.statusLine = statusLine;
       setAgentProgress(owner, statusLine, 'operator');
       const ctx = { sessionId: contract.sessionId, traceId: `${contract.sessionId}:contract:${contract.id}:owner`, source: 'contract-runner', agentId: owner.id };
@@ -1753,7 +1780,7 @@ export function createContractRunner(deps: ContractRunnerDeps): ContractRunner &
     groups.stopRun(run);
     const count = filesModified(contract);
     const where = contract.isolation === 'worktree' && contract.branch !== undefined ? `on branch ${contract.branch}` : 'on disk';
-    contract.statusLine = `Contract ${contract.id} cancelled; ${count} file${count === 1 ? '' : 's'} already modified ${where}`;
+    contract.statusLine = `The work was stopped; ${count} file${count === 1 ? '' : 's'} already changed ${where}`;
     run.decide('cancelled', contract.id, reason);
     run.emit({ type: 'CONTRACT_CANCELLED', contractId: contract.id, reason, filesModified: count });
     settleEnded(run);
@@ -1767,15 +1794,16 @@ export function createContractRunner(deps: ContractRunnerDeps): ContractRunner &
   function withCheckpointWarning<T extends Pick<ContractView, 'id' | 'status' | 'statusLine'>>(view: T): T {
     const failure = deps.store.writeFailure(view.id);
     if (failure === null) return view;
-    const base = view.statusLine ?? `Contract ${view.id} ${view.status}`;
-    return { ...view, statusLine: `${base} (warning: ${failure.message} Progress since the last saved checkpoint is not durable.)` };
+    const base = view.statusLine ?? workStatusWords(view.status);
+    return { ...view, statusLine: `${base} (warning: ${failure.message} What it did since it was last saved is lost if the daemon stops.)` };
   }
 
   function finishPassed(run: ContractRun, result: { readonly answer: string; readonly statusLine: string }): void {
     if (run.terminal) return;
     const { contract } = run;
-    const unmet = contract.units.filter((unit) => unit.status !== 'passed');
-    if (unmet.length > 0) throw new Error(`contract ${contract.id} cannot pass while units ${unmet.map((unit) => unit.id).join(', ')} have not passed`);
+    // A step the owner went on without (after it failed) is left out, not unfinished.
+    const unmet = contract.units.filter((unit) => unit.status !== 'passed' && !wentOnWithout(contract, unit));
+    if (unmet.length > 0) throw new Error(`the work cannot be done while steps ${unmet.map((unit) => `"${unit.title || unit.id}"`).join(', ')} are not done`);
     contract.answer = result.answer;
     contract.statusLine = result.statusLine;
     contract.completedAt = now();
@@ -1886,36 +1914,38 @@ export function createContractRunner(deps: ContractRunnerDeps): ContractRunner &
     retryUnit: async (contractId, unitId) => {
       const refused = (reason: string): UnitRetryOutcome => ({ outcome: 'refused', reason });
       const run = runs.get(contractId);
-      if (run === undefined || run.terminal) return refused(`contract ${contractId} is not running here; an ended contract is run again by starting a new one with the request`);
+      // Said in the words of the work: a step by its title, never "unit u2" or the record's id.
+      if (run === undefined || run.terminal) return refused('the work is not running here; work that ended runs again when you ask for it again');
       const unit = run.unit(unitId);
-      if (unit === undefined) return refused(`contract ${contractId} has no unit ${unitId}; its units are ${run.contract.units.map((candidate) => candidate.id).join(', ') || 'not planned yet'}`);
-      if (run.contract.sessionMode === true) return refused(`unit ${unit.id} is worked by the session itself; continue in that session`);
+      if (unit === undefined) return refused(`the work has no such step; its steps are ${run.contract.units.map((candidate) => `"${candidate.title || candidate.id}"`).join(', ') || 'not planned yet'}`);
+      const step = `step "${unit.title || unit.id}"`;
+      if (run.contract.sessionMode === true) return refused(`${step} is worked in the conversation itself; go on there`);
       if (unit.status === 'passed' || unit.status === 'held-merge') {
         const itemId = unit.attemptUnits === undefined ? unit.id : unit.attemptSelection?.pickedId;
         const commit = itemId === undefined || run.engine === null ? null : await run.engine.retryItemCommit(itemId);
         if (commit === null) {
           return refused(itemId === undefined
-            ? `unit ${unit.id} waits for one of its attempts to be picked; there is no commit to retry`
+            ? `${step} waits for the best of its tries to be chosen; there is nothing to run again`
             : unit.status === 'held-merge'
-              ? `unit ${unit.id} passed and its work is committed; it is waiting for its branch to merge, so there is no commit to retry`
-              : `unit ${unit.id} passed and its work is recorded; there is nothing to retry`);
+              ? `${step} is done and its changes are committed; it waits for its branch to merge, so there is nothing to run again`
+              : `${step} is done and its work is kept; there is nothing to run again`);
         }
-        if (commit.status === 'failed') return refused(`unit ${unit.id}'s commit failed again: ${commit.reason ?? 'no reason given'}; its changes are still uncommitted in its working tree and its branch is not merged until the commit lands`);
-        const merged = run.contract.isolation === 'worktree' ? '; its branch was handed to the merge' : '';
-        return { outcome: 'committed', reason: commit.status === 'committed' ? `unit ${unit.id}'s changes were committed (${commit.hash ?? 'no hash'})${merged}` : `unit ${unit.id} had nothing left to commit${merged}` };
+        if (commit.status === 'failed') return refused(`the commit of ${step} failed again: ${commit.reason ?? 'no reason given'}; its changes are still uncommitted and its branch is not merged until the commit lands`);
+        const merged = run.contract.isolation === 'worktree' ? '; its branch was handed on to merge' : '';
+        return { outcome: 'committed', reason: commit.status === 'committed' ? `the changes of ${step} were committed (${commit.hash ?? 'no hash'})${merged}` : `${step} had nothing left to commit${merged}` };
       }
-      // A failed unit waits on its owner's retry-or-cancel question: retrying it is answering "retry".
+      // A failed unit waits on its owner: running it again is answering its pause "retry".
       const failurePause = run.contract.escalations.find((item) => item.resolvedAt === undefined && item.failurePause === true && item.scope === 'unit' && item.targetId === unit.id);
       if (failurePause !== undefined) {
         try { await steps.reply(run, failurePause.id, 'retry'); }
         catch (error) { if (error instanceof OwnerReplyRefusedError) return refused(error.message); throw error; }
-        return { outcome: 'restarted', reason: `unit ${unit.id} failed and starts again with a fresh agent; the units waiting on it run once it passes` };
+        return { outcome: 'restarted', reason: `${step} failed and runs again with a fresh agent; the steps waiting on it run once it is done` };
       }
-      if (isTerminalUnitStatus(unit.status)) return refused(`unit ${unit.id} is ${unit.status}; the contract ended with it, so start a new contract for the remaining work`);
-      if (unit.status === 'pending' || unit.status === 'blocked') return refused(`unit ${unit.id} has not started yet (${unit.status}); it starts once what it waits on is done`);
-      if (unit.status === 'fixing') return refused(`a fix is being planned for unit ${unit.id}; retry it after the fix plan is in place`);
+      if (isTerminalUnitStatus(unit.status)) return refused(`${step} ${unit.status === 'passed' ? 'is done' : unit.status === 'failed' ? 'failed' : 'was stopped'} and the work ended with it; ask for the work again for what is left`);
+      if (unit.status === 'pending' || unit.status === 'blocked') return refused(`${step} has not started yet; it starts once what it waits on is done`);
+      if (unit.status === 'fixing') return refused(`a fix is being planned for ${step}; run it again once the fix is in place`);
       groups.requeueUnit(run, unit, 'run again at the owner\'s request', 'fresh-unit');
-      return { outcome: 'restarted', reason: `unit ${unit.id} starts again with a fresh agent` };
+      return { outcome: 'restarted', reason: `${step} runs again with a fresh agent` };
     },
     raiseBudget: (contractId, ceiling) => {
       const run = runs.get(contractId);
@@ -1988,8 +2018,10 @@ export function createContractRunner(deps: ContractRunnerDeps): ContractRunner &
     hooks: () => checks.hooks,
     fleetControls: () => fleetControls,
     on,
+    prepareToClose: () => { hostClosing = true; },
     dispose: () => {
       if (disposed) return;
+      hostClosing = true;
       disposed = true;
       for (const run of new Set([...runs.values(), ...settling.values()])) {
         const json = serializeContract(run.contract, now());

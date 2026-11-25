@@ -53,6 +53,8 @@ export interface ApprovalRaiseExtras {
   readonly signal?: AbortSignal | undefined;
   readonly routeId?: string | undefined;
   readonly metadata?: Record<string, unknown> | undefined;
+  /** The session the ask is raised under: it stays that session's ask, never another's. */
+  readonly sessionId?: string | undefined;
   /** Expiry for a raised ask; the trust question sets one, tool asks do not. */
   readonly timeoutMs?: number | undefined;
 }
@@ -200,7 +202,7 @@ export function trustGatedApprovalRaiser(
     // One private identity per participation, even if callers reuse the same
     // request object while waiting on the shared workspace trust decision.
     const request = { ...input.request };
-    extrasByRequest.set(request, { routeId: input.routeId, metadata: input.metadata, signal });
+    extrasByRequest.set(request, { routeId: input.routeId, metadata: input.metadata, signal, ...(input.sessionId !== undefined ? { sessionId: input.sessionId } : {}) });
     // Idempotent, and awaited on every ask rather than once at composition:
     // see the module header for why the composition root cannot await it.
     return awaitPermission(async () => {

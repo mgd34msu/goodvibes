@@ -25,6 +25,7 @@ import type { AgentManager } from '../tools/agent/manager.js';
 import { builtinAgentTemplate } from './builtin-templates.js';
 import type { AgentInput } from '../tools/agent/schema.js';
 import { summarizeError } from '../utils/error-display.js';
+import { spendingName } from '../runtime/cost/model-usage.js';
 import type {
   DecompositionRunner,
   DecompositionRunnerRequest,
@@ -116,6 +117,10 @@ export function createAgentManagerDecompositionRunner(
         systemPromptAddendum: request.systemPrompt,
         ...routeFields(request, deps),
       };
+      // Its spending is the work's it plans (Money, Spending): the owner's source, else the work by what was asked.
+      const owner = request.forAgentId ? deps.agentManager.getStatus(request.forAgentId) : null;
+      const spendingSource = owner?.spendingSource ?? (owner ? `work "${spendingName(owner.task)}"` : undefined);
+      if (spendingSource) spawnInput.spendingSource = spendingSource;
 
       let agentId: string;
       try {

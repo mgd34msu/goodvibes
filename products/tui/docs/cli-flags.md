@@ -55,7 +55,7 @@ goodvibes --resume user-sess-1234
 
 ### `--yes`, `-y`
 
-Most CLI commands act immediately and never ask for confirmation, so this flag has no effect on them. It has an effect on two lines. On `plugin bundles install`, without it the command only verifies the bundle and prints the activation plan, and with it the bundle is installed: its files are unpacked into the same install directory `/marketplace` uses (`.goodvibes/plugins`, `skills`, `hooks/packs` or `policies/packs`), with an install receipt that records the pin and the granted and withheld capabilities. `/marketplace rollback`, `history` and `uninstall` work on it like any installed entry, and `goodvibes plugin bundles uninstall <id>` removes it from the command line (`goodvibes-agent plugin bundles` takes the same words).
+Most CLI commands act immediately and never ask for confirmation, so this flag has no effect on them. It has an effect on two lines. On `plugin bundles install`, without it the command only verifies the bundle and prints the activation plan, and with it the bundle is installed: its files are unpacked into the same install directory the marketplace uses (`.goodvibes/plugins`, `skills`, `hooks/packs` or `policies/packs`), with an install receipt that records the pin and the granted and withheld capabilities. Rolling back, its backups and uninstalling (the Installed tab of Tools and extensions) work on it like any installed entry, and `goodvibes plugin bundles uninstall <id>` removes it from the command line (`goodvibes-agent plugin bundles` takes the same words).
 
 ```sh
 goodvibes plugin bundles install <ref> --sha256 <pin>          # preview only
@@ -63,7 +63,7 @@ goodvibes plugin bundles install <ref> --sha256 <pin> --yes    # installs it
 goodvibes plugin bundles install <remote> --ref <tag> --sha256 <pin> --yes
 ```
 
-It also answers the one question `plugin trust` asks: marking a plugin `trusted` when its manifest signature does not verify against the publisher key saved with `/plugin trust-key` is refused without `--yes`. `goodvibes plugin trust <name> <untrusted|limited|trusted>`, `plugin verify <name>` and `plugin capabilities <name>` set and inspect what a plugin may register without starting the app; the tier is shared by every GoodVibes app on the machine (`~/.goodvibes/plugin-trust.json`), and each applies it the next time it starts the plugin.
+It also answers the one question `plugin trust` asks: marking a plugin `trusted` when its manifest signature does not verify against the publisher key saved with "save its publisher key" (the Plugins tab of Tools and extensions) is refused without `--yes`. `goodvibes plugin trust <name> <untrusted|limited|trusted>`, `plugin verify <name>` and `plugin capabilities <name>` set and inspect what a plugin may register without starting the app; the tier is shared by every GoodVibes app on the machine (`~/.goodvibes/plugin-trust.json`), and each applies it the next time it starts the plugin.
 
 ```sh
 goodvibes plugin trust my-plugin limited
@@ -251,13 +251,13 @@ Editor launch line (Zed `agent_servers` entry, or any ACP client that takes a co
 
 Unsupported capabilities are reported as such in `initialize`: `loadSession` is `false` (no session restore over ACP) and prompt input is text only. Editor threads share the one embedded daemon of the home directory (a thread whose working directory lies outside the daemon's gets its own); `session/close` ends a thread and the daemon stops once no thread uses it.
 
-`/remote dispatch` and the `delegate` tool start this same command as their subagent. `ACP_AGENT_CMD` replaces it; give it as a JSON array of program and arguments (`["/path/to/agent","acp"]`) so a path with a space survives. `/remote env` prints that form.
+A remote runner the daemon starts (the Runners tab of the Work place, "start a runner") runs this same command as its subagent. `ACP_AGENT_CMD`, set for the daemon, replaces it; give it as a JSON array of program and arguments (`["/path/to/agent","acp"]`) so a path with a space survives. "Environment" on the Runners tab prints that form.
 
 To expose the operator surface to an MCP client instead, use `goodvibes-daemon mcp serve` (see the [daemon command reference](../../daemon/docs/commands-reference.md#mcp)).
 
 ### `goodvibes open <link>`
 
-Starts the app and opens the view a `goodvibes://open/<view>[?target=<id>[:<kind>]]` link names, the same link "Open a view by its link" (the capability `deeplink.open`) and `/startup link` use. In a process view (agents, tasks, orchestration) the target selects that process; another view opens and says the target was not used. The transcript's first line says what was opened. A missing or unparsable link prints the expected form on stderr and exits `2`. Registering the `goodvibes://` scheme with the operating system, so a click in another program runs this command, is left to the installer.
+Starts the app and opens the view a `goodvibes://open/<view>[?target=<id>[:<kind>]]` link names, the same link "Open a view by its link" (the capability `deeplink.open`) and the Links tab of the System place use. In a process view (agents, tasks, orchestration) the target selects that process; another view opens and says the target was not used. The transcript's first line says what was opened. A missing or unparsable link prints the expected form on stderr and exits `2`. Registering the `goodvibes://` scheme with the operating system, so a click in another program runs this command, is left to the installer.
 
 ## Argument terminator
 
@@ -281,7 +281,7 @@ Stop once the model has answered `n` times in this run's own turn loop and still
 
 ### `--answer-permissions` (`run` only)
 
-With `--output stream-json`, a script answers the owner prompts the run raises. Each one is written as a `PERMISSION_PROMPT` frame; answer with a line on stdin, `{"type":"PERMISSION_ANSWER","callId":"<callId>","approved":true}` (optional `remember`, and `note` for a refusal). Every answer line is acknowledged with a `PERMISSION_ANSWERED` frame, or a `PERMISSION_ANSWER_REJECTED` frame naming the reason and the call ids still waiting. A call that is never answered is refused when stdin ends, the run is cancelled or the run finishes. Without the flag, a call that needs the owner is refused. Using it with another output format is a usage error (exit `2`).
+With `--output stream-json`, a script answers the owner prompts the run raises. Each one is written as a `PERMISSION_PROMPT` frame; answer with a line on stdin, `{"type":"PERMISSION_ANSWER","callId":"<callId>","approved":true}` (optional `remember`, and `note` for a refusal). Every answer line is acknowledged with a `PERMISSION_ANSWERED` frame, or a `PERMISSION_ANSWER_REJECTED` frame naming the reason and the call ids still waiting. A call that is never answered is refused when stdin ends, the run is cancelled or the run finishes. With the flag the script is the one place each question is asked: it is not put in the daemon's approvals as well, and that holds for every question the run's calls raise, a method the daemon would otherwise decide itself (a schedule, a channel route or draft, a profile fact) included: the run asks the script and sends the call saying so, and the daemon asks nobody again. No time limit decides a question: a call waiting on one waits until it is answered or the run ends (`--timeout` ends the run). Without the flag nobody in the run can answer, so a call that needs the owner is held for him: a capability the daemon runs (`capability_run` of one of its capabilities) is handed to the daemon, which puts it to him once in Waiting for you, worded as the capability (its label, its sentence, each input on its own line, a secret one hidden), and runs it when he approves it; the run's `PERMISSION_DECIDED` frame has `reasonCode` `mode_queued_for_owner` and a `reason` that says it is held and names the approval. Any other call (a command, a file write) can only run inside this run, which goes on without it. Using it with another output format is a usage error (exit `2`).
 
 ### `--prompt-file <path>` (`run` only)
 
@@ -404,7 +404,7 @@ Every `stream-json` line carries `schemaVersion` and `type`. Consumers should ig
 | `TOOL_CANCELLED` | `turnId`, `callId`, `tool`, `reason` | It was cancelled. |
 | `PERMISSION_REQUESTED` | `callId`, `tool`, `category`, `riskLevel`, `summary`, `ownerPrompt` | A tool call reached the permission gate. Sent when the gate reports its decision, so nothing waits behind it; `ownerPrompt` says whether the owner was asked. |
 | `PERMISSION_DECIDED` | `callId`, `tool`, `category`, `approved`, `source`, `reasonCode`, `reason`, `ownerPrompt` | The gate decided it. `ownerPrompt` is `true` when the owner was asked, `false` when a rule, preset or remembered approval decided. `reason` says why (masked and cut at 1000 characters): when Jev decided, its reason (for example `Jev allowed it: the safety reading put its stakes at low.`); on a refusal, the refusal's explanation. |
-| `PERMISSION_PROMPT` | `callId`, `tool`, `category`, `riskLevel`, `summary`, `answer` | With `--answer-permissions`: the owner is being asked; the run waits for a `PERMISSION_ANSWER` line on stdin. |
+| `PERMISSION_PROMPT` | `callId`, `tool`, `category`, `riskLevel`, `summary`, `lines`, `answer` | With `--answer-permissions`: the owner is being asked; the run waits for a `PERMISSION_ANSWER` line on stdin. For a capability (`capability_run`) `summary` is the capability's own question ("Keep this computer awake?") and `lines` its sentence, then each input on a labelled line, a secret one hidden; `lines` is left out for a call its tool does not word itself. |
 | `PERMISSION_ANSWERED` | `callId`, `approved` | A `PERMISSION_ANSWER` line was accepted for that call. |
 | `PERMISSION_ANSWER_REJECTED` | `callId` (when it was a string), `reason`, `waiting` | A `PERMISSION_ANSWER` line was not used: `reason` says why, `waiting` lists the call ids still waiting. |
 | `AGENT_SPAWNING`, `AGENT_RUNNING` | `agentId`, `taskId`, `parentAgentId`, `contractId`, `contractRole` | A delegated agent starts. |

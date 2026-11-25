@@ -103,11 +103,37 @@ export function defineList<Ctx>(list: NamedList<Ctx>): ListName {
   return list.name as ListName;
 }
 
-/** The list registered under a name; throws for a name no command defined. */
+/**
+ * The label of each value a list showed, by list: a value picked from a list (an id such as "qm-1") is shown by its
+ * label wherever a person reads it (the form, the question before it runs, the outcome); the id is what is sent.
+ * Kept as the lists are read; the newest read of a list wins.
+ */
+const pickedLabels = new Map<string, Map<string, string>>();
+const PICKED_LABELS_PER_LIST = 500;
+
+function rememberLabels(name: string, rows: readonly ListRow[]): void {
+  const labels = new Map<string, string>();
+  for (const row of rows.slice(0, PICKED_LABELS_PER_LIST)) if (row.label && row.label !== row.value) labels.set(row.value, row.label);
+  pickedLabels.set(name, labels);
+}
+
+/** A value of a list as a person reads it: its label when the list showed one, else the value itself. */
+export function pickedLabel(name: ListName | string, value: string): string {
+  return pickedLabels.get(name)?.get(value) ?? value;
+}
+
+/** The list registered under a name; throws for a name no command defined. Its reads keep the labels they show. */
 export function listByName<Ctx = unknown>(name: ListName | string): NamedList<Ctx> {
-  const list = lists.get(name);
+  const list = lists.get(name) as unknown as NamedList<Ctx> | undefined;
   if (!list) throw new Error(`No live list named "${name}" is defined.`);
-  return list as unknown as NamedList<Ctx>;
+  return {
+    ...list,
+    read: async (ctx, earlier, signal) => {
+      const rows = await list.read(ctx, earlier, signal);
+      rememberLabels(list.name, rows);
+      return rows;
+    },
+  };
 }
 
 /** Every defined list, for the generators and the check. */
@@ -118,4 +144,30 @@ export function allLists(): readonly NamedList<unknown>[] {
 /** Read a list's rows with the earlier answers it depends on. */
 export async function readList<Ctx>(name: ListName, ctx: Ctx, earlier: Readonly<Record<string, string>>, signal?: AbortSignal): Promise<readonly ListRow[]> {
   return listByName<Ctx>(name).read(ctx, earlier, signal ?? new AbortController().signal);
+}
+
+/**
+ * Every value picked from a list shown by its label: a live list's (ActionShape inputs with list choices) and a fixed
+ * list's (`{ value, label }` choices), each of several picked too; other values as they are.
+ */
+export function valuesAsShown(inputs: ReadonlyArray<{ readonly id: string; readonly choices?: unknown }>, values: Readonly<Record<string, string>>): Record<string, string> {
+  const shown: Record<string, string> = { ...values };
+  for (const input of inputs) {
+    const value = values[input.id];
+    if (value === undefined) continue;
+    if (Array.isArray(input.choices)) {
+      const fixed = new Map((input.choices as ReadonlyArray<{ readonly value?: unknown; readonly label?: unknown }>)
+        .filter((choice) => typeof choice?.value === 'string' && typeof choice.label === 'string')
+        .map((choice) => [choice.value as string, choice.label as string]));
+      shown[input.id] = fixed.get(value) ?? value.split(',').map((part) => fixed.get(part.trim()) ?? part.trim()).join(', ');
+      if (!fixed.has(value) && !value.split(',').some((part) => fixed.has(part.trim()))) shown[input.id] = value;
+      continue;
+    }
+    const choices = input.choices as { readonly list?: string } | undefined;
+    if (!choices || typeof choices.list !== 'string') continue;
+    // A value picked whole, else each of several picked ("a,b": a list input that takes more than one).
+    const whole = pickedLabel(choices.list, value);
+    shown[input.id] = whole !== value ? whole : value.split(',').map((part) => pickedLabel(choices.list!, part.trim())).join(', ');
+  }
+  return shown;
 }

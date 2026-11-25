@@ -112,6 +112,13 @@ export const queryKeys = {
   // The one-event read that answers "is a calendar connected": shared by the
   // account status in Settings and the new-chat starters.
   calendarProbe: ['calendar', 'surface-probe'] as const,
+  // Whether a calendar is set up (the capability calendar.status), then the one-event read: the account box in Settings.
+  calendarSetUp: ['calendar', 'surface-probe', 'set-up'] as const,
+  // Whether the mailbox is set up and answers (the capability mail.status): the new-chat mail starter. A read that
+  // answers either way, so a new chat with no mail set up asks nothing the daemon refuses.
+  mailStatus: ['email', 'status'] as const,
+  // The same capability's whole answer (reachable, and why not by the refusal's code): the mail account box in Settings.
+  mailStatusDetail: ['email', 'status', 'detail'] as const,
   // email.*, the inbox listing is keyed on the filters that change what the daemon
   // fetches from IMAP (limit, unread-only, since), so toggling a filter refetches
   // rather than re-rendering a window that no longer matches the controls. No wire

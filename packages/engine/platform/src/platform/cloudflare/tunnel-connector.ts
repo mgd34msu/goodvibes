@@ -163,7 +163,7 @@ export class CloudflareTunnelConnector implements CloudflareTunnelConnectorHandl
     }
     if (!config.enabled && options.force !== true) {
       await this.stop();
-      this.set({ state: 'stopped', tunnelId: config.tunnelId, detail: 'The Cloudflare integration is off, so the tunnel connector is not running.', next: ['Run /cloudflare provision to turn it on'] });
+      this.set({ state: 'stopped', tunnelId: config.tunnelId, detail: 'The Cloudflare integration is off, so the tunnel connector is not running.', next: ['Deploy from the Cloudflare tab of Devices and network to turn it on'] });
       return this.current;
     }
     const token = await this.resolveToken(config.tunnelTokenRef);
@@ -183,7 +183,7 @@ export class CloudflareTunnelConnector implements CloudflareTunnelConnectorHandl
         state: 'not-configured',
         tunnelId: config.tunnelId,
         detail: `Tunnel ${config.tunnelId} is provisioned but no tunnel token is stored.`,
-        next: [`Store the token as goodvibes://secrets/goodvibes/${CLOUDFLARE_TUNNEL_TOKEN_KEY} (or set cloudflare.tunnelTokenRef), or run /cloudflare provision again`],
+        next: [`Store the token as goodvibes://secrets/goodvibes/${CLOUDFLARE_TUNNEL_TOKEN_KEY} (or set cloudflare.tunnelTokenRef), or deploy again from the Cloudflare tab of Devices and network`],
       });
       return this.current;
     }
@@ -195,7 +195,7 @@ export class CloudflareTunnelConnector implements CloudflareTunnelConnectorHandl
         state: 'not-installed',
         tunnelId: config.tunnelId,
         detail: 'cloudflared is not installed, so nothing connects the tunnel and the daemon hostname does not reach this daemon.',
-        next: [`Install cloudflared (${INSTALL_URL}), then run /cloudflare provision again or restart the daemon`],
+        next: [`Install cloudflared (${INSTALL_URL}), then deploy again from the Cloudflare tab of Devices and network, or restart the daemon`],
       });
       return this.current;
     }
@@ -349,7 +349,7 @@ export class CloudflareTunnelConnector implements CloudflareTunnelConnectorHandl
       tunnelId: running.tunnelId,
       detail: `cloudflared ${reason}. It is started again in ${Math.round(delayMs / 1000)} s.`,
       restarts: this.current.restarts + 1,
-      next: ['Check the daemon log for cloudflared errors', 'If the tunnel was deleted in Cloudflare, run /cloudflare provision again'],
+      next: ['Check the daemon log for cloudflared errors', 'If the tunnel was deleted in Cloudflare, deploy again from the Cloudflare tab of Devices and network'],
     });
     this.restartTimer = setTimeout(() => {
       this.restartTimer = null;

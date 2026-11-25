@@ -14,7 +14,7 @@ import { fixedInput, pickedInput, storeCapability, storeRead, wordsInput } from 
 export const AGENTS_HANDED_OFF_LIST = 'agents.handed-off' as ListName;
 
 export const AGENTS_HAND_OFF = storeCapability({
-  id: 'agents.hand-off', group: 'work', actionId: 'hand-off', label: 'Hand coding work to the terminal app', word: 'hand-off',
+  id: 'agents.hand-off', group: 'work', actionId: 'hand-off', label: 'Hand over coding work to the terminal app', word: 'hand-off',
   inputs: [
     wordsInput({ id: 'task', label: 'The work', help: 'What to build, fix or review, in full', why: 'your own words for the work', kind: 'long-text', typed: { tail: true } }),
     fixedInput({ id: 'review', label: 'Reviewed', help: 'Whether the terminal app has its work reviewed', choices: [{ value: 'no', label: 'No review asked' }, { value: 'yes', label: 'Review the work too' }], typed: { flag: '--review', switchOn: 'yes' }, optional: { default: 'no', means: 'no review asked' } }),

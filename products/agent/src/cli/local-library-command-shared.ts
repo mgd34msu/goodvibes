@@ -11,7 +11,7 @@ import type { CliCommandRuntime } from './management.ts';
  * skill bundles): option parsing, success/failure envelopes, and registry
  * accessors. Split out of local-library-command.ts (the file
  * cleanly contained three independent command handlers glued together) so
- * personas-command.ts, skills-command.ts, and skill-bundle-command.ts can
+ * skills-command.ts and skill-bundle-command.ts can
  * share one option-parsing/output prelude without duplicating it.
  */
 

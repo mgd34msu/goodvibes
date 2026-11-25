@@ -22,7 +22,7 @@ This part covers work that runs without a conversation (scheduled routines, supe
     The daemon reads that tier, so this keeps working with this client closed.
   ```
 
-  The secret key name is `GOODVIBES_` followed by the setting key in upper case with dots and camel-case boundaries turned into `_`. The same value can be stored directly with `/secrets set GOODVIBES_SURFACES_TELEGRAM_BOT_TOKEN <value>`.
+  The secret key name is `GOODVIBES_` followed by the setting key in upper case with dots and camel-case boundaries turned into `_`. The same value can be stored directly as the secret `GOODVIBES_SURFACES_TELEGRAM_BOT_TOKEN` ("Store a secret" in Permissions and safety, Secrets, or `goodvibes secrets set GOODVIBES_SURFACES_TELEGRAM_BOT_TOKEN --user`).
 - Everything a service sends as the owner passes the permission gate described in "Permissions, decisions and safety": a new recipient is the owner's to allow, and a change asked for on a channel is the owner's to approve.
 
 ## Scheduled routines
@@ -106,7 +106,7 @@ Failures:
 
 ### Routines on a schedule, and a schedule's runs
 
-A routine becomes a schedule of the daemon with "Run a routine on a schedule" (`routines.promote`; `e` on a routine on the Routines tab of Automation, `p` on the Routines tab of Memory and knowledge), in every program, the web UI, a model's `capability_run` and `goodvibes do routines.promote`: when (a calendar pattern, an interval or a time, with a time zone for a pattern), where the answer goes (channels, routes, web addresses, linked surfaces, one per line), a name, a provider and model, and whether it starts paused. Only a routine switched on, reviewed and with nothing missing is put on one, and a repeat after a lost answer finds the schedule already made. "See routines put on a schedule" (`routines.receipts`), "See one schedule receipt" (`routines.receipt`) and "Check scheduled routines against their schedules" (`routines.reconcile`) read what was recorded. From the shell: `goodvibes-agent routines promote <routine-id> --cron "0 9 * * *" --timezone America/Chicago --yes`.
+A routine becomes a schedule of the daemon with "Run a routine on a schedule" (`routines.promote`; `p` on a routine on the Routines tab of Automation or of Memory and knowledge), in every program, the web UI, a model's `capability_run` and `goodvibes do routines.promote`: when (a calendar pattern, an interval or a time, with a time zone for a pattern), where the answer goes (channels, routes, web addresses, linked surfaces, one per line), a name, a provider and model, and whether it starts paused. Only a routine switched on, reviewed and with nothing missing is put on one, and a repeat after a lost answer finds the schedule already made. "See routines put on a schedule" (`routines.receipts`), "See one schedule receipt" (`routines.receipt`) and "Check scheduled routines against their schedules" (`routines.reconcile`) read what was recorded. From the shell: `goodvibes do routines.promote --input routine=<routine> --input how=cron --input when="0 9 * * *" --input tz=America/Chicago`.
 
 A schedule's runs are on Automation's Runs tab in every program: `s` stops one that is waiting or running (`schedule.stop-run`), `t` runs a failed one again (`schedule.retry-run`).
 
@@ -136,11 +136,11 @@ The model can list and create schedules with the `schedule` tool (its inputs are
 - A routine the terminal app keeps itself (with `daemon.enabled` off) has no owner inbox to fall back to: an answer with no surface is kept only in its run history.
 - A run's answer is owed from the moment the run ends (saved with the run's end) until its delivery is recorded. A daemon that stops in between delivers it at its next start, under the same identity, so a surface that drops repeats drops a second copy. A one-shot routine is removed only once its run's answer was delivered.
 - The model's `schedule` tool with `action:"remind"` does not send its text as is: at each run a model turn is started with the text framed as a reminder ("GoodVibes Agent scheduled reminder. Reminder: <text> ... Keep the reminder concise and state any next action"), and its answer is delivered. New schedule (`schedule.add`) sends what it does as written.
-- A scheduled run is an agent the daemon starts with the platform's tool set (files, shell, fetch, web search, MCP, channel tools, and the like). Once you have connected mail or a calendar (a Google account with `/google connect`, or a CalDAV server in `surfaces.calendar.caldavUrl` and `surfaces.calendar.caldavUser`), it also gets the `google` tool: `mail.list` and `mail.read` on the connected Gmail, and `calendar.list` on the daemon's calendar (the CalDAV server when one is set, otherwise the Google calendar). Its calls pass the same permission gate as any turn. A send or a calendar event it makes may not carry what it read from mail or a calendar, and `calendar.create` is refused in a scheduled run (nobody asked for that event at that moment). A routine limited with `--tool` gets the tool only when `google` is listed.
+- A scheduled run is an agent the daemon starts with the platform's tool set (files, shell, fetch, web search, MCP, channel tools, and the like). Once you have connected mail or a calendar (a Google account with "connect" on the Google tab of Mail, calendar and channels, or a CalDAV server in `surfaces.calendar.caldavUrl` and `surfaces.calendar.caldavUser`), it also gets the `google` tool: `mail.list` and `mail.read` on the connected Gmail, and `calendar.list` on the daemon's calendar (the CalDAV server when one is set, otherwise the Google calendar). Its calls pass the same permission gate as any turn. A send or a calendar event it makes may not carry what it read from mail or a calendar, and `calendar.create` is refused in a scheduled run (nobody asked for that event at that moment). A routine limited with `--tool` gets the tool only when `google` is listed.
 
 ### A daily 8 am summary of mail and calendar delivered to Telegram
 
-1. Connect the mail and calendar to the daemon: in the Agent, `/google connect` (Gmail and Google Calendar over OAuth, Path B in "Google" below: the model's `google` tool reads mail only through it, in a conversation as in a scheduled run), or set a CalDAV server for the calendar. `/google status` shows the connection.
+1. Connect the mail and calendar to the daemon: "connect" on the Google tab of Mail, calendar and channels (Gmail and Google Calendar over OAuth, Path B in "Google" below: the model's `google` tool reads mail only through it, in a conversation as in a scheduled run), or set a CalDAV server for the calendar. The Google tab shows the connection; "check it" proves it by use.
 2. Set up Telegram as in "Telegram" (owner claim accepted) and give it a delivery chat: `/settings set surfaces.telegram.defaultChatId <your-numeric-id>`.
 3. Create the schedule (any program): open Automation, press `n` (New schedule), write what it does ("Summarize my unread mail from the last 24 hours and today's calendar events. Group the mail by sender and give the events in time order."), choose "On a calendar pattern" with `0 8 * * *` and the time zone `America/Chicago`, and under "Anything else?" put `telegram` in "Answer goes to". From a script:
 
@@ -338,26 +338,15 @@ The check-in settings own the scheduled job named `Proactive check-in`, which Au
 
 Agent and workstream outcomes, approvals waiting and budget alerts are announced to the notification transports: Slack, Discord and webhook URLs.
 
-```text
-/notify add https://ntfy.sh/<your-topic>
-/notify list            each address shown by its site; --show reveals them (the owner's only)
-/notify remove 1
-/notify clear           removes every address for good (/notify add puts one back)
-/notify test            sends a test message to each address (it cannot be called back)
-/notify send <message>  sends it at once, as typed (it cannot be called back)
-/notify failed          notifications this app could not deliver
-/notify resend <id|all> [--to-current]
-/notifications          open the notification history view
-```
+The webhook addresses are one list, the daemon's, for every program on this machine. In either terminal program they are the Notifications tab of Mail, calendar and channels (`Ctrl+G` then `m`): `n` adds an address (asked for on a hidden line), `x` stops sending to the selected one, `Shift+D` removes every address (asked first: it cannot be undone), `t` sends a test to each, `s` sends a notification you write, `v` shows the full addresses (asked first: each carries its key). The Failed notifications tab lists what could not be delivered (Slack, Discord, webhooks): `Enter` sends the selected one again, `a` sends them all again, `c` sends it where its Slack or Discord channel posts now, `l` lists them in words. A model, an outside agent or a script reaches the same as the capabilities `notify.list`, `notify.add`, `notify.remove`, `notify.clear`, `notify.test`, `notify.send`, `notify.failed` and `notify.resend` (`capability_run`, `capabilities.run`, `goodvibes do`). The notice history is the Notices tab of the System place (`Ctrl+N`).
 
-`/notify` and `/notifications` are one command each in both apps; `/notify` alone lists its actions, and a model or script running it bare gets the list. The address after `/notify add` is asked for on a hidden line in the guided path; `/notify remove` takes the number `/notify list` shows.
-
-- `/notify add` keeps each URL in the secret store (key `GOODVIBES_NOTIFY_WEBHOOK_<id>`, daemon tier) and adds its `goodvibes://secrets/` reference to `notifications.webhookUrls`; the URL is read only when a notification is sent. Each URL carries its own key, so a literal URL written into the list is refused, screens show the host only, and the address typed after `/notify add` is kept as `<redacted>` in the input history. `/notify remove` and `/notify clear` delete the stored URLs too. When a stored URL cannot be deleted (or the session has no secret store), the reply names its key and the command `/secrets delete <key>` that removes it. The setting applies at the next start.
+- Adding keeps each URL in the secret store (key `GOODVIBES_NOTIFY_WEBHOOK_<id>`, daemon tier) and adds its `goodvibes://secrets/` reference to the daemon's `notifications.webhookUrls`; the URL is read only when a notification is sent. Each URL carries its own key, so a literal URL written into the list is refused and screens show the host only. Removing an address, or every address, deletes the stored URLs too. A program that sends a notice on its own events reads the daemon's list when it starts.
+- Until 3.5.0 the terminal app, the Agent and the daemon each kept a list. The first start of this version carries every address of each into the daemon's list (the same address once); the programs' own settings keep their old value, so a 3.5.0 program after a rollback still sends where it did.
 - An address on your own network (a self-hosted ntfy or a webhook receiver on the LAN, written as `http://192.168.1.20/...`, `http://ntfy.home.lan/...` or `http://localhost:8080/...`) is delivered to only when its host is listed in `network.privateDeliveryHosts`, shown in `/settings` as "Machines on your network deliveries may reach" (for example `192.168.1.20, ntfy.home.lan` or `*.home.lan`). A listed host may be a private, loopback, link-local, unique-local or shared (CGNAT, Tailscale) address, and the request goes to the address that was checked; a cloud metadata address is never reached. A host that is not listed is refused when it is added (a private or loopback address written in the URL) or when the notification is sent (a name that resolves to one), and the refusal names the setting and the host to add, for example `Webhook URL host 192.168.1.20 is on your own network and is not approved. To deliver to a host on your own network, add "192.168.1.20" to the setting "Machines on your network deliveries may reach" (network.privateDeliveryHosts).` The same list admits a watcher's target and the default webhook target; it never admits an address someone else supplied, such as the callback URL a webhook sender bound.
 - Slack and Discord carry notifications only when they have somewhere to post: an incoming-webhook URL (`SLACK_WEBHOOK_URL`, `DISCORD_WEBHOOK_URL`) or a bot token with `surfaces.slack.defaultChannel` / `surfaces.discord.defaultChannelId`.
 - A notification that fails is retried, then kept in a failed list. The daemon keeps its own list on disk (operator methods `notifications.deadLetters.list` and `notifications.deadLetters.replay`). A resent entry keeps its id and stays in the list (and on disk) until its resend is delivered, retries included; a resend that fails for good replaces it in place, and a second resend of an entry still being resent starts nothing. A notification still waiting to retry when the program stops is kept in the failed list (`The program stopped while this notification waited to retry; it was not sent. Resend it from the failed list.`), so it can be resent after the restart. A list that cannot be written is reported as a failure, and a terminal takes over another terminal's list file only after its own file was written.
 - Every attempt at one notification, retries and resends included, carries the same identity: a Discord bot post sends it as the message nonce (Discord drops the repeat) and a `notifications.webhookUrls` webhook receives it as the `Idempotency-Key` header.
-- A notification is sent only to the destination it was queued for: a retry waiting while the Slack or Discord webhook or default channel changed ends in the failed list with the reason instead of going to the new place. `/notify resend` (and `notifications.deadLetters.replay`) refuses one whose channel now posts somewhere else, naming the old and new destination (`destination-changed`), and leaves it in the list; `--to-current` (`toCurrent: true`) sends it to where the channel posts now.
+- A notification is sent only to the destination it was queued for: a retry waiting while the Slack or Discord webhook or default channel changed ends in the failed list with the reason instead of going to the new place. Sending it again (and `notifications.deadLetters.replay`) refuses one whose channel now posts somewhere else, naming the old and new destination (`destination-changed`), and leaves it in the list; "send it where the channel posts now" (`toCurrent: true`) sends it there.
 - `notifications.pushApproval`, `notifications.pushNeedsInput` and `notifications.pushCompletion` decide which events go to paired devices as push notifications. `notifications.adaptiveSuppression` and `notifications.burstThreshold` quiet bursts. `notifications.blockedEscalation*` decide when a blocked approval is raised again.
 
 ## Mail
@@ -383,7 +372,7 @@ Mail is read and sent by the daemon over IMAP and SMTP (or Gmail through Google,
 2. Store the password where the daemon reads it:
 
    ```text
-   /secrets set GOODVIBES_SURFACES_EMAIL_PASSWORD <your-password>
+   goodvibes secrets set GOODVIBES_SURFACES_EMAIL_PASSWORD --user
    ```
 
    The terminal app files this daemon-owned credential in the daemon's store.
@@ -422,11 +411,11 @@ Status failures and fixes:
 | Daemon code | Meaning | Fix |
 | --- | --- | --- |
 | `EMAIL_NOT_CONFIGURED` | Host or user missing. | Steps 1 and 2 above. |
-| `EMAIL_CREDENTIALS_MISSING` | Password secret missing. | `/secrets set GOODVIBES_SURFACES_EMAIL_PASSWORD <password>` |
+| `EMAIL_CREDENTIALS_MISSING` | Password secret missing. | "Store a secret" `GOODVIBES_SURFACES_EMAIL_PASSWORD` (Permissions and safety, Secrets) |
 | `EMAIL_CREDENTIALS_UNREADABLE` (HTTP 412) | The secret store on the daemon's computer could not be read, so the mailbox password, which may well be stored, could not be read; the answer gives the cause. The Inbox says it could not read your inbox because the secret store could not be read, and the web mail view "The secret store could not be read"; neither asks for the password. | Make the store readable on that computer (its key file, `~/.goodvibes/secrets.key`, must be the one the store was written with); nothing needs to be given again. |
 | `EMAIL_NOT_ENABLED` | The mailbox is not set up: an IMAP host, SMTP host or account is missing. | Steps 1 and 2 above. |
-| `EMAIL_CREDENTIALS_REJECTED` (HTTP 424) | The IMAP or SMTP server refused the stored password (an app password revoked or changed). Not a sign-in failure: the daemon answers 424, never 401. | Store a current password with `/secrets set GOODVIBES_SURFACES_EMAIL_PASSWORD <password>`. |
-| unreachable | The daemon cannot be reached. | Check the daemon with `/health` and `goodvibes status`. |
+| `EMAIL_CREDENTIALS_REJECTED` (HTTP 424) | The IMAP or SMTP server refused the stored password (an app password revoked or changed). Not a sign-in failure: the daemon answers 424, never 401. | Store a current password with "Store a secret" `GOODVIBES_SURFACES_EMAIL_PASSWORD` (Permissions and safety, Secrets). |
+| unreachable | The daemon cannot be reached. | Check the daemon on the Health tab of the System place and with `goodvibes status`. |
 
 ### Mailbox settings: `mail.settings`, `mail.set`, `mail.password`
 
@@ -471,7 +460,7 @@ The daemon can watch mailboxes and tell the owner when mail arrives. Arrival is 
 /settings set surfaces.email.inbound.enabled true
 /settings set surfaces.email.inbound.accounts "[\"main\",\"signups\"]"
 /settings set surfaces.email.inbound.mailboxes "{\"signups\":{\"host\":\"imap.example.com\",\"user\":\"signups@example.com\"}}"
-/secrets set GOODVIBES_EMAIL_INBOUND_SIGNUPS_PASSWORD <password>
+goodvibes secrets set GOODVIBES_EMAIL_INBOUND_SIGNUPS_PASSWORD --user
 ```
 
 `surfaces.email.inbound.accounts` and `surfaces.email.inbound.mailboxes` are text settings that hold JSON, so the JSON is written as one quoted string (as above); a bare array or object is not a string and is refused.
@@ -502,7 +491,7 @@ Prerequisites: a CalDAV server URL, user and password (or an app password).
    ```text
    /settings set surfaces.calendar.caldavUrl https://caldav.example.com/dav/
    /settings set surfaces.calendar.caldavUser you@example.com
-   /secrets set GOODVIBES_SURFACES_CALENDAR_CALDAV_PASSWORD <your-password>
+   goodvibes secrets set GOODVIBES_SURFACES_CALENDAR_CALDAV_PASSWORD --user
    ```
 
    Optional: `surfaces.calendar.defaultCalendarId` and `surfaces.calendar.calendars`.
@@ -554,11 +543,11 @@ A subscribed feed is read at the Agent's start and again whenever the calendar i
 Connecting a calendar account over OAuth needs your own OAuth client id: no client id ships with the product. Steps:
 
 1. Register a free OAuth app (Google Cloud Console for Google, the Azure portal for Microsoft) and copy its client id. A desktop or public-client app needs no secret.
-2. Keep the client id with `/calendar use-app google <client-id>` (or `outlook`); add `--secret` to be asked for a client secret, masked. The id goes in `calendar.google.clientId` or `calendar.microsoft.clientId`; a client secret goes in the secret store and is referenced by `calendar.google.clientSecretRef` / `calendar.microsoft.clientSecretRef`. The rows "Use your own Google Calendar app" and "Use your own Outlook calendar app" under `/agent personal-ops` open the same action.
+2. Keep the client id with `/calendar use-app google <client-id>` (or `outlook`); add `--secret` to be asked for a client secret, masked. The id goes in `calendar.google.clientId` or `calendar.microsoft.clientId`; a client secret goes in the secret store and is referenced by `calendar.google.clientSecretRef` / `calendar.microsoft.clientSecretRef`. The rows "Use your own Google Calendar app" and "Use your own Outlook calendar app" in the Agent workspace's personal-ops area (`Ctrl+G` then `w`) open the same action.
 3. Run `/calendar connect google` (or `outlook`). A browser opens; approve. On a machine with no browser, add `--with device`: Outlook shows a device code to enter on another device; Google prints a link to open anywhere, and after approving you run `/calendar connect google --with code` within ten minutes and give the 127.0.0.1 address the browser landed on (asked for masked).
 4. The answer lists the account, the transport and the scopes. `/calendar upcoming` then merges that account's events.
 
-A Google account has one connection on a machine. `/calendar connect google`, `/google connect` and the model's `google` tool all store the same one (the refresh token `GOODVIBES_GOOGLE_OAUTH_REFRESH_TOKEN`, and beside it `GOODVIBES_GOOGLE_OAUTH_ACCOUNT`: the account's label, the scopes granted at connect and a digest of the token, never the token), and the daemon's calendar (the web Calendar), its Gmail access and the Agent's `/calendar` all read it. Every Google sign-in asks for the same scopes: `gmail.readonly`, `gmail.send`, `calendar.readonly`, `calendar.events`. A connection made earlier with fewer (a `/calendar connect google` from 3.4.4 or before has no Gmail scope; one from `/google` has no `calendar.readonly`, which listing calendars needs) works for what it was granted and names the missing scope when a feature needs it; connecting once more grants them all. A Microsoft account connected with `/calendar connect outlook` is one connection too (`GOODVIBES_CALENDAR_MICROSOFT_TOKENS`, with the client id in `calendar.microsoft.clientId`): the Agent's `/calendar` and the daemon's calendar (the web Calendar) both read it. The daemon serves it beside the CalDAV server or the Google connection: a read of the default calendars returns the events of both, Outlook's events and calendars carry ids that start with `outlook:` (its calendars are listed as "<name> (Outlook)"), and a read, change or removal of an `outlook:` event goes to Outlook. With Outlook the only account, it is the daemon's calendar and a new event goes there. An `.ics` import into an Outlook calendar is refused (`CALENDAR_NOT_SUPPORTED`): import it in Outlook. With no usable account at all, the answer (`CALENDAR_NOT_CONFIGURED`) names the accounts that exist and why none can be read; when the reason is a secret store this computer cannot read, the answer is `CALENDAR_CREDENTIALS_UNREADABLE` ("No calendar this daemon can read: …" with the cause), and the Agent's `/calendar accounts` says the store could not be read instead of "not connected".
+A Google account has one connection on a machine. `/calendar connect google`, "connect" on the Google tab and the model's `google` tool all store the same one (the refresh token `GOODVIBES_GOOGLE_OAUTH_REFRESH_TOKEN`, and beside it `GOODVIBES_GOOGLE_OAUTH_ACCOUNT`: the account's label, the scopes granted at connect and a digest of the token, never the token), and the daemon's calendar (the web Calendar), its Gmail access and the Agent's `/calendar` all read it. Every Google sign-in asks for the same scopes: `gmail.readonly`, `gmail.send`, `calendar.readonly`, `calendar.events`. A connection made earlier with fewer (a `/calendar connect google` from 3.4.4 or before has no Gmail scope; one from the Agent's Google connection before 3.4.5 has no `calendar.readonly`, which listing calendars needs) works for what it was granted and names the missing scope when a feature needs it; connecting once more grants them all. A Microsoft account connected with `/calendar connect outlook` is one connection too (`GOODVIBES_CALENDAR_MICROSOFT_TOKENS`, with the client id in `calendar.microsoft.clientId`): the Agent's `/calendar` and the daemon's calendar (the web Calendar) both read it. The daemon serves it beside the CalDAV server or the Google connection: a read of the default calendars returns the events of both, Outlook's events and calendars carry ids that start with `outlook:` (its calendars are listed as "<name> (Outlook)"), and a read, change or removal of an `outlook:` event goes to Outlook. With Outlook the only account, it is the daemon's calendar and a new event goes there. An `.ics` import into an Outlook calendar is refused (`CALENDAR_NOT_SUPPORTED`): import it in Outlook. With no usable account at all, the answer (`CALENDAR_NOT_CONFIGURED`) names the accounts that exist and why none can be read; when the reason is a secret store this computer cannot read, the answer is `CALENDAR_CREDENTIALS_UNREADABLE` ("No calendar this daemon can read: …" with the cause), and the Agent's `/calendar accounts` says the store could not be read instead of "not connected".
 
 Up to 3.4.4, `/calendar connect google` kept a second Google connection (`GOODVIBES_CALENDAR_GOOGLE_TOKENS`) that the daemon never read. The daemon's first start of 3.4.5 moves it into the one connection, once, and says "Carried forward from the earlier version: 1 Google connection." When a different Google connection was already there, that one stays (the daemon's mail and calendar were using it), the earlier one is kept unused, and the notice names both accounts and how to choose the other: `/calendar connect google` signed in as it. Going back to 3.4.4 after the move: the daemon, the web Calendar and mail keep the connection, and the Agent's `/calendar accounts` lists no Google account until `/calendar connect google` is run there.
 
@@ -570,26 +559,27 @@ On a CalDAV calendar each occurrence of a recurring event has its own id (the re
 
 ## Google (Gmail and Google Calendar)
 
-The Agent's `/google` connects one Google account for both mail and calendar. Saying "connect my Google account" to the Agent runs the same flow.
+One Google account serves both mail and calendar, and its connection is the daemon's: every Google setting is the daemon's and every Google credential is in the daemon's secret store. Connecting, checking, asking for consent again, adopting and disconnecting run in the daemon, so they work the same from the terminal app, the Agent, the web UI, a script (`goodvibes do google.connect`) or a model's call (`capability_run`, put to you first because it stores a credential). Saying "connect my Google account" in a conversation runs the same.
 
-```text
-/google connect                 work out the shortest route and connect
-/google status                  what is connected, proven by reading mail and calendar
-/google reauthorize             fresh consent covering mail and calendar
-/google forget                  remove stored Google credentials: shows what would go and asks; the yes removes only the values the question named, and keeps one stored or replaced since
-/google adopt [--replace]       take up Google credentials from files on this machine (~/.gmail-mcp); --replace replaces stored ones
-/google client-file <path>      store an OAuth client JSON you already have, then ask for consent
-/google client <client-id> <client-secret>
-/google account <address>       the Gmail address to connect as
-/google calendar-address <url>  store the private iCal address (read-only calendar)
-/google setup [--path app-password|oauth|existing-client]
-/google runbook                 print the step-by-step instructions
-/google waiting                 the sends the content check refused, exactly as they would go out
-/google approve [<n>]           shows the send and asks, then sends it exactly as shown (without a number: the one the last /google waiting showed alone, refused if the waiting sends changed since; with none shown, the one waiting send)
-/google drop <n>                drop a refused send
-```
+The controls are on the **Google** tab of **Mail, calendar and channels** (`Ctrl+G` then `m`). The tab shows the connection (connected, needs your consent, mail by app password, not connected, or "could not be read" when the secret store cannot be read: never "not connected" then) and, under it, the steps of the connection under way or the last one, each as it starts and ends, read again on the daemon's `google` notice with no key pressed. Keys on the connection (each rebindable in the Keys place):
 
-The Agent workspace's Inbox & calendar rows open these same `/google` actions. The terminal app has no `/google`; it uses the mail and calendar the daemon already has.
+| Key | Control | Capability |
+| --- | --- | --- |
+| `c` | connect: works out the shortest route and connects; installs what it needs as it goes (the Google Cloud SDK, about 500 MB, into your home folder: pressing it is the request, nothing is asked first); its consent link opens in a pane of its own, with the copy key | `google.connect` |
+| `c` while the link waits | show the consent link again | `google.connect` |
+| `s` while one runs | stop connecting: the step under way ends (a waiting consent link stops working), nothing more is set up, and it says what was set up and kept and what was not | `google.stop` |
+| `k` | check it: reads the mailbox and the calendar once and says, for what failed, what to do; a part refused for a missing scope is named at once, and "ask for consent again" is what renews it (nothing waits on a consent) | `google.status` |
+| `a` | ask for consent again: a fresh consent for mail and calendar together; the current connection stays in use until Google returns a new token | `google.reauthorize` |
+| `x` | disconnect: removes the stored refresh token, OAuth client secret, app password and private calendar address (asks first: it cannot be undone) | `google.forget` |
+| `o` | connect by one route: app password, a new OAuth client, or an OAuth client you have | `google.setup` |
+| `i` | use your client id and secret (the secret typed hidden) | `google.client` |
+| `f` | use your client file (a client JSON on the daemon's machine) | `google.client-file` |
+| `u` | take up credentials on this machine (`~/.gmail-mcp` on the daemon's machine; the files are read and left as they are) | `google.adopt` |
+| `m` | the Gmail address mail is signed in and sent as | `google.account` |
+| `l` | calendar by private address (read once, then kept in the secret store; typed hidden) | `google.calendar-address` |
+| `w` | the written steps for connecting by hand | `google.runbook` |
+
+One connection runs at a time: a second press while one is under way says so and starts nothing, and "stop connecting" ends it. The line under the list says what the press answered until the connection moves on (approved, stopped, or changed elsewhere); the list then says where it stands. A connection someone started from a program nobody is sitting at (a model's call, a script that is not the owner's own) puts its consent link in Waiting for you instead. A send the content check refused waits in **Waiting for you**, under Sends, where it is sent exactly as shown or dropped (`google.approve`, `google.drop`; `google.waiting` lists them).
 
 ### Choosing a path
 
@@ -609,24 +599,24 @@ Start with the app password path. The two coexist.
 
 Prerequisites: 2-Step Verification on the Google account.
 
-1. `/google setup --path app-password` (or `/google connect`). A browser window opens at `https://myaccount.google.com/apppasswords`. Google blocks automated browsers at sign-in, so sign in once by hand in that window; the profile is kept for later runs.
+1. "connect by one route", An app password (or "connect"). A browser window opens on the daemon's machine at `https://myaccount.google.com/apppasswords`. Google blocks automated browsers at sign-in, so sign in once by hand in that window; the profile is kept for later runs. Someone who signed in this way through the 3.5.0 Agent does not sign in again: the Agent's browser profile for Google is carried into the daemon's the first time the daemon opens one (the Agent's own copy is left as it was), unless the Agent's browser has it open at that moment, which the run says.
 2. If 2-Step Verification is off, turn it on at `https://myaccount.google.com/signinoptions/twosv`.
 3. The flow creates an app password named `goodvibes-agent` (by hand: type that name, click Create, copy the 16-character password, paste it when asked). It is stored as the secret `GOODVIBES_SURFACES_EMAIL_PASSWORD`.
-4. The flow writes the Gmail endpoints: IMAP `imap.gmail.com:993`, SMTP `smtp.gmail.com:587` with STARTTLS. Give the address with `/google account you@gmail.com` when asked.
+4. The flow writes the Gmail endpoints: IMAP `imap.gmail.com:993`, SMTP `smtp.gmail.com:587` with STARTTLS. Give the address with "the Gmail address" on the Google tab when asked.
 5. The flow opens a real IMAP and SMTP session to prove the password; nothing is sent.
-6. For calendar, the flow captures the "Secret address in iCal format" from Google Calendar settings (Settings for my calendars, Integrate calendar). By hand: `/google calendar-address <url>`. It is stored as the secret `GOODVIBES_CALENDAR_GOOGLE_ICS_URL` and subscribed read-only. Treat that URL as a password.
+6. For calendar, the flow captures the "Secret address in iCal format" from Google Calendar settings (Settings for my calendars, Integrate calendar). By hand: "calendar by private address" on the Google tab. It is read once, then stored as the secret `GOODVIBES_CALENDAR_GOOGLE_ICS_URL`. Treat that URL as a password.
 7. The flow reads calendar events to prove it works.
 
 ### Path B: OAuth
 
-Prerequisites: a Google Cloud account. The `gcloud` CLI is installed by the flow when it is not on this computer (`/google connect` is the request: nothing is asked first): the Google Cloud SDK archive (about 500 MB) is downloaded into your home folder, unpacked and its installer run, and each step is said as it happens: `Installing Google Cloud SDK, 511 MB, into ~/google-cloud-sdk: downloading`, `...: 25% downloaded` at each quarter, `...: unpacking`, `...: running its installer`. In the `/google` list the row says `installs Google Cloud SDK, about 500 MB` while gcloud is missing. What the flow found is said first, before its steps.
+Prerequisites: a Google Cloud account. The `gcloud` CLI is installed by the daemon when it is not on its machine (pressing "connect" is the request: nothing is asked first): the Google Cloud SDK archive (about 500 MB) is downloaded into your home folder, unpacked and its installer run, and each step is said on the Google tab as it happens: `Installing Google Cloud SDK, 511 MB, into ~/google-cloud-sdk: downloading`, `...: 25% downloaded` at each quarter, `...: unpacking`, `...: running its installer`. What the flow found is said first, before its steps.
 
 1. `gcloud auth login` (you choose the account and click Allow).
 2. The flow selects or creates a Cloud project and enables `gmail.googleapis.com` and `calendar-json.googleapis.com`.
 3. Fill in the OAuth consent screen at `https://console.cloud.google.com/auth/branding`: app name `goodvibes agent`, your support email, Audience External, your contact email, agree, Create.
 4. At `https://console.cloud.google.com/auth/audience`, set Publishing status to **In production** (PUBLISH APP, Confirm). An app left in Testing gets refresh tokens that expire after seven days, and the integration then stops silently.
-5. At `https://console.cloud.google.com/auth/clients`, Create client, type Desktop app, name `goodvibes agent`, Create. Copy the client id and secret (the secret is shown in full only once) and run `/google client <client-id> <client-secret>`.
-6. Open the consent link the flow prints. Check the account shown at the top. Expect "Google hasn't verified this app": click Advanced, then "Go to goodvibes agent (unsafe)". Leave every permission ticked; Continue. The browser lands on a local page confirming the connection.
+5. At `https://console.cloud.google.com/auth/clients`, Create client, type Desktop app, name `goodvibes agent`, Create. Copy the client id and secret (the secret is shown in full only once) and hand them over with "use your client id and secret" on the Google tab.
+6. Open the consent link the Google tab shows in its own pane (the copy key copies it). Check the account shown at the top. Expect "Google hasn't verified this app": click Advanced, then "Go to goodvibes agent (unsafe)". Leave every permission ticked; Continue. The browser lands on a local page confirming the connection.
 7. The flow reads your mailbox and calendar with the new credential and reports the account, both answers and the publishing status.
 
 Scopes requested: `gmail.readonly`, `gmail.send`, `calendar.readonly`, `calendar.events`. Stored: the client secret as `GOODVIBES_CALENDAR_GOOGLE_CLIENT_SECRET_REF` (none is needed for a Desktop-app client signed in with PKCE), the refresh token as `GOODVIBES_GOOGLE_OAUTH_REFRESH_TOKEN`, the same one connection `/calendar connect google` stores; settings `calendar.google.clientId`, `calendar.google.clientSecretRef`, `google.oauth.projectId`, `google.oauth.publishingStatus`. No secret is written to settings files, logs, transcripts or status output.
@@ -636,12 +626,12 @@ Scopes requested: `gmail.readonly`, `gmail.send`, `calendar.readonly`, `calendar
 | Symptom | Fix |
 | --- | --- |
 | "This browser or app may not be secure" | Sign in by hand in the window that opened, then re-run. |
-| `IMAP: The mail server rejected the credentials for <address>.` or `SMTP: SMTP AUTH PLAIN failed: 535 …` | The app password is wrong or revoked. The failure shows the steps: delete the `goodvibes-agent` entry at the app passwords page, create a new one there, store it with "Store the mailbox password" in Mail, calendar and channels, and run `/google setup` again. |
-| `IMAP: The mail server did not answer.` or another failure naming a server it could not reach | The failure names the server (`imap.gmail.com:993` or `smtp.gmail.com:587`): this machine's network or that address is the cause, and the app password was not checked. Run `/google setup` again once the network is up. |
-| Worked, then broke about a week later | The OAuth app is in Testing. Publish it; the next Google request starts a fresh consent by itself. |
-| Google is not connected, a scope is missing, or the credential is dead | The request that meets it starts a consent asking for every scope at once and shows its link (in the owner inbox from the daemon, on screen in the Agent); approve it and the request is sent again when the consent completes. One consent at a time: other requests join the open one. `/google reauthorize` starts one by hand. |
+| `IMAP: The mail server rejected the credentials for <address>.` or `SMTP: SMTP AUTH PLAIN failed: 535 …` | The app password is wrong or revoked. The failure shows the steps: delete the `goodvibes-agent` entry at the app passwords page, create a new one there, store it with "Store the mailbox password" in Mail, calendar and channels, and press "connect" on the Google tab again. |
+| `IMAP: The mail server did not answer.` or another failure naming a server it could not reach | The failure names the server (`imap.gmail.com:993` or `smtp.gmail.com:587`): this machine's network or that address is the cause, and the app password was not checked. Press "connect" again once the network is up. |
+| Worked, then broke about a week later | The OAuth app is in Testing. Publish it, then "ask for consent again" on the Google tab. |
+| Google is not connected, a scope is missing, or the credential is dead | A request the daemon makes (its calendar and mail, a conversation it hosts) starts a consent asking for every scope at once, puts its link in Waiting for you, and is sent again when the consent completes; one consent at a time, other requests join the open one. A check ("check it") and a request made in a terminal program's own conversation open none: they say which part needs consent again, and "ask for consent again" on the Google tab is what renews it. |
 | An API is not enabled on the Cloud project | Enabling it is put to your mode (asked under Ask me, decided by Jev under Jev decides as `google.enable-apis`), run with the gcloud signed in on this machine, then the request is sent again. Without gcloud the answer says so and names the command. |
-| A send was refused | `/google waiting` lists refused sends; `/google approve <n>` shows one, asks and sends it exactly as shown, typed by the owner. |
+| A send was refused | It waits in Waiting for you, under Sends, exactly as it would go out; the owner's answer there sends it as shown or drops it. |
 
 Re-running any step is safe: each step checks what already exists and skips it.
 
@@ -654,7 +644,7 @@ A channel is a chat surface the daemon sits behind: Slack, Discord, Telegram, nt
 ### General setup procedure
 
 1. Get the credentials from the provider (each surface below says which).
-2. In the terminal app, run `/devices pair channel <surface>`. It lists the surface's declared fields, asks for every missing required value (and offers the optional ones), stores secret values in the daemon's secret store with a reference in the setting, and switches the surface on once every required field is set. `/devices pair channel` alone lists every surface and how many required values are set. A surface whose schema marks no field required (Slack, ntfy, the generic webhook, Google Chat) is switched on even when you skip every value, so enter its tokens before you finish, or set them with `/settings set` as below.
+2. In the terminal app, open Devices and network (`Ctrl+G` then `m`) and press Pair something, A chat channel, then choose the surface. It lists the surface's declared fields, asks for every missing required value (and offers the optional ones), stores secret values in the daemon's secret store with a reference in the setting, and switches the surface on once every required field is set. A surface whose schema marks no field required (Slack, ntfy, the generic webhook, Google Chat) is switched on even when you skip every value, so enter its tokens before you finish, or set them with `/settings set` as below.
    - Alternatively set each key with `/settings set surfaces.<surface>.<field> <value>` and switch it on with `/settings set surfaces.<surface>.enabled true` or `goodvibes surfaces enable <surface>`.
    - In the Agent: `/channels setup <id>`, `/channels doctor <id>`, `/channels guide <id>`.
 3. Prove it end to end: `/channels test <surface>` sends a real test message through the daemon and reports the delivered or error outcome.
@@ -708,7 +698,9 @@ Each surface has an ingress policy.
   | Approve or veto a purchase, type a card code | Yes | No |
   | `status`, `cancel`, `retry` on a run, agent or session | Yes, for work started from the same conversation | No: `Not done: <action> <id> was refused. Status, cancel and retry act on any run or agent, so only the owner of this channel may send them. Ask the owner, or have them change the channel's owner.` |
 
-  Where the asks of a guest's turn go: never to the guest's chat. The approval prompt goes to the owner's own direct conversation on that surface (newest first), or when none takes it, to his direct conversations on other surfaces; it is also listed in the owner inbox (Waiting for you in either terminal app and the web UI). The owner answers it by replying in any of his own direct conversations, or in the inbox. When none of his conversations takes the prompt, he is alerted ("Approval required for <tool>: ... It was asked for by someone on <surface> who is not you, and none of your own conversations took it. Answer it in the terminal app or the web UI") and the alert is kept as a receipt for the next terminal or web UI the owner uses: an owner alert kept this way is shown to and cleared by the owner only (the operator token, a device he paired himself, the owner sign-in user), never by another signed-in user or a scoped device.
+  Where the asks of a guest's turn go: never to the guest's chat. An approval is shown on a channel only in a conversation proven to be the owner's alone (his direct conversation with the bot, his ntfy topic); never in a group, even one only he has written in so far, a shared channel, a webhook route or a Home Assistant conversation. An approval about any of those, or raised in a guest's turn, goes to the owner's own direct conversation on that surface (newest first), or when none takes it, to his direct conversations on other surfaces; it is also listed in the owner inbox (Waiting for you in either terminal app and the web UI). The owner answers it by replying in any of his own direct conversations, or in the inbox. When none of his conversations takes the prompt, he is alerted ("Waiting for your answer: <the ask in words> It is about a conversation on <channel> that is not yours alone, so it is not shown there, and none of your own conversations took it. Answer it in Waiting for you") and the alert is kept as a receipt for the next terminal or web UI the owner uses: an owner alert kept this way is shown to and cleared by the owner only (the operator token, a device he paired himself, the owner sign-in user), never by another signed-in user or a scoped device.
+
+  Work the owner himself asks for in a conversation that is not his alone (a group, a shared channel) is proposed the same way: the proposal is never posted there; it goes to his own conversations (`Start work on: <what>` and `You asked for it in a conversation on <channel> that is not yours alone, so it is answered here.`), answered from the one that took it. When none takes it, it waits in Waiting for you, Questions, as `Start this work? <what>` with `accept` (starts the work) and `dismiss` (leaves it undone), until the proposal expires.
 
   Authority belongs to the person, not the surface. The owner's own messages keep the surface's authority: on Telegram (a command-authority surface) his turn runs as if typed in the terminal app, in his permission mode; on every other chat surface a change his turn asks for becomes an approval for him each time (`channel-request`); on email, webhook and ntfy it is refused. A guest's turn runs under the guest form of the surface (`guest:<surface>`), which carries no authority on any surface, Telegram included. A guest's message is also never handed to an agent already running in that conversation; it starts a guest's turn of its own. A surface with no owner (`open`, below) has only guests.
 
@@ -726,7 +718,7 @@ A message names a command only when its first word is written as one (`/status`,
 
 #### Answering an approval from a channel
 
-An approval prompt for a turn the owner started from a channel is shown in that conversation, and he answers it by replying in the same conversation (same chat, channel and thread); a reply anywhere else does not count. An approval a guest's turn raised is shown in the owner's own direct conversation instead, and he answers it by replying in any of his own direct conversations. With a decision model in use, any wording is read (approve, deny, or approve with changes, which declines the original call and passes the change back); a reply the model reads as unclear leaves the ask waiting and the message goes on as conversation. With several asks waiting in one conversation, the reply must make clear which one it answers. With no decision model in use, only the exact `/approve <id>` or `/deny <id>` is recognised (the id from the prompt), with nothing else on the line. Discord and ntfy prompts say which reply answers them: `Reply /approve <id> or /deny <id>.` with the real id when no decision model is in use, otherwise `Reply yes or no, or say what to change.` Slack and Discord prompts also carry Approve and Deny buttons; only the owner's press counts. A guest's reply never answers an ask.
+An approval prompt for a turn the owner started in his own direct conversation is shown there, and he answers it by replying in the same conversation (same chat and thread); a reply anywhere else does not count. An approval a guest's turn raised, or one about a group or shared channel, is shown in the owner's own direct conversation instead, and he answers it by replying in any of his own direct conversations. The prompt is the ask in the words Waiting for you shows (what waits, from whom, what it would do), never the call's arguments or an internal id, and it ends with where it is answered. With a decision model in use, any wording is read (approve, deny, or approve with changes, which declines the original call and passes the change back); a reply the model reads as unclear leaves the ask waiting and the message goes on as conversation. With several asks waiting in one conversation, the reply must make clear which one it answers. With no decision model in use, only the exact `/approve <id>` or `/deny <id>` is recognised (the id from the prompt), with nothing else on the line. Every channel's prompt says which reply answers it: `Reply /approve <id> or /deny <id>, or answer it in Waiting for you.` with the real id when no decision model is in use, otherwise `Reply yes or no, or say what to change; or answer it in Waiting for you.` An ask only the owner's own decision can approve (a held Telegram message, let in from the Telegram list) says only `Answer it in Waiting for you.`, since no reply decides it. Slack and Discord prompts also carry Approve and Deny buttons where a press decides it; only the owner's press counts. A guest's reply never answers an ask.
 
 #### Run control
 
@@ -750,7 +742,7 @@ Only the channel's owner controls runs: a guest (anyone else the channel admits)
 /channels telegram-cursor recover the Telegram update cursor
 ```
 
-The terminal app adds `overview`, `routes` (where replies go), `delivery` (delivery strategies) and `open` (the routes view); the Agent adds `readiness [--show all|ready|attention]`, `configured <channel>`, `guide [<channel>]`, `triage`, `send` and `deliveries`. Each app refuses the other's, saying where it is done. Pairing a channel is "Pair something" under `/devices`: `/devices pair channel <channel>`.
+The terminal app adds `overview`, `routes` (where replies go), `delivery` (delivery strategies) and `open` (the routes view); the Agent adds `readiness [--show all|ready|attention]`, `configured <channel>`, `guide [<channel>]`, `triage`, `send` and `deliveries`. Each app refuses the other's, saying where it is done. Pairing a channel is Pair something, A chat channel, in Devices and network.
 
 A profile change that loosens the permission mode a channel's sessions run under (`set-profile` with a looser `--permission-mode`, a `set-profile` that leaves out a tighter mode the binding had, or `remove-profile` of a binding that held one) is the owner's own act, like `config.set` of `permissions.mode`: asked with a credential that is not the owner's, `channels.profiles.set` and `channels.profiles.delete` answer `202` `OWNER_APPROVAL_PENDING` with the approval id, nothing changes until the owner approves it from his own app, and the command reads `Not applied: <state>. It was put to the owner as approval <id>; ...`; with no approval path the answer is `403` `OWNER_ONLY`.
 
@@ -790,7 +782,7 @@ From nothing to the first answered message (Socket Mode, no public address neede
 5. Interactivity & Shortcuts: turn on (approval and purchase buttons). App Home: allow users to send messages from the Messages tab (Slack's own requirement for direct messages to a bot).
 6. Optional, Slash Commands: create one, for example `/goodvibes`.
 7. Install to Workspace. Copy the Bot User OAuth Token (`xoxb-...`).
-8. In the terminal app (set both tokens before switching the surface on; `/devices pair channel slack` would switch it on with nothing entered):
+8. In the terminal app (set both tokens before switching the surface on; pairing Slack in Devices and network would switch it on with nothing entered):
 
    ```text
    /settings set surfaces.slack.botToken <your-bot-token>
@@ -816,7 +808,7 @@ Slack delivers every message as a channel or thread conversation, direct message
 | `surfaces.discord.defaultChannelId` | for notifications | |
 | `DISCORD_WEBHOOK_URL` (env) | optional | Notifications into one channel without a bot token. |
 
-Steps: create a Discord application and bot, install it into your server, `/devices pair channel discord`, optionally register slash commands through the surface's provider actions, verify, then mention the bot. A reply after Discord's fifteen-minute interaction window is posted to the command's channel.
+Steps: create a Discord application and bot, install it into your server, pair it in Devices and network (Pair something, A chat channel, discord), optionally register slash commands through the surface's provider actions, verify, then mention the bot. A reply after Discord's fifteen-minute interaction window is posted to the command's channel.
 
 ### Telegram
 
@@ -840,7 +832,7 @@ From nothing to the first answered message:
 4. In Telegram, open a chat with your bot and send any message (tapping Start sends `/start`). It is not answered and binds nothing: it raises an owner claim, `Make <your-numeric-id> (<your-username>) the owner of telegram?`.
 5. In the terminal app: open Waiting for you from the menu, select the claim and press its accept key. You are the owner, and only you are on the user list: the bot answers nobody else until you admit them.
 6. Send `/start` again: the bot replies with how to use it. Then send a request. A conversation gets a reply; a request for work is proposed back, and `yes` (or `go ahead`) starts it.
-7. Optional, for deliveries (routines, notices) with no conversation to answer: `/settings set surfaces.telegram.defaultChatId <chat-id>`. A private chat's id is your numeric user id from the claim. `/devices pair channel telegram verify` sends its test message to this chat; without it the test reports `delivered:false`.
+7. Optional, for deliveries (routines, notices) with no conversation to answer: `/settings set surfaces.telegram.defaultChatId <chat-id>`. A private chat's id is your numeric user id from the claim. A test (the Channels tab of Mail, calendar and channels, `t` on Telegram) sends its message to this chat; without it the test reports `delivered:false`.
 
 The bot's own commands (answered by the adapter, never sent to an agent): `/start` and `/help` reply with usage; `/stop` explains that it does not cancel work (its reply says to send `cancel <id>`; with no decision model in use send `/cancel <id>`) and that the surface is switched off with `surfaces.telegram.enabled false`. In a group, the bot acts only on `/goodvibes <message>` or `@<your_bot> <message>` and ignores other text; the group's other members are answered only if they are admitted (each raises a "reach you" claim). While work runs, the owner can send `status <id>`, `cancel <id>`, `retry <id>` (`/status <id>` and so on without a decision model; see "Run control"). A message with only a photo, voice note or file is answered "I cannot read <kind>s yet. Send the request as text." Edits of a message already sent are not read.
 
@@ -884,7 +876,7 @@ Settings:
 Setup from nothing:
 
 1. In Home Assistant, create a long-lived access token.
-2. In a terminal app: `/devices pair channel homeassistant` and enter the instance URL, the access token and a webhook secret you choose (or use `/settings set` for each key), then switch the surface on.
+2. In the terminal app: Devices and network, Pair something, A chat channel, homeassistant, and enter the instance URL, the access token and a webhook secret you choose (or use `/settings set` for each key), then switch the surface on.
 3. Make the daemon reachable from Home Assistant: Home Assistant calls the daemon's control plane, which listens on `127.0.0.1:3421` by default, so a Home Assistant on another machine needs the daemon exposed on the network (see "Network exposure" in "The daemon, the web UI and networking").
 4. Send a prompt. Two routes:
    - Webhook, authenticated by the webhook secret: `POST http://<daemon>:3421/webhook/homeassistant` with header `x-goodvibes-homeassistant-secret: <secret>` (or `x-goodvibes-webhook-secret: <secret>`, or `Authorization: Bearer <secret>`) and a JSON body such as `{"type":"prompt","message":"turn on the kitchen lights","conversationId":"home","messageId":"ha-msg-1"}`. The prompt text may be in `message`, `prompt`, `text` or `task`; optional `areaId`, `entityId`, `userId`, `displayName`, `providerId`, `modelId`. The request is held until the turn ends (at most 120 seconds) and answers with `delivered`, `sessionId` and `assistantMessageId`; the reply text arrives as the event below. A body with a `tools` list is refused with 400. A body whose text is a run-control command (see "Run control" under "Who may talk to the assistant") controls a run started from the same conversation.
@@ -965,28 +957,18 @@ When a request names no provider, a configured `local` provider is used first, t
 /settings set tts.provider openai
 /settings set tts.voice <voice-id>
 /settings set tts.speed 1.1
-/voice speak <message> speak the answer to a message
-/voice stop
-/voice on              speak every answer
-/voice off
 ```
 
-### `/voice`
+### Voice in the System place
 
-```text
-/voice                 the list of voice actions (a model or script gets /voice review)
-/voice review
-/voice status
-/voice setup
-/voice on              speak every answer
-/voice off
-/voice wake-status
-/voice wake-setup [--with-speech-to-text]
-/voice wake-again      listen for the wake word again after it stopped by itself
-/voice export <file>
-/voice inspect <file>
-/voice import <file>
-```
+Voice has no slash command. In the System place (Ctrl+G then m, System), in both terminal programs:
+
+| Where | Row | Keys |
+| --- | --- | --- |
+| This session | "Speak answers aloud" | `a` speak every answer / stop speaking them, `p` ask and hear the answer, `w` listen for the wake word again after it stopped by itself |
+| Voice | "Voice runtime" | `i` install it (when not installed or partly), `t` stop speaking, `v` the wake word's state, `w` set up the wake word, `e` save the voice settings to a file, `o` read a voice settings file, `m` apply one |
+
+The capabilities are `voice.review`, `voice.on`, `voice.off`, `voice.speak`, `voice.stop`, `voice.status`, `voice.setup`, `voice.wake-status`, `voice.wake-setup`, `voice.wake-again`, `voice.export`, `voice.inspect` and `voice.import`; a model runs them with `capability_run`, a script with `goodvibes do`.
 
 `ui.voiceEnabled` turns the voice control surface on. The `voice-input` key action (Ctrl+G then v, or F8, by default) starts and stops recording in the terminal app.
 
@@ -994,7 +976,7 @@ When a request names no provider, a configured `local` provider is used first, t
 
 `voice.local.sttEngine` (`whisper-cpp` or `faster-whisper`), `voice.local.sttBinary`, `voice.local.sttModelPath`, `voice.local.ttsEngine` (`piper` or `kokoro`), `voice.local.ttsBinary`, `voice.local.ttsModelPath`. The `local` provider reports `unconfigured` until an engine is set up.
 
-Managed install: `/voice setup` asks the daemon to download and set up piper (text to speech) with the `en_US-lessac-medium` voice, and whisper.cpp 1.8.2 with the `base.en` model (speech to text, about 148 MB). Every download is checksum-verified and resumable; re-run `/voice setup` to retry a failed part. `/voice status` shows what is installed. The managed install has pinned builds for Linux x86_64 only; on any other platform it reports the engine unsupported, and you install the engine yourself and set the `voice.local.*` keys:
+Managed install: "install it" on the Voice tab of the System place (`voice.setup`) asks the daemon to download and set up piper (text to speech) with the `en_US-lessac-medium` voice, and whisper.cpp 1.8.2 with the `base.en` model (speech to text, about 148 MB). Every download is checksum-verified and resumable; installing again fetches only a part that failed. The Voice tab follows the install by itself, wherever it was started: each part's step (downloading, checking, unpacking, done or failed) with its bytes, then the result (each engine, each part, the settings it pointed at the runtime and those it left as you set them). The managed install has pinned builds for Linux x86_64 only; on any other platform it reports the engine unsupported, and you install the engine yourself and set the `voice.local.*` keys:
 
 ```text
 /settings set voice.local.ttsEngine piper
@@ -1014,20 +996,15 @@ Wake-word detection listens continuously on the microphone for the phrase "hey g
 
 What it needs:
 
-- The wake models: a classifier for "hey goodvibes" and a speech-embedding front end (about 6 MB in all), checksum-pinned and downloaded into `~/.goodvibes/voice/wake`. Installing GoodVibes downloads them, and a daemon retries at start if the install had no network. If they are still missing, turning `voice.wake.enabled` on in the terminal app or the Agent runs the wake setup plan, which downloads them (see below); `/voice wake-setup` and `goodvibes-daemon provision-wake-model` also fetch them.
+- The wake models: a classifier for "hey goodvibes" and a speech-embedding front end (about 6 MB in all), checksum-pinned and downloaded into `~/.goodvibes/voice/wake`. Installing GoodVibes downloads them, and a daemon retries at start if the install had no network. If they are still missing, turning `voice.wake.enabled` on in the terminal app or the Agent runs the wake setup plan, which downloads them (see below); setting up the wake word on the Voice tab and `goodvibes-daemon provision-wake-model` also fetch them.
 - A recorder program on the host for the terminal apps: `pw-record`, `parecord`, `arecord`, `ffmpeg` or `sox` (`voice.wake.captureCommand` `auto` uses the first one found in that order).
 - Speech to text: a configured speech-to-text provider (the managed local whisper, or a cloud provider from the table above). Without it a wake has nothing to transcribe.
 
 Turning it on from nothing (terminal app):
 
-```text
-/voice wake-status          what is installed and what blocks wake
-/voice wake-setup           fetch missing wake models, turn on the wake rows for this terminal, and propose speech to text
-/voice wake-setup --with-speech-to-text       the same, and install the proposed local speech to text through the daemon
-/settings set voice.wake.enabled true
-```
+On the Voice tab of the System place: `v` shows what is installed and what blocks wake; `w` sets up the wake word (fetches missing wake models, turns on the wake rows for this terminal, and proposes speech to text; choosing "Install it too" also starts the daemon's install of the local speech to text, which the Voice tab then follows). Then `/settings set voice.wake.enabled true`.
 
-In both the terminal app and the Agent, turning on `voice.wake.enabled` from anywhere (the settings workspace, `/settings set`, a model's settings call) runs the same setup plan as `/voice wake-setup`: it fetches missing wake models and prints the plan. In the Agent the same write also turns on `voice.wake.surfaces.agent` (off by default) and says so, because the switch alone would open no microphone there; the terminal app's row `voice.wake.surfaces.tui` is on by default. The Agent's follow-up line is `(yes: /voice wake-setup --with-speech-to-text installs it now)`. While wake runs, the terminal footer shows the listening marker (`voice.wake.indicator`). When listening stops by itself (the recorder kept failing after its own restarts), it starts again when the terminal regains focus or the wake input device setting changes; `/voice wake-again` starts it at once. `ui.voiceEnabled` (always-speak) is not needed for wake. The `voice.wake.*` settings belong to each app, not the daemon: the Agent keeps its own `voice.wake.enabled`, set with `/settings set voice.wake.enabled true` there.
+In both the terminal app and the Agent, turning on `voice.wake.enabled` from anywhere (the settings workspace, `/settings set`, a model's settings call) runs the same setup plan as setting up the wake word: it fetches missing wake models and prints the plan. In the Agent the same write also turns on `voice.wake.surfaces.agent` (off by default) and says so, because the switch alone would open no microphone there; the terminal app's row `voice.wake.surfaces.tui` is on by default. The follow-up line names "Install it too" on the Voice tab. While wake runs, the terminal footer shows the listening marker (`voice.wake.indicator`). When listening stops by itself (the recorder kept failing after its own restarts), it starts again when the terminal regains focus or the wake input device setting changes; `w` on the "Speak answers aloud" row of This session (System) starts it at once. `ui.voiceEnabled` (always-speak) is not needed for wake. The `voice.wake.*` settings belong to each app, not the daemon: the Agent keeps its own `voice.wake.enabled`, set with `/settings set voice.wake.enabled true` there.
 
 The `voice.wake.*` settings, by group:
 
@@ -1048,10 +1025,10 @@ Failures:
 
 | Symptom | Fix |
 | --- | --- |
-| Wake models reported missing or failing verification | `/voice wake-setup` (re-run to resume). |
+| Wake models reported missing or failing verification | Set up the wake word (System, Voice, `w`); again to resume. |
 | No recorder found, or a named `captureCommand` is not installed | Install one of `pw-record`, `parecord`, `arecord`, `ffmpeg`, `sox`, or set `captureCommand` to `auto`. |
-| A surface refuses to start with `vadThreshold` above 0 | The speech gate artifact is not installed there: run `/voice wake-setup`, or set `vadThreshold` to 0. |
-| Wakes but nothing is transcribed | No speech-to-text provider: `/voice wake-setup --with-speech-to-text`, or configure a cloud speech-to-text key. |
+| A surface refuses to start with `vadThreshold` above 0 | The speech gate artifact is not installed there: set up the wake word (System, Voice, `w`), or set `vadThreshold` to 0. |
+| Wakes but nothing is transcribed | No speech-to-text provider: set up the wake word with "Install it too" (System, Voice, `w`), or configure a cloud speech-to-text key. |
 | Detector stops after repeated crashes | It latched off after `maxRestarts`; fix the device or recorder, then restart the app. |
 | Fires on ordinary speech | Raise `threshold`, set `vadThreshold` 0.3, or raise `patienceFrames`. |
 
@@ -1093,8 +1070,8 @@ The daemon can buy things for the owner with a stored card, inside budgets the o
 Purchases are off, and every budget is `0`. With the defaults, a checkout that adds any tax, fee or paid delivery is refused outright (the daily overage budget of 0 cannot cover it), and one that adds nothing asks you first (the daily item budget and the per-purchase ceiling of 0 send every purchase to you). Set the amounts below before the first purchase.
 
 1. Turn purchases on, choosing how they run. In Settings (both terminal programs: the `Let GoodVibes make purchases` row; the web UI: Settings, payments) turning it on asks which of two ways, and nothing is preselected: `Ask me before every purchase (recommended)` (The safer way: nothing is bought until you approve it, naming the shop, the item and the most it may cost; `payments.confirmEveryPurchase` on) or `Buy, and give me <N> minutes to stop it` (A purchase within your budgets at a shop you can get your money back from goes ahead unless you say stop within N minutes; if the notice cannot reach you, it still goes ahead; `payments.confirmEveryPurchase` off, N is `payments.windows.vetoMinutes`). Both settings are written in one update. From a command line: `/settings set payments.confirmEveryPurchase true` (or `false`), then `/settings set payments.enabled true`. A choice already saved stays as it is until you pick another. While a stop window runs, its card (the terminal's Waiting for you, the web UI's Work list, a chat channel) says so on its face: `Inside your daily budget. It goes ahead when the time runs out, even if this notice never reached you.`, with `Stop it` selected.
-2. Add a card (each field hidden, sent to the daemon after the last field): `/payments add-card`. Fields: label, kind (`virtual` or `real`), number, expiry, security code (3 or 4 digits), cardholder name. The answer is `[payments] Card stored on the selected daemon: <label> ...`. A virtual card with an issuer cap is recommended: the issuer enforces its cap even when this software is wrong. The terminal apps cannot record the cap; the web UI's card form (Settings, payments) has an optional "Issuer cap" field, and the operator method `payments.cards.create` takes `issuerCapMinorUnits`. A recorded cap is your declaration; a purchase whose full total is over it is refused (`card-limit-exceeded`) before any window. A card cannot be edited: to change its cap, remove it (`/payments remove-card <card>`) and add it again. Adding the same card again (the same label, number and expiry, for example after an answer that did not arrive) returns the card already stored and stores no second copy. A card number (and a security code asked for with `payments.cvvHandling` `prompt`) is taken only from a connection that reaches the daemon from its own machine, over https (`controlPlane.tls`, or a trusted proxy that ended TLS), or over a Tailscale address; over plain http on the local network (a LAN address or a `.local` name) the daemon refuses it with `403` `CARD_ENTRY_TRANSPORT` before reading it, and the web UI shows that reason instead of the card form or the code field.
-3. Set the addresses: `/payments address` in either program (it asks which, then the fields: `name`, `line1`, `line2`, `city`, `region`, `postalCode`, `country`), or the settings workspace (`/settings payments.shippingAddress`).
+2. Add a card: Money, Cards tab, `n` ("Add a card", a form; the number, expiry, security code and name hidden as typed, sent to the daemon after the last field). Fields: label, kind (`virtual` or `real`), number, expiry, security code (3 or 4 digits), cardholder name. The answer is `Stored card "<label>".` with the card's kind, brand, last four digits and expiry. A virtual card with an issuer cap is recommended: the issuer enforces its cap even when this software is wrong. The terminal apps cannot record the cap; the web UI's card form (Settings, payments) has an optional "Issuer cap" field, and the operator method `payments.cards.create` takes `issuerCapMinorUnits`. A recorded cap is your declaration; a purchase whose full total is over it is refused (`card-limit-exceeded`) before any window. A card cannot be edited: to change its cap, remove it (Money, Cards, `x` on the card) and add it again. Adding the same card again (the same label, number and expiry, for example after an answer that did not arrive) returns the card already stored and stores no second copy. A card number (and a security code asked for with `payments.cvvHandling` `prompt`) is taken only from a connection that reaches the daemon from its own machine, over https (`controlPlane.tls`, or a trusted proxy that ended TLS), or over a Tailscale address; over plain http on the local network (a LAN address or a `.local` name) the daemon refuses it with `403` `CARD_ENTRY_TRANSPORT` before reading it, and the web UI shows that reason instead of the card form or the code field.
+3. Set the addresses: Money, Addresses tab, `Enter` on the billing or the shipping address in either program (a form of the fields `name`, `line1`, `line2`, `city`, `region`, `postalCode`, `country`; a blank field keeps what is set), or the settings workspace (`/settings payments.shippingAddress`).
 4. Set the currency and budgets:
 
    ```text
@@ -1107,59 +1084,58 @@ Purchases are off, and every budget is `0`. With the defaults, a checkout that a
 
    Amounts are written as you would say them (`19.99`). The day resets at midnight in `daemon.timezone` (UTC when empty). Every hold and spend records its currency: changing `payments.currency` starts new daily pools in the new currency for the rest of the day, and `payments.budget.status` lists what was spent earlier that day in the old currency (`earlierSpend`), in that currency, never converted.
 5. Say where approval and veto prompts also go: `/settings set payments.notifyChannels telegram`. The only accepted value today is `telegram` (or empty); any other name is refused with `expected string (a comma-separated list; only 'telegram' can deliver a notice today)`. Every notice, window and confirmation always goes to the owner inbox (Waiting for you, the web UI) whatever this says.
-6. Check: `/payments cards`.
+6. Check: Money, Cards tab.
 
-### `/payments`
+### Money
 
-`/payments` alone opens its list of actions (in a script or for a model it prints the cards, as "See your cards" does). Each action is also a typed line; a line with something missing opens the step that asks for it.
+Cards, addresses and what may be bought without asking are in **Money** (the menu of places, in both terminal programs and the web UI). Each action is a control on the thing it acts on, and the same capability a script runs with `goodvibes do <id>`:
 
-| Action | Line | Risk |
-| --- | --- | --- |
-| See your cards | `/payments cards` (the cards on the daemon and the addresses purchases use) | |
-| See what is waiting for your answer | `/payments pending` (answer a purchase window, stop a checkout, type a security code) | |
-| Approve one purchase ahead of time | `/payments approve <shop> --most <amount> <item...>` | spends money |
-| Allow a repeat purchase | `/payments repeat --shop <shop> [--shop <shop>]... --item <item> --each <amount> --per-period <amount> [--days 7\|30\|90\|365] [--until YYYY-MM-DD]` | spends money |
-| See repeat purchases you have allowed | `/payments repeats` | |
-| Stop a repeat purchase | `/payments stop-repeat <repeat purchase>` (picked from the ones you allowed) | |
-| Add a card | `/payments add-card` (asks each field, hidden) | |
-| Remove a card | `/payments remove-card <card>` (picked from the daemon's cards) | cannot be undone |
-| Set your billing or shipping address | `/payments address <billing\|shipping> [--name ...] [--line1 ...] [--line2 ...] [--city ...] [--region ...] [--postal-code ...] [--country ...]` (blank keeps what is set) | |
+| Action | Control | Capability | Risk |
+| --- | --- | --- | --- |
+| See your cards | Money, Cards tab (the cards on the daemon; the addresses purchases use are on Addresses) | `payments.cards` | |
+| See what is waiting for your answer | Waiting for you, Purchases tab (answer a purchase window, stop a checkout, type a security code) | `payments.pending` | |
+| Approve one purchase ahead of time | Money, Repeat purchases, `a` (shop, at most, item) | `payments.approve` | spends money |
+| Allow a repeat purchase | Money, Repeat purchases, `n` (the six blanks below) | `payments.repeat` | spends money |
+| See repeat purchases you have allowed | Money, Repeat purchases tab | `payments.repeats` | |
+| Stop a repeat purchase | Money, Repeat purchases, `x` on the one to stop | `payments.stop-repeat` | |
+| Add a card | Money, Cards, `n` (each card field hidden) | `payments.add-card` | |
+| Remove a card | Money, Cards, `x` on the card (asks first) | `payments.remove-card` | cannot be undone |
+| Set your billing or shipping address | Money, Addresses, `Enter` on the address (blank keeps what is set) | `payments.address` | |
 
-Every action is the owner's own: a line a model runs is refused, naming the action. Each needs a paired owner credential with the `read:payments` and `write:payments` scopes. An action marked "spends money" or "cannot be undone" runs at once when you type it, and its result says what it did (`This spent money.`, `This cannot be undone.`). `/payments address` in the terminal app writes this machine's settings; in the Agent it writes the connected host's settings.
+Every action but the two reads is the owner's own: a model's call is refused, naming the action. A pressed key or a submitted form is the request; only removing a card asks first, and the outcome line says what the act did ("Nothing has been bought yet: ..."). In the terminal app the address is written to this machine's daemon settings; in the Agent to the connected host's.
 
-`/payments approve <shop> --most <amount> <item...>`: the shop's domain, the most it may cost (in `payments.currency`), and the item in your words. The approval is used once, for a purchase matching all three that begins within five minutes; such a purchase needs no further answer up to that amount. Approving the same shop, item and amount again while the first approval is unused returns that approval rather than making a second. When recording an approval cannot be confirmed, the answer is `OUTCOME_UNKNOWN` ("The approval may have been recorded ..."), and the web UI says it may have been approved instead of "Nothing was approved". The approval is for that amount in the currency `payments.currency` named when it was given (the reply names it): a begin after `payments.currency` changed is a different purchase, does not spend it, and with `payments.confirmEveryPurchase` on is refused saying the merchant, item, amount or currency differs.
+"Approve one purchase ahead of time": the shop's domain, the most it may cost (in `payments.currency`), and the item in your words. The approval is used once, for a purchase matching all three that begins within five minutes; such a purchase needs no further answer up to that amount. Approving the same shop, item and amount again while the first approval is unused returns that approval rather than making a second. When recording an approval cannot be confirmed, the answer is `OUTCOME_UNKNOWN` ("The approval may have been recorded ..."), and the web UI says it may have been approved instead of "Nothing was approved". The approval is for that amount in the currency `payments.currency` named when it was given (the reply names it): a begin after `payments.currency` changed is a different purchase, does not spend it, and with `payments.confirmEveryPurchase` on is refused saying the merchant, item, amount or currency differs.
 
 ```text
-/payments approve shop.example --most 25.00 USB-C cable
+goodvibes do payments.approve --input shop=shop.example --input most=25.00 --input "item=USB-C cable"
 Approved ahead of time: "USB-C cable" from shop.example, at most 25.00.
 It ends 11/18/2026, 10:20:00 AM; the amount is in USD.
 ```
 
 "Allow a repeat purchase" lets a scheduled routine or trigger buy one thing without asking, within limits. Its blanks:
 
-| Blank | Option | Rule |
+| Blank | Input | Rule |
 | --- | --- | --- |
-| Shop | `--shop` (again for each further shop) | 1 to 8 shop domains, each with a dot; picked from the shops you have bought from, or typed. |
-| What may be bought | `--item` | Your words, 1 to 200 characters. |
-| Most per purchase | `--each` | Above zero. |
-| Most in any period | `--per-period` | At least the per-purchase amount. |
-| Period | `--days` | 7, 30 (the usual), 90 or 365 days; typed, any whole number 1 to 366. |
-| Last day | `--until` | Optional, `YYYY-MM-DD`. Without it the authorisation lasts until you stop it. |
+| Shop | `shop` (one per line for further shops) | 1 to 8 shop domains, each with a dot; picked from the shops you have bought from, or typed. |
+| What may be bought | `item` | Your words, 1 to 200 characters. |
+| Most per purchase | `each` | Above zero. |
+| Most in any period | `per-period` | At least the per-purchase amount. |
+| Period | `days` | 7, 30 (the usual), 90 or 365 days; typed, any whole number 1 to 366. |
+| Last day | `until` | Optional, `YYYY-MM-DD`. Without it the authorisation lasts until you stop it. |
 
 At most 32 repeat purchases are kept.
 
 ```text
-/payments repeat --shop shop.example --shop pets.example --item "dog food" --each 60.00 --per-period 120.00 --days 30 --until 2027-06-30
-Allowed: "dog food" from shop.example, pets.example. Stop it any time: Stop a repeat purchase.
-/payments repeats
-/payments stop-repeat standing-1a2b3c4d
+goodvibes do payments.repeat --input shop=shop.example --input "item=dog food" --input each=60.00 --input per-period=120.00 --input days=30 --input until=2027-06-30
+goodvibes do payments.repeats
+goodvibes do payments.stop-repeat --input repeat=standing-1a2b3c4d
 ```
 
 In the web UI the Repeat purchases screen lists the same allowances, each with Stop, under `Allow a repeat purchase…`, a sheet with the same six blanks and sentence; both are sent as the owner's own request.
 
 The example lets a scheduled run buy "dog food" from either shop, at most 60.00 a purchase and 120.00 every 30 days, until 30 June 2027. A routine's purchase names the authorisation as `standingId` when it calls `payments.checkout.begin`. Every budget, ceiling and purchase window still applies to each purchase under it. A refusal names the field and ends with `Nothing was added.`, for example `maxPerPeriod must be one amount in USD, at least the per-purchase maximum.`
 
-How a purchase is started: there is no owner command that buys. You ask the Agent in conversation ("buy one USB-C cable from shop.example, at most 25 dollars"). The Agent's model opens the shop's checkout page with its `browser` tool, then calls its `agent_operator_method` tool with `methodId` `payments.checkout.begin` and the open page (`sessionId`, `pageId`), `requestId`, `merchantDomain`, `checkoutUrl`, `item`, the requested and quoted lines, the shipping options, the stated total, the currency and optionally `cardId` (else `payments.defaultCardId`) and `requestedMax`. The daemon then reads the page itself, applies the decision below and runs the window. "Accepted" in the answer does not mean bought: `payments.purchase.status` with the `requestId`, `/payments pending` and the web UI Purchases panel show where it stands. The terminal app's model has neither tool, so purchases are started from the Agent (or from a daemon-hosted Agent session, or by an operator client calling `POST /api/payments/checkout/begin` with the `write:payments` scope). A routine or trigger purchase must name a standing authorisation as `standingId`.
+How a purchase is started: there is no owner command that buys. You ask the Agent in conversation ("buy one USB-C cable from shop.example, at most 25 dollars"). The Agent's model opens the shop's checkout page with its `browser` tool, then calls its `agent_operator_method` tool with `methodId` `payments.checkout.begin` and the open page (`sessionId`, `pageId`), `requestId`, `merchantDomain`, `checkoutUrl`, `item`, the requested and quoted lines, the shipping options, the stated total, the currency and optionally `cardId` (else `payments.defaultCardId`) and `requestedMax`. The daemon then reads the page itself, applies the decision below and runs the window. "Accepted" in the answer does not mean bought: `payments.purchase.status` with the `requestId`, Waiting for you's Purchases tab and the web UI Purchases panel show where it stands. The terminal app's model has neither tool, so purchases are started from the Agent (or from a daemon-hosted Agent session, or by an operator client calling `POST /api/payments/checkout/begin` with the `write:payments` scope). A routine or trigger purchase must name a standing authorisation as `standingId`.
 
 How that call is checked, in order:
 
@@ -1181,7 +1157,7 @@ The model may start a purchase (`payments.checkout.begin`) and cancel one, and r
    - Veto window (within budget, recourse established): silence for `payments.windows.vetoMinutes` (10) proceeds; an objection cancels. An answer that could not be read (an unreadable owner inbox) is not silence: nothing is bought, and the purchase is refused `answer-unreadable`. An objection or denial given through `payments.purchase.deny` or `payments.purchase.cancel` (the web UI's buttons) is written to the purchase's record before it is reported accepted, so a daemon that stops right after never resumes that window and never buys on its silence.
    - Approval window (over budget, over the requested maximum, or no recourse): silence for `payments.windows.approvalMinutes` (60) denies; only an explicit approve proceeds. When the notice cannot be delivered, a within-budget purchase proceeds and an over-budget one is refused.
    - `payments.confirmEveryPurchase` `true` makes every purchase need the owner's approval.
-7. The card is filled and the order submitted. Without a decision model, code checks the live page first: the approved total must be the amount on the order summary's total line (a "Total", "Order total" or "Grand total" line, never a subtotal), and when the page offers delivery choices the quoted one must be the one shown as selected; otherwise nothing is submitted and the purchase stops for the owner to start again. A card security code, 3-D Secure or CAPTCHA pauses for the owner (`/payments pending`). With `payments.cvvHandling` `prompt`, the security code is not stored and is asked every time.
+7. The card is filled and the order submitted. Without a decision model, code checks the live page first: the approved total must be the amount on the order summary's total line (a "Total", "Order total" or "Grand total" line, never a subtotal), and when the page offers delivery choices the quoted one must be the one shown as selected; otherwise nothing is submitted and the purchase stops for the owner to start again. A card security code, 3-D Secure or CAPTCHA pauses for the owner (Waiting for you, Purchases tab). With `payments.cvvHandling` `prompt`, the security code is not stored and is asked every time.
 8. The purchase is recorded as `purchased` only when the page the submit landed on, on the merchant's own domain, shows an order number, or shows a confirmation together with this submit's own total. Confirmation wording alone ("Thank you for your order") records `submitted-unverified`: the money is counted as spent, and the owner confirms or denies the order (`payments.purchase.reconcile`, the Purchases panel) or the shop's confirmation mail settles it.
 9. The owner's report of a recorded purchase is saved with the purchase record and marked sent once a channel took it; a report the daemon did not get out before it stopped is sent at its next start. The same holds for a refund the shop's mail reports and for a shop mail that settles a `submitted-unverified` purchase: the note is saved in the same write as the refund or the move to `purchased`, and one no channel took is sent at the next start.
 
@@ -1346,7 +1322,7 @@ Some settings hold a whole list. Each is read and written as one JSON value; a m
 
 | Setting | What it is for | Example |
 | --- | --- | --- |
-| `notifications.webhookUrls` | Webhook URLs that receive this machine's notifications (turn ends, approvals waiting, budget alerts). Each member is a `goodvibes://secrets/` reference to a URL kept in the secret store; a literal URL is refused. Applies at the next start. Managed by `/notify add`. | `["goodvibes://secrets/goodvibes/GOODVIBES_NOTIFY_WEBHOOK_1A2B3C4D5E6F"]` |
+| `notifications.webhookUrls` | Webhook URLs that receive this machine's notifications (turn ends, approvals waiting, budget alerts). Each member is a `goodvibes://secrets/` reference to a URL kept in the secret store; a literal URL is refused. Applies at the next start. The daemon's, one list for every program; managed on the Notifications tab of Mail, calendar and channels. | `["goodvibes://secrets/goodvibes/GOODVIBES_NOTIFY_WEBHOOK_1A2B3C4D5E6F"]` |
 | `sandbox.egressAllowlist` | Command names the exec sandbox lets reach the network. From the next command. | `["git","npm"]` |
 | `sandbox.workspaceWritable` | Extra absolute paths sandboxed commands (exec commands and contract gates) may write. From the next command. Every sandbox boundary (exec commands, sandbox sessions, contract gates) hides the home directory except toolchain installs, shown read-only (`RUSTUP_HOME`, cargo's `bin` and config, `NVM_DIR`, `PYENV_ROOT`, `ASDF_DATA_DIR`, mise's data, bun's `bin`, `GOPATH/bin`, the user-level git config, the PATH folders inside home), and caches, shown writable (`GOCACHE`, `GOMODCACHE` and `GOPATH/pkg`, cargo's `registry` and `git`, bun's install cache, npm's cache, pnpm's store, yarn's cache, pip's and uv's caches, and `XDG_CACHE_HOME`), each from its variable or its default. The GoodVibes state, ssh and gpg keys, cloud and registry credentials (cargo's included), browser profiles and caches and shell history are never shown. A command that fails on a missing path in home, or on a write refused in a read-only toolchain folder, says so and names this setting. | `["/home/me/.cache/build"]` |
 | `surfaces.email.imap.authservIds` | Authserv-ids your mailbox's receiving server writes in `Authentication-Results`, for a provider that is not built in. An entry starting with `.` matches the hosts under that domain. | `["mx.example.com"]` |
@@ -1369,7 +1345,7 @@ How to edit one, from each surface:
 | Web UI | Settings: the key's field is a JSON editor that checks the list before it saves. |
 | Operator API | `config.set` and the other `config.*` methods (described in "The daemon, the web UI and networking"). |
 
-`notifications.webhookUrls` is set through `/notify add|remove|list|clear`, which keep each URL in the secret store. A value that fails the key's check is refused whole with the key's hint, for example `list of absolute paths`.
+`notifications.webhookUrls` is set on the Notifications tab of Mail, calendar and channels (the `notify.*` capabilities), which keeps each URL in the secret store. A value that fails the key's check is refused whole with the key's hint, for example `list of absolute paths`.
 
 ## Settings reference for this part
 

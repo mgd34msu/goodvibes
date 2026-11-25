@@ -156,6 +156,9 @@ export const builtinGatewayControlAutomationMethodDescriptors: readonly GatewayM
       enabled: BOOLEAN_SCHEMA,
       deleteAfterRun: BOOLEAN_SCHEMA,
       metadata: METADATA_SCHEMA,
+      // The project folder its runs work in: the folder of the program or caller that makes it. A create without
+      // it is refused by the handler, with the sentence saying what to send.
+      workingDirectory: STRING_SCHEMA,
     }, ['prompt']),
     outputSchema: AUTOMATION_JOB_SCHEMA,
   }),
@@ -387,6 +390,9 @@ export const builtinGatewayControlAutomationMethodDescriptors: readonly GatewayM
       failure: AUTOMATION_FAILURE_POLICY_SCHEMA,
       enabled: BOOLEAN_SCHEMA,
       deleteAfterRun: BOOLEAN_SCHEMA,
+      // The project folder its runs work in: the folder of the program or caller that makes it. A create without
+      // it is refused by the handler, with the sentence saying what to send.
+      workingDirectory: STRING_SCHEMA,
     }, ['prompt']),
     outputSchema: AUTOMATION_JOB_SCHEMA,
   }),

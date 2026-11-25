@@ -449,7 +449,7 @@ export default function App() {
     [setUrlState],
   );
   const openViewFromSettings = useCallback(
-    (nextView: ViewId) => setUrlState({ view: nextView, settings: '' }),
+    (nextView: ViewId, options?: { readonly tab?: string }) => setUrlState({ view: nextView, settings: '', ...(options?.tab ? { tab: options.tab, filters: {} } : {}) }),
     [setUrlState],
   );
 

@@ -1,4 +1,5 @@
 import { createNativeHostFetch } from './native-host-fetch.js';
+import { inProjectFolder } from './native-project-folder.js';
 import { realpathSync, writeSync } from 'node:fs';
 import { createOperatorApiClient } from '@goodvibes/engine/operator-client';
 import { getOperatorWorkLedgerProject, nativeWorkExecutionSnapshotSchema } from '@goodvibes/engine/platform/platform/workflow/work-ledger/native-execution-client';
@@ -191,7 +192,8 @@ export async function executeNativeHeadless(options: NativeHeadlessOptions, poli
             const operator = createOperatorApiClient({ baseUrl: host.baseUrl, authToken: host.token, fetchImpl: createNativeHostFetch({ current: () => !options.signal.aborted && currentHost() }) });
             let projectId: string;
             try {
-                projectId = await getOperatorWorkLedgerProject(operator, { signal: AbortSignal.any([options.signal, AbortSignal.timeout(5000)]) });
+                // The project of this program's folder, whatever folder the daemon runs in.
+                projectId = await getOperatorWorkLedgerProject({ invoke: inProjectFolder(operator.invoke.bind(operator), host.workspace) }, { signal: AbortSignal.any([options.signal, AbortSignal.timeout(5000)]) });
             }
             finally {
                 operator.dispose();
@@ -306,7 +308,9 @@ function resultForState(state: NativeConversationIntakeState | undefined, mode: 
 export function headlessRecoveryText(text: string): string {
     return text
         .replace(/(?<![-\w])(?:\/work )?intake-(status|retry|resume|cancel)\b/g, '--intake-$1')
-        .replace(/(?<![-\w])\/work intake(?![-\w])/g, '--intake-status');
+        .replace(/(?<![-\w])\/work intake(?![-\w])/g, '--intake-status')
+        // A screen's words name the Work place's Unanswered list; a script settles the message with the run flags.
+        .replace(/in Work, under Unanswered/g, 'with --intake-status, --intake-retry, --intake-resume or --intake-cancel');
 }
 // Synchronous so the line lands before the caller's process.exit; a pipe that refuses a sync write falls back.
 const writeStderrLine = (line: string): void => {

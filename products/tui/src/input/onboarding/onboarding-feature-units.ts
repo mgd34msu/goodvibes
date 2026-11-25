@@ -150,7 +150,7 @@ export const FEATURE_ONBOARDING_SECTIONS: readonly FeatureSection[] = [
       {
         flagId: 'policy-as-code',
         label: 'Policy-as-code',
-        hint: 'Versioned policy bundle registry with promote/rollback; before enforcing, /security simulate-policy shows the recorded calls a bundle would decide differently. Exposes the /security policy actions.',
+        hint: 'Versioned policy bundle registry with promote/rollback; before enforcing, "See what the candidate policy changes" shows the recorded calls a bundle would decide differently (Permissions and safety, Policy).',
         subOptions: [
           {
             key: 'source',
@@ -288,7 +288,7 @@ export const FEATURE_ONBOARDING_SECTIONS: readonly FeatureSection[] = [
       {
         flagId: 'integration-delivery-slo',
         label: 'Integration delivery SLO',
-        hint: 'Retry with backoff and a dead-letter queue for Slack/Discord/webhook delivery, with dead-letter events surfaced in diagnostics. On by default; exposes /notify failed and /notify resend. Retry bounds are tuned in /settings.',
+        hint: 'Retry with backoff and a dead-letter queue for Slack/Discord/webhook delivery, with dead-letter events surfaced in diagnostics. On by default; failed ones are listed and sent again under Failed notifications in Mail, calendar and channels. Retry bounds are tuned in /settings.',
       },
       {
         flagId: 'daemon-auto-update',
@@ -341,7 +341,7 @@ export const FEATURE_ONBOARDING_SECTIONS: readonly FeatureSection[] = [
         flagId: 'wake-word-detection',
         label: 'Wake-word detection',
         hint: 'Listen continuously on a capture device for the pinned "hey goodvibes" phrase and hand the utterance that follows to speech-to-text. Off by default because holding a microphone open must be an explicit act.',
-        note: 'On this terminal, turning this on starts a recorder (pw-record, parecord, arecord, ffmpeg or sox; whichever is installed), scores every frame with the pinned classifier, plays a short chime the moment a wake confirms, and shows a persistent "listening" row in the footer for as long as it runs. What follows a wake goes to speech-to-text and lands in the composer, or is sent straight away if you turn voice.wake.autoSubmit on. The model it scores with is already here: installing GoodVibes downloads and checksum-verifies it, and a running daemon retries at boot if the install could not reach the network, so turning this on normally needs no setup step. What it will NOT do on its own is download anything at the moment you turn it on: a host whose artifacts are missing or fail verification says which and names /voice wake-setup, instead of pretending to listen. That same provisioning fetches the speech gate, so voice.wake.vadThreshold above 0 screens frames once it has run and refuses to start before it has, rather than scoring frames it claims to be screening. voice.wake.noiseSuppression: speex runs here too, the filter travels with the platform, so there is nothing to install for it.',
+        note: 'On this terminal, turning this on starts a recorder (pw-record, parecord, arecord, ffmpeg or sox; whichever is installed), scores every frame with the pinned classifier, plays a short chime the moment a wake confirms, and shows a persistent "listening" row in the footer for as long as it runs. What follows a wake goes to speech-to-text and lands in the composer, or is sent straight away if you turn voice.wake.autoSubmit on. The model it scores with is already here: installing GoodVibes downloads and checksum-verifies it, and a running daemon retries at boot if the install could not reach the network, so turning this on normally needs no setup step. What it will NOT do on its own is download anything at the moment you turn it on: a host whose artifacts are missing or fail verification says which and names setting up the wake word (System place, Voice), instead of pretending to listen. That same provisioning fetches the speech gate, so voice.wake.vadThreshold above 0 screens frames once it has run and refuses to start before it has, rather than scoring frames it claims to be screening. voice.wake.noiseSuppression: speex runs here too, the filter travels with the platform, so there is nothing to install for it.',
       },
     ],
   },

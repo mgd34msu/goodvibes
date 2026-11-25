@@ -25,7 +25,7 @@ export const builtinGatewayCostMethodDescriptors: readonly GatewayMethodDescript
   methodDescriptor({
     id: 'cost.attribution.get',
     title: 'Get Cost Attribution',
-    description: 'Return windowed (24h/7d) cost attribution over observed LLM usage, grouped by a dimension (agent, tool, hook, mcp, model, provider, session), with cache-aware pricing (fresh input vs cache-read vs cache-write). Honest-unpriced: an unknown model contributes to unpricedRecordCount with a null cost, never a fabricated amount; costState is priced, unpriced, or estimated (a mix). totalCostUsd is null when every contributor is unpriced.',
+    description: 'Return windowed (24h/7d) cost attribution over observed LLM usage, grouped by a dimension (agent, tool, hook, mcp, model, provider, session, or source: what it was for, a schedule, a piece of work, a web chat, a shared session or a conversation), each row naming the models that spent it and whether each has a price, with cache-aware pricing (fresh input vs cache-read vs cache-write). Honest-unpriced: an unknown model contributes to unpricedRecordCount with a null cost, never a fabricated amount; costState is priced, unpriced, or estimated (a mix). totalCostUsd is null when every contributor is unpriced.',
     category: 'cost',
     effects: ['telemetry.read'],
     transport: ['ws'],

@@ -2,7 +2,7 @@ import { decisionModelUse } from '@goodvibes/engine/platform/platform/runtime/de
 import { isTerminalContractStatus } from '@goodvibes/engine/platform/platform/contract/types';
 import type { ContractRunner, ContractStatus } from '@goodvibes/engine/platform/platform/contract';
 import type { ConversationMessageSnapshot, Orchestrator, TurnFailoverMove } from '@goodvibes/engine/platform/platform/core';
-import { describePermissionModeInForce, type PermissionManager, type PermissionRequestHandler } from '@goodvibes/engine/platform/platform/permissions';
+import { describePermissionModeInForce, setRunAnswersEveryQuestion, setRunHoldsForOwner, type PermissionManager, type PermissionRequestHandler } from '@goodvibes/engine/platform/platform/permissions';
 import { VERSION } from '@goodvibes/engine/platform/platform/version';
 import { buildPersistedSessionContextFromFacts } from '@goodvibes/engine/platform/platform/runtime/operations';
 import type { RuntimeEventBus } from '@goodvibes/engine/platform/platform/runtime/state';
@@ -15,19 +15,30 @@ import { dispatchNativeConversationTurn } from './native-conversation-ingress.js
 import type { NativeConversationIntakeState } from './native-conversation-intake.js';
 import type { HeadlessSessionRecovery, NativeHeadlessTurnResult } from './native-headless.js';
 import { describeCrashRecovery, type CrashRecoveryReport } from '../session-crash-recovery.js';
+import { holdForOwnerInHeadlessRun, type HeldThroughDaemon } from './headless-held-calls.js';
+import { postHeadlessHookRunsToDaemon, type HookRunsSource } from '../places/hook-runs-poster.js';
+import { programNotices } from '../program-notices.js';
+import type { ShellPathService } from '@goodvibes/engine/platform/platform/runtime/shell';
+import type { ConnectedHostConfigReader } from '../agent-turn/connected-host-client.js';
 
 /** The parts of a bootstrapped terminal runtime one headless turn drives. */
 export interface HeadlessTurnContext {
   readonly runtimeBus: Pick<RuntimeEventBus, 'on'>;
   readonly orchestrator: Pick<Orchestrator, 'abort' | 'handleUserInput' | 'bindNativeConversationProject'> & Partial<Pick<Orchestrator, 'onTurnFailover'>>;
   readonly runtime: { readonly sessionId: string; readonly model: string; readonly provider: string };
-  readonly permissionPromptRef: { requestPermission: PermissionRequestHandler };
+  /** The run's prompt; `answersHere` set for the run: its asks are answered here (its script) or held for the owner, never raised on the daemon too. */
+  readonly permissionPromptRef: { requestPermission: PermissionRequestHandler; answersHere?: boolean };
+  /**
+   * Where this program's daemon credential is read, to hand a held capability call to the daemon (headless-held-calls.ts);
+   * the hooks this run fires, posted to the daemon's one hook trace.
+   */
+  readonly services?: { readonly shellPaths: ShellPathService; readonly configManager: ConnectedHostConfigReader; readonly hookActivityTracker?: HookRunsSource | undefined } | undefined;
   /** The gate: calls just-vibes held during this run are reported on the result. */
   readonly permissions?: Pick<PermissionManager, 'listHeldForOwner'> | undefined;
   readonly uiServices: {
     readonly agents: {
       readonly contractRunner: Pick<ContractRunner, 'list' | 'cancel' | 'get' | 'on' | 'join'>;
-      readonly agentManager: Pick<AgentManager, 'list' | 'cancel' | 'join' | 'getStatus'>;
+      readonly agentManager: Pick<AgentManager, 'list' | 'cancel' | 'join' | 'getStatus'> & Partial<Pick<AgentManager, 'stopFollowingDelegatedWork'>>;
     };
   };
 }
@@ -36,6 +47,12 @@ export type HeadlessTurnLimits = Pick<HeadlessTurnObserverOptions, 'maxTurns' | 
   readonly answerPermissions?: boolean | undefined;
   /** The settings the chosen mode is read from: a `PERMISSION_MODE_CHANGED` frame names it and says why the mode in force differs. */
   readonly settings?: Parameters<typeof describePermissionModeInForce>[0] | undefined;
+  /**
+   * The program running this turn and its call to the daemon: the hooks the turn fires reach the daemon's hook trace,
+   * and the program's notices (an agent or work that ended, an approval, a budget) reach the daemon's webhook list and
+   * its Slack and Discord notifier, before the run ends.
+   */
+  readonly daemon?: { readonly program: 'tui' | 'agent'; readonly invoke: (method: string, input: Readonly<Record<string, unknown>>) => Promise<unknown> } | undefined;
 };
 
 /** Stop reason a headless run reports, in both terminal apps, when the turn ends without a settling event. */
@@ -71,10 +88,19 @@ export async function executeHeadlessTurn(
   // This freshly bootstrapped executor belongs only to this invocation.
   const abort = () => {
     ctx.orchestrator.abort();
+    // Work this run handed to the daemon is the daemon's: it runs on and its result waits in Work; only following it ends.
+    agents.stopFollowingDelegatedWork?.();
     for (const contract of owned()) runner.cancel(contract.id, 'Headless invocation cancelled');
     for (const agent of ownedAgents()) agents.cancel(agent.id);
   };
-  const { answerPermissions, settings, ...observerLimits } = limits;
+  const { answerPermissions, settings, daemon, ...observerLimits } = limits;
+  // The hooks this run fires go to the daemon's one hook trace, as an interactive program's do (Tools and extensions, Hook runs).
+  const hookRuns = daemon && ctx.services?.hookActivityTracker
+    ? postHeadlessHookRunsToDaemon({ runs: ctx.services.hookActivityTracker, invoke: daemon.invoke, program: daemon.program, project: ctx.services.shellPaths.workingDirectory })
+    : undefined;
+  // This run's notices go through the daemon as an interactive program's do (program-notices.ts); those made while the
+  // runtime started waited and go now.
+  const stopNotices = daemon ? programNotices.bind({ invoke: daemon.invoke, onDaemonBack: () => () => {}, program: daemon.program }) : undefined;
   const chosenMode = settings === undefined ? undefined : (modeInForce: string): { chosen: string; reason?: string } => {
     const described = describePermissionModeInForce(settings);
     return { chosen: described.chosen, ...(described.chosen !== modeInForce && described.reason !== undefined ? { reason: described.reason } : {}) };
@@ -92,7 +118,21 @@ export async function executeHeadlessTurn(
   const permissionAnswers = answerPermissions
     ? createHeadlessPermissionInput({ input: process.stdin, emit: observer.frame, signal })
     : undefined;
-  if (permissionAnswers) ctx.permissionPromptRef.requestPermission = permissionAnswers.prompt;
+  // One answerer per question: the script, or (nobody here) the owner in his own list, never both.
+  ctx.permissionPromptRef.answersHere = true;
+  // The calls this run held for the owner through the daemon, each by the approval it waits as (the result's heldForOwner).
+  const heldThroughDaemon: HeldThroughDaemon[] = [];
+  // The script is the run's one answerer for every question its calls raise, a method the daemon would otherwise
+  // decide itself when it arrives included: this run's gate decides it, and it is sent saying so.
+  if (permissionAnswers) {
+    ctx.permissionPromptRef.requestPermission = permissionAnswers.prompt;
+    setRunAnswersEveryQuestion(true);
+  } else if (ctx.services) {
+    ctx.permissionPromptRef.requestPermission = holdForOwnerInHeadlessRun(ctx.services, (call) => { heldThroughDaemon.push(call); });
+    // Nobody answers this run: a call the daemon would decide by asking the owner (a natively admitted method) is
+    // decided here and held for him through the daemon, never waited on (permissions/run-answerer.ts).
+    setRunHoldsForOwner(true);
+  }
   signal.addEventListener('abort', abort, { once: true });
   try {
     if (signal.aborted) return { exitCode: 130, response: '', stopReason: 'cancelled' };
@@ -141,14 +181,36 @@ export async function executeHeadlessTurn(
       }
       for (const agent of standalone) {
         collectedAgents.add(agent.id);
-        await agents.join(agent.id);
+        // Work handed to the daemon that waits on the owner in Work (a question, its plan, a failed step): nobody here
+        // can answer it, so the run stops waiting and says where it waits; the work stays on the daemon.
+        const waitsInWork = (): string | undefined => agents.getStatus(agent.id)?.delegatedWorkWaiting;
+        let stopWatch: (() => void) | undefined;
+        await Promise.race([
+          agents.join(agent.id),
+          new Promise<void>((resolve) => {
+            if (waitsInWork()) { resolve(); return; }
+            stopWatch = ctx.runtimeBus.on('AGENT_PROGRESS', () => { if (waitsInWork()) resolve(); });
+          }),
+        ]);
+        stopWatch?.();
+        const waiting = waitsInWork();
+        if (waiting) {
+          state.exitCode = 1;
+          state.stopReason = 'awaiting-owner';
+          state.error = `${waiting}. The work runs on the daemon; its result waits in Work.`;
+          agents.stopFollowingDelegatedWork?.();
+          continue;
+        }
         const current = agents.getStatus(agent.id);
         if (current?.status === 'completed' && current.fullOutput?.trim()) answers.push(current.fullOutput);
         else {
           const cancelled = signal.aborted || current?.status === 'cancelled';
           state.exitCode = cancelled ? 130 : 1;
           state.stopReason = cancelled ? 'cancelled' : 'agent-failed';
-          state.error = current?.error ?? `Delegated agent ${agent.id} did not return a completed report.`;
+          // Work handed to the daemon runs on there whatever this run does: said so, never as a lost agent.
+          state.error = current?.delegatedWorkId && cancelled
+            ? `"${current.task.split('\n')[0]!.trim()}" runs on on the daemon; its result waits in Work.`
+            : current?.error ?? `Delegated agent ${agent.id} did not return a completed report.`;
         }
       }
     }
@@ -160,12 +222,26 @@ export async function executeHeadlessTurn(
       ? { ...ctx.runtime, model: answeredBy.toRegistryKey, provider: answeredBy.toProvider }
       : ctx.runtime);
     // A just-vibes run ends with what it held for the owner; nothing was run for them.
-    const held = (ctx.permissions?.listHeldForOwner() ?? []).filter((call) => call.heldAt >= startedAt)
-      .map((call) => ({ id: call.id, tool: call.toolName, summary: call.summary, reason: call.reason }));
+    const held = [
+      ...(ctx.permissions?.listHeldForOwner() ?? []).filter((call) => call.heldAt >= startedAt)
+        .map((call) => ({ id: call.id, tool: call.toolName, summary: call.summary, reason: call.reason })),
+      // What waits in Waiting for you, named by its approval: the owner's answer there runs it.
+      ...heldThroughDaemon.map((call) => ({ id: call.id, tool: call.tool, summary: call.summary, reason: call.reason })),
+    ];
     // Read while the run's composition still owns the policy: whether a decision model was in use, and its failure.
     const decisionModel = decisionModelUse();
     return { ...result, ...(held.length > 0 ? { heldForOwner: held } : {}), ...(decisionModel.inUse ? {} : { decisionModel }) };
   } finally {
+    // Every hook run of this turn reaches the trace before the run ends (or the daemon did not take it: said in the log).
+    if (hookRuns) {
+      await hookRuns.settle();
+      hookRuns.stop();
+    }
+    // Every notice of this run reached the daemon before the run ends (or the daemon did not answer: said in the log).
+    if (stopNotices) {
+      await programNotices.settle();
+      stopNotices();
+    }
     signal.removeEventListener('abort', abort);
     permissionAnswers?.dispose();
     stopFailoverWatch?.();

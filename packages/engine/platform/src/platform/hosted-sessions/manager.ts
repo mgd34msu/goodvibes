@@ -59,7 +59,7 @@ import { summarizeError } from '../utils/error-display.js';
 import type { AnyRuntimeEvent, RuntimeEventBus, RuntimeEventEnvelope, TurnEvent } from '../runtime/events/index.js';
 import type { SessionLiveTurnControls } from '../control-plane/routes/session-runtime.js';
 import { resolveHostedModelDefinition } from './model-route.js';
-import { createHostedSessionRuntime, newHostedSessionId, type HostedSessionContractSink, type HostedSessionRuntime } from './session-runtime.js';
+import { createHostedSessionRuntime, newHostedSessionId, type HostedSessionContractSink, type HostedSessionRuntime, type HostedSubmitOptions } from './session-runtime.js';
 import type { HostedContractRunners } from '../contract/operator-service.js';
 import { HostedWorkspaceFloors, type HostedWorkspaceFloor, type HostedWorkspaceFloorFactory, type HostedWorkspaceFloorLease } from './workspace-floor.js';
 import type { HostedDaemonRequestPath, HostedSurfaceTurn, HostedSurfaceTurns } from './surface-turn.js';
@@ -283,6 +283,7 @@ export class HostedSessionManager {
           : callback());
       },
       deliver: (sessionId, text, correlationId, delivery) => this.deliver(sessionId, text, correlationId, delivery),
+      steerRunning: (sessionId, text, correlationId, delivery) => this.steerRunning(sessionId, text, correlationId, delivery),
       now: () => this.now(),
       alertOwner: (text) => this.alerter?.(text),
     });
@@ -865,8 +866,9 @@ export class HostedSessionManager {
    * `operatorInput` marks input an authenticated operator sent; it starts the
    * session's next untrusted-content turn (session-runtime.ts).
    * `answersContractQuestion` sends it as the answer to that open contract question.
+   * `ownerTyped`: the owner typed it into his own program attached here (session-runtime.ts).
    */
-  async deliver(sessionId: string, text: string, correlationId?: string, delivery?: { readonly operatorInput?: boolean | undefined; readonly answersContractQuestion?: string | undefined }): Promise<void> {
+  async deliver(sessionId: string, text: string, correlationId?: string, delivery?: HostedSubmitOptions): Promise<void> {
     const live = this.requireLive(sessionId);
     await this.ensureComposed(live);
     this.assertSessionUsable(live);
@@ -882,6 +884,16 @@ export class HostedSessionManager {
       };
       await this.persist(live.record);
     }
+  }
+
+  /**
+   * A steer (`sessions.steer`) while this session runs a turn: the message goes into that turn before its next request
+   * to the model. False when no turn runs (or the session has no loop): the caller delivers it, which starts one.
+   */
+  steerRunning(sessionId: string, text: string, correlationId?: string, delivery?: { readonly operatorInput?: boolean | undefined; readonly ownerTyped?: boolean | undefined }): boolean {
+    const live = this.sessions.get(sessionId);
+    if (!live?.runtime || !live.runtime.isRunning()) return false;
+    return live.runtime.steer(text, correlationId, delivery);
   }
 
   /** Dedicated native path: exact broker input, real permit, no ordinary queue/retry. */

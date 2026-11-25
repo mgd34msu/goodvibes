@@ -53,13 +53,6 @@ export interface DaemonConfig {
    */
   companionChatRateLimiterOptions?: { threshold?: number } | undefined;
   /**
-   * WorkspaceSwapManager instance to handle runtime.workingDir transitions.
-   * When provided, POST /config runtime.workingDir requests are delegated
-   * to the swap manager rather than rejected. Injected by cli.ts at startup;
-   * omitted in embedded/test contexts where workspace swaps are not supported.
-   */
-  swapManager?: import('./http/system-route-types.js').WorkspaceSwapManagerLike | null | undefined;
-  /**
    * Identity of the RUNNING artifact for the auto-update loop: its version
    * (compared against release tags) and optionally the executable the swap
    * replaces. The daemon executable passes its release version; an
@@ -104,6 +97,11 @@ export interface DaemonConfig {
    * its own alone.
    */
   secureAddressGroup?: import('./lan-https/group-share.js').SecureAddressGroupAccess | undefined;
+  /**
+   * The places as declared (terminal-shell places/browser.ts), for `places.counts`: each place's count made from its
+   * own daemon lists. Absent: the method answers no places.
+   */
+  places?: readonly import('../capabilities/place-counts.js').CountedPlace[] | undefined;
   /**
    * Serve the web UI to the network (what `goodvibes-daemon webui enable
    * --lan` writes) and resolve once the listener is bound again; the Secure

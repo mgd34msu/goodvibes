@@ -13,6 +13,7 @@ import { isCapturedReplTool } from '../repl/captured.js';
 import type { Tool } from '../../types/tools.js';
 import type { ReadAccessFilter } from './read-access.js';
 import { ToolInputProjectionError } from '../input-projection.js';
+import { JudgmentError } from '@goodvibes/judgment';
 import {
   assertContractInputAuthority,
   assertCapturedInputPathContext,
@@ -23,6 +24,8 @@ import {
   contractInputAuthorityMutable,
   contractInputAuthorityRoot,
   contractInputAuthoritySourceRoot,
+  ContractInputReadDeniedError,
+  noteContractInputCallHeld,
   type ContractInputAuthority,
 } from '../../contract/input-authority.js';
 
@@ -279,6 +282,12 @@ export function capturedInputTool(
               // Backend error strings can include source bytes. A held call returns
               // only a fixed cause and next step, never the exception text or
               // partial tool output.
+              const cancelled = signal?.aborted || callSignal?.aborted || (error instanceof ToolInputProjectionError && error.problem === 'cancelled');
+              // The run is told too, so the work says in words what held its step back (never the exception text).
+              if (!cancelled) {
+                noteContractInputCallHeld(authority, error instanceof ContractInputReadDeniedError ? 'refused'
+                  : error instanceof JudgmentError || (error instanceof ToolInputProjectionError && error.problem === 'stale') ? 'changed-while-judged' : 'view-changed');
+              }
               return { success: false, error: capturedHeldMessage(error, signal, callSignal, root) };
             }
           },

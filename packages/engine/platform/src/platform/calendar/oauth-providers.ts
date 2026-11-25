@@ -37,6 +37,13 @@ import type {
  */
 export const GOOGLE_SCOPES_DEFAULT: readonly string[] = OAUTH_SCOPES;
 
+/**
+ * The scopes of a calendar-only Google sign-in (Calendar accounts, for a person who has not connected Google on the
+ * Google tab): the calendar's two, no mail. The grant is kept as the one Google connection; connecting mail later asks
+ * for consent again on the Google tab, once, for mail and calendar together.
+ */
+export const GOOGLE_CALENDAR_ONLY_SCOPES: readonly string[] = OAUTH_SCOPES.filter((scope) => scope.includes('/auth/calendar'));
+
 /** Microsoft Graph read/write calendar scope (+ offline_access for a refresh token). */
 export const MICROSOFT_SCOPES_DEFAULT = [
   'offline_access',

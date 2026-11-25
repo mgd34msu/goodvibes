@@ -223,7 +223,8 @@ this default for that queue alone.
 Agent and workstream outcomes (an agent completed, failed or was cancelled; a
 workstream passed, failed or was cancelled) are announced with the same
 events and the same words to every notification transport: Slack, Discord
-and the generic webhook URLs (`/notify add`). Slack and Discord get a
+and the generic webhook URLs (the daemon's one list, on the Notifications tab
+of Mail, calendar and channels). Slack and Discord get a
 notification channel only when they have somewhere to post: an
 incoming-webhook URL (the service's `webhookUrl`, or `SLACK_WEBHOOK_URL` /
 `DISCORD_WEBHOOK_URL`), or a bot token together with
@@ -234,9 +235,10 @@ and names what to add.
 Every transport retries a failed notification with the same policy, then
 keeps it in a failed-notification list. The daemon stores its list on disk,
 so it survives a restart; list and resend it with the operator methods
-`notifications.deadLetters.list` and `notifications.deadLetters.replay`. A
-terminal app lists and resends the notifications it sent itself with
-`/notify failed` and `/notify resend <id|all>`. A
+`notifications.deadLetters.list` and `notifications.deadLetters.replay`, or on
+the Failed notifications tab of Mail, calendar and channels. A notification a
+terminal program sent on its own events and could not deliver stays in that
+program's own failed list on disk. A
 resent notification is delivered, queued again for retry, or back in the
 list; a webhook notification is not sent to a URL that was removed since it
 failed.

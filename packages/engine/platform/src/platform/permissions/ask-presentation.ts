@@ -26,7 +26,7 @@ import { buildPermissionApprovalBrief } from './briefs/build.js';
 import { execRunPlace, permissionSubject } from './subject.js';
 import { composeConsequence, folderName, readingAnswer, undoFactOf, commandEffect, type SandboxFact } from './ask-consequence.js';
 import { modeInForceLine, type ModeInForceWords } from './decision-model-readiness.js';
-import { HELD_OWNER_ONLY_METADATA } from './held-for-owner.js';
+import { HELD_OWNER_ONLY_METADATA, HELD_SEND_METADATA } from './held-for-owner.js';
 import { PURCHASE_AMOUNT_METADATA, PURCHASE_DEADLINE_METADATA, PURCHASE_ITEM_METADATA, PURCHASE_SHOP_METADATA, PURCHASE_STANDING_METADATA } from '../payments/payment-ports.js';
 import { formatMinorUnits } from '../payments/message.js';
 import { minorUnitExponent } from '../payments/money-parsing.js';
@@ -368,6 +368,8 @@ function whoAsked(request: PermissionPromptRequest): string | undefined {
   switch (attribution?.kind) {
     // An agent this chat started, by its display name; everything else this chat's own work asked is GoodVibes's ask.
     case 'background-agent': return attribution.template ? `the ${lowerFirst(archetypeDisplayName(attribution.template))}` : 'the agent';
+    // A caller over the daemon's API whose call the daemon put to the owner: by name (a sign-in, a paired device).
+    case 'outside-caller': return attribution.name;
     default: return undefined;
   }
 }
@@ -409,6 +411,8 @@ export const ONCE_LABEL = 'Yes, once';
 const OPENS_ON_NO: ReadonlySet<OwnerOnlyKind> = new Set<OwnerOnlyKind>([
   'unrecoverable-delete', 'irreversible-operator', 'spend-over-limit', 'payment-step', 'new-recipient', 'untrusted-derived-send',
   'loosen-security', 'grant-access',
+  // An act only the owner does (a capability put to him rather than refused): his yes is the act.
+  'owner-act',
 ]);
 
 /** Whether an ask held for the owner for this owner-only kind opens on No. */
@@ -506,9 +510,29 @@ function approvalChoices(kind: AskKind, remember: AskPresentation['remember'], c
   ];
 }
 
+/** The parts of a call an ask's question is worded from. */
+type AskedCall = Pick<PermissionPromptRequest, 'tool' | 'args' | 'category' | 'workingDirectory' | 'attribution' | 'ownerOnly'>;
+
+/**
+ * What a call does, in the words its ask's title uses, as a statement ("Change notes.md", "Run bun test", "Open
+ * example.com"): a decision made about it is said in these words wherever it is shown.
+ */
+export function callActWords(call: AskedCall): string {
+  const kind = askKindOf(call);
+  // A file is named as the call wrote it, so a file outside the project reads as where it is, not by its name alone.
+  const paths = kind === 'change-files' ? [...new Set(extractPathArgs(call.args))] : [];
+  if (paths.length === 1) return `Change ${paths[0]}`;
+  return questionOf(kind, call, {}, permissionSubject(call.tool, call.args).values).title.replace(/\?$/, '');
+}
+
 /** "Run this command?" and the rest of the 3.4 table for a permission request. */
-function questionOf(kind: AskKind, request: PermissionPromptRequest, facts: Pick<AskFacts, 'workingDirectory' | 'settingLabel'>, subjectValues: readonly string[]): { question: string; title: string } {
+function questionOf(kind: AskKind, request: AskedCall, facts: Pick<AskFacts, 'workingDirectory' | 'settingLabel'>, subjectValues: readonly string[]): { question: string; title: string } {
   const args = request.args;
+  // A call its program words itself (a daemon method admitted natively, judged as a write: "Add a schedule ...?").
+  if (kind === 'change-files' && extractPathArgs(args).length === 0) {
+    const own = toolAskWords(request.tool, args);
+    if (own) return { question: own.question, title: own.question };
+  }
   switch (kind) {
     case 'run-command': {
       const n = subjectValues.length;
@@ -685,8 +709,10 @@ export function presentApprovalAsk(request: PermissionPromptRequest, facts: AskF
   // The gate's own fact (it holds the call because it loosens a protection) needs no decision model; the reading's answer is the other way to know.
   const weakensSetting = kind === 'change-setting' && (request.ownerOnly === 'loosen-security' || readingAnswer(reading, 'weakensSecurity') === 'yes');
   const lasting = lastingYesOf(kind, request);
-  // What weakens a protection or cannot be undone opens on No, wherever it is shown.
-  const opensOnNo = cannotUndo || weakensSetting || ownerOnlyOpensOnNo(request.ownerOnly);
+  // What weakens a protection or cannot be undone opens on No, wherever it is shown. So does a call someone other than
+  // you asked for (an outside caller's held call, any ask raised over the wire): what such a caller says it is cannot
+  // be weighed here, so Enter never says yes to it.
+  const opensOnNo = cannotUndo || weakensSetting || ownerOnlyOpensOnNo(request.ownerOnly) || request.attribution?.kind === 'outside-caller';
   const consequence = composeConsequence({
     toolName: request.tool, args: request.args, reading, undo,
     ...(directory !== undefined ? { workingDirectory: directory } : {}),
@@ -703,10 +729,14 @@ export function presentApprovalAsk(request: PermissionPromptRequest, facts: AskF
 
   // A price change is asked because the price moved, not because of the mode: that is its why.
   const priceWhy = kind === 'model-price' ? modelPriceWhy(request.args) : undefined;
-  const why = priceWhy ?? [
+  // An act only the owner makes, asked by someone else (a paired device, a member): it is put to him in every mode,
+  // so the mode is not why it is asked; only that it is his.
+  const ownersAlone = request.ownerOnly === 'owner-act' && request.attribution?.kind === 'outside-caller';
+  const why = priceWhy ?? (ownersAlone ? `${capitalize(by ?? 'someone other than you')} asked for it, and only you may do it, so it is put to you whatever the mode.` : undefined) ?? [
     modeWhy(facts),
-    request.ownerOnly !== undefined ? `Only you decide this: ${ownerOnlyReason(request.ownerOnly)}.` : undefined,
-    cannotUndo ? 'It can\'t be undone, so it asks every time; to let it run without asking, add a permission rule with /permissions.' : undefined,
+    // "This can't be undone." is said once, in the question: the reasons below do not say it again.
+    request.ownerOnly !== undefined ? `Only you decide this: ${cannotUndo && request.ownerOnly === 'irreversible-operator' ? 'it is an operator action' : ownerOnlyReason(request.ownerOnly)}.` : undefined,
+    cannotUndo ? 'So it asks every time; to let it run without asking, add a permission rule with /permissions.' : undefined,
   ].filter((part): part is string => part !== undefined).join(' ');
 
   const brief = buildPermissionApprovalBrief(request);
@@ -756,7 +786,7 @@ function optionChoices(options: readonly string[], ownWords: string): AskChoice[
 }
 
 const DECISION_LABELS: Readonly<Record<string, string>> = {
-  keep: 'Keep it as decided', undo: 'Undo the change', never: 'Never allow calls like it', always: 'Always allow calls like it', ask: 'Always ask me',
+  keep: 'Keep it as decided', never: 'Never allow calls like it', always: 'Always allow calls like it', ask: 'Always ask me',
 };
 
 function metadataText(item: OwnerItem, key: string): string | undefined {
@@ -794,17 +824,15 @@ export function presentInboxAsk(item: OwnerItem, facts: AskFacts, request?: Perm
         title: clipLine(item.title, 80),
       };
     case 'decision': {
-      const tool = metadataText(item, 'tool');
-      const verdict = metadataText(item, 'verdict') ?? 'decided';
-      const noun = tool === 'exec' ? 'command' : tool === 'write' || tool === 'edit' ? 'file change' : tool === 'fetch' ? 'web request' : 'action';
-      const question = `Jev ${verdict} a ${noun} for you`;
+      // The item's own sentence (permissions/jev-decisions.ts): what Jev allowed or refused, the same in the list and the card.
+      const question = item.title;
       return {
         ...base, kind: 'decision', mark: 'question', question, body: firstLine(item.detail).replace(/^Why: /, ''),
         choices: item.options.map((option, index): AskChoice => ({
           id: `option:${index}`, label: DECISION_LABELS[option] ?? capitalize(option), key: String(index + 1), value: option, ...(index === 0 ? { default: true as const } : {}),
         })),
         remember: noRemember, typeToRefuse: false,
-        why: 'Jev, the decision model, decided this in your place; you can keep it, undo it, or set a standing rule for calls like it.',
+        why: 'Jev, the decision model, decided this in your place; you can keep it, or set a standing rule for calls like it.',
         details: [{ label: 'Decided', value: item.title }, { label: 'Detail', value: item.detail }],
         title: question,
       };
@@ -822,6 +850,24 @@ export function presentInboxAsk(item: OwnerItem, facts: AskFacts, request?: Perm
       };
     case 'queued-action': {
       const summary = firstLine(item.detail);
+      // A mail or an invitation the Agent's content check refused (terminal-shell places/held-sends-inbox.ts): sent
+      // exactly as shown, or dropped. It goes outside this machine, so it opens on Drop.
+      if (item.metadata?.[HELD_SEND_METADATA] === true) {
+        return {
+          ...base, kind: 'queued-action', mark: 'ask', question: 'Send this exactly as shown?',
+          subject: { kind: 'text' as const, lines: item.detail.split('\n').slice(0, 12) },
+          consequence: { text: 'It goes outside this machine and cannot be called back.', withPlace: 'It goes outside this machine and cannot be called back.', tone: 'cannot-undo' },
+          choices: [
+            { id: 'once', label: 'Send it as shown', key: 'y', value: 'approve', said: 'You sent it' },
+            { id: 'no', label: 'Drop it', key: 'n', value: 'drop', default: true },
+          ],
+          remember: noRemember, typeToRefuse: false,
+          why: 'The content check refused this send because something the agent read just before may have steered it; only you can send it.',
+          details: [{ label: 'What would go out', value: item.detail }],
+          // The send in its own words ("Send mail to robin@example.com ..."), asked.
+          title: `${clipLine(item.title.replace(/^Refused send: /, ''), 70)}?`,
+        };
+      }
       // A call held for the owner-only kind it is (held-for-owner.ts posts it) opens on No like the ask it stands for.
       const opensOnNo = ownerOnlyOpensOnNo(metadataText(item, HELD_OWNER_ONLY_METADATA));
       return {
@@ -889,7 +935,10 @@ export function presentInboxAsk(item: OwnerItem, facts: AskFacts, request?: Perm
         ...base, kind: 'report', mark: 'question', question: item.title, body: firstLine(item.detail),
         choices: [{ id: 'acknowledge', label: 'Mark as read', key: 'y', default: true, value: 'read' }],
         remember: noRemember, typeToRefuse: false,
-        why: 'A scheduled run or a trigger answered while no one was watching; its answer waits here.',
+        // A notice, not a question: it says why it is here, and that nothing waits on an answer.
+        why: item.metadata?.['source'] === 'schedule' || item.metadata?.['source'] === 'trigger'
+          ? 'A scheduled run or a trigger answered while no one was watching; its answer waits here. It needs no answer: mark it read once you have seen it.'
+          : `${origin ? `${capitalize(origin.by)} left this for you to read` : 'This was left for you to read'}; it needs no answer: mark it read once you have seen it.`,
         details: [{ label: 'Report', value: item.detail }],
         title: item.title,
       };

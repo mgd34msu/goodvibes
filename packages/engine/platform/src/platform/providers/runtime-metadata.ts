@@ -180,10 +180,10 @@ export async function buildStandardProviderAuthRoutes(
         ...(envVars.length > 0
           ? [
             keys.length > 0 && !envVars.every((envVar) => keys.includes(envVar))
-              ? `Set ${envVars.join(' or ')} in the process environment; only ${keys.join(' or ')} can be stored in /secrets.`
-              : `Set ${envVars.join(' or ')} or store one of those keys in /secrets.`,
+              ? `Set ${envVars.join(' or ')} in the process environment; only ${keys.join(' or ')} can be stored as a secret (Permissions and safety, Secrets).`
+              : `Set ${envVars.join(' or ')} or store one of those keys as a secret (Permissions and safety, Secrets).`,
           ]
-          : ['Store the provider API key in /secrets or the process environment.']),
+          : ['Store the provider API key as a secret (Permissions and safety, Secrets) or in the process environment.']),
       ],
     });
     routes.push({
@@ -197,7 +197,7 @@ export async function buildStandardProviderAuthRoutes(
         : 'No SecretRef-backed credential is configured.',
       ...(keys.length > 0 ? { secretKeys: keys } : {}),
       repairHints: [
-        'Use /secrets link <KEY> <secret-ref> to attach Bitwarden, Vaultwarden, BWS, or another supported SecretRef.',
+        '"Point a secret at a password manager" (Permissions and safety, Secrets) attaches Bitwarden, Vaultwarden, BWS, or another supported SecretRef.',
       ],
     });
   };
@@ -216,7 +216,7 @@ export async function buildStandardProviderAuthRoutes(
         ? 'A service-owned OAuth credential is available for this provider.'
         : 'Service OAuth metadata exists, but the credential path is incomplete.',
       ...(serviceNames.length > 0 ? { serviceNames } : {}),
-      repairHints: ['Repair the provider service credential in /services or the settings surface.'],
+      repairHints: ['Repair the provider service credential on the Services tab of Models and providers.'],
     });
   }
 

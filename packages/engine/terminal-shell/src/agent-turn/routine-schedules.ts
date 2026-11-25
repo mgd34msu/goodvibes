@@ -117,8 +117,10 @@ export type ConnectedScheduleCreateResult =
 export async function createConnectedSchedule(
   connection: AgentConnectedHostConnection,
   payload: ScheduleCreateInput,
-  options: { readonly signal?: AbortSignal | undefined } = {},
+  options: { readonly signal?: AbortSignal | undefined; readonly workingDirectory?: string | undefined } = {},
 ): Promise<ConnectedScheduleCreateResult> {
+  // Its runs work in the project it is made from; the host refuses a schedule that names none.
+  if (options.workingDirectory) payload = { ...payload, workingDirectory: options.workingDirectory };
   const host = createConnectedHost(() => connectedHostOf(connection));
   try {
     const listed: unknown = await host.invoke('automation.schedules.list', {}, { signal: options.signal }).catch((error: unknown) => {
@@ -343,18 +345,12 @@ export function buildRoutineSchedulePreview(routine: AgentRoutineRecord, parsed:
 /**
  * What stands between a routine and an unattended, recurring schedule: it must
  * be switched on, reviewed, and have nothing missing. Each blocker names what
- * clears it where the refusal is read (the place's controls, or the Agent's
- * command line).
+ * clears it where the refusal is read (the place's controls).
  */
-export function routinePromotionBlockers(routine: AgentRoutineRecord, surface: 'place' | 'cli' = 'place'): readonly string[] {
+export function routinePromotionBlockers(routine: AgentRoutineRecord): readonly string[] {
   const blockers: string[] = [];
-  if (surface === 'cli') {
-    if (!routine.enabled) blockers.push(`it is switched off (run goodvibes-agent routines enable ${routine.id})`);
-    if (routine.reviewState !== 'reviewed') blockers.push(`it has not been reviewed (read its steps with goodvibes-agent routines show ${routine.id}, then run goodvibes-agent routines review ${routine.id})`);
-  } else {
-    if (!routine.enabled) blockers.push('it is switched off (switch it on, on the routine in Memory and knowledge or Automation)');
-    if (routine.reviewState !== 'reviewed') blockers.push('it has not been reviewed (read its steps, then mark it reviewed, on the routine in Memory and knowledge)');
-  }
+  if (!routine.enabled) blockers.push('it is switched off (switch it on, on the routine in Memory and knowledge or Automation)');
+  if (routine.reviewState !== 'reviewed') blockers.push('it has not been reviewed (read its steps, then mark it reviewed, on the routine in Memory and knowledge)');
   const readiness = evaluateAgentRoutineReadiness(routine);
   if (!readiness.ready) blockers.push(`setup is missing: ${readiness.missing.map(formatAgentSkillRequirement).join(', ')}`);
   return blockers;
@@ -364,7 +360,7 @@ export function routinePromotionBlockers(routine: AgentRoutineRecord, surface: '
 export async function promoteRoutineToConnectedSchedule(
   connection: AgentConnectedHostConnection,
   preview: RoutineSchedulePromotionPreview,
-  options: { readonly signal?: AbortSignal | undefined } = {},
+  options: { readonly signal?: AbortSignal | undefined; readonly workingDirectory?: string | undefined } = {},
 ): Promise<RoutineSchedulePromotionResult> {
   const created = await createConnectedSchedule(connection, preview.payload, options);
   if (!created.ok) return { ok: false, kind: created.kind, error: created.error, route: ROUTINE_SCHEDULE_ROUTE, baseUrl: created.baseUrl };
@@ -834,22 +830,26 @@ function formatRoutineScheduleFailureKind(kind: string): string {
   return kind.replace(/[_-]+/g, ' ');
 }
 
-/** The Agent command line that makes the same schedule, every option the preview shows repeated (a webhook address shown as a placeholder). */
+/** The input of routines.promote each delivery flag fills. */
+const DELIVERY_INPUT: Readonly<Record<string, string>> = { '--delivery-channel': 'channel', '--delivery-route': 'route', '--delivery-webhook': 'webhook', '--delivery-link': 'link' };
+
+/** The script line that makes the same schedule (`goodvibes-agent do routines.promote`), every value the preview shows repeated (a webhook address shown as a placeholder). */
 export function routineScheduleConfirmCommand(preview: RoutineSchedulePromotionPreview, options: { readonly redactWebhook?: boolean | undefined } = {}): string {
   const { payload } = preview;
-  const selector = payload.kind === 'cron' ? { flag: '--cron', value: String(payload.cron ?? '') } : payload.kind === 'every' ? { flag: '--every', value: String(payload.every ?? '') } : { flag: '--at', value: String(payload.at ?? '') };
-  const args = ['goodvibes-agent routines promote', scheduleRouteArg(preview.routineId), selector.flag, scheduleRouteArg(selector.value)];
-  if (typeof payload.timezone === 'string' && payload.timezone) args.push('--timezone', scheduleRouteArg(payload.timezone));
-  if (typeof payload.name === 'string' && payload.name) args.push('--name', scheduleRouteArg(payload.name));
-  if (typeof payload.provider === 'string' && payload.provider) args.push('--provider', scheduleRouteArg(payload.provider));
-  if (typeof payload.model === 'string' && payload.model) args.push('--model', scheduleRouteArg(payload.model));
-  if (payload.enabled === false) args.push('--disabled');
+  const when = payload.kind === 'cron' ? String(payload.cron ?? '') : payload.kind === 'every' ? String(payload.every ?? '') : String(payload.at ?? '');
+  const input = (id: string, value: string): string => `--input ${scheduleRouteArg(`${id}=${value}`)}`;
+  const args = ['goodvibes-agent do routines.promote', input('routine', preview.routineId), input('how', String(payload.kind)), input('when', when)];
+  if (typeof payload.timezone === 'string' && payload.timezone) args.push(input('tz', payload.timezone));
+  if (typeof payload.name === 'string' && payload.name) args.push(input('name', payload.name));
+  if (typeof payload.provider === 'string' && payload.provider) args.push(input('provider', payload.provider));
+  if (typeof payload.model === 'string' && payload.model) args.push(input('model', payload.model));
+  if (payload.enabled === false) args.push(input('paused', 'yes'));
   for (const target of payload.delivery?.targets ?? []) {
     const flag = deliveryTargetFlag(target);
-    const hidden = options.redactWebhook === true && flag?.flag === '--delivery-webhook';
-    if (flag) args.push(flag.flag, scheduleRouteArg(hidden ? '<webhook-url>' : flag.value));
+    const id = flag ? DELIVERY_INPUT[flag.flag] : undefined;
+    const hidden = options.redactWebhook === true && id === 'webhook';
+    if (flag && id) args.push(input(id, hidden ? '<webhook-url>' : flag.value));
   }
-  args.push('--yes');
   return args.join(' ');
 }
 

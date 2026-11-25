@@ -1,7 +1,8 @@
 /**
  * views.ts, where every old view name goes now.
  *
- * Views live in four kit modals (Usage, Changes, Agents, Notifications), the
+ * Views live in kit modals (Changes, Agents), places (Money, Spending, holds
+ * what the Usage view did; Notifications is in System), the
  * session picker and the config-modal surfaces. Old names still arrive from
  * many places: deep links, notifications that name the view they are
  * about, cross-modal jumps (the work plan's "show this agent"), saved muscle
@@ -19,7 +20,8 @@ export interface ViewTarget {
 
 export type ViewRoute =
   | { readonly kind: 'agents'; readonly hosted?: boolean }
-  | { readonly kind: 'usage'; readonly tab?: 'agents' }
+  /** Money, Spending: this conversation's usage and cost, its turns and its agents, then the daemon's records. */
+  | { readonly kind: 'usage' }
   | { readonly kind: 'changes'; readonly mode?: 'review' | 'git' }
   | { readonly kind: 'notifications' }
   | { readonly kind: 'sessions' }
@@ -83,8 +85,6 @@ export function resolveViewName(name: string, modalRedirect: (name: string) => s
   if (!id) return null;
   if (id === 'hosted') return { kind: 'agents', hosted: true };
   if (AGENT_VIEW_NAMES.includes(id)) return { kind: 'agents' };
-  // The old cost view's heart was the per-agent cost ledger: Usage's Agents tab.
-  if (id === 'cost') return { kind: 'usage', tab: 'agents' };
   if (USAGE_VIEW_NAMES.includes(id)) return { kind: 'usage' };
   if (id === 'review') return { kind: 'changes', mode: 'review' };
   if (id === 'git') return { kind: 'changes', mode: 'git' };

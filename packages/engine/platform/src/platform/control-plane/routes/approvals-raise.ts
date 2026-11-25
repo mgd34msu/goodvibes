@@ -49,7 +49,9 @@
 
 import type { GatewayMethodCatalog } from '../method-catalog.js';
 import type { GatewayMethodHandler, GatewayMethodInvocation } from '../method-catalog-shared.js';
-import type { PermissionPromptRequest } from '../../permissions/prompt.js';
+import type { PermissionAttribution, PermissionPromptRequest } from '../../permissions/prompt.js';
+import { approvalQuestion } from '../../permissions/ask-presentation.js';
+import { LOCAL_OWNER_PRINCIPAL, pairingTokenIdOfPrincipal } from '../../pairing/principal-ids.js';
 import type { RequestSharedApprovalInput, SharedApprovalRecord } from '../approval-broker.js';
 import type { RaisedApproval } from '../approval-broker-raise.js';
 import { GatewayVerbError } from './gateway-verb-error.js';
@@ -143,28 +145,46 @@ export function readApprovalRaiseRequest(raw: unknown): PermissionPromptRequest 
   if (!Array.isArray(reasons) || !reasons.every((entry) => typeof entry === 'string')) {
     throw invalid('Invalid request.analysis.reasons: expected an array of strings', 'request.analysis.reasons');
   }
-  requireStringValue(analysis['classification'], 'request.analysis.classification');
+  const classification = requireStringValue(analysis['classification'], 'request.analysis.classification');
   requireStringValue(analysis['summary'], 'request.analysis.summary');
   const workingDirectory = optionalString(raw['workingDirectory'], 'request.workingDirectory');
-  const attribution = raw['attribution'];
-  const rememberOptions = raw['rememberOptions'];
   const ownerOnly = raw['ownerOnly'];
   if (ownerOnly !== undefined && (typeof ownerOnly !== 'string' || !(OWNER_ONLY_KINDS as readonly string[]).includes(ownerOnly))) {
     throw invalid(`Invalid request.ownerOnly: expected one of ${OWNER_ONLY_KINDS.join(', ')}`, 'request.ownerOnly');
   }
-  // Only the fields of a permission ask are copied: the record is stored and
-  // shown to every surface, so a field nobody validated must not ride along.
+  // What is being asked, and nothing the daemon later reads as authority, wording, routing or identity: the caller's
+  // `attribution` (who asked, and the kind of card), `rememberOptions` (the tiers and their words), `ownerOnly`, and
+  // the analysis' own words (its summary, reasons, reading and effects) are dropped. The daemon words the question
+  // itself from the tool and its arguments and names the principal it authenticated (createApprovalRaiseHandler). The
+  // project folder stays as the place the card shows; no rule or sweep reads it from a wire record (approval-broker.ts).
   return {
     callId,
     tool,
     args,
     category: category as PermissionPromptRequest['category'],
-    analysis: analysis as unknown as PermissionPromptRequest['analysis'],
+    analysis: { classification, riskLevel: riskLevel as PermissionPromptRequest['analysis']['riskLevel'], summary: '', reasons: [] },
     ...(workingDirectory === undefined ? {} : { workingDirectory }),
-    ...(isRecord(attribution) ? { attribution: attribution as unknown as PermissionPromptRequest['attribution'] } : {}),
-    ...(Array.isArray(rememberOptions) ? { rememberOptions: rememberOptions as PermissionPromptRequest['rememberOptions'] } : {}),
-    ...(ownerOnly === undefined ? {} : { ownerOnly: ownerOnly as NonNullable<PermissionPromptRequest['ownerOnly']> }),
   };
+}
+
+/**
+ * Who raised a wire ask, as the owner reads it on the card: the principal the daemon authenticated, never a name the
+ * caller sent. A sign-in by its user name, a paired device by its name, the Agent's credential and the operator token
+ * as a program on this machine (a person's own terminal program raises its model's asks with that token).
+ */
+export function wireAskerWords(context: GatewayMethodInvocation['context'], deviceName?: (pairingId: string) => string | undefined): string {
+  const principalId = context.principalId;
+  if (!principalId) return 'a caller the daemon could not name';
+  // Told apart by the kind of credential first, never by the name alone: a sign-in user's name is its principal id.
+  if (context.principalKind === 'user' || context.credentialKind === 'user-session') return `${principalId}, signed in`;
+  if (context.credentialKind === 'agent') return 'the Agent on this machine';
+  const pairingId = pairingTokenIdOfPrincipal(principalId);
+  if (pairingId !== undefined) {
+    const name = deviceName?.(pairingId);
+    return name ? `the paired device "${name}"` : `a paired device (${pairingId})`;
+  }
+  if (principalId === LOCAL_OWNER_PRINCIPAL) return context.credentialKind === 'local' ? 'a program on this machine using your operator token' : 'a program using your operator token';
+  return principalId;
 }
 
 /**
@@ -181,10 +201,11 @@ export function buildRaiseMetadata(
   invocation: GatewayMethodInvocation,
   supplied: unknown,
 ): Record<string, unknown> {
-  const base = isRecord(supplied) ? { ...supplied } : {};
-  // Who raised the ask is the daemon's observation alone: a caller's own
-  // claim about it is dropped, so it cannot join another raiser's ask.
-  for (const key of RAISER_METADATA_KEYS) delete base[key];
+  // Nothing a caller supplies is ever read back as authority: only the keys a surface shows are kept, and every key the
+  // daemon itself reads on an approval (who raised it, which capability call it holds and who that call runs as, where
+  // it is delivered, when it started, what came of it, its settled words) is dropped, whatever the caller sent.
+  const base: Record<string, unknown> = {};
+  if (isRecord(supplied)) for (const key of RAISE_DISPLAY_METADATA_KEYS) if (Object.hasOwn(supplied, key)) base[key] = supplied[key];
   return {
     ...base,
     raisedVia: 'approvals.raise',
@@ -194,8 +215,13 @@ export function buildRaiseMetadata(
   };
 }
 
-/** Metadata keys only the daemon writes on a raised ask. */
-const RAISER_METADATA_KEYS: readonly string[] = ['raisedVia', 'raisedByPrincipal', 'raisedByPrincipalKind', 'raisedBySurface'];
+/**
+ * The metadata a raiser may put on its ask: none. Every key a caller could send is read somewhere as wording or
+ * identity (`judgmentVerdict` is drawn as Jev's verdict on the web card; `agentId`/`agentTemplate` list the ask under
+ * a background agent in the fleet view, which marks that agent blocked on the owner), or is read by the daemon itself
+ * (see buildRaiseMetadata), so a wire ask carries only what the daemon records about its raiser.
+ */
+const RAISE_DISPLAY_METADATA_KEYS: readonly string[] = [];
 
 /** Wait for a decision for at most `waitMs`; resolves false when it runs out. */
 async function awaitDecision(raised: RaisedApproval, waitMs: number, signal?: AbortSignal): Promise<boolean> {
@@ -223,19 +249,41 @@ async function awaitDecision(raised: RaisedApproval, waitMs: number, signal?: Ab
   }
 }
 
-export function createApprovalRaiseHandler(broker: ApprovalRaiseService): GatewayMethodHandler {
+/** What the raise verb reads beside the broker: a paired device's name, so the card names the device that asked. */
+export interface ApprovalRaiseNames {
+  readonly deviceName?: ((pairingId: string) => string | undefined) | undefined;
+  /** Who registered a session (the session broker's); a raise names a session only when its raiser registered it. */
+  readonly sessionRegistrant?: ((sessionId: string) => string | undefined) | undefined;
+}
+
+/** A principal as a session's registrant record names it: this machine's own credential is the operator token's. */
+function registrantKey(principal: string | undefined): string {
+  return principal === undefined || principal === 'local' ? LOCAL_OWNER_PRINCIPAL : principal;
+}
+
+export function createApprovalRaiseHandler(broker: ApprovalRaiseService, names: ApprovalRaiseNames = {}): GatewayMethodHandler {
   return async (invocation) => {
     const params = readInvocationParams(invocation);
-    const request = readApprovalRaiseRequest(params['request']);
+    const asked = readApprovalRaiseRequest(params['request']);
+    // The card names the principal the daemon authenticated, and its question is the daemon's own words for the call.
+    const attribution: PermissionAttribution = {
+      kind: 'outside-caller', name: wireAskerWords(invocation.context, names.deviceName), principalId: invocation.context.principalId ?? 'unknown',
+    };
+    const attributed: PermissionPromptRequest = { ...asked, attribution };
+    const request: PermissionPromptRequest = { ...attributed, analysis: { ...attributed.analysis, summary: approvalQuestion(attributed) } };
     const timeoutMs = clampedMs(params['timeoutMs'], 'timeoutMs', APPROVAL_RAISE_MAX_TIMEOUT_MS);
     const waitMs = clampedMs(params['waitMs'], 'waitMs', APPROVAL_RAISE_MAX_WAIT_MS);
-    const sessionId = optionalString(params['sessionId'], 'sessionId');
-    const routeId = optionalString(params['routeId'], 'routeId');
+    // Where the ask is shown and delivered is never the caller's word: a channel route is dropped, and a session is
+    // kept only when this raiser registered it (its own conversation), never one it merely named.
+    const named = optionalString(params['sessionId'], 'sessionId');
+    optionalString(params['routeId'], 'routeId');
+    const registrant = named !== undefined ? names.sessionRegistrant?.(named) : undefined;
+    const sessionId = named !== undefined && registrant !== undefined && registrantKey(registrant) === registrantKey(invocation.context.principalId)
+      && invocation.context.credentialKind !== 'user-session' ? named : undefined;
 
     const raised = await broker.raiseApproval({
       request,
       ...(sessionId === undefined ? {} : { sessionId }),
-      ...(routeId === undefined ? {} : { routeId }),
       ...(timeoutMs === undefined || timeoutMs === 0 ? {} : { timeoutMs }),
       metadata: buildRaiseMetadata(invocation, params['metadata']),
     });
@@ -271,7 +319,8 @@ export function createApprovalRaiseHandler(broker: ApprovalRaiseService): Gatewa
 export function registerApprovalRaiseGatewayMethods(
   catalog: GatewayMethodCatalog,
   broker: ApprovalRaiseService,
+  names: ApprovalRaiseNames = {},
 ): void {
   const descriptor = catalog.get('approvals.raise');
-  if (descriptor) catalog.register(descriptor, createApprovalRaiseHandler(broker), { replace: true });
+  if (descriptor) catalog.register(descriptor, createApprovalRaiseHandler(broker, names), { replace: true });
 }

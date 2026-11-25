@@ -21,7 +21,6 @@ import { createBootstrapCommandContext } from './bootstrap-command-context.ts';
 import { startPlanActivationTurn } from './plan-activation.ts';
 import { ownerInputFor } from '@goodvibes/engine/terminal-shell/companion-input';
 import { loadBootstrapSystemPrompt } from '@/runtime/index.ts';
-import { createShellRemoteCommandService } from '@/runtime/index.ts';
 import { createRuntimeFoundationClients } from '@/runtime/index.ts';
 import type { ToolRegistry } from '@goodvibes/engine/platform/platform/tools';
 import type { ForensicsRegistry } from '@/runtime/index.ts';
@@ -157,12 +156,6 @@ export function createBootstrapShell(options: BootstrapShellOptions): BootstrapS
   });
   const { directTransport, hookApi, mcpApi, opsApi, providerApi } = foundationClients;
   const agentKnowledgeApi = createKnowledgeApi(services.agentKnowledgeService, { memoryRegistry: services.memoryRegistry });
-  const remoteRuntime = createShellRemoteCommandService({
-    readModels: uiServices.readModels,
-    remoteRunnerRegistry: services.remoteRunnerRegistry,
-    runtimeStore,
-  });
-
   const commandContext: CommandContext = createBootstrapCommandContext({
     ...projectBootstrapShellCommandOptions({
       configManager,
@@ -174,7 +167,6 @@ export function createBootstrapShell(options: BootstrapShellOptions): BootstrapS
       forensicsRegistry,
       policyRuntimeState,
       uiServices,
-      remoteRuntime,
       providerApi,
       directTransport,
       hookApi,

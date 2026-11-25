@@ -13,9 +13,11 @@ interface AgentNotificationConfigReader {
   getConfigurationIncarnation?(): number;
 }
 
+/** The notifier the tool sends through: the daemon's own (its turns), or a terminal program's notices sent through its daemon. */
 interface AgentNotificationSender {
-  setUrls(urls: string[]): void;
-  send(text: string, lifetime?: { readonly signal?: AbortSignal | undefined; readonly assertCurrent?: (() => void) | undefined }): Promise<WebhookNotifierSendResult>;
+  /** The daemon's own notifier is handed the targets read here; a program's notices go to the daemon's list as it is. */
+  setUrls?(urls: string[]): void;
+  send(text: string, lifetime?: { readonly signal?: AbortSignal | undefined; readonly assertCurrent?: (() => void) | undefined }): Promise<WebhookNotifierSendResult & { readonly textSent?: boolean | undefined }>;
 }
 
 export interface AgentNotifyToolArgs {
@@ -50,9 +52,11 @@ function preview(message: string, targetCount: number): string {
   ].join('\n');
 }
 
-function formatSendResult(result: WebhookNotifierSendResult): string {
+function formatSendResult(result: WebhookNotifierSendResult & { readonly textSent?: boolean | undefined }): string {
   const lines = [
-    result.failed === 0 && result.delivered > 0 ? 'Agent notification sent' : 'Agent notification delivery incomplete',
+    result.failed === 0 && result.delivered > 0
+      ? (result.textSent === false ? 'Sent a notice without the text (only the notice goes out while \'metadata only\' is on).' : 'Agent notification sent')
+      : 'Agent notification delivery incomplete',
     `  attempted: ${result.attempted}`,
     `  delivered: ${result.delivered}`,
     `  failed: ${result.failed}`,
@@ -104,7 +108,7 @@ export function createAgentNotifyTool(
         const urls = configuredWebhookUrls(configManager);
         if (readFlag(args.preview, 'preview', false)) return output(preview(message, urls.length));
         if (urls.length === 0) {
-          return failure('No Agent notification webhook targets are configured. Add one from the Channels workspace before sending notifications.');
+          return failure('No notification webhook address is set. The owner adds one in Mail, calendar and channels (Notifications, add an address).');
         }
         // The configuration's revision: a settings change meanwhile means the captured targets may be stale.
         const incarnation = configManager.getConfigurationIncarnation?.() ?? null;
@@ -124,7 +128,7 @@ export function createAgentNotifyTool(
         if (!outward.allowed) return failure([outward.reason ?? 'Notification content was refused.', outward.fix].filter(Boolean).join(' '));
         const card = await screenOutboundForCardMaterial({ surface: 'webhook', message }, { signal: executionOptions?.signal, assertCurrent });
         assertCurrent(); if (card) throw new CardMaterialRefusedError(card);
-        notifier.setUrls([...urls]);
+        notifier.setUrls?.([...urls]);
         assertCurrent();
         const result = await notifier.send(message, { signal: executionOptions?.signal, assertCurrent });
         try { assertCurrent(); } catch {

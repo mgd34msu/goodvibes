@@ -7,6 +7,7 @@ import { effortLevelsForModel } from '@goodvibes/engine/platform/platform/provid
 import { summarizeError } from '@goodvibes/engine/platform/platform/utils';
 import type { OpenSelection } from './selection-modal.js';
 import type { FileEditorOpener } from './external-editor.js';
+import { writeSetting, type SettingWriteContext } from './settings-writes.js';
 
 export interface DecisionRouterPickerContext {
   readonly platform: { readonly configManager: Pick<ConfigManager, 'get' | 'setDynamic'> };
@@ -37,6 +38,7 @@ export function openDecisionRouterSettings(ctx: DecisionRouterPickerContext, cha
   const open = ctx.openSelection;
   if (!open) return false;
   const config = ctx.platform.configManager;
+  const settingsContext = ctx as unknown as SettingWriteContext;
   let settings: ReturnType<typeof captureDecisionRouterSettings>;
   try { settings = captureDecisionRouterSettings(config.get('provider.decisionRouter')); }
   catch (error) { ctx.print('Unable to read routing settings: ' + summarizeError(error)); return true; }
@@ -55,12 +57,12 @@ export function openDecisionRouterSettings(ctx: DecisionRouterPickerContext, cha
       const latest = captureDecisionRouterSettings(config.get('provider.decisionRouter'));
       const category = latest.categories[id];
       if (!category) throw new Error('Routing category changed; reopen its settings.');
-      config.setDynamic('provider.decisionRouter', {
+      // Through the daemon's settings.set (settings-writes.ts); a refusal is said there.
+      void writeSetting(settingsContext, 'provider.decisionRouter', {
         ...latest,
         categories: { ...latest.categories, [id]: { ...category, target: model
           ? { provider: model.provider, model: model.id, ...(effort ? { effort } : {}) } : null } },
-      });
-      changed(); ctx.renderRequest();
+      }).then(() => { changed(); ctx.renderRequest(); }, () => { ctx.renderRequest(); });
     } catch (error) { ctx.print('Unable to save routing settings: ' + summarizeError(error)); ctx.renderRequest(); }
   };
   open('Decision Router — choose a category', Object.entries(settings.categories).map(([id, category]) => ({
@@ -75,7 +77,9 @@ export function openDecisionRouterSettings(ctx: DecisionRouterPickerContext, cha
       const apply: ApplyRouting = (text, baseline) => {
         try {
           if (!unchangedSince(baseline)) return 'overtaken';
-          config.setDynamic('provider.decisionRouter', captureDecisionRouterSettings(JSON.parse(text))); changed(); ctx.renderRequest();
+          // Checked here as the setting checks it, then written through the daemon's settings.set; a refusal is said there.
+          const value = captureDecisionRouterSettings(JSON.parse(text));
+          void writeSetting(settingsContext, 'provider.decisionRouter', value).then(() => { changed(); ctx.renderRequest(); }, () => { ctx.renderRequest(); });
           return 'saved';
         } catch (error) { ctx.print('Unable to save routing settings: ' + summarizeError(error)); ctx.renderRequest(); return 'failed'; }
       };

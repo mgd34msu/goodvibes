@@ -95,9 +95,12 @@ function fieldHint(field: ChannelSetupFieldDescriptor, schema: ChannelSetupSchem
   return field.placeholder ? `e.g. ${field.placeholder}` : field.label;
 }
 
+/** Setting up a channel, as the place's control names it. */
+const pairChannel = (surface: string): string => `Devices and network, Pair something, A chat channel, ${surface}`;
+
 function listAdapters(ctx: CommandContext): void {
   const configManager = ctx.platform.configManager;
-  const lines: string[] = ['Channel adapters: pair with /devices pair channel <surface>:', ''];
+  const lines: string[] = ['Channel adapters: pair one in Devices and network (Pair something, A chat channel):', ''];
   for (const surface of PAIRABLE_SURFACES) {
     const schema = getBuiltinSetupSchema(surface);
     const creds = credentialFields(schema);
@@ -110,7 +113,7 @@ function listAdapters(ctx: CommandContext): void {
     lines.push(`  ${surface.padEnd(14)} ${schema.label.padEnd(22)} ${state.padEnd(12)} ${enabled ? '(enabled)' : ''}`);
   }
   lines.push('');
-  lines.push('Run /devices pair channel <surface> to see and enter its declared credentials.');
+  lines.push('Choose the channel there to see and enter its declared credentials.');
   ctx.print(lines.join('\n'));
 }
 
@@ -143,7 +146,7 @@ async function finishPairing(ctx: CommandContext, schema: ChannelSetupSchema, st
   const missing = missingRequired(schema, configManager);
   if (missing.length > 0) {
     // Enabling a surface with a required value missing would start it half-configured.
-    ctx.print(`\n${schema.label} was NOT enabled: still missing ${missing.map((f) => f.label).join(', ')} (required). Re-run /devices pair channel ${schema.surface} to enter ${missing.length === 1 ? 'it' : 'them'}.`);
+    ctx.print(`\n${schema.label} was NOT enabled: still missing ${missing.map((f) => f.label).join(', ')} (required). Use ${pairChannel(schema.surface)} again to enter ${missing.length === 1 ? 'it' : 'them'}.`);
     ctx.renderRequest();
     return;
   }
@@ -154,7 +157,7 @@ async function finishPairing(ctx: CommandContext, schema: ChannelSetupSchema, st
     // The switch is the daemon's: it counts as on only once the daemon took it.
     const refused = await daemonRefusal(configManager, enabledKey);
     if (refused) {
-      ctx.print(`\n${schema.label}: every required value is set${storedAny ? ' and the new ones are stored' : ''}, but the surface was NOT enabled: the daemon refused ${enabledKey} (${refused}). Fix that, then run /devices pair channel ${schema.surface} again.`);
+      ctx.print(`\n${schema.label}: every required value is set${storedAny ? ' and the new ones are stored' : ''}, but the surface was NOT enabled: the daemon refused ${enabledKey} (${refused}). Fix that, then use ${pairChannel(schema.surface)} again.`);
       ctx.renderRequest();
       return;
     }
@@ -211,7 +214,7 @@ function promptMissingFields(
   }
   const configKey = field.configKey as ConfigKey;
   if (!ctx.beginConcealedInput) {
-    ctx.print(`[pair] This surface cannot take typed input; set ${missing.slice(index).map((f) => `${f.label} (${f.configKey})`).join(', ')} with /settings, then run /devices pair channel ${schema.surface} again.`);
+    ctx.print(`[pair] This surface cannot take typed input; set ${missing.slice(index).map((f) => `${f.label} (${f.configKey})`).join(', ')} with /settings, then use ${pairChannel(schema.surface)} again.`);
     return;
   }
   const what = field.required ? 'required' : 'optional, Enter to skip';
@@ -236,7 +239,7 @@ function promptMissingFields(
         });
     },
     onCancel: () => {
-      ctx.print(`[pair] Stopped. Re-run /devices pair channel ${schema.surface} to finish the remaining values.`);
+      ctx.print(`[pair] Stopped. Use ${pairChannel(schema.surface)} again to finish the remaining values.`);
     },
   });
 }

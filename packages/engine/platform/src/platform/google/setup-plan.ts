@@ -151,7 +151,7 @@ export const FORBIDDEN_OAUTH_SCOPES: readonly string[] = [
  *
  * The guided path walks someone to a Google console dialog and asks them to
  * copy two strings out of it. What happens next used to be "now go and type
- * /google client <id> <secret>", which is a chore handed over at the exact
+ * a command with the id and the secret", which is a chore handed over at the exact
  * moment the platform had everything it needed. The values ARE the answer to
  * the question the flow just asked, and a turn that receives them and asks
  * what to do with them has dropped the thread.
@@ -160,9 +160,9 @@ export const FORBIDDEN_OAUTH_SCOPES: readonly string[] = [
  * walkthrough emits the same contract for finishing it.
  */
 export const GOOGLE_WALKTHROUGH_CONTINUATION_PROMPT = [
-  'When the user pastes a Google OAuth client id and client secret, that is the continuation of this walkthrough, not a new request: register them and carry on.',
-  'When they name a path to a client JSON instead, read it and carry on the same way.',
-  'Registering is a local write of values they just handed over. Store the secret encrypted, confirm by the client id\'s last characters only, and never echo the secret back.',
+  'When the user pastes a Google OAuth client id and client secret, that is the continuation of this walkthrough, not a new request: run capability google.client with the client id (the secret is typed on the hidden line) and carry on.',
+  'When they name a path to a client JSON instead, run capability google.client-file with that path and carry on the same way.',
+  'Registering stores the values they just handed over in the daemon\'s secret store. Confirm by the client id\'s last characters only, and never echo the secret back.',
   'Answer with the consent link in the same reply, so the only thing left for them is to open it and approve.',
   'Never reply by telling them to run a command.',
 ].join('\n');
@@ -480,7 +480,7 @@ const OAUTH_STEPS: readonly GoogleSetupStepSpec[] = [
     // could not verify those steps precisely against the live console, so the
     // guided path does not send anyone looking for a file. It uses the two
     // values the dialog definitely shows. Handing over a JSON path still works
-    // and is fully supported. It is just user-directed, via /google client-file
+    // and is fully supported. It is just user-directed, via "use your client file" (google.client-file)
     // <path>, never something this path talks a person into.
     manualSteps: [
       `Open ${AUTH_CLIENTS_URL}`,

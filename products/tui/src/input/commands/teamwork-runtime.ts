@@ -156,24 +156,25 @@ async function runRecipe(recipe: TeamworkRecipe, title: string, ctx: CommandCont
     try {
       started = startModeAgent(mode, title, manager, { sessionId: ctx.session.runtime.sessionId, context, cohort });
     } catch (error) {
-      ctx.print(`[Recipe ${recipe.value}] step ${index + 1} (${mode.id}) could not start: ${summarizeError(error)}. Not started: ${recipe.steps.slice(index).join(', ')}.`);
+      ctx.print(`Recipe ${recipe.value}: step ${index + 1} (${mode.id}) could not start: ${summarizeError(error)}. Not started: ${recipe.steps.slice(index).join(', ')}.`);
       return;
     }
     if (!started) {
-      ctx.print(`[Recipe ${recipe.value}] step ${index + 1} (${mode.id}) did not start: ${REMOTE_STEP_REFUSAL} Not started: ${recipe.steps.slice(index).join(', ')}.`);
+      ctx.print(`Recipe ${recipe.value}: step ${index + 1} (${mode.id}) did not start: ${REMOTE_STEP_REFUSAL} Not started: ${recipe.steps.slice(index).join(', ')}.`);
       return;
     }
-    ctx.print(`[Recipe ${recipe.value}] step ${index + 1}/${recipe.steps.length} ${mode.id}: agent ${started.id} (${started.template}) started.`);
+    ctx.print(`Recipe ${recipe.value}, step ${index + 1} of ${recipe.steps.length} (${mode.id}): an agent (${started.template}) started on "${title}".`);
     await manager.join(started.id);
     const record = manager.getStatus(started.id);
     if (record?.status !== 'completed') {
       const later = recipe.steps.slice(index + 1);
-      ctx.print(`[Recipe ${recipe.value}] stopped at step ${index + 1} (${mode.id}): agent ${started.id} is ${record?.status ?? 'gone'}${record?.error ? ` (${record.error})` : ''}.${later.length > 0 ? ` Not started: ${later.join(', ')}.` : ''}`);
+      const ended = record?.status === 'cancelled' ? 'was stopped' : record?.status === 'failed' ? 'failed' : record ? `is ${record.status}` : 'is gone';
+      ctx.print(`Recipe ${recipe.value} stopped at step ${index + 1} (${mode.id}): its agent ${ended}${record?.error ? ` (${record.error})` : ''}.${later.length > 0 ? ` Not started: ${later.join(', ')}.` : ''}`);
       return;
     }
     previous = { step: mode.id, output: record.fullOutput ?? record.progress ?? '(no output)' };
   }
-  ctx.print(`[Recipe ${recipe.value}] finished all ${recipe.steps.length} steps for "${title}"; /agents open lists them under cohort ${cohort}.`);
+  ctx.print(`Recipe ${recipe.value} finished all ${recipe.steps.length} steps for "${title}".`);
 }
 
 /** The team part of `/agents` in this app. */
@@ -184,25 +185,25 @@ export function teamHost(): Exclude<AgentsHost<CommandContext>['team'], { readon
     .sort((a, b) => a.id.localeCompare(b.id));
   const findArchetype = (ctx: CommandContext, name: string): ResolvedArchetypeMode => {
     const mode = listArchetypeModes(ctx).find((entry) => entry.id === name);
-    if (!mode) throw commandRefusal(`No archetype is named ${name}.`, '/agents archetypes lists them.');
+    if (!mode) throw commandRefusal(`No archetype is named ${name}.`, 'The Archetypes tab of the Work place lists them.');
     return mode;
   };
   return {
     review(ctx) {
       const snapshot = buildTeamworkReviewSnapshot(ctx, listArchetypeModes(ctx));
       return [
-        'Team modes (/agents start <mode> <what to do>)',
+        'Team modes (start an agent in one with s on Your agents)',
         ...TEAMWORK_MODES.map((mode) => `${formatMode(mode)}  ${TEAM_MODES.find((entry) => entry.value === mode.id)?.label ?? ''}`),
         '',
-        'Recipes (/agents recipe <recipe> <what to do>)',
+        'Recipes (run one with Shift+R on Your agents)',
         ...TEAM_RECIPES.map((recipe) => `  ${recipe.value.padEnd(26)} ${recipe.steps.join(' -> ')}\n    ${recipe.help ?? ''}`),
         '',
         'Agent templates',
         ...Object.entries(AGENT_TEMPLATES).map(([name, template]) => `  ${name.padEnd(12)} ${template.description}`),
         '',
-        `Archetypes: ${snapshot.builtinArchetypes} built in, ${snapshot.customArchetypes} in this project, ${snapshot.archetypesWithIssues} with problems, ${snapshot.undeclaredArchetypes} without a declared family (/agents archetypes)`,
+        `Archetypes: ${snapshot.builtinArchetypes} built in, ${snapshot.customArchetypes} in this project, ${snapshot.archetypesWithIssues} with problems, ${snapshot.undeclaredArchetypes} without a declared family (the Archetypes tab)`,
         `  implement/review/research: ${snapshot.implementArchetypes}/${snapshot.reviewArchetypes}/${snapshot.researchArchetypes}`,
-        `Tasks: ${snapshot.activeTaskCount} active, ${snapshot.blockedTaskCount} blocked, ${snapshot.reviewTaskCount} reviewing (/tasks)`,
+        `Tasks: ${snapshot.activeTaskCount} active, ${snapshot.blockedTaskCount} blocked, ${snapshot.reviewTaskCount} reviewing (the Tasks here tab)`,
       ].join('\n');
     },
     archetypes(ctx) {
@@ -227,24 +228,25 @@ export function teamHost(): Exclude<AgentsHost<CommandContext>['team'], { readon
     },
     startMode(ctx, modeId, title) {
       const mode = TEAMWORK_MODES.find((entry) => entry.id === modeId);
-      if (!mode) throw commandRefusal(`No team mode is named ${modeId}.`, '/agents team lists them.');
+      if (!mode) throw commandRefusal(`No team mode is named ${modeId}.`, '"Team modes and recipes" (t on Your agents) lists them.');
       const started = startModeAgent(mode, title, requireAgentManager(ctx), { sessionId: ctx.session.runtime.sessionId });
       if (!started) throw commandRefusal(`Nothing was started: ${REMOTE_STEP_REFUSAL}`);
-      return `Started agent ${started.id} (${started.template}, ${mode.executionProtocol}) for "${title}" in mode ${mode.id}; /agents open shows its progress.`;
+      // Named by its task, as its row is; the id is not a word a person reads.
+      return `Started an agent (${started.template}) on "${title}"; Your agents, in the Work place, shows its progress.`;
     },
     runRecipe(ctx, recipeId, title) {
       const recipe = TEAM_RECIPES.find((entry) => entry.value === recipeId);
-      if (!recipe) throw commandRefusal(`No recipe is named ${recipeId}.`, '/agents team lists them.');
+      if (!recipe) throw commandRefusal(`No recipe is named ${recipeId}.`, '"Team modes and recipes" (t on Your agents) lists them.');
       const manager = requireAgentManager(ctx);
       // The steps run one after another in the background; each prints when it starts and how it ended.
       void runRecipe(recipe, title, ctx, manager).catch((error) => {
-        ctx.print(`[Recipe ${recipe.value}] stopped: ${summarizeError(error)}`);
+        ctx.print(`Recipe ${recipe.value} stopped: ${summarizeError(error)}`);
       });
-      return `Recipe ${recipe.value} started: ${recipe.steps.join(' -> ')}. Each step prints when it starts and how it ended.`;
+      return `Recipe ${recipe.value} started, its steps in turn: ${recipe.steps.join(', then ')}. The conversation says when each step starts and how it ended.`;
     },
     startArchetype(ctx, name, title) {
       const mode = findArchetype(ctx, name);
-      if (mode.validationIssues.length > 0) throw commandRefusal(`Archetype ${mode.id} cannot be started: ${mode.validationIssues.join('; ')}.`, `/agents archetype ${mode.id} shows what to fix.`);
+      if (mode.validationIssues.length > 0) throw commandRefusal(`Archetype ${mode.id} cannot be started: ${mode.validationIssues.join('; ')}.`, `Its row on the Archetypes tab shows what to fix.`);
       const record = requireAgentManager(ctx).spawn({
         mode: 'spawn',
         task: title,
@@ -252,7 +254,7 @@ export function teamHost(): Exclude<AgentsHost<CommandContext>['team'], { readon
         sessionId: ctx.session.runtime.sessionId,
         ...(mode.reading === 'settled' ? { executionProtocol: mode.executionProtocol } : {}),
       });
-      return `Started agent ${record.id} from archetype ${mode.id} (${familyLabel(mode)}, ${protocolLabel(mode)}) for "${title}"; /agents open shows its progress.${mode.reading === 'undeclared' ? ` Its family is not declared, so it runs with its template's own protocol: ${mode.reason}.` : ''}`;
+      return `Started an agent from archetype ${mode.id} (${familyLabel(mode)}, ${protocolLabel(mode)}) on "${title}"; Your agents, in the Work place, shows its progress.${mode.reading === 'undeclared' ? ` Its family is not declared, so it runs with its template's own protocol: ${mode.reason}.` : ''}`;
     },
   };
 }

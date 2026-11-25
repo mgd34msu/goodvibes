@@ -144,7 +144,7 @@ export function renderSandboxRecommendation(
   if (!review.host.secureSandboxReady) {
     lines.push('  install bubblewrap (Linux, or WSL 2 on Windows) so commands and MCP servers can run contained.');
   } else if (review.config.mcpIsolation === 'disabled') {
-    lines.push('  /security contain-mcp runs every stdio MCP server inside its own boundary.');
+    lines.push('  "Run MCP servers inside the sandbox" (Permissions and safety, Sandbox) runs every stdio MCP server inside its own boundary.');
   } else {
     lines.push('  commands and MCP servers are contained.');
   }

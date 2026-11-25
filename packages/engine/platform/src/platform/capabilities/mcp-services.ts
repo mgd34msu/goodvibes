@@ -9,7 +9,7 @@
  * before its next MCP call (the registry's config stamp), and the program that
  * asked reads it again at once.
  */
-import { resolve } from 'node:path';
+import { projectIdentityOf } from '../workspace/project-identity.js';
 import {
   loadMcpEffectiveConfig, removeMcpServerConfig, setMcpServerPolicy, setMcpServerToolRule, upsertMcpServerConfig, withMcpConfigLock,
   type McpConfigRoots, type McpEffectiveConfig,
@@ -18,6 +18,7 @@ import { forgetOwnerAddedServer, recordOwnerAddedServer } from '../mcp/owner-add
 import type { McpRegistry } from '../mcp/registry.js';
 import { resolveGoodVibesHome } from '../config/goodvibes-home.js';
 import type { McpCapabilityServices, McpProjectConfig } from './builtin/mcp.js';
+import { requireCallerProject } from './caller-project.js';
 
 export interface McpServiceSources {
   readonly configManager: { getWorkingDirectory(): string | null | undefined };
@@ -37,15 +38,69 @@ function writableEntry(effective: McpEffectiveConfig, server: string, what: stri
   return entry;
 }
 
+/** A project's own MCP files (read or written only for a caller that names its project). */
+const PROJECT_KINDS: ReadonlySet<string> = new Set(['project-mcp', 'project-goodvibes']);
+
+/**
+ * The MCP config of a caller that named no project: only the files that are for all the person's projects (and the
+ * other programs' files in his home). Every project-scope read or write is refused (NO_PROJECT); the daemon's folder is
+ * never read in its place.
+ */
+function userOnlyConfig(homeDirectory: string): McpProjectConfig {
+  // The home as the root: only its global locations are kept below; its project-shaped paths are never read or written.
+  const roots: McpConfigRoots = { workingDirectory: homeDirectory, homeDirectory };
+  const noProject = (): never => requireCallerProject(undefined, 'the project MCP config file') as never;
+  const effective = (): McpEffectiveConfig => {
+    const all = loadMcpEffectiveConfig(roots);
+    return {
+      ...all,
+      locations: all.locations.filter((location) => !PROJECT_KINDS.has(location.kind)),
+      servers: all.servers.filter((entry) => !PROJECT_KINDS.has(entry.source.kind)),
+    };
+  };
+  const globalEntry = (server: string, what: string): void => {
+    const entry = writableEntry(effective(), server, what);
+    if (entry.source.scope !== 'global') noProject();
+  };
+  return {
+    roots,
+    effective,
+    heldForTrust: async () => [],
+    async upsert(scope, server) {
+      if (scope !== 'global') noProject();
+      const written = await withMcpConfigLock(roots, 'global', () => upsertMcpServerConfig(roots, 'global', server));
+      return { path: written.path };
+    },
+    async remove(scope, name) {
+      if (scope !== 'global') noProject();
+      const written = await withMcpConfigLock(roots, 'global', () => removeMcpServerConfig(roots, 'global', name));
+      return { path: written.path, removed: written.removed };
+    },
+    async storeToolRule(server, tool, rule) {
+      globalEntry(server, `rule for its tool '${tool}'`);
+      const written = await withMcpConfigLock(roots, 'global', () => setMcpServerToolRule(roots, 'global', server, tool, rule));
+      return { scope: 'global', path: written.path, changed: written.changed };
+    },
+    async storePolicy(server, policy) {
+      globalEntry(server, 'trustMode' in policy ? 'trust mode' : 'role');
+      const written = await withMcpConfigLock(roots, 'global', () => setMcpServerPolicy(roots, 'global', server, policy));
+      return { scope: 'global', path: written.path, changed: written.changed };
+    },
+  };
+}
+
 export function createMcpCapabilityServices(sources: McpServiceSources): McpCapabilityServices {
   const homeDirectory = sources.homeDirectory ?? resolveGoodVibesHome();
   return {
     mcp: {
       forProject(workingDirectory): McpProjectConfig {
         const daemonDirectory = sources.configManager.getWorkingDirectory() ?? undefined;
-        const directory = resolve(workingDirectory ?? daemonDirectory ?? process.cwd());
+        // A change for all the person's projects needs no project; a project's own files need the caller's project,
+        // and the daemon's own folder is never taken in its place (caller-project.ts).
+        if (typeof workingDirectory !== 'string' || !workingDirectory.trim()) return userOnlyConfig(homeDirectory);
+        const directory = requireCallerProject(workingDirectory, 'the MCP config files');
         const roots: McpConfigRoots = { workingDirectory: directory, homeDirectory };
-        const own = sources.mcpRegistry && daemonDirectory && resolve(daemonDirectory) === directory ? sources.mcpRegistry : undefined;
+        const own = sources.mcpRegistry && daemonDirectory && projectIdentityOf(daemonDirectory) === directory ? sources.mcpRegistry : undefined;
         return {
           roots,
           effective: () => loadMcpEffectiveConfig(roots),

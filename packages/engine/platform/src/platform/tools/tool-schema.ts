@@ -46,17 +46,20 @@ function fullView(definition: ToolDefinition): { name: string; description: stri
 }
 
 /**
- * The answer to a call of a tool that was listed in one line and not loaded:
- * nothing ran; the result carries the tool's full definition and says to send
- * the call again with those parameters. The tool goes in full from the next
- * request on.
+ * The answer to a call of a tool that was listed in one line and not loaded,
+ * whose arguments do not fit its parameters: nothing ran; the result carries
+ * the tool's full definition, what did not fit (`misfit`, when known) and says
+ * to send the call again with those parameters. The tool goes in full from the
+ * next request on. It is held to load, not refused (`heldToLoad`): the retry
+ * runs, whatever it carries.
  */
-export function deferredToolRefusal(callId: string, definition: ToolDefinition): ToolResult {
-  const reason = `${definition.name} was listed in one line and its parameters had not been loaded, so the call was not run.`;
+export function deferredToolRefusal(callId: string, definition: ToolDefinition, misfit?: string): ToolResult {
+  const reason = `${definition.name} was listed in one line and its parameters had not been loaded, so the call was not run${misfit ? `: ${misfit}` : ''}.`;
   const next = `Send the ${definition.name} call again with the parameters in this result; ${definition.name} is sent in full from now on.`;
   return {
     callId,
     success: false,
+    heldToLoad: true,
     error: `${reason} ${next}`,
     output: JSON.stringify({ tools: [fullView(definition)] }),
     decision: { state: 'refused', decidedBy: 'code', reason, next: [next] },

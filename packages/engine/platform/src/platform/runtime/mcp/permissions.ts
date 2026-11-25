@@ -378,7 +378,11 @@ export class McpPermissionManager {
     const asks = !allowed && profile.mode === 'ask-on-risk';
     return {
       allowed, verdict: allowed ? 'allow' : asks ? 'ask' : 'deny', profileMode: profile.mode, causes,
-      ...(asks ? { askOwner: `The MCP server '${serverName}' is trusted ask-on-risk and this call to '${toolName}' is outside its configured scope: ${details.join('; ')}.` } : {}),
+      // Shown to the owner: the level and the limit in words (mcp/trust-words.ts), the value as the call gave it.
+      ...(asks ? { askOwner: `The tool server ${serverName} asks you about calls outside its limits, and this call to ${toolName} is outside them: ${[
+        ...(outsidePath ? [`${outsidePath.value}${outsidePath.resolved !== undefined && outsidePath.resolved !== outsidePath.value ? ` (${outsidePath.resolved})` : ''} is not in a folder it may use (${profile.allowedPaths.join(', ')})`] : []),
+        ...(outsideHost ? [`${outsideHost.value} is not a site it may reach (${profile.allowedHosts.join(', ')})`] : []),
+      ].join('; ')}.` } : {}),
       reason: allowed
         ? `server '${serverName}' permits this tool`
         : asks

@@ -26,18 +26,20 @@ function inputsOf(args: Record<string, unknown>): Record<string, unknown> | unde
 }
 
 /**
- * The projector for `capability_run`: `secretInputsOf(id)` names the inputs of
- * the capability a call names that are secret (none for an unknown id or a
- * daemon method id).
+ * The projector for `capability_run`: `secretInputsOf(id, inputs)` names the inputs of
+ * the capability a call names that are secret with the inputs the call gives (none for an
+ * unknown id or a daemon method id; an input secret only for some values, such as a
+ * setting's new value only when the setting holds a credential, `plainWhen`, is named only then).
  */
-export function createSecretInputProjector(secretInputsOf: (id: string) => readonly string[]): ToolInputProjector {
+export function createSecretInputProjector(secretInputsOf: (id: string, inputs: Readonly<Record<string, string>>) => readonly string[]): ToolInputProjector {
   return Object.freeze({
     async project(request: ToolInputProjectionRequest) {
       request.assertCurrent();
       const args = captureProjectionArgs(request.args, request.name);
       const id = typeof args['id'] === 'string' ? args['id'].trim() : '';
       const inputs = inputsOf(args);
-      const secret = id && inputs ? secretInputsOf(id).filter((input) => typeof inputs[input] === 'string' && inputs[input] !== '') : [];
+      const given = Object.fromEntries(Object.entries(inputs ?? {}).filter((entry): entry is [string, string] => typeof entry[1] === 'string'));
+      const secret = id && inputs ? secretInputsOf(id, given).filter((input) => typeof inputs[input] === 'string' && inputs[input] !== '') : [];
       if (secret.length === 0) return { status: 'projected' as const, args };
       const values = new Map<string, string>();
       const shown = new Map<string, string>();

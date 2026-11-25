@@ -23,6 +23,9 @@
  */
 
 export type { DaemonReachability, DaemonVerbCaller, DaemonVerbInvokeOptions } from './daemon-verbs.js';
+// The one call context a program carries on every call to the daemon: its program, project and session.
+export { CALL_PROGRAM_HEADER, CALL_PROJECT_HEADER, CALL_SESSION_HEADER, programCallContextNow, programCallHeaders, setProgramCallContext } from './call-context.js';
+export type { ProgramCallContext } from './call-context.js';
 export { OwnedSelectionObservation } from './selection-observation.js';
 
 export { createClientApprovalRaiser } from './approval-raiser.js';
@@ -80,7 +83,7 @@ export type { SessionInputChangeHandlers, SessionInputsWireClient, SurfaceAgentO
 export { SESSION_UPDATE_DOMAIN, SESSION_UPDATE_WIRE_EVENT, createSessionInputChangeSubscriber, inputChangeSessionId } from './session-input-updates.js';
 export type { SessionInputChangeSubscriberOptions } from './session-input-updates.js';
 export { LIST_CHANGE_DOMAIN, LIST_CHANGE_WIRE_EVENT, listChangeOf, subscribeDaemonEventFrames, subscribeDaemonListChanges } from './list-change-updates.js';
-export type { DaemonFrameInterest, DaemonFrameStreamState } from './list-change-updates.js';
+export type { DaemonFrameChange, DaemonFrameInterest, DaemonFrameStreamState } from './list-change-updates.js';
 export type { ListChangeSubscriberOptions } from './list-change-updates.js';
 
 export { createConversationRewindHost } from './conversation-rewind-host.js';
@@ -115,11 +118,17 @@ export type { DaemonFleetRows, DaemonFleetRowsPoller, DaemonFleetRowsPollerOptio
 export {
   autostartInstalledDaemon,
   createDaemonServiceControl,
+  DAEMON_PROGRAM_MISSING_NOTICE,
+  DAEMON_PROGRAM_STARTED_LINE,
+  GOODVIBES_INSTALLER_COMMAND,
   daemonNotInstalledNotice,
   daemonProgramInstalled,
+  daemonProgramStartFailedLine,
   describeDaemonAutostart,
   waitForStartingDaemon,
 } from './daemon-autostart.js';
+export { daemonProgramArtifactName, findDaemonProgram, startDaemonProgram } from './daemon-program.js';
+export type { DaemonProgram, DaemonProgramStart, FindDaemonProgramOptions } from './daemon-program.js';
 export type {
   DaemonAutostartInactionReason,
   DaemonAutostartOptions,

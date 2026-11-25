@@ -712,6 +712,25 @@ export function reduceWorkLedgerSettlement(state: WorkLedgerState, input: {
   return { state: next, report: report.event, evidence: evidence.event };
 }
 
+/**
+ * A native run that ended failed, said in the ledger: its attempt reported `blocked` with the failure in words, so the
+ * work never reads "in progress" once nothing runs. Only the run's own target, while the work is still in progress.
+ */
+export function reduceWorkLedgerFailure(state: WorkLedgerState, input: {
+  readonly target: WorkEvidenceTarget; readonly actorId: string; readonly reason: string; readonly requestId: string;
+}, clock: WorkLedgerClock): { readonly state: WorkLedgerState } {
+  const next = workLedgerStateSchema.parse(state);
+  const work = next.works.find(value => value.id === input.target.workId);
+  const attempt = next.attempts.find(value => value.id === input.target.attemptId);
+  if (!work || !attempt || !targetMatches(input.target, work, attempt) || attempt.ownerId !== input.actorId
+    || attempt.state !== 'active' || work.reportedState === 'complete' || work.reportedState === 'cancelled') throw new Error('Native failure target is stale');
+  const command = workLedgerCommandSchema.parse({ type: 'report', requestId: input.requestId, expectedRevision: next.revision,
+    workId: work.id, attemptId: attempt.id, state: 'blocked', report: input.reason, blocker: input.reason });
+  const result = reduceWorkLedger(next, command, { projectId: next.projectId, actorId: input.actorId, role: 'worker' }, clock);
+  if (result.kind !== 'accepted') throw new Error('Native failure report refused');
+  return { state: next };
+}
+
 /** Native owner-only successor reduction; ledger events remain evidence, never launch authority. */
 export function reduceWorkLedgerContinuation(state: WorkLedgerState, input: {
   readonly target: WorkEvidenceTarget; readonly actorId: string; readonly continuationId: string; readonly successorId: string;

@@ -14,13 +14,13 @@ Install with the [suite installer](../../docs/installation.md), which installs t
 curl -fsSL https://goodvibes.sh/install.sh | sh
 ```
 
-Then run `goodvibes-agent`. When no model is ready, it runs the same three-step first run as `goodvibes`: choose how to get a model (a ChatGPT subscription, an API key for Anthropic, OpenRouter or another provider, or a model server found on this computer), sign in or paste the key, and start the conversation. `/setup` sets up everything else one topic at a time (`/setup import-settings` brings over what you set in `goodvibes`), and `/agent` or `Ctrl+G` `w` opens the workspace at any time; `Ctrl+G` `m` opens the menu of every place. The [getting started guide](docs/getting-started.md) covers the rest. How often you are asked, and the optional decision model, are explained in the [decision-model policies](../../docs/decision-model-policy.md).
+Then run `goodvibes-agent`. When no model is ready, it runs the same three-step first run as `goodvibes`: choose how to get a model (a ChatGPT subscription, an API key for Anthropic, OpenRouter or another provider, or a model server found on this computer), sign in or paste the key, and start the conversation. `/setup` sets up everything else one topic at a time (`/setup import-settings` brings over what you set in `goodvibes`), and `Ctrl+G` `w` opens the workspace at any time; `Ctrl+G` `m` opens the menu of every place. The [getting started guide](docs/getting-started.md) covers the rest. How often you are asked, and the optional decision model, are explained in the [decision-model policies](../../docs/decision-model-policy.md).
 
 ---
 
 ## A short tour
 
-**The workspace and the commands are one.** `goodvibes-agent` starts on a conversation. The fullscreen workspace opens with `/agent` or `Ctrl+G` `w` (the leader `Ctrl+G` starts a two-key shortcut and the screen lists what can follow); each of its rows names a slash command action and opens the same guided form that command opens, and its side pane says what the selected row does and shows that command's own report. The workspace reads its reports by itself: what is waiting is read at every start, each area's reports as soon as it is shown, and the work list stays live; `Ctrl+R` reads everything again now. Press `/` inside the workspace to search every action by name, category, command, or detail. `Ctrl+P`, `?` or `/help` opens the one list of every command and key.
+**The workspace and the commands are one.** `goodvibes-agent` starts on a conversation. The fullscreen workspace opens with `Ctrl+G` `w` (the leader `Ctrl+G` starts a two-key shortcut and the screen lists what can follow); each of its rows names a slash command action and opens the same guided form that command opens, and its side pane says what the selected row does and shows that command's own report. The workspace reads its reports by itself: what is waiting is read at every start, each area's reports as soon as it is shown, and the work list stays live; `Ctrl+R` reads everything again now. Press `/` inside the workspace to search every action by name, category, command, or detail. `Ctrl+P`, `?` or `/help` opens the one list of every command and key.
 
 **One assistant, several jobs.** Beyond normal chat, the workspace gives you read-only web research with explicit hand-off into Agent Knowledge, versioned document drafting with blind model comparison, an Inbox & calendar area for inbox/agenda/task/reminder/note requests, and an Operator Runtime view of the connected host's own methods and service posture.
 
@@ -51,7 +51,7 @@ Each row links to the page that documents it; the full list, including the pairi
 | Knowledge, artifacts, and multimodal | Isolated Agent Knowledge, document/image/media artifacts, ingest and review routes | [knowledge-artifacts-and-multimodal.md](docs/knowledge-artifacts-and-multimodal.md) |
 | Channels, remote access, and API | Slack, Discord, Telegram, Matrix, webhook, and other configured channels; setup/triage/delivery; companion pairing; the operator method catalog | [channels-remote-and-api.md](docs/channels-remote-and-api.md) |
 | Voice and live TTS | Spoken playback, TTS/STT provider setup | [voice-and-live-tts.md](docs/voice-and-live-tts.md) |
-| Google setup | The generated step-by-step runbook for connecting Gmail and Google Calendar (also printed by `/google runbook`), plus which OAuth scopes the integration requests and why | [google-setup-runbook.md](../../packages/engine/docs/google-setup-runbook.md), [google-scope-strategy.md](docs/google-scope-strategy.md) |
+| Google setup | The generated step-by-step runbook for connecting Gmail and Google Calendar (also shown by "the written steps" on the Google tab of Mail, calendar and channels), plus which OAuth scopes the integration requests and why | [google-setup-runbook.md](../../packages/engine/docs/google-setup-runbook.md), [google-scope-strategy.md](docs/google-scope-strategy.md) |
 
 Full index: [docs/README.md](docs/README.md).
 
@@ -94,18 +94,17 @@ The sections below describe specific commands and requirements in detail.
 
 ### Purchase approval and veto windows
 
-Type `/payments pending` in the owner terminal to read purchase notices from
-the selected paired daemon. Select a purchase, read its notice and deadline,
-then choose approve/deny or proceed-now/cancel. The menu retains that host and
-window reference; changing the connection requires reopening it. Escape closes
-the local view. An answer already sent may still complete on the host.
+The purchases waiting for you are on the Purchases tab of Waiting for you (the
+menu of places): select one, read its notice and deadline, then press the
+answer it offers (approve or deny, go ahead now or cancel), stop a checkout, or
+type a card's security code on the hidden line. An answer already sent may
+still complete on the host.
 
-This requires a paired administrative credential with `read:payments` and
-`write:payments`. `/payments` opens its list of actions. "Add a card" asks for
-the card field by field, each hidden, and sends it to the selected daemon in one
-`payments.cards.create` request; "Set your billing or shipping address" writes
-the addresses, and "See your cards" (`/payments cards`) lists the cards the
-daemon holds (never the number, CVV or name) and the addresses.
+Cards, the billing and shipping addresses and the purchases you allow ahead of
+time are in Money. On its Cards tab, `n` ("Add a card") is a form with every
+card field hidden, sent to the daemon in one `payments.cards.create` request;
+the tab lists the cards the daemon holds (never the number, CVV or name), and
+`Enter` on the Addresses tab writes an address.
 
 ### Work on the host
 

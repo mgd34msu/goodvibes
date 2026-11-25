@@ -49,6 +49,7 @@ export const TELEGRAM_MESSAGES_LIST = 'telegram.messages' as ListName;
 export const TELEGRAM_CONFIGURATIONS_LIST = 'telegram.configurations' as ListName;
 
 const REVIEW_ID_PREFIX = 'external-review-';
+const APPROVAL_ID_PREFIX = 'approval-';
 const SHORT_ID_CHARS = 8;
 const MAX_DURATION_MS = 2_147_483_647;
 const TIME_WHY = 'a time such as 90s, 30m, 2h or 7d (at most 24 days)';
@@ -68,8 +69,10 @@ export function telegramReviewShortId(record: Pick<ReviewRecord, 'id'>): string 
   return id.slice(0, SHORT_ID_CHARS);
 }
 
+/** An approval's id after its `approval-` prefix, which every one shares: two held messages never show the same id. */
 export function telegramPendingShortId(entry: Pick<PendingMessage, 'approvalId'>): string {
-  return entry.approvalId.slice(0, SHORT_ID_CHARS);
+  const id = entry.approvalId.startsWith(APPROVAL_ID_PREFIX) ? entry.approvalId.slice(APPROVAL_ID_PREFIX.length) : entry.approvalId;
+  return id.slice(0, SHORT_ID_CHARS);
 }
 
 /** `90s`, `30m`, `2h`, `7d`, or a whole number of milliseconds. */
@@ -94,10 +97,46 @@ function isHold(result: Outcome): boolean {
   return result.outcome === 'held';
 }
 
+const TOKEN_PLACE = 'the bot\'s token in Mail, calendar and channels, under Telegram';
+const NOT_HELD = { said: 'This chat is not held for you right now, so the message was not captured.', next: 'Press h (hold a chat) for it, then ask the sender to send the message again.' };
+const RELEASED = { said: 'This message was refused, closed or expired; its text was let go.', next: 'Ask the sender to send it again if it still needs your review.' };
+/**
+ * What a held answer of the intake means and what to do next, per reason, in the words of Waiting for you's Telegram
+ * list and its keys (h hold a chat, y accept, n refuse, i where it stands, o read, c close, x stop holding, b hand
+ * back, r read again). The intake's own next step names its methods, for a script calling them; it is never shown here.
+ */
+const HOLD_WORDS: Readonly<Record<string, { readonly said: string; readonly next: string }>> = {
+  'account-proof-required': { said: 'The Telegram bot could not be verified, so nothing was held or captured.', next: `Check ${TOKEN_PLACE}, then press h (hold a chat) again.` },
+  'account-not-chosen': { said: 'The bot you named is not the bot this daemon verified.', next: 'Press h (hold a chat) again and give the verified bot.' },
+  'account-proof-unavailable': { said: 'The Telegram bot could not be verified just now, so nothing was decided.', next: `Check ${TOKEN_PLACE}, then press the key again.` },
+  'account-proof-changed': { said: 'The Telegram bot changed while the message arrived, so it was not captured.', next: 'Press h (hold a chat) again for the bot in use now.' },
+  'workspace-changed': { said: 'The project changed, so a held chat has to be held again.', next: 'Start the daemon again, then press h (hold a chat).' },
+  'lifecycle-changed': { said: 'Holding chats was stopped or started again, so nothing was captured or decided.', next: 'Press h (hold a chat) again for this chat.' },
+  'owner-changed': { said: 'The paired owner changed while this ran, so nothing was done.', next: 'Press the key again from the device paired as the owner.' },
+  'not-owner': { said: 'This chat was held from another paired owner\'s device.', next: 'Do it from the device that held the chat.' },
+  'message-identity-missing': { said: 'Telegram sent the message without its id, so it was not captured.', next: 'Ask the sender to send it again.' },
+  'tracking-full': { said: '500 messages already wait, so this one was not captured.', next: 'Accept (y), refuse (n) or close (c) waiting messages, or let older ones expire.' },
+  'message-edited': { said: 'The sender edited the message, so the earlier copy was released.', next: 'Decide on the edited message when it shows in this list.' },
+  'no-configuration': NOT_HELD,
+  'configuration-not-current': NOT_HELD,
+  'source-unavailable': { said: 'The original message or its chat is no longer there, so nothing was done.', next: 'Press r (read again) to see what still waits.' },
+  'missing-source-proof': { said: 'This daemon holds no such message.', next: 'Press r (read again) to see the messages it holds.' },
+  'configuration-unavailable': { said: 'That chat is no longer held: it was handed back, or its time ran out.', next: 'Press h (hold a chat) to hold it again.' },
+  'chat-not-selected': { said: 'That chat is not held, so there is nothing to hand back.', next: 'Press h (hold a chat) to hold one.' },
+  'already-decided': { said: 'This message was already decided.', next: 'Press i (where it stands) to see how it came out.' },
+  'lifetime-exceeds-configuration': { said: 'The original would be kept longer than the chat is held.', next: 'Give a shorter Keep the original, or hold the chat again for longer with h (hold a chat).' },
+  'not-durably-resolved': { said: 'Your answer was not recorded exactly as given, so the original was released.', next: 'Press i (where it stands).' },
+  'review-queue-refused': { said: 'The review queue did not take the message.', next: 'Close a review with c (close), or let one expire.' },
+  'review-held': RELEASED,
+  'review-closed': RELEASED,
+  'handoff-held': { said: 'The accepted message could not be put in the review queue.', next: 'Press i (where it stands).' },
+};
+
 function holdText(hold: Outcome): string {
   const identity = hold.accountIdentity as { readonly id?: unknown; readonly username?: unknown } | undefined;
-  const account = identity && typeof identity.username === 'string' ? ` The verified bot is @${text(identity.username)} (${text(String(identity.id ?? ''))}).` : '';
-  return `${text(String(hold.message ?? 'Delegated intake held this.'))}${account} Next: ${text(String(hold.nextStep ?? 'look at the chat in the daemon\'s channel settings'))}`;
+  const account = identity && typeof identity.username === 'string' ? ` The verified bot is @${text(identity.username)}.` : '';
+  const words = HOLD_WORDS[String(hold.reason ?? '')] ?? { said: 'Telegram held this, so nothing was done.', next: 'Press r (read again) to see where things stand.' };
+  return `${words.said}${account} Next: ${words.next}`;
 }
 
 function recordLine(record: ReviewRecord): string {
@@ -123,7 +162,7 @@ function findMessage(list: ListResult, id: string): Match[] {
   }
   for (const entry of list.pending) {
     if (matches.some((match) => match.kind === 'review' && match.record.ref.requestId === entry.ref.requestId)) continue;
-    if (entry.approvalId.startsWith(id) || entry.ref.requestId.startsWith(id)) matches.push({ kind: 'pending', entry });
+    if (telegramPendingShortId(entry).startsWith(id) || entry.approvalId.startsWith(id) || entry.ref.requestId.startsWith(id)) matches.push({ kind: 'pending', entry });
   }
   return matches;
 }
@@ -194,9 +233,11 @@ export const TELEGRAM_LIST: CapabilityDefinition<unknown> = {
   sentence: 'Lists the messages waiting for your decision and the review queue.', done: '',
   touches: 'reads', lasts: 'not-a-change', risk: 'none', example: {},
   async run(_values, _services, caller) {
-    const list = await listed(caller);
+    const all = await listed(caller);
+    // What waits is what still waits for the owner: one accepted is in the review queue, one refused is gone.
+    const list = { ...all, pending: all.pending.filter((entry) => entry.outcome === 'awaiting-owner') };
     const data = listData(list);
-    if (list.records.length === 0 && list.pending.length === 0) return { text: 'No Telegram message waits for you and the review queue is empty. Holding a chat\'s messages for you is telegram.configure.', data };
+    if (list.records.length === 0 && list.pending.length === 0) return { text: 'No Telegram message waits for you and the review queue is empty. To hold a chat\'s messages for you: h (hold a chat).', data };
     const lines: string[] = [];
     if (list.pending.length > 0) lines.push(`Waiting for your decision (${list.pending.length}):`, ...list.pending.map((entry) => `  ${pendingLine(entry)}`));
     if (list.records.length > 0) lines.push(`Review queue (${list.records.length}):`, ...list.records.map((record) => `  ${recordLine(record)}`));
@@ -254,8 +295,8 @@ async function decide(caller: CapabilityCaller, message: string, approved: boole
   });
   if (isHold(result)) throw new CapabilityRefusal(holdText(result), undefined, 'HELD');
   return result.outcome === 'denied'
-    ? { text: 'Refused; its original was released and nothing was run.', data: { outcome: 'denied' } }
-    : { text: 'Accepted for review; nothing was run. Its original can be read from the review queue.', data: { outcome: result.outcome } };
+    ? { text: 'Refused; its text was let go unread and nothing was run.', data: { outcome: 'denied' } }
+    : { text: 'Accepted for review; nothing was run. Press o (read it) on it to read its text.', data: { outcome: result.outcome } };
 }
 
 export const TELEGRAM_APPROVE: CapabilityDefinition<unknown> = {
@@ -280,11 +321,15 @@ export const TELEGRAM_APPROVE: CapabilityDefinition<unknown> = {
 export const TELEGRAM_DENY: CapabilityDefinition<unknown> = {
   capability: { id: 'telegram.deny', group: 'waiting', home: 'daemon', repeat: 'safe' },
   actionId: 'deny', label: 'Refuse a waiting message', word: 'deny', inputs: [WAITING_MESSAGE],
-  sentence: '{message} is refused; its original is released and nothing in it is run.', done: '',
+  sentence: '{message} is refused; its text is let go unread and nothing in it is run.', done: '',
   touches: 'another-machine', lasts: 'not-a-change', risk: 'none', ownerOnly: OWNER_DECIDES,
   example: { message: '3f9a1c2e' },
   run: async (values, _services, caller) => await decide(caller, values.message!, false, undefined),
 };
+
+function capitalizeFirst(line: string): string {
+  return line.charAt(0).toUpperCase() + line.slice(1);
+}
 
 async function showMessage(caller: CapabilityCaller, message: string, operation: 'status' | 'read'): Promise<CapabilityResult> {
   const match = await lookup(caller, message);
@@ -297,11 +342,12 @@ async function showMessage(caller: CapabilityCaller, message: string, operation:
       : { text: `This message is ${text(String(result.outcome))}; its original is ${text(String(result.source))}.`, data: { state: result.outcome, source: result.source } };
   }
   const record = result.record as ReviewRecord;
-  const lines = [recordLine(record)];
+  // Read in the place's pane, the message is the one selected: its short id (for a typed reference) is left out.
+  const lines = [operation === 'read' ? capitalizeFirst(recordLine(record).replace(/^\S+\s+/, '')) : recordLine(record)];
   if (result.source !== 'available-in-memory') lines.push('Its original is no longer in memory; ask the sender to send it again if it still needs review.');
   const original = result.original as { readonly text: string; readonly unsupportedSources: readonly { readonly kind: string; readonly label: string }[] } | undefined;
   if (operation === 'read' && original) {
-    lines.push('Original:', text(original.text));
+    lines.push('', 'The message:', text(original.text));
     for (const entry of original.unsupportedSources) lines.push(`  (not shown: ${text(entry.kind)} ${text(entry.label)})`);
   }
   return { text: lines.join('\n'), data: { state: record.state === 'reviewed' ? 'read' : 'in review', source: result.source } };
@@ -327,26 +373,26 @@ export const TELEGRAM_READ: CapabilityDefinition<unknown> = {
 export const TELEGRAM_CANCEL: CapabilityDefinition<unknown> = {
   capability: { id: 'telegram.cancel', group: 'waiting', home: 'daemon', repeat: 'safe' },
   actionId: 'cancel', label: 'Close a review', word: 'cancel', inputs: [ANY_MESSAGE],
-  sentence: '{message} leaves the queue and its original is released.', done: '',
+  sentence: '{message} leaves the review queue and its text is let go; you cannot read it here again.', done: '',
   touches: 'another-machine', lasts: 'not-a-change', risk: 'cannot-be-undone', ownerOnly: OWNER_DECIDES,
   example: { message: '3f9a1c2e' },
   async run(values, _services, caller) {
     const match = await lookup(caller, values.message!);
-    return holdOr(await call(caller, 'cancel', { ref: match.kind === 'review' ? match.record.ref : match.entry.ref }), 'Closed; its place in the queue is free and its original was released.');
+    return holdOr(await call(caller, 'cancel', { ref: match.kind === 'review' ? match.record.ref : match.entry.ref }), 'Closed: it left the review queue and its text was let go.');
   },
 };
 
 export const TELEGRAM_REVOKE: CapabilityDefinition<unknown> = {
   capability: { id: 'telegram.revoke', group: 'waiting', home: 'daemon', repeat: 'safe' },
-  actionId: 'revoke', label: 'Stop holding new messages from a chat', word: 'revoke',
+  actionId: 'revoke', label: 'Keep no new messages from a chat', word: 'revoke',
   inputs: [{
     id: 'configuration', label: 'Configuration', help: 'The configuration shown when you held the chat', kind: 'choice',
     choices: { list: TELEGRAM_CONFIGURATIONS_LIST, allowOther: { reason: 'a configuration id shown when the chat was held' } }, required: true, typed: { position: 1 },
   }],
-  sentence: 'No new message is captured under {configuration}; the chat stays held until you hand it back.', done: '',
+  sentence: 'New messages in the chat you held are no longer kept for your review, and they are still not answered until you hand the chat back.', done: '',
   touches: 'another-machine', lasts: 'kept', risk: 'cannot-be-undone', ownerOnly: OWNER_DECIDES,
   example: { configuration: 'telegram-config-1' },
-  run: async (values, _services, caller) => holdOr(await call(caller, 'revoke', { configurationId: (values.configuration ?? '').trim() }), 'No new message is captured. The chat stays held until you hand it back.'),
+  run: async (values, _services, caller) => holdOr(await call(caller, 'revoke', { configurationId: (values.configuration ?? '').trim() }), 'New messages are no longer kept for your review; the chat is still not answered until you hand it back.'),
 };
 
 export const TELEGRAM_RELEASE: CapabilityDefinition<unknown> = {

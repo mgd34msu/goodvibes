@@ -35,7 +35,7 @@ const BY_COMMAND: Readonly<Record<string, CapabilityGroupId>> = {
 /** Actions sorted to another group than their command's, by `<command> <action id>`. */
 const BY_ACTION: Readonly<Record<string, CapabilityGroupId>> = {
   'bundle load': 'tools', 'compare export': 'work', 'deeplink review': 'system', 'deeplink export': 'tools',
-  'devices grants': 'safety', 'google adopt': 'tools', 'google waiting': 'waiting', 'health stop-agent': 'work',
+  'devices grants': 'safety', 'google waiting': 'waiting', 'health stop-agent': 'work',
   'hosted send-later': 'conversation', 'hosted stop-tool': 'tools', 'local-auth remove-first-run-file': 'system',
   'media make': 'tools', 'media collect': 'work', 'payments see-waiting': 'waiting',
   'remote tunnel': 'devices', 'remote tunnel-export': 'devices',

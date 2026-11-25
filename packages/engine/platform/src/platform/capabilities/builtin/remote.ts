@@ -110,6 +110,18 @@ function sessionFor(runners: DaemonRemoteRunners, runnerId: string, pick: (sessi
   throw new CapabilityRefusal(runnerId ? `No remote runner ${runnerId}.` : 'No runner is connected over a transport now.', undefined, 'NOT_FOUND');
 }
 
+/** "1 pool", "2 pools", "no pools". */
+const counted = (count: number, one: string, many = `${one}s`): string => count === 0 ? `no ${many}` : `${count} ${count === 1 ? one : many}`;
+/** What a runner bundle holds, in words. */
+const bundleWords = (bundle: { readonly pools: readonly unknown[]; readonly contracts: readonly unknown[]; readonly artifacts: readonly unknown[] }): string =>
+  `${counted(bundle.pools.length, 'pool')}, ${counted(bundle.contracts.length, 'runner')} and ${bundle.artifacts.length === 0 ? 'nothing handed back' : counted(bundle.artifacts.length, 'thing handed back', 'things handed back')}`;
+
+/** A runner's connection state in words. */
+const CONNECTION_WORDS: Readonly<Record<string, string>> = {
+  initializing: 'starting', authenticating: 'starting', connected: 'connected', syncing: 'working', degraded: 'struggling',
+  reconnecting: 'reconnecting', disconnected: 'closed', terminal_failure: 'lost for good',
+};
+
 function reviewModeText(selected: SupervisorSession): string {
   return selected.negotiation.trustClass === 'self-hosted-acp' && selected.negotiation.reviewMode === 'contract' ? 'contract (not applied to an external runner)' : selected.negotiation.reviewMode;
 }
@@ -165,17 +177,17 @@ function tunnelLines(connections: number): string[] {
   ];
 }
 
-function bundleWords(bundle: RemoteSessionBundle, replaces: readonly string[]): string {
-  const exportedAt = typeof bundle.exportedAt === 'number' && Number.isFinite(bundle.exportedAt) ? new Date(bundle.exportedAt).toISOString() : 'unknown';
+/** A runner's name (its contract's label, which is its task), else its id. */
+function runnerName(registry: DaemonRemoteRunners['registry'], runnerId: string): string {
+  return registry.getContract(runnerId)?.label ?? runnerId;
+}
+
+function bundleInspectWords(bundle: RemoteSessionBundle, replaces: readonly string[]): string {
+  const saved = typeof bundle.exportedAt === 'number' && Number.isFinite(bundle.exportedAt) ? `saved ${new Date(bundle.exportedAt).toLocaleString()}` : 'saved at a time it does not say';
+  // Open connections are not counted: the daemon saves a bundle with no conversation store, so it never records them.
   return [
-    'Runner bundle',
-    `  saved: ${exportedAt}`,
-    `  connections open when saved: ${Array.isArray(bundle.activeConnectionIds) ? bundle.activeConnectionIds.length : 0}`,
-    `  pools: ${bundle.pools.length}`,
-    `  contracts: ${bundle.contracts.length}`,
-    `  artifacts: ${bundle.artifacts.length}`,
-    '  it holds runner pools, runner contracts and artifacts; it does not hold a conversation',
-    replaces.length > 0 ? `  bringing it in replaces: ${replaces.join(', ')}` : '  bringing it in replaces nothing held now',
+    `This runner bundle, ${saved}, holds ${bundleWords(bundle)}, and no conversation.`,
+    replaces.length > 0 ? `Bringing it in replaces ${replaces.join(', ')}.` : 'Bringing it in replaces nothing held now.',
   ].join('\n');
 }
 
@@ -224,14 +236,14 @@ export const REMOTE_SHOW = read({
     return {
       text: [
         `Remote connection ${connection.agentId}`,
-        `  label: ${connection.label}`,
         `  transport: ${connection.transportState}`,
-        `  connected: ${connection.connectedAt ? new Date(connection.connectedAt).toISOString() : 'not yet'}`,
+        `  connected: ${connection.connectedAt ? new Date(connection.connectedAt).toLocaleString() : 'not yet'}`,
         `  errors: ${connection.errorCount}`,
-        `  task: ${contract?.taskId ?? 'none'}`,
+        `  tracked task: ${contract?.taskId ?? 'none'}`,
         `  last error: ${connection.lastError ?? 'none'}`,
-        `  contract: ${contract?.id ?? 'none'}`,
-        `  pool: ${contract?.poolId ?? 'none'}`,
+        // The contract's id is the runner's own with a prefix: whether one is held is what a person needs.
+        `  contract: ${contract ? 'held by the daemon' : 'none yet'}`,
+        `  pool: ${contract?.poolId ? runners.registry.getPool(contract.poolId)?.label ?? contract.poolId : 'none'}`,
         `  protocol: ${contract?.capabilityCeiling.executionProtocol ?? 'not known'}`,
         `  review: ${contract ? runnerReviewText(contract) : 'not known'}`,
         `  tools: ${contract ? runnerToolsText(contract) : 'not known'}`,
@@ -243,18 +255,17 @@ export const REMOTE_SHOW = read({
 
 export const REMOTE_CONTRACT = read({
   actionId: 'contract', label: 'See a runner\'s contract', inputs: [RUNNER],
-  sentence: 'Shows {runner}\'s template, trust, transport, tools, write scope and review mode.', example: { runner: 'acp-7f2' },
+  sentence: 'Shows {runner}\'s kind of agent, trust, transport, tools, write scope and review mode.', example: { runner: 'acp-7f2' },
   async run(values, services) {
-    const contract = runnersOf(services).registry.readContractForAgent(values.runner!);
+    const registry = runnersOf(services).registry;
+    const contract = registry.readContractForAgent(values.runner!);
     if (!contract) throw new CapabilityRefusal(`No remote runner ${values.runner}.`, undefined, 'NOT_FOUND');
     return {
       text: [
-        `Runner contract ${contract.id}`,
-        `  runner: ${contract.runnerId}`,
-        `  label: ${contract.label}`,
-        `  pool: ${contract.poolId ?? '(none)'}`,
+        `${contract.label}: what it is held to`,
+        `  pool: ${contract.poolId ? registry.getPool(contract.poolId)?.label ?? contract.poolId : 'none'}`,
         `  trust: ${contract.trustClass}`,
-        `  template: ${contract.template}`,
+        `  kind of agent: ${contract.template}`,
         `  transport: ${contract.transport?.state ?? 'none (a local runner in the daemon)'}`,
         `  tools: ${runnerToolsText(contract)}`,
         `  protocol: ${contract.capabilityCeiling.executionProtocol}`,
@@ -272,23 +283,23 @@ export const REMOTE_SUPERVISOR = read({
   sentence: 'Shows {runner}\'s transport, heartbeat, negotiated protocol, capabilities and recovery steps.', example: { runner: 'acp-7f2' },
   async run(values, services) {
     const selected = sessionFor(runnersOf(services), values.runner ?? '');
+    // Opening the runners in the Work place is where this is read, so only the steps beyond it are shown.
+    const recovery = selected.recovery.filter((action) => action.id !== 'remote-panel');
     return {
       text: [
         `Supervised runner ${selected.runnerId}`,
-        `  label: ${selected.label}`,
         `  transport: ${selected.transportState}`,
         `  heartbeat: ${selected.heartbeat.status} (${selected.heartbeat.detail})`,
         `  protocol: ${selected.negotiation.executionProtocol}`,
         `  review: ${reviewModeText(selected)}`,
         `  communication: ${selected.negotiation.communicationLane}`,
         `  trust: ${selected.negotiation.trustClass}`,
-        `  task: ${selected.taskId ?? 'none'}`,
+        `  tracked task: ${selected.taskId ?? 'none'}`,
         `  errors: ${selected.errorCount}`,
         ...(selected.lastError ? [`  last error: ${selected.lastError}`] : []),
         '  capabilities:',
         ...selected.capabilities.map((capability) => `    ${capability.id}: ${capability.supported ? 'yes' : 'no'} (${capability.detail})`),
-        '  recovery:',
-        ...selected.recovery.map((action) => `    ${action.reason}`),
+        ...(recovery.length > 0 ? ['  to put it right:', ...recovery.map((action) => `    ${action.label}: ${action.reason}`)] : []),
       ].join('\n'),
       data: { session: selected },
     };
@@ -303,7 +314,6 @@ export const REMOTE_CAPABILITIES = read({
     return {
       text: [
         `What runner ${selected.runnerId} can do`,
-        `  label: ${selected.label}`,
         `  transport: ${selected.transportState}`,
         `  protocol: ${selected.negotiation.executionProtocol}`,
         `  review: ${reviewModeText(selected)}`,
@@ -319,16 +329,18 @@ export const REMOTE_RECOVER = read({
   sentence: 'Shows {runner}\'s heartbeat and last error, and the steps that recover it.', example: { runner: 'acp-7f2' },
   async run(values, services) {
     const selected = sessionFor(runnersOf(services), values.runner ?? '', (sessions) => sessions.find((entry) => entry.recovery.length > 0) ?? sessions[0]);
-    const steps = selected.recovery.length > 0 ? selected.recovery.map((action) => `${action.label}: ${action.reason}`) : ['Look at the connection first: nothing says it needs recovering.'];
+    const recovery = selected.recovery.filter((action) => action.id !== 'remote-panel');
+    const steps = recovery.length > 0 ? recovery.map((action) => `${action.label}: ${action.reason}`) : ['Look at the connection first: nothing says it needs recovering.'];
     return {
       text: [
-        `Recovering runner ${selected.runnerId}`,
-        `  label: ${selected.label}`,
-        `  transport: ${selected.transportState}`,
-        `  heartbeat: ${selected.heartbeat.status} (${selected.heartbeat.detail})`,
+        // Named as its row is, by its task; the id is in the data. The first line is the answer (a place shows it alone).
+        recovery[0]
+          ? `The runner on "${selected.label}": ${recovery[0].label.charAt(0).toLowerCase()}${recovery[0].label.slice(1)}; ${recovery[0].reason}.`
+          : `The runner on "${selected.label}": ${steps[0]}`,
+        `  connection: ${CONNECTION_WORDS[selected.transportState] ?? selected.transportState}`,
+        `  heartbeat: ${selected.heartbeat.detail}`,
         ...(selected.lastError ? [`  last error: ${selected.lastError}`] : []),
-        ...(selected.taskId ? [`  task: ${selected.taskId}`] : []),
-        '  steps:',
+        '  to put it right:',
         ...steps.map((step) => `    ${step}`),
       ].join('\n'),
       data: { runnerId: selected.runnerId, steps },
@@ -339,7 +351,7 @@ export const REMOTE_RECOVER = read({
 export const REMOTE_STOP: Definition = {
   capability: { id: 'remote.stop', group: 'work', home: 'daemon', repeat: 'safe' },
   actionId: 'stop', label: 'Stop a remote runner', word: 'stop', inputs: [CONNECTION],
-  sentence: 'The runner on {connection} is stopped; what it was doing is not finished.', done: '',
+  sentence: 'Runner {connection} is stopped; what it was doing is not finished.', done: '',
   touches: 'this-machine', lasts: 'kept', risk: 'cannot-be-undone', example: { connection: 'acp-7f2' },
   async run(values, services) {
     const runnerId = values.connection!;
@@ -350,9 +362,12 @@ export const REMOTE_STOP: Definition = {
       throw new CapabilityRefusal(`Stopping runner ${runnerId} failed: ${summarizeError(error)}. It may still be running.`, 'Stop it again.');
     }
     if (!stopped) throw new CapabilityRefusal(`No runner ${runnerId} is running in the daemon.`, undefined, 'NOT_FOUND');
-    return { text: `Stopped runner ${runnerId}.`, data: { runnerId } };
+    return { text: `Stopped runner "${runnerName(runnersOf(services).registry, runnerId)}".`, data: { runnerId } };
   },
 };
+
+/** What a caller that names no project is told, before anything is asked (capabilities.run reads `callerNeeds`). */
+const RUNNER_PROJECT_NEEDED = 'No project folder came with the request, so the runner has nowhere to work. Nothing was started. Send workingDirectory, the project folder, with the request.';
 
 async function dispatch(services: RemoteCapabilityServices, caller: CapabilityCaller, task: string, template: string, poolId: string | undefined) {
   const runners = runnersOf(services);
@@ -370,12 +385,12 @@ async function dispatch(services: RemoteCapabilityServices, caller: CapabilityCa
   }
   return {
     text: [
-      !pool ? `Started runner ${started.runnerId}.` : started.inPool ? `Started runner ${started.runnerId} from pool ${pool.id}.`
-        : `Started runner ${started.runnerId}; pool ${pool.id} filled up meanwhile, so the runner is not in it (stop it if it should not run outside the pool).`,
-      `  template: ${started.template}`,
+      // Named by its task, as its row is; the id is in the data and in the row's detail.
+      !pool ? `Started a runner on "${task}"; it is in Runners, in the Work place.` : started.inPool ? `Started a runner on "${task}" in pool ${pool.label}; it is in Runners, in the Work place.`
+        : `Started a runner on "${task}"; pool ${pool.label} filled up meanwhile, so the runner is not in it (stop it if it should not run outside the pool).`,
+      `  kind of agent: ${started.template}`,
       `  tools: ${started.tools.join(', ')} (a permission ask for any other kind of call is refused)`,
       `  folder: ${caller.workingDirectory}`,
-      `  task: ${task}`,
     ].join('\n'),
     data: { runnerId: started.runnerId, template: started.template, ...(pool ? { pool: pool.id, inPool: started.inPool } : {}) },
   };
@@ -384,18 +399,21 @@ async function dispatch(services: RemoteCapabilityServices, caller: CapabilityCa
 export const REMOTE_DISPATCH: Definition = {
   capability: { id: 'remote.dispatch', group: 'work', home: 'daemon', repeat: 'unsafe' },
   actionId: 'dispatch', label: 'Start a remote runner on a task', word: 'dispatch', inputs: [TASK, TEMPLATE('a general agent')],
-  sentence: 'A self-hosted runner starts on "{task}" now in this project, with only its template\'s tools; it runs in the daemon until it finishes or you stop it.',
-  done: '', touches: 'this-machine', lasts: 'not-a-change', risk: 'none', undoneBy: 'stop', ownerOnly: DISPATCH_OWNER,
+  // It makes a runner, the Runners tab's kind of thing, which is kept (an empty tab names this action first).
+  sentence: 'A self-hosted runner starts on "{task}" now in this project, with only the tools its kind of agent has; it runs in the daemon until it finishes or you stop it, and stays in Runners, with its pool, until you change it.',
+  done: '', touches: 'this-machine', lasts: 'kept', risk: 'none', undoneBy: 'stop', ownerOnly: DISPATCH_OWNER,
   example: { task: 'run the test suite and report failures', template: 'tester' },
+  callerNeeds: { project: RUNNER_PROJECT_NEEDED },
   async run(values, services, caller) { return dispatch(services, caller, values.task!, values.template ?? '', undefined); },
 };
 
 export const REMOTE_DISPATCH_POOL: Definition = {
   capability: { id: 'remote.dispatch-pool', group: 'work', home: 'daemon', repeat: 'unsafe' },
   actionId: 'dispatch-pool', label: 'Start a runner from a pool on a task', word: 'dispatch-pool', inputs: [POOL, { ...TASK }, TEMPLATE('the pool\'s usual agent')],
-  sentence: 'A runner from pool {pool} starts on "{task}" now in this project, with only its template\'s tools; it runs in the daemon until it finishes or you stop it.',
-  done: '', touches: 'this-machine', lasts: 'not-a-change', risk: 'none', undoneBy: 'stop', ownerOnly: DISPATCH_OWNER,
+  sentence: 'A runner from pool {pool} starts on "{task}" now in this project, with only the tools its kind of agent has; it runs in the daemon until it finishes or you stop it, and stays in Runners, with its pool, until you change it.',
+  done: '', touches: 'this-machine', lasts: 'kept', risk: 'none', undoneBy: 'stop', ownerOnly: DISPATCH_OWNER,
   example: { pool: 'ci', task: 'run the test suite and report failures' },
+  callerNeeds: { project: RUNNER_PROJECT_NEEDED },
   async run(values, services, caller) { return dispatch(services, caller, values.task!, values.template ?? '', values.pool!); },
 };
 
@@ -405,25 +423,24 @@ export const REMOTE_POOLS = read({
   async run(_values, services) {
     const pools = runnersOf(services).registry.listPools();
     if (pools.length === 0) return { text: 'No runner pools yet.', data: { pools } };
-    return { text: [`Runner pools (${pools.length})`, ...pools.map((pool) => `  ${pool.id}  ${pool.runnerIds.length} runner(s)  trust ${pool.trustClass}  template ${pool.preferredTemplate ?? '(none)'}`)].join('\n'), data: { pools } };
+    return { text: [`Runner pools (${pools.length})`, ...pools.map((pool) => `  ${pool.id}  ${pool.runnerIds.length} runner(s)  trust ${pool.trustClass}  usual agent ${pool.preferredTemplate ?? 'general'}`)].join('\n'), data: { pools } };
   },
 });
 
 export const REMOTE_POOL = read({
   actionId: 'pool', label: 'See a runner pool', inputs: [POOL],
-  sentence: 'Shows {pool}\'s label, trust, template, limit and runners.', example: { pool: 'ci' },
+  sentence: 'Shows {pool}\'s trust, usual agent, limit and runners.', example: { pool: 'ci' },
   async run(values, services) {
     const pool = runnersOf(services).registry.getPool(values.pool!);
     if (!pool) throw new CapabilityRefusal(`No runner pool ${values.pool}.`, undefined, 'NOT_FOUND');
     return {
       text: [
-        `Runner pool ${pool.id}`,
-        `  label: ${pool.label}`,
+        `Runner pool "${pool.label}"${pool.label !== pool.id ? ` (id ${pool.id})` : ''}`,
         `  trust: ${pool.trustClass}`,
-        `  usual template: ${pool.preferredTemplate ?? '(none)'}`,
+        `  usual agent: ${pool.preferredTemplate ?? 'general (none chosen)'}`,
         `  limit: ${pool.maxRunners ?? 'none'}`,
-        `  runners: ${pool.runnerIds.join(', ') || '(none)'}`,
-        `  description: ${pool.description ?? '(none)'}`,
+        `  runners: ${pool.runnerIds.join(', ') || 'none yet'}`,
+        ...(pool.description ? [`  description: ${pool.description}`] : []),
       ].join('\n'),
       data: { pool },
     };
@@ -441,7 +458,8 @@ export const REMOTE_CREATE_POOL: Definition = {
   touches: 'this-machine', lasts: 'kept', risk: 'none', example: { pool: 'ci', label: 'CI machines' },
   async run(values, services) {
     const pool = runnersOf(services).registry.createPool({ id: values.pool!, label: values.label || values.pool! });
-    return { text: `Made runner pool ${pool.id} (${pool.label}).`, data: { pool } };
+    // Named as its row is; its id is in the data.
+    return { text: `Made the runner pool "${pool.label || pool.id}"; it is in Runner pools, in the Work place.`, data: { pool } };
   },
 };
 
@@ -451,8 +469,9 @@ export const REMOTE_ASSIGN: Definition = {
   sentence: 'Runner {runner} joins pool {pool} until you change it.', done: '',
   touches: 'this-machine', lasts: 'kept', risk: 'none', undoneBy: 'unassign', example: { pool: 'ci', runner: 'acp-7f2' },
   async run(values, services) {
-    if (!runnersOf(services).registry.assignRunnerToPool(values.pool!, values.runner!)) throw new CapabilityRefusal(`Pool ${values.pool} is full, so ${values.runner} was not put in it.`, 'Take a runner out of the pool first.');
-    return { text: `Runner ${values.runner} is in pool ${values.pool}.`, data: { pool: values.pool, runner: values.runner } };
+    const registry = runnersOf(services).registry;
+    if (!registry.assignRunnerToPool(values.pool!, values.runner!)) throw new CapabilityRefusal(`Pool ${values.pool} is full, so ${values.runner} was not put in it.`, 'Take a runner out of the pool first.');
+    return { text: `Runner "${runnerName(registry, values.runner!)}" is in pool "${registry.getPool(values.pool!)?.label ?? values.pool}".`, data: { pool: values.pool, runner: values.runner } };
   },
 };
 
@@ -463,8 +482,9 @@ export const REMOTE_UNASSIGN: Definition = {
   sentence: 'Runner {runner} leaves pool {pool} until you change it.', done: '',
   touches: 'this-machine', lasts: 'kept', risk: 'none', undoneBy: 'assign', example: { pool: 'ci', runner: 'acp-7f2' },
   async run(values, services) {
-    if (!runnersOf(services).registry.removeRunnerFromPool(values.pool!, values.runner!)) throw new CapabilityRefusal(`No runner pool ${values.pool}.`, undefined, 'NOT_FOUND');
-    return { text: `Runner ${values.runner} left pool ${values.pool}.`, data: { pool: values.pool, runner: values.runner } };
+    const registry = runnersOf(services).registry;
+    if (!registry.removeRunnerFromPool(values.pool!, values.runner!)) throw new CapabilityRefusal(`No runner pool ${values.pool}.`, undefined, 'NOT_FOUND');
+    return { text: `Runner "${runnerName(registry, values.runner!)}" left pool "${registry.getPool(values.pool!)?.label ?? values.pool}".`, data: { pool: values.pool, runner: values.runner } };
   },
 };
 
@@ -486,9 +506,24 @@ export const REMOTE_REVIEW = read({
   sentence: 'Shows what {artifact} holds: the task, its result and the evidence.', example: { artifact: 'art-31c' },
   async run(values, services) {
     const runners = runnersOf(services);
-    const summary = runners.registry.buildReviewSummary(values.artifact!);
-    if (!summary) throw new CapabilityRefusal(`No artifact ${values.artifact}.`, undefined, 'NOT_FOUND');
-    return { text: summary, data: { artifact: runners.registry.getArtifact(values.artifact!) } };
+    const artifact = runners.registry.getArtifact(values.artifact!);
+    if (!artifact) throw new CapabilityRefusal(`No artifact ${values.artifact}.`, undefined, 'NOT_FOUND');
+    const { toolCallCount, errorCount } = artifact.evidence;
+    // The artifact's id joins its runner, task and time: the words name each instead.
+    return {
+      text: [
+        `What runner "${artifact.runnerContract.label}" handed back`,
+        `  task: ${artifact.task.task || 'not said'}`,
+        `  result: ${artifact.task.status === 'unknown' ? 'not known' : artifact.task.status}`,
+        `  summary: ${artifact.task.summary || 'none'}`,
+        ...(artifact.task.error ? [`  what went wrong: ${artifact.task.error}`] : []),
+        `  kind of agent: ${artifact.runnerContract.template}`,
+        `  tools it had: ${artifact.runnerContract.capabilityCeiling.allowedTools.join(', ') || 'none'}`,
+        `  evidence: ${toolCallCount} tool call${toolCallCount === 1 ? '' : 's'}, ${errorCount} error${errorCount === 1 ? '' : 's'}`,
+        ...(artifact.knowledgeInjections.length > 0 ? [`  knowledge it was given: ${artifact.knowledgeInjections.map((entry) => entry.id).join(', ')}`] : []),
+      ].join('\n'),
+      data: { artifact },
+    };
   },
 });
 
@@ -503,7 +538,7 @@ export const REMOTE_EXPORT: Definition = {
     if (!artifact) throw new CapabilityRefusal(`No runner ${values.runner} to capture.`, undefined, 'NOT_FOUND');
     const exported = await registry.exportArtifact(artifact.id, values.path ? projectPath(caller, values.path) : caller.workingDirectory ? join(caller.workingDirectory, '.goodvibes', 'remote-artifacts', `${artifact.id.replace(/[:]/g, '_')}.json`) : undefined);
     if (!exported) throw new CapabilityRefusal(`Saving runner ${values.runner}'s work failed.`);
-    return { text: `Saved artifact ${exported.artifact.id} to ${exported.path}.`, data: { artifact: exported.artifact.id, path: exported.path } };
+    return { text: `Saved what the runner did to ${exported.path}; it is in Handed back, in the Work place.`, data: { artifact: exported.artifact.id, path: exported.path } };
   },
 };
 
@@ -516,14 +551,15 @@ export const REMOTE_ARTIFACT_EXPORT: Definition = {
     const id = values.artifact!;
     const exported = await runnersOf(services).registry.exportArtifact(id, values.path ? projectPath(caller, values.path) : caller.workingDirectory ? join(caller.workingDirectory, '.goodvibes', 'remote-artifacts', `${id.replace(/[:]/g, '_')}.json`) : undefined);
     if (!exported) throw new CapabilityRefusal(`No artifact ${id}.`, undefined, 'NOT_FOUND');
-    return { text: `Saved artifact ${exported.artifact.id} to ${exported.path}.`, data: { artifact: exported.artifact.id, path: exported.path } };
+    // The artifact's id is long (runner, task and time) and a place drops a line that holds one: the line says where it went.
+    return { text: `Saved the artifact to ${exported.path}.`, data: { artifact: exported.artifact.id, path: exported.path } };
   },
 };
 
 export const REMOTE_RERUN_LOCAL: Definition = {
   capability: { id: 'remote.rerun-local', group: 'work', home: 'daemon', repeat: 'unsafe' },
   actionId: 'rerun-local', label: 'Run an artifact\'s task here', word: 'rerun-local', inputs: [ARTIFACT],
-  sentence: 'An agent starts in the daemon on the task {artifact} recorded, with only the tools it recorded (shown beside each artifact); it may come from another machine.',
+  sentence: 'An agent starts in the daemon on the task recorded in {artifact}, with only the tools recorded there (shown beside it); that task and those tools may come from another machine.',
   done: '', touches: 'this-machine', lasts: 'not-a-change', risk: 'loosens-a-protection',
   ownerOnly: { reason: 'it runs task text and a tool list that may come from another machine', instead: 'Ask the owner to run it from the Work place.' },
   example: { artifact: 'art-31c' },
@@ -553,13 +589,15 @@ export const REMOTE_IMPORT: Definition = {
   sentence: 'The artifact in {path} is added for review, replacing a different artifact held with the same id; a file that would replace a known runner\'s tools is refused.',
   done: '', touches: 'this-machine', lasts: 'kept', risk: 'cannot-be-undone', example: { path: 'remote/art-31c.json' },
   async run(values, services, caller) {
+    const path = projectPath(caller, values.path!);
+    if (!existsSync(path)) throw new CapabilityRefusal(`There is no file ${path}; nothing was brought in.`, undefined, 'NOT_FOUND');
     try {
       // Reached only once the person confirmed the replacement the sentence names.
-      const artifact = await runnersOf(services).registry.importArtifact(projectPath(caller, values.path!), { replace: true });
-      return { text: `Brought in artifact ${artifact.id} from runner ${artifact.runnerId}; it is in the list of what runners handed back.`, data: { artifact: artifact.id } };
+      const artifact = await runnersOf(services).registry.importArtifact(path, { replace: true });
+      return { text: `Brought in the artifact from ${path}; it is in Handed back, in the Work place.`, data: { artifact: artifact.id } };
     } catch (error) {
       if (error instanceof CapabilityRefusal) throw error;
-      throw new CapabilityRefusal(`Not brought in: ${summarizeError(error)}`);
+      throw new CapabilityRefusal(`${summarizeError(error)}; nothing was brought in.`);
     }
   },
 };
@@ -593,7 +631,7 @@ function envSnippet(): string {
 export const REMOTE_ENV = read({
   actionId: 'env', label: 'See the environment a remote agent needs',
   sentence: 'Shows the shell line that tells a remote agent which agent command to run.',
-  async run() { return { text: ['Remote environment', envSnippet()].join('\n') }; },
+  async run() { return { text: ['Set this in the shell that starts a remote agent:', envSnippet()].join('\n') }; },
 });
 
 export const REMOTE_ENV_EXPORT = exportFile({
@@ -631,12 +669,13 @@ export const REMOTE_BOOTSTRAP_INSPECT = read({
   async run(values, _services, caller) {
     const path = projectPath(caller, values.path!);
     const parsed = readJson(path, 'a start-up bundle') as { sessionId?: unknown; acpAgentCommand?: unknown; links?: unknown } | null;
+    const command = Array.isArray(parsed?.acpAgentCommand) ? parsed.acpAgentCommand.map(String).join(' ') : typeof parsed?.acpAgentCommand === 'string' ? parsed.acpAgentCommand : '';
+    const links = Array.isArray(parsed?.links) ? parsed.links.length : 0;
     return {
       text: [
-        'Start-up bundle',
-        ...(typeof parsed?.sessionId === 'string' ? [`  session: ${parsed.sessionId}`] : []),
-        `  agent command: ${JSON.stringify(parsed?.acpAgentCommand ?? null)}`,
-        `  links: ${Array.isArray(parsed?.links) ? parsed.links.length : 0}`,
+        command ? `The start-up bundle at ${path} starts a remote agent with: ${command}` : `The start-up bundle at ${path} names no agent command.`,
+        ...(typeof parsed?.sessionId === 'string' ? [`It belongs to session ${parsed.sessionId}.`] : []),
+        `It holds ${links} link${links === 1 ? '' : 's'}.`,
       ].join('\n'),
     };
   },
@@ -652,7 +691,7 @@ export const REMOTE_SESSION_EXPORT: Definition = {
     // The registry frames and writes the bundle (the same file a session import reads).
     const exported = await runnersOf(services).registry.exportSessionBundle(undefined, path);
     return {
-      text: `Saved a runner bundle to ${exported.path}: ${exported.bundle.pools.length} pool(s), ${exported.bundle.contracts.length} runner contract(s) and ${exported.bundle.artifacts.length} artifact(s). It holds no conversation.`,
+      text: `Saved a runner bundle to ${exported.path}: ${bundleWords(exported.bundle)}. It holds no conversation.`,
       data: { path: exported.path },
     };
   },
@@ -665,7 +704,7 @@ export const REMOTE_SESSION_INSPECT = read({
     const path = projectPath(caller, values.path!);
     const described = runnersOf(services).registry.describeSessionBundleImport(readJson(path, 'a runner bundle'));
     if (!described.ok) throw new CapabilityRefusal(`Cannot use ${path} as a runner bundle: ${described.problem}. Nothing was changed.`);
-    return { text: bundleWords(described.bundle, described.replaces), data: { replaces: described.replaces } };
+    return { text: bundleInspectWords(described.bundle, described.replaces), data: { replaces: described.replaces } };
   },
 });
 
@@ -679,7 +718,7 @@ export const REMOTE_SESSION_IMPORT: Definition = {
     if (!existsSync(path)) throw new CapabilityRefusal(`There is no file ${path}. Nothing was changed.`, undefined, 'NOT_FOUND');
     try {
       const bundle = await runnersOf(services).registry.importSessionBundle(path, { replace: true });
-      return { text: `Brought in the runner bundle: ${bundle.pools.length} pool(s), ${bundle.contracts.length} runner contract(s), ${bundle.artifacts.length} artifact(s).` };
+      return { text: `Brought in the runner bundle: ${bundleWords(bundle)}.` };
     } catch (error) {
       throw new CapabilityRefusal(summarizeError(error));
     }

@@ -189,8 +189,8 @@ export async function runTestCommand(
     const reason = projectTestCommandMissing(cwd);
     ctx.session.conversationManager.addNotice(`[Test] Not run. ${reason}`, { level: 'error' });
     ctx.renderRequest();
-    // A first line a screen can show whole (the reason names the folder and a settings value).
-    return `Not run: this project has no test command; the conversation says how to add one.\n${reason}`;
+    // A first line a screen can show whole (the reason, under it, names the folder, a settings value and how to add one).
+    return `Not run: this project has no test command.\n${reason}`;
   }
   const limitMs = timeoutMs ?? getContractGateTimeoutMs(configManager);
   const runs = ctx.testRuns;

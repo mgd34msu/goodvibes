@@ -30,7 +30,7 @@
  * set model failed during this mail) what the mail says is not read. The
  * owner is asked instead, once per purchase and kind of subject: which
  * purchase it may be about, from our records, and to record an unverified
- * one's outcome in /payments pending. Nothing is settled or refunded unread.
+ * one's outcome in Waiting for you, under Purchases. Nothing is settled or refunded unread.
  */
 import { correlatePurchaseMail, extractConfirmationFacts, readRefundMail, type InboundMailFacts } from './order-correlation.js';
 import { renderConfirmationReport, renderRefundReport, renderUnreadOrderMail, type OrderMailKind } from './message.js';

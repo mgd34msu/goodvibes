@@ -81,7 +81,7 @@ export class SessionOpenElsewhereError extends Error {
   readonly code = 'SESSION_OPEN_ELSEWHERE';
   constructor(readonly sessionId: string) {
     super(`Session ${sessionId} is open in another running terminal: continuing in it here would fork its live state and the two would overwrite each other's turns. `
-      + `Continue it there, or run \`/session resume ${sessionId} --force\` to have that terminal save it and hand it over to this one.`);
+      + `Continue it there, or run \`/resume ${sessionId} --force\` to have that terminal save it and hand it over to this one.`);
     this.name = 'SessionOpenElsewhereError';
   }
 }

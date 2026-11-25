@@ -13,7 +13,7 @@ import { dirname, join } from 'node:path';
 import { ApprovalBroker } from '../platform/src/platform/control-plane/approval-broker.ts';
 import { ConfigManager } from '../platform/src/platform/config/manager.ts';
 import { daemonSecretKeyFor } from '../platform/src/platform/config/daemon-secret-keys.ts';
-import { SecretsManager } from '../platform/src/platform/config/secrets.ts';
+import { SecretsManager, resolveSecretWriteScope } from '../platform/src/platform/config/secrets.ts';
 import { UserPermissionRuleStore, ownerPermissionRulesPath, previousOwnerPermissionRuleFiles } from '../platform/src/platform/permissions/user-rule-store.ts';
 import { DurableBudgetLedger } from '../platform/src/platform/payments/host/budget-store.ts';
 import { readPaymentsServiceConfig } from '../platform/src/platform/payments/payments-config.ts';
@@ -21,7 +21,6 @@ import { UserAuthManager } from '../platform/src/platform/security/user-auth.ts'
 import { CalendarTokenStore, carryGoogleCalendarConnectionForward } from '../platform/src/platform/calendar/oauth-token-store.ts';
 import { runDaemonBootGuarantees, releaseDaemonActivityLog } from '../platform/src/platform/daemon/facade-boot-guarantees.ts';
 import { syntheticCredential } from '../platform/src/platform/utils/fixture-credentials.ts';
-import { daemonScopedSecrets } from '../terminal-shell/src/agent-turn/calendar-oauth-service.ts';
 
 const roots: string[] = [];
 afterEach(() => { for (const root of roots.splice(0)) rmSync(root, { recursive: true, force: true }); });
@@ -155,7 +154,13 @@ test('every kind of owner data a 3.3.1 home holds is read by this release, carri
   // token record with the account under a key beside it; the daemon's start moves it into the one Google
   // connection (its refresh token and account), where /calendar and the daemon's calendar read it.
   {
-    const secrets = daemonScopedSecrets(new SecretsManager({ surfaceRoot: 'goodvibes', globalHome: h.home, projectRoot: h.workspace }));
+    // The store as the daemon's start reads it (facade-boot-guarantees.ts), each write filed where the daemon reads it.
+    const store = new SecretsManager({ surfaceRoot: 'goodvibes', globalHome: h.home, projectRoot: h.workspace });
+    const secrets = {
+      get: async (key: string) => (await store.getStored(key))?.reveal('store-write') ?? null,
+      set: (key: string, value: string) => store.set(key, value, { scope: resolveSecretWriteScope(key) }),
+      delete: (key: string) => store.delete(key),
+    };
     const tokenKey = daemonSecretKeyFor('calendar.google.tokens'), accountKey = daemonSecretKeyFor('calendar.google.account');
     const grantKey = daemonSecretKeyFor('google.oauth.refreshToken'), oneAccountKey = daemonSecretKeyFor('google.oauth.account');
     const refreshToken = syntheticCredential('1//', 'upgrade-refresh', 40);

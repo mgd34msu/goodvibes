@@ -3,7 +3,6 @@ import type { InfiniteBuffer } from '@goodvibes/engine/terminal-shell';
 import type { ConversationManager } from '../core/conversation.ts';
 import type { SelectionResult, SelectionModal } from './selection-modal.ts';
 import type { BookmarkModal } from './bookmark-modal.ts';
-import type { SettingsModal } from './settings-modal.ts';
 import type { SessionPickerModal } from './session-picker-modal.ts';
 import type { ProfilePickerModal } from './profile-picker-modal.ts';
 import type { HistorySearch } from './input-history.ts';
@@ -24,7 +23,6 @@ import {
   handleProfilePickerToken,
   handleSelectionModalToken,
   handleSessionPickerToken,
-  handleSettingsModalToken,
 } from './handler-modal-routes.ts';
 import {
   handleBlockActionsToken,
@@ -43,7 +41,6 @@ export type ModalTokenRouteState = {
   getSelectionCallback?: () => ((result: SelectionResult | null) => void) | null;
   setSelectionCallback?: (callback: ((result: SelectionResult | null) => void) | null) => void;
   bookmarkModal: BookmarkModal;
-  settingsModal: SettingsModal;
   mcpWorkspace: McpWorkspace;
   agentWorkspace: AgentWorkspace;
   sessionPickerModal: SessionPickerModal;
@@ -89,7 +86,6 @@ export const handleModalTokenRoutes = createModalTokenPipeline<ModalTokenRouteSt
     handleSearchModeToken,
     handleSelectionModalToken,
     handleBookmarkModalToken,
-    handleSettingsModalToken,
     handleMcpWorkspaceToken,
     handleSessionPickerToken,
     handleProfilePickerToken,

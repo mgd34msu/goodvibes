@@ -4,7 +4,7 @@ Generated from the synced GoodVibes operator contract artifact.
 
 ## Summary
 
-- Methods: `663`
+- Methods: `678`
 - Events: `37`
 - Auth modes: `shared-bearer`, `session-login`
 - HTTP status path: `/status`
@@ -973,6 +973,29 @@ Approve a pending approval. Optionally pass selectedHunks (edit-tool approvals o
                     "kind",
                     "host",
                     "url"
+                  ],
+                  "additionalProperties": false
+                },
+                {
+                  "type": "object",
+                  "properties": {
+                    "kind": {
+                      "type": "string",
+                      "enum": [
+                        "outside-caller"
+                      ]
+                    },
+                    "name": {
+                      "type": "string"
+                    },
+                    "principalId": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "kind",
+                    "name",
+                    "principalId"
                   ],
                   "additionalProperties": false
                 }
@@ -2059,6 +2082,29 @@ Cancel a pending approval; send `expectedRevision`, the `revision` you read. An 
                     "url"
                   ],
                   "additionalProperties": false
+                },
+                {
+                  "type": "object",
+                  "properties": {
+                    "kind": {
+                      "type": "string",
+                      "enum": [
+                        "outside-caller"
+                      ]
+                    },
+                    "name": {
+                      "type": "string"
+                    },
+                    "principalId": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "kind",
+                    "name",
+                    "principalId"
+                  ],
+                  "additionalProperties": false
                 }
               ]
             },
@@ -3136,6 +3182,29 @@ Claim a pending approval for operator handling. A claim is advisory: it shows wh
                     "kind",
                     "host",
                     "url"
+                  ],
+                  "additionalProperties": false
+                },
+                {
+                  "type": "object",
+                  "properties": {
+                    "kind": {
+                      "type": "string",
+                      "enum": [
+                        "outside-caller"
+                      ]
+                    },
+                    "name": {
+                      "type": "string"
+                    },
+                    "principalId": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "kind",
+                    "name",
+                    "principalId"
                   ],
                   "additionalProperties": false
                 }
@@ -4235,6 +4304,29 @@ Deny a pending approval. rememberTier generalizes the denial (a generalizing tie
                     "kind",
                     "host",
                     "url"
+                  ],
+                  "additionalProperties": false
+                },
+                {
+                  "type": "object",
+                  "properties": {
+                    "kind": {
+                      "type": "string",
+                      "enum": [
+                        "outside-caller"
+                      ]
+                    },
+                    "name": {
+                      "type": "string"
+                    },
+                    "principalId": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "kind",
+                    "name",
+                    "principalId"
                   ],
                   "additionalProperties": false
                 }
@@ -5452,6 +5544,29 @@ Return pending and historical approval records, newest 50. Pass `approvalId` to 
                       "url"
                     ],
                     "additionalProperties": false
+                  },
+                  {
+                    "type": "object",
+                    "properties": {
+                      "kind": {
+                        "type": "string",
+                        "enum": [
+                          "outside-caller"
+                        ]
+                      },
+                      "name": {
+                        "type": "string"
+                      },
+                      "principalId": {
+                        "type": "string"
+                      }
+                    },
+                    "required": [
+                      "kind",
+                      "name",
+                      "principalId"
+                    ],
+                    "additionalProperties": false
                   }
                 ]
               },
@@ -6661,6 +6776,29 @@ Raise a permission ask INTO the shared broker from a surface that is not in the 
                 "url"
               ],
               "additionalProperties": false
+            },
+            {
+              "type": "object",
+              "properties": {
+                "kind": {
+                  "type": "string",
+                  "enum": [
+                    "outside-caller"
+                  ]
+                },
+                "name": {
+                  "type": "string"
+                },
+                "principalId": {
+                  "type": "string"
+                }
+              },
+              "required": [
+                "kind",
+                "name",
+                "principalId"
+              ],
+              "additionalProperties": false
             }
           ]
         },
@@ -7108,6 +7246,29 @@ Raise a permission ask INTO the shared broker from a surface that is not in the 
                     "kind",
                     "host",
                     "url"
+                  ],
+                  "additionalProperties": false
+                },
+                {
+                  "type": "object",
+                  "properties": {
+                    "kind": {
+                      "type": "string",
+                      "enum": [
+                        "outside-caller"
+                      ]
+                    },
+                    "name": {
+                      "type": "string"
+                    },
+                    "principalId": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "kind",
+                    "name",
+                    "principalId"
                   ],
                   "additionalProperties": false
                 }
@@ -7862,6 +8023,9 @@ Answer one open inbox item with one of its `options`, or with `text` when it has
             },
             "surface": {
               "type": "string"
+            },
+            "owner": {
+              "type": "boolean"
             }
           },
           "required": [
@@ -8701,6 +8865,9 @@ The asking session reports what became of the answer to a question it posted: `d
             },
             "surface": {
               "type": "string"
+            },
+            "owner": {
+              "type": "boolean"
             }
           },
           "required": [
@@ -9557,6 +9724,9 @@ Everything waiting on the owner in one list, newest first: permission asks (kind
               },
               "surface": {
                 "type": "string"
+              },
+              "owner": {
+                "type": "boolean"
               }
             },
             "required": [
@@ -10391,6 +10561,9 @@ Leave the owner a question or a queued action from a process that is not the dae
             },
             "surface": {
               "type": "string"
+            },
+            "owner": {
+              "type": "boolean"
             }
           },
           "required": [
@@ -11162,6 +11335,9 @@ Take back an open item this caller posted, because the answer is no longer neede
             },
             "surface": {
               "type": "string"
+            },
+            "owner": {
+              "type": "boolean"
             }
           },
           "required": [
@@ -14824,6 +15000,9 @@ Create a durable automation job. An optional id keeps the job under that id and 
           }
         ]
       }
+    },
+    "workingDirectory": {
+      "type": "string"
     },
     "kind": {
       "type": "string",
@@ -24280,6 +24459,9 @@ Create a schedule record.
     "deleteAfterRun": {
       "type": "boolean"
     },
+    "workingDirectory": {
+      "type": "string"
+    },
     "kind": {
       "type": "string",
       "enum": [
@@ -27026,7 +27208,7 @@ Return schedule records.
 
 #### `automation.schedules.pause`
 
-Stop a schedule from running until it is resumed; it is kept. The same as /schedule pause <schedule>.
+Stop a schedule from running until it is resumed; it is kept. The same as the schedule.pause capability (Pause in Automation).
 
 - Title: `Pause a Schedule`
 - Source: `builtin`
@@ -27081,7 +27263,7 @@ Stop a schedule from running until it is resumed; it is kept. The same as /sched
 
 #### `automation.schedules.preview`
 
-Read the values of "Schedule something to run" (action add) or "Change a schedule" (action change), the /schedule blanks by name (prompt, when, at, every, cron, tz, stagger, name, target, model, provider, deliver, outside, source, reasoning, thinking, wake, fallback, tool, template, light, paused; for change: schedule, task, success), into what would be kept: summary is the reading in words ("Read as: every weekday at 09:00 (0 9 * * 1-5) [Europe/Vienna]. Next run: ..."), and input is the body of automation.schedules.create (add) or automation.jobs.update (change). Nothing is kept. A described time (when) is read once, by the decision model when one is set, else only the fixed forms (an ISO time, a cron pattern, every 30m, in 2h) are read. zone is the caller's time zone, used when tz is blank.
+Read the values of "Schedule something to run" (action add) or "Change a schedule" (action change), the inputs of the schedule.add and schedule.change capabilities by name (prompt, when, at, every, cron, tz, stagger, name, target, model, provider, deliver, outside, source, reasoning, thinking, wake, fallback, tool, template, light, paused; for change: schedule, task, success), into what would be kept: summary is the reading in words ("Read as: every weekday at 09:00 (0 9 * * 1-5) [Europe/Vienna]. Next run: ..."), and input is the body of automation.schedules.create (add) or automation.jobs.update (change). Nothing is kept. A described time (when) is read once, by the decision model when one is set, else only the fixed forms (an ISO time, a cron pattern, every 30m, in 2h) are read. zone is the caller's time zone, used when tz is blank.
 
 - Title: `Preview a Schedule`
 - Source: `builtin`
@@ -27236,7 +27418,7 @@ Read the values of "Schedule something to run" (action add) or "Change a schedul
 
 #### `automation.schedules.resume`
 
-Let a paused schedule run again at its next time, until you change it. The same as /schedule resume <schedule>.
+Let a paused schedule run again at its next time, until you change it. The same as the schedule.resume capability (Resume in Automation).
 
 - Title: `Resume a Schedule`
 - Source: `builtin`
@@ -30916,7 +31098,7 @@ The calendars the configured account can reach (the Google calendar list, or the
 
 #### `calendar.events.create`
 
-Create an event on the configured calendar. Requires explicit confirmation (confirm: true); attendees are invited by the calendar. When the calendar server takes the request but sends no answer, the call fails with 502 CALENDAR_OUTCOME_UNKNOWN naming the new event's UID (on Google Calendar, its event id): read it with calendar.events.get before creating it again. Change it with calendar.events.update and remove it with calendar.events.delete.
+Create an event on the configured calendar, or on the calendar kept on this computer (calendarId local, or when no calendar is connected). With no end it ends when it starts. Requires explicit confirmation (confirm: true); attendees are invited by the calendar. When the calendar server takes the request but sends no answer, the call fails with 502 CALENDAR_OUTCOME_UNKNOWN naming the new event's UID (on Google Calendar, its event id): read it with calendar.events.get before creating it again. Change it with calendar.events.update and remove it with calendar.events.delete.
 
 - Title: `Create Calendar Event`
 - Source: `builtin`
@@ -30965,7 +31147,6 @@ Create an event on the configured calendar. Requires explicit confirmation (conf
   "required": [
     "title",
     "start",
-    "end",
     "confirm"
   ],
   "additionalProperties": true
@@ -31148,7 +31329,7 @@ Return the full event object including attendees, recurrence, raw iCalendar UID 
 
 #### `calendar.events.list`
 
-Return event summaries from the configured calendar (a CalDAV server, or the connected Google account) within an optional time window. With no from or to, lists from 24 hours ago to 30 days ahead; a recurring event is listed at each occurrence in the window, each with its own id (on CalDAV, the resource href plus `#` and the occurrence's RECURRENCE-ID instant).
+Return event summaries from the configured calendar (a CalDAV server, or the connected Google account) within an optional time window. With no from or to, lists from 24 hours ago to 30 days ahead; a recurring event is listed at each occurrence in the window, each with its own id (on CalDAV, the resource href plus `#` and the occurrence's RECURRENCE-ID instant) and the `seriesId` every occurrence of its series shares (on Google, its recurringEventId), so a list can count the series once.
 
 - Title: `List Calendar Events`
 - Source: `builtin`
@@ -31220,6 +31401,9 @@ Return event summaries from the configured calendar (a CalDAV server, or the con
             "items": {
               "type": "string"
             }
+          },
+          "seriesId": {
+            "type": "string"
           }
         },
         "required": [
@@ -31664,9 +31848,266 @@ What the caller needs, in words, in; three to five capabilities out, never the w
 }
 ```
 
+#### `capabilities.list`
+
+The capabilities this daemon knows, as a screen draws them: each one's id, group, where it runs (daemon: here; session: in the program holding a conversation; terminal: only inside a terminal program for now), what a repeat does, its words (label, the sentence that says what it will do, the line said when it is done), its risk, what it touches and how long it lasts, its inputs as described (kind, required or its usual value, fixed choices or the live list they are read from), and what undoes it. ids narrows the answer to those capabilities, group to one function group; with neither, every capability. Nothing runs.
+
+- Title: `List Capabilities`
+- Source: `builtin`
+- Access: `authenticated`
+- Transport: `ws`
+- HTTP: none
+- Scopes: `read:control-plane`
+- Emits events: none
+- Dangerous: `no`
+- Invokable: `yes`
+
+##### Input schema
+
+```json
+{
+  "type": "object",
+  "properties": {
+    "ids": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      }
+    },
+    "group": {
+      "type": "string",
+      "enum": [
+        "conversation",
+        "sessions",
+        "code",
+        "work",
+        "waiting",
+        "models",
+        "safety",
+        "tools",
+        "memory",
+        "messages",
+        "automation",
+        "devices",
+        "money",
+        "system"
+      ]
+    }
+  },
+  "additionalProperties": false
+}
+```
+
+##### Output schema
+
+```json
+{
+  "type": "object",
+  "properties": {
+    "capabilities": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string"
+          },
+          "group": {
+            "type": "string",
+            "enum": [
+              "conversation",
+              "sessions",
+              "code",
+              "work",
+              "waiting",
+              "models",
+              "safety",
+              "tools",
+              "memory",
+              "messages",
+              "automation",
+              "devices",
+              "money",
+              "system"
+            ]
+          },
+          "runsIn": {
+            "type": "string",
+            "enum": [
+              "daemon",
+              "session",
+              "terminal"
+            ]
+          },
+          "repeat": {
+            "type": "string",
+            "enum": [
+              "safe",
+              "unsafe"
+            ]
+          },
+          "command": {
+            "type": "string"
+          },
+          "commandTitle": {
+            "type": "string"
+          },
+          "actionId": {
+            "type": "string"
+          },
+          "word": {
+            "type": "string"
+          },
+          "label": {
+            "type": "string"
+          },
+          "sentence": {
+            "type": "string"
+          },
+          "done": {
+            "type": "string"
+          },
+          "risk": {
+            "type": "string"
+          },
+          "riskDone": {
+            "type": "string"
+          },
+          "touches": {
+            "type": "string"
+          },
+          "lasts": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "number"
+              },
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              },
+              {
+                "type": "object",
+                "additionalProperties": {}
+              },
+              {
+                "type": "array",
+                "items": {}
+              }
+            ]
+          },
+          "ownerOnly": {
+            "type": "object",
+            "additionalProperties": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "number"
+                },
+                {
+                  "type": "boolean"
+                },
+                {
+                  "type": "null"
+                },
+                {},
+                {
+                  "type": "array",
+                  "items": {}
+                }
+              ]
+            }
+          },
+          "undoneBy": {
+            "type": "string"
+          },
+          "button": {
+            "type": "string"
+          },
+          "asksItself": {
+            "type": "boolean"
+          },
+          "stepTitles": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "reveals": {
+            "type": "object",
+            "properties": {
+              "label": {
+                "type": "string"
+              },
+              "note": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "label",
+              "note"
+            ],
+            "additionalProperties": false
+          },
+          "inputs": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "additionalProperties": {
+                "anyOf": [
+                  {
+                    "type": "string"
+                  },
+                  {
+                    "type": "number"
+                  },
+                  {
+                    "type": "boolean"
+                  },
+                  {
+                    "type": "null"
+                  },
+                  {},
+                  {
+                    "type": "array",
+                    "items": {}
+                  }
+                ]
+              }
+            }
+          }
+        },
+        "required": [
+          "id",
+          "group",
+          "runsIn",
+          "command",
+          "actionId",
+          "label",
+          "sentence",
+          "risk",
+          "inputs"
+        ],
+        "additionalProperties": false
+      }
+    }
+  },
+  "required": [
+    "capabilities"
+  ],
+  "additionalProperties": false
+}
+```
+
 #### `capabilities.run`
 
-Runs one capability by id with its inputs (names and values as capabilities.find lists them), as the same act would run from any other source: the inputs are checked against its definition, its effects are admitted for the caller, and then a person's own request (a sign-in, a paired device or an app on this machine stating a person asked) runs at once, a call the Agent makes after its own gate admitted it runs, and any other caller's call is decided under the owner's permission mode (an act that loosens a protection or cannot be undone is put to the owner and opens on No). A capability with its own method runs through that method. workingDirectory is the caller's project (a hooks file, a project secret store); program is the terminal program asking (tui or agent). The answer is the text a person reads (detail: the capability's own words without its done line), the facts a script reads (never a secret value), the risk and what a repeat of this capability does.
+Runs one capability by id with its inputs (names and values as capabilities.find lists them), as the same act would run from any other source: the inputs are checked against its definition, its effects are admitted for the caller, and then a person's own request (a sign-in, a paired device or an app on this machine stating a person asked) runs at once, a call the Agent makes after its own capability gate judged it (the Agent's credential with that gate's mark) runs, and any other caller's call, the Agent's credential without the mark included, is decided under the owner's permission mode (an act that loosens a protection or cannot be undone is put to the owner and opens on No). A capability with its own method runs through that method. workingDirectory is the caller's project (a hooks file, a project secret store); program is the terminal program asking (tui or agent); model is the model that program's conversation uses (provider:model), which a capability on that conversation's model (its context window size) acts on unless its inputs name another. The answer is the text a person reads (detail: the capability's own words without its done line), the facts a script reads (never a secret value), the risk and what a repeat of this capability does; reveal is a value the person must see once (a new device's token, a join key), returned only to the person who asked. A call put to the owner is never held open: the answer is at once 202 with code OWNER_APPROVAL_PENDING, the approvalId of the question waiting for him in Waiting for you, state and next; send approvalId alone (no id), with the same credential, to read what came of it: 202 again while he has not answered, the run's answer once he approved it, or the refusal (403 CAPABILITY_NOT_APPROVED with his reason, or the capability's own refusal). A refusal is never a 500: it keeps the code of what refused it and the status that code stands for (404 NOT_FOUND for what is not held, 422 only for inputs that do not fit, 503 UNAVAILABLE for what this daemon was started without, 409 for any other refusal of the state found, with the capability's own code); a refusal from a method or an outside program the daemon ran for the capability keeps that method's status and code (424 CI_SOURCE_REFUSED for GitHub); 500 is the daemon's own fault. A capability that acts in a project folder is refused at once, 422 CAPABILITY_CALLER_CONTEXT_MISSING, when the call names no workingDirectory: the owner is never asked about a call that would then be refused. The owner's approval of a call put to him stands as the person's request for that call's own nested method that needs one (confirmation owner-request), for that one call only. A call put to him runs on his yes, after a daemon restart too, as the caller it was held for; whatever can refuse it without him (its inputs, its preview) is checked before he is asked. A capability that is the owner's own act is put to him, opening on No, never refused outright: asked for by a caller who is not the owner (an admin's sign-in, a paired device, a member), it is put to him the same way, the question naming who asks, and on his yes it runs with his authority for that one call and its nested methods. Before a held call runs on his yes, the caller it was held for must still be allowed: one whose operator token was replaced, whose device was unpaired, or whose sign-in user or sign-in is gone gets 403 CAPABILITY_CALLER_GONE naming it, and nothing runs; when that cannot be told (after a restart, a caller told only by a credential that is not kept) it is 409 CAPABILITY_ASK_AGAIN. His yes is judged again against the mode and the deny rules as they are when he answers: plan mode switched on, or a rule that now refuses it, refuses it with that reason. A remembered answer to an outside caller's call is kept for that caller only, and none is offered for an act of the owner's own asked by someone who is not the owner. Folder trust is not asked for a daemon capability: it acts on what the daemon keeps, not in a project folder.
 
 - Title: `Run A Capability`
 - Source: `builtin`
@@ -31720,11 +32161,204 @@ Runs one capability by id with its inputs (names and values as capabilities.find
         "tui",
         "agent"
       ]
+    },
+    "model": {
+      "type": "string"
+    },
+    "sessionId": {
+      "type": "string"
+    },
+    "approvalId": {
+      "type": "string"
     }
   },
-  "required": [
-    "id"
-  ],
+  "additionalProperties": false
+}
+```
+
+##### Output schema
+
+```json
+{
+  "anyOf": [
+    {
+      "type": "object",
+      "properties": {
+        "id": {
+          "type": "string"
+        },
+        "ok": {
+          "type": "boolean"
+        },
+        "text": {
+          "type": "string"
+        },
+        "detail": {
+          "type": "string"
+        },
+        "data": {
+          "type": "object",
+          "additionalProperties": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "number"
+              },
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              },
+              {},
+              {
+                "type": "array",
+                "items": {}
+              }
+            ]
+          }
+        },
+        "risk": {
+          "type": "string"
+        },
+        "repeat": {
+          "type": "string",
+          "enum": [
+            "safe",
+            "unsafe"
+          ]
+        },
+        "method": {
+          "type": "string"
+        },
+        "reveal": {
+          "type": "object",
+          "properties": {
+            "label": {
+              "type": "string"
+            },
+            "note": {
+              "type": "string"
+            },
+            "value": {
+              "type": "string"
+            },
+            "qr": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "label",
+            "note",
+            "value"
+          ],
+          "additionalProperties": false
+        }
+      },
+      "required": [
+        "id",
+        "ok",
+        "text",
+        "risk"
+      ],
+      "additionalProperties": false
+    },
+    {
+      "type": "object",
+      "properties": {
+        "success": {
+          "type": "boolean",
+          "const": false
+        },
+        "code": {
+          "type": "string",
+          "const": "OWNER_APPROVAL_PENDING"
+        },
+        "approvalId": {
+          "type": "string"
+        },
+        "followable": {
+          "type": "boolean"
+        },
+        "key": {
+          "type": "string"
+        },
+        "keys": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "reasons": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "sessionId": {
+          "type": "string"
+        },
+        "mode": {
+          "type": "string"
+        },
+        "requestedMode": {
+          "type": "string"
+        },
+        "state": {
+          "type": "string"
+        },
+        "next": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        }
+      },
+      "required": [
+        "code",
+        "approvalId",
+        "state"
+      ],
+      "additionalProperties": true
+    }
+  ]
+}
+```
+
+#### `places.counts`
+
+What waits or is wrong in every place (Waiting for you, Automation, Work, ...), in one call, as a menu of places shows it when it opens: for each place with something to count, the count, its words ("2 waiting", "1 failed") and its tone (waiting: something waits on you; wrong: something needs a look). Each count is the place's own, made from its own lists read from their daemon sources, so it agrees with the place when opened; a list a terminal program keeps (its conversation, its key table) is not read here, and unread names a list whose read was refused (the count is made without it). program (tui, agent or web) counts that program's view: a list declared for other programs only is not read. workingDirectory is the caller's project, sent with each project-bound read. A place with nothing to count has no count. Nothing changes.
+
+- Title: `Count Every Place`
+- Source: `builtin`
+- Access: `authenticated`
+- Transport: `ws`
+- HTTP: none
+- Scopes: `read:control-plane`
+- Emits events: none
+- Dangerous: `no`
+- Invokable: `yes`
+
+##### Input schema
+
+```json
+{
+  "type": "object",
+  "properties": {
+    "program": {
+      "type": "string",
+      "enum": [
+        "tui",
+        "agent",
+        "web"
+      ]
+    },
+    "workingDirectory": {
+      "type": "string"
+    }
+  },
   "additionalProperties": false
 }
 ```
@@ -31735,61 +32369,43 @@ Runs one capability by id with its inputs (names and values as capabilities.find
 {
   "type": "object",
   "properties": {
-    "id": {
-      "type": "string"
-    },
-    "ok": {
-      "type": "boolean"
-    },
-    "text": {
-      "type": "string"
-    },
-    "detail": {
-      "type": "string"
-    },
-    "data": {
-      "type": "object",
-      "additionalProperties": {
-        "anyOf": [
-          {
+    "places": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "properties": {
+          "place": {
             "type": "string"
           },
-          {
+          "count": {
             "type": "number"
           },
-          {
-            "type": "boolean"
+          "words": {
+            "type": "string"
           },
-          {
-            "type": "null"
+          "tone": {
+            "type": "string",
+            "enum": [
+              "waiting",
+              "wrong"
+            ]
           },
-          {},
-          {
+          "unread": {
             "type": "array",
-            "items": {}
+            "items": {
+              "type": "string"
+            }
           }
-        ]
+        },
+        "required": [
+          "place"
+        ],
+        "additionalProperties": false
       }
-    },
-    "risk": {
-      "type": "string"
-    },
-    "repeat": {
-      "type": "string",
-      "enum": [
-        "safe",
-        "unsafe"
-      ]
-    },
-    "method": {
-      "type": "string"
     }
   },
   "required": [
-    "id",
-    "ok",
-    "text",
-    "risk"
+    "places"
   ],
   "additionalProperties": false
 }
@@ -34902,6 +35518,39 @@ Return doctor checks and repair posture for a channel surface.
     },
     "state": {
       "type": "string"
+    },
+    "runtime": {
+      "type": "object",
+      "properties": {
+        "observable": {
+          "type": "boolean"
+        },
+        "running": {
+          "anyOf": [
+            {
+              "type": "boolean"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "reason": {
+          "type": "string"
+        },
+        "lastError": {
+          "type": "string"
+        },
+        "observedAt": {
+          "type": "number"
+        }
+      },
+      "required": [
+        "observable",
+        "running",
+        "reason"
+      ],
+      "additionalProperties": false
     },
     "summary": {
       "type": "string"
@@ -44200,7 +44849,7 @@ Close a companion-chat session (soft close). The session record and its messages
 
 #### `companion.chat.sessions.create`
 
-Create a new companion-chat session. Optional `provider` / `model` override the registry default. The session retains its requested `reasoningEffort`; null restores provider defaults. Title and system prompt are stored on the session record.
+Create a new companion-chat session. Optional `provider` / `model` override the registry default. The session retains its requested `reasoningEffort`; null restores provider defaults. Title and system prompt are stored on the session record. `workingDirectory` (absolute; else the `x-goodvibes-project` header) is the project the chat works in: its tools, tool servers, hooks, checkpoints and rules are that project's; without one the chat works in the daemon's own folder.
 
 - Title: `Create Companion Chat Session`
 - Source: `builtin`
@@ -44248,6 +44897,9 @@ Create a new companion-chat session. Optional `provider` / `model` override the 
       ]
     },
     "systemPrompt": {
+      "type": "string"
+    },
+    "workingDirectory": {
       "type": "string"
     }
   },
@@ -44339,6 +44991,9 @@ Create a new companion-chat session. Optional `provider` / `model` override the 
               "type": "null"
             }
           ]
+        },
+        "project": {
+          "type": "string"
         },
         "status": {
           "type": "string",
@@ -44545,6 +45200,9 @@ Return a companion-chat session record together with its full message history.
               "type": "null"
             }
           ]
+        },
+        "project": {
+          "type": "string"
         },
         "status": {
           "type": "string",
@@ -45022,6 +45680,9 @@ List active companion-chat sessions, newest first, one page of `limit` (default 
               }
             ]
           },
+          "project": {
+            "type": "string"
+          },
           "status": {
             "type": "string",
             "enum": [
@@ -45376,6 +46037,9 @@ Update companion-chat session metadata, including session-local provider, model 
               "type": "null"
             }
           ]
+        },
+        "project": {
+          "type": "string"
         },
         "status": {
           "type": "string",
@@ -45810,7 +46474,7 @@ Return the resolved GoodVibes config snapshot.
 
 #### `config.reset`
 
-Remove the explicit value of one config key through the daemon API so it reads as its default again, in every settings file that holds it. The response reports the value the host now holds and which file and tier it came from. Refuses a key that holds a credential (use credentials.delete), a key the host does not know, a key locked by managed policy, and runtime.workingDir (change the workspace with config.set). A change that loosens a security, permission, judgment or payment setting is the owner's own act: asked with a token minted for automation (one minted through the API by another token, such as pairing.tokens.create or pairing.tokens.migrate, or with narrowed scopes or for a named client; pairing.tokens.list shows it as origin automation) it is not made, but put to the owner as an approval only his own credential answers, and the answer is 202 with code OWNER_APPROVAL_PENDING and the `approvalId`; the change is applied when he approves it, and lapses after a day unanswered or if the daemon restarts first. The operator token, an admin sign-in, the apps on the daemon's machine and a device the owner paired himself (origin owner-pairing) make it at once.
+Remove the explicit value of one config key through the daemon API so it reads as its default again, in every settings file that holds it. The response reports the value the host now holds and which file and tier it came from. Refuses a key that holds a credential (use credentials.delete), a key the host does not know, a key locked by managed policy, and runtime.workingDir (no caller moves the daemon). A change that loosens a security, permission, judgment or payment setting is the owner's own act: asked with a token minted for automation (one minted through the API by another token, such as pairing.tokens.create or pairing.tokens.migrate, or with narrowed scopes or for a named client; pairing.tokens.list shows it as origin automation) it is not made, but put to the owner as an approval only his own credential answers, and the answer is 202 with code OWNER_APPROVAL_PENDING and the `approvalId`; the change is applied when he approves it, and lapses after a day unanswered or if the daemon restarts first. The operator token, an admin sign-in, the apps on the daemon's machine and a device the owner paired himself (origin owner-pairing) make it at once.
 
 - Title: `Reset Config Value`
 - Source: `builtin`
@@ -45957,7 +46621,7 @@ Remove the explicit value of one config key through the daemon API so it reads a
 
 #### `config.set`
 
-Write one config value on the daemon: `{ key, value }`, where value is any JSON the key accepts. The response reports the value the host now holds and which file and tier it is in; a value that did not take is refused with what the host holds instead. A key that holds a credential takes only a goodvibes://secrets/ reference (store the secret with credentials.set); runtime.workingDir is saved and the daemon moves there in the same process once no session is mid-turn (every service starts again on the new directory and attached apps reconnect; `moving`, `waitingForSessions` and `note` say what happens, and a second change while it moves is 409 WORKSPACE_BUSY), or, on a host that cannot move, at its next start (`restartRequired`). The same route also serves the settings clients' lanes, which answer with that lane's own object: `{ settingsPrecondition }` takes action `capture` (read the facts a change would act on) or `write` (make it, optionally only while `ifServing` and `ifIncarnation` still hold; a repeated `requestId` returns the first answer), and `{ settingsImportPrecondition }` takes the same two actions plus `apply`, which spends a captured `reference`; a settings import is refused (403 OWNER_ONLY) for a token minted for automation. A change that loosens a security, permission, judgment or payment setting is the owner's own act: asked with a token minted for automation (one minted through the API by another token, such as pairing.tokens.create or pairing.tokens.migrate, or with narrowed scopes or for a named client; pairing.tokens.list shows it as origin automation) it is not made, but put to the owner as an approval only his own credential answers, and the answer is 202 with code OWNER_APPROVAL_PENDING and the `approvalId`; the change is applied when he approves it, and lapses after a day unanswered or if the daemon restarts first. The operator token, an admin sign-in, the apps on the daemon's machine and a device the owner paired himself (origin owner-pairing) make it at once.
+Write one config value on the daemon: `{ key, value }`, where value is any JSON the key accepts. The response reports the value the host now holds and which file and tier it is in; a value that did not take is refused with what the host holds instead. A key that holds a credential takes only a goodvibes://secrets/ reference (store the secret with credentials.set); runtime.workingDir is refused (409 WORKSPACE_CHANGE_UNAVAILABLE): the daemon serves every project at once and no caller moves it, so a call names its project itself. The same route also serves the settings clients' lanes, which answer with that lane's own object: `{ settingsPrecondition }` takes action `capture` (read the facts a change would act on) or `write` (make it, optionally only while `ifServing` and `ifIncarnation` still hold; a repeated `requestId` returns the first answer), and `{ settingsImportPrecondition }` takes the same two actions plus `apply`, which spends a captured `reference`; a settings import is refused (403 OWNER_ONLY) for a token minted for automation. A change that loosens a security, permission, judgment or payment setting is the owner's own act: asked with a token minted for automation (one minted through the API by another token, such as pairing.tokens.create or pairing.tokens.migrate, or with narrowed scopes or for a named client; pairing.tokens.list shows it as origin automation) it is not made, but put to the owner as an approval only his own credential answers, and the answer is 202 with code OWNER_APPROVAL_PENDING and the `approvalId`; the change is applied when he approves it, and lapses after a day unanswered or if the daemon restarts first. The operator token, an admin sign-in, the apps on the daemon's machine and a device the owner paired himself (origin owner-pairing) make it at once.
 
 - Title: `Set Config Value`
 - Source: `builtin`
@@ -46316,7 +46980,7 @@ Write one config value on the daemon: `{ key, value }`, where value is any JSON 
 
 #### `config.setMany`
 
-Write several config values on the daemon as one update: `{ entries: [{ key, value }] }`. Every entry is admitted before anything is written, each settings file is written once and the configuration revision moves once, so a pair of settings that only make sense together never lands half-applied. A refusal names the setting, the reason and the next step, and says what was saved (nothing, unless a later settings file could not be written after an earlier one was). The answer lists, per key, the value the host now holds and which file and tier it is in; when a key does not hold the value asked for (a higher tier overrides it, or it was coerced), the answer is 409 CONFIG_SET_NOT_APPLIED naming those keys in `notApplied`, with the revision written and every entry's held value. A key that holds a credential takes only a goodvibes://secrets/ reference; runtime.workingDir is set on its own with config.set. A change that loosens a security, permission, judgment or payment setting is the owner's own act: asked with a token minted for automation (one minted through the API by another token, such as pairing.tokens.create or pairing.tokens.migrate, or with narrowed scopes or for a named client; pairing.tokens.list shows it as origin automation) it is not made, but put to the owner as an approval only his own credential answers, and the answer is 202 with code OWNER_APPROVAL_PENDING and the `approvalId`; the change is applied when he approves it, and lapses after a day unanswered or if the daemon restarts first. The operator token, an admin sign-in, the apps on the daemon's machine and a device the owner paired himself (origin owner-pairing) make it at once.
+Write several config values on the daemon as one update: `{ entries: [{ key, value }] }`. Every entry is admitted before anything is written, each settings file is written once and the configuration revision moves once, so a pair of settings that only make sense together never lands half-applied. A refusal names the setting, the reason and the next step, and says what was saved (nothing, unless a later settings file could not be written after an earlier one was). The answer lists, per key, the value the host now holds and which file and tier it is in; when a key does not hold the value asked for (a higher tier overrides it, or it was coerced), the answer is 409 CONFIG_SET_NOT_APPLIED naming those keys in `notApplied`, with the revision written and every entry's held value. A key that holds a credential takes only a goodvibes://secrets/ reference; runtime.workingDir is refused (409 WORKSPACE_CHANGE_UNAVAILABLE), as with config.set. A change that loosens a security, permission, judgment or payment setting is the owner's own act: asked with a token minted for automation (one minted through the API by another token, such as pairing.tokens.create or pairing.tokens.migrate, or with narrowed scopes or for a named client; pairing.tokens.list shows it as origin automation) it is not made, but put to the owner as an approval only his own credential answers, and the answer is 202 with code OWNER_APPROVAL_PENDING and the `approvalId`; the change is applied when he approves it, and lapses after a day unanswered or if the daemon restarts first. The operator token, an admin sign-in, the apps on the daemon's machine and a device the owner paired himself (origin owner-pairing) make it at once.
 
 - Title: `Set Several Config Values`
 - Source: `builtin`
@@ -84484,7 +85148,7 @@ Whether this daemon is keeping itself current, and, when it is not, the reason i
 
 #### `cost.attribution.get`
 
-Return windowed (24h/7d) cost attribution over observed LLM usage, grouped by a dimension (agent, tool, hook, mcp, model, provider, session), with cache-aware pricing (fresh input vs cache-read vs cache-write). Honest-unpriced: an unknown model contributes to unpricedRecordCount with a null cost, never a fabricated amount; costState is priced, unpriced, or estimated (a mix). totalCostUsd is null when every contributor is unpriced.
+Return windowed (24h/7d) cost attribution over observed LLM usage, grouped by a dimension (agent, tool, hook, mcp, model, provider, session, or source: what it was for, a schedule, a piece of work, a web chat, a shared session or a conversation), each row naming the models that spent it and whether each has a price, with cache-aware pricing (fresh input vs cache-read vs cache-write). Honest-unpriced: an unknown model contributes to unpricedRecordCount with a null cost, never a fabricated amount; costState is priced, unpriced, or estimated (a mix). totalCostUsd is null when every contributor is unpriced.
 
 - Title: `Get Cost Attribution`
 - Source: `builtin`
@@ -84518,7 +85182,8 @@ Return windowed (24h/7d) cost attribution over observed LLM usage, grouped by a 
         "mcp",
         "model",
         "provider",
-        "session"
+        "session",
+        "source"
       ]
     }
   },
@@ -84555,7 +85220,8 @@ Return windowed (24h/7d) cost attribution over observed LLM usage, grouped by a 
         "mcp",
         "model",
         "provider",
-        "session"
+        "session",
+        "source"
       ]
     },
     "totalCostUsd": {
@@ -84713,6 +85379,25 @@ Return windowed (24h/7d) cost attribution over observed LLM usage, grouped by a 
               "cacheWriteTokens"
             ],
             "additionalProperties": false
+          },
+          "models": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "key": {
+                  "type": "string"
+                },
+                "priced": {
+                  "type": "boolean"
+                }
+              },
+              "required": [
+                "key",
+                "priced"
+              ],
+              "additionalProperties": false
+            }
           }
         },
         "required": [
@@ -85275,6 +85960,148 @@ Send failed notifications again: those named in `ids`, or all of them when `ids`
     "failed",
     "notFound",
     "destinationChanged"
+  ],
+  "additionalProperties": false
+}
+```
+
+#### `notifications.send`
+
+A terminal program (the terminal app, the Agent) sends a notice of its own event (a turn that ended, an approval waiting, a budget reached, an agent that failed, or the model's own words through its notify tool) to the daemon's one list of webhook addresses (notifications.webhookUrls) and, for a turn, approval or budget notice, to the Slack and Discord channels the daemon posts notifications to. Facts are worded by the daemon under "metadata only" as it is set now. A typed notice is queued and retried; one that fails every attempt is kept in the daemon's failed notifications (notifications.deadLetters.list). A text notice is one attempt, reported per address. No address is returned.
+
+- Title: `Send a Program Notice`
+- Source: `builtin`
+- Access: `authenticated`
+- Transport: `ws`
+- HTTP: none
+- Scopes: `write:deliveries`
+- Emits events: none
+- Dangerous: `no`
+- Invokable: `yes`
+
+##### Input schema
+
+```json
+{
+  "type": "object",
+  "properties": {
+    "kind": {
+      "type": "string",
+      "enum": [
+        "turn",
+        "approval",
+        "budget",
+        "text"
+      ]
+    },
+    "facts": {
+      "type": "object",
+      "additionalProperties": {
+        "anyOf": [
+          {
+            "type": "string"
+          },
+          {
+            "type": "number"
+          },
+          {
+            "type": "boolean"
+          },
+          {
+            "type": "null"
+          },
+          {},
+          {
+            "type": "array",
+            "items": {}
+          }
+        ]
+      }
+    },
+    "text": {
+      "type": "string"
+    },
+    "event": {
+      "type": "string"
+    },
+    "program": {
+      "type": "string",
+      "enum": [
+        "tui",
+        "agent"
+      ]
+    }
+  },
+  "required": [
+    "kind"
+  ],
+  "additionalProperties": false
+}
+```
+
+##### Output schema
+
+```json
+{
+  "type": "object",
+  "properties": {
+    "attempted": {
+      "type": "number"
+    },
+    "delivered": {
+      "type": "number"
+    },
+    "failed": {
+      "type": "number"
+    },
+    "textSent": {
+      "type": "boolean"
+    },
+    "results": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "properties": {
+          "ok": {
+            "type": "boolean"
+          },
+          "error": {
+            "type": "string"
+          },
+          "status": {
+            "type": "number"
+          },
+          "outcome": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "ok"
+        ],
+        "additionalProperties": false
+      }
+    },
+    "chat": {
+      "type": "object",
+      "properties": {
+        "attempted": {
+          "type": "number"
+        },
+        "failed": {
+          "type": "number"
+        }
+      },
+      "required": [
+        "attempted",
+        "failed"
+      ],
+      "additionalProperties": false
+    }
+  },
+  "required": [
+    "attempted",
+    "delivered",
+    "failed"
   ],
   "additionalProperties": false
 }
@@ -86773,7 +87600,7 @@ Change one inbox message by IMAP UID: action seen or unseen sets or clears its r
 
 #### `email.send`
 
-Send a composed email via the configured SMTP account. Irreversible external send; requires confirm: true and explicit user review of recipients and body. Pass a clientSendId (8-128 letters, digits, - or _) chosen when the message was composed: a repeat with the same id and the same message within ten minutes returns the first answer instead of sending again (the id also becomes the Message-ID), and the same id with a different message is refused (409 CLIENT_SEND_ID_REUSED). A send whose final server reply was lost fails with EMAIL_DELIVERY_UNCONFIRMED: it may have gone, and repeating it with the same id will not send it twice.
+Send a composed email via the configured SMTP account. Irreversible external send; requires confirm: true and explicit user review of recipients and body. Pass a clientSendId (8-128 letters, digits, - or _) chosen when the message was composed: a repeat with the same id and the same message within ten minutes returns the first answer, marked repeated: true, instead of sending again (the id also becomes the Message-ID), and the same id with a different message is refused (409 CLIENT_SEND_ID_REUSED). A send whose final server reply was lost fails with EMAIL_DELIVERY_UNCONFIRMED: it may have gone, and repeating it with the same id will not send it twice.
 
 - Title: `Send Email`
 - Source: `builtin`
@@ -86831,6 +87658,9 @@ Send a composed email via the configured SMTP account. Irreversible external sen
     },
     "sentAt": {
       "type": "string"
+    },
+    "repeated": {
+      "type": "boolean"
     }
   },
   "required": [
@@ -86845,7 +87675,7 @@ Send a composed email via the configured SMTP account. Irreversible external sen
 
 #### `flags.graduation.report`
 
-Return the feature defaults report: every platform capability with its current default, default-disposition state (dark = default-off with no evidence, soaking = accumulating evidence, graduate-candidate = judged ready and awaiting a release decision, graduated = default on, blocked = held off with a dated reason), and its validation evidence. The daemon collects no validation readings, so every entry's evidence says "no evidence collected"; the only instrumentation, the permissions divergence simulation, runs in the terminal app with /security simulate-policy and reports there. releaseBlockers lists every graduate-candidate entry: capabilities judged ready that are neither on by default nor held with a dated reason.
+Return the feature defaults report: every platform capability with its current default, default-disposition state (dark = default-off with no evidence, soaking = accumulating evidence, graduate-candidate = judged ready and awaiting a release decision, graduated = default on, blocked = held off with a dated reason), and its validation evidence. The daemon collects no validation readings, so every entry's evidence says "no evidence collected"; the only instrumentation, the permissions divergence simulation, runs with "See what the candidate policy changes" (the capability security.simulate-policy) and reports there. releaseBlockers lists every graduate-candidate entry: capabilities judged ready that are neither on by default nor held with a dated reason.
 
 - Title: `Feature Defaults Report`
 - Source: `builtin`
@@ -92805,6 +93635,169 @@ Whether the pinned wake-word artifacts are on disk and VERIFIED BY CONTENT: the 
 }
 ```
 
+### hooks
+
+#### `hooks.trace.post`
+
+A terminal program (the terminal app, the Agent) tells the daemon which hooks it ran: which hook, at which hook point, on what, when, and what it did (let the event go on, refused it, put it to the owner, changed its input, added context, failed). The daemon keeps one trace of every program's runs, newest first, and says the list changed (LIST_CHANGED hook-trace); the capability hooks.trace reads it. A run is kept once by its id, so a post sent again changes nothing. Up to 100 runs per post.
+
+- Title: `Post Hook Runs`
+- Source: `builtin`
+- Access: `authenticated`
+- Transport: `ws`
+- HTTP: none
+- Scopes: `write:control-plane`
+- Emits events: none
+- Dangerous: `no`
+- Invokable: `yes`
+
+##### Input schema
+
+```json
+{
+  "type": "object",
+  "properties": {
+    "program": {
+      "type": "string",
+      "enum": [
+        "tui",
+        "agent"
+      ]
+    },
+    "project": {
+      "type": "string"
+    },
+    "runs": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string"
+          },
+          "at": {
+            "type": "number"
+          },
+          "point": {
+            "type": "string"
+          },
+          "on": {
+            "type": "string"
+          },
+          "hook": {
+            "type": "string"
+          },
+          "type": {
+            "type": "string",
+            "enum": [
+              "command",
+              "prompt",
+              "agent",
+              "http",
+              "ts"
+            ]
+          },
+          "pattern": {
+            "type": "string"
+          },
+          "ok": {
+            "type": "boolean"
+          },
+          "decision": {
+            "type": "string",
+            "enum": [
+              "allow",
+              "deny",
+              "ask"
+            ]
+          },
+          "reason": {
+            "type": "string"
+          },
+          "changedInput": {
+            "type": "boolean"
+          },
+          "addedContext": {
+            "type": "boolean"
+          },
+          "error": {
+            "type": "string"
+          },
+          "durationMs": {
+            "type": "number"
+          },
+          "background": {
+            "type": "boolean"
+          },
+          "sessionId": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "at",
+          "point",
+          "hook",
+          "type",
+          "ok"
+        ],
+        "additionalProperties": false
+      }
+    }
+  },
+  "required": [
+    "program",
+    "runs"
+  ],
+  "additionalProperties": false
+}
+```
+
+##### Output schema
+
+```json
+{
+  "type": "object",
+  "properties": {
+    "recorded": {
+      "type": "number"
+    },
+    "refused": {
+      "type": "number"
+    },
+    "detail": {
+      "type": "object",
+      "additionalProperties": {
+        "anyOf": [
+          {
+            "type": "string"
+          },
+          {
+            "type": "number"
+          },
+          {
+            "type": "boolean"
+          },
+          {
+            "type": "null"
+          },
+          {},
+          {
+            "type": "array",
+            "items": {}
+          }
+        ]
+      }
+    }
+  },
+  "required": [
+    "recorded",
+    "refused"
+  ],
+  "additionalProperties": false
+}
+```
+
 ### inbound
 
 #### `inbound.telegram.cancel`
@@ -94026,6 +95019,27 @@ The review queue (accepted-for-review and reviewed rows) and the messages still 
           "approvalId",
           "sourceExpiresAt",
           "outcome"
+        ],
+        "additionalProperties": false
+      }
+    },
+    "chats": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "properties": {
+          "configurationId": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 256
+          },
+          "keepsNewMessages": {
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "configurationId",
+          "keepsNewMessages"
         ],
         "additionalProperties": false
       }
@@ -129910,6 +130924,9 @@ Return the retained memory-consolidation run receipts (what each idle/scheduled 
       "items": {
         "type": "object",
         "properties": {
+          "id": {
+            "type": "string"
+          },
           "kind": {
             "type": "string",
             "enum": [
@@ -129939,6 +130956,9 @@ Return the retained memory-consolidation run receipts (what each idle/scheduled 
         ],
         "additionalProperties": false
       }
+    },
+    "decidedProposalCount": {
+      "type": "number"
     }
   },
   "required": [
@@ -130755,6 +131775,9 @@ Add a memory record to the daemon-owned canonical store. The daemon is the singl
             "team"
           ]
         },
+        "project": {
+          "type": "string"
+        },
         "cls": {
           "type": "string",
           "enum": [
@@ -131057,6 +132080,9 @@ Export a no-loss bundle (records + links) for the given filter from the canonica
                   "team"
                 ]
               },
+              "project": {
+                "type": "string"
+              },
               "cls": {
                 "type": "string",
                 "enum": [
@@ -131253,6 +132279,9 @@ Return a single memory record by id from the canonical store, or 404 when no rec
             "team"
           ]
         },
+        "project": {
+          "type": "string"
+        },
         "cls": {
           "type": "string",
           "enum": [
@@ -131420,6 +132449,9 @@ Import a bundle into the canonical store as an id-keyed union: an id already pre
                   "project",
                   "team"
                 ]
+              },
+              "project": {
+                "type": "string"
               },
               "cls": {
                 "type": "string",
@@ -131867,6 +132899,9 @@ Bulk read from the canonical store: a literal (non-semantic) search returning th
               "team"
             ]
           },
+          "project": {
+            "type": "string"
+          },
           "cls": {
             "type": "string",
             "enum": [
@@ -132093,6 +133128,9 @@ Search the canonical store, literal or semantic. When semantic is requested but 
               "project",
               "team"
             ]
+          },
+          "project": {
+            "type": "string"
           },
           "cls": {
             "type": "string",
@@ -132375,6 +133413,9 @@ Rank records by semantic similarity against the query, returning scored results 
                   "team"
                 ]
               },
+              "project": {
+                "type": "string"
+              },
               "cls": {
                 "type": "string",
                 "enum": [
@@ -132610,6 +133651,9 @@ Edit a record's content fields (class, scope, summary, detail, tags) and its tem
             "team"
           ]
         },
+        "project": {
+          "type": "string"
+        },
         "cls": {
           "type": "string",
           "enum": [
@@ -132783,6 +133827,9 @@ Update a record's review signal (reviewState, confidence, reviewer, staleReason)
             "project",
             "team"
           ]
+        },
+        "project": {
+          "type": "string"
         },
         "cls": {
           "type": "string",
@@ -137880,7 +138927,7 @@ Store a card. The number, expiry, CVV and cardholder name go to the daemon secre
 
 #### `payments.cards.delete`
 
-Delete a card: its config metadata and every secret derived from its config path, reporting how many secret entries were cleared so a partial deletion is visible rather than silent. payments.defaultCardId is not cleared by a delete; payments.cards.list shows a stale id as empty, and every purchase must name its card anyway.
+Delete a card: its config metadata and every secret derived from its config path, reporting how many secret entries were cleared so a partial deletion is visible rather than silent. An id the daemon holds no card for, and no material under, answers 404 NOT_FOUND with nothing removed (so a delete sent again after it went through says the card is no longer there); an id with no card left but material a crashed add stranded answers deleted: false with the entries it cleared. payments.defaultCardId is not cleared by a delete; payments.cards.list shows a stale id as empty, and every purchase must name its card anyway.
 
 - Title: `Remove a Payment Card`
 - Source: `builtin`
@@ -138040,7 +139087,7 @@ Configured cards, as METADATA ONLY: id, label, brand, last four digits, whether 
 
 #### `payments.checkout.approve`
 
-The owner approves one purchase in advance, out of band from the conversation that will run it: the merchant's registrable domain, the item, and the most it may cost. Optional unless payments.confirmEveryPurchase is on. The amount is read in the budget currency, payments.currency ("25" and "25.00" are the same amount), and an amount no purchase could match is refused before anything is recorded. Mints a persisted, single-use approval bound to those fields and that currency (returned as currency), expiring in five minutes; a begin after payments.currency changed is a different purchase and does not spend it; a matching payments.checkout.begin spends it, and it answers that purchase's approval window for a total up to its amount. Its confirmation is owner-request: confirm: true from a credential that states a person asked (a sign-in, a paired device or an app on the daemon's machine), else 403 CONFIRMATION_REQUIRED (400 when confirm is missing); /payments approve and the web UI send both. The response never carries card material; this verb never touches a card at all.
+The owner approves one purchase in advance, out of band from the conversation that will run it: the merchant's registrable domain, the item, and the most it may cost. Optional unless payments.confirmEveryPurchase is on. The amount is read in the budget currency, payments.currency ("25" and "25.00" are the same amount), and an amount no purchase could match is refused before anything is recorded. Mints a persisted, single-use approval bound to those fields and that currency (returned as currency), expiring in five minutes; a begin after payments.currency changed is a different purchase and does not spend it; a matching payments.checkout.begin spends it, and it answers that purchase's approval window for a total up to its amount. Its confirmation is owner-request: confirm: true from a credential that states a person asked (a sign-in, a paired device or an app on the daemon's machine), else 403 CONFIRMATION_REQUIRED (400 when confirm is missing); the Money place (payments.approve) and the web UI send both. The response never carries card material; this verb never touches a card at all.
 
 - Title: `Approve One Purchase`
 - Source: `builtin`
@@ -139665,7 +140712,7 @@ The purchase audit ledger: what was bought, from which merchant registrable doma
 
 #### `payments.standing.create`
 
-The owner authorises, in advance, a purchase a schedule or trigger may start without asking him: the item in his words, the shops, the most one purchase may come to, the most all of them may come to every periodDays days, and an optional last day. Amounts are read in the budget currency. Every other limit still applies to each purchase: the budgets, the per-purchase ceiling and the veto or approval window. Its confirmation is owner-request: confirm: true from a credential that states a person asked, else CONFIRMATION_REQUIRED; /payments repeat sends both. The owner's own act: an agent cannot add one.
+The owner authorises, in advance, a purchase a schedule or trigger may start without asking him: the item in his words, the shops, the most one purchase may come to, the most all of them may come to every periodDays days, and an optional last day. Amounts are read in the budget currency. Every other limit still applies to each purchase: the budgets, the per-purchase ceiling and the veto or approval window. Its confirmation is owner-request: confirm: true from a credential that states a person asked, else CONFIRMATION_REQUIRED; the Money place (payments.repeat) sends both. The owner's own act: an agent cannot add one.
 
 - Title: `Authorise a Purchase in Advance`
 - Source: `builtin`
@@ -139818,7 +140865,7 @@ The owner authorises, in advance, a purchase a schedule or trigger may start wit
 
 #### `payments.standing.delete`
 
-Remove one standing purchase authorisation by its id. No new purchase can start under it, and one under it that a daemon restart interrupted is not resumed; a purchase already running keeps its window, where the owner can still stop it. Its confirmation is owner-request: confirm: true from a credential that states a person asked, else CONFIRMATION_REQUIRED; /payments stop-repeat sends both. The owner's own act.
+Remove one standing purchase authorisation by its id. No new purchase can start under it, and one under it that a daemon restart interrupted is not resumed; a purchase already running keeps its window, where the owner can still stop it. Its confirmation is owner-request: confirm: true from a credential that states a person asked, else CONFIRMATION_REQUIRED; the Money place (payments.stop-repeat) sends both. The owner's own act.
 
 - Title: `Withdraw a Standing Authorisation`
 - Source: `builtin`
@@ -139985,6 +141032,126 @@ The purchases the owner authorised in advance for runs nobody starts in the mome
 
 ### permissions
 
+#### `permissions.audit.post`
+
+A terminal program (the terminal app, the Agent) tells the daemon which calls its permission gate decided: the tool, its kind, its target, how risky, and whether it was allowed. The daemon keeps them beside its own decided calls (the newest 100 in all), so reviewing a candidate policy ("See what the candidate policy changes") decides every program's calls again. A call is kept once by its id. Up to 100 calls per post.
+
+- Title: `Post Decided Calls`
+- Source: `builtin`
+- Access: `authenticated`
+- Transport: `ws`
+- HTTP: none
+- Scopes: `write:control-plane`
+- Emits events: none
+- Dangerous: `no`
+- Invokable: `yes`
+
+##### Input schema
+
+```json
+{
+  "type": "object",
+  "properties": {
+    "program": {
+      "type": "string",
+      "enum": [
+        "tui",
+        "agent"
+      ]
+    },
+    "calls": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "properties": {
+          "callId": {
+            "type": "string"
+          },
+          "tool": {
+            "type": "string"
+          },
+          "category": {
+            "type": "string"
+          },
+          "approved": {
+            "type": "boolean"
+          },
+          "sourceLayer": {
+            "type": "string"
+          },
+          "reasonCode": {
+            "type": "string"
+          },
+          "riskLevel": {
+            "type": "string"
+          },
+          "classification": {
+            "type": "string"
+          },
+          "summary": {
+            "type": "string"
+          },
+          "reasons": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "target": {
+            "type": "string"
+          },
+          "host": {
+            "type": "string"
+          },
+          "requestedAt": {
+            "type": "number"
+          },
+          "decidedAt": {
+            "type": "number"
+          }
+        },
+        "required": [
+          "callId",
+          "tool",
+          "category",
+          "riskLevel",
+          "classification",
+          "summary",
+          "requestedAt"
+        ],
+        "additionalProperties": false
+      }
+    }
+  },
+  "required": [
+    "program",
+    "calls"
+  ],
+  "additionalProperties": false
+}
+```
+
+##### Output schema
+
+```json
+{
+  "type": "object",
+  "properties": {
+    "recorded": {
+      "type": "number"
+    },
+    "refused": {
+      "type": "number"
+    }
+  },
+  "required": [
+    "recorded",
+    "refused"
+  ],
+  "additionalProperties": false
+}
+```
+
 #### `permissions.rules.delete`
 
 Delete one durable user-origin permission rule by id. The matching asks prompt again afterwards, deleting a grant is how a remembered decision is revoked. deleted:false when no rule with that id exists (an honest miss, not an error).
@@ -140035,7 +141202,7 @@ Delete one durable user-origin permission rule by id. The matching asks prompt a
 
 #### `permissions.rules.list`
 
-List the durable user-origin permission rules written by remembered approval decisions (exact command / command class / path scope / whole tool), newest first, the persistent grants and denials the permission manager consults before ever prompting. Project-scoped.
+List the durable user-origin permission rules written by remembered approval decisions (exact command / command class / path scope / whole tool), newest first, the persistent grants and denials the permission manager consults before ever prompting. Project-scoped: with `project` (a folder), only the rules in force there, that project's own and those of every project; without it, every rule with the project it belongs to.
 
 - Title: `List Durable Permission Rules`
 - Source: `builtin`
@@ -140052,7 +141219,11 @@ List the durable user-origin permission rules written by remembered approval dec
 ```json
 {
   "type": "object",
-  "properties": {},
+  "properties": {
+    "project": {
+      "type": "string"
+    }
+  },
   "additionalProperties": false
 }
 ```
@@ -140097,6 +141268,15 @@ List the durable user-origin permission rules written by remembered approval dec
           },
           "createdAt": {
             "type": "number"
+          },
+          "project": {
+            "type": "string"
+          },
+          "carried": {
+            "type": "string"
+          },
+          "madeIn": {
+            "type": "string"
           }
         },
         "required": [
@@ -142165,6 +143345,74 @@ Promote a field's most recent superseded value back to the active line, so a wro
 
 ### providers
 
+#### `context.windows.learned.post`
+
+A terminal program (the terminal app, the Agent) tells the daemon what a provider showed its own turn about a model's context window: a request of so many tokens was refused as too long, or an input of so many tokens went through. The daemon keeps it in its one context-window file (a learned limit only lowers, an accepted floor only rises, a size the person set stays), says the list changed (LIST_CHANGED context-windows), and every program reads the file again before its next turn. The capability context.window reads it; context.clear-window forgets it.
+
+- Title: `Post A Learned Context Limit`
+- Source: `builtin`
+- Access: `authenticated`
+- Transport: `ws`
+- HTTP: none
+- Scopes: `write:control-plane`
+- Emits events: none
+- Dangerous: `no`
+- Invokable: `yes`
+
+##### Input schema
+
+```json
+{
+  "type": "object",
+  "properties": {
+    "program": {
+      "type": "string",
+      "enum": [
+        "tui",
+        "agent"
+      ]
+    },
+    "model": {
+      "type": "string"
+    },
+    "tokens": {
+      "type": "number"
+    },
+    "outcome": {
+      "type": "string",
+      "enum": [
+        "refused",
+        "accepted"
+      ]
+    }
+  },
+  "required": [
+    "program",
+    "model",
+    "tokens",
+    "outcome"
+  ],
+  "additionalProperties": false
+}
+```
+
+##### Output schema
+
+```json
+{
+  "type": "object",
+  "properties": {
+    "kept": {
+      "type": "boolean"
+    }
+  },
+  "required": [
+    "kept"
+  ],
+  "additionalProperties": false
+}
+```
+
 #### `models.current.get`
 
 The model this daemon would use for a turn right now, with whether its provider is actually configured and by which authentication route. `model` is null when nothing is selected, which is a real state, not an error, and a caller rendering a picker needs to tell it from a selection whose provider has lost its credentials. `effort` is the persisted reasoning level, null when none has been set explicitly.
@@ -142512,7 +143760,7 @@ Switch the daemon's current model live, by the registry key `models.list` return
 
 #### `models.list`
 
-Every provider this daemon knows about with the models it offers, whether it is configured, and how it was configured. A GET also triggers the TTL-respecting live-discovery re-check that the terminal's model picker triggers on open: a provider's list stored more than 24 hours ago is read from the provider again, and the shared model catalog checked when its last check is that old; a list that changes is announced as a providers change, so every client reads it again. Each provider carries `modelList`: where its list came from (`live` from the provider, `cache` its last stored list, `catalog` the shared model catalog), `listedAt` when it was read, and `error` when the last reading from the provider failed. `currentModel` is the daemon's current selection, or null when nothing is selected. `secretsResolutionSkipped` is true when secret-backed credentials were not resolved for this read, so a caller can tell "not configured" from "not checked". Each model that reasons carries `reasoningOptions`: the levels it actually offers and which source resolved them; a model with no entry does not reason at all. Each model carries `textWork`, what the model catalog says about holding a conversation: `text`, `other` (an image, speech or embedding model) or `unknown`. Each model carries `priceTier`, what it costs to use: `free`, `paid` (charged per token), `subscription` (served through a plan the person signed in with) or `unknown`; a picker shows it beside the model, and a model the person uses that the catalog stops listing as free is announced as a PROVIDER_WARNING when the catalog is next checked. `pinned` are the registry keys of the models the person pinned and `recent` the ten used most recently, newest first: a picker lists pinned, then recent, then the rest, as the terminal's does. A connected provider's models may carry `recommended`, why the model is on that provider's short list of at most five, in catalog facts only ("newest claude-sonnet", "largest context: 1M tokens", "lowest price: $0.15 in, $0.60 out per 1M tokens"); a picker shows them after pinned and recent, and a provider the catalog gives no such facts for has none.
+Every provider this daemon knows about with the models it offers, whether it is configured, and how it was configured. A GET also triggers the TTL-respecting live-discovery re-check that the terminal's model picker triggers on open: a provider's list stored more than 24 hours ago is read from the provider again, and the shared model catalog checked when its last check is that old; a list that changes is announced as a providers change, so every client reads it again. Each provider carries `modelList`: where its list came from (`live` from the provider, `cache` its last stored list, `catalog` the shared model catalog), `listedAt` when it was read, and `error` when the last reading from the provider failed. `currentModel` is the daemon's current selection, or null when nothing is selected. `secretsResolutionSkipped` is true when secret-backed credentials were not resolved for this read, so a caller can tell "not configured" from "not checked". Each model that reasons carries `reasoningOptions`: the levels it actually offers and which source resolved them; a model with no entry does not reason at all. Each model carries `textWork`, what the model catalog says about holding a conversation: `text`, `other` (an image, speech or embedding model) or `unknown`. Each model carries `priceTier`, what it costs to use: `free`, `paid` (charged per token), `subscription` (served through a plan the person signed in with), `local` (a server on this computer or your own network serves it: nothing is charged per token) or `unknown`; a picker shows it beside the model, and a model the person uses that the catalog stops listing as free is announced as a PROVIDER_WARNING when the catalog is next checked. `pinned` are the registry keys of the models the person pinned and `recent` the ten used most recently, newest first: a picker lists pinned, then recent, then the rest, as the terminal's does. A connected provider's models may carry `recommended`, why the model is on that provider's short list of at most five, in catalog facts only ("newest claude-sonnet", "largest context: 1M tokens", "lowest price: $0.15 in, $0.60 out per 1M tokens"); a picker shows them after pinned and recent, and a provider the catalog gives no such facts for has none.
 
 - Title: `Model Catalog`
 - Source: `builtin`
@@ -142715,6 +143963,7 @@ Every provider this daemon knows about with the models it offers, whether it is 
                     "free",
                     "paid",
                     "subscription",
+                    "local",
                     "unknown"
                   ]
                 },
@@ -143755,7 +145004,7 @@ Return runtime provider metadata, policy hooks, and priced model summaries.
 
 #### `providers.subscription.signIn.begin`
 
-Begin signing in to a provider through its own sign-in page, from any client (the web UI's "Sign in again"), on the same code path as the terminal's /provider sign-in. Answers `authorizationUrl` (open it) and `finishes`: `on-its-own` when the provider returns to an address on the daemon's machine and a browser there completes it (the daemon then stores the sign-in and announces it with PROVIDERS_CHANGED), `paste` when the page shows a code or an address to send to providers.subscription.signIn.finish (a browser on another device always finishes this way). A new begin replaces one still waiting. Tokens are kept in the subscription store and never answered or logged. A provider with no subscription sign-in is refused 404; an API-key provider is signed in by storing its key with credentials.set. Admin, like the terminal command.
+Begin signing in to a provider through its own sign-in page, from any client (the web UI's "Sign in again"), on the same code path as the Sign in control of Models and providers (the capability provider.sign-in runs this method). Answers `authorizationUrl` (open it) and `finishes`: `on-its-own` when the provider returns to an address on the daemon's machine and a browser there completes it (the daemon then stores the sign-in and announces it with PROVIDERS_CHANGED), `paste` when the page shows a code or an address to send to providers.subscription.signIn.finish (a browser on another device always finishes this way). A new begin replaces one still waiting. Tokens are kept in the subscription store and never answered or logged. A provider with no subscription sign-in is refused 404; an API-key provider is signed in by storing its key with credentials.set. Admin, like the terminal command.
 
 - Title: `Begin A Subscription Sign-in`
 - Source: `builtin`
@@ -149657,6 +150906,9 @@ What the Secure address screen shows: the four ways to give the daemon an https 
             "own-files",
             "lets-encrypt"
           ]
+        },
+        "reach": {
+          "type": "string"
         }
       },
       "required": [
@@ -149897,6 +151149,9 @@ What the Secure address screen shows: the four ways to give the daemon an https 
               "address": {
                 "type": "string"
               },
+              "port": {
+                "type": "number"
+              },
               "covered": {
                 "type": "boolean"
               },
@@ -149911,6 +151166,38 @@ What the Secure address screen shows: the four ways to give the daemon an https 
             ],
             "additionalProperties": false
           }
+        },
+        "formerHolders": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "name": {
+                "type": "string"
+              },
+              "at": {
+                "type": "number"
+              },
+              "until": {
+                "type": "number"
+              },
+              "source": {
+                "type": "string",
+                "enum": [
+                  "local-authority",
+                  "own-files",
+                  "lets-encrypt"
+                ]
+              }
+            },
+            "required": [
+              "name",
+              "at",
+              "until",
+              "source"
+            ],
+            "additionalProperties": false
+          }
         }
       },
       "required": [
@@ -149919,6 +151206,50 @@ What the Secure address screen shows: the four ways to give the daemon an https 
       "additionalProperties": false
     },
     "reissue": {
+      "type": "object",
+      "properties": {
+        "title": {
+          "type": "string"
+        },
+        "line": {
+          "type": "string"
+        },
+        "available": {
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "title",
+        "line",
+        "available"
+      ],
+      "additionalProperties": false
+    },
+    "replaceAuthority": {
+      "type": "object",
+      "properties": {
+        "title": {
+          "type": "string"
+        },
+        "line": {
+          "type": "string"
+        },
+        "question": {
+          "type": "string"
+        },
+        "available": {
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "title",
+        "line",
+        "question",
+        "available"
+      ],
+      "additionalProperties": false
+    },
+    "serve": {
       "type": "object",
       "properties": {
         "title": {
@@ -150106,6 +151437,9 @@ The Secure address screen's "Issue a new certificate now", on the machine that s
                 "own-files",
                 "lets-encrypt"
               ]
+            },
+            "reach": {
+              "type": "string"
             }
           },
           "required": [
@@ -150346,6 +151680,9 @@ The Secure address screen's "Issue a new certificate now", on the machine that s
                   "address": {
                     "type": "string"
                   },
+                  "port": {
+                    "type": "number"
+                  },
                   "covered": {
                     "type": "boolean"
                   },
@@ -150360,6 +151697,38 @@ The Secure address screen's "Issue a new certificate now", on the machine that s
                 ],
                 "additionalProperties": false
               }
+            },
+            "formerHolders": {
+              "type": "array",
+              "items": {
+                "type": "object",
+                "properties": {
+                  "name": {
+                    "type": "string"
+                  },
+                  "at": {
+                    "type": "number"
+                  },
+                  "until": {
+                    "type": "number"
+                  },
+                  "source": {
+                    "type": "string",
+                    "enum": [
+                      "local-authority",
+                      "own-files",
+                      "lets-encrypt"
+                    ]
+                  }
+                },
+                "required": [
+                  "name",
+                  "at",
+                  "until",
+                  "source"
+                ],
+                "additionalProperties": false
+              }
             }
           },
           "required": [
@@ -150368,6 +151737,1128 @@ The Secure address screen's "Issue a new certificate now", on the machine that s
           "additionalProperties": false
         },
         "reissue": {
+          "type": "object",
+          "properties": {
+            "title": {
+              "type": "string"
+            },
+            "line": {
+              "type": "string"
+            },
+            "available": {
+              "type": "boolean"
+            }
+          },
+          "required": [
+            "title",
+            "line",
+            "available"
+          ],
+          "additionalProperties": false
+        },
+        "replaceAuthority": {
+          "type": "object",
+          "properties": {
+            "title": {
+              "type": "string"
+            },
+            "line": {
+              "type": "string"
+            },
+            "question": {
+              "type": "string"
+            },
+            "available": {
+              "type": "boolean"
+            }
+          },
+          "required": [
+            "title",
+            "line",
+            "question",
+            "available"
+          ],
+          "additionalProperties": false
+        },
+        "serve": {
+          "type": "object",
+          "properties": {
+            "title": {
+              "type": "string"
+            },
+            "line": {
+              "type": "string"
+            },
+            "available": {
+              "type": "boolean"
+            }
+          },
+          "required": [
+            "title",
+            "line",
+            "available"
+          ],
+          "additionalProperties": false
+        }
+      },
+      "required": [
+        "intro",
+        "choices",
+        "groupLines",
+        "node",
+        "inForce",
+        "letsEncrypt",
+        "ownFiles",
+        "localAuthority",
+        "tailscale",
+        "group",
+        "reissue"
+      ],
+      "additionalProperties": false
+    }
+  },
+  "required": [
+    "ok",
+    "words",
+    "status"
+  ],
+  "additionalProperties": false
+}
+```
+
+#### `secureAddress.replaceAuthority`
+
+The Secure address screen's "Replace the authority", where this computer serves GoodVibes' own certificate: its certificate authority is removed and a new one made, and a new server certificate signed by it is served here and sent, sealed, to the machines that follow this computer. Every phone must then remove the old GoodVibes certificate and install the new one from the page /lan-https; until it does it shows a warning for the address. It is what ends, at once, the trust a phone gives a machine that left the group or was removed and still holds a certificate the old authority signed. It cannot be undone: the screens ask first, opening on No. No input. The answer is ok, one line of words (with the new authority's fingerprint) and the screen as secureAddress.get returns it; never a key. Refused 409 SECURE_ADDRESS_NODE on a member of a group, and 409 SECURE_ADDRESS_UNAVAILABLE when https is off or the certificate in force is not GoodVibes' own.
+
+- Title: `Replace The Secure Address Authority`
+- Source: `builtin`
+- Access: `admin`
+- Transport: `ws`
+- HTTP: none
+- Scopes: `write:control-plane`
+- Emits events: none
+- Dangerous: `no`
+- Invokable: `yes`
+
+##### Input schema
+
+```json
+{
+  "type": "object",
+  "properties": {},
+  "additionalProperties": false
+}
+```
+
+##### Output schema
+
+```json
+{
+  "type": "object",
+  "properties": {
+    "ok": {
+      "type": "boolean"
+    },
+    "words": {
+      "type": "string"
+    },
+    "status": {
+      "type": "object",
+      "properties": {
+        "notice": {
+          "type": "string"
+        },
+        "intro": {
+          "type": "string"
+        },
+        "choices": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "id": {
+                "type": "string",
+                "enum": [
+                  "lets-encrypt",
+                  "own-files",
+                  "tailscale",
+                  "local-authority"
+                ]
+              },
+              "title": {
+                "type": "string"
+              },
+              "does": {
+                "type": "string"
+              },
+              "needs": {
+                "type": "string"
+              },
+              "phoneGains": {
+                "type": "string"
+              },
+              "sends": {
+                "type": "string"
+              },
+              "caution": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "id",
+              "title",
+              "does",
+              "needs",
+              "phoneGains",
+              "sends"
+            ],
+            "additionalProperties": false
+          }
+        },
+        "groupLines": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "node": {
+          "type": "boolean"
+        },
+        "inForce": {
+          "type": "object",
+          "properties": {
+            "on": {
+              "type": "boolean"
+            },
+            "certificate": {
+              "type": "string",
+              "enum": [
+                "local-authority",
+                "own-files",
+                "lets-encrypt"
+              ]
+            },
+            "servedToNetwork": {
+              "type": "boolean"
+            },
+            "serving": {
+              "type": "boolean"
+            },
+            "port": {
+              "type": "number"
+            },
+            "address": {
+              "type": "string"
+            },
+            "names": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              }
+            },
+            "notAfter": {
+              "type": "number"
+            },
+            "problem": {
+              "type": "string"
+            },
+            "from": {
+              "type": "string",
+              "enum": [
+                "this-machine",
+                "group"
+              ]
+            },
+            "servedSource": {
+              "type": "string",
+              "enum": [
+                "local-authority",
+                "own-files",
+                "lets-encrypt"
+              ]
+            },
+            "reach": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "on",
+            "certificate",
+            "servedToNetwork",
+            "serving"
+          ],
+          "additionalProperties": false
+        },
+        "letsEncrypt": {
+          "type": "object",
+          "properties": {
+            "domain": {
+              "type": "string"
+            },
+            "tokenStored": {
+              "type": "boolean"
+            },
+            "tokenUnreadable": {
+              "type": "string"
+            },
+            "issuing": {
+              "type": "boolean"
+            },
+            "certificate": {
+              "type": "object",
+              "properties": {
+                "names": {
+                  "type": "array",
+                  "items": {
+                    "type": "string"
+                  }
+                },
+                "notAfter": {
+                  "type": "number"
+                },
+                "issuedAt": {
+                  "type": "number"
+                }
+              },
+              "required": [
+                "names",
+                "notAfter",
+                "issuedAt"
+              ],
+              "additionalProperties": false
+            },
+            "lastAttempt": {
+              "type": "object",
+              "properties": {
+                "at": {
+                  "type": "number"
+                },
+                "ok": {
+                  "type": "boolean"
+                },
+                "words": {
+                  "type": "string"
+                }
+              },
+              "required": [
+                "at",
+                "ok",
+                "words"
+              ],
+              "additionalProperties": false
+            },
+            "addressProblem": {
+              "type": "string"
+            },
+            "routerCheck": {
+              "type": "object",
+              "properties": {
+                "name": {
+                  "type": "string"
+                },
+                "ok": {
+                  "type": "boolean"
+                },
+                "words": {
+                  "type": "string"
+                }
+              },
+              "required": [
+                "name",
+                "ok",
+                "words"
+              ],
+              "additionalProperties": false
+            },
+            "addressRecords": {
+              "type": "object",
+              "additionalProperties": {
+                "type": "string"
+              }
+            }
+          },
+          "required": [
+            "domain",
+            "tokenStored",
+            "issuing",
+            "addressRecords"
+          ],
+          "additionalProperties": false
+        },
+        "ownFiles": {
+          "type": "object",
+          "properties": {
+            "certFile": {
+              "type": "string"
+            },
+            "keyFile": {
+              "type": "string"
+            },
+            "check": {
+              "type": "object",
+              "properties": {
+                "ok": {
+                  "type": "boolean"
+                },
+                "problem": {
+                  "type": "string"
+                },
+                "names": {
+                  "type": "array",
+                  "items": {
+                    "type": "string"
+                  }
+                },
+                "notAfter": {
+                  "type": "number"
+                }
+              },
+              "required": [
+                "ok",
+                "names"
+              ],
+              "additionalProperties": false
+            }
+          },
+          "required": [
+            "certFile",
+            "keyFile"
+          ],
+          "additionalProperties": false
+        },
+        "localAuthority": {
+          "type": "object",
+          "properties": {
+            "made": {
+              "type": "boolean"
+            },
+            "fingerprint": {
+              "type": "string"
+            },
+            "page": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "made"
+          ],
+          "additionalProperties": false
+        },
+        "tailscale": {
+          "type": "object",
+          "properties": {
+            "address": {
+              "type": "string"
+            }
+          },
+          "additionalProperties": false
+        },
+        "group": {
+          "type": "object",
+          "properties": {
+            "following": {
+              "type": "object",
+              "properties": {
+                "nodeId": {
+                  "type": "string"
+                },
+                "name": {
+                  "type": "string"
+                }
+              },
+              "required": [
+                "nodeId",
+                "name"
+              ],
+              "additionalProperties": false
+            },
+            "received": {
+              "type": "object",
+              "properties": {
+                "leadName": {
+                  "type": "string"
+                },
+                "names": {
+                  "type": "array",
+                  "items": {
+                    "type": "string"
+                  }
+                },
+                "notAfter": {
+                  "type": "number"
+                },
+                "receivedAt": {
+                  "type": "number"
+                },
+                "source": {
+                  "type": "string",
+                  "enum": [
+                    "local-authority",
+                    "own-files",
+                    "lets-encrypt"
+                  ]
+                }
+              },
+              "required": [
+                "leadName",
+                "names",
+                "notAfter",
+                "receivedAt",
+                "source"
+              ],
+              "additionalProperties": false
+            },
+            "followers": {
+              "type": "array",
+              "items": {
+                "type": "object",
+                "properties": {
+                  "name": {
+                    "type": "string"
+                  },
+                  "address": {
+                    "type": "string"
+                  },
+                  "port": {
+                    "type": "number"
+                  },
+                  "covered": {
+                    "type": "boolean"
+                  },
+                  "needs": {
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "name",
+                  "address",
+                  "covered"
+                ],
+                "additionalProperties": false
+              }
+            },
+            "formerHolders": {
+              "type": "array",
+              "items": {
+                "type": "object",
+                "properties": {
+                  "name": {
+                    "type": "string"
+                  },
+                  "at": {
+                    "type": "number"
+                  },
+                  "until": {
+                    "type": "number"
+                  },
+                  "source": {
+                    "type": "string",
+                    "enum": [
+                      "local-authority",
+                      "own-files",
+                      "lets-encrypt"
+                    ]
+                  }
+                },
+                "required": [
+                  "name",
+                  "at",
+                  "until",
+                  "source"
+                ],
+                "additionalProperties": false
+              }
+            }
+          },
+          "required": [
+            "followers"
+          ],
+          "additionalProperties": false
+        },
+        "reissue": {
+          "type": "object",
+          "properties": {
+            "title": {
+              "type": "string"
+            },
+            "line": {
+              "type": "string"
+            },
+            "available": {
+              "type": "boolean"
+            }
+          },
+          "required": [
+            "title",
+            "line",
+            "available"
+          ],
+          "additionalProperties": false
+        },
+        "replaceAuthority": {
+          "type": "object",
+          "properties": {
+            "title": {
+              "type": "string"
+            },
+            "line": {
+              "type": "string"
+            },
+            "question": {
+              "type": "string"
+            },
+            "available": {
+              "type": "boolean"
+            }
+          },
+          "required": [
+            "title",
+            "line",
+            "question",
+            "available"
+          ],
+          "additionalProperties": false
+        },
+        "serve": {
+          "type": "object",
+          "properties": {
+            "title": {
+              "type": "string"
+            },
+            "line": {
+              "type": "string"
+            },
+            "available": {
+              "type": "boolean"
+            }
+          },
+          "required": [
+            "title",
+            "line",
+            "available"
+          ],
+          "additionalProperties": false
+        }
+      },
+      "required": [
+        "intro",
+        "choices",
+        "groupLines",
+        "node",
+        "inForce",
+        "letsEncrypt",
+        "ownFiles",
+        "localAuthority",
+        "tailscale",
+        "group",
+        "reissue"
+      ],
+      "additionalProperties": false
+    }
+  },
+  "required": [
+    "ok",
+    "words",
+    "status"
+  ],
+  "additionalProperties": false
+}
+```
+
+#### `secureAddress.serve`
+
+The Secure address screen's "Serve other machines", offered while other machines are not served (controlPlane.enabled off, or the daemon listening on this computer only), when a phone cannot open the https address: what goodvibes-daemon webui enable --lan writes, so the daemon listens on the network and answers other machines; each still needs its own pairing or sign-in. The answer comes once the listener is bound again: ok, one line of words and the screen as secureAddress.get returns it. Refused 409 SECURE_ADDRESS_UNAVAILABLE when this daemon cannot change it from here.
+
+- Title: `Serve Other Machines For The Secure Address`
+- Source: `builtin`
+- Access: `admin`
+- Transport: `ws`
+- HTTP: none
+- Scopes: `write:control-plane`
+- Emits events: none
+- Dangerous: `no`
+- Invokable: `yes`
+
+##### Input schema
+
+```json
+{
+  "type": "object",
+  "properties": {},
+  "additionalProperties": false
+}
+```
+
+##### Output schema
+
+```json
+{
+  "type": "object",
+  "properties": {
+    "ok": {
+      "type": "boolean"
+    },
+    "words": {
+      "type": "string"
+    },
+    "status": {
+      "type": "object",
+      "properties": {
+        "notice": {
+          "type": "string"
+        },
+        "intro": {
+          "type": "string"
+        },
+        "choices": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "id": {
+                "type": "string",
+                "enum": [
+                  "lets-encrypt",
+                  "own-files",
+                  "tailscale",
+                  "local-authority"
+                ]
+              },
+              "title": {
+                "type": "string"
+              },
+              "does": {
+                "type": "string"
+              },
+              "needs": {
+                "type": "string"
+              },
+              "phoneGains": {
+                "type": "string"
+              },
+              "sends": {
+                "type": "string"
+              },
+              "caution": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "id",
+              "title",
+              "does",
+              "needs",
+              "phoneGains",
+              "sends"
+            ],
+            "additionalProperties": false
+          }
+        },
+        "groupLines": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "node": {
+          "type": "boolean"
+        },
+        "inForce": {
+          "type": "object",
+          "properties": {
+            "on": {
+              "type": "boolean"
+            },
+            "certificate": {
+              "type": "string",
+              "enum": [
+                "local-authority",
+                "own-files",
+                "lets-encrypt"
+              ]
+            },
+            "servedToNetwork": {
+              "type": "boolean"
+            },
+            "serving": {
+              "type": "boolean"
+            },
+            "port": {
+              "type": "number"
+            },
+            "address": {
+              "type": "string"
+            },
+            "names": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              }
+            },
+            "notAfter": {
+              "type": "number"
+            },
+            "problem": {
+              "type": "string"
+            },
+            "from": {
+              "type": "string",
+              "enum": [
+                "this-machine",
+                "group"
+              ]
+            },
+            "servedSource": {
+              "type": "string",
+              "enum": [
+                "local-authority",
+                "own-files",
+                "lets-encrypt"
+              ]
+            },
+            "reach": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "on",
+            "certificate",
+            "servedToNetwork",
+            "serving"
+          ],
+          "additionalProperties": false
+        },
+        "letsEncrypt": {
+          "type": "object",
+          "properties": {
+            "domain": {
+              "type": "string"
+            },
+            "tokenStored": {
+              "type": "boolean"
+            },
+            "tokenUnreadable": {
+              "type": "string"
+            },
+            "issuing": {
+              "type": "boolean"
+            },
+            "certificate": {
+              "type": "object",
+              "properties": {
+                "names": {
+                  "type": "array",
+                  "items": {
+                    "type": "string"
+                  }
+                },
+                "notAfter": {
+                  "type": "number"
+                },
+                "issuedAt": {
+                  "type": "number"
+                }
+              },
+              "required": [
+                "names",
+                "notAfter",
+                "issuedAt"
+              ],
+              "additionalProperties": false
+            },
+            "lastAttempt": {
+              "type": "object",
+              "properties": {
+                "at": {
+                  "type": "number"
+                },
+                "ok": {
+                  "type": "boolean"
+                },
+                "words": {
+                  "type": "string"
+                }
+              },
+              "required": [
+                "at",
+                "ok",
+                "words"
+              ],
+              "additionalProperties": false
+            },
+            "addressProblem": {
+              "type": "string"
+            },
+            "routerCheck": {
+              "type": "object",
+              "properties": {
+                "name": {
+                  "type": "string"
+                },
+                "ok": {
+                  "type": "boolean"
+                },
+                "words": {
+                  "type": "string"
+                }
+              },
+              "required": [
+                "name",
+                "ok",
+                "words"
+              ],
+              "additionalProperties": false
+            },
+            "addressRecords": {
+              "type": "object",
+              "additionalProperties": {
+                "type": "string"
+              }
+            }
+          },
+          "required": [
+            "domain",
+            "tokenStored",
+            "issuing",
+            "addressRecords"
+          ],
+          "additionalProperties": false
+        },
+        "ownFiles": {
+          "type": "object",
+          "properties": {
+            "certFile": {
+              "type": "string"
+            },
+            "keyFile": {
+              "type": "string"
+            },
+            "check": {
+              "type": "object",
+              "properties": {
+                "ok": {
+                  "type": "boolean"
+                },
+                "problem": {
+                  "type": "string"
+                },
+                "names": {
+                  "type": "array",
+                  "items": {
+                    "type": "string"
+                  }
+                },
+                "notAfter": {
+                  "type": "number"
+                }
+              },
+              "required": [
+                "ok",
+                "names"
+              ],
+              "additionalProperties": false
+            }
+          },
+          "required": [
+            "certFile",
+            "keyFile"
+          ],
+          "additionalProperties": false
+        },
+        "localAuthority": {
+          "type": "object",
+          "properties": {
+            "made": {
+              "type": "boolean"
+            },
+            "fingerprint": {
+              "type": "string"
+            },
+            "page": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "made"
+          ],
+          "additionalProperties": false
+        },
+        "tailscale": {
+          "type": "object",
+          "properties": {
+            "address": {
+              "type": "string"
+            }
+          },
+          "additionalProperties": false
+        },
+        "group": {
+          "type": "object",
+          "properties": {
+            "following": {
+              "type": "object",
+              "properties": {
+                "nodeId": {
+                  "type": "string"
+                },
+                "name": {
+                  "type": "string"
+                }
+              },
+              "required": [
+                "nodeId",
+                "name"
+              ],
+              "additionalProperties": false
+            },
+            "received": {
+              "type": "object",
+              "properties": {
+                "leadName": {
+                  "type": "string"
+                },
+                "names": {
+                  "type": "array",
+                  "items": {
+                    "type": "string"
+                  }
+                },
+                "notAfter": {
+                  "type": "number"
+                },
+                "receivedAt": {
+                  "type": "number"
+                },
+                "source": {
+                  "type": "string",
+                  "enum": [
+                    "local-authority",
+                    "own-files",
+                    "lets-encrypt"
+                  ]
+                }
+              },
+              "required": [
+                "leadName",
+                "names",
+                "notAfter",
+                "receivedAt",
+                "source"
+              ],
+              "additionalProperties": false
+            },
+            "followers": {
+              "type": "array",
+              "items": {
+                "type": "object",
+                "properties": {
+                  "name": {
+                    "type": "string"
+                  },
+                  "address": {
+                    "type": "string"
+                  },
+                  "port": {
+                    "type": "number"
+                  },
+                  "covered": {
+                    "type": "boolean"
+                  },
+                  "needs": {
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "name",
+                  "address",
+                  "covered"
+                ],
+                "additionalProperties": false
+              }
+            },
+            "formerHolders": {
+              "type": "array",
+              "items": {
+                "type": "object",
+                "properties": {
+                  "name": {
+                    "type": "string"
+                  },
+                  "at": {
+                    "type": "number"
+                  },
+                  "until": {
+                    "type": "number"
+                  },
+                  "source": {
+                    "type": "string",
+                    "enum": [
+                      "local-authority",
+                      "own-files",
+                      "lets-encrypt"
+                    ]
+                  }
+                },
+                "required": [
+                  "name",
+                  "at",
+                  "until",
+                  "source"
+                ],
+                "additionalProperties": false
+              }
+            }
+          },
+          "required": [
+            "followers"
+          ],
+          "additionalProperties": false
+        },
+        "reissue": {
+          "type": "object",
+          "properties": {
+            "title": {
+              "type": "string"
+            },
+            "line": {
+              "type": "string"
+            },
+            "available": {
+              "type": "boolean"
+            }
+          },
+          "required": [
+            "title",
+            "line",
+            "available"
+          ],
+          "additionalProperties": false
+        },
+        "replaceAuthority": {
+          "type": "object",
+          "properties": {
+            "title": {
+              "type": "string"
+            },
+            "line": {
+              "type": "string"
+            },
+            "question": {
+              "type": "string"
+            },
+            "available": {
+              "type": "boolean"
+            }
+          },
+          "required": [
+            "title",
+            "line",
+            "question",
+            "available"
+          ],
+          "additionalProperties": false
+        },
+        "serve": {
           "type": "object",
           "properties": {
             "title": {
@@ -150579,6 +153070,9 @@ The Secure address screen's change. certificate lets-encrypt (domain, and cloudf
             "own-files",
             "lets-encrypt"
           ]
+        },
+        "reach": {
+          "type": "string"
         }
       },
       "required": [
@@ -150819,6 +153313,9 @@ The Secure address screen's change. certificate lets-encrypt (domain, and cloudf
               "address": {
                 "type": "string"
               },
+              "port": {
+                "type": "number"
+              },
               "covered": {
                 "type": "boolean"
               },
@@ -150833,6 +153330,38 @@ The Secure address screen's change. certificate lets-encrypt (domain, and cloudf
             ],
             "additionalProperties": false
           }
+        },
+        "formerHolders": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "name": {
+                "type": "string"
+              },
+              "at": {
+                "type": "number"
+              },
+              "until": {
+                "type": "number"
+              },
+              "source": {
+                "type": "string",
+                "enum": [
+                  "local-authority",
+                  "own-files",
+                  "lets-encrypt"
+                ]
+              }
+            },
+            "required": [
+              "name",
+              "at",
+              "until",
+              "source"
+            ],
+            "additionalProperties": false
+          }
         }
       },
       "required": [
@@ -150841,6 +153370,50 @@ The Secure address screen's change. certificate lets-encrypt (domain, and cloudf
       "additionalProperties": false
     },
     "reissue": {
+      "type": "object",
+      "properties": {
+        "title": {
+          "type": "string"
+        },
+        "line": {
+          "type": "string"
+        },
+        "available": {
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "title",
+        "line",
+        "available"
+      ],
+      "additionalProperties": false
+    },
+    "replaceAuthority": {
+      "type": "object",
+      "properties": {
+        "title": {
+          "type": "string"
+        },
+        "line": {
+          "type": "string"
+        },
+        "question": {
+          "type": "string"
+        },
+        "available": {
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "title",
+        "line",
+        "question",
+        "available"
+      ],
+      "additionalProperties": false
+    },
+    "serve": {
       "type": "object",
       "properties": {
         "title": {
@@ -171263,6 +173836,9 @@ Create a trigger from a definition { id, label, description?, spec, action?, own
           }
         ]
       }
+    },
+    "workingDirectory": {
+      "type": "string"
     }
   },
   "required": [
@@ -171751,7 +174327,7 @@ List the supervised triggers: id, label, kind, what each watches, state, how oft
 
 #### `watchers.triggers.preview`
 
-Read the blanks of "Watch for something" (the /triggers watch values by name: name, kind finishes|prints|page|file|written, command one word per line, match, url, path, every, then ask|run, say, deliver, grant, definition) into what would be kept: summary is what it watches and does in one sentence, and input is the body of watchers.triggers.create ({ definition }). Nothing is made. A grant is looked up among the commands the owner let triggers run.
+Read the blanks of "Watch for something" (the inputs of the triggers.watch capability by name: name, kind finishes|prints|page|file|written, command one word per line, match, url, path, every, then ask|run, say, deliver, grant, definition) into what would be kept: summary is what it watches and does in one sentence, and input is the body of watchers.triggers.create ({ definition }). Nothing is made. A grant is looked up among the commands the owner let triggers run.
 
 - Title: `Preview a trigger`
 - Source: `builtin`
@@ -172682,6 +175258,461 @@ Execute a provider-backed web search and return normalized ranked results.
 ```
 
 ### work-ledger
+
+#### `work.list`
+
+Every piece of work of this daemon's project, read in one call: what it is, what done means, where it stands (not started, its plan waiting, starting, its start cut off, running, needs you, a step failed, done, failed, stopped), its plan as steps with their state, the questions it waits on, the step it stopped at when one failed (what failed, and whether the work can go on without it), its spending limit and its results; and each piece of work proposed with its plan (`proposed: true`, not yet asked for). What the Work place, the web Work view and an agent read. No mutation and no execution.
+
+- Title: `List Your Work`
+- Source: `builtin`
+- Access: `admin`
+- Transport: `http`, `ws`
+- HTTP: `GET /api/work`
+- Scopes: `read:work-ledger`
+- Emits events: none
+- Dangerous: `no`
+- Invokable: `yes`
+
+##### Input schema
+
+```json
+{
+  "type": "object",
+  "additionalProperties": false,
+  "properties": {}
+}
+```
+
+##### Output schema
+
+```json
+{
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "projectId",
+    "works"
+  ],
+  "properties": {
+    "projectId": {
+      "type": "string"
+    },
+    "works": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": true,
+        "required": [
+          "id",
+          "title",
+          "state"
+        ],
+        "properties": {
+          "id": {
+            "type": "string"
+          },
+          "title": {
+            "type": "string"
+          },
+          "goal": {
+            "type": "string"
+          },
+          "state": {
+            "type": "string"
+          },
+          "criteria": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          }
+        }
+      }
+    }
+  }
+}
+```
+
+#### `work.plan.approve`
+
+Mark the waiting plan of a piece of work approved: its next start runs with exactly these steps. A proposed piece of work (work.propose) is approved as the piece of work it was then asked for as: `as` names that work, and the plan becomes its plan.
+
+- Title: `Approve A Plan`
+- Source: `builtin`
+- Access: `admin`
+- Transport: `http`, `ws`
+- HTTP: `POST /api/work/plan/approve`
+- Scopes: `read:work-ledger`, `write:work-ledger`
+- Emits events: none
+- Dangerous: `no`
+- Invokable: `yes`
+
+##### Input schema
+
+```json
+{
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "work"
+  ],
+  "properties": {
+    "work": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 200
+    },
+    "as": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 200
+    }
+  }
+}
+```
+
+##### Output schema
+
+```json
+{
+  "type": "object",
+  "additionalProperties": true,
+  "properties": {
+    "title": {
+      "type": "string"
+    }
+  }
+}
+```
+
+#### `work.plan.discard`
+
+Throw away the waiting plan of a piece of work; the work stays, not started, and its next start writes a new plan.
+
+- Title: `Throw A Plan Away`
+- Source: `builtin`
+- Access: `admin`
+- Transport: `http`, `ws`
+- HTTP: `POST /api/work/plan/discard`
+- Scopes: `read:work-ledger`, `write:work-ledger`
+- Emits events: none
+- Dangerous: `no`
+- Invokable: `yes`
+
+##### Input schema
+
+```json
+{
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "work"
+  ],
+  "properties": {
+    "work": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 200
+    }
+  }
+}
+```
+
+##### Output schema
+
+```json
+{
+  "type": "object",
+  "additionalProperties": true,
+  "properties": {
+    "title": {
+      "type": "string"
+    }
+  }
+}
+```
+
+#### `work.plan.redo`
+
+Write the waiting plan of a piece of work again from its goal and what done means (the planning agent splits it into steps again). It waits for approval again.
+
+- Title: `Write A Plan Again`
+- Source: `builtin`
+- Access: `admin`
+- Transport: `http`, `ws`
+- HTTP: `POST /api/work/plan/redo`
+- Scopes: `read:work-ledger`, `write:work-ledger`
+- Emits events: none
+- Dangerous: `no`
+- Invokable: `yes`
+
+##### Input schema
+
+```json
+{
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "work"
+  ],
+  "properties": {
+    "work": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 200
+    }
+  }
+}
+```
+
+##### Output schema
+
+```json
+{
+  "type": "object",
+  "additionalProperties": true,
+  "properties": {
+    "title": {
+      "type": "string"
+    }
+  }
+}
+```
+
+#### `work.plan.step.drop`
+
+Take one step out of a waiting plan (and out of what the other steps wait on); the last step stays. The plan waits for approval again.
+
+- Title: `Take A Step Out Of A Plan`
+- Source: `builtin`
+- Access: `admin`
+- Transport: `http`, `ws`
+- HTTP: `POST /api/work/plan/step/drop`
+- Scopes: `read:work-ledger`, `write:work-ledger`
+- Emits events: none
+- Dangerous: `no`
+- Invokable: `yes`
+
+##### Input schema
+
+```json
+{
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "work",
+    "step"
+  ],
+  "properties": {
+    "work": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 200
+    },
+    "step": {
+      "type": "string",
+      "minLength": 1
+    }
+  }
+}
+```
+
+##### Output schema
+
+```json
+{
+  "type": "object",
+  "additionalProperties": true,
+  "properties": {
+    "title": {
+      "type": "string"
+    }
+  }
+}
+```
+
+#### `work.plan.step.edit`
+
+Change what one step of a waiting plan does. The plan waits for approval again.
+
+- Title: `Change A Step Of A Plan`
+- Source: `builtin`
+- Access: `admin`
+- Transport: `http`, `ws`
+- HTTP: `POST /api/work/plan/step/edit`
+- Scopes: `read:work-ledger`, `write:work-ledger`
+- Emits events: none
+- Dangerous: `no`
+- Invokable: `yes`
+
+##### Input schema
+
+```json
+{
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "work",
+    "step",
+    "brief"
+  ],
+  "properties": {
+    "work": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 200
+    },
+    "step": {
+      "type": "string",
+      "minLength": 1
+    },
+    "brief": {
+      "type": "string",
+      "minLength": 1
+    }
+  }
+}
+```
+
+##### Output schema
+
+```json
+{
+  "type": "object",
+  "additionalProperties": true,
+  "properties": {
+    "title": {
+      "type": "string"
+    }
+  }
+}
+```
+
+#### `work.plan.step.move`
+
+Move one step of a waiting plan to another place, counting from 1. The plan waits for approval again.
+
+- Title: `Move A Step Of A Plan`
+- Source: `builtin`
+- Access: `admin`
+- Transport: `http`, `ws`
+- HTTP: `POST /api/work/plan/step/move`
+- Scopes: `read:work-ledger`, `write:work-ledger`
+- Emits events: none
+- Dangerous: `no`
+- Invokable: `yes`
+
+##### Input schema
+
+```json
+{
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "work",
+    "step",
+    "position"
+  ],
+  "properties": {
+    "work": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 200
+    },
+    "step": {
+      "type": "string",
+      "minLength": 1
+    },
+    "position": {
+      "type": "integer",
+      "minimum": 1
+    }
+  }
+}
+```
+
+##### Output schema
+
+```json
+{
+  "type": "object",
+  "additionalProperties": true,
+  "properties": {
+    "title": {
+      "type": "string"
+    }
+  }
+}
+```
+
+#### `work.target`
+
+Read what an act on one piece of work sends, from the work alone: `operation` "execution" answers the identity start, status, stop and resume take (its current attempt and revisions); "contract" answers the run that answering, running a step again and the spending limit act on. Every other field is passed through. Answers { summary, input }; nothing is kept.
+
+- Title: `Name A Piece Of Work For An Act`
+- Source: `builtin`
+- Access: `admin`
+- Transport: `http`, `ws`
+- HTTP: `POST /api/work/target`
+- Scopes: `read:work-ledger`
+- Emits events: none
+- Dangerous: `no`
+- Invokable: `yes`
+
+##### Input schema
+
+```json
+{
+  "type": "object",
+  "additionalProperties": true,
+  "required": [
+    "work",
+    "operation"
+  ],
+  "properties": {
+    "work": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 200
+    },
+    "operation": {
+      "type": "string",
+      "enum": [
+        "execution",
+        "contract"
+      ]
+    },
+    "zone": {
+      "type": "string"
+    }
+  }
+}
+```
+
+##### Output schema
+
+```json
+{
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "summary",
+    "input"
+  ],
+  "properties": {
+    "summary": {
+      "type": "string"
+    },
+    "title": {
+      "type": "string"
+    },
+    "input": {
+      "type": "object",
+      "additionalProperties": true
+    }
+  }
+}
+```
 
 #### `workLedger.execution.cancel`
 
@@ -178125,2265 +181156,6 @@ Read at most 100 events after an exclusive cursor, pinned to a history high-wate
     "events"
   ],
   "additionalProperties": false
-}
-```
-
-#### `workLedger.importLegacy`
-
-Import one exact versioned legacy manifest only after fresh recorded autonomous admission under paired authority. Durable exact-request replay bypasses new evaluation. Preserves source records and grants no execution or verification authority.
-
-- Title: `Import Legacy Work Atomically`
-- Source: `builtin`
-- Access: `admin`
-- Transport: `http`, `ws`
-- HTTP: `POST /api/work-ledger/legacy-import`
-- Scopes: `write:work-ledger-import`, `read:knowledge`
-- Emits events: none
-- Dangerous: `no`
-- Invokable: `yes`
-
-##### Input schema
-
-```json
-{
-  "type": "object",
-  "additionalProperties": false,
-  "required": [
-    "type",
-    "requestId",
-    "expectedRevision",
-    "manifest"
-  ],
-  "properties": {
-    "type": {
-      "type": "string",
-      "enum": [
-        "import_legacy"
-      ]
-    },
-    "requestId": {
-      "type": "string",
-      "minLength": 1,
-      "maxLength": 200
-    },
-    "expectedRevision": {
-      "type": "integer",
-      "minimum": 0,
-      "maximum": 9007199254740991
-    },
-    "manifest": {
-      "type": "object",
-      "additionalProperties": true
-    }
-  }
-}
-```
-
-##### Output schema
-
-```json
-{
-  "anyOf": [
-    {
-      "$schema": "https://json-schema.org/draft/2020-12/schema",
-      "anyOf": [
-        {
-          "type": "object",
-          "properties": {
-            "kind": {
-              "type": "string",
-              "enum": [
-                "accepted"
-              ]
-            },
-            "replayed": {
-              "type": "boolean"
-            },
-            "event": {
-              "anyOf": [
-                {
-                  "type": "object",
-                  "properties": {
-                    "sequence": {
-                      "type": "integer",
-                      "minimum": 0,
-                      "maximum": 9007199254740991
-                    },
-                    "type": {
-                      "type": "string",
-                      "enum": [
-                        "create",
-                        "submit_native",
-                        "revise",
-                        "claim",
-                        "report",
-                        "release",
-                        "handoff",
-                        "cancel",
-                        "reopen",
-                        "record_evidence"
-                      ]
-                    },
-                    "actorId": {
-                      "type": "string",
-                      "minLength": 1,
-                      "maxLength": 200
-                    },
-                    "requestId": {
-                      "type": "string",
-                      "minLength": 1,
-                      "maxLength": 200
-                    },
-                    "workId": {
-                      "type": "string",
-                      "minLength": 1,
-                      "maxLength": 200
-                    },
-                    "attemptId": {
-                      "anyOf": [
-                        {
-                          "type": "string",
-                          "minLength": 1,
-                          "maxLength": 200
-                        },
-                        {
-                          "type": "null"
-                        }
-                      ]
-                    },
-                    "at": {
-                      "type": "integer",
-                      "minimum": 0,
-                      "maximum": 9007199254740991
-                    },
-                    "work": {
-                      "type": "object",
-                      "properties": {
-                        "id": {
-                          "type": "string",
-                          "minLength": 1,
-                          "maxLength": 200
-                        },
-                        "title": {
-                          "type": "string",
-                          "minLength": 1,
-                          "maxLength": 20000
-                        },
-                        "goal": {
-                          "type": "string",
-                          "minLength": 1,
-                          "maxLength": 20000
-                        },
-                        "criteria": {
-                          "minItems": 1,
-                          "maxItems": 100,
-                          "type": "array",
-                          "items": {
-                            "type": "string",
-                            "minLength": 1,
-                            "maxLength": 20000
-                          }
-                        },
-                        "source": {
-                          "anyOf": [
-                            {
-                              "anyOf": [
-                                {
-                                  "type": "object",
-                                  "properties": {
-                                    "version": {
-                                      "type": "number",
-                                      "enum": [
-                                        1
-                                      ]
-                                    },
-                                    "sourceId": {
-                                      "type": "string",
-                                      "minLength": 1,
-                                      "maxLength": 200
-                                    },
-                                    "sourceRevision": {
-                                      "type": "string",
-                                      "minLength": 1,
-                                      "maxLength": 200
-                                    },
-                                    "inputId": {
-                                      "type": "string",
-                                      "minLength": 1,
-                                      "maxLength": 200
-                                    },
-                                    "sessionId": {
-                                      "type": "string",
-                                      "minLength": 1,
-                                      "maxLength": 200
-                                    }
-                                  },
-                                  "required": [
-                                    "version",
-                                    "sourceId",
-                                    "sourceRevision",
-                                    "inputId",
-                                    "sessionId"
-                                  ],
-                                  "additionalProperties": false
-                                },
-                                {
-                                  "type": "object",
-                                  "properties": {
-                                    "version": {
-                                      "type": "number",
-                                      "enum": [
-                                        2
-                                      ]
-                                    },
-                                    "sourceId": {
-                                      "type": "string",
-                                      "minLength": 1,
-                                      "maxLength": 200
-                                    },
-                                    "sourceRevision": {
-                                      "type": "string",
-                                      "minLength": 1,
-                                      "maxLength": 200
-                                    },
-                                    "inputId": {
-                                      "type": "string",
-                                      "minLength": 1,
-                                      "maxLength": 200
-                                    },
-                                    "sessionId": {
-                                      "type": "string",
-                                      "minLength": 1,
-                                      "maxLength": 200
-                                    },
-                                    "continuation": {
-                                      "type": "object",
-                                      "properties": {
-                                        "version": {
-                                          "type": "number",
-                                          "enum": [
-                                            2
-                                          ]
-                                        },
-                                        "sessionId": {
-                                          "type": "string",
-                                          "minLength": 1,
-                                          "maxLength": 200
-                                        },
-                                        "revision": {
-                                          "type": "string",
-                                          "maxLength": 200,
-                                          "pattern": "^(?:[a-f0-9]{64}|[0-9a-p]{8}-[0-9a-p]{4}-[0-9a-p]{4}-[0-9a-p]{4}-[0-9a-p]{12})$"
-                                        },
-                                        "selectedDiff": {
-                                          "anyOf": [
-                                            {
-                                              "type": "object",
-                                              "properties": {
-                                                "kind": {
-                                                  "type": "string",
-                                                  "enum": [
-                                                    "session"
-                                                  ]
-                                                },
-                                                "revision": {
-                                                  "type": "string",
-                                                  "maxLength": 200,
-                                                  "pattern": "^(?:[a-f0-9]{64}|checkpoint-diff:[0-9a-p]{8}-[0-9a-p]{4}-[0-9a-p]{4}-[0-9a-p]{4}-[0-9a-p]{12}:[0-9a-z]+)$"
-                                                },
-                                                "fileIndex": {
-                                                  "type": "integer",
-                                                  "minimum": 0,
-                                                  "maximum": 9007199254740991
-                                                },
-                                                "hunkIndex": {
-                                                  "type": "integer",
-                                                  "minimum": 0,
-                                                  "maximum": 9007199254740991
-                                                },
-                                                "unifiedDiff": {
-                                                  "type": "string",
-                                                  "minLength": 1,
-                                                  "maxLength": 65536
-                                                },
-                                                "provenance": {
-                                                  "type": "object",
-                                                  "properties": {
-                                                    "kind": {
-                                                      "type": "string",
-                                                      "enum": [
-                                                        "session"
-                                                      ]
-                                                    },
-                                                    "sessionId": {
-                                                      "type": "string",
-                                                      "minLength": 1,
-                                                      "maxLength": 200
-                                                    },
-                                                    "baselineCheckpointId": {
-                                                      "type": "string",
-                                                      "minLength": 1,
-                                                      "maxLength": 200
-                                                    },
-                                                    "latestCheckpointId": {
-                                                      "type": "string",
-                                                      "minLength": 1,
-                                                      "maxLength": 200
-                                                    }
-                                                  },
-                                                  "required": [
-                                                    "kind",
-                                                    "sessionId",
-                                                    "baselineCheckpointId",
-                                                    "latestCheckpointId"
-                                                  ],
-                                                  "additionalProperties": false
-                                                }
-                                              },
-                                              "required": [
-                                                "kind",
-                                                "revision",
-                                                "fileIndex",
-                                                "hunkIndex",
-                                                "unifiedDiff",
-                                                "provenance"
-                                              ],
-                                              "additionalProperties": false
-                                            },
-                                            {
-                                              "type": "object",
-                                              "properties": {
-                                                "kind": {
-                                                  "type": "string",
-                                                  "enum": [
-                                                    "workspace"
-                                                  ]
-                                                },
-                                                "baselineId": {
-                                                  "type": "string",
-                                                  "minLength": 1,
-                                                  "maxLength": 200
-                                                },
-                                                "revision": {
-                                                  "type": "string",
-                                                  "maxLength": 200,
-                                                  "pattern": "^(?:[a-f0-9]{64}|checkpoint-diff:[0-9a-p]{8}-[0-9a-p]{4}-[0-9a-p]{4}-[0-9a-p]{4}-[0-9a-p]{12}:[0-9a-z]+)$"
-                                                },
-                                                "fileIndex": {
-                                                  "type": "integer",
-                                                  "minimum": 0,
-                                                  "maximum": 9007199254740991
-                                                },
-                                                "hunkIndex": {
-                                                  "type": "integer",
-                                                  "minimum": 0,
-                                                  "maximum": 9007199254740991
-                                                },
-                                                "unifiedDiff": {
-                                                  "type": "string",
-                                                  "minLength": 1,
-                                                  "maxLength": 65536
-                                                },
-                                                "provenance": {
-                                                  "type": "object",
-                                                  "properties": {
-                                                    "kind": {
-                                                      "type": "string",
-                                                      "enum": [
-                                                        "workspace"
-                                                      ]
-                                                    },
-                                                    "baselineId": {
-                                                      "type": "string",
-                                                      "minLength": 1,
-                                                      "maxLength": 200
-                                                    },
-                                                    "to": {
-                                                      "type": "string",
-                                                      "enum": [
-                                                        "WORKING"
-                                                      ]
-                                                    }
-                                                  },
-                                                  "required": [
-                                                    "kind",
-                                                    "baselineId",
-                                                    "to"
-                                                  ],
-                                                  "additionalProperties": false
-                                                }
-                                              },
-                                              "required": [
-                                                "kind",
-                                                "baselineId",
-                                                "revision",
-                                                "fileIndex",
-                                                "hunkIndex",
-                                                "unifiedDiff",
-                                                "provenance"
-                                              ],
-                                              "additionalProperties": false
-                                            }
-                                          ]
-                                        },
-                                        "messages": {
-                                          "readOnly": true,
-                                          "type": "array",
-                                          "items": {
-                                            "type": "object",
-                                            "properties": {
-                                              "role": {
-                                                "type": "string",
-                                                "enum": [
-                                                  "user",
-                                                  "assistant",
-                                                  "system",
-                                                  "tool"
-                                                ]
-                                              },
-                                              "content": {
-                                                "type": "string"
-                                              }
-                                            },
-                                            "required": [
-                                              "role",
-                                              "content"
-                                            ],
-                                            "additionalProperties": false
-                                          }
-                                        }
-                                      },
-                                      "required": [
-                                        "sessionId",
-                                        "revision",
-                                        "messages"
-                                      ],
-                                      "additionalProperties": false
-                                    },
-                                    "attachments": {
-                                      "minItems": 1,
-                                      "maxItems": 8,
-                                      "type": "array",
-                                      "items": {
-                                        "type": "object",
-                                        "properties": {
-                                          "artifactId": {
-                                            "type": "string",
-                                            "minLength": 1,
-                                            "maxLength": 200
-                                          },
-                                          "label": {
-                                            "type": "string",
-                                            "minLength": 1,
-                                            "maxLength": 200
-                                          },
-                                          "filename": {
-                                            "type": "string",
-                                            "minLength": 1,
-                                            "maxLength": 1000
-                                          },
-                                          "mimeType": {
-                                            "type": "string",
-                                            "minLength": 1,
-                                            "maxLength": 255
-                                          },
-                                          "sizeBytes": {
-                                            "type": "integer",
-                                            "minimum": 0,
-                                            "maximum": 9007199254740991
-                                          }
-                                        },
-                                        "required": [
-                                          "artifactId",
-                                          "mimeType",
-                                          "sizeBytes"
-                                        ],
-                                        "additionalProperties": false
-                                      }
-                                    },
-                                    "extraction": {
-                                      "type": "object",
-                                      "properties": {
-                                        "version": {
-                                          "type": "number",
-                                          "enum": [
-                                            1
-                                          ]
-                                        },
-                                        "offsetEncoding": {
-                                          "type": "string",
-                                          "enum": [
-                                            "utf16"
-                                          ]
-                                        },
-                                        "spans": {
-                                          "minItems": 1,
-                                          "maxItems": 100,
-                                          "type": "array",
-                                          "items": {
-                                            "type": "object",
-                                            "properties": {
-                                              "partId": {
-                                                "type": "string",
-                                                "enum": [
-                                                  "input"
-                                                ]
-                                              },
-                                              "start": {
-                                                "type": "integer",
-                                                "minimum": 0,
-                                                "maximum": 9007199254740991
-                                              },
-                                              "end": {
-                                                "type": "integer",
-                                                "minimum": 0,
-                                                "maximum": 9007199254740991
-                                              }
-                                            },
-                                            "required": [
-                                              "partId",
-                                              "start",
-                                              "end"
-                                            ],
-                                            "additionalProperties": false
-                                          }
-                                        },
-                                        "proposalRevision": {
-                                          "type": "string",
-                                          "minLength": 1,
-                                          "maxLength": 200
-                                        },
-                                        "admissionDecisionId": {
-                                          "type": "string",
-                                          "minLength": 1,
-                                          "maxLength": 200
-                                        },
-                                        "judgmentDecisionIds": {
-                                          "minItems": 1,
-                                          "maxItems": 128,
-                                          "type": "array",
-                                          "items": {
-                                            "type": "string",
-                                            "minLength": 1,
-                                            "maxLength": 200
-                                          }
-                                        }
-                                      },
-                                      "required": [
-                                        "version",
-                                        "offsetEncoding",
-                                        "spans",
-                                        "proposalRevision",
-                                        "admissionDecisionId",
-                                        "judgmentDecisionIds"
-                                      ],
-                                      "additionalProperties": false
-                                    }
-                                  },
-                                  "required": [
-                                    "version",
-                                    "sourceId",
-                                    "sourceRevision",
-                                    "inputId",
-                                    "sessionId",
-                                    "extraction"
-                                  ],
-                                  "additionalProperties": false
-                                },
-                                {
-                                  "type": "object",
-                                  "properties": {
-                                    "version": {
-                                      "type": "number",
-                                      "enum": [
-                                        3
-                                      ]
-                                    },
-                                    "sourceId": {
-                                      "type": "string",
-                                      "pattern": "^[0-9a-p]{8}(?:-[0-9a-p]{4}){3}-[0-9a-p]{12}$"
-                                    },
-                                    "sourceRevision": {
-                                      "type": "string",
-                                      "pattern": "^[a-f0-9]{64}$"
-                                    },
-                                    "inputId": {
-                                      "type": "string",
-                                      "minLength": 1,
-                                      "maxLength": 200
-                                    },
-                                    "sessionId": {
-                                      "type": "string",
-                                      "minLength": 1,
-                                      "maxLength": 200
-                                    }
-                                  },
-                                  "required": [
-                                    "version",
-                                    "sourceId",
-                                    "sourceRevision",
-                                    "inputId",
-                                    "sessionId"
-                                  ],
-                                  "additionalProperties": false
-                                },
-                                {
-                                  "type": "object",
-                                  "properties": {
-                                    "version": {
-                                      "type": "number",
-                                      "enum": [
-                                        4
-                                      ]
-                                    },
-                                    "sourceId": {
-                                      "type": "string",
-                                      "pattern": "^[0-9a-p]{8}(?:-[0-9a-p]{4}){3}-[0-9a-p]{12}$"
-                                    },
-                                    "sourceRevision": {
-                                      "type": "string",
-                                      "pattern": "^[0-9a-p]{8}(?:-[0-9a-p]{4}){3}-[0-9a-p]{12}$"
-                                    },
-                                    "inputId": {
-                                      "type": "string",
-                                      "minLength": 1,
-                                      "maxLength": 200
-                                    },
-                                    "sessionId": {
-                                      "type": "string",
-                                      "minLength": 1,
-                                      "maxLength": 200
-                                    }
-                                  },
-                                  "required": [
-                                    "version",
-                                    "sourceId",
-                                    "sourceRevision",
-                                    "inputId",
-                                    "sessionId"
-                                  ],
-                                  "additionalProperties": false
-                                }
-                              ]
-                            },
-                            {
-                              "type": "null"
-                            }
-                          ]
-                        },
-                        "revision": {
-                          "type": "integer",
-                          "minimum": 0,
-                          "maximum": 9007199254740991
-                        },
-                        "criteriaRevision": {
-                          "type": "integer",
-                          "minimum": 0,
-                          "maximum": 9007199254740991
-                        },
-                        "reportedState": {
-                          "type": "string",
-                          "enum": [
-                            "pending",
-                            "in_progress",
-                            "blocked",
-                            "complete",
-                            "cancelled"
-                          ]
-                        },
-                        "currentAttemptId": {
-                          "anyOf": [
-                            {
-                              "type": "string",
-                              "minLength": 1,
-                              "maxLength": 200
-                            },
-                            {
-                              "type": "null"
-                            }
-                          ]
-                        },
-                        "createdAt": {
-                          "type": "integer",
-                          "minimum": 0,
-                          "maximum": 9007199254740991
-                        },
-                        "updatedAt": {
-                          "type": "integer",
-                          "minimum": 0,
-                          "maximum": 9007199254740991
-                        }
-                      },
-                      "required": [
-                        "id",
-                        "title",
-                        "goal",
-                        "criteria",
-                        "source",
-                        "revision",
-                        "criteriaRevision",
-                        "reportedState",
-                        "currentAttemptId",
-                        "createdAt",
-                        "updatedAt"
-                      ],
-                      "additionalProperties": false
-                    },
-                    "attempts": {
-                      "type": "array",
-                      "items": {
-                        "type": "object",
-                        "properties": {
-                          "id": {
-                            "type": "string",
-                            "minLength": 1,
-                            "maxLength": 200
-                          },
-                          "workId": {
-                            "type": "string",
-                            "minLength": 1,
-                            "maxLength": 200
-                          },
-                          "predecessorId": {
-                            "anyOf": [
-                              {
-                                "type": "string",
-                                "minLength": 1,
-                                "maxLength": 200
-                              },
-                              {
-                                "type": "null"
-                              }
-                            ]
-                          },
-                          "ownerId": {
-                            "type": "string",
-                            "minLength": 1,
-                            "maxLength": 200
-                          },
-                          "revision": {
-                            "type": "integer",
-                            "minimum": 0,
-                            "maximum": 9007199254740991
-                          },
-                          "state": {
-                            "type": "string",
-                            "enum": [
-                              "active",
-                              "complete",
-                              "released",
-                              "cancelled"
-                            ]
-                          },
-                          "report": {
-                            "anyOf": [
-                              {
-                                "type": "string",
-                                "minLength": 1,
-                                "maxLength": 20000
-                              },
-                              {
-                                "type": "null"
-                              }
-                            ]
-                          },
-                          "blocker": {
-                            "anyOf": [
-                              {
-                                "type": "string",
-                                "minLength": 1,
-                                "maxLength": 20000
-                              },
-                              {
-                                "type": "null"
-                              }
-                            ]
-                          },
-                          "createdAt": {
-                            "type": "integer",
-                            "minimum": 0,
-                            "maximum": 9007199254740991
-                          },
-                          "updatedAt": {
-                            "type": "integer",
-                            "minimum": 0,
-                            "maximum": 9007199254740991
-                          }
-                        },
-                        "required": [
-                          "id",
-                          "workId",
-                          "predecessorId",
-                          "ownerId",
-                          "revision",
-                          "state",
-                          "report",
-                          "blocker",
-                          "createdAt",
-                          "updatedAt"
-                        ],
-                        "additionalProperties": false
-                      }
-                    },
-                    "evidence": {
-                      "anyOf": [
-                        {
-                          "type": "object",
-                          "properties": {
-                            "id": {
-                              "type": "string",
-                              "minLength": 1,
-                              "maxLength": 200
-                            },
-                            "target": {
-                              "type": "object",
-                              "properties": {
-                                "workId": {
-                                  "type": "string",
-                                  "minLength": 1,
-                                  "maxLength": 200
-                                },
-                                "workRevision": {
-                                  "type": "integer",
-                                  "minimum": 0,
-                                  "maximum": 9007199254740991
-                                },
-                                "criteriaRevision": {
-                                  "type": "integer",
-                                  "minimum": 0,
-                                  "maximum": 9007199254740991
-                                },
-                                "attemptId": {
-                                  "type": "string",
-                                  "minLength": 1,
-                                  "maxLength": 200
-                                },
-                                "attemptRevision": {
-                                  "type": "integer",
-                                  "minimum": 0,
-                                  "maximum": 9007199254740991
-                                }
-                              },
-                              "required": [
-                                "workId",
-                                "workRevision",
-                                "criteriaRevision",
-                                "attemptId",
-                                "attemptRevision"
-                              ],
-                              "additionalProperties": false
-                            },
-                            "outcome": {
-                              "type": "string",
-                              "enum": [
-                                "verified",
-                                "failed",
-                                "unavailable"
-                              ]
-                            },
-                            "reason": {
-                              "type": "string",
-                              "minLength": 1,
-                              "maxLength": 20000
-                            },
-                            "references": {
-                              "maxItems": 100,
-                              "type": "array",
-                              "items": {
-                                "type": "object",
-                                "properties": {
-                                  "kind": {
-                                    "type": "string",
-                                    "enum": [
-                                      "decision",
-                                      "artifact",
-                                      "test",
-                                      "commit"
-                                    ]
-                                  },
-                                  "ref": {
-                                    "type": "string",
-                                    "minLength": 1,
-                                    "maxLength": 20000
-                                  },
-                                  "digest": {
-                                    "type": "string",
-                                    "minLength": 1,
-                                    "maxLength": 200
-                                  }
-                                },
-                                "required": [
-                                  "kind",
-                                  "ref"
-                                ],
-                                "additionalProperties": false
-                              }
-                            },
-                            "source": {
-                              "type": "string",
-                              "enum": [
-                                "host_check",
-                                "judgment"
-                              ]
-                            },
-                            "criteriaResults": {
-                              "maxItems": 100,
-                              "type": "array",
-                              "items": {
-                                "type": "object",
-                                "properties": {
-                                  "criterionIndex": {
-                                    "type": "integer",
-                                    "minimum": 0,
-                                    "maximum": 9007199254740991
-                                  },
-                                  "status": {
-                                    "type": "string",
-                                    "enum": [
-                                      "satisfied",
-                                      "unsatisfied",
-                                      "unknown"
-                                    ]
-                                  },
-                                  "references": {
-                                    "maxItems": 100,
-                                    "type": "array",
-                                    "items": {
-                                      "type": "string",
-                                      "minLength": 1,
-                                      "maxLength": 20000
-                                    }
-                                  }
-                                },
-                                "required": [
-                                  "criterionIndex",
-                                  "status",
-                                  "references"
-                                ],
-                                "additionalProperties": false
-                              }
-                            },
-                            "actorId": {
-                              "type": "string",
-                              "minLength": 1,
-                              "maxLength": 200
-                            },
-                            "at": {
-                              "type": "integer",
-                              "minimum": 0,
-                              "maximum": 9007199254740991
-                            }
-                          },
-                          "required": [
-                            "id",
-                            "target",
-                            "outcome",
-                            "reason",
-                            "references",
-                            "source",
-                            "criteriaResults",
-                            "actorId",
-                            "at"
-                          ],
-                          "additionalProperties": false
-                        },
-                        {
-                          "type": "null"
-                        }
-                      ]
-                    },
-                    "reason": {
-                      "anyOf": [
-                        {
-                          "type": "string",
-                          "minLength": 1,
-                          "maxLength": 20000
-                        },
-                        {
-                          "type": "null"
-                        }
-                      ]
-                    }
-                  },
-                  "required": [
-                    "sequence",
-                    "type",
-                    "actorId",
-                    "requestId",
-                    "workId",
-                    "attemptId",
-                    "at",
-                    "work",
-                    "attempts",
-                    "evidence",
-                    "reason"
-                  ],
-                  "additionalProperties": false
-                },
-                {
-                  "type": "object",
-                  "properties": {
-                    "sequence": {
-                      "type": "integer",
-                      "minimum": 0,
-                      "maximum": 9007199254740991
-                    },
-                    "type": {
-                      "type": "string",
-                      "enum": [
-                        "import_legacy"
-                      ]
-                    },
-                    "actorId": {
-                      "type": "string",
-                      "minLength": 1,
-                      "maxLength": 200
-                    },
-                    "requestId": {
-                      "type": "string",
-                      "minLength": 1,
-                      "maxLength": 200
-                    },
-                    "at": {
-                      "type": "integer",
-                      "minimum": 0,
-                      "maximum": 9007199254740991
-                    },
-                    "manifest": {
-                      "type": "object",
-                      "additionalProperties": true
-                    },
-                    "works": {
-                      "maxItems": 5000,
-                      "type": "array",
-                      "items": {
-                        "type": "object",
-                        "properties": {
-                          "id": {
-                            "type": "string",
-                            "minLength": 1,
-                            "maxLength": 200
-                          },
-                          "title": {
-                            "type": "string",
-                            "minLength": 1,
-                            "maxLength": 20000
-                          },
-                          "goal": {
-                            "type": "string",
-                            "minLength": 1,
-                            "maxLength": 20000
-                          },
-                          "criteria": {
-                            "minItems": 1,
-                            "maxItems": 100,
-                            "type": "array",
-                            "items": {
-                              "type": "string",
-                              "minLength": 1,
-                              "maxLength": 20000
-                            }
-                          },
-                          "source": {
-                            "anyOf": [
-                              {
-                                "anyOf": [
-                                  {
-                                    "type": "object",
-                                    "properties": {
-                                      "version": {
-                                        "type": "number",
-                                        "enum": [
-                                          1
-                                        ]
-                                      },
-                                      "sourceId": {
-                                        "type": "string",
-                                        "minLength": 1,
-                                        "maxLength": 200
-                                      },
-                                      "sourceRevision": {
-                                        "type": "string",
-                                        "minLength": 1,
-                                        "maxLength": 200
-                                      },
-                                      "inputId": {
-                                        "type": "string",
-                                        "minLength": 1,
-                                        "maxLength": 200
-                                      },
-                                      "sessionId": {
-                                        "type": "string",
-                                        "minLength": 1,
-                                        "maxLength": 200
-                                      }
-                                    },
-                                    "required": [
-                                      "version",
-                                      "sourceId",
-                                      "sourceRevision",
-                                      "inputId",
-                                      "sessionId"
-                                    ],
-                                    "additionalProperties": false
-                                  },
-                                  {
-                                    "type": "object",
-                                    "properties": {
-                                      "version": {
-                                        "type": "number",
-                                        "enum": [
-                                          2
-                                        ]
-                                      },
-                                      "sourceId": {
-                                        "type": "string",
-                                        "minLength": 1,
-                                        "maxLength": 200
-                                      },
-                                      "sourceRevision": {
-                                        "type": "string",
-                                        "minLength": 1,
-                                        "maxLength": 200
-                                      },
-                                      "inputId": {
-                                        "type": "string",
-                                        "minLength": 1,
-                                        "maxLength": 200
-                                      },
-                                      "sessionId": {
-                                        "type": "string",
-                                        "minLength": 1,
-                                        "maxLength": 200
-                                      },
-                                      "continuation": {
-                                        "type": "object",
-                                        "properties": {
-                                          "version": {
-                                            "type": "number",
-                                            "enum": [
-                                              2
-                                            ]
-                                          },
-                                          "sessionId": {
-                                            "type": "string",
-                                            "minLength": 1,
-                                            "maxLength": 200
-                                          },
-                                          "revision": {
-                                            "type": "string",
-                                            "maxLength": 200,
-                                            "pattern": "^(?:[a-f0-9]{64}|[0-9a-p]{8}-[0-9a-p]{4}-[0-9a-p]{4}-[0-9a-p]{4}-[0-9a-p]{12})$"
-                                          },
-                                          "selectedDiff": {
-                                            "anyOf": [
-                                              {
-                                                "type": "object",
-                                                "properties": {
-                                                  "kind": {
-                                                    "type": "string",
-                                                    "enum": [
-                                                      "session"
-                                                    ]
-                                                  },
-                                                  "revision": {
-                                                    "type": "string",
-                                                    "maxLength": 200,
-                                                    "pattern": "^(?:[a-f0-9]{64}|checkpoint-diff:[0-9a-p]{8}-[0-9a-p]{4}-[0-9a-p]{4}-[0-9a-p]{4}-[0-9a-p]{12}:[0-9a-z]+)$"
-                                                  },
-                                                  "fileIndex": {
-                                                    "type": "integer",
-                                                    "minimum": 0,
-                                                    "maximum": 9007199254740991
-                                                  },
-                                                  "hunkIndex": {
-                                                    "type": "integer",
-                                                    "minimum": 0,
-                                                    "maximum": 9007199254740991
-                                                  },
-                                                  "unifiedDiff": {
-                                                    "type": "string",
-                                                    "minLength": 1,
-                                                    "maxLength": 65536
-                                                  },
-                                                  "provenance": {
-                                                    "type": "object",
-                                                    "properties": {
-                                                      "kind": {
-                                                        "type": "string",
-                                                        "enum": [
-                                                          "session"
-                                                        ]
-                                                      },
-                                                      "sessionId": {
-                                                        "type": "string",
-                                                        "minLength": 1,
-                                                        "maxLength": 200
-                                                      },
-                                                      "baselineCheckpointId": {
-                                                        "type": "string",
-                                                        "minLength": 1,
-                                                        "maxLength": 200
-                                                      },
-                                                      "latestCheckpointId": {
-                                                        "type": "string",
-                                                        "minLength": 1,
-                                                        "maxLength": 200
-                                                      }
-                                                    },
-                                                    "required": [
-                                                      "kind",
-                                                      "sessionId",
-                                                      "baselineCheckpointId",
-                                                      "latestCheckpointId"
-                                                    ],
-                                                    "additionalProperties": false
-                                                  }
-                                                },
-                                                "required": [
-                                                  "kind",
-                                                  "revision",
-                                                  "fileIndex",
-                                                  "hunkIndex",
-                                                  "unifiedDiff",
-                                                  "provenance"
-                                                ],
-                                                "additionalProperties": false
-                                              },
-                                              {
-                                                "type": "object",
-                                                "properties": {
-                                                  "kind": {
-                                                    "type": "string",
-                                                    "enum": [
-                                                      "workspace"
-                                                    ]
-                                                  },
-                                                  "baselineId": {
-                                                    "type": "string",
-                                                    "minLength": 1,
-                                                    "maxLength": 200
-                                                  },
-                                                  "revision": {
-                                                    "type": "string",
-                                                    "maxLength": 200,
-                                                    "pattern": "^(?:[a-f0-9]{64}|checkpoint-diff:[0-9a-p]{8}-[0-9a-p]{4}-[0-9a-p]{4}-[0-9a-p]{4}-[0-9a-p]{12}:[0-9a-z]+)$"
-                                                  },
-                                                  "fileIndex": {
-                                                    "type": "integer",
-                                                    "minimum": 0,
-                                                    "maximum": 9007199254740991
-                                                  },
-                                                  "hunkIndex": {
-                                                    "type": "integer",
-                                                    "minimum": 0,
-                                                    "maximum": 9007199254740991
-                                                  },
-                                                  "unifiedDiff": {
-                                                    "type": "string",
-                                                    "minLength": 1,
-                                                    "maxLength": 65536
-                                                  },
-                                                  "provenance": {
-                                                    "type": "object",
-                                                    "properties": {
-                                                      "kind": {
-                                                        "type": "string",
-                                                        "enum": [
-                                                          "workspace"
-                                                        ]
-                                                      },
-                                                      "baselineId": {
-                                                        "type": "string",
-                                                        "minLength": 1,
-                                                        "maxLength": 200
-                                                      },
-                                                      "to": {
-                                                        "type": "string",
-                                                        "enum": [
-                                                          "WORKING"
-                                                        ]
-                                                      }
-                                                    },
-                                                    "required": [
-                                                      "kind",
-                                                      "baselineId",
-                                                      "to"
-                                                    ],
-                                                    "additionalProperties": false
-                                                  }
-                                                },
-                                                "required": [
-                                                  "kind",
-                                                  "baselineId",
-                                                  "revision",
-                                                  "fileIndex",
-                                                  "hunkIndex",
-                                                  "unifiedDiff",
-                                                  "provenance"
-                                                ],
-                                                "additionalProperties": false
-                                              }
-                                            ]
-                                          },
-                                          "messages": {
-                                            "readOnly": true,
-                                            "type": "array",
-                                            "items": {
-                                              "type": "object",
-                                              "properties": {
-                                                "role": {
-                                                  "type": "string",
-                                                  "enum": [
-                                                    "user",
-                                                    "assistant",
-                                                    "system",
-                                                    "tool"
-                                                  ]
-                                                },
-                                                "content": {
-                                                  "type": "string"
-                                                }
-                                              },
-                                              "required": [
-                                                "role",
-                                                "content"
-                                              ],
-                                              "additionalProperties": false
-                                            }
-                                          }
-                                        },
-                                        "required": [
-                                          "sessionId",
-                                          "revision",
-                                          "messages"
-                                        ],
-                                        "additionalProperties": false
-                                      },
-                                      "attachments": {
-                                        "minItems": 1,
-                                        "maxItems": 8,
-                                        "type": "array",
-                                        "items": {
-                                          "type": "object",
-                                          "properties": {
-                                            "artifactId": {
-                                              "type": "string",
-                                              "minLength": 1,
-                                              "maxLength": 200
-                                            },
-                                            "label": {
-                                              "type": "string",
-                                              "minLength": 1,
-                                              "maxLength": 200
-                                            },
-                                            "filename": {
-                                              "type": "string",
-                                              "minLength": 1,
-                                              "maxLength": 1000
-                                            },
-                                            "mimeType": {
-                                              "type": "string",
-                                              "minLength": 1,
-                                              "maxLength": 255
-                                            },
-                                            "sizeBytes": {
-                                              "type": "integer",
-                                              "minimum": 0,
-                                              "maximum": 9007199254740991
-                                            }
-                                          },
-                                          "required": [
-                                            "artifactId",
-                                            "mimeType",
-                                            "sizeBytes"
-                                          ],
-                                          "additionalProperties": false
-                                        }
-                                      },
-                                      "extraction": {
-                                        "type": "object",
-                                        "properties": {
-                                          "version": {
-                                            "type": "number",
-                                            "enum": [
-                                              1
-                                            ]
-                                          },
-                                          "offsetEncoding": {
-                                            "type": "string",
-                                            "enum": [
-                                              "utf16"
-                                            ]
-                                          },
-                                          "spans": {
-                                            "minItems": 1,
-                                            "maxItems": 100,
-                                            "type": "array",
-                                            "items": {
-                                              "type": "object",
-                                              "properties": {
-                                                "partId": {
-                                                  "type": "string",
-                                                  "enum": [
-                                                    "input"
-                                                  ]
-                                                },
-                                                "start": {
-                                                  "type": "integer",
-                                                  "minimum": 0,
-                                                  "maximum": 9007199254740991
-                                                },
-                                                "end": {
-                                                  "type": "integer",
-                                                  "minimum": 0,
-                                                  "maximum": 9007199254740991
-                                                }
-                                              },
-                                              "required": [
-                                                "partId",
-                                                "start",
-                                                "end"
-                                              ],
-                                              "additionalProperties": false
-                                            }
-                                          },
-                                          "proposalRevision": {
-                                            "type": "string",
-                                            "minLength": 1,
-                                            "maxLength": 200
-                                          },
-                                          "admissionDecisionId": {
-                                            "type": "string",
-                                            "minLength": 1,
-                                            "maxLength": 200
-                                          },
-                                          "judgmentDecisionIds": {
-                                            "minItems": 1,
-                                            "maxItems": 128,
-                                            "type": "array",
-                                            "items": {
-                                              "type": "string",
-                                              "minLength": 1,
-                                              "maxLength": 200
-                                            }
-                                          }
-                                        },
-                                        "required": [
-                                          "version",
-                                          "offsetEncoding",
-                                          "spans",
-                                          "proposalRevision",
-                                          "admissionDecisionId",
-                                          "judgmentDecisionIds"
-                                        ],
-                                        "additionalProperties": false
-                                      }
-                                    },
-                                    "required": [
-                                      "version",
-                                      "sourceId",
-                                      "sourceRevision",
-                                      "inputId",
-                                      "sessionId",
-                                      "extraction"
-                                    ],
-                                    "additionalProperties": false
-                                  },
-                                  {
-                                    "type": "object",
-                                    "properties": {
-                                      "version": {
-                                        "type": "number",
-                                        "enum": [
-                                          3
-                                        ]
-                                      },
-                                      "sourceId": {
-                                        "type": "string",
-                                        "pattern": "^[0-9a-p]{8}(?:-[0-9a-p]{4}){3}-[0-9a-p]{12}$"
-                                      },
-                                      "sourceRevision": {
-                                        "type": "string",
-                                        "pattern": "^[a-f0-9]{64}$"
-                                      },
-                                      "inputId": {
-                                        "type": "string",
-                                        "minLength": 1,
-                                        "maxLength": 200
-                                      },
-                                      "sessionId": {
-                                        "type": "string",
-                                        "minLength": 1,
-                                        "maxLength": 200
-                                      }
-                                    },
-                                    "required": [
-                                      "version",
-                                      "sourceId",
-                                      "sourceRevision",
-                                      "inputId",
-                                      "sessionId"
-                                    ],
-                                    "additionalProperties": false
-                                  },
-                                  {
-                                    "type": "object",
-                                    "properties": {
-                                      "version": {
-                                        "type": "number",
-                                        "enum": [
-                                          4
-                                        ]
-                                      },
-                                      "sourceId": {
-                                        "type": "string",
-                                        "pattern": "^[0-9a-p]{8}(?:-[0-9a-p]{4}){3}-[0-9a-p]{12}$"
-                                      },
-                                      "sourceRevision": {
-                                        "type": "string",
-                                        "pattern": "^[0-9a-p]{8}(?:-[0-9a-p]{4}){3}-[0-9a-p]{12}$"
-                                      },
-                                      "inputId": {
-                                        "type": "string",
-                                        "minLength": 1,
-                                        "maxLength": 200
-                                      },
-                                      "sessionId": {
-                                        "type": "string",
-                                        "minLength": 1,
-                                        "maxLength": 200
-                                      }
-                                    },
-                                    "required": [
-                                      "version",
-                                      "sourceId",
-                                      "sourceRevision",
-                                      "inputId",
-                                      "sessionId"
-                                    ],
-                                    "additionalProperties": false
-                                  }
-                                ]
-                              },
-                              {
-                                "type": "null"
-                              }
-                            ]
-                          },
-                          "revision": {
-                            "type": "integer",
-                            "minimum": 0,
-                            "maximum": 9007199254740991
-                          },
-                          "criteriaRevision": {
-                            "type": "integer",
-                            "minimum": 0,
-                            "maximum": 9007199254740991
-                          },
-                          "reportedState": {
-                            "type": "string",
-                            "enum": [
-                              "pending",
-                              "in_progress",
-                              "blocked",
-                              "complete",
-                              "cancelled"
-                            ]
-                          },
-                          "currentAttemptId": {
-                            "anyOf": [
-                              {
-                                "type": "string",
-                                "minLength": 1,
-                                "maxLength": 200
-                              },
-                              {
-                                "type": "null"
-                              }
-                            ]
-                          },
-                          "createdAt": {
-                            "type": "integer",
-                            "minimum": 0,
-                            "maximum": 9007199254740991
-                          },
-                          "updatedAt": {
-                            "type": "integer",
-                            "minimum": 0,
-                            "maximum": 9007199254740991
-                          }
-                        },
-                        "required": [
-                          "id",
-                          "title",
-                          "goal",
-                          "criteria",
-                          "source",
-                          "revision",
-                          "criteriaRevision",
-                          "reportedState",
-                          "currentAttemptId",
-                          "createdAt",
-                          "updatedAt"
-                        ],
-                        "additionalProperties": false
-                      }
-                    }
-                  },
-                  "required": [
-                    "sequence",
-                    "type",
-                    "actorId",
-                    "requestId",
-                    "at",
-                    "manifest",
-                    "works"
-                  ],
-                  "additionalProperties": false
-                }
-              ]
-            }
-          },
-          "required": [
-            "kind",
-            "replayed",
-            "event"
-          ],
-          "additionalProperties": false
-        },
-        {
-          "type": "object",
-          "properties": {
-            "kind": {
-              "type": "string",
-              "enum": [
-                "rejected"
-              ]
-            },
-            "code": {
-              "type": "string"
-            },
-            "reason": {
-              "type": "string"
-            },
-            "revision": {
-              "anyOf": [
-                {
-                  "type": "integer",
-                  "minimum": 0,
-                  "maximum": 9007199254740991
-                },
-                {
-                  "type": "null"
-                }
-              ]
-            }
-          },
-          "required": [
-            "kind",
-            "code",
-            "reason",
-            "revision"
-          ],
-          "additionalProperties": false
-        },
-        {
-          "type": "object",
-          "properties": {
-            "kind": {
-              "type": "string",
-              "enum": [
-                "indeterminate"
-              ]
-            },
-            "requestId": {
-              "type": "string",
-              "minLength": 1,
-              "maxLength": 200
-            },
-            "actorId": {
-              "type": "string",
-              "minLength": 1,
-              "maxLength": 200
-            },
-            "reason": {
-              "type": "string"
-            }
-          },
-          "required": [
-            "kind",
-            "requestId",
-            "actorId",
-            "reason"
-          ],
-          "additionalProperties": false
-        }
-      ]
-    },
-    {
-      "type": "object",
-      "additionalProperties": false,
-      "required": [
-        "kind",
-        "decision"
-      ],
-      "properties": {
-        "kind": {
-          "type": "string",
-          "enum": [
-            "decision"
-          ]
-        },
-        "decision": {
-          "oneOf": [
-            {
-              "type": "object",
-              "additionalProperties": false,
-              "required": [
-                "schemaVersion",
-                "decisionId",
-                "binding",
-                "judgmentDecisionIds",
-                "evidence",
-                "summary",
-                "outcome",
-                "next"
-              ],
-              "properties": {
-                "schemaVersion": {
-                  "const": 1
-                },
-                "decisionId": {
-                  "type": "string",
-                  "minLength": 1,
-                  "maxLength": 256,
-                  "not": {
-                    "pattern": "[^!-~]"
-                  }
-                },
-                "binding": {
-                  "type": "object",
-                  "additionalProperties": false,
-                  "required": [
-                    "sourceId",
-                    "inputRevision",
-                    "actionId",
-                    "actionRevision",
-                    "authorityId",
-                    "authorityRevision",
-                    "scopeId",
-                    "scopeRevision"
-                  ],
-                  "properties": {
-                    "sourceId": {
-                      "type": "string",
-                      "minLength": 1,
-                      "maxLength": 256,
-                      "not": {
-                        "pattern": "[^!-~]"
-                      }
-                    },
-                    "inputRevision": {
-                      "type": "string",
-                      "minLength": 1,
-                      "maxLength": 256,
-                      "not": {
-                        "pattern": "[^!-~]"
-                      }
-                    },
-                    "actionId": {
-                      "type": "string",
-                      "minLength": 1,
-                      "maxLength": 256,
-                      "not": {
-                        "pattern": "[^!-~]"
-                      }
-                    },
-                    "actionRevision": {
-                      "type": "string",
-                      "minLength": 1,
-                      "maxLength": 256,
-                      "not": {
-                        "pattern": "[^!-~]"
-                      }
-                    },
-                    "authorityId": {
-                      "type": "string",
-                      "minLength": 1,
-                      "maxLength": 256,
-                      "not": {
-                        "pattern": "[^!-~]"
-                      }
-                    },
-                    "authorityRevision": {
-                      "type": "string",
-                      "minLength": 1,
-                      "maxLength": 256,
-                      "not": {
-                        "pattern": "[^!-~]"
-                      }
-                    },
-                    "scopeId": {
-                      "type": "string",
-                      "minLength": 1,
-                      "maxLength": 256,
-                      "not": {
-                        "pattern": "[^!-~]"
-                      }
-                    },
-                    "scopeRevision": {
-                      "type": "string",
-                      "minLength": 1,
-                      "maxLength": 256,
-                      "not": {
-                        "pattern": "[^!-~]"
-                      }
-                    }
-                  }
-                },
-                "judgmentDecisionIds": {
-                  "type": "array",
-                  "minItems": 1,
-                  "maxItems": 256,
-                  "uniqueItems": true,
-                  "items": {
-                    "type": "string",
-                    "minLength": 1,
-                    "maxLength": 256,
-                    "not": {
-                      "pattern": "[^!-~]"
-                    }
-                  }
-                },
-                "evidence": {
-                  "type": "array",
-                  "maxItems": 256,
-                  "uniqueItems": true,
-                  "items": {
-                    "type": "object",
-                    "additionalProperties": false,
-                    "required": [
-                      "id",
-                      "revision"
-                    ],
-                    "properties": {
-                      "id": {
-                        "type": "string",
-                        "minLength": 1,
-                        "maxLength": 256,
-                        "not": {
-                          "pattern": "[^!-~]"
-                        }
-                      },
-                      "revision": {
-                        "type": "string",
-                        "minLength": 1,
-                        "maxLength": 256,
-                        "not": {
-                          "pattern": "[^!-~]"
-                        }
-                      }
-                    }
-                  }
-                },
-                "summary": {
-                  "type": "string",
-                  "minLength": 1,
-                  "maxLength": 2000,
-                  "pattern": "\\S"
-                },
-                "outcome": {
-                  "const": "revise"
-                },
-                "next": {
-                  "type": "object",
-                  "additionalProperties": false,
-                  "required": [
-                    "id",
-                    "revision",
-                    "kind"
-                  ],
-                  "properties": {
-                    "id": {
-                      "type": "string",
-                      "minLength": 1,
-                      "maxLength": 256,
-                      "not": {
-                        "pattern": "[^!-~]"
-                      }
-                    },
-                    "revision": {
-                      "type": "string",
-                      "minLength": 1,
-                      "maxLength": 256,
-                      "not": {
-                        "pattern": "[^!-~]"
-                      }
-                    },
-                    "kind": {
-                      "enum": [
-                        "reconsider",
-                        "gather-evidence",
-                        "revise-action"
-                      ]
-                    }
-                  }
-                }
-              }
-            },
-            {
-              "type": "object",
-              "additionalProperties": false,
-              "required": [
-                "schemaVersion",
-                "decisionId",
-                "binding",
-                "judgmentDecisionIds",
-                "evidence",
-                "summary",
-                "outcome",
-                "until"
-              ],
-              "properties": {
-                "schemaVersion": {
-                  "const": 1
-                },
-                "decisionId": {
-                  "type": "string",
-                  "minLength": 1,
-                  "maxLength": 256,
-                  "not": {
-                    "pattern": "[^!-~]"
-                  }
-                },
-                "binding": {
-                  "type": "object",
-                  "additionalProperties": false,
-                  "required": [
-                    "sourceId",
-                    "inputRevision",
-                    "actionId",
-                    "actionRevision",
-                    "authorityId",
-                    "authorityRevision",
-                    "scopeId",
-                    "scopeRevision"
-                  ],
-                  "properties": {
-                    "sourceId": {
-                      "type": "string",
-                      "minLength": 1,
-                      "maxLength": 256,
-                      "not": {
-                        "pattern": "[^!-~]"
-                      }
-                    },
-                    "inputRevision": {
-                      "type": "string",
-                      "minLength": 1,
-                      "maxLength": 256,
-                      "not": {
-                        "pattern": "[^!-~]"
-                      }
-                    },
-                    "actionId": {
-                      "type": "string",
-                      "minLength": 1,
-                      "maxLength": 256,
-                      "not": {
-                        "pattern": "[^!-~]"
-                      }
-                    },
-                    "actionRevision": {
-                      "type": "string",
-                      "minLength": 1,
-                      "maxLength": 256,
-                      "not": {
-                        "pattern": "[^!-~]"
-                      }
-                    },
-                    "authorityId": {
-                      "type": "string",
-                      "minLength": 1,
-                      "maxLength": 256,
-                      "not": {
-                        "pattern": "[^!-~]"
-                      }
-                    },
-                    "authorityRevision": {
-                      "type": "string",
-                      "minLength": 1,
-                      "maxLength": 256,
-                      "not": {
-                        "pattern": "[^!-~]"
-                      }
-                    },
-                    "scopeId": {
-                      "type": "string",
-                      "minLength": 1,
-                      "maxLength": 256,
-                      "not": {
-                        "pattern": "[^!-~]"
-                      }
-                    },
-                    "scopeRevision": {
-                      "type": "string",
-                      "minLength": 1,
-                      "maxLength": 256,
-                      "not": {
-                        "pattern": "[^!-~]"
-                      }
-                    }
-                  }
-                },
-                "judgmentDecisionIds": {
-                  "type": "array",
-                  "minItems": 1,
-                  "maxItems": 256,
-                  "uniqueItems": true,
-                  "items": {
-                    "type": "string",
-                    "minLength": 1,
-                    "maxLength": 256,
-                    "not": {
-                      "pattern": "[^!-~]"
-                    }
-                  }
-                },
-                "evidence": {
-                  "type": "array",
-                  "maxItems": 256,
-                  "uniqueItems": true,
-                  "items": {
-                    "type": "object",
-                    "additionalProperties": false,
-                    "required": [
-                      "id",
-                      "revision"
-                    ],
-                    "properties": {
-                      "id": {
-                        "type": "string",
-                        "minLength": 1,
-                        "maxLength": 256,
-                        "not": {
-                          "pattern": "[^!-~]"
-                        }
-                      },
-                      "revision": {
-                        "type": "string",
-                        "minLength": 1,
-                        "maxLength": 256,
-                        "not": {
-                          "pattern": "[^!-~]"
-                        }
-                      }
-                    }
-                  }
-                },
-                "summary": {
-                  "type": "string",
-                  "minLength": 1,
-                  "maxLength": 2000,
-                  "pattern": "\\S"
-                },
-                "outcome": {
-                  "const": "defer"
-                },
-                "until": {
-                  "type": "object",
-                  "additionalProperties": false,
-                  "required": [
-                    "id",
-                    "revision"
-                  ],
-                  "properties": {
-                    "id": {
-                      "type": "string",
-                      "minLength": 1,
-                      "maxLength": 256,
-                      "not": {
-                        "pattern": "[^!-~]"
-                      }
-                    },
-                    "revision": {
-                      "type": "string",
-                      "minLength": 1,
-                      "maxLength": 256,
-                      "not": {
-                        "pattern": "[^!-~]"
-                      }
-                    }
-                  }
-                }
-              }
-            },
-            {
-              "type": "object",
-              "additionalProperties": false,
-              "required": [
-                "schemaVersion",
-                "decisionId",
-                "binding",
-                "judgmentDecisionIds",
-                "evidence",
-                "summary",
-                "outcome"
-              ],
-              "properties": {
-                "schemaVersion": {
-                  "const": 1
-                },
-                "decisionId": {
-                  "type": "string",
-                  "minLength": 1,
-                  "maxLength": 256,
-                  "not": {
-                    "pattern": "[^!-~]"
-                  }
-                },
-                "binding": {
-                  "type": "object",
-                  "additionalProperties": false,
-                  "required": [
-                    "sourceId",
-                    "inputRevision",
-                    "actionId",
-                    "actionRevision",
-                    "authorityId",
-                    "authorityRevision",
-                    "scopeId",
-                    "scopeRevision"
-                  ],
-                  "properties": {
-                    "sourceId": {
-                      "type": "string",
-                      "minLength": 1,
-                      "maxLength": 256,
-                      "not": {
-                        "pattern": "[^!-~]"
-                      }
-                    },
-                    "inputRevision": {
-                      "type": "string",
-                      "minLength": 1,
-                      "maxLength": 256,
-                      "not": {
-                        "pattern": "[^!-~]"
-                      }
-                    },
-                    "actionId": {
-                      "type": "string",
-                      "minLength": 1,
-                      "maxLength": 256,
-                      "not": {
-                        "pattern": "[^!-~]"
-                      }
-                    },
-                    "actionRevision": {
-                      "type": "string",
-                      "minLength": 1,
-                      "maxLength": 256,
-                      "not": {
-                        "pattern": "[^!-~]"
-                      }
-                    },
-                    "authorityId": {
-                      "type": "string",
-                      "minLength": 1,
-                      "maxLength": 256,
-                      "not": {
-                        "pattern": "[^!-~]"
-                      }
-                    },
-                    "authorityRevision": {
-                      "type": "string",
-                      "minLength": 1,
-                      "maxLength": 256,
-                      "not": {
-                        "pattern": "[^!-~]"
-                      }
-                    },
-                    "scopeId": {
-                      "type": "string",
-                      "minLength": 1,
-                      "maxLength": 256,
-                      "not": {
-                        "pattern": "[^!-~]"
-                      }
-                    },
-                    "scopeRevision": {
-                      "type": "string",
-                      "minLength": 1,
-                      "maxLength": 256,
-                      "not": {
-                        "pattern": "[^!-~]"
-                      }
-                    }
-                  }
-                },
-                "judgmentDecisionIds": {
-                  "type": "array",
-                  "minItems": 1,
-                  "maxItems": 256,
-                  "uniqueItems": true,
-                  "items": {
-                    "type": "string",
-                    "minLength": 1,
-                    "maxLength": 256,
-                    "not": {
-                      "pattern": "[^!-~]"
-                    }
-                  }
-                },
-                "evidence": {
-                  "type": "array",
-                  "maxItems": 256,
-                  "uniqueItems": true,
-                  "items": {
-                    "type": "object",
-                    "additionalProperties": false,
-                    "required": [
-                      "id",
-                      "revision"
-                    ],
-                    "properties": {
-                      "id": {
-                        "type": "string",
-                        "minLength": 1,
-                        "maxLength": 256,
-                        "not": {
-                          "pattern": "[^!-~]"
-                        }
-                      },
-                      "revision": {
-                        "type": "string",
-                        "minLength": 1,
-                        "maxLength": 256,
-                        "not": {
-                          "pattern": "[^!-~]"
-                        }
-                      }
-                    }
-                  }
-                },
-                "summary": {
-                  "type": "string",
-                  "minLength": 1,
-                  "maxLength": 2000,
-                  "pattern": "\\S"
-                },
-                "outcome": {
-                  "const": "reject"
-                }
-              }
-            }
-          ]
-        }
-      }
-    }
-  ]
 }
 ```
 
@@ -191573,103 +192345,6 @@ Explicitly recover captured conversation admission with a fresh semantic operati
 }
 ```
 
-#### `workLedger.prepareLegacyImport`
-
-Capture bounded complete legacy sources on the selected authoritative host, plus every work-plan task of the project (the host adds those). Preparation does not write or grant execution authority.
-
-- Title: `Prepare Legacy Work Import`
-- Source: `builtin`
-- Access: `admin`
-- Transport: `http`, `ws`
-- HTTP: `POST /api/work-ledger/legacy-import/prepare`
-- Scopes: `read:work-ledger`, `read:knowledge`
-- Emits events: none
-- Dangerous: `no`
-- Invokable: `yes`
-
-##### Input schema
-
-```json
-{
-  "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "type": "object",
-  "properties": {
-    "projectId": {
-      "type": "string",
-      "minLength": 1,
-      "maxLength": 200
-    },
-    "sourceIds": {
-      "maxItems": 500,
-      "type": "array",
-      "items": {
-        "type": "string",
-        "minLength": 1,
-        "maxLength": 200
-      }
-    }
-  },
-  "required": [
-    "projectId",
-    "sourceIds"
-  ],
-  "additionalProperties": false
-}
-```
-
-##### Output schema
-
-```json
-{
-  "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "anyOf": [
-    {
-      "type": "object",
-      "properties": {
-        "kind": {
-          "type": "string",
-          "enum": [
-            "prepared"
-          ]
-        },
-        "manifest": {
-          "type": "object",
-          "additionalProperties": true
-        }
-      },
-      "required": [
-        "kind",
-        "manifest"
-      ],
-      "additionalProperties": false
-    },
-    {
-      "type": "object",
-      "properties": {
-        "kind": {
-          "type": "string",
-          "enum": [
-            "blocked"
-          ]
-        },
-        "code": {
-          "type": "string"
-        },
-        "reason": {
-          "type": "string"
-        }
-      },
-      "required": [
-        "kind",
-        "code",
-        "reason"
-      ],
-      "additionalProperties": false
-    }
-  ]
-}
-```
-
 #### `workLedger.project`
 
 Read only the selected host project identity. Does not confer execution eligibility or authority.
@@ -194041,6 +194716,66 @@ Read native hosted dispatch status. Does not admit, claim, retry or execute.
 
 ### workspaces
 
+#### `workspaces.projects.list`
+
+The projects a caller with no folder of its own (the web UI, a script) can choose to act in: the daemon's own working folder (daemonFolder: true), then every registered workspace root with its label, each once. A capability bound to a project takes the chosen one as workingDirectory (capabilities.run, places.counts) or project (worktrees.snapshot); nothing picks one for the caller. Read-only.
+
+- Title: `List the Projects the Daemon Knows`
+- Source: `builtin`
+- Access: `authenticated`
+- Transport: `ws`
+- HTTP: none
+- Scopes: `read:workspaces`
+- Emits events: none
+- Dangerous: `no`
+- Invokable: `yes`
+
+##### Input schema
+
+```json
+{
+  "type": "object",
+  "properties": {},
+  "additionalProperties": false
+}
+```
+
+##### Output schema
+
+```json
+{
+  "type": "object",
+  "properties": {
+    "projects": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "properties": {
+          "root": {
+            "type": "string"
+          },
+          "label": {
+            "type": "string"
+          },
+          "daemonFolder": {
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "root",
+          "daemonFolder"
+        ],
+        "additionalProperties": false
+      }
+    }
+  },
+  "required": [
+    "projects"
+  ],
+  "additionalProperties": false
+}
+```
+
 #### `workspaces.registrations.add`
 
 Register a workspace root so the whole subtree beneath it is covered. Refuses an absurdly broad root (the home directory, the filesystem root, or the daemon state directory) with a 400, coverage flows down the entire subtree, so a root that broad would sweep far more than a project. Idempotent: re-registering the same normalized root returns alreadyRegistered:true. A root registered before native work existed has no native scope; re-registering it grants that scope and answers nativeScopeGranted:true (false otherwise), which is the step a native-work refusal asks for. Registering a root clears any remembered decline recorded at exactly that root.
@@ -194104,6 +194839,26 @@ Register a workspace root so the whole subtree beneath it is covered. Refuses an
         },
         "checkpointEligible": {
           "type": "boolean"
+        },
+        "nativeScope": {
+          "type": "object",
+          "properties": {
+            "id": {
+              "type": "string"
+            },
+            "canonicalRoot": {
+              "type": "string"
+            },
+            "generation": {
+              "type": "number"
+            }
+          },
+          "required": [
+            "id",
+            "canonicalRoot",
+            "generation"
+          ],
+          "additionalProperties": false
         }
       },
       "required": [
@@ -194177,6 +194932,26 @@ Return every registered workspace root (coverage flows down each root's subtree)
           },
           "checkpointEligible": {
             "type": "boolean"
+          },
+          "nativeScope": {
+            "type": "object",
+            "properties": {
+              "id": {
+                "type": "string"
+              },
+              "canonicalRoot": {
+                "type": "string"
+              },
+              "generation": {
+                "type": "number"
+              }
+            },
+            "required": [
+              "id",
+              "canonicalRoot",
+              "generation"
+            ],
+            "additionalProperties": false
           }
         },
         "required": [
@@ -194360,7 +195135,7 @@ Resolve a path against the registry: covered (by which nearest registered root),
 
 #### `worktrees.discard`
 
-Remove a worktree per the eviction-preserving rules: any uncommitted state is first committed onto the worktree's branch (a preservation failure REFUSES the removal rather than losing work), the directory is removed, and the branch is KEPT. Returns an honest receipt (ok, branch kept, preservation commit, detail) either way.
+Remove a worktree per the eviction-preserving rules: any uncommitted state is first committed onto the worktree's branch (a preservation failure REFUSES the removal rather than losing work), the directory is removed, and the branch is KEPT. `project` names the project (its folder's full path, a git repository on this machine) the worktree belongs to; absent, the daemon's own working folder. Returns an honest receipt (ok, branch kept, preservation commit, detail) either way.
 
 - Title: `Discard a Worktree`
 - Source: `builtin`
@@ -194379,6 +195154,9 @@ Remove a worktree per the eviction-preserving rules: any uncommitted state is fi
   "type": "object",
   "properties": {
     "path": {
+      "type": "string"
+    },
+    "project": {
       "type": "string"
     }
   },
@@ -194426,7 +195204,7 @@ Remove a worktree per the eviction-preserving rules: any uncommitted state is fi
 
 #### `worktrees.setup.run`
 
-Re-run cold-start setup (worktree.setup.commands, then untracked-file carry-over from worktree.setup.carryOverGlobs; each is auto, none or a list, and auto derives from the repository) on a live worktree by path, recording the honest outcome onto the worktree record. Returns the setup result: state skipped (nothing to run or copy), succeeded, or failed with the failing step and error, which names a derived step as derived. A failed setup is a visible worktree state, never silent.
+Re-run cold-start setup (worktree.setup.commands, then untracked-file carry-over from worktree.setup.carryOverGlobs; each is auto, none or a list, and auto derives from the repository) on a live worktree by path, recording the honest outcome onto the worktree record. `project` names the project (its folder's full path, a git repository on this machine) whose worktree it is and whose register records it; absent, the daemon's own working folder. Returns the setup result: state skipped (nothing to run or copy), succeeded, or failed with the failing step and error, which names a derived step as derived. A failed setup is a visible worktree state, never silent.
 
 - Title: `Re-run Worktree Setup`
 - Source: `builtin`
@@ -194445,6 +195223,9 @@ Re-run cold-start setup (worktree.setup.commands, then untracked-file carry-over
   "type": "object",
   "properties": {
     "path": {
+      "type": "string"
+    },
+    "project": {
       "type": "string"
     }
   },
@@ -194526,6 +195307,9 @@ Re-run cold-start setup (worktree.setup.commands, then untracked-file carry-over
         "steps"
       ],
       "additionalProperties": false
+    },
+    "projectCommandsNotUsed": {
+      "type": "string"
     }
   },
   "required": [
@@ -194538,7 +195322,7 @@ Re-run cold-start setup (worktree.setup.commands, then untracked-file carry-over
 
 #### `worktrees.snapshot`
 
-Return the worktree integration snapshot.
+Return the worktrees of a project and their ownership summary: project (a folder's full path, one workspaces.projects.list names) reads that project's register, the one its terminal programs keep; without it, the daemon's own folder. The method invoke and the GET route (`?project=`) are the same handler. A register's change is announced as LIST_CHANGED worktrees. 400 when project is not a full path, 404 when it is not a git repository this machine has.
 
 - Title: `Worktrees Snapshot`
 - Source: `builtin`
@@ -194555,7 +195339,11 @@ Return the worktree integration snapshot.
 ```json
 {
   "type": "object",
-  "properties": {},
+  "properties": {
+    "project": {
+      "type": "string"
+    }
+  },
   "additionalProperties": false
 }
 ```
@@ -196221,6 +197009,29 @@ Every approval record transition, pushed the moment the broker records it: an as
                     "url"
                   ],
                   "additionalProperties": false
+                },
+                {
+                  "type": "object",
+                  "properties": {
+                    "kind": {
+                      "type": "string",
+                      "enum": [
+                        "outside-caller"
+                      ]
+                    },
+                    "name": {
+                      "type": "string"
+                    },
+                    "principalId": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "kind",
+                    "name",
+                    "principalId"
+                  ],
+                  "additionalProperties": false
                 }
               ]
             },
@@ -197390,6 +198201,9 @@ A question, claim, purchase window or queued action in the owner inbox was poste
             },
             "surface": {
               "type": "string"
+            },
+            "owner": {
+              "type": "boolean"
             }
           },
           "required": [

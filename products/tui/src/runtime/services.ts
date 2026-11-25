@@ -59,6 +59,8 @@ import { createFleetReadModel } from '../views/fleet-read-model.ts';
 import type { PermissionPromptDecision, PermissionPromptRequest } from '@goodvibes/engine/platform/platform/permissions';
 import { sandboxAwareApprovalRaiser, sandboxExecAskDepsFromRuntime } from '../permissions/sandbox-exec-gate.ts';
 import type { RuntimeServicesOptions, RuntimeServices } from './runtime-services-types.ts';
+import { routeArtifactSavesThroughDaemon } from '@goodvibes/engine/terminal-shell/agent-turn/artifact-saves-through-daemon';
+import { createDaemonWorkDelegation } from '@goodvibes/engine/terminal-shell/agent-turn/daemon-work-delegation';
 export type { RuntimeServicesOptions, RuntimeServices } from './runtime-services-types.ts';
 
 export function createRuntimeServices(options: RuntimeServicesOptions): RuntimeServices {
@@ -80,7 +82,8 @@ export function createRuntimeServices(options: RuntimeServicesOptions): RuntimeS
   const daemonCredentials = createDaemonCredentialsClient(verbs);
 
   // The late-bound terminal prompt: the UI layer patches the real implementation in after boot.
-  const localPromptRef: { requestPermission: (request: PermissionPromptRequest) => Promise<PermissionPromptDecision> } = {
+  // `answersHere`: set by a headless run, whose asks have their one answerer in the run (headless-turn.ts).
+  const localPromptRef: { requestPermission: (request: PermissionPromptRequest) => Promise<PermissionPromptDecision>; answersHere?: boolean } = {
     requestPermission: async () => ({ approved: false, remember: false }),
   };
   const liveSessionIdRef: { value: string | null } = { value: null };
@@ -159,7 +162,8 @@ export function createRuntimeServices(options: RuntimeServicesOptions): RuntimeS
           sessionId: () => liveSessionIdRef.value,
           // The signal is the raiser's: a decision made on another surface aborts it,
           // which retires this broker's record and clears the card here.
-          localPrompt: () => (request, promptOptions) =>
+          // A headless run's prompt is its one answerer, with no card here: its answer (a hold for the owner included) is used as given.
+          localPrompt: () => localPromptRef.answersHere === true ? (request) => localPromptRef.requestPermission(request) : (request, promptOptions) =>
             approvalBroker.requestApproval({
               request,
               ...(promptOptions?.signal ? { signal: promptOptions.signal } : {}),
@@ -169,6 +173,8 @@ export function createRuntimeServices(options: RuntimeServicesOptions): RuntimeS
           // A decision made on another surface reaches this terminal in the time one
           // SSE frame takes; the interval stays as the fallback (client/approval-updates.ts).
           subscribeApprovalUpdates: createTerminalApprovalUpdateSubscriber({ configManager, homeDirectory }),
+          // A headless run answers its own asks (its script), or holds them for the owner: never raised a second time on the daemon.
+          answersHere: () => localPromptRef.answersHere === true,
         });
         clientRaiserRef.current = requestApproval;
         // A contained command the turn runs without a prompt does not prompt for a
@@ -231,6 +237,15 @@ export function createRuntimeServices(options: RuntimeServicesOptions): RuntimeS
       // This product serves no verbs itself: each built-in verb on this catalog is
       // answered by the daemon. Plugins, mail, calendar and review surfaces call it.
       forwardGatewayMethodsToDaemon(base.gatewayMethods, verbs);
+      // Every artifact this program's turns save goes through the daemon's `artifacts.save` (the daemon announces it).
+      routeArtifactSavesThroughDaemon(base.artifactStore, shellPaths, configManager, 'tui');
+      // Work has one runner, the daemon's: a delegation that would have been a contract here is handed to it as a piece
+      // of work for this project (daemon-work-delegation.ts), and this program starts no contract of its own. Closed
+      // first, so the program's own shutdown never stops a work it was following.
+      agentManager.setContractRunner(null);
+      const workDelegation = createDaemonWorkDelegation({ shellPaths, configManager, program: 'tui' });
+      agentManager.setWorkDelegation(workDelegation);
+      scope.registry.add('work delegation', () => workDelegation.close());
       const contractIntake = createContractIntake({ runner: contractRunner, projectRoot: workingDirectory });
       // Work that arrives for a session THIS surface hosts reaches the loop through
       // the same runner whether it came from the local broker or from the daemon's

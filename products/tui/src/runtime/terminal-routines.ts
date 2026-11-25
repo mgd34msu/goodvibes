@@ -85,6 +85,8 @@ function moveInput(job: AutomationJob): CreateJobInput {
     ...(execution.lightContext !== undefined ? { lightContext: execution.lightContext } : {}),
     enabled: job.enabled,
     deleteAfterRun: job.deleteAfterRun,
+    // It ran in this program's folder; on the daemon its runs work in the same project.
+    workingDirectory: execution.workingDirectory ?? process.cwd(),
   });
 }
 

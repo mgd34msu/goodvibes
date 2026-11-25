@@ -1,5 +1,4 @@
 import type { OpenSelection } from './selection-modal.js';
-import type { SettingsTargetOutcome } from './settings-navigation.js';
 interface CommonModal {
   open(): unknown;
 }
@@ -40,21 +39,4 @@ export function createCommonShellUiOpeners<Context>(options: {
   };
 }
 
-/**
- * Opens the settings workspace and says where it landed: on a category, on a
- * setting, on a search for text that names neither (`not-found`), or nowhere in
- * particular (`none`, no target given; `unreported` when the product's modal does
- * not say what its selection did).
- */
-export function createSettingsWorkspaceOpener(options: {
-  readonly configure: () => void;
-  readonly selectTarget: (target?: string) => SettingsTargetOutcome | void;
-  readonly render: () => void;
-}): (target?: string) => SettingsTargetOutcome | 'unreported' {
-  return (target) => {
-    options.configure();
-    const outcome = options.selectTarget(target);
-    options.render();
-    return outcome ?? (target?.trim() ? 'unreported' : 'none');
-  };
-}
+// The settings screen opens through the places (places/index.ts openSettings, settings-screen/).

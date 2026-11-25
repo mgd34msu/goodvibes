@@ -8,5 +8,4 @@
 export {
   createAgentCalendarTool,
   registerAgentCalendarTool,
-  type AgentCalendarToolOptions,
 } from '@goodvibes/engine/terminal-shell/agent-turn/connected-calendar-tool';

@@ -41,6 +41,7 @@ import {
   type ProcessIdentityProbe,
 } from './lifecycle-marker.js';
 import { crashLoopRollbackReceipt, decideCrashLoopRollback } from './boot-rollback.js';
+import { noteListChanged } from '../runtime/list-changes.js';
 import { inspectDaemonUpdateInstallation, resolveDaemonUpdateTargets } from '../runtime/daemon-update-installation.js';
 import { configuredSuiteWebuiDirectory, rollbackSuiteUpdate, SuiteUpdatePreparationError, SuiteUpdateRecoveryError } from '../runtime/suite-update.js';
 import { rollbackKeptPrevious, realUpdateFileIo, captureUpdateFileIo, retainDaemonNativeFiles, UpdateTransactionError, UpdateTransactionContendedError, compareVersions, normalizeVersion, describeTransactionRecovery, type UpdateFileIo, type UpdateTransactionReceipt, type DaemonCurrentReader } from '../runtime/self-update.js';
@@ -1015,6 +1016,25 @@ export class DaemonLifecycleRuntime {
     return { outcome: 'restarting', begin };
   }
 
+  /**
+   * A setting that takes effect only at the daemon's start changed: the daemon restarts itself through its service,
+   * once the change's own answer has gone (the restart begins on the next turn of the event loop, after the reply the
+   * write is part of). A daemon no service manager runs, or one that cannot restart itself, says so to the owner: the
+   * setting is kept and applies at the next start.
+   */
+  restartToApply(label: string): 'restarting' | 'by-hand' | 'failed' {
+    const restarted = this.restartThroughService();
+    if (restarted.outcome === 'restarting' && restarted.begin) {
+      const begin = restarted.begin;
+      setImmediate(begin);
+    } else if (restarted.outcome === 'by-hand') {
+      this.alertOwner(`${label} is changed and kept; it takes effect when the daemon starts again, and no service manager runs this daemon to restart it. Restart the daemon to apply it now.`);
+    } else {
+      this.alertOwner(`${label} is changed and kept, but the daemon could not restart itself to apply it (${restarted.detail ?? 'no reason given'}). Restart the daemon to apply it now.`);
+    }
+    return restarted.outcome;
+  }
+
   /** Fence handovers before the facade awaits any shutdown hooks. Never self-drains. */
   beginStopping(forHandover = false): void {
     this.stopping = true;
@@ -1160,6 +1180,8 @@ export class DaemonLifecycleRuntime {
       ...(this.options.exitProcess ? { exitProcess: this.options.exitProcess } : {}),
       ...(this.options.stderr ? { stderr: this.options.stderr } : {}),
       ...(this.options.onIncompleteHandover ? { onIncompleteHandover: this.options.onIncompleteHandover } : {}),
+      // Every screen showing the update state (the System place's Updates tab, the web view) reads it again.
+      onStateChange: () => { noteListChanged({ list: 'system-updates', change: 'changed' }); },
     });
     this.autoUpdater = updater;
     this.updateLoopOffReason = '';

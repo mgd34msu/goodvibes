@@ -86,6 +86,13 @@ const PERMISSION_ATTRIBUTION_FETCH_LOCALHOST_SCHEMA = objectSchema({
   url: STRING_SCHEMA,
 }, ['kind', 'host', 'url'], { additionalProperties: false });
 
+// A caller outside the daemon asked for a capability (capabilities.run) and the daemon put it to the owner: who asked.
+const PERMISSION_ATTRIBUTION_OUTSIDE_CALLER_SCHEMA = objectSchema({
+  kind: enumSchema(['outside-caller']),
+  name: STRING_SCHEMA,
+  principalId: STRING_SCHEMA,
+}, ['kind', 'name', 'principalId'], { additionalProperties: false });
+
 export const PERMISSION_ATTRIBUTION_SCHEMA: Record<string, unknown> = {
   anyOf: [
     PERMISSION_ATTRIBUTION_BACKGROUND_AGENT_SCHEMA,
@@ -93,6 +100,7 @@ export const PERMISSION_ATTRIBUTION_SCHEMA: Record<string, unknown> = {
     PERMISSION_ATTRIBUTION_SANDBOX_ESCALATION_SCHEMA,
     PERMISSION_ATTRIBUTION_EXEC_PROMPT_SCHEMA,
     PERMISSION_ATTRIBUTION_FETCH_LOCALHOST_SCHEMA,
+    PERMISSION_ATTRIBUTION_OUTSIDE_CALLER_SCHEMA,
   ],
 };
 
@@ -145,9 +153,16 @@ export const PERMISSION_USER_RULE_SCHEMA = objectSchema({
   createdAt: NUMBER_SCHEMA,
   /** The project a rule is scoped to; absent for a rule of every project (a never-run rule). */
   project: STRING_SCHEMA,
+  /** `3.5.0`: a refusing rule 3.5.0 kept for the daemon's folder that could not be placed, kept for every project. */
+  carried: STRING_SCHEMA,
+  /** The title of the session whose answer made the rule (a runner by its task, a chat by its title). */
+  madeIn: STRING_SCHEMA,
 }, ['id', 'effect', 'tier', 'tool', 'createdAt'], { additionalProperties: false });
 
-export const PERMISSION_RULES_LIST_INPUT_SCHEMA = objectSchema({}, []);
+export const PERMISSION_RULES_LIST_INPUT_SCHEMA = objectSchema({
+  /** A project's folder: only the rules in force there (that project's and those of every project). Absent: every rule. */
+  project: STRING_SCHEMA,
+}, []);
 export const PERMISSION_RULES_LIST_OUTPUT_SCHEMA = objectSchema({
   rules: arraySchema(PERMISSION_USER_RULE_SCHEMA),
 }, ['rules'], { additionalProperties: false });

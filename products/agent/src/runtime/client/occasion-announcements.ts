@@ -24,10 +24,14 @@ export interface OccasionAnnouncementWatch {
 export interface WatchOccasionAnnouncementsOptions {
   readonly baseUrl: string;
   readonly token: string;
+  /** The credential as it is now, read for every connect (a renewed one after the daemon restarted); else `token`. */
+  readonly currentToken?: (() => string | null) | undefined;
   /** Called once per announcement. */
   readonly onWaiting: () => void;
   /** Called once when an opened stream ends; not called for `close()`. */
   readonly onEnded: () => void;
+  /** Called each time the stream is open again after it was lost (the daemon is back, a restarted one included). */
+  readonly onBack?: (() => void) | undefined;
   readonly fetchImpl?: typeof fetch | undefined;
 }
 
@@ -47,16 +51,19 @@ export async function watchOccasionAnnouncements(options: WatchOccasionAnnouncem
   const url = new URL(buildUrl(options.baseUrl, '/api/control-plane/events'));
   url.searchParams.set('domains', 'deliveries');
   let closed = false;
+  // The daemon greets every connection (`ready`): each greeting after the first is this connection coming back.
+  let greetings = 0;
   const ended = (): void => { if (!closed) { closed = true; options.onEnded(); } };
   try {
     const close = await openRawServerSentEventStream(options.fetchImpl ?? globalThis.fetch, url.toString(), {
+      onReady: () => { greetings += 1; if (greetings > 1 && !closed) options.onBack?.(); },
       onEvent: ({ name: domain, payload }) => {
         if (domain === 'deliveries' && isOccasionWaitingFrame(payload)) options.onWaiting();
       },
       // An announcement may have been dropped: say a reminder may be waiting, so it is read now.
       onGap: () => { if (!closed) options.onWaiting(); },
       onEnd: (end) => { if (end.kind !== 'closed') ended(); },
-    }, { getAuthToken: () => options.token, reconnect: { enabled: true } });
+    }, { getAuthToken: () => options.currentToken?.() ?? options.token, reconnect: { enabled: true } });
     return { close: (): void => { if (closed) return; closed = true; close(); } };
   } catch (error) {
     logger.debug('[occasions] the reminder announcement stream could not be opened; reminders arrive at turn end and idle checks', {

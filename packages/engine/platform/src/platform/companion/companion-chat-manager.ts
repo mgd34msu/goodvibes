@@ -34,6 +34,7 @@ import { randomUUID } from 'node:crypto';
 import { EngineErrorCodes, RefusalError, refusal } from '@goodvibes/engine/errors';
 import type { ConversationManager } from '../core/conversation.js';
 import { startTurnForOwnerInput } from '../security/turn-boundary.js';
+import { withOtherPartyInput, withOwnerInput } from '../security/turn-input-party.js';
 import { withUntrustedContentScope } from '../security/untrusted-content.js';
 import type { CompanionPostMessageOptions } from './companion-chat-turn-control.js';
 import type {
@@ -103,7 +104,11 @@ import type { HookEvent, HookResult } from '../hooks/types.js';
 import { appendGoodVibesRuntimeAwarenessPrompt } from '../tools/goodvibes-runtime/index.js';
 import { normalizeError, summarizeError } from '../utils/error-display.js';
 import { logger } from '../utils/logger.js';
+import { noteModelUsage, spendingName } from '../runtime/cost/model-usage.js';
 import type { ConfigManager } from '../config/manager.js';
+import { resolve as resolvePath } from 'node:path';
+import { SCREENLESS_TURN_LINE, environmentBlock, sessionEnvironment } from '../core/environment-block.js';
+import { emitTurnCompleted } from '../runtime/emitters/index.js';
 
 // ---------------------------------------------------------------------------
 // Turn control (per-turn abort scope, cancel finalization, pending queue),
@@ -130,6 +135,20 @@ import type {
 type HookDispatcherLike = {
   fire(event: HookEvent): Promise<HookResult>;
 };
+
+/**
+ * A chat turn's environment in its project, from the host's one turn assembly (agents/orchestrator.ts
+ * `acquireTurnEnvironment`): the registry rooted there, the project's hooks, and the step after the turn.
+ */
+export interface CompanionTurnEnvironment {
+  readonly workingDirectory: string;
+  readonly registry: ToolRegistry;
+  readonly toolCallHooks?: HookDispatcherLike | undefined;
+  /** Resolves once the project's hooks are read and its checkpoint baseline is taken (awaited before the first tool call). */
+  ready?(): Promise<void>;
+  afterTurn(turn: { readonly sessionId?: string | undefined; readonly turnId?: string | undefined }): void;
+  release(): Promise<void>;
+}
 
 export type { CompanionChatArtifactStore } from './companion-chat-attachments.js';
 
@@ -308,6 +327,12 @@ export interface CompanionChatManagerConfig {
    */
   readonly toolRegistry?: ToolRegistry | undefined;
   /**
+   * The host's one turn assembly: a turn's environment in the chat's project (its tools rooted there, the project's
+   * tool servers, hooks and checkpoint after the turn), made once per project and reused. When given, every turn takes
+   * its tools and hooks from it instead of `toolRegistry` and `hookDispatcher`.
+   */
+  readonly turnEnvironment?: ((project: string | undefined) => CompanionTurnEnvironment) | undefined;
+  /**
    * Permission boundary used when executing model-originated tool calls.
    * Tool calls are denied when a registry is present without this manager.
    */
@@ -364,6 +389,7 @@ export class CompanionChatManager {
   private readonly nativeDataWriter: NativeDataWriteOwner | undefined;
   private readonly eventPublisher: CompanionChatEventPublisher;
   private readonly toolRegistry: ToolRegistry | null;
+  private readonly turnEnvironment: CompanionChatManagerConfig['turnEnvironment'];
   private readonly permissionManager: PermissionManager | null;
   private readonly hookDispatcher: HookDispatcherLike | null;
   private readonly runtimeBus: RuntimeEventBus | null;
@@ -394,6 +420,7 @@ export class CompanionChatManager {
     this.nativeDataWriter = config.nativeDataWriter;
     this.eventPublisher = config.eventPublisher;
     this.toolRegistry = config.toolRegistry ?? null;
+    this.turnEnvironment = config.turnEnvironment;
     this.permissionManager = config.permissionManager ?? null;
     this.hookDispatcher = config.hookDispatcher ?? null;
     this.runtimeBus = config.runtimeBus ?? null;
@@ -496,6 +523,7 @@ export class CompanionChatManager {
       provider: input.provider ?? null,
       ...(input.reasoningEffort === undefined ? {} : { reasoningEffort: input.reasoningEffort }),
       systemPrompt: input.systemPrompt ?? null,
+      ...(input.project ? { project: resolvePath(input.project) } : {}),
       status: 'active',
       createdAt: now,
       updatedAt: now,
@@ -789,7 +817,7 @@ export class CompanionChatManager {
           await broker.register({
             sessionId,
             kind: 'companion-chat',
-            project: 'unknown',
+            project: updated.project ?? 'unknown',
             title: updated.title,
             participant: { surfaceKind: 'companion', surfaceId: sessionId, lastSeenAt: Date.now() },
             reopen: true,
@@ -1369,7 +1397,10 @@ export class CompanionChatManager {
       // The companion/webui turn boundary: this manager runs its own turn loop,
       // so the one in Orchestrator.runTurn never reached it. See turn-boundary.ts.
       startTurnForOwnerInput({ ownerDirect });
-      return run();
+      // A message the owner did not send (Home Assistant's room, a signed-in person or device that is not the owner)
+      // drives a turn on someone else's input: no command outside a real sandbox, no file written
+      // (security/turn-input-party.ts).
+      return ownerDirect ? withOwnerInput(run) : withOtherPartyInput('a message to this chat that the owner did not send', run);
     });
     this.activeWork.add(work);
     void work.then(() => { this.activeWork.delete(work); }, (error: unknown) => {
@@ -1538,6 +1569,8 @@ export class CompanionChatManager {
     const turnAttempts = new TurnAttemptRecord();
     const turnChanges = new TurnChangeRecord();
     let actualUsage = { inputTokens: 0, outputTokens: 0, cacheReadTokens: 0, cacheWriteTokens: 0 };
+    // The turn's environment in the chat's project, from the host's one turn assembly; released when the turn ends.
+    let environment: CompanionTurnEnvironment | undefined;
     try {
       // Inside the try so a throwing publisher still releases the slot and drains the queue.
       session.activeTurn = scope.activeTurn;
@@ -1545,7 +1578,16 @@ export class CompanionChatManager {
       else this.markTurn(session, userMessageId, 'started');
       publish({ type: 'turn.started', sessionId, messageId: userMessageId, turnId, envelope: startEnvelope });
       const conversation = await prepareConversation();
-      const toolRegistry = this.toolRegistry;
+      environment = this.turnEnvironment?.(session.meta.project);
+      const toolRegistry = environment?.registry ?? this.toolRegistry;
+      const turnHooks = environment ? environment.toolCallHooks ?? null : this.hookDispatcher;
+      const turnEnvironment = environment;
+      const environmentReady = (): Promise<void> => turnEnvironment?.ready?.() ?? Promise.resolve();
+      // The facts every turn is told, in the host channel a terminal turn uses: the folder it works in, the system,
+      // today's date and the repository there (read once per chat, kept with its conversation).
+      if (environment) {
+        conversation.hostInstructions.set('environment', `${environmentBlock(await sessionEnvironment(conversation, environment.workingDirectory), new Date())}\n${SCREENLESS_TURN_LINE}`);
+      }
       const history = new TurnHistoryWriter(conversation, (name, args) => toolCallActivity(toolRegistry?.definitionOf(name)?.activity, args));
       writer = history;
 
@@ -1574,6 +1616,24 @@ export class CompanionChatManager {
         },
         describeCost: (from, to) => describeFailoverCost((modelId, providerId) => registry.resolveModelPricing(modelId, providerId), from, to),
       }) : undefined;
+      // What one request of this turn cost, recorded by the daemon as this chat's (Money, Spending; runtime/cost/model-usage.ts).
+      const noteTurnUsage = (usage: { readonly inputTokens: number; readonly outputTokens: number; readonly cacheReadTokens?: number | undefined; readonly cacheWriteTokens?: number | undefined }): void => {
+        let provider = route.provider ?? undefined;
+        let model = route.model ?? undefined;
+        if ((provider === undefined || model === undefined) && registry) {
+          const chosen = currentModel();
+          provider = chosen.provider;
+          model = chosen.registryKey.slice(chosen.registryKey.indexOf(':') + 1);
+        } else if (provider !== undefined && model !== undefined && model.startsWith(`${provider}:`)) {
+          model = model.slice(provider.length + 1);
+        }
+        noteModelUsage({
+          at: Date.now(), ...(provider !== undefined ? { provider } : {}), ...(model !== undefined ? { model } : {}), sessionId,
+          source: `chat "${spendingName(session.meta.title) || 'untitled'}"`,
+          inputTokens: usage.inputTokens, outputTokens: usage.outputTokens,
+          cacheReadTokens: usage.cacheReadTokens ?? 0, cacheWriteTokens: usage.cacheWriteTokens ?? 0,
+        });
+      };
       // The text a failed attempt streamed is not the answer: the next model's replaces it.
       let attemptBase = '';
       // One request of the turn. The closing request after the round limit asks
@@ -1581,7 +1641,8 @@ export class CompanionChatManager {
       const request = async ({ tools, signal, onDelta }: TurnRequest): Promise<TurnModelResponse> => {
         uncommittedContent = '';
         attemptBase = assistantContent;
-        const stream = this.provider.chatStream([...conversation.getMessagesForLLM()], {
+        // The history and, when set, the host channel's facts (as a terminal turn's request carries them).
+        const stream = this.provider.chatStream([...(environment ? conversation.getMessagesForRequest() : conversation.getMessagesForLLM())], {
           routingContext: { sessionId, turnId, ...(tools && userMsg ? { prompt: userMsg.content } : {}) },
           systemPrompt: appendGoodVibesRuntimeAwarenessPrompt(tools
             ? route.systemPrompt
@@ -1590,7 +1651,7 @@ export class CompanionChatManager {
           provider: route.provider,
           reasoningEffort: route.reasoningEffort,
           // Core tools in full, the rest one line each (tool_schema loads them), read per request.
-          ...(tools ? { tools: this.toolRegistry?.getModelToolDefinitions() ?? [] } : {}),
+          ...(tools ? { tools: toolRegistry?.getModelToolDefinitions() ?? [] } : {}),
           abortSignal: signal,
         });
         let content = '';
@@ -1633,12 +1694,15 @@ export class CompanionChatManager {
               throw chunk.failure instanceof Error ? chunk.failure : new Error(chunk.error ?? 'Provider streaming error');
             case 'done':
               if (chunk.decisionRoute) decisionRoute = chunk.decisionRoute;
-              if (chunk.usage) actualUsage = {
-                inputTokens: actualUsage.inputTokens + chunk.usage.inputTokens,
-                outputTokens: actualUsage.outputTokens + chunk.usage.outputTokens,
-                cacheReadTokens: actualUsage.cacheReadTokens + (chunk.usage.cacheReadTokens ?? 0),
-                cacheWriteTokens: actualUsage.cacheWriteTokens + (chunk.usage.cacheWriteTokens ?? 0),
-              };
+              if (chunk.usage) {
+                actualUsage = {
+                  inputTokens: actualUsage.inputTokens + chunk.usage.inputTokens,
+                  outputTokens: actualUsage.outputTokens + chunk.usage.outputTokens,
+                  cacheReadTokens: actualUsage.cacheReadTokens + (chunk.usage.cacheReadTokens ?? 0),
+                  cacheWriteTokens: actualUsage.cacheWriteTokens + (chunk.usage.cacheWriteTokens ?? 0),
+                };
+                noteTurnUsage(chunk.usage);
+              }
               break;
           }
         }
@@ -1684,9 +1748,12 @@ export class CompanionChatManager {
           },
         },
         ...(toolRegistry ? {
-          executeTools: (calls: ToolCall[], { signal, onSettled }: { signal: AbortSignal; onSettled(result: ToolResult): void }) => executeCompanionToolCalls(
-            { toolRegistry, permissionManager: this.permissionManager, hookDispatcher: this.hookDispatcher, runtimeBus: this.runtimeBus, configManager: this.configManager,
-              autonomousSource: () => ({ goal: userMsg?.content ?? '', criteria: [] }) },
+          // The project's hooks are read and its checkpoint baseline taken before the first call changes anything.
+          executeTools: async (calls: ToolCall[], { signal, onSettled }: { signal: AbortSignal; onSettled(result: ToolResult): void }) => environmentReady().then(() => executeCompanionToolCalls(
+            { toolRegistry, permissionManager: this.permissionManager, hookDispatcher: turnHooks, runtimeBus: this.runtimeBus, configManager: this.configManager,
+              autonomousSource: () => ({ goal: userMsg?.content ?? '', criteria: [] }),
+              // Every decision on this chat's calls is made for its project (rules, folder trust, "in this project").
+              ...(session.meta.project ? { workingDirectory: session.meta.project } : {}) },
             calls, publish, sessionId, turnId, {
               signal,
               onSettled: (result) => {
@@ -1694,7 +1761,7 @@ export class CompanionChatManager {
                 onSettled(result);
               },
             },
-          ),
+          )),
         } : {}),
       }, {
         speaker: 'owner',
@@ -1757,6 +1824,12 @@ export class CompanionChatManager {
       };
 
       publish({ type: 'turn.completed', sessionId, turnId, assistantMessageId, envelope: completedEnvelope });
+      // The turn ends as every turn does: its session bound to its project's checkpoint store, then TURN_COMPLETED on
+      // the daemon's bus, which that store snapshots (the project's files, when the turn changed them).
+      environment?.afterTurn({ sessionId, turnId });
+      if (this.runtimeBus && environment) {
+        emitTurnCompleted(this.runtimeBus, { sessionId, traceId: `${sessionId}:${turnId}`, source: 'companion-chat' }, { turnId, response: assistantContent, stopReason: assistantContent ? 'completed' : 'empty_response' });
+      }
       this.resolvePendingReply(userMessageId, { messageId: userMessageId, assistantMessageId, response: assistantContent });
     } catch (err: unknown) {
       if (!abortSignal.aborted) {
@@ -1780,6 +1853,10 @@ export class CompanionChatManager {
       if (!this.replyUnsaved(session, userMessageId)) this.markTurn(session, userMessageId, 'ended');
       scope.detach();
       scope.settle({ partialPersisted: false });
+      // The project's environment stays made for the next turn there; this turn lets go of it.
+      void environment?.release().catch((error: unknown) => {
+        logger.warn('[companion-chat] a turn\'s environment was not released', { sessionId, error: summarizeError(error) });
+      });
       // Drain: a queued send (or a steer that jumped the queue) starts now.
       this._startNextTurn(session);
     }
@@ -1819,6 +1896,8 @@ export class CompanionChatManager {
       error: raw,
       stopReason: providerFailed ? 'provider_error' : 'unexpected_error',
       ...(normalized.statusCode !== undefined ? { status: normalized.statusCode } : {}),
+      // The provider's own code (a conversation too long for the model, a content filter): the row says what it was.
+      ...(normalized.providerCode ? { providerCode: normalized.providerCode } : {}),
       ...(normalized.provider ? { provider: normalized.provider, providerName: providerDisplayLabel(normalized.provider) } : {}),
       ...(providerFailed && turn.attempts.count > 0 ? { attempts: turn.attempts.count, attemptTimes: [...turn.attempts.times] } : {}),
       changes: turn.changes,

@@ -78,6 +78,12 @@ export interface AgentRecord extends ProgressBearingRecord {
    * (automation, hooks); such an agent is listed to no session's model.
    */
   sessionId?: string | undefined;
+  /**
+   * What this run's spending is for, as Money, Spending names it (`schedule "Morning brief"`, `work "Add retries"`,
+   * `shared session "Support"`): set by the host that started it, else taken from the agent that started it or the
+   * work it is a step of (AgentManager.spawn). Absent: the run is named by its task.
+   */
+  spendingSource?: string | undefined;
   /** The contract this agent belongs to (its owner record, a unit's sub-agent, or the planner). */
   contractId?: string | undefined;
   /** The part this agent plays in its contract. */
@@ -92,6 +98,13 @@ export interface AgentRecord extends ProgressBearingRecord {
   routeReason?: string | undefined;
   /** Units a spawn proposed for its contract (a batch-spawn's tasks), carried to the planner. */
   proposedUnits?: AgentInput['proposedUnits'] | undefined;
+  /**
+   * The piece of work on the daemon this record follows (a terminal program's delegation, work-delegation.ts): the
+   * record runs while the work runs and settles with its result; the work is the daemon's and shows in Work.
+   */
+  delegatedWorkId?: string | undefined;
+  /** While that work waits on the owner in Work (a question, its plan, a failed step): where it stands, in words. */
+  delegatedWorkWaiting?: string | undefined;
   outsideContract?: boolean | undefined;
   /** Completion report, or reply to a person; see AgentInput.replyStyle. Absent ⇒ 'report'. */
   replyStyle?: 'report' | 'conversational' | undefined;

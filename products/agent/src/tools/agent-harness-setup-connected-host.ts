@@ -97,7 +97,7 @@ export async function connectedHostAuthPosture(
       sessions: snapshot.auth.snapshot.sessionCount,
     },
     routes: {
-      reviewCommand: '/auth review',
+      reviewCommand: 'capability_run auth.review (Models and providers, Providers)',
       connectedHostStatus: 'host action:"status" includeParameters:true',
       pairingPosture: 'agent_harness mode:"pairing_posture" includeParameters:true',
       qrPairingRoute: 'agent_harness mode:"pairing_route" pairingRouteId:"qr-pairing"',
@@ -279,7 +279,7 @@ export function connectedHostRepairCards(
       state: 'available',
       effect: 'read-only',
       modelRoute: 'host action:"status" includeParameters:true',
-      userRoute: '/health compat',
+      userRoute: 'System place, Health: check the connected host\'s compatibility',
       recommendation: statusRecommendation,
       liveEvidence: repairLiveEvidence(probe, probe.status === 'reachable'
         ? 'Runtime endpoint is reachable; use connected-host status when token, compatibility, or Knowledge readiness still needs review.'
@@ -295,7 +295,7 @@ export function connectedHostRepairCards(
       state: 'available',
       effect: 'read-only',
       modelRoute: 'host action:"services" includeParameters:true',
-      userRoute: '/health',
+      userRoute: 'System place, Health',
       recommendation: postureRecommendation,
       liveEvidence: repairLiveEvidence(probe, probe.issues.length > 0
         ? `Service posture reports ${probe.issues.length} issue(s); inspect endpoint binding, reachability, and logs before mutation.`
@@ -310,7 +310,7 @@ export function connectedHostRepairCards(
       label: 'Read service install/runtime status',
       methodId: 'services.status',
       effect: 'read-only',
-      userRoute: '/health compat',
+      userRoute: 'System place, Health: check the connected host\'s compatibility',
       prerequisite: liveHostPrerequisite,
       recommendation: statusRecommendation,
       liveEvidence: repairLiveEvidence(probe, probe.status === 'reachable'

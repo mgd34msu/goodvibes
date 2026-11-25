@@ -46,7 +46,8 @@ export const builtinTriggerOperationMethodDescriptors = [
     repeat: 'safe',
     description: 'Create a trigger from a definition { id, label, description?, spec, action?, ownerSessionId? }. spec.kind is on-exit, stream or condition; commands are argv, never a shell line. The action defaults to an agent turn, whose answer goes to the channel its deliverTo names (telegram, slack:C123) or else to the owner inbox; an action-grant action names a grant the owner registered. Needs watchers.triggers.enabled.',
     category: 'watchers', transport: ['ws'], effects: ['watchers.administer'],
-    inputSchema: objectSchema({ definition: JSON_OBJECT_SCHEMA }, ['definition']), outputSchema: ONE_TRIGGER, errorCodes: TRIGGER_ERRORS }),
+    // workingDirectory: the project folder its turns and commands work in (or definition.workingDirectory).
+    inputSchema: objectSchema({ definition: JSON_OBJECT_SCHEMA, workingDirectory: STRING_SCHEMA }, ['definition']), outputSchema: ONE_TRIGGER, errorCodes: TRIGGER_ERRORS }),
   methodDescriptor({ id: 'watchers.triggers.preview', title: 'Preview a trigger',
     description: 'Read the blanks of "Watch for something" (the inputs of the triggers.watch capability by name: name, kind finishes|prints|page|file|written, command one word per line, match, url, path, every, then ask|run, say, deliver, grant, definition) into what would be kept: summary is what it watches and does in one sentence, and input is the body of watchers.triggers.create ({ definition }). Nothing is made. A grant is looked up among the commands the owner let triggers run.',
     category: 'watchers', transport: ['ws'], effects: ['watchers.inspect'],

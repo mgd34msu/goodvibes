@@ -981,7 +981,7 @@ export class CloudflareControlPlaneManager {
           verification.daemonBatchProxy && !verification.daemonBatchProxy.ok ? `daemon proxy answered ${verification.daemonBatchProxy.status}${verification.daemonBatchProxy.error ? ` (${verification.daemonBatchProxy.error.slice(0, 200)})` : ''}` : '',
         ].filter(Boolean).join('; ');
         problems.push(`The Worker could not reach the daemon: ${failures}.`);
-        steps.push({ name: 'verify-worker', status: 'warning', message: `Worker check failed: ${failures}. Fix the cause, then run /cloudflare verify and provision again.` });
+        steps.push({ name: 'verify-worker', status: 'warning', message: `Worker check failed: ${failures}. Fix the cause, then in Devices and network under Cloudflare check the worker and deploy again.` });
       }
     } else if (verifyRequested) {
       problems.push('No Worker URL is known, so the Worker was not checked.');
@@ -1068,7 +1068,7 @@ export class CloudflareControlPlaneManager {
   private async startTunnelConnector(persist: boolean, steps: CloudflareProvisionStep[]): Promise<CloudflareTunnelConnectorStatus | undefined> {
     const connector = this.options.tunnelConnector;
     if (!connector) {
-      steps.push({ name: 'tunnel-connector', status: 'warning', message: 'This process does not run the tunnel connector. The daemon runs it whenever cloudflare.enabled is on and a tunnel is recorded, and follows changes to those settings; /cloudflare status on the daemon says whether it is connected.' });
+      steps.push({ name: 'tunnel-connector', status: 'warning', message: 'This process does not run the tunnel connector. The daemon runs it whenever cloudflare.enabled is on and a tunnel is recorded, and follows changes to those settings; the Cloudflare tab of Devices and network (the daemon\'s cloudflare.status) says whether it is connected.' });
       return undefined;
     }
     if (!persist) {
@@ -1239,7 +1239,7 @@ export class CloudflareControlPlaneManager {
       const bootstrapToken = clean(input.bootstrapToken);
       const label = `operational token ${madeToken.tokenName} (${madeToken.tokenId})`;
       if (!bootstrapToken) {
-        steps.push({ name: 'revoke-operational-token', status: 'skipped', message: `The ${label} is still live in Cloudflare. Disable again with a bootstrap token to revoke it (/cloudflare disable --bootstrap-token <token> or --bootstrap-env <name>), or delete it in the Cloudflare dashboard (My Profile > API Tokens).`, resourceId: madeToken.tokenId });
+        steps.push({ name: 'revoke-operational-token', status: 'skipped', message: `The ${label} is still live in Cloudflare. Turn Cloudflare off again with a bootstrap token to revoke it (Devices and network, Cloudflare, Turn off, Bootstrap token), or delete it in the Cloudflare dashboard (My Profile > API Tokens).`, resourceId: madeToken.tokenId });
       } else {
         let outcome: { readonly revoked: boolean; readonly reason?: string | undefined };
         try {
@@ -1392,7 +1392,7 @@ export class CloudflareControlPlaneManager {
       const status = error && typeof error === 'object' ? Object.getOwnPropertyDescriptor(error, 'status')?.value : undefined;
       if (status === 404) return false;
       throw new CloudflareControlPlaneError(
-        `Could not check at Cloudflare whether the operational token ${tokenId} made earlier still works: ${summarizeError(error)}. Nothing was created. Retry, or ask for a new token (reuse: false, /cloudflare create-token --new).`,
+        `Could not check at Cloudflare whether the operational token ${tokenId} made earlier still works: ${summarizeError(error)}. Nothing was created. Retry, or ask for a new token (reuse: false; in Devices and network, Cloudflare, Create the token, If one is held: Make a fresh one).`,
         'CLOUDFLARE_TOKEN_CHECK_FAILED',
         502,
         { cause: error },

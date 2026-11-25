@@ -25,7 +25,7 @@ leads to everything deeper.
 - [Planning and saved planning records](../products/tui/docs/project-planning.md): how planning works now and what happened to the older planning interview.
 - [Knowledge, artifacts and multimodal](../products/tui/docs/knowledge-artifacts-and-multimodal.md): session memory, durable memory, the knowledge store, artifacts, images and documents.
 - [Session durability](../products/tui/docs/session-durability.md): the saved session and the crash snapshot offered at the next start.
-- [Saving and uploading a session](../products/tui/docs/share-command.md): `/session save-file` and `/session upload`, formats and redaction.
+- [Saving and uploading a session](../products/tui/docs/share-command.md): saving this conversation as a file and uploading it for a link, formats and redaction.
 - [Voice and live TTS](../products/tui/docs/voice-and-live-tts.md): spoken answers and the speech providers.
 - [Sandbox](../products/tui/docs/sandbox.md): how shell commands are contained on Linux.
 - [Accessibility](../products/tui/docs/accessibility.md): using the terminal app with a screen reader.

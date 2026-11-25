@@ -692,7 +692,7 @@ export class ServiceRegistry {
         outcome: 'not-tested',
         status: null,
         testedUrl: null,
-        error: `No ${config.authType} credential could be resolved for ${serviceName}; nothing was sent. Store ${config.tokenKey} with /secrets set`,
+        error: `No ${config.authType} credential could be resolved for ${serviceName}; nothing was sent. Store ${config.tokenKey} with "Store a secret" (Permissions and safety, Secrets)`,
       };
     }
     const testPath = config.testPath?.trim();

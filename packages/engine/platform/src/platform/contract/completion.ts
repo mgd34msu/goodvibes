@@ -1485,11 +1485,12 @@ export function createCompletion(context: StepContext, correction: Pick<Correcti
   }
 
   return {
-    groupUnitsPassed: (run, groupId) => verify(run, groupId, `group ${groupId} could not be judged`, () => groupUnitsPassed(run, groupId)),
-    groupsPassed: (run) => verify(run, run.id, 'the deliverable could not be judged', () => groupsPassed(run)),
-    judgeGroup: (run, groupId, trigger) => verify(run, groupId, `group ${groupId} could not be judged`, () => judgeGroup(run, groupId, trigger)),
-    judgeDeliverable: (run, trigger) => verify(run, run.id, 'the deliverable could not be judged', () => judgeDeliverable(run, trigger)),
-    commitDeliverable: (run) => verify(run, run.id, 'the deliverable could not be published', () => judgeDeliverable(run, 'resume')),
+    // Failure reasons a person reads about the work: its steps and its result, never "group g1" or "the deliverable".
+    groupUnitsPassed: (run, groupId) => verify(run, groupId, `the steps "${run.group(groupId)?.title || groupId}" could not be checked`, () => groupUnitsPassed(run, groupId)),
+    groupsPassed: (run) => verify(run, run.id, 'its result could not be checked', () => groupsPassed(run)),
+    judgeGroup: (run, groupId, trigger) => verify(run, groupId, `the steps "${run.group(groupId)?.title || groupId}" could not be checked`, () => judgeGroup(run, groupId, trigger)),
+    judgeDeliverable: (run, trigger) => verify(run, run.id, 'its result could not be checked', () => judgeDeliverable(run, trigger)),
+    commitDeliverable: (run) => verify(run, run.id, 'its result could not be put in the project', () => judgeDeliverable(run, 'resume')),
   };
 }
 

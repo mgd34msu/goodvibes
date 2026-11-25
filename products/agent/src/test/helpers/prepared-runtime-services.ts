@@ -3,6 +3,6 @@ import { createRuntimeServices, type RuntimeServices, type RuntimeServicesOption
 
 /** Perform the same explicit project activation as Agent bootstrap, on the fixture's real owner. */
 export async function createPreparedAgentRuntimeServices(options: RuntimeServicesOptions): Promise<RuntimeServices> {
-  await prepareConfiguredProjectContext(options.configManager, options.workingDir, 'knowledge-agent.sqlite', { activate: true });
+  await prepareConfiguredProjectContext(options.configManager, options.workingDir, 'knowledge-wiki.sqlite', { activate: true, inDaemonStateFolder: true });
   return createRuntimeServices(options);
 }

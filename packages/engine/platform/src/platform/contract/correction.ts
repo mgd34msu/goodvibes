@@ -327,6 +327,7 @@ export function createCorrection(context: StepContext, escalations: Pick<Escalat
           attempt: attempt === 0 ? 'initial' : 'repair',
           route,
           signal: run.abort.signal,
+          forAgentId: contract.ownerAgentId,
         }, input.authority)));
         if (result.agentId !== undefined) contract.plannerAgentIds.push(result.agentId);
         if (run.terminal) return;
@@ -390,7 +391,7 @@ export function createCorrection(context: StepContext, escalations: Pick<Escalat
         const attempt = spendNative(contract, context.native, key);
         const result = await context.decompositionRunner.run(bindContractPlanConsumer(bindContractActionSource(bindContractInputAuthority({ goal: contract.nativeSource!.goal, workingDir: input.workingDirectory,
           systemPrompt: buildFixPlannerPrompt(), userPrompt: buildFixPlannerRequest(brief, repair), bounds: readPlannerBounds(context.configManager),
-          attempt: attempt === 1 ? 'initial' : 'repair', route: route!, signal: run.abort.signal }, input.authority), sourceOf, port => nativeContractPort(contract, context.native, port, run.abort.signal))));
+          attempt: attempt === 1 ? 'initial' : 'repair', route: route!, signal: run.abort.signal, forAgentId: contract.ownerAgentId }, input.authority), sourceOf, port => nativeContractPort(contract, context.native, port, run.abort.signal))));
         if (result.agentId !== undefined) contract.plannerAgentIds.push(result.agentId);
         if (run.terminal) return;
         if (result.status !== 'completed') { run.control.fail('planning', 'the fix planner stopped before it produced a fix plan'); return; }
@@ -809,7 +810,7 @@ export function createCorrection(context: StepContext, escalations: Pick<Escalat
       retryOrCancel: true,
     });
     // The caller saves the question's binding and writes the checkpoint once.
-    run.contract.statusLine = `Contract ${run.id} finished; no decision model is in use, so its result waits for you to accept it (reply "accept" or "cancel").`;
+    run.contract.statusLine = 'The work finished; no decision model is in use, so its result waits for you to accept it or stop the work.';
     return escalation.id;
   }
 
@@ -824,7 +825,7 @@ export function createCorrection(context: StepContext, escalations: Pick<Escalat
       question: buildPublicationPauseQuestion(run.contract, input),
       retryOrCancel: true,
     });
-    run.contract.statusLine = `Contract ${run.id} passed its checks but its result is not published (${input.note})${input.branch === undefined ? '' : `; it is kept on branch ${input.branch}`}. Clear the obstacle and reply "retry", or "cancel".`;
+    run.contract.statusLine = `The work's result passed its checks but could not be put in the project (${input.note})${input.branch === undefined ? '' : `; it is kept on branch ${input.branch}`}. Clear what blocks it, then put it in again or stop the work.`;
     context.checkpoint?.(run);
   }
 }

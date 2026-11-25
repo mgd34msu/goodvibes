@@ -10,6 +10,8 @@ import { remoteReadModelSnapshot, type RemoteCaptureOutcomeRecord, type RemoteWo
 import { previewHarnessText } from '@goodvibes/engine/terminal-shell/agent-turn/preview-text';
 import { clampReadLimit } from '@goodvibes/engine/terminal-shell/agent-turn/read-helpers';
 import { readString } from '@goodvibes/engine/terminal-shell/agent-turn/tool-args';
+import { runDaemonCapability } from '@goodvibes/engine/terminal-shell/command-actions';
+import { capabilityBinding } from '../input/commands/capability-binding.ts';
 
 interface AgentHarnessAgentOrchestrationArgs {
   readonly agentId?: unknown;
@@ -103,27 +105,23 @@ function exportAgents(context: CommandContext): readonly AgentRecordView[] | nul
   }
 }
 
-function remoteContracts(context: CommandContext): readonly Record<string, unknown>[] {
+/**
+ * The remote runners are the daemon's (runtime/remote/daemon-runners.ts): its pools, contracts and handed-back
+ * artifacts, read once through `remote.list`. A daemon that cannot be asked is said in `unreadable`, never counted as none.
+ */
+async function daemonRunners(context: CommandContext): Promise<{
+  readonly pools: readonly Record<string, unknown>[]; readonly contracts: readonly Record<string, unknown>[]; readonly artifacts: readonly Record<string, unknown>[];
+  readonly unreadable?: string | undefined;
+}> {
+  const rows = (value: unknown): readonly Record<string, unknown>[] => Array.isArray(value) ? value.filter((entry): entry is Record<string, unknown> => !!entry && typeof entry === 'object' && !Array.isArray(entry)) : [];
   try {
-    return context.ops.remoteRuntime?.listContracts().map((record) => record as unknown as Record<string, unknown>) ?? [];
-  } catch {
-    throw new ToolInputProjectionError('unavailable');
-  }
-}
-
-function remotePools(context: CommandContext): readonly Record<string, unknown>[] {
-  try {
-    return context.ops.remoteRuntime?.listPools().map((record) => record as unknown as Record<string, unknown>) ?? [];
-  } catch {
-    throw new ToolInputProjectionError('unavailable');
-  }
-}
-
-function remoteRuntimeArtifacts(context: CommandContext): readonly Record<string, unknown>[] {
-  try {
-    return context.ops.remoteRuntime?.listArtifacts().map((record) => record as unknown as Record<string, unknown>) ?? [];
-  } catch {
-    throw new ToolInputProjectionError('unavailable');
+    const data = readObject(readObject(await runDaemonCapability('remote.list', {}, context, capabilityBinding)).data);
+    return {
+      pools: rows(data.pools), contracts: rows(data.contracts), artifacts: rows(data.artifacts),
+      ...(typeof data.unreadable === 'string' ? { unreadable: data.unreadable } : {}),
+    };
+  } catch (error) {
+    return { pools: [], contracts: [], artifacts: [], unreadable: error instanceof Error ? error.message : String(error) };
   }
 }
 
@@ -148,8 +146,7 @@ export function remoteReceiptArtifacts(context: CommandContext): readonly Record
   }
 }
 
-function remoteArtifacts(context: CommandContext): readonly Record<string, unknown>[] {
-  const runtimeArtifacts = remoteRuntimeArtifacts(context);
+function remoteArtifacts(context: CommandContext, runtimeArtifacts: readonly Record<string, unknown>[]): readonly Record<string, unknown>[] {
   const seen = new Set(runtimeArtifacts.map((artifact) => readString(artifact.id)).filter(Boolean));
   const receiptArtifacts = remoteReceiptArtifacts(context).filter((artifact) => {
     const id = readString(artifact.id);
@@ -158,18 +155,19 @@ function remoteArtifacts(context: CommandContext): readonly Record<string, unkno
   return [...runtimeArtifacts, ...receiptArtifacts];
 }
 
-function remoteRuntimeSnapshot(context: CommandContext): RemoteRuntimeSnapshot {
-  const pools = remotePools(context), contracts = remoteContracts(context), artifacts = remoteArtifacts(context);
-  const readModels = remoteReadModelSnapshot(context);
+async function remoteRuntimeSnapshot(context: CommandContext): Promise<RemoteRuntimeSnapshot> {
+  const runners = await daemonRunners(context);
+  const readModels = remoteReadModelSnapshot(context, { contracts: runners.contracts, artifacts: runners.artifacts });
+  const sourceErrors = [...(readModels.sourceErrors ?? []), ...(runners.unreadable ? [`the daemon's remote runners could not be read: ${runners.unreadable}`] : [])];
   return {
-    pools,
-    contracts,
-    artifacts,
+    pools: runners.pools,
+    contracts: runners.contracts,
+    artifacts: remoteArtifacts(context, runners.artifacts),
     outcomes: readModels.outcomes,
     workspaces: readModels.workspaces,
     sourceCounts: readModels.sourceCounts,
     ...(readModels.dropped ? { dropped: readModels.dropped } : {}),
-    ...(readModels.sourceErrors ? { sourceErrors: readModels.sourceErrors } : {}),
+    ...(sourceErrors.length > 0 ? { sourceErrors } : {}),
   };
 }
 
@@ -568,7 +566,7 @@ function managedExecutionPlan(
   const running = records.filter((record) => ['pending', 'running'].includes(agentStatus(record))).length;
   const failed = records.filter((record) => agentStatus(record) === 'failed').length;
   const completed = records.filter((record) => agentStatus(record) === 'completed').length;
-  const remoteStatus = contracts.length > 0 || artifacts.length > 0 || outcomes.length > 0 || workspaces.length > 0 ? 'ready' : context.ops.remoteRuntime ? 'ready' : 'needs-setup';
+  const remoteStatus = contracts.length > 0 || artifacts.length > 0 || outcomes.length > 0 || workspaces.length > 0 ? 'ready' : remoteSnapshot.sourceErrors?.some((error) => error.startsWith('the daemon\'s remote runners')) ? 'needs-setup' : 'ready';
   const linkedWorkPlanItemCount = Array.from(workPlanByAgent.values()).reduce((count, entries) => count + entries.length, 0);
   const dispatchReceiptCount = Array.from(workPlanByAgent.values()).reduce(
     (count, entries) => count + entries.reduce((entryCount, item) => entryCount + dispatchReceiptLines(item).length, 0),
@@ -584,7 +582,7 @@ function managedExecutionPlan(
         label: 'Intake and lane selection',
         status: 'ready',
         purpose: 'Choose serial chat, one visible agent, batch agents, delegated review, or remote inspection based on user outcome.',
-        routes: ['delegation action:"status"', 'execution action:"status"', 'agent_harness mode:"agent_orchestration"', 'Owner: /work submit-file <JSON-path> (submission only; no execution)'],
+        routes: ['delegation action:"status"', 'execution action:"status"', 'agent_harness mode:"agent_orchestration"', 'Owner: New work in the Work place, its "From a file" field naming a JSON file (asks for the work; nothing starts)'],
       },
       {
         id: 'visible-agent-work',
@@ -712,11 +710,11 @@ export function agentOrchestrationCatalogStatus(context: CommandContext, toolReg
  * so nothing re-reads it to prove it unchanged; the call's signal is the only
  * "still wanted" check.
  */
-function readOrchestrationSources(context: CommandContext) {
-  return { records: exportAgents(context), remote: remoteRuntimeSnapshot(context), workItems: workPlanItems(context) };
+async function readOrchestrationSources(context: CommandContext) {
+  return { records: exportAgents(context), remote: await remoteRuntimeSnapshot(context), workItems: workPlanItems(context) };
 }
 
-function orchestrationEntries(sources: ReturnType<typeof readOrchestrationSources>) {
+function orchestrationEntries(sources: Awaited<ReturnType<typeof readOrchestrationSources>>) {
   const contracts = contractByRunnerId(sources.remote.contracts), artifacts = artifactsByRunnerId(sources.remote.artifacts);
   const outcomes = outcomesByRunnerId(sources.remote.outcomes), workspaces = workspacesByRunnerId(sources.remote.workspaces);
   const workItems = workPlanItemsByAgentId(sources.workItems);
@@ -789,7 +787,7 @@ async function matchingAgents(entries: ReturnType<typeof orchestrationEntries>, 
 export async function agentOrchestrationSummary(context: CommandContext, toolRegistry: ToolRegistry, args: AgentHarnessAgentOrchestrationArgs, options: CatalogRankingOptions = {}): Promise<Record<string, unknown>> {
   options.signal?.throwIfAborted(); options.assertCurrent?.();
   const query = readString(args.query);
-  const sources = readOrchestrationSources(context);
+  const sources = await readOrchestrationSources(context);
   const records = sources.records;
   const toolRegistered = agentToolRegistered(toolRegistry);
   if (!records) {
@@ -849,7 +847,7 @@ export async function describeAgentOrchestrationAgent(context: CommandContext, a
       usage: 'agent_orchestration_agent requires agentId, target, or query. Use mode:"agent_orchestration" to inspect visible agents.',
     };
   }
-  const sources = readOrchestrationSources(context);
+  const sources = await readOrchestrationSources(context);
   if (!sources.records) return { status: 'missing_lookup', usage: 'Visible Agent orchestration requires an Agent manager in the runtime.' };
   const entries = orchestrationEntries(sources);
   const full = args.includeParameters !== false;

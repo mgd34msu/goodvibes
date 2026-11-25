@@ -10,6 +10,7 @@
  */
 import {
   BOOLEAN_SCHEMA,
+  NUMBER_SCHEMA,
   STRING_SCHEMA,
   arraySchema,
   enumSchema,
@@ -30,6 +31,13 @@ const REGISTERED_WORKSPACE_SCHEMA = objectSchema(
     // consumer's checkpoint scope; the checkpoint-owning consumer stamps its
     // own roots (re-adding an existing root with this flag upgrades it).
     checkpointEligible: BOOLEAN_SCHEMA,
+    // The scope native work runs under, minted when the root is registered (absent on a root registered before
+    // native work existed, until it is registered again). The store writes it on every registration, so every
+    // answer that carries a record can carry it.
+    nativeScope: objectSchema(
+      { id: STRING_SCHEMA, canonicalRoot: STRING_SCHEMA, generation: NUMBER_SCHEMA },
+      ['id', 'canonicalRoot', 'generation'],
+    ),
   },
   ['root', 'registeredAt'],
 );
@@ -44,6 +52,15 @@ const DECLINED_WORKSPACE_SCHEMA = objectSchema(
 
 // ── workspaces.registrations.list ─────────────────────────────────────────────
 export const WORKSPACES_REGISTRATIONS_LIST_INPUT_SCHEMA = objectSchema({}, []);
+
+// ── workspaces.projects.list ──────────────────────────────────────────────────
+export const WORKSPACES_PROJECTS_LIST_INPUT_SCHEMA = objectSchema({}, []);
+export const WORKSPACES_PROJECTS_LIST_OUTPUT_SCHEMA = objectSchema(
+  {
+    projects: arraySchema(objectSchema({ root: STRING_SCHEMA, label: STRING_SCHEMA, daemonFolder: BOOLEAN_SCHEMA }, ['root', 'daemonFolder'])),
+  },
+  ['projects'],
+);
 export const WORKSPACES_REGISTRATIONS_LIST_OUTPUT_SCHEMA = objectSchema(
   {
     workspaces: arraySchema(REGISTERED_WORKSPACE_SCHEMA),

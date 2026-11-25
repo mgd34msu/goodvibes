@@ -32,6 +32,7 @@ import { decisionOrClassic, isClassicOperation, withConfiguredDecisionModelPolic
  * consumed marks that did not land.
  */
 
+import { OWNER_TYPED_METADATA_KEY } from '@goodvibes/engine/daemon-api';
 import { hostedLifecycleCallbacks } from './lifecycle-callbacks.js';
 import { logger } from '../utils/logger.js';
 import { summarizeError } from '../utils/error-display.js';
@@ -75,6 +76,8 @@ export interface HostedSessionSpine {
     readonly correlationId?: string | undefined;
     /** The surface the input was submitted from, recorded by the code that accepted it. */
     readonly surfaceKind?: string | undefined;
+    /** What the sender asked for: `steer` goes into a running turn, `follow-up` runs after it. */
+    readonly intent?: string | undefined;
   }[];
   /** Report one collected (`consumed:false`) or finished (`consumed:true`). */
   markInputDelivered(
@@ -119,7 +122,12 @@ export interface HostedSessionSpineIntakeOptions {
   /** Attribute awaited registration/close callbacks to their session owner. */
   readonly withLifecycle?: <T>(sessionId: string, callback: () => Promise<T>) => Promise<T>;
   /** Hand one collected input to its session's loop. */
-  readonly deliver: (sessionId: string, text: string, correlationId?: string | undefined, delivery?: { readonly operatorInput?: boolean | undefined; readonly answersContractQuestion?: string | undefined }) => Promise<void>;
+  readonly deliver: (sessionId: string, text: string, correlationId?: string | undefined, delivery?: { readonly operatorInput?: boolean | undefined; readonly answersContractQuestion?: string | undefined; readonly ownerTyped?: boolean | undefined }) => Promise<void>;
+  /**
+   * A steer while the session runs a turn: put it into that turn (before its next request) and say true, without
+   * waiting in the session's lane behind the turn being delivered. False when no turn runs: it is delivered as usual.
+   */
+  readonly steerRunning?: ((sessionId: string, text: string, correlationId?: string | undefined, delivery?: { readonly operatorInput?: boolean | undefined; readonly ownerTyped?: boolean | undefined }) => boolean) | undefined;
   readonly now: () => number;
   /** Interval read. Default 750ms without a spine `subscribe`; with one, a 5 s retry pass for deliveries and marks that did not land. */
   readonly intervalMs?: number | undefined;
@@ -187,6 +195,12 @@ interface PendingDelivery {
    * carries it: a contract's question is the owner's to answer.
    */
   readonly answersContractQuestion?: string | undefined;
+  /**
+   * The daemon stamped it as typed by the owner into his own program attached
+   * to the session (`OWNER_TYPED_METADATA_KEY`, set by the route where the
+   * request entered, never kept from a caller). Operator input only.
+   */
+  readonly ownerTyped?: boolean | undefined;
   readonly attempts: number;
   /** Failed attempts to classify the current failure; bounded like delivery attempts. */
   readonly readingFailures?: number | undefined;
@@ -453,6 +467,7 @@ export class HostedSessionSpineIntake {
             correlationId: input.correlationId,
             ...(operatorInput ? { operatorInput: true } : {}),
             ...(operatorInput && typeof answers === 'string' && answers.trim() !== '' ? { answersContractQuestion: answers } : {}),
+            ...(operatorInput && input.metadata?.[OWNER_TYPED_METADATA_KEY] === true ? { ownerTyped: true } : {}),
             attempts: 0,
           };
           // Without the collected mark the input is still queued on the spine, so
@@ -462,6 +477,16 @@ export class HostedSessionSpineIntake {
             logger.warn('[hosted-sessions] a queued input could not be marked collected; it stays queued and is retried next tick', {
               sessionId: record.id, inputId: input.id, error: summarizeError(error),
             });
+            continue;
+          }
+          // A steer while the session runs a turn goes into that turn now (before its next request), not behind it in
+          // the lane: the lane is waiting for that very turn. Without a running turn it is delivered, which starts one.
+          if (input.intent === 'steer' && delivery.answersContractQuestion === undefined
+            && this.options.steerRunning?.(record.id, delivery.body, delivery.correlationId,
+              operatorInput ? { operatorInput: true, ...(delivery.ownerTyped === true ? { ownerTyped: true } : {}) } : undefined) === true) {
+            const key = pendingKey(record.id, delivery.inputId);
+            try { await spine.markInputDelivered(record.id, delivery.inputId, { consumed: true }); }
+            catch { this.unconsumed.set(key, { sessionId: record.id, inputId: delivery.inputId }); }
             continue;
           }
           this.enqueueDelivery(spine, delivery);
@@ -623,7 +648,8 @@ export class HostedSessionSpineIntake {
     try {
       await this.options.deliver(pending.sessionId, pending.body, pending.correlationId,
         pending.operatorInput === true
-          ? { operatorInput: true, ...(pending.answersContractQuestion !== undefined ? { answersContractQuestion: pending.answersContractQuestion } : {}) }
+          ? { operatorInput: true, ...(pending.answersContractQuestion !== undefined ? { answersContractQuestion: pending.answersContractQuestion } : {}),
+            ...(pending.ownerTyped === true ? { ownerTyped: true } : {}) }
           : undefined);
       this.pending.delete(key);
       // A successfully completed turn stays delivered during shutdown drain.

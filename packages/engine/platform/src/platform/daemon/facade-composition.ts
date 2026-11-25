@@ -16,6 +16,7 @@ import { gateSurfaceSpawn, WAITING_FOR_RESTART_OUTCOME, type SurfaceIngressOrigi
 import { withGuestTurn } from '../security/turn-boundary.js';
 import { conversationalTurnConfigReaderFrom, conversationalTurnSpawnOptions } from '../personal-capture/spawn-contract.js';
 import { logger } from '../utils/logger.js';
+import { spendingName } from '../runtime/cost/model-usage.js';
 import { existsSync } from 'node:fs';
 import { readHeldCompanionTurn } from './held-companion-turn.js';
 import { daemonOperationLog, daemonOperationsPath } from './operations-log.js';
@@ -76,6 +77,7 @@ import { PlatformServiceManager } from './service-manager.js';
 import { resolveDaemonServiceDefault, resolveServiceUnitHome } from './daemon-service-default.js';
 import type { ResolvedInboundTlsContext } from '../runtime/network/index.js';
 import { createBrokeredPermissionManager } from '../runtime/permissions/permission-composition.js';
+import { projectOfDecision } from '../permissions/call-project.js';
 // Re-export type definitions from the dedicated types module.
 export type {
   ResolvedDaemonFacadeRuntime,
@@ -261,7 +263,8 @@ export function createCompanionProviderAdapter(providerRegistry: ProviderRegistr
           }
         },
       }).then((resp) => {
-        routeMetadata = { ...(resp.decisionRoute ? { decisionRoute: resp.decisionRoute, usage: resp.usage } : {}) };
+        // The usage on every answer: the chat records what each request cost (Money, Spending), routed or not.
+        routeMetadata = { ...(resp.decisionRoute ? { decisionRoute: resp.decisionRoute } : {}), ...(resp.usage ? { usage: resp.usage } : {}) };
         if (resp.content && streamedContent.length === 0) {
           push({ type: 'text_delta', delta: resp.content });
         }
@@ -431,12 +434,20 @@ export function resolveDaemonFacadeRuntime(
     sessionBroker: runtimeServices.sessionBroker,
     // Wire the full ToolRegistry so LLM-emitted tool calls are executed.
     toolRegistry: runtimeServices.agentOrchestrator.getToolRegistry(),
+    // A turn's environment in the chat's project, by the one turn assembly every daemon turn uses
+    // (agents/orchestrator.ts): its tools, tool servers, hooks and checkpoint, made once per project.
+    turnEnvironment: (project) => runtimeServices.agentOrchestrator.acquireTurnEnvironment(project),
     configManager: runtimeServices.configManager,
     // Asks ride the daemon's approval broker like every other background caller's, so a tool call that needs
     // the owner raises a card on every surface instead of being denied as if the user had refused it.
     permissionManager: createBrokeredPermissionManager({
       workspaceTrust: null,
-      requestApproval: (input) => runtimeServices.approvalBroker.requestApproval(input),
+      // A chat in a project is decided for that project (companion-chat-turn-execution.ts): its folder trust, and an
+      // ask behind that project's trust question, as every daemon turn's in a project; a chat in no project as before.
+      ...(runtimeServices.nativeMutationHost?.workspaceTrustFor ? { workspaceTrustFor: runtimeServices.nativeMutationHost.workspaceTrustFor } : {}),
+      requestApproval: (input) => projectOfDecision() !== undefined && runtimeServices.requestApproval
+        ? runtimeServices.requestApproval(input)
+        : runtimeServices.approvalBroker.requestApproval(input),
       sessionOfAsk: companionToolCallSession,
       configManager: resolvedConfigManager,
       policyRuntimeState: runtimeServices.policyRuntimeState,
@@ -736,6 +747,8 @@ export function createDaemonFacadeCollaborators(
     approvalBroker: runtime.approvalBroker,
     resolveDefaultProviderModel: options.resolveDefaultProviderModel,
     workProposals,
+    // The owner's own work proposal none of his conversations took waits in Waiting for you, answered there.
+    ...(runtime.runtimeServices.ownerInbox ? { ownerInbox: runtime.runtimeServices.ownerInbox } : {}),
     deliverSurfaceNotice: (binding, text) => surfaceDeliveryHelper.deliverSurfaceNotice(binding, text),
   });
   // A channel message from someone it admits who is not its owner never directs a running agent.
@@ -838,7 +851,8 @@ export function createDaemonFacadeCollaborators(
       extractAuthToken: (req) => controlPlaneHelper.extractAuthToken(req),
       requireAdmin: (req) => controlPlaneHelper.requireAdmin(req),
     },
-    nativeMutationHost: runtime.runtimeServices.nativeMutationHost,
+    // Channel routing and drafts, a settings import: daemon methods on what the daemon keeps, decided with no folder trust.
+    nativeMutationHost: runtime.runtimeServices.daemonMethodHost ?? runtime.runtimeServices.nativeMutationHost,
     browserJudgment: runtime.runtimeServices.browserJudgment,
     configManager: runtime.configManager,
     serviceRegistry: runtime.serviceRegistry,
@@ -875,7 +889,12 @@ export function createDaemonFacadeCollaborators(
     multimodalService: runtime.multimodalService,
     artifactStore: runtime.artifactStore,
     memoryRegistry: runtime.runtimeServices.memoryRegistry,
-    memoryConsolidation: { listReceipts: () => runtime.runtimeServices.memoryConsolidationScheduler.listReceipts() },
+    // The standing proposals come from the memory store (they survive a restart and leave it once answered), not
+    // only from the receipts of this run: without listProposals a proposal kept from an earlier run never shows.
+    memoryConsolidation: {
+      listReceipts: () => runtime.runtimeServices.memoryConsolidationScheduler.listReceipts(),
+      listProposals: () => runtime.runtimeServices.memoryConsolidationScheduler.listProposals(),
+    },
     memoryEmbeddingRegistry: runtime.runtimeServices.memoryEmbeddingRegistry,
     platformServiceManager: runtime.platformServiceManager,
     integrationHelpers: runtime.integrationHelpers,
@@ -902,7 +921,6 @@ export function createDaemonFacadeCollaborators(
     trySpawnAgent: options.trySpawnAgent,
     companionChatManager: runtime.companionChatManager,
     secretsManager: runtime.runtimeServices.secretsManager,
-    swapManager: options.swapManager,
     resolveDefaultProviderModel: options.resolveDefaultProviderModel,
   });
   const providerRuntime = new ChannelProviderRuntimeManager({
@@ -984,6 +1002,8 @@ export function configureDaemonSessionContinuation(options: {
         task,
         ...buildSharedSessionAgentSpawnRoutingInput(input.routing, { modelCandidates: options.modelCandidates?.() }),
         context: `shared-session:${sessionId}`,
+        // Money, Spending: what this answer cost is the shared session's, by its title.
+        spendingSource: `shared session "${spendingName(options.sessionBroker.getSession(sessionId)?.title) || sessionId}"`,
       };
       // Classify the OWNER's words (`input.body`), never the enriched
       // continuation task the broker builds from the transcript, that framing

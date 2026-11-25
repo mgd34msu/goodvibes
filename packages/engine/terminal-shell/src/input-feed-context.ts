@@ -21,7 +21,6 @@ export type FeedContextStableKeys =
   | 'projectRoot'
   | 'selectionModal'
   | 'bookmarkModal'
-  | 'settingsModal'
   | 'mcpWorkspace'
   | 'sessionPickerModal'
   | 'profilePickerModal'
@@ -117,7 +116,6 @@ const STABLE_HOST_KEYS = [
   'imageRegistry',
   'selectionModal',
   'bookmarkModal',
-  'settingsModal',
   'mcpWorkspace',
   'sessionPickerModal',
   'profilePickerModal',

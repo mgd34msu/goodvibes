@@ -83,7 +83,8 @@ export class AcpPermissionWire {
       if (pending.invalid || pending.finished || this.requests.get(id!) !== pending
         || !pending.response || message.result !== pending.response || JSON.stringify(message.result) !== pending.responseText)
         throw new Error('ACP permission response is not its original bound result');
-      pending.scope.assertCurrent(); pending.admission?.assertCurrent();
+      // An approval must still be the current admission's; a refusal does nothing, so it goes as decided (the runner's own reject option).
+      pending.scope.assertCurrent(); if (pending.claim) pending.admission?.assertCurrent();
       bytes = new TextEncoder().encode(JSON.stringify(message) + '\n');
       if (pending.claim) pending.admission!.claim();
       pending.scope.assertCurrent();

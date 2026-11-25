@@ -182,12 +182,10 @@ export function tuiArchitecture(root: string): RuntimeArchitecture {
 
 /**
  * Layer edges that exist today and are allowed until their target moves out of
- * `cli/`: `/update` names the service unit through the CLI's service-name
- * resolver. Each entry is `<from> -> <to>`, relative to `products/tui/src`.
+ * `cli/` (none now: the service-name resolver moved to the platform). Each
+ * entry is `<from> -> <to>`, relative to `products/tui/src`.
  */
-const TUI_ALLOWED_LAYER_EDGES: ReadonlySet<string> = new Set([
-  'input/commands/update-runtime.ts -> cli/service-posture.ts',
-]);
+const TUI_ALLOWED_LAYER_EDGES: ReadonlySet<string> = new Set<string>();
 
 export function tuiArchitectureProblems(root: string): string[] {
   const product = resolve(root, 'products/tui/src');
@@ -265,6 +263,7 @@ export const PRODUCT_PROGRAM_SPAWN_FILES: ReadonlySet<string> = new Set([
   'platform/power/sleep-edge-watch.ts',
   'platform/remote-access/tailscale.ts',
   'platform/runtime/client/daemon-handover.ts',
+  'platform/runtime/client/daemon-program.ts', // goodvibes-daemon serve, started when no service is installed
   'platform/runtime/ecosystem/bundle-pin.ts',
   'platform/runtime/fleet/observed/detect.ts',
   'platform/runtime/fleet/observed/source.ts',
@@ -275,6 +274,7 @@ export const PRODUCT_PROGRAM_SPAWN_FILES: ReadonlySet<string> = new Set([
   'platform/runtime/worktree/retention.ts',
   'platform/runtime/worktree/setup.ts',
   'platform/state/memory-file-projection.ts',
+  'platform/support/service-manager-posture.ts', // systemctl --user show, read-only
   'platform/tools/analyze/captured-git.ts',
   'platform/tools/find/ripgrep.ts',
   'platform/utils/clipboard.ts',

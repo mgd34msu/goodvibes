@@ -10,6 +10,7 @@
 import type { CapabilityCatalog } from '@goodvibes/engine/platform/platform/capabilities';
 import { terminalCapabilityCatalog } from './capability-catalog.js';
 import type { SessionCapabilityServices } from './agent-turn/capability-tools.js';
+import type { ConcealedInputRequest } from './concealed-input.js';
 
 interface RegisteredCommandLike {
   readonly name: string;
@@ -74,6 +75,32 @@ export function askBoundHiddenValue(label: string): Promise<string | null> | und
 /** The words a program prints over its hidden line when a model's call needs a value only the person types. */
 export function hiddenValuePrompt(label: string): string {
   return `${label}: type it below and press Enter (it is hidden and never kept in history, and the model never sees it). Esc goes back.`;
+}
+
+/**
+ * A program's hidden line for a model's call, from its command context: the instruction is shown while the value is
+ * typed, and once it is taken (or the person went back) that line says only that, so nothing about the value stays
+ * on screen. Undefined until the screen has a hidden line.
+ */
+export function hiddenLineFrom(context: {
+  readonly print: (text: string) => void;
+  readonly printLive?: ((text: string) => ((next: string) => void) | null) | undefined;
+  readonly beginConcealedInput?: ((request: ConcealedInputRequest) => void) | undefined;
+}): HiddenLine | undefined {
+  const begin = context.beginConcealedInput;
+  if (!begin) return undefined;
+  return (request) => {
+    const prompt = hiddenValuePrompt(request.label);
+    const replace = context.printLive?.(prompt) ?? null;
+    if (replace === null) context.print(prompt);
+    // The value's own name ("Security code"), the last part of a label that names the act first.
+    const value = request.label.split(': ').pop() ?? request.label;
+    begin({
+      label: request.label,
+      onSubmit: (typed) => { replace?.(`${value}: given.`); request.onSubmit(typed); },
+      onCancel: () => { replace?.(`${value}: not given (you went back).`); request.onCancel(); },
+    });
+  };
 }
 
 /** The open conversation's services now, or undefined when there is none. */

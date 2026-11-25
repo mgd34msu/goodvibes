@@ -1,24 +1,30 @@
+/**
+ * `agent_knowledge_ingest`: one source added to the owner's knowledge, the daemon's one store. The arguments and any
+ * workspace path are checked here; the ingest itself runs the daemon's `knowledge.*` capability as a nested
+ * `capability_run` call, judged by that capability's own risk (fetching from the owner's network loosens a protection
+ * and is the owner's to set; importing browser history is his own act), the one gate a model's daemon call goes
+ * through. This call only routes it and is classed a read. A workspace file the turn names is read by this program, on
+ * its own machine, and its content is sent: the daemon may be on another machine.
+ */
 import type { Tool } from '@goodvibes/engine/platform/platform/types';
-import { assertCurrentToolEffect, ToolInputProjectionError, type ToolInputProjector, type ToolRegistry } from '@goodvibes/engine/platform/platform/tools';
+import { assertCurrentToolInvocation, ToolInputProjectionError, type ToolInputProjector, type ToolRegistry } from '@goodvibes/engine/platform/platform/tools';
 import { captureStrictJudgmentJson } from '@goodvibes/engine/platform/platform/gate';
 import { closeSync, constants, fstatSync, openSync, readFileSync, realpathSync, statSync } from 'node:fs';
 import { basename, relative, isAbsolute } from 'node:path';
 import type { ShellPathService } from '@goodvibes/engine/platform/platform/runtime/shell';
 import type { ConnectedHostConfigReader as AgentConnectedHostConfigReader } from './connected-host-client.js';
 import type { AgentInProcessHost } from './in-process-host.js';
-import {
-  classifyKnowledgeError,
-  connectionIsThisMachine,
-  localFileIngestSend,
-  MAX_KNOWLEDGE_INGEST_FILE_BYTES,
-  resolveConnectedHostConnection,
-  sendAgentKnowledgeIngest,
-  type AgentKnowledgeFailure,
-  type AgentKnowledgeIngestSend,
-  type AgentKnowledgeLocalFileKind,
-} from './knowledge-runtime.js';
+/**
+ * The largest file this tool sends as a capability's content: the daemon takes a method call's body of up to 1 MiB,
+ * and a file that is not text goes as base64 (four bytes for three). A larger one, up to the command line's limit
+ * (`MAX_KNOWLEDGE_INGEST_FILE_BYTES`, 64 MiB), is uploaded by the path the command line uses (the artifact upload) and
+ * then added through the daemon's `knowledge.ingest-artifact`: one question, that capability's.
+ */
+const MAX_SENT_FILE_BYTES = 700 * 1024;
+const TOO_LARGE_TO_SEND = `Nothing was ingested: the file is larger than ${MAX_KNOWLEDGE_INGEST_FILE_BYTES / (1024 * 1024)} MiB, the most a file is read and sent to the daemon. Split it, or add a part of it.`;
 import { AGENT_KNOWLEDGE_METHODS } from './knowledge-methods.js';
-import { batchIngestState, formatBatchIngest, formatFailure, formatIngest } from './knowledge-format.js';
+import { MAX_KNOWLEDGE_INGEST_FILE_BYTES, postAgentKnowledgeUpload, resolveConnectedHostConnection } from './knowledge-runtime.js';
+import { daemonCapabilityRunner } from './capability-tools.js';
 import { readString } from './tool-args.js';
 import { confirmParameter, requestParameter } from './effect-admission.js';
 
@@ -146,10 +152,6 @@ function failure(error: string): { readonly success: false; readonly error: stri
 
 function output(text: string): { readonly success: true; readonly output: string } {
   return { success: true, output: text };
-}
-
-function formatKnowledgeFailure(failureResult: AgentKnowledgeFailure): string {
-  return formatFailure(failureResult, false);
 }
 
 function preview(request: AgentKnowledgeIngestRequest): string {
@@ -353,57 +355,6 @@ function workspacePath(shellPaths: ShellPathService, selected: string, field: st
 }
 
 /**
- * Read a workspace file once, bounded; these bytes are what the host ingests.
- * `path` is already fully resolved inside the workspace, but a link can be put
- * in place of it (or of a directory above it) between that check and this
- * open. So the open refuses a final-component link, and the opened file must
- * be the one the path names inside the workspace now: one realpath and one
- * stat more, no extra read.
- */
-function readIngestFile(shellPaths: ShellPathService, path: string): Buffer {
-  let fd: number;
-  try {
-    fd = openSync(path, constants.O_RDONLY | constants.O_NONBLOCK | (constants.O_NOFOLLOW ?? 0));
-  } catch (error) {
-    if ((error as NodeJS.ErrnoException).code === 'ELOOP') {
-      throw new IngestArgumentError('Nothing was ingested: a link was put in place of the file while it was being opened. Check the path and call again.');
-    }
-    throw error;
-  }
-  try {
-    const stat = fstatSync(fd);
-    if (!stat.isFile()) throw new IngestArgumentError('The path must name a regular file, not a directory.');
-    const current = workspacePath(shellPaths, path, 'path');
-    const named = statSync(current);
-    if (named.dev !== stat.dev || named.ino !== stat.ino) {
-      throw new IngestArgumentError('Nothing was ingested: the file changed while it was being opened (it was replaced or a link was put in its place). Check the path and call again.');
-    }
-    if (stat.size > MAX_KNOWLEDGE_INGEST_FILE_BYTES) throw new IngestArgumentError(`The file is larger than the ${MAX_KNOWLEDGE_INGEST_FILE_BYTES / (1024 * 1024)} MiB limit.`);
-    return readFileSync(fd);
-  } finally { closeSync(fd); }
-}
-
-/**
- * Local files are read here, inside the workspace, and sent as bytes
- * (localFileIngestSend), never as a path the host would open on its own
- * machine. A browser profile home is sent as the absolute directory the
- * workspace check admitted, which only a host on this machine can read.
- */
-function sendFor(request: AgentKnowledgeIngestRequest, shellPaths: ShellPathService, sourceKind: string): AgentKnowledgeIngestSend {
-  const homeOverride = readOptionalString(request.payload.homeOverride);
-  const payload = homeOverride
-    ? { ...request.payload, homeOverride: workspacePath(shellPaths, homeOverride, 'homeOverride') }
-    : request.payload;
-  const selected = readOptionalString(payload.path);
-  if (!selected) return { kind: 'json', route: request.method.route, payload };
-  const path = workspacePath(shellPaths, selected, 'path');
-  const bytes = readIngestFile(shellPaths, path);
-  const { path: _path, ...rest } = payload;
-  const kind: AgentKnowledgeLocalFileKind = sourceKind === 'file' || sourceKind === 'urls_file' || sourceKind === 'bookmarks_file' ? sourceKind : 'connector';
-  return localFileIngestSend(kind, rest, { bytes, filename: basename(path) });
-}
-
-/**
  * Argument and path problems are refused before the gate is asked anything:
  * they are facts about the arguments, settled here with no host call.
  */
@@ -414,7 +365,7 @@ export function createAgentKnowledgeIngestInputProjector(shellPaths: ShellPathSe
       const ingest = requestForArgs(captureStrictJudgmentJson(request.args) as AgentKnowledgeIngestToolArgs);
       const path = readOptionalString(ingest.payload.path), homeOverride = readOptionalString(ingest.payload.homeOverride);
       if (path && statSync(workspacePath(shellPaths, path, 'path')).size > MAX_KNOWLEDGE_INGEST_FILE_BYTES) {
-        throw new IngestArgumentError(`The file is larger than the ${MAX_KNOWLEDGE_INGEST_FILE_BYTES / (1024 * 1024)} MiB limit.`);
+        throw new IngestArgumentError(TOO_LARGE_TO_SEND);
       }
       if (homeOverride) workspacePath(shellPaths, homeOverride, 'homeOverride');
     } catch (error) {
@@ -426,15 +377,15 @@ export function createAgentKnowledgeIngestInputProjector(shellPaths: ShellPathSe
 }
 
 /**
- * `inProcess` is the daemon hosting this turn, which is then the host (reached
- * in process, with the credential the Agent presents to it); absent, the Agent's
- * configured connected host.
+ * The ingest reaches the daemon through the nested daemon-capability runner, which holds the connection (the daemon
+ * hosting this turn, or the Agent's connected host).
  */
 export function createAgentKnowledgeIngestTool(
   shellPaths: ShellPathService,
   configManager: AgentConnectedHostConfigReader,
   inProcess?: AgentInProcessHost | undefined,
 ): Tool {
+  const runCapability = daemonCapabilityRunner();
   return {
     definition: {
       name: 'agent_knowledge_ingest',
@@ -512,50 +463,140 @@ export function createAgentKnowledgeIngestTool(
         required: [],
         additionalProperties: false,
       },
-      sideEffects: ['read_fs', 'network', 'state'],
+      // This call only routes the ingest to the daemon's knowledge capability (a nested capability_run call, judged by
+      // that capability's own risk); its path checks hold here first. Classed a read: the capability's question is the
+      // only one.
+      sideEffects: ['state'],
+      category: 'read',
     },
     execute: async (rawArgs, options) => {
       let request: AgentKnowledgeIngestRequest;
       const args = captureStrictJudgmentJson(rawArgs) as AgentKnowledgeIngestToolArgs;
       try { request = requestForArgs(args); }
       catch (error) { return failure(error instanceof Error ? error.message : 'Agent Knowledge ingest input is invalid.'); }
-      const admitted = () => assertCurrentToolEffect(rawArgs, options, 'write') && assertCurrentToolEffect(rawArgs, options, 'send');
-      let wasAdmitted = false;
-      try { wasAdmitted = admitted(); } catch { wasAdmitted = false; }
-      if (!wasAdmitted) {
-        return failure(`${preview(request)}\n\nNothing was ingested: this call ran without the owner's admission of an ingest. Ask the owner to allow it, then call again.`);
-      }
-      const connection = resolveConnectedHostConnection({ configManager, homeDirectory: shellPaths.homeDirectory, ...(inProcess ? { inProcess } : {}) });
-      if (readOptionalString(request.payload.homeOverride) && !connectionIsThisMachine(connection)) {
-        return failure(`Nothing was imported: homeOverride names a directory on this machine, but the knowledge host is ${connection.baseUrl}, another machine, which cannot read it. Omit homeOverride to import that host's own browsers.`);
-      }
-      let send: AgentKnowledgeIngestSend;
-      try { send = sendFor(request, shellPaths, readString(args.sourceKind) || 'url'); }
+      let call: IngestCall;
+      try { call = capabilityFor(request, shellPaths, readString(args.sourceKind) || 'url', args); }
       catch (error) { return failure(error instanceof IngestArgumentError ? error.message : `The file could not be read: ${error instanceof Error ? error.message : String(error)}`); }
-      if (!connection.token) return failure(formatKnowledgeFailure({ ok: false, kind: 'auth_required',
-        error: connection.unavailable?.reason ?? 'No connected-host operator token found.', baseUrl: connection.baseUrl, route: send.route,
-        ...(connection.unavailable ? { next: connection.unavailable.next } : {}) }));
-      const assertCurrent = () => {
-        options?.signal?.throwIfAborted();
-        if (!admitted()) throw new Error('The ingest admission ended before the request left. Nothing was sent.');
-      };
-      const restrictions = { ...(options?.signal ? { signal: options.signal } : {}), assertCurrent };
-      let data: unknown;
-      try {
-        data = await sendAgentKnowledgeIngest(connection, send, restrictions);
-      } catch (error) {
+      options?.signal?.throwIfAborted();
+      if (!assertCurrentToolInvocation(rawArgs, options)) {
+        return failure(`${preview(request)}\n\nNothing was ingested: it runs only as an admitted tool call.`);
+      }
+      let inputs = call.inputs;
+      if (call.upload) {
+        // The file's bytes go up by the command line's upload (the daemon's artifact upload), then the daemon's
+        // knowledge.ingest-artifact adds that artifact: its question is the one asked.
         try {
-          return failure(formatKnowledgeFailure(await classifyKnowledgeError(error, connection, send.route, restrictions.signal ? { signal: restrictions.signal } : {})));
-        } catch {
-          return failure('Agent Knowledge ingest was cancelled. The request may already have reached the host. List the Agent Knowledge sources before retrying, so the same source is not ingested twice.');
+          const connection = resolveConnectedHostConnection({ configManager, homeDirectory: shellPaths.homeDirectory, ...(inProcess ? { inProcess } : {}) });
+          if (connection.unavailable) return failure(`Nothing was ingested: ${connection.unavailable.reason}`);
+          const uploaded = await postAgentKnowledgeUpload<{ artifact?: { id?: unknown } }>(connection, '/api/artifacts',
+            { bytes: call.upload.bytes, filename: call.upload.name }, { kind: 'document', metadata: { purpose: 'knowledge-ingest', originSurface: 'agent_knowledge_ingest' } },
+            options?.signal ? { signal: options.signal } : {});
+          const artifactId = typeof uploaded.artifact?.id === 'string' ? uploaded.artifact.id : undefined;
+          if (!artifactId) return failure('Nothing was ingested: the daemon did not say which artifact it kept the file as.');
+          inputs = { ...inputs, artifact: artifactId };
+        } catch (error) {
+          return failure(`Nothing was ingested: the file could not be uploaded to the daemon (${error instanceof Error ? error.message : String(error)}).`);
         }
       }
-      const text = [request.batch ? formatBatchIngest(data, request.label)
-        : formatIngest(data, request.target, request.label, request.method.route, request.targetLabel), ...(request.notes ?? [])].join('\n');
-      // A batch that imported nothing and reported failures stored nothing: it is a failure, not a save.
-      return request.batch && batchIngestState(data) === 'failed' ? failure(text) : output(text);
+      const answer = await runCapability(call.id, inputs, options);
+      if (!answer.ok) return failure(answer.error);
+      return output([answer.text || `${call.id}: done.`, ...(request.notes ?? [])].join('\n'));
     },
   };
+}
+
+/**
+ * Read a workspace file once, bounded; these bytes are what the daemon adds. `path` is already fully resolved inside
+ * the workspace, but a link can be put in place of it (or of a directory above it) between that check and this open.
+ * So the open refuses a final-component link, and the opened file must be the one the path names inside the workspace
+ * now: one realpath and one stat more, no extra read.
+ */
+function readIngestFile(shellPaths: ShellPathService, path: string): Buffer {
+  let fd: number;
+  try {
+    fd = openSync(path, constants.O_RDONLY | constants.O_NONBLOCK | (constants.O_NOFOLLOW ?? 0));
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code === 'ELOOP') {
+      throw new IngestArgumentError('Nothing was ingested: a link was put in place of the file while it was being opened. Check the path and call again.');
+    }
+    throw error;
+  }
+  try {
+    const stat = fstatSync(fd);
+    if (!stat.isFile()) throw new IngestArgumentError('The path must name a regular file, not a directory.');
+    const current = workspacePath(shellPaths, path, 'path');
+    const named = statSync(current);
+    if (named.dev !== stat.dev || named.ino !== stat.ino) {
+      throw new IngestArgumentError('Nothing was ingested: the file changed while it was being opened (it was replaced or a link was put in its place). Check the path and call again.');
+    }
+    if (stat.size > MAX_KNOWLEDGE_INGEST_FILE_BYTES) throw new IngestArgumentError(TOO_LARGE_TO_SEND);
+    return readFileSync(fd);
+  } finally { closeSync(fd); }
+}
+
+/** A file's bytes as a capability input: its text when it is UTF-8, else base64. */
+function contentOf(bytes: Buffer): { readonly content: string; readonly encoding: 'text' | 'base64' } {
+  try {
+    return { content: new TextDecoder('utf-8', { fatal: true }).decode(bytes), encoding: 'text' };
+  } catch {
+    return { content: bytes.toString('base64'), encoding: 'base64' };
+  }
+}
+
+/**
+ * The daemon's knowledge capability one ingest runs, and its inputs. A file the turn names is read here, on this
+ * program's own machine, inside the workspace, and its content is sent: the daemon may be on another machine, and it
+ * reads by path only what is on its own machine and was named by a caller there. A browser profile home of the
+ * model's choosing is not taken: the daemon reads the owner's own browsers, and that import is the owner's own act.
+ */
+interface IngestCall {
+  readonly id: string;
+  readonly inputs: Record<string, string>;
+  /** A file too large for a method call's body: uploaded first (its artifact id fills `inputs.artifact`). */
+  readonly upload?: { readonly bytes: Buffer; readonly name: string } | undefined;
+}
+
+function capabilityFor(request: AgentKnowledgeIngestRequest, shellPaths: ShellPathService, sourceKind: string, args: AgentKnowledgeIngestToolArgs): IngestCall {
+  const payload = request.payload;
+  const text = (value: unknown): string | undefined => readOptionalString(value);
+  const tags = (): string | undefined => { const list = readStringList(args.tags); return list.length > 0 ? list.join(', ') : undefined; };
+  const kept = (inputs: Record<string, string | undefined>): Record<string, string> => Object.fromEntries(Object.entries(inputs).filter((entry): entry is [string, string] => typeof entry[1] === 'string' && entry[1] !== ''));
+  const path = (): string => workspacePath(shellPaths, readString(payload.path), 'path');
+  if (sourceKind === 'url') return { id: 'knowledge.ingest-url', inputs: kept({ url: text(payload.url), title: text(payload.title), tags: tags(), folder: text(payload.folderPath) }) };
+  if (sourceKind === 'file') {
+    const resolved = path();
+    const bytes = readIngestFile(shellPaths, resolved);
+    // Larger than a method call's body takes: uploaded as the command line uploads it, then added as that artifact.
+    if (bytes.length > MAX_SENT_FILE_BYTES) {
+      return { id: 'knowledge.ingest-artifact', inputs: kept({ title: text(payload.title) ?? basename(resolved), tags: tags(), folder: text(payload.folderPath) }),
+        upload: { bytes, name: basename(resolved) } };
+    }
+    const file = { ...contentOf(bytes), name: basename(resolved) };
+    return { id: 'knowledge.ingest-file', inputs: kept({ content: file.content, encoding: file.encoding, name: file.name, title: text(payload.title), tags: tags(), folder: text(payload.folderPath) }) };
+  }
+  if (sourceKind === 'artifact') return { id: 'knowledge.ingest-artifact', inputs: kept({ artifact: text(payload.artifactId), title: text(payload.title), tags: tags(), folder: text(payload.folderPath) }) };
+  // A list of addresses or a bookmarks file is text: sent as its text.
+  if (sourceKind === 'urls_file') return { id: 'knowledge.import-urls', inputs: { content: new TextDecoder().decode(readIngestFile(shellPaths, path())) } };
+  if (sourceKind === 'bookmarks_file') return { id: 'knowledge.import-bookmarks', inputs: { content: new TextDecoder().decode(readIngestFile(shellPaths, path())) } };
+  if (sourceKind === 'browser_history') {
+    if (text(payload.homeOverride)) throw new IngestArgumentError('Nothing was imported: homeOverride is not taken; the daemon reads the owner\'s own browsers. Omit it.');
+    const kinds = readStringList(args.sourceKinds);
+    const since = readSinceWindowMs(args.sinceDays);
+    return { id: 'knowledge.import-browser-history', inputs: kept({
+      browsers: readStringList(args.browsers).join(', ') || undefined,
+      sources: kinds.length === 1 ? kinds[0] : undefined,
+      limit: typeof payload.limit === 'number' ? String(payload.limit) : undefined,
+      days: since === undefined ? undefined : String(Math.round(since / 86_400_000)),
+    }) };
+  }
+  const input = payload.input;
+  // A connector's file is read here and sent as the text it reads, when no text or input was given with it.
+  const fileText = text(payload.path) && input === undefined && !text(payload.content) ? new TextDecoder().decode(readIngestFile(shellPaths, path())) : undefined;
+  return { id: 'knowledge.ingest-connector', inputs: kept({
+    connector: text(payload.connectorId),
+    input: input === undefined ? undefined : typeof input === 'string' ? input : JSON.stringify(input),
+    content: text(payload.content) ?? fileText,
+  }) };
 }
 
 export function registerAgentKnowledgeIngestTool(

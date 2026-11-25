@@ -331,6 +331,11 @@ export interface TriggerDefinition {
   readonly action: TriggerFireAction;
   /** Session that created it; used by recovery reaping. */
   readonly ownerSessionId?: string | undefined;
+  /**
+   * The project folder it was made for: its agent turn works there, and a command with no `cwd` of its own runs
+   * there. Absent only on a trigger kept by 3.5.0, given the daemon's folder of that time once at the next start.
+   */
+  readonly workingDirectory?: string | undefined;
   readonly createdAt: number;
 }
 

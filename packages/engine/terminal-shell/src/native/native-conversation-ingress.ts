@@ -17,7 +17,7 @@ export class NativeTurnNotStartedError extends Error {
   }
 }
 
-const CLAIM_RELEASED_MESSAGE = 'The native turn did not start and its dispatch claim was released. Use /work intake-retry to run it, or submit a new input.';
+const CLAIM_RELEASED_MESSAGE = 'Your message was not answered: its turn did not start. Try it again in Work, under Unanswered, or send a new message.';
 
 /**
  * For a dispatch that failed: when the turn is known never to have started, gives its
@@ -67,7 +67,7 @@ export async function routeNativeConversationInput(deps: {
   readonly preparationFailureMessage?: string | undefined;
 }): Promise<NativeConversationIntakeState | undefined> {
   if (!deps.intake) {
-    const state = { status: 'unavailable' as const, message: 'Native conversation intake is unavailable. No ordinary turn was started.' };
+    const state = { status: 'unavailable' as const, message: 'Your message could not be sent to the daemon, so it was not answered.' };
     if (deps.runLocal) {
       await deps.runLocal('No connected host is set up for this terminal, so messages run in this process.');
       return { status: 'recorded', message: 'Ran in this process.' };
@@ -83,7 +83,7 @@ export async function routeNativeConversationInput(deps: {
     const failed = {
       status: 'unknown' as const,
       cause: nativeIntakeFailureCause(error),
-      message: deps.preparationFailureMessage ?? 'Prompt preparation failed. Use /work intake to inspect the original input.',
+      message: deps.preparationFailureMessage ?? 'Your message could not be prepared for sending. Check it in Work, under Unanswered.',
     };
     deps.notify(failed.message);
     return failed;
@@ -107,7 +107,7 @@ export async function routeNativeConversationInput(deps: {
         deps.notify(message);
         return { ...state, status: 'unknown', cause, turnReady: false, message };
       }
-      const kept = 'Native turn dispatch requires recovery. Its durable claim was preserved; the turn may not have started and will not be replayed automatically.';
+      const kept = 'Whether your message was answered is not known, so it is not sent again by itself. Check it in Work, under Unanswered.';
       deps.notify(kept);
       return { ...state, status: 'unknown', cause, turnReady: false, message: kept };
     }

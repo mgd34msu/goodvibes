@@ -6,7 +6,10 @@
  * store and its settings. Something the daemon was composed without makes
  * every use of it say so, in one sentence.
  */
-import { join, resolve } from 'node:path';
+import { dirname, join, resolve } from 'node:path';
+import { persistProviders, scanLocalhost, type DiscoveredServer } from '../discovery/scanner.js';
+import { DAEMON_STATE_SURFACE_ROOT } from '../daemon/lifecycle-marker.js';
+import { resolveGoodVibesHome } from '../config/goodvibes-home.js';
 // `shellPaths` is named for where the daemon keeps its files; the providers folder is its settings manager's.
 import type { ConfigManager } from '../config/manager.js';
 import type { SecretsManager } from '../config/secrets.js';
@@ -36,6 +39,13 @@ export interface ModelsServiceSources {
   readonly mediaProviders?: { status(): Promise<readonly MediaProviderStatusLike[]> } | undefined;
   readonly runtimeBus?: RuntimeEventBus | undefined;
   readonly shellPaths?: Pick<ShellPathService, 'resolveUserPath'> | undefined;
+  /** The owner's home: the model servers found on this computer are kept under its daemon folder. */
+  readonly homeDirectory?: string | undefined;
+}
+
+/** A server answering on this computer (as the scanner names it), not one on the network. */
+function onThisComputer(server: DiscoveredServer): boolean {
+  return server.host === '127.0.0.1' || server.host === 'localhost' || server.host === '::1';
 }
 
 /** A service the daemon was composed without: any use says so. */
@@ -66,6 +76,20 @@ export function createModelsCapabilityServices(sources: ModelsServiceSources): M
       // The daemon's own settings manager (its file holds the shared default model, the backups and the routing).
       configManager: settings as unknown as ModelsCapabilityServices['models']['configManager'],
       mediaProviders: sources.mediaProviders ?? absent<{ status(): Promise<readonly MediaProviderStatusLike[]> }>('its media providers'),
+      // Model servers on this computer: scanned by the daemon and added beside the ones its network scan found (Devices
+      // and network keeps that decision), and kept so the next start restores them.
+      async scanThisComputer() {
+        if (!registry) throw new CapabilityRefusal('This daemon was started without its providers; nothing was scanned.', undefined, 'UNAVAILABLE');
+        const result = await scanLocalhost();
+        const network = registry.listDiscoveredServers().filter((server) => !onThisComputer(server));
+        const servers = [...result.servers, ...network];
+        registry.registerDiscoveredProviders(servers);
+        const homeDirectory = sources.homeDirectory ?? (sources.shellPaths as Partial<Pick<ShellPathService, 'homeDirectory'>> | undefined)?.homeDirectory ?? dirname(resolveGoodVibesHome());
+        // Kept with the daemon's own state (`~/.goodvibes/tui/discovered-providers.json`), which the daemon and the
+        // terminal app restore at start; merged by address, so the network scan's servers are left as they are.
+        persistProviders({ homeDirectory, surfaceRoot: DAEMON_STATE_SURFACE_ROOT }, [...result.servers]);
+        return { found: result.servers, skipped: result.skipped, durationMs: result.durationMs };
+      },
       announce: (change) => {
         // Every screen showing the models and providers reads them again (LIST_CHANGED, the place's follow).
         noteListChanged({ list: 'models', change: (change.added?.length ?? 0) > 0 ? 'created' : (change.removed?.length ?? 0) > 0 ? 'deleted' : 'changed' });

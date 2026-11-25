@@ -145,7 +145,7 @@ async function settingRows(): Promise<readonly SettingRow[]> {
     rows.push({ key: setting.key, type: setting.type, default: setting.default, description: setting.description, validationHint: range, app: { name, projectSettable: setting.projectSettable === true } });
   }
   // Keys the terminal app's /settings screen shows that neither schema declares (its own entries).
-  const { buildSettingGroups } = await loadProductModule<SettingsModalModule>('products/tui/src/input/settings-modal-data.ts');
+  const { buildSettingGroups } = await loadProductModule<SettingsModalModule>('packages/engine/terminal-shell/src/settings-screen/rows.ts');
   const { TuiConfigManager } = await loadProductModule<{ TuiConfigManager: AppConfigManager & (new (options: Record<string, unknown>) => object) }>('products/tui/src/config/host-settings.ts');
   const known = new Set(rows.map((row) => row.key));
   const screenManager = new TuiConfigManager({ homeDir: SCRATCH_HOME, workingDir: join(SCRATCH_WORKSPACE, 'settings-tui'), surfaceRoot: 'tui', readOnly: true });

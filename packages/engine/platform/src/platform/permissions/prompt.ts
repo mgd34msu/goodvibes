@@ -21,7 +21,21 @@ export type PermissionAttribution =
   | McpServerAttribution
   | SandboxEscalationAttribution
   | FetchLocalhostAttribution
-  | ExecPromptAttribution;
+  | ExecPromptAttribution
+  | OutsideCallerAttribution;
+
+/**
+ * A caller outside the daemon (a script or agent with a credential, a signed-in user, a paired device) asked for a
+ * capability over the daemon's API, and the daemon put it to the owner (`capabilities.run`): the question names who
+ * is asking.
+ */
+export interface OutsideCallerAttribution {
+  readonly kind: 'outside-caller';
+  /** Who asked, as a person reads it: a sign-in by its user name, a paired device by its name. */
+  readonly name: string;
+  /** The principal the daemon authenticated (`pairing:<id>`, a user name, `shared-token`). */
+  readonly principalId: string;
+}
 
 /** A background/subagent tool call brokered an ask on behalf of a spawned agent. */
 export interface BackgroundAgentAttribution {
@@ -124,6 +138,12 @@ export interface PermissionPromptRequest {
    * the owner answers. In-process only; approvals.raise does not carry it.
    */
   containable?: true | undefined;
+  /**
+   * Set by the gate when the call acts on what the daemon holds and works in no project folder (a daemon
+   * capability): the folder's trust neither refuses nor asks about it; the call itself is still asked. In-process
+   * only; approvals.raise does not carry it.
+   */
+  outsideFolder?: true | undefined;
 }
 
 export interface PermissionPromptDecision {
@@ -156,6 +176,13 @@ export interface PermissionPromptDecision {
    * for an ask it marked `containable`.
    */
   settledBy?: 'sandbox' | undefined;
+  /**
+   * Set by a surface where nobody can answer (a headless run with no
+   * `--answer-permissions`): the ask was not answered, the call is held for
+   * the owner, and `reason` says where it waits. The gate reports the call as
+   * held for him, never as refused by him.
+   */
+  heldForOwner?: boolean | undefined;
 }
 
 /** In-process lifetime only; never stored in a prompt or sent over the wire. */

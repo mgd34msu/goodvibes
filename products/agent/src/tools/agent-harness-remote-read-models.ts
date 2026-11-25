@@ -508,56 +508,36 @@ function sourceCounts(entries: readonly CollectedRecord[]): Readonly<Record<stri
   return counts;
 }
 
-function outcomeSources(context: CommandContext): readonly SourceCandidate[] {
-  const platform = readObject(context.platform);
-  const readModels = readObject(platform.readModels);
-  const remoteRuntime = readObject(readModels.remoteRuntime);
-  const remoteRunners = readObject(readModels.remoteRunners);
-  const remote = readObject(readModels.remote);
-  const opsRemote = readObject(readObject(context.ops).remoteRuntime);
-  const opsReadModels = readObject(opsRemote.readModels);
-  const clients = readObject(context.clients);
-  const operator = readObject(clients.operator);
-  const operatorRemote = readObject(operator.remoteRuntime);
-  return [
-    { path: 'context.platform.readModels.remoteRuntime.captureOutcomes', source: remoteRuntime.captureOutcomes, kind: 'daemon-read-model' },
-    { path: 'context.platform.readModels.remoteRuntime.outcomes', source: remoteRuntime.outcomes, kind: 'daemon-read-model' },
-    { path: 'context.platform.readModels.remoteRuntime.captures', source: remoteRuntime.captures, kind: 'daemon-read-model' },
-    { path: 'context.platform.readModels.remoteRuntime.exports', source: remoteRuntime.exports, kind: 'daemon-read-model' },
-    { path: 'context.platform.readModels.remoteRuntime.closeouts', source: remoteRuntime.closeouts, kind: 'daemon-read-model' },
-    { path: 'context.platform.readModels.remoteRunners.captureOutcomes', source: remoteRunners.captureOutcomes, kind: 'daemon-read-model' },
-    { path: 'context.platform.readModels.remote.captureOutcomes', source: remote.captureOutcomes, kind: 'daemon-read-model' },
-    { path: 'context.platform.readModels.remoteCaptureOutcomes', source: readModels.remoteCaptureOutcomes, kind: 'daemon-read-model' },
-    { path: 'context.platform.readModels.remoteRunnerOutcomes', source: readModels.remoteRunnerOutcomes, kind: 'daemon-read-model' },
-    { path: 'context.ops.remoteRuntime.readModels.captureOutcomes', source: opsReadModels.captureOutcomes, kind: 'platform-read-model' },
-    { path: 'context.clients.operator.remoteRuntime.captureOutcomes', source: operatorRemote.captureOutcomes, kind: 'platform-read-model' },
-  ];
+/**
+ * What the daemon holds of its remote runners (`remote.list`, runtime/remote/daemon-runners.ts): the contracts of the
+ * runners it started and what each handed back. A program keeps no runners of its own.
+ */
+export interface DaemonRemoteRecords {
+  readonly contracts: readonly Record<string, unknown>[];
+  readonly artifacts: readonly Record<string, unknown>[];
 }
 
-function workspaceSources(context: CommandContext): readonly SourceCandidate[] {
-  const platform = readObject(context.platform);
-  const readModels = readObject(platform.readModels);
-  const remoteRuntime = readObject(readModels.remoteRuntime);
-  const remoteRunners = readObject(readModels.remoteRunners);
-  const remote = readObject(readModels.remote);
-  const worktrees = readObject(readModels.worktrees);
-  const opsRemote = readObject(readObject(context.ops).remoteRuntime);
-  const opsReadModels = readObject(opsRemote.readModels);
-  const clients = readObject(context.clients);
-  const operator = readObject(clients.operator);
-  const operatorRemote = readObject(operator.remoteRuntime);
-  return [
-    { path: 'context.platform.readModels.remoteRuntime.workspaces', source: remoteRuntime.workspaces, kind: 'daemon-read-model' },
-    { path: 'context.platform.readModels.remoteRuntime.workspaceIsolation', source: remoteRuntime.workspaceIsolation, kind: 'daemon-read-model' },
-    { path: 'context.platform.readModels.remoteRuntime.worktrees', source: remoteRuntime.worktrees, kind: 'daemon-read-model' },
-    { path: 'context.platform.readModels.remoteRunners.workspaces', source: remoteRunners.workspaces, kind: 'daemon-read-model' },
-    { path: 'context.platform.readModels.remote.workspaceIsolation', source: remote.workspaceIsolation, kind: 'daemon-read-model' },
-    { path: 'context.platform.readModels.remoteWorkspaces', source: readModels.remoteWorkspaces, kind: 'daemon-read-model' },
-    { path: 'context.platform.readModels.remoteWorkspaceIsolation', source: readModels.remoteWorkspaceIsolation, kind: 'daemon-read-model' },
-    { path: 'context.platform.readModels.worktrees.remote', source: worktrees.remote, kind: 'daemon-read-model' },
-    { path: 'context.ops.remoteRuntime.readModels.workspaces', source: opsReadModels.workspaces, kind: 'platform-read-model' },
-    { path: 'context.clients.operator.remoteRuntime.workspaces', source: operatorRemote.workspaces, kind: 'platform-read-model' },
-  ];
+/** A runner's outcome is what it handed back to the daemon: its task, result and summary. */
+function outcomeSources(daemon: DaemonRemoteRecords | undefined): readonly SourceCandidate[] {
+  if (!daemon) return [];
+  return [{
+    path: 'daemon remote.list artifacts',
+    source: daemon.artifacts.map((artifact) => ({ ...artifact, artifactId: readString(artifact.id), kind: 'capture' })),
+    kind: 'daemon-read-model',
+  }];
+}
+
+/** A runner's workspace is the folder its contract lets it work in. */
+function workspaceSources(daemon: DaemonRemoteRecords | undefined): readonly SourceCandidate[] {
+  if (!daemon) return [];
+  return [{
+    path: 'daemon remote.list contracts',
+    source: daemon.contracts.map((contract) => ({
+      runnerId: readString(contract.runnerId), id: readString(contract.id), label: readString(contract.label),
+      workspacePath: readString(contract.workspaceRoot), status: readString(readObject(contract.transport).state), isolationKind: 'runner folder',
+    })),
+    kind: 'daemon-read-model',
+  }];
 }
 
 interface NativeWorkspaceDisplayCapture {
@@ -568,12 +548,13 @@ interface NativeWorkspaceDisplayCapture {
   readonly path: string;
 }
 
-function acquireRemoteEntries(context: CommandContext) {
+/** The daemon's records, as the Agent read them once (`remote.list`); none when the caller read none. */
+function acquireRemoteEntries(_context: CommandContext, daemon?: DaemonRemoteRecords) {
   const sourceErrors: string[] = [];
   return {
-    outcomeEntries: outcomeSources(context).flatMap((candidate) =>
+    outcomeEntries: outcomeSources(daemon).flatMap((candidate) =>
       collectFromSource(candidate.source, candidate.path, candidate.kind, OUTCOME_WRAPPER_KEYS, OUTCOME_METHODS, undefined, sourceErrors)),
-    workspaceEntries: workspaceSources(context).flatMap((candidate) =>
+    workspaceEntries: workspaceSources(daemon).flatMap((candidate) =>
       collectFromSource(candidate.source, candidate.path, candidate.kind, WORKSPACE_WRAPPER_KEYS, WORKSPACE_METHODS, undefined, sourceErrors)),
     sourceErrors,
   };
@@ -623,12 +604,13 @@ function normalizeRemoteEntries(entries: RemoteEntries, captures?: NativeWorkspa
   return snapshot;
 }
 
-function readRemoteSnapshot(context: CommandContext): RemoteReadModelSnapshot {
-  return normalizeRemoteEntries(acquireRemoteEntries(context));
+function readRemoteSnapshot(context: CommandContext, daemon: DaemonRemoteRecords): RemoteReadModelSnapshot {
+  return normalizeRemoteEntries(acquireRemoteEntries(context, daemon));
 }
 
-export function remoteReadModelSnapshot(context: CommandContext): RemoteReadModelSnapshot {
-  return readRemoteSnapshot(context);
+/** The remote runners' outcomes and workspaces, from the daemon's records (read once by the caller through `remote.list`). */
+export function remoteReadModelSnapshot(context: CommandContext, daemon: DaemonRemoteRecords): RemoteReadModelSnapshot {
+  return readRemoteSnapshot(context, daemon);
 }
 
 const nativeWorkspaceDisplays = new WeakMap<object, {

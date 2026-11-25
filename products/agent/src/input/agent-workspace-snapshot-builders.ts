@@ -266,10 +266,10 @@ export function buildAgentWorkspaceCompanionAccessSnapshot(context: CommandConte
     : { path: '(Agent home unavailable)', present: false, token: null };
   const pairingReady = Boolean(tokenRecord.token);
   const nextStep = tokenRecord.error
-    ? 'Repair the connected-host operator token file through the owning GoodVibes host, then rerun /devices pair'
+    ? 'Repair the connected-host operator token file through the owning GoodVibes host, then press Pair something in Devices and network again'
     : pairingReady
-      ? 'Type /devices pair device (optionally --name <device name>): it mints a named, revocable device token on the connected host and shows its link and QR code to scan.'
-      : 'Pair or provision connected-host access through the owning GoodVibes host, then rerun /devices pair';
+      ? 'In Devices and network press Pair something, A phone or another device (a name is optional): it mints a named, revocable device token on the connected host and shows its link and QR code to scan.'
+      : 'Pair or provision connected-host access through the owning GoodVibes host, then press Pair something in Devices and network again';
   return {
     surface: GOODVIBES_AGENT_PAIRING_SURFACE,
     hostUrl: runtimeBaseUrl,
@@ -278,7 +278,7 @@ export function buildAgentWorkspaceCompanionAccessSnapshot(context: CommandConte
     tokenReadable: Boolean(tokenRecord.token),
     tokenError: tokenRecord.error ?? null,
     pairingReady,
-    qrCommand: '/devices pair device',
+    qrCommand: 'Devices and network, Pair something, A phone or another device',
     nextStep,
   } as const;
 }

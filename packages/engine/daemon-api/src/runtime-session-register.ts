@@ -58,7 +58,11 @@ export async function handleRegisterSharedSession(
   await context.sessionBroker.start();
 
   const reopen = body.reopen === true;
+  // Who registers it, from the credential the listener authenticated (never the body): a session this call makes is
+  // that principal's, the only one that may name it as a question's asker (inbox.post).
+  const registeredBy = context.requestPrincipalId?.(req);
   const result = await context.sessionBroker.register({
+    ...(registeredBy ? { registeredBy } : {}),
     sessionId,
     ...(kindRaw ? { kind: kindRaw } : {}),
     ...(readString(body.project) ? { project: readString(body.project) } : {}),

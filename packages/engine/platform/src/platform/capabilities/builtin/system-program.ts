@@ -142,7 +142,7 @@ export const HEALTH_SAVE_FAILURE: Def = {
 };
 
 export const HEALTH_KEEP_FAILURE: Def = {
-  capability: session('health.keep-failure'), actionId: 'keep-failure', label: 'Keep a failure of this session as an incident', word: 'keep-failure',
+  capability: session('health.keep-failure'), actionId: 'keep-failure', label: 'Remember a failure of this session as an incident in memory', word: 'keep-failure',
   inputs: [REPORT_INPUT],
   sentence: 'A failure report of this session (what failed, why, the evidence) is kept as an incident record that later sessions remember, once, until you change it.', done: '',
   touches: 'this-machine', lasts: 'kept', risk: 'none', example: { report: 'latest' },
@@ -188,7 +188,7 @@ export const RELEASE_REVIEW: Def = read({
   capability: session('release.review'), actionId: 'review', label: 'See release readiness', word: 'review',
   sentence: 'Shows whether this project is ready to release: the model in use, the project\'s eval tasks, this session\'s failure reports, remote work and the plugins and skills installed.',
   available: hasRelease,
-  async run(_values, services) { return { text: releaseOf(services).review() }; },
+  async run(_values, services) { return { text: await releaseOf(services).review() }; },
 });
 
 export const RELEASE_CHECKLIST: Def = read({
@@ -203,7 +203,7 @@ export const RELEASE_CHECKLIST: Def = read({
         '  3. Permissions and safety, the policy: it is what you mean to enforce.',
         '  4. Work and agents, the eval gate over the project\'s eval tasks.',
         '  5. System, Health (failure reports) and Work and agents (remote runners): nothing is left unexplained.',
-        '  6. Save the release evidence to a file (System, This session).',
+        '  6. Save the release evidence to a file (System, Release).',
       ].join('\n'),
     };
   },
@@ -214,7 +214,7 @@ export const RELEASE_SAVE: Def = {
   inputs: [pathInput('Where to write it'), REPLACE],
   sentence: 'The release evidence (what "See release readiness" shows) will be written to {path}, until you change it.', done: '',
   touches: 'this-machine', lasts: 'kept', risk: 'none', example: { path: 'release-evidence.json' }, available: hasRelease,
-  async run(values, services) { return { text: releaseOf(services).save(values.path!, values.replace === 'yes') }; },
+  async run(values, services) { return { text: await releaseOf(services).save(values.path!, values.replace === 'yes') }; },
 };
 
 export const RELEASE_READ: Def = read({
@@ -222,7 +222,7 @@ export const RELEASE_READ: Def = read({
   inputs: [pathInput('Release evidence saved earlier')],
   sentence: 'Reads the release evidence saved in {path} and shows what it recorded.', example: { path: 'release-evidence.json' },
   available: hasRelease,
-  async run(values, services) { return { text: releaseOf(services).read(values.path!) }; },
+  async run(values, services) { return { text: await releaseOf(services).read(values.path!) }; },
 });
 
 // ---------------------------------------------------------------------------
@@ -269,7 +269,11 @@ export const STARTUP_LINK: Def = read({
     { id: 'target', label: 'Item', help: 'One item in that view, by its id', kind: 'text', freeTextReason: 'an id inside the view, typed as it is shown there', required: { default: '', defaultMeans: 'the view itself' }, typed: { position: 2 } },
   ],
   sentence: 'Shows a goodvibes:// link that opens {surface}.', example: { surface: 'tasks' }, available: hasStartup,
-  async run(values, services) { return { text: startupOf(services).link(values.surface!, values.target ?? '') }; },
+  // The link first, then what it opens: a link said at the end of a sentence would be copied with its full stop.
+  async run(values, services) {
+    const link = startupOf(services).link(values.surface!, values.target ?? '');
+    return { text: `${link} opens the ${values.surface} view${values.target ? ` at ${values.target}` : ''}.`, data: { link } };
+  },
 });
 
 export const STARTUP_OPEN_LINK: Def = {
@@ -350,6 +354,66 @@ export const VOICE_WAKE_SETUP: Def = {
   async run(values, services) { return { text: await wakeOf(services).setup(values.stt === 'yes') }; },
 };
 
+// ---------------------------------------------------------------------------
+// The setup topics: setup.<topic>, each opening this program's form for it
+// ---------------------------------------------------------------------------
+
+/** A `/setup` topic: its words, and the group whose place offers it (a key of that place runs it by id). */
+export interface SetupTopicWords {
+  readonly label: string;
+  readonly word: string;
+  /** One sentence: what the form lets you do. */
+  readonly sentence: string;
+  readonly group: Def['capability']['group'];
+}
+
+/** Every topic a form opens for, in list order (pairing and a provider of your own are capabilities of their own). */
+export const SETUP_TOPIC_WORDS = {
+  'model': { label: 'Choose a model', word: 'model', sentence: 'Opens the form for the model new turns use and how hard it thinks.', group: 'models' },
+  // Labels are short enough to stand whole in a list at 80 columns; the sentence says the rest.
+  'sign-in': { label: 'Provider sign-in', word: 'sign-in', sentence: 'Opens the form for signing in to a provider with your browser, finishing a sign-in, or signing out.', group: 'models' },
+  'store-key': { label: 'Store a password or key', word: 'store-key', sentence: 'Opens the form for storing a provider or channel key, and how keys are stored.', group: 'models' },
+  'local-only': { label: 'Only this computer', word: 'local-only', sentence: 'Opens the form that keeps everything on this computer: it turns off the browser, network and webhook access.', group: 'system' },
+  'browser': { label: 'Use it in a browser', word: 'browser', sentence: 'Opens the form for using GoodVibes from a web browser on this computer or your network.', group: 'system' },
+  'other-devices': { label: 'Other devices', word: 'other-devices', sentence: 'Opens the form for letting your other devices reach GoodVibes: addresses and ports.', group: 'devices' },
+  'connect-daemon': { label: 'A daemon elsewhere', word: 'connect-daemon', sentence: 'Opens the form for pointing this program at a GoodVibes daemon already running on another computer; nothing on this computer is opened to the network.', group: 'system' },
+  'webhooks': { label: 'Receive webhooks', word: 'webhooks', sentence: 'Opens the form for receiving webhooks and events from other tools.', group: 'system' },
+  'chat-apps': { label: 'Chat apps and services', word: 'chat-apps', sentence: 'Opens the form for connecting Slack, Discord, Telegram and the other chat apps and services.', group: 'messages' },
+  'cloudflare': { label: 'Use Cloudflare', word: 'cloudflare', sentence: 'Opens the form for using Cloudflare for batch and remote work.', group: 'devices' },
+  'who-signs-in': { label: 'Who can sign in here', word: 'who-signs-in', sentence: 'Opens the form for the account that signs in to this GoodVibes from other devices.', group: 'system' },
+  'how-it-works': { label: 'When it asks', word: 'how-it-works', sentence: 'Opens the form for how GoodVibes works with you: how much GoodVibes tells you, how much guidance it gives, and when it asks.', group: 'system' },
+  'safety': { label: 'Safety', word: 'safety', sentence: 'Opens the form for sandboxing and the other safety features.', group: 'safety' },
+  'memory': { label: 'Memory and context', word: 'memory', sentence: 'Opens the form for memory and how a long conversation is kept in context.', group: 'memory' },
+  'telemetry': { label: 'Record traces', word: 'telemetry', sentence: 'Opens the form for recording traces of what GoodVibes does.', group: 'system' },
+  'automation': { label: 'Automation settings', word: 'automation', sentence: 'Opens the form for scheduled routines, watchers and triggers.', group: 'automation' },
+  'devices-voice': { label: 'Paired devices and voice', word: 'devices-voice', sentence: 'Opens the form for paired phones and voice.', group: 'devices' },
+  'provider-behaviour': { label: 'Provider behaviour', word: 'provider-behaviour', sentence: 'Opens the form for how GoodVibes chooses and talks to providers.', group: 'system' },
+  'advanced': { label: 'Advanced switches', word: 'advanced', sentence: 'Opens the form for the advanced runtime switches.', group: 'system' },
+  'history': { label: 'Saved chats', word: 'history', sentence: 'Opens the setting for whether conversations are saved on this computer.', group: 'system' },
+  'import-settings': { label: 'Import settings', word: 'import-settings', sentence: 'Copies the settings the Agent shares with the terminal app into the Agent.', group: 'system' },
+  'first-run': { label: 'Run first-run again', word: 'first-run', sentence: 'Opens the three-step first run: choose a provider, sign in, start.', group: 'system' },
+} as const satisfies Readonly<Record<string, SetupTopicWords>>;
+
+export type SetupFormTopicId = keyof typeof SETUP_TOPIC_WORDS;
+
+function setupTopicCapability(topic: SetupFormTopicId): Def {
+  const words: SetupTopicWords = SETUP_TOPIC_WORDS[topic];
+  return {
+    capability: { id: `setup.${topic}`, group: words.group, home: 'session', repeat: 'safe' },
+    actionId: topic, label: words.label, word: words.word, inputs: [],
+    sentence: words.sentence, done: '', touches: 'reads', lasts: 'not-a-change', risk: 'none', example: {},
+    available: (services) => Boolean(services.systemSession?.setupTopic),
+    async run(_values, services) {
+      const open = systemOf(services).setupTopic;
+      if (!open) throw new CapabilityRefusal('This program has no setup forms to open.', undefined, 'UNAVAILABLE');
+      return { text: (await open(topic)) || '' };
+    },
+  };
+}
+
+/** `setup.<topic>`: one capability per topic, opening this program's form for it; other places' keys run them by id. */
+export const SETUP_TOPIC_CAPABILITIES: readonly Def[] = (Object.keys(SETUP_TOPIC_WORDS) as SetupFormTopicId[]).map(setupTopicCapability);
+
 /** Every capability of this file, with the command it came from. */
 export const SYSTEM_PROGRAM_CAPABILITIES: readonly { readonly definition: Def; readonly command: { readonly name: string; readonly title: string } }[] = [
   ...[HEALTH_REPORT, HEALTH_CHECK, HEALTH_DIAGNOSE, HEALTH_FAILURE, HEALTH_SAVE_FAILURE, HEALTH_KEEP_FAILURE, HEALTH_STATE, HEALTH_COMPAT]
@@ -360,4 +424,5 @@ export const SYSTEM_PROGRAM_CAPABILITIES: readonly { readonly definition: Def; r
   { definition: DEEPLINK_REVIEW, command: { name: 'deeplink', title: 'Links to views' } },
   { definition: SYSTEM_HELP, command: { name: 'help', title: 'Help' } },
   ...[VOICE_STOP, VOICE_WAKE_STATUS, VOICE_WAKE_SETUP].map((definition) => ({ definition, command: { name: 'voice', title: 'Voice' } })),
+  ...SETUP_TOPIC_CAPABILITIES.map((definition) => ({ definition, command: { name: 'setup', title: 'Set up GoodVibes' } })),
 ];

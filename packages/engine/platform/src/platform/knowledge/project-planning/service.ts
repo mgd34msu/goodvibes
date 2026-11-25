@@ -81,7 +81,7 @@ export interface WorkPlanTaskMatch {
 }
 
 export class WorkPlanNotReadyError extends Error {
-  constructor() { super('The work plan is still opening; try again in a moment.'); this.name = 'WorkPlanNotReadyError'; }
+  constructor() { super('The checklist is still opening; read it again in a moment.'); this.name = 'WorkPlanNotReadyError'; }
 }
 
 export interface ProjectPlanningServiceOptions {

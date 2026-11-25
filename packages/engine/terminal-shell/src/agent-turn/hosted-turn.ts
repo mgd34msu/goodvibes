@@ -35,7 +35,8 @@ import { registerAgentProfileTool } from './profile-tool.js';
 import { registerAgentOccasionsTool } from './occasions-tool.js';
 import type { FamilyGatewayRemote } from './family-gateway.js';
 import { registerAgentArtifactsTool } from './artifacts-tool.js';
-import { registerAgentDocumentsTool } from './documents-tool.js';
+import { createAgentDocumentsTool } from './documents-tool.js';
+import { documentWritesThroughDaemon } from './document-writes-through-daemon.js';
 import { registerAgentResearchRunsTool } from './research-runs-tool.js';
 import { registerAgentResearchSourcesTool } from './research-sources-tool.js';
 import { registerAgentReviewPacketPresetsTool } from './review-packet-presets-tool.js';
@@ -71,7 +72,7 @@ import { registerAgentChannelSendTool } from './channel-send-tool.js';
 import { registerAgentBrowserTool, type AgentBrowserToolOptions, type BrowserToolBackend } from './browser-tool.js';
 import { wireAgentGoogleTool, type GoogleToolWiringDeps } from './google-wiring.js';
 import { connectedHostGoogleCalendar } from './google-tool.js';
-import { registerAgentCalendarTool, type AgentCalendarToolOptions } from './connected-calendar-tool.js';
+import { registerAgentCalendarTool } from './connected-calendar-tool.js';
 import { AGENT_PLATFORM_TOOL_ADMISSION, decorateAgentWorkerRegistry, installAgentToolPolicy } from './read-modes.js';
 import { connectedHostFamilyRemote } from './family-remote.js';
 import { registerAgentLocalRegistryTool } from './local-registry-tool.js';
@@ -144,6 +145,8 @@ export interface AgentTurnToolDeps {
   readonly browser?: AgentBrowserToolOptions | undefined;
   /** The Google account `google` uses: the process's own config and credential stores and, when reachable, the daemon's calendar. */
   readonly google: GoogleToolWiringDeps;
+  /** The conversation this turn belongs to: `capability_run` sends it, so what the model adds names where it came from. */
+  readonly sessionId?: (() => string | undefined) | undefined;
 }
 
 /**
@@ -161,7 +164,8 @@ export function registerAgentTurnTools(registry: ToolRegistry, deps: AgentTurnTo
   });
   registerAgentOccasionsTool(registry, { invoke: createOccasionsGatewayInvoke(family) });
   registerAgentArtifactsTool(registry, deps.artifactStore, { projectRoot: deps.shellPaths.workingDirectory });
-  registerAgentDocumentsTool(registry, deps.shellPaths, deps.artifactStore);
+  // Its draft writes run the daemon's document capabilities, as the Drafts tab does, so every program follows them.
+  registry.register(documentWritesThroughDaemon(createAgentDocumentsTool(deps.shellPaths, deps.artifactStore), daemonCapabilityRunner()));
   registerAgentResearchRunsTool(registry, deps.shellPaths);
   registerAgentResearchSourcesTool(registry, deps.shellPaths);
   registerAgentReviewPacketPresetsTool(registry, deps.artifactStore);
@@ -186,6 +190,7 @@ export function registerAgentTurnTools(registry: ToolRegistry, deps: AgentTurnTo
     session: boundSessionCapabilities,
     program: 'agent',
     workingDirectory: () => deps.shellPaths.workingDirectory,
+    ...(deps.sessionId ? { sessionId: deps.sessionId } : {}),
     // The model this conversation uses: a capability on it (its context window size) acts on it.
     model: () => {
       const current = deps.modelCompare.modelCatalog.getCurrentModel?.();
@@ -199,19 +204,16 @@ export function registerAgentTurnTools(registry: ToolRegistry, deps: AgentTurnTo
   registerAgentScheduleEditTool(registry, deps.shellPaths, deps.settings, deps.inProcessHost);
   registerAgentScheduleTool(registry, deps.shellPaths, deps.settings);
   // Its skill and bundle writes run the daemon's skills capabilities, as the Skills tab does, so every program follows them.
-  registerAgentLocalRegistryTool(registry, deps.shellPaths, deps.memoryRegistry, deps.memoryAccess,
-    daemonCapabilityRunner(deps.shellPaths, deps.settings, 'agent', deps.inProcessHost));
+  // Each write is a nested capability_run call, judged by that capability's own risk (capability-tools.ts).
+  registerAgentLocalRegistryTool(registry, deps.shellPaths, deps.memoryRegistry, deps.memoryAccess, daemonCapabilityRunner());
   registerAgentLearningConsolidationTool(registry, deps.shellPaths, deps.memoryRegistry, deps.memoryAccess);
   registerAgentChannelSendTool(registry, deps.channelDeliveryRouter, { shellPaths: deps.shellPaths });
   if (deps.browser) registerAgentBrowserTool(registry, deps.browser);
   // The google tool waits on the same book the accounts alias opened its watch in.
   wireAgentGoogleTool(registry, deps.accountExpectations ? { ...deps.google, expectations: deps.accountExpectations } : deps.google);
-  // The connected Google and Microsoft calendars (/calendar connect), read and
-  // written over the same settings and credential stores the google tool uses.
-  registerAgentCalendarTool(registry, {
-    config: deps.google.configManager as unknown as AgentCalendarToolOptions['config'],
-    secrets: deps.google.secretsManager as unknown as AgentCalendarToolOptions['secrets'],
-  });
+  // The calendars the daemon reaches (its Google and Microsoft accounts, CalDAV, its own): each call runs the daemon's
+  // calendar method nested, through the one gate (connected-calendar-tool.ts).
+  registerAgentCalendarTool(registry);
 }
 
 /**
@@ -368,6 +370,8 @@ export function createAgentHostedTurn(deps: AgentHostedTurnDeps): HostedSurfaceT
       const connectedHost = { configManager: deps.settings, homeDirectory: deps.homeDirectory, inProcess: operatorHost };
       registerAgentTurnTools(registry, {
         ...(ownProject ? { workPlan: deps.workPlan } : {}),
+        // The hosted session this turn runs in: a record the model adds through capability_run names it.
+        sessionId: () => sessionId,
         // Profile and occasions: a read presents the Agent's ordinary credential, a
         // write the Agent makes for the owner its delegated one, which the daemon
         // gives that pairing's scopes and native authority.

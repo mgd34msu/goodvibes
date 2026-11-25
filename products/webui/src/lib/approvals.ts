@@ -121,6 +121,8 @@ export function attributionLabel(attribution: ApprovalAttribution | undefined): 
       return `Command waiting on its terminal: ${attribution.command}`;
     case 'fetch-localhost':
       return `First fetch of ${attribution.host} on this machine: ${attribution.url}`;
+    case 'outside-caller':
+      return `Asked by ${attribution.name}`;
     default:
       return null;
   }

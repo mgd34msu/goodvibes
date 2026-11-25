@@ -40,6 +40,8 @@ export function createSettingsRows<Modal extends SettingsRowState<Entry, Categor
   readonly listCount: (modal: Modal, category: Category) => string | undefined;
   readonly focused: (modal: Modal) => boolean;
   readonly routeLabel: (route: string) => string;
+  /** The title of the section an open list belongs to, drawn above it; undefined draws none. */
+  readonly listSection?: ((modal: Modal) => string | undefined) | undefined;
   readonly specialRow?:
     | ((modal: Modal, entry: Entry, selected: boolean, focused: boolean, width: number) => KitRow | undefined)
     | undefined;
@@ -81,18 +83,24 @@ export function createSettingsRows<Modal extends SettingsRowState<Entry, Categor
     if (modal.openList !== null) {
       const special = policy.specialList?.(modal, width, focused, clamp);
       if (special) return special;
+      // The open list's section titled above it, as a topic's sections are.
+      const titled = (list: { rows: KitRow[]; selected: number }): { rows: KitRow[]; selected: number } => {
+        const section = policy.listSection?.(modal);
+        // The settings screen's section titles keep their own capitals.
+        return section ? { rows: [{ header: section, headerAsWritten: true, selectable: false }, ...list.rows], selected: list.selected < 0 ? -1 : list.selected + 1 } : list;
+      };
       if (modal.currentCategory === 'mcp') {
         const entries = modal.mcpEntries;
-        if (!entries.length) return { rows: [{ label: 'No tool servers are set up. /mcp adds one.', muted: true }], selected: -1 };
+        if (!entries.length) return titled({ rows: [{ label: 'No tool servers are set up. /mcp adds one.', muted: true }], selected: -1 });
         const selected = clamp(entries.length);
-        return { rows: mcpTrustRows(entries, selected, focused, modal.editingMode, modal.editBuffer), selected };
+        return titled({ rows: mcpTrustRows(entries, selected, focused, modal.editingMode, modal.editBuffer), selected });
       }
       if (modal.currentCategory === 'subscriptions') {
         const entries = modal.subscriptionEntries;
-        if (!entries.length) return { rows: [{ label: 'No provider sign-ins are available or set up.', muted: true }], selected: -1 };
+        if (!entries.length) return titled({ rows: [{ label: 'No provider sign-ins are available or set up.', muted: true }], selected: -1 });
         const selected = clamp(entries.length),
           tokens = activeTokens();
-        return {
+        return titled({
           rows: entries.map((entry, index) => ({
             label: entry.provider,
             desc:
@@ -108,25 +116,33 @@ export function createSettingsRows<Modal extends SettingsRowState<Entry, Categor
             current: index === selected && !focused,
           })),
           selected,
-        };
+        });
       }
     }
     const rows = policy.visibleRows(modal);
     if (!rows.length) return { rows: [{ label: 'Nothing in this topic yet.', muted: true }], selected: -1 };
     const selected = clamp(rows.length);
-    return {
-      rows: rows.map((row, index) =>
-        row.kind === 'setting'
-          ? settingRow(modal, row.entry, index === selected, focused, width)
-          : {
-              label: row.list.label,
-              right: policy.listCount(modal, row.list.category),
-              selected: index === selected && focused,
-              current: index === selected && !focused,
-            },
-      ),
-      selected,
-    };
+    // Each section's title on a line of its own above its rows (not selectable), so a section a person is sent to
+    // ("secure address") is one he sees named.
+    const drawn: KitRow[] = [];
+    let at = -1;
+    let section: string | undefined;
+    rows.forEach((row, index) => {
+      if (row.place.sectionId !== section) {
+        section = row.place.sectionId;
+        drawn.push({ header: row.place.section, headerAsWritten: true, selectable: false });
+      }
+      if (index === selected) at = drawn.length;
+      drawn.push(row.kind === 'setting'
+        ? settingRow(modal, row.entry, index === selected, focused, width)
+        : {
+            label: row.list.label,
+            right: policy.listCount(modal, row.list.category),
+            selected: index === selected && focused,
+            current: index === selected && !focused,
+          });
+    });
+    return { rows: drawn, selected: at };
   }
   return { settingRow, listRows };
 }

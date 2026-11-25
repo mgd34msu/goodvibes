@@ -80,7 +80,8 @@ export function formatAgentRecordProvenance(provenance: string | undefined): str
     return `Starter profile: ${starter[1]}`;
   }
 
-  return titleCaseWords(raw);
+  // Anything else is said as it was written: it can hold a path, which is never re-cased.
+  return raw;
 }
 
 export function formatAgentRecordOrigin(source: string | undefined, provenance: string | undefined): string {
@@ -90,7 +91,7 @@ export function formatAgentRecordOrigin(source: string | undefined, provenance: 
   if (sourceLabel === 'User' && USER_PROVENANCE_LABELS.has(provenanceLabel)) {
     return provenanceLabel;
   }
-  if (sourceLabel === 'Imported' && provenanceLabel.startsWith('Imported file')) {
+  if (sourceLabel === 'Imported' && provenanceLabel.toLowerCase().startsWith('imported file')) {
     return provenanceLabel;
   }
   return `${sourceLabel} (${provenanceLabel})`;

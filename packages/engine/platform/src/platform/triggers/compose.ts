@@ -26,6 +26,8 @@ export interface TriggerSupervisorDeps {
   readonly processManager: ProcessManager;
   /** Where a fired turn's answer goes, and the connected tools (mail, calendar) it gets. */
   readonly unattendedRuns?: UnattendedRuns | undefined;
+  /** The tools a conversation's turn is offered, which a fired turn is offered too (runtime-graph.ts). */
+  readonly conversationTools?: (() => readonly string[]) | undefined;
   /** False when the session that created a trigger is gone; such triggers are reaped. */
   readonly sessionIsLive?: ((sessionId: string) => boolean) | undefined;
   /** Whether new work is admitted (daemon/work-admission.ts); no action fires while it is not. */
@@ -79,7 +81,7 @@ export function createTriggerSupervisor(deps: TriggerSupervisorDeps): TriggerMan
   const manager = new TriggerManager({
     storePath: deps.resolveStorePath('triggers.db'),
     config: () => readTriggerConfig(configManager),
-    actions: createTriggerActionExecutor({ agents: deps.agents, processManager, unattendedRuns: deps.unattendedRuns }),
+    actions: createTriggerActionExecutor({ agents: deps.agents, processManager, unattendedRuns: deps.unattendedRuns, conversationTools: deps.conversationTools }),
     processHost: createProcessManagerTriggerHost(processManager),
     streamHost: createBunStreamHost(processManager),
     probeIo: createDefaultProbeIo({

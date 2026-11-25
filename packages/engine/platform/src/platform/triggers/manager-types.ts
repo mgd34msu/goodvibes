@@ -26,6 +26,8 @@ export interface TriggerActionExecutor {
     readonly model?: string | undefined;
     /** Where the turn's answer goes (a channel); absent: the owner inbox. */
     readonly deliverTo?: string | undefined;
+    /** The project folder the turn works in: the one its trigger was made for. */
+    readonly workingDirectory?: string | undefined;
   }): Promise<string>;
   runGrant(input: {
     readonly triggerId: string;

@@ -1,4 +1,3 @@
-import { GOODVIBES_TUI_SURFACE_ROOT } from '../config/surface.ts';
 import type { ModalSurfaceRegistry } from './modal-surface-registry.ts';
 import type { ResolvedBuiltinViewDeps } from './view-deps.ts';
 import type { ConfigModalSurface, ConfigModalView } from '../input/config-modal-types.ts';
@@ -6,18 +5,9 @@ import { copyToClipboard } from '../utils/clipboard.ts';
 import { pairingNoWebUiLines, pairingOriginUsesStableHost, pairingReachFromSettings, pairingThisMachineLines, refreshStableHostInputs, resolvePairingWebOrigin } from '@goodvibes/engine/platform/platform/pairing';
 import { availablePairingOffers, mintPairingHandoff, defaultPairingTokenName, PAIRING_HANDOFF_OFFER_KINDS, type OriginPosture, type PairingHandoffOfferKind } from '@goodvibes/engine/platform/platform/pairing';
 import { probePairingTailscale, runPairingTailscaleServe, stopPairingTailscaleServe } from '../core/pairing-tailscale-gateway.ts';
-// ── Security subset ──────────────────────────────────────────────────────────
-import { createSandboxModalSurface } from './modals/sandbox-modal.ts';
-// ── Ecosystem & Governance ─────────────────────────────────────────────────
-import { createMarketplaceModalSurface } from './modals/marketplace-modal.ts';
-import { createSecurityModalSurface } from './modals/security-modal.ts';
-import { createPolicyModalSurface } from './modals/policy-modal.ts';
 import { createKeybindingsModalSurface } from './modals/keybindings-modal.ts';
 import { createPairingModalSurface, type PairingConnectionRequest, type PairingModalConnectionInfo, type PairingModalUnreachable } from './modals/pairing-modal.ts';
-import { createDevicesModalSurface } from './modals/devices-modal.ts';
-import { describeOperatorRpcError, resolveDaemonEndpoint, resolveOperatorRpc } from '../runtime/client/operator-endpoint.ts';
-import { subscribeDaemonListChanges } from '@goodvibes/engine/platform/platform/runtime/client';
-import { revokeSharedTokenOnDaemon } from '../runtime/client/shared-token-revocation.ts';
+import { describeOperatorRpcError, resolveOperatorRpc } from '../runtime/client/operator-endpoint.ts';
 
 /**
  * Register the config-modal surfaces and the old names that open them. Called
@@ -42,21 +32,12 @@ export function registerBuiltinModals(
 
   // ── Security & Governance ────────────────────────────────────────────────────
   // Settings sync is the Devices and network place's Settings sync tab (terminal-shell places/devices-place.ts).
-
-  manager.registerModalSurface(createSandboxModalSurface(deps.configManager, deps.sandboxSessionRegistry, deps.requestRender));
-  manager.registerModalRedirect('sandbox', 'sandbox-modal');
+  // Security, the policy bundles and the sandbox are the Permissions and safety place (terminal-shell
+  // places/safety-place.ts); view-openers.ts opens it by the old screens' names.
 
   // ── Ecosystem & Governance ───────────────────────────────────────────────────
-  manager.registerModalSurface(createMarketplaceModalSurface({
-    readModel: ui.readModels.marketplace,
-    ecosystemPaths: {
-      cwd: ui.environment.shellPaths.workingDirectory,
-      homeDir: ui.environment.shellPaths.homeDirectory,
-      projectCatalogRoot: ui.environment.shellPaths.resolveProjectPath(GOODVIBES_TUI_SURFACE_ROOT, 'ecosystem'),
-      userCatalogRoot: ui.environment.shellPaths.resolveUserPath(GOODVIBES_TUI_SURFACE_ROOT, 'ecosystem'),
-    },
-  }));
-  manager.registerModalRedirect('marketplace', 'marketplace-modal');
+  // The marketplace is the Marketplace and Installed tabs of Tools and extensions (terminal-shell places/tools-place.ts);
+  // view-openers.ts opens it by the old screen's name.
 
   // plugins/hooks/knowledge deps are wired at bootstrap in production
   // (bootstrap-shell.ts) but may be absent in a partially-wired context (e.g. a
@@ -65,23 +46,6 @@ export function registerBuiltinModals(
   // honestly" charter pattern).
   // Skills, plugins and hooks (with the trace of which hooks ran) are tabs of Tools and extensions
   // (terminal-shell places/tools-place.ts, tools-skills-entries.ts): no screen of their own.
-
-  // The daemon's LIST_CHANGED `paired-devices`, followed while the Security or Paired Devices screen is open:
-  // a phone paired, renamed or revoked through the daemon redraws them with no key.
-  const watchPairedDevices = (onChange: () => void): (() => void) => {
-    let closed = false;
-    let stop: (() => void) | null = null;
-    void resolveDaemonEndpoint({ configManager: deps.configManager, homeDirectory: ui.environment.shellPaths.homeDirectory }).then((endpoint) => {
-      if (closed || !endpoint.available) return;
-      stop = subscribeDaemonListChanges({ baseUrl: endpoint.baseUrl, getAuthToken: () => endpoint.token }, ['paired-devices'], onChange);
-    });
-    return () => { closed = true; stop?.(); stop = null; };
-  };
-  manager.registerModalSurface(createSecurityModalSurface({ readModel: ui.readModels.security, watchPairedDevices }));
-  manager.registerModalRedirect('security', 'security-modal');
-
-  manager.registerModalSurface(createPolicyModalSurface({ policyRuntimeState: deps.policyRuntimeState }));
-  manager.registerModalRedirect('policy', 'policy-modal');
 
   // Memory and knowledge is a place (terminal-shell places/memory-place.ts); view-openers.ts opens it by these names.
 
@@ -109,16 +73,7 @@ export function registerBuiltinModals(
   }));
   manager.registerModalRedirect('qr-code', 'pairing-modal');
 
-  // Paired-device management (settings security domain): list/rename/revoke/
-  // migrate-shared over the same per-device token store the pairing QR mints into.
-  manager.registerModalSurface(createDevicesModalSurface({
-    pairingTokens: ui.platform.pairingTokens,
-    // Resolved per press: the daemon's address and this machine's bearer are read then.
-    revokeShared: () => revokeSharedTokenOnDaemon(resolveOperatorRpc({ configManager: deps.configManager, homeDirectory: ui.environment.shellPaths.homeDirectory })),
-    copyToClipboard,
-    watchPairedDevices,
-  }));
-  manager.registerModalRedirect('devices', 'devices-modal');
+  // Paired devices are the Devices and network place (terminal-shell places/devices-place.ts).
 
 
   // The retired 'sessions' view folds into the EXISTING session-picker modal
@@ -126,6 +81,9 @@ export function registerBuiltinModals(
   // from the deleted ecosystem bridge.
   manager.registerModalRedirect('sessions', 'sessionPicker');
 }
+
+/** The step that makes a new pairing code: the control that opened this screen. */
+const PAIR_AGAIN = 'Press Pair something (A phone or another device) in Devices and network again';
 
 /**
  * Build the companion-pairing connection info lazily (called from the pairing
@@ -142,9 +100,9 @@ export function buildPairingConnectionInfo(deps: ResolvedBuiltinViewDeps, reques
   // No code is minted for a phone that a phone could not open: the same
   // decision and the same steps `goodvibes pair` gives, from the settings, with
   // no probe. When only this machine can open it, the code is for a browser here.
-  if (webOrigin === null) return { kind: 'unreachable', lines: pairingNoWebUiLines('/devices pair device') };
+  if (webOrigin === null) return { kind: 'unreachable', lines: pairingNoWebUiLines(PAIR_AGAIN) };
   const reach = pairingReachFromSettings(configManager, webOrigin.origin);
-  const thisMachineOnly = reach.otherDevices ? undefined : pairingThisMachineLines(webOrigin.origin, reach, '/devices pair device');
+  const thisMachineOnly = reach.otherDevices ? undefined : pairingThisMachineLines(webOrigin.origin, reach, PAIR_AGAIN);
   const url = webOrigin.alternateOrigin ? `${webOrigin.origin}  (or ${webOrigin.alternateOrigin})` : webOrigin.origin;
   const held = request.held;
   // Reopening shows the same offer while nobody has used it and it has not

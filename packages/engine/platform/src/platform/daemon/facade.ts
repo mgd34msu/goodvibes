@@ -1,4 +1,5 @@
 import { requestedEffortOverride } from '../providers/reasoning-effort-surface.js';
+import { DAEMON_RESTART_SETTINGS } from '../runtime/program-host-settings.js';
 import { completeGatewayScopePolicyBootstrap } from '../control-plane/scope-policy-bootstrap.js';
 import { markUnservedGatewayMethods } from '../control-plane/method-catalog-route-reconcile.js';
 import { channelProfileForSession, withChannelExecutionMode } from '../channel-profiles/install-inbound-intake.js';
@@ -8,6 +9,8 @@ import { isChannelSurfaceKind } from '../../events/surfaces.js';
 import { channelTurnScope, withTurnSurfaceId } from '../security/turn-boundary.js';
 import { releaseDaemonActivityLog, runDaemonBootGuarantees } from './facade-boot-guarantees.js';
 import { sayCarriedForwardNow } from '../state/carried-forward.js';
+import { attributeOldProjectMemory } from '../state/memory-project.js';
+import { daemonReceiptStoreAt, daemonReceiptsPath } from './receipts.js';
 import { logger } from '../utils/logger.js';
 import { jsonErrorResponse } from './http/error-response.js';
 import { ModelReferenceError } from '../providers/model-id-resolution.js';
@@ -91,7 +94,6 @@ import { listenerWithinConfiguredHost, resolveHostBinding } from './host-resolve
 import { isLoopbackHost } from '../utils/reachable-base-url.js';
 import { isWildcardHost } from '../config/control-plane-base-url.js';
 import { LanHttpsListener, type LanHttpsState } from './lan-https/listener.js';
-import { lanAuthorityCertificate } from './lan-https/authority.js';
 import { lanHttpsPageResponse } from './lan-https/page.js';
 import { SecureAddressGroupShare } from './lan-https/group-share.js';
 import { registerSecureAddressGatewayMethods } from '../control-plane/routes/secure-address.js';
@@ -408,7 +410,6 @@ export class DaemonServer {
       signWebhookPayload: (body, secret) => this.signWebhookPayload(body, secret),
       handleApprovalAction: (approvalId, action, req, interaction?: { readonly surface: string; readonly userId: string }) => this.handleApprovalAction(approvalId, action, req, interaction),
       tlsState: () => this.tlsState,
-      swapManager: this.config.swapManager ?? null,
       // Resolve companion-chat defaults from the live ProviderRegistry (current route, not a startup snapshot).
       resolveDefaultProviderModel: () => {
         try {
@@ -487,14 +488,17 @@ export class DaemonServer {
       : null;
     // capabilities.find and capabilities.run: every capability by need and by id, through this daemon's own dispatch and gate.
     // A nested call is described as the outer one was: the operator token from this machine stays the `local` credential.
-    registerDaemonCapabilities(this.runtimeServices, ({ localOrigin, transport, daemonTurn, ...given }) => {
+    registerDaemonCapabilities(this.runtimeServices, ({ localOrigin, transport, daemonTurn, asCaller, ...given }) => {
+      // A held call run on the owner's yes after a restart: dispatched as the caller it was held for, never with any
+      // credential (capability-wiring.ts).
+      if (asCaller) return this.invokeGatewayMethodCall({ ...given, authToken: '', principal: asCaller });
       // A call nested in one of the daemon's own turns carries no credential: it goes with the daemon's own, its
       // effects already admitted for that turn's actor (capability-wiring.ts).
       const input = daemonTurn === true ? { ...given, authToken: this.authToken ?? '' } : given;
       const described = localOrigin === true || transport !== undefined ? this.controlPlaneHelper.describeRequestPrincipal(input.authToken, localOrigin === true) : null;
       const principal = described && transport !== undefined ? { ...described, transport } : described;
       return this.invokeGatewayMethodCall({ ...input, ...(principal ? { principal } : {}) });
-    }, { clusterVerbs: () => groupVerbs });
+    }, { clusterVerbs: () => groupVerbs, ...(config.places ? { places: config.places } : {}), users: this.userAuth });
     // A group's machines share the secure address of the one that set it up (lan-https/group-share.ts).
     if (config.secureAddressGroup) {
       const share = new SecureAddressGroupShare(config.secureAddressGroup, this.lanHttps.secureAddress);
@@ -882,6 +886,14 @@ export class DaemonServer {
       }
       // Init the canonical memory store so the daemon is a live single-writer memory service on accept (memory.records.add would else throw "not initialized" on a cold store).
       await this.runtimeServices.memoryStore.init();
+      // Once per store: 3.5.0 "this project" records given the project they were saved in, the owner told once.
+      try {
+        const line = attributeOldProjectMemory(this.runtimeServices.memoryRegistry, this.runtimeServices.homeDirectory,
+          this.runtimeServices.sessionBroker.listSessions(Number.MAX_SAFE_INTEGER));
+        if (line) daemonReceiptStoreAt(daemonReceiptsPath(this.runtimeServices.configManager)).record(line, { audience: 'owner' });
+      } catch (error) {
+        logger.warn('DaemonServer: old "this project" memory could not be given its project; it is given everywhere as before', { error: summarizeError(error) });
+      }
       if (this.replySettlement === null) {
         // A channel reply is settled by its agent's terminal event, the same
         // event the reply pipeline and the session broker act on; no timer.
@@ -1174,10 +1186,14 @@ export class DaemonServer {
     }
   }
 
-  /** The LAN https authority's public certificate, or null when none was made (lan-https/authority.ts). */
+  /**
+   * The authority a phone installs to trust what the LAN https listener serves now (lan-https/secure-address.ts
+   * authorityForPhones): this machine's own, or its lead's while it is a member of a group serving the lead's
+   * certificate; null when none was made or the certificate served needs none.
+   */
   private async lanAuthorityCertificate(): Promise<string | null> {
-    const secrets = this.runtimeServices?.secretsManager;
-    return secrets ? lanAuthorityCertificate(secrets) : null;
+    if (!this.runtimeServices?.secretsManager) return null;
+    return this.lanHttps.secureAddress.authorityForPhones();
   }
 
   /** Where a phone that reached the plain listener at this request's host opens the LAN https listener, while it serves. */
@@ -1516,6 +1532,7 @@ export class DaemonServer {
     this.unbindSharedToken?.();
     this.unbindSharedToken = null;
     this.surfaceActionHelper.closeDelegatedTelegram();
+    this.surfaceActionHelper.closeProposalAnswers();
     try { await this.companionChatManager.close(); }
     catch (error) { runtimeCloseFailures.push(error); }
     // Kill-policy sessions end here; survive-policy ones are parked with their transcript.
@@ -1558,6 +1575,10 @@ export class DaemonServer {
     // A daemon that never listened has no disconnect to announce and no "stopped" to claim; everything above was released either way.
     await close(async () => { await this.restartCycle.pending; });
     const hadListener = this.acceptedTransportBinding !== null || this.server !== null || this.listenerDrain !== null;
+    // Closing the listener waits for every running request: a request held open while it waits (a crashed program's
+    // take of rewind questions) is ended first, or it holds the stop until its own wait runs out.
+    try { this.runtimeServices.endLongWaits?.(); this.distributedRuntime.endWaits(); }
+    catch (error) { logger.warn('DaemonServer: ending waiting requests failed', { error: summarizeError(error) }); }
     await close(() => this.detachControlPlaneListener());
     if (hadListener) { this.transportEventsHelper.emitTransportDisconnected('Daemon server stopped', false); logger.info('DaemonServer stopped'); }
     else logger.debug('DaemonServer released without ever binding a socket');
@@ -1594,7 +1615,8 @@ export class DaemonServer {
     // intentional stop.
     const watcher = createHostModeRestartWatcher({
       configManager: this.configManager,
-      keys: ['controlPlane.hostMode', 'controlPlane.host', 'controlPlane.port'],
+      // The address and its TLS: a rebind reads both again (a certificate or mode change is a rebind too).
+      keys: ['controlPlane.hostMode', 'controlPlane.host', 'controlPlane.port', 'controlPlane.tls.mode', 'controlPlane.tls.certFile', 'controlPlane.tls.keyFile'],
       onRestart: () => this.restartCycle.request(),
       getIsRunning: () => this.restartCycle.active,
     });
@@ -1610,7 +1632,14 @@ export class DaemonServer {
       ...(['secureAddress.certificate', 'secureAddress.domain', 'secureAddress.acmeDirectory', 'secureAddress.certFile', 'secureAddress.keyFile'] as const)
         .map((key) => this.configManager.subscribe(key, () => { void this.lanHttps.resync(); })),
     ];
-    this._configWatchUnsub = () => { watcher.unsubscribe(); unsubscribeStreamMode(); for (const stop of unsubscribeLanHttps) stop(); };
+    // The webhook listener is composed at the daemon's start (on or off): switching it restarts the daemon itself,
+    // after the change's answer (DAEMON_RESTART_SETTINGS; every other listener setting above rebinds in place).
+    const unsubscribeRestart = DAEMON_RESTART_SETTINGS.map((setting) => this.configManager.subscribe(setting.key, () => {
+      if (!this.restartCycle.active) return;
+      const outcome = this.lifecycle?.restartToApply(setting.label);
+      logger.info('DaemonServer: a setting read only at start changed', { key: setting.key, outcome: outcome ?? 'no lifecycle' });
+    }));
+    this._configWatchUnsub = () => { watcher.unsubscribe(); unsubscribeStreamMode(); for (const stop of unsubscribeLanHttps) stop(); for (const stop of unsubscribeRestart) stop(); };
   }
 
   /**
@@ -1683,6 +1712,8 @@ export class DaemonServer {
     };
     /** The principal the request was authenticated as where it entered, with its actor; not authenticated again. */
     readonly principal?: Parameters<DaemonControlPlaneHelper['invokeGatewayMethodCall']>[0]['principal'];
+    /** The owner approved the outer call (control-plane/owner-approved-call.ts); kept for the dispatch to spend. */
+    readonly ownerApproved?: Parameters<DaemonControlPlaneHelper['invokeGatewayMethodCall']>[0]['ownerApproved'];
   }): Promise<{ status: number; ok: boolean; body: unknown; replayed?: boolean }> {
     return await this.controlPlaneHelper.invokeGatewayMethodCall(input);
   }

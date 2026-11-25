@@ -14,11 +14,6 @@ import { localModelCookbook } from '../tools/agent-harness-model-routing.ts';
 import { localModelSetupStatus } from '../tools/agent-harness-setup-model-helpers.ts';
 import { startHardwareProbe } from '../core/hardware-profile.ts';
 
-// Re-exported so main.ts, which sits against the 800-line architecture cap,
-// names the boot-followup module once instead of importing the prompt type
-// from a second path.
-export type { DaemonRepairPrompt } from './daemon-repair-prompt.ts';
-
 export interface FirstRenderFollowupDeps extends Omit<SessionPersistenceAndRecoveryDeps, 'uiServicesTurns'> {
   readonly shellPaths: Parameters<typeof wireSetupIncompleteHint>[0]['shellPaths'];
   readonly providerRegistry: { readonly getCurrentModel: () => { readonly id?: string } | null | undefined };
@@ -46,7 +41,7 @@ export function startFirstRenderFollowups(deps: FirstRenderFollowupDeps): Sessio
     unsubs,
     workingDir,
     daemonRepair,
-    askWorkspaceRegistration,
+    registersStartedWorkspace,
     isHostedTurn,
   } = deps;
 
@@ -92,7 +87,7 @@ export function startFirstRenderFollowups(deps: FirstRenderFollowupDeps): Sessio
     hookDispatcher,
     onStreamSpeedUpdate,
     daemonRepair,
-    askWorkspaceRegistration,
+    registersStartedWorkspace,
     isHostedTurn,
   });
 }

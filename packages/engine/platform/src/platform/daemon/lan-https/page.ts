@@ -21,7 +21,7 @@ function escape(text: string): string {
 
 /** The page's words, also what `goodvibes-daemon webui https` prints for each phone. */
 export const LAN_HTTPS_INSTALL_WORDS = {
-  what: 'Installing this certificate lets this phone open GoodVibes over https on your network, which the microphone, push notifications and installing the app need. It was made on your computer and can only vouch for your computer\'s own names and private network addresses: it cannot be used to pose as any website on the internet. Install it only on your own devices.',
+  what: 'Installing this certificate lets this phone open GoodVibes over https on your network, which the microphone, push notifications and installing the app need. It was made on one of your computers and can only vouch for names and private network addresses on your own network (that computer\'s, and those of the machines in its group): it cannot be used to pose as any website on the internet. Install it only on your own devices.',
   iphone: [
     'Open this page in Safari and tap Download the certificate; allow the download.',
     'Open Settings, General, VPN & Device Management, tap the GoodVibes profile and tap Install.',
@@ -65,7 +65,10 @@ export async function lanHttpsPageResponse(req: Request, certificate: () => Prom
 <h2>iPhone and iPad</h2>${steps(LAN_HTTPS_INSTALL_WORDS.iphone)}
 <h2>Android</h2>${steps(LAN_HTTPS_INSTALL_WORDS.android)}
 ${address ? `<p>Then open <a href="${escape(address)}">${escape(address)}</a>.</p>` : ''}`
-    : '<p>https on your network is off, so there is no certificate to install. On the computer running GoodVibes: <code>goodvibes-daemon webui enable --lan --https</code></p>';
+    // Served with a certificate phones already trust (Let's Encrypt, or one you made): there is nothing to install.
+    : address
+      ? `<p>There is nothing to install from here: the https address uses a certificate from Let's Encrypt or one its owner made, not GoodVibes' own. Open <a href="${escape(address)}">${escape(address)}</a>.</p>`
+      : '<p>https on your network is off, so there is no certificate to install. On the computer running GoodVibes: <code>goodvibes-daemon webui enable --lan --https</code></p>';
   const html = `<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Trust GoodVibes on this phone</title>
 <style>body{font:16px/1.5 system-ui,sans-serif;max-width:40rem;margin:2rem auto;padding:0 1rem}code{word-break:break-all}a{font-weight:600}</style></head>
 <body><h1>Trust GoodVibes on this phone</h1>${body}</body></html>`;

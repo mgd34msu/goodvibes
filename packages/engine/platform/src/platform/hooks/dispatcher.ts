@@ -39,7 +39,8 @@ function runHook(
   execution?: HookExecutionOptions,
 ): Promise<HookResult> {
   switch (hook.type) {
-    case 'command': return commandRunner.run(hook, event, execution);
+    // In the project the hooks file belongs to: a daemon's dispatcher for one project runs its hooks there.
+    case 'command': return commandRunner.run(hook, event, execution, deps.projectRoot);
     case 'prompt': return promptRunner.run(hook, event, deps.toolLLM ?? null, execution);
     case 'agent':
       if (!deps.agentManager) {

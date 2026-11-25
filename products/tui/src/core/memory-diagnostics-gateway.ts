@@ -1,7 +1,7 @@
 // ---------------------------------------------------------------------------
 // memory-diagnostics-gateway.ts
 //
-// The daemon-backed verb the /health memory (doctor) surface reads:
+// The daemon-backed verb the Health tab's memory check (System place, "Check one area") reads:
 // ops.memory.get (GET /api/ops/memory), the read-only MemoryGovernor snapshot.
 // No named facade exists on the in-process OperatorClient, so, exactly like
 // the memory-consolidation and voice-provisioning gateways, it goes over the
@@ -21,7 +21,7 @@ import { GoodVibesError } from '@goodvibes/engine/errors';
 import { resolveOperatorRpc, describeOperatorRpcError } from '../runtime/client/operator-endpoint.ts';
 import { memoryStatusLines, type MemoryGovernorSnapshotResult } from '@goodvibes/engine/platform/platform/runtime/memory';
 
-/** The narrow async verb surface the /health memory (doctor) surface drives. */
+/** The narrow async verb surface the Health tab's memory check drives. */
 export interface MemoryDiagnosticsGateway {
   /** Read the MemoryGovernor snapshot (ops.memory.get). */
   fetchSnapshot(): Promise<MemoryGovernorSnapshotResult>;
@@ -78,7 +78,7 @@ export function classifyMemoryDiagnosticsError(error: unknown): MemoryDiagnostic
 }
 
 /**
- * Render the /health memory (doctor) block from an already-resolved gateway
+ * Render the Health tab's memory check block from an already-resolved gateway
  * resolution, the testable core the command wraps. Kept separate from the live
  * gateway construction so a wire test injects a fake resolution (available /
  * unavailable / failing) with no HTTP.

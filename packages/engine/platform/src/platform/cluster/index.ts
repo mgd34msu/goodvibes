@@ -245,7 +245,13 @@ export {
   type RenameGroupResult,
   type RotateKeyResult,
   type SettingDecisionResult,
+  ownGroupView,
+  settingDifferences,
+  type SettingDifference,
+  type SharingOnResult,
+  type MemberViewResult,
 } from './group-operations.js';
+export { GroupViewTenant, GROUP_VIEW_MESSAGE_TYPES, GROUP_VIEW_WAIT_MS, type MemberGroupView, type MemberViewMachine, type MemberViewOutcome } from './group-view.js';
 export {
   DEFAULT_CLUSTER_GROUP_SETTINGS,
   keyRotationGraceMs,

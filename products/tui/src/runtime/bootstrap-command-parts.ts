@@ -49,7 +49,6 @@ import type {
   ShellModeManagerService,
   ShellPlanManagerService,
   ShellSessionOrchestrationService,
-  RemoteCommandService,
 } from '@/runtime/index.ts';
 import type { BootstrapCommandShellServices } from '@/runtime/index.ts';
 import type { OperatorClient } from '@/runtime/index.ts';
@@ -146,7 +145,6 @@ export interface BootstrapCommandSectionOptions {
   readonly automationManager?: ShellAutomationManagerRuntimeService;
   readonly planManager?: ShellPlanManagerService;
   readonly sessionOrchestration?: ShellSessionOrchestrationService;
-  readonly remoteRuntime?: RemoteCommandService;
   readonly operatorClient?: OperatorClient;
   readonly userPermissionRuleStore?: import('@goodvibes/engine/platform/platform/permissions').UserPermissionRuleStore;
   readonly peerClient?: PeerClient;

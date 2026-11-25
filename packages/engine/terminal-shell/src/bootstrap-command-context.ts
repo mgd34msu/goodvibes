@@ -202,7 +202,6 @@ export function projectBootstrapShellCommandOptions<
     readonly forensicsRegistry: unknown;
     readonly policyRuntimeState: unknown;
     readonly uiServices: { readonly readModels: unknown };
-    readonly remoteRuntime: unknown;
     readonly providerApi: unknown;
     readonly directTransport: { readonly operator: unknown; readonly peer: unknown };
     readonly hookApi: unknown;
@@ -229,7 +228,6 @@ export function projectBootstrapShellCommandOptions<
     readModels: input.uiServices.readModels,
     shellPaths: input.services.shellPaths,
     surface: input.services.surface,
-    remoteRuntime: input.remoteRuntime,
     fileUndoManager: input.services.fileUndoManager,
     memoryRegistry: input.services.memoryRegistry,
     integrationHelpers: input.services.integrationHelpers,
@@ -287,7 +285,6 @@ export function projectBootstrapShellCommandOptions<
     readModels: Input['uiServices']['readModels'];
     shellPaths: Input['services']['shellPaths'];
     surface: Input['services']['surface'];
-    remoteRuntime: Input['remoteRuntime'];
     fileUndoManager: Input['services']['fileUndoManager'];
     memoryRegistry: Input['services']['memoryRegistry'];
     integrationHelpers: Input['services']['integrationHelpers'];

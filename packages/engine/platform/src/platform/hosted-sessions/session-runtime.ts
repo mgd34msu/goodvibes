@@ -16,7 +16,7 @@ import { resolve } from 'node:path';
 import { logger } from '../utils/logger.js';
 import { summarizeError } from '../utils/error-display.js';
 import { ConversationManager } from '../core/conversation.js';
-import { Orchestrator } from '../core/orchestrator.js';
+import { Orchestrator, type OrchestratorUserInputOptions } from '../core/orchestrator.js';
 import { ToolRegistry } from '../tools/registry.js';
 import { registerAllTools } from '../tools/index.js';
 import { registerDevicePhoneTool } from '../devices/device-phone-tool.js';
@@ -44,11 +44,8 @@ import type { QuestionInbox } from '../tools/query/index.js';
 import { resolveSurfaceDirectory } from '../runtime/surface-root.js';
 import { getProcessUntrustedContentLedger, withUntrustedContentScope } from '../security/untrusted-content.js';
 import { currentTurn } from '../security/turn-boundary.js';
-import {
-  containmentFor,
-  resolveHostedExecPosture,
-  type HostedSessionExecPosture,
-} from './exec-posture.js';
+import type { HostedSessionExecPosture } from './exec-posture.js';
+import { TURN_EXEC_CONTAINMENT } from '../tools/exec/containment.js';
 
 /**
  * Where a hosted session's client-owned settings live, when the session belongs
@@ -186,6 +183,30 @@ export interface HostedSessionContractSink {
   said(line: string): void;
 }
 
+/** How a message reached a hosted session (see `HostedSessionRuntime.submit`). */
+export interface HostedSubmitOptions {
+  readonly operatorInput?: boolean | undefined;
+  readonly answersContractQuestion?: string | undefined;
+  readonly ownerTyped?: boolean | undefined;
+}
+
+/** What a hosted session's message carries into its turn, submitted or sent into the running one. */
+function hostedInputOptions(ownerTyped: boolean, correlationId: string | undefined, submitOptions: HostedSubmitOptions | undefined): OrchestratorUserInputOptions {
+  return {
+    // An operator's message is the owner's request for its own turn (and only that turn).
+    ...(submitOptions?.operatorInput === true ? { ownerRequest: true } : {}),
+    ...(submitOptions?.answersContractQuestion !== undefined ? { answersContractQuestion: submitOptions.answersContractQuestion } : {}),
+    origin: {
+      source: 'hosted-session',
+      surface: 'service',
+      ...(ownerTyped ? { ownerDirect: true } : {}),
+      // Carry only the broker's correlation identity. It associates this
+      // actual turn with its submitting input; it conveys no authority.
+      ...(correlationId === undefined ? {} : { metadata: { correlationId } }),
+    },
+  };
+}
+
 /**
  * A composed hosted session. Everything a caller needs to drive one turn, read
  * its history, and take it apart again.
@@ -211,8 +232,18 @@ export interface HostedSessionRuntime {
    * what starts a new untrusted-content turn for this session.
    * `answersContractQuestion` (an open escalation id of this session's
    * contracts) sends the message to that contract as the owner's answer.
+   * `ownerTyped`: the daemon established that the owner typed it into his own
+   * program attached to this session (a person's credential, the program's
+   * label and a person's claim, checked where the request entered; never the
+   * caller's word). His turn then edits and runs commands in this session's
+   * project under his mode, exactly as a conversation in a terminal there.
    */
-  submit(text: string, correlationId?: string, options?: { readonly operatorInput?: boolean | undefined; readonly answersContractQuestion?: string | undefined }): Promise<void>;
+  submit(text: string, correlationId?: string, options?: HostedSubmitOptions): Promise<void>;
+  /**
+   * Put a message into the turn running now (`sessions.steer` while one runs): it joins that turn before its next
+   * request to the model. False when no turn runs: the caller submits it instead, which starts one.
+   */
+  steer(text: string, correlationId?: string, options?: HostedSubmitOptions): boolean;
   /** Dedicated native delivery; refuses queue acceptance and requires actual completion. */
   /** `content`: what the model receives when the request carried files (the text with them); its text alone otherwise. */
   submitNative(permit: NativeConversationTurnPermit, inputId: string, correlationId: string, content?: ContentPart[]): Promise<void>;
@@ -375,12 +406,10 @@ export function createHostedSessionRuntime(options: HostedSessionRuntimeOptions)
     execPromptAnswerHandler: approvalHandlers.execPromptAnswerHandler,
     localhostFetchApproval: approvalHandlers.localhostFetchApproval,
     onSandboxedRun: approvalHandlers.onSandboxedRun,
-    // The posture this file's header states: the caller's when it named one,
-    // else the floor's, else contained. Nothing here reads the wire.
-    execContainment: containmentFor(options.execPosture ?? resolveHostedExecPosture(
-      options.floor.execPosture,
-      { sessionId, workspaceRoot: options.workspaceRoot },
-    )),
+    // The one rule every door's turn runs its commands under (tools/exec/containment.ts): the shared sandbox
+    // setting decides the boundary and the gate under the owner's mode decides the command; a hosted turn is not
+    // refused a command a terminal turn in the same folder would run. Nothing here reads the wire.
+    execContainment: TURN_EXEC_CONTAINMENT,
   });
 
   if (options.floor.devicePosture) registerDevicePhoneTool(toolRegistry, options.floor.devicePosture);
@@ -551,33 +580,35 @@ export function createHostedSessionRuntime(options: HostedSessionRuntimeOptions)
       },
     },
     isRunning: () => orchestrator.isTurnInFlight,
-    submit: async (text: string, correlationId?: string, submitOptions?: { readonly operatorInput?: boolean | undefined; readonly answersContractQuestion?: string | undefined }): Promise<void> => {
+    submit: async (text: string, correlationId?: string, submitOptions?: HostedSubmitOptions): Promise<void> => {
       if (disposed) throw new HostedSessionUnavailableError(sessionId, 'its loop was shut down before this message was delivered');
-      // `ownerDirect` is deliberately unset: it also decides the gate's surface
-      // authority, and a verb call carrying an operator token is not the owner
-      // at his own terminal. The window is this session's own instead, and an
-      // operator's input starts its next turn here. Only when no turn is in
-      // flight: a message queued behind a running turn must not erase the
-      // evidence that turn's pending send is judged against. Channel and
-      // automation input never starts one, so their exposure accumulates.
+      // `ownerDirect` decides the gate's surface authority, so it is set only
+      // when the daemon established that the owner typed this into his own
+      // program attached to the session (`ownerTyped`, operator input only):
+      // then the turn is his at work in this session's project, like his own
+      // terminal conversation there. Any other verb call carrying an operator
+      // token stays a service-surface instruction. The window is this
+      // session's own, and an operator's input starts its next turn here. Only
+      // when no turn is in flight: a message queued behind a running turn must
+      // not erase the evidence that turn's pending send is judged against.
+      // Channel and automation input never starts one, so their exposure accumulates.
+      const ownerTyped = submitOptions?.operatorInput === true && submitOptions.ownerTyped === true;
       try {
         await withUntrustedContentScope(contentScope, async () => {
           if (submitOptions?.operatorInput === true && !orchestrator.isTurnInFlight && !orchestrator.isThinking) ledger.startTurn();
           await withExecutionModeOwner(modeOwner, () => orchestrator.handleUserInput(text, undefined, {
             awaitQueuedTurn: true,
-            // An operator's message is the owner's request for its own turn (and only that turn).
-            ...(submitOptions?.operatorInput === true ? { ownerRequest: true } : {}),
-            ...(submitOptions?.answersContractQuestion !== undefined ? { answersContractQuestion: submitOptions.answersContractQuestion } : {}),
-            origin: {
-              source: 'hosted-session',
-              surface: 'service',
-              // Carry only the broker's correlation identity. It associates this
-              // actual turn with its submitting input; it conveys no authority.
-              ...(correlationId === undefined ? {} : { metadata: { correlationId } }),
-            },
+            ...hostedInputOptions(ownerTyped, correlationId, submitOptions),
           }));
         });
       } finally { busyEnded(); }
+    },
+    steer: (text: string, correlationId?: string, submitOptions?: HostedSubmitOptions): boolean => {
+      if (disposed) return false;
+      // Into the turn running now; if that turn makes no further request it runs as the next turn, with the
+      // options a submitted message would have had.
+      const ownerTyped = submitOptions?.operatorInput === true && submitOptions.ownerTyped === true;
+      return orchestrator.steerRunningTurn(text, hostedInputOptions(ownerTyped, correlationId, submitOptions));
     },
     submitNative: async (permit, inputId, correlationId, content): Promise<void> => {
       const source = readNativeConversationTurnPermit(permit);

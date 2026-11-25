@@ -203,6 +203,8 @@ export interface DaemonAutoUpdaterOptions {
    * failure status. Absent: the incomplete handover is only reported.
    */
   readonly onIncompleteHandover?: (() => void) | undefined;
+  /** Told when what `update.status` reports changed: a check ended, an install began or ended, recovery is needed. */
+  readonly onStateChange?: (() => void) | undefined;
   /** Injectable stderr; absent = a synchronous write to fd 2, so the service journal records an incomplete handover. */
   readonly stderr?: { write(chunk: string): unknown } | undefined;
   /**
@@ -397,6 +399,8 @@ export class DaemonAutoUpdater {
           this.finishActiveCheck?.();
         }
         if (!this.pendingSwap) this.clearWait();
+        // Every screen showing the update state reads it again (a check ran: found, failed or nothing new).
+        this.stateChanged();
         return this.pendingSwap ? 'deferred' : 'settled';
       },
       onError: (error) => {
@@ -519,6 +523,13 @@ export class DaemonAutoUpdater {
       + (this.waitingFor.length > 0 ? ` (${this.waitingFor.slice(0, 5).join(', ')}${this.waitingFor.length > 5 ? ` and ${this.waitingFor.length - 5} more` : ''})` : '')
       + `. The daemon stays on v${normalizeVersion(this.options.currentVersion)} until that work ends; stop it from /agents open to install sooner.`,
     );
+  }
+
+  /** Tell the owner of this loop that what `update.status` reports changed; a listener's failure never reaches the update. */
+  private stateChanged(): void {
+    try { this.options.onStateChange?.(); } catch (error) {
+      logger.warn('DaemonAutoUpdater: the update-state listener failed', { error: summarizeError(error) });
+    }
   }
 
   private clearWait(): void {
@@ -747,6 +758,7 @@ export class DaemonAutoUpdater {
     const installing = { version: normalizeVersion(tag), since: this.now(), receivedBytes: 0, file: null as string | null,
       fileReceivedBytes: 0, fileTotalBytes: null as number | null, fileNumber: null as number | null, fileCount: null as number | null };
     this.installing = installing;
+    this.stateChanged();
     // The release's files in download order, from the update's own plan (no request): which file of how many is downloading.
     let releaseFiles: readonly string[] = suiteConfiguration ? [] : targets.map(target => target.assetName);
     const onFiles = (assetNames: readonly string[]) => { releaseFiles = assetNames; };
@@ -842,6 +854,7 @@ export class DaemonAutoUpdater {
       throw error;
     } finally {
       this.installing = null;
+      this.stateChanged();
     }
     this.pendingSwap = null;
     // Set the latch before any receipt, shutdown hook, or service action can

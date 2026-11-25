@@ -311,8 +311,11 @@ message is never handed to an agent already running in the conversation.
 A channel conversation can ask the assistant to read, search and summarize. A
 request that would change something (write a file, run a command, send a
 message) is not refused: it becomes an approval for the owner, shown on the
-terminal apps, the web UI, Telegram and in that conversation, where the
-channel's owner can answer it. It is asked each time; an answer is not
+terminal apps and the web UI (Waiting for you), and on a channel only in a
+conversation proven to be the owner's alone (his direct conversation with the
+bot): an approval about a group, even one only he has written in, or a shared
+channel goes to his own direct conversation, never to that conversation. It is
+asked each time; an answer is not
 remembered for later calls. Email, webhook and ntfy are the exception, as is
 anything read from a web page or another source that is not a channel: anyone
 can write to them, so a change asked for there is refused and no approval is

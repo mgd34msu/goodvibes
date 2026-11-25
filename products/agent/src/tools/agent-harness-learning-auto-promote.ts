@@ -360,6 +360,10 @@ async function runAutoPromoterOnce(
     const ledger = () => durable ? [...log, `wrote ${candidate.proposalTarget} for ${candidate.id}; the checks after the write stopped the pass`] : log;
     try {
       let line: string;
+      if (candidate.proposalTarget === 'memory' && !memorySpine) {
+        // Memory is written through the daemon, the one writer every screen follows; without it nothing is written.
+        skipped++; log.push(`Skipped ${candidate.id}: memory is written through the daemon, which this Agent is not connected to; it is offered again next pass.`); continue;
+      }
       if (candidate.proposalTarget === 'memory') line = await promoteMemory(memoryApi, candidate, collection, options, context, assertOwnership, onDurable, paths, memorySpine);
       else if (candidate.proposalTarget === 'persona') line = promotePersona(paths, candidate, collection, context, options, assertOwnership, onDurable);
       else if (candidate.proposalTarget === 'routine') line = promoteRoutine(paths, candidate, collection, context, options, assertOwnership, onDurable);

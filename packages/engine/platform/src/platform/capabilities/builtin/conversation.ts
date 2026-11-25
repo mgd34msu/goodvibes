@@ -42,6 +42,8 @@ export const CONVERSATION_CLEAR: CapabilityDefinition<ClearServices> = {
   capability: { id: 'conversation.clear', group: 'conversation', home: 'session', repeat: 'unsafe' },
   actionId: 'clear', label: 'Start a fresh conversation', word: '', inputs: [],
   sentence: 'Starts over: the current conversation is saved as its own session and a fresh chat starts; /resume brings the saved one back.', done: '',
+  // A typed /clear prints nothing and keeps the empty conversation's splash; pressed in a place, the line says it.
+  doneInPlace: 'Started a fresh conversation.',
   touches: 'this-machine', lasts: 'not-a-change', risk: 'none', example: {},
   async run(_values, services) {
     if (services.conversation.isGenerating()) throw new CapabilityRefusal('A turn is still running, so nothing was cleared.', 'Stop it with Esc or let it finish, then /clear.', 'TURN_RUNNING');
@@ -58,7 +60,7 @@ export const CONVERSATION_CLEAR: CapabilityDefinition<ClearServices> = {
 export const CONVERSATION_COMPACT: CapabilityDefinition<CompactServices> = {
   capability: { id: 'conversation.compact', group: 'conversation', home: 'session', repeat: 'unsafe' },
   actionId: 'compact', label: 'Compact the conversation now', word: '', inputs: [],
-  sentence: 'The conversation is made shorter: the older messages are replaced by a summary, so the model has room again; /session compactions lists what each compaction removed.', done: '',
+  sentence: 'The conversation is made shorter: the older messages are replaced by a summary, so the model has room again; "See what compaction removed" lists what each compaction removed.', done: '',
   touches: 'this-machine', lasts: 'not-a-change', risk: 'none', example: {},
   async run(_values, services) {
     if (services.conversation.messageCount() === 0) throw new NothingToCompactError(NOTHING_TO_COMPACT_YET);

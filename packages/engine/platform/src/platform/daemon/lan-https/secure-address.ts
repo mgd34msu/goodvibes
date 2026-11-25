@@ -45,12 +45,13 @@ import { summarizeError } from '../../utils/error-display.js';
 import { logger } from '../../utils/logger.js';
 import { AcmeClient, AcmeOrderError, newAccountKey, type AcmeAccount } from './acme.js';
 import { X509Certificate } from 'node:crypto';
-import { lanAuthorityCertificate, lanHostName, lanServerNames, loadOrCreateLanAuthority, type LanAuthoritySecrets } from './authority.js';
+import { forgetLanAuthority, lanAuthorityCertificate, lanHostName, lanServerNames, loadOrCreateLanAuthority, type LanAuthoritySecrets } from './authority.js';
+import { noteListChanged } from '../../runtime/list-changes.js';
 import { CloudflareDnsProvider } from './cloudflare-dns.js';
 import { DnsProviderError, type DnsProvider } from './dns-provider.js';
 import { checkCertificatePair, nameCovered, publicCheck, readOwnCertificate, ownCertificateStamp, type OwnCertificateCheck } from './own-certificate.js';
 import { LETS_ENCRYPT_DIRECTORY, secureAddressDate } from './secure-address-words.js';
-import { isLanAddress, issueLanServerCertificate } from './x509.js';
+import { GROUP_SERVER_DAYS, isLanAddress, issueLanServerCertificate } from './x509.js';
 import { httpsCertificateSource, type HttpsCertificateSource } from './served-https.js';
 
 export { httpsCertificateSource, type HttpsCertificateSource } from './served-https.js';
@@ -110,6 +111,24 @@ export interface StoredGroupCertificate {
   readonly hostName?: string | undefined;
   readonly fingerprint: string;
   readonly receivedAt: number;
+  /**
+   * The lead's certificate authority's own certificate (public, never its key), when the lead serves GoodVibes' own
+   * certificate: the page /lan-https on this machine offers it to phones while it serves the lead's certificate.
+   */
+  readonly authorityPem?: string | undefined;
+}
+
+/** A machine that held the group's certificate and its key, and left the group or was removed from it. */
+export interface FormerHolder {
+  readonly nodeId: string;
+  readonly name: string;
+  /** When it stopped being followed here (left, removed). */
+  readonly at: number;
+  /** The end of the certificate it holds a copy of: until then it can present it. */
+  readonly until: number;
+  readonly source: HttpsCertificateSource;
+  /** The authority (sha-256 fingerprint) that signed it, for GoodVibes' own certificate: replacing the authority ends its trust on a phone that removes it. */
+  readonly authority?: string | undefined;
 }
 
 /** The non-secret facts kept beside the daemon's settings. */
@@ -127,6 +146,12 @@ interface SecureAddressState {
   setAsideNoticePending?: { groupId: string; text: string } | undefined;
   /** Whom this lead sent its Let's Encrypt certificate (issued at `issuedAt`) to, under which signing generation. */
   groupShare?: { groupId: string; generation: number; issuedAt: number; sharedWith: string[] } | undefined;
+  /** Each follower this lead sent a certificate and its key to, with that certificate's end (the latest sent). */
+  holders?: Record<string, { name: string; until: number; source: HttpsCertificateSource; authority?: string | undefined }> | undefined;
+  /** The machines that held a copy and stopped following (left, removed), until their copy ends. */
+  formerHolders?: FormerHolder[] | undefined;
+  /** The members that told this lead they left the group (their roster entry stays until a member removes them). */
+  left?: { groupId: string; nodes: string[] } | undefined;
 }
 
 const DAY_MS = 86_400_000;
@@ -195,6 +220,8 @@ export interface GroupFollower {
   readonly label: string;
   readonly hostName: string;
   readonly addresses: readonly string[];
+  /** The https port that machine serves on, as it reported it (each machine has its own setting). */
+  readonly port?: number | undefined;
 }
 
 export class SecureAddressService {
@@ -278,7 +305,7 @@ export class SecureAddressService {
         if (copy && copy.groupId === this.group?.groupFacts()?.groupId) {
           return { ok: true, certificate: { certPem: copy.certPem, keyPem: copy.keyPem, names: copy.names, notAfter: copy.notAfter, source: copy.source, from: 'group', hostName: copy.hostName, renewAt: copy.notAfter } };
         }
-        return { ok: false, problem: `This machine is a node of ${following.name}: its secure address comes from there, and ${following.name} has not sent it yet.` };
+        return { ok: false, problem: `This machine is a member of ${following.name}: its secure address comes from there, and ${following.name} has not sent it yet.` };
       }
       // Not a node (any more): a copy of a group's certificate is not kept.
       if (copy) await this.deleteGroupCopy();
@@ -315,8 +342,12 @@ export class SecureAddressService {
       if (follower.hostName) { dnsNames.add(follower.hostName); dnsNames.add(`${follower.hostName}.local`); }
       for (const address of follower.addresses) if (isLanAddress(address)) addresses.add(address);
     }
-    const certificate = issueLanServerCertificate(authority, { dnsNames: [...dnsNames].filter((name) => /^[a-z0-9.-]+$/.test(name)), addresses: [...addresses] });
-    return { ok: true, certificate: { certPem: certificate.certPem, keyPem: certificate.keyPem, names: [...certificate.dnsNames, ...certificate.addresses], notAfter: certificate.notAfter, source: 'local-authority', from: 'this-machine', renewAt: certificate.notAfter - DAY_MS } };
+    // A lead's certificate goes, with its key, to every machine of its group: it lasts 90 days and is renewed by itself
+    // a month before it ends (checkDue), so a machine that leaves or is removed holds one that ends soon.
+    const forGroup = this.leadsGroup();
+    const certificate = issueLanServerCertificate(authority, { dnsNames: [...dnsNames].filter((name) => /^[a-z0-9.-]+$/.test(name)), addresses: [...addresses] },
+      this.now(), forGroup ? GROUP_SERVER_DAYS : undefined);
+    return { ok: true, certificate: { certPem: certificate.certPem, keyPem: certificate.keyPem, names: [...certificate.dnsNames, ...certificate.addresses], notAfter: certificate.notAfter, source: 'local-authority', from: 'this-machine', renewAt: certificate.notAfter - (forGroup ? LETS_ENCRYPT_RENEW_MS : DAY_MS) } };
   }
 
   /** The domain and the names its certificate covers: the name, and every name directly under it (one per machine of a group). */
@@ -366,6 +397,120 @@ export class SecureAddressService {
         state.groupShare = { groupId, generation, issuedAt, sharedWith: [...new Set([...before, ...sharedWith])] };
       });
     });
+  }
+
+  /** Record what each follower now holds (the certificate just sent and its end), so one that stops following is said. */
+  noteHolders(sent: readonly { readonly nodeId: string; readonly name: string }[], served: ServedCertificate, authority?: string): void {
+    if (sent.length === 0) return;
+    this.writeState((state) => {
+      const holders = { ...(state.holders ?? {}) };
+      for (const node of sent) holders[node.nodeId] = { name: node.name, until: served.notAfter, source: served.source, ...(authority ? { authority } : {}) };
+      state.holders = holders;
+    });
+  }
+
+  /**
+   * The followers that held a copy and no longer follow (they left, or were removed): moved to the former holders,
+   * said on the screen until their copy ends. Called when the group's followers changed.
+   */
+  private noteFormerHolders(): void {
+    const current = new Set((this.group?.followers() ?? []).map((follower) => follower.nodeId));
+    const now = this.now();
+    this.writeState((state) => {
+      const holders = { ...(state.holders ?? {}) };
+      const former = (state.formerHolders ?? []).filter((holder) => holder.until > now && !current.has(holder.nodeId));
+      for (const [nodeId, held] of Object.entries(holders)) {
+        if (current.has(nodeId)) continue;
+        delete holders[nodeId];
+        // One line per machine: its latest copy.
+        for (let index = former.length - 1; index >= 0; index -= 1) if (former[index]!.nodeId === nodeId) former.splice(index, 1);
+        if (held.until > now) former.push({ nodeId, name: held.name, at: now, until: held.until, source: held.source, ...(held.authority ? { authority: held.authority } : {}) });
+      }
+      state.holders = holders;
+      state.formerHolders = former;
+    });
+    noteListChanged({ list: 'machine-group', change: 'changed' });
+  }
+
+  /** The machines that held a copy of the group's certificate and stopped following, whose copy has not ended. */
+  formerHolders(): readonly FormerHolder[] {
+    const now = this.now();
+    return (this.readState().formerHolders ?? []).filter((holder) => holder.until > now);
+  }
+
+  /** A member told this lead it left the group: it is no longer a follower (its roster entry stays until a member removes it). */
+  noteLeft(groupId: string, nodeId: string): void {
+    this.writeState((state) => {
+      const nodes = state.left?.groupId === groupId ? state.left.nodes : [];
+      if (!nodes.includes(nodeId)) state.left = { groupId, nodes: [...nodes, nodeId] };
+      this.leftCache = state.left ?? null;
+    });
+  }
+
+  /** It is back: it reported to this lead again (it joined again). */
+  clearLeft(nodeId: string): void {
+    if (!this.leftKnown()?.nodes.includes(nodeId)) return;
+    this.writeState((state) => {
+      if (state.left) state.left = { ...state.left, nodes: state.left.nodes.filter((node) => node !== nodeId) };
+      this.leftCache = state.left ?? null;
+    });
+  }
+
+  /** The members of `groupId` that said they left (read from the state file once, then kept in memory). */
+  leftNodes(groupId: string): readonly string[] {
+    const left = this.leftKnown();
+    return left?.groupId === groupId ? left.nodes : [];
+  }
+
+  private leftCache: { groupId: string; nodes: string[] } | null | undefined;
+
+  private leftKnown(): { groupId: string; nodes: string[] } | null {
+    if (this.leftCache === undefined) this.leftCache = this.readState().left ?? null;
+    return this.leftCache;
+  }
+
+  /** The https port this machine serves on (its own setting), as it reports it to its lead. */
+  httpsPort(): number | undefined {
+    const port = Number(this.deps.config().get('controlPlane.lanHttps.port'));
+    return Number.isInteger(port) && port > 0 ? port : undefined;
+  }
+
+  /** This machine's own authority's certificate (public), or null when none was made. */
+  async ownAuthorityPem(): Promise<string | null> {
+    const secrets = this.deps.secrets();
+    return secrets ? lanAuthorityCertificate(secrets) : null;
+  }
+
+  /**
+   * The authority a phone installs to trust what this machine serves now (the page /lan-https offers it): the lead's,
+   * while this machine serves its lead's GoodVibes certificate; this machine's own otherwise. Null when the certificate
+   * served needs no authority installed (Let's Encrypt, a certificate you made) or none was made.
+   */
+  async authorityForPhones(): Promise<string | null> {
+    if (this.group?.following()) {
+      const copy = await this.groupCopy();
+      return copy?.source === 'local-authority' ? copy.authorityPem ?? null : null;
+    }
+    return this.ownAuthorityPem();
+  }
+
+  /**
+   * "Replace the authority": a new certificate authority, a new server certificate signed by it, served here and sent
+   * to the machines that follow. Every phone must remove the old GoodVibes certificate and install the new one; a
+   * machine that left or was removed then holds a certificate no phone trusts once it removed the old one. Asked first
+   * on every screen (it cannot be undone). Words for the screen; never a key.
+   */
+  async replaceAuthority(): Promise<{ readonly ok: boolean; readonly words: string }> {
+    const secrets = this.deps.secrets();
+    if (!secrets) return { ok: false, words: 'This daemon has no secret store to keep a certificate authority in.' };
+    await forgetLanAuthority(secrets);
+    await this.resyncListener?.();
+    await this.group?.share();
+    const pem = await this.ownAuthorityPem();
+    if (!pem || this.served?.source !== 'local-authority') return { ok: false, words: 'The old authority was removed, but no new certificate is served: the https address could not start (the screen says why).' };
+    this.writeState((state) => { state.formerHolders = (state.formerHolders ?? []).filter((holder) => holder.source !== 'local-authority'); });
+    noteListChanged({ list: 'machine-group', change: 'changed' });
+    return { ok: true, words: `A new certificate authority is made (fingerprint ${new X509Certificate(pem).fingerprint256}) and serves a new certificate${(this.group?.followers() ?? []).length > 0 ? ' here and on the machines of the group' : ''}. On every phone, remove the old GoodVibes certificate and install the new one from the page /lan-https; until a phone removes the old one it still trusts what the old authority signed.` };
   }
 
   private dnsProvider(): DnsProvider {
@@ -528,6 +673,9 @@ export class SecureAddressService {
     this.dueCheckRunning = true;
     void (async () => {
       try {
+        // A machine that held the certificate and its key stopped following (it left, or was removed): said on the
+        // screen until its copy ends, and the certificate is made again below with a new key it does not hold.
+        if (groupChanged) this.noteFormerHolders();
         if (source === 'lets-encrypt' && (due || this.reissueNeeded(await this.storedLetsEncrypt()))) await this.startIssue(false);
         else if (source === 'local-authority' && (due || groupChanged)) { await this.resyncListener?.(); if (groupChanged) await this.group?.share(); }
         else if (source === 'own-files') await this.checkOwnFiles(served, now);
@@ -567,10 +715,13 @@ export class SecureAddressService {
     if (!check.ok) return { ok: false, problem: check.problem };
     const record: StoredGroupCertificate = { version: 1, ...copy, fingerprint: check.fingerprint ?? '', receivedAt: this.now() };
     const before = await this.groupCopy();
-    if (before?.fingerprint === record.fingerprint && before.groupId === record.groupId) return { ok: true };
+    // The same certificate again changes nothing, unless it now comes with the lead's authority (sent from this version on).
+    if (before?.fingerprint === record.fingerprint && before.groupId === record.groupId && (before.authorityPem ?? '') === (record.authorityPem ?? '')) return { ok: true };
     await secrets.set(SECURE_ADDRESS_SECRET_KEYS.groupCertificate, JSON.stringify(record));
     await this.noteSetAside(copy.groupId, copy.leadName);
     await this.resyncListener?.();
+    // The Secure address screen open here says what was received, and when, with no key pressed.
+    noteListChanged({ list: 'machine-group', change: 'changed' });
     return { ok: true };
   }
 
@@ -578,6 +729,7 @@ export class SecureAddressService {
   async dropGroupCopy(): Promise<boolean> {
     if (!(await this.deleteGroupCopy())) return false;
     await this.resyncListener?.();
+    noteListChanged({ list: 'machine-group', change: 'changed' });
     return true;
   }
 
@@ -601,7 +753,7 @@ export class SecureAddressService {
     const secrets = this.deps.secrets();
     const own = secrets ? await secrets.get('controlPlane.lanHttps.authority') : null;
     if (!own) { this.writeState((next) => { next.setAsideNoticeFor = groupId; }); return; }
-    const text = `This machine now serves https with the certificate of its group's lead, ${leadName}. Its own GoodVibes certificate authority is kept, set aside: phones that installed it trust this machine again if it leaves the group; while it is a node they trust it through the lead's certificate.`;
+    const text = `This machine now serves https with the certificate of its group's lead, ${leadName}. Its own GoodVibes certificate authority is kept, set aside: phones that installed it trust this machine again if it leaves the group. While it is a member of ${leadName}, a phone trusts this machine only when it trusts the lead's certificate: when that is GoodVibes' own, the phone installs ${leadName}'s authority, from the page /lan-https on this machine's plain address or on ${leadName}'s.`;
     let carried = false;
     if (this.deps.noticeOwner) carried = await this.deps.noticeOwner(text).catch(() => false);
     else this.deps.alertOwner?.(text);
@@ -663,8 +815,12 @@ export class SecureAddressService {
         ...(copy ? { received: { leadName: copy.leadName, names: copy.names, notAfter: copy.notAfter, receivedAt: copy.receivedAt, source: copy.source } } : {}),
         followers: followers.map((follower) => {
           const name = this.followerName(follower, domain);
-          return { name: follower.name, address: name ?? '', covered: name !== undefined && (servedNames.length === 0 || nameCovered(name, servedNames) || follower.addresses.some((address) => servedNames.includes(address))), needs: this.followerNeeds(follower, domain) };
+          return {
+            name: follower.name, address: name ?? '', ...(follower.port !== undefined ? { port: follower.port } : {}),
+            covered: name !== undefined && (servedNames.length === 0 || nameCovered(name, servedNames) || follower.addresses.some((address) => servedNames.includes(address))), needs: this.followerNeeds(follower, domain),
+          };
         }),
+        formerHolders: this.formerHolders().map((holder) => ({ name: holder.name, at: holder.at, until: holder.until, source: holder.source })),
       },
     };
   }
@@ -710,8 +866,8 @@ export class SecureAddressService {
 
   /** Whether this machine's own local authority was made, and its public fingerprint (for the screen). */
   async localAuthority(): Promise<{ readonly made: boolean; readonly fingerprint?: string | undefined }> {
-    const secrets = this.deps.secrets();
-    const pem = secrets ? await lanAuthorityCertificate(secrets) : null;
+    // On a member of a group, the authority its phones install is its lead's (what the page /lan-https here offers).
+    const pem = await this.authorityForPhones();
     return pem ? { made: true, fingerprint: new X509Certificate(pem).fingerprint256 } : { made: false };
   }
 
@@ -750,6 +906,8 @@ export interface SecureAddressStatusFacts {
   readonly group: {
     readonly following?: { readonly nodeId: string; readonly name: string } | undefined;
     readonly received?: { readonly leadName: string; readonly names: readonly string[]; readonly notAfter: number; readonly receivedAt: number; readonly source: HttpsCertificateSource } | undefined;
-    readonly followers: readonly { readonly name: string; readonly address: string; readonly covered: boolean; readonly needs?: string | undefined }[];
+    readonly followers: readonly { readonly name: string; readonly address: string; readonly port?: number | undefined; readonly covered: boolean; readonly needs?: string | undefined }[];
+    /** The machines that held a copy of the certificate and its key and stopped following, until their copy ends. */
+    readonly formerHolders: readonly { readonly name: string; readonly at: number; readonly until: number; readonly source: HttpsCertificateSource }[];
   };
 }

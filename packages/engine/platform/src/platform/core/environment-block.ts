@@ -59,6 +59,12 @@ export function environmentBlock(environment: SessionEnvironment, now: Date): st
     `Today: ${localDate(now)}`, ...(repository ? [repository] : [])].join('\n');
 }
 
+/**
+ * The one line a turn with no terminal screen is told (the web chat, a schedule's or trigger's run, handed-off work, a
+ * hosted session): what such a turn lacks, so the model does not look for it. Its tools are otherwise a terminal turn's.
+ */
+export const SCREENLESS_TURN_LINE = 'Screen: this turn runs in the GoodVibes daemon with no terminal screen, so there is no clipboard, text editor, microphone or slash-command screen here; everything else a terminal turn has is available.';
+
 const sessions = new WeakMap<object, { readonly directory: string; readonly facts: Promise<SessionEnvironment> }>();
 
 /** The session's facts, read on its first turn and kept with its conversation; a changed folder reads them again. */

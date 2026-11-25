@@ -41,9 +41,9 @@ export function shortcutGroups(keybindingsManager: KeybindingsManager): Shortcut
   ];
   // Where the views live now (they open as modals over the conversation).
   const views: ReadonlyArray<readonly [string, string]> = [
-    ['/usage', 'Usage: context, tokens and cost'],
+    [`${bound('open-menu')}, Money`, 'Spending: this conversation\'s context, tokens and cost'],
     ['/changes', 'Changes: files, diff, review'],
-    ['/notifications', 'Notification history'],
+    [bound('open-notifications'), 'Open the notices (the status bar counts the unread ones)'],
     [bound('back'), 'Close the top modal (one level)'],
     ['Enter on lane', 'Open that agent full screen; typing there steers it'],
     ['Enter on ▶ bead', 'Open that background process\'s live output'],

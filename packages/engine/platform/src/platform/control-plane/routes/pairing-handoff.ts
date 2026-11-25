@@ -21,7 +21,7 @@ import type { GatewayMethodCatalog } from '../method-catalog.js';
 import type { GatewayMethodHandler, GatewayMethodInvocation } from '../method-catalog-shared.js';
 import type { MintedPairingToken, PairingTokenManager } from '../../pairing/pairing-token-store.js';
 import { PairingLimitReachedError, PairingMinterRevokedError } from '../../pairing/pairing-token-store.js';
-import { pairingPrincipalId, pairingTokenIdOfPrincipal } from '../../pairing/principal-ids.js';
+import { pairingPrincipalId, pairingTokenIdOfCaller } from '../../pairing/principal-ids.js';
 import type { StepUpGatewayService } from './stepup.js';
 import type { PushGatewayService } from './push.js';
 import {
@@ -191,7 +191,7 @@ function createHandoffCreateHandler(deps: PairingHandoffDeps): GatewayMethodHand
     // token too; a device whose own pairing is gone is refused (403).
     const minted: MintedPairingToken = ((): MintedPairingToken => {
       try {
-        const input = { name, mintedBy: pairingTokenIdOfPrincipal(invocation.context.principalId),
+        const input = { name, mintedBy: pairingTokenIdOfCaller(invocation.context),
           ...(scopes !== undefined ? { scopes } : {}), ...(ownerPairing ? { origin: 'owner-pairing' as const } : {}) };
         // A client moving off the shared token pairs ITSELF through this flow: it already
         // uses this daemon, so its mint is exempt from device.nodes.maxPaired as

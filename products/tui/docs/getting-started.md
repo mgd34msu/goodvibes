@@ -15,7 +15,7 @@ user. Both install the TUI with the daemon, Agent and WebUI; npm installs do not
 install this workspace.
 
 The checkout installer pairs the local TUI with the daemon and registers a project
-workspace; after the release installer, pair from the TUI with `/devices pair host` (see
+workspace; after the release installer, pair from the TUI in Devices and network (Ctrl+G, m opens the menu): Pair something, This program with its daemon (see
 [host pairing](host-pairing.md)). Launch `goodvibes` from that directory, then configure a conversation provider below.
 Jev credentials and conversation-provider credentials serve different purposes.
 Use `goodvibes --version` and `goodvibes-daemon --version` to inspect the installed
@@ -105,28 +105,24 @@ Additional built-in integrations resolve from the same env/secrets path. The clo
 | Comfy media | `COMFY_API_KEY` (optional, for cloud ComfyUI) |
 | Runway media | `RUNWAYML_API_SECRET` or `RUNWAY_API_KEY` |
 
-Alternatively, store keys encrypted using the `/secrets` command, which asks
-for the value on a hidden line:
-
-```sh
-/secrets set OPENAI_API_KEY
-```
-
-From a shell, `goodvibes secrets set OPENAI_API_KEY --user` does the same: it
-asks for the value without showing it, or reads it from standard input when
-piped, so the key never lands in your shell history.
+Alternatively, store keys encrypted: in the app, "Store a secret" on the
+Secrets tab of Permissions and safety (the menu, `Ctrl+G` then `m`) asks for
+the value on a hidden line. From a shell, `goodvibes secrets set OPENAI_API_KEY --user`
+does the same: it asks for the value without showing it, or reads it from
+standard input when piped, so the key never lands in your shell history.
 
 For self-hosted or external secret managers, link a GoodVibes key to a
-provider-backed secret reference:
+provider-backed secret reference ("Point a secret at a password manager" on
+the same tab, or from a shell):
 
 ```sh
-/secrets link OPENAI_API_KEY goodvibes://secrets/bitwarden?item=GoodVibes%20OpenAI&field=password
-/secrets link SLACK_BOT_TOKEN goodvibes://secrets/vaultwarden?item=GoodVibes%20Slack&field=password&server=https%3A%2F%2Fvault.example.test
-/secrets link STRIPE_TOKEN goodvibes://secrets/bws/00000000-0000-0000-0000-000000000000?field=value
-/secrets link OPENAI_API_KEY goodvibes://secrets/1password?vault=Private&item=GoodVibes%20OpenAI&field=API%20Key
+goodvibes secrets link OPENAI_API_KEY 'goodvibes://secrets/bitwarden?item=GoodVibes%20OpenAI&field=password' --user
+goodvibes secrets link SLACK_BOT_TOKEN 'goodvibes://secrets/vaultwarden?item=GoodVibes%20Slack&field=password&server=https%3A%2F%2Fvault.example.test' --user
+goodvibes secrets link STRIPE_TOKEN 'goodvibes://secrets/bws/00000000-0000-0000-0000-000000000000?field=value' --user
+goodvibes secrets link OPENAI_API_KEY 'goodvibes://secrets/1password?vault=Private&item=GoodVibes%20OpenAI&field=API%20Key' --user
 ```
 
-Use `/secrets providers` for supported provider shapes and `/secrets test <secret-ref>` to validate a ref without printing its value.
+`goodvibes secrets providers` lists the supported provider shapes and `goodvibes secrets test <secret-ref>` validates a ref without printing its value (the same as "See where secrets can come from" and "Test a secret reference" on the Secrets tab).
 
 Environment variables take precedence over stored secrets when both are present.
 
@@ -157,31 +153,24 @@ After the splash, a short notice summarizes the resumable state that actually
 exists on disk (saved sessions, workspace checkpoints, chain history) and names
 the command that reaches each one.
 
-### The startup recovery modal
+### The startup recovery offer
 
-If a session crashed before saving, its crash snapshot survives on disk. At
-the next launch, right after the first frame is drawn, the TUI asks about it
-instead of leaving a sentence for you to act on. Nothing loads unless you choose
-Resume.
+If a session crashed before saving, its crash snapshot survives on disk. At the
+next launch one line says so, the same in the terminal app and the Agent, and
+nothing opens over the composer:
 
-The ask is two steps:
+`[Recovery] "<title>" stopped before it was saved: Ctrl+R restores it, Esc discards it, typing starts a new one.`
 
-1. **Recovery snapshot found.** `Resume it` loads the snapshot into the current
-   session and retires the recovery point once the load succeeds. `Not now`
-   starts fresh. The row detail names the facts actually known about the
-   snapshot, namely session id, age, the title when it carries one, and the
-   file size when it can be read.
-2. **Remove recovery point?** Asked only after you decline. `Keep it` is first
-   and preselected, so the snapshot stays on disk and is offered again the next
-   time the workspace opens. `Remove it` deletes it, and the conversation it
-   holds cannot be recovered afterwards. Remove applies to that snapshot only:
-   if the same session crashes again later, that new snapshot is offered.
+It is drawn under the splash, where you are looking, and kept in System, Notices.
 
-Escape is not an answer. Dismissing either modal leaves the snapshot exactly
-where it is. Only `Remove it` deletes anything, and a failed load leaves the
-file in place to be offered again next launch. A snapshot whose session another
-running terminal has open is never offered at all, because it is that
-instance's live state rather than an orphaned crash. Keeping (or dismissing) stays quiet for the rest of the run.
+Nothing loads unless you press Ctrl+R; the recovery point is retired once the
+load succeeds, and a failed load leaves the file in place to be offered again at
+the next start. Esc on an empty composer deletes it. Typing anything starts a new
+conversation: the offer closes quietly for this run and the snapshot is offered
+again at the next start. A session opened later (`--continue`, `--resume`, the
+Sessions place) with a snapshot newer than its saved copy gets the same line. A
+snapshot whose session another running terminal has open is never offered,
+because it is that instance's live state rather than an orphaned crash.
 
 ## Common paths
 
@@ -219,13 +208,13 @@ These slash commands are the fastest way to get oriented once the TUI is running
 | `/settings` | The settings screen; every setting is shown by a plain name with its key beside it |
 | `/setup` | Setting GoodVibes up, one topic at a time |
 | `/memory` | Memory and knowledge: what the project remembers, your knowledge, what is known about you, your templates |
-| `/plugin` and `/marketplace` | Your plugins, and the curated marketplace |
-| `/remote` | Remote peers and node-host runners, if you use them |
+| Tools and extensions (the menu: `Ctrl+G`, then `m`) | Your hooks and which ran, the model's tools, tool servers, plugins, the curated marketplace and skills |
+| Work and agents (the menu): Runners | Remote runners the daemon starts and keeps, if you use them |
 | `/mcp` | Add, edit, remove, reload, and inspect MCP servers while the TUI is running |
 
 ## Local server discovery
 
-Run `/scan` to discover local inference servers and register them as OpenAI-compatible providers. Discovery does not run automatically at startup; the scan probes well-known ports and, where a fixed port is not enough, the server's own response headers. Built-in discovery covers:
+In Models and providers (the menu: `Ctrl+G`, then `m`), `m` ("Find model servers on this computer") has the daemon discover local inference servers and register them as OpenAI-compatible providers for every program; a running program takes them at once. Your local network is scanned from Devices and network. Discovery does not run automatically at startup; the scan probes well-known ports and, where a fixed port is not enough, the server's own response headers. Built-in discovery covers:
 
 | Server | Identified by |
 | --- | --- |

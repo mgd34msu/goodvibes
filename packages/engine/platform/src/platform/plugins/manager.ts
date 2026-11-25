@@ -381,7 +381,7 @@ export class PluginManager {
       if (!manifest.signature) {
         logger.warn(
           `[plugins] '${name}' set to 'trusted' tier without a signed manifest, ` +
-          'consider using /plugin verify first',
+          'consider checking its signature first (v on it in the Plugins tab of Tools and extensions)',
         );
       }
     }
@@ -957,7 +957,7 @@ export class PluginManager {
       const drain = await this.inFlight.quiesce(name, DEFAULT_PLUGIN_QUIESCE_TIMEOUT_MS);
       if (!drain.drained) {
         this.inFlight.resume(name);
-        return { ok: false, error: `'${name}' still had ${drain.inFlight} call(s) running, so it keeps its current registrations until /plugin reload` };
+        return { ok: false, error: `'${name}' still had ${drain.inFlight} call(s) running, so it keeps its current registrations until the plugins are loaded again (R on the Plugins tab of Tools and extensions)` };
       }
       try {
         try { await this.unload(loaded, 'trust changed'); }
@@ -1211,7 +1211,7 @@ export class PluginManager {
     }
     if (carried.length === 0) return;
     noteCarriedForwardChange(`Plugin trust carried forward from the earlier version for ${carried.length} plugin${carried.length === 1 ? '' : 's'} (${carried.join(', ')}); `
-      + 'each is now bound to its current content, so a later change to any of its files needs /plugin trust again.');
+      + 'each is now bound to its current content, so a later change to any of its files needs its trust set again (s on it in the Plugins tab of Tools and extensions).');
   }
 
   /** The trust tiers as they stand now: the shared file is read again only when it changed (one stat). */
@@ -1229,7 +1229,7 @@ export class PluginManager {
     try {
       const records = readJsonFileOrQuarantine<Record<string, PluginTrustRecord>>(path, {
         label: 'plugins/trust',
-        recovery: 'Every plugin returns to the untrusted tier until its trust is set again with /plugin trust.',
+        recovery: 'Every plugin returns to the untrusted tier until its trust is set again on the Plugins tab of Tools and extensions.',
         validate: readTrustRecords,
       });
       if (records) {

@@ -17,6 +17,7 @@
  * surface showing Work reads it again.
  */
 import { readFileSync } from 'node:fs';
+import { randomUUID } from 'node:crypto';
 import { numberDraft } from '../../contract/draft-plan.js';
 import type { DraftedPlan } from '../../contract/types.js';
 import type { WorkstreamDraft, WorkstreamDraftService } from '../../orchestration/workstream-services.js';
@@ -56,11 +57,32 @@ export interface WorkPlans {
   discard(workId: string): boolean;
   /** The work started with its approved plan: the draft is done with. */
   started(workId: string): void;
+  /**
+   * Hold a piece of work proposed with its plan (a plan written in a conversation): it is not yet a piece of work,
+   * only a plan waiting for the owner, under an id of its own; approving it asks for the work and `adopt`s the plan.
+   */
+  propose(proposal: WorkPlanProposal): { readonly id: string; readonly title: string; readonly steps: number };
+  /** The proposed pieces of work still waiting, with what each asks for. */
+  proposals(): readonly (WorkPlanView & { readonly goal: string; readonly criteria: readonly string[]; readonly at: number })[];
+  /** What a proposal asks for, or undefined when `id` is not a proposal held here. */
+  proposal(id: string): { readonly goal: string; readonly criteria: readonly string[] } | undefined;
+  /** The proposal became the piece of work `workId`: its plan is that work's now. */
+  adopt(proposalId: string, workId: string): void;
 }
 
 export interface WorkPlanSubject { readonly id: string; readonly goal: string; readonly criteria: readonly string[] }
 
-interface Held { draftId?: string | undefined; state: WorkPlanState; reason?: string | undefined }
+export interface WorkPlanProposal {
+  readonly goal: string;
+  readonly criteria: readonly string[];
+  readonly steps: readonly { readonly title: string; readonly brief: string; readonly after: readonly number[] }[];
+}
+
+interface Held {
+  draftId?: string | undefined; state: WorkPlanState; reason?: string | undefined;
+  /** Set on a proposed piece of work, not yet asked for: what it asks for and when it was proposed. */
+  proposal?: { readonly goal: string; readonly criteria: readonly string[]; readonly at: number } | undefined;
+}
 
 export class WorkPlanRefusal extends Error {
   constructor(message: string) { super(message); this.name = 'WorkPlanRefusal'; }
@@ -80,8 +102,9 @@ function stepsOf(draft: WorkstreamDraft): readonly WorkPlanStep[] {
 function howOf(draft: WorkstreamDraft): string {
   const kind = draft.provenance.kind;
   return kind === 'agent' ? 'split into steps by a planning agent'
-    : kind === 'heuristic-configured' ? 'kept as one step (planner.decomposition is heuristic)'
-      : `kept as one step${draft.provenance.fallbackReason ? ` (${draft.provenance.fallbackReason})` : ''}`;
+    : kind === 'proposed' ? 'proposed in a conversation'
+      : kind === 'heuristic-configured' ? 'kept as one step (your settings keep plans in one step)'
+        : `kept as one step${draft.provenance.fallbackReason ? ` (${draft.provenance.fallbackReason})` : ''}`;
 }
 
 export function createWorkPlans(deps: {
@@ -97,7 +120,11 @@ export function createWorkPlans(deps: {
     const stored = JSON.parse(readFileSync(deps.file, 'utf8')) as { readonly plans?: Record<string, Held> };
     for (const [workId, entry] of Object.entries(stored.plans ?? {})) {
       // A plan being written when the daemon stopped was never finished: it is written again on the next Start.
-      if (entry.state === 'writing') continue;
+      // A proposal whose plan was being written again is kept: its plan reads as not written, to be written again.
+      if (entry.state === 'writing') {
+        if (entry.proposal) held.set(workId, { state: 'failed', reason: 'the daemon stopped while the plan was written again', proposal: entry.proposal });
+        continue;
+      }
       if (entry.draftId && !deps.drafts.getDraft(entry.draftId)) continue;
       held.set(workId, { ...entry });
     }
@@ -133,15 +160,17 @@ export function createWorkPlans(deps: {
   function write(work: WorkPlanSubject): Promise<WorkPlanView> {
     const prior = held.get(work.id);
     const previous = prior?.draftId;
-    held.set(work.id, { state: 'writing' });
+    // A proposed piece of work stays a proposal while its plan is written again.
+    const proposal = prior?.proposal ? { proposal: prior.proposal } : {};
+    held.set(work.id, { state: 'writing', ...proposal });
     save();
     return deps.drafts.proposeDraft(taskOf(work)).then((draft) => {
       if (previous) deps.drafts.removeDraft(previous);
-      held.set(work.id, { draftId: draft.id, state: 'waiting' });
+      held.set(work.id, { draftId: draft.id, state: 'waiting', ...proposal });
       save();
       return view(work.id)!;
     }, (error: unknown) => {
-      held.set(work.id, { state: 'failed', reason: `the plan could not be written: ${summarizeError(error)}` });
+      held.set(work.id, { state: 'failed', reason: `the plan could not be written: ${summarizeError(error)}`, ...proposal });
       save();
       return view(work.id)!;
     });
@@ -196,6 +225,29 @@ export function createWorkPlans(deps: {
       if (!entry) return;
       if (entry.draftId) deps.drafts.removeDraft(entry.draftId);
       held.delete(workId);
+      save();
+    },
+    propose(proposal) {
+      const draft = deps.drafts.holdDraft(taskOf({ id: '', goal: proposal.goal, criteria: proposal.criteria }), proposal.steps);
+      const id = `proposed-${randomUUID()}`;
+      held.set(id, { draftId: draft.id, state: 'waiting', proposal: { goal: proposal.goal, criteria: [...proposal.criteria], at: Date.now() } });
+      save();
+      return { id, title: proposal.goal.split('\n')[0]!.trim() || proposal.goal, steps: draft.spec.items.length };
+    },
+    proposals() {
+      return [...held.entries()].filter(([, entry]) => entry.proposal !== undefined).map(([id, entry]) => ({
+        ...view(id)!, goal: entry.proposal!.goal, criteria: entry.proposal!.criteria, at: entry.proposal!.at,
+      }));
+    },
+    proposal(id) {
+      const entry = held.get(id)?.proposal;
+      return entry ? { goal: entry.goal, criteria: entry.criteria } : undefined;
+    },
+    adopt(proposalId, workId) {
+      const entry = held.get(proposalId);
+      if (!entry?.proposal) throw new WorkPlanRefusal('This proposal is no longer held.');
+      held.delete(proposalId);
+      held.set(workId, { draftId: entry.draftId, state: entry.state });
       save();
     },
   };

@@ -76,6 +76,11 @@ const REVIEW_IS_THE_OWNERS = {
   instead: 'Ask the owner to mark it reviewed in Tools and extensions.',
 };
 
+/** Who made or changed a skill, as its provenance says it: the person's own press or line, else the model. */
+function madeBy(caller: CapabilityCaller): string {
+  return caller.personAsked === true ? 'Made by you' : 'Made by the model';
+}
+
 /** Marking reviewed, and switching on what nobody reviewed, count only from the owner's own press or typed line. */
 function ownerMay(caller: CapabilityCaller, what: string): void {
   if (caller.personAsked === true) return;
@@ -287,7 +292,7 @@ export const MY_SKILLS_CREATE = change({
     const skill = library.create({
       name: values.name!, description: values.description!, procedure: values.procedure!,
       triggers: splitList(values.triggers), tags: splitList(values.tags), requirements: requirementsOf(values, library)!,
-      enabled: values.enabled === 'yes', source: caller.personAsked === true ? 'user' : 'agent', provenance: 'Command',
+      enabled: values.enabled === 'yes', source: caller.personAsked === true ? 'user' : 'agent', provenance: madeBy(caller),
     });
     return { text: receipt('Made the skill', skill, [`  file ${skill.path ?? library.folder}`, skill.enabled ? '  switched on' : '  off until you review it and switch it on']), data: { skill: skillFacts(skill) } };
   },
@@ -305,11 +310,11 @@ export const MY_SKILLS_UPDATE = change({
     LIST('commands', 'Programs it needs', 'Program names', '--requires-command', 'unchanged'),
   ],
   sentence: '{skill} is changed to what you gave until you change it; a changed skill waits for review again.', example: { skill: 'release-notes', description: 'Write release notes for a tag' },
-  run: (values, library) => {
+  run: (values, library, caller) => {
     const skill = library.update(values.skill!, {
       name: values.name || undefined, description: values.description || undefined, procedure: values.procedure || undefined,
       triggers: values.triggers ? splitList(values.triggers) : undefined, tags: values.tags ? splitList(values.tags) : undefined,
-      requirements: requirementsOf(values, library, values.skill!), provenance: 'Command',
+      requirements: requirementsOf(values, library, values.skill!), provenance: caller.personAsked === true ? 'Changed by you' : 'Changed by the model',
     });
     return { text: receipt('Changed the skill', skill, ['  waits for your review again']), data: { skill: skillFacts(skill) } };
   },
@@ -427,7 +432,11 @@ export const MY_SKILLS_EXPORT_STANDARD = change({
       throw new CapabilityRefusal(`A SKILL.md is already at ${skillStandardFilePath(skill.name, targetDir)}; it was kept and nothing was written.`, 'Choose "Replace it" to write over it.');
     }
     const written = library.exportToStandard(skill.id, targetDir, overwrite);
-    return { text: receipt('Saved the skill as a shared SKILL.md', skill, [`  file ${written}${replaced ? ' (replaced the file that was there)' : ''}`]), data: { file: written } };
+    // Where the file went, in one true sentence: "Saved garden journal as a shared SKILL.md at <path>."
+    return {
+      text: `Saved ${skill.name} as a shared SKILL.md at ${written}${replaced ? ', in place of the file that was there' : ''}.`,
+      data: { file: written },
+    };
   },
 });
 
@@ -476,7 +485,7 @@ export const MY_SKILLS_BUNDLE_CREATE = change({
   example: { name: 'releases', description: 'Everything for a release', skills: 'release-notes,changelog' },
   run: (values, library, caller) => {
     if (values.enabled === 'yes') ownerMay(caller, 'Switching on a skill bundle nobody reviewed');
-    const bundle = library.createBundle({ name: values.name!, description: values.description!, skillIds: splitList(values.skills), enabled: values.enabled === 'yes', source: caller.personAsked === true ? 'user' : 'agent', provenance: 'Command' });
+    const bundle = library.createBundle({ name: values.name!, description: values.description!, skillIds: splitList(values.skills), enabled: values.enabled === 'yes', source: caller.personAsked === true ? 'user' : 'agent', provenance: madeBy(caller) });
     return { text: receipt('Made the skill bundle', bundle, [`  skills ${bundle.skillIds.join(', ')}`]), data: { bundle: bundleFacts(bundle, library.list()) } };
   },
 });
@@ -484,8 +493,8 @@ export const MY_SKILLS_BUNDLE_UPDATE = change({
   id: 'my-skills.bundle-update', actionId: 'bundle-update', label: 'Change a skill bundle', word: 'bundle-update',
   inputs: [BUNDLE, text('name', 'Name', 'A new name', { flag: '--name' }, { default: '', means: 'unchanged' }), text('description', 'What it is for', 'A new line', { flag: '--description' }, { default: '', means: 'unchanged' }), BUNDLE_SKILLS({ default: '', means: 'unchanged' })],
   sentence: '{bundle} is changed to what you gave until you change it; a changed bundle waits for review again.', example: { bundle: 'releases', skills: 'release-notes' },
-  run: (values, library) => {
-    const bundle = library.updateBundle(values.bundle!, { name: values.name || undefined, description: values.description || undefined, skillIds: values.skills ? splitList(values.skills) : undefined, provenance: 'Command' });
+  run: (values, library, caller) => {
+    const bundle = library.updateBundle(values.bundle!, { name: values.name || undefined, description: values.description || undefined, skillIds: values.skills ? splitList(values.skills) : undefined, provenance: caller.personAsked === true ? 'Changed by you' : 'Changed by the model' });
     return { text: receipt('Changed the skill bundle', bundle, ['  waits for your review again']), data: { bundle: bundleFacts(bundle, library.list()) } };
   },
 });

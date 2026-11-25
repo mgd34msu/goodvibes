@@ -18,7 +18,8 @@ export type NativeWorkSubmissionSelection =
 export interface NativeWorkSubmissionState {
   readonly status: 'pending' | 'submitted' | 'not-found' | 'discarded' | 'unknown' | 'conflict' | 'invalid' | 'unavailable';
   readonly message: string;
-  readonly request?: Readonly<Pick<NativeWorkSubmissionRequest, 'requestId' | 'inputId' | 'expectedRevision'>> | undefined;
+  /** The request's identity and what was asked for (the Work place's Unanswered list names it by its goal). */
+  readonly request?: Readonly<Pick<NativeWorkSubmissionRequest, 'requestId' | 'inputId' | 'expectedRevision' | 'goal'>> | undefined;
   readonly receipt?: NativeWorkSubmissionReceipt;
   readonly replayed?: boolean;
 }
@@ -34,8 +35,10 @@ export interface NativeWorkSubmissionActions {
   discard(): Promise<NativeWorkSubmissionState | undefined>;
   close(): void;
 }
-const requestIdentity = (command: NativeWorkSubmissionRequest): Pick<NativeWorkSubmissionRequest, 'requestId' | 'inputId' | 'expectedRevision'> => ({
-  requestId: command.requestId, inputId: command.inputId, expectedRevision: command.expectedRevision,
+/** The answer when nothing asked for from this folder waits: not a failure to read. */
+export const NO_SENT_WORK_WAITS = 'No work you asked for from this folder waits for an answer.';
+const requestIdentity =(command: NativeWorkSubmissionRequest): Pick<NativeWorkSubmissionRequest, 'requestId' | 'inputId' | 'expectedRevision' | 'goal'> => ({
+  requestId: command.requestId, inputId: command.inputId, expectedRevision: command.expectedRevision, goal: command.goal,
 });
 const freezeCommand = (command: NativeWorkSubmissionRequest): NativeWorkSubmissionRequest => {
   const captured = { ...command, criteria: [...command.criteria] }; Object.freeze(captured.criteria); return Object.freeze(captured);
@@ -103,7 +106,7 @@ export class NativeWorkSubmissionControls {
     // Selection is checked after every await below; nothing polls it in between.
     this.active = { identity: selected.identity, detach };
     try {
-      publish({ status: 'pending', message: mode === 'submit' ? 'Validating exact source before native submission…' : 'Recovering the original submission journal and live principal…' });
+      publish({ status: 'pending', message: mode === 'submit' ? 'Checking what you asked for before it is sent…' : 'Looking up the work you sent earlier…' });
       const source = mode === 'submit' ? validateNativeWorkSource(await load!(selected, controller.signal)) : undefined;
       if (!current()) return;
       binding = selected.bind(); if (!current()) return;
@@ -123,9 +126,9 @@ export class NativeWorkSubmissionControls {
       }
       this.draft = operationDraft;
       if (mode === 'submit' && operationDraft?.outcome === 'unknown') {
-        result = publish({ status: 'unknown', message: 'A previous submission from this workspace is unresolved, so this one was not sent. Check it with /work submission, send it again with /work submission-retry, or drop it with /work submission-discard.', request: requestIdentity(operationDraft.command) });
+        result = publish({ status: 'unknown', message: 'Work you asked for earlier from this folder has no answer from the daemon yet, so this one was not sent. It waits in Work, under Unanswered, where you can check it, send it again or drop it.', request: requestIdentity(operationDraft.command) });
       } else if (mode !== 'submit' && !operationDraft) {
-        result = publish({ status: 'unavailable', message: 'No retained submission exists for this verified host, project, workspace and principal. Use /work submit-file <path>.' });
+        result = publish({ status: 'unavailable', message: NO_SENT_WORK_WAITS });
       } else if (mode === 'submit') {
         phase = 'snapshot'; const snapshot = await binding.readSnapshot(); if (!current()) return;
         if (snapshot.projectId !== selected.projectId || !Number.isSafeInteger(snapshot.revision) || snapshot.revision < 0) throw new Error('Invalid live ledger revision');
@@ -143,17 +146,17 @@ export class NativeWorkSubmissionControls {
         if (found.kind === 'found') {
           this.validateReceipt(found.receipt, draft); draft.outcome = 'submitted';
           await this.release(selected, scope, draft);
-          result = publish({ status: 'submitted', message: mode === 'discard' ? 'The host already has this submission, so it was not discarded: its work exists. No execution was started.' : 'Original submission found. No execution was started.', request: requestIdentity(draft.command), receipt: found.receipt, replayed: true });
+          result = publish({ status: 'submitted', message: mode === 'discard' ? 'The daemon already has this work, so it was not dropped: it is in Work, not started.' : 'The daemon has this work: it is in Work, not started.', request: requestIdentity(draft.command), receipt: found.receipt, replayed: true });
         } else if (mode === 'discard') {
           phase = 'journal-remove';
           if (!selected.journal.remove) throw new Error('This journal cannot remove records');
           await selected.journal.remove(scope, draft.command.requestId); if (!current()) return;
           if (this.draft === draft) this.draft = undefined;
-          result = publish({ status: 'discarded', message: 'The host has no record of this submission, so it was removed from the journal and nothing was sent. If a lost delivery still arrives, its work appears in /work. A new /work submit-file may be sent now.', request: requestIdentity(draft.command) });
+          result = publish({ status: 'discarded', message: 'The daemon has no record of this work, so it was dropped and nothing was sent. If a lost answer still arrives, the work shows in Work. You can ask for new work now.', request: requestIdentity(draft.command) });
         } else if (mode === 'status' || draft.outcome !== 'unknown') {
           result = publish({ status: 'not-found', message: draft.outcome === 'conflict'
-            ? 'The stale submission was not found. An explicitly new submit-file command may capture a fresh revision and identity.'
-            : 'Submission not found at this lookup. A lost in-flight delivery may still arrive; no replay was sent.', request: requestIdentity(draft.command) });
+            ? 'The daemon does not have this work. Drop it and ask for the work again.'
+            : 'The daemon does not have this work yet. An answer may still be on its way; nothing was sent again.', request: requestIdentity(draft.command) });
         }
       }
       if (!result) {
@@ -166,11 +169,11 @@ export class NativeWorkSubmissionControls {
         // A save this run completed is already durable; only a record recovered from disk is confirmed first.
         if (!savedHere) { phase = 'journal-confirm'; await selected.journal.confirm(scope, draft.command); if (!current()) return; }
         phase = 'submit';
-        publish({ status: 'pending', message: mode === 'retry' ? 'Replaying the exact durable request after lookup; IDs, source and revision are unchanged…' : 'Source and identity are durably recorded; submitting to the native ledger…', request: requestIdentity(draft.command) });
+        publish({ status: 'pending', message: mode === 'retry' ? 'Sending the same work again, exactly as before…' : 'Saved on this computer; sending it to the daemon…', request: requestIdentity(draft.command) });
         const submitted = await binding.client.submit(draft.command, { signal: controller.signal }); if (!current()) return;
         this.validateReceipt(submitted.receipt, draft); draft.outcome = 'submitted';
         await this.release(selected, scope, draft);
-        result = publish({ status: 'submitted', message: 'Native source submitted. No execution was started.', request: requestIdentity(draft.command), receipt: submitted.receipt, replayed: submitted.replayed });
+        result = publish({ status: 'submitted', message: 'Sent: the work is in Work, not started.', request: requestIdentity(draft.command), receipt: submitted.receipt, replayed: submitted.replayed });
       }
     } catch (error) {
       if (!current()) return;
@@ -185,22 +188,23 @@ export class NativeWorkSubmissionControls {
       const request = operationDraft && !(mode === 'submit' && phase === 'snapshot') ? requestIdentity(operationDraft.command) : undefined;
       if (error instanceof NativeWorkSourceError) result = publish({ status: 'invalid', message: error.message });
       else if (phase === 'journal-save' && code === 'journal_limit') result = publish({ status: 'unavailable', message: await this.fullJournalMessage(selected), request });
-      else if (isJournalPhase(phase)) result = publish({ status: 'unavailable', message: 'The durable submission journal could not be confirmed. No submission was sent. The visible record was preserved; repair storage, then inspect the same request before retrying.', request });
+      else if (isJournalPhase(phase)) result = publish({ status: 'unavailable', message: 'What you asked for could not be saved on this computer, so nothing was sent. What was saved before is kept; fix the folder or free some space, then check it again.', request });
       else if (code === 'NATIVE_SUBMISSION_CONFLICT' || code === 'CONFLICT') {
         if (operationDraft) operationDraft.outcome = 'conflict';
-        result = publish({ status: 'conflict', message: 'Native ledger revision changed. The original request was not rewritten. Inspect its status; an explicitly new submit-file command may capture a fresh revision.', request });
+        result = publish({ status: 'conflict', message: 'Other work changed at the same moment, so this was not taken as it was. Check it, or drop it and ask for the work again.', request });
       } else if (code === 'PAIRED_OWNER_REQUIRED' || code === 'NATIVE_SUBMISSION_UNSUPPORTED_AUTHORITY' || code === 'NATIVE_SUBMISSION_FORBIDDEN' || code === 'FORBIDDEN') {
-        result = publish({ status: 'unavailable', message: 'Submission runs from the daemon\'s own machine or a paired device with work-ledger read and write access. Run it there, or pair this terminal with the daemon (/devices migrate-shared), then retry. No submission was sent.', request });
+        result = publish({ status: 'unavailable', message: 'Work can be asked for only from the daemon\'s own computer or a paired device. Pair this terminal with the daemon in Devices and network, then try again. Nothing was sent.', request });
       } else if (code === 'NATIVE_SUBMISSION_WORKSPACE_REFUSED') {
         // The host refused the workspace before it wrote anything: nothing is pending, so no journal entry is kept.
         const draft = operationDraft;
         if (draft) { draft.outcome = 'submitted'; await this.release(selected, scope, draft); if (this.draft === draft) this.draft = undefined; }
         result = publish({ status: 'unavailable', message: workspaceRefusalMessage(error) });
       } else if (code === 'NATIVE_SUBMISSION_REQUEST_CONFLICT') {
-        result = publish({ status: 'unknown', message: 'Submission identity conflicts with recorded input. Inspect the original request; no source or identity was replaced.', request });
+        result = publish({ status: 'unknown', message: 'This clashes with work sent earlier. Check the earlier one first; nothing was replaced.', request });
       } else result = publish({ status: request ? 'unknown' : 'unavailable', message: request
-        ? 'Submission outcome is unknown. Durable source, requestId, inputId and expectedRevision are retained. Inspect status before retrying.'
-        : 'Source or native host could not be read. Check the source file, journal and selected host.', request });
+        ? 'Whether the daemon has this work is not known. What you asked for is kept here; check it before sending it again.'
+        : phase === 'source' ? 'The file could not be read. Check that it is there and holds "goal" and "criteria".'
+          : 'The daemon could not be reached, so nothing was sent. Ask again once it runs.', request });
     } finally {
       dispose();
       if (epoch === this.epoch) this.active = undefined;
@@ -218,7 +222,7 @@ export class NativeWorkSubmissionControls {
     try { records = (await selected.journal.list?.()) ?? []; } catch { /* the message below still names the step */ }
     const now = Date.now();
     const rows = records.map(record => `  ${record.binding.workspace} · project ${record.binding.projectId} · ${record.savedAt === undefined ? 'saved by an earlier version' : `saved ${Math.max(0, Math.round((now - record.savedAt) / 60_000))} min ago`}`);
-    return ['The submission journal is full, so no submission was sent. It holds one unresolved submission per workspace; from each workspace listed, run /work submission to settle it or /work submission-discard to drop it, then submit again.',
+    return ['Too much work without an answer is kept, so this was not sent. Each folder keeps one; in each folder listed, check it or drop it in Work, under Unanswered, then ask again.',
       ...rows].join('\n');
   }
   /** A settled submission no longer needs its journal slot; a failed release leaves the record, which is harmless. */
@@ -244,16 +248,14 @@ function workspaceRefusalMessage(error: unknown): string {
   return [typeof message === 'string' && message.trim() ? message.trim() : fallback, ...steps].join(' ');
 }
 
+/** What became of work asked for, in a person's words: the outcome line of New work and of the Unanswered list's controls. */
 export function nativeWorkSubmissionLines(state: NativeWorkSubmissionState | undefined): string[] {
-  if (!state) return ['Native submission was detached or its host, token or workspace changed. Its stale response was discarded.'];
+  if (!state) return ['The daemon or this folder changed while this was sent; its answer was set aside. Check it again.'];
   const lines = [state.message];
-  if (state.request) lines.push(`requestId ${state.request.requestId} · inputId ${state.request.inputId} · submitted against ledger revision ${state.request.expectedRevision}`);
   if (state.receipt) {
-    const receipt = state.receipt;
-    lines.push(`Submission receipt: work ${receipt.workId} · attempt ${receipt.attemptId} · ledger revision ${receipt.ledgerRevision}${state.replayed ? ' · replay/lookup' : ''}`,
-      `Native target: work r${receipt.expectedRevision.work} · criteria r${receipt.expectedRevision.criteria} · attempt r${receipt.expectedRevision.attempt}`,
-      `Exact source retained: goal ${receipt.goal.length} characters · ${receipt.criteria.length} ordered criteria.`,
-      `Inspect /work and use its explicit Start control, or /work start ${receipt.workId} in Agent. Submission never starts execution.`);
+    const goal = state.receipt.goal.split('\n')[0]!.trim();
+    const results = state.receipt.criteria.length;
+    lines.push(`"${goal.length > 80 ? `${goal.slice(0, 77)}...` : goal}", with ${results} result${results === 1 ? '' : 's'} to meet: start it from Work when you want it to run.`);
   }
   return lines;
 }

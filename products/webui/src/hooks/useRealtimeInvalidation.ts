@@ -37,6 +37,9 @@ const APP_DOMAINS: readonly RuntimeEventDomain[] = [
   'surfaces',
   // A schedule made, changed, paused, run or removed, a run started or ended: Automation reads its schedules and runs again.
   'automation',
+  // The places (views/places) follow these too: carried all the time, so entering or leaving Places never reopens the
+  // lane (which would read every active query again).
+  'agents', 'mcp', 'plugins',
 ];
 
 /**
@@ -47,37 +50,24 @@ const APP_DOMAINS: readonly RuntimeEventDomain[] = [
 const LIST_CHANGED_KEYS: Readonly<Record<string, readonly (readonly unknown[])[]>> = {
   memory: [['memory']],
   checkpoints: [queryKeys.checkpoints],
-  // Automation (AutomationPanel.tsx) reads its CI watches, check-ins and triggers again too.
-  'ci-watches': [queryKeys.ciWatches, ['command-screen', 'automation-ci-watches']],
-  'check-ins': [queryKeys.checkinConfig, queryKeys.checkinReceipts, ['command-screen', 'automation-check-ins']],
-  triggers: [['command-screen', 'automation-triggers'], ['command-screen', 'automation-trigger-commands']],
-  people: [queryKeys.principals, ['command-screen', 'safety-people']],
+  // The places (views/places) follow these lists themselves (hooks/usePlaceLists.ts); the keys here are other views'.
+  'ci-watches': [queryKeys.ciWatches],
+  'check-ins': [queryKeys.checkinConfig, queryKeys.checkinReceipts],
+  people: [queryKeys.principals],
   // Package E's lists: the inbox and the message read, the calendar's events and calendars, every
   // occasions read, paired devices, local voice and the wake word, Tailscale.
   mail: [['email']],
   calendar: [['calendar']],
   dates: [['occasions']],
-  // Devices and network (DevicesPanel.tsx) reads its paired devices, grants and captures again too.
-  'paired-devices': [queryKeys.pairingTokens, ['command-screen', 'devices-tokens'], ['command-screen', 'devices-grants'], ['command-screen', 'devices-captures']],
-  relay: [['command-screen', 'devices-relay']],
-  // Waiting for you (WaitingPanel.tsx): a Telegram chat held or handed back, a held message decided or a review closed.
-  'telegram-intake': [['command-screen', 'waiting-telegram']],
+  'paired-devices': [queryKeys.pairingTokens],
   voice: [['voice']],
   tailscale: [queryKeys.tailscale],
-  // Money (MoneyPanel.tsx, RepeatPurchases.tsx): a card added or removed, a repeat purchase allowed or stopped, an address set; what was spent.
-  payments: [['command-screen', 'money-cards'], ['command-screen', 'money-addresses'], ['command-screen', 'repeat-purchases']],
-  spending: [['command-screen', 'money-spending']],
-  // Permissions and safety (SafetyPanel.tsx): a rule, a secret, a folder's trust or a sign-in changed, from any program.
-  safety: [['command-screen', 'safety-rules'], ['command-screen', 'safety-secrets'], ['command-screen', 'safety-sign-in'], queryKeys.permissionRules],
-  // Tools and extensions (ToolsSkillsSections.tsx): a skill, a bundle, a published skill, a preset or a managed setting changed through the daemon.
-  tools: [['command-screen', 'tools-skills'], ['command-screen', 'tools-skill-bundles'], ['command-screen', 'tools-published'], ['command-screen', 'tools-presets'], ['command-screen', 'tools-managed'],
-    // ToolsPanel.tsx: the hooks file or an MCP config file changed through the daemon.
-    ['command-screen', 'tools-hooks'], ['command-screen', 'tools-server-files']],
-  // Tools and extensions (ToolsPanel.tsx): a hook ran in any program.
-  'hook-trace': [['command-screen', 'tools-hook-runs']],
-  // Memory and knowledge (Library, AboutYouTab.tsx, TemplatesTab.tsx): your profile written or edited by hand, a template deleted.
-  profile: [['command-screen', 'library-about-you']],
-  templates: [['command-screen', 'library-templates']],
+  // Settings > Payments (RepeatPurchases.tsx): a repeat purchase allowed or stopped.
+  payments: [['command-screen', 'repeat-purchases']],
+  safety: [queryKeys.permissionRules],
+  // Settings > Secure address (SecureAddressSettings.tsx): this machine's group or the group's certificate changed,
+  // here or on another machine (the Devices and network place follows the same list itself).
+  'machine-group': [['secureAddress', 'get']],
 };
 
 /** Session changes are built from checkpoints: every `['sessions', <id>, 'changes']` read follows that list too. */

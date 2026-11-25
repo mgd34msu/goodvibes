@@ -22,10 +22,20 @@ export interface HeldForOwnerCall {
   readonly heldAt: number;
   /** The owner-only kind it was held as (gate/classify.ts), when it is one. */
   readonly ownerOnly?: string | undefined;
+  /** The folder of the project the call was made in, when the gate knew it: approving it settles the call there only. */
+  readonly project?: string | undefined;
+  /** The session the call was made in, when the gate knew it. */
+  readonly sessionId?: string | undefined;
 }
 
 /** Inbox item metadata naming the owner-only kind a held call was held as; its card opens on No for the kinds that do (ask-presentation.ts). */
 export const HELD_OWNER_ONLY_METADATA = 'ownerOnly';
+
+/**
+ * Inbox item metadata marking a queued action as a send the Agent's content check refused (a mail or a calendar
+ * invitation), held for the owner to send as shown or drop (terminal-shell places/held-sends-inbox.ts).
+ */
+export const HELD_SEND_METADATA = 'heldSend';
 
 interface HeldEntry extends HeldForOwnerCall {
   /** Identifies the exact call (tool, arguments, session); a repeat is held once. */
@@ -58,7 +68,8 @@ export class HeldForOwnerLedger {
   }
 
   /** Hold one call; the same exact call held again keeps its first id. */
-  hold(call: { readonly key: string; readonly toolName: string; readonly summary: string; readonly reason: string; readonly ownerOnly?: string | undefined },
+  hold(call: { readonly key: string; readonly toolName: string; readonly summary: string; readonly reason: string; readonly ownerOnly?: string | undefined;
+    readonly project?: string | undefined; readonly sessionId?: string | undefined },
     approve: () => void): HeldForOwnerCall {
     for (const entry of this.entries.values()) if (entry.key === call.key) return view(entry);
     const entry: HeldEntry = { ...call, id: `h${(++this.sequence).toString()}`, heldAt: Date.now(), approve };
@@ -102,7 +113,8 @@ export class HeldForOwnerLedger {
 }
 
 function view(entry: HeldEntry): HeldForOwnerCall {
-  return { id: entry.id, toolName: entry.toolName, summary: entry.summary, reason: entry.reason, heldAt: entry.heldAt, ...(entry.ownerOnly !== undefined ? { ownerOnly: entry.ownerOnly } : {}) };
+  return { id: entry.id, toolName: entry.toolName, summary: entry.summary, reason: entry.reason, heldAt: entry.heldAt, ...(entry.ownerOnly !== undefined ? { ownerOnly: entry.ownerOnly } : {}),
+    ...(entry.project !== undefined ? { project: entry.project } : {}), ...(entry.sessionId !== undefined ? { sessionId: entry.sessionId } : {}) };
 }
 
 const processLedger = new HeldForOwnerLedger();
@@ -155,7 +167,8 @@ export function bridgeHeldForOwnerToInbox(ledger: HeldForOwnerLedger, inbox: Hel
     let itemId: string;
     try {
       itemId = inbox.postNow({ kind: 'queued-action', key: `${boot}${call.id}`, title: `Held for you: ${call.toolName}`,
-        detail: `${call.summary}\n${call.reason}\nApprove to allow this exact call for the session; it runs when the work carries on.`,
+        // The project it was made in, by its name: an approval settles the call there, never in another project.
+        detail: `${call.summary}\n${call.reason}\n${call.project ? `In: ${call.project.split(/[\\/]/).filter(Boolean).pop() ?? call.project} (${call.project})\n` : ''}Approve to allow this exact call for the session; it runs when the work carries on.`,
         options: ['approve', 'dismiss'], expiresAt: Date.now() + HELD_ITEM_LIFETIME_MS,
         ...(call.ownerOnly !== undefined ? { metadata: { [HELD_OWNER_ONLY_METADATA]: call.ownerOnly } } : {}) }).item.id;
     } catch { return; }

@@ -1,5 +1,5 @@
 import { createDaemonWorkspaceTrustResolver } from './workspace-trust-composition.js';
-import { nativeHostedConversationOwner } from './native-hosted-conversation-composition.js';
+import { nativeHostedConversationOwner, nativeHostedConversationProjects } from './native-hosted-conversation-composition.js';
 /**
  * hosted-session-composition.ts, what this daemon states so it may host
  * conversation loops.
@@ -70,10 +70,10 @@ import type {
   HostedWorkspaceFloor,
 } from '@goodvibes/engine/platform/platform/hosted-sessions';
 import {
-  containmentFor,
   hostedAgentAsker,
   hostedWorkerSurface,
 } from '@goodvibes/engine/platform/platform/hosted-sessions';
+import { TURN_EXEC_CONTAINMENT } from '@goodvibes/engine/platform/platform/tools';
 import { CONVERSATIONAL_DIAGNOSIS_SECTION, askingQuestions } from '@goodvibes/engine/platform/platform/agents';
 import { createWorkspaceTrustDecisionAsk, trustGatedApprovalRaiser, WORKSPACE_TRUST_ASK_TIMEOUT_MS, type ApprovalRaise } from '@goodvibes/engine/platform/platform/runtime/operations';
 import { GOODVIBES_DAEMON_SURFACE_ROOT } from '../config/surface.js';
@@ -82,8 +82,11 @@ import { daemonWorkspaceCheckpoints } from './workspace-checkpointing.js';
 import { hostedRewindStorage, hostedSessionConversations } from './conversation-rewind-port.js';
 import { createAgentHostedTurn } from '@goodvibes/engine/terminal-shell/agent-turn/hosted-turn';
 import {
-  createDaemonCapabilityServices, daemonCapabilityCatalog, loadedDaemonCapabilityCatalog, preloadDaemonCapabilityCatalog,
+  createDaemonCapabilityServices, daemonCapabilityCatalog, loadedDaemonCapabilityCatalog, preloadDaemonCapabilityCatalog, traceProjectHookRuns,
 } from '@goodvibes/engine/platform/platform/capabilities';
+import { HooksFileAwaitingTrustError } from '@goodvibes/engine/platform/platform/hooks';
+import { repositoryFileGate } from '@goodvibes/engine/platform/platform/runtime/operations';
+import { logger, summarizeError } from '@goodvibes/engine/platform/platform/utils';
 
 /** The operator policy a session hosted by THIS daemon runs under. */
 function hostedSystemPrompt(input: { readonly workspaceRoot: string }): string {
@@ -156,6 +159,8 @@ export function createHostedSessionOptions(services: RuntimeServices): DaemonHos
 
   return {
     nativeConversation: nativeHostedConversationOwner(services.gatewayMethods),
+    // Every other project's native turns, each over that project's own intake (the program's project, not the daemon's).
+    nativeConversationProjects: nativeHostedConversationProjects(services.gatewayMethods),
     // A hosted session in the daemon's own project keeps this plan with `work_plan`.
     workPlan: services.workPlan,
     floorFactory: async ({ workspaceRoot, liveConversationMessages }): Promise<HostedWorkspaceFloor> => {
@@ -193,8 +198,11 @@ export function createHostedSessionOptions(services: RuntimeServices): DaemonHos
         // One store owns the rule file: a remembered approval in a hosted session
         // is the one the gateway lists and deletes.
         userPermissionRuleStore: services.userPermissionRuleStore,
-        // Workers a hosted turn delegates to run under the turn's own posture.
-        execContainment: containmentFor(hostedExecPosture()),
+        // Its rules, remembered answers and paths are this workspace's, though its settings are the daemon's.
+        permissionProject: workspaceRoot,
+        // Workers a hosted turn delegates to run their commands under the one rule every turn does
+        // (tools/exec/containment.ts): the shared sandbox setting and the gate under the owner's mode.
+        execContainment: TURN_EXEC_CONTAINMENT,
         // Workers a hosted turn starts can leave the owner a question in the one inbox, like every spawned agent;
         // the agent takes the answer while it runs, otherwise the hosted session that started it does.
         ...(services.ownerInbox ? { ownerQuestions: askingQuestions(services.ownerInbox, hostedAgentAsker) } : {}),
@@ -202,8 +210,17 @@ export function createHostedSessionOptions(services: RuntimeServices): DaemonHos
         // session created for the Agent spawns workers with the Agent's tool
         // policy, admission and settings routing, as the Agent's own process does.
         workerSurface: hostedWorkerSurface,
+        // The daemon's settings are lent: their one hook slot keeps the daemon's own dispatcher.
+        configHookSlot: 'host',
       });
       let stopLending = (): void => {};
+      // This project's hooks file, for this floor's turns: held until the owner trusts the folder, its runs in the
+      // hook trace as this project's. Read before the first session's first turn.
+      const stopHookTrust = floor.hookWorkbench.bindTrustGate(repositoryFileGate(trustFor(workspaceRoot), services.homeDirectory));
+      traceProjectHookRuns(services.shellPaths, workspaceRoot, floor.hookActivityTracker);
+      await floor.hookWorkbench.loadAndApplyManagedHooks().catch((error: unknown) => {
+        if (!(error instanceof HooksFileAwaitingTrustError)) logger.warn('[daemon] a hosted project\'s hooks file was not loaded; its sessions run without its hooks', { workspaceRoot, error: summarizeError(error) });
+      });
       try {
         // The floor's own tolerant custom load must settle before cached names
         // can be copied or a hosted model can be selected. The shared floor
@@ -233,13 +250,14 @@ export function createHostedSessionOptions(services: RuntimeServices): DaemonHos
           contractRunner: floor.contractRunner,
           execPosture: hostedExecPosture,
           // Resolves once every owner the floor started has drained (its background processes included).
-          dispose: (): Promise<void> => { stopLending(); return floor.close(); },
+          dispose: (): Promise<void> => { stopLending(); stopHookTrust(); return floor.close(); },
         };
       } catch (error) {
         // Until publication, this factory owns its returned client graph. The
         // cause rides on the failure; the session engine logs it and refuses
         // the create with the workspace named.
         stopLending();
+        stopHookTrust();
         try { floor.dispose(); }
         catch (cleanupError) { throw new AggregateError([error, cleanupError], 'Daemon hosted workspace provider preload and cleanup failed'); }
         throw new Error('Daemon hosted workspace provider preload failed', { cause: error });

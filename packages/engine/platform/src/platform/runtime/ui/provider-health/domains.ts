@@ -55,14 +55,14 @@ export function buildProviderHealthDomainSummaries(
     summary: auth.bootstrapCredentialPresent
       ? 'bootstrap credential file still present'
       : `${auth.userCount} users / ${auth.sessionCount} sessions`,
-    next: auth.bootstrapCredentialPresent ? '/local-auth remove-first-run-file' : '/local-auth review',
+    next: auth.bootstrapCredentialPresent ? '"Remove the first-run sign-in file" (System, Sign-in)' : 'Permissions and safety, Sign-in',
     details: [
       auth.bootstrapCredentialPresent ? 'bootstrap credential file should be cleared after rotation' : `${auth.userCount} local auth users configured`,
       `${auth.sessionCount} active local auth sessions`,
     ].filter(Boolean),
     nextSteps: auth.bootstrapCredentialPresent
-      ? ['/local-auth review', '/local-auth password <user>', '/local-auth remove-first-run-file']
-      : ['/local-auth review'],
+      ? ['Permissions and safety, Sign-in: who may sign in', '"Change password" on a user there', '"Remove the first-run sign-in file" (System, Sign-in)']
+      : ['Permissions and safety, Sign-in: who may sign in'],
   });
 
   const settingIssueCount = settings.conflictCount + settings.recentFailureCount + (settings.hasStagedManagedBundle ? 1 : 0);
@@ -74,7 +74,7 @@ export function buildProviderHealthDomainSummaries(
       : settingIssueCount > 0
         ? `${settings.conflictCount} conflicts / ${settings.recentFailureCount} failures${settings.hasStagedManagedBundle ? ' / staged bundle' : ''}`
         : 'settings control plane clean',
-    next: settingIssueCount > 0 ? '/settings-sync open' : '/settings-sync show <key>',
+    next: settingIssueCount > 0 ? 'Devices and network, Settings sync' : 'Devices and network, Settings sync, One setting',
     details: [
       settings.conflictCount > 0 ? `${settings.conflictCount} unresolved import conflict(s)` : '',
       settings.recentFailureCount > 0 ? `${settings.recentFailureCount} recent sync or managed failure(s)` : '',
@@ -82,8 +82,8 @@ export function buildProviderHealthDomainSummaries(
       settings.managedLockCount > 0 ? `${settings.managedLockCount} managed lock(s) enforced` : '',
     ].filter(Boolean),
     nextSteps: settingIssueCount > 0
-      ? ['/settings-sync open', '/settings-sync show <key>', 'Tools and extensions, Managed settings: the staged bundle']
-      : ['/settings-sync show <key>'],
+      ? ['Devices and network, Settings sync: settle each setting that disagrees', 'Devices and network, Settings sync, Recent failures', 'Tools and extensions, Managed settings: the staged bundle']
+      : ['Devices and network, Settings sync, One setting'],
   });
 
   summaries.push({
@@ -92,7 +92,7 @@ export function buildProviderHealthDomainSummaries(
     summary: remote.supervisor.sessions.length === 0
       ? 'no remote sessions tracked'
       : `${remote.supervisor.sessions.length} sessions / ${remote.supervisor.degradedConnections} degraded`,
-    next: remote.supervisor.degradedConnections > 0 ? '/remote recover <runnerId>' : '/remote supervisor',
+    next: remote.supervisor.degradedConnections > 0 ? 'Work and agents, Runners: how to recover, on the struggling runner' : 'Work and agents, Runners: supervisor',
     details: remote.supervisor.sessions.length === 0
       ? ['no remote sessions have been attached yet']
       : remote.supervisor.sessions
@@ -105,8 +105,8 @@ export function buildProviderHealthDomainSummaries(
           .slice(0, 3)
           .map((entry) => `${entry.runnerId}: transport=${entry.transportState} heartbeat=${entry.heartbeat.status}${entry.lastError ? ` error=${entry.lastError}` : ''}`),
     nextSteps: remote.supervisor.degradedConnections > 0
-      ? ['/remote supervisor', '/remote recover <runnerId>', '/remote capabilities']
-      : ['/remote supervisor'],
+      ? ['Work and agents, Runners: supervisor', 'Work and agents, Runners: how to recover', 'Work and agents, Runners: what it can do']
+      : ['Work and agents, Runners: supervisor'],
   });
 
   const degradedServers = security.mcpServers.filter((server) =>
@@ -160,7 +160,7 @@ export function buildProviderHealthDomainSummaries(
       ].filter(Boolean)
       : ['syntax diagnostics and symbols come from the built-in parser'],
     nextSteps: intelligenceIssues > 0
-      ? ['Code intelligence, in Code and changes: the files with problems and what is ready', '/health check intelligence']
+      ? ['Code intelligence, in Code and changes: the files with problems and what is ready']
       : ['Code intelligence, in Code and changes'],
   });
 
@@ -192,15 +192,15 @@ export function buildProviderHealthDomainSummaries(
     summary: continuity.recoveryFilePresent
       ? `recovery file present for ${continuity.sessionId || '(unknown session)'}`
       : continuity.lastSessionPointer ? `last session pointer ${continuity.lastSessionPointer}` : 'no last-session pointer',
-    next: continuity.recoveryFilePresent ? '/resume <id>' : '/session list',
+    next: continuity.recoveryFilePresent ? '/resume <id>' : 'the Sessions place lists your saved sessions',
     details: [
       continuity.returnContext ? `last activity: ${continuity.returnContext.activityLabel}` : '',
       continuity.returnContext ? `resume posture: ${continuity.returnContext.statusLabel}` : '',
       !continuity.lastSessionPointer ? 'no persisted last-session pointer recorded' : '',
     ].filter(Boolean),
     nextSteps: continuity.recoveryFilePresent
-      ? ['/session list', '/resume <id>', '/health check continuity']
-      : ['/session list'],
+      ? ['the Sessions place lists your saved sessions', '/resume <id>', 'System, Health: check one area, Picking up where you left off']
+      : ['the Sessions place lists your saved sessions'],
   });
 
   const worktreeSummary = worktrees.summary;

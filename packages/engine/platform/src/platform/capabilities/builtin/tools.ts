@@ -91,7 +91,8 @@ export const TOOLS_VERIFY: CapabilityDefinition<ToolRegistryCapabilityServices> 
   async run(values, services) {
     const check = await services.toolRegistry.verify(values.tool!);
     if (!check) throw noTool(values.tool!);
-    return { text: check.text, data: { tool: check.tool, passed: check.passed } };
+    // Said first in words; the verifier's own report follows for whoever reads on.
+    return { text: [`${check.tool} ${check.passed ? 'keeps its contract: every structural check passed' : 'does not keep its contract'}.`, check.text].join('\n'), data: { tool: check.tool, passed: check.passed } };
   },
 };
 
@@ -102,7 +103,11 @@ export const TOOLS_VERIFY_ALL: CapabilityDefinition<ToolRegistryCapabilityServic
   touches: 'reads', lasts: 'not-a-change', risk: 'none', example: {},
   async run(_values, services) {
     const { checks, text } = await services.toolRegistry.verifyAll();
-    return { text, data: { checks: checks.map((check) => ({ tool: check.tool, passed: check.passed })), failed: checks.filter((check) => !check.passed).length } };
+    const failed = checks.filter((check) => !check.passed).map((check) => check.tool);
+    const said = failed.length === 0
+      ? `All ${checks.length} tools keep their contracts.`
+      : `${checks.length - failed.length} of ${checks.length} tools keep their contracts; these do not: ${failed.join(', ')}.`;
+    return { text: [said, text].join('\n'), data: { checks: checks.map((check) => ({ tool: check.tool, passed: check.passed })), failed: checks.filter((check) => !check.passed).length } };
   },
 };
 

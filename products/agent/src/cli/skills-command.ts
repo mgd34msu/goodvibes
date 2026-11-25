@@ -1,4 +1,5 @@
 import { discoverSkills, type SkillRecord } from '../agent/skill-discovery.ts';
+import { copiedFromProvenance } from '@goodvibes/engine/platform/platform/skills';
 import { commandArgsWithLiteralMarker } from '@goodvibes/engine/terminal-shell/cli-parser-engine';
 import { formatAgentRecordOrigin, formatAgentRecordReviewState } from '@goodvibes/engine/terminal-shell/agent-turn/record-labels';
 import { buildAgentSkillRequirements, evaluateAgentSkillReadiness, formatAgentSkillRequirement, formatSkillDeleteBundleLines } from '@goodvibes/engine/terminal-shell/agent-turn/skill-registry';
@@ -162,7 +163,9 @@ export async function handleSkillsCommand(runtime: CliCommandRuntime): Promise<C
       return success(runtime, 'agent.skills.attention', { path: snapshot.path, skills }, renderSkillList('Agent skills needing setup', snapshot.path, skills, 'No Agent-local skills need setup.'));
     }
     if (normalized === 'discover') {
-      const discovered = await discoverSkills(shellPaths(runtime));
+      // A file already copied into the store is listed as its copy, not offered again.
+      const copied = new Set(snapshot.skills.filter((skill) => skill.marked === true).map((skill) => skill.provenance));
+      const discovered = (await discoverSkills(shellPaths(runtime))).filter((skill) => !copied.has(copiedFromProvenance(skill.path)));
       return success(runtime, 'agent.skills.discover', { skills: discovered }, renderDiscoveredSkillList(discovered));
     }
     if (normalized === 'import-discovered' || normalized === 'import-skill') {

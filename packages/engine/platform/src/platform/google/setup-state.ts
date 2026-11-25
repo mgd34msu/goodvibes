@@ -130,13 +130,14 @@ export function describeGoogleSetupState(state: GoogleSetupState): readonly stri
   } else if (state.hasAppPassword) {
     lines.push('Gmail: an app password is stored but the mail settings are incomplete.');
   } else {
-    lines.push('Gmail: not connected.');
+    // The app-password route only: mail over OAuth is the line below.
+    lines.push('Gmail by app password: not set up.');
   }
 
   lines.push(
     state.hasCalendarAddress
       ? 'Calendar: a private calendar address is stored (read-only access).'
-      : 'Calendar: not connected.',
+      : 'Calendar by private address: not set up.',
   );
 
   if (state.hasRefreshToken) {

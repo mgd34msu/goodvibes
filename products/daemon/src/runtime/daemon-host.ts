@@ -1,5 +1,6 @@
 /** Owned configured daemon host; native lifecycle requires an installed caller. */
 import { DaemonServer, HttpListener, createSafeHostServeFactory, secureAddressGroupAccess, type DaemonUpdateArtifact } from '@goodvibes/engine/platform/platform/daemon';
+import { BROWSER_PLACES } from '@goodvibes/engine/terminal-shell/places/browser';
 import { createAsyncDisposalScope } from '@goodvibes/engine/platform/platform/runtime/disposal';
 import { createDaemonProviderDiscovery, type DaemonProviderDiscoveryDependencies } from './provider-discovery.js';
 import { createDaemonBootOperations } from './boot-composition.js';
@@ -31,12 +32,6 @@ export interface DaemonHostOptions {
   /** Absent for source/embedded hosts; the native CLI supplies a verified installation. */
   readonly updateArtifact?: DaemonUpdateArtifact;
   readonly hasOverriddenHome?: boolean;
-  /**
-   * The start option that chose the working directory ahead of the saved
-   * setting (`--working-dir`, `GOODVIBES_WORKING_DIR`), when there was one: a
-   * saved working-directory change then says that option must change first.
-   */
-  readonly workingDirectoryOverride?: string;
   /** Explicit opt-in; an absent binding constructs no secondary listener. */
   readonly httpListener?: DaemonHostBinding;
   /**
@@ -235,7 +230,6 @@ export function createDaemonHost(options: DaemonHostOptions, factories: DaemonHo
       if (typeof options.runtime.inboxFactory !== 'function') throw new Error('Explicit inbox factory required');
       services = await (factories.createRuntime ?? createRuntimeServices)({
         ...options.runtime, nativeDataWriter, createBootOperations: createDaemonBootOperations,
-        ...(options.workingDirectoryOverride !== undefined ? { workingDirectoryOverride: options.workingDirectoryOverride } : {}),
       });
       const runtime = services;
       let graphClosing: Promise<void> | undefined;
@@ -311,14 +305,14 @@ export function createDaemonHost(options: DaemonHostOptions, factories: DaemonHo
         daemonHomeDir: options.runtime.daemonHomeDirectory,
         configManager: runtime.configManager, userAuth: runtime.localUserAuthManager,
         runtimeBus: runtime.runtimeBus, runtimeServices: runtime,
-        // A working-directory change (POST /config runtime.workingDir) moves the whole host when its owner gave one (moveWorkspace).
-        ...(runtime.workspaceSwap ? { swapManager: runtime.workspaceSwap } : {}),
         drainForNativeHandover,
         deferNativeActivationUntilHostReady: true,
         serveFactory: createSafeHostServeFactory('Configured daemon', binding?.serveFactory),
         clusterCoordinator: runtime.clusterCoordinator, clusterGroupVerbs: runtime.clusterGroup.verbs,
         // The group's one secure address reaches its machines over the group's own channel.
         secureAddressGroup: secureAddressGroupAccess(runtime.clusterGroup.runtime),
+        // Every place as declared: places.counts makes each place's count from its own lists, in one call.
+        places: BROWSER_PLACES,
         serveToNetwork: () => serveDaemonToNetwork(runtime.configManager, runtime.runtimeBus),
         paymentReplies: runtime.daemonHandlers.paymentReplies,
         // Channel profile assignments apply to the agents started for channel messages.

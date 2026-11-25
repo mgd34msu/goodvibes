@@ -23,8 +23,7 @@ import {
   type OwnerInboxClient,
 } from '@goodvibes/engine/platform/platform/runtime/client';
 import { OWNER_ASKER_SESSION_FILE_METADATA, handleOwnerDecisions } from '@goodvibes/engine/platform/platform/control-plane';
-import { bridgeContractQuestionsToInbox, type ContractRunner } from '@goodvibes/engine/platform/platform/contract';
-import { bridgeJevDecisionsToInbox, processJevDecisions, type JevDecisionUndo } from '@goodvibes/engine/platform/platform/permissions';
+import { bridgeJevDecisionsToInbox, processJevDecisions } from '@goodvibes/engine/platform/platform/permissions';
 import { watchSessionAnswers, type SessionAnswerWatch } from '@goodvibes/engine/platform/platform/agents';
 import type { ConfigManager } from '@goodvibes/engine/platform/platform/config';
 import type { SessionManager } from '@goodvibes/engine/platform/platform/sessions';
@@ -47,10 +46,6 @@ export interface OwnerQuestionServices {
   readonly sessionManager: Pick<SessionManager, 'onDeleted'>;
   /** Where this app keeps its sessions: a session's identity is its saved file there. */
   readonly surface: Pick<SessionSurface, 'sessionsDir'>;
-  /** Restores the files of a call Jev let run, when the owner chooses undo in /decisions. */
-  readonly fileUndoManager?: JevDecisionUndo | undefined;
-  /** The contracts this app runs: their questions to the owner are put in the owner inbox. */
-  readonly contractRunner?: Pick<ContractRunner, 'get' | 'list' | 'reply' | 'on'> | undefined;
 }
 
 function connectedHost(options: ConnectedHostInboxOptions): ConnectedHost {
@@ -146,16 +141,11 @@ export function wireOwnerQuestionSessions(
   const inbox = (): AnswerDeliveringInbox => agentOwnerQuestions(services, options, sessionId);
   const stopOpened = whenSessionOpens(conversation, (id) => inbox().openSession(id));
   const stopDeleted = services.sessionManager.onDeleted((id) => { void inbox().deleteSession(id); });
-  // What Jev decides in this Agent's turns is listed in /decisions here, in the TUI and in the web UI; a choice on it is carried out here.
+  // What Jev decides in this Agent's turns is listed in Waiting for you here, in the TUI and in the web UI; a choice on it is carried out here.
   const stopDecisions = bridgeJevDecisionsToInbox(processJevDecisions(), homeOwnerInbox(services.shellPaths),
-    { surface: 'agent', handle: handleOwnerDecisions, undo: services.fileUndoManager });
-  // What a contract this app runs asks its owner waits in the owner inbox too; an answer there is the contract's reply.
-  const contracts = services.contractRunner;
-  const stopContractQuestions = contracts
-    ? bridgeContractQuestionsToInbox(contracts, (listener) => contracts.on(listener), homeOwnerInbox(services.shellPaths))
-    : () => {};
+    { surface: 'agent', handle: handleOwnerDecisions });
+  // What a piece of work asks waits in the owner inbox by the daemon's own bridge: the Agent runs no contract of its own.
   return () => {
-    stopContractQuestions();
     stopDecisions();
     stopOpened();
     stopDeleted();

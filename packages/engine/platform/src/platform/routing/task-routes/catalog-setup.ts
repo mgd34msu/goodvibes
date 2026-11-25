@@ -162,7 +162,7 @@ const modelProviderAccount: TaskRouteEntry = {
         ? `models action:"provider" providerId:"${providerId}" includeParameters:true`
         : `models action:"providers" query:${quote(request)} includeParameters:true`,
       inspectRoute: 'models action:"providers" includeParameters:true',
-      userRoute: 'Agent Workspace -> Models; /accounts',
+      userRoute: 'Models and providers, Providers tab (its account, the ways it is reached, how to fix it)',
       requiresConfirmation: slots.changes,
       missingFields: slots.changes ? ['provider id', 'credential or subscription setup route', 'confirmation before storing credentials or changing routes'] : undefined,
       supportingRoutes: [

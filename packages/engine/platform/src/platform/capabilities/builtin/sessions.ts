@@ -17,6 +17,8 @@ export interface LiveSessions {
   readonly keepsBranches: boolean;
   /** False in a program that uploads no conversation (the Agent). */
   readonly uploads: boolean;
+  /** A saved session's title by its id, when it has one (an ask names the session by it). */
+  readonly titleOf?: ((id: string) => string | undefined) | undefined;
   /** This session's id, name, start, message count and model. */
   current(): Promise<string>;
   /** The saved sessions, newest first. */
@@ -44,20 +46,29 @@ export interface LiveSessions {
   /** This conversation's record: entry by entry, by turn, or counted by what took most. */
   review(view: 'events' | 'groups' | 'hotspots', input: { readonly kind: string; readonly start: string; readonly last: string }): Promise<string>;
   /** Entries holding the words (none: the program's in-place search). */
-  find(words: string, kind: string): Promise<string>;
+  /** `opensScreen`: the in-place search may open (the person's press, words left blank); a model's call opens nothing. */
+  find(words: string, kind: string, options?: { readonly opensScreen?: boolean | undefined }): Promise<string>;
   /** Move the view to the next or previous entry of a kind (`error`: an error). */
   jump(direction: 'next' | 'prev', kind: string): Promise<string>;
   /** What the composer waits on. */
   composer(): Promise<string>;
   /** What the last resume brought back. */
   restored(): Promise<string>;
-  /** The bookmarked blocks; with a block's key, the conversation is moved to that block. */
-  bookmarks(block: string): Promise<string>;
+  /**
+   * The bookmarked blocks; with a block's key, the conversation is moved to that block. `asWords`: the list is the
+   * answer (a model asked), never a picker opened on the person's screen.
+   */
+  bookmarks(block: string, asWords: boolean): Promise<string>;
   /**
    * The cross-session task graph: the project's one file for both terminal programs (`.goodvibes/shared/task-graph.json`),
-   * the same one a turn's task tool reads. False in a program that only reads it (the Agent): its changes are no controls.
+   * the same one a turn's task tool reads. False in a program that only reads it: its changes are no controls.
    */
   readonly changesTaskGraph: boolean;
+  /**
+   * True in a program that changes only what is its own session's (the Agent): it adds and cancels its own tasks,
+   * accepts a task handed to it and takes back one handed off from it; it hands nothing off itself.
+   */
+  readonly ownTasksOnly?: boolean | undefined;
   /** The graph as text or JSON, every session's tasks or one's. */
   graph(input: { readonly session: string; readonly format: string }): Promise<string>;
   linkTask(input: { readonly task: string; readonly from: string; readonly after: string; readonly label: string }): Promise<string>;
@@ -79,12 +90,19 @@ export interface SessionsCapabilityServices {
 
 /** The terminal's own join of a hosted session; each call runs the daemon's method with this terminal's own id. */
 export interface HostedJoin {
+  /** Whether this terminal is in a hosted session now: a control that acts on the joined one shows only then. */
+  joined(): boolean;
   status(): Promise<string>;
-  join(session: string): Promise<string>;
-  send(text: string): Promise<string>;
+  /** Joins it; `opensScreen` only for the person's own press (a model's join opens no screen on his display). */
+  join(session: string, options?: { readonly opensScreen?: boolean | undefined }): Promise<string>;
+  /**
+   * `personAsked`: the person typed it himself (his own press, never the model's call). Only then is it sent with a
+   * person's claim, which lets the daemon run it as his own turn in the session's project.
+   */
+  send(text: string, personAsked?: boolean): Promise<string>;
   leave(): Promise<string>;
   /** Queue a message to run after the joined session's current turn (hosted.send-later, builtin/conversation-controls.ts). */
-  readonly sendLater?: ((text: string) => Promise<string>) | undefined;
+  readonly sendLater?: ((text: string, personAsked?: boolean) => Promise<string>) | undefined;
 }
 
 /** The daemon's hosted sessions (the terminal's list reads them from sessions.hosted.list). */
@@ -136,7 +154,7 @@ export const SESSION_CURRENT: CapabilityDefinition<SessionsCapabilityServices> =
 export const SESSION_LIST: CapabilityDefinition<SessionsCapabilityServices> = {
   capability: { id: 'session.list', group: 'sessions', home: 'session', repeat: 'safe' },
   actionId: 'list', label: 'See your saved sessions', word: 'list', inputs: [],
-  sentence: 'Lists your saved sessions, the past conversations kept in this project, newest first, with what each was doing when it was left.', done: '',
+  sentence: 'Lists your saved sessions, your old conversations and past chats kept in this project, newest first, with what each was doing when it was left.', done: '',
   touches: 'reads', lasts: 'not-a-change', risk: 'none', example: {},
   async run(_values, services) { return { text: await live(services).list() }; },
 };
@@ -176,6 +194,17 @@ const RESUME_FORCE: readonly FixedChoice[] = [
   { value: 'yes', label: 'Have it handed over here', help: 'That terminal saves it and lets go first, through the daemon both are attached to.' },
 ];
 
+/**
+ * The preview check of an act that changes the live conversation itself (resume, fork, switch or merge a branch): it
+ * cannot run while a turn is running, and a model's call always comes from inside its own turn, so a model's call is
+ * refused before anyone is asked, saying why and what the person presses instead. The person's own press runs it.
+ */
+function notDuringModelTurn(act: string, press: string): NonNullable<CapabilityDefinition<SessionsCapabilityServices>['check']> {
+  return (_values, caller) => caller.personAsked === true ? undefined
+    : new CapabilityRefusal(`Not done: ${act} changes the conversation this turn is running in, so it cannot run while the model's turn is running; nobody was asked.`,
+      `The person does it after the turn: ${press}`);
+}
+
 export const SESSION_RESUME: CapabilityDefinition<SessionsCapabilityServices> = {
   capability: { id: 'session.resume', group: 'sessions', home: 'session', repeat: 'safe' },
   actionId: 'resume', label: 'Resume a saved session', word: 'resume',
@@ -185,6 +214,7 @@ export const SESSION_RESUME: CapabilityDefinition<SessionsCapabilityServices> = 
   }],
   sentence: 'You go back to {session}: this conversation is set aside and that one continues here, with its messages, model and agent records.', done: '',
   touches: 'this-machine', lasts: 'not-a-change', risk: 'none', example: { session: 'my-notes' },
+  check: notDuringModelTurn('resuming another conversation', 'Enter on it in Sessions'),
   async run(values, services) { return { text: await live(services).resume(values.session ?? '', values.force === 'yes') }; },
 };
 
@@ -194,19 +224,22 @@ export const SESSION_FORK: CapabilityDefinition<SessionsCapabilityServices> = {
   inputs: [{ ...NAME, required: { default: '', defaultMeans: 'fork-of- and this session\'s id' } }],
   sentence: 'A copy of this chat is saved under the name given and you keep going in the copy; this session stays as it is now, until you change it.', done: '',
   touches: 'this-machine', lasts: 'kept', risk: 'none', example: { name: 'try another way' },
+  check: notDuringModelTurn('continuing in a copy of this conversation', '"f" on this conversation in Sessions'),
   async run(values, services) { return { text: await live(services).fork(values.name ?? '') }; },
 };
 
 export const SESSION_RENAME: CapabilityDefinition<SessionsCapabilityServices> = {
   capability: { id: 'session.rename', group: 'sessions', home: 'session', repeat: 'safe' },
-  actionId: 'rename', label: 'Give this session a new name', word: 'rename',
-  inputs: [{ ...NAME, required: true, help: 'Its new name' }],
-  sentence: 'This session, the conversation you are in, will be called {name} until you change it.', done: 'This session is called {name} now.',
-  touches: 'this-machine', lasts: 'kept', risk: 'none', button: 'Rename', example: { name: 'release notes' },
+  actionId: 'rename', label: 'Rename a saved session', word: 'rename',
+  inputs: [
+    { ...SAVED, help: 'Your saved sessions, chosen from the list', required: { default: '', defaultMeans: 'the one open here' }, typed: { flag: '--session' } },
+    { ...NAME, required: true, help: 'Its new name' },
+  ],
+  sentence: 'Saved session {session}, one of the saved sessions listed in this project, will be called {name} in the list until you change it.', done: '',
+  touches: 'this-machine', lasts: 'kept', risk: 'none', button: 'Rename', example: { session: 'my-notes', name: 'release notes' },
   async run(values, services) {
-    // The done line says it; the program's own line says the same.
-    await live(services).rename(values.name ?? '');
-    return { text: '' };
+    // The program's own line names the session it renamed.
+    return { text: await live(services).rename(values.session ?? '', values.name ?? '') };
   },
 };
 
@@ -242,7 +275,7 @@ export const SESSION_UPLOAD: CapabilityDefinition<SessionsCapabilityServices> = 
   ],
   sentence: 'This conversation ({format}) will be written to a file and uploaded as a secret GitHub Gist that anyone with its link can read.', done: '',
   touches: 'another-machine', lasts: 'not-a-change', risk: 'sends-out',
-  ownerOnly: { reason: 'it sends the conversation outside this machine', instead: 'Save it as a file instead: /session save-file' },
+  ownerOnly: { reason: 'it sends the conversation outside this machine', instead: 'Save it as a file instead: This conversation, "Save or export this conversation as a file".' },
   example: { format: 'md' }, available: (services) => services.sessions?.uploads !== false,
   async run(values, services) {
     const format = values.format === 'md' || values.format === 'json' ? values.format : 'html';
@@ -263,6 +296,7 @@ export const SESSION_SWITCH_BRANCH: CapabilityDefinition<SessionsCapabilityServi
   actionId: 'switch-branch', label: 'Switch to a branch', word: 'switch-branch', inputs: [BRANCH],
   sentence: 'The conversation goes on from branch {branch} until you change it.', done: 'The conversation goes on from branch {branch} now.',
   touches: 'this-machine', lasts: 'kept', risk: 'none', example: { branch: 'main' }, available: keepsBranches,
+  check: notDuringModelTurn('switching to another branch', 'Enter on the branch in Sessions, Branches'),
   async run(values, services) {
     // The done line says it; the program's own line says the same.
     await live(services).switchBranch(values.branch ?? '');
@@ -276,6 +310,7 @@ export const SESSION_MERGE_BRANCH: CapabilityDefinition<SessionsCapabilityServic
   sentence: 'The messages branch {branch} gained after it was made are brought back into this conversation, until you change it.',
   done: 'The new messages of branch {branch} are in this conversation now.',
   touches: 'this-machine', lasts: 'kept', risk: 'none', example: { branch: 'before refactor' }, available: keepsBranches,
+  check: notDuringModelTurn('bringing in a branch\'s new messages', '"m" on the branch in Sessions, Branches'),
   async run(values, services) {
     await live(services).mergeBranch(values.branch ?? '');
     return { text: '' };
@@ -341,7 +376,7 @@ export const SESSION_FIND: CapabilityDefinition<SessionsCapabilityServices> = {
   ],
   sentence: 'Lists the entries of this conversation that hold the words given; with none, searches in place.', done: '',
   touches: 'reads', lasts: 'not-a-change', risk: 'none', example: { words: 'approval', kind: 'approval_request' },
-  async run(values, services) { return { text: await live(services).find(values.words ?? '', values.kind || 'all') }; },
+  async run(values, services, caller) { return { text: await live(services).find(values.words ?? '', values.kind || 'all', { opensScreen: caller.personAsked === true }) }; },
 };
 
 function jump(direction: 'next' | 'prev'): CapabilityDefinition<SessionsCapabilityServices> {
@@ -359,10 +394,11 @@ export const SESSION_PREV = jump('prev');
 
 export const SESSION_BOOKMARKS: CapabilityDefinition<SessionsCapabilityServices> = {
   capability: { id: 'session.bookmarks', group: 'sessions', home: 'session', repeat: 'safe' },
-  actionId: 'bookmarks', label: 'See bookmarked blocks', word: 'bookmarks', inputs: [],
-  sentence: 'Lists the blocks you bookmarked (Ctrl+B) and jumps to one.', done: '',
+  actionId: 'bookmarks', label: 'See bookmarked blocks', word: 'bookmarks',
+  inputs: [{ id: 'block', label: 'Block', help: 'A bookmarked block to move the conversation to', kind: 'text', freeTextReason: 'a bookmark\'s key', required: { default: '', defaultMeans: 'list them' }, typed: { position: 1 } }],
+  sentence: 'Lists the blocks you bookmarked in this conversation, or moves the conversation to the one given.', done: '',
   touches: 'reads', lasts: 'not-a-change', risk: 'none', example: {},
-  async run(_values, services) { return { text: await live(services).bookmarks() }; },
+  async run(values, services, caller) { return { text: await live(services).bookmarks((values.block ?? '').trim(), caller.personAsked !== true) }; },
 };
 
 export const SESSION_COMPOSER: CapabilityDefinition<SessionsCapabilityServices> = {
@@ -381,6 +417,112 @@ export const SESSION_RESTORED: CapabilityDefinition<SessionsCapabilityServices> 
   async run(_values, services) { return { text: await live(services).restored() }; },
 };
 
+// ---------------------------------------------------------------------------
+// The cross-session task graph: the project's one file for both terminal programs
+// ---------------------------------------------------------------------------
+
+/** A program that changes the task graph. */
+function changesGraph(services: SessionsCapabilityServices): boolean {
+  return services.sessions?.changesTaskGraph !== false;
+}
+
+const TASK: InputDescription = { id: 'task', label: 'Task', help: 'The task\'s id', kind: 'text', freeTextReason: 'a task id', required: true, typed: { position: 1 } };
+const TASK_SESSION: InputDescription = {
+  id: 'from', label: 'In session', help: 'The session the task belongs to', kind: 'text', freeTextReason: 'a session id',
+  required: { default: '', defaultMeans: 'this session' }, typed: { flag: '--session' },
+};
+const HANDOFF: InputDescription = {
+  id: 'handoff', label: 'Hand-off', help: 'Hand-offs waiting to be accepted', kind: 'choice', choices: { list: WAITING_HANDOFFS_LIST, allowOther: { reason: 'a hand-off id' } },
+  required: true, typed: { position: 1 },
+};
+
+export const SESSION_GRAPH: CapabilityDefinition<SessionsCapabilityServices> = {
+  capability: { id: 'session.graph', group: 'sessions', home: 'session', repeat: 'safe' },
+  actionId: 'graph', label: 'See the tasks handed between sessions', word: 'graph',
+  inputs: [
+    { id: 'session', label: 'Session', help: 'Only one session\'s tasks', kind: 'text', freeTextReason: 'a session id or its start', required: { default: '', defaultMeans: 'every session' }, typed: { flag: '--session' } },
+    { id: 'format', label: 'As', help: 'Text, or JSON for programs', kind: 'choice', choices: [{ value: 'text', label: 'Text' }, { value: 'json', label: 'JSON' }], required: { default: 'text', defaultMeans: 'text' }, typed: { flag: '--format' } },
+  ],
+  sentence: 'Shows the cross-session task graph of this project: the tasks linked across sessions, what each waits on, and the hand-offs waiting.', done: '',
+  touches: 'reads', lasts: 'not-a-change', risk: 'none', example: { format: 'json' },
+  async run(values, services, caller) {
+    const session = values.session ?? '';
+    const format = values.format || 'text';
+    const text = await live(services).graph({ session, format });
+    if (format !== 'text' || caller.personAsked === true) return { text };
+    // The words name sessions by title for a person; a model acts by id, so it also reads the graph as data, ids whole.
+    const data = await live(services).graph({ session, format: 'json' });
+    return { text: `${text}\n\nThe graph as data, every id whole:\n${data}` };
+  },
+};
+
+export const SESSION_LINK_TASK: CapabilityDefinition<SessionsCapabilityServices> = {
+  capability: { id: 'session.link-task', group: 'sessions', home: 'session', repeat: 'safe' },
+  actionId: 'link-task', label: 'Add a task to the cross-session graph', word: 'link-task',
+  inputs: [
+    TASK, TASK_SESSION,
+    { id: 'after', label: 'Waits on', help: 'A task it depends on, as session:task or a task of the same session', kind: 'text', freeTextReason: 'a task reference', required: { default: '', defaultMeans: 'nothing' }, typed: { flag: '--depends-on' } },
+    { id: 'label', label: 'Label', help: 'A short name to show for it', kind: 'text', freeTextReason: 'your own words', required: { default: '', defaultMeans: 'its id' }, typed: { flag: '--label' } },
+  ],
+  sentence: 'Task {task} will be in this project\'s cross-session task graph, with what it waits on, until you change it.', done: '',
+  touches: 'this-machine', lasts: 'kept', risk: 'none', example: { task: 'build', after: 'other:lint' }, available: changesGraph,
+  async run(values, services) {
+    return { text: await live(services).linkTask({ task: (values.task ?? '').trim(), from: values.from ?? '', after: values.after ?? '', label: values.label ?? '' }) };
+  },
+};
+
+export const SESSION_HAND_OFF: CapabilityDefinition<SessionsCapabilityServices> = {
+  capability: { id: 'session.hand-off', group: 'sessions', home: 'session', repeat: 'unsafe' },
+  actionId: 'hand-off', label: 'Hand a task to another session', word: 'hand-off',
+  inputs: [
+    TASK,
+    { id: 'to', label: 'To session', help: 'The session that takes it over', kind: 'choice', choices: { list: SAVED_SESSIONS_LIST, allowOther: { reason: 'a session id' } }, required: true, typed: { flag: '--to' } },
+    TASK_SESSION,
+    { id: 'reason', label: 'Why', help: 'A note the other session sees', kind: 'long-text', freeTextReason: 'your own words', required: { default: '', defaultMeans: 'no note' }, typed: { flag: '--reason' } },
+  ],
+  sentence: 'Task {task} is handed to session {to} and waits, blocked, until that session accepts it or you take it back.', done: '',
+  // The Agent hands off its own session's tasks too (its routines refuse another session's in words).
+  touches: 'this-machine', lasts: 'not-a-change', risk: 'none', undoneBy: 'withdraw', example: { task: 'build', to: 'user-1a2b3c4d' }, available: changesGraph,
+  async run(values, services) {
+    return { text: await live(services).handOff({ task: (values.task ?? '').trim(), to: (values.to ?? '').trim(), from: values.from ?? '', reason: values.reason ?? '' }) };
+  },
+};
+
+export const SESSION_ACCEPT: CapabilityDefinition<SessionsCapabilityServices> = {
+  capability: { id: 'session.accept', group: 'sessions', home: 'session', repeat: 'safe' },
+  actionId: 'accept', label: 'Accept a task handed to a session', word: 'accept', inputs: [HANDOFF],
+  sentence: 'Hand-off {handoff} is accepted for the session it was handed to, and its task is no longer blocked.', done: '',
+  touches: 'this-machine', lasts: 'not-a-change', risk: 'none', example: { handoff: 'h-1' }, available: changesGraph,
+  async run(values, services) { return { text: await live(services).accept((values.handoff ?? '').trim()) }; },
+};
+
+export const SESSION_WITHDRAW: CapabilityDefinition<SessionsCapabilityServices> = {
+  capability: { id: 'session.withdraw', group: 'sessions', home: 'session', repeat: 'safe' },
+  actionId: 'withdraw', label: 'Take back a task you handed off', word: 'withdraw', inputs: [HANDOFF],
+  sentence: 'Hand-off {handoff} is taken back and its task goes back to the state it had before it was handed off.', done: '',
+  touches: 'this-machine', lasts: 'not-a-change', risk: 'none', example: { handoff: 'h-1' }, available: changesGraph,
+  async run(values, services) { return { text: await live(services).withdraw((values.handoff ?? '').trim()) }; },
+};
+
+export const SESSION_CANCEL: CapabilityDefinition<SessionsCapabilityServices> = {
+  capability: { id: 'session.cancel', group: 'sessions', home: 'session', repeat: 'safe' },
+  actionId: 'cancel', label: 'Cancel tasks in the cross-session graph', word: 'cancel',
+  inputs: [
+    { id: 'scope', label: 'What', help: 'One task, it and what waits on it, or every task of a session', kind: 'choice', choices: [
+      { value: 'task', label: 'Only this task' }, { value: 'subtree', label: 'This task and everything waiting on it' }, { value: 'session', label: 'Every task in the session' },
+    ], required: { default: 'task', defaultMeans: 'only this task' }, typed: { flag: '--scope' } },
+    { ...TASK, showWhen: { input: 'scope', is: 'task' } },
+    { id: 'root', label: 'Task', help: 'The task whose waiting tasks go too', kind: 'text', freeTextReason: 'a task id', required: true, typed: { flag: '--task' }, showWhen: { input: 'scope', is: 'subtree' } },
+    TASK_SESSION,
+    { id: 'reason', label: 'Why', help: 'A note kept with each cancelled task', kind: 'long-text', freeTextReason: 'your own words', required: { default: '', defaultMeans: 'no note' }, typed: { flag: '--reason' } },
+  ],
+  sentence: 'Task {task} of the cross-session task graph will be cancelled, with what waits on it or every task of its session when that is chosen; a cancelled task does not start again.', done: '',
+  touches: 'this-machine', lasts: 'kept', risk: 'cannot-be-undone', example: { scope: 'task', task: 'build' }, available: changesGraph,
+  async run(values, services) {
+    return { text: await live(services).cancelTasks({ scope: values.scope || 'task', task: values.task ?? '', root: values.root ?? '', from: values.from ?? '', reason: values.reason ?? '' }) };
+  },
+};
+
 function joining(services: SessionsCapabilityServices): HostedJoin {
   if (!services.hostedJoin) throw new CapabilityRefusal('Only the terminal app joins hosted sessions; this program cannot join one.', undefined, 'UNAVAILABLE');
   return services.hostedJoin;
@@ -396,7 +538,7 @@ export const HOSTED_STATUS: CapabilityDefinition<SessionsCapabilityServices> = {
 
 const HOSTED_SESSION: InputDescription = {
   id: 'session', label: 'Session', help: 'The hosted sessions the daemon has', kind: 'choice',
-  choices: { list: HOSTED_SESSIONS_LIST, allowOther: { reason: 'a session id, or its number in the last list of hosted sessions' } },
+  choices: { list: HOSTED_SESSIONS_LIST, allowOther: { reason: 'a session id' } },
   required: true, typed: { position: 1 },
 };
 
@@ -405,16 +547,17 @@ export const HOSTED_ATTACH: CapabilityDefinition<SessionsCapabilityServices> = {
   actionId: 'join', label: 'Join a hosted session', word: 'attach', inputs: [HOSTED_SESSION],
   sentence: 'This terminal joins hosted session {session}, shows its conversation so far and follows it live.', done: '',
   touches: 'reads', lasts: 'not-a-change', risk: 'none', undoneBy: 'leave', example: { session: 'hs-1' }, available: joinsHosted,
-  async run(values, services) { return { text: await joining(services).join(values.session ?? '') }; },
+  // Only the person's own press opens Your agents on his screen; a model's join follows the session without it.
+  async run(values, services, caller) { return { text: await joining(services).join(values.session ?? '', { opensScreen: caller.personAsked === true }) }; },
 };
 
 export const HOSTED_SEND: CapabilityDefinition<SessionsCapabilityServices> = {
   capability: { id: 'hosted.send', group: 'sessions', home: 'session', repeat: 'unsafe' },
   actionId: 'send-now', label: 'Send a message now', word: 'send',
-  inputs: [{ id: 'text', label: 'Message', help: 'What to tell it; it reads it during the turn it is in', kind: 'long-text', freeTextReason: 'your own words', required: true, typed: { tail: true } }],
-  sentence: '"{text}" will be sent to the hosted session now, into the turn it is running.', done: '',
+  inputs: [{ id: 'text', label: 'Message', help: 'What to tell it; a turn it is running reads it at its next step', kind: 'long-text', freeTextReason: 'your own words', required: true, typed: { tail: true } }],
+  sentence: '"{text}" will be sent to the hosted session now: into the turn it is running, at its next step, or as a new turn when none runs.', done: '',
   touches: 'this-machine', lasts: 'not-a-change', risk: 'none', example: { text: 'focus on the failing test' }, available: joinsHosted,
-  async run(values, services) { return { text: await joining(services).send((values.text ?? '').trim()) }; },
+  async run(values, services, caller) { return { text: await joining(services).send((values.text ?? '').trim(), caller.personAsked === true) }; },
 };
 
 export const HOSTED_LEAVE: CapabilityDefinition<SessionsCapabilityServices> = {
@@ -504,9 +647,10 @@ export const HOSTED_NEW: CapabilityDefinition<HostedCapabilityServices> = {
       { value: 'stop', label: 'Stop it', help: 'It ends when the last one leaves.' },
     ], required: { default: '', defaultMeans: 'as hostedSessions.detachPolicy says' }, typed: { flag: '--on-leave' } },
   ],
-  sentence: 'A conversation will start in the daemon for this project, the folder you asked from; it lasts until you change it (ending it, or as "When everyone leaves" says). The terminal app that starts it joins it.',
+  sentence: 'A conversation will start in the daemon for this project, the folder you asked from; it lasts until you change it (ending it, or as "When everyone leaves" says).',
   done: '', touches: 'this-machine', lasts: 'kept', risk: 'none', undoneBy: 'end',
   example: { prompt: 'summarise the open issues', leave: 'keep' },
+  callerNeeds: { project: 'No project folder came with the request, so no hosted session was started. Ask from the project\'s folder, or send workingDirectory with the request.' },
   async run(values, _services, caller) {
     // The project is the caller's own folder (from context, never asked): the folder its program works in.
     if (!caller.workingDirectory) throw new CapabilityRefusal('No project folder came with the request, so no hosted session was started.', 'Ask from the project\'s folder, or send workingDirectory with the request.');
@@ -514,9 +658,10 @@ export const HOSTED_NEW: CapabilityDefinition<HostedCapabilityServices> = {
     const detachPolicy = values.leave === 'keep' ? 'survive' : values.leave === 'stop' ? 'kill' : undefined;
     const answer = await hostedMethod(caller, 'sessions.hosted.create', {
       workspaceRoot: caller.workingDirectory,
-      // The terminal app's own kind of session. From the Agent it is not one that answers as the Agent (that needs an
-      // admin credential the Agent's connection does not hold): the daemon's ordinary hosted conversation.
-      ...(caller.program === 'tui' ? { originSurface: 'tui' } : {}),
+      // The asking program's own kind of session: from the Agent one that answers as the Agent. The daemon starts an
+      // Agent session only for a creator holding full operator authority (routes/hosted-sessions.ts): the Agent's own
+      // press carries this machine's credential (its ownerPressBinding); its model's call is refused in the daemon's words.
+      ...(caller.program === 'tui' || caller.program === 'agent' ? { originSurface: caller.program } : {}),
       ...(prompt ? { initialPrompt: prompt } : {}),
       ...(detachPolicy ? { detachPolicy } : {}),
     });

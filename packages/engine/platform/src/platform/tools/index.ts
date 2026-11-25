@@ -40,13 +40,14 @@ import {
   type ExecPromptAsk,
   type ExecPromptAnswer,
 } from './exec/interactive.js';
-import type { ExecContainmentRequirement } from './exec/containment.js';
+import { foreignInputWriteRefusal, type ExecContainmentRequirement } from './exec/containment.js';
 import { createAnalyzeTool } from './analyze/index.js';
 import { InspectTool } from './inspect/index.js';
 import { createAgentTool } from './agent/index.js';
 import { createConfiguredFetchDeps, createFetchTool } from './fetch/index.js';
 import { createStateTool } from './state/index.js';
-import type { StateMemoryStore } from './state/memory-mirror.js';
+import { projectStateMemory, type StateMemoryStore } from './state/memory-mirror.js';
+import { memoryProjectIdentity } from '../state/memory-project.js';
 import { createLocalMemoryAccess } from '../runtime/memory-spine/client.js';
 import { createWorkflowServices, createWorkflowTool } from './workflow/index.js';
 import { createRegistryTool } from './registry-tool/index.js';
@@ -102,6 +103,7 @@ export type {
   UnavailableConfigRead,
 } from './goodvibes-runtime/config-routing.js';
 
+export { runRegisteredTool, currentToolExecuteOptions, previewRegisteredTool } from './registry.js';
 export { ToolRegistry, assertCurrentToolExecution, assertCurrentToolInvocation, assertCurrentToolEffect, currentToolAutonomySource, commitCurrentToolSettingsPlan, currentToolSettingsPresentation, claimCurrentToolSettingsDispatch, toolActivityOf } from './registry.js';
 export { registrySelect } from './batteries/registry-select.js';
 export { registryCatalogGroupFit } from './batteries/registry-catalog-group.js';
@@ -116,6 +118,8 @@ export { ProcessManager } from './shared/process-manager.js';
 export type { BackgroundProcess, BgCommandResult, SpawnOptions, ProcessLifecycleEvent, ProcessLifecycleListener } from './shared/process-manager.js';
 export { AGENT_TEMPLATES, AgentManager } from './agent/index.js';
 export type { AgentExecutor, AgentRecord, AgentFleetOwnership } from './agent/index.js';
+// A terminal program's delegations, run as pieces of work on the daemon's one runner.
+export type { AgentWorkDelegation, DelegatedWork, DelegatedWorkUpdate } from './agent/work-delegation.js';
 export { AutoHealer } from './shared/auto-heal.js';
 export {
   appendSchemaFingerprint,
@@ -190,7 +194,7 @@ export type {
 // The composition-stated exec posture: whether the boundary is REQUIRED
 // (containment). It defaults to the historical behaviour when a composition says
 // nothing, so naming it here is what lets a composition say something.
-export { decideExecContainment } from './exec/containment.js';
+export { decideExecContainment, TURN_EXEC_CONTAINMENT } from './exec/containment.js';
 export type {
   ExecContainmentPosture,
   ExecContainmentRequirement,
@@ -349,8 +353,6 @@ export function registerAllTools(
      * instead of reading or writing a local store the host does not serve.
      */
     memoryRoutedOverWire?: (() => boolean) | undefined;
-    /** Changes the working directory (the daemon's workspace swap manager): the daemon moves there, or keeps it for its next start; `state set runtime.workingDir` uses it. */
-    workspaceSwap?: import('./state/index.js').StateSwapManager | undefined;
     /**
      * Where the owner profile store and occasions service arrive once the
      * gateway composition has built them. Supplying it registers the `profile`
@@ -644,8 +646,17 @@ export function registerAllTools(
   const validatorRunner = deps.capturedExec
     ? createCapturedValidatorRunner(deps.capturedExec, { sandbox: execSandbox, credentialEnvScrub })
     : createExecValidatorRunner(processManager, execOptions);
+  // A turn acting on someone else's input writes no file (exec/containment.ts foreignInputWriteRefusal, decided in
+  // security/turn-input-party.ts): asked at the call, since one registry serves the owner's turns and others' alike.
+  const ownersWritesOnly = (tool: Tool): Tool => ({
+    ...tool,
+    execute: async (args, options) => {
+      const refusal = foreignInputWriteRefusal(tool.definition.name);
+      return refusal ? { success: false, error: refusal } : tool.execute(args, options);
+    },
+  });
   registerTool(
-    createWriteTool({
+    ownersWritesOnly(createWriteTool({
       projectRoot: workingDirectory,
       fileCache,
       projectIndex,
@@ -657,10 +668,10 @@ export function registerAllTools(
       toolLLM: deps.toolLLM,
       changeTracker: deps?.changeTracker,
       diagnosticsProvider,
-    }),
+    })),
   );
   registerTool(
-    createEditTool(fileCache, {
+    ownersWritesOnly(createEditTool(fileCache, {
       cwd: workingDirectory,
       validatorRunner,
       capturedAutoHeal,
@@ -669,7 +680,7 @@ export function registerAllTools(
       toolLLM: deps.toolLLM,
       changeTracker: deps?.changeTracker,
       diagnosticsProvider,
-    }),
+    })),
   );
   registerTool(
     createFindTool(workingDirectory, deps.featureFlags, undefined, deps.readAccessFilter, deps.capturedReadAccess, allowOutsideProject, codeIntelligence),
@@ -733,8 +744,10 @@ export function registerAllTools(
   // Only the host's real dispatcher is ever handed over (a private one would accept hooks nothing fires).
   // Without one the state tool does not offer mode=hooks. With one but no gate it lists hooks and refuses changes.
   const printLevelConfig = deps.configManager;
-  const stateMemory = deps.memoryAccess
+  const sharedStateMemory = deps.memoryAccess
     ?? (deps.memoryRegistry ? localStateMemory(deps.memoryRegistry, deps.memoryRoutedOverWire) : undefined);
+  // Memory is one store for every project: this registry's keys are its folder's project's (memory-project.ts).
+  const stateMemory = sharedStateMemory ? projectStateMemory(sharedStateMemory, memoryProjectIdentity(workingDirectory)) : undefined;
   registerTool(
     createStateTool(kvState, projectIndex, {
       ...(deps.hookDispatcher ? { hookDispatcher: deps.hookDispatcher } : {}),
@@ -745,7 +758,6 @@ export function registerAllTools(
       setPrintLevel: (level) => printLevelConfig.setDynamic('behavior.hitlMode', level),
       ...(deps.runtimeBus ? { telemetryDB: toolCallTelemetryFor(deps.runtimeBus) } : {}),
       ...(stateMemory ? { memory: stateMemory } : {}),
-      ...(deps.workspaceSwap ? { swapManager: deps.workspaceSwap } : {}),
       contextAccounting: contextAccountingHolder,
     }),
   );
@@ -791,14 +803,17 @@ export function registerAllTools(
   if (deps.workPlan) registerTool(createWorkPlanTool(deps.workPlan, deps.resolveSessionId ? { resolveSessionId: deps.resolveSessionId } : {}));
   // "Tell me when this build exits", "watch this log", "check this URL every minute": supervised by the host, not this turn.
   if (deps.triggers) {
-    registerTool(createTriggerTool(deps.triggers, deps.resolveSessionId ? { resolveSessionId: deps.resolveSessionId } : {}));
+    // A trigger made from this registry's turns works in its folder.
+    registerTool(createTriggerTool(deps.triggers, { ...(deps.resolveSessionId ? { resolveSessionId: deps.resolveSessionId } : {}), workingDirectory }));
     if (deps.triggers instanceof TriggerManager) detachProbeTools = deps.triggers.attachProbeTools(registry, deps.resolveSessionId);
   }
   if (mcpRegistry) {
     registerTool(createMcpTool(mcpRegistry));
   }
   if (deps.ownerQuestions) {
-    registerTool(createQueryTool({ inbox: deps.ownerQuestions, ...(deps.resolveSessionId ? { resolveSessionId: deps.resolveSessionId } : {}) }));
+    // A question says the project this registry works in: a session the daemon hosts posts in process, with no
+    // program's call context for the inbox route to read it from.
+    registerTool(createQueryTool({ inbox: deps.ownerQuestions, resolveProject: () => workingDirectory, ...(deps.resolveSessionId ? { resolveSessionId: deps.resolveSessionId } : {}) }));
   }
   if (remoteRunnerRegistry) {
     registerTool(createRemoteTool(remoteRunnerRegistry, { importRoot: workingDirectory }));

@@ -6,9 +6,9 @@
  *
  * - the boot-time autostart (bootstrap-external-services.ts), which starts an
  *   installed-but-stopped service through the platform service manager;
- * - the repair question at first render (shell/daemon-repair-prompt.ts), for a
- *   machine whose `daemon.enabled` is false while no daemon runs, where the
- *   flag stops discovery before the autostart is ever consulted;
+ * - the repair at first render (shell/daemon-repair-prompt.ts), nothing asked,
+ *   for a machine whose `daemon.enabled` is false while no daemon runs, where
+ *   the flag stops discovery before the autostart is ever consulted;
  * - a headless run, which cannot prompt and prints the commands that repair it.
  *
  * The service query is the platform's `DaemonServiceControl`, the same one the
@@ -18,10 +18,10 @@
  * daemon's command line, which this process does not own; everything after
  * that is the autostart's job.
  *
- * Boundaries: the offer is made only when the flag is false AND the service is
+ * Boundaries: the repair runs only when the flag is false AND the service is
  * stopped or absent (a false flag beside a running daemon is a deliberate
- * local-only configuration). Declining changes nothing and is remembered for
- * the session. Every step reports what it did, a partial repair included.
+ * local-only configuration). Every step reports what it did, a partial repair
+ * included, and the person is told in one line.
  * Nothing here reads or writes the terminal.
  */
 import net from 'node:net';
@@ -38,6 +38,7 @@ import {
 import {
   autostartInstalledDaemon,
   createDaemonServiceControl,
+  daemonProgramStartFailedLine,
   waitForStartingDaemon,
   type DaemonAutostartOutcome,
   type DaemonServiceControl,
@@ -168,6 +169,10 @@ export function createStandaloneDaemonHost(options: {
           return { answered: true, detail: `started the daemon service "${outcome.serviceName}" and it answers on its configured address` };
         case 'came-online':
           return { answered: true, detail: `the daemon service "${outcome.serviceName}" was already starting and now answers` };
+        case 'program-started':
+          return { answered: true, detail: 'started the GoodVibes daemon and it answers on its configured address' };
+        case 'program-start-failed':
+          return { answered: false, detail: daemonProgramStartFailedLine(outcome.reason) };
         case 'start-failed':
           return { answered: false, detail: `${outcome.reason}; start it with: ${DAEMON_START_COMMAND}` };
         case 'not-installed':
@@ -221,24 +226,6 @@ function tcpReachability(config: DaemonRepairConfig): () => Promise<boolean> {
   });
 }
 
-/**
- * A decline, remembered for the life of this process. Not persisted: it
- * answers "fix this machine now" about a state that is still broken, and a
- * durable "no" would turn one dismissal into permanent silence.
- */
-export interface DaemonRepairSessionMemory {
-  readonly declined: () => boolean;
-  readonly decline: () => void;
-}
-
-export function createDaemonRepairSessionMemory(): DaemonRepairSessionMemory {
-  let declined = false;
-  return {
-    declined: () => declined,
-    decline: () => { declined = true; },
-  };
-}
-
 /** The wedged state, once both halves have been confirmed. */
 export interface DaemonRepairOffer {
   /** Whether a unit exists already: decides whether the repair installs one first. */
@@ -247,13 +234,10 @@ export interface DaemonRepairOffer {
   readonly serviceName: string | null;
   /** One plain line stating what is wrong. */
   readonly diagnosis: string;
-  /** The offer itself, in the wording the interactive surface presents verbatim. */
-  readonly offer: string;
 }
 
 export interface DaemonRepairDiagnosisOptions {
   readonly config: DaemonRepairConfig;
-  readonly session: DaemonRepairSessionMemory;
   /** The daemon on this machine; defaults to the platform service manager over `config`. */
   readonly host?: DaemonHost | undefined;
 }
@@ -265,7 +249,6 @@ export interface DaemonRepairDiagnosisOptions {
  * when the flag is already off, so a healthy machine pays one setting read.
  */
 export function diagnoseDaemonRepair(options: DaemonRepairDiagnosisOptions): DaemonRepairOffer | null {
-  if (options.session.declined()) return null;
   // `resolveDaemonEnabled` is the reader discovery uses, so this cannot
   // disagree with the thing it is diagnosing.
   if (resolveDaemonEnabled(options.config)) return null;
@@ -288,11 +271,8 @@ export function diagnoseDaemonRepair(options: DaemonRepairDiagnosisOptions): Dae
   const diagnosis = serviceInstalled
     ? `This machine cannot reach a GoodVibes daemon: its service${named} is installed but stopped, and this Agent's ${DAEMON_ENABLED_KEY} setting is false, which stops it from even looking.`
     : `This machine cannot reach a GoodVibes daemon: no daemon service is installed here, and this Agent's ${DAEMON_ENABLED_KEY} setting is false, which stops it from even looking.`;
-  const offer = serviceInstalled
-    ? `Choose "Start the daemon" in the question to set ${DAEMON_ENABLED_KEY} to true, start the daemon service, and connect to it; "Leave it as it is" or Escape changes nothing.`
-    : `Choose "Install and start the daemon" in the question to set ${DAEMON_ENABLED_KEY} to true, install and start the daemon service, and connect to it; "Leave it as it is" or Escape changes nothing.`;
 
-  return { serviceInstalled, serviceName: state.serviceName, diagnosis, offer };
+  return { serviceInstalled, serviceName: state.serviceName, diagnosis };
 }
 
 /** What a repair actually did, step by step, in the order it did it. */
@@ -317,7 +297,7 @@ export interface DaemonRepairRunOptions {
 }
 
 /**
- * Perform the repair the user confirmed: set the setting, install the service
+ * Perform the repair: set the setting, install the service
  * when there is none, then run the autostart. Never throws; everything that
  * goes wrong comes back as a step that says so.
  */
@@ -339,14 +319,14 @@ export async function runDaemonRepair(options: DaemonRepairRunOptions): Promise<
   } catch (error) {
     const reason = summarizeError(error);
     steps.push(`could not set ${DAEMON_ENABLED_KEY} to true: ${reason}`);
-    return finish(false, `[Daemon] Repair could not start: the setting "Use the background daemon" could not be saved (${reason}). Nothing was changed.`);
+    return finish(false, `[Daemon] Not reconnected to the daemon on this computer: the setting "Use the background daemon" could not be turned back on (${reason}). Turn it on in Settings, then start the daemon with: ${offer.serviceInstalled ? DAEMON_START_COMMAND : DAEMON_INSTALL_COMMAND}`);
   }
 
   if (!offer.serviceInstalled) {
     const installed = await installDaemonService(options.runDaemonCli ?? createDaemonCliRunner());
     if (!installed.ok) {
       steps.push(`could not install the daemon service: ${installed.detail}`);
-      return finish(false, `[Daemon] Not repaired: "Use the background daemon" is now on, but the daemon service could not be installed (${installed.detail}). Install it with: ${DAEMON_INSTALL_COMMAND}`);
+      return finish(false, `[Daemon] Not reconnected: "Use the background daemon" is back on, but the daemon service could not be installed (${installed.detail}). Install it with: ${DAEMON_INSTALL_COMMAND}`);
     }
     steps.push(`installed the daemon service through goodvibes-daemon (${installed.detail})`);
   }
@@ -354,7 +334,7 @@ export async function runDaemonRepair(options: DaemonRepairRunOptions): Promise<
   const host = options.host ?? defaultDaemonHost(config);
   if (!host) {
     steps.push('could not reach the service manager from this process');
-    return finish(false, `[Daemon] Partly repaired: "Use the background daemon" is now on. Start the daemon with: ${DAEMON_START_COMMAND}`);
+    return finish(false, `[Daemon] Not reconnected: "Use the background daemon" is back on, but the service manager could not be reached from the Agent. Start the daemon with: ${DAEMON_START_COMMAND}`);
   }
   let brought: DaemonBringUpResult;
   try {
@@ -363,9 +343,10 @@ export async function runDaemonRepair(options: DaemonRepairRunOptions): Promise<
     brought = { answered: false, detail: summarizeError(error) };
   }
   steps.push(brought.detail);
+  const did = offer.serviceInstalled ? 'started the daemon service' : 'installed and started the daemon service';
   return brought.answered
-    ? finish(true, `[Daemon] Repaired: "Use the background daemon" is on and the daemon answers. ${steps.length} steps recorded in the activity log.`)
-    : finish(false, `[Daemon] Partly repaired: "Use the background daemon" is now on, but the daemon is not answering yet: ${brought.detail}. The Agent tries again at the next launch.`);
+    ? finish(true, `[Daemon] Reconnected to the daemon on this computer: turned "Use the background daemon" back on and ${did}${offer.serviceName ? ` "${offer.serviceName}"` : ''}; it answers.`)
+    : finish(false, `[Daemon] Not reconnected: "Use the background daemon" is back on, but the daemon is not answering: ${brought.detail}. The Agent tries again at the next launch.`);
 }
 
 /**

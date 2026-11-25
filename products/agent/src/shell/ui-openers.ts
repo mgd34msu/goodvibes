@@ -6,7 +6,9 @@ import { openCommandPaletteOn, type PaletteShortcut } from '@goodvibes/engine/te
 import type { KeybindingsManager } from '../input/keybindings.ts';
 import { runPickedCommand } from '@goodvibes/engine/terminal-shell/command-registry';
 import { getProviderIdFromModel } from '@goodvibes/engine/terminal-shell/agent-turn/provider-model';
-import { createSettingsWorkspaceOpener } from '@goodvibes/engine/terminal-shell/shell-ui-openers';
+import type { SettingsScreenProgram } from '@goodvibes/engine/terminal-shell/places';
+import { openTtsProviderPicker, openTtsVoicePicker } from '../input/tts-settings-actions.ts';
+import { openThemePicker } from '../input/theme-settings-actions.ts';
 import { modelPickerCatalogServices } from '@goodvibes/engine/terminal-shell/model-picker-targets';
 import { createCommonShellUiOpeners } from '@goodvibes/engine/terminal-shell/shell-ui-openers';
 import { buildConversationModelPickerTargets, selectedModelPickerRoute } from '@goodvibes/engine/terminal-shell/model-picker-targets';
@@ -39,7 +41,11 @@ import { syncServiceSettingToPlatform } from './service-settings-sync.ts';
 import { wireNotificationSurfaces } from './notification-surfaces.ts';
 import { confirmThrough } from '../input/confirm-dialog.ts';
 import { takeAppliedThemeMessage } from '../renderer/theme-mode-config.ts';
-import { createAgentDaemonVerbCaller } from '../runtime/client/daemon-verbs.ts';
+import { hasActiveExecutionMode, readExecutionMode } from '../permissions/execution-mode.ts';
+import { routeSettingWrites } from '@goodvibes/engine/terminal-shell/settings-writes';
+import { runDaemonCapability } from '@goodvibes/engine/terminal-shell/command-actions';
+import { isSecretConfigKey } from '@goodvibes/engine/platform/platform/config';
+import { capabilityBinding } from '../input/commands/capability-binding.ts';
 
 type WireShellUiOpenersOptions = {
   commandContext: CommandContext;
@@ -73,7 +79,12 @@ type WireShellUiOpenersOptions = {
  * Pass preResolvedSecretKeys (from an async SecretsManager batch) to surface the 'secrets' tier.
  */
 
-export function wireShellUiOpeners(options: WireShellUiOpenersOptions): void {
+/** What the Agent gives the settings screen both programs show (terminal-shell settings-screen), wired with the places. */
+export interface WiredShellUiOpeners {
+  readonly settings: SettingsScreenProgram;
+}
+
+export function wireShellUiOpeners(options: WireShellUiOpenersOptions): WiredShellUiOpeners {
   const {
     commandContext,
     input,
@@ -331,40 +342,43 @@ export function wireShellUiOpeners(options: WireShellUiOpenersOptions): void {
     },
     render,
   });
-  commandContext.openSettingsModal = createSettingsWorkspaceOpener({
-    configure: () => {
-      input.settingsModal.open(configManager, featureFlags, subscriptionManager, serviceRegistry, mcpRegistry, secretsManager, {
-        requestRender: render,
-        reportError: (message: string) => {
-          commandContext.print?.(message);
-          render();
-        },
-        // The Secure address list reads what the daemon's https address serves.
-        invokeDaemon: (method, methodInput) => createAgentDaemonVerbCaller({ configManager, homeDirectory }).invoke(method, methodInput),
-        onSettingApplied: (change) => {
-          // A theme change was applied by the start-up theme subscription
-          // (startup-theme-probe.ts); this only reports what it did.
-          const themeMessage = takeAppliedThemeMessage(String(change.key));
-          if (themeMessage !== undefined) return { message: themeMessage };
-          // The owner keep-awake toggle no longer needs a bespoke live-apply
-          // here: services.ts wires wireRuntimePower's subscribeConfig option
-          // (the platform's own PowerManager config subscription), so setDynamic's
-          // persist above already flips the real local inhibitor, and a
-          // separate configManager.subscribe('power.keepAwake', ...) in
-          // services.ts forwards the toggle to an adopted daemon over the wire
-          // when one is reachable, both fire from the config change itself,
-          // not from this settings-modal callback.
-          return syncServiceSettingToPlatform({ configManager, workingDirectory, homeDirectory }, change);
-        },
-      });
-    },
-    selectTarget: (target) => input.settingsModal.selectTarget(target),
-    render,
+  // The settings screen both programs show (terminal-shell settings-screen), opened through the places
+  // (interactive.ts sets openSettingsModal once they are wired): what the Agent keeps and the pickers it draws.
+  // A setting the Agent's own pickers and switches change goes through the daemon's settings.set (settings-writes.ts).
+  routeSettingWrites(async (ctx, key, value) => {
+    await runDaemonCapability('settings.set', { key, value: isSecretConfigKey(key) ? String(value ?? '') : JSON.stringify(value ?? '') }, ctx as CommandContext, capabilityBinding);
   });
+  const settings: SettingsScreenProgram = {
+    program: 'agent',
+    configManager,
+    featureFlags,
+    mcpRegistry,
+    subscriptions: { manager: subscriptionManager, services: serviceRegistry },
+    models: () => providerRegistry.getSelectableModels().filter((model) => providerRegistry.has(model.provider))
+      .map((model) => ({ id: model.id, provider: model.provider, displayName: model.displayName })),
+    pickers: {
+      theme: (context) => openThemePicker(context as CommandContext),
+      ttsProvider: (context) => openTtsProviderPicker(context as CommandContext),
+      ttsVoice: (context) => openTtsVoicePicker(context as CommandContext),
+    },
+    // The hosted session's own mode, shown beside the shared default on "When GoodVibes asks".
+    sessionMode: () => (hasActiveExecutionMode(configManager) ? readExecutionMode(configManager) ?? 'not reported' : undefined),
+    afterChange: (change) => {
+      // A theme change was applied by the start-up theme subscription
+      // (startup-theme-probe.ts); this only reports what it did.
+      const themeMessage = takeAppliedThemeMessage(String(change.key));
+      if (themeMessage !== undefined) return { message: themeMessage };
+      // This machine's service follows a change of the service settings: the daemon keeps the setting, and the Agent
+      // does the service manager's part after the daemon took it. Keep-awake needs nothing here: the platform's power
+      // manager follows the setting itself (services.ts).
+      return syncServiceSettingToPlatform({ configManager, workingDirectory, homeDirectory }, change);
+    },
+  };
 
   commandContext.openAgentWorkspace = (categoryId?: string) => {
-    input.openAgentWorkspace(commandContext, categoryId);
+    const closed = input.openAgentWorkspace(commandContext, categoryId);
     render();
+    return closed;
   };
 
   commandContext.openAgentSetupRows = (actionIds) => {
@@ -384,6 +398,7 @@ export function wireShellUiOpeners(options: WireShellUiOpenersOptions): void {
 
   // System notices: the /notifications history, counted on the status bar (notification-surfaces.ts).
   wireNotificationSurfaces({ commandContext, input, render });
+  return { settings };
 }
 
 /** Every row of the shortcut groups, as the help palette lists them. */

@@ -143,7 +143,7 @@ interface PaymentsConfig {
   /** Master switch. Nothing in this capability runs while false. */
   enabled: boolean;                         // default false
 
-  /** True: every purchase needs `/payments approve` first. */
+  /** True: every purchase needs an approval ahead of time (`payments.approve`) first. */
   confirmEveryPurchase: boolean;            // default FALSE
   /** The card a purchase that names none is paid with. */
   defaultCardId: string;                    // default ''
@@ -1311,7 +1311,7 @@ settles it.
 
 #### Resolving an uncertain merchant submission
 
-Open Payments in the WebUI or type `/payments pending` in the TUI or Agent.
+Open Payments in the WebUI, or Waiting for you's Purchases tab in the TUI or Agent.
 For an uncertain checkout, merchant verification challenge, or an unverified
 submission, first inspect that merchant’s order history and your payment
 statement. Choose **An order was placed** or **No order was placed**, then
@@ -1459,7 +1459,7 @@ report settle by refusal. See §8.6.**
    its original authority, page and settings: archived replies are read first
    and an objection or refusal ends it; silence counts only with the receive
    coverage described above; an uncovered recipient gets the notice again and a
-   renewed deadline. `/payments pending` and `payments.purchase.approve`
+   renewed deadline. Waiting for you's Purchases tab and `payments.purchase.approve`
    answer a resumed window like a live one.
 3. **A channel the notice reached keeps no replies across a restart.** A reply
    there may have been lost, and a lost objection must never become a veto's
@@ -2118,7 +2118,7 @@ real test over real payloads rather than a smoke test.
 `'stored'`. The alternative value `'prompt'` stores nothing. A purchase that has
 passed every check and been approved stops before the card is typed and asks the
 owner for the code: the notice channels are told where to type it, and the
-terminal apps' `/payments pending` lists the purchase as "Security code needed"
+terminal apps' Waiting for you, Purchases tab, lists the purchase as "Security code needed"
 and takes the code through the masked composer line, sending it once over the
 paired admin method `payments.purchase.securityCode`. The purchase waits as long
 as an approval window (`windows.approvalMinutes`); with no code by then nothing is
@@ -2394,7 +2394,7 @@ owner's behalf inside the limits: `payments.checkout.begin` needs no prior
 approval, and that standing answer stays in settings until the owner changes
 it. Over a limit, or at a shop nobody vouches for, the purchase still asks once
 in its window. An approval given in advance with `payments.checkout.approve`
-(`/payments approve`) is still used: when a begin names the same merchant, item
+(Money, Repeat purchases, "approve one purchase ahead") is still used: when a begin names the same merchant, item
 and amount (`requestedMax`), it is spent at admission and a final total at or
 below that amount needs no window (the record says `pre-approved`, answered by
 `operator`). With `payments.confirmEveryPurchase: true`, every begin must spend
@@ -2428,20 +2428,19 @@ No surface computes a budget, a ladder step, or a window outcome.
 A purchase nobody asks for in the moment, "order dog food every month", a gift
 a scheduled routine buys, has no explicit owner request, so gate 0 refuses it
 (`not-owner-request`). The owner authorises such purchases in advance with
-`/payments repeat` in either terminal app (`payments.standing.create`); bare, it
-opens a form:
+"Allow a repeat purchase" in either terminal app (Money, Repeat purchases, `n`: a
+form; the capability `payments.repeat`, which calls `payments.standing.create`):
 
 ```
-/payments repeat --shop <shop> [--shop <shop>] --item <item> --each <amount> --per-period <amount> [--days <n>] [--until <date>]
-/payments repeat --shop shop.example --item dog food --each 60.00 --per-period 120.00 --days 30 --until 2027-06-30
+goodvibes do payments.repeat --input shop=shop.example --input "item=dog food" --input each=60.00 --input per-period=120.00 --input days=30 --input until=2027-06-30
 ```
 
 Each entry holds the item in the owner's words, one or more shop domains, the
 most one purchase may come to, the most all purchases under it may come to over
-the last `--days` days (30 when not given), and an optional last day.
-`/payments repeats` lists them with what is left in the current period;
-`/payments stop-repeat <id>` withdraws one. Adding and removing are confirmed
-and sent with the owner's confirmation; both verbs are owner-only, so an agent can read the list
+the last `days` days (30 when not given), and an optional last day.
+The Repeat purchases tab lists them with what is left in the current period;
+`x` on one withdraws it (`payments.stop-repeat`). Adding and removing are sent
+with the owner's confirmation; both verbs are owner-only, so an agent can read the list
 (`payments.standing.list`) but never write it.
 
 A scheduled or triggered run begins the purchase with `standingId` set to the
@@ -2515,11 +2514,11 @@ The TUI-side glue that turns a typed value into a `goodvibes://secrets/...`
 reference plus a secret-store write is
 `products/tui/src/config/secret-config.ts` (`buildSecretBackedConfigUpdate`,
 which re-exports the platform's secret-backed config helpers) and
-`input/settings-modal-secrets.ts`. Card entry itself is
-`products/tui/src/input/commands/payment-card-intake.ts` (`/payments add-card`),
-which collects the card through concealed prompts and sends it to the selected
-daemon in one `payments.cards.create` request; the card never touches the
-terminal's own config or secret store.
+`input/settings-modal-secrets.ts`. Card entry itself is the capability
+`payments.add-card` (`platform/capabilities/builtin/money.ts`), "Add a card" on
+the Money place's Cards tab, a form whose card fields are secret inputs (hidden
+as typed), checked and sent to the daemon in one `payments.cards.create`
+request; the card never touches the terminal's own config or secret store.
 
 ### 10.3 Purchase windows in the product UI
 
@@ -2529,10 +2528,10 @@ for an approval and proceed-now/cancel controls for a veto. The view refreshes
 the actual windows and drops stale account/connection data when the client
 identity changes. Answer requests require a paired owner connection.
 
-In TUI and Agent, type **`/payments pending`** in the owner terminal. Select a
-purchase to read its notice and deadline, then choose approve/deny or
-proceed-now/cancel. Refresh reads the same selected host. Escape closes the local
-view; it does not veto a purchase or undo an answer already sent. Typed answers
+In TUI and Agent, open Waiting for you, **Purchases** tab. Select a
+purchase to read its notice and deadline, then press approve/deny or
+proceed-now/cancel. The tab reads itself again when a window changes. Escape closes the place;
+it does not veto a purchase or undo an answer already sent. Typed answers
 are sent once, with the displayed purchase and window reference. An expired or
 replaced window requires a fresh view.
 

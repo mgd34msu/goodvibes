@@ -162,12 +162,15 @@ export const SCHEDULE_ADD: MethodCapabilityDefinition = {
   ],
   sentence: '"{prompt}" will run at the times you gave, whether or not a program is open, until you change it.',
   done: 'Scheduled.',
-  touches: 'this-machine', lasts: 'kept', risk: 'none', undoneBy: 'remove',
+  // A schedule makes work run by itself later, with nobody at the screen: it loosens a protection.
+  touches: 'this-machine', lasts: 'kept', risk: 'loosens-a-protection', undoneBy: 'remove',
   example: { prompt: 'summarise open pull requests', when: 'every weekday at 9am' },
   // The daemon reads the blanks (a described time included) into what it keeps; the web UI's sheet shows the reading first.
   method: {
     id: 'automation.schedules.create',
     preview: 'automation.schedules.preview',
+    // Its runs work in the project it was made from.
+    project: true,
     fields: {
       action: '="add"', prompt: 'prompt', when: 'when', at: 'at', every: 'every', cron: 'cron', tz: 'tz', stagger: 'stagger', name: 'name',
       target: 'target', model: 'model', provider: 'provider', deliver: 'deliver', outside: 'outside', source: 'source', reasoning: 'reasoning',
@@ -211,7 +214,8 @@ export const SCHEDULE_RESUME: MethodCapabilityDefinition = {
   inputs: [{ ...SCHEDULE_INPUT, help: 'Paused schedules', choices: { list: 'schedules.paused' as ListName } }],
   sentence: '{schedule} is turned back on and runs again at its next time, {lasts}.',
   done: 'Resumed {schedule}.',
-  touches: 'this-machine', lasts: 'kept', risk: 'none', undoneBy: 'pause',
+  // It runs by itself again: it loosens a protection, as adding it does.
+  touches: 'this-machine', lasts: 'kept', risk: 'loosens-a-protection', undoneBy: 'pause',
   example: { schedule: 'weekly-report' },
   method: { id: 'automation.schedules.resume', fields: { scheduleId: 'schedule' } },
 };
@@ -258,7 +262,8 @@ export const SCHEDULE_CHANGE: MethodCapabilityDefinition = {
   ],
   sentence: '{schedule} will run with what you changed, until you change it again.',
   done: 'Changed {schedule}.',
-  touches: 'this-machine', lasts: 'kept', risk: 'none',
+  // New words for what runs by itself later: it loosens a protection, as adding it does.
+  touches: 'this-machine', lasts: 'kept', risk: 'loosens-a-protection',
   example: { schedule: 'weekly-report', cron: '0 8 * * 1' },
   method: {
     id: 'automation.jobs.update',
@@ -352,13 +357,17 @@ export const TRIGGERS_WATCH: MethodCapabilityDefinition = {
   ],
   sentence: '{name} will watch what you gave (a command when it finishes, a line it prints, a page or a file when it changes) and act each time it fires, telling you or running a command, until you change it.',
   done: 'Watching: {name}.',
-  touches: 'another-machine', lasts: 'kept', risk: 'none', undoneBy: 'stop',
+  // A trigger runs by itself later (a watched command is started by it, a turn or a command follows when it fires):
+  // it loosens a protection.
+  touches: 'another-machine', lasts: 'kept', risk: 'loosens-a-protection', undoneBy: 'stop',
   example: { name: 'Build finished', command: 'npm\nrun\nbuild' },
   // The daemon reads the blanks into the trigger's definition (and the approved command's digest) before it is made.
   method: {
     id: 'watchers.triggers.create',
     preview: 'watchers.triggers.preview',
     fields: { name: 'name', kind: 'kind', command: 'command', match: 'match', url: 'url', path: 'path', every: 'every', then: 'then', say: 'say', deliver: 'deliver', grant: 'grant', definition: 'definition' },
+    // Its turns and commands work in the project it was made from.
+    project: true,
   },
   said(answer) {
     const trigger = record(answer['trigger']);
@@ -407,7 +416,8 @@ export const TRIGGERS_RESTART: MethodCapabilityDefinition = {
   inputs: [{ ...TRIGGER_INPUT, help: 'Triggers that stopped after failing again and again' }],
   sentence: '{trigger}, which stopped after repeated failures, will watch again {lasts}; fix what made it fail first.',
   done: 'Started {trigger} again.',
-  touches: 'another-machine', lasts: 'kept', risk: 'none',
+  // It runs by itself again: it loosens a protection, as making it does.
+  touches: 'another-machine', lasts: 'kept', risk: 'loosens-a-protection',
   example: { trigger: 'build-finished' },
   method: { id: 'watchers.triggers.reset', fields: { id: 'trigger' } },
   said(answer) {

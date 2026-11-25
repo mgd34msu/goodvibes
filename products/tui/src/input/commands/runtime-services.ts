@@ -40,7 +40,6 @@ export const {
   requireProviderOptimizer,
   requireFavoritesStore,
   requireBenchmarkStore,
-  requireRemoteRuntime,
   requireOperatorClient,
   requirePeerClient,
   requireProviderApi,
@@ -104,9 +103,9 @@ export function openOnboardingWizard(
   modeOrOptions?:
     | import('../onboarding/onboarding-wizard.ts').OnboardingWizardMode
     | import('../handler-ui-state.ts').OpenOnboardingWizardOptions,
-): void {
+): Promise<import('../onboarding/onboarding-wizard.ts').OnboardingFormOutcome> | void {
   const openWizard = requireContextValue(context.openOnboardingWizard, 'openOnboardingWizard');
-  openWizard(modeOrOptions);
+  return openWizard(modeOrOptions);
 }
 
 /**

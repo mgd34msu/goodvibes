@@ -61,6 +61,10 @@
  */
 import type { AuthorityChange, AuthorityRecordFile } from '../cluster/authority-record-file.js';
 import { createHash, randomBytes, randomUUID } from 'node:crypto';
+import { AsyncLocalStorage } from 'node:async_hooks';
+
+/** The store whose native ownership lock the running code holds (a nested ask is refused as before, never queued). */
+const insideNativeAuthority = new AsyncLocalStorage<object>();
 import { lstatSync, mkdirSync, readFileSync, rmdirSync, writeFileSync } from 'node:fs';
 import { basename, dirname, join } from 'node:path';
 import { isDeepStrictEqual } from 'node:util';
@@ -932,7 +936,7 @@ export class PairingTokenManager {
       reason: 'This request presented a shared operator token that this daemon no longer accepts.',
       next: served
         ? ['Restart the daemon so it writes the replacement token, then retry from this machine.']
-        : ['Pair this device for its own token: run /devices pair in the GoodVibes terminal on the daemon\'s machine (or goodvibes-daemon pair there), then use the new link.'],
+        : ['Pair this device for its own token: press Pair something in Devices and network in the GoodVibes terminal on the daemon\'s machine (or run goodvibes-daemon pair there), then use the new link.'],
     };
   }
 
@@ -943,10 +947,34 @@ export class PairingTokenManager {
    * and, while revoked, one hash.
    */
   refusesSharedToken(token: string): boolean {
+    return this.refusesSharedTokenFingerprint(this.sharedTokenFingerprint(token));
+  }
+
+  /**
+   * A shared operator token's fingerprint: its hash, as this store keeps the replacement's, never the value. A call
+   * held for the owner keeps it, to tell after a restart whether the token it came with was replaced since.
+   */
+  sharedTokenFingerprint(token: string): string {
+    return hashToken(token.trim());
+  }
+
+  /**
+   * Whether the shared token with this fingerprint is the one this daemon serves now, however the served value came
+   * to be (its stored file, a value the environment set, a replacement after a revocation): false when another value
+   * is served; undefined when no serving daemon's token is bound here (a store read by another process).
+   */
+  servesSharedTokenFingerprint(fingerprint: string): boolean | undefined {
+    const served = this.#sharedCustody?.current() ?? null;
+    if (served === null) return undefined;
+    return this.sharedTokenFingerprint(served) === fingerprint;
+  }
+
+  /** Whether the shared token with this fingerprint is refused here now (see {@link refusesSharedToken}). */
+  refusesSharedTokenFingerprint(fingerprint: string): boolean {
     this.refreshIfChanged();
     if (this.snapshot.legacyRevoked !== true) return false;
     const replacement = this.snapshot.localSharedHash;
-    return replacement === undefined || hashToken(token.trim()) !== replacement;
+    return replacement === undefined || fingerprint !== replacement;
   }
 
   /** Take in the last-seen times stamped since the last write; true when a record moved. */
@@ -1375,6 +1403,26 @@ export class PairingTokenManager {
 
   /** Hold native ownership through the caller's workspace/ledger/launch boundary. */
   async withNativeAuthority<T>(credential: NativeCredential, expected: AuthenticatedNativePairingToken,
+    operation: (assertCurrent: () => AuthenticatedNativePairingToken) => T | Promise<T>): Promise<T> {
+    // Callers in this process take the ownership lock one after another: two submissions at the same moment (two
+    // programs, two projects) wait their turn instead of one being refused as "busy" by the other's hold. The file lock
+    // still refuses another process holding it.
+    // A hold asked for inside a hold is refused as before (never waits on itself).
+    if (insideNativeAuthority.getStore() === this) return this.holdNativeAuthority(credential, expected, operation);
+    const previous = this.nativeAuthorityTail;
+    let release!: () => void;
+    const turn = new Promise<void>((resolve) => { release = resolve; });
+    this.nativeAuthorityTail = previous.then(() => turn);
+    await previous;
+    try {
+      return await insideNativeAuthority.run(this, () => this.holdNativeAuthority(credential, expected, operation));
+    } finally { release(); }
+  }
+
+  /** Earlier callers' holds of the native ownership lock in this process, in the order they asked. */
+  private nativeAuthorityTail: Promise<void> = Promise.resolve();
+
+  private async holdNativeAuthority<T>(credential: NativeCredential, expected: AuthenticatedNativePairingToken,
     operation: (assertCurrent: () => AuthenticatedNativePairingToken) => T | Promise<T>): Promise<T> {
     const lock = this.acquireOwnerLock();
     let active = true;

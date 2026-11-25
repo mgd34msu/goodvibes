@@ -25,6 +25,8 @@ export function getModelGroupKey(model: ModelDefinition, groupBy: GroupByMode, p
         case 'family':
             return detectFamily(model) ?? 'Ungrouped';
         case 'pricingTier':
+            // A model a server on this computer or your own network serves is grouped as local, never as paid.
+            if (model.local === true) return 'local';
             return model.tier === undefined ? 'price not known yet' : tierToCategoryFilter(model.tier);
         case 'qualityTier': {
             if (model.provider === 'synthetic') {

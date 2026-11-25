@@ -11,6 +11,7 @@ import { writeFileAtomic } from '../../utils/atomic-json-store.js';
 import { atomicWriteFileSync } from '../../config/atomic-write.js';
 import { readFileObservation, type FileObservation } from '../../utils/file-observation.js';
 import { tryAcquireCrossProcessLock } from '../../workspace/checkpoint/cross-process-lock.js';
+import { noteListChanged } from '../../runtime/list-changes.js';
 import { purchaseDisposition, purchaseOutcomeText, readPaymentOperation, type PaymentOperationView } from '../operation-view.js';
 import type { PaymentUnreadableOperation } from '../window-view.js';
 import { assertSynchronousJudgmentGuard } from '@goodvibes/judgment/decisions';
@@ -267,7 +268,10 @@ export class DurablePaymentOperations {
         try { unlinkSync(path); flushDirectory(this.directory); } catch { /* A file we cannot remove is reported by the original failure below. */ }
         throw error;
       }
-      return this.writer(id, persisted, observation, release);
+      const writer = this.writer(id, persisted, observation, release);
+      // A checkout admitted: the purchases waiting for the owner read again (Waiting for you, Purchases).
+      noteListChanged({ list: 'payments', change: 'created', id });
+      return writer;
     } catch (error) {
       release();
       if (error instanceof PaymentOperationStoreError) throw error;
@@ -342,6 +346,8 @@ export class DurablePaymentOperations {
       } catch { failed = true; throw new PaymentOperationStoreError('unavailable'); }
       unindexed = stored.operation;
       repairIndex();
+      // The purchases waiting for the owner read again (Waiting for you, Purchases): a checkout moved on.
+      noteListChanged({ list: 'payments', change: 'changed', id });
     };
     return Object.freeze({ purchaseId: id, principalId: initial.principalId, assertCurrent,
       read: () => { assertCurrent(); return row.operation; },

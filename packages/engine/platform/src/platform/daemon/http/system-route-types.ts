@@ -7,5 +7,4 @@ export type {
   RouteBindingManagerLike,
   WatcherRecord,
   WatcherRegistryLike,
-  WorkspaceSwapManagerLike,
 } from '@goodvibes/engine/daemon-api';

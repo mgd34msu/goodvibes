@@ -21,7 +21,7 @@
  * the same and always looks like something else: a capability that reports
  * itself unconfigured while working credentials sit on the same disk.
  *
- * It appeared once with Google mail (`/google adopt` succeeded in the agent, and
+ * It appeared once with Google mail (taking up the Google credentials succeeded in the agent, and
  * the daemon answering Telegram said no email integration was available), once
  * with payment card fields (the settings modal wrote at user scope while the
  * command wrote at daemon scope), and once with the Telegram bot username. Three

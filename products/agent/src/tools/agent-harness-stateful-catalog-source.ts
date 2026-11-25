@@ -2,7 +2,7 @@ import { isDeepStrictEqual } from 'node:util';
 import { readFileObservation } from '@goodvibes/engine/platform/platform/utils';
 import { lstatSync, realpathSync } from 'node:fs';
 import { dirname } from 'node:path';
-import { retainCliConfig } from '@goodvibes/engine/terminal-shell/cli-config-owner';
+import { retainCliConfig } from '@goodvibes/engine/platform/platform/support/service-posture';
 import { ToolInputProjectionError } from '@goodvibes/engine/platform/platform/tools/input-projection';
 import type { CommandContext } from '../input/command-registry.ts';
 import { captureCatalogSnapshot } from '@goodvibes/engine/terminal-shell/agent-turn/catalog-data';

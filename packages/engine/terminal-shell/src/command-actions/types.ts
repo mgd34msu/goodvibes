@@ -13,7 +13,7 @@ import type { ConcealedInputRequest } from '../concealed-input.js';
 import type { PlainLineInputRequest } from '../plain-line-input.js';
 import type { SurfaceModal } from '../surface-modal-host.js';
 
-import type { ActionRisk, ActionLasts, ActionTouches, ActionValues, CapabilityDeclaration, InputDescription } from '@goodvibes/engine/platform/platform/capabilities';
+import type { ActionRisk, ActionLasts, ActionTouches, ActionValues, CapabilityDeclaration, CapabilitySentenceWhen, CapabilityTightensWhen, InputDescription } from '@goodvibes/engine/platform/platform/capabilities';
 
 /**
  * An action IS a capability: the input shapes, risk, lifetime and touch words
@@ -45,6 +45,8 @@ export interface ActionDescription<Ctx> {
   readonly sentence: string;
   /** What happened: "Blocked {tool} on {server} {lasts}." */
   readonly done: string;
+  /** What happened, said only by a place, for a control whose typed line prints nothing on purpose (capabilities/types.ts). */
+  readonly doneInPlace?: string | undefined;
   readonly touches: ActionTouches;
   readonly lasts: ActionLasts | 'not-a-change';
   readonly risk: ActionRisk;
@@ -59,6 +61,14 @@ export interface ActionDescription<Ctx> {
   readonly riskDone?: string | undefined;
   /** Only counts when the owner types it; a model is refused with the reason and what it may do instead. */
   readonly ownerOnly?: { readonly reason: string; readonly instead: string } | undefined;
+  /** Whether a run with these values loosens a protection though its risk is none (capabilities/types.ts `loosensIf`). */
+  readonly loosensIf?: ((values: ActionValues) => boolean) | undefined;
+  /** The chosen values with which a run cannot be undone though its risk is none (capabilities/types.ts `irreversibleWhen`). */
+  readonly irreversibleWhen?: CapabilityTightensWhen | undefined;
+  /** The sentence said instead with some values (capabilities/types.ts `sentenceWhen`). */
+  readonly sentenceWhen?: CapabilitySentenceWhen | undefined;
+  /** The question asked before a run that cannot be undone or loosens a protection, with `{input}` blanks (capabilities/types.ts `question`). */
+  readonly question?: string | undefined;
   /**
    * The action asks its own question before it does what its risk names, with
    * what it read at that moment (and refuses where it cannot ask). The kit then
@@ -134,7 +144,8 @@ export interface CommandDescription<Ctx> {
    */
   readonly bareOpens?: string | undefined;
   /**
-   * Opens place: the id of the place (places/index.ts `PLACES`) a bare command opens where a screen can be shown,
+   * Opens place: the id of the place (places/index.ts `PLACES`), or `place/list` for one of its tabs (`system/updates`),
+   * a bare command opens where a screen can be shown (a command of one action with no word too),
    * in place of the action list. A typed command that stays only to open its place (`/checkpoint` opens This
    * conversation) declares it here, with no action for it: the place is how its actions are reached. A model or a
    * script typing it bare still gets the `report` action.
@@ -198,5 +209,5 @@ export interface CommandActionContext extends ConfirmationHost {
   /** Push a kit modal on the surface's modal stack (the guided panel draws there). */
   readonly pushSurfaceModal?: ((modal: SurfaceModal) => void) | undefined;
   /** Open a place of this program by id (a command's `opens`); absent where the surface has no places. */
-  readonly openPlace?: ((placeId: string) => void) | undefined;
+  readonly openPlace?: ((placeId: string, start?: { readonly list?: string | undefined }) => void) | undefined;
 }

@@ -2,9 +2,9 @@
  * Your agents (Work and agents). Two homes:
  *
  * - `session`: team modes, recipes and archetypes start agents in the
- *   conversation of the program holding it, and work contracts and the agents
- *   running them are that program's own (the terminal app runs them; the Agent
- *   has none, so these are not something it does).
+ *   conversation of the program holding it, and the agents running are that
+ *   program's own (the terminal app runs them; the Agent has none, so these are
+ *   not something it does). Work an agent hands over runs on the daemon (Work).
  * - `daemon`: the third-party coding agents (Claude Code, Codex, opencode) the
  *   daemon finds and hosts, through its own `acp.agents.list` and
  *   `acp.sessions.create` methods, run as the same caller.
@@ -12,8 +12,11 @@
 import { CapabilityRefusal, type CapabilityCaller, type CapabilityDefinition, type FixedChoice, type InputDescription, type ListName } from '../types.js';
 
 export interface AgentArchetypeRow { readonly id: string; readonly label: string; readonly family: string; readonly issues: number }
-export interface AgentContractRow { readonly id: string; readonly ask: string; readonly status: string }
-export interface RunningAgentRow { readonly id: string; readonly task: string; readonly status: string; readonly graphId?: string | undefined }
+export interface RunningAgentRow {
+  readonly id: string; readonly task: string; readonly status: string; readonly graphId?: string | undefined;
+  /** Its last progress line, and what went wrong when it failed: an ended agent's record, read on Your agents. */
+  readonly progress?: string | undefined; readonly error?: string | undefined;
+}
 
 /** Team modes, recipes and archetypes, and starting agents from them, in this program's conversation. */
 export interface AgentTeamServices {
@@ -25,11 +28,16 @@ export interface AgentTeamServices {
   startArchetype(name: string, title: string): string;
 }
 
-/** Work contracts and the agents running them, in this program. */
+/**
+ * The agents this program started and stopping them. A delegation that once ran as a contract here is a piece of work
+ * on the daemon now (Work, tools/agent/work-delegation.ts); its agent here follows it.
+ */
 export interface AgentContractServices {
-  list(): readonly AgentContractRow[];
-  show(contractId: string): string;
   running(): readonly RunningAgentRow[];
+  /** Every agent started in this session, the ended ones too (Your agents lists them, so their record can be read). */
+  started(): readonly RunningAgentRow[];
+  /** Stop one running agent, the note kept with the stop. */
+  stop(agentId: string, note: string): string;
   stopGroup(graphId: string): string;
   stopBranch(agentId: string): string;
 }
@@ -57,7 +65,6 @@ export const WORK_BRIEF: CapabilityDefinition<AgentsCapabilityServices> = {
 
 /** The lists the inputs choose from (terminal-shell agents-command.ts reads them). */
 export const AGENTS_HOSTABLE_LIST = 'agents.hostable' as ListName;
-export const AGENTS_CONTRACTS_LIST = 'agents.contracts' as ListName;
 export const AGENTS_RUNNING_LIST = 'agents.running' as ListName;
 export const AGENTS_GROUPS_LIST = 'agents.groups' as ListName;
 export const AGENTS_ARCHETYPES_LIST = 'agents.archetypes' as ListName;
@@ -86,7 +93,7 @@ export const TEAM_RECIPES: readonly (FixedChoice & { readonly steps: readonly st
 type SessionDefinition = CapabilityDefinition<AgentsCapabilityServices>;
 type DaemonDefinition = CapabilityDefinition<Record<never, never>>;
 
-const NOT_HERE = 'Starting agents of its own and their work contracts belong to the terminal app, which runs them.';
+const NOT_HERE = 'Starting agents of its own and stopping them belong to the terminal app, which runs them.';
 
 function teamOf(services: AgentsCapabilityServices): AgentTeamServices {
   if (!services.agentTeam) throw new CapabilityRefusal(`Nothing was started: ${NOT_HERE}`, 'Open the Work place in the terminal app.', 'UNAVAILABLE');
@@ -102,11 +109,12 @@ const ARCHETYPE: InputDescription = { id: 'archetype', label: 'Archetype', help:
 
 function session(fields: Omit<SessionDefinition, 'capability' | 'word' | 'done' | 'lasts' | 'touches' | 'risk' | 'example' | 'available'> & {
   readonly touches?: SessionDefinition['touches']; readonly risk?: SessionDefinition['risk']; readonly example?: SessionDefinition['example']; readonly repeat: 'safe' | 'unsafe';
+  readonly lasts?: SessionDefinition['lasts'];
 }): SessionDefinition {
   const { repeat, ...rest } = fields;
   return {
     capability: { id: `agents.${fields.actionId}`, group: 'work', home: 'session', repeat },
-    word: fields.actionId, done: '', touches: fields.touches ?? 'reads', lasts: 'not-a-change', risk: fields.risk ?? 'none', example: fields.example ?? {},
+    word: fields.actionId, done: '', touches: fields.touches ?? 'reads', lasts: fields.lasts ?? 'not-a-change', risk: fields.risk ?? 'none', example: fields.example ?? {},
     // The Agent starts no agents of its own: these are not offered there.
     available: (services) => services.agentTeam !== undefined || services.agentContracts !== undefined,
     ...rest,
@@ -120,9 +128,10 @@ export const AGENTS_TEAM = session({
 });
 
 export const AGENTS_START = session({
-  actionId: 'start', label: 'Start an agent in a team mode', repeat: 'unsafe', touches: 'this-machine',
+  // It makes an agent, Your agents' kind of thing, listed for the session: the empty tab names this action first.
+  actionId: 'start', label: 'Start an agent in a team mode', repeat: 'unsafe', touches: 'this-machine', lasts: 'session',
   inputs: [{ id: 'mode', label: 'Kind of agent', help: 'What it does', kind: 'choice', choices: TEAM_MODES, required: true, typed: { position: 1 } }, TITLE],
-  sentence: 'An agent ({mode}) starts on "{title}" in this session; Your agents shows its progress.', example: { mode: 'research', title: 'compare the two parsers' },
+  sentence: 'An agent ({mode}) starts on "{title}"; Your agents shows its progress and its record, for this session only.', example: { mode: 'research', title: 'compare the two parsers' },
   async run(values, services) { return { text: teamOf(services).startMode(values.mode!, values.title!) }; },
 });
 
@@ -158,24 +167,28 @@ export const AGENTS_START_ARCHETYPE = session({
   async run(values, services) { return { text: teamOf(services).startArchetype(values.archetype!, values.title!) }; },
 });
 
-export const AGENTS_CONTRACT = session({
-  actionId: 'contract', label: 'See a work contract', repeat: 'safe',
-  inputs: [{ id: 'contract', label: 'Contract', help: 'Work contracts, newest first', kind: 'choice', choices: { list: AGENTS_CONTRACTS_LIST, allowOther: { reason: 'a contract id' } }, required: { default: '', defaultMeans: 'the newest' }, typed: { position: 1 } }],
-  sentence: 'Shows work contract {contract}: what was asked, its state, and its groups and units.', example: { contract: 'contract-1a2b' },
-  async run(values, services) { return { text: contractsOf(services).show(values.contract ?? '') }; },
-});
-
 export const AGENTS_STOP_GROUP = session({
   actionId: 'stop-group', label: 'Stop a group of agents', repeat: 'safe', touches: 'this-machine', risk: 'cannot-be-undone',
   inputs: [{ id: 'group', label: 'Group', help: 'Groups with agents running', kind: 'choice', choices: { list: AGENTS_GROUPS_LIST, allowOther: { reason: 'a group id' } }, required: true, typed: { position: 1 } }],
-  sentence: 'Every agent still running in group {group} is stopped.', example: { group: 'graph-1a2b' },
+  sentence: 'Every agent still running in the group {group} is stopped.', example: { group: 'graph-1a2b' },
   async run(values, services) { return { text: contractsOf(services).stopGroup(values.group!) }; },
 });
 
+/** Stopping one running agent (`x` in Your agents), with a note kept with the stop. */
+export const AGENTS_STOP = session({
+  actionId: 'stop', label: 'Stop one of the agents you started', repeat: 'safe', touches: 'this-machine', risk: 'cannot-be-undone',
+  inputs: [
+    { id: 'agent', label: 'Agent', help: 'Agents running now', kind: 'choice', choices: { list: AGENTS_RUNNING_LIST, allowOther: { reason: 'an agent id' } }, required: true, typed: { position: 1 } },
+    { id: 'note', label: 'Why', help: 'A note kept with the stop', kind: 'long-text', freeTextReason: 'your own words', required: { default: '', defaultMeans: 'no note' }, typed: { flag: '--note' } },
+  ],
+  sentence: 'Agent {agent} is stopped; what it has not finished is not done.', example: { agent: 'agent-1a2b' },
+  async run(values, services) { return { text: contractsOf(services).stop(values.agent!, values.note ?? '') }; },
+});
+
 export const AGENTS_STOP_BRANCH = session({
-  actionId: 'stop-branch', label: 'Stop an agent and the agents it started', repeat: 'safe', touches: 'this-machine', risk: 'cannot-be-undone',
+  actionId: 'stop-branch', label: 'Stop an agent and every agent it spawned', repeat: 'safe', touches: 'this-machine', risk: 'cannot-be-undone',
   inputs: [{ id: 'agent', label: 'Agent', help: 'Agents running now', kind: 'choice', choices: { list: AGENTS_RUNNING_LIST, allowOther: { reason: 'an agent id' } }, required: true, typed: { position: 1 } }],
-  sentence: 'Agent {agent} and every agent it started, and they started, are stopped.', example: { agent: 'agent-1a2b' },
+  sentence: 'Agent {agent} and every agent it spawned, and they spawned, are stopped.', example: { agent: 'agent-1a2b' },
   async run(values, services) { return { text: contractsOf(services).stopBranch(values.agent!) }; },
 });
 
@@ -211,8 +224,10 @@ export const AGENTS_HOST: DaemonDefinition = {
     { id: 'agent', label: 'Coding agent', help: 'The coding agents found on this machine', kind: 'choice', choices: { list: AGENTS_HOSTABLE_LIST }, required: true, typed: { position: 1 } },
     { id: 'directory', label: 'Folder', help: 'Where it works', kind: 'path', freeTextReason: 'a folder on this machine', required: { default: '', defaultMeans: 'the current folder' }, typed: { position: 2 } },
   ],
-  sentence: '{agent} starts as a long-running session in the folder given and shows as a row in Your agents, where you steer and stop it.',
-  done: '', touches: 'this-machine', lasts: 'not-a-change', risk: 'none', example: { agent: 'claude-code' },
+  sentence: '{agent} starts as a long-running session in the folder given; it is listed in the Sessions place as a shared session, where you send it work and close it.',
+  // Another coding agent, long-running in that folder, that runs its own tools under its own rules, not this gate's:
+  // it loosens a protection.
+  done: '', touches: 'this-machine', lasts: 'not-a-change', risk: 'loosens-a-protection', example: { agent: 'claude-code' },
   async run(values, _services, caller) {
     const cwd = values.directory || caller.workingDirectory;
     if (!cwd) throw new CapabilityRefusal('Nothing was started: no folder was given and the caller named none.', 'Give the folder it works in.');
@@ -220,9 +235,11 @@ export const AGENTS_HOST: DaemonDefinition = {
     const hosted = record(answer['hosted']);
     const failure = record(hosted['error']);
     const title = plain(hosted['title']) || values.agent!;
-    if (hosted['error']) throw new CapabilityRefusal(`Could not host ${title}: the ${plain(failure['stage'])} stage failed for ${plain(failure['binary'])}; ${plain(failure['message'])}`);
+    // The hosted session's title is "<agent>: <folder>"; the sentence names the folder once.
+    const named = title.endsWith(`: ${cwd}`) ? title.slice(0, -(cwd.length + 2)) : title;
+    if (hosted['error']) throw new CapabilityRefusal(`Could not host ${named}: the ${plain(failure['stage'])} stage failed for ${plain(failure['binary'])}; ${plain(failure['message'])}`);
     return {
-      text: `Hosting ${title} in ${cwd}${answer['started'] === false ? ' (queued)' : ''}; it shows as a row in Your agents, where you steer and stop it.`,
+      text: `Hosting ${named} in ${cwd}${answer['started'] === false ? ' (queued)' : ''}; it is listed in the Sessions place as a shared session, where you send it work and close it.`,
       data: { hosted: { id: hosted['id'], title, state: hosted['state'] }, started: answer['started'] !== false },
     };
   },

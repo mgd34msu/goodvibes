@@ -6,7 +6,9 @@ import type { CommandContext } from '../command-registry.ts';
 
 import type { ConversationMessageSnapshot } from '../../core/conversation.ts';
 import { formatReturnContextForDisplay, getReturnContextMode, maybeAssistReturnContextSummary } from '@/runtime/index.ts';
-import { requireProviderApi, requireSessionManager } from './runtime-services.ts';
+import { mkdirSync, writeFileSync } from 'node:fs';
+import { dirname, join } from 'node:path';
+import { requireProviderApi, requireSessionManager, requireShellPaths } from './runtime-services.ts';
 import { logger, redactSensitiveDataAsync, summarizeError } from '@goodvibes/engine/platform/platform/utils';
 import { readConversationMessageSnapshots } from '../../core/conversation-message-snapshot.ts';
 import { copySessionSidecars, moveLiveSessionArtifacts } from '../../core/session-resume-core.ts';
@@ -30,6 +32,7 @@ async function printSessionExport(
   messages: readonly ConversationMessageSnapshot[],
   format: TranscriptFormat,
   current: boolean,
+  output: { readonly printOnly: boolean; readonly path: string | undefined },
 ): Promise<void> {
   const signal = ctx.judgmentReadingOptions?.signal;
   const live = current ? ctx.session.conversationManager.revisionSource : undefined;
@@ -47,10 +50,24 @@ async function printSessionExport(
   // section, so an exported session cannot become the copy of the dossier that
   // the file itself is careful not to be (docs/owner-profile.md §10, §11.3).
   const redacted = await redactSensitiveDataAsync(formatted, { ...(signal ? { signal } : {}), purpose: 'export' });
-  ctx.print(redacted);
-  if (live && live.revision() !== liveRevision) {
-    ctx.print('The chat changed while exporting: this transcript is the saved session from before the change. Run /session save-saved . --print again for the newest messages.');
+  const changed = live !== undefined && live.revision() !== liveRevision;
+  const lag = 'The chat changed while exporting: this transcript is the saved session from before the change; write it out again for the newest messages.';
+  if (output.printOnly) {
+    ctx.print(redacted);
+    if (changed) ctx.print(lag);
+    return;
   }
+  // Written as the terminal app writes it: a new file (never one that exists), readable only by you.
+  const paths = requireShellPaths(ctx);
+  const stamp = new Date().toISOString().replace(/[:.]/g, '-').slice(0, 19);
+  const target = output.path
+    ? paths.resolveWorkspacePath(output.path)
+    : join(paths.homeDirectory, 'goodvibes-exports', `session-${sessionId}-${stamp}.${format === 'text' ? 'txt' : 'md'}`);
+  mkdirSync(dirname(target), { recursive: true });
+  writeFileSync(target, redacted, { encoding: 'utf-8', flag: 'wx', mode: 0o600 });
+  // The path on its own line: a screen that shows a short answer keeps the first.
+  ctx.print(`Exported session ${title || sessionId} (${messages.length} messages, keys and paths hidden) to a file.\n${target}`);
+  if (changed) ctx.print(lag);
 }
 
 function conversationMessageContentText(message: ConversationMessageSnapshot): string {
@@ -99,7 +116,6 @@ export const sessionWorkflow = createSessionWorkflowCommands<CommandContext>(req
           };
     return (labels[key] ?? '') + value;
   },
-  renamed: (name) => 'Session renamed\n  name ' + name,
   deleted: (name, title) => ['Session deleted', '  id ' + name, ...(title ? ['  title ' + title] : [])].join('\n'),
   failed: (action, error) => formatSessionFailure(action + ' session', error),
   captureSession: (ctx) => ({
@@ -191,9 +207,8 @@ export async function resumeSavedSession(ctx: CommandContext, input: { readonly 
       }
 }
 
-/** Print a saved session's redacted transcript here (`/session save-saved`); the Agent writes no file for it. */
+/** Write a saved session's redacted transcript to a file, or print it here (session.save-saved). */
 export async function exportSavedSession(ctx: CommandContext, input: { readonly target: string; readonly format: TranscriptFormat; readonly path: string; readonly print: boolean }): Promise<void> {
-      if (!input.print) throw commandRefusal('The Agent prints a saved session here and writes no file.', 'Choose "Print it here", or save this conversation as a file: /session save-file');
       const sm = requireSessionManager(ctx);
       const request = resolveSessionExportRequest(
         { target: input.target || '.', format: input.format },
@@ -207,13 +222,13 @@ export async function exportSavedSession(ctx: CommandContext, input: { readonly 
         loaded = sm.load(loadName);
       } catch (error) {
         if (found || target === '.') throw commandRefusal(formatSessionFailure('export session', error));
-        throw commandRefusal(`Session not found ${sessionId}`, 'Use /session list to see available sessions.');
+        throw commandRefusal(`Session not found ${sessionId}`, 'The Sessions place lists your saved sessions.');
       }
       try {
-        await printSessionExport(ctx, loadName, loaded.meta.title, readConversationMessageSnapshots(loaded.messages), format, target === '.');
+        await printSessionExport(ctx, loadName, loaded.meta.title, readConversationMessageSnapshots(loaded.messages), format, target === '.', { printOnly: input.print, path: input.path || undefined });
       } catch (error) {
         if (ctx.judgmentReadingOptions?.signal?.aborted) {
-          throw commandRefusal(`Export of session ${loadName} was cancelled; nothing was printed.`);
+          throw commandRefusal(`Export of session ${loadName} was cancelled; nothing was written or printed.`);
         }
         throw commandRefusal(formatSessionFailure('export session', error));
       }

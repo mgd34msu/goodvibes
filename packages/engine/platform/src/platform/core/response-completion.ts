@@ -1028,7 +1028,10 @@ export async function waitForResponseDelegates(conversation: ConversationManager
   let delegates = unhanded(collectResponseDelegates(conversation, { list: () => manager.list() }, knownAgentIds));
   if (!delegates.length) return false;
   const ids = new Set(delegates.map(agent => agent.id));
-  const waiting = () => manager.list().filter(agent => ids.has(agent.id) && (agent.status === 'pending' || agent.status === 'running') && canWait(agent.id));
+  // A piece of work handed to the daemon that now waits on the owner in Work (a question, its plan, a failed step) is
+  // not waited on, as a contract stopped on a question is not: the turn answers, and the work's end is news later.
+  const waiting = () => manager.list().filter(agent => ids.has(agent.id) && (agent.status === 'pending' || agent.status === 'running')
+    && agent.delegatedWorkWaiting === undefined && canWait(agent.id));
   for (let pending = waiting(); pending.length > 0; pending = waiting()) {
     options.signal?.throwIfAborted(); options.assertCurrent?.();
     // A running agent wakes the wait when its execution ends; a pending one has

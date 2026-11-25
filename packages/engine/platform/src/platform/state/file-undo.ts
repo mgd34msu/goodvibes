@@ -246,49 +246,6 @@ export class FileUndoManager {
     return entry ? { path: entry.path, paths: entry.operations.map((op) => op.path), tool: entry.tool } : null;
   }
 
-  /**
-   * Revert the first tool call recorded at or after `since` that changed one of
-   * `paths` (absolute): the call a decision made at `since` let run. Every file
-   * of that call is checked first; a file changed since (by a later call or by
-   * hand) refuses the whole entry (FileUndoConflictError, nothing written).
-   * The entry leaves the undo history and is not offered for redo, since later
-   * calls may sit above it. Returns null when no such call is recorded.
-   */
-  undoCallAfter(since: number, paths: readonly string[]): FileUndoResult | null {
-    const wanted = new Set(paths);
-    const index = this.undoStack.findIndex((entry) => Date.parse(entry.timestamp) >= since
-      && entry.operations.some((op) => wanted.has(op.path)));
-    if (index < 0) return null;
-    const entry = this.undoStack[index]!;
-    const operations = [...entry.operations].reverse();
-    const all = entry.operations.map((op) => op.path);
-    for (const op of operations) {
-      const current = readCurrent(op.path);
-      if (!(op.beforeContent === null && current === null) && !holds(current, op.afterContent)) {
-        // It can never apply again; kept, it would be found first by every later look.
-        this.undoStack.splice(index, 1);
-        throw new FileUndoConflictError(op.path, 'undo', all);
-      }
-    }
-    const done: FileOperation[] = [];
-    try {
-      for (const op of operations) {
-        restore(op.path, op.beforeContent, { content: op.afterContent, conflict: () => new FileUndoConflictError(op.path, 'undo', all) });
-        done.push(op);
-      }
-    } catch (err) {
-      for (const op of done.reverse()) {
-        try { restore(op.path, op.afterContent); } catch (rollbackError) {
-          logger.warn('file-undo: undo could not put back a file', { path: op.path, error: summarizeError(rollbackError) });
-        }
-      }
-      throw err;
-    }
-    this.undoStack.splice(index, 1);
-    for (const op of done) this.options.onFileChanged?.(op.path);
-    return { path: entry.path, paths: all, tool: entry.tool };
-  }
-
   // ---------------------------------------------------------------------------
   // Introspection
   // ---------------------------------------------------------------------------

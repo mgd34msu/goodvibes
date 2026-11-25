@@ -7,7 +7,7 @@
  *   alt+o  use another model / choose a model: opens the model picker; the
  *          model chosen there answers the same prompt
  *   alt+i  details: the reading's details under the cause, and back
- *   alt+s  sign in again: the provider sign-ins (/auth)
+ *   alt+s  sign in again: the provider sign-ins (Models and providers, Providers)
  *
  * The reading itself is platform core/turn-failure.ts; this file keeps only
  * which row is live and what its keys do. No request, write or model call: a
@@ -229,6 +229,7 @@ export interface WireFailedTurnActionsOptions {
     failedTurnAction?: ((action: FailedTurnKeyAction) => boolean) | undefined;
     openModelPicker?: ((onClosed?: (chosen: boolean) => void) => void) | undefined;
     executeCommand?: ((name: string, args: string[]) => Promise<boolean>) | undefined;
+    openPlace?: ((placeId: string, start?: { readonly list?: string | undefined }) => void) | undefined;
   };
   /** The program's retry of the failed turn; absent: the one offered with offerFailedTurnRetry. */
   readonly retry?: (() => boolean) | undefined;
@@ -240,8 +241,8 @@ export function wireFailedTurnActions(options: WireFailedTurnActionsOptions): vo
   const { commandContext } = options;
   commandContext.failedTurnAction = createFailedTurnAction({
     openModelPicker: (onClosed) => commandContext.openModelPicker?.(onClosed),
-    // The provider sign-ins: each provider, whether it is signed in, and how to fix it.
-    openSignIn: () => { void commandContext.executeCommand?.('auth', []).finally(options.render); },
+    // The provider sign-ins: each provider, whether it is signed in, and how to fix it (Models and providers, Providers).
+    openSignIn: () => { commandContext.openPlace?.('models', { list: 'providers' }); options.render(); },
     ...(options.retry ? { retry: options.retry } : {}),
     render: options.render,
   });

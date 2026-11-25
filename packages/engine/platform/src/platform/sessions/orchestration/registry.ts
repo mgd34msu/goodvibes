@@ -310,7 +310,7 @@ export class CrossSessionTaskRegistry {
         return {
           ok: false,
           error: `Task ref not found: ${makeRefKey(taskRef.sessionId, taskRef.taskId)}. ` +
-            'Register the task with /session link-task first.',
+            'Add the task to the graph first (Sessions, Hand-offs, or the task tool).',
         };
       }
       if (taskRef.sessionId !== fromSessionId) {
@@ -376,7 +376,7 @@ export class CrossSessionTaskRegistry {
   public withdrawHandoff(handoffId: string, bySessionId?: string): HandoffWithdrawal {
     return this._change((): HandoffWithdrawal => {
       const record = this._graph.getHandoffs().find((handoff) => handoff.handoffId === handoffId);
-      if (!record) return { ok: false, error: `Unknown handoff: ${handoffId}. Nothing was changed. List handoffs with task mode=handoffs or /session graph.` };
+      if (!record) return { ok: false, error: `Unknown handoff: ${handoffId}. Nothing was changed. List handoffs with task mode=handoffs or Sessions, Hand-offs.` };
       if (bySessionId !== undefined && record.fromSessionId !== bySessionId) {
         return { ok: false, error: `Handoff ${handoffId} was made by session ${record.fromSessionId}; only that session can withdraw it. Nothing was changed.` };
       }

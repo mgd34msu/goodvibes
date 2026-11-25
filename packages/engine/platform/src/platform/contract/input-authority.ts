@@ -63,6 +63,22 @@ const activeInputAuthority = new AsyncLocalStorage<ContractInputAuthority>();
 // Only roots outside the product-owned layout are kept: that layout is denied by pattern alone, so
 // remembering every view and worktree of every contract would only grow the set and slow each lookup.
 const capturedRoots = new Set<string>();
+/**
+ * Why a call of this view was held back: its view refused it (a fixed cause), or the permission gate refused the
+ * call itself (`gate`: who decided, why and what can be done, as the gate said it to the step's agent).
+ */
+export type ContractInputCallHeld = 'refused' | 'changed-while-judged' | 'view-changed'
+  | { readonly gate: { readonly tool: string; readonly decidedBy: string; readonly reason: string; readonly next?: readonly string[] | undefined } };
+const heldListeners = new WeakMap<ContractInputAuthority, (why: ContractInputCallHeld) => void>();
+/** Who is told when a call on this view is held back (the run, which says it on the work). One listener per view. */
+export function onContractInputCallHeld(token: ContractInputAuthority, listener: (why: ContractInputCallHeld) => void): void {
+  stateOf(token);
+  heldListeners.set(token, listener);
+}
+/** A call on this view was held back: told to the view's listener, never thrown from it. */
+export function noteContractInputCallHeld(token: ContractInputAuthority, why: ContractInputCallHeld): void {
+  try { heldListeners.get(token)?.(why); } catch (error) { logger.warn('Captured input: telling the run of a held call failed', { error: error instanceof Error ? error.message : String(error) }); }
+}
 /** The contract kinds of the product worktree layout (git/product-worktree-marker.ts), read from a path alone. */
 function isReservedViewPath(path: string): boolean {
   return liesInProductWorktreeOfKind(path, CONTRACT_WORKTREE_KINDS);

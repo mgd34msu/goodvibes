@@ -7,6 +7,10 @@
 import type { GatewayMethodCatalog } from '../method-catalog.js';
 import type { GatewayMethodHandler, GatewayMethodInvocation } from '../method-catalog-shared.js';
 import {
+  OWNER_ANSWER_AGENT_METADATA,
+  OWNER_ANSWER_SESSION_METADATA,
+  OWNER_ASKER_HOST_METADATA,
+  OWNER_ASKER_SESSION_FILE_METADATA,
   OWNER_ITEM_KINDS,
   OwnerInboxInputError,
   type NewOwnerItem,
@@ -18,8 +22,44 @@ import {
 import { GatewayVerbError } from './gateway-verb-error.js';
 import { readInvocationParams, requireStringValue } from './invocation-params.js';
 import { missingScopes } from '@goodvibes/engine/daemon-api/route-helpers';
+import { LOCAL_OWNER_PRINCIPAL } from '../../pairing/principal-ids.js';
 
 export type OwnerInboxGatewayService = Pick<OwnerInbox, 'listNow' | 'listPageNow' | 'get' | 'answer' | 'postNow' | 'withdraw' | 'reportDelivery' | 'postedBy' | 'revision' | 'subscribe' | 'viewerOf'>;
+
+/** Who registered a session (the session broker's `registrantOf`); undefined for a session nobody registered. */
+export type SessionRegistrantLookup = (sessionId: string) => string | undefined;
+
+/** The metadata naming who asked a question and where its answer goes back to (owner-inbox.ts `askerOf`). */
+const ASKER_KEYS: readonly string[] = [OWNER_ANSWER_SESSION_METADATA, OWNER_ANSWER_AGENT_METADATA, OWNER_ASKER_SESSION_FILE_METADATA, OWNER_ASKER_HOST_METADATA];
+
+/** A principal as the registrant record names it: the daemon's own-machine credential is the operator token's. */
+function principalKey(principal: string | undefined): string {
+  return principal === undefined || principal === 'local' ? LOCAL_OWNER_PRINCIPAL : principal;
+}
+
+/**
+ * A posted question's metadata with its asker kept only when the poster may be it. A question's asker is the principal
+ * that posted it, and a session is named as the asker only by the principal that registered that session
+ * (`sessions.register`, kept by the broker): nobody takes a session by naming it first, and a caller that holds no
+ * conversation whose answers it takes itself (a model acting for the owner with the Agent's credential, a web sign-in)
+ * names none. An asker with no session (an agent, a session file, a host) is kept only from this machine's own
+ * programs (the operator token); a paired device's is dropped. Undefined when nothing is left.
+ */
+function askerKeptFrom(invocation: GatewayMethodInvocation, metadata: Record<string, string | number | boolean>, registrantOf: SessionRegistrantLookup | undefined): Record<string, string | number | boolean> | undefined {
+  const names = ASKER_KEYS.some((key) => metadata[key] !== undefined);
+  if (!names) return Object.keys(metadata).length > 0 ? metadata : undefined;
+  const kind = invocation.context.credentialKind;
+  const principal = principalKey(invocation.context.principalId);
+  const session = metadata[OWNER_ANSWER_SESSION_METADATA];
+  const holdsNone = kind === 'agent' || kind === 'user-session';
+  const registrant = typeof session === 'string' ? registrantOf?.(session) : undefined;
+  const mayAsk = !holdsNone && (typeof session === 'string'
+    ? registrant !== undefined && principalKey(registrant) === principal
+    : session === undefined && principal === LOCAL_OWNER_PRINCIPAL);
+  if (mayAsk) return metadata;
+  const kept = Object.fromEntries(Object.entries(metadata).filter(([key]) => !ASKER_KEYS.includes(key)));
+  return Object.keys(kept).length > 0 ? kept : undefined;
+}
 
 const LIST_STATUSES = new Set(['open', 'closed', 'all']);
 /** Every kind the list can filter by, decision included (the schema's enum). */
@@ -34,9 +74,12 @@ function optionalString(value: unknown, field: string): string | undefined {
 }
 
 function answerSource(invocation: GatewayMethodInvocation): OwnerAnswerSource {
+  const actor = invocation.context.actor;
   return {
     actor: invocation.context.principalId ?? 'operator',
     surface: invocation.context.clientKind ?? 'web',
+    // Whether the owner himself answered, from the actor the transport established (never a model acting for him).
+    ...(actor?.class === 'owner' && actor.agentFor === undefined ? { owner: true as const } : {}),
   };
 }
 
@@ -168,7 +211,7 @@ export function createOwnerInboxAnswerHandler(inbox: OwnerInboxGatewayService): 
   };
 }
 
-export function createOwnerInboxPostHandler(inbox: OwnerInboxGatewayService): GatewayMethodHandler {
+export function createOwnerInboxPostHandler(inbox: OwnerInboxGatewayService, registrantOf?: SessionRegistrantLookup): GatewayMethodHandler {
   return async (invocation) => {
     const params = readInvocationParams(invocation);
     const kind = requireStringValue(params['kind'], 'kind');
@@ -187,10 +230,22 @@ export function createOwnerInboxPostHandler(inbox: OwnerInboxGatewayService): Ga
     if (expiresAt !== undefined && typeof expiresAt !== 'number') {
       throw new GatewayVerbError('Invalid expiresAt: expected milliseconds', 'INVALID_ARGUMENT', 400, 'expiresAt');
     }
-    const detail = optionalString(params['detail'], 'detail');
-    const sessionId = optionalString(params['sessionId'], 'sessionId');
+    const given = optionalString(params['detail'], 'detail');
+    // The project the posting program works in (its call context): said on the item, so the same question from two
+    // projects is two questions the owner can tell apart, as an approval's "In:" line says (owner-inbox.ts).
+    const project = invocation.context.call?.project;
+    const where = project && !(given ?? '').includes('In: ') ? `In: ${project.split(/[\\/]/).filter(Boolean).pop() ?? project} (${project})` : undefined;
+    const detail = where ? [given, where].filter(Boolean).join('\n') : given;
+    const named = optionalString(params['sessionId'], 'sessionId');
+    // The conversation a question is shown in (a program's question card shows it as asked there): only the principal
+    // that registered that session names it, as for the asker below.
+    const sessionId = named !== undefined && registrantOf?.(named) !== undefined && principalKey(registrantOf(named)) === principalKey(invocation.context.principalId)
+      ? named : undefined;
     const askedBy = optionalString(params['askedBy'], 'askedBy');
     const key = optionalString(params['key'], 'key');
+    // The asker is the principal that posted, and a session only the one that registered it: the owner's answer is
+    // never delivered into a conversation that did not ask.
+    const asker = metadata === undefined ? undefined : askerKeptFrom(invocation, metadata as Record<string, string | number | boolean>, registrantOf);
     const input: NewOwnerItem = {
       kind: kind as NewOwnerItem['kind'],
       title: requireStringValue(params['title'], 'title'),
@@ -200,7 +255,7 @@ export function createOwnerInboxPostHandler(inbox: OwnerInboxGatewayService): Ga
       ...(askedBy !== undefined ? { askedBy } : {}),
       ...(key !== undefined ? { key } : {}),
       ...(typeof expiresAt === 'number' ? { expiresAt } : {}),
-      ...(metadata !== undefined ? { metadata: metadata as Record<string, string | number | boolean> } : {}),
+      ...(asker !== undefined ? { metadata: asker } : {}),
     };
     try {
       return inbox.postNow(input, invocation.context.principalId);
@@ -243,12 +298,15 @@ export function createOwnerInboxDeliveryHandler(inbox: OwnerInboxGatewayService)
   };
 }
 
-/** Attach the inbox.* handlers to their descriptors. A missing descriptor is skipped. */
-export function registerOwnerInboxGatewayMethods(catalog: GatewayMethodCatalog, inbox: OwnerInboxGatewayService): void {
+/**
+ * Attach the inbox.* handlers to their descriptors. A missing descriptor is skipped. `registrantOf`: who registered a
+ * session; absent, no posted question keeps a session as its asker.
+ */
+export function registerOwnerInboxGatewayMethods(catalog: GatewayMethodCatalog, inbox: OwnerInboxGatewayService, registrantOf?: SessionRegistrantLookup): void {
   const handlers: Record<string, GatewayMethodHandler> = {
     'inbox.list': createOwnerInboxListHandler(inbox),
     'inbox.answer': createOwnerInboxAnswerHandler(inbox),
-    'inbox.post': createOwnerInboxPostHandler(inbox),
+    'inbox.post': createOwnerInboxPostHandler(inbox, registrantOf),
     'inbox.withdraw': createOwnerInboxWithdrawHandler(inbox),
     'inbox.delivery': createOwnerInboxDeliveryHandler(inbox),
   };

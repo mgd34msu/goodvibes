@@ -44,9 +44,11 @@ import {
   settleUnstartedWork,
   gateSurfaceSpawn,
   startAgreedWork,
+  WORK_PROPOSAL_ITEM_KEY,
   type OwnerConversation,
   type SurfaceIngressOrigin,
 } from './surface-conversation-gate.js';
+import type { OwnerAnswer, OwnerInbox, OwnerItem } from '../control-plane/owner-inbox.js';
 import { isOwnerConversation, orderOwnerAlertRoutes } from './owner-alert.js';
 import { isChannelSurfaceKind } from '../../events/surfaces.js';
 import type { WorkProposalStore } from '../agents/work-proposal-store.js';
@@ -139,6 +141,11 @@ interface DaemonSurfaceActionContext {
   /** Purchase windows waiting for the owner's answer; the helper makes its own when absent. */
   readonly paymentReplies?: PaymentReplyInbox | undefined;
   /**
+   * The owner inbox (Waiting for you): the owner's own work proposal that none of his conversations took waits there,
+   * accepted or dismissed as an item (surface-conversation-gate.ts WORK_PROPOSAL_ITEM_KEY).
+   */
+  readonly ownerInbox?: Pick<OwnerInbox, 'postNow' | 'handleAnswers'> | undefined;
+  /**
    * Put one short line on the channel a binding points at, and say whether it
    * got there. The outcome is discriminated rather than boolean so a caller
    * can log WHICH guard refused, see SurfaceNoticeRefusal.
@@ -175,6 +182,51 @@ export class DaemonSurfaceActionHelper {
   constructor(private readonly context: DaemonSurfaceActionContext) {
     this.paymentReplies = context.paymentReplies ?? new PaymentReplyInbox();
     this.paymentReplies.bindTelegramSource(context.telegramSourceAccounts, this.controlAbort.signal);
+    // The owner's answer to a work proposal waiting in Waiting for you: recorded as applied only once it is acted on.
+    if (context.ownerInbox && context.workProposals) {
+      this.stopProposalAnswers = context.ownerInbox.handleAnswers(WORK_PROPOSAL_ITEM_KEY, (item, answer) => this.answerProposalFromInbox(item, answer));
+    }
+  }
+
+  private stopProposalAnswers: (() => void) | null = null;
+
+  /** Stop applying answers given in the owner inbox (the daemon is stopping). */
+  closeProposalAnswers(): void {
+    this.stopProposalAnswers?.();
+    this.stopProposalAnswers = null;
+  }
+
+  /**
+   * The owner accepted or dismissed, in Waiting for you, his own work proposal that none of his conversations took.
+   * Saved before it is acted on; accepted work is claimed, started and recorded as the channel reply does
+   * (work-proposal-reply.ts). A proposal that expired or was answered already refuses the answer with the reason.
+   */
+  private async answerProposalFromInbox(item: OwnerItem, answer: OwnerAnswer): Promise<void> {
+    const store = this.context.workProposals;
+    const id = item.metadata?.['proposalId'];
+    if (!store || typeof id !== 'string') throw new Error('This item names no work proposal; nothing was started.');
+    const accepted = answer.option === 'accept';
+    const resolved = await store.resolve(id, accepted ? 'accepted' : 'declined');
+    if (!resolved) {
+      throw new Error(store.get(id)?.status === 'accepted' ? 'It was agreed already and is under way.' : 'The proposal expired before it was answered; send the request again.');
+    }
+    const deps = this.conversationGateDeps();
+    if (!accepted) {
+      await settleUnstartedWork(deps, resolved, 'The owner dismissed this work.');
+      return;
+    }
+    // Null: a start already under way in this process (the start-up pass) took it.
+    if (await store.markStarting(resolved.id) === null) return;
+    let started: 'started' | 'held' | 'not-started';
+    try {
+      started = await startAgreedWork(deps, resolved);
+    } catch (error) {
+      await settleUnstartedWork(deps, resolved, 'The agreed work could not be started. Send the message again.').catch(() => undefined);
+      await store.markStarted(resolved.id).catch(() => undefined);
+      throw new Error(`Accepted, but the work could not be started: ${summarizeError(error)}. Send the request again.`);
+    }
+    // Held: the daemon is restarting into an update; the claim is given back and the work starts after the restart.
+    await (started === 'held' ? store.releaseStart(resolved.id) : store.markStarted(resolved.id));
   }
 
   startDelegatedTelegram(): void {
@@ -426,6 +478,7 @@ export class DaemonSurfaceActionHelper {
       deliverSurfaceNotice: this.context.deliverSurfaceNotice,
       workAdmitted: () => this.context.workAdmission?.open !== false,
       ownerConversations: (surface: string) => this.ownerConversations(surface),
+      ownerInbox: this.context.ownerInbox,
       senderIsGuest: (surface: string, userId: string | undefined) => this.senderIsGuest(surface, userId),
     };
   }

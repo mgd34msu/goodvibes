@@ -23,7 +23,7 @@ import {
 import { bindRequestContext, createRequestContext, isPrincipalCurrent, requestContextOf } from './request-context.js';
 import type { ControlPlaneGateway, SharedSessionBroker } from '../control-plane/index.js';
 import type { GatewayMethodCatalog, GatewayMethodDescriptor } from '../control-plane/index.js';
-import type { GatewayMethodInvocationContext } from '../control-plane/method-catalog-shared.js';
+import type { CallContext, GatewayMethodInvocationContext } from '../control-plane/method-catalog-shared.js';
 import type { RuntimeEventDomain } from '../runtime/events/index.js';
 import { RUNTIME_EVENT_DOMAINS } from '../runtime/events/index.js';
 import { readRequestedDomains } from '../control-plane/gateway-utils.js';
@@ -42,6 +42,7 @@ import { logger } from '../utils/logger.js';
 import { redactDiagnosticText } from '../utils/redaction.js';
 import { validateInvocationInput } from '../control-plane/invoke-input-validation.js';
 import { readGatewayVerbRefusal } from '../control-plane/routes/gateway-verb-error.js';
+import { ownerApprovalCovers, spendOwnerApprovalGrant, type OwnerApprovedCallGrant } from '../control-plane/owner-approved-call.js';
 import { AUTHENTICATION_REQUIRED_GUIDANCE, authenticationRequiredResponse, buildErrorResponseBody, jsonErrorResponse } from './http/error-response.js';
 import { EngineErrorCodes, isRefusal, refusalErrorBody } from '@goodvibes/engine/errors';
 import { startsWork, type DaemonWorkAdmission } from './work-admission.js';
@@ -270,6 +271,23 @@ interface GatewayMethodCallInput {
      * security/turn-boundary.ts.
      */
     readonly explicitUserRequest?: boolean | undefined;
+    /**
+     * The sending run's own answerer (its script) decided this natively admitted call (daemon-api control-routes.ts
+     * `DECIDED_IN_RUN_HEADER`). Kept only for the Agent's credential, whose calls the daemon takes as decided by the
+     * program's gate already (capabilities.run): the native admission then asks nobody again.
+     */
+    readonly decidedInRun?: boolean | undefined;
+    /**
+     * The program's capability gate decided this `capabilities.run` call by the capability's own risk (daemon-api
+     * control-routes.ts `CAPABILITY_GATE_DECIDED_HEADER`). Kept only for the Agent's credential: without it, a call
+     * with that credential is decided by the daemon's own gate (control-plane/routes/capabilities.ts).
+     */
+    readonly decidedByCapabilityGate?: boolean | undefined;
+    /**
+     * The call context the calling program sends with every request (daemon-api control-routes.ts `readCallContext`):
+     * the project folder it acts in and its conversation. Given to the handler as `context.call`.
+     */
+    readonly call?: CallContext | undefined;
   };
   /**
    * The principal the caller already verified for this credential on this
@@ -277,6 +295,11 @@ interface GatewayMethodCallInput {
    * call authenticates the token once itself.
    */
   readonly principal?: RequestPrincipal | undefined;
+  /**
+   * In process only: the owner approved the outer call this one is nested in (control-plane/owner-approved-call.ts).
+   * Spent on this call, it keeps the person's claim for a method that needs one (`owner-request`), whatever the credential.
+   */
+  readonly ownerApproved?: OwnerApprovedCallGrant | undefined;
 }
 
 export class DaemonControlPlaneHelper {
@@ -1165,6 +1188,11 @@ export class DaemonControlPlaneHelper {
     readonly principal?: RequestPrincipal | undefined;
     /** Whose in-flight budget the call uses (see {@link callerKey}); a caller that names none shares one budget. */
     readonly caller?: string | undefined;
+    /**
+     * Facts of the dispatched call the route reads from its request's headers: the program's label and a person's
+     * claim already kept by dispatch (only a person's credential keeps it), and the call context. Never a credential.
+     */
+    readonly headers?: Readonly<Record<string, string>> | undefined;
   }): Promise<{ status: number; ok: boolean; body: unknown }> {
     // The router sees the normalised path, so the descriptor and its scope are looked up by that one,
     // never by the raw text a client typed (`/api/x/../admin`, `/api/x?y`).
@@ -1208,6 +1236,7 @@ export class DaemonControlPlaneHelper {
         request = new Request(url.toString(), {
           method: input.method,
           headers: {
+            ...(input.headers ?? {}),
             Authorization: `Bearer ${input.authToken}`,
             ...(input.body !== undefined ? { 'Content-Type': 'application/json' } : {}),
           },
@@ -1269,7 +1298,13 @@ export class DaemonControlPlaneHelper {
    * field. The original credential/principal/scopes and actual catalog/auth
    * owners remain restrictions after a handler returns or its socket closes. */
   private retainGatewayAuthorization(token: string, descriptor: GatewayMethodDescriptor,
-    context: GatewayMethodInvocationContext | undefined): (requiredScopes?: readonly string[]) => boolean {
+    context: GatewayMethodInvocationContext | undefined,
+    /**
+     * The call is made with the authority the owner's approval granted it (owner-approved-call.ts): its actor is the
+     * owner (or the owner the model acts for), so the credential's own actor is not held to the method; the credential
+     * must still be current, so a revoked one ends it.
+     */
+    ownerApproved = false): (requiredScopes?: readonly string[]) => boolean {
     const catalog = this.context.gatewayMethods, pairing = this.context.pairingTokens, users = this.context.userAuth;
     const captured = Object.freeze({ principalId: context?.principalId, principalKind: context?.principalKind, actor: context?.actor });
     // Authenticated again only when the credential owners' revision moved.
@@ -1281,7 +1316,7 @@ export class DaemonControlPlaneHelper {
       if (!known || !isPrincipalCurrent(known, this.authRevision())) known = this.describeRequestPrincipal(token);
       const fresh = known;
       return fresh !== null && fresh.principalId === captured.principalId && fresh.principalKind === captured.principalKind
-        && refuseGatewayInvocation(descriptor, fresh.actor, requiredScopes) === null
+        && (ownerApproved || refuseGatewayInvocation(descriptor, fresh.actor, requiredScopes) === null)
         && refuseGatewayInvocation(descriptor, captured.actor, requiredScopes) === null;
     };
   }
@@ -1368,6 +1403,16 @@ export class DaemonControlPlaneHelper {
     if (descriptor.effects?.includes('card.enter') && !mayCrossWithCardDetails(authenticated?.transport)) {
       return { status: 403, ok: false, body: refusalBody(describeCardTransportRefusal(), 'CARD_ENTRY_TRANSPORT', 403) };
     }
+    // A call the owner approved (in Waiting for you, or on the card his program put to him): his approval is the
+    // person's request for its own nested method that needs one, and that method's act is admitted as his, for this
+    // one call only (control-plane/owner-approved-call.ts). When the caller is not the owner and the act was his, the
+    // grant carries his actor: this nested call is made with his authority, never the caller's.
+    const offered = input.ownerApproved;
+    const granted = offered !== undefined && (offered.owner !== undefined || (context?.explicitUserRequest === true && ownerApprovalCovers(descriptor)))
+      ? spendOwnerApprovalGrant(offered) : undefined;
+    const ownerApproved = granted !== undefined;
+    if (granted?.owner !== undefined) context = { ...context, actor: granted.owner, admin: true };
+    else if (granted !== undefined && context?.actor?.agentFor !== undefined) context = { ...context, actor: context.actor.agentFor };
     const denied = this.validateGatewayInvocation(descriptor, context);
     if (denied) return denied;
     // The client frame asserts that a person asked for this call. Only a principal
@@ -1377,9 +1422,13 @@ export class DaemonControlPlaneHelper {
     // makes on the owner's behalf, a bot, service or peer cannot, so their claim
     // is dropped before any handler reads it. A literal false stays: it only restricts.
     const credential = authenticated?.credentialKind;
-    if (context?.explicitUserRequest === true && credential !== 'user-session' && credential !== 'device-token' && credential !== 'local') {
+    if (context?.explicitUserRequest === true && !ownerApproved && credential !== 'user-session' && credential !== 'device-token' && credential !== 'local') {
       context = { ...context, explicitUserRequest: undefined };
     }
+    // A run's own answerer decided this call: kept only from the Agent's credential (see GatewayMethodCallInput).
+    const decidedInRun = input.context?.decidedInRun === true && credential === 'agent';
+    // The program's capability gate decided this call: kept only from the Agent's credential (see GatewayMethodCallInput).
+    const decidedByCapabilityGate = input.context?.decidedByCapabilityGate === true && credential === 'agent';
     // Input validation gate: reject a wrong-typed / missing-required body against
     // the verb's typed inputSchema before the handler runs (honest 400, not silent
     // coercion). Only body-carrying invocations are checked, a handler method
@@ -1400,7 +1449,8 @@ export class DaemonControlPlaneHelper {
     // work deliberately does not. It runs only once the call is known, the
     // principal is current and its scopes allow it, so a refused or malformed
     // frame cannot clear what strangers' content left behind. See security/turn-boundary.ts.
-    startTurnForOwnerRequest(context?.explicitUserRequest);
+    // The approved call is still the caller's work: it does not start a new turn for the owner.
+    startTurnForOwnerRequest(ownerApproved ? undefined : context?.explicitUserRequest);
     const caller = callerKey(input.context?.connectionId, context?.principalId ?? authenticated?.principalId);
 
     if (this.context.gatewayMethods.hasHandler(input.methodId)) {
@@ -1420,7 +1470,7 @@ export class DaemonControlPlaneHelper {
           // fields that are accessors. For anything but a paired device's token
           // or the local credential it is a prefix test and null.
           nativeExecutionAuthority: this.createNativeExecutionAuthority(input.authToken, context?.scopes ?? [], authenticated?.credentialKind) ?? undefined,
-          isAuthorized: this.retainGatewayAuthorization(input.authToken, descriptor, context),
+          isAuthorized: this.retainGatewayAuthorization(input.authToken, descriptor, context, ownerApproved),
           context: {
             authToken: input.authToken,
             principalId: context?.principalId,
@@ -1432,9 +1482,15 @@ export class DaemonControlPlaneHelper {
             // How the request reached the listener, from the principal the listener authenticated; never from the caller.
             ...(authenticated?.transport ? { transport: authenticated.transport } : {}),
             ...(context?.actor ? { actor: context.actor } : {}),
-            ...(context?.explicitUserRequest === undefined
+            // The project and conversation the calling program named (call-context.ts), for the handler to act in.
+            ...(input.context?.call ? { call: input.context.call } : {}),
+            ...(context?.explicitUserRequest === undefined && !decidedInRun && !decidedByCapabilityGate
               ? {}
-              : { metadata: { explicitUserRequest: context.explicitUserRequest } }),
+              : { metadata: {
+                ...(context?.explicitUserRequest === undefined ? {} : { explicitUserRequest: context.explicitUserRequest }),
+                ...(decidedInRun ? { decidedInRun: true } : {}),
+                ...(decidedByCapabilityGate ? { decidedByCapabilityGate: true } : {}),
+              } }),
           },
         });
         if (body instanceof Response) {
@@ -1529,6 +1585,14 @@ export class DaemonControlPlaneHelper {
         actor: context?.actor,
       },
       ...(authenticated ? { principal: authenticated } : {}),
+      // The route reads these from its request as it would from a direct one: the program's label, the claim dispatch
+      // kept (dropped above for any credential that cannot make it), and the call context.
+      headers: {
+        ...(context?.clientKind === 'tui' || context?.clientKind === 'agent' ? { 'x-goodvibes-client': context.clientKind } : {}),
+        ...(context?.explicitUserRequest === true ? { 'x-goodvibes-explicit-user-request': 'true' } : {}),
+        ...(input.context?.call?.project ? { 'x-goodvibes-project': encodeURIComponent(input.context.call.project) } : {}),
+        ...(input.context?.call?.sessionId ? { 'x-goodvibes-session': encodeURIComponent(input.context.call.sessionId) } : {}),
+      },
     });
   }
 }

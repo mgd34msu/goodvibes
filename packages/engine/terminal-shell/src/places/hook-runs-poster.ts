@@ -35,16 +35,28 @@ export interface HookRunsPosterOptions {
 
 /** Post this program's hook runs to the daemon's hook trace. Returns the stop. */
 export function postHookRunsToDaemon(options: HookRunsPosterOptions): () => void {
+  return startHookRunsPoster(options).stop;
+}
+
+/**
+ * A headless run's poster (`goodvibes run`, `goodvibes-agent run`): the same posts, and `settle` waits
+ * until every run recorded so far reached the daemon, or a post failed, so the process ends after its
+ * hook runs are in the trace. Nothing waits on a clock.
+ */
+export function postHeadlessHookRunsToDaemon(options: Omit<HookRunsPosterOptions, 'onDaemonBack'>): { readonly stop: () => void; readonly settle: () => Promise<void> } {
+  return startHookRunsPoster({ ...options, onDaemonBack: () => () => {} });
+}
+
+function startHookRunsPoster(options: HookRunsPosterOptions): { readonly stop: () => void; readonly settle: () => Promise<void> } {
   const started = Date.now().toString(36);
   const project = options.project ? resolve(options.project) : undefined;
   let sequence = 0;
   let waiting: HookTraceRecord[] = [];
-  let sending = false;
+  let inFlight: Promise<boolean> | undefined;
   let stopped = false;
 
-  const send = async (): Promise<void> => {
-    if (sending || stopped || waiting.length === 0) return;
-    sending = true;
+  /** One post of the oldest waiting runs; true when it was taken. */
+  const postOnce = async (): Promise<boolean> => {
     const batch = waiting.slice(0, MAX_PER_POST);
     try {
       // The program and the project are the post's: the daemon sets them on every run.
@@ -52,14 +64,33 @@ export function postHookRunsToDaemon(options: HookRunsPosterOptions): () => void
       await options.invoke('hooks.trace.post', { program: options.program, ...(project ? { project } : {}), runs });
       const sent = new Set(batch.map((run) => run.id));
       waiting = waiting.filter((run) => !sent.has(run.id));
+      return true;
     } catch (error) {
       // Kept for the next post, or for when the daemon is back.
       logger.debug('hook runs not posted to the daemon yet', { waiting: waiting.length, error: summarizeError(error) });
-      sending = false;
-      return;
+      return false;
     }
-    sending = false;
-    if (waiting.length > 0) void send();
+  };
+
+  const send = async (): Promise<void> => {
+    if (inFlight || stopped || waiting.length === 0) return;
+    inFlight = postOnce();
+    const taken = await inFlight;
+    inFlight = undefined;
+    if (taken && waiting.length > 0) void send();
+  };
+
+  const settle = async (): Promise<void> => {
+    for (;;) {
+      if (inFlight && !(await inFlight)) return;
+      if (waiting.length === 0) return;
+      if (!inFlight) {
+        inFlight = postOnce();
+        const taken = await inFlight;
+        inFlight = undefined;
+        if (!taken) return;
+      }
+    }
   };
 
   const stopRecords = options.runs.onRecord((record) => {
@@ -68,9 +99,12 @@ export function postHookRunsToDaemon(options: HookRunsPosterOptions): () => void
     void send();
   });
   const stopBack = options.onDaemonBack(() => { void send(); });
-  return () => {
-    stopped = true;
-    stopRecords();
-    stopBack();
+  return {
+    stop: () => {
+      stopped = true;
+      stopRecords();
+      stopBack();
+    },
+    settle,
   };
 }

@@ -164,8 +164,8 @@ function buildLeftRows(workspace: AgentWorkspace, height: number): WorkspaceRow[
 /** The right-hand column of an action row: the line it runs, or what kind of row it is. */
 function actionCommand(action: AgentWorkspaceAction): string {
   if (action.kind === 'act' && action.act) return workspaceActionLine(action.act);
-  // `/agent <area>` opens any area of this workspace, so it is the line an area row runs.
-  if (action.kind === 'workspace') return action.targetCategoryId ? `/agent ${action.targetCategoryId}` : 'opens another area';
+  // An area row opens that area of this workspace (there is no typed command for it).
+  if (action.kind === 'workspace') return action.targetCategoryId ? `opens ${action.targetCategoryId}` : 'opens another area';
   if (action.kind === 'setting') return action.settingKey ? `setting ${action.settingKey}` : 'setting';
   if (action.kind === 'settings-import') return '/setup import-settings';
   if (action.kind === 'model-picker') return action.modelPickerFlow === 'model' ? 'model picker' : 'provider/model picker';

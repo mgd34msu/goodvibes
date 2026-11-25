@@ -27,8 +27,9 @@ export const pricingConfigSettings: ConfigSettingRow[] = [
     description:
       'Manual model prices, keyed provider:model (e.g. "openrouter:deepseek/deepseek-chat"). Each entry: '
       + '{ input, output, cacheRead?, cacheWrite? } in USD per 1M tokens. A manual price always wins over '
-      + 'provider-served and catalog pricing and applies live (no restart). Set one when registering a '
-      + 'custom provider/model, or to pin a negotiated rate for any model.',
+      + 'provider-served and catalog pricing and applies live (no restart). Kept by the daemon for every program '
+      + 'and for what it records; set one in Money, Spending (your price for the model in use, or for a model '
+      + 'with no price), when registering a custom provider/model, or to pin a negotiated rate for any model.',
     validate: validateManualModelPrices,
     closedShape: true,
     validationHint: 'record keyed "provider:model" of { input, output, cacheRead?, cacheWrite? }, finite numbers >= 0, USD per 1M tokens',

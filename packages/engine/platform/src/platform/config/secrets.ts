@@ -1020,7 +1020,7 @@ export class SecretsManager {
     if (report && !this.#reportedUnconfirmed.has(id)) {
       this.#reportedUnconfirmed.add(id);
       logger.warn('SecretsManager: a key in this project\'s secret store is not used until you confirm it', {
-        key, path: store.path, next: `/secrets trust ${key} --yes, or store it in your user store`,
+        key, path: store.path, next: `"Use a secret from this project's store" on ${key} (Permissions and safety, Secrets), or store it for all your projects`,
       });
     }
     return false;
@@ -1036,7 +1036,7 @@ export class SecretsManager {
       this.#approvals.approve(store.path, values);
     }
     catch (error) {
-      logger.warn('SecretsManager: stored in the project store, but the confirmation could not be recorded; confirm it with /secrets trust', {
+      logger.warn('SecretsManager: stored in the project store, but the confirmation could not be recorded; confirm it with "Use a secret from this project\'s store" (Permissions and safety, Secrets)', {
         keys, path: store.path, error: summarizeError(error),
       });
     }
@@ -1747,7 +1747,7 @@ export class SecretsManager {
     }
     const unconfirmed = storedRecords.filter((record) => record.unconfirmed);
     if (unconfirmed.length) {
-      warnings.push(`${unconfirmed.length} key(s) in this project's store are not used until confirmed with /secrets trust <KEY>: ${unconfirmed.map((record) => record.key).join(', ')}`);
+      warnings.push(`${unconfirmed.length} key(s) in this project's store are not used until confirmed with "Use a secret from this project's store" (Permissions and safety, Secrets): ${unconfirmed.map((record) => record.key).join(', ')}`);
     }
     if (policy === 'preferred_secure' && storedRecords.some((record) => !record.secure)) {
       warnings.push('plaintext fallback secrets are present');

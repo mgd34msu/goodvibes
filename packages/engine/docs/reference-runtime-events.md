@@ -687,6 +687,29 @@ Schema blocks below are emitted directly from the synced contract JSON and may c
                     "url"
                   ],
                   "additionalProperties": false
+                },
+                {
+                  "type": "object",
+                  "properties": {
+                    "kind": {
+                      "type": "string",
+                      "enum": [
+                        "outside-caller"
+                      ]
+                    },
+                    "name": {
+                      "type": "string"
+                    },
+                    "principalId": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "kind",
+                    "name",
+                    "principalId"
+                  ],
+                  "additionalProperties": false
                 }
               ]
             },
@@ -1642,6 +1665,9 @@ Schema blocks below are emitted directly from the synced contract JSON and may c
             },
             "surface": {
               "type": "string"
+            },
+            "owner": {
+              "type": "boolean"
             }
           },
           "required": [

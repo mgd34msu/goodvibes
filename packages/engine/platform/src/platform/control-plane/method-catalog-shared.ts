@@ -146,7 +146,22 @@ export interface GatewayEventDescriptor {
   readonly metadata?: Record<string, unknown> | undefined;
 }
 
+/**
+ * The call context: where a call acts and which conversation it came from, as the caller named it. A terminal program
+ * sets it once and sends it on every request (runtime/client/call-context.ts headers); `capabilities.run` also takes it
+ * in its body (`workingDirectory`, `sessionId`: the web UI's chosen project and an outside caller give it so). The
+ * daemon reads a per-project thing's project from here and never puts its own folder in its place.
+ */
+export interface CallContext {
+  /** The project folder, absolute, as the caller named it. */
+  readonly project?: string | undefined;
+  /** The conversation the call came from. */
+  readonly sessionId?: string | undefined;
+}
+
 export interface GatewayMethodInvocationContext {
+  /** Where the call acts and the conversation it came from, as its caller named them ({@link CallContext}). */
+  readonly call?: CallContext | undefined;
   readonly principalId?: string | undefined;
   readonly principalKind?: PrincipalKind | undefined;
   readonly admin?: boolean | undefined;

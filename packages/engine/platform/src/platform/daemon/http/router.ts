@@ -167,7 +167,7 @@ interface DaemonHttpRouterContext {
   readonly artifactStore: ArtifactStore;
   readonly memoryRegistry: MemoryRegistry;
   /** Consolidation receipts + pending proposals for the memory.consolidation.receipts route. */
-  readonly memoryConsolidation?: { listReceipts(): readonly unknown[] } | null | undefined;
+  readonly memoryConsolidation?: { listReceipts(): readonly unknown[]; listProposals?(): readonly unknown[] } | null | undefined;
   readonly memoryEmbeddingRegistry: MemoryEmbeddingProviderRegistry;
   readonly platformServiceManager: PlatformServiceManager;
   readonly integrationHelpers: IntegrationHelperService | null;
@@ -232,11 +232,6 @@ interface DaemonHttpRouterContext {
   ) => boolean;
   readonly syncSpawnedAgentTask: (record: import('../../tools/agent/index.js').AgentRecord, sessionId?: string) => void;
   readonly syncFinishedAgentTask: (record: import('../../tools/agent/index.js').AgentRecord) => void;
-  /**
-   * WorkspaceSwapManager instance for delegating POST /config runtime.workingDir
-   * requests. Null in embedded/test contexts that don't support live workspace swaps.
-   */
-  readonly swapManager: import('./system-route-types.js').WorkspaceSwapManagerLike | null;
   /**
    * Optional companion chat manager. When present, companion chat routes
    * (/api/companion/chat/...) are enabled. Injected by the daemon facade
@@ -564,6 +559,8 @@ export class DaemonHttpRouter {
       const response = await handleRemotePairRequest({
         parseJsonBody: (request) => this.parseJsonBody(request),
         distributedRuntime: this.context.distributedRuntime,
+        // Kept with the request: Waiting to pair says where it was asked from.
+        remoteAddress: this.clientIpOf(req),
       }, req);
       if (response.ok) emitCompanionPairRequested(this.context.runtimeBus, this.securityContext(req, 'pair-request'), { clientIp: this.clientIpOf(req) });
       return response;
@@ -767,6 +764,8 @@ export class DaemonHttpRouter {
       resolveDefaultProviderModel: context.resolveDefaultProviderModel,
       requireAdmin,
       requireScope: (request, scope) => this.requireCallerScope(request, scope),
+      // Whose input a message is (security/turn-input-party.ts): the owner's credential, or someone else's.
+      isOwnerCaller: (request) => this.principalOf(request)?.actor.class === 'owner',
       openSessionEventStream: (request: Request, sessionId: string) => {
         // Turn events are published to the registered client, so it must be this connection's own id.
         return openScopedSessionEventStream(gateway, request, {
@@ -943,7 +942,6 @@ export class DaemonHttpRouter {
           requireAuthenticatedSession: (request) => this.context.requireAuthenticatedSession(request),
           resolveAuthenticatedPrincipal: (request) => this.principalOf(request),
           routeBindings: this.context.routeBindings,
-          swapManager: this.context.swapManager,
           watcherRegistry: this.context.watcherRegistry,
         }),
       },
@@ -954,6 +952,7 @@ export class DaemonHttpRouter {
         requireAdmin: (request) => this.context.requireAdmin(request),
         sessionBroker: buildRouterSessionBrokerAdapter(this.context.sessionBroker),
         mayReadSession: (request, session) => this.mayReadSession(request, session),
+        requestPrincipalId: (request) => this.principalOf(request)?.principalId ?? undefined,
         agentManager: { getStatus: (agentId) => this.context.agentManager.getStatus(agentId), cancel: (agentId) => this.context.agentManager.cancel(agentId) },
         // platform-owned empty-state copy, served while automation is enabled with zero routines (see feature-announcements).
         automationEmptyState: () => buildAutomationEmptyState({ enabled: this.getConfigValue('automation.enabled') === true, routineCount: this.context.automationManager.listJobs().length }),
@@ -1011,6 +1010,17 @@ export class DaemonHttpRouter {
           req,
           { clientPrefix: 'shared-session', sessionId, ...this.streamAuthority(req) },
         ),
+        // The owner typed this into his own program: the owner, with a person's credential, a terminal app or the
+        // Agent by its label, and a person's claim (runtime-session-routes.ts OWNER_TYPED_METADATA_KEY).
+        ownerTypedAtProgram: (req) => {
+          const principal = this.principalOf(req);
+          if (!principal || principal.actor.class !== 'owner') return false;
+          const credential = principal.credentialKind;
+          if (credential !== 'local' && credential !== 'device-token' && credential !== 'user-session') return false;
+          const program = req.headers.get('x-goodvibes-client')?.trim().toLowerCase();
+          if (program !== 'tui' && program !== 'agent') return false;
+          return req.headers.get('x-goodvibes-explicit-user-request')?.trim().toLowerCase() === 'true';
+        },
       },
       remote: {
         resolveAuthenticatedPrincipal: (request) => this.principalOf(request),

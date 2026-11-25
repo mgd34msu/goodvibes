@@ -7,8 +7,8 @@ GoodVibes Agent uses the provider/model configuration exposed by the connected G
 Provider and model state should be visible in:
 
 - the shell footer/status rows;
-- `/health` in the TUI and `goodvibes-agent status` in the CLI;
-- `/model` and `/provider`;
+- the Health tab of the System place in the TUI and `goodvibes-agent status` in the CLI;
+- `/model` (this conversation's model) and Models and providers in the menu (the default model, pins, backups, providers and sign-ins, routing, the same place as the terminal app's);
 - the Agent operator workspace setup checklist;
 - the TTS configuration workspace when spoken turns are used;
 - `models action:"status|route|local|providers|provider|smoke"` when the model needs provider/model route posture, selectable model metadata, pinned model status, reasoning support, context-window posture, readiness scores, safe setting keys, provider auth posture, subscription freshness, or the hardware-scored local model cookbook;
@@ -21,11 +21,13 @@ OpenAI is one provider with two sign-ins, a ChatGPT subscription and an API key,
 
 ## Local provider definitions
 
-Agent-owned provider definitions live under the Agent profile root when supported by the shared GoodVibes provider registry:
+Providers of your own are the daemon's, one set for every program, kept in the daemon's provider folder:
 
 ```text
-~/.goodvibes/agent/providers/*.json
+~/.goodvibes/tui/providers/*.json
 ```
+
+At the first start of this version the daemon copies each provider file a 3.5.0 Agent kept in `~/.goodvibes/agent/providers/` into that folder when it has none of that name (and the Agent's pins into the daemon's), and leaves the Agent's own files as they were, so a 3.5.0 Agent after a rollback still has them. "Add a provider of your own" (`n` in Models and providers) writes there.
 
 These files are local configuration. They are not Agent Knowledge records and should not be copied into knowledge search state. A definition's `name` is how its models are addressed (`name:model`), so it must not contain `:` or any space; a file whose name does is skipped with a warning naming the file.
 
@@ -36,7 +38,7 @@ The Models workspace (Agent Workspace -> Models) keeps inspection, comparison, a
 | Surface | What it does |
 | --- | --- |
 | Choose provider and model | Workspace picker action for the main chat route; helper, tool, and spoken-turn routes have their own picker rows. |
-| Run a local model benchmark | Confirmed workspace action that runs a local-route benchmark through blind comparison and saves latency/task-fit evidence without changing the route. |
+| Benchmark local models | `b` on the Comparisons tab of Models and providers (`compare.benchmark`): a local-route benchmark through blind comparison that saves latency/task-fit evidence without changing the route. |
 | `models action:"status"` | Route readiness scores, missing signals, pinned state, and safe route keys. |
 | `models action:"local"` | The hardware-scored local model cookbook with recipe ranking and setup/download guidance. |
 | `models action:"route"` | Exact endpoint inspection for one route, with model-list smoke commands, success criteria, and failure triage. |
@@ -65,7 +67,7 @@ Search, voice, media, and multimodal providers are valid Agent features when the
 
 Outputs that should become durable knowledge must go through Agent Knowledge routes. No provider output should be inserted into default knowledge or another product segment by Agent.
 
-Setting discovery is compact by default through `settings action:"list"` and full with `includeParameters:true` or `settings action:"get"`. Setting changes use `settings action:"set|reset"` only when the user explicitly asks and provides confirmation. `models action:"status|route|local|providers|provider"` is read-only; `models action:"smoke"` is confirmation-gated. Model/provider selection, catalog refresh, pin/unpin, custom provider edits, and route setting changes stay visible picker, settings, workspace, or slash-command flows. Secret-backed provider or channel values are stored through the secret manager and displayed as redacted references.
+Setting discovery is compact by default through `settings action:"list"` and full with `includeParameters:true` or `settings action:"get"`. Setting changes use `settings action:"set|reset"` only when the user explicitly asks and provides confirmation. `models action:"status|route|local|providers|provider"` is read-only; `models action:"smoke"` is confirmation-gated. Model/provider selection, catalog refresh, pin/unpin, custom provider edits, and route setting changes stay visible picker, settings or Models and providers controls (the model reaches the same acts as capabilities, under the permission mode). Secret-backed provider or channel values are stored through the secret manager and displayed as redacted references.
 
 ## Related docs
 

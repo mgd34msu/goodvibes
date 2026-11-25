@@ -67,6 +67,7 @@ import { ModeManager } from '../state/mode-manager.js';
 import { FileUndoManager } from '../state/file-undo.js';
 import { WorkspaceCheckpointManager } from '../workspace/checkpoint/index.js';
 import { MemoryRegistry } from '../state/memory-registry.js';
+import { memoryProjectOf } from '../state/memory-project.js';
 import { MemoryStore } from '../state/memory-store.js';
 import { emitProviderVoiceUsage } from './emitters/providers.js';
 import { emitAuthorityChanged } from './emitters/security.js';
@@ -91,7 +92,7 @@ import { HookDispatcher, createHookWorkbench } from '../hooks/index.js';
 import { PluginManager } from '../plugins/manager.js';
 import { BookmarkManager } from '../bookmarks/manager.js';
 import { ProfileManager } from '../profiles/manager.js';
-import { CrossSessionTaskRegistry } from '../sessions/orchestration/index.js';
+import { CrossSessionTaskRegistry, carryTaskGraphsOnce, projectTaskGraphPath } from '../sessions/orchestration/index.js';
 import { bindPairingRotationLimit, createConfiguredTokenAuditor, startPairingTokenAudit } from './pairing-token-audit.js';
 import { UserAuthManager } from '../security/user-auth.js';
 import { PairingTokenManager } from '../pairing/pairing-token-store.js';
@@ -109,6 +110,8 @@ import {
 import { resolveCanonicalMemoryDbPath } from '../state/canonical-memory.js';
 import { repositoryFileGate, WorkspaceTrustManager } from './workspace-trust.js';
 import { createWorkspaceTrustDecisionAsk, trustGatedApprovalRaiser, WORKSPACE_TRUST_ASK_TIMEOUT_MS } from './workspace-trust-approval.js';
+import { methodAskWords, nativeMutationAskWords } from '../control-plane/native-mutation-words.js';
+import { presentToolAskWith, toolAskWords } from '../permissions/tool-ask-words.js';
 import { FeatureAnnouncementStore, announceStoredSkips, featureAnnouncementsPath } from './feature-announcements.js';
 import { DeterministicReplayEngine } from '../core/deterministic-replay.js';
 import { buildPricingSeams } from './cost/pricing-seams.js';
@@ -183,7 +186,7 @@ export function buildRuntimeGraph<X extends object>(product: ProductComposition<
   const runtimeStore = seams.runtimeStore;
   const configManager = seams.configManager;
   const nativeDataWriter = seams.nativeDataWriter ?? configManager.getNativeDataWriter();
-  const shellPaths = createShellPathService({ workingDirectory, homeDirectory });
+  const shellPaths = createShellPathService({ workingDirectory, homeDirectory, recordsRoot: roots.recordsRoot });
   // The single-writer claim comes before anything writes under the home, so a
   // refused second process has changed nothing.
   if (product.homeSingleWriter === 'claim') {
@@ -402,9 +405,20 @@ export function buildRuntimeGraph<X extends object>(product: ProductComposition<
   // The broker is the register of session identity, so a task-graph record
   // whose session it does not know, and that is past the reaper's grace
   // floor, is collected. A product whose broker is not that register keeps
-  // every record.
+  // every record. The terminal app and the Agent share the project's one graph (sessions/orchestration/shared-graph.ts),
+  // with their own earlier graphs carried into it once, before it is read; the daemon keeps its own.
+  const terminalProgram = product.surface === 'tui' || product.surface === 'agent';
+  if (terminalProgram) {
+    try {
+      const carried = carryTaskGraphsOnce(workingDirectory);
+      if (carried) logger.info('[sessions] the terminal programs\' task graphs were carried into the project\'s shared one', carried);
+    } catch (error) {
+      logger.warn('[sessions] the earlier task graphs were not carried; they are left as they are', { error: summarizeError(error) });
+    }
+  }
   const sessionOrchestration = new CrossSessionTaskRegistry(
-    join(surface.sessionsDir, 'task-graph.json'),
+    // A host's own task graph is one of its records (the daemon's records folder, whatever folder it started in).
+    terminalProgram ? projectTaskGraphPath(workingDirectory) : shellPaths.resolveProjectPath(surfaceRoot, 'sessions', 'task-graph.json'),
     (product.taskGraphReaping ?? 'broker') === 'broker'
       ? { sessionExists: (sessionId: string) => sessionBroker.getSession(sessionId) !== null }
       : {},
@@ -420,9 +434,14 @@ export function buildRuntimeGraph<X extends object>(product: ProductComposition<
       logger.warn('[artifacts] the Agent\'s saved artifacts could not be carried into the daemon\'s store; they stay in the Agent\'s folder', { error: summarizeError(error) });
     }
   }
+  // The daemon's store announces each artifact it saves (its own turns, comparisons, and every program's save through
+  // `artifacts.save`), so an open Artifacts list follows with no key. A program's store saves through the daemon
+  // (routeCreate, set by the program) and announces nothing itself.
+  const onCreated = product.surface === 'daemon'
+    ? (created: { readonly id: string }) => noteListChanged({ list: 'artifacts', change: 'created', id: created.id }) : undefined;
   const artifactStore = new ArtifactStore(surfaceRoot === 'agent'
     ? { configManager, rootDir: shellPaths.resolveUserPath(DAEMON_STATE_SURFACE_ROOT, 'artifacts') }
-    : { configManager });
+    : { configManager, ...(onCreated ? { onCreated } : {}) });
   const memoryEmbeddingRegistry = new MemoryEmbeddingProviderRegistry({ configManager });
   const memoryDbPath = resolveMemoryDbPath(product.memoryStore, roots, surfaceRoot);
   const memoryStore = new MemoryStore(memoryDbPath, { embeddingRegistry: memoryEmbeddingRegistry });
@@ -432,7 +451,10 @@ export function buildRuntimeGraph<X extends object>(product: ProductComposition<
   const memoryRegistry = new MemoryRegistry(memoryStore);
   // Local-until-adopted access for spine-shaped consumers; a client activates
   // the wire transport when it adopts a daemon, the daemon always serves local.
-  const memorySpine = new MemorySpineClient({ local: createLocalMemoryAccess(memoryRegistry), log: logger });
+  // A terminal program's "this project" record is for its project; the daemon serves every project, so an add
+  // through it names its project itself (memory-project.ts).
+  const memorySpine = new MemorySpineClient({ local: createLocalMemoryAccess(memoryRegistry), log: logger,
+    ...(product.surface === 'daemon' ? {} : { project: memoryProjectOf(workingDirectory) }) });
   const deliveryManager = new AutomationDeliveryManager({
     configManager,
     // The delivery router replies leave through: without the secrets manager it
@@ -463,55 +485,69 @@ export function buildRuntimeGraph<X extends object>(product: ProductComposition<
     workAdmitted,
     // The run's agent is how a run ends: the manager reads its status to
     // settle the run and stops it to cancel the run or end it at its timeout.
-    ...createAutomationAgentControls(agentManager, () => unattendedRuns.connectedTools()),
+    // A run with no tool list of its own is a turn like any other: it is offered what a conversation in its project is
+    // (the full registry, its project's tool servers and checklist; the run's registry has only what its project has),
+    // plus the connected mail and calendar tool.
+    ...createAutomationAgentControls(agentManager, () => [...unattendedRuns.connectedTools(), ...conversationToolNames()]),
   });
+  function conversationToolNames(): readonly string[] {
+    try { return [...agentOrchestrator.getToolRegistry().list().map((tool) => tool.definition.name), 'mcp', 'work_plan']; }
+    catch (error) {
+      logger.warn('Automation: the conversation tools could not be listed; the run is offered its template\'s tools', { error: summarizeError(error) });
+      return [];
+    }
+  }
   // In a group, schedules, reminders and url watchers live on the group's
   // record and run on the machine holding the automation role
   // (cluster/group-work.ts); outside one, nothing changes.
   automationManager.attachGroupWork({ file: authorityRecord, roles: clusterRoles });
   watcherRegistry.attachGroupWork({ file: authorityRecord, roles: clusterRoles });
 
-  // Knowledge: the project's store (the wiki, or for a product that chose
-  // `agent` the agent's own knowledge, with no wiki), the agent's own knowledge
-  // and the home graph, each with its semantic service, all under governor backpressure.
-  const wikiStore = product.knowledge === 'agent'
-    ? undefined
-    : createConfiguredPlanningStore(configManager, REGULAR_KNOWLEDGE_DB_FILE, { nativeDataWriter, family: 'wiki' });
-  if (wikiStore) scope.registry.add('knowledge store', () => wikiStore.close());
-  const agentKnowledgeStore = wikiStore
+  // Knowledge: the project's store (the wiki: the daemon's one store), the agent-routes store beside it and the home
+  // graph, each with its semantic service, all under governor backpressure. A product that chose `daemon` (the Agent)
+  // opens the daemon's one store where the daemon keeps it (prepared `inDaemonStateFolder`) and opens no knowledge
+  // file of its own: its old `knowledge-agent.sqlite` was carried into the one store and is never written again.
+  const ownAgentStore = product.knowledge !== 'daemon';
+  const wikiStore = createConfiguredPlanningStore(configManager, REGULAR_KNOWLEDGE_DB_FILE, { nativeDataWriter, family: 'wiki' });
+  scope.registry.add('knowledge store', () => wikiStore.close());
+  const agentKnowledgeStore = ownAgentStore
     ? KnowledgeStore.forFamily({ nativeDataWriter, configManager, dbFileName: GOODVIBES_AGENT_KNOWLEDGE_DB_FILE, family: 'agent' })
-    : createConfiguredPlanningStore(configManager, GOODVIBES_AGENT_KNOWLEDGE_DB_FILE, { nativeDataWriter, family: 'agent' });
-  scope.registry.add('agent knowledge store', () => agentKnowledgeStore.close());
+    : undefined;
+  if (agentKnowledgeStore) scope.registry.add('agent knowledge store', () => agentKnowledgeStore.close());
   const homeGraphKnowledgeStore = KnowledgeStore.forFamily({ nativeDataWriter, configManager, dbFileName: HOME_GRAPH_KNOWLEDGE_DB_FILE, family: 'home-graph' });
   scope.registry.add('home graph knowledge store', () => homeGraphKnowledgeStore.close());
   // The store planning, the work ledger and native intake read and write.
-  const knowledgeStore = wikiStore ?? agentKnowledgeStore;
-  const knowledgeStores = [...(wikiStore ? [wikiStore] : []), agentKnowledgeStore, homeGraphKnowledgeStore];
-  configureKnowledgeArtifactReferences({ artifactStore, controlPlaneDirectory: configManager.getControlPlaneConfigDir(), stores: knowledgeStores });
+  const knowledgeStore = wikiStore;
+  const knowledgeStores = [wikiStore, ...(agentKnowledgeStore ? [agentKnowledgeStore] : []), homeGraphKnowledgeStore];
+  // Generated-artifact cleanup has one owner: the daemon, over its state folder, where the one knowledge store lives
+  // (the Agent opens it there, `inDaemonStateFolder`; the terminal app's state folder is the same one). A program binds
+  // no cleanup ensemble: unbound, its cleanup answers "unavailable" and keeps every artifact, and the daemon's own
+  // discovery at its start removes what no store of that folder refers to.
+  if (product.surface === 'daemon') configureKnowledgeArtifactReferences({ artifactStore, controlPlaneDirectory: configManager.getControlPlaneConfigDir(), stores: knowledgeStores });
   const knowledgeSemanticLlm = createProviderBackedKnowledgeSemanticLlm(providerRegistry, { timeoutMs: 20_000, maxConcurrent: 1 });
-  const wikiSemanticService = wikiStore
-    ? new KnowledgeSemanticService(wikiStore, { llm: knowledgeSemanticLlm, maxLlmSourcesPerReindex: 3, isBackgroundPaused: isKnowledgeBackgroundPaused, admitExpensiveWork })
-    : undefined;
-  if (wikiSemanticService) scope.registry.add('regular knowledge semantic service', () => wikiSemanticService.dispose());
+  const wikiSemanticService = new KnowledgeSemanticService(wikiStore, { llm: knowledgeSemanticLlm, maxLlmSourcesPerReindex: 3, isBackgroundPaused: isKnowledgeBackgroundPaused, admitExpensiveWork });
+  scope.registry.add('regular knowledge semantic service', () => wikiSemanticService.dispose());
   const homeGraphSemanticService = new KnowledgeSemanticService(homeGraphKnowledgeStore, { llm: knowledgeSemanticLlm, maxLlmSourcesPerReindex: 3, objectProfiles: HOME_GRAPH_KNOWLEDGE_EXTENSION.objectProfiles, isBackgroundPaused: isKnowledgeBackgroundPaused, admitExpensiveWork });
   scope.registry.add('home graph semantic service', () => homeGraphSemanticService.dispose());
-  const agentKnowledgeSemanticService = new KnowledgeSemanticService(agentKnowledgeStore, { llm: knowledgeSemanticLlm, maxLlmSourcesPerReindex: 3, isBackgroundPaused: isKnowledgeBackgroundPaused, admitExpensiveWork });
-  scope.registry.add('agent knowledge semantic service', () => agentKnowledgeSemanticService.dispose());
-  const wikiService = wikiStore && wikiSemanticService
-    ? new KnowledgeService(wikiStore, artifactStore, undefined, { memoryRegistry, runtimeBus, semanticService: wikiSemanticService, admitExpensiveWork, workAdmitted })
+  const agentKnowledgeSemanticService = agentKnowledgeStore
+    ? new KnowledgeSemanticService(agentKnowledgeStore, { llm: knowledgeSemanticLlm, maxLlmSourcesPerReindex: 3, isBackgroundPaused: isKnowledgeBackgroundPaused, admitExpensiveWork })
     : undefined;
-  if (wikiService) {
-    scope.ownUntilRegistered('knowledge service', () => wikiService.dispose());
-    wikiService.attachRuntimeBus(runtimeBus);
+  if (agentKnowledgeSemanticService) scope.registry.add('agent knowledge semantic service', () => agentKnowledgeSemanticService.dispose());
+  const wikiService = new KnowledgeService(wikiStore, artifactStore, undefined, { memoryRegistry, runtimeBus, semanticService: wikiSemanticService, admitExpensiveWork, workAdmitted });
+  scope.ownUntilRegistered('knowledge service', () => wikiService.dispose());
+  wikiService.attachRuntimeBus(runtimeBus);
+  // In a product that opens only the daemon's one store, "the agent's knowledge" is that store's service.
+  const agentKnowledgeService = agentKnowledgeStore && agentKnowledgeSemanticService
+    ? new KnowledgeService(agentKnowledgeStore, artifactStore, undefined, { memoryRegistry, runtimeBus, semanticService: agentKnowledgeSemanticService, admitExpensiveWork, workAdmitted })
+    : wikiService;
+  if (agentKnowledgeService !== wikiService) {
+    scope.ownUntilRegistered('agent knowledge service', () => agentKnowledgeService.dispose());
+    agentKnowledgeService.attachRuntimeBus(runtimeBus);
   }
-  const agentKnowledgeService = new KnowledgeService(agentKnowledgeStore, artifactStore, undefined, { memoryRegistry, runtimeBus, semanticService: agentKnowledgeSemanticService, admitExpensiveWork, workAdmitted });
-  scope.ownUntilRegistered('agent knowledge service', () => agentKnowledgeService.dispose());
-  agentKnowledgeService.attachRuntimeBus(runtimeBus);
-  // With no wiki, the project's knowledge service is the agent's own.
-  const knowledgeService = wikiService ?? agentKnowledgeService;
+  const knowledgeService = wikiService;
   // ONE knowledge store, the daemon's: the Agent's own is carried into it once, the daemon its single writer.
   // The Agent program kept its own file under its own folder (`~/.goodvibes/agent/`), beside the daemon's (`~/.goodvibes/tui/`).
-  if (product.surface === 'daemon' && wikiStore) {
+  if (product.surface === 'daemon' && agentKnowledgeStore) {
     startAgentKnowledgeCarry(agentKnowledgeStore, wikiStore, join(dirname(configManager.getControlPlaneConfigDir()), 'agent', GOODVIBES_AGENT_KNOWLEDGE_DB_FILE));
   }
   const homeGraphService = new HomeGraphService(homeGraphKnowledgeStore, artifactStore, { semanticService: homeGraphSemanticService, admitExpensiveWork });
@@ -556,8 +592,8 @@ export function buildRuntimeGraph<X extends object>(product: ProductComposition<
     serviceRegistry, featureFlags, configManager, localhostFetchApprovalSource: () => localhostFetchApprovalForSearch,
   }));
   for (const [semantic, ingest] of [
-    ...(wikiSemanticService && wikiService ? [[wikiSemanticService, wikiService] as const] : []),
-    [agentKnowledgeSemanticService, agentKnowledgeService] as const,
+    [wikiSemanticService, wikiService] as const,
+    ...(agentKnowledgeSemanticService ? [[agentKnowledgeSemanticService, agentKnowledgeService] as const] : []),
     [homeGraphSemanticService, homeGraphService] as const,
   ]) {
     semantic.setGapRepairer(createWebKnowledgeGapRepairer({ searchService: webSearchService, ingestService: ingest }));
@@ -571,7 +607,9 @@ export function buildRuntimeGraph<X extends object>(product: ProductComposition<
   const multimodalService = new MultimodalService(artifactStore, mediaProviders, voiceService, knowledgeService);
   const pluginManager = new PluginManager({
     pathOptions: { cwd: shellPaths.workingDirectory, homeDir: shellPaths.homeDirectory },
-    stateFilePath: shellPaths.resolveUserPath(surfaceRoot, 'plugins.json'),
+    // One plugin state for every program, the daemon's (state-carry-forward.ts): the Agent's own file of 3.5.0 was
+    // carried into it once. Read from the Agent's folder, a quarantine made in the Agent never reached the Plugins list.
+    stateFilePath: shellPaths.resolveUserPath(DAEMON_STATE_SURFACE_ROOT, 'plugins.json'),
     // One trust decision per plugin for every app on this machine.
     trustFilePath: shellPaths.resolveUserPath('plugin-trust.json'),
     runtimeBus,
@@ -595,7 +633,8 @@ export function buildRuntimeGraph<X extends object>(product: ProductComposition<
   // Hosts the daemon runs a command on itself (docker, ssh, cloud terminal, local
   // process). Nothing opens until a backend is listed, registered or invoked.
   const remoteBackends = createRemoteBackendHost({
-    workingDirectory,
+    // Only its peer register's file is under this folder: this host's own records.
+    workingDirectory: shellPaths.recordsRoot,
     homeDirectory,
     credentials: {
       // A secret absent because the store could not be read throws (getStored), so a backend says "could not read"
@@ -715,6 +754,7 @@ export function buildRuntimeGraph<X extends object>(product: ProductComposition<
       agents: agentManager,
       processManager,
       unattendedRuns,
+      conversationTools: conversationToolNames,
       sessionIsLive: (sessionId: string) => sessionBroker.getSession(sessionId) !== null,
       workAdmitted,
     })
@@ -730,7 +770,7 @@ export function buildRuntimeGraph<X extends object>(product: ProductComposition<
   const trustChoice = product.workspaceTrust === 'none' ? null
     : product.workspaceTrust === 'surface' ? { kind: 'surface' as const } : product.workspaceTrust;
   const workspaceTrustManager = trustChoice ? new WorkspaceTrustManager({ shellPaths, surfaceRoot }) : undefined;
-  const requestApproval: ApprovalRaiser = trustChoice && workspaceTrustManager
+  const ownFolderAsk: ApprovalRaiser = trustChoice && workspaceTrustManager
     ? trustGatedApprovalRaiser(
       workspaceTrustManager,
       raiseApproval,
@@ -740,6 +780,25 @@ export function buildRuntimeGraph<X extends object>(product: ProductComposition<
     )
     : raiseApproval;
   const workspaceTrustFor = trustChoice?.resolveFor && workspaceTrustManager ? trustChoice.resolveFor(workspaceTrustManager) : undefined;
+  // An ask about a call in another project (a runner, an agent or a hosted agent the daemon runs there: its request
+  // names that project, permissions/call-project.ts) waits on THAT project's trust, with a question naming it; the
+  // daemon's own folder's trust says nothing about another project.
+  const projectAsks = new Map<WorkspaceTrustManager, ApprovalRaiser>();
+  const requestApproval: ApprovalRaiser = workspaceTrustFor && trustChoice && !trustChoice.requestTrustDecision
+    ? (input) => {
+      const folder = input.request.workingDirectory;
+      let trust: unknown;
+      try { trust = folder ? workspaceTrustFor(folder) : undefined; } catch { trust = undefined; }
+      if (!(trust instanceof WorkspaceTrustManager) || trust === workspaceTrustManager) return ownFolderAsk(input);
+      let ask = projectAsks.get(trust);
+      if (!ask) {
+        ask = trustGatedApprovalRaiser(trust, raiseApproval,
+          createWorkspaceTrustDecisionAsk({ broker: approvalBroker, workingDirectory: trust.workspaceRoot }), { waitMs: WORKSPACE_TRUST_ASK_TIMEOUT_MS });
+        projectAsks.set(trust, ask);
+      }
+      return ask(input);
+    }
+    : ownFolderAsk;
   // What a repository brings (its hooks file, its MCP server files) waits on the owner's trust of the
   // workspace in every product, including one whose own actions pass no trust gate: it reads the same
   // saved decision. An undecided workspace is not trusted.
@@ -750,6 +809,8 @@ export function buildRuntimeGraph<X extends object>(product: ProductComposition<
   const permissionManager = createBrokeredPermissionManager({
     // A product with no workspace trust gate still honours a headless run's refusal (WorkspaceTrustManager.refuseForThisRun).
     workspaceTrust: workspaceTrustManager ?? repositoryTrust.runRefusalConstraint(),
+    // A decision for a turn or call in another project reads that project's trust (permissions/call-project.ts).
+    ...(workspaceTrustFor ? { workspaceTrustFor } : {}),
     requestApproval,
     configManager,
     policyRuntimeState,
@@ -765,6 +826,38 @@ export function buildRuntimeGraph<X extends object>(product: ProductComposition<
     port: judgment.port, permissionManager, config: configManager, signal: autonomousLifetime.signal,
     workspaceTrust: workspaceTrustManager ?? null, workspaceRoot: workingDirectory,
     ...(workspaceTrustFor ? { workspaceTrustFor } : {}),
+  };
+  // A natively admitted daemon method (schedules, channel routing and drafts, the owner profile and occasions, a
+  // settings import: control-plane/native-mutation.ts) acts on what the daemon keeps, not in the folder the daemon
+  // started in: its one decision is the call's own, raised straight on the owner's approvals, with no folder-trust
+  // question before it and no folder's restriction refusing it (as capabilities.run's gate, daemon/capability-owner-gate.ts).
+  // Its question is worded from the method and its inputs ("Add a schedule "Morning brief", every weekday at 09:00?"),
+  // on the card and on the record (control-plane/native-mutation-words.ts).
+  const nativeWords = (args: Readonly<Record<string, unknown>>) => nativeMutationAskWords(args, (method) => gatewayMethods.get(method)?.title,
+    Intl.DateTimeFormat().resolvedOptions().timeZone || 'UTC');
+  scope.registry.add('native admission ask words', presentToolAskWith('write', nativeWords));
+  scope.registry.add('native admission send ask words', presentToolAskWith('send_message', nativeWords));
+  // Every method asked by a program's own gate, as its nested method call (natively admitted or not: a calendar event,
+  // a schedule): worded from the method and its inputs by the same source, never "Delegate work through ...".
+  scope.registry.add('nested method ask words', presentToolAskWith('agent_operator_method', (args) =>
+    methodAskWords(typeof args['methodId'] === 'string' ? args['methodId'] : '', args['input'] ?? {}, (method) => gatewayMethods.get(method)?.title,
+      Intl.DateTimeFormat().resolvedOptions().timeZone || 'UTC')));
+  const daemonMethodHost = {
+    port: judgment.port, config: configManager, signal: autonomousLifetime.signal,
+    workspaceTrust: null, workspaceRoot: workingDirectory,
+    permissionManager: createBrokeredPermissionManager({
+      workspaceTrust: null,
+      requestApproval: (input) => {
+        const words = toolAskWords(input.request.tool, input.request.args);
+        return raiseApproval(words ? { ...input, request: { ...input.request, analysis: { ...input.request.analysis, summary: words.question } } } : input);
+      },
+      configManager,
+      policyRuntimeState,
+      hookDispatcher,
+      featureFlags,
+      userRuleStore: userPermissionRuleStore,
+      secretsManager,
+    }),
   };
   const announcementStore = new FeatureAnnouncementStore(featureAnnouncementsPath(configManager));
   // A person at this surface answers a command's terminal prompt (and, in ask-me, the localhost ask) in a model's run.
@@ -1042,21 +1135,29 @@ export function buildRuntimeGraph<X extends object>(product: ProductComposition<
   // so every host serves it, whichever verb groups the product registers.
   registerFlagsStatusGatewayMethods(gatewayMethods, featureFlags);
   registerAuthorityStatusGatewayMethods(gatewayMethods, authorityRecord, () => authorityPeers);
+  // The methods that hold a request open while they wait; ended by the daemon before it closes its listener.
+  const longWaitEnds: { readonly label: string; readonly end: () => void }[] = [];
+  const endLongWaits = (): void => {
+    for (const { label, end } of longWaitEnds.splice(0)) {
+      try { end(); } catch (error) { logger.warn('Ending a waiting request at stop failed', { label, error: summarizeError(error) }); }
+    }
+  };
   if ((product.gatewayVerbs ?? 'platform') === 'platform') {
     registerGatewayVerbGroups(gatewayMethods, {
+      longWaits: { add: (label, end) => { longWaitEnds.push({ label, end }); } },
       triggerSupervisor: triggerManager, homeDirectory, processRegistry, workspaceCheckpointManager, sessionBroker, secretsManager,
       approvalBroker, watcherRegistry, userPermissionRuleStore, shellPaths, surfaceRoot, runtimeBus, sessionPresence, configManager,
       runtimeStore, channelDeliveryRouter, providerRegistry, automationManager, sessionLister: sessionBroker, sessionIntake: sessionBroker,
       channelPolicy, workingDirectory, attemptsController: contractRunner.fleetControls(), contractOperator, stepUpService, memoryRegistry,
       pairingTokens: pairingTokens(), authority: authorityRecord, users: localUserAuthManager, acpHost, sessionLiveTurnControls, powerManager, memoryGovernor, voiceSetup,
       credentialWrites: { config: configManager, secrets: secretsManager }, approvalRaise: approvalBroker, approvalList: approvalBroker, disposal: scope.registry,
-      personalCapture, clusterRoles, ciAutonomousHost: () => externalPermissionHost, onCiAutoWatch: (observer) => { ciAutoWatchObserver = observer; },
+      personalCapture, clusterRoles, ciAutonomousHost: () => externalPermissionHost, nativeMutationHost: () => daemonMethodHost, onCiAutoWatch: (observer) => { ciAutoWatchObserver = observer; },
       listContracts: () => contractRunner.list({ includeInputSnapshot: false }),
       modeInForce: (chosen, explicitlyChosen) => permissionManager.modeInForce(chosen, explicitlyChosen),
       modeInForceReason: (chosen, explicitlyChosen) => permissionManager.describeModeInForce(chosen, explicitlyChosen).reason,
       modeInForceWords: (chosen, explicitlyChosen) => describeModeInForceWords(configManager, { chosen, explicitlyChosen }),
     });
-    scope.registry.add('native automation updates', registerNativeAutomationGatewayMethods(gatewayMethods, { manager: automationManager, host: externalPermissionHost }));
+    scope.registry.add('native automation updates', registerNativeAutomationGatewayMethods(gatewayMethods, { manager: automationManager, host: daemonMethodHost }));
   }
   // Key-level config changes on the runtime bus `config` domain; secret-bearing keys travel by name only.
   scope.registry.add('config event bridge', attachConfigEmitBridge({ config: { subscribe: (key, cb) => configManager.subscribe(key as never, cb as never) }, bus: runtimeBus }));
@@ -1079,11 +1180,13 @@ export function buildRuntimeGraph<X extends object>(product: ProductComposition<
   // Contracts left on disk resume once the services are up.
   if ((product.contractRecovery ?? 'platform') === 'platform') void resumeContracts(contractRunner, workingDirectory);
 
-  const close = (): Promise<void> => { stopAutonomousWork(); stopRequests.request(); return scope.close(); };
+  const close = (): Promise<void> => { stopAutonomousWork(); stopRequests.request(); endLongWaits(); return scope.close(); };
   return {
     workingDirectory,
+    endLongWaits,
     nativeDataWriter: seams.nativeDataWriter,
     nativeMutationHost: externalPermissionHost,
+    daemonMethodHost,
     homeDirectory,
     surfaceRoot,
     surface,

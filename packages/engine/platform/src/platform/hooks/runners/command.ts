@@ -24,7 +24,7 @@ import { OwnedProcessGroupUnsupportedError, runProcess } from '../../utils/proce
  * The event JSON is written to stdin; stdout is parsed as HookResult JSON.
  * If stdout is not valid JSON, returns { ok: true } (fire-and-forget semantics).
  */
-export async function run(hook: HookDefinition, event: HookEvent, options?: HookExecutionOptions): Promise<HookResult> {
+export async function run(hook: HookDefinition, event: HookEvent, options?: HookExecutionOptions, cwd?: string): Promise<HookResult> {
   const command = hook.command;
   if (!command) {
     return { ok: false, error: 'command hook missing "command" field' };
@@ -38,6 +38,8 @@ export async function run(hook: HookDefinition, event: HookEvent, options?: Hook
     if (options !== undefined) {
       const result = await runProcess({
         args: ['/bin/sh', '-c', command],
+        // In the project whose hooks file it came from (the dispatcher's project), not wherever this process started.
+        ...(cwd === undefined ? {} : { cwd }),
         stdin: eventJson,
         timeoutMs,
         ...(options.signal === undefined ? {} : { signal: options.signal }),
@@ -62,6 +64,7 @@ export async function run(hook: HookDefinition, event: HookEvent, options?: Hook
     // started, which would otherwise keep the output pipes open.
     const groupLeader = process.platform !== 'win32';
     const proc = Bun.spawn(['/bin/sh', '-c', command], {
+      ...(cwd === undefined ? {} : { cwd }),
       stdin: 'pipe',
       stdout: 'pipe',
       stderr: 'pipe',

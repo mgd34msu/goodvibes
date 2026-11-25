@@ -263,7 +263,7 @@ Typing `/` lists what the composer can do from the browser, and only that:
 `/new` starts a new chat; `/mcp` and `/payments` open their screens (schedules,
 triggers, CI watches and check-ins are the Automation screen, in the command
 palette); every other command with an action the daemon carries out for
-the browser (`/devices`, `/calendar` and the rest) opens
+the browser (`/calendar` and the rest) opens
 that action's guided sheet, or the command palette narrowed to its actions when
 it has several. Commands whose every action runs only in the terminal app are
 not listed. Arrows move, Tab or Enter on a partly typed name completes it,

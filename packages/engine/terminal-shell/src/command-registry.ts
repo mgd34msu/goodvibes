@@ -1,6 +1,7 @@
 /** Platform command lookup, dispatch and exact one-dispatch terminal owner provenance. */
 import { AsyncLocalStorage } from 'node:async_hooks';
 import type { SlashCommandRawRest } from './slash-command-parser.js';
+import { asPersonsOwnAct } from './persons-own-act.js';
 import { captureNativeConversationInput, type NativeConversationInput } from './native/native-conversation-input.js';
 import type { DaemonWriteRefusal } from '@goodvibes/engine/platform/platform/config';
 import { summarizeError } from '@goodvibes/engine/platform/platform/utils/native-error-summary';
@@ -435,12 +436,13 @@ export function createTerminalCommandRegistry<
       const cmd = this.get(rawName);
       if (!cmd) return false;
       const owned = { ...context };
-      if (context.invokedByModel !== true && !commandDispatchScope.getStore() && !directOwnerCommands.has(context)) {
-        directOwnerCommands.set(owned, { name: cmd.name, rawInput });
-      }
+      const person = context.invokedByModel !== true && !commandDispatchScope.getStore() && !directOwnerCommands.has(context);
+      if (person) directOwnerCommands.set(owned, { name: cmd.name, rawInput });
       const after = commandDispatchScope.getStore() ? undefined : options.afterCommand?.(context);
       try {
-        await commandDispatchScope.run(dispatchOf(cmd, args), () => cmd.handler(args, owned));
+        // A line the person typed: what it makes (an artifact it saves) is part of what he asked (persons-own-act.ts).
+        const run = () => commandDispatchScope.run(dispatchOf(cmd, args), () => cmd.handler(args, owned));
+        await (person ? asPersonsOwnAct(run) : run());
         return true;
       } finally {
         directOwnerCommands.delete(owned);

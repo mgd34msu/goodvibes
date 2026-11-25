@@ -238,7 +238,7 @@ function commandModelNotes(commandName: string): Omit<CommandExecutionPolicy, 'e
     return {
       confirmation,
       preferredModelTool: 'google',
-      boundary: 'Connects the Google account that backs mail and calendar. /google connect runs the connection flow; /google adopt takes up credentials from files you point it at. Once connected, the google tool is the model route, no MCP server is involved. forget, adopt, account, calendar-address, client, client-file and approve store, adopt, remove or unlock credentials, so only the owner typing them counts; a model invocation is refused.',
+      boundary: 'The Google account that backs mail and calendar is the daemon\'s one connection, connected on the Google tab of Mail, calendar and channels (capability google.connect; google.adopt takes up credentials found on the daemon\'s machine). Once connected, the google tool is the model route, no MCP server is involved. A model\'s capability_run of a Google capability that stores, adopts, replaces or removes a credential is put to the owner, opening on No.',
     };
   }
   if (root === 'mail') {
@@ -252,7 +252,7 @@ function commandModelNotes(commandName: string): Omit<CommandExecutionPolicy, 'e
     return {
       confirmation,
       preferredModelTool: agentHarnessModes('run_command'),
-      boundary: '/calendar upcoming, all, get, subscriptions and accounts read and need no admission. add, delete, import and export change the local ICS events (delete asks first); subscribe and refresh read a feed from outside. unsubscribe (deletes a stored feed address), connect and disconnect (sign a calendar account in or out) and a feed on the private network are the owner\'s to type: a model invocation is refused before it runs. /calendar alone lists every action.',
+      boundary: 'The calendar is the daemon\'s: the capabilities calendar.upcoming, all, get, subscriptions, accounts and status read and need no admission; add, change, delete and import change events (delete asks first); subscribe and refresh read a feed from outside; unsubscribe and disconnect cannot be undone and are asked first; connect and use-app keep a credential and a feed on the private network loosens a protection, so a model\'s call of them is put to the owner, opening on No. Find them with capability_find.',
     };
   }
   if (root === 'channels' || root === 'channel' || root === 'notify') {

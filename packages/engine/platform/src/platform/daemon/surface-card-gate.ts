@@ -157,7 +157,7 @@ export async function refuseCardTalk(
   if (!isSecurityCodeAwaited() || !await readsAsSecurityCode(text)) return null;
   const outcome = await deliverProposalNotice(deps, originBinding(deps, input),
     'That looks like your card security code. Do not send it here: delete that message from this chat. '
-    + 'Type the code in the terminal app with /payments pending, or in the local web UI.');
+    + 'Type the code in the terminal app or the Agent (Waiting for you, under Purchases), or in the local web UI.');
   logger.warn('Refused a likely card security code on a remote channel', { surface: input.surface, refusalDelivered: outcome.delivered });
   return { allowed: false, reason: `${CARD_SHAPES_REFUSED_REASON}:security-code`, policy: deps.channelPolicy.getPolicy(input.surface) };
 }

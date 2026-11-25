@@ -17,7 +17,6 @@ import { renderHistorySearchOverlay } from '@goodvibes/engine/terminal-shell/his
 import { renderProcessModal } from './process-modal.ts';
 import { renderLiveTailModal } from './live-tail-modal.ts';
 import { renderContextInspector } from './context-inspector.ts';
-import { renderSettingsModal } from './settings-modal.ts';
 import { renderMcpWorkspace } from './mcp-workspace.ts';
 import { renderSessionPickerModal } from './session-picker-modal.ts';
 import { renderProfilePickerModal } from './profile-picker-modal.ts';
@@ -102,7 +101,6 @@ export function buildConversationLayers(context: ConversationLayerContext): Surf
   const entries: ModalEntry[] = [
     ['agentWorkspace', input.agentWorkspace.active, () => renderAgentWorkspaceLayer(input.agentWorkspace, w, h)],
     ['modelPicker', input.modelPicker.active, () => renderModelWorkspace(input.modelPicker, w, h)],
-    ['settings', input.settingsModal.active, () => renderSettingsModal(input.settingsModal, w, h)],
     ['mcpWorkspace', input.mcpWorkspace.active, () => renderMcpWorkspace(input.mcpWorkspace, w, h)],
     ['sessionPicker', input.sessionPickerModal.active, () => renderSessionPickerModal(input.sessionPickerModal, w, h)],
     ['profilePicker', input.profilePickerModal.active, () => renderProfilePickerModal(input.profilePickerModal, w, h)],

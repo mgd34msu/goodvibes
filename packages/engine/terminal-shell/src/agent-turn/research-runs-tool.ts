@@ -286,8 +286,8 @@ function formatMutationResult(action: string, run: AgentResearchRunRecord): stri
     '  nextRoutes',
     ...nextRoutes,
     // True of this call whoever made it: it records the run. Collecting sources is the runner's (research action:"runner"),
-    // which /research start-run starts at once; nothing here ingests Knowledge, saves an artifact or sends a message.
-    '  policy this call records the run; sources are collected by the research runner (research action:"runner", which /research start-run starts at once); no Knowledge ingest, artifact save or external message',
+    // which the daemon starts at once for a run started with research.start-run; nothing here ingests Knowledge, saves an artifact or sends a message.
+    '  policy this call records the run; sources are collected by the research runner (research action:"runner", which the daemon starts at once for a run started with capability research.start-run); no Knowledge ingest, artifact save or external message',
   ].join('\n');
 }
 

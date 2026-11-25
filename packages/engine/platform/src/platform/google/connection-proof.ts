@@ -29,6 +29,21 @@ export interface GoogleProofResult {
   /** Populated only on failure. */
   readonly problem?: string;
   readonly fix?: string;
+  /** When Google refused because an API is switched off: the service and project it named (either may be unnamed). */
+  readonly apiOff?: { readonly service: string | null; readonly project: string | null } | undefined;
+}
+
+/** The Google APIs a check found switched off, and the Cloud project Google named (null when it named none). */
+export interface GoogleApiOff {
+  readonly services: readonly string[];
+  readonly project: string | null;
+}
+
+/** A Google API in a person's words: "the Gmail API", "the Google Calendar API". */
+export function serviceWords(service: string): string {
+  if (service === 'gmail.googleapis.com') return 'the Gmail API';
+  if (service === 'calendar-json.googleapis.com') return 'the Google Calendar API';
+  return `the ${service} API`;
 }
 
 export interface GoogleConnectionProof {
@@ -51,8 +66,10 @@ function classify(capability: 'mail' | 'calendar', failure: GoogleApiFailure): G
       detail: `${capability === 'mail' ? 'Mail' : 'Calendar'} refused the credential.`,
       problem:
         `The stored credential does not carry the ${capability === 'mail' ? 'Gmail' : 'Calendar'} scope. `
-        + `A grant carries exactly the scopes that were approved, so this consent was approved without it. ${problem}`,
-      // The client already started the fresh consent asking for mail and calendar together, and says how it ended.
+        // Google's own words ("lacks the required OAuth permissions") say the same again: left out.
+        + 'A grant carries exactly the scopes that were approved, so this consent was approved without it.',
+      // What renews it: the client's own words (a fresh consent asking for mail and calendar together, or how the
+      // repair that ran ended).
       fix: failure.fix,
     };
   }
@@ -61,8 +78,9 @@ function classify(capability: 'mail' | 'calendar', failure: GoogleApiFailure): G
       ok: false,
       detail: `${capability === 'mail' ? 'Mail' : 'Calendar'} is not enabled on the Cloud project.`,
       problem: `The credential is valid but the ${capability === 'mail' ? 'Gmail' : 'Calendar'} API is switched off on the project this client belongs to. ${problem}`,
-      // The client already put enabling it to the person's mode and ran it with gcloud, and says how that ended.
+      // What enables it: the client's own words (or how the repair that put it to the person's mode ended).
       fix: failure.fix,
+      apiOff: { service: failure.disabledService?.service ?? null, project: failure.disabledService?.project ?? null },
     };
   }
   return {

@@ -14,6 +14,7 @@ import { readRefusal, formatRefusal } from '@goodvibes/engine/errors';
 import { summarizeError } from '@goodvibes/engine/platform/platform/utils/native-error-summary';
 import { askInput, pickFrom } from './ask-input.js';
 import { runForm } from './form.js';
+import { valuesAsShown } from './lists.js';
 import { openGuidedPanel } from './panel.js';
 import { isCommandReport, renderCommandReport } from './report.js';
 import {
@@ -23,6 +24,7 @@ import {
   actionSentence,
   effectiveRisk,
   renderTypedLine,
+  riskSentences,
   riskWords,
   singleAction,
   withoutSecrets,
@@ -117,7 +119,8 @@ async function fillInputs(
   if (index < 0) index = open.length;
   while (index < open.length) {
     const input = open[index]!;
-    const where = `${action.label}${action.inputs.filter((candidate) => values[candidate.id]).map((candidate) => `  ›  ${candidate.kind === 'secret' ? '•••' : values[candidate.id]}`).join('')}`;
+    const shownValues = valuesAsShown(action.inputs, values);
+    const where = `${action.label}${action.inputs.filter((candidate) => values[candidate.id]).map((candidate) => `  ›  ${candidate.kind === 'secret' ? '•••' : shownValues[candidate.id]}`).join('')}`;
     const step = await askInput(command, action, input, values, ctx, where, `step ${index + 1} of ${open.length}`);
     if (step.kind === 'back') {
       if (index === 0) return 'back';
@@ -139,7 +142,7 @@ async function askSentence(action: ActionDescription<never>, values: ActionValue
   if (!ctx.confirm) { ctx.print(sentence); return true; }
   return ctx.confirm({
     title: action.label,
-    body: risk === 'none' ? sentence : `${sentence}\n\nThis ${riskWords(risk)}.`,
+    body: risk === 'none' ? sentence : `${sentence}\n\n${riskSentences(action, values)}`,
     confirmLabel: actionButton(action),
     cancelLabel: 'Back',
     tone: risk === 'none' ? 'primary' : 'danger',

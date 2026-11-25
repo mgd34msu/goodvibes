@@ -3,6 +3,13 @@
  * addresses purchases use, the repeat purchases you have allowed, and what
  * the daemon spent on models.
  *
+ * Spending starts with this conversation (its context, tokens, cost against the
+ * spending alert, its turns and its agents), supplied by the program holding
+ * it (conversation-spending.ts), above what the daemon recorded, by what it was
+ * for (a schedule, a piece of work, a web chat, a shared session), with where
+ * the daemon's own runs stand against the alert. A model with no price gets
+ * your own price there, as does the model this conversation uses.
+ *
  * Every list is read from the daemon (the card store, its settings, the
  * standing authorisations, its cost records) and follows the `payments` and
  * `spending` list changes, so a card added from the web UI, a repeat purchase
@@ -50,14 +57,43 @@ interface RepeatItem extends PlaceItem {
 }
 
 interface SpendItem extends PlaceItem {
-  readonly state: 'priced' | 'estimated' | 'unpriced';
+  /** `none`: the daemon recorded no model call in the window (one row says so). */
+  readonly state: 'priced' | 'estimated' | 'unpriced' | 'none';
   readonly kind: 'spend';
-  readonly model: string;
+  /** What it was for: `schedule "Morning brief"`, `work "Add retries"`, `chat "Plans"`, `conversation`. */
+  readonly source: string;
   readonly cost: string;
   readonly tokens: string;
+  /** The models that spent it (`provider:model`), each with whether it has a price. */
+  readonly models: readonly { readonly key: string; readonly priced: boolean }[];
+  /** The first of them with no price: the one its "give it a price" control prices. */
+  readonly unpricedModel?: string | undefined;
 }
 
-type Item = CardItem | AddressItem | RepeatItem | SpendItem;
+/** The spending alert against what the daemon's own runs cost in the last 24 hours (the daemon warns when they pass it). */
+interface AlertItem extends PlaceItem {
+  readonly state: 'alert-passed' | 'alert-under';
+  readonly kind: 'alert';
+  readonly usd: string;
+  readonly runs: string;
+}
+
+/** This conversation's rows above the daemon's (conversation-spending.ts), supplied by the program holding it. */
+interface HereItem extends PlaceItem {
+  readonly state: 'conversation' | 'turns' | 'agent';
+  readonly kind: 'here';
+  readonly title: string;
+  readonly right: string;
+  readonly attention: boolean;
+  readonly lines: readonly PlaceDetailLine[];
+  /** The conversation's row: the model in use as `provider:model`. */
+  readonly modelKey?: string | undefined;
+}
+
+type Item = CardItem | AddressItem | RepeatItem | SpendItem | AlertItem | HereItem;
+
+/** The program source the Spending tab lists above the daemon's records (wirePlaces supplies it). */
+export const SPENDING_HERE_SOURCE = 'spending-here';
 
 /** Text from another process, with control characters taken out. */
 function plain(value: unknown): string {
@@ -142,20 +178,40 @@ function repeats(output: unknown): readonly RepeatItem[] {
 
 function dollars(costUsd: unknown, state: unknown): string {
   if (typeof costUsd !== 'number' || !Number.isFinite(costUsd) || state === 'unpriced') return 'not priced';
-  const shown = costUsd > 0 && costUsd < 0.01 ? costUsd.toFixed(4) : costUsd.toFixed(2);
+  // Under a dollar, up to four places: $0.0243 is not shown as $0.02 beside an alert of $0.02.
+  const shown = costUsd > 0 && costUsd < 1 ? costUsd.toFixed(4).replace(/0{1,2}$/, '') : costUsd.toFixed(2);
   return `${state === 'estimated' ? 'about ' : ''}$${shown}`;
 }
 
-function spending(output: unknown): readonly SpendItem[] {
-  return rows(record(output).rows).filter((row) => plain(row.key)).map((row): SpendItem => {
-    const tokens = record(row.tokens);
-    const count = (value: unknown): number => typeof value === 'number' && Number.isFinite(value) ? value : 0;
-    const state = row.costState === 'unpriced' || row.costState === 'estimated' ? row.costState : 'priced';
-    return {
-      id: `model:${plain(row.key)}`, kind: 'spend', state, model: plain(row.key), cost: dollars(row.costUsd, row.costState),
-      tokens: `${count(tokens.inputTokens)} in, ${count(tokens.outputTokens)} out, ${count(tokens.cacheReadTokens)} read from cache, ${count(tokens.cacheWriteTokens)} written to cache`,
-    };
-  });
+/** `usage.by-source` split by what it was for, over 7 days (capabilities.run answers `{ data: { rows, alert } }`). */
+function spending(output: unknown): readonly (SpendItem | AlertItem)[] {
+  const data = record(record(output).data);
+  const items: (SpendItem | AlertItem)[] = [];
+  // Where the daemon's own runs stand against the spending alert, first when an alert is set.
+  const alert = record(data.alert);
+  if (typeof alert.usd === 'number' && alert.usd > 0) {
+    items.push({
+      id: 'alert:runs', kind: 'alert', state: alert.passed === true ? 'alert-passed' : 'alert-under',
+      usd: dollars(alert.usd, 'priced'), runs: dollars(typeof alert.runsUsd === 'number' ? alert.runsUsd : 0, 'priced'),
+    });
+  }
+  const recorded = rows(data.rows).filter((row) => plain(row.split) === 'source' && plain(row.key));
+  // The daemon recorded no model cost: one row says so, below this conversation's own (which the program lists).
+  if (recorded.length === 0) {
+    items.push({ id: 'source:none', kind: 'spend', state: 'none', source: 'Daemon, last 7 days', cost: 'nothing recorded', tokens: 'none', models: [] });
+    return items;
+  }
+  for (const row of recorded) {
+    const state = row.state === 'unpriced' || row.state === 'estimated' ? row.state : 'priced';
+    const models = rows(row.models).filter((model) => plain(model.key)).map((model) => ({ key: plain(model.key), priced: model.priced === true }));
+    const unpriced = models.find((model) => !model.priced);
+    items.push({
+      id: `source:${plain(row.key)}`, kind: 'spend', state, source: plain(row.key) === '(unattributed)' ? 'not named' : plain(row.key),
+      cost: dollars(row.costUsd, row.state), tokens: plain(row.tokens), models,
+      ...(unpriced ? { unpricedModel: unpriced.key } : {}),
+    });
+  }
+  return items;
 }
 
 /** A card, a repeat purchase or an address changed anywhere; the daemon recorded a model call's cost. */
@@ -244,21 +300,51 @@ export const MONEY_PLACE = definePlace<Item>({
       id: 'spending',
       label: 'Spending',
       noun: 'what the daemon spent on models',
-      source: { kind: 'daemon', method: 'cost.attribution.get', input: { window: '7d', dimension: 'model' }, items: spending },
+      // What the daemon recorded over 7 days, by what it was for (a schedule, a piece of work, a web chat, a shared
+      // session, a conversation it holds), with where its own runs stand against the spending alert.
+      source: { kind: 'daemon', method: 'capabilities.run', input: { id: 'usage.by-source', inputs: { window: '7d', by: 'source' } }, items: spending },
+      // This conversation first (its tokens, context, cost, turns and agents, as the program holding it keeps them): a
+      // session source, so the web view, which holds no conversation of a terminal program, lists the daemon's rows alone.
+      before: { kind: 'session', name: SPENDING_HERE_SOURCE, items: (raw) => (Array.isArray(raw) ? raw as HereItem[] : []) },
       follows: MONEY_CHANGES,
       empty: 'Nothing spent on models in the last 7 days.',
       row: (item) => {
+        if ((item as HereItem).kind === 'here') {
+          const here = item as HereItem;
+          return { title: here.title, right: here.right, mark: here.attention ? 'attention' : here.state === 'agent' ? 'running' : 'ok' };
+        }
+        if ((item as AlertItem).kind === 'alert') {
+          const alert = item as AlertItem;
+          return { title: 'Daemon runs, 24 hours', right: alert.state === 'alert-passed' ? 'over alert' : 'under alert', mark: alert.state === 'alert-passed' ? 'attention' : 'ok' };
+        }
         const spend = item as SpendItem;
-        return { title: spend.model, right: spend.cost, mark: spend.state === 'unpriced' ? 'attention' : 'ok' };
+        if (spend.state === 'none') return { title: spend.source, right: spend.cost, mark: 'paused' };
+        // Below the daemon's runs row, each what it was for over 7 days (the detail says so).
+        return { title: spend.source, right: spend.cost, mark: spend.state === 'unpriced' ? 'attention' : 'ok' };
       },
       detail: (item) => {
+        if ((item as HereItem).kind === 'here') return (item as HereItem).lines;
+        if ((item as AlertItem).kind === 'alert') {
+          const alert = item as AlertItem;
+          return [
+            { label: 'Spending alert', text: alert.usd },
+            { label: 'Last 24 hours', text: `${alert.runs}, what schedules, work, web chat and shared sessions cost on the daemon`, ...(alert.state === 'alert-passed' ? { tone: 'warning' as const } : {}) },
+            alert.state === 'alert-passed'
+              ? { text: 'More than the spending alert. The daemon says so once to your notification addresses, if you have set any.', tone: 'warning' as const }
+              : { text: 'Under the spending alert. When they pass it, the daemon says so once to your notification addresses, if you have set any.', tone: 'muted' as const },
+          ];
+        }
         const spend = item as SpendItem;
+        if (spend.state === 'none') {
+          return [{ text: 'The daemon recorded no model costs in the last 7 days.' }];
+        }
         return [
-          { label: 'Model', text: spend.model },
-          { label: 'In the last 7 days', text: spend.cost },
+          { label: 'For', text: spend.source },
+          { label: 'Daemon, last 7 days', text: spend.cost },
           { label: 'Tokens', text: spend.tokens },
-          ...(spend.state === 'unpriced' ? [{ label: 'Why no amount', text: 'the price list does not know this model, so its cost is not guessed', tone: 'muted' as const }] : []),
-          ...(spend.state === 'estimated' ? [{ label: 'About', text: 'some of its calls could not be priced, so the amount is less than the whole', tone: 'muted' as const }] : []),
+          ...spend.models.map((model) => ({ label: 'Model', text: model.priced ? model.key : `${model.key}, no price` })),
+          ...(spend.state === 'unpriced' ? [{ label: 'Why no amount', text: 'the price list does not know its model, so its cost is not guessed; give it your own price', tone: 'muted' as const }] : []),
+          ...(spend.state === 'estimated' ? [{ label: 'About', text: 'one of its models has no price, so the amount is less than the whole; give it your own price', tone: 'muted' as const }] : []),
         ];
       },
     },
@@ -272,11 +358,20 @@ export const MONEY_PLACE = definePlace<Item>({
     // What may be bought without asking: once, ahead of time, beside what a schedule may buy again.
     { key: 'a', list: 'repeats', whole: true, capability: 'payments.approve', label: 'approve one purchase ahead' },
     { key: 'b', list: 'spending', whole: true, capability: 'usage.by-source', label: 'every split' },
-    { key: 'u', list: 'spending', whole: true, capability: 'usage.open', label: 'this session' },
     { key: 'w', list: 'spending', whole: true, capability: 'usage.alert', label: 'spending alert' },
+    // The conversation's own row: shorten it now (This conversation's control, run where the conversation is).
+    { key: 'c', id: 'compact', list: 'spending', states: ['conversation'], capability: 'conversation.compact', label: 'shorten it now' },
+    // Your own price: for the model in use, on the conversation's row; for a model with no price, on the daemon's row it spent.
+    { key: 'p', id: 'price', list: 'spending', states: ['conversation'], capability: 'usage.price', label: 'your price for this model',
+      fill: { model: (item) => (item as HereItem).modelKey ?? '' } },
+    { key: 'p', id: 'price-unpriced', list: 'spending', states: ['unpriced', 'estimated'], capability: 'usage.price', label: 'give its model a price',
+      fill: { model: (item) => (item as SpendItem).unpricedModel ?? '' } },
   ],
   count: (lists) => {
     const incomplete = (lists.cards ?? []).filter((item) => item.state === 'incomplete').length;
-    return incomplete > 0 ? { count: incomplete, words: `${incomplete} card${incomplete === 1 ? '' : 's'} to add again`, tone: 'wrong' } : undefined;
+    if (incomplete > 0) return { count: incomplete, words: `${incomplete} card${incomplete === 1 ? '' : 's'} to add again`, tone: 'wrong' };
+    // The daemon's own runs cost more than the spending alert in the last 24 hours.
+    if ((lists.spending ?? []).some((item) => item.state === 'alert-passed')) return { count: 1, words: 'spending alert passed', tone: 'wrong' };
+    return undefined;
   },
 });

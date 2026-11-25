@@ -196,6 +196,9 @@ const skillsList: PlaceList<ToolsSkillsItem> = {
       ...(skill.missing.length > 0 ? [{ label: 'Missing', text: skill.missing.join(', '), tone: 'warning' as const }] : []),
       { label: 'Brought up by', text: skill.triggers.join(', ') || 'only when asked for' },
       ...(skill.tags.length > 0 ? [{ label: 'Tags', text: skill.tags.join(', ') }] : []),
+      // Who made it: the person, the model, or a file (its provenance says which, and where a copy came from).
+      ...(skill.state === 'found' ? [] : [{ label: 'Made by', text: skill.source === 'agent' ? 'the model' : skill.source === 'user' ? 'you' : skill.provenance || 'a skill file' }]),
+      ...(skill.provenance.startsWith('Copied from the file ') ? [{ label: 'Copied from', text: skill.provenance.slice('Copied from the file '.length), tone: 'muted' as const }] : []),
       { label: 'Found in', text: ORIGIN_WORDS[skill.origin] ?? (skill.origin || 'not said'), tone: 'muted' as const },
       { label: 'File', text: skill.path || 'not said', tone: 'muted' as const },
     ];

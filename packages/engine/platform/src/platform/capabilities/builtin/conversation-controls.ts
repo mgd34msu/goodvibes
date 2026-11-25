@@ -11,6 +11,8 @@
  * then says so in one line. Nothing here reaches a screen; the program draws
  * what changed.
  */
+import { homedir } from 'node:os';
+import { isAbsolute, relative } from 'node:path';
 import { CapabilityRefusal, REPLACED_DONE, type CapabilityDefinition, type FixedChoice, type InputDescription, type ListName } from '../types.js';
 import type { LiveConversation, UndoServices } from './conversation.js';
 import type { SessionsCapabilityServices } from './sessions.js';
@@ -52,7 +54,7 @@ export interface ConversationRecord {
 /** What the conversation's model is given and how hard it thinks. */
 export interface ConversationContext {
   /** What fills the context now, message by message (or the program's own screen for it); its words. */
-  show(): Promise<string>;
+  show(options?: { readonly opensScreen?: boolean | undefined }): Promise<string>;
   /** The project instruction files read into each turn; undefined where this program does not list them. */
   readonly instructionFiles: (() => Promise<string>) | undefined;
   /** What this conversation's last turns were given (memories, persona, skills, routines, what was left out); undefined where the program keeps no such record. */
@@ -210,7 +212,7 @@ export const CONVERSATION_TITLE: CapabilityDefinition<TurnServices> = {
   capability: { id: 'conversation.title', group: 'conversation', home: 'session', repeat: 'safe' },
   actionId: 'title', label: 'Give this chat a title', word: '',
   inputs: [{ id: 'text', label: 'Title', help: 'Its new title: the name this chat goes by', kind: 'text', freeTextReason: 'your own words', required: true, typed: { tail: true } }],
-  sentence: 'The title, the name this conversation (this chat) goes by, becomes {text} until you change it.', done: '',
+  sentence: 'The title, the name this conversation (the chat open here, not a saved session) goes by, becomes {text} until you change it.', done: '',
   touches: 'this-machine', lasts: 'kept', risk: 'none', button: 'Set the title', example: { text: 'release notes' },
   async run(values, services) {
     const turns = need(services.turns, 'A conversation title');
@@ -308,16 +310,24 @@ export const SESSION_SAVE_FILE: CapabilityDefinition<RecordServices> = {
       { value: 'nothing', label: 'Nothing more' }, { value: 'open', label: 'Open it in the browser', help: 'A web page only' }, { value: 'copy', label: 'Copy its path' },
     ], required: { default: 'nothing', defaultMeans: 'nothing more' }, typed: { flag: '--then' } },
   ],
-  sentence: 'This conversation (the chat) will be exported to the file {path} as {format} (Markdown, text, a web page or JSON) on this machine, until you change it.', done: '',
+  sentence: 'This conversation (the chat) is exported to a file on this machine, as Markdown, plain text, a web page or JSON; the answer says where it is.', done: '',
   touches: 'this-machine', lasts: 'kept', risk: 'none', example: { format: 'html', path: 'notes/session.html' },
   async run(values, services) {
     const record = need(services.record, 'Saving this conversation as a file');
     if (values.path && values.replace !== 'yes' && record.fileExists(values.path)) {
       throw new CapabilityRefusal(`${values.path} already exists; nothing was written.`, 'Choose "Write over it" for "If the file exists", or another file');
     }
-    const text = await record.saveFile({
+    const said = await record.saveFile({
       format: (values.format || 'markdown') as 'markdown' | 'text' | 'html' | 'json', path: values.path ?? '',
       redact: values.redact !== 'keep', open: values.open === 'open', copy: values.open === 'copy',
+    });
+    // A file in the project is named from the project's folder (`exports/session.md`): a whole path is one long run a
+    // screen's outcome line cannot show.
+    const text = said.replace(/(\/[^\s/]+)+\/[^\s/]+/g, (path) => {
+      const inProject = relative(process.cwd(), path);
+      if (inProject && !inProject.startsWith('..') && !isAbsolute(inProject)) return inProject;
+      const home = homedir();
+      return path.startsWith(`${home}/`) ? `~/${path.slice(home.length + 1)}` : path;
     });
     return { text, data: { format: values.format || 'markdown', path: values.path ?? '' } };
   },
@@ -325,9 +335,9 @@ export const SESSION_SAVE_FILE: CapabilityDefinition<RecordServices> = {
 
 export const SESSION_BRANCH: CapabilityDefinition<RecordServices> = {
   capability: { id: 'session.branch', group: 'conversation', home: 'session', repeat: 'unsafe' },
-  actionId: 'branch', label: 'Branch this conversation here', word: 'branch',
+  actionId: 'branch', label: 'Branch this chat here', word: 'branch',
   inputs: [{ id: 'name', label: 'Name', help: 'A name for the branch', kind: 'text', freeTextReason: 'a name you choose', required: { default: '', defaultMeans: 'a numbered name' }, typed: { tail: true } }],
-  sentence: 'A branch of the conversation is kept as it is now, under the name given, to come back to and try something else from; you go on in the current one, until you change it.', done: '',
+  sentence: 'A branch of this chat is kept as it is now, under the name given, to come back to and try something else from; you go on in the current one, until you change it.', done: '',
   touches: 'this-machine', lasts: 'kept', risk: 'none', example: { name: 'before refactor' },
   async run(values, services) {
     return { text: await need(services.record, 'Branching this conversation').branch(values.name ?? '') };
@@ -343,8 +353,9 @@ export const CONTEXT_SHOW: CapabilityDefinition<ContextServices> = {
   actionId: 'see', label: 'See what fills the context', word: 'show', inputs: [],
   sentence: 'Shows how many tokens each message of this conversation takes, and the total.', done: '',
   touches: 'reads', lasts: 'not-a-change', risk: 'none', example: {},
-  async run(_values, services) {
-    return { text: await need(services.context, 'What fills the context').show() };
+  // The program's own screen for it opens only on the person's press; a model reads the words.
+  async run(_values, services, caller) {
+    return { text: await need(services.context, 'What fills the context').show({ opensScreen: caller.personAsked === true }) };
   },
 };
 
@@ -562,7 +573,8 @@ export const QUEUE_EDIT: CapabilityDefinition<QueueServices> = {
   capability: { id: 'queue.edit', group: 'conversation', home: 'session', repeat: 'safe' },
   actionId: 'edit', label: 'Change a queued message', word: 'edit',
   inputs: [QUEUED_MESSAGE, { id: 'text', label: 'New text', help: 'What it says instead', kind: 'long-text', freeTextReason: 'your own words', required: true, typed: { tail: true } }],
-  sentence: 'Queued message {message} is sent as {text} instead, when the running turn ends.', done: '',
+  // The message is named by what it says in the answer; its id never reaches a sentence a person reads.
+  sentence: 'The queued message you chose is sent as {text} instead, when the running turn ends.', done: '',
   touches: 'this-machine', lasts: 'not-a-change', risk: 'none', example: { message: '1', text: 'also check the tests' },
   available: (services) => services.queue !== undefined,
   async run(values, services) {
@@ -577,7 +589,7 @@ export const QUEUE_DELETE: CapabilityDefinition<QueueServices> = {
   capability: { id: 'queue.delete', group: 'conversation', home: 'session', repeat: 'safe' },
   actionId: 'delete', label: 'Take back a queued message', word: 'delete',
   inputs: [QUEUED_MESSAGE],
-  sentence: 'Queued message {message} is taken back and never sent.', done: '',
+  sentence: 'The queued message you chose is taken back and never sent.', done: '',
   touches: 'this-machine', lasts: 'kept', risk: 'cannot-be-undone', example: { message: '1' },
   available: (services) => services.queue !== undefined,
   async run(values, services) {
@@ -668,10 +680,10 @@ export const HOSTED_SEND_LATER: CapabilityDefinition<SessionsCapabilityServices>
   sentence: '"{text}" will wait and run after the current turn of the hosted session this terminal joined.', done: '',
   touches: 'this-machine', lasts: 'not-a-change', risk: 'none', example: { text: 'then update the changelog' },
   available: (services) => services.hostedJoin?.sendLater !== undefined,
-  async run(values, services) {
+  async run(values, services, caller) {
     const later = services.hostedJoin?.sendLater;
     if (!later) throw new CapabilityRefusal('Only the terminal app joins hosted sessions; this program cannot queue a message for one.', undefined, 'UNAVAILABLE');
-    return { text: await later((values.text ?? '').trim()) };
+    return { text: await later((values.text ?? '').trim(), caller.personAsked === true) };
   },
 };
 

@@ -32,7 +32,7 @@ import { PREVIOUS_FILE_SUFFIX, sha256 } from '../platform/src/platform/runtime/s
 import { nativeCohortFixture } from './_helpers/daemon-native-cohort.ts';
 import { RELEASE_EVIDENCE_PRODUCT_IDS } from '../platform/src/platform/runtime/native-cohort-table.ts';
 import { NATIVE_READER_REQUIREMENT_FILE, createNativeDataWriteOwner } from '../platform/src/platform/runtime/native-reader-compatibility.ts';
-import { readManagedDefinitionOwner } from '../terminal-shell/src/managed-daemon-service.ts';
+import { readManagedDefinitionOwner } from '../platform/src/platform/daemon/managed-daemon-service.ts';
 import { VERSION } from '../platform/src/platform/version.ts';
 
 const scratchDirs: string[] = [];

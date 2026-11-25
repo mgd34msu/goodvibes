@@ -170,8 +170,8 @@ const sharedOwners = new WeakMap<object, GoogleConnectionOwner>();
 
 /**
  * The connection owner of one scope (an Agent session's secret store), made
- * on first use, so the `google` tool and the `/google` commands of a session
- * share one token manager.
+ * on first use, so every Google request made with that store (the `google`
+ * tool, the daemon's calendar and mail) shares one token manager.
  */
 export function sharedGoogleConnectionOwner(scope: object, create: () => GoogleConnectionOwner): GoogleConnectionOwner {
   const existing = sharedOwners.get(scope);

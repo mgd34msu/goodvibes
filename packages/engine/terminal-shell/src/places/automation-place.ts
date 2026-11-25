@@ -255,8 +255,16 @@ function checkins(output: unknown): readonly CheckinItem[] {
   }));
 }
 
-/** What every list follows: the automation domain's frames, and the three lists that say when they change. */
-const AUTOMATION_EVENTS = { domains: ['automation'], events: ['automation'], lists: ['triggers', 'ci-watches', 'check-ins'] } as const;
+/**
+ * What each list follows: its own source's notice only (a trigger change does not read the CI watches again).
+ * Schedules and runs: the automation domain's frames; triggers and the commands they may run: LIST_CHANGED `triggers`
+ * (triggers/manager.ts); CI watches: `ci-watches`; check-ins: `check-ins`. A capability that acts on a list is heard by
+ * it besides (LIST_CHANGED `capabilities`, place-modal.ts followPlace).
+ */
+const AUTOMATION_EVENTS = { domains: ['automation'], events: ['automation'] } as const;
+const TRIGGER_EVENTS = { domains: [], events: [], lists: ['triggers'] } as const;
+const CI_EVENTS = { domains: [], events: [], lists: ['ci-watches'] } as const;
+const CHECKIN_EVENTS = { domains: [], events: [], lists: ['check-ins'] } as const;
 
 export const AUTOMATION_PLACE = definePlace<Item>({
   id: 'automation',
@@ -324,7 +332,7 @@ export const AUTOMATION_PLACE = definePlace<Item>({
       label: 'Triggers',
       noun: 'your triggers',
       source: { kind: 'daemon', method: 'watchers.triggers.list', input: {}, items: triggers },
-      follows: AUTOMATION_EVENTS,
+      follows: TRIGGER_EVENTS,
       empty: 'No triggers yet: nothing is watched.',
       row: (item) => {
         const trigger = item as TriggerItem;
@@ -353,7 +361,7 @@ export const AUTOMATION_PLACE = definePlace<Item>({
       label: 'Commands',
       noun: 'the commands triggers may run',
       source: { kind: 'daemon', method: 'watchers.triggers.grant.list', input: {}, items: grants },
-      follows: AUTOMATION_EVENTS,
+      follows: TRIGGER_EVENTS,
       empty: 'Triggers may run no command yet.',
       row: (item) => ({ title: item.id, right: (item as GrantItem).command, mark: 'ok' }),
       detail: (item) => {
@@ -373,7 +381,7 @@ export const AUTOMATION_PLACE = definePlace<Item>({
       label: 'CI watches',
       noun: 'your CI watches',
       source: { kind: 'daemon', method: 'ci.watches.list', input: {}, items: watches },
-      follows: AUTOMATION_EVENTS,
+      follows: CI_EVENTS,
       empty: 'No CI watches yet.',
       row: (item) => {
         const watch = item as WatchItem;
@@ -399,7 +407,7 @@ export const AUTOMATION_PLACE = definePlace<Item>({
       label: 'Check-ins',
       noun: 'what the check-ins did',
       source: { kind: 'daemon', method: 'checkin.receipts.list', input: { limit: 20 }, items: checkins },
-      follows: AUTOMATION_EVENTS,
+      follows: CHECKIN_EVENTS,
       empty: 'No check-ins yet. Whether they run, how often and where they go are in Settings.',
       row: (item) => {
         const checkin = item as CheckinItem;
@@ -454,6 +462,8 @@ export const AUTOMATION_PLACE = definePlace<Item>({
     { key: 'x', list: 'ci', capability: 'ci.unwatch', label: 'stop watching', fill: { watch: 'id' } },
     // Check-ins.
     { key: 'g', list: 'checkins', whole: true, capability: 'checkin.run', label: 'check in now' },
+    // The settings of scheduled routines, watchers and triggers (the setup topic's form), from every tab.
+    { key: 'o', capability: 'setup.automation', label: 'automation settings' },
   ],
   count: (lists) => {
     const failedSchedules = (lists.schedules ?? []).filter((item) => (item as ScheduleItem).trouble !== undefined).length;

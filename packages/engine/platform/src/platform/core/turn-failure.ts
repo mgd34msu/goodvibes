@@ -9,6 +9,7 @@
  * error's wording, and asks no model. Pure, with no Node imports, so the
  * browser renders the same row from the same facts.
  */
+import { CONTENT_FILTER_CODES, isContextRefusalCode, MODEL_NOT_FOUND_CODE } from './provider-refusal-codes.js';
 
 /** Why a turn was refused before any request was made. */
 export type TurnRefusalReason =
@@ -71,6 +72,8 @@ export interface TurnFailureInput {
   readonly status?: number | undefined;
   /** A connection errno or machine code (ECONNREFUSED). */
   readonly code?: string | undefined;
+  /** The provider's own error code for a refusal (`context_length_exceeded`, `content_filter`, `model_not_found`). */
+  readonly providerCode?: string | undefined;
   /** Requests made to the provider that failed last, for the request that failed. */
   readonly attempts?: number | undefined;
   /** When each of those requests was sent, epoch ms. */
@@ -93,6 +96,8 @@ export interface TurnFailureInput {
   readonly refusal?: TurnRefusalReason | undefined;
   /** The command that starts the GoodVibes service, for `daemon-unreachable`. */
   readonly startCommand?: string | undefined;
+  /** The provider refused the request as too long for the model's context window (its error code said so). */
+  readonly contextTooLong?: boolean | undefined;
 }
 
 /** What a turn's successful tool calls changed, as its runner recorded them (TURN_ERROR carries the same fields). */
@@ -149,6 +154,11 @@ function changedReading(input: TurnFailureInput): TurnFailureReading['changed'] 
   return { text: sentence(`${list.charAt(0).toUpperCase()}${list.slice(1)} before it stopped`), ...facts };
 }
 
+/** The provider refused the conversation as too long for the model: said so by the turn, or by the provider's code. */
+function tooLong(input: TurnFailureInput): boolean {
+  return input.contextTooLong === true || isContextRefusalCode(input.providerCode);
+}
+
 function causeOf(input: TurnFailureInput, provider: string): string {
   switch (input.refusal) {
     case 'no-provider':
@@ -164,6 +174,11 @@ function causeOf(input: TurnFailureInput, provider: string): string {
   if (stop === 'hook_denied') return sentence(`A hook stopped the request: ${firstLine(input.error) || 'it gave no reason'}`);
   if (stop === 'tool_loop_circuit_breaker') return 'It kept repeating the same failing tool calls, so GoodVibes stopped it.';
   const status = input.status;
+  const shownStatus = status !== undefined ? ` (${status})` : '';
+  // Too long for the model: the conversation, not the provider, is what to change.
+  if (tooLong(input)) return `The conversation is too long for ${input.model ?? 'this model'}: ${provider} refused it${shownStatus}${count}.`;
+  if (input.providerCode !== undefined && CONTENT_FILTER_CODES.has(input.providerCode)) return `${provider}'s content filter refused this request${shownStatus}${count}.`;
+  if (input.providerCode === MODEL_NOT_FOUND_CODE) return `${provider} does not have ${input.model ?? 'this model'}${shownStatus}.`;
   if (status === 401 || status === 403) return `${provider} refused the API key (${status})${count}.`;
   if (status === 429) return `${provider} turned the request away for too many requests (429)${count}.`;
   if (status !== undefined) return `${provider} returned an error (${status})${count}.`;
@@ -203,12 +218,20 @@ export function readTurnFailure(input: TurnFailureInput): TurnFailureReading {
       next.push({ action: 'choose-model', label: 'choose another model' });
       next.push({ action: 'retry', label: 'send it anyway (asks again)' });
       break;
-    case undefined:
+    case undefined: {
+      const long = tooLong(input);
+      const filtered = input.providerCode !== undefined && CONTENT_FILTER_CODES.has(input.providerCode);
+      const noModel = input.providerCode === MODEL_NOT_FOUND_CODE;
       if (input.status === 401 || input.status === 403) next.push({ action: 'sign-in', label: 'sign in again' });
-      else next.push({ action: 'retry', label: 'try again' });
-      if (providerFailed) next.push({ action: 'other-model', label: 'use another model' });
+      else if (noModel) next.push({ action: 'choose-model', label: 'choose another model' });
+      else next.push({ action: 'retry', label: long ? 'try again once shorter' : filtered ? 'try again once rephrased' : 'try again' });
+      if (providerFailed && !noModel) next.push({ action: 'other-model', label: long ? 'use a model that takes more' : 'use another model' });
       next.push({ action: 'details', label: 'details' });
+      // The next step for a conversation too long for the model: shorten it.
+      if (long) also = 'first shorten the conversation: /compact, or "Compact the conversation now" in This conversation';
+      else if (filtered) also = 'first rephrase what was asked';
       break;
+    }
   }
   const details: { label: string; value: string }[] = [];
   const add = (label: string, value: string | number | undefined): void => {
@@ -219,6 +242,7 @@ export function readTurnFailure(input: TurnFailureInput): TurnFailureReading {
   add('Model', input.model);
   add('Status', input.status);
   add('Code', input.code);
+  add('Provider code', input.providerCode);
   add('Attempts', input.attempts);
   if (input.attemptTimes && input.attemptTimes.length > 0) add('Times', input.attemptTimes.map(clock).join(', '));
   add('Fallback', input.fallbackNote);
@@ -232,7 +256,8 @@ export function readTurnFailure(input: TurnFailureInput): TurnFailureReading {
     ...(input.attempts !== undefined && input.attempts > 0 ? { attempts: { count: input.attempts, times: [...(input.attemptTimes ?? [])] } } : {}),
     next,
     ...(also ? { also } : {}),
-    ...(providerFailed && input.fallbackOrderSet === false ? { tip: { text: TIP_TEXT, command: TIP_COMMAND } } : {}),
+    // A backup model is no answer to a conversation that is too long: the tip is for a provider that failed otherwise.
+    ...(providerFailed && input.fallbackOrderSet === false && !tooLong(input) ? { tip: { text: TIP_TEXT, command: TIP_COMMAND } } : {}),
     details,
   };
 }

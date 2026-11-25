@@ -101,6 +101,47 @@ export function readModeCategory(readModes: ToolReadModes, args: Record<string, 
 }
 
 /**
+ * The calls of a tool that dispatches on one argument (a capability id) that only tighten a protection: plan mode
+ * on, a folder restricted, a "never" rule added, a protection switched on. Such a call is classed a read and allowed
+ * as a fact (gate/classify.ts), in every mode and in a restricted folder: a model is never refused or asked about it.
+ * `values` tighten whatever else the call says; a value in `when` tightens only with one of the listed argument
+ * values (a rule that refuses or asks, not one that allows).
+ */
+export interface ToolTightens {
+  readonly field: ToolArgumentPath;
+  readonly values: readonly string[];
+  readonly when?: Readonly<Record<string, readonly { readonly path: ToolArgumentPath; readonly values: readonly string[] }[]>> | undefined;
+}
+
+/** Whether this call only tightens a protection, by the tool's {@link ToolTightens}. */
+export function callOnlyTightens(tightens: ToolTightens, args: Record<string, unknown>): boolean {
+  const named = readModeValues(args, tightens.field, undefined);
+  if (named === undefined || named.length !== 1 || typeof named[0] !== 'string') return false;
+  const value = named[0].trim();
+  if (tightens.values.includes(value)) return true;
+  const conditions = tightens.when?.[value];
+  if (!conditions || conditions.length === 0) return false;
+  return conditions.every((condition) => {
+    const given = readModeValues(args, condition.path, undefined);
+    return given !== undefined && given.length > 0 && given.every((entry) => typeof entry === 'string' && condition.values.includes(entry));
+  });
+}
+
+/**
+ * A tool whose calls write only the model's own working state (its running checklist): not an act on the person's
+ * things, so the gate allows it as a fact in every mode, with or without a decision model, never held or asked
+ * (gate/classify.ts). `true`: every call; `{ field, values }`: a call naming one of `values` (a capability id).
+ */
+export type ToolOwnWorkingState = true | { readonly field: ToolArgumentPath; readonly values: readonly string[] };
+
+/** Whether this call writes only the model's own working state, by the tool's {@link ToolOwnWorkingState}. */
+export function callWritesOwnWorkingState(own: ToolOwnWorkingState, args: Record<string, unknown>): boolean {
+  if (own === true) return true;
+  const named = readModeValues(args, own.field, undefined);
+  return named !== undefined && named.length === 1 && typeof named[0] === 'string' && own.values.includes(named[0].trim());
+}
+
+/**
  * The argument values that make a call an act only the owner performs himself
  * (gate/classify.ts `owner-act`): a model's call carrying one is refused in
  * every mode. `values` are read from the published declaration of what is
@@ -111,6 +152,16 @@ export interface ToolOwnerActs {
   readonly values: readonly string[];
   /** Each value's act in its own words ("Start a remote runner on a task"), for the refusal a model is given. */
   readonly words?: Readonly<Record<string, string>> | undefined;
+  /**
+   * The values among `values` that are put to the owner instead of refused (every capability: capability_run):
+   * asked in every mode, opening on No, run on his yes (gate/classify.ts). The others stay refused to a model.
+   */
+  readonly asked?: readonly string[] | undefined;
+  /**
+   * The values among `asked` whose answer is never remembered: each call is asked on its own (a card's detail typed
+   * by the owner, `card.enter`). No remembered yes stands in for him, and the ask offers none.
+   */
+  readonly once?: readonly string[] | undefined;
 }
 
 /**
@@ -138,6 +189,12 @@ export interface ToolOwnerDecisions {
    * text), the argument and the values that do (`loosen-security`).
    */
   readonly loosensWhen?: Readonly<Record<string, readonly { readonly path: ToolArgumentPath; readonly values: readonly string[] }[]>> | undefined;
+  /**
+   * For a value whose call cannot be undone only with some arguments (a reset of
+   * a setting that holds a credential), the argument and the values that make it
+   * so (`irreversible-operator`).
+   */
+  readonly irreversibleWhen?: Readonly<Record<string, readonly { readonly path: ToolArgumentPath; readonly values: readonly string[] }[]>> | undefined;
 }
 
 /** A tool whose changes are recorded where the owner can undo them, except when a listed argument is present. */
@@ -184,6 +241,10 @@ export interface ToolDefinition {
   recoverable?: ToolRecoverability | undefined;
   /** The argument values with which a call only reads; see {@link ToolReadModes}. */
   readModes?: ToolReadModes | undefined;
+  /** The calls that only tighten a protection; see {@link ToolTightens}. */
+  tightens?: ToolTightens | undefined;
+  /** The calls that write only the model's own working state (its checklist); see {@link ToolOwnWorkingState}. */
+  ownWorkingState?: ToolOwnWorkingState | undefined;
   /**
    * A tool the model reaches for on nearly every task: every model request
    * carries its full definition. Any other tool goes as a one-line entry whose
@@ -222,6 +283,19 @@ export interface ToolDefinition {
    * surface without command authority still apply here first.
    */
   hostDecides?: ToolOwnerActs | undefined;
+  /**
+   * Calls of this tool that act on what the daemon holds and work in no project folder (a `capability_run` of a
+   * capability whose home is the daemon): the folder's trust neither refuses nor asks about them. They are decided as
+   * any other call (asked, opening on No, when the owner decides them); only the folder is not theirs. Folder trust
+   * holds a turn's own work in the folder (file writes, commands).
+   */
+  outsideFolder?: (ToolOwnerActs & {
+    /**
+     * Values outside the folder only with these arguments (a `secrets.set` or `mcp.add` kept for all your projects,
+     * `inputs.scope`): every condition must hold, each argument given and one of its values; else held to the folder.
+     */
+    readonly when?: Readonly<Record<string, readonly { readonly path: ToolArgumentPath; readonly values: readonly string[] }[]>> | undefined;
+  }) | undefined;
   /** Calls of this tool the owner decides, and where a sending call's recipients sit; see {@link ToolOwnerDecisions}. */
   ownerDecisions?: ToolOwnerDecisions | undefined;
   /**
@@ -319,6 +393,14 @@ export interface ToolResult {
   hostEvidence?: ToolHostEvidence | undefined;
   /** True when the call's arguments did not match the tool's schema: nothing ran, and the model was asked to send it again. */
   malformed?: boolean | undefined;
+  /**
+   * True when the call was held back only to load its tool's parameters (a tool
+   * the request listed in one line, called with arguments that do not fit it):
+   * nothing ran, and the answer carries the full definition. It is not a
+   * refusal of the call: the model's retry runs, and the turn's repeat and
+   * failed-round rules do not count it.
+   */
+  heldToLoad?: boolean | undefined;
   /** The line a person reads for this result in place of the model-facing text; never sent to the model. */
   ownerLine?: string | undefined;
   /**
@@ -382,6 +464,13 @@ export interface Tool {
    * call is laned by its definition alone.
    */
   callReadsOnly?: ((args: Record<string, unknown>) => boolean) | undefined;
+  /**
+   * What refuses this call for a reason known before anyone decides it (inputs that do not fit, a target that does
+   * not exist, a described time with no decision model to read it): the words the model gets, read after the call's
+   * arguments were checked and before the gate, so nobody is asked about a call that would then fail. Undefined: the
+   * gate decides it. Only reads; never a permission grant. A throw is not a refusal: the gate decides the call.
+   */
+  refuseBeforeGate?: ((args: Record<string, unknown>, opts: { readonly signal?: AbortSignal | undefined }) => Promise<string | undefined>) | undefined;
   /** Tools return a result without callId, the registry injects callId when wrapping. */
   execute(args: Record<string, unknown>, opts?: ToolExecuteOptions): Promise<Omit<ToolResult, 'callId'>>;
 }

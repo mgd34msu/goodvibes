@@ -10,13 +10,13 @@
  */
 import {
   ARTIFACTS_LIST, DOCUMENTS_LIST, DOCUMENT_COMMENTS_LIST, DOCUMENT_SUGGESTIONS_LIST, NOTES_LIST, PERSONAS_LIST, PERSONA_FILES_LIST,
-  ROUTINES_LIST, ROUTINE_FILES_LIST, ROUTINE_RECEIPTS_LIST,
+  ROUTINES_LIST, ROUTINE_FILES_LIST, ROUTINE_RECEIPTS_LIST, AGENT_HOMES_LIST, AGENT_STARTERS_LIST,
 } from '@goodvibes/engine/platform/platform/capabilities';
 import { defineList, type ListRow } from '../command-actions/lists.js';
 import { runDaemonCapability, type DaemonCapabilityBinding } from '../command-actions/capability-actions.js';
 import type { CommandActionContext, ListName } from '../command-actions/types.js';
 import {
-  DRAFT_WORDS, REVIEW_WORDS, RUNNING_WORDS, artifactItems, draftItems, noteItems, personaItems, reviewOf, routineItems,
+  DRAFT_WORDS, REVIEW_WORDS, RUNNING_WORDS, artifactItems, draftItems, homeItems, noteItems, personaItems, reviewOf, routineItems, starterItems,
 } from './memory-stores-entries.js';
 
 const text = (value: unknown): string => typeof value === 'string' ? value : '';
@@ -72,5 +72,9 @@ storeList(DOCUMENT_COMMENTS_LIST, 'documents.list', { limit: '1000' }, (output, 
 storeList(DOCUMENT_SUGGESTIONS_LIST, 'documents.list', { limit: '1000' }, (output, earlier) => list(draftOf(output, earlier)['suggestions']).filter((suggestion) => suggestion['state'] === 'proposed' && text(suggestion['id']))
   .map((suggestion): ListRow => ({ value: text(suggestion['id']), label: plain(suggestion['summary']) || text(suggestion['id']), state: plain(suggestion['state']) })),
   operator('documents.list', 'documents', 'id', 'summary', { where: { field: 'id', equals: '{document}' }, each: 'suggestions', state: 'state' }));
+storeList(AGENT_HOMES_LIST, 'agent-home.list', {}, (output) => homeItems(output).map((home): ListRow => ({ value: home.id, label: home.id, detail: home.home, ...(home.state === 'starts-next' ? { state: 'starts next' } : {}) })),
+  operator('agent-home.list', 'homes', 'id', 'id', { detail: 'home', state: 'state' }));
+storeList(AGENT_STARTERS_LIST, 'agent-home.starters', {}, (output) => starterItems(output).map((starter): ListRow => ({ value: starter.id, label: starter.name, ...(starter.description ? { detail: starter.description } : {}), state: starter.state === 'yours' ? 'yours' : 'built in' })),
+  operator('agent-home.starters', 'starters', 'id', 'name', { detail: 'description', state: 'state' }));
 storeList(ARTIFACTS_LIST, 'artifacts.list', { limit: '1000' }, (output) => artifactItems(output).map((artifact): ListRow => ({ value: artifact.id, label: artifact.name, detail: [artifact.state, artifact.mimeType].filter(Boolean).join(', '), state: artifact.createdAt.slice(0, 10) })),
   operator('artifacts.list', 'artifacts', 'id', 'name', { detail: 'mimeType', state: 'kind' }));

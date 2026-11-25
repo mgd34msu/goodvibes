@@ -20,7 +20,7 @@ export interface HITLModeDefinition {
 
 export const HITL_QUIET: HITLModeDefinition = {
   name: 'quiet',
-  description: 'Prints less: only warnings and errors toast; routine notices and notifications go to the history (/notifications). Batches updates in 5s windows.',
+  description: 'Prints less: only warnings and errors toast; routine notices and notifications go to the notices, counted on the status bar. Batches updates in 5s windows.',
   defaultDomainVerbosity: 'minimal',
   quietWhileTyping: true,
   batchWindowMs: 5_000,

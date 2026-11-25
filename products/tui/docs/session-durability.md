@@ -12,7 +12,7 @@ the session's title, model and message count, so listing sessions reads one line
 
 Saved sessions are kept until you delete them. The start-up retention sweep that bounds agent
 journals, logs and crash snapshots (`atRest.retentionMaxAgeDays`, `atRest.retentionMaxTotalMb`) never removes
-a saved conversation, whether it was saved at turn end or with `/session save`.
+a saved conversation, whether it was saved at turn end or with "Save this session under a name" (This conversation).
 
 ## Crash snapshot
 
@@ -48,7 +48,7 @@ file was kept is matched by its session id, as it always was.
 A terminal that has a session open holds that session's lock: an empty file under
 `~/.goodvibes/shared/owner-askers/`, locked with an operating-system lock that is released when the
 process ends, however it ends. It is taken when the session becomes the live one and moves when the
-session id moves (a resume, a fork, `/session save <name>`, a recovery restore); a clean close
+session id moves (a resume, a fork, a save under another name, a recovery restore); a clean close
 removes the file while still holding it. Nothing refreshes it and no process id or age is compared,
 so a crashed terminal never reads as open and a crash relaunched at once is offered at once. The
 owner inbox reads the same lock to tell whether the session that asked a question is open now.
@@ -91,7 +91,7 @@ that turn that had not finished. A completed turn is never lost.
 
 ## Side branches left out of a restore
 
-A saved side branch (made with `/session branch`) that this version cannot read is left out of a resume or
+A saved side branch (made with "Branch this chat here", in This conversation) that this version cannot read is left out of a resume or
 crash restore, and the transcript names it and the reason. The rest of the session is restored;
 the next save of that session is written without the branch.
 
@@ -99,8 +99,8 @@ the next save of that session is written without the branch.
 
 If a session was killed before the first snapshot was written (i.e., no last-session pointer
 exists), `--continue` and a bare `--resume` print "No previous conversation to continue. This is
-a new one; /session list shows saved ones." in the transcript and then start as a plain launch
+a new one; the Sessions place lists saved ones." in the transcript and then start as a plain launch
 would: first run when the model is not ready yet, otherwise a fresh conversation. **Recovery path:** the startup recovery
 modal (see "The startup recovery modal" in [getting-started.md](getting-started.md)) offers to
-resume from the recovery snapshot if one exists, or use `/session resume <id>` once a snapshot
+resume from the recovery snapshot if one exists, or use `/resume <id>` once a snapshot
 exists.

@@ -28,6 +28,7 @@
  */
 
 import { createHash } from 'node:crypto';
+import { isAbsolute } from 'node:path';
 import { readReasoningEffortLevel } from '../providers/reasoning-effort.js';
 import { EngineErrorCodes, isOperationKey, OPERATION_KEY_RULE, readRefusal, refusal, refusalErrorBody, type Refusal } from '@goodvibes/engine/errors';
 import { logger } from '../utils/logger.js';
@@ -214,6 +215,15 @@ export async function dispatchCompanionChatRoutes(
 // POST /api/companion/chat/sessions
 // ---------------------------------------------------------------------------
 
+/** The chat's project folder from the request's call context: the body's `workingDirectory`, else the header. */
+function chatProjectOf(body: Record<string, unknown>, req: Request): string | undefined {
+  const named = body['workingDirectory'];
+  if (typeof named === 'string' && named.trim().length > 0) return named.trim();
+  const header = req.headers.get('x-goodvibes-project');
+  if (!header) return undefined;
+  try { return decodeURIComponent(header).trim() || undefined; } catch { return undefined; }
+}
+
 async function handleCreateSession(
   req: Request,
   context: CompanionChatRouteContext,
@@ -248,7 +258,13 @@ async function handleCreateSession(
     provider: hasProvider ? (body['provider'] as string) : (resolvedDefaults?.provider ?? undefined),
     reasoningEffort: reasoningEffort === null ? null : readReasoningEffortLevel(reasoningEffort) ?? resolvedDefaults?.reasoningEffort,
     systemPrompt: typeof body['systemPrompt'] === 'string' ? body['systemPrompt'] : undefined,
+    // The project the chat works in: the web UI's chosen project, given as the call context's folder (the body's
+    // `workingDirectory`, as capabilities.run takes it, else the `x-goodvibes-project` header).
+    project: chatProjectOf(body, req),
   };
+  if (input.project !== undefined && !isAbsolute(input.project)) {
+    return Response.json({ error: 'workingDirectory must be an absolute folder', code: 'INVALID_ARGUMENT' }, { status: 400 });
+  }
 
   if (shouldResolveDefaults
     && (!input.provider || !input.model)
@@ -769,7 +785,9 @@ function respondWithManagerError(err: unknown): Response {
  * historical answer, because the router already validated the credential.
  */
 function isOwnerRequest(req: Request, context: CompanionChatRouteContext): boolean {
-  return context.requireAdmin ? context.requireAdmin(req) === null : true;
+  // The daemon's own authority, and the owner himself: an admin who is not the owner sends someone else's input
+  // (security/turn-input-party.ts), which the chat's turn runs under (companion-chat-manager.ts launchTurn).
+  return (context.requireAdmin ? context.requireAdmin(req) === null : true) && (context.isOwnerCaller?.(req) ?? true);
 }
 
 /**

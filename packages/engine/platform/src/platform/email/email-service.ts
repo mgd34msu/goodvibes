@@ -820,7 +820,29 @@ export class EmailService {
     if (errors.length > 0) {
       return { ok: false, stage: 'config', error: errors.join('; ') };
     }
+    const reading = await this.#testReading(config);
+    if (!reading.ok) return reading;
+    if (!sends) return { ok: true, smtp: 'not-configured' };
+    return this.#testSending(config);
+  }
 
+  /**
+   * Each half checked once, whatever the other answered: reading (IMAP) and sending (SMTP), so a person setting up
+   * a mailbox is told what worked and what did not in one go. Nothing is read or sent. `config` is a setting problem
+   * found before any connection was tried (then neither half is tried).
+   */
+  async testEach(): Promise<{ readonly config?: string; readonly reading?: EmailConnectionTestResult; readonly sending?: EmailConnectionTestResult | 'not-configured' }> {
+    const config = readEmailConfig(this.readConfigFor('read'));
+    if (!config.enabled) return { config: NOT_SET_UP_FOR_READING };
+    const sends = config.smtpHost.length > 0;
+    const errors = sends ? validateEmailConfig(config) : validateEmailInboxConfig(config);
+    if (errors.length > 0) return { config: errors.join('; ') };
+    const [reading, sending] = await Promise.all([this.#testReading(config), sends ? this.#testSending(config) : Promise.resolve('not-configured' as const)]);
+    return { reading, sending };
+  }
+
+  /** Sign in over IMAP and EXAMINE the mailbox that will be read; nothing is read. */
+  async #testReading(config: EmailConfig): Promise<EmailConnectionTestResult> {
     const sourceRead = this.deps.replySubjectSourceOwner?.beginRead(config);
     try {
       // EXAMINE the mailbox that will actually be read, so a folder name that
@@ -840,8 +862,11 @@ export class EmailService {
         ...(failure === undefined ? {} : { failure }),
       };
     }
-    if (!sends) return { ok: true, smtp: 'not-configured' };
+    return { ok: true };
+  }
 
+  /** Sign in over SMTP and quit; nothing is sent. */
+  async #testSending(config: EmailConfig): Promise<EmailConnectionTestResult> {
     let smtpSocket: { destroy(): unknown } | undefined;
     const smtpServer = `${config.smtpHost}:${String(config.smtpPort)}`;
     try {

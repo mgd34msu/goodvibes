@@ -31,6 +31,8 @@ import { primaryLanAddress } from '../../daemon/lan-https/secure-address.js';
 import { DnsProviderError } from '../../daemon/lan-https/dns-provider.js';
 import {
   SECURE_ADDRESS_GROUP_LINE, SECURE_ADDRESS_INTRO, SECURE_ADDRESS_LEAD_LINE, SECURE_ADDRESS_REISSUE_TITLE, secureAddressChoicesFor, secureAddressReissueLine, secureAddressNodeLine,
+  SECURE_ADDRESS_REPLACE_AUTHORITY_LINE, SECURE_ADDRESS_REPLACE_AUTHORITY_QUESTION, SECURE_ADDRESS_REPLACE_AUTHORITY_TITLE, SECURE_ADDRESS_SERVE_LINE, SECURE_ADDRESS_SERVE_TITLE,
+  secureAddressFormerHolderLine, secureAddressReachLine,
 } from '../../daemon/lan-https/secure-address-words.js';
 
 export interface SecureAddressRouteDeps {
@@ -59,11 +61,14 @@ async function status(deps: SecureAddressRouteDeps): Promise<Record<string, unkn
   const authority = await service.localAuthority();
   const plainPort = Number(config.get('controlPlane.port'));
   const lan = primaryLanAddress();
+  // A machine that held the group's certificate and stopped following: until when it can present it, per kind.
+  const former = following ? [] : facts.group.formerHolders.map((holder) => secureAddressFormerHolderLine(holder));
   const groupLines = following
     ? [secureAddressNodeLine(following.name)]
-    : facts.group.followers.length > 0 ? [SECURE_ADDRESS_LEAD_LINE, SECURE_ADDRESS_GROUP_LINE] : [];
+    : [...(facts.group.followers.length > 0 ? [SECURE_ADDRESS_LEAD_LINE, SECURE_ADDRESS_GROUP_LINE] : []), ...former];
   // A notice no owner channel carried (a node's own authority set aside): shown at the top of the screen, which marks it given.
   const notice = service.takeScreenNotice();
+  const served = servedToNetwork(config);
   return {
     ...(notice ? { notice } : {}),
     intro: SECURE_ADDRESS_INTRO,
@@ -74,7 +79,9 @@ async function status(deps: SecureAddressRouteDeps): Promise<Record<string, unkn
     inForce: {
       on: config.get('controlPlane.lanHttps.enabled') === true || following !== undefined,
       certificate: facts.source,
-      servedToNetwork: servedToNetwork(config),
+      servedToNetwork: served,
+      // Other machines are not answered: phones cannot open the https address yet, whatever it serves.
+      ...(!served ? { reach: secureAddressReachLine(config.get('controlPlane.hostMode') === 'local') } : {}),
       serving: state.serving,
       ...(state.port !== undefined ? { port: state.port } : {}),
       ...(address ? { address } : {}),
@@ -92,9 +99,21 @@ async function status(deps: SecureAddressRouteDeps): Promise<Record<string, unkn
     // The lead's "Issue a new certificate now" (secureAddress.reissue): shown where it can act.
     reissue: {
       title: SECURE_ADDRESS_REISSUE_TITLE,
-      line: secureAddressReissueLine(service.leadsGroup(), facts.source),
+      // The group's machines are named only while some follow this computer.
+      line: secureAddressReissueLine(facts.group.followers.length > 0, facts.source),
       available: following === undefined && config.get('controlPlane.lanHttps.enabled') === true && facts.source !== 'own-files',
     },
+    // "Replace the authority": offered after a machine that held this computer's GoodVibes certificate left the group or
+    // was removed, while its copy is still trusted, for someone who needs that trust ended now.
+    replaceAuthority: {
+      title: SECURE_ADDRESS_REPLACE_AUTHORITY_TITLE,
+      line: SECURE_ADDRESS_REPLACE_AUTHORITY_LINE,
+      question: SECURE_ADDRESS_REPLACE_AUTHORITY_QUESTION,
+      available: following === undefined && config.get('controlPlane.lanHttps.enabled') === true && facts.source === 'local-authority' && authority.made
+        && facts.group.formerHolders.some((holder) => holder.source === 'local-authority'),
+    },
+    // "Serve other machines": while phones cannot reach the address (other machines not served).
+    serve: { title: SECURE_ADDRESS_SERVE_TITLE, line: SECURE_ADDRESS_SERVE_LINE, available: !served && deps.serveToNetwork !== undefined },
   };
 }
 
@@ -181,10 +200,45 @@ function createReissueHandler(deps: SecureAddressRouteDeps): GatewayMethodHandle
   };
 }
 
-export const SECURE_ADDRESS_METHOD_IDS: readonly string[] = ['secureAddress.get', 'secureAddress.set', 'secureAddress.reissue'];
+/**
+ * `secureAddress.replaceAuthority`, "Replace the authority": a new GoodVibes certificate authority on this computer and
+ * a new certificate signed by it, served here and sent to the machines that follow. Every phone must remove the old
+ * GoodVibes certificate and install the new one. Refused on a member, with https off, and when the certificate in force
+ * is not GoodVibes' own. The screens ask first, opening on No.
+ */
+function createReplaceAuthorityHandler(deps: SecureAddressRouteDeps): GatewayMethodHandler {
+  return async () => {
+    const service = deps.listener.secureAddress;
+    const following = service.groupFollowing();
+    if (following) throw new GatewayVerbError(`${secureAddressNodeLine(following.name)} Its authority is replaced on ${following.name}.`, 'SECURE_ADDRESS_NODE', 409);
+    if (deps.config.get('controlPlane.lanHttps.enabled') !== true || (await service.status()).source !== 'local-authority') {
+      throw new GatewayVerbError('This computer does not serve GoodVibes\' own certificate, so there is no authority of its to replace.', 'SECURE_ADDRESS_UNAVAILABLE', 409);
+    }
+    const outcome = await service.replaceAuthority();
+    return { ok: outcome.ok, words: outcome.words, status: await status(deps) };
+  };
+}
+
+/**
+ * `secureAddress.serve`, "Serve other machines": what `webui enable --lan` writes (the daemon listens on the network and
+ * answers other machines), so phones can open the https address; the answer comes once the listener is bound again.
+ */
+function createServeHandler(deps: SecureAddressRouteDeps): GatewayMethodHandler {
+  return async () => {
+    if (!deps.serveToNetwork) throw new GatewayVerbError('This daemon cannot change whom it serves from here: set controlPlane.hostMode to network and controlPlane.enabled to on in Settings.', 'SECURE_ADDRESS_UNAVAILABLE', 409);
+    if (!servedToNetwork(deps.config)) await deps.serveToNetwork();
+    await deps.listener.resync();
+    const served = servedToNetwork(deps.config);
+    return { ok: served, words: served ? 'This daemon now answers your other machines and phones on the network: phones can open the https address.' : 'This daemon still answers only this computer: the change did not take (the screen says what is set).', status: await status(deps) };
+  };
+}
+
+export const SECURE_ADDRESS_METHOD_IDS: readonly string[] = ['secureAddress.get', 'secureAddress.set', 'secureAddress.reissue', 'secureAddress.replaceAuthority', 'secureAddress.serve'];
 
 export function registerSecureAddressGatewayMethods(catalog: GatewayMethodCatalog, deps: SecureAddressRouteDeps): void {
   attachHandler(catalog, 'secureAddress.get', () => status(deps));
   attachHandler(catalog, 'secureAddress.set', createSetHandler(deps));
   attachHandler(catalog, 'secureAddress.reissue', createReissueHandler(deps));
+  attachHandler(catalog, 'secureAddress.replaceAuthority', createReplaceAuthorityHandler(deps));
+  attachHandler(catalog, 'secureAddress.serve', createServeHandler(deps));
 }

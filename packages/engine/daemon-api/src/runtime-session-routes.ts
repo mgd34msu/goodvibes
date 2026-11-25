@@ -239,8 +239,18 @@ export function toSharedSessionRecordResponse(
     ...(lastAgentId ? { lastAgentId } : {}),
     ...(lastAgentModel ? { lastAgentModel } : {}),
     ...(lastError ? { lastError } : {}),
-    metadata: isJsonRecord(record.metadata) ? record.metadata : {},
+    metadata: isJsonRecord(record.metadata) ? withoutRegistrant(record.metadata) : {},
   };
+}
+
+/**
+ * A session's metadata as it leaves the daemon: without the principal that registered it (`registeredBy`, kept only
+ * for the daemon's own asker checks): a caller that may list sessions does not learn which credential made each.
+ */
+export function withoutRegistrant(metadata: Record<string, unknown>): Record<string, unknown> {
+  if (!Object.hasOwn(metadata, 'registeredBy')) return metadata;
+  const { registeredBy: _kept, ...rest } = metadata;
+  return rest;
 }
 
 function readSessionStatus(value: unknown): SharedSessionRecordResponse['status'] | undefined {
@@ -671,7 +681,7 @@ async function handlePostSharedSessionMessage(context: DaemonRuntimeRouteContext
     return jsonErrorResponse({ error: 'Missing shared session message body' }, { status: 400 });
   }
 
-  const input = buildSharedSessionMessageInput(sessionId, body, message);
+  const input = buildSharedSessionMessageInput(sessionId, body, message, context.ownerTypedAtProgram?.(req) === true);
   if (input instanceof Response) return input;
 
   // kind='followup', always queues/spawns a follow-up turn via followUpMessage()
@@ -810,7 +820,7 @@ async function handlePostSharedSessionSteer(context: DaemonRuntimeRouteContext, 
   if (!message) {
     return jsonErrorResponse({ error: 'Missing shared session steer body' }, { status: 400 });
   }
-  const input = buildSharedSessionMessageInput(sessionId, body, message);
+  const input = buildSharedSessionMessageInput(sessionId, body, message, context.ownerTypedAtProgram?.(req) === true);
   if (input instanceof Response) return input;
   const submission = await callOrSessionClosed(() => context.sessionBroker.steerMessage({
     ...input,
@@ -829,7 +839,7 @@ async function handlePostSharedSessionFollowUp(context: DaemonRuntimeRouteContex
   if (!message) {
     return jsonErrorResponse({ error: 'Missing shared session follow-up body' }, { status: 400 });
   }
-  const input = buildSharedSessionMessageInput(sessionId, body, message);
+  const input = buildSharedSessionMessageInput(sessionId, body, message, context.ownerTypedAtProgram?.(req) === true);
   if (input instanceof Response) return input;
   const submission = await callOrSessionClosed(() => context.sessionBroker.followUpMessage(input));
   if (submission instanceof Response) return submission;
@@ -882,10 +892,28 @@ export function readSharedSessionMessageBody(body: JsonRecord): string {
   return typeof body.body === 'string' ? body.body.trim() : '';
 }
 
+/**
+ * The input metadata key saying the owner typed this message into his own program (a terminal app or the Agent)
+ * attached to the session. Only the daemon writes it, from `ownerTypedAtProgram` where the request entered: a value a
+ * caller puts in its own metadata is removed. A hosted session runs such a message as the owner's own turn in its
+ * project (hosted-sessions/session-runtime.ts).
+ */
+export const OWNER_TYPED_METADATA_KEY = 'ownerTypedAtProgram';
+
+function callerMetadataOf(body: JsonRecord, ownerTyped: boolean): Record<string, unknown> | undefined {
+  const given = typeof body.metadata === 'object' && body.metadata !== null && !Array.isArray(body.metadata)
+    ? { ...(body.metadata as Record<string, unknown>) }
+    : undefined;
+  if (given) delete given[OWNER_TYPED_METADATA_KEY];
+  if (!ownerTyped) return given;
+  return { ...(given ?? {}), [OWNER_TYPED_METADATA_KEY]: true };
+}
+
 function buildSharedSessionMessageInput(
   sessionId: string,
   body: JsonRecord,
   message: string,
+  ownerTyped = false,
 ): SharedSessionMessageInput | Response {
   const routing = readSharedSessionRoutingIntent(body.routing);
   if (routing instanceof Response) return routing;
@@ -895,6 +923,7 @@ function buildSharedSessionMessageInput(
   // broker answers a repeat with the receipt of the input it already holds.
   const clientMessageId = readClientMessageId(body.messageId);
   if (clientMessageId instanceof Response) return clientMessageId;
+  const metadata = callerMetadataOf(body, ownerTyped);
   return {
     sessionId,
     surfaceKind,
@@ -907,7 +936,7 @@ function buildSharedSessionMessageInput(
     ...(typeof body.routeId === 'string' ? { routeId: body.routeId } : {}),
     body: message,
     ...(clientMessageId ? { providerMessageId: clientMessageId } : {}),
-    ...(typeof body.metadata === 'object' && body.metadata !== null ? { metadata: body.metadata as Record<string, unknown> } : {}),
+    ...(metadata ? { metadata } : {}),
     ...(routing ? { routing } : {}),
   };
 }

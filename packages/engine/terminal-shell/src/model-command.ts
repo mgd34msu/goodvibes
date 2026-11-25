@@ -1,6 +1,7 @@
 /**
  * `/model`, described once (command-actions/) for both terminal apps: which
- * model your conversations use, its backup models and the list of models read
+ * model this conversation uses (the shared default is set in Models and
+ * providers), the backup models and the list of models read
  * again from every provider you have set up; and how hard the model thinks,
  * which is a control on the conversation (`effortOf`). Each app says how it
  * reaches its provider API and what it does before a switch lands (the
@@ -231,9 +232,8 @@ function switchTo(ctx: ModelCommandContext, registryKey: string): Promise<string
     services().beforeSelection(ctx, selected.providerId, () => {
       ctx.session.runtime.model = selected.registryKey;
       ctx.session.runtime.provider = selected.providerId;
-      // The shared default every program holds in the daemon's settings (config-ownership.ts), and this conversation's
-      // own choice with it, so a model it chose before in its picker does not stay in force here.
-      ctx.platform.configManager.set('provider.model', selected.registryKey);
+      // This conversation's own choice only, as the picker makes it: the shared default every program holds in the
+      // daemon's settings (config-ownership.ts) is set in Models and providers ("make it the default"), never here.
       ctx.platform.configManager.setRuntimeOverride('provider.model', selected.registryKey);
       // The requested level may not exist on this model: the session runs at what it offers; the preference stays.
       const switchedTo = toEffortModel(ctx.provider.providerRegistry.getCurrentModel());
@@ -241,7 +241,8 @@ function switchTo(ctx: ModelCommandContext, registryKey: string): Promise<string
       ctx.session.runtime.reasoningEffort = serving.effective ?? '';
       void api.recordModelUsage(selected.registryKey).catch((error: unknown) => logger.debug('model usage record failed', { error }));
       resolve([
-        `Now using ${selected.displayName} (${selected.providerId}).`,
+        // Says whose choice it is: this conversation's; the shared default is left as it was.
+        `This conversation now uses ${selected.displayName} (${selected.providerId}); the default model for new conversations is unchanged.`,
         ...(serving.requested !== '' ? [`Reasoning effort: ${describeServingEffort(serving, switchedTo)}.`] : []),
       ].join('\n'));
     });
@@ -251,7 +252,7 @@ function switchTo(ctx: ModelCommandContext, registryKey: string): Promise<string
 export const MODEL_COMMAND: CommandDescription<ModelCommandContext> = {
   name: 'model',
   title: 'Model',
-  summary: 'Choose the model your conversations use and its backups, and read the list of models again',
+  summary: 'Choose the model this conversation uses and the backup models, and read the list of models again',
   group: 'Models',
   report: 'see-models',
   // Bare `/model` opens the full picker; its other actions are typed lines.
@@ -289,10 +290,10 @@ export const MODEL_COMMAND: CommandDescription<ModelCommandContext> = {
       },
     }),
     {
-      id: 'use', label: 'Switch model', word: 'use', inputs: [MODEL],
-      sentence: 'Your conversations will use {model} from the next message, until you change it.', done: '',
-      touches: 'this-machine', lasts: 'kept', risk: 'none',
-      operator: { method: 'models.current.set', fields: { registryKey: 'model' } },
+      id: 'use', label: 'Switch this conversation\'s model', word: 'use', inputs: [MODEL],
+      sentence: 'This conversation uses {model} from its next message. The default model for new conversations is not changed: that is "make it the default" in Models and providers.', done: '',
+      touches: 'this-machine', lasts: 'session', risk: 'none',
+      operator: { terminalOnly: 'This conversation\'s model is the terminal program\'s; the default model every program starts with is set in Models and providers.' },
       example: { model: 'openai:gpt-5' },
       // `/model use` with no model named opens the full picker, as bare `/model` does.
       blankOpens: 'choose',

@@ -14,11 +14,15 @@ export interface StoreActContext {
   /** The Agent's stores for this caller: the owner's home, and the asking program's project (the daemon's own when none was named). */
   readonly shellPaths: ShellPathService;
   /** The daemon's artifact store, which every program's saved artifacts are kept in. */
-  readonly artifacts: Pick<ArtifactStore, 'list'>;
+  readonly artifacts: Pick<ArtifactStore, 'list' | 'create'>;
   /** The one memory store, for a note kept as a memory. */
   readonly memory?: Pick<MemoryAccess, 'add'> | undefined;
   /** Add a web page to the daemon's one knowledge store (the act of `knowledge.ingest-url`); absent where it has none. */
   readonly ingestUrl?: ((input: { readonly url: string; readonly tags: readonly string[]; readonly folderPath: string }) => Promise<{ readonly source: { readonly id: string; readonly title?: string | undefined } }>) | undefined;
+  /** The person asked it himself (not a model, a script or another agent): a file outside the project is his to name. */
+  readonly personAsked?: boolean | undefined;
+  /** The caller named a project (its working directory); without one, a relative path has nothing to be relative to. */
+  readonly projectGiven?: boolean | undefined;
   /** The daemon itself as the host a routine's schedule is made on (routine-schedules.ts); absent where it cannot be reached. */
   readonly scheduleHost?: (() => AgentConnectedHostConnection) | undefined;
   /** Run one of the Agent's store tools as the owner's confirmed act; its printed answer, or a refusal with its reason. */

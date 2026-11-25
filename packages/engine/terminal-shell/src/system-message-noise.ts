@@ -4,7 +4,7 @@
  * source these rules catch is emitted (from the platform) through
  * SystemMessageRouter, so this one funnel is where first-run plumbing is kept
  * out of the user's stream while the information stays reachable elsewhere
- * (Agents modal, /health, /model, activity log). (item 1.)
+ * (Agents modal, the System place's Health tab, /model, activity log). (item 1.)
  */
 export interface NoiseGateDeps {
     /**
@@ -73,7 +73,7 @@ export function providerNameFromReplay(message: string): string {
 }
 /**
  * Build the single folded summary line for a burst of provider-replay lines.
- * Names a few providers; the full list stays reachable via /health and /model.
+ * Names a few providers; the full list stays reachable on the Health tab and with /model.
  */
 export function foldProviderReplayLines(messages: readonly string[]): string {
     const names = messages.map(providerNameFromReplay);

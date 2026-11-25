@@ -47,10 +47,10 @@ export async function createRuntimeServices(options: RuntimeServicesOptions): Pr
     scope.registry.add('daemon handler surfaces', daemonHandlers.close);
     // Calls just-vibes holds in a hosted session wait in the owner inbox, answerable from every surface.
     if (services.ownerInbox) scope.registry.add('held calls in the owner inbox', bridgeHeldForOwnerToInbox(processHeldForOwner(), services.ownerInbox));
-    // What Jev decides in a hosted session is listed in /decisions and the web UI, where the owner can undo it or set a rule.
+    // What Jev decides in a hosted session is listed in Waiting for you and the web UI, where the owner can keep it or set a rule.
     if (services.ownerInbox) {
       scope.registry.add('Jev decisions in the owner inbox', bridgeJevDecisionsToInbox(processJevDecisions(), services.ownerInbox,
-        { surface: 'daemon', handle: handleOwnerDecisions, undo: services.fileUndoManager }));
+        { surface: 'daemon', handle: handleOwnerDecisions }));
     }
     // Peers must be loaded before the device recovery sweep decides which
     // grants belong to a departed node, and a failed load must stop the boot
@@ -65,7 +65,7 @@ export async function createRuntimeServices(options: RuntimeServicesOptions): Pr
     void contractRecovery.then((report) => {
       if ('failed' in report) {
         daemonReceiptStoreAt(daemonReceiptsPath(services.configManager))
-          .record(`Saved contracts could not be resumed at start-up: ${report.failed}. They are still on disk; restart to try again, or /agents contracts-view to see them.`);
+          .record(`Saved contracts could not be resumed at start-up: ${report.failed}. They are still on disk; restart to try again, or see them on the Work contracts tab of the Work place.`);
         return;
       }
       if (report.refused.length === 0) return;

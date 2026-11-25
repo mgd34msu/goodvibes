@@ -1,8 +1,9 @@
 /**
- * WorkspaceEvent, discriminated union covering workspace swap lifecycle events.
+ * WorkspaceEvent, discriminated union of the 'workspace' domain: list changes,
+ * native request changes, rewinds and hunk reverts.
  *
- * Emitted under the 'workspace' domain on the RuntimeEventBus.
- * Subscribers can react to working-directory changes without polling config.
+ * Emitted under the 'workspace' domain on the RuntimeEventBus. The daemon has no
+ * working directory a caller can move, so there is no swap event.
  */
 
 export type WorkspaceEvent =
@@ -33,7 +34,7 @@ export type WorkspaceEvent =
         // Money: the daemon recorded what a model call cost.
         | 'spending'
         // Memory and knowledge: a note, persona, routine, draft or saved artifact changed through the daemon.
-        | 'notes' | 'personas' | 'routines' | 'documents' | 'artifacts'
+        | 'notes' | 'personas' | 'routines' | 'documents' | 'artifacts' | 'agent-homes'
         // Memory and knowledge: what is known about you written or edited by hand, a template deleted through the daemon.
         | 'profile' | 'templates'
         // Models and providers: a pin, a backup, the routing, a provider of your own, a sign-in or the services list changed through the daemon.
@@ -42,12 +43,34 @@ export type WorkspaceEvent =
         | 'network-scan'
         // Devices and network: a settings sync bundle pulled, or a setting that disagreed settled.
         | 'settings-sync'
+        // Devices and network, and Secure address: this machine's group changed (from this machine or another), a group
+        // was heard on the network, or the group's certificate changed.
+        | 'machine-group'
         // This conversation: a model's context window size set or cleared through the daemon; every running program reads it again.
         | 'context-windows'
+        // Code and changes: a build of the project's code index began or ended.
+        | 'code-index'
+        // Code and changes: a project's worktree register changed.
+        | 'worktrees'
         // Mail, calendar and channels: the daemon's webhook addresses changed, or a notification failed.
-        | 'notifications';
+        | 'notifications'
+        // Mail, calendar and channels: the Google connection changed, or a step of connecting it began or ended.
+        | 'google'
+        // System: the daemon's update state changed (a check ended, an install began or ended, recovery needed).
+        | 'system-updates'
+        // System: the setup record changed (a checklist topic skipped or brought back, "Who decides" answered or put off).
+        | 'setup'
+        // System: a terminal program's own setting changed or was put back through the daemon.
+        | 'settings'
+        // Any place: a capability that changes something ran through capabilities.run (`id` is the capability's id), so a
+        // list it acts on is read again whoever pressed it (the web view, the model, a script, another program).
+        | 'capabilities';
       change: 'created' | 'changed' | 'deleted';
       id?: string | undefined;
+      /** The project (its resolved folder) a per-project change is about; absent for a shared list. */
+      project?: string | undefined;
+      /** The session a per-session change is about; absent otherwise. */
+      sessionId?: string | undefined;
     }
   /**
    * A native request changed: a write to it committed (its capture, a host
@@ -59,51 +82,6 @@ export type WorkspaceEvent =
       type: 'NATIVE_REQUEST_CHANGED';
       projectId: string;
       store: 'intake' | 'work-ledger' | 'execution';
-    }
-  /** Emitted when the daemon begins to move to another working directory (every service stops and starts again there). */
-  | {
-      type: 'WORKSPACE_SWAP_STARTED';
-      from: string;
-      to: string;
-    }
-  /**
-   * Emitted by the daemon once it serves on the new working directory after a
-   * move, or, on a host that cannot move, once the change is saved for its next start.
-   */
-  | {
-      type: 'WORKSPACE_SWAP_COMPLETED';
-      from: string;
-      to: string;
-      /** True if the new path was persisted to daemon-settings.json. */
-      persistedInDaemonSettings: boolean;
-    }
-  /** Emitted when a change is refused because the daemon is already moving. */
-  | {
-      type: 'WORKSPACE_SWAP_REFUSED';
-      from: string;
-      to: string;
-      /** Human-readable reason string. */
-      reason: string;
-      /** Suggested retry delay in seconds. */
-      retryAfter: number;
-    }
-  /**
-   * Emitted when a working-directory change fails: the path could not be
-   * created or saved, or a move failed and the daemon started again on its
-   * previous root.
-   * Any subscriber that saw WORKSPACE_SWAP_STARTED without a subsequent
-   * WORKSPACE_SWAP_COMPLETED should watch for this event.
-   */
-  | {
-      type: 'WORKSPACE_SWAP_FAILED';
-      /** Original working directory (swap source). */
-      from: string;
-      /** Target path that was attempted. */
-      to: string;
-      /** Machine-readable failure code. */
-      code: 'INVALID_PATH' | 'REROOT_FAILED' | 'UNKNOWN';
-      /** Human-readable reason. */
-      reason: string;
     }
   /**
    * A unified rewind was PREVIEWED (rewind.plan), a surface can render that a

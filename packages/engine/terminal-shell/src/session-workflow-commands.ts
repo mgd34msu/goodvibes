@@ -30,7 +30,6 @@ export function createSessionWorkflowCommands<Context extends SessionWorkflowCon
     readonly reviewSeparator: string;
     readonly reviewDetailSeparator: string;
     readonly field: (view: 'current' | 'info', key: string, value: string) => string;
-    readonly renamed: (name: string) => string;
     readonly deleted: (name: string, title: string) => string;
     readonly failed: (action: 'rename' | 'delete' | 'fork' | 'save', error: unknown) => string;
     readonly captureSession: (context: Context) => {
@@ -50,7 +49,7 @@ export function createSessionWorkflowCommands<Context extends SessionWorkflowCon
   const { buildTranscriptReviewLines } = createTranscriptReviewFormatter(policy.reviewSeparator, policy.reviewDetailSeparator);
 
   /**
-   * The one save behind `/save` and `/session save`. It writes the conversation
+   * The one save behind `/save` and session.save. It writes the conversation
    * under the name and stays in the live session; `--switch` also makes the
    * saved name the live session id (later turns are saved there). The manager
    * refuses a name that holds another conversation unless `--replace` (or `--yes`).
@@ -107,7 +106,7 @@ export function createSessionWorkflowCommands<Context extends SessionWorkflowCon
       throw commandRefusal(`Ambiguous session: ${target}.`, `Use an exact ID: ${candidates.map((session) => session.name).join(', ')}`);
     }
     const found = candidates[0];
-    if (!found) throw commandRefusal(`Session not found${policy.detailSeparator}${target}`, 'Use /session list to see saved sessions.');
+    if (!found) throw commandRefusal(`Session not found${policy.detailSeparator}${target}`, 'The Sessions place lists your saved sessions.');
     return found;
   }
 
@@ -139,7 +138,7 @@ export function createSessionWorkflowCommands<Context extends SessionWorkflowCon
     {
       const sessions = sm.list();
       if (sessions.length === 0) {
-        ctx.print('No saved sessions. Use /session save [name] to save the current session.');
+        ctx.print('No saved sessions. This conversation, "Save this session under a name", saves the one open here.');
         return;
       }
       const lines = ['Sessions (most recent first)' + policy.headingSuffix, ''];
@@ -164,13 +163,27 @@ export function createSessionWorkflowCommands<Context extends SessionWorkflowCon
     }
   }
 
-  /** Give this session a new name (saving it first when it has no file yet). */
-  function rename(ctx: Context, name: string): void {
+  /** Give a saved session a new name, or this one (saving it first when it has no file yet). */
+  function rename(ctx: Context, name: string, target?: string): void {
     const sm = requireSessionManager(ctx);
     {
       const newName = name.trim();
       if (!newName) {
         throw commandRefusal('A session needs a name; nothing was renamed.');
+      }
+      const requested = (target ?? '').trim();
+      if (requested && requested !== '.' && requested !== ctx.session.runtime.sessionId) {
+        // A saved session other than the one open here: only its name in the list changes.
+        const found = findSaved(sm, requested);
+        if (found.name !== ctx.session.runtime.sessionId) {
+          try {
+            sm.rename(found.name, newName);
+          } catch (e) {
+            throw commandRefusal(policy.failed('rename', e));
+          }
+          ctx.print(`Saved session "${found.title || found.name}" is called "${newName}" now.`);
+          return;
+        }
       }
       try {
         const sessionId = ctx.session.runtime.sessionId;
@@ -189,7 +202,7 @@ export function createSessionWorkflowCommands<Context extends SessionWorkflowCon
         }
         sm.rename(sessionId, newName);
         ctx.session.conversationManager.title = newName;
-        ctx.print(policy.renamed(newName));
+        ctx.print(`This session, the one open here, is called "${newName}" now.`);
         ctx.renderRequest();
       } catch (e) {
         throw commandRefusal(policy.failed('rename', e));

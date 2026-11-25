@@ -36,6 +36,7 @@ import {
   startDistributedRuntime,
   persistDistributedRuntime,
   applyDistributedPeerTokenRevocations,
+  endDistributedRuntimeWaiters,
 } from './distributed-runtime-store.js';
 import type { AuthorityRecordFile } from '../../cluster/authority-record-file.js';
 import {
@@ -311,8 +312,15 @@ export class DistributedRuntimeManager implements DistributedRuntimeManagerState
     readonly automationJobId?: string | undefined;
     readonly approvalId?: string | undefined;
     readonly metadata?: Record<string, unknown> | undefined;
+    /** The asking client's request: when it goes away, the wait for the result ends. */
+    readonly signal?: AbortSignal | undefined;
   }): Promise<{ work: DistributedPendingWork; completed: boolean }> {
     return invokeDistributedPeer(this, input);
+  }
+
+  /** End every request waiting for a peer's result (the daemon is stopping): each answers as a wait that ran out. */
+  endWaits(): void {
+    endDistributedRuntimeWaiters(this);
   }
 
   async authenticatePeerToken(tokenValue: string, remoteAddress?: string): Promise<DistributedPeerAuth | null> {

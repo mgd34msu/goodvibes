@@ -6,6 +6,7 @@
 
 import type { ToolDecision, ToolDecisionMaker } from '../types/tools.js';
 import type { PermissionDecisionReasonCode } from './types.js';
+import { toolAskWords } from './tool-ask-words.js';
 
 /**
  * Structured-denial reason surfaced for a plan-mode refusal.
@@ -118,8 +119,9 @@ export function refusalFacts(reasonCode: string, tool: string): { readonly state
  * is returned unchanged; anything else is read from the result's layer and
  * reason code, so every result carries one shape.
  */
-export function toolDecisionOf(source: DecisionSource, tool = 'this tool'): ToolDecision {
+export function toolDecisionOf(source: DecisionSource, tool = 'this tool', args?: Readonly<Record<string, unknown>>): ToolDecision {
   if (source.decision) return source.decision;
+  tool = args ? callSubject(tool, args).name : tool;
   const decidedBy = DECIDED_BY[source.sourceLayer] ?? 'code';
   const decisionId = source.autonomousDecision?.decisionId;
   const id = decisionId ? { decisionId } : {};
@@ -133,13 +135,27 @@ export function toolDecisionOf(source: DecisionSource, tool = 'this tool'): Tool
 }
 
 /**
+ * How a refused or held call is named to the model: a tool that runs something the owner names in his own words
+ * (`capability_run`: the capability, through its registered ask words) by what it does ("Keeping this computer
+ * awake"), never by the tool; any other tool as before ("Tool 'exec'").
+ */
+function callSubject(toolName: string, args: Readonly<Record<string, unknown>> | undefined): { readonly lead: string; readonly name: string; readonly label?: string } {
+  const words = args ? toolAskWords(toolName, args) : undefined;
+  if (words?.doing && words.subject) return { lead: words.doing, name: `"${words.subject}"`, label: words.subject };
+  return { lead: `Tool '${toolName}'`, name: toolName };
+}
+
+/**
  * The error string the asking agent reads for a refused tool call: what state
  * this is, whether it stands for the rest of the session, and what to do next.
  */
-export function buildDenialErrorMessage(toolName: string, source: DenialSource): string {
+export function buildDenialErrorMessage(toolName: string, source: DenialSource,
+  /** The call's arguments: a call through a tool that runs something else (`capability_run`) is named by what it runs. */
+  args?: Readonly<Record<string, unknown>>): string {
+  const subject = callSubject(toolName, args);
   if (isPlanModeDenial(source)) {
     return (
-      `Tool '${toolName}' was refused: you are in plan mode (reason: ${PLAN_MODE_DENIAL_REASON}, `
+      `${subject.lead} was refused: you are in plan mode (reason: ${PLAN_MODE_DENIAL_REASON}, `
       + `scope: ${source.sourceLayer}). Do not attempt mutating or command-execution tools. `
       + `Present a concrete plan of the changes you intend to make and wait for the user to `
       + `approve it or switch out of plan mode.`
@@ -150,18 +166,26 @@ export function buildDenialErrorMessage(toolName: string, source: DenialSource):
   const decision = source.decision;
   if (decision && decision.state !== 'refused') {
     const held = decision.state === 'queued-for-owner';
-    const next = decision.next ?? refusalFacts(source.reasonCode, toolName).next;
+    const next = decision.next ?? refusalFacts(source.reasonCode, subject.name).next;
+    // Said once: the lead already says it waits for the owner, so the reason's own "held for you: <it> is waiting for
+    // the owner: " is not said again.
+    let reason = decision.reason;
+    if (held) {
+      reason = reason.replace(/^held for you:\s*/, '');
+      const again = subject.label ? `${subject.label} is waiting for the owner: ` : undefined;
+      if (again && reason.startsWith(again)) reason = reason.slice(again.length);
+    }
     return (
-      `Tool '${toolName}' was ${held ? `held for the owner${decision.heldId ? ` (held id ${decision.heldId})` : ''}` : 'not run'}: `
-      + `${decision.reason} (reason: ${source.reasonCode}, scope: ${source.sourceLayer}). `
+      `${held ? `${subject.lead} is waiting for the owner's answer${decision.heldId ? ` (held id ${decision.heldId})` : ''}` : `${subject.lead} was not run`}: `
+      + `${reason} (reason: ${source.reasonCode}, scope: ${source.sourceLayer}). `
       + `${held ? 'It has not run; it runs only if the owner approves it.' : 'It has not run.'} Next: ${next.join('; ')}.`
     );
   }
-  const facts = refusalFacts(source.reasonCode, toolName);
+  const facts = refusalFacts(source.reasonCode, subject.name);
   const note = source.userReason ? ` The owner said: "${source.userReason}".` : source.detail ? ` ${source.detail}` : '';
   const scope = facts.standing ? 'This stands for the rest of the session.' : 'Only this call was refused.';
   return (
-    `Tool '${toolName}' was refused: ${facts.state} (reason: ${source.reasonCode}, scope: ${source.sourceLayer}).${note} `
+    `${subject.lead} was refused: ${facts.state} (reason: ${source.reasonCode}, scope: ${source.sourceLayer}).${note} `
     + `${scope} Next: ${facts.next.join('; ')}.`
   );
 }

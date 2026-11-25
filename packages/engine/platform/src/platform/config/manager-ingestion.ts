@@ -12,7 +12,7 @@
 import { ConfigError } from '../types/errors.js';
 import { summarizeError } from '../utils/error-display.js';
 import { unknownSettingNotices } from './settings-unknown-forms.js';
-import { DAEMON_KEYS_KEPT_FOR_ROLLBACK } from './settings-carry-forward.js';
+import { DAEMON_KEYS_KEPT_FOR_ROLLBACK, MERGED_DAEMON_LISTS, MERGED_DAEMON_RECORDS } from './settings-carry-forward.js';
 import { CONFIG_SCHEMA } from './schema.js';
 import {
   SettingsIngestionRefusal,
@@ -86,7 +86,7 @@ function omitDaemonOwnedLeaves(
       const key = prefix ? `${prefix}.${name}` : name;
       if (daemonOwned(key)) {
         // Left in a program's file for an earlier version (settings-carry-forward.ts): not read here, and nothing to say.
-        if (DAEMON_KEYS_KEPT_FOR_ROLLBACK.includes(key)) continue;
+        if (DAEMON_KEYS_KEPT_FOR_ROLLBACK.includes(key) || MERGED_DAEMON_LISTS.includes(key) || MERGED_DAEMON_RECORDS.includes(key)) continue;
         notices.push({
           file, key, action: 'skipped',
           reason: "only the daemon's settings file sets this, so the value here is not used",

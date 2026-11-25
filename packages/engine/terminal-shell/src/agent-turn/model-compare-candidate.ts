@@ -51,12 +51,16 @@ export function registerComparisonCandidate(registry: ToolRegistry, deps: AgentM
 
 export async function runAdmittedComparisonCandidate(registry: ToolRegistry | undefined, options: ToolExecuteOptions | undefined,
   model: ResolvedCompareModel, blindId: string, prompt: string, systemPrompt: string, maxTokens: number, assertCurrent: () => void,
-  comparisonRequest: Record<string, unknown>, screeningId: string): Promise<CompareCandidateResult> {
+  comparisonRequest: Record<string, unknown>, screeningId: string,
+  dispatch?: AgentModelCompareToolDeps['dispatchCandidate']): Promise<CompareCandidateResult> {
   if (!registry) throw new Error('Metered comparison requires its owning tool registry.');
-  const result = await registry.executeNested(`comparison-candidate-${++sequence}`, NAME, {
+  const args = {
     registryKey: model.registryKey, modelId: model.modelId, providerId: model.providerId, blindId, prompt, systemPrompt, maxTokens, metered: true,
     comparisonRequest, screeningId,
-  }, options, { assertCurrent, signal: options?.signal });
+  };
+  const result = dispatch
+    ? await (assertCurrent(), dispatch(NAME, args))
+    : await registry.executeNested(`comparison-candidate-${++sequence}`, NAME, args, options, { assertCurrent, signal: options?.signal });
   if (!result.success || typeof result.output !== 'string') throw new Error(result.error || 'Comparison candidate was not admitted.');
   const parsed: unknown = JSON.parse(result.output);
   const candidate = parseArtifactCandidate(parsed, 0);

@@ -7,7 +7,8 @@ import { mkdirSync } from 'node:fs';
 import type { ConfigKey } from '@goodvibes/engine/platform/platform/config';
 import type { ManagedServiceStatus } from '@goodvibes/engine/platform/platform/daemon';
 import { logger, summarizeError } from '@goodvibes/engine/platform/platform/utils';
-import { createPlatformServiceManager, getServiceStateRoot, type CliServiceRuntime } from '../cli/service-posture.ts';
+import { getServiceStateRoot, type CliServiceRuntime } from '@goodvibes/engine/platform/platform/support/service-manager-posture';
+import { createPlatformServiceManager } from '../cli/service-posture.ts';
 
 type ManagedServiceAction = 'install' | 'uninstall' | 'start' | 'stop' | 'restart' | 'status';
 

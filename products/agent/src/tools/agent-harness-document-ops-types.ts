@@ -13,7 +13,7 @@ export type DocumentOpsLaneId =
   | 'model_compare';
 
 export type DocumentOpsStatus = 'ready' | 'attention' | 'partial' | 'needs-setup' | 'gap';
-export type ReviewerReadinessStatus = 'ready' | 'attention' | 'needs-setup';
+export type { ReviewerReadinessStatus } from '@goodvibes/engine/terminal-shell/agent-turn/review-packet-report';
 export type ReviewerReadinessCheckStatus = 'pass' | 'attention' | 'needs-setup';
 
 export interface AgentHarnessDocumentOpsArgs {
@@ -36,48 +36,13 @@ export interface DocumentOpsLane {
   readonly actionIds: readonly string[];
   readonly reviewerReadiness?: ReviewerReadinessChecklist;
   readonly reviewPacketWizard?: AgentWorkspaceReviewPacketWizard;
-  /** The whole timeline (the lane's signals list only the latest five); read by `/documents timeline`. */
+  /** The whole timeline (the lane's signals list only the latest five); the daemon's documents.timeline tells the same. */
   readonly reviewPacketTimeline?: AgentWorkspaceReviewPacketTimeline;
 }
 
-export interface ReviewerReadinessChecklist {
-  readonly status: ReviewerReadinessStatus;
-  readonly next: string;
-  readonly summary: {
-    readonly documents: number;
-    readonly openComments: number;
-    readonly proposedSuggestions: number;
-    readonly documentsMissingSourceArtifacts: number;
-    readonly savedComparisons: number;
-    readonly unrevealedComparisons: number;
-    readonly hiddenJudgments: number;
-    /** Revealed judgments, whether or not a route decision was recorded for them. */
-    readonly revealedJudgments: number;
-    /**
-     * Judgments, blind or revealed, that still lack an apply or leave-unchanged
-     * route decision (apply reads the winner from the judged comparison, so a
-     * blind one waits on the same decision).
-     */
-    readonly judgmentsAwaitingRouteDecision: number;
-    readonly handoffsMissingRelatedArtifacts: number;
-  };
-  /** Stores that could not be read in full; the counts above do not include what was not read. */
-  readonly readProblems?: readonly string[];
-  readonly checks: readonly ReviewerReadinessCheck[];
-  readonly policy: string;
-}
-
-export interface ReviewerReadinessCheck {
-  readonly id: string;
-  readonly label: string;
-  readonly status: ReviewerReadinessCheckStatus;
-  readonly count: number;
-  readonly detail: string;
-  readonly inspectRoute: string;
-  readonly repairRoute?: string;
-  /** The line a person types to fix it, with a blank in angle brackets where they choose; absent when nothing is to fix. */
-  readonly ownerLine?: string | undefined;
-}
+// The readiness checklist is computed by the daemon too, from the stores themselves (terminal-shell agent-turn/review-packet-report.ts).
+export type { ReviewerReadinessCheck, ReviewerReadinessChecklist } from '@goodvibes/engine/terminal-shell/agent-turn/review-packet-report';
+import type { ReviewerReadinessChecklist } from '@goodvibes/engine/terminal-shell/agent-turn/review-packet-report';
 
 export type DocumentOpsLaneResolution =
   | { readonly status: 'found'; readonly lane: Record<string, unknown> }

@@ -88,7 +88,7 @@ export const MARKETPLACE_OVERVIEW = read({
     const { catalog } = project(services, caller);
     const counts = ALL_KINDS.map((kind) => ({ kind, curated: loadEcosystemCatalog(kind, catalog).length, installed: listInstalledEcosystemEntries(kind, catalog).length }));
     return {
-      text: ['Marketplace Overview', ...counts.map((count) => `  curated ${KIND_LABEL.get(count.kind)}s: ${count.curated}`), ...counts.map((count) => `  installed ${KIND_LABEL.get(count.kind)}s: ${count.installed}`)].join('\n'),
+      text: ['The marketplace at a glance (in the catalog, installed):', ...counts.map((count) => { const label = `${KIND_LABEL.get(count.kind)}s`; return `${label.charAt(0).toUpperCase()}${label.slice(1)}: ${count.curated} in the catalog, ${count.installed} installed`; })].join('\n'),
       data: { counts },
     };
   },
@@ -103,11 +103,12 @@ export const MARKETPLACE_BROWSE = read({
     const query = values.query ?? '';
     const found = await Promise.all(ALL_KINDS.map(async (kind) => ({ kind, ...(query ? await searchEcosystemCatalog(kind, query, catalog) : { entries: loadEcosystemCatalog(kind, catalog), unchecked: 0 }) })));
     const installed = new Set(ALL_KINDS.flatMap((kind) => listInstalledEcosystemEntries(kind, catalog).map((receipt) => `${kind}:${receipt.entry.id}`)));
-    const lines = [`Marketplace Browse${query ? ` (${query})` : ''}`];
+    const total = found.reduce((sum, group) => sum + group.entries.length, 0);
+    const lines = [query ? `${total} curated entr${total === 1 ? 'y matches' : 'ies match'} "${query}":` : `The catalog holds ${total} curated entr${total === 1 ? 'y' : 'ies'}:`];
     for (const group of found) {
-      lines.push(`  ${KIND_LABEL.get(group.kind)}s: ${group.entries.length}`, ...group.entries.map((entry) => `    ${group.kind.padEnd(11)} ${entry.id}  ${entry.name}  ${entry.summary}`));
+      lines.push(...group.entries.map((entry) => `${entry.name} (${KIND_LABEL.get(group.kind)}): ${entry.summary}`));
       const unchecked = describeUncheckedCatalogEntries(group);
-      if (unchecked) lines.push(`    ${unchecked}`);
+      if (unchecked) lines.push(unchecked);
     }
     return {
       text: lines.join('\n'),
@@ -138,9 +139,12 @@ export const MARKETPLACE_REVIEW = read({
     const review = await reviewEcosystemCatalogEntry(entry, catalog);
     const notes = review.compatibility.reasons.length === 0 ? 'compatible with current runtime' : review.compatibility.reasons.join('; ');
     return {
-      text: [`Marketplace Review: ${entry.name}`, `  kind: ${values.kind}`, `  id: ${entry.id}`, `  source: ${entry.source}`, `  sourceKind: ${review.sourceKind}`,
-        `  sourceExists: ${review.sourceExists ? 'yes' : 'no'}`, `  recommendedScope: ${review.recommendedScope}`, `  risk: ${review.riskLevel}`,
-        `  compatibility: ${review.compatibility.status}`, `  notes: ${notes}`].join('\n'),
+      // One fact a line, in words.
+      text: [`${entry.name} (${values.kind}, catalog id ${entry.id})`,
+        `Comes from: ${entry.source} (${review.sourceKind === 'local-path' ? 'a folder on this machine' : review.sourceKind === 'remote' ? 'another machine' : 'a place not said'}${review.sourceExists ? '' : ', which is not there now'})`,
+        `Best installed for: ${review.recommendedScope === 'user' ? 'all your projects' : 'this project'}`,
+        `Risk: ${review.riskLevel}`,
+        `Works with this version: ${review.compatibility.status === 'supported' ? 'yes' : review.compatibility.status}${review.compatibility.reasons.length > 0 ? ` (${notes})` : ''}`].join('\n'),
       data: { kind: values.kind, id: entry.id, source: entry.source, sourceExists: review.sourceExists, risk: review.riskLevel, compatibility: review.compatibility.status, recommendedScope: review.recommendedScope },
     };
   },
@@ -154,9 +158,9 @@ export const MARKETPLACE_PROVENANCE = read({
     const entry = entryOf(catalog, values);
     const review = await reviewEcosystemCatalogEntry(entry, catalog);
     return {
-      text: [`Marketplace Provenance: ${entry.name}`, `  source: ${entry.source}`, `  provenance: ${entry.provenance ?? '(none declared)'}`, `  version: ${entry.version ?? '(unspecified)'}`,
-        `  author: ${entry.author ?? '(unspecified)'}`, `  signature: ${entry.signature ?? '(none declared)'}`,
-        `  compatibility: ${review.compatibility.reasons.length === 0 ? 'compatible with current runtime' : review.compatibility.reasons.join('; ')}`, `  trust notes: ${entry.trustNotes ?? '(none)'}`].join('\n'),
+      text: [`Where ${entry.name} comes from`, `From: ${entry.source}`, `Provenance: ${entry.provenance ?? 'none declared'}`, `Version: ${entry.version ?? 'not said'}`,
+        `Author: ${entry.author ?? 'not said'}`, `Signature: ${entry.signature ?? 'none declared'}`,
+        `Works with this version: ${review.compatibility.reasons.length === 0 ? 'yes' : review.compatibility.reasons.join('; ')}`, `Trust notes: ${entry.trustNotes ?? 'none'}`].join('\n'),
       data: { id: entry.id, source: entry.source, provenance: entry.provenance ?? null, version: entry.version ?? null, author: entry.author ?? null, signature: entry.signature ?? null },
     };
   },
@@ -168,7 +172,7 @@ export const MARKETPLACE_INSTALL_HINT = read({
   async run(values, services, caller) {
     const entry = entryOf(project(services, caller).catalog, values);
     const hint = entry.installHint ?? 'Install from a local curated source with explicit scope.';
-    return { text: [`Marketplace Install Guidance: ${entry.name}`, `  kind: ${values.kind}`, `  source: ${entry.source}`, `  install hint: ${hint}`, `  trust notes: ${entry.trustNotes ?? '(none)'}`].join('\n'), data: { id: entry.id, hint, trustNotes: entry.trustNotes ?? null } };
+    return { text: [`How ${entry.name} (${values.kind}) installs`, `From: ${entry.source}`, `How: ${hint}`, `Trust notes: ${entry.trustNotes ?? 'none'}`].join('\n'), data: { id: entry.id, hint, trustNotes: entry.trustNotes ?? null } };
   },
 });
 
@@ -179,8 +183,8 @@ export const MARKETPLACE_HISTORY = read({
     const backups = listEcosystemInstallBackups(values.kind as EcosystemEntryKind, values.entry!, scoped(project(services, caller).catalog, values));
     return {
       text: backups.length > 0
-        ? [`Marketplace Rollback History: ${values.kind} ${values.entry}`, ...backups.map((backup) => `  ${backup.id}  ${new Date(backup.createdAt).toISOString()}  ${backup.reason}  ${backup.receipt.entry.version ?? 'n/a'}`)].join('\n')
-        : `Marketplace Rollback History: ${values.kind} ${values.entry}\n  No rollback backups recorded.`,
+        ? [`The ${values.kind} ${values.entry} has ${backups.length} backup${backups.length === 1 ? '' : 's'} to roll back to, newest first:`, ...backups.map((backup) => `${new Date(backup.createdAt).toLocaleString()}: version ${backup.receipt.entry.version ?? 'not said'}, kept before ${backup.reason === 'update' ? 'an update' : backup.reason === 'rollback' ? 'a roll back' : backup.reason}`)].join('\n')
+        : `The ${values.kind} ${values.entry} has no backups to roll back to.`,
       data: { backups: backups.map((backup) => ({ id: backup.id, at: backup.createdAt, reason: backup.reason, version: backup.receipt.entry.version ?? null })) },
     };
   },
@@ -194,8 +198,8 @@ export const MARKETPLACE_RECEIPT = read({
     if (!result.ok) notDone(result.error);
     const { receipt } = result;
     return {
-      text: [`Marketplace Receipt: ${receipt.entry.name}`, `  installedAt: ${new Date(receipt.installedAt).toISOString()}`, `  scope: ${receipt.scope}`, `  targetPath: ${receipt.targetPath}`,
-        `  provenance: ${receipt.provenanceSummary}`, `  compatibility: ${receipt.compatibility.status}`, ...receipt.compatibility.reasons.map((reason) => `  note: ${reason}`)].join('\n'),
+      text: [`${receipt.entry.name}'s install receipt`, `Installed: ${new Date(receipt.installedAt).toLocaleString()}, for ${receipt.scope === 'user' ? 'all your projects' : 'this project'}`, `Kept in: ${receipt.targetPath}`,
+        `From: ${receipt.provenanceSummary}`, `Works with this version: ${receipt.compatibility.status === 'supported' ? 'yes' : receipt.compatibility.status}`, ...receipt.compatibility.reasons.map((reason) => `Note: ${reason}`)].join('\n'),
       data: { id: receipt.entry.id, at: receipt.installedAt, scope: receipt.scope, path: receipt.targetPath },
     };
   },
@@ -210,7 +214,8 @@ export const MARKETPLACE_BUNDLE_INSPECT = read({
     const exportedDate = typeof summary.exportedAt === 'number' ? new Date(summary.exportedAt) : undefined;
     const exportedAt = exportedDate !== undefined && !Number.isNaN(exportedDate.getTime()) ? exportedDate.toISOString() : 'unknown';
     return {
-      text: ['Marketplace Bundle Review', `  exportedAt: ${exportedAt}`, `  scope: ${summary.scope}`, `  plugins: ${summary.counts.plugin}`, `  skills: ${summary.counts.skill}`, `  hook packs: ${summary.counts['hook-pack']}`, `  policy packs: ${summary.counts['policy-pack']}`].join('\n'),
+      text: [`${values.path} holds the curated catalog ${summary.scope === 'user' ? 'for all your projects' : 'of a project'}, saved ${exportedAt === 'unknown' ? 'at a time not said' : new Date(exportedAt).toLocaleString()}:`,
+        `Plugins: ${summary.counts.plugin}`, `Skills: ${summary.counts.skill}`, `Hook packs: ${summary.counts['hook-pack']}`, `Policy packs: ${summary.counts['policy-pack']}`, 'Nothing was installed.'].join('\n'),
       data: { scope: summary.scope, counts: { ...summary.counts } },
     };
   },
@@ -225,7 +230,8 @@ function change(fields: Pick<CapabilityDefinition<MarketplaceCapabilityServices>
 
 export const MARKETPLACE_INSTALL = change({
   actionId: 'install', label: 'Install an entry', word: 'install', inputs: [KIND, CATALOG_ENTRY, INSTALL_SCOPE],
-  sentence: 'The {kind} {entry} is installed for {scope} until you change it.', risk: 'none', undoneBy: 'uninstall',
+  // Installing a plugin, a skill pack or a hook pack puts code where the programs load it by themselves: it loosens a protection.
+  sentence: 'The {kind} {entry} is installed, for this project or all your projects as "Install for" says, until you change it.', risk: 'loosens-a-protection', undoneBy: 'uninstall',
   async run(values, services, caller) {
     const result = installEcosystemCatalogEntry(values.kind as EcosystemEntryKind, values.entry!, scoped(project(services, caller).catalog, values));
     if (!result.ok) notDone(result.error);
@@ -236,7 +242,8 @@ export const MARKETPLACE_INSTALL = change({
 
 export const MARKETPLACE_UPDATE = change({
   actionId: 'update', label: 'Update an installed entry', word: 'update', inputs: [KIND, INSTALLED_ENTRY, INSTALL_SCOPE],
-  sentence: 'The installed {kind} {entry} ({scope}) is updated to the catalog\'s version until you change it; the old one is kept as a backup.', risk: 'none', undoneBy: 'rollback',
+  // New code where the programs load it by themselves: it loosens a protection, as installing does.
+  sentence: 'The installed {kind} {entry} is updated to the catalog\'s version until you change it; the old one is kept as a backup.', risk: 'loosens-a-protection', undoneBy: 'rollback',
   async run(values, services, caller) {
     const result = updateInstalledEcosystemEntry(values.kind as EcosystemEntryKind, values.entry!, scoped(project(services, caller).catalog, values));
     if (!result.ok) notDone(result.error);
@@ -251,7 +258,7 @@ export const MARKETPLACE_ROLLBACK = change({
     id: 'backup', label: 'Backup', help: 'Its backups, newest first', kind: 'choice', choices: { list: MARKETPLACE_BACKUPS_LIST, dependsOn: 'entry' },
     required: { default: '', defaultMeans: 'the newest one' }, typed: { flag: '--backup' },
   }],
-  sentence: 'The installed {kind} {entry} ({scope}) goes back to an earlier backup until you change it.', risk: 'none', undoneBy: 'update',
+  sentence: 'The installed {kind} {entry} goes back to an earlier backup until you change it.', risk: 'none', undoneBy: 'update',
   async run(values, services, caller) {
     const result = rollbackInstalledEcosystemEntry(values.kind as EcosystemEntryKind, values.entry!, { ...scoped(project(services, caller).catalog, values), ...(values.backup ? { backupId: values.backup } : {}) });
     if (!result.ok) notDone(result.error);
@@ -262,7 +269,7 @@ export const MARKETPLACE_ROLLBACK = change({
 
 export const MARKETPLACE_UNINSTALL = change({
   actionId: 'uninstall', label: 'Uninstall an entry', word: 'uninstall', inputs: [KIND, INSTALLED_ENTRY, INSTALL_SCOPE],
-  sentence: 'The installed {kind} {entry} ({scope}) is removed from disk with its install receipt; installing it again brings it back from the catalog.', risk: 'cannot-be-undone',
+  sentence: 'The installed {kind} {entry} is removed from disk with its install receipt; installing it again brings it back from the catalog.', risk: 'cannot-be-undone',
   async run(values, services, caller) {
     const result = uninstallEcosystemCatalogEntry(values.kind as EcosystemEntryKind, values.entry!, scoped(project(services, caller).catalog, values));
     if (!result.ok) notDone(result.error);
@@ -273,8 +280,9 @@ export const MARKETPLACE_UNINSTALL = change({
 
 export const MARKETPLACE_BUNDLE_EXPORT: CapabilityDefinition<MarketplaceCapabilityServices> = {
   capability: { id: 'marketplace.bundle-export', group: 'tools', home: 'daemon', repeat: 'safe' },
-  actionId: 'bundle-export', label: 'Save your installs to a bundle', word: 'bundle-export', inputs: [{ ...BUNDLE_FILE, help: 'Where to write the bundle' }, INSTALL_SCOPE],
-  sentence: 'What is installed for {scope} is written to {path} as a bundle another machine can bring in.', done: '',
+  // The bundle is the local curated catalog (its entries), not the installs: the words say so.
+  actionId: 'bundle-export', label: 'Save the catalog to a bundle', word: 'bundle-export', inputs: [{ ...BUNDLE_FILE, help: 'Where to write the bundle' }, { ...INSTALL_SCOPE, label: 'Catalog of', help: 'This project\'s catalog, or the one for all your projects' }],
+  sentence: 'The local curated catalog (this project\'s, or the one for all your projects, as "Catalog of" says) is written to {path} as a bundle another machine can bring in; nothing installed is in it.', done: '',
   touches: 'this-machine', lasts: 'not-a-change', risk: 'none', example: { path: 'marketplace.json' },
   async run(values, services, caller) {
     const { catalog, cwd } = project(services, caller);
@@ -282,14 +290,15 @@ export const MARKETPLACE_BUNDLE_EXPORT: CapabilityDefinition<MarketplaceCapabili
     const target = fileIn(cwd, values.path!);
     mkdirSync(dirname(target), { recursive: true });
     writeFileSync(target, `${JSON.stringify(bundle, null, 2)}\n`, 'utf-8');
-    return { text: `Saved the marketplace bundle to ${target}`, data: { path: target } };
+    const entries = bundle.entries.length;
+    return { text: `Saved the ${values.scope === 'user' ? 'catalog for all your projects' : 'project\'s catalog'} (${entries} entr${entries === 1 ? 'y' : 'ies'}) to ${target}`, data: { path: target, entries } };
   },
 };
 
 export const MARKETPLACE_BUNDLE_IMPORT: CapabilityDefinition<MarketplaceCapabilityServices> = {
   capability: { id: 'marketplace.bundle-import', group: 'tools', home: 'daemon', repeat: 'safe' },
-  actionId: 'bundle-import', label: 'Bring in installs from a bundle', word: 'bundle-import', inputs: [BUNDLE_FILE, INSTALL_SCOPE],
-  sentence: 'The entries in {path} are merged into what is installed for {scope}, by kind and id, until you change it.', done: '',
+  actionId: 'bundle-import', label: 'Bring a catalog bundle in', word: 'bundle-import', inputs: [BUNDLE_FILE, { ...INSTALL_SCOPE, label: 'Into the catalog of', help: 'This project\'s catalog, or the one for all your projects' }],
+  sentence: 'The curated entries in {path} are merged into the local catalog (this project\'s, or the one for all your projects), by kind and id, until you change it; nothing is installed.', done: '',
   touches: 'this-machine', lasts: 'kept', risk: 'none', example: { path: 'marketplace.json' },
   async run(values, services, caller) {
     const { catalog, cwd } = project(services, caller);
@@ -298,8 +307,8 @@ export const MARKETPLACE_BUNDLE_IMPORT: CapabilityDefinition<MarketplaceCapabili
     if (result.error) throw new CapabilityRefusal(`Marketplace bundle import failed: ${result.error}`, undefined, 'BUNDLE_IMPORT_FAILED');
     changed();
     return {
-      text: [`Brought in the marketplace bundle from ${source}`, `  merged into existing entries by kind and id; ${result.rejected.length} rejected`, `  entries: ${result.imported}`,
-        ...Object.entries(result.pathByKind).map(([kind, path]) => `  ${kind}: ${path}`), ...result.rejected.map((entry) => `  rejected ${entry.id}: ${entry.reason}`)].join('\n'),
+      text: [`Brought ${result.imported} curated entr${result.imported === 1 ? 'y' : 'ies'} in from ${source}, merged into the catalog by kind and id${result.rejected.length > 0 ? `; ${result.rejected.length} refused` : ''}.`,
+        ...Object.entries(result.pathByKind).map(([kind, path]) => `The ${KIND_LABEL.get(kind as EcosystemEntryKind) ?? kind}s went into ${path}.`), ...result.rejected.map((entry) => `Refused ${entry.id}: ${entry.reason}`)].join('\n'),
       data: { imported: result.imported, rejected: result.rejected.map((entry) => ({ ...entry })) },
     };
   },
@@ -336,13 +345,15 @@ export const MARKETPLACE_RECOMMEND: CapabilityDefinition<MarketplaceRecommendSer
     const source = services.marketplaceRecommend;
     if (!source) throw new CapabilityRefusal('This program reads no recommendations for the project.', undefined, 'UNAVAILABLE');
     const snapshot = await source.recommend();
-    if (snapshot.ranking === 'failed') return { text: ['Marketplace Recommendations', ...snapshot.startupIssues.map((issue) => `  ${issue}`)].join('\n'), data: { recommendations: [] } };
-    const notice = snapshot.ranking === 'off' ? snapshot.startupIssues.map((issue) => `  ${issue}`) : [];
+    // Only what bears on the recommendations is said: the read model's other start-up issues (a tool server's state) are not theirs.
+    const bearing = snapshot.startupIssues.filter((issue) => /recommend|decision model|catalog|rank/i.test(issue));
+    if (snapshot.ranking === 'failed') return { text: ['What fits this project could not be read.', ...bearing].join('\n'), data: { recommendations: [] } };
+    const notice = snapshot.ranking === 'off' ? bearing : [];
     const recommendations = snapshot.recommendations;
     return {
       text: recommendations.length > 0
-        ? ['Marketplace Recommendations', ...notice, ...recommendations.map((recommendation) => `  ${recommendation.kind} ${recommendation.entry.id}  ${recommendation.title}: ${recommendation.reason}`)].join('\n')
-        : ['Marketplace Recommendations', ...notice, '  No contextual recommendations right now.'].join('\n'),
+        ? [`${recommendations.length} curated entr${recommendations.length === 1 ? 'y fits' : 'ies fit'} this project:`, ...recommendations.map((recommendation) => `${recommendation.entry.name || recommendation.entry.id} (${recommendation.kind}): ${recommendation.title}. ${recommendation.reason}`), ...notice].join('\n')
+        : ['Nothing in the catalog fits this project right now.', ...notice].join('\n'),
       data: { recommendations: recommendations.map((recommendation) => ({ kind: recommendation.kind, id: recommendation.entry.id, title: recommendation.title, reason: recommendation.reason })) },
     };
   },

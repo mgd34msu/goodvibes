@@ -149,7 +149,7 @@ Shell execution with background processes, retry, progress tracking, and file op
 HTTP client with extraction modes, service registry auth, and batch operations.
 
 - Extraction modes include `raw`, `text`, `json`, `markdown`, `readable` (strips nav/sidebar/footer), `code_blocks`, `links`, `tables`, `metadata` (og-tags), `structured` (CSS selectors), and `pdf`
-- Named service registry: configure API credentials once in `~/.goodvibes/tui/services.json`, reference by name in fetch calls (a project's `.goodvibes/tui/services.json` adds services only when they name keys in your secret store and you confirm each with `/services trust <name>`; references and `oauth` blocks are used only from your own file)
+- Named service registry: configure API credentials once in `~/.goodvibes/tui/services.json`, reference by name in fetch calls (a project's `.goodvibes/tui/services.json` adds services only when they name keys in your secret store and you confirm each with "Use a service this project defines" (`y` on the Services tab of Models and providers); references and `oauth` blocks are used only from your own file)
 - Inline auth: `bearer`, `basic`, `api-key` per request
 - Batch parallel fetches in a single tool call
 - A call whose every request is `GET`, `HEAD` or `OPTIONS` is a read and runs beside the other reads of the same response; a call with a `POST`, `PUT`, `PATCH` or `DELETE` runs alone, in the model's order, and is decided as a change (plan mode refuses it)
@@ -229,7 +229,7 @@ Structured execution and coordination beyond a single conversation turn.
 
 ### query
 
-- `query`: leave the owner a question and carry on working. `ask` posts it to the owner inbox and returns its id at once; the owner sees it in Waiting for you in either terminal app and, when push is on, as a notification on his phone, and answers it there. The question is recorded as asked by the session. When the owner answers, the answer is passed to the asker on its next model request: a spawned agent while it runs, otherwise the conversation that asked or spawned it. If that session is not open when he answers, he is told the answer is saved and will be delivered when the session is next opened, and it is put into the conversation once when the session is resumed (`/session resume`, `/resume`, the session picker, `--continue`/`--resume`, headless runs included). Deleting the session withdraws its open questions and marks its waiting answers not deliverable. Waiting for you's Answered tab shows each answer as delivered, waiting for its session to be opened, or not deliverable with the reason (a deleted session, an agent that can never run again); the answer stays on the question in every case. `show` and `list` read it back at any time; `withdraw` takes back a question that no longer matters. A `key` makes a repeated ask return the first open question instead of posting a second one. There is one owner inbox per home (`~/.goodvibes/shared/owner-inbox.sqlite`), shared by the daemon, this app, the Agent and every other terminal at once: a question asked in one shows in Waiting for you in all of them, and an answer given in any of them reaches the asking session on its next model request, with no restart. While the daemon is reachable the inbox is read through it (so its permission asks are listed too and the phone is pushed)
+- `query`: leave the owner a question and carry on working. `ask` posts it to the owner inbox and returns its id at once; the owner sees it in Waiting for you in either terminal app and, when push is on, as a notification on his phone, and answers it there. The question is recorded as asked by the session. When the owner answers, the answer is passed to the asker on its next model request: a spawned agent while it runs, otherwise the conversation that asked or spawned it. If that session is not open when he answers, he is told the answer is saved and will be delivered when the session is next opened, and it is put into the conversation once when the session is resumed (the Sessions place, `/resume`, the session picker, `--continue`/`--resume`, headless runs included). Deleting the session withdraws its open questions and marks its waiting answers not deliverable. Waiting for you's Answered tab shows each answer as delivered, waiting for its session to be opened, or not deliverable with the reason (a deleted session, an agent that can never run again); the answer stays on the question in every case. `show` and `list` read it back at any time; `withdraw` takes back a question that no longer matters. A `key` makes a repeated ask return the first open question instead of posting a second one. There is one owner inbox per home (`~/.goodvibes/shared/owner-inbox.sqlite`), shared by the daemon, this app, the Agent and every other terminal at once: a question asked in one shows in Waiting for you in all of them, and an answer given in any of them reaches the asking session on its next model request, with no restart. While the daemon is reachable the inbox is read through it (so its permission asks are listed too and the phone is pushed)
 
 ### mcp / remote / control
 
@@ -267,22 +267,19 @@ Representative slash-command families, with a one-line summary of each:
 | `/model` | Your model and the others you can use, switching, backup models, and reading the list of models again |
 | `/settings` | Open the settings screen at a setting (`/settings open <setting>`), see one (`get`), change one (`set <key> <value>`; a credential goes to the secret store) or put it back (`reset`) |
 | `/memory` | Opens Memory and knowledge (also the menu, `Ctrl+G` then `m`): what the project remembers, your structured knowledge (pages, files, bookmarks, its entries, issues and jobs), what is known about you, and your prompt templates; every action is a key on the thing it acts on |
-| `/remote` | Inspect, dispatch, and review self-hosted remote runners and artifacts |
-| `/security` | What protects this machine: the short status, tokens, MCP routes, what is trusted and this folder's trust, policy bundles, the sandbox and its sessions |
-| `/plugin` | Manage plugins, trust, review, and ecosystem paths |
-| `/marketplace` | Browse the unified plugin and skill marketplace |
+| Work and agents (the menu): Runners, Runner pools, Handed back | Start, follow, stop and review self-hosted remote runners and what they hand back; the daemon keeps them |
+| `/permissions` | Opens Permissions and safety: this conversation's permissions and plan mode, rules, secrets, this folder's trust, who may sign in, who is who, device tokens, phone grants, the policy bundles, the sandbox setting and sessions, and what needs attention |
+| Tools and extensions (the menu) | Hooks and the hooks that ran, hook points, the model's tools, tool servers (MCP), plugins and their trust, the marketplace and what you installed from it, skills, presets and managed settings; every action is a key on the thing it acts on |
 | `/session` | Sessions: resume, save, copy, export as a file or upload for a link, branches and cross-session tasks |
-| `/voice` | Hear an answer spoken (`speak`), speak every answer (`on`, `off`), stop playback, and set up the local voice runtime and the wake word |
-| `/mcp` | Manage MCP servers and their tools |
-| `/health` | Is everything working: the short status, one area in detail, a problem described, this session's failure reports (see, save, keep in memory), stopping an agent, the runtime store |
-| `/replay` | Deterministic replay: load, step, seek, diff, and export recorded runs |
-| `/eval` | Evaluate the product on real tasks: run a task suite through goodvibes run, compare baselines, and gate regressions |
-| `/web-search` | Provider-backed web search with ranked results and source labels |
-| `/media` | Make an image or a video through a configured provider (`make`), collect a job still running (`collect`), see the providers |
+| System place, This session and Voice | Hear an answer spoken, speak every answer, stop playback, and set up the local voice runtime and the wake word (voice has no slash command) |
+| `/mcp` | Opens Tools and extensions on its Servers tab: your MCP servers and their tools |
+| Work and agents (the menu): Recorded runs | Deterministic replay: load, step, jump, compare and save the report of recorded runs |
+| Work and agents (the menu): Evaluations | Evaluate the product on real tasks: run a task suite through goodvibes run, compare with the baseline, and gate regressions |
+| Tools and extensions (the menu): Tools, `M` | Make an image or a video through a configured provider; a job still running is collected in Work ("collect a media job"); the providers are the Media tab of Models and providers |
 | `/work` | Open the Work place: your work and its plans, a plan waiting for your approval, the questions it asks, a failed step run again, its spending limit, past work, the checklist and the tasks running in the background |
 | `/checkpoint` | Workspace checkpoints: list them, make one, put the files back to one (`restore <n\|id>`, previewed), or go back to an earlier turn (`rewind`, previewed) |
 
-Code and changes, in the menu or typed as `/changes`, is the place for the project's files: the changed files (`Enter` opens a file's diff in the Changes view, `c` commits every change, `v` reviews this session's changes), the recent commits, the worktrees (pause, resume, keep, run setup again, tie to a session or task, remove, stop tracking), the code index (how it stands, `b` builds it) and code intelligence (what is ready, the files with problems, the lookups and installing a language server), with `t` running the project's tests and `f` finding code in the index anywhere in it.
+Code and changes, in the menu or typed as `/changes` (`/changes staged`, `working` or `head` opens the Changes view on that set), is the place for the project's files: the changed files (`Enter` opens a file's diff in the Changes view, `c` commits every change, `v` reviews this session's changes), the recent commits, the worktrees (pause, resume, keep, run setup again, tie to a session or task, remove, stop tracking), the code index (how it stands, `b` builds it) and code intelligence (what is ready, the files with problems, the lookups and installing a language server), with `t` running the project's tests and `f` finding code in the index anywhere in it.
 
 The controls on the conversation itself are in the menu's "This conversation" row (the leader, then `m`): each row is one control, with what it acts on now and the key or typed line that also reaches it, and `Enter` runs it (a form asks for what it needs). Among them: name this conversation, write the message in your editor, send an image with a message, paste the clipboard, read the folded pastes, see, change or take back a queued message, see what fills the context, see and choose how hard the model thinks, save this session under a name or as a file, branch it, fold or open its blocks, see what compaction removed, and the guidance. The model reaches the same controls through `capability_find` and `capability_run`.
 
@@ -294,9 +291,9 @@ A typed line that starts with `!` runs the rest as a shell command in the workin
 
 Automation, in the menu (the leader, then `m`), is the place for what runs by itself, kept and run by the daemon: your schedules (`n` new schedule; on one `g` run now, `p` pause or resume, `c` change, `x` remove), their runs (`s` stop one that is going, `t` run a failed one again), your triggers (`n` watch for something; `h` what it did, `x` stop, `s` start one that gave up), the commands triggers may run (`n` let triggers run one), your CI watches (`n` watch a repository, `k` check one now; `g` check a watch now, `x` stop watching) and what the check-ins did (`g` check in now). Every list reads by itself and follows changes made anywhere. New schedule's "Describe it" accepts natural-language times, for example `every weekday at 9am`, `daily at 6pm`, `every 30 minutes`, `every monday at 08:00`, or `in 2 hours`; the daemon reads them, and the outcome line says the concrete interpretation it kept.
 
-`/web-search <words> [--limit <n>]` runs a provider-backed web search directly (bypassing the agent-tool JSON wrapper) and renders ranked results, an instant answer, and the source label into the transcript; it degrades honestly using the web-search service's own status note.
+"Search the web" (`w` on the Tools tab of Tools and extensions, `tools.web-search`) runs a provider-backed web search through the daemon and shows ranked results, an instant answer, and where each came from; a failed search says why, using the web-search service's own status note.
 
-`/media make <prompt>` generates an image through the first configured provider that makes images; a provider that only makes video is never sent the request. Each image is written to a file, `generated/<prompt words>-<time>.<ext>` under the working directory or the path given with `--out <path>` (a file already there is never replaced), the path is printed, and the system image viewer opens it where there is a desktop. The artifact store keeps a second copy, so the image stays available after the provider's own link expires. When no configured provider makes images, it prints each generation provider's status, what it makes, and the key it needs. A job the provider accepted but had not finished when the wait ended is reported with the command that collects it later: `/media collect <provider> <task-id> [key=value ...]`. ("Send an image with a message", in This conversation, is the other direction; it sends a local image file with a message for multimodal analysis.)
+"Make an image or a video" (`M` on the Tools tab, `media.make`) asks the daemon's first configured provider that makes images; a provider that only makes video is never sent the request. Each image is written to a file in the project, `generated/<prompt words>-<time>.<ext>` or the file given in the form inside the project (a file already there is never replaced), the path is said, and after your own press the terminal app opens it in the desktop's viewer (a model's call opens nothing). The daemon's artifact store keeps a second copy, so the image stays available after the provider's own link expires. When no configured provider makes images, it says each generation provider's status, what it makes, and the key it needs. A job the provider accepted but had not finished when the wait ended is reported with where to collect it later: "collect a media job" in the Work place. ("Send an image with a message", in This conversation, is the other direction; it sends a local image file with a message for multimodal analysis.)
 
 `/session` is the single front-door for all session work, split across two domains. The lifecycle subcommands operate on sessions themselves:
 
@@ -408,7 +405,7 @@ Every view opens as a modal over the dimmed conversation, and `Esc` closes one l
 | `Ctrl+P` / `Ctrl+K` | The list of every command and key (also `?` and `/help`); older view names (fleet, tokens, git, …) are search words too, and the keyboard shortcuts are the last group |
 | `F2` / `Ctrl+O` | Your agents: what is waiting for you, running, scheduled and finished, with background services behind one line; open an agent or background process full screen (`Enter`), stop it and what it started (`s` or `Ctrl+X`, asks first) |
 | `Ctrl+N` | The notices the status bar counts |
-| `/usage` | Usage: context bar with the compaction threshold, session totals, per-turn bars, fleet cost split, compact now |
+| `Ctrl+G` `m`, Money | Spending: this conversation's context against the compaction threshold, totals and cost against the spending alert, its turns, its agents' costs; `c` shortens it now, `w` sets the spending alert |
 | `/changes` | Changes: changed files with +/- counts, a tinted syntax-colored diff, the semantic summary, hunk navigation (`]` `[`), stage hunk (`space`), review comments (`c`), mark reviewed (`m`), open in editor (`o`) |
 | `/notifications` | Notification history |
 | `/resume` | Session picker, with hosted sessions in a Hosted group |
@@ -432,7 +429,7 @@ The recovery offer, session picker, profile picker, and config rows are all pick
 
 In a searchable modal, `/` focuses the filter, and any keystroke that no row hotkey claims also arms the filter and starts the query with that character.
 
-The config modals (`/memory`, `/marketplace`, `/plugin`, `/services open`, `/provider open` and the others built on the config-modal host) have an always-live search row: every typed character goes into the search and never fires an action. An action fires from `Enter`, from `Ctrl` plus its letter (the hint bar shows `^d delete`), or from the leader (`Ctrl+G` unless rebound) followed by its key (the hint bar shows `^G c` for the keys a terminal cannot send as a Ctrl chord: `c`, `h`, `i`, `j`, `m`, digits and capitals). An action that deletes, uninstalls or clears asks for the same keys a second time; `Esc` cancels it.
+The config modals (the ones built on the config-modal host) have an always-live search row: every typed character goes into the search and never fires an action. An action fires from `Enter`, from `Ctrl` plus its letter (the hint bar shows `^d delete`), or from the leader (`Ctrl+G` unless rebound) followed by its key (the hint bar shows `^G c` for the keys a terminal cannot send as a Ctrl chord: `c`, `h`, `i`, `j`, `m`, digits and capitals). An action that deletes, uninstalls or clears asks for the same keys a second time; `Esc` cancels it.
 
 ### System
 
@@ -440,7 +437,7 @@ The config modals (`/memory`, `/marketplace`, `/plugin`, `/services open`, `/pro
 |-----|--------|
 | `Ctrl+C` | Clear input / cancel generation / exit (double-press to quit) |
 | `Ctrl+K` | Open the list of every command and key (search and run any command) |
-| `Shift+Tab` | Cycle this session's execution mode: ask-me → jev-decides → just-vibes → yolo, asking before yolo (declining moves on to ask-me); the saved default changes only in `/settings` (plan is outside the cycle; `/plan` toggles it). It does this in every state, also while the session chips show |
+| `Shift+Tab` | Cycle this session's execution mode: ask-me → jev-decides → just-vibes → yolo, asking before yolo (declining moves on to ask-me); the saved default changes only in `/settings` (plan is outside the cycle; its row on This conversation in Permissions and safety toggles it). It does this in every state, also while the session chips show |
 | `Ctrl+G` `n` / `Ctrl+G` `p` | While the session chips show: the next / previous agent or process (`next-session`, `previous-session`) |
 | `Ctrl+X` | Inside an agent or process view: stop what it shows (the first press asks, the second stops) |
 | `Ctrl+G` `t` or `Ctrl+T` | Cancel the running tool call (the turn continues) |
@@ -497,7 +494,7 @@ When an agent is spawned, it can be given its own git worktree. On completion, c
 
 ## Hook system
 
-Hooks fire on lifecycle events throughout a session. They are configured in `hooks.json` in the project working directory (or a custom file set in `tools.hooksFile`, also resolved against the project working directory). A hooks file inside a workspace you have not trusted is not loaded and runs nothing: a cloned repository cannot bring commands that run on its first event. At start the app says once that the workspace's hooks wait on its trust; `/security trust-folder` loads them at once. A hooks file outside the workspace (an absolute `tools.hooksFile`), or a workspace that is your home directory, is yours and loads as before.
+Hooks fire on lifecycle events throughout a session. They are configured in `hooks.json` in the project working directory (or a custom file set in `tools.hooksFile`, also resolved against the project working directory). A hooks file inside a workspace you have not trusted is not loaded and runs nothing: a cloned repository cannot bring commands that run on its first event. At start the app says once that the workspace's hooks wait on its trust; "Trust this folder" in Permissions and safety, This folder, loads them at once. A hooks file outside the workspace (an absolute `tools.hooksFile`), or a workspace that is your home directory, is yours and loads as before.
 
 ### Event path format
 
@@ -535,9 +532,9 @@ The category names which subsystem's events the hook watches:
 | `transport` | Transport lifecycle |
 | `webhook` | Events posted to the daemon's webhook route (any phase the sender names) |
 
-Wildcards are supported: `Pre:tool:*` matches all pre-tool events. `/hooks contracts` lists every hook point; `/hooks contracts <words>` filters the list.
+Wildcards are supported: `Pre:tool:*` matches all pre-tool events. The Hook points tab of Tools and extensions lists every hook point (`hooks.contracts`, which also takes words to filter the list).
 
-A hook fires on the key it is listed under in `hooks.json`. A key that is not exactly `Phase:Category:Specific`, or that no hook point matches (segments are case-sensitive, so `pre:tool:exec` never fires), is not loaded: the reason is logged as a warning and shown in the hook activity list, and `goodvibes hooks validate` reports it.
+A hook fires on the key it is listed under in `hooks.json`. A key that is not exactly `Phase:Category:Specific`, or that no hook point matches (segments are case-sensitive, so `pre:tool:exec` never fires), is not loaded: the reason is logged as a warning, and `goodvibes hooks validate` reports it.
 
 Tool hooks fire for every tool call: the conversation's own, and those of spawned agents, background workers and contract units. A `Pre:tool:*` hook runs before the call is admitted, in every permission mode (`yolo` included). It can refuse the call (`decision: "deny"`), put it to you (`decision: "ask"`), rewrite its arguments (`updatedInput`, which is what the permission check sees and what runs), or add a note (`additionalContext`) that the model reads with that call's result. When several hooks answer, a deny outranks an ask and an ask outranks an allow, so one hook's `allow` never cancels another's `ask`. A `Pre:tool:*` hook that fails (an error, a timeout, a non-zero exit) refuses the call and says which hook failed. `Post:tool:*`, `Fail:tool:*` and the file hooks observe: they run beside the turn, so the next call does not wait for them.
 
@@ -601,7 +598,7 @@ Chains trigger an action only after a sequence of events occurs, with optional t
 }
 ```
 
-A step's `within` and `debounce` are a number with `ms`, `s`, `m` or `h` (`500ms`, `30s`, `5m`, `1h`); a chain with any other value is not registered, and the reason is logged. An optional step is skipped when an event for the next step arrives, and that event also ends an optional step's `debounce` wait early. A chain cannot be switched on or off: `/hooks enable` and `/hooks disable` act on hooks, and `/hooks remove` takes out a hook or a chain.
+A step's `within` and `debounce` are a number with `ms`, `s`, `m` or `h` (`500ms`, `30s`, `5m`, `1h`); a chain with any other value is not registered, and the reason is logged. An optional step is skipped when an event for the next step arrives, and that event also ends an optional step's `debounce` wait early. A chain cannot be switched on or off: switching on and off (`o` on the Hooks tab) acts on hooks, and removing (`x`) takes out a hook or a chain.
 
 A hook definition supports these properties:
 
@@ -630,7 +627,7 @@ table.
 Beyond individual hook definitions, GoodVibes treats hook points, workflow runs, and scheduled tasks as a managed contract rather than plain fire-and-forget shell calls.
 
 - Hook-point contracts carry execution authority, mutation/injection permissions, timeout policy, and failure policy metadata: a hook point declares what it is allowed to do, not just what triggers it
-- Managed hooks support scaffold, chain, enable/disable, inspect, import/export, and simulation flows through `/hooks` and the `state` tool's hook management modes
+- Managed hooks support scaffold, chain, enable/disable, inspect, import/export, and simulation flows through the Hooks and Hook points tabs of Tools and extensions and the `state` tool's hook management modes; the Hook runs tab shows which hooks ran, when, on what, and what each did
 - Workflow state machines (`fix_loop`, `test_then_fix`, `review_only`) drive validated transitions for multi-step review/fix cycles. See [Tool reference: workflow](#workflow) above
 - Cron-like scheduled agent tasks support timezone-aware schedules, missed-run tracking, run history, and manual trigger support, managed in Automation (the menu)
 
@@ -662,7 +659,7 @@ GoodVibes also reads MCP servers already configured for other tools, read-only: 
 }
 ```
 
-A server with a `url` instead of a `command` is a remote HTTP server. Give it a `headers` object (for example `"headers": { "Authorization": "Bearer ..." }`) to send credentials on every request; the headers are never shown by the read routes, and an edit that does not resend them keeps them. Fields GoodVibes does not model are kept when it rewrites the file. A server name may not contain `:` or `/`; such an entry is skipped with a warning rather than blocking other edits. `trustMode: "allow-all"` is honoured only from the global config: in a project file it is ignored (with a warning) and the default trust mode applies, so a checked-out repository cannot grant its own servers unrestricted trust. The project files (`.mcp/mcp.json` and `.goodvibes/mcp.json` in the workspace) start no server until you trust the workspace (an undecided workspace counts as not trusted), and until then a server they name does not take the place of one of yours with the same name; the app says so once at start, and `/security trust-folder` starts them. Your own files (`~/.config/mcp/mcp.json`, `~/.mcp/mcp.json`, Claude Desktop's) are not affected.
+A server with a `url` instead of a `command` is a remote HTTP server. Give it a `headers` object (for example `"headers": { "Authorization": "Bearer ..." }`) to send credentials on every request; the headers are never shown by the read routes, and an edit that does not resend them keeps them. Fields GoodVibes does not model are kept when it rewrites the file. A server name may not contain `:` or `/`; such an entry is skipped with a warning rather than blocking other edits. `trustMode: "allow-all"` is honoured only from the global config: in a project file it is ignored (with a warning) and the default trust mode applies, so a checked-out repository cannot grant its own servers unrestricted trust. The project files (`.mcp/mcp.json` and `.goodvibes/mcp.json` in the workspace) start no server until you trust the workspace (an undecided workspace counts as not trusted), and until then a server they name does not take the place of one of yours with the same name; the app says so once at start, and "Trust this folder" in Permissions and safety, This folder, starts them. Your own files (`~/.config/mcp/mcp.json`, `~/.mcp/mcp.json`, Claude Desktop's) are not affected.
 
 One tool of a server can be ruled on its own. `/mcp block <server> <tool>` refuses every call to it for this session only, whatever the server's trust level and limits allow. `/mcp block <server> <tool> --keep` keeps the block with the server's entry as `"deniedTools": ["<tool>"]` until you change it, after a restart too. `/mcp exempt <server> <tool>` keeps `"allowedTools": ["<tool>"]`: calls to that tool pass the server's `allowedPaths` and `allowedHosts`, while a blocked server, held-back tools or a block of the same tool still refuse it. An exemption loosens what a server may do, so it is yours alone: it is refused when the model runs it (`/mcp unexempt` puts it back), the daemon refuses it for the Agent's model, and it is kept only in your global config (an `allowedTools` list in a project file is ignored with a warning, like `allow-all`). `/mcp unblock <server> <tool>` removes this session's block and the kept one, and says which it removed; it loosens, so it is refused when the model runs it (`/mcp block` puts it back). `/mcp unexempt <server> <tool>` removes only a kept exemption. On a server's row in Settings -> MCP, typing `block`, `unblock`, `exempt` or `unexempt` (a tool is optional) opens that `/mcp` action for the server, the `/mcp` screen's form edits the blocked tools, and the web app lists each server's tools with their rules under Settings > Permissions > MCP tool rules. A rule written while a server runs applies at once, without restarting it: a call not yet sent to a newly blocked tool ends. `/mcp servers` lists each rule with where it came from (this session or the config).
 
@@ -710,7 +707,7 @@ The plugin's trust tier decides what of its declaration it gets, checked at ever
 | `limited` | also the tools, providers and hooks it declares, and gateway methods, channels and delivery strategies |
 | `trusted` | also the high-risk capabilities it declares |
 
-A plugin that declares a high-risk capability does not start below `trusted`: it runs inside this process, so a capability it was refused can only be withheld by not running it. The tier is one decision per plugin for every GoodVibes app on this machine (kept in `~/.goodvibes/plugin-trust.json`): `/plugin trust <name> <tier>` sets it and starts a running plugin again at once, or starts a switched-on plugin its old tier kept from starting (`It was started at the new tier.`); a `/plugin enable <name>` its tier refused leaves the plugin switched on (`did not start and stays switched on: …`), so the trust line starts it whenever you set it, also after the app was restarted; `/plugin lift <name>` lifts a quarantine and starts the plugin when it is switched on (`Plugin '<name>' quarantine lifted and the plugin started.`). The other apps (the agent app, the daemon) apply it the next time they start the plugin; `trusted` is set by a verified signature, or by your confirmation when the signature does not verify. The signature is checked against the publisher's Ed25519 public key, which you save once with `/plugin trust-key <name> <key.pem>`.
+A plugin that declares a high-risk capability does not start below `trusted`: it runs inside this process, so a capability it was refused can only be withheld by not running it. The tier is one decision per plugin for every GoodVibes app on this machine (kept in `~/.goodvibes/plugin-trust.json`): "set what it may do" (`s` on the plugin in the Plugins tab of Tools and extensions, `plugin.trust`) sets it and starts a running plugin again at once, or starts a switched-on plugin its old tier kept from starting (`It was started at the new tier.`); switching on a plugin its tier refuses leaves it switched on, so setting the tier starts it whenever you set it, also after the app was restarted; lifting a quarantine (`u`) starts the plugin when it is switched on (`Plugin <name> quarantine lifted and the plugin started.`). The other apps (the agent app, the daemon) apply it the next time they start the plugin; `trusted` is set by a verified signature, or by your confirmation when the signature does not verify. The signature is checked against the publisher's Ed25519 public key, which you save once with `k` (save its publisher key).
 
 ### Plugin API
 
@@ -718,7 +715,7 @@ Plugins receive a sandboxed API:
 
 - `registerCommand()`: add custom slash commands, each named `/plugin-<plugin name>-<command name>`; the handler receives the arguments and a context whose `print(text)` shows text in the session that typed the command, and an error it throws (or a refusal while the plugin reloads) is shown there too
 - `registerProvider()` / `registerProviderInstance()`: add OpenAI-compatible or fully custom LLM providers
-- `registerTool()`: add custom tools available to the LLM; registering a tool name the plugin already registered throws, so the plugin does not start and `/plugin enable` or `/plugin reload` says why
+- `registerTool()`: add custom tools available to the LLM; registering a tool name the plugin already registered throws, so the plugin does not start and switching it on, or loading the plugins again, says why
 - `registerGatewayMethod()`: add control-plane/API methods
 - `registerChannelPlugin()` / `registerDeliveryStrategy()`: extend omnichannel surfaces
 - `registerMemoryEmbeddingProvider()`: extend sqlite-vec-backed memory indexing
@@ -727,22 +724,22 @@ Plugins receive a sandboxed API:
 - `getConfig()`: read plugin-specific settings
 - `log()`: emit structured plugin logs
 
-Manage installed plugins via `/plugin enable|disable|reload|list`. `/plugin reload` names each plugin that did not start (with its reason), each one left on its current version because calls into it were still running, each one skipped because it is quarantined, and each one whose earlier copy reported an error while stopping.
+Manage installed plugins on the Plugins tab of Tools and extensions: `o` switches one on or off, `R` loads them all again, and the tab lists them. Loading them again names each plugin that did not start (with its reason), each one left on its current version because calls into it were still running, each one skipped because it is quarantined, and each one whose earlier copy reported an error while stopping.
 
 ### Trust, quarantine, and discovery
 
 - local plugin discovery across configured search directories
 - plugin inspect/review output with trust tier, quarantine posture, declared and withheld capabilities, and signature fingerprint visibility
-- `/plugin list|inspect|review|dirs|capabilities|trust|quarantine|lift|verify|publish-local|unpublish`; browsing, installing, updating and uninstalling from the catalog are `/marketplace browse|review|install|update|uninstall`
+- every plugin action is a key on the Plugins and Published plugins tabs of Tools and extensions (see each, how much they may do, where they are looked for, what one asks to do, set what it may do, quarantine, lift it, check its signature, publish a folder, take one out); browsing, installing, updating and uninstalling from the catalog are the Marketplace and Installed tabs
 
 ### Curated ecosystem catalogs
 
 Beyond direct local plugins, a local-first curated distribution channel covers plugins, skills, hook-packs, and policy-packs:
 
 - curated ecosystem catalogs with bundle import and export, overview, review, install, update, rollback, uninstall, and installed-receipt flows
-- local-first curated plugin distribution via `.goodvibes/ecosystem/*.json` (global under `~/.goodvibes/ecosystem/`, project-local under `.goodvibes/ecosystem/` in the workspace), shared across GoodVibes surfaces rather than scoped to the TUI
+- local-first curated plugin distribution via `.goodvibes/tui/ecosystem/*.json` (for all your projects under `~/.goodvibes/tui/ecosystem/`, for one under `.goodvibes/tui/ecosystem/` in the workspace), managed by the daemon and shared across GoodVibes surfaces
 - recommendations tied to installed state, denials, and missing capabilities
-- `/marketplace` browses the curated plugin, skill, hook-pack, and policy-pack surfaces
+- the Marketplace tab of Tools and extensions browses the curated plugin, skill, hook-pack, and policy-pack entries; the Installed tab manages what was installed
 
 ## Operator surfaces
 
@@ -757,7 +754,7 @@ Beyond direct local plugins, a local-first curated distribution channel covers p
 
 Many commands also have matching modals and control rooms. High-signal examples:
 
-- provider accounts and health: `/health` prints `✓ Everything is working.` or each thing that is not with `Fix:` and the line that fixes it; `/health check <area>` reviews one area: `setup`, `services`, `provider`, `sandbox`, `accounts`, `auth`, `settings`, `intelligence`, `remote`, `mcp`, `memory`, `metrics`, `continuity`, `worktrees`, `maintenance` and `terminal`
+- provider accounts and health: the Health tab of the System place says `✓ Everything is working.` or each thing that is not with what fixes it; "Check one area" there reviews one area: `setup`, `services`, `provider`, `sandbox`, `accounts`, `auth`, `settings`, `intelligence`, `remote`, `mcp`, `memory`, `metrics`, `continuity`, `worktrees`, `maintenance` and `terminal`
 - knowledge and memory review
 - remote peers and work queues
 - channels and deliveries
@@ -772,9 +769,9 @@ Many commands also have matching modals and control rooms. High-signal examples:
 
 GoodVibes includes a post-execution and operator-repair stack:
 
-- `/eval` runs a task suite (default `.goodvibes/eval/tasks`: one directory per task with a `task.json` instruction and a `verify.sh`) through headless `goodvibes run`, lets each task's script decide pass or fail, compares runs with a baseline, and gates on a failed or regressed task
-- `/replay` loads and steps deterministic replay runs
-- `/health failure`, `/health save-failure` and `/health keep-failure` show, save and keep this session's failure reports
+- Evaluations (Work place) runs a task suite (default `.goodvibes/eval/tasks`: one directory per task with a `task.json` instruction and a `verify.sh`) through headless `goodvibes run`, lets each task's script decide pass or fail, compares runs with a baseline, and gates on a failed or regressed task
+- Recorded runs (Work place) loads and steps deterministic replay runs
+- "This session's failures" on the same tab shows, saves and keeps this session's failure reports
 - Health and diagnostics surfaces expose repair actions, transport issues, task failure state, and replay hooks
 - telemetry exporters can write to local ledgers, console sinks, or OTLP bridges
 - retention and pruning policy keeps checkpoint/snapshot growth bounded
@@ -809,9 +806,9 @@ The answer shows the text, the sources, facts and linked entries it used, the ga
 
 ## Live TTS commands
 
-`/voice speak <message>` submits a normal chat turn and adds live spoken output for that one turn. Text still renders normally in the transcript. Assistant deltas are chunked at sentence or phrase boundaries and streamed through the configured TTS provider.
+"Ask and hear it" (`p` on the "Speak answers aloud" row of This session, in the System place) submits a normal chat turn and adds live spoken output for that one turn. Text still renders normally in the transcript. Assistant deltas are chunked at sentence or phrase boundaries and streamed through the configured TTS provider.
 
-`/voice stop` cancels active playback and pending TTS requests without deleting the text response.
+"Stop speaking" (`t` on the Voice tab of the System place) cancels active playback and pending TTS requests without deleting the text response.
 
 `/settings open tts` opens the TTS category in the fullscreen configuration workspace. It manages the defaults used by spoken-output clients:
 
@@ -819,9 +816,9 @@ The answer shows the text, the sources, facts and linked entries it used, the ga
 | --- | --- |
 | `tts.provider` | Choose a provider with streaming TTS support |
 | `tts.voice` | Choose a voice from that provider |
-| `tts.llmProvider` / `tts.llmModel` | Choose an optional `/voice speak` response model override through the fullscreen provider/model workspace |
+| `tts.llmProvider` / `tts.llmModel` | Choose an optional response model override for spoken answers through the fullscreen provider/model workspace |
 
-Without that override, `/voice speak` uses the current chat provider/model. Live local playback requires `mpv` or `ffplay` on `PATH`.
+Without that override, "ask and hear it" uses the current chat provider/model. Live local playback requires `mpv` or `ffplay` on `PATH`.
 
 ## Cloudflare batch commands
 
@@ -846,9 +843,9 @@ Some command families are especially important when you are running GoodVibes as
 
 - `/agents` (`team`, `start`, `recipe`) for the packaged task modes and orchestration recipes that produce WRFC and related execution chains
 - Automation (the menu) for cron-like and interval-based schedules, triggers, CI watches and check-ins
-- `/hooks` for managed hook inspection and simulation
-- `/remote` for dispatching and recovering distributed work
-- `/security sandbox` and `/security sandbox-sessions` for isolation review and the live sandbox sessions
+- the Hooks, Hook runs and Hook points tabs of Tools and extensions for managed hooks, which ran and what each did, and trying an event
+- the Runners tab of the Work place for starting and recovering distributed work
+- the Sandbox setting and Sandbox sessions tabs of Permissions and safety for isolation review and the live sandbox sessions
 
 There is no standalone `/workflow` command; contract and workflow state is visible in Your agents (`F2`, `Ctrl+O` or `/agents`).
 
@@ -874,7 +871,7 @@ See [CLI flags reference](cli-flags.md) for full syntax, inline-value forms, and
 
 - [Getting started](getting-started.md)
 - [CLI flags reference](cli-flags.md)
-- [/session upload: share a session](share-command.md)
+- [Saving and uploading a session](share-command.md)
 - [Deployment and services](deployment-and-services.md)
 - [Channels, remote runtime, and API](channels-remote-and-api.md)
 - [Providers and routing](providers-and-routing.md)

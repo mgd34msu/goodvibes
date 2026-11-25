@@ -10,25 +10,19 @@
 // NOTHING is rendered and the metadata is never even read.
 // ---------------------------------------------------------------------------
 
-import type { ConfigKey, ConfigManager, HostBooleanSetting } from '@goodvibes/engine/platform/platform/config';
-
-/** Setting key: show the per-turn memory-provenance chip. Default OFF. */
-export const MEMORY_SHOW_PROVENANCE_CONFIG_KEY = 'memory.showProvenance';
-export const MEMORY_SHOW_PROVENANCE_DEFAULT = false;
+import type { ConfigKey, ConfigManager } from '@goodvibes/engine/platform/platform/config';
+import { MEMORY_SHOW_PROVENANCE_CONFIG_KEY } from '@goodvibes/engine/platform/platform/runtime/program-host-settings';
 
 /**
- * Registered on the TUI's config manager (see config/host-settings.ts), so the
- * loader knows the key, Settings lists it under Memory, and every read resolves
- * to a boolean (the default when unset or malformed).
+ * The setting, registered on the TUI's config manager (see config/host-settings.ts) and declared once in the
+ * platform (runtime/program-host-settings.ts), so the loader knows the key, Settings lists it under Memory, and every
+ * read resolves to a boolean (the default when unset or malformed).
  */
-export const MEMORY_SHOW_PROVENANCE_SETTING: HostBooleanSetting = Object.freeze({
-  key: MEMORY_SHOW_PROVENANCE_CONFIG_KEY,
-  label: 'Show which memories an answer used',
-  type: 'boolean',
-  default: MEMORY_SHOW_PROVENANCE_DEFAULT,
-  description: 'Show a "used N memories" chip on turns that drew on your standing memories, with a drill-in '
-    + 'listing them (Ctrl+G then e to expand, unless rebound). Off by default; when off, nothing is rendered and no metadata is read.',
-});
+export {
+  MEMORY_SHOW_PROVENANCE_CONFIG_KEY,
+  MEMORY_SHOW_PROVENANCE_DEFAULT,
+  MEMORY_SHOW_PROVENANCE_SETTING,
+} from '@goodvibes/engine/platform/platform/runtime/program-host-settings';
 
 /** Whether the memory-provenance chip is on. */
 export function readMemoryShowProvenance(configManager: Pick<ConfigManager, 'get'>): boolean {

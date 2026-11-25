@@ -18,11 +18,11 @@ daemon of the same release.
 - Every cataloged operator method. The counts below are taken from the contract
   itself.
   <!-- openapi-counts:start -->
-  Methods with a dedicated REST binding appear as path operations (538 operations, one per
+  Methods with a dedicated REST binding appear as path operations (544 operations, one per
   method's declared HTTP verb and path); methods without one are reachable only through the
-  generic invoke endpoint (`POST /api/control-plane/methods/{methodId}/invoke`, operation 539,
-  125 methods) and are listed on it under `x-invoke-only-methods`.
-  `x-operator-methods` is a flat index of all 663 cataloged methods, REST-bound
+  generic invoke endpoint (`POST /api/control-plane/methods/{methodId}/invoke`, operation 545,
+  134 methods) and are listed on it under `x-invoke-only-methods`.
+  `x-operator-methods` is a flat index of all 678 cataloged methods, REST-bound
   or invoke-only, each with its category, access level, resolved REST route (or
   `null` for invoke-only), and schema coverage.
   <!-- openapi-counts:end -->
@@ -58,7 +58,7 @@ daemon of the same release.
   declared on the method in the catalog, beside its route. `contracts.start`
   reads the `Idempotency-Key` request header (`in: header`): a retry with the
   same key and body returns the first contract. `sessions.register`
-  (`sessionId`), `workLedger.submit` and `workLedger.importLegacy` (`requestId`)
+  (`sessionId`), `workLedger.submit` (`requestId`)
   replay on a field of the request body (`in: body`).
 
 ## Small agent-facing spec

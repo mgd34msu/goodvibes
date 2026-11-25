@@ -168,7 +168,7 @@ export class SessionPickerModal extends SavedSessionPickerState {
     if (!session) return false;
     if (session.name === this.currentSessionId?.()) {
       this.deleteConfirmationTarget = null;
-      this.statusMessage = `Cannot delete ${session.name}: it is the session open here. Switch to another session first (/session resume <id>), then delete it.`;
+      this.statusMessage = `Cannot delete ${session.name}: it is the session open here. Switch to another session first (/resume <id>), then delete it.`;
       return false;
     }
     if (this.deleteConfirmationTarget !== session.name) {

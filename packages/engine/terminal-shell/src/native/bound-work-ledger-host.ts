@@ -1,5 +1,6 @@
 import type { GatePresetName } from '@goodvibes/engine/platform/platform/gate/presets';
 import { createNativeHostFetch } from './native-host-fetch.js';
+import { inProjectFolder } from './native-project-folder.js';
 import { NativeConversationIntakePreflight } from './native-conversation-intake-preflight.js';
 import { NativeConversationIntakeControls, type NativeConversationIntakePolicy, type NativeConversationIntakeState } from './native-conversation-intake.js';
 import { NativeConversationIntakeJournal } from './native-conversation-intake-journal.js';
@@ -11,52 +12,25 @@ import { intakeJournalPathFor } from './native-journal-paths.js';
 import { NativeWorkSubmissionControls, type NativeWorkSubmissionBinding } from './native-work-submission.js';
 import { createNativeWorkSubmissionBinding, createNativeSubmissionIdentity, type NativeHostIdentityFormat, type NativeSubmissionHost } from './native-work-submission-host.js';
 import { NativeWorkSourceError, readNativeWorkSourceFile } from './native-work-submission-source.js';
-import { createOperatorApiClient, type OperatorRemoteClient } from '@goodvibes/engine/operator-client';
+import { createOperatorApiClient } from '@goodvibes/engine/operator-client';
 
 import { getOperatorWorkLedgerProject } from '@goodvibes/engine/platform/platform/workflow/work-ledger/native-execution-client';
-import { BoundWorkLedgerModel as NativeWorkLedgerModel } from './bound-work-ledger.js';
 import type { NativeWorkLedgerView } from './work-ledger-view.js';
-import type { NativeWorkLedgerBinding } from './work-ledger-projection.js';
-import { createNativeWorkLedgerReadBinding } from './work-ledger-binding.js';
+
+// This program's link to the daemon for work you ask for and messages you type: the daemon's project, found by
+// asking the daemon, and the journals that keep what was sent until the daemon answers. The terminal's own view of
+// the work ledger (and its reader and run controls) was removed: the Work place reads work from the daemon.
 
 export type NativeLedgerHost = (NativeSubmissionHost & { readonly readExecutionMode?: () => GatePresetName }) | { readonly reason: string };
 type BoundHost = Exclude<NativeLedgerHost, { reason: string }>;
-export type NativeLedgerBindingFactory = (host: BoundHost, project: string, current?: () => boolean) => NativeWorkLedgerBinding;
-export const createNativeLedgerBinding: NativeLedgerBindingFactory = (host, project, current = () => true) => {
-  let disposed = false;
-  const operator = createOperatorApiClient({ baseUrl: host.baseUrl, authToken: host.token, fetchImpl: createNativeHostFetch({ current: () => !disposed && current() }) });
-  // The host authorises each call itself (owner, scopes, paired credential) and
-  // refuses a revoked token; asking who we are first repeats that.
-  const invoke = (async (...args: Parameters<OperatorRemoteClient['invoke']>) => {
-    if (disposed || !current()) throw new Error('Native host selection changed.');
-    try {
-      const value = await operator.invoke(...args);
-      if (disposed || !current()) throw new Error('Native host selection changed.');
-      return value;
-    } catch (error) {
-      // Failures are shown in the work view. Keep the typed status and code, but
-      // never let a host reflect the bearer token back onto the screen.
-      if (error instanceof Error) {
-        error.message = error.message.split(host.token).join('[redacted]');
-        if (error.stack) error.stack = error.stack.split(host.token).join('[redacted]');
-      }
-      throw error;
-    }
-  }) as OperatorRemoteClient['invoke'];
-  return createNativeWorkLedgerReadBinding({ invoke, dispose: () => operator.dispose() }, project, {
-    execution: { invoke },
-    beforeDispose: () => {
-      disposed = true;
-    },
-  });
-};
 
 /** Asks the host which project it serves; `holds` is asked again before each request leaves. */
 export async function discoverNativeLedgerProject(host: BoundHost, signal: AbortSignal, holds: () => boolean = () => true): Promise<string> {
   const current = () => !signal.aborted && holds();
   const operator = createOperatorApiClient({ baseUrl: host.baseUrl, authToken: host.token, fetchImpl: createNativeHostFetch({ current }) });
   try {
-    return await getOperatorWorkLedgerProject(operator, { signal });
+    // The project of this program's folder, whatever folder the daemon runs in.
+    return await getOperatorWorkLedgerProject({ invoke: inProjectFolder(operator.invoke.bind(operator), host.workspace) }, { signal });
   } finally {
     operator.dispose();
   }
@@ -78,19 +52,17 @@ export interface NativeLedgerHostPolicy {
   readonly intake: NativeConversationIntakePolicy;
 }
 
-const SELECTION_MOVED = 'Selected host, credentials, or workspace changed. Select the daemon project again with /work <project-id>.';
+const SELECTION_MOVED = 'The daemon, its sign-in or this folder changed while it was in use; the daemon\'s project is found again at the next request.';
 
 /**
- * The one host and project selection owner of a terminal app. The view, the
- * submission controls and the intake controls all read the selection from here;
- * `revision` moves on every change of it, and an action compares that integer
- * before it hands its result back.
+ * The one host and project selection owner of a terminal app. The submission
+ * controls and the intake controls read the selection from here; `revision`
+ * moves on every change of it, and an action compares that integer before it
+ * hands its result back.
  */
 export function createBoundNativeWorkLedgerView(
   resolve: () => NativeLedgerHost,
-  changed: () => void,
   policy: NativeLedgerHostPolicy,
-  bind: NativeLedgerBindingFactory = createNativeLedgerBinding,
   discover: typeof discoverNativeLedgerProject = discoverNativeLedgerProject,
   bindSubmission: (host: BoundHost, project: string, current: () => boolean) => NativeWorkSubmissionBinding = createNativeWorkSubmissionBinding,
 ): NativeWorkLedgerView {
@@ -98,10 +70,6 @@ export function createBoundNativeWorkLedgerView(
   const nativeIdentity = identityOwner.identify;
   let state: NativeLedgerHostState = { kind: 'closed' };
   let revision = 0;
-  // The view is open: a selected project is shown through a bound reader.
-  let viewing = false;
-  let boundRevision = -1;
-  const model = new NativeWorkLedgerModel(changed, () => viewing && boundRevision === revision);
   const same = (a: BoundHost, b: BoundHost) =>
     a.baseUrl === b.baseUrl &&
     a.token === b.token &&
@@ -116,43 +84,6 @@ export function createBoundNativeWorkLedgerView(
     const now = resolve();
     return !('reason' in now) && same(host, now);
   };
-  const disposeBinding = (binding: NativeWorkLedgerBinding) => {
-    try {
-      binding.execution?.dispose();
-    } catch {}
-    if (binding.available) {
-      try {
-        binding.client.dispose();
-      } catch {}
-    }
-  };
-  const present = () => {
-    if (!viewing) return;
-    if (state.kind === 'closed') model.close();
-    else if (state.kind === 'unavailable') model.unavailable(state.reason);
-    else if (state.kind === 'discovering') model.loading(`Discovering daemon project on ${state.host.baseUrl}…`);
-    else {
-      const { host, project } = state;
-      const at = revision;
-      try {
-        // Each request of the binding asks whether the selection still holds; a
-        // change closes the view at once with the reason (sync), so nothing polls.
-        const binding = bind(host, project, () => {
-          const current = viewing && holds(host, project, at);
-          if (!current && viewing && at === revision) queueMicrotask(sync);
-          return current;
-        });
-        if (!viewing || at !== revision) {
-          disposeBinding(binding);
-          return;
-        }
-        boundRevision = at;
-        model.open(binding);
-      } catch (error) {
-        model.unavailable(error instanceof Error ? error.message : String(error));
-      }
-    }
-  };
   const to = (next: NativeLedgerHostState) => {
     const prior = state;
     state = next;
@@ -162,7 +93,6 @@ export function createBoundNativeWorkLedgerView(
       submission.close();
       intake.close();
     }
-    present();
   };
   const sync = () => {
     if (state.kind !== 'discovering' && state.kind !== 'selected') return;
@@ -184,7 +114,7 @@ export function createBoundNativeWorkLedgerView(
           if (state !== discovering) return;
           const current = resolve();
           to('reason' in current || !same(current, host)
-            ? { kind: 'unavailable', reason: 'Host changed during discovery. Reopen /work.' }
+            ? { kind: 'unavailable', reason: 'The daemon changed while its project was being found; it is found again at the next request.' }
             : { kind: 'selected', host, project });
         },
         (error) => {
@@ -192,7 +122,7 @@ export function createBoundNativeWorkLedgerView(
           const reason = error instanceof Error ? error.message : String(error);
           to({
             kind: 'unavailable',
-            reason: `Project discovery unavailable on ${host.baseUrl}: ${reason.split(host.token).join('[redacted]')}. Select explicitly with /work <project-id>; discovery requires read:work-ledger.`,
+            reason: `The daemon at ${host.baseUrl} did not say which project it serves: ${reason.split(host.token).join('[redacted]')}. This program needs the daemon's own sign-in, or a pairing that may read your work.`,
           });
         },
       );
@@ -208,7 +138,7 @@ export function createBoundNativeWorkLedgerView(
       if (now.kind === 'discovering') {
         await now.done;
         if (state.kind === 'unavailable') return state;
-        if (state.kind === 'closed') return { reason: 'Native work ledger view is closed.' };
+        if (state.kind === 'closed') return { reason: 'This program\'s link to the daemon for work is closed.' };
         continue;
       }
       const host = resolve();
@@ -308,18 +238,7 @@ export function createBoundNativeWorkLedgerView(
   });
   const intakeAction = (action: () => Promise<NativeConversationIntakeState | undefined>): Promise<NativeConversationIntakeState | undefined> =>
     intakePreflight.run((_signal, current) => withSelection(action, current));
-  const open = () => {
-    if (viewing && boundRevision === revision && state.kind === 'selected' && (model.state.status === 'ready' || model.state.status === 'loading')) return;
-    viewing = true;
-    boundRevision = -1;
-    sync();
-    present();
-    if (state.kind === 'closed' || state.kind === 'unavailable') void ensure();
-  };
   return {
-    get state() {
-      return model.state;
-    },
     intake: {
       submit: (source, options) => {
         const captured = structuredClone(source);
@@ -361,42 +280,12 @@ export function createBoundNativeWorkLedgerView(
     submissionStatus: () => preflight.run((_signal, current) => withSelection(() => submission.status(), current)),
     retrySubmission: () => preflight.run((_signal, current) => withSelection(() => submission.retry(), current)),
     discardSubmission: () => preflight.run((_signal, current) => withSelection(() => submission.discard(), current)),
-    selectProject(project) {
-      preflight.close();
-      intakePreflight.close();
-      if (!project.trim() || project.length > 200 || /[\u0000-\u001f\u007f]/.test(project)) {
-        to({ kind: 'unavailable', reason: 'A nonempty daemon project ID of at most 200 characters is required.' });
-        return;
-      }
-      const host = resolve();
-      // Without a host yet the choice waits and is applied when one appears.
-      to('reason' in host ? { kind: 'unavailable', reason: host.reason, project } : { kind: 'selected', host, project });
-    },
-    open,
     sync,
-    async execute(action, workId) {
-      open();
-      const selected = await ensure();
-      if ('reason' in selected) return undefined;
-      const at = revision;
-      const result = await model.execute(action, workId);
-      sync();
-      return at === revision ? result : undefined;
-    },
-    observedExecutionAttempt: (workId) => model.observedExecutionAttempt(workId),
-    close() {
-      viewing = false;
-      boundRevision = -1;
-      model.close();
-    },
     dispose() {
       preflight.close();
       intakePreflight.close();
-      viewing = false;
-      boundRevision = -1;
       to({ kind: 'closed' });
       identityOwner.clear();
-      model.close();
     },
   };
 }

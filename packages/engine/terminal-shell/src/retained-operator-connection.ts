@@ -42,14 +42,14 @@ export class RetainedOperatorConnectionError extends Error {
 /**
  * The sentence a command prints when its connection would not open or ended: the state and
  * the step that fixes it. `again` is the command that reopens the view, for example
- * "reopen /payments pending".
+ * "reopen the Telegram review".
  */
 export function describeRetainedConnectionFailure(error: unknown, again: string): string {
   const reason = error instanceof RetainedOperatorConnectionError ? error.reason : 'unavailable';
-  if (reason === 'not-paired') return `No host is paired with this terminal. Pair it (/setup pair in the Agent, /devices pair host in the terminal app), then ${again}.`;
+  if (reason === 'not-paired') return `No host is paired with this terminal. Pair it (Devices and network, Pair something, This program with its daemon), then ${again}.`;
   if (reason === 'closed') return `The view closed before the host answered. Nothing more was sent; ${again}.`;
   if (reason === 'unavailable') {
-    return `The connection to the selected host could not be opened: its pairing or credential file could not be read, or its address is not usable. Nothing was sent; check the pairing (/setup pair in the Agent, /devices pair host in the terminal app), then ${again}.`;
+    return `The connection to the selected host could not be opened: its pairing or credential file could not be read, or its address is not usable. Nothing was sent; check the pairing (Devices and network, Paired tab, How this terminal connects), then ${again}.`;
   }
   return `The selected host or its credential changed while this was open. Nothing more was sent; ${again} to use the current one.`;
 }

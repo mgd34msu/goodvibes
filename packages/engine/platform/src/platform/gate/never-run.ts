@@ -52,7 +52,7 @@
 import { baseName, commandWalker, shellWord, type CommandWalker, type ProgramRun } from './command-walk.js';
 import { execShellCommandsAt, type ShellCommandAt } from '../runtime/permissions/exec-command-text.js';
 import { declaredValues } from './classify.js';
-import type { ToolDefinition } from '../types/tools.js';
+import { callOnlyTightens, type ToolDefinition } from '../types/tools.js';
 
 /** One rule as the gate matches it: the program and the words after it, in order. */
 export interface NeverRunPattern {
@@ -190,7 +190,10 @@ export interface CallShellTexts {
  * running process. No I/O.
  */
 export function callShellTexts(toolName: string, args: Record<string, unknown>,
-  definition?: Pick<ToolDefinition, 'subjects' | 'sideEffects'> | undefined): CallShellTexts {
+  definition?: Pick<ToolDefinition, 'subjects' | 'sideEffects' | 'tightens'> | undefined): CallShellTexts {
+  // A call that only tightens a protection (a never-run rule's own command among its values) runs nothing: a
+  // never-run rule never refuses the owner a stricter rule.
+  if (definition?.tightens && callOnlyTightens(definition.tightens, args)) return { commands: [], argv: [], code: [], pieces: [] };
   const found: ShellCommandAt[] = execShellCommandsAt(args);
   // Commands nested in a call's input (an operator method's `input`, a remote run's payload) are read the same way.
   nestedCommandTexts(args, found);

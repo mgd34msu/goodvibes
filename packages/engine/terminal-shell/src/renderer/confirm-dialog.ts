@@ -23,9 +23,14 @@ const CONFIRM_WIDTH = 64;
 
 export function renderConfirmDialog(dialog: ConfirmView, screenWidth: number, screenHeight: number): SurfaceLayer {
   const t = activeTokens();
-  const { title, body, confirmLabel, tone } = dialog.options;
+  const { title, body, tone } = dialog.options;
   const cancelLabel = dialog.options.cancelLabel ?? 'Cancel';
   const width = Math.min(CONFIRM_WIDTH, standardModalWidth(screenWidth));
+  // The confirming button is a short phrase that fits beside Cancel: a longer one keeps its first whole words (its
+  // verb), never a phrase cut in the middle of a word.
+  const room = modalInnerWidth(width) - buttonWidth(cancelLabel) - 2;
+  let confirmLabel = dialog.options.confirmLabel;
+  while (buttonWidth(confirmLabel) > room && confirmLabel.includes(' ')) confirmLabel = confirmLabel.slice(0, confirmLabel.lastIndexOf(' ')).replace(/[:;,.]+$/, '');
   const lines = body.split('\n').flatMap((para) => (para.trim() === '' ? [''] : wrapLines(para, modalInnerWidth(width))));
   // A field to type in the same ask: a blank, its help line, the value, and what is wrong with it while it is.
   const field = dialog.options.field;

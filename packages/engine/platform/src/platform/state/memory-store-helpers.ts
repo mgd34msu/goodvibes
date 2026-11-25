@@ -61,6 +61,11 @@ export function createSchema(db: { run(sql: string): void; exec(sql: string, par
   ensureColumn(db, 'memory_records', 'referenced_count INTEGER NOT NULL DEFAULT 0', 'referenced_count');
   ensureColumn(db, 'memory_records', 'last_injected_at INTEGER', 'last_injected_at');
   ensureColumn(db, 'memory_records', 'last_referenced_at INTEGER', 'last_referenced_at');
+  // The project a "this project" record was saved for (memory-project.ts); NULL is the person's own, given
+  // everywhere. Outside the revision trigger's column list (its SQL is checked as written), so a write that sets it
+  // stamps the revision itself. A 3.5.0 reader names its columns and does not read it.
+  ensureColumn(db, 'memory_records', 'project TEXT', 'project');
+  db.run('CREATE INDEX IF NOT EXISTS idx_memory_project ON memory_records(project)');
 
   // Small store-owned facts (the consolidation cursor) and the standing
   // consolidation proposals, one row each, keyed by kind and record ids.
@@ -132,6 +137,7 @@ export function rowToRecord(columns: string[], values: unknown[]): MemoryRecord 
   return {
     id,
     scope: normalizePersistedScope(row.scope),
+    ...(typeof row.project === 'string' && row.project ? { project: row.project } : {}),
     cls,
     summary,
     ...(typeof row.detail === 'string' && row.detail.trim() ? { detail: row.detail.trim() } : {}),
@@ -332,6 +338,8 @@ export function compareByTrust(a: MemoryRecord, b: MemoryRecord): number {
 
 export function recordMatchesPostSqlFilter(record: MemoryRecord, filter: MemorySearchFilter): boolean {
   if (filter.scope && record.scope !== filter.scope) return false;
+  // Another project's record never answers this project's search.
+  if (filter.project !== undefined && record.project !== undefined && record.project !== filter.project) return false;
   if (filter.cls && record.cls !== filter.cls) return false;
   // Same rules as the literal path's SQL: `since` is creation time, and every tag must be present.
   if (filter.since && record.createdAt < filter.since) return false;

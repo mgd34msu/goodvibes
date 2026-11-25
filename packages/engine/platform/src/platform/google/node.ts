@@ -57,7 +57,8 @@ export const nodeGoogleFilePort: GoogleFilePort = {
  * call returns at the timeout with the output read so far instead of waiting
  * for a grandchild that still holds the pipes.
  */
-export function createProcessCommandPort(): GoogleCommandPort {
+export function createProcessCommandPort(signal?: AbortSignal): GoogleCommandPort {
+  // `signal`: a run the person stopped (google.stop) ends the command under way and starts no other.
   return {
     async run(command, args, options) {
       try {
@@ -65,6 +66,7 @@ export function createProcessCommandPort(): GoogleCommandPort {
           args: [command, ...args],
           timeoutMs: options?.timeoutMs ?? GCLOUD_DEFAULT_TIMEOUT_MS,
           ...(options?.env ? { env: { ...options.env } } : {}),
+          ...(signal ? { signal } : {}),
         });
         return {
           code: result.timedOut ? null : result.exitCode,
@@ -87,7 +89,7 @@ export function createProcessCommandPort(): GoogleCommandPort {
     // progress back when its output is a pipe). An HTTP error is a failure, never saved as the file.
     async download(url, path, onProgress) {
       try {
-        const response = await fetch(url, { redirect: 'follow' });
+        const response = await fetch(url, { redirect: 'follow', ...(signal ? { signal } : {}) });
         if (!response.ok || !response.body) return { ok: false, problem: `Downloading ${url} failed: HTTP ${response.status}.` };
         const length = Number(response.headers.get('content-length'));
         const total = Number.isFinite(length) && length > 0 ? length : undefined;

@@ -9,7 +9,7 @@
  * (a pressed key, a submitted form), the same as a line typed in full.
  */
 import { formatRefusal, readRefusal } from '@goodvibes/engine/errors';
-import type { DaemonFrameStreamState } from '@goodvibes/engine/platform/platform/runtime/client';
+import type { DaemonFrameChange, DaemonFrameStreamState } from '@goodvibes/engine/platform/platform/runtime/client';
 import { subscribeDaemonEventFrames } from '@goodvibes/engine/platform/platform/runtime/client';
 import {
   DAEMON_CAPABILITIES, KEYS_BIND, KEYS_RESET, KEYS_RESET_ALL, METHOD_CAPABILITIES, capabilityGroupOf, capabilityIdOf,
@@ -20,10 +20,11 @@ import type { SessionCapabilityServices } from '../agent-turn/capability-tools.j
 import type { KeyCombo, KeyConflict, KeyContext, KeyContextEntry, KeyToken } from '../keybindings.js';
 import { keysServices } from '../keys-capabilities.js';
 import {
-  daemonCapabilityAction, runDaemonCapability, sessionCapabilityAction, type CapabilityRevealed, type DaemonCapabilityBinding,
+  daemonCapabilityAction, runDaemonCapabilityHere, sessionCapabilityAction, type CapabilityRevealed, type DaemonCapabilityBinding,
 } from '../command-actions/capability-actions.js';
 import type { SurfaceModal } from '../surface-modal-host.js';
 import { parseSlashCommand } from '../slash-command-parser.js';
+import { asPersonsOwnAct } from '../persons-own-act.js';
 import { describedCommandByName } from '../command-actions/define.js';
 import { openGuidedPanel } from '../command-actions/panel.js';
 import { fixedChoices } from '../command-actions/typed-line.js';
@@ -34,6 +35,8 @@ import type { PlaceFollow } from './place-types.js';
 /** The key table, as a place reads it (both programs' KeybindingsManager). */
 export interface PlaceKeyTable {
   getComboLabel(action: string): string;
+  /** Every key bound to an action, as the table prints each. */
+  getComboLabels(action: string): readonly string[];
   getAll(): ReadonlyArray<{ readonly action: string; readonly combos: readonly KeyCombo[]; readonly description: string }>;
   getDefaults(action: string): readonly KeyCombo[];
   getConflicts(): readonly KeyConflict[];
@@ -54,6 +57,16 @@ export interface PlaceKeyTable {
 export interface PlaceProgramSource {
   read(): unknown;
   subscribe(onChange: () => void): () => void;
+  /**
+   * The items whose content holds the words, each with the line that holds them (item id to line), for a list that
+   * declares `search` (place-types.ts): a list's titles are matched by the place itself.
+   */
+  find?(words: string): Promise<ReadonlyMap<string, string>> | ReadonlyMap<string, string>;
+  /**
+   * The list was drawn for a person: its tab is the one open in a place on screen (a read for a count or a find is
+   * not). What being looked at means for the program: the System place's notices are seen then (system-place.ts).
+   */
+  shown?(): void;
 }
 
 /** What running a capability from a place came to. */
@@ -66,8 +79,8 @@ export interface PlaceHost {
   readonly keys: PlaceKeyTable;
   /** Call a daemon method; throws with the reason when it was not answered. */
   invoke(method: string, input: Readonly<Record<string, unknown>>): Promise<unknown>;
-  /** Follow the daemon's change events; returns the stop. */
-  follow(interest: PlaceFollow, onChange: () => void, onState: (state: DaemonFrameStreamState) => void): () => void;
+  /** Follow the daemon's change events, each told with its frame (none after the stream came back); returns the stop. */
+  follow(interest: PlaceFollow, onChange: (change?: DaemonFrameChange) => void, onState: (state: DaemonFrameStreamState) => void): () => void;
   /** Told each time the program's own daemon connection comes back (its adoption of the daemon); returns the stop. */
   onDaemonBack(listener: () => void): () => void;
   /** A session or program source by name, undefined where this program has none. */
@@ -88,8 +101,11 @@ export interface PlaceHost {
   push(modal: SurfaceModal): void;
   close(modal: SurfaceModal): void;
   requestRender(): void;
-  /** Open a place, on its list `start.list` when given (a tab the menu found by name). */
-  openPlace(id: string, start?: { readonly list?: string | undefined }): void;
+  /**
+   * Open a place, on its list `start.list` when given (a tab the menu found by name), pressing its action
+   * `start.action` (by its name in the place's key context) at once when given (an action the menu ran).
+   */
+  openPlace(id: string, start?: { readonly list?: string | undefined; readonly action?: string | undefined }): void;
 }
 
 /** What a program action may ask of the place that runs it. */
@@ -197,11 +213,15 @@ function firstOpenStep(action: ActionDescription<never>, values: ActionValues, g
 }
 
 /** A bound key as a hint's keycap shows it: `esc`, `⏎`, `ctrl+g m`; the fallback when it is unbound. */
-export function keycapOf(keys: Pick<PlaceKeyTable, 'getComboLabel'>, action: string, fallback: string): string {
-  const label = keys.getComboLabel(action);
-  if (label === '(unbound)') return fallback;
-  const lower = label.toLowerCase();
-  return lower === 'escape' ? 'esc' : lower === 'enter' ? '⏎' : lower;
+export function keycapOf(keys: Pick<PlaceKeyTable, 'getComboLabel'> & Partial<Pick<PlaceKeyTable, 'getComboLabels'>>, action: string, fallback: string, every = false): string {
+  // A hint names the first key bound; the list of every key (`every`) names all of them ("x/delete").
+  const bound = keys.getComboLabels ? keys.getComboLabels(action) : [keys.getComboLabel(action)].filter((label) => label !== '(unbound)');
+  const labels = every ? bound : bound.slice(0, 1);
+  if (labels.length === 0) return fallback;
+  return labels.map((label) => {
+    const lower = label.toLowerCase();
+    return lower === 'escape' ? 'esc' : lower === 'enter' ? '⏎' : lower;
+  }).join('/');
 }
 
 /** A transport's words for an unreachable daemon, which say nothing to a person. */
@@ -210,14 +230,32 @@ const UNREACHABLE = /unable to connect|econnrefused|connection refused|socket co
 /** A reason as a person reads it: an unreachable daemon in plain words, no doubled ending. */
 export function plainReason(reason: string): string {
   if (UNREACHABLE.test(reason)) return 'the daemon did not answer (it may be stopped or still starting)';
-  return reason.trim().replace(/[.?!]+\s*\.$/, '.').replace(/\.$/, '');
+  return reason.trim()
+    // A refusal and its next step are two sentences, however a transport joined them ("... changed.; Ask the owner").
+    .replace(/([.?!])\s*;\s*(\S)/g, (_whole, stop: string, first: string) => `${stop} ${first.toUpperCase()}`)
+    .replace(/[.?!]+\s*\.$/, '.').replace(/\.$/, '');
 }
 
 /** The reason a refusal or an error gives, in its own words (never a command to type). */
 export function reasonOf(error: unknown): string {
   const refusal = readRefusal(error);
-  if (refusal) return plainReason(refusal.reason.trim() || formatRefusal(refusal));
-  return plainReason(error instanceof Error ? error.message : String(error));
+  // The refusal and its next step as two sentences, worded by the one shared piece (errors `formatRefusal`).
+  if (refusal) return plainReason(refusal.reason.trim() ? formatRefusal(refusal) : refusal.state);
+  const words = error instanceof Error ? error.message : String(error);
+  // A capability's refusal (`CapabilityRefusal.next`) or a daemon's answer (`next`, `hint`) carries its next step:
+  // said as the second sentence, as formatRefusal says it.
+  const next = nextStepOf(error) ?? nextStepOf((error as { readonly body?: unknown } | null)?.body);
+  if (next && !words.includes(next)) return plainReason(formatRefusal({ code: '', state: '', reason: words, next: [next], retryable: false } as unknown as Parameters<typeof formatRefusal>[0]));
+  return plainReason(words);
+}
+
+/** The next step an error or a daemon answer names (`next`: a step or a list, most useful first; else `hint`). */
+function nextStepOf(holder: unknown): string | undefined {
+  if (!holder || typeof holder !== 'object') return undefined;
+  const record = holder as { readonly next?: unknown; readonly hint?: unknown };
+  const next = Array.isArray(record.next) ? record.next.find((step): step is string => typeof step === 'string' && step.trim() !== '') : record.next;
+  if (typeof next === 'string' && next.trim()) return next.trim();
+  return typeof record.hint === 'string' && record.hint.trim() ? record.hint.trim() : undefined;
 }
 
 export interface PlaceHostOptions {
@@ -249,7 +287,7 @@ export interface PlaceHostOptions {
   readonly sessionServices?: (() => SessionCapabilityServices) | undefined;
   readonly modals: { push(modal: SurfaceModal): void; close(modal: SurfaceModal): void };
   readonly requestRender: () => void;
-  readonly openPlace: (id: string, start?: { readonly list?: string | undefined }) => void;
+  readonly openPlace: (id: string, start?: { readonly list?: string | undefined; readonly action?: string | undefined }) => void;
 }
 
 /** The one host both terminal programs build for their places. */
@@ -277,31 +315,49 @@ export function createPlaceHost(options: PlaceHostOptions): PlaceHost {
   const host: PlaceHost = {
     keys: options.keys,
     // A list read through `capabilities.run` is this program's: its project and its name go with it (a project's hooks file, its MCP config).
-    invoke: (method, input) => options.invoke(method, method === 'capabilities.run' && options.capabilityBinding && input['workingDirectory'] === undefined
-      ? { ...options.capabilityBinding.caller(options.context as never), ...input } : input),
+    invoke: (method, input) => {
+      if ((method !== 'capabilities.run' && method !== 'places.counts') || !options.capabilityBinding) return options.invoke(method, input);
+      const body = method === 'capabilities.run' && input['workingDirectory'] === undefined ? { ...options.capabilityBinding.caller(options.context as never), ...input } : input;
+      // A list the person opened (or the menu's counts of them) is read as the person's own request: without it the
+      // daemon's gate decided each read under the owner's mode, and in Jev decides each read was a decision posted to
+      // the inbox, whose event read the lists again.
+      return options.capabilityBinding.daemon(options.context as never).invoke(method, body, { explicitUserRequest: true });
+    },
     follow(interest, onChange, onState) {
       let stop: (() => void) | null = null;
       let stopped = false;
       void options.daemonEndpoint().then((endpoint) => {
         if (stopped) return;
         if ('unavailable' in endpoint) { onState({ kind: 'lost', reason: endpoint.unavailable }); return; }
-        stop = subscribeDaemonEventFrames({ baseUrl: endpoint.baseUrl, getAuthToken: () => endpoint.token }, interest, onChange, onState);
+        // This program's project: a notice about another project's list is not a change for this screen.
+        const own = options.capabilityBinding?.caller(options.context as never).workingDirectory;
+        // The credential is read again for every connect: one the program renewed since (its connection repaired after
+        // the daemon restarted) is the one sent, never the one this follow started with, which the daemon then refuses
+        // for good (a refused credential ends a stream; nothing reconnects it).
+        const token = async (): Promise<string | null> => {
+          const now = await options.daemonEndpoint().catch(() => endpoint);
+          return 'unavailable' in now ? endpoint.token : now.token;
+        };
+        stop = subscribeDaemonEventFrames({ baseUrl: endpoint.baseUrl, getAuthToken: token,
+          ...(own !== undefined ? { workingDirectory: own } : {}) }, interest, onChange, onState);
       }, (error: unknown) => { if (!stopped) onState({ kind: 'lost', reason: reasonOf(error) }); });
       return () => { stopped = true; stop?.(); stop = null; };
     },
     onDaemonBack: options.onDaemonBack,
     source: (name) => options.sources?.[name],
     capability: resolve,
-    async runCapability(id, values) {
+    // A press is the person's own act: what it makes (an artifact it saves) is part of what he asked (persons-own-act.ts).
+    runCapability(id, values) { return asPersonsOwnAct(async (): Promise<PlaceRunOutcome> => {
       const resolved = resolve(id);
       if (!resolved) return { ok: false, reason: `${id} is not a capability this program has.` };
       const printed: string[] = [];
       const context: CommandActionContext = { ...options.context, print: (message: string) => { printed.push(message); }, printLive: undefined };
       if (resolved.daemon && options.capabilityBinding) {
         // A daemon capability no slash command carries: asked of the daemon here, as the owner's own press, so the
-        // whole answer is read (a value to see once comes back as its reveal, never as a line).
+        // whole answer is read (a value to see once comes back as its reveal, never as a line). What this program does
+        // itself around it (a plugin started here, a made file opened here) runs as for a typed line.
         try {
-          const answer = await runDaemonCapability(id, values, context as never, options.capabilityBinding);
+          const answer = await runDaemonCapabilityHere(id, values, context as never, options.capabilityBinding);
           const said = answer.detail ?? '';
           return { ok: true, lines: said.split('\n').filter((line) => line.trim() !== ''), ...(answer.reveal ? { reveal: answer.reveal } : {}) };
         } catch (error) {
@@ -326,7 +382,7 @@ export function createPlaceHost(options: PlaceHostOptions): PlaceHost {
       } catch (error) {
         return { ok: false, reason: reasonOf(error) };
       }
-    },
+    }); },
     async openForm(id, values, form) {
       const resolved = resolve(id);
       if (!resolved) return undefined;

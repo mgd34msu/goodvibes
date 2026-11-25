@@ -20,7 +20,8 @@ import type { PlanProposal } from '../core/plan-proposal.js';
  */
 export interface WorkstreamDraftProvenance {
   readonly policy?: 'classic';
-  readonly kind: 'agent' | 'heuristic-configured' | 'gate-declined' | 'fallback';
+  /** `proposed`: the steps were written in a conversation (a plan proposed in plan mode), not by a planning agent. */
+  readonly kind: 'agent' | 'heuristic-configured' | 'gate-declined' | 'fallback' | 'proposed';
   readonly itemCount: number;
   readonly agentCostUsd?: number | undefined;
   readonly agentTokens?: number | undefined;

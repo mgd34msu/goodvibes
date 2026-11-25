@@ -40,7 +40,7 @@ export const RESEARCH_ASK: SessionDefinition = {
   actionId: 'ask', label: 'Research a question on the web', word: 'ask',
   inputs: [
     wordsInput({ id: 'request', label: 'What to find out', help: 'Ask for the outcome you want, not just keywords', why: 'your own words', kind: 'long-text', typed: { tail: true } }),
-    opt('hints', 'Sources', 'Such as official docs only, the last 30 days, or primary sources', '--sources', 'current, primary or official sources where there are some'),
+    opt('hints', 'Sources', 'Such as official docs only, the last 30 days, or primary sources', '--sources', 'current, primary or official ones'),
   ],
   sentence: 'The question "{request}" goes to the conversation, where the Agent researches it on the web and answers; nothing is added to Agent Knowledge.',
   done: '', touches: 'reads', lasts: 'not-a-change', risk: 'none', example: { request: 'Which e-bikes under 2000 have the longest range?' },

@@ -213,6 +213,8 @@ export class ConversationManager {
   private messages: Message[] = [];
   private _title = '';
   private _titleSource: ConversationTitleSource = 'system';
+  /** A message a control wrote for the person (research's question): it never names the conversation. */
+  #notTitledBy: string | undefined;
   private sessionMemoryStore: Pick<SessionMemoryStore, 'list'> | null = null;
   private sessionLineageTracker: Pick<SessionLineageTracker, 'addCompactionEntry'> = {
     addCompactionEntry: () => {},
@@ -355,8 +357,18 @@ export class ConversationManager {
     return withHostMessage(this.getMessagesForLLM(), this.hostInstructions.render());
   }
 
+  /**
+   * The next user message that holds `text` is a message a control wrote (research's question sent from the Work
+   * place): it does not name the conversation, whose title stays its own.
+   */
+  public leaveTitleFor(text: string): void {
+    this.#notTitledBy = text;
+  }
+
   public addUserMessage(content: string | ContentPart[]): void {
-    if (this._title === '' && typeof content === 'string' && deriveConversationTitle(content).length > 0) {
+    const written = typeof content === 'string' && this.#notTitledBy !== undefined && content.includes(this.#notTitledBy);
+    if (written) this.#notTitledBy = undefined;
+    if (!written && this._title === '' && typeof content === 'string' && deriveConversationTitle(content).length > 0) {
       this.setSystemTitle(deriveConversationTitle(content));
     }
     const correlationId = this.#turnCorrelationId;
@@ -463,7 +475,8 @@ export class ConversationManager {
         role: 'tool',
         callId: result.callId,
         content,
-        outcome: result.cancelled === true ? 'cancelled' : result.success ? 'ok' : 'error',
+        // A call held only to load its parameters failed nothing: its row is not a failed tool (its ownerLine says so).
+        outcome: result.cancelled === true ? 'cancelled' : result.success || result.heldToLoad === true ? 'ok' : 'error',
         ...(toolName ? { toolName } : {}),
         ...(result.hostEvidence ? { hostEvidence: structuredClone(result.hostEvidence) } : {}),
         ...(result.ownerLine ? { ownerLine: result.ownerLine } : {}),

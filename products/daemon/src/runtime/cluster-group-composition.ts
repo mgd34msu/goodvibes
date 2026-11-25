@@ -39,6 +39,8 @@ import {
   resolveNodeIdentity,
   stillOnRoster,
   UdpClusterTransport,
+  GroupViewTenant,
+  ownGroupView,
   type AuthorityRecordFile,
   type ClusterGroupVerbSurface,
   type ClusterClock,
@@ -50,6 +52,7 @@ import type { ConfigManager } from '@goodvibes/engine/platform/platform/config';
 import type { SecretsManager } from '../config/secrets.js';
 import type { ClusterTransport } from '@goodvibes/engine/platform/platform/cluster';
 import { logger, summarizeError } from '@goodvibes/engine/platform/platform/utils';
+import { noteListChanged } from '@goodvibes/engine/platform/platform/runtime/emitters';
 import type { ShellPathService } from './index.js';
 import { createClusterComposition } from './cluster-composition.js';
 import type { ClusterCoordinator } from '@goodvibes/engine/platform/platform/cluster';
@@ -192,8 +195,18 @@ export function createClusterGroupComposition(options: {
     electionSecret: () => settings.secret.state,
     authorityRecord: options.authorityRecord,
     // A join the owner said yes to while sharing was off: saved now, applied when the daemon starts again.
-    enableSharing: () => { options.configManager.set('cluster.enabled', true); },
+    enableSharing: () => { options.configManager.set('cluster.enabled', true); noteListChanged({ list: 'machine-group', change: 'changed' }); },
+    // Saved on but not yet in force (the daemon has not started again): Nearby groups says so instead of "off".
+    sharingSaved: () => options.configManager.get('cluster.enabled') === true,
+    // "See its group" on another machine's row: that machine's own view, asked of it over the group's channel.
+    askMember: (memberId) => views.ask(memberId),
   };
+  // Answers another member's "see its group" with this machine's own view, and asks theirs.
+  const views = new GroupViewTenant(runtime.tenantHost(), () => ownGroupView(context), (fn, ms) => clock.setTimer(fn, ms), () => clock.now());
+  let stopViews: (() => void) | null = null;
+  // Every change of the group a person sees (from this machine or another: a join, a leave, a removal, a rename, a new
+  // key) and every group newly heard nearby reaches the open places as LIST_CHANGED `machine-group`: no key pressed.
+  runtime.onGroupChanged(() => { noteListChanged({ list: 'machine-group', change: 'changed' }); });
   let acknowledging = false;
   removedFromGroup = () => {
     if (acknowledging || !started || stopping) return;
@@ -244,6 +257,7 @@ export function createClusterGroupComposition(options: {
         if (stopping) throw new Error('Cluster composition startup cancelled by stop');
         await runtime.start();
         if (stopping) throw new Error('Cluster composition startup cancelled by stop');
+        stopViews ??= views.start();
         started = true;
         await resumePendingGroupAction(context, options.tellOwner);
         if (stopping) throw new Error('Cluster composition startup cancelled by stop');
@@ -261,6 +275,8 @@ export function createClusterGroupComposition(options: {
       if (stopping) return stopping;
       started = false;
       clearRejoin();
+      stopViews?.();
+      stopViews = null;
       const pending = starting;
       stopping = Promise.resolve().then(async () => {
         // Cancel the runtime FIRST: a pending return announcement needs its
@@ -329,7 +345,7 @@ async function resumePendingGroupAction(context: GroupOperationsContext, tellOwn
   }
   await clearPendingGroupAction(context.secrets);
   if (result.ok) {
-    tellOwner?.('This machine joined the group', `It joined "${result.data.groupName}" [${result.data.groupId}] with ${result.data.memberCount} machine(s).${result.data.warning ? ` ${result.data.warning}` : ''}`);
+    tellOwner?.('This machine joined the group', `It joined "${result.data.groupName}" with ${result.data.memberCount} machine${result.data.memberCount === 1 ? '' : 's'}.${result.data.warning ? ` ${result.data.warning}` : ''}`);
   } else {
     tellOwner?.('This machine did not join the group', `${result.error}. ${result.fix}.`);
   }

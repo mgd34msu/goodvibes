@@ -92,8 +92,8 @@ export interface RaiseApprovalDeps {
     actorSurface?: string,
     note?: string,
   ): SharedApprovalAuditRecord;
-  /** The (session, tool, args) coalescing key, the broker's own. */
-  coalesceKey(sessionId: string | undefined, tool: string, args: Record<string, unknown>): string;
+  /** The (session, project, tool, args) coalescing key, the broker's own. */
+  coalesceKey(sessionId: string | undefined, tool: string, args: Record<string, unknown>, workingDirectory?: string | undefined): string;
 }
 
 /** A raised ask: the record it produced, and the decision still to come. */
@@ -169,7 +169,12 @@ function isWireRaise(input: RequestSharedApprovalInput): boolean {
  * raised. Only one raiser's identical asks coalesce.
  */
 export function approvalRaiser(metadata: Readonly<Record<string, unknown>> | undefined): string {
-  if (metadata?.['raisedVia'] !== 'approvals.raise') return 'in-process';
+  if (metadata?.['raisedVia'] !== 'approvals.raise') {
+    // A call `capabilities.run` put to the owner (daemon/capability-owner-gate.ts) is its caller's own: two callers
+    // asking the same act get a question each, each run (or refused) as its own caller, never one answer for both.
+    const caller = metadata?.['source'] === 'capabilities.run' ? metadata['requestedBy'] : undefined;
+    return typeof caller === 'string' && caller.length > 0 ? `in-process:capability-caller:${caller}` : 'in-process';
+  }
   const principal = metadata['raisedByPrincipal'];
   return typeof principal === 'string' && principal.length > 0 ? `principal:${principal}` : 'wire:unidentified';
 }
@@ -184,7 +189,7 @@ function joinable(input: RequestSharedApprovalInput, key: string, deps: RaiseApp
   if (input.requireOwnerDecision) return null;
   for (const existing of deps.approvals.values()) {
     if (existing.requiresOwnerDecision || !isOpenApprovalStatus(existing.status)) continue;
-    if (raiseKey(existing.metadata, deps.coalesceKey(existing.sessionId, existing.request.tool, existing.request.args)) !== key) continue;
+    if (raiseKey(existing.metadata, deps.coalesceKey(existing.sessionId, existing.request.tool, existing.request.args, existing.request.workingDirectory)) !== key) continue;
     const pending = deps.pendingResolvers.get(existing.id);
     if (pending && !pending.retired) return { record: existing, pending };
   }
@@ -212,7 +217,7 @@ export async function raiseSharedApproval(
   input.requireOwnerDecision?.assertCurrent();
   const wire = isWireRaise(input);
   // Keyed by raiser too: another caller's identical ask is its own, never joined to this one.
-  const key = raiseKey(input.metadata, deps.coalesceKey(input.sessionId, input.request.tool, input.request.args));
+  const key = raiseKey(input.metadata, deps.coalesceKey(input.sessionId, input.request.tool, input.request.args, input.request.workingDirectory));
 
   // An identical raise being written: wait for it, then join what it made (its failure is this raise's too).
   for (;;) {
@@ -255,7 +260,8 @@ export async function raiseSharedApproval(
 
   const now = Date.now();
   const creatorHoldId = wire ? randomUUID() : undefined;
-  const requester: ApprovalRequester = creatorHoldId !== undefined ? { kind: 'wire', holds: [{ id: creatorHoldId }] } : { kind: 'in-process' };
+  const requester: ApprovalRequester = creatorHoldId !== undefined ? { kind: 'wire', holds: [{ id: creatorHoldId }] }
+    : input.readsRecord === true ? { kind: 'record-reader' } : { kind: 'in-process' };
   const approval: SharedApprovalRecord = {
     id: `approval-${randomUUID().slice(0, 8)}`,
     callId: input.request.callId,

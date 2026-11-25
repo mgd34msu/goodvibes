@@ -40,7 +40,7 @@
 import { statSync } from 'node:fs';
 import { getOperatorMethod } from '@goodvibes/engine/contracts';
 import { validateOperatorResponse } from '@goodvibes/engine/operator-client/client-core';
-import { OwnedSelectionObservation, captureRemoteSettingsPrecondition } from '@goodvibes/engine/platform/platform/runtime/client';
+import { OwnedSelectionObservation, captureRemoteSettingsPrecondition, programCallHeaders } from '@goodvibes/engine/platform/platform/runtime/client';
 import { assertProjectionCurrent } from '@goodvibes/engine/platform/platform/tools/input-projection';
 import { agentHostPairingStorePath } from '@goodvibes/engine/terminal-shell/agent-turn/connected-host-pairing-store';
 import { connectedHostOperatorTokenPath } from '@goodvibes/engine/terminal-shell/agent-turn/connected-host-auth';
@@ -48,7 +48,9 @@ import { resolveConnectedHostDialEnabled, captureRemoteSettingsImportPreconditio
   assertImportFileCurrent } from '@goodvibes/engine/platform/platform/config';
 import type { ConfigManager } from '@goodvibes/engine/platform/platform/config';
 import type { DaemonReachability, DaemonVerbCaller } from '@goodvibes/engine/platform/platform/runtime/client';
-import { readConnectedHostOperatorToken, connectedHostTokenRequiredMessage, type ConnectedHostCredentialSource } from '@goodvibes/engine/terminal-shell/agent-turn/connected-host-auth';
+import {
+  readConnectedHostBootstrapToken, readConnectedHostOperatorToken, connectedHostTokenRequiredMessage, type ConnectedHostCredentialSource,
+} from '@goodvibes/engine/terminal-shell/agent-turn/connected-host-auth';
 import { resolveConnectedHostAddress } from '@goodvibes/engine/terminal-shell/agent-turn/connected-host-dial';
 import { configuredDaemonIsThisMachine } from '@goodvibes/engine/platform/platform/runtime/client/daemon-target-resolver';
 import { ConnectedHostVerbError, DaemonVerbNotSentError } from '@goodvibes/engine/terminal-shell/agent-turn/connected-host-verb-error';
@@ -75,6 +77,14 @@ export interface AgentDaemonVerbCallerOptions {
    * host that would answer 404.
    */
   readonly hostRefusal?: () => string | undefined;
+  /**
+   * The caller of a control a person pressed in one of the Agent's places (capability-binding.ts `ownerPressBinding`):
+   * when the host is this machine, the call carries this machine's own daemon credential, the one the terminal app's
+   * presses carry, so the host keeps the person's claim (it drops it from the Agent's pairing, which the Agent's model
+   * also calls with: control-plane.ts, "Only a principal the transport itself established as a person's"). The
+   * Agent's model never calls through a caller made with this. Another machine's host gets the Agent's own credential.
+   */
+  readonly ownerPress?: boolean | undefined;
 }
 
 const DEFAULT_INVOKE_TIMEOUT_MS = 120_000;
@@ -131,6 +141,14 @@ function resolveConnection(options: AgentDaemonVerbCallerOptions): ResolvedConne
     if (!observation) {
       observation = new OwnedSelectionObservation();
       connectionObservations.set(options, observation);
+    }
+    if (options.ownerPress) {
+      // This machine's daemon credential, presented only to this machine's host (it says so and gives none otherwise).
+      const own = readConnectedHostBootstrapToken(homeDirectory, baseUrl);
+      if (own.token) {
+        return { baseUrl, token: own.token, source: own.source,
+          selectionIdentity: observation.observe(['agent-owner-press', baseUrl, homeDirectory, own.source, own.path], configManager) };
+      }
     }
     const token = readConnectedHostOperatorToken(homeDirectory, baseUrl, observation, configManager);
     if (!token.token) {
@@ -300,7 +318,8 @@ export function createAgentDaemonVerbCaller(options: AgentDaemonVerbCallerOption
             method: 'POST',
             // The caller names the Agent, so the approvals it raises and the credentials it writes are attributed to it.
             headers: {
-              Authorization: `Bearer ${resolved.token}`, 'Content-Type': 'application/json', 'x-goodvibes-client': 'agent',
+              // The Agent's call context (its project and conversation) goes with every call (call-context.ts).
+              Authorization: `Bearer ${resolved.token}`, 'Content-Type': 'application/json', ...programCallHeaders('agent'),
               ...(invokeOptions?.idempotencyKey ? { 'Idempotency-Key': invokeOptions.idempotencyKey } : {}),
               ...(invokeOptions?.explicitUserRequest === true ? { 'x-goodvibes-explicit-user-request': 'true' } : {}),
             },
@@ -335,7 +354,8 @@ export function createAgentDaemonVerbCaller(options: AgentDaemonVerbCallerOption
           ? `${String(body.error)}${firstNext ? `; ${firstNext}` : ''}`
           : `HTTP ${response.status}`;
         const code = typeof body?.code === 'string' && body.code.length > 0 ? body.code : undefined;
-        throw new ConnectedHostVerbError(`'${methodId}' failed: ${described}`, response.status, code);
+        throw new ConnectedHostVerbError(`'${methodId}' failed: ${described}`, response.status, code,
+          body && typeof body.error === 'string' ? { error: body.error, ...(firstNext ? { next: firstNext } : {}) } : undefined);
       }
       // The check the typed operator client applies, so a host of another
       // version is reported as a contract mismatch naming the field, not as a

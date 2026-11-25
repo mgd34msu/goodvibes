@@ -63,12 +63,11 @@ import type { ConversationManager } from '../core/conversation';
 import { BlockActionsMenu } from '../renderer/block-actions.ts';
 import { ContextInspectorModal } from '../renderer/context-inspector.ts';
 import { BookmarkModal } from './bookmark-modal.ts';
-import { SettingsModal } from './settings-modal.ts';
 import { McpWorkspace } from './mcp-workspace.ts';
 import { SessionPickerModal, getSharedHostedSessionRoster } from './session-picker-modal.ts';
 import { ConfigModal } from './config-modal.ts';
 import { ProfilePickerModal } from '@goodvibes/engine/terminal-shell/profile-picker-state';
-import { OnboardingWizardController, type OnboardingWizardAction, type OnboardingWizardMode } from './onboarding/onboarding-wizard.ts';
+import { OnboardingWizardController, type OnboardingFormOutcome, type OnboardingWizardAction, type OnboardingWizardMode } from './onboarding/onboarding-wizard.ts';
 import type { OnboardingApplyRequest, OnboardingVerificationItem } from '../runtime/onboarding/index.ts';
 import { handleClipboardPaste, type ClipboardPasteSource } from './handler-content-actions.ts';
 import { pasteFromClipboard, pasteImageFromClipboard } from '../utils/clipboard.ts';
@@ -134,7 +133,6 @@ export class InputHandler extends TerminalInputHandlerState implements InputHand
   /** The main transcript's scroll, for Esc while scrolled back (handler-modal-stack.ts); null until the shell wires it. */
   public transcriptScroll: import('./handler-modal-stack.ts').TranscriptScrollControls | null = null;
 
-  public settingsModal = new SettingsModal();
   public configModal = new ConfigModal();
   public mcpWorkspace = new McpWorkspace();
   public onboardingWizard = new OnboardingWizardController();
@@ -157,11 +155,6 @@ export class InputHandler extends TerminalInputHandlerState implements InputHand
       this.concealedInput !== null ||
       (this.selectionModal.active && this.selectionCallback !== null) ||
       this.surfaceModals.waitingForOwner ||
-      (this.settingsModal.active &&
-        (this.settingsModal.mcpAllowAllConfirmationTarget !== null ||
-          this.settingsModal.subscriptionLogoutConfirmationTarget !== null ||
-          this.settingsModal.resetCategoryConfirm !== null ||
-          this.settingsModal.resetAllConfirm !== null)) ||
       (this.configModal.active && this.configModal.hasPendingConfirm()) ||
       (this.sessionPickerModal.active && this.sessionPickerModal.deleteConfirmationTarget !== null) ||
       (this.profilePickerModal.active && this.profilePickerModal.deleteConfirmationTarget !== null)
@@ -233,7 +226,6 @@ export class InputHandler extends TerminalInputHandlerState implements InputHand
     this.surfaceModals.track(
       modals.command,
       modals.onboarding,
-      modals.settings,
       modals.config,
       modals.mcpWorkspace,
       modals.sessionPicker,
@@ -332,8 +324,12 @@ export class InputHandler extends TerminalInputHandlerState implements InputHand
     this.selectionQueue.request({ title, items, opts: withComposer, callback });
   }
 
-  public openOnboardingWizard(modeOrOptions: OnboardingWizardMode | OpenOnboardingWizardOptions = 'new'): void {
+  /** Opens the setup form on top of what is open (a place included); resolves when it is submitted or left. */
+  public openOnboardingWizard(modeOrOptions: OnboardingWizardMode | OpenOnboardingWizardOptions = 'new'): Promise<OnboardingFormOutcome> {
+    // A form kept in the stack from an earlier opening would come back beneath what opened since: it leaves first.
+    if (!this.onboardingWizard.active) this.surfaceModals.close(this.modals.onboarding);
     openOnboardingWizardForHandler(this, modeOrOptions);
+    return this.onboardingWizard.whenClosed();
   }
 
   public async hydrateOnboardingWizardFromRuntime(hydrationSerial: number): Promise<void> {

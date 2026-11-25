@@ -46,6 +46,7 @@
 
 import type { ExecSandboxPlan } from './sandbox.js';
 import type { Containment } from '../../runtime/sandbox/contained-spawn.js';
+import { turnInputParty, type TurnInputParty } from '../../security/turn-input-party.js';
 
 /**
  * Whether a composition requires the exec boundary: the same posture every
@@ -70,6 +71,47 @@ export interface ExecContainmentRequirement {
    * Ignored when the posture is `host-allowed`.
    */
   readonly reason: string;
+}
+
+/**
+ * The ONE rule for a turn's commands, whichever door the turn came through (a terminal program, the Agent, the web
+ * chat, a schedule or trigger, handed-off work, a hosted session): the shared `sandbox.*` setting decides whether a
+ * command runs inside the boundary, and the permission gate under the owner's mode decides whether it runs at all
+ * (an ask nobody is present for waits for the owner in Waiting for you). No door refuses a command the others would run.
+ * The one exception is who the input came from, not the door: a turn acting on someone else's input is held to the
+ * boundary at the command ({@link containmentForTurn}).
+ */
+export const TURN_EXEC_CONTAINMENT: ExecContainmentRequirement = {
+  posture: 'host-allowed',
+  reason: 'every turn runs its commands under the shared sandbox setting and the owner\'s mode',
+};
+
+/**
+ * The requirement a command is judged against in the turn it runs in: the composition's own, unless the turn is
+ * acting on someone else's input (security/turn-input-party.ts, the one place that is decided). Then the boundary is
+ * REQUIRED whatever the composition or the mode says: no real sandbox, no command. Read at the command, not at
+ * composition, because one project's registry serves the owner's turns and other people's alike.
+ */
+export function containmentForTurn(
+  requirement: ExecContainmentRequirement | null | undefined,
+  party: TurnInputParty = turnInputParty(),
+): ExecContainmentRequirement | null | undefined {
+  if (party.party === 'owner') return requirement;
+  return {
+    posture: 'required',
+    reason: `this turn acts on someone else's input (${party.who}), so it runs commands only inside a real sandbox and writes no file, whatever the mode`,
+  };
+}
+
+/**
+ * The refusal a file write or edit gets in a turn acting on someone else's input, or null when it may go on (the
+ * owner's turn: the gate under his mode decides it). Such a turn writes no file outside a real sandbox, and the write
+ * and edit tools have none: what it may change it proposes to the owner instead.
+ */
+export function foreignInputWriteRefusal(tool: string, party: TurnInputParty = turnInputParty()): string | null {
+  if (party.party === 'owner') return null;
+  return `Tool '${tool}' was refused: this turn acts on someone else's input (${party.who}), and such a turn writes no `
+    + 'file outside a real sandbox, whatever the mode. Say what you would change, and the owner can make the change himself.';
 }
 
 /** The verdict for one command. */

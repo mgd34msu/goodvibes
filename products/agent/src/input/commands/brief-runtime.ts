@@ -112,22 +112,23 @@ export function formatAgentOperatorBriefing(ctx: CommandContext): string {
         ? 'Switch on reviewed routines: switch on, on the Routines tab of Automation.'
         : '',
     channelSetupGaps > 0
-      ? `Finish setting up ${plural(channelSetupGaps, 'enabled channel')}: /channels setup.`
+      ? `Finish setting up ${plural(channelSetupGaps, 'enabled channel')}: select it on the Channels tab of Mail, calendar and channels and press "what it needs".`
       : '',
     voiceSetupNeedsReview
-      ? 'Check the voice setup before relying on spoken replies: /voice status.'
+      ? 'Check the voice runtime before relying on spoken replies: the System place, Voice tab.'
       : '',
     mediaSetupNeedsReview
-      ? 'Check the media providers before relying on images or media: /media providers.'
+      ? 'Check the media providers before relying on images or media: the Media tab of Models and providers.'
       : '',
     'Your knowledge: the Sources tab of Memory and knowledge.',
-    'Hand build, fix or review work to the terminal app only when you mean to: /agents hand-off.',
+    'Hand build, fix or review work to the terminal app only when you mean to: Handed off, in the Work place ("hand coding work on").',
   ].filter((line): line is string => line.length > 0);
 
   return [
     'Agent Briefing',
     `  chat route: ${snapshot.provider} / ${snapshot.modelDisplayName}`,
-    `  session ${snapshot.sessionId}`,
+    // A session is named by its title, never by its id.
+    `  conversation: ${ctx.session.conversationManager.title.trim() || 'this one, not named yet'}`,
     `  profile ${snapshot.activeRuntimeProfile}`,
     `  policy ${snapshot.executionPolicy}; delegated review ${snapshot.delegatedReviewPolicy}`,
     `  knowledge ${snapshot.knowledgeRoute} (${snapshot.knowledgeIsolation}; no fallback)`,
@@ -142,7 +143,7 @@ export function formatAgentOperatorBriefing(ctx: CommandContext): string {
     `  channels: ${readyChannels}/${snapshot.channels.length} ready; ${enabledChannels} enabled; setup gaps ${channelSetupGaps}`,
     `  voice/media: ${snapshot.voiceProviderCount} voice, ${snapshot.mediaProviderCount} media; browser tools ${snapshot.voiceMediaReadiness.browserToolState}`,
     `  spoken replies: ${snapshot.voiceMediaReadiness.selectedTtsProviderLabel} (${snapshot.voiceMediaReadiness.selectedTtsProviderStatus}); voice ${snapshot.voiceSurfaceEnabled ? 'on' : 'off'}; ${snapshot.voiceMediaReadiness.readyVoiceProviderCount} voice and ${snapshot.voiceMediaReadiness.readyMediaProviderCount} media providers ready`,
-    `  this device: ${snapshot.companionAccess.pairingReady ? 'paired with its host' : 'not paired with a host'} (${snapshot.companionAccess.hostUrl}); phones and their camera, location and notifications: /devices nodes`,
+    `  this device: ${snapshot.companionAccess.pairingReady ? 'paired with its host' : 'not paired with a host'} (${snapshot.companionAccess.hostUrl}); phones and their camera, location and notifications: Devices and network, Phones`,
     formatWorkPlanLine(workPlan),
     'unavailable' in jobReading ? `  schedules unavailable: ${jobReading.unavailable}` : `  schedules ${enabledJobs}/${jobs.length} visible jobs enabled`,
     '',

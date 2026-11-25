@@ -2,6 +2,7 @@ import type { ConfigKey } from '@goodvibes/engine/platform/platform/config';
 import type { SelectionItem } from './selection-modal.js';
 import type { ConfigManager } from '@goodvibes/engine/platform/platform/config';
 import type { OpenSelection } from './selection-modal.js';
+import { writeSetting, type SettingWriteContext } from './settings-writes.js';
 export interface TtsPickerContext {
   readonly platform: {
     readonly configManager: Pick<ConfigManager, 'get' | 'setDynamic'>;
@@ -54,7 +55,8 @@ export function createTtsSettingsActions<Context extends TtsPickerContext>(prese
     return registry.list().filter((provider) => provider.capabilities.includes('tts-stream'));
   }
   function setTtsConfigValue(ctx: Context, key: ConfigKey, value: string): void {
-    ctx.platform.configManager.setDynamic(key, value);
+    // Through the daemon's settings.set (settings-writes.ts); a refusal is said there.
+    void writeSetting(ctx as unknown as SettingWriteContext, key, value).catch(() => {});
   }
   function openTtsProviderPicker(
     ctx: Context,

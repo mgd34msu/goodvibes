@@ -66,7 +66,6 @@ import type { JudgmentServices } from '@goodvibes/engine/platform/platform/runti
 import type { SessionSnapshot } from '@goodvibes/engine/platform/platform/runtime/operations';
 import type { DaemonInboxFactory } from './daemon-handler-composition.js';
 import type { TriggerManager } from '@goodvibes/engine/platform/platform/triggers';
-import type { WorkspaceSwapManager } from '@goodvibes/engine/platform/platform/workspace';
 import type { DaemonBootController, DaemonBootOperations } from './boot-tasks.js';
 
 export interface RuntimeServicesOptions {
@@ -101,19 +100,6 @@ export interface RuntimeServicesOptions {
    * is the single reader that produces it.
    */
   readonly daemonHomeDirectory?: string | undefined;
-  /**
-   * The start option that chose the working directory ahead of the saved
-   * setting (`--working-dir`, `GOODVIBES_WORKING_DIR`), when there was one: a
-   * saved working-directory change then says that option must change first.
-   */
-  readonly workingDirectoryOverride?: string | undefined;
-  /**
-   * Moves this daemon to another working directory: the process owner stops
-   * this host and builds every service again there (cli/serve.ts). Called by
-   * the working-directory owner once the change is saved and no session is
-   * busy. Absent: a working-directory change applies at the next start.
-   */
-  readonly moveWorkspace?: ((workingDirectory: string) => void) | undefined;
   /** Opt-in (daemon-side only): fold host-observed external coding-agent sessions
    * into the fleet as 'observed-external' rows. Interactive leaves it off and reads
    * the daemon snapshot. Mirrors the platform's own createRuntimeServices option. */
@@ -206,8 +192,6 @@ export interface RuntimeServices {
   readonly hookWorkbench: HookWorkbench;
   readonly pluginManager: PluginManager;
   readonly workflow: WorkflowServices;
-  /** Saves a working-directory change for the next start; null without a daemon home directory. */
-  readonly workspaceSwap: WorkspaceSwapManager | null;
   /** Stream watchers, on-exit process triggers and condition checks, supervised as one, see trigger-services.ts. */
   readonly triggerManager: TriggerManager;
   readonly voiceProviders: VoiceProviderRegistry;

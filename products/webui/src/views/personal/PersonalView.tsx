@@ -8,7 +8,6 @@ import { PERSONAL, resolveTab } from '../../components/shell/nav';
 import { Segmented } from '../../components/ui/Segmented';
 import type { PersonalTab } from '../../lib/router';
 import { CalendarView } from '../calendar/CalendarView';
-import { ChannelsView } from '../channels/ChannelsView';
 import { DatesView } from '../dates/DatesView';
 import { MailView } from '../mail/MailView';
 
@@ -28,7 +27,6 @@ export function PersonalView({ tab, onTabChange }: PersonalViewProps) {
     />
   );
   if (current === 'mail') return <MailView tabs={tabs} />;
-  if (current === 'channels') return <ChannelsView tabs={tabs} />;
   if (current === 'occasions') return <DatesView tabs={tabs} />;
   return <CalendarView tabs={tabs} />;
 }

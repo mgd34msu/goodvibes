@@ -6039,6 +6039,29 @@
          "url"
         ],
         "additionalProperties": false
+       },
+       {
+        "type": "object",
+        "properties": {
+         "kind": {
+          "type": "string",
+          "enum": [
+           "outside-caller"
+          ]
+         },
+         "name": {
+          "type": "string"
+         },
+         "principalId": {
+          "type": "string"
+         }
+        },
+        "required": [
+         "kind",
+         "name",
+         "principalId"
+        ],
+        "additionalProperties": false
        }
       ]
      },

@@ -65,21 +65,9 @@ export function registerPermissionsCommand<Ctx extends CommandActionContext>(
     summary: 'See which permission settings are in force, and the rules that decide calls without asking',
     group: 'Permissions',
     // Typed bare by a person, it opens Permissions and safety; a model or a script gets the mode in force.
-    bareOpens: 'open',
+    opens: 'safety',
     report: 'mode',
     actions: [
-      {
-        id: 'open', label: 'Open Permissions and safety', word: 'open', inputs: [],
-        sentence: 'Opens Permissions and safety: this conversation\'s permissions, the rules, your secrets, this folder\'s trust, who may sign in and who is who.',
-        done: '', touches: 'reads', lasts: 'not-a-change', risk: 'none', example: {},
-        operator: { terminalOnly: 'It is a terminal screen.' },
-        async run(_values, ctx) {
-          const open = (ctx as CommandActionContext & { readonly openPlace?: ((id: string) => void) | undefined }).openPlace;
-          if (!open) return (await sessionCapabilityAction<Ctx, PermissionsSessionServices>(PERMISSIONS_MODE, here, { terminalOnly }).run({}, ctx)) ?? undefined;
-          open('safety');
-          return undefined;
-        },
-      },
       sessionCapabilityAction<Ctx, PermissionsSessionServices>(PERMISSIONS_MODE, here, { terminalOnly }),
       sessionCapabilityAction<Ctx, PermissionsSessionServices>(PERMISSIONS_SHOW, here, { terminalOnly }),
       daemonCapabilityAction<Ctx>(PERMISSIONS_RULES, binding),

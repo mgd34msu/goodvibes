@@ -15,9 +15,9 @@
  * So capability questions get a route that cannot be wrong in that direction:
  *   - the capability index is re-resolved LIVE on every call, not read from
  *     the boot snapshot, because credentials can be connected mid-session;
- *   - Google, mail and calendar additionally carry the same status report
- *     `/google status` prints, from the same function, so the answer is what
- *     the connector actually sees;
+ *   - Google, mail and calendar additionally carry the daemon's own check of
+ *     the one connection (capability `google.status`, the same the Google tab
+ *     runs), so the answer is what the connector actually sees;
  *   - a capability with no route registered in this build is reported as
  *     absent from the build, in those words, with the fact that configuring
  *     something will not turn it on;
@@ -38,7 +38,8 @@ import { resolveCapabilityIndex } from '../capabilities/capability-index.ts';
 import { configValueIsPresent, safeMcpServerPosture, secretValueIsPresent, servedOperatorMethodIds } from '../capabilities/capability-sources.ts';
 import type { CapabilityIndexReport, ResolvedCapability } from '@goodvibes/engine/terminal-shell/agent-turn/capability-types';
 import { refreshCapabilityIndex, setCapabilitySnapshot } from '../capabilities/capability-snapshot.ts';
-import { describeGoogleConnection } from '../input/commands/google-connection-actions.ts';
+import { runDaemonCapability } from '@goodvibes/engine/terminal-shell/command-actions';
+import { capabilityBinding } from '../input/commands/capability-binding.ts';
 import { requirePlatform, requireShellPaths } from '../input/commands/runtime-services.ts';
 import type { CommandContext } from '../input/command-registry.ts';
 
@@ -74,7 +75,7 @@ export interface CapabilityStatusInputs {
   readonly report: CapabilityIndexReport;
   /** True when the in-process Google route is registered in this build. */
   readonly googleToolRegistered: boolean;
-  /** The `/google status` report, or undefined when the subject does not need it. */
+  /** The daemon's `google.status` report, or undefined when the subject does not need it. */
   readonly googleStatus?: string | undefined;
   /** True when the live Google status was asked for and could not be read, so the answer says so rather than omitting it. */
   readonly googleStatusUnreadable?: boolean | undefined;
@@ -163,9 +164,9 @@ function describeGoogleRoute(inputs: CapabilityStatusInputs): string[] {
     ];
   }
   const lines = [
-    'Gmail and Google Calendar run through the built-in google tool, in this process.',
-    'There is nothing to install and nothing separate to register: connect an account with /google connect,',
-    'or take up credentials already on this machine with /google adopt.',
+    'Gmail and Google Calendar run through the built-in google tool; the connection is the daemon\'s, one for every program.',
+    'There is nothing separate to register: the person connects an account with "connect" on the Google tab of Mail, calendar and',
+    'channels (capability google.connect), or takes up credentials already on the daemon\'s machine there (capability google.adopt).',
   ];
   if (inputs.googleStatus) {
     lines.push('');
@@ -173,7 +174,7 @@ function describeGoogleRoute(inputs: CapabilityStatusInputs): string[] {
     for (const line of inputs.googleStatus.split('\n')) lines.push(`  ${line}`);
   } else if (inputs.googleStatusUnreadable) {
     lines.push('');
-    lines.push('The connector\'s live status could not be read just now; run /google status to see it.');
+    lines.push('The connector\'s live status could not be read from the daemon just now; the Google tab of Mail, calendar and channels shows it (capability google.status).');
   }
   return lines;
 }
@@ -275,7 +276,9 @@ export function createAgentCapabilityTool(options: AgentCapabilityToolOptions): 
       let googleStatusUnreadable = false;
       if (registered && (GOOGLE_BACKED.has(subject) || subject === 'all')) {
         try {
-          googleStatus = await describeGoogleConnection(options.commandContext);
+          // The daemon's one Google connection, checked by reading mail and calendar (capability google.status), as the model's read.
+          const answer = await runDaemonCapability('google.status', { check: 'yes' }, { ...options.commandContext, invokedByModel: true }, capabilityBinding);
+          googleStatus = answer.detail ?? answer.text;
         } catch {
           googleStatusUnreadable = true;
         }

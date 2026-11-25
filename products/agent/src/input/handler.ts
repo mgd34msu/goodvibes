@@ -42,7 +42,6 @@ import { BlockActionsMenu } from '../renderer/block-actions.ts';
 import { ContextInspectorModal } from '../renderer/context-inspector.ts';
 import { SurfaceModalHost, isTrackedModal, type TrackedModal } from '@goodvibes/engine/terminal-shell/surface-modal-host';
 import { BookmarkModal } from './bookmark-modal.ts';
-import { SettingsModal } from './settings-modal.ts';
 import { McpWorkspace } from './mcp-workspace.ts';
 import { AgentWorkspace } from './agent-workspace.ts';
 import { parseSlashCommand } from './slash-command-parser.ts';
@@ -147,7 +146,6 @@ export class InputHandler extends TerminalInputHandlerState {
 
   public bookmarkModal: BookmarkModal;
   public blockActionsMenu = new BlockActionsMenu();
-  public settingsModal = new SettingsModal();
   public mcpWorkspace = new McpWorkspace();
   public agentWorkspace = new AgentWorkspace();
   /** Screen row → what a click on that status bar row (and column) opens; set each frame. */
@@ -170,8 +168,6 @@ export class InputHandler extends TerminalInputHandlerState {
       this.concealedInput !== null ||
       this.plainLineInput !== null ||
       this.surfaceModals.waitingForOwner ||
-      (this.settingsModal.active &&
-        (this.settingsModal.mcpAllowAllConfirmationTarget !== null || this.settingsModal.subscriptionLogoutConfirmationTarget !== null)) ||
       (this.sessionPickerModal.active && this.sessionPickerModal.deleteConfirmationTarget !== null) ||
       (this.profilePickerModal.active && this.profilePickerModal.deleteConfirmationTarget !== null)
     );
@@ -230,7 +226,6 @@ export class InputHandler extends TerminalInputHandlerState {
     this.surfaceModals.track(
       modals.command,
       modals.agentWorkspace,
-      modals.settings,
       modals.mcpWorkspace,
       modals.process,
       modals.liveTail,
@@ -247,8 +242,9 @@ export class InputHandler extends TerminalInputHandlerState {
       if (fromEmpty) this.modalReturnFocus = this.indicatorFocused ? 'indicator' : 'prompt';
       if (!isTrackedModal(modal)) return;
       this.setupPairing?.cancelForTakeover();
-      // The workspace stays under the model picker and settings it opens; any other modal replaces it.
-      const keepsWorkspaceUnder = modal === modals.modelPicker || modal === modals.settings;
+      // The workspace stays under the model picker it opens (settings is a kit modal now, never tracked here); any
+      // other tracked modal replaces it.
+      const keepsWorkspaceUnder = modal === modals.modelPicker;
       if (modal !== modals.agentWorkspace && !keepsWorkspaceUnder && this.agentWorkspace.active) this.closeAgentWorkspaceModal();
     };
     this.initFeedContext();
@@ -418,7 +414,16 @@ export class InputHandler extends TerminalInputHandlerState {
   public openMcpWorkspace(context: CommandContext): void {
     openHandlerMcpWorkspace(this, context);
   }
-  public openAgentWorkspace(context: CommandContext, categoryId?: string, onlyGroup?: string): void {
+  /** Opens the workspace on top of what is open (a place included); resolves when it closes. */
+  public openAgentWorkspace(context: CommandContext, categoryId?: string, onlyGroup?: string): Promise<void> {
+    // A workspace kept in the stack from an earlier opening would come back beneath what opened since: it leaves first.
+    if (!this.agentWorkspace.active) this.surfaceModals.close(this.modals.agentWorkspace);
+    const closed = this.agentWorkspace.whenClosed();
+    this.openAgentWorkspaceNow(context, categoryId, onlyGroup);
+    return closed;
+  }
+
+  private openAgentWorkspaceNow(context: CommandContext, categoryId?: string, onlyGroup?: string): void {
     this.indicatorFocused = false;
     this.agentWorkspace.open(
       context,

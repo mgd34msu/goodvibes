@@ -31,7 +31,6 @@ import { createResumeSessionHandler } from './bootstrap-hook-bridge.ts';
 import { confirmLiveResume } from './session-resume-liveness-confirm.ts';
 import { logger } from '@goodvibes/engine/platform/platform/utils';
 import { loadBootstrapSystemPrompt } from '@/runtime/index.ts';
-import { createShellRemoteCommandService } from '@/runtime/index.ts';
 import { createRuntimeFoundationClients } from '@/runtime/index.ts';
 import type { ToolRegistry } from '@goodvibes/engine/platform/platform/tools';
 import type { ForensicsRegistry } from '@/runtime/index.ts';
@@ -158,9 +157,9 @@ export function createBootstrapShell(options: BootstrapShellOptions): BootstrapS
   });
 
   // initial cost-budget alert threshold (USD; 0/unset = disabled).
-  // Once the session starts, the Usage modal's 'b' key and /usage alert <dollars>
-  // both write the behavior.budgetAlertUsd config key (runtime/usage-tracker.ts),
-  // the same key the background budget-breach notifier reads. The env var
+  // The amount is the daemon's setting behavior.budgetAlertUsd, set in Money,
+  // Spending (usage.alert), the same key the budget-breach notifier reads at the
+  // end of each turn from this program's copy of the daemon's settings. The env var
   // remains a first-run convenience only: it seeds the key when nothing was ever
   // stored for it, so it never overrides a value (including a deliberate 0) the
   // user set in a prior session.
@@ -214,11 +213,6 @@ export function createBootstrapShell(options: BootstrapShellOptions): BootstrapS
   const commandRegistry = new CommandRegistry();
   registerBuiltinCommands(commandRegistry);
   registerNativeWorkLedgerCommand(commandRegistry, nativeWorkLedgerHost.view);
-  const remoteRuntime = createShellRemoteCommandService({
-    readModels: uiServices.readModels,
-    remoteRunnerRegistry: services.remoteRunnerRegistry,
-    runtimeStore,
-  });
 
   const commandContext: CommandContext = createBootstrapCommandContext({
     ...projectBootstrapShellCommandOptions({
@@ -231,7 +225,6 @@ export function createBootstrapShell(options: BootstrapShellOptions): BootstrapS
       forensicsRegistry,
       policyRuntimeState,
       uiServices,
-      remoteRuntime,
       providerApi,
       directTransport,
       hookApi,

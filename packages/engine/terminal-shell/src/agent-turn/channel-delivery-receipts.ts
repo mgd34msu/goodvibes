@@ -208,8 +208,29 @@ export function agentChannelDeliveryReceiptPath(shellPaths: AgentChannelDelivery
   return shellPaths.resolveUserPath(GOODVIBES_AGENT_SURFACE_ROOT, 'channels', 'delivery-receipts.json');
 }
 
-export function readAgentChannelDeliveryReceipts(shellPaths: AgentChannelDeliveryReceiptShellPaths): AgentChannelDeliveryReceiptSnapshot {
-  const path = agentChannelDeliveryReceiptPath(shellPaths);
+/** Where the daemon keeps the receipts of the sends it made for every program (`~/.goodvibes/daemon/channels/`). */
+export function daemonChannelDeliveryReceiptPath(shellPaths: AgentChannelDeliveryReceiptShellPaths): string {
+  return shellPaths.resolveUserPath('daemon', 'channels', 'delivery-receipts.json');
+}
+
+/**
+ * The Agent's own receipts (3.5.0) carried into the daemon's once: done when the daemon's file does not exist yet,
+ * so a receipt the daemon's list let go of never comes back. The Agent's file is only read. Returns how many.
+ */
+export function carryAgentChannelDeliveryReceipts(shellPaths: AgentChannelDeliveryReceiptShellPaths): number {
+  const daemonPath = daemonChannelDeliveryReceiptPath(shellPaths);
+  const daemonStore = readJsonStore(daemonPath, RECEIPT_STORE);
+  if (daemonStore.exists) return 0;
+  const agent = readJsonStore(agentChannelDeliveryReceiptPath(shellPaths), RECEIPT_STORE);
+  updateJsonStore(daemonPath, RECEIPT_STORE, (store) => ({
+    value: undefined,
+    entries: [...store.entries, ...agent.entries.filter((receipt) => !store.entries.some((kept) => kept.id === receipt.id))].slice(0, RECEIPT_LIMIT),
+  }));
+  return agent.entries.length;
+}
+
+export function readAgentChannelDeliveryReceipts(shellPaths: AgentChannelDeliveryReceiptShellPaths, at?: string): AgentChannelDeliveryReceiptSnapshot {
+  const path = at ?? agentChannelDeliveryReceiptPath(shellPaths);
   const store = readJsonStore(path, RECEIPT_STORE);
   return {
     path,
@@ -226,8 +247,10 @@ export function recordAgentChannelDeliveryReceipt(
     readonly deliveryInput: AgentChannelDeliveryInput;
     readonly result: AgentChannelDeliveryResult;
   },
+  /** The store written; the Agent's own file when absent. */
+  at?: string,
 ): AgentChannelDeliveryReceipt & { readonly storeNote?: string | undefined } {
-  const path = agentChannelDeliveryReceiptPath(shellPaths);
+  const path = at ?? agentChannelDeliveryReceiptPath(shellPaths);
   const title = previewMessage(input.result.title || 'GoodVibes Agent message');
   const receipt: AgentChannelDeliveryReceipt = {
     version: RECEIPT_VERSION,
@@ -242,7 +265,7 @@ export function recordAgentChannelDeliveryReceipt(
     strategyCount: input.result.strategyCount,
     ...(input.result.responseId ? { responseId: input.result.responseId } : {}),
     authorization: 'explicit-user-confirmed',
-    userRoute: `/channels send --title "${safeRouteArg(title)}" ${targetInput(input.deliveryInput)} --message "[redacted]" --yes`,
+    userRoute: `Mail, calendar and channels: Channels, send a message (title "${safeRouteArg(title)}", ${targetInput(input.deliveryInput)})`,
     modelRoute: 'agent_channel_send explicitUserRequest:"..."',
   };
   // Under the store's lock like every other store, so a CLI send and a running Agent's send both keep their receipt.

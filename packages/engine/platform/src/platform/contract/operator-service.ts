@@ -162,12 +162,13 @@ export interface ContractOperatorService {
    */
   attachHosted(hosted: HostedContractRunners | null): void;
   /**
-   * Joins the daemon's native work execution runner in, or takes it out with
-   * null. Its contracts can be read and their open failure question answered
-   * (retry or cancel); they are not started or stopped from here, because the
-   * native work execution owns that.
+   * Joins one project's native work execution runner in, beside the other
+   * projects' (each holds only its project's work); null takes every one out.
+   * Returns the detach of the one joined. Its contracts can be read and their
+   * open failure question answered (retry or cancel); they are not started or
+   * stopped from here, because the native work execution owns that.
    */
-  attachNative(runner: Pick<ContractRunner, 'get' | 'list' | 'reply'> | null): void;
+  attachNative(runner: Pick<ContractRunner, 'get' | 'list' | 'reply'> | null): () => void;
   /**
    * Starts `ask` as a contract in a new hosted session: its questions are that
    * session's replies, and the session ends when the contract settles. Read
@@ -365,9 +366,13 @@ function notRunning(contractId: string, status: string): ContractOperatorError {
 export function createContractOperatorService(deps: ContractOperatorServiceDeps): ContractOperatorService {
   /** Present while this daemon hosts sessions. */
   let hostedRunners: HostedContractRunners | null = null;
-  let nativeRunner: Pick<ContractRunner, 'get' | 'list' | 'reply'> | null = null;
+  /** The daemon's Work runners, one per project whose Work it holds (each runs only its own project's work). */
+  const nativeRunners = new Set<Pick<ContractRunner, 'get' | 'list' | 'reply'>>();
+  /** The Work runner that holds this contract (its project's), if one does. */
+  const nativeHolding = (contractId: string): Pick<ContractRunner, 'get' | 'list' | 'reply'> | undefined =>
+    [...nativeRunners].find((runner) => runner.get(contractId) !== null);
   let dispatcher: OperatorWorkDispatcher | null = null;
-  const runners = (): readonly Pick<ContractRunner, 'get' | 'list' | 'reply' | 'held'>[] => [deps.runner, ...(nativeRunner === null ? [] : [nativeRunner]), ...(hostedRunners?.runners() ?? [])];
+  const runners = (): readonly Pick<ContractRunner, 'get' | 'list' | 'reply' | 'held'>[] => [deps.runner, ...nativeRunners, ...(hostedRunners?.runners() ?? [])];
   /** Why a stored contract is held without running, from the runner holding it; null when none holds it. */
   const holdOf = (contractId: string): ContractHold | null => {
     for (const runner of runners()) {
@@ -391,8 +396,21 @@ export function createContractOperatorService(deps: ContractOperatorServiceDeps)
   }
 
   /** The runner holding a contract the caller may see, with its view; first found wins. */
+  /**
+   * The runners to read one contract from, the one that runs it first. The daemon's Work (a durable native admission)
+   * is run by the native runner; the other runner reads the same stored record, which is not the live one, so a
+   * question the work asked or an answer it took would not show from it.
+   */
+  function runnersFor(contractId: string): readonly Pick<ContractRunner, 'get' | 'list' | 'reply'>[] {
+    const all = runners();
+    const native = nativeHolding(contractId);
+    if (native === undefined) return all;
+    const stored = all.map((runner) => runner.get(contractId)).find((contract) => contract !== null);
+    return stored?.durableAdmission !== undefined ? [native, ...all.filter((runner) => runner !== native)] : all;
+  }
+
   function holder(contractId: string, caller?: OperatorCaller): { readonly runner: Pick<ContractRunner, 'get' | 'list' | 'reply'>; readonly contract: ContractView } {
-    for (const runner of runners()) {
+    for (const runner of runnersFor(contractId)) {
       const contract = runner.get(contractId);
       if (contract !== null && visibleTo(contract, caller)) return { runner, contract };
       if (contract !== null) break;
@@ -495,7 +513,7 @@ export function createContractOperatorService(deps: ContractOperatorServiceDeps)
       return visibleContracts(filter, caller).map(summaryOf);
     },
     get(contractId, caller, options = {}) {
-      for (const runner of runners()) {
+      for (const runner of runnersFor(contractId)) {
         const contract = runner.get(contractId);
         if (contract === null) continue;
         if (!visibleTo(contract, caller)) return null;
@@ -505,7 +523,7 @@ export function createContractOperatorService(deps: ContractOperatorServiceDeps)
       return null;
     },
     status(contractId, caller) {
-      for (const runner of runners()) {
+      for (const runner of runnersFor(contractId)) {
         const contract = runner.get(contractId);
         if (contract !== null) return visibleTo(contract, caller) ? summaryOf(contract) : null;
       }
@@ -514,7 +532,7 @@ export function createContractOperatorService(deps: ContractOperatorServiceDeps)
     start,
     cancel(contractId, reason, caller) {
       const { runner } = holder(contractId, caller);
-      if (runner === nativeRunner) {
+      if (nativeRunners.has(runner)) {
         throw new ContractOperatorError(`Contract ${contractId} is native work: stop it through the native work execution, or answer its open question with "cancel".`, 'CONTRACT_NATIVE', 409);
       }
       // A contract held because no run claim could be taken may be running in another process: it is not ended here.
@@ -529,7 +547,10 @@ export function createContractOperatorService(deps: ContractOperatorServiceDeps)
       return false;
     },
     async reply(contractId, escalationId, text, caller) {
-      const { runner, contract } = holder(contractId, caller);
+      const held = holder(contractId, caller);
+      const { contract } = held;
+      // The daemon's Work is run by the native runner; another runner reading the same stored record never runs it.
+      const runner = (contract.durableAdmission !== undefined ? nativeHolding(contractId) : undefined) ?? held.runner;
       if (isTerminalContractStatus(contract.status)) {
         throw new ContractOperatorError(`Contract ${contractId} has ended (${contract.status}); there is nothing to reply to.`, 'CONTRACT_ENDED', 409);
       }
@@ -551,7 +572,7 @@ export function createContractOperatorService(deps: ContractOperatorServiceDeps)
     },
     remove(contractId, caller) {
       const { runner, contract } = holder(contractId, caller);
-      if (runner === nativeRunner || contract.durableAdmission !== undefined) {
+      if (nativeRunners.has(runner) || contract.durableAdmission !== undefined) {
         throw new ContractOperatorError(`Contract ${contractId} is native work: its record belongs to the native work execution and is kept with it.`, 'CONTRACT_NATIVE', 409);
       }
       const outcome = (runner as OperatorContractRunner).remove?.(contractId);
@@ -564,15 +585,26 @@ export function createContractOperatorService(deps: ContractOperatorServiceDeps)
     async retryUnit(contractId, unitId, caller) {
       const { runner, contract } = holder(contractId, caller);
       if (isTerminalContractStatus(contract.status)) throw new ContractOperatorError(`Contract ${contractId} has ended (${contract.status}); start a new contract for the remaining work.`, 'CONTRACT_ENDED', 409);
-      if (runner === nativeRunner) {
+      const failedPause = contract.escalations.find((item) => item.resolvedAt === undefined && item.failurePause === true && item.scope === 'unit' && item.targetId === unitId);
+      if (nativeRunners.has(runner) || (contract.nativeSource !== undefined && failedPause !== undefined)) {
         // Work's steps are run by its native execution, which decides each of them; a failed step waits on its
-        // retry-or-cancel question, and running it again is answering that question "retry", as the owner may.
-        const pause = contract.escalations.find((item) => item.resolvedAt === undefined && item.failurePause === true && item.scope === 'unit' && item.targetId === unitId);
+        // pause, and running it again is answering that pause "retry", as the owner may. After a restart of the
+        // daemon the run is kept but not live: CONTRACT_NOT_RUNNING says so, and its execution resumes it first.
+        const pause = failedPause;
+        const step = `"${contract.units.find((unit) => unit.id === unitId)?.title || unitId}"`;
         if (pause === undefined) {
-          throw new ContractOperatorError(`Step ${unitId} has not failed, so there is nothing to run again; a step of this work runs again only after it failed.`, 'CONTRACT_NATIVE', 409);
+          throw new ContractOperatorError(`Step ${step} has not failed, so there is nothing to run again; a step of this work runs again only after it failed.`, 'CONTRACT_NATIVE', 409);
         }
-        await runner.reply(contractId, pause.id, 'retry');
-        return { outcome: 'restarted', reason: `step ${unitId} failed and starts again with a fresh agent; the steps waiting on it run once it passes` };
+        const answering = (contract.durableAdmission !== undefined ? nativeHolding(contractId) : undefined) ?? runner;
+        try { await answering.reply(contractId, pause.id, 'retry'); } catch (error) {
+          if (error instanceof OwnerReplyRefusedError) {
+            // A run not live here (after a restart of the daemon) is not ended: its execution resumes it.
+            if (error.refusal === 'ended' && !isTerminalContractStatus(contract.status)) throw notRunning(contractId, contract.status);
+            throw new ContractOperatorError(error.message, error.refusal === 'ended' ? 'CONTRACT_ENDED' : 'ESCALATION_NOT_OPEN', 409);
+          }
+          throw error;
+        }
+        return { outcome: 'restarted', reason: `step ${step} failed and runs again with a fresh agent; the steps waiting on it run once it is done` };
       }
       const retry = (runner as OperatorContractRunner).retryUnit;
       if (retry === undefined) throw new ContractOperatorError(`The runner holding contract ${contractId} cannot run a unit again.`, 'CONTRACT_NOT_RUNNING', 409);
@@ -594,7 +626,10 @@ export function createContractOperatorService(deps: ContractOperatorServiceDeps)
       hostedRunners = hosted;
     },
     attachNative(runner) {
-      nativeRunner = runner;
+      // One per project: a project's Work joins beside the others'; null takes every one out (the daemon closing).
+      if (runner === null) nativeRunners.clear();
+      else nativeRunners.add(runner);
+      return () => { if (runner !== null) nativeRunners.delete(runner); };
     },
     async dispatch(input) {
       if (input.ask.trim().length === 0) throw new ContractOperatorError('ask is required', 'INVALID_ARGUMENT', 400, 'ask');

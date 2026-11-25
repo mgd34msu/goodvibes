@@ -10,6 +10,7 @@ import {
 } from '../../runtime/execution-intents.js';
 import type { DaemonRuntimeRouteContext, DaemonRuntimeRouteHandlerMap } from './runtime-route-types.js';
 import { isRecord } from '../../utils/record-coerce.js';
+import { isAbsolute, resolve } from 'node:path';
 import { REASONING_EFFORT_SEVERITY } from '../../providers/reasoning-effort.js';
 import { ROUTE_SURFACE_KINDS } from '../../../events/routes.js';
 import {
@@ -230,6 +231,7 @@ const JOB_FIELD_CHECKS: readonly FieldCheck[] = [
 
 const CREATE_JOB_CHECKS: readonly FieldCheck[] = [
   optionalString('id'),
+  optionalString('workingDirectory'),
   field('name', (value) => typeof value === 'string', 'a string'),
   field('prompt', (value) => typeof value === 'string', 'a string'),
   scheduleCheck(true),
@@ -252,7 +254,13 @@ function refuseInvalidJob(problem: InvalidField): never {
 export function parseCreateAutomationJobInput(input: Record<string, unknown>): CreateAutomationJobInput {
   const problem = objectProblem(input, CREATE_JOB_CHECKS, '');
   if (problem) refuseInvalidJob(problem);
-  return input as unknown as CreateAutomationJobInput;
+  // Its runs work in a project: the folder of the program or caller that makes it, never the daemon's own folder.
+  const folder = typeof input['workingDirectory'] === 'string' ? input['workingDirectory'].trim() : '';
+  if (!folder || !isAbsolute(folder)) {
+    throw new GatewayVerbError('Nothing was scheduled: no project folder came with the request, and a schedule\'s runs work in a project. Send workingDirectory, the absolute path of the project folder its runs work in.',
+      'AUTOMATION_PROJECT_REQUIRED', 422, 'workingDirectory');
+  }
+  return { ...input, workingDirectory: resolve(folder) } as unknown as CreateAutomationJobInput;
 }
 
 /** An update body with every present field in its documented shape; otherwise a 400 naming the first field that is not. */

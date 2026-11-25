@@ -15,7 +15,8 @@ export interface DeepLinkCapabilityServices {
   } | undefined;
 }
 
-const session = (id: string) => ({ id, group: 'memory' as const, home: 'session' as const, repeat: 'safe' as const });
+// System's (the System place's Links tab): they act on this program's views.
+const session = (id: string) => ({ id, group: 'system' as const, home: 'session' as const, repeat: 'safe' as const });
 
 function linksOf(services: DeepLinkCapabilityServices): NonNullable<DeepLinkCapabilityServices['deepLinks']> {
   if (!services.deepLinks) throw new CapabilityRefusal('Links open views of the terminal app; this program has none.');

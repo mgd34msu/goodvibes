@@ -119,6 +119,11 @@ const PROPOSAL_WORDS: Readonly<Record<string, string>> = {
   contradiction: 'two records disagree', 'cross-scope-duplicate': 'the same record twice', 'stale-delete': 'out of date, could go',
 };
 
+/** Accepting a proposal does what it proposes: the first record kept (the store names the one to keep first), or the old one deleted. */
+const acceptOf = (proposal: ProposalItem): string => proposal.state === 'stale-delete' ? 'delete' : 'keep-first';
+/** Refusing it leaves the records as they are, and the store does not raise it again. */
+const refuseOf = (proposal: ProposalItem): string => proposal.state === 'stale-delete' ? 'keep' : proposal.state === 'contradiction' ? 'both-stand' : 'keep-both';
+
 function proposals(output: unknown): readonly ProposalItem[] {
   return rows(record(output).pendingProposals).map((entry, index): ProposalItem => {
     const ids = Array.isArray(entry.ids) ? entry.ids.map(plain).filter(Boolean) : [];
@@ -426,6 +431,7 @@ export const MEMORY_PLACE = definePlace<Item>({
       label: 'Connectors',
       noun: 'the knowledge connectors',
       source: { kind: 'daemon', method: 'knowledge.connectors.list', input: {}, items: connectors },
+      // Follows nothing: the connectors are the daemon's own set, fixed while it runs (read again when it is back).
       empty: 'No knowledge connectors.',
       row: (item) => {
         const connector = item as ConnectorItem;
@@ -512,13 +518,17 @@ export const MEMORY_PLACE = definePlace<Item>({
     { key: 'g', list: 'memory', whole: true, capability: 'setup.memory', label: 'memory settings' },
     // Proposals: the first record it names, in full.
     { key: 'enter', list: 'proposals', capability: 'memory.show', label: 'see the record', fill: { record: (item) => (item as ProposalItem).records[0] ?? '' } },
+    // Answered on the press: accept does what it proposes, refuse leaves the records as they are (not raised again).
+    { key: 'y', id: 'accept-proposal', list: 'proposals', capability: 'memory.decide-proposal', label: 'accept', fill: { proposal: 'id', answer: (item) => acceptOf(item as ProposalItem) } },
+    { key: 'd', id: 'refuse-proposal', list: 'proposals', capability: 'memory.decide-proposal', label: 'refuse', fill: { proposal: 'id', answer: (item) => refuseOf(item as ProposalItem) } },
     // Copies and files.
     { key: 'u', list: 'copies', capability: 'memory.restore', label: 'replace memory with this copy', fill: { copy: 'id' } },
     { key: 'o', list: 'copies', whole: true, capability: 'memory.export', label: 'save to a file' },
     { key: 'k', list: 'copies', whole: true, capability: 'memory.inspect', label: 'read a file' },
     { key: 'm', list: 'copies', whole: true, capability: 'memory.import', label: 'load a file' },
-    { key: 'f', list: 'copies', whole: true, capability: 'memory.sync-files', label: 'keep as files' },
-    { key: 'd', list: 'copies', whole: true, capability: 'memory.review-files', label: 'what file edits change' },
+    // The form opens so a folder of the person's own can be named; left blank it is this project's.
+    { key: 'f', list: 'copies', whole: true, form: true, capability: 'memory.sync-files', label: 'keep as files' },
+    { key: 'd', list: 'copies', whole: true, form: true, capability: 'memory.review-files', label: 'what file edits change' },
     { key: 't', list: 'copies', whole: true, capability: 'memory.apply-files', label: 'take file edits in' },
     { key: 'h', list: 'copies', whole: true, capability: 'memory.index', label: 'search index' },
     { key: 'b', list: 'copies', whole: true, capability: 'memory.rebuild-index', label: 'rebuild the index' },

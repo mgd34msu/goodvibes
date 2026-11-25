@@ -154,6 +154,8 @@ function telegramIngressGate(
 export const RESTART_BY_HAND_TO_JOIN = 'Restart this daemon to finish joining: it was started by hand, so GoodVibes cannot restart it.';
 /** The same answer for the other group actions kept for the restart. */
 export const RESTART_BY_HAND_TO_FINISH = 'Restart this daemon to finish it: it was started by hand, so GoodVibes cannot restart it.';
+/** The same for turning sharing on by itself (Nearby groups' control). */
+export const RESTART_BY_HAND_FOR_SHARING = 'Sharing is on from the daemon\'s next start: it was started by hand, so GoodVibes cannot restart it. Restart it to see the groups on this network.';
 
 type GroupVerbs = import('./http/cluster-group-routes.js').ClusterGroupVerbs;
 type RestartOutcome = {
@@ -175,17 +177,24 @@ type RestartOutcome = {
 export function withRestartForPendingGroupAction(verbs: GroupVerbs, restart: () => RestartOutcome): GroupVerbs {
   const finish = async <T extends { readonly pending?: true }>(
     result: import('../cluster/index.js').GroupOperationResult<T>,
-    join: boolean,
+    join: boolean | 'sharing',
   ): Promise<import('../cluster/index.js').GroupOperationResult<T>> => {
     if (!result.ok || result.data.pending !== true) return result;
     const restarted = restart();
-    const message = restarted.outcome === 'restarting'
-      ? join
-        ? 'Sharing is on. The daemon is restarting to bring the group up; it joins at its next start and tells you once it has.'
-        : 'Sharing is on. The daemon is restarting to bring the group up; this finishes at its next start and you are told once it has.'
-      : restarted.outcome === 'by-hand'
-        ? (join ? RESTART_BY_HAND_TO_JOIN : RESTART_BY_HAND_TO_FINISH)
-        : `Sharing is on and this is kept, but the daemon could not restart itself (${restarted.detail ?? 'no reason given'}). Restart this daemon to finish it.`;
+    // Turning sharing on keeps no action for the next start: it is in force once the daemon is back.
+    const message = join === 'sharing'
+      ? restarted.outcome === 'restarting'
+        ? 'Sharing is on. The daemon is restarting to bring the group layer up; once it is back, Nearby groups lists the groups on this network.'
+        : restarted.outcome === 'by-hand'
+          ? RESTART_BY_HAND_FOR_SHARING
+          : `Sharing is on from the daemon's next start, but the daemon could not restart itself (${restarted.detail ?? 'no reason given'}). Restart this daemon to see the groups on this network.`
+      : restarted.outcome === 'restarting'
+        ? join
+          ? 'Sharing is on. The daemon is restarting to bring the group up; it joins at its next start and tells you once it has.'
+          : 'Sharing is on. The daemon is restarting to bring the group up; this finishes at its next start and you are told once it has.'
+        : restarted.outcome === 'by-hand'
+          ? (join ? RESTART_BY_HAND_TO_JOIN : RESTART_BY_HAND_TO_FINISH)
+          : `Sharing is on and this is kept, but the daemon could not restart itself (${restarted.detail ?? 'no reason given'}). Restart this daemon to finish it.`;
     const answer: import('../cluster/index.js').GroupOperationResult<T> = { ok: true, data: { ...result.data, restart: restarted.outcome, warning: message } };
     return restarted.begin ? Object.assign(answer, { [AFTER_REPLY]: restarted.begin }) : answer;
   };
@@ -197,6 +206,7 @@ export function withRestartForPendingGroupAction(verbs: GroupVerbs, restart: () 
     rename: async (name, options) => finish(await verbs.rename(name, options), false),
     publish: async (path, options) => finish(await verbs.publish(path, options), false),
     accept: async (path, options) => finish(await verbs.accept(path, options), false),
+    ...(verbs.sharingOn ? { sharingOn: async () => finish(await verbs.sharingOn!(), 'sharing') } : {}),
   };
 }
 

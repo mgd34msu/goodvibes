@@ -16,10 +16,14 @@
  * a key from a newer version): it is left in the file and reported once
  * (manager-ingestion.ts), never rewritten here.
  */
+import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { homedir } from 'node:os';
-import { collectDaemonOwnedEntries, persistDaemonKey, readDaemonTierFile } from './daemon-config-tier.js';
+import { dirname, join } from 'node:path';
+import { collectDaemonOwnedEntries, persistDaemonKey, readDaemonTierFile, removeDaemonKey } from './daemon-config-tier.js';
 import { readDotPath } from './shared-config-tier.js';
 import { deleteRawDotPath } from './settings-io.js';
+import { coreConfigDefaults } from './schema-domain-core.js';
+import { GATE_PRESETS, parsePermissionMode } from '../gate/presets.js';
 
 /**
  * Settings keys a release from 3.0.0 to 3.4.2 declared that this release does
@@ -100,9 +104,15 @@ export const PROGRAM_SETTINGS_ROOTS: readonly string[] = ['tui', 'agent'];
  * into the daemon's settings file once (when it does not set them yet) and left in the program's file as they were,
  * so a 3.5.0 binary after a rollback keeps its value. This release never reads them from the program's file (the
  * daemon's is the one copy) and says nothing about them there. `behavior.budgetAlertUsd`: the terminal app's own
- * spending alert until 3.5.0, the daemon's from this release.
+ * spending alert until 3.5.0, the daemon's from this release. `sandbox.mcpIsolation`: each program's own choice of
+ * running MCP servers inside the sandbox until 3.5.0, the daemon's from this release, which every program follows.
+ * The model, its reasoning effort, its backups, the request routing and the permission mode: each program's own
+ * default until 3.5.0, one default in the daemon's file from this release (a conversation still chooses its own).
  */
-export const DAEMON_KEYS_KEPT_FOR_ROLLBACK: readonly string[] = ['behavior.budgetAlertUsd'];
+export const DAEMON_KEYS_KEPT_FOR_ROLLBACK: readonly string[] = [
+  'behavior.budgetAlertUsd', 'sandbox.mcpIsolation', 'sandbox.enabled',
+  'provider.model', 'provider.reasoningEffort', 'provider.fallbackModels', 'provider.optimizerMode', 'provider.optimizerPinnedModel', 'permissions.mode',
+];
 
 /** What carrying one file forward did, for the one line the owner reads. */
 export interface SettingsCarryForward {
@@ -125,7 +135,9 @@ export interface SettingsCarryForward {
  * `document` is changed.
  */
 export function carrySettingsForward(document: Record<string, unknown>, daemonTierPath: string | null): SettingsCarryForward {
-  const daemonEntries = daemonTierPath === null ? [] : collectDaemonOwnedEntries(document);
+  const merged = daemonTierPath === null ? [] : [...carryMergedLists(document, daemonTierPath), ...carryMergedRecords(document, daemonTierPath)];
+  const daemonEntries = daemonTierPath === null ? [] : collectDaemonOwnedEntries(document)
+    .filter(({ key }) => !MERGED_DAEMON_LISTS.includes(key) && !MERGED_DAEMON_RECORDS.includes(key));
   const retired = RETIRED_SETTING_KEYS.filter((key) => readDotPath(document, key).present);
   const moved: string[] = [];
   const copied: string[] = [];
@@ -141,7 +153,306 @@ export function carrySettingsForward(document: Record<string, unknown>, daemonTi
   }
   for (const { key } of daemonEntries) if (!kept.has(key)) deleteRawDotPath(document, key);
   for (const key of retired) deleteRawDotPath(document, key);
-  return { moved, copied, superseded, removed: retired };
+  return { moved, copied: [...merged, ...copied], superseded, removed: retired };
+}
+
+/**
+ * Daemon lists each program kept a copy of until 3.5.0, carried into the daemon's one list member by member: every
+ * member a program's file holds that was never carried is added after the daemon's own, so nothing is dropped when
+ * the terminal app and the Agent held different lists. The program's own value stays in its file, so a 3.5.0 program
+ * after a rollback still sends where it did. A member once carried is never carried again (`carried-lists.json`
+ * beside the daemon's settings), so one removed in the daemon does not come back from a program's old copy.
+ */
+export const MERGED_DAEMON_LISTS: readonly string[] = ['notifications.webhookUrls'];
+
+/** Where the members already carried are recorded, beside the daemon's settings file. */
+export function carriedListsPath(daemonTierPath: string): string {
+  return join(dirname(daemonTierPath), 'carried-lists.json');
+}
+
+function carryMergedLists(document: Record<string, unknown>, daemonTierPath: string): string[] {
+  const merged: string[] = [];
+  const markerPath = carriedListsPath(daemonTierPath);
+  let carried: Record<string, unknown> = {};
+  try { carried = JSON.parse(readFileSync(markerPath, 'utf8')) as Record<string, unknown>; } catch { carried = {}; }
+  let changed = false;
+  for (const key of MERGED_DAEMON_LISTS) {
+    const found = readDotPath(document, key);
+    if (!found.present || !Array.isArray(found.value)) continue;
+    const members = found.value.filter((entry): entry is string => typeof entry === 'string' && entry.trim() !== '');
+    const done = new Set(Array.isArray(carried[key]) ? (carried[key] as unknown[]).filter((entry): entry is string => typeof entry === 'string') : []);
+    const fresh = members.filter((entry) => !done.has(entry));
+    if (fresh.length === 0) continue;
+    const tier = readDaemonTierFile(daemonTierPath);
+    const current = readDotPath(tier, key);
+    const list = current.present && Array.isArray(current.value) ? current.value.filter((entry): entry is string => typeof entry === 'string') : [];
+    const added = fresh.filter((entry) => !list.includes(entry));
+    if (added.length > 0) {
+      persistDaemonKey(daemonTierPath, key, [...list, ...added]);
+      merged.push(key);
+    }
+    carried = { ...carried, [key]: [...done, ...fresh] };
+    changed = true;
+  }
+  if (changed) {
+    mkdirSync(dirname(markerPath), { recursive: true });
+    writeFileSync(markerPath, `${JSON.stringify(carried, null, 2)}\n`, { mode: 0o600 });
+  }
+  return merged;
+}
+
+/**
+ * Daemon maps each program kept a copy of until 3.5.0 (your own model prices, keyed `provider:model`), carried into
+ * the daemon's one map entry by entry: an entry a program's file holds that was never carried is added when the
+ * daemon's map does not name it (the daemon's own entry wins), so nothing is dropped when the terminal app and the
+ * Agent held different prices. The program's own value stays in its file for a 3.5.0 program after a rollback. An
+ * entry once carried is never carried again (`carried-lists.json`), so one changed or removed in the daemon does not
+ * come back from a program's old copy.
+ */
+export const MERGED_DAEMON_RECORDS: readonly string[] = ['pricing.modelPrices'];
+
+function carryMergedRecords(document: Record<string, unknown>, daemonTierPath: string): string[] {
+  const merged: string[] = [];
+  const markerPath = carriedListsPath(daemonTierPath);
+  let carried: Record<string, unknown> = {};
+  try { carried = JSON.parse(readFileSync(markerPath, 'utf8')) as Record<string, unknown>; } catch { carried = {}; }
+  let changed = false;
+  for (const key of MERGED_DAEMON_RECORDS) {
+    const found = readDotPath(document, key);
+    if (!found.present || found.value === null || typeof found.value !== 'object' || Array.isArray(found.value)) continue;
+    const entries = Object.entries(found.value as Record<string, unknown>);
+    const done = new Set(Array.isArray(carried[key]) ? (carried[key] as unknown[]).filter((entry): entry is string => typeof entry === 'string') : []);
+    const fresh = entries.filter(([name]) => !done.has(name));
+    if (fresh.length === 0) continue;
+    const tier = readDaemonTierFile(daemonTierPath);
+    const current = readDotPath(tier, key);
+    const map = current.present && current.value !== null && typeof current.value === 'object' && !Array.isArray(current.value)
+      ? { ...(current.value as Record<string, unknown>) } : {};
+    const added = fresh.filter(([name]) => !(name in map));
+    if (added.length > 0) {
+      for (const [name, value] of added) map[name] = value;
+      persistDaemonKey(daemonTierPath, key, map);
+      merged.push(key);
+    }
+    carried = { ...carried, [key]: [...done, ...fresh.map(([name]) => name)] };
+    changed = true;
+  }
+  if (changed) {
+    mkdirSync(dirname(markerPath), { recursive: true });
+    writeFileSync(markerPath, `${JSON.stringify(carried, null, 2)}\n`, { mode: 0o600 });
+  }
+  return merged;
+}
+
+/**
+ * The daemon's side of DAEMON_KEYS_KEPT_FOR_ROLLBACK, for a machine whose programs have not started since the
+ * upgrade: each kept key a program's file (`programFile`) holds and the daemon's file does not is copied into the
+ * daemon's file, the program's file untouched. Returns the keys copied. Throws when a file cannot be read or written.
+ */
+export function copyKeptProgramKeys(programFile: string, daemonTierPath: string): readonly string[] {
+  if (!existsSync(programFile)) return [];
+  const program = JSON.parse(readFileSync(programFile, 'utf-8')) as Record<string, unknown>;
+  const tier = readDaemonTierFile(daemonTierPath);
+  // The lists each program kept (MERGED_DAEMON_LISTS) are merged member by member, as a program's own start does.
+  const copied: string[] = [...carryMergedLists(program, daemonTierPath), ...carryMergedRecords(program, daemonTierPath)];
+  for (const key of DAEMON_KEYS_KEPT_FOR_ROLLBACK) {
+    const held = readDotPath(program, key);
+    if (!held.present || readDotPath(tier, key).present) continue;
+    persistDaemonKey(daemonTierPath, key, held.value);
+    copied.push(key);
+  }
+  return copied;
+}
+
+/**
+ * Kept keys (DAEMON_KEYS_KEPT_FOR_ROLLBACK) carried as the STRICTER of the programs' values, not the first program's:
+ * `sandbox.mcpIsolation` is a protection, so when the terminal app ran MCP servers inside the sandbox and the Agent
+ * as host processes (or the other way), the daemon keeps them inside. Each key's order of strictness, loosest first.
+ */
+export const STRICTER_KEPT_KEYS: Readonly<Record<string, (value: unknown) => number>> = {
+  // Any containment is stricter than none (`disabled`, or no value).
+  'sandbox.mcpIsolation': (value) => (typeof value === 'string' && value !== 'disabled' ? 1 : 0),
+  // Commands inside the sandbox (on, the default) are stricter than on the host (false).
+  'sandbox.enabled': (value) => (value === false ? 0 : 1),
+};
+
+/** Each STRICTER_KEPT_KEYS key's value in a program whose file did not set it. */
+const STRICTER_KEPT_DEFAULTS: Readonly<Record<string, unknown>> = { 'sandbox.mcpIsolation': 'disabled', 'sandbox.enabled': true };
+
+/** What carrying one stricter key did: the value kept and each program's own, for the one line the owner reads. */
+export interface StricterCarry {
+  readonly key: string;
+  readonly kept: unknown;
+  readonly held: Readonly<Record<string, unknown>>;
+}
+
+/**
+ * Once per key (recorded in `carried-lists.json` as `stricter`): each program's own value of a STRICTER_KEPT_KEYS key
+ * read from its settings file, and the strictest written to the daemon's file when the daemon's value is a looser one
+ * a program held (the first program's, copied by the plain carry). A value the daemon's file holds that no program
+ * held is the owner's own choice there, and stays. Returns, for each key whose programs held different values, what
+ * was kept, so the owner is told once. Programs' files are never changed (a 3.5.0 binary after a rollback reads its
+ * own). Throws when a file cannot be read or written.
+ */
+export function carryStricterKeptValues(programFiles: Readonly<Record<string, string>>, daemonTierPath: string): readonly StricterCarry[] {
+  const markerPath = carriedListsPath(daemonTierPath);
+  let carried: Record<string, unknown> = {};
+  try { carried = JSON.parse(readFileSync(markerPath, 'utf8')) as Record<string, unknown>; } catch { carried = {}; }
+  const done = new Set(Array.isArray(carried['stricter']) ? (carried['stricter'] as unknown[]).filter((key): key is string => typeof key === 'string') : []);
+  const told: StricterCarry[] = [];
+  const finished: string[] = [];
+  for (const [key, strictness] of Object.entries(STRICTER_KEPT_KEYS)) {
+    if (done.has(key)) continue;
+    const held: Record<string, unknown> = {};
+    let anySet = false;
+    for (const [program, file] of Object.entries(programFiles)) {
+      if (!existsSync(file)) continue;
+      const found = readDotPath(JSON.parse(readFileSync(file, 'utf-8')) as Record<string, unknown>, key);
+      // A program whose file does not set the key followed its default (STRICTER_KEPT_DEFAULTS).
+      held[program] = found.present ? found.value : STRICTER_KEPT_DEFAULTS[key];
+      if (found.present) anySet = true;
+    }
+    const values = Object.values(held);
+    if (!anySet) continue;
+    const strictest = values.reduce((best, value) => (strictness(value) > strictness(best) ? value : best));
+    const tier = readDaemonTierFile(daemonTierPath);
+    const current = readDotPath(tier, key);
+    const fromAProgram = !current.present || values.some((value) => JSON.stringify(value) === JSON.stringify(current.value));
+    if (fromAProgram && (!current.present || strictness(strictest) > strictness(current.value))) persistDaemonKey(daemonTierPath, key, strictest);
+    const differ = new Set(values.map((value) => JSON.stringify(value))).size > 1;
+    if (differ && fromAProgram) told.push({ key, kept: strictest, held });
+    finished.push(key);
+  }
+  if (finished.length > 0) {
+    mkdirSync(dirname(markerPath), { recursive: true });
+    writeFileSync(markerPath, `${JSON.stringify({ ...carried, stricter: [...done, ...finished] }, null, 2)}\n`, { mode: 0o600 });
+  }
+  return told;
+}
+
+/** The one line the owner is told when the programs held different values of a protection. */
+export function describeStricterCarry(carry: StricterCarry): string {
+  if (carry.key === 'sandbox.mcpIsolation') {
+    const inside = (value: unknown): boolean => STRICTER_KEPT_KEYS['sandbox.mcpIsolation']!(value) > 0;
+    const where = (program: string): string => (program === 'tui' ? 'the terminal app' : program === 'agent' ? 'the Agent' : program);
+    const holders = Object.entries(carry.held);
+    const contained = holders.filter(([, value]) => inside(value)).map(([program]) => where(program));
+    const host = holders.filter(([, value]) => !inside(value)).map(([program]) => where(program));
+    return `Before this version ${contained.join(' and ')} ran MCP servers inside the sandbox and ${host.join(' and ')} ran them as host processes. `
+      + 'The daemon now keeps one setting for every program, and it kept the stricter one: MCP servers run inside the sandbox in every program. '
+      + '"Run MCP servers as host processes" in Permissions and safety, Sandbox setting, changes it.';
+  }
+  if (carry.key === 'sandbox.enabled') {
+    const where = (program: string): string => (program === 'tui' ? 'the terminal app' : program === 'agent' ? 'the Agent' : program);
+    const holders = Object.entries(carry.held);
+    const inside = holders.filter(([, value]) => value !== false).map(([program]) => where(program));
+    const host = holders.filter(([, value]) => value === false).map(([program]) => where(program));
+    return `Before this version ${inside.join(' and ')} ran commands inside the sandbox and ${host.join(' and ')} ran them on the host. `
+      + 'The daemon now keeps one setting for every program, and it kept the stricter one: commands run inside the sandbox in every program. '
+      + '"Run commands on the host, with no sandbox" in Permissions and safety, Sandbox setting, changes it.';
+  }
+  return `Before this version the programs held different values of ${carry.key}; the daemon kept the stricter one (${JSON.stringify(carry.kept)}) for every program.`;
+}
+
+/** The keys of the one shared default the two programs each kept their own of until 3.5.0 (carrySharedDefaults). */
+export const SHARED_DEFAULT_KEYS = ['provider.model', 'provider.reasoningEffort', 'permissions.mode'] as const;
+export type SharedDefaultKey = typeof SHARED_DEFAULT_KEYS[number];
+
+/** What carrying the shared defaults did: each program's own values and the ones kept. */
+export interface SharedDefaultsCarry {
+  readonly held: Readonly<Record<string, Readonly<Record<SharedDefaultKey, unknown>>>>;
+  readonly kept: Readonly<Record<SharedDefaultKey, unknown>>;
+}
+
+const SHARED_DEFAULTS_MARKER = 'shared-defaults';
+
+function sharedDefault(key: SharedDefaultKey): unknown {
+  return readDotPath(coreConfigDefaults as unknown as Record<string, unknown>, key).value;
+}
+
+/** A permission mode's strictness, strictest first: Plan 0, Ask me 1, Jev decides and Just vibes 2, YOLO 3. */
+function modeLooseness(value: unknown): number {
+  switch (parsePermissionMode(value)) {
+    case 'plan': return 0;
+    case 'ask-me': return 1;
+    case 'jev-decides': case 'just-vibes': return 2;
+    case 'yolo': return 3;
+    default: return 2;
+  }
+}
+
+/**
+ * The one shared default the daemon keeps from this release (model, its reasoning effort, permission mode), carried
+ * from the two programs' own 3.5.0 defaults the same way whichever program starts first: the permission mode is the
+ * STRICTER of the programs' (Plan, then Ask me, then Jev decides and Just vibes, then YOLO), the model and its effort
+ * are the terminal app's (the Agent's only when the terminal app never kept a settings file). A program whose file
+ * does not set a key held that key's default. Once (recorded in `carried-lists.json` as `shared-defaults`); the
+ * daemon's value is changed only when it is one a program held (the first program's, copied by the plain carry) or
+ * unset, never the owner's own later choice there. Programs' files are never changed (a 3.5.0 binary after a rollback
+ * reads its own). Returns what each program held and what was kept when the programs held different values, so the
+ * owner is told once; undefined otherwise. Throws when a file cannot be read or written.
+ */
+export function carrySharedDefaults(programFiles: Readonly<Record<string, string>>, daemonTierPath: string): SharedDefaultsCarry | undefined {
+  const markerPath = carriedListsPath(daemonTierPath);
+  let carried: Record<string, unknown> = {};
+  try { carried = JSON.parse(readFileSync(markerPath, 'utf8')) as Record<string, unknown>; } catch { carried = {}; }
+  if (carried[SHARED_DEFAULTS_MARKER] === true) return undefined;
+  const held: Record<string, Record<SharedDefaultKey, unknown>> = {};
+  let anySet = false;
+  for (const [program, file] of Object.entries(programFiles)) {
+    if (!existsSync(file)) continue;
+    const document = JSON.parse(readFileSync(file, 'utf-8')) as Record<string, unknown>;
+    const values = {} as Record<SharedDefaultKey, unknown>;
+    for (const key of SHARED_DEFAULT_KEYS) {
+      const found = readDotPath(document, key);
+      values[key] = found.present ? found.value : sharedDefault(key);
+      if (found.present) anySet = true;
+    }
+    held[program] = values;
+  }
+  const finish = (): void => {
+    mkdirSync(dirname(markerPath), { recursive: true });
+    writeFileSync(markerPath, `${JSON.stringify({ ...carried, [SHARED_DEFAULTS_MARKER]: true }, null, 2)}\n`, { mode: 0o600 });
+  };
+  if (!anySet) { finish(); return undefined; }
+  const programs = Object.keys(held);
+  const leading = held['tui'] ?? held[programs[0]!]!;
+  const modes = programs.map((program) => held[program]!['permissions.mode']);
+  const kept: Record<SharedDefaultKey, unknown> = {
+    'provider.model': leading['provider.model'],
+    'provider.reasoningEffort': leading['provider.reasoningEffort'],
+    'permissions.mode': modes.reduce((best, value) => (modeLooseness(value) < modeLooseness(best) ? value : best)),
+  };
+  const tier = readDaemonTierFile(daemonTierPath);
+  for (const key of SHARED_DEFAULT_KEYS) {
+    const current = readDotPath(tier, key);
+    const fromAProgram = !current.present || programs.some((program) => JSON.stringify(held[program]![key]) === JSON.stringify(current.value));
+    if (!fromAProgram) continue;
+    const wanted = kept[key];
+    if (current.present && JSON.stringify(current.value) === JSON.stringify(wanted)) continue;
+    // The kept value is the default: the daemon holds none, so the default is in force.
+    if (JSON.stringify(wanted) === JSON.stringify(sharedDefault(key))) { if (current.present) removeDaemonKey(daemonTierPath, key); }
+    else persistDaemonKey(daemonTierPath, key, wanted);
+  }
+  finish();
+  const differ = programs.length > 1 && SHARED_DEFAULT_KEYS.some((key) => new Set(programs.map((program) => JSON.stringify(held[program]![key]))).size > 1);
+  return differ ? { held, kept } : undefined;
+}
+
+/** The one notice the owner reads when the programs kept different defaults: both programs' values and what was kept. */
+export function describeSharedDefaultsCarry(carry: SharedDefaultsCarry): string {
+  const where = (program: string): string => (program === 'tui' ? 'the terminal app' : program === 'agent' ? 'the Agent' : program);
+  const mode = (value: unknown): string => {
+    const parsed = parsePermissionMode(value);
+    return parsed === undefined ? String(value) : GATE_PRESETS[parsed].label;
+  };
+  const words = (values: Readonly<Record<SharedDefaultKey, unknown>>): string =>
+    `the model ${String(values['provider.model'])} with reasoning effort ${String(values['provider.reasoningEffort'])} and the mode ${mode(values['permissions.mode'])}`;
+  const each = Object.entries(carry.held).map(([program, values]) => `${where(program)} used ${words(values)}`);
+  return `Before this version each program kept its own defaults: ${each.join('; ')}. `
+    + `Every program now starts its conversations with one default: the model ${String(carry.kept['provider.model'])} with reasoning effort ${String(carry.kept['provider.reasoningEffort'])} (the terminal app's), `
+    + `and the mode ${mode(carry.kept['permissions.mode'])} (the stricter of the two). `
+    + 'A conversation can still choose its own. The default model is changed in Models and providers, the effort and the mode in Settings ("How hard the model thinks", "When GoodVibes asks").';
 }
 
 /** Whether carrying forward changed anything. */

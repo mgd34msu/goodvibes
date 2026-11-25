@@ -1,4 +1,39 @@
-import { createContractInputAuthority, type ContractInputAuthority } from './input-authority.js';
+import { createContractInputAuthority, onContractInputCallHeld, type ContractInputAuthority, type ContractInputCallHeld } from './input-authority.js';
+import { currentTurn } from '../security/turn-boundary.js';
+
+/** What held a step's change back, in words, with what to do. */
+const HELD_WORDS: Readonly<Record<Exclude<ContractInputCallHeld, object>, string>> = {
+  refused: 'your permission rules do not let the work read or change a file it needed. Change the rule in Permissions and safety, then run the step again',
+  'changed-while-judged': 'what its change was judged on changed while it ran. Run the step again',
+  'view-changed': 'the work\'s copy of the project changed or could not be checked while it ran. Run the step again; if it is held back again, stop the work and ask for it again',
+};
+
+/** Who refused a step's call at the permission gate, in words. */
+const GATE_WORDS: Readonly<Record<string, string>> = {
+  rule: 'a permission rule', limit: 'a limit you set', jev: 'Jev, deciding for you', owner: 'you', mode: 'the permission mode in force', code: 'a safety check',
+};
+/** What to do about it, by who refused it. */
+const GATE_NEXT: Readonly<Record<string, string>> = {
+  rule: 'Change the rule in Permissions and safety, then run the step again',
+  limit: 'Raise the limit in Permissions and safety, then run the step again',
+  jev: 'Run the step again and answer for yourself, or change who decides in Permissions and safety',
+  owner: 'Run the step again and allow it, or stop the work',
+  mode: 'Change the permission mode (plan mode lets nothing change), then run the step again',
+  code: 'Trust this project\'s folder or change what the check names in Permissions and safety, then run the step again',
+};
+
+/** Says on the work that a step's change was held back (routes/work.ts shows it), and saves it with the run's next event. */
+function noteHeldChange(run: ContractRun, why: ContractInputCallHeld): void {
+  if (run.terminal) return;
+  const agentId = currentTurn()?.callerAgentId ?? undefined;
+  const unit = agentId === undefined ? undefined : run.allUnits().find((candidate) => candidate.activeAgentId === agentId || candidate.agentIds.includes(agentId));
+  const step = unit ? unit.title || unit.brief || unit.id : undefined;
+  const said = typeof why === 'object'
+    ? `${step ? `The step "${step}"` : 'A step'} was held back from ${why.gate.tool}: ${GATE_WORDS[why.gate.decidedBy] ?? 'the permission check'} refused it (${why.gate.reason.replace(/[.\s]+$/, '')}). ${GATE_NEXT[why.gate.decidedBy] ?? 'Change what refused it, then run the step again'}.`
+    : `${step ? `A change of the step "${step}"` : 'A change of a step'} was held back: ${HELD_WORDS[why]}.`;
+  run.contract.heldChange = { at: Date.now(), ...(step ? { step } : {}), said };
+  run.emit({ type: 'CONTRACT_WAITING', contractId: run.id, reason: said });
+}
 import { nativeContractRoute } from './native-decisions.js';
 /**
  * Groups on the orchestration engine: one engine per contract, a workstream per group started
@@ -122,6 +157,17 @@ export function takeBaseline(cwd: string): ContractUnit['baseline'] {
   return captureTreeBaselineSync(cwd);
 }
 
+/** A step named as a person reads it: its title, never its id. */
+function stepName(unit: Pick<ContractUnit, 'id' | 'title'>): string {
+  return `"${(unit.title || unit.id).replace(/\s+/g, ' ').trim()}"`;
+}
+
+/** Whether the owner went on without this unit after it failed: it was set aside, its pause answered "go on". */
+export function wentOnWithout(contract: Pick<ContractRun['contract'], 'escalations'>, unit: Pick<ContractUnit, 'id' | 'status'>): boolean {
+  return unit.status === 'cancelled' && contract.escalations.some((entry) => entry.failurePause === true && entry.scope === 'unit'
+    && entry.targetId === unit.id && entry.resolvedAt !== undefined && entry.reply?.text === 'go on');
+}
+
 /** The contract baseline each running contract is taking, so its groups start only once it is recorded. */
 const contractBaselines = new WeakMap<ContractRun, Promise<void>>();
 
@@ -158,6 +204,8 @@ export function createGroupRunner(deps: GroupRunnerDeps): GroupRunner {
         signal.throwIfAborted();
         const authority = await createContractInputAuthority(contract, worktree.path, { signal: AbortSignal.any([run.abort.signal, signal]), mutable: true, branch: worktree.branch });
         signal.throwIfAborted();
+        // A change of a step held back is said on the work, in words with what to do (never only to the step's model).
+        onContractInputCallHeld(authority, (why) => noteHeldChange(run, why));
         return authority;
       }, initializeWorktree: (worktree: import('../agents/worktree.js').IsolatedWorktree) => initializeContractMemberWorktree(contract.worktreePath!, worktree) }),
       contractUnitSettlement: deps.settlement,
@@ -243,7 +291,7 @@ export function createGroupRunner(deps: GroupRunnerDeps): GroupRunner {
     } catch (error) {
       if (run.terminal || isAbortError(error, run.abort.signal)) return;
       const failure = failureFromError(error);
-      deps.failContract(run, failure.kind, `group ${group.id} could not start: ${failure.reason}`);
+      deps.failContract(run, failure.kind, `its steps "${group.title || group.id}" could not start: ${failure.reason}`);
     } finally {
       run.startingGroups.delete(group.id);
     }
@@ -329,7 +377,7 @@ export function createGroupRunner(deps: GroupRunnerDeps): GroupRunner {
       steps: deps.steps,
       failUnit: deps.failUnit,
       failContract: deps.failContract,
-    })).catch((error: unknown) => stepFailed(run, `the attempts of group ${event.groupId} could not be selected`, error));
+    })).catch((error: unknown) => stepFailed(run, 'the best of a step\'s tries could not be chosen', error));
   }
 
   function onEngineEvent(run: ContractRun, event: OrchestrationEvent): void {
@@ -346,7 +394,7 @@ export function createGroupRunner(deps: GroupRunnerDeps): GroupRunner {
       const what = `${event.type}${itemId === undefined ? '' : ` for ${itemId}`}`;
       const unit = itemId === undefined ? undefined : unitOfItem(run, itemId);
       if (unit !== undefined && !isTerminalUnitStatus(unit.status) && !(error instanceof IllegalContractTransitionError)) {
-        deps.failUnit(run, unit, failure.kind, `unit ${unit.id} could not follow its work (${what}): ${failure.reason}`);
+        deps.failUnit(run, unit, failure.kind, `step ${stepName(unit)} failed: its progress could not be followed (${what}): ${failure.reason}`);
         return;
       }
       deps.failContract(run, failure.kind, `the contract could not follow its work (${what}): ${failure.reason}`);
@@ -363,7 +411,7 @@ export function createGroupRunner(deps: GroupRunnerDeps): GroupRunner {
         // contracts.budget, /workstream budget) lets the unit start; cancelling ends it.
         const unit = unitOfItem(run, event.itemId);
         if (unit?.status === 'pending') run.moveUnit(unit, 'blocked');
-        run.contract.statusLine = `Contract ${run.id} is waiting: its budget is used up (${event.reason}), so unit ${unit?.id ?? event.itemId} cannot start. Raise the budget (/workstream budget ${run.id} <dollars>) or cancel the contract; the work done so far is kept.`;
+        run.contract.statusLine = `The work is waiting: its spending limit is used up (${event.reason}), so step ${unit === undefined ? 'its next step' : stepName(unit)} cannot start. Raise the limit or stop the work; what it did so far is kept.`;
         run.decide('queued', unit?.id ?? run.id, `waiting for a budget raise: ${event.reason}`);
         return;
       }
@@ -402,14 +450,14 @@ export function createGroupRunner(deps: GroupRunnerDeps): GroupRunner {
         const unit = attempt === undefined ? undefined : (planUnitOf(run, attempt) ?? attempt);
         if (unit === undefined) return;
         run.emit({ type: 'CONTRACT_MERGE_CONFLICT', contractId: run.id, unitId: unit.id, branch: event.branch, path: event.path, files: event.files });
-        void deps.steps.unitMergeConflict(run, unit.id, event.files).catch((error: unknown) => stepFailed(run, `unit ${unit.id}'s merge conflict could not be routed`, error));
+        void deps.steps.unitMergeConflict(run, unit.id, event.files).catch((error: unknown) => stepFailed(run, `the conflicting changes of step ${stepName(unit)} could not be handed on`, error));
         return;
       }
       case 'item-failed': {
         // The engine failed an item the runner did not end (a worktree that
         // could not be set up, a spawn that threw): the unit fails with it.
         const unit = unitOfItem(run, event.itemId);
-        if (unit !== undefined && !isTerminalUnitStatus(unit.status)) deps.failUnit(run, unit, 'other', `unit ${unit.id}'s work item failed: ${event.reason}`);
+        if (unit !== undefined && !isTerminalUnitStatus(unit.status)) deps.failUnit(run, unit, 'other', `step ${stepName(unit)} failed before its agent could work: ${event.reason}`);
         return;
       }
       default:
@@ -426,7 +474,8 @@ export function createGroupRunner(deps: GroupRunnerDeps): GroupRunner {
   function unitPassed(run: ContractRun, unit: ContractUnit): void {
     const group = run.group(unit.groupId);
     if (group === undefined || group.status !== 'running' || run.settledGroups.has(group.id)) return;
-    const units = run.contract.units.filter((candidate) => candidate.groupId === group.id);
+    // A unit the owner went on without (its failure pause answered "go on") counts as finished, with no result.
+    const units = run.contract.units.filter((candidate) => candidate.groupId === group.id && !wentOnWithout(run.contract, candidate));
     if (!units.every((candidate) => candidate.status === 'passed')) return;
     if (!units.every((candidate) => {
       const itemId = unitItemId(candidate);
@@ -435,7 +484,7 @@ export function createGroupRunner(deps: GroupRunnerDeps): GroupRunner {
     run.settledGroups.add(group.id);
     run.sharedTreeReleases.get(group.id)?.();
     run.sharedTreeReleases.delete(group.id);
-    void deps.steps.groupUnitsPassed(run, group.id).catch((error: unknown) => stepFailed(run, `group ${group.id} could not be judged`, error));
+    void deps.steps.groupUnitsPassed(run, group.id).catch((error: unknown) => stepFailed(run, `the steps "${group.title || group.id}" could not be checked`, error));
   }
 
   function passGroup(run: ContractRun, groupId: string): void {
@@ -445,11 +494,11 @@ export function createGroupRunner(deps: GroupRunnerDeps): GroupRunner {
     run.decide('group-passed', group.id, `every unit of ${group.id} passed${group.criteria.length === 0 ? '' : ' and the group check passed'}`);
     if (group.kind === 'fix') {
       // A planned fix passed: its target is checked again; the target decides what runs next.
-      void deps.steps.fixGroupPassed(run, group.id).catch((error: unknown) => stepFailed(run, `fix group ${group.id}'s target could not be checked again`, error));
+      void deps.steps.fixGroupPassed(run, group.id).catch((error: unknown) => stepFailed(run, `what the fix "${group.title || group.id}" fixed could not be checked again`, error));
       return;
     }
     if (run.contract.groups.every((candidate) => candidate.status === 'passed')) {
-      void deps.steps.groupsPassed(run).catch((error: unknown) => stepFailed(run, 'the deliverable could not be judged', error));
+      void deps.steps.groupsPassed(run).catch((error: unknown) => stepFailed(run, 'its result could not be checked', error));
       return;
     }
     startReadyGroups(run);
@@ -482,7 +531,7 @@ export function createGroupRunner(deps: GroupRunnerDeps): GroupRunner {
     }
     // An item the engine already failed (its dependents skipped) is reset instead: its dependents wait on it again.
     if (!engine.requeueItem(unit.id, reason, task, unit.route) && !engine.retryItem(unit.id, task, unit.route)) {
-      deps.failUnit(run, unit, 'other', `unit ${unit.id} could not be given a fresh agent (${reason})`);
+      deps.failUnit(run, unit, 'other', `step ${stepName(unit)} failed: it could not be given a fresh agent (${reason})`);
     }
   }
 

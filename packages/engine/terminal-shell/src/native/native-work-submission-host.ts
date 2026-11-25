@@ -1,5 +1,6 @@
 import { isNativeOwnerPrincipal } from './native-paired-principal.js';
 import { createNativeHostFetch } from './native-host-fetch.js';
+import { inProjectFolder } from './native-project-folder.js';
 import { realpathSync } from 'node:fs';
 import { createOperatorApiClient, type OperatorRemoteClient } from '@goodvibes/engine/operator-client';
 import { createOperatorWorkLedgerReadClient } from '@goodvibes/engine/platform/platform/workflow/work-ledger/operator-read-client';
@@ -43,7 +44,8 @@ export function createNativeSubmissionIdentity(identityFormat: NativeHostIdentit
 export function createNativeWorkSubmissionBinding(host: NativeSubmissionHost, projectId: string, current: () => boolean = () => true): NativeWorkSubmissionBinding {
     let disposed = false;
     const operator = createOperatorApiClient({ baseUrl: host.baseUrl, authToken: host.token, fetchImpl: createNativeHostFetch({ current: () => !disposed && current() }) });
-    const invoke = (async (...args: Parameters<OperatorRemoteClient['invoke']>) => {
+    // Each call names this program's project folder: the daemon serves it from that project's ledger.
+    const invoke = inProjectFolder((async (...args: Parameters<OperatorRemoteClient['invoke']>) => {
         if (disposed || !current())
             throw new Error('Native submission host selection changed');
         // The principal is read once per operation (readPrincipal). The daemon
@@ -53,14 +55,14 @@ export function createNativeWorkSubmissionBinding(host: NativeSubmissionHost, pr
         if (disposed || !current())
             throw new Error('Native submission host selection changed');
         return value;
-    }) as OperatorRemoteClient['invoke'];
+    }) as OperatorRemoteClient['invoke'], host.workspace);
     const reader = createOperatorWorkLedgerReadClient({ invoke }, projectId);
     const client = createOperatorNativeWorkSubmissionClient({ invoke }, projectId);
     return { client,
         readPrincipal: signal => invoke('control.auth.current', {}, { signal }).then(auth => {
             // The host states the credential kind; this exact principal comes from the live host.
             if (!isNativeOwnerPrincipal(auth, host.expectedPrincipalId)) {
-                throw Object.assign(new Error('Native submission runs from the daemon\'s own machine or a paired device; pair this device (/devices migrate-shared), then retry'), { code: 'PAIRED_OWNER_REQUIRED' });
+                throw Object.assign(new Error('Native submission runs from the daemon\'s own machine or a paired device; pair this device (Devices and network, Pair something, This program with its daemon), then retry'), { code: 'PAIRED_OWNER_REQUIRED' });
             }
             return auth.principalId;
         }),

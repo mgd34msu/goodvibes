@@ -2,12 +2,15 @@
  * models-place.ts, the Models and providers place: the models every
  * conversation can use, the providers they come from and how you are signed in
  * to each, how requests are routed, the services your stored keys are sent to,
- * and moving sign-ins or the services list to another machine.
+ * blind comparisons of models on one prompt, and moving sign-ins or the
+ * services list to another machine; model servers on this computer are found
+ * from anywhere in it.
  *
  * Everything listed is the daemon's, one copy for every program: the models,
  * providers, routing and the move list come from one read of `provider.list`,
  * the services from `services.list`, the media providers from
- * `media.providers`. The lists follow the daemon's provider changes, its
+ * `media.providers`, the saved comparisons from `compare.review` (each named
+ * by its prompt). The lists follow the daemon's provider changes, its
  * settings changes and the `models` and `services` list notices, so a pin, a
  * sign-in or a routing change made from the web UI, a script or the other
  * program shows here with no key pressed. Every action is a capability on the
@@ -35,6 +38,8 @@ interface ModelItem extends PlaceItem {
   readonly label: string;
   readonly provider: string;
   readonly contextWindow: number;
+  /** Whether it reasons, from its own definition (what "why requests go there" says); undefined when not said. */
+  readonly reasoning?: boolean | undefined;
   readonly backup: number;
   readonly pinned: boolean;
 }
@@ -64,6 +69,8 @@ interface ServiceItem extends PlaceItem {
   readonly keyName: string;
   readonly missing: readonly string[];
   readonly sends: string;
+  /** A project service waiting for you: the entry as this row shows it, which "use it" approves and nothing else. */
+  readonly digest: string;
 }
 
 interface MoveItem extends PlaceItem {
@@ -73,12 +80,47 @@ interface MoveItem extends PlaceItem {
 }
 
 interface MediaItem extends PlaceItem {
-  readonly state: 'ready' | 'needs-setup';
+  /** `key-set` and `needs-key` are `ready` and `needs-setup` for a provider that takes a key: "store its key" shows there. */
+  readonly state: 'ready' | 'needs-setup' | 'key-set' | 'needs-key';
   readonly label: string;
   readonly about: string;
+  /** The name its key is stored under, for a provider that takes one (never the key). */
+  readonly keyName?: string | undefined;
 }
 
-type Item = ModelItem | ProviderItem | RouteItem | ServiceItem | MoveItem | MediaItem;
+/** A saved comparison, by what it is: the answers, a judgment, a decision, a report, a handoff or its ZIP. */
+interface ComparisonItem extends PlaceItem {
+  readonly state: 'comparison' | 'judgment' | 'decision' | 'report' | 'handoff' | 'archive';
+  /** The prompt of the comparison it belongs to. */
+  readonly prompt: string;
+  readonly createdAt: string;
+  readonly winner: string;
+  readonly winnerModel: string;
+  readonly decision: string;
+  readonly model: string;
+}
+
+type Item = ModelItem | ProviderItem | RouteItem | ServiceItem | MoveItem | MediaItem | ComparisonItem;
+
+const COMPARISON_STATES: readonly ComparisonItem['state'][] = ['comparison', 'judgment', 'decision', 'report', 'handoff', 'archive'];
+
+const COMPARISON_WORDS: Readonly<Record<ComparisonItem['state'], string>> = {
+  comparison: 'answers to judge', judgment: 'judgment', decision: 'model decision', report: 'report', handoff: 'reviewer handoff', archive: 'handoff ZIP',
+};
+
+/** The saved comparisons as `compare.review` lists them (agent-turn/model-compare-person.ts). */
+function comparisons(output: unknown): readonly ComparisonItem[] {
+  return list(dataOf(output).saved).filter((saved) => text(saved.id) && COMPARISON_STATES.includes(text(saved.kind) as ComparisonItem['state'])).map((saved): ComparisonItem => ({
+    id: text(saved.id),
+    state: text(saved.kind) as ComparisonItem['state'],
+    prompt: plain(saved.prompt),
+    createdAt: text(saved.createdAt),
+    winner: plain(saved.winner),
+    winnerModel: plain(saved.winnerModel),
+    decision: text(saved.decision),
+    model: plain(saved.model),
+  }));
+}
 
 function models(output: unknown): readonly ModelItem[] {
   return list(dataOf(output).models).filter((model) => text(model.registryKey)).map((model): ModelItem => {
@@ -90,6 +132,7 @@ function models(output: unknown): readonly ModelItem[] {
       label: plain(model.label) || text(model.registryKey),
       provider: plain(model.provider),
       contextWindow: count(model.contextWindow),
+      ...(typeof model.reasoning === 'boolean' ? { reasoning: model.reasoning } : {}),
       backup: count(model.backup),
       pinned,
     };
@@ -146,9 +189,10 @@ function services(output: unknown): readonly ServiceItem[] {
     keyName: text(service.keyName),
     missing: strings(service.missing).map(plain),
     sends: '',
+    digest: '',
   }));
   const waiting = list(data.pending).filter((service) => text(service.name)).map((service): ServiceItem => ({
-    id: text(service.name), state: 'waiting', authType: '', address: '', keyName: '', missing: [], sends: plain(service.sends),
+    id: text(service.name), state: 'waiting', authType: '', address: '', keyName: '', missing: [], sends: plain(service.sends), digest: text(service.digest),
   }));
   return [...own, ...waiting];
 }
@@ -166,14 +210,19 @@ function moves(output: unknown): readonly MoveItem[] {
 function media(output: unknown): readonly MediaItem[] {
   return list(dataOf(output).providers).filter((provider) => text(provider.id)).map((provider): MediaItem => ({
     id: text(provider.id),
-    state: provider.configured === true ? 'ready' : 'needs-setup',
+    state: provider.configured === true ? (text(provider.keyName) ? 'key-set' : 'ready') : (text(provider.keyName) ? 'needs-key' : 'needs-setup'),
     label: text(provider.id),
     about: plain(provider.state),
+    ...(text(provider.keyName) ? { keyName: text(provider.keyName) } : {}),
   }));
 }
 
-/** What the lists follow: the daemon's provider changes, its settings, and the models and services notices. */
-const FOLLOW = { domains: ['providers', 'config'], events: [], lists: ['models', 'services'] } as const;
+/**
+ * What the lists follow: the daemon's provider changes, its settings, and the models and services notices. A
+ * declaration that names its notices hears only the events it names, so the two domains' frames (each carries its
+ * domain's name) are named too; a program's own setting changed through the daemon is the `settings` notice.
+ */
+const FOLLOW = { domains: ['providers', 'config'], events: ['providers', 'config'], lists: ['models', 'services', 'settings'] } as const;
 
 const SIGN_IN_WORDS: Readonly<Record<ProviderItem['state'], string>> = {
   waiting: 'waiting for its code',
@@ -249,6 +298,7 @@ export const MODELS_PLACE = definePlace<Item>({
           { label: 'Model', text: model.id },
           { label: 'Provider', text: model.provider || 'not said' },
           ...(model.contextWindow > 0 ? [{ label: 'Context', text: `${model.contextWindow.toLocaleString('en-US')} tokens` }] : []),
+          ...(model.reasoning === undefined ? [] : [{ label: 'Reasoning', text: model.reasoning ? 'yes' : 'no' }]),
           { label: 'Default', text: model.state.startsWith('default') ? 'yes: every conversation that has not chosen its own model uses it' : 'no' },
           ...(model.backup > 0 ? [{ label: 'Backup', text: `tried ${model.backup === 1 ? 'first' : model.backup === 2 ? 'second' : `${model.backup}th`} when a turn fails on the default` }] : []),
           { label: 'Pinned', text: model.pinned ? 'yes: kept at the top of the model picker' : 'no' },
@@ -341,6 +391,35 @@ export const MODELS_PLACE = definePlace<Item>({
       },
     },
     {
+      id: 'comparisons',
+      label: 'Comparisons',
+      noun: 'your model comparisons',
+      // Saved comparisons are artifacts in the daemon's store; a new one, a judgment or a report announces `artifacts`.
+      source: { kind: 'daemon', method: 'capabilities.run', input: run('compare.review'), items: comparisons },
+      follows: { domains: [], events: [], lists: ['artifacts', 'models'] },
+      empty: 'No model comparisons yet: c sends one prompt to two to four models with their names hidden, and keeps the answers here to judge.',
+      row: (item) => {
+        const saved = item as ComparisonItem;
+        return { title: saved.prompt ? `"${saved.prompt}"` : 'A comparison', right: COMPARISON_WORDS[saved.state], mark: saved.state === 'comparison' ? 'waiting' : 'ok' };
+      },
+      detail: (item) => {
+        const saved = item as ComparisonItem;
+        return [
+          { label: 'What it is', text: COMPARISON_WORDS[saved.state] },
+          ...(saved.createdAt ? [{ label: 'Saved', text: when(Date.parse(saved.createdAt)) }] : []),
+          ...(saved.winner ? [{ label: 'Won', text: `answer ${saved.winner}${saved.winnerModel ? `, by ${saved.winnerModel}` : ''}` }] : []),
+          ...(saved.state === 'decision' ? [{ label: 'Decision', text: saved.decision === 'switched' ? `switched the default model to ${saved.model || 'the winner'}` : `kept ${saved.model || 'the default model'}` }] : []),
+          { text: '' },
+          {
+            text: saved.state === 'comparison' ? 'Read the answers (v), then judge which won (j).'
+              : saved.state === 'judgment' ? 'Switch to the winning model (a), or keep the default model and record why (k).'
+                : 'Read it (v), or save a report or a reviewer handoff from it (e).',
+            tone: 'muted' as const,
+          },
+        ];
+      },
+    },
+    {
       id: 'media',
       label: 'Media',
       noun: 'the media providers',
@@ -349,11 +428,16 @@ export const MODELS_PLACE = definePlace<Item>({
       empty: 'No media providers are registered in this build.',
       row: (item) => {
         const provider = item as MediaItem;
-        return { title: provider.label, right: provider.state === 'ready' ? 'set up' : 'setup needed', mark: provider.state === 'ready' ? 'ok' : 'paused' };
+        const set = provider.state === 'ready' || provider.state === 'key-set';
+        return { title: provider.label, right: set ? 'set up' : 'setup needed', mark: set ? 'ok' : 'paused' };
       },
       detail: (item) => {
         const provider = item as MediaItem;
-        return [{ label: 'Provider', text: provider.label }, { label: 'State', text: provider.about || (provider.state === 'ready' ? 'set up' : 'setup needed') }];
+        const words: Readonly<Record<string, string>> = { unconfigured: 'not set up yet: it needs its key or address', configured: 'set up', ready: 'set up', available: 'set up', degraded: 'set up, but not answering as it should', unavailable: 'not reachable now' };
+        return [
+          { label: 'Provider', text: provider.label }, { label: 'State', text: words[provider.about] ?? (provider.about || (provider.state === 'ready' || provider.state === 'key-set' ? 'set up' : 'setup needed')) },
+          ...(provider.keyName ? [{ label: 'Its key', text: `${provider.keyName} (stored as a secret; never shown)` }] : []),
+        ];
       },
     },
     {
@@ -371,6 +455,7 @@ export const MODELS_PLACE = definePlace<Item>({
     // Anywhere in the place.
     { key: 'n', capability: 'provider.add', label: 'add a provider of your own' },
     { key: 'g', capability: 'model.refresh', label: 'read the model lists again' },
+    { key: 'm', capability: 'models.scan', label: 'find model servers on this computer' },
     // A model.
     { key: 'u', list: 'models', states: ['backup', 'backup-pinned', 'other', 'other-pinned'], capability: 'model.use', label: 'make it the default', fill: { model: 'id' } },
     { key: 'f', list: 'models', states: ['default', 'backup', 'other'], capability: 'pin.add', label: 'pin', fill: { model: 'id' } },
@@ -385,6 +470,8 @@ export const MODELS_PLACE = definePlace<Item>({
     { key: 'o', list: 'providers', states: ['signed-in', 'expired', 'expiring'], capability: 'provider.sign-out', label: 'sign out', fill: { provider: 'id' } },
     { key: 'k', list: 'providers', states: ['set-up', 'key-can-sign-in', 'can-sign-in', 'not-set-up'], capability: 'secrets.set', label: 'store its key', fill: { key: (item) => (item as ProviderItem).keyName } },
     { key: 'x', list: 'providers', states: ['custom'], capability: 'provider.remove', label: 'remove', fill: { name: 'id' } },
+    // A media provider that takes a key (a job it was still making is collected from the Work place once it has one).
+    { key: 'k', id: 'store-media-key', list: 'media', states: ['needs-key', 'key-set'], capability: 'secrets.set', label: 'store its key', fill: { key: (item) => (item as MediaItem).keyName ?? '' } },
     { key: 'a', list: 'providers', states: [...ALL_PROVIDER_STATES], capability: 'accounts.show', label: 'its account', fill: { provider: 'id' } },
     { key: 'w', list: 'providers', states: [...ALL_PROVIDER_STATES], capability: 'accounts.routes', label: 'ways it is reached', fill: { provider: 'id' } },
     { key: 'h', list: 'providers', states: [...ALL_PROVIDER_STATES], capability: 'accounts.repair', label: 'how to fix it', fill: { provider: 'id' } },
@@ -399,8 +486,18 @@ export const MODELS_PLACE = definePlace<Item>({
     { key: 't', list: 'services', states: ['ready', 'missing'], capability: 'services.test', label: 'test it', fill: { service: 'id' } },
     { key: 'c', list: 'services', states: ['ready', 'missing'], capability: 'services.check-auth', label: 'check its sign-in', fill: { service: 'id' } },
     { key: 'v', list: 'services', states: ['ready', 'missing', 'unreadable'], capability: 'services.show', label: 'what it holds', fill: { service: 'id' } },
-    { key: 'y', list: 'services', states: ['waiting'], capability: 'services.trust', label: 'use it', fill: { service: 'id' } },
+    { key: 'y', list: 'services', states: ['waiting'], capability: 'services.trust', label: 'use it', fill: { service: 'id', shown: (item) => (item as ServiceItem).digest } },
     { key: 'a', list: 'services', capability: 'services.check', label: 'check every service' },
+    // Model comparisons.
+    { key: 'c', list: 'comparisons', whole: true, capability: 'compare.run', label: 'compare models on a prompt' },
+    { key: 'b', list: 'comparisons', whole: true, capability: 'compare.benchmark', label: 'benchmark the local models' },
+    { key: 'w', list: 'comparisons', whole: true, capability: 'compare.analytics', label: 'which models win' },
+    { key: 'd', list: 'comparisons', whole: true, capability: 'compare.diff-handoffs', label: 'compare two handoffs' },
+    { key: 'v', list: 'comparisons', capability: 'compare.review', label: 'read it', fill: { comparison: 'id' } },
+    { key: 'j', list: 'comparisons', states: ['comparison'], capability: 'compare.judge', label: 'judge it', fill: { comparison: 'id' } },
+    { key: 'a', list: 'comparisons', states: ['judgment'], capability: 'compare.apply', label: 'switch to the winner', fill: { judgment: 'id' } },
+    { key: 'k', list: 'comparisons', states: ['judgment'], capability: 'compare.record-decision', label: 'keep the model, record why', fill: { judgment: 'id' } },
+    { key: 'e', list: 'comparisons', states: ['comparison', 'judgment', 'handoff'], capability: 'compare.export', label: 'save a report or handoff', fill: { source: 'id' } },
     // Moving to another machine.
     { key: 'e', list: 'move', states: ['sign-ins'], capability: 'provider.export', label: 'save to a file' },
     { key: 'c', list: 'move', states: ['sign-ins'], capability: 'provider.inspect', label: 'check a file' },

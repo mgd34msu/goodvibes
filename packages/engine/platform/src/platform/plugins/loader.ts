@@ -341,7 +341,7 @@ export async function loadPlugin(
     return fail(`not started: it declares ${named}, which only a trusted plugin may use, and `
       + (set !== undefined
         ? describeUnappliedTier(manifest.name, set)
-        : `its trust tier is '${tier}'. Run /plugin trust ${manifest.name} trusted to allow it, or remove ${named} from its manifest`), 'warn', true);
+        : `its trust tier is '${tier}'. Set what ${manifest.name} may do to trusted (s on it in the Plugins tab of Tools and extensions) to allow it, or remove ${named} from its manifest`), 'warn', true);
   }
 
   // The tier limits what the host hands the plugin; its own code still runs with this process's access.

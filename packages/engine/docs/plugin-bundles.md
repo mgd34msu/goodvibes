@@ -102,7 +102,7 @@ not grant, it installs **quarantined**: those capabilities are withheld and
 recorded (`plan.quarantine`), and the returned guard cannot exercise them even
 though they were declared. Because a plugin runs inside the process, the loader
 does not start a plugin while a high-risk capability it declares is withheld;
-`/plugin trust <id> trusted` (or removing the capability) lets it start.
+Setting its tier to `trusted` (`s` on it in the Plugins tab of Tools and extensions, or `goodvibes plugin trust <id> trusted`), or removing the capability, lets it start.
 Over-reach is withheld, never silently granted.
 
 ## SHA-256 pinned distribution

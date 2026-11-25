@@ -3,17 +3,15 @@
 GoodVibes has two separate voice paths:
 
 - daemon/API voice routes for provider discovery, TTS, STT, realtime sessions, and streamed TTS
-- TUI live spoken output through `/voice speak`, which runs a normal chat turn and plays the assistant response locally as it streams
+- TUI live spoken output through "ask and hear it", which runs a normal chat turn and plays the assistant response locally as it streams
 
-The `/voice speak` command does not replace text output. The normal assistant response still appears in the TUI. `/voice speak` only marks that turn for additional live audio playback.
+"Ask and hear it" does not replace text output. The normal assistant response still appears in the TUI; it only marks that turn for additional live audio playback.
 
-## TUI commands
+## Where it is
+
+Voice has no slash command. In the System place (Ctrl+G then m, System), on This session, the row "Speak answers aloud": `p` ask and hear it (`voice.speak`), `a` speak every answer or stop speaking them (`voice.on`, `voice.off`). On the Voice tab: `t` stop speaking (`voice.stop`). The settings:
 
 ```text
-/voice speak <message>
-/voice stop
-/voice on
-/voice off
 /settings open tts
 /settings open tts.provider
 /settings open tts.voice
@@ -22,7 +20,7 @@ The `/voice speak` command does not replace text output. The normal assistant re
 /settings open tts.speed
 ```
 
-`/voice speak <message>` submits the prompt through the normal conversation path. It uses the active chat provider/model by default, unless a separate TTS response model override is configured. Assistant deltas are chunked at sentence or phrase boundaries (a minimum of roughly 24 characters before a boundary is accepted, a hard cap around 320 characters, and a fallback flush after about a second of buffering) and sent to streaming TTS in order. Audio failures are reported as non-blocking TUI status messages and do not cancel the text turn.
+"Ask and hear it" submits the prompt through the normal conversation path. It uses the active chat provider/model by default, unless a separate TTS response model override is configured. Assistant deltas are chunked at sentence or phrase boundaries (a minimum of roughly 24 characters before a boundary is accepted, a hard cap around 320 characters, and a fallback flush after about a second of buffering) and sent to streaming TTS in order. Audio failures are reported as non-blocking TUI status messages and do not cancel the text turn.
 
 Before a chunk reaches the synthesizer, markdown formatting is stripped so the voice does not read punctuation aloud. Each construct has its own spoken form:
 
@@ -40,11 +38,11 @@ Before a chunk reaches the synthesizer, markdown formatting is stripped so the v
 
 The text response shown in the TUI is unaffected; only the audio synthesis input is cleaned up this way.
 
-`/voice stop` cancels pending TTS requests, kills active playback, and clears the queued audio chunks.
+"Stop speaking" cancels pending TTS requests, kills active playback, and clears the queued audio chunks.
 
-`/voice on` enables always-speak mode. Every turn submitted to the conversation, including turns not prefixed with `/voice speak`, is automatically marked for live spoken output. The setting is persisted via `ui.voiceEnabled` in the TUI config. The player availability check still gates gracefully: if no player is found the turn text continues normally with a status message.
+"Speak answers" (`a`) enables always-speak mode. Every turn submitted to the conversation, including turns not sent with "ask and hear it", is automatically marked for live spoken output. The setting is persisted via `ui.voiceEnabled` in the TUI config. The player availability check still gates gracefully: if no player is found the turn text continues normally with a status message.
 
-`/voice off` disables always-speak mode. After running `/voice off`, only prompts submitted with `/voice speak <message>` are spoken.
+"Stop speaking them" (`a` again) disables always-speak mode. After that, only prompts sent with "ask and hear it" are spoken.
 
 ### Always-speak mode
 
@@ -54,7 +52,7 @@ Always-speak mode is controlled by the `ui.voiceEnabled` config key (boolean, de
 /settings open tts
 ```
 
-The **Always Speak** row appears at the top of the TTS settings tab. Toggle it there or use `/voice on` / `/voice off`. Both are the same switch writing the same `ui.voiceEnabled` key.
+The **Always Speak** row appears at the top of the TTS settings tab. Toggle it there or with `a` on the "Speak answers aloud" row (System, This session). Both are the same switch writing the same `ui.voiceEnabled` key.
 
 `/settings open tts` opens the settings screen at the Voice topic, on the first spoken-reply setting. From there users can toggle always-speak mode, choose the streaming TTS provider, choose a voice from that provider, open the fullscreen provider/model workspace for the TTS response model override, clear text fields, or reset selected settings.
 
@@ -69,9 +67,9 @@ The modal and direct commands write the platform TTS config keys:
 | `tts.llmModel` | Model override for the spoken-turn response model; empty uses the active chat model |
 | `tts.speed` | The playback speed multiplier (see the Speed section below) |
 
-By default, `/voice speak` uses the active chat provider/model for text generation. If `tts.llmProvider` and `tts.llmModel` are set through `/settings`, `/voice speak` uses that configured spoken-turn model for `/voice speak` turns without changing the main chat model. Selecting either of those rows opens the same fullscreen model picker used by the main model/provider commands, on its `Spoken replies` tab.
+By default, "ask and hear it" uses the active chat provider/model for text generation. If `tts.llmProvider` and `tts.llmModel` are set through `/settings`, it uses that configured spoken-turn model for those turns without changing the main chat model. Selecting either of those rows opens the same fullscreen model picker used by the main model/provider commands, on its `Spoken replies` tab.
 
-Spoken turns stay active until the logical turn reaches `TURN_COMPLETED`, `TURN_ERROR`, `TURN_CANCEL`, or `PREFLIGHT_FAIL`. platform `STREAM_END` is provider-stream scoped and non-terminal, so tool-using or multi-step `/voice speak` turns must not stop audio collection just because one provider stream iteration ended.
+Spoken turns stay active until the logical turn reaches `TURN_COMPLETED`, `TURN_ERROR`, `TURN_CANCEL`, or `PREFLIGHT_FAIL`. platform `STREAM_END` is provider-stream scoped and non-terminal, so tool-using or multi-step spoken turns must not stop audio collection just because one provider stream iteration ended.
 
 ## Speed
 
@@ -87,7 +85,7 @@ The platform defines `tts.speed` in the config schema (default `1`, supported ra
 
 ## Playback requirements
 
-Live TTS playback streams audio bytes to a local player over stdin. Install `mpv`, which is checked first and preferred for its read-ahead pipe buffering, or `ffplay`, which is used as the fallback when `mpv` is not found. If neither player is on `PATH`, `/voice speak` still submits and renders the normal text response, but live audio is skipped with a non-blocking status message.
+Live TTS playback streams audio bytes to a local player over stdin. Install `mpv`, which is checked first and preferred for its read-ahead pipe buffering, or `ffplay`, which is used as the fallback when `mpv` is not found. If neither player is on `PATH`, "ask and hear it" still submits and renders the normal text response, but live audio is skipped with a non-blocking status message.
 
 ## Providers and voices
 

@@ -72,6 +72,8 @@ export interface MemoryRecordAddInput {
   readonly cls: string;
   readonly summary: string;
   readonly scope?: string | undefined;
+  /** The project (its resolved folder) a "this project" record is for; absent, the person's own. */
+  readonly project?: string | undefined;
   readonly detail?: string | undefined;
   readonly tags?: readonly string[] | undefined;
   readonly provenance?: readonly MemoryProvenanceLinkInput[] | undefined;
@@ -86,6 +88,8 @@ export interface MemoryRecordAddInput {
 /** The search filter body, structurally compatible with the platform's MemorySearchFilter. */
 export interface MemoryRecordSearchFilterInput {
   readonly scope?: string | undefined;
+  /** The asking project (its resolved folder): only its records and the person's own. */
+  readonly project?: string | undefined;
   readonly cls?: string | undefined;
   readonly tags?: readonly string[] | undefined;
   readonly query?: string | undefined;
@@ -116,6 +120,8 @@ export interface MemoryRecordUpdateInput {
   /** The record's class; the store checks it as it checks a new record's. */
   readonly cls?: string | undefined;
   readonly scope?: string | undefined;
+  /** The project a record made "this project" is for (its resolved folder). */
+  readonly project?: string | undefined;
   readonly summary?: string | undefined;
   readonly detail?: string | undefined;
   readonly tags?: readonly string[] | undefined;
@@ -197,6 +203,8 @@ export interface UserAuthManagerLike {
 /** The memory-consolidation scheduler slice the receipts route reads (RuntimeServices.memoryConsolidationScheduler satisfies it structurally). */
 export interface MemoryConsolidationSchedulerLike {
   listReceipts(): readonly unknown[];
+  /** The proposals still waiting for a person, from the memory store (they outlive the run that raised them). */
+  listProposals?(): readonly unknown[];
 }
 
 export interface DaemonIntegrationRouteContext {

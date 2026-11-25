@@ -21,7 +21,11 @@ export type FirstRunScreen =
      * "You're set" ("Using Anthropic (claude-…) from ANTHROPIC_API_KEY; …").
      */
     readonly using?: string | undefined;
+    /** The one line naming the mode in force and where "Who decides" is chosen (first run never asks it). */
+    readonly decides?: string | undefined;
   }
+  /** A first launch whose model was ready already: only the line naming the mode in force and where to change it. */
+  | { readonly kind: 'decides'; readonly decides: string }
   /** Set up later: "Not set up yet." */
   | { readonly kind: 'not-ready' };
 
@@ -47,13 +51,42 @@ interface SplashAdditionsState extends SplashAdditionsInstall {
   words: ModeWordsSource | null;
   /** "You're set" was said on the status bar because its line did not fit. */
   setFlashed: boolean;
+  /**
+   * The crash-recovery offer's one line (session-crash-recovery.ts recoveryOfferLine), drawn under the splash while
+   * the offer stands, so it is seen where the person is looking; absent when there is no offer.
+   */
+  recoveryLine: string | undefined;
 }
 
 let state: SplashAdditionsState | null = null;
+/** A recovery line set before the additions were installed (the offer can come first). */
+let pendingRecoveryLine: string | undefined;
 
 export function installSplashAdditions(install: SplashAdditionsInstall): void {
   state?.words?.stop();
-  state = { ...install, importCommand: state?.importCommand, importRun: state?.importRun, firstRun: state?.firstRun, words: null, setFlashed: false };
+  state = { ...install, importCommand: state?.importCommand, importRun: state?.importRun, firstRun: state?.firstRun, words: null, setFlashed: false,
+    recoveryLine: state?.recoveryLine ?? pendingRecoveryLine };
+}
+
+/** Lines already said on the status bar because they did not fit under the splash (each said once). */
+const flashedLines = new Set<string>();
+
+/**
+ * A line under the splash (the mode in force, the recovery offer) that did not fit: the line the status bar flashes
+ * instead, once per line; null when it was flashed already.
+ */
+export function takeDroppedLineFlash(line: string): string | null {
+  if (flashedLines.has(line)) return null;
+  flashedLines.add(line);
+  return line;
+}
+
+/** Show (or, with undefined, take away) the crash-recovery offer's one line under the splash. */
+export function setSplashRecoveryLine(line: string | undefined): void {
+  pendingRecoveryLine = line;
+  if (!state || state.recoveryLine === line) return;
+  state.recoveryLine = line;
+  if (state.splashShowing()) requestSplashRender();
 }
 
 /**
@@ -96,6 +129,8 @@ export interface SplashAdditionsView {
   readonly importCommand: string | undefined;
   /** Enter on the empty composer takes the import offer. */
   readonly importOnEnter: boolean;
+  /** The crash-recovery offer's one line, while the offer stands. */
+  readonly recoveryLine: string | undefined;
 }
 
 /** What to draw under the splash now; null when nothing is installed. */
@@ -108,6 +143,7 @@ export function readSplashAdditions(): SplashAdditionsView | null {
     setupCommand: state.setupCommand,
     importCommand: state.importCommand,
     importOnEnter: state.importRun !== undefined,
+    recoveryLine: state.recoveryLine,
   };
 }
 
@@ -135,7 +171,7 @@ export function requestSplashRender(): void {
 export function firstRunOwnsScreen(): boolean {
   const kind = state?.firstRun?.kind;
   if (kind === 'pending') return true;
-  return (kind === 'set' || kind === 'not-ready') && state!.splashShowing();
+  return (kind === 'set' || kind === 'decides' || kind === 'not-ready') && state!.splashShowing();
 }
 
 /** First run is open (step 1 or 2): a model chosen meanwhile is said by first run, not by a line in the conversation. */

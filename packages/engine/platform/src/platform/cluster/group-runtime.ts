@@ -266,6 +266,9 @@ export class ClusterGroupRuntime {
   readonly #tenants = new Map<string, GroupTenant>();
   readonly #memberHeardListeners = new Set<(nodeId: string) => void>();
   readonly #membershipClearedListeners = new Set<() => void>();
+  readonly #groupChangedListeners = new Set<() => void>();
+  readonly #leavingListeners = new Set<() => Promise<void>>();
+  #lastGroupFacts = '';
 
   /** Called when this machine stops being a member (it left, was forgotten or removed); returns the removal. */
   onMembershipCleared(listener: () => void): () => void {
@@ -544,8 +547,10 @@ export class ClusterGroupRuntime {
     return this.router.counters;
   }
 
+  /** The groups other machines announce; the group this machine is in is not one to join, so it is left out. */
   groupsOnTheNetwork(): readonly DiscoveredGroup[] {
-    return [...this.discovered.values()].sort((a, b) => b.lastSeenAt - a.lastSeenAt);
+    const own = this.material?.groupId;
+    return [...this.discovered.values()].filter((group) => group.groupId !== own).sort((a, b) => b.lastSeenAt - a.lastSeenAt);
   }
 
   electionTiming(): ClusterElectionTiming | null {
@@ -593,7 +598,8 @@ export class ClusterGroupRuntime {
     // original file intact; only a real current-group write replaces that slot.
     if (material && this.replication) this.replication.adopt(savedReplica?.groupId === material.groupId
       ? savedReplica : createConfigReplicaDocument(material.groupId),
-      readHeldConfigChanges(loadHeldConfigChanges(this.options.stateDirectory, material.groupId, this.options.logger)));
+      readHeldConfigChanges(loadHeldConfigChanges(this.options.stateDirectory, material.groupId, this.options.logger)),
+      savedReplica?.groupId === material.groupId);
     if (this.networkStarted && !this.runtimeStopping && this.membershipOperations.available && !this.membershipTransition) { this.incoming.open(); this.configChanges.resume(); }
   }
 
@@ -721,6 +727,51 @@ export class ClusterGroupRuntime {
     }
     this.acceptance = computeKeyAcceptance(material, this.epochs, keyRotationGraceMs(this.options.settings));
     if (this.state && findTombstone(this.state, this.options.nodeId)) this.options.onRemovedFromGroup?.();
+    this.noteGroupFacts();
+  }
+
+  /** The group's facts a person sees, as one string: its name, its machines, its removals and its key generation. */
+  private groupFacts(): string {
+    const state = this.state;
+    if (!this.material || !state) return '';
+    return [state.groupId, state.displayName, state.members.map((member) => `${member.nodeId}=${member.displayName}`).sort().join(','),
+      String(state.tombstones.length), String(this.acceptance?.current ?? ''), String(this.material.groupSigning.generation),
+      String(this.replication?.status()?.awaitingSync ?? '')].join('|');
+  }
+
+  /**
+   * Tell the group-changed listeners when what a person sees of the group changed (a join, a leave, a removal, a
+   * rename, a new key): on this machine's own act and on a change that came from another machine alike.
+   */
+  private noteGroupFacts(): void {
+    const facts = this.groupFacts();
+    if (facts === this.#lastGroupFacts) return;
+    this.#lastGroupFacts = facts;
+    for (const listener of [...this.#groupChangedListeners]) {
+      try { listener(); } catch (error) { this.options.logger.warn('cluster: a group-changed listener failed', { error: error instanceof Error ? error.message : String(error) }); }
+    }
+  }
+
+  /** Called when the group's name, machines, removals or key generation changed here, whoever changed them. */
+  onGroupChanged(listener: () => void): () => void {
+    this.#groupChangedListeners.add(listener);
+    return () => { this.#groupChangedListeners.delete(listener); };
+  }
+
+  /**
+   * Called just before this machine leaves its group, while it still holds the group's keys: the moment a feature
+   * tells the other members (the secure address's lead stops sharing its certificate with it). Never throws.
+   */
+  onLeaving(listener: () => Promise<void>): () => void {
+    this.#leavingListeners.add(listener);
+    return () => { this.#leavingListeners.delete(listener); };
+  }
+
+  /** Run the leaving listeners (cluster leave, before the keys are cleared); a failing one is logged and passed over. */
+  async noteLeaving(): Promise<void> {
+    for (const listener of [...this.#leavingListeners]) {
+      try { await listener(); } catch (error) { this.options.logger.warn('cluster: a leaving listener failed', { error: error instanceof Error ? error.message : String(error) }); }
+    }
   }
 
   /**
@@ -1031,6 +1082,11 @@ export class ClusterGroupRuntime {
     return this.material ? (this.replication?.status() ?? null) : null;
   }
 
+  /** The shared settings that differ here, with both values (never a secret), for the share and take forms. */
+  settingDifferences(): readonly { readonly path: string; readonly origin: string; readonly here: unknown; readonly group: unknown }[] {
+    return this.material ? (this.replication?.localDifferenceValues() ?? []) : [];
+  }
+
   /** The replicated settings document, for tests and for a snapshot on demand. */
   replicaDocument(): ConfigReplicaDocument | null {
     return this.replication?.replica ?? null;
@@ -1131,6 +1187,8 @@ export class ClusterGroupRuntime {
   private persistReplica(document: ConfigReplicaDocument): void {
     if (this.runtimeStopping || !this.membershipOperations.available || document.groupId !== this.material?.groupId) throw new ClusterMembershipOperationError('abandoned');
     this.stateOwner.write(GROUP_REPLICA_FILENAME, `${JSON.stringify(document, null, 2)}\n`, false);
+    // The group's settings arrived (or moved): "does not hold the group's settings yet" may no longer be true.
+    queueMicrotask(() => this.noteGroupFacts());
   }
 
   /**
@@ -1553,6 +1611,10 @@ export class ClusterGroupRuntime {
         for (const listener of [...this.#memberHeardListeners]) {
           try { listener(envelope.nodeId); } catch { /* a tenant's listener never stops the group layer */ }
         }
+        // A machine heard again (or for the first time) is no longer "not heard": the lists showing it read again.
+        for (const listener of [...this.#groupChangedListeners]) {
+          try { listener(); } catch { /* a listener never stops the group layer */ }
+        }
       }
     }
     this.incoming.admit(() => this.runGroupWork(() => this.handleGroupMessage(envelope)));
@@ -1673,6 +1735,10 @@ export class ClusterGroupRuntime {
     const nodeCount = typeof body['nodeCount'] === 'number' && Number.isFinite(body['nodeCount'])
       ? Math.max(0, Math.trunc(body['nodeCount']))
       : 0;
+    const before = this.discovered.get(groupId);
+    // A group newly heard, renamed or grown is told to the group-changed listeners (the Nearby groups list reads again);
+    // a beacon that changes nothing is not.
+    const changed = !before || before.displayName !== displayName || before.nodeCount !== nodeCount;
     if (!this.discovered.has(groupId) && this.discovered.size >= MAX_DISCOVERED_GROUPS) {
       let oldest: DiscoveredGroup | undefined;
       for (const entry of this.discovered.values()) if (!oldest || entry.lastSeenAt < oldest.lastSeenAt) oldest = entry;
@@ -1685,6 +1751,11 @@ export class ClusterGroupRuntime {
       version,
       lastSeenAt: this.options.clock.now(),
     });
+    if (changed) {
+      for (const listener of [...this.#groupChangedListeners]) {
+        try { listener(); } catch { /* a listener never stops the group layer */ }
+      }
+    }
   }
 
   /** Every key generation this node holds, for the status report. */

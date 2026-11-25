@@ -12,7 +12,7 @@ export const NOTES_LIST = 'notes' as ListName;
 
 const NOTE: InputDescription = pickedInput({ id: 'note', label: 'Note', help: 'Your notes', list: NOTES_LIST, other: 'a note id or title' });
 const ENABLE: InputDescription = fixedInput({
-  id: 'enabled', label: 'Switch it on', help: 'At once, or after you review it',
+  id: 'enabled', label: 'Put it to use', help: 'At once, or after you review it',
   choices: [{ value: 'no', label: 'After I review it' }, { value: 'yes', label: 'At once', help: 'It may be used before anyone reviewed it.', risk: 'loosens-a-protection' }],
   typed: { flag: '--enable', switchOn: 'yes' }, optional: { default: 'no', means: 'after you review it' },
 });

@@ -32,6 +32,8 @@ import { SubscriptionManager } from '../../platform/src/platform/config/subscrip
 import { ApprovalBroker } from '../../platform/src/platform/control-plane/approval-broker.ts';
 import { SharedSessionBroker } from '../../platform/src/platform/control-plane/session-broker.ts';
 import { DaemonSurfaceActionHelper } from '../../platform/src/platform/daemon/surface-actions.ts';
+import { createFacadeWorkProposalStore } from '../../platform/src/platform/daemon/facade-work-proposal-store.ts';
+import { createOwnerInbox } from '../../platform/src/platform/control-plane/owner-inbox.ts';
 import { DaemonSurfaceDeliveryHelper } from '../../platform/src/platform/daemon/surface-delivery.ts';
 import { isSurfaceDeliveryEnabled } from '../../platform/src/platform/daemon/surface-policy.ts';
 import type { PendingSurfaceReply } from '../../platform/src/platform/daemon/types.ts';
@@ -57,6 +59,11 @@ export interface SurfaceDaemonOptions {
   readonly policies?: Partial<Record<ChannelSurface, Partial<Omit<ChannelPolicyRecord, 'surface' | 'updatedAt'>>>> | undefined;
   /** The agent runtime's answer to a spawn request; a started agent by default. */
   readonly spawn?: ((request: SpawnRequest, count: number) => AgentRecord | Response) | undefined;
+  /**
+   * The conversation gate's pieces, as the facade composes them: the work-proposal store and the owner inbox over the
+   * scratch home's one store (Waiting for you), both handed to the surface-action helper.
+   */
+  readonly conversationGate?: true | undefined;
 }
 
 export async function surfaceDaemon(options: SurfaceDaemonOptions = {}) {
@@ -106,8 +113,13 @@ export async function surfaceDaemon(options: SurfaceDaemonOptions = {}) {
     spawns.push(request);
     return options.spawn?.(request, spawns.length) ?? ({ id: `agent-${spawns.length}` } as AgentRecord);
   };
+  const workProposals = options.conversationGate ? createFacadeWorkProposalStore(configManager, sessionBroker) : undefined;
+  await workProposals?.init();
+  const ownerInbox = options.conversationGate ? createOwnerInbox({ questionsPath: join(root, 'owner-inbox.sqlite'), approvals: approvalBroker }) : undefined;
   const helper = new DaemonSurfaceActionHelper({
     serviceRegistry, secretsManager, configManager, routeBindings, sessionBroker, channelPolicy, approvalBroker, automationManager,
+    ...(workProposals ? { workProposals } : {}),
+    ...(ownerInbox ? { ownerInbox } : {}),
     agentManager: agentRuntime,
     trySpawnAgent,
     queueSurfaceReplyFromBinding: (binding: never, input: never) => delivery.queueSurfaceReplyFromBinding(binding, input),
@@ -118,7 +130,7 @@ export async function surfaceDaemon(options: SurfaceDaemonOptions = {}) {
   } as unknown as ConstructorParameters<typeof DaemonSurfaceActionHelper>[0]);
   return {
     root, configManager, secretsManager, serviceRegistry, routeBindings, sessionBroker, channelPolicy, approvalBroker,
-    channelPlugins, channelReplyPipeline, delivery, helper, spawns, trySpawnAgent,
+    channelPlugins, channelReplyPipeline, delivery, helper, spawns, trySpawnAgent, workProposals, ownerInbox,
     /** What the daemon hands a chat adapter. */
     adapterContext: () => helper.buildSurfaceAdapterContext(),
     /** What the daemon hands the generic webhook adapter. */
@@ -127,6 +139,9 @@ export async function surfaceDaemon(options: SurfaceDaemonOptions = {}) {
     storedMessages: () => sessionBroker.listSessions(1_000).flatMap((session) => sessionBroker.getMessages(session.id, 1_000).filter((message) => message.role === 'user')),
     async stop() {
       helper.closeDelegatedTelegram();
+      helper.closeProposalAnswers();
+      ownerInbox?.dispose();
+      workProposals?.dispose();
       channelReplyPipeline.dispose();
       automationManager.stop();
       await channelPolicy.stop();

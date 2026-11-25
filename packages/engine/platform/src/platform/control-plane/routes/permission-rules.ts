@@ -8,7 +8,8 @@
 
 import type { GatewayMethodCatalog } from '../method-catalog.js';
 import type { GatewayMethodHandler } from '../method-catalog-shared.js';
-import type { UserPermissionRuleStore } from '../../permissions/user-rule-store.js';
+import { projectIdentity, type UserPermissionRuleStore } from '../../permissions/user-rule-store.js';
+import { projectRootOfDirectory } from '../../permissions/call-project.js';
 import { readInvocationParams, requireString } from './invocation-params.js';
 import { attachHandler } from './attach-handler.js';
 import { logger } from '../../utils/logger.js';
@@ -19,8 +20,13 @@ export interface PermissionRulesGatewayDeps {
 }
 
 export function createPermissionRulesListHandler(store: PermissionRulesGatewayDeps['userRuleStore']): GatewayMethodHandler {
-  return async () => ({
-    rules: store.list().map((record) => ({
+  return async (invocation) => {
+    const params = readInvocationParams(invocation);
+    const named = params['project'];
+    const folder = typeof named === 'string' && named.trim().length > 0 ? named.trim() : undefined;
+    // A project's own list: its rules and the ones of every project, never another project's.
+    const project = folder === undefined ? undefined : projectIdentity(projectRootOfDirectory(folder));
+    return { rules: store.list().filter((record) => project === undefined || record.project === undefined || record.project === project).map((record) => ({
       id: record.rule.id,
       effect: record.rule.effect,
       tier: record.tier,
@@ -28,8 +34,12 @@ export function createPermissionRulesListHandler(store: PermissionRulesGatewayDe
       ...(record.rule.description ? { description: record.rule.description } : {}),
       createdAt: record.createdAt,
       ...(record.project !== undefined ? { project: record.project } : {}),
-    })),
-  });
+      // Carried from 3.5.0 to every project, until placed in one or removed.
+      ...(record.carried !== undefined ? { carried: record.carried } : {}),
+      // The session whose answer made it, by its title when it had one (a runner by its task, a chat by its title).
+      ...(record.madeIn !== undefined ? { madeIn: record.madeIn } : {}),
+    })) };
+  };
 }
 
 export function createPermissionRulesDeleteHandler(store: PermissionRulesGatewayDeps['userRuleStore']): GatewayMethodHandler {

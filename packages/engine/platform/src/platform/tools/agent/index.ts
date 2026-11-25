@@ -102,6 +102,20 @@ function agentSummary(record: AgentRecord) {
 }
 
 /** The fields a result carries for a contract the call started: read as code by core (contract/intake-route.ts toolResultStartedContract). */
+/**
+ * A delegation handed to the daemon as a piece of work (a terminal program, AgentManager.delegatesToDaemon): the
+ * record that follows it here, and where the work is seen. `agent wait` on the id gives the work's result.
+ */
+function delegatedWorkFields(record: AgentRecord) {
+  return {
+    agentId: record.id,
+    status: 'spawned',
+    handedTo: 'the daemon, as a piece of work for this project',
+    seenIn: 'Work (the Work and agents place); it runs on when this program closes, and its result then waits there',
+    ...(record.delegatedWorkId ? { workId: record.delegatedWorkId } : {}),
+  };
+}
+
 function startedContractFields(started: StartedContract) {
   return {
     contractStarted: true as const,
@@ -390,7 +404,11 @@ export function createAgentTool(config: AgentToolConfig): Tool {
     const input = classicAgentInput({ ...modelAgentInput(args as unknown as AgentInput), sessionId: session,
       ...(callerAgentId ? { parentAgentId: callerAgentId } : {}) });
     if (isNativeConversationTurn() && decisionModelPolicyState().operation !== 'no-decision-model' && (input.mode === 'spawn' || input.mode === 'batch-spawn')) {
-      return { success: false, error: NATIVE_TURN_EXECUTION_REFUSAL };
+      // A task handed to the daemon as a piece of work is new work on the daemon's one runner, as the daemon's intake
+      // would make it; an agent that would run in this process is not started from a turn the daemon admitted.
+      const runsHere = !config.manager.delegatesToDaemon() || input.outsideContract === true
+        || (input.tasks ?? []).some((task) => task.outsideContract === true);
+      if (runsHere) return { success: false, error: NATIVE_TURN_EXECUTION_REFUSAL };
     }
 
     if (!input.mode) {
@@ -469,6 +487,20 @@ export function createAgentTool(config: AgentToolConfig): Tool {
 
         const refused = await authorize([input.task]);
         if (refused) return refused;
+
+        // In a terminal program the task is handed to the daemon as a piece of work: one runner, on the daemon.
+        if (!input.outsideContract && manager.delegatesToDaemon()) {
+          let record;
+          try {
+            // Not owned by this call: the work is the daemon's and runs on after the call, the turn and the program
+            // (the call answers at once, as a contract's start did; `agent wait` follows it to its end).
+            assertCurrent();
+            record = manager.spawn(input);
+          } catch (error) {
+            return { success: false, error: describeErrorInFull(error) };
+          }
+          return publish({ success: true, output: JSON.stringify({ ...delegatedWorkFields(record), template: record.template, task: input.task }) });
+        }
 
         if (!input.outsideContract) {
           let started: StartedContract;
@@ -930,7 +962,24 @@ export function createAgentTool(config: AgentToolConfig): Tool {
         if (refused) return refused;
 
         const batchOutput: Record<string, unknown> = { cohort: input.cohort };
-        if (contractTasks.length > 0) {
+        if (contractTasks.length > 0 && manager.delegatesToDaemon()) {
+          // In a terminal program the tasks are handed to the daemon as one piece of work, its steps proposed from them.
+          const units: ProposedUnit[] = contractTasks.map((taskDef) => ({
+            task: taskDef.task,
+            ...(taskDef.template ?? input.template ? { template: taskDef.template ?? input.template } : {}),
+          }));
+          let owner;
+          try {
+            // Not owned by this call (the daemon's work runs on after it), as a single hand-over.
+            assertCurrent();
+            owner = manager.spawn({ ...input, mode: 'spawn', task: contractAsk(input, units), proposedUnits: units, outsideContract: false });
+          } catch (error) {
+            return { success: false, error: describeErrorInFull(error) };
+          }
+          // `contractStarted` keeps its meaning for the rest of the batch: the delegated work already started.
+          Object.assign(batchOutput, { contractStarted: true, owner: agentSummary(owner), contractTaskCount: contractTasks.length }, delegatedWorkFields(owner));
+          delete batchOutput['status'];
+        } else if (contractTasks.length > 0) {
           const units: ProposedUnit[] = contractTasks.map((taskDef) => ({
             task: taskDef.task,
             ...(taskDef.template ?? input.template ? { template: taskDef.template ?? input.template } : {}),

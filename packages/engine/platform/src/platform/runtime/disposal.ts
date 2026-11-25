@@ -171,7 +171,7 @@ export interface RuntimePollerOwners {
    */
   readonly homeGraphService: { dispose(): void | Promise<void> };
   /** The composed contract runner: disposing it stops the runner (each contract's engine with it) and releases its store's writer and sweep. */
-  readonly contractRunner: { dispose(): void; flushWorkPlan?(): Promise<void>; closed?(): Promise<import('../utils/owned-work.js').CloseReport> };
+  readonly contractRunner: { dispose(): void; prepareToClose?(): void; flushWorkPlan?(): Promise<void>; closed?(): Promise<import('../utils/owned-work.js').CloseReport> };
   readonly processRegistry: { dispose(): void };
   readonly memoryGovernor: { stop(): void };
   /**
@@ -233,6 +233,8 @@ export function registerRuntimePollers(registry: AsyncDisposalRegistry, owners: 
   // out from under it, otherwise the window between is spent driving half-torn-
   // down subsystems.
   registry.add('hosted agent runs', () => {
+    // Told first: the agents cancelled here end with the host, which neither stops nor fails the work they run.
+    owners.contractRunner.prepareToClose?.();
     const cancelled = owners.cancelHostedAgentRuns();
     if (cancelled > 0) logger.info('Runtime disposal cancelled in-flight agent runs', { cancelled });
   });

@@ -61,6 +61,8 @@ export {
   SKILL_LIBRARY_FILE,
   agentSkillStorePath,
   buildAgentSkillRequirements,
+  copiedFromProvenance,
+  wasCopiedIn,
   evaluateAgentSkillBundleReadiness,
   evaluateAgentSkillReadiness,
   formatAgentSkillRequirement,

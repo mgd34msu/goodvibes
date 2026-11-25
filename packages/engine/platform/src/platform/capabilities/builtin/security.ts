@@ -91,22 +91,20 @@ export const SECURITY_SANDBOX_PRESETS: CapabilityDefinition<SecurityCapabilitySe
   },
 };
 
+/** What a caller that names no folder is told, before anything is asked (capabilities.run reads `callerNeeds`). */
+const FOLDER_NEEDED = 'No folder was given: folder trust is about the folder a program works in. Send workingDirectory, the folder, with the request.';
+
 /** The folder of the program that asked. */
 function folderOf(caller: CapabilityCaller): string {
   if (!caller.workingDirectory) throw new CapabilityRefusal('No folder was given: folder trust is about the folder a program works in.');
   return caller.workingDirectory;
 }
 
-/** What a level means in the program that asked: the Agent's own actions pass no folder trust gate. */
-function levelMeaning(trusted: boolean, program: CapabilityCaller['program']): string {
-  if (program === 'agent') {
-    return trusted
-      ? 'Its hooks file loads and the MCP servers its files name start.'
-      : 'Its hooks file is not loaded and the MCP servers its files name do not start; your own hooks and MCP files are not affected.';
-  }
+/** What a level means: the same words in every program (the terminal app's). */
+function levelMeaning(trusted: boolean, _program: CapabilityCaller['program']): string {
   return trusted
-    ? 'Every tool may run here, subject to your permission settings; its hooks file loads and the MCP servers its files name start.'
-    : 'Reading only: tools that write, run commands or hand work to agents are refused here, and its hooks file and the MCP servers its files name stay off.';
+    ? 'Every tool may run here, subject to your permission settings; its hooks file loads, the MCP servers its files name start, and its own worktree setup commands run.'
+    : 'Reading only: tools that write, run commands or hand work to agents are refused here, and its hooks file, the MCP servers its files name and its own worktree setup commands stay off.';
 }
 
 /** A folder's trust, as the place and a script read it. */
@@ -134,6 +132,7 @@ export const SECURITY_FOLDER: CapabilityDefinition<SecurityCapabilityServices> =
   actionId: 'folder', label: 'See whether this folder is trusted', word: 'folder', inputs: [],
   sentence: 'Shows whether this folder is trusted, restricted or not decided, and what each means here.', done: '',
   touches: 'reads', lasts: 'not-a-change', risk: 'none', example: {},
+  callerNeeds: { project: FOLDER_NEEDED },
   async run(_values, services, caller) {
     const trust = services.security.folder(folderOf(caller));
     const facts = await folderFacts(trust, caller.program);
@@ -170,18 +169,20 @@ async function setFolder(services: SecurityCapabilityServices, caller: Capabilit
 export const SECURITY_TRUST_FOLDER: CapabilityDefinition<SecurityCapabilityServices> = {
   capability: { id: 'security.trust-folder', group: 'safety', home: 'daemon', repeat: 'safe' },
   actionId: 'trust-folder', label: 'Trust this folder', word: 'trust-folder', inputs: [],
-  sentence: 'This folder becomes trusted: its own hooks and MCP servers may run and tools may change it, until you change it.',
+  sentence: 'This folder becomes trusted: its own hooks, MCP servers and worktree setup commands may run and tools may change it, until you change it.',
   done: '', touches: 'this-machine', lasts: 'kept', risk: 'loosens-a-protection', undoneBy: 'restrict-folder',
   ownerOnly: { reason: 'it lets this folder\'s own files decide what runs', instead: 'Ask the owner to trust it under Permissions and safety.' },
   example: {},
+  callerNeeds: { project: FOLDER_NEEDED },
   async run(_values, services, caller) { return setFolder(services, caller, 'trusted'); },
 };
 
 export const SECURITY_RESTRICT_FOLDER: CapabilityDefinition<SecurityCapabilityServices> = {
   capability: { id: 'security.restrict-folder', group: 'safety', home: 'daemon', repeat: 'safe' },
   actionId: 'restrict-folder', label: 'Restrict this folder', word: 'restrict-folder', inputs: [],
-  sentence: 'This folder becomes restricted: its own hooks and MCP servers stay off, until you change it.',
-  done: '', touches: 'this-machine', lasts: 'kept', risk: 'none', undoneBy: 'trust-folder', example: {},
+  sentence: 'This folder becomes restricted: its own hooks, MCP servers and worktree setup commands stay off, until you change it.',
+  done: '', touches: 'this-machine', lasts: 'kept', risk: 'none', undoneBy: 'trust-folder', tightens: true, example: {},
+  callerNeeds: { project: FOLDER_NEEDED },
   async run(_values, services, caller) { return setFolder(services, caller, 'restricted'); },
 };
 
@@ -230,8 +231,11 @@ export const SECURITY_START_SANDBOX: CapabilityDefinition<SandboxSessionServices
   capability: { id: 'security.start-sandbox', group: 'safety', home: 'session', repeat: 'unsafe' }, available: keepsSandboxSessions,
   actionId: 'start-sandbox', label: 'Start a sandbox session', word: 'start-sandbox',
   inputs: [
-    { id: 'profile', label: 'Profile', help: 'What the session is for', kind: 'choice', required: true, typed: { position: 1 },
-      choices: listSandboxProfiles().map((profile) => ({ value: profile.id, label: profile.label })) },
+    // The profiles, the most restrictive first (no network), and the form opens on it.
+    { id: 'profile', label: 'Profile', help: 'What the session is for', kind: 'choice', typed: { position: 1 },
+      choices: [...listSandboxProfiles()].sort((a, b) => (a.network === 'disabled' ? 0 : 1) - (b.network === 'disabled' ? 0 : 1))
+        .map((profile) => ({ value: profile.id, label: profile.label, help: profile.notes.join('; ') })),
+      required: { default: 'command', defaultMeans: 'contained commands, with no network' } },
     { id: 'where', label: 'Boundary', help: 'Inside the sandbox, or on this machine with no boundary', kind: 'choice', typed: { flag: '--host', switchOn: 'host' },
       choices: [
         { value: 'contained', label: 'Inside the sandbox' },
@@ -262,8 +266,8 @@ export const SECURITY_START_SANDBOX: CapabilityDefinition<SandboxSessionServices
 
 export const SECURITY_SANDBOX_SESSION: CapabilityDefinition<SandboxSessionServices> = {
   capability: { id: 'security.sandbox-session', group: 'safety', home: 'session', repeat: 'safe' }, available: keepsSandboxSessions,
-  actionId: 'sandbox-session', label: 'See a sandbox session', word: 'sandbox-session', inputs: [SESSION_INPUT],
-  sentence: 'Shows sandbox session {session}: its profile, backend, state and the last command it ran.', done: '',
+  actionId: 'sandbox-session', label: 'See the details of a sandbox session', word: 'sandbox-session', inputs: [SESSION_INPUT],
+  sentence: 'Shows the details of sandbox session {session}: its profile, backend, state and the last command it ran.', done: '',
   touches: 'reads', lasts: 'not-a-change', risk: 'none', example: { session: 'sbx-1a2b' },
   async run(values, services) {
     const session = sandboxSessions(services).registry.get(values.session!);

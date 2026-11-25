@@ -427,7 +427,7 @@ export async function maybeProvisionCloudflareOnFinalApplyForHandler(handler: In
     return [{
       id: 'cloudflare:provision',
       status: 'warn',
-      message: `Cloudflare provisioning did not complete: ${normalizeCloudflareActionError(error)} Settings were saved; retry from the Cloudflare wizard or /cloudflare command.`,
+      message: `Cloudflare provisioning did not complete: ${normalizeCloudflareActionError(error)} Settings were saved; retry from the Cloudflare wizard, or Deploy on the Cloudflare tab of Devices and network.`,
       target: 'cloudflare',
     }];
   }

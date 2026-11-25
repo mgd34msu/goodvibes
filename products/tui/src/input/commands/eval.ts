@@ -63,11 +63,10 @@ async function runSuite(location: TaskSuiteLocation, context: CommandContext): P
     const startedAt = Date.now();
     const result = await runTaskSuite(copy, { executor: createHeadlessRunExecutor(), sourceDir: location.dir, signal });
     if (signal?.aborted) return 'stopped';
+    // Its first line already says how many passed.
     const words = [
       formatTaskSuiteResult({ ...result, suiteDir: location.dir }),
-      result.total === 0
-        ? 'The suite has no tasks: add a folder with a task.json and a verify.sh.'
-        : result.passed ? 'Every task passed.' : `${result.total - result.passedCount} of ${result.total} task(s) failed.`,
+      ...(result.total === 0 ? ['The suite has no tasks: add a folder with a task.json and a verify.sh.'] : []),
     ].join('\n');
     return { words, result: taskSuiteAsEvalSuite(location.name, result, startedAt) };
   } catch (error) {
@@ -106,11 +105,12 @@ function list(suite: string, context: CommandContext): string {
   } catch (error) {
     throw new CapabilityRefusal(`The task suite at ${location.dir} could not be read: ${summarizeError(error)}`);
   }
+  if (tasks.length === 0) return `The task suite at ${location.dir} has no tasks: add a folder with a task.json and a verify.sh.`;
   return [
-    `Task suite ${location.dir} (${tasks.length} task${tasks.length === 1 ? '' : 's'}):`,
+    `The task suite at ${location.dir} has ${tasks.length} task${tasks.length === 1 ? '' : 's'}.`,
     ...tasks.map(({ definition }) => {
       const instruction = definition.instruction.replace(/\s+/g, ' ').trim();
-      return `  - ${definition.id}: ${instruction.length > 80 ? `${instruction.slice(0, 79)}…` : instruction}`;
+      return `${definition.id}: ${instruction.length > 80 ? `${instruction.slice(0, 79)}…` : instruction}`;
     }),
   ].join('\n');
 }

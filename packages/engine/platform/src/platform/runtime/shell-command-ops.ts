@@ -1,18 +1,7 @@
 import type { ExternalOperationSource } from '../permissions/external-request.js';
 import type { SubagentTask } from '../acp/protocol.js';
-import { exportRemoteArtifactForAgent } from './remote/runner-registry.js';
-import type { RuntimeStore } from './store/index.js';
 import type { AgentInput } from '../tools/agent/schema.js';
 import type { AgentRecord } from '../tools/agent/manager.js';
-import type { AcpConnection } from './store/domains/acp.js';
-import type { UiRemoteSnapshot } from './ui-read-models.js';
-import type { RemoteRunnerRegistry } from './remote/index.js';
-import type {
-  RemoteExecutionArtifact,
-  RemoteRunnerContract,
-  RemoteRunnerPool,
-  RemoteSessionBundle,
-} from './remote/types.js';
 import type {
   AutomationJob,
   AutomationRun,
@@ -97,29 +86,7 @@ export interface ShellSessionOrchestrationService {
   cancel(request: CancellationRequest): CancellationResult;
 }
 
-export interface RemoteCommandService {
-  listActiveConnections(): readonly AcpConnection[];
-  getSnapshot(): UiRemoteSnapshot;
-  listPools(): readonly RemoteRunnerPool[];
-  getPool(id: string): RemoteRunnerPool | null;
-  createPool(input: { id: string; label: string }): RemoteRunnerPool;
-  assignRunnerToPool(poolId: string, runnerId: string): RemoteRunnerPool | null;
-  removeRunnerFromPool(poolId: string, runnerId: string): RemoteRunnerPool | null;
-  listContracts(): readonly RemoteRunnerContract[];
-  getContract(runnerId: string): RemoteRunnerContract | null;
-  registerContract(contract: RemoteRunnerContract): RemoteRunnerContract;
-  upsertContractForAgent(runnerId: string): RemoteRunnerContract | null;
-  listArtifacts(): readonly RemoteExecutionArtifact[];
-  getArtifact(artifactId: string): RemoteExecutionArtifact | null;
-  buildReviewSummary(artifactId: string): string | null;
-  exportArtifact(artifactId: string, path?: string): Promise<{ artifact: RemoteExecutionArtifact; path: string } | null>;
-  exportArtifactForAgent(agentId: string, path?: string): Promise<{ artifact: RemoteExecutionArtifact; path: string } | null>;
-  /** Refused when it would replace a different artifact held under its id, unless `replace` is set. */
-  importArtifact(path: string, options?: { readonly replace?: boolean | undefined }): Promise<RemoteExecutionArtifact>;
-  exportSessionBundle(path: string): Promise<{ bundle: RemoteSessionBundle; path: string }>;
-  importSessionBundle(path: string): Promise<RemoteSessionBundle>;
-}
-
+/** The remote runners are the daemon's (runtime/remote/daemon-runners.ts), read through `remote.*`: a program keeps none. */
 export interface CommandOpsShellServices {
   readonly agentManager?: ShellAgentManagerService | undefined;
   readonly acpManager?: ShellAcpManagerService | undefined;
@@ -127,42 +94,4 @@ export interface CommandOpsShellServices {
   readonly modeManager?: ShellModeManagerService | undefined;
   readonly planManager?: ShellPlanManagerService | undefined;
   readonly sessionOrchestration?: ShellSessionOrchestrationService | undefined;
-  readonly remoteRuntime?: RemoteCommandService | undefined;
-}
-
-export function createShellRemoteCommandService(options: {
-  readonly readModels: import('./ui-read-models.js').UiReadModels;
-  readonly remoteRunnerRegistry?: RemoteRunnerRegistry | undefined;
-  readonly runtimeStore: RuntimeStore;
-}): RemoteCommandService | undefined {
-  const { readModels, remoteRunnerRegistry, runtimeStore } = options;
-  if (!remoteRunnerRegistry) return undefined;
-  return {
-    listActiveConnections: () => readModels.remote.getSnapshot().acp.activeConnections,
-    getSnapshot: () => readModels.remote.getSnapshot(),
-    listPools: () => remoteRunnerRegistry.listPools(),
-    getPool: (id) => remoteRunnerRegistry.getPool(id),
-    createPool: (input) => remoteRunnerRegistry.createPool(input),
-    assignRunnerToPool: (poolId, runnerId) => remoteRunnerRegistry.assignRunnerToPool(poolId, runnerId),
-    removeRunnerFromPool: (poolId, runnerId) => remoteRunnerRegistry.removeRunnerFromPool(poolId, runnerId),
-    listContracts: () => remoteRunnerRegistry.listContracts(),
-    getContract: (runnerId) => remoteRunnerRegistry.getContract(runnerId),
-    registerContract: (contract) => remoteRunnerRegistry.registerContract(contract),
-    upsertContractForAgent: (runnerId) => remoteRunnerRegistry.upsertContractForAgent(runnerId, runtimeStore),
-    listArtifacts: () => remoteRunnerRegistry.listArtifacts(),
-    getArtifact: (artifactId) => remoteRunnerRegistry.getArtifact(artifactId),
-    buildReviewSummary: (artifactId) => remoteRunnerRegistry.buildReviewSummary(artifactId),
-    exportArtifact: (artifactId, path) => remoteRunnerRegistry.exportArtifact(artifactId, path),
-    exportArtifactForAgent: async (agentId, path) => (
-      await exportRemoteArtifactForAgent(remoteRunnerRegistry, agentId, runtimeStore, path)
-      ?? await (async () => {
-        const artifact = remoteRunnerRegistry.captureArtifactForRunner(agentId, runtimeStore);
-        if (!artifact) return null;
-        return remoteRunnerRegistry.exportArtifact(artifact.id, path);
-      })()
-    ),
-    importArtifact: (path, importOptions) => remoteRunnerRegistry.importArtifact(path, importOptions),
-    exportSessionBundle: (path) => remoteRunnerRegistry.exportSessionBundle(runtimeStore, path),
-    importSessionBundle: (path) => remoteRunnerRegistry.importSessionBundle(path),
-  };
 }

@@ -204,16 +204,16 @@ export function createModelSelectionAction(
       const serving = resolveRequestedEffortForServingModel(configManager, effortModel);
       runtime.reasoningEffort = serving.effective ?? '';
       const effortNote =
-        policy.alwaysShowEffort || serving.requested !== '' ? `, effort: ${describeServingEffort(serving, effortModel)}` : '';
-      conversation.log(`Switched to model: ${def.displayName} (${def.provider})${effortNote}, from the provider.model setting`, {
+        policy.alwaysShowEffort || serving.requested !== '' ? `, with reasoning effort ${describeServingEffort(serving, effortModel)}` : '';
+      conversation.log(`The default model is now ${def.displayName} (${def.provider})${effortNote}. This conversation uses it from its next message.`, {
         fg: activeTokens().secondary,
       });
       completeModelSelectionSideEffect?.();
     } catch (error) {
       Object.assign(runtime, previousRuntime);
       conversation.log(
-        `provider.model is now ${reference}, but this session cannot use it: ${summarizeError(error)}. ` +
-          `The session stays on ${previousRuntime.model}; choose a model with /model.`,
+        `The default model is now ${reference}, but this conversation cannot use it: ${summarizeError(error)}. ` +
+          `This conversation stays on ${previousRuntime.model}; the model picker chooses another.`,
         { fg: activeTokens().error },
       );
     }

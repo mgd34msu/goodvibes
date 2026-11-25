@@ -79,6 +79,24 @@ export interface ControlRouteContext {
       readonly clientKind?: string | undefined;
       /** Self-asserted by the caller through {@link EXPLICIT_USER_REQUEST_HEADER}; a consumer that acts on it must not treat it as proof a person asked. */
       readonly explicitUserRequest?: boolean | undefined;
+      /**
+       * Self-asserted through {@link DECIDED_IN_RUN_HEADER}: the sending run's own answerer (its script) decided this
+       * natively admitted call. The dispatch keeps it only for the Agent's credential, the credential whose calls the
+       * daemon already takes as decided by the program's gate.
+       */
+      readonly decidedInRun?: boolean | undefined;
+      /**
+       * Self-asserted through {@link CAPABILITY_GATE_DECIDED_HEADER}: the program's capability gate (`capability_run`)
+       * decided this `capabilities.run` call by the capability's own risk. The dispatch keeps it only for the Agent's
+       * credential; without it, a call with that credential is decided by the daemon as any outside caller's.
+       */
+      readonly decidedByCapabilityGate?: boolean | undefined;
+      /**
+       * The call context the calling program set once and sends with every request (`x-goodvibes-project`,
+       * `x-goodvibes-session`; the program is `clientKind`): the project folder the call acts in and the conversation it
+       * came from. Self-asserted like the program: it names where a call acts, never who may make it.
+       */
+      readonly call?: CallContextHeaders | undefined;
     };
     /**
      * The principal the request was authenticated as where it entered,
@@ -166,6 +184,20 @@ const controlBodySchemas = createRouteBodySchemaRegistry({
  */
 export const EXPLICIT_USER_REQUEST_HEADER = 'x-goodvibes-explicit-user-request';
 
+/** A run whose script answers every question decided this natively admitted call itself (terminal-shell run-answerer). */
+export const DECIDED_IN_RUN_HEADER = 'x-goodvibes-decided-in-run';
+
+function readDecidedInRun(req: Request): boolean {
+  return req.headers.get(DECIDED_IN_RUN_HEADER)?.trim().toLowerCase() === 'true';
+}
+
+/** The program's capability gate (`capability_run`) decided this `capabilities.run` call (terminal-shell capability-tools.ts). */
+export const CAPABILITY_GATE_DECIDED_HEADER = 'x-goodvibes-decided-by-capability-gate';
+
+function readCapabilityGateDecided(req: Request): boolean {
+  return req.headers.get(CAPABILITY_GATE_DECIDED_HEADER)?.trim().toLowerCase() === 'true';
+}
+
 /**
  * The credential a resolved principal was authenticated with. The daemon's
  * resolver hands back the request principal, which carries it; a resolver
@@ -187,6 +219,37 @@ const NAMED_CLIENT_SURFACES: ReadonlySet<string> = new Set(['tui', 'agent']);
 function readClientSurface(req: Request): string {
   const raw = req.headers.get(CLIENT_SURFACE_HEADER)?.trim().toLowerCase();
   return raw !== undefined && NAMED_CLIENT_SURFACES.has(raw) ? raw : 'web';
+}
+
+/** The project folder a program's call acts in (URI-encoded), set once by the program (runtime/client/call-context.ts). */
+export const CALL_PROJECT_HEADER = 'x-goodvibes-project';
+/** The conversation a program's call came from (URI-encoded). */
+export const CALL_SESSION_HEADER = 'x-goodvibes-session';
+
+/** The call context a request names in its headers: its project folder and its session, each only when given. */
+export interface CallContextHeaders {
+  readonly project?: string | undefined;
+  readonly sessionId?: string | undefined;
+}
+
+function decodedHeader(req: Request, name: string): string | undefined {
+  const raw = req.headers.get(name)?.trim();
+  if (!raw) return undefined;
+  try {
+    const value = decodeURIComponent(raw).trim();
+    return value.length > 0 && value.length <= 4096 && !value.includes('\0') ? value : undefined;
+  } catch {
+    return undefined;
+  }
+}
+
+/** The call context of a request: the project only as an absolute folder, the session as given. */
+export function readCallContext(req: Request): CallContextHeaders | undefined {
+  const project = decodedHeader(req, CALL_PROJECT_HEADER);
+  const sessionId = decodedHeader(req, CALL_SESSION_HEADER);
+  const absolute = project !== undefined && (project.startsWith('/') || /^[A-Za-z]:[\\/]/.test(project)) ? project : undefined;
+  if (!absolute && !sessionId) return undefined;
+  return { ...(absolute ? { project: absolute } : {}), ...(sessionId ? { sessionId } : {}) };
 }
 
 function readExplicitUserRequest(req: Request): boolean | undefined {
@@ -389,6 +452,9 @@ export function createDaemonControlRouteHandlers(
           ...(readExplicitUserRequest(req) === undefined
             ? {}
             : { explicitUserRequest: readExplicitUserRequest(req) }),
+          ...(readDecidedInRun(req) ? { decidedInRun: true } : {}),
+          ...(readCapabilityGateDecided(req) ? { decidedByCapabilityGate: true } : {}),
+          ...(readCallContext(req) ? { call: readCallContext(req) } : {}),
         },
       });
       return gatewayCallResponse(methodId, response);
@@ -461,6 +527,9 @@ export function createDaemonControlRouteHandlers(
           ...(readExplicitUserRequest(req) === undefined
             ? {}
             : { explicitUserRequest: readExplicitUserRequest(req) }),
+          ...(readDecidedInRun(req) ? { decidedInRun: true } : {}),
+          ...(readCapabilityGateDecided(req) ? { decidedByCapabilityGate: true } : {}),
+          ...(readCallContext(req) ? { call: readCallContext(req) } : {}),
         },
       });
       return gatewayCallResponse(methodId, response);

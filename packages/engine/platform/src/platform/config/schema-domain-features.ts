@@ -285,7 +285,7 @@ export const featureConfigSettings: ConfigSettingRow[] = [
     appliesWhen: 'now',
     type: 'boolean',
     description:
-      'Enforce delivery service-level objectives for channel integrations: failures are classified retryable/terminal, retried with exponential backoff, and dead-letter events are logged at error level and surfaced in integration diagnostics; failed webhook notifications are listed with /notify failed and sent again with /notify resend <id|all>. When false, dead letters are warn-level only. An explicit per-queue sloEnforced option still overrides this default.',
+      'Enforce delivery service-level objectives for channel integrations: failures are classified retryable/terminal, retried with exponential backoff, and dead-letter events are logged at error level and surfaced in integration diagnostics; failed webhook notifications are listed under Failed notifications in Mail, calendar and channels, where each, or all, is sent again. When false, dead letters are warn-level only. An explicit per-queue sloEnforced option still overrides this default.',
   },
   {
     key: 'policy.registryEnabled',
@@ -293,7 +293,7 @@ export const featureConfigSettings: ConfigSettingRow[] = [
     appliesWhen: 'now',
     type: 'boolean',
     description:
-      'Enable the versioned policy bundle registry with promote/rollback semantics and the /security load-policy, simulate-policy, compare-policy, enforce-policy and restore-policy actions. Enforcement requires passing divergence-gate evidence first; default off until that evidence exists.',
+      'Enable the versioned policy bundle registry with promote/rollback semantics, loaded, reviewed, enforced and restored in Permissions and safety, Policy. Enforcement requires passing divergence-gate evidence first; default off until that evidence exists.',
   },
   {
     key: 'policy.requireSignedBundles',

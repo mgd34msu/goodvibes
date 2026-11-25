@@ -16,7 +16,7 @@ export function deriveRemoteHeartbeat(
   if (!lastSeenAt) {
     return {
       status: 'offline',
-      detail: 'No heartbeat has been observed yet.',
+      detail: 'it has not connected yet',
     };
   }
   const ageMs = Math.max(0, Date.now() - lastSeenAt);
@@ -26,7 +26,7 @@ export function deriveRemoteHeartbeat(
       status: 'offline',
       lastSeenAt,
       ageMs,
-      detail: 'Transport is offline and requires reattach or redispatch.',
+      detail: `the connection is ${state === 'disconnected' ? 'closed' : 'lost for good'}; start the runner again to go on`,
     };
   }
   // Only the time of connection is recorded, never the last message, so age
@@ -38,13 +38,13 @@ export function deriveRemoteHeartbeat(
       status: 'stale',
       lastSeenAt,
       ageMs,
-      detail: `Transport is ${state}; remote recovery should be reviewed.`,
+      detail: `the connection is ${state}, so contact with the runner was lost`,
     };
   }
   return {
     status: 'fresh',
     lastSeenAt,
     ageMs,
-    detail: 'Transport is connected; the age shown is the time since it connected, not since the last message.',
+    detail: `the connection is ${state} and has not reported lost contact`,
   };
 }

@@ -47,7 +47,6 @@ export const AGENT_WORKSPACE_CATEGORY_IDS = [
   'onboarding-channels',
   'onboarding-voice-media',
   'onboarding-context',
-  'onboarding-automation',
   'personal-ops',
   'research',
   'documents',
@@ -134,108 +133,13 @@ export interface AgentWorkspaceActionResult {
   readonly lines?: readonly string[];
 }
 
-export interface AgentWorkspaceRecentReviewerHandoffArtifact {
-  readonly id: string;
-  readonly filename: string;
-  readonly createdAt: number;
-  readonly handoffId: string;
-  readonly comparisonId: string;
-  readonly sourceArtifactId: string;
-  readonly sourceKind: string;
-  readonly relatedArtifactCount: number;
-}
-
-export type AgentWorkspaceReviewPacketTimelineEventKind =
-  | 'document'
-  | 'comment'
-  | 'suggestion'
-  | 'attachment'
-  | 'document-export'
-  | 'compare'
-  | 'compare-export'
-  | 'judgment'
-  | 'route-decision'
-  | 'packet-preset'
-  | 'handoff'
-  | 'handoff-archive';
-
-export interface AgentWorkspaceReviewPacketTimelineEvent {
-  readonly id: string;
-  readonly kind: AgentWorkspaceReviewPacketTimelineEventKind;
-  readonly at: number;
-  readonly label: string;
-  readonly detail: string;
-  readonly status: 'ready' | 'attention' | 'complete' | 'info';
-  readonly route: string;
-  readonly sourceId: string;
-}
-
-export interface AgentWorkspaceReviewPacketTimeline {
-  readonly available: boolean;
-  readonly count: number;
-  readonly next: string;
-  readonly items: readonly AgentWorkspaceReviewPacketTimelineEvent[];
-}
-
-export interface AgentWorkspaceReviewPacketPresetLineage {
-  readonly artifactId: string;
-  readonly presetId: string | null;
-  readonly name: string | null;
-  readonly refreshed: boolean;
-  readonly refreshedFromArtifactId: string | null;
-  readonly refreshedFromPresetId: string | null;
-  readonly freshnessMissingCount: number | null;
-  readonly freshnessSupersededCount: number | null;
-  readonly freshnessUnresolvedCount: number | null;
-  readonly summary: string;
-  readonly inspectRoute: string;
-}
-
-export interface AgentWorkspaceReviewPacketDefaults {
-  readonly documentId: string | null;
-  readonly documentTitle: string | null;
-  readonly documentExportArtifactId: string | null;
-  readonly comparisonArtifactId: string | null;
-  readonly judgmentArtifactId: string | null;
-  readonly revealedJudgmentArtifactId: string | null;
-  readonly routeDecisionArtifactId: string | null;
-  readonly routeDecision: string | null;
-  readonly handoffArtifactId: string | null;
-  readonly handoffArchiveArtifactId: string | null;
-  readonly reviewPacketPresetArtifactId: string | null;
-  readonly reviewPacketPresetName: string | null;
-  readonly reviewPacketPresetLineage: AgentWorkspaceReviewPacketPresetLineage | null;
-  readonly relatedArtifactIds: readonly string[];
-  readonly summary: string;
-}
-
-export type AgentWorkspaceReviewPacketWizardStepStatus = 'done' | 'current' | 'pending' | 'blocked';
-
-export interface AgentWorkspaceReviewPacketWizardStep {
-  readonly id: string;
-  readonly label: string;
-  readonly status: AgentWorkspaceReviewPacketWizardStepStatus;
-  readonly detail: string;
-  readonly userRoute: string;
-  readonly modelRoute: string;
-  readonly actionId: string;
-  readonly backtrackRoute: string | null;
-  /** The line a person types for this step, with a blank in angle brackets where they choose. */
-  readonly ownerLine: string;
-}
-
-export interface AgentWorkspaceReviewPacketWizard {
-  readonly available: boolean;
-  readonly status: 'complete' | 'active' | 'blocked' | 'empty';
-  readonly completedSteps: number;
-  readonly totalSteps: number;
-  readonly currentStepId: string | null;
-  readonly currentStepLabel: string | null;
-  readonly next: string;
-  readonly finalReview: string;
-  readonly presetLineage: AgentWorkspaceReviewPacketPresetLineage | null;
-  readonly steps: readonly AgentWorkspaceReviewPacketWizardStep[];
-}
+// The review packet's shapes are shared with the daemon, which reports the same packet (terminal-shell agent-turn/review-packet-utils.ts).
+export type {
+  AgentWorkspaceRecentReviewerHandoffArtifact, AgentWorkspaceReviewPacketDefaults, AgentWorkspaceReviewPacketPresetLineage, AgentWorkspaceReviewPacketTimeline,
+  AgentWorkspaceReviewPacketTimelineEvent, AgentWorkspaceReviewPacketTimelineEventKind, AgentWorkspaceReviewPacketWizard, AgentWorkspaceReviewPacketWizardStep,
+  AgentWorkspaceReviewPacketWizardStepStatus,
+} from '@goodvibes/engine/terminal-shell/agent-turn/review-packet-utils';
+import type { AgentWorkspaceReviewPacketTimeline, AgentWorkspaceReviewPacketWizard } from '@goodvibes/engine/terminal-shell/agent-turn/review-packet-utils';
 
 export interface AgentWorkspaceRuntimeProfileItem {
   readonly id: string;
@@ -357,7 +261,7 @@ export interface AgentWorkspaceCompanionAccessSummary {
   readonly tokenReadable: boolean;
   readonly tokenError: string | null;
   readonly pairingReady: boolean;
-  readonly qrCommand: '/devices pair device';
+  readonly qrCommand: 'Devices and network, Pair something, A phone or another device';
   readonly nextStep: string;
 }
 

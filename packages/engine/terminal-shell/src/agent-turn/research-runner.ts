@@ -285,7 +285,7 @@ function sourceFromCandidate(
         ...(evidence ? { evidence } : {}),
         credibility: 'unreviewed',
         tags: ['research', 'web-search', 'runner'],
-        note: 'Captured by admitted GoodVibes research runner.',
+        note: 'Collected by the research runner from a public web search.',
         provenance: 'agent-research-runner',
       }),
     };
@@ -350,9 +350,9 @@ export async function runAdmittedResearchRunner(
     assertCurrent();
     assertWrite();
     if (run.status === 'planned') {
-      run = runRegistry.start(run.id, 'Admitted research runner started bounded source collection.');
+      run = runRegistry.start(run.id, 'Started collecting public web sources.');
     } else if (run.status === 'paused' || run.status === 'blocked') {
-      run = runRegistry.resume(run.id, 'Admitted research runner resumed bounded source collection.');
+      run = runRegistry.resume(run.id, 'Collecting public web sources again.');
     } else if (run.status === 'completed' || run.status === 'failed' || run.status === 'cancelled') {
       return error(`Cannot run admitted research runner for ${run.status} research run ${run.id}. Create a follow-up run instead.`);
     }
@@ -369,8 +369,8 @@ export async function runAdmittedResearchRunner(
         status: 'blocked',
         phase: 'searching',
         progress: Math.max(run.progress, 10),
-        note: `Admitted research runner blocked during source collection: ${readString(webResult.error) || 'web_search failed.'}`,
-        nextSteps: ['Inspect runner readiness.', 'Retry bounded source collection after search is available.'],
+        note: `Stopped while searching the web: ${readString(webResult.error) || 'the web search failed.'}`,
+        nextSteps: ['Check that a web search provider is set up and this machine reaches it.', 'Start a new research run once the search works.'],
       });
       return {
         success: false,
@@ -397,10 +397,10 @@ export async function runAdmittedResearchRunner(
       status: 'running',
       phase: 'reading',
       progress: Math.max(run.progress, sourceIds.length > 0 ? 35 : 20),
-      note: `Admitted research runner captured ${createdCount} new source candidate(s)${duplicateCount > 0 ? ` and reused ${duplicateCount} existing source(s)` : ''}.`,
+      note: `Collected ${createdCount} new source${createdCount === 1 ? '' : 's'} into the research queue${duplicateCount > 0 ? `, and found ${duplicateCount} already there` : ''}.`,
       nextSteps: sourceIds.length > 0
-        ? ['Review candidate source credibility.', 'Save a citation-covered report artifact after source review.']
-        : ['Try a more specific query or provider.', 'Capture sources manually if public search found none.'],
+        ? ['Judge how far to trust each source.', 'Save a sourced report once the sources are reviewed.']
+        : ['Try a more specific question.', 'Add sources of your own if the search found none.'],
       sourceIds,
     });
 
@@ -449,8 +449,8 @@ export async function runAdmittedResearchRunner(
         assertWrite();
         runRegistryForFailure.checkpoint(activeRun.id, {
           status: 'blocked', phase: 'searching', progress: activeRun.progress,
-          note: `Admitted research runner stopped: ${previewText(message, 200)}`,
-          nextSteps: ['Fix the cause named in the note, then run the runner again with this runId.'],
+          note: `Stopped: ${previewText(message, 200)}`,
+          nextSteps: ['Fix what the note names, then start a new research run.'],
         });
         blocked = true;
       } catch { /* the run keeps its last recorded state; the message below says so */ }

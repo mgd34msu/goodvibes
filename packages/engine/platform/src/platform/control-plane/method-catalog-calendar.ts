@@ -20,6 +20,7 @@ const CALENDAR_EVENT_SUMMARY_SCHEMA = objectSchema({
   location: STRING_SCHEMA,
   description: STRING_SCHEMA,
   attendees: arraySchema(STRING_SCHEMA),
+  seriesId: STRING_SCHEMA,
 }, ['id', 'title', 'start', 'end']);
 
 const CALENDAR_EVENT_DETAIL_SCHEMA = objectSchema({
@@ -68,7 +69,7 @@ export const builtinGatewayCalendarMethodDescriptors: readonly GatewayMethodDesc
   methodDescriptor({
     id: 'calendar.events.list',
     title: 'List Calendar Events',
-    description: 'Return event summaries from the configured calendar (a CalDAV server, or the connected Google account) within an optional time window. With no from or to, lists from 24 hours ago to 30 days ahead; a recurring event is listed at each occurrence in the window, each with its own id (on CalDAV, the resource href plus `#` and the occurrence\'s RECURRENCE-ID instant).',
+    description: 'Return event summaries from the configured calendar (a CalDAV server, or the connected Google account) within an optional time window. With no from or to, lists from 24 hours ago to 30 days ahead; a recurring event is listed at each occurrence in the window, each with its own id (on CalDAV, the resource href plus `#` and the occurrence\'s RECURRENCE-ID instant) and the `seriesId` every occurrence of its series shares (on Google, its recurringEventId), so a list can count the series once.',
     category: 'calendar',
     effects: ['calendar.read'],
     http: { method: 'GET', path: '/api/calendar/events' },
@@ -102,7 +103,7 @@ export const builtinGatewayCalendarMethodDescriptors: readonly GatewayMethodDesc
     confirmation: 'confirm',
     recipients: ['attendees[]'],
     title: 'Create Calendar Event',
-    description: 'Create an event on the configured calendar. Requires explicit confirmation (confirm: true); attendees are invited by the calendar. When the calendar server takes the request but sends no answer, the call fails with 502 CALENDAR_OUTCOME_UNKNOWN naming the new event\'s UID (on Google Calendar, its event id): read it with calendar.events.get before creating it again. Change it with calendar.events.update and remove it with calendar.events.delete.',
+    description: 'Create an event on the configured calendar, or on the calendar kept on this computer (calendarId local, or when no calendar is connected). With no end it ends when it starts. Requires explicit confirmation (confirm: true); attendees are invited by the calendar. When the calendar server takes the request but sends no answer, the call fails with 502 CALENDAR_OUTCOME_UNKNOWN naming the new event\'s UID (on Google Calendar, its event id): read it with calendar.events.get before creating it again. Change it with calendar.events.update and remove it with calendar.events.delete.',
     category: 'calendar',
     effects: ['calendar.administer', 'outward.send'],
     dangerous: true,
@@ -116,7 +117,7 @@ export const builtinGatewayCalendarMethodDescriptors: readonly GatewayMethodDesc
       location: STRING_SCHEMA,
       calendarId: STRING_SCHEMA,
       confirm: BOOLEAN_SCHEMA,
-    }, ['title', 'start', 'end']),
+    }, ['title', 'start']),
     outputSchema: objectSchema({
       eventId: STRING_SCHEMA,
       uid: STRING_SCHEMA,

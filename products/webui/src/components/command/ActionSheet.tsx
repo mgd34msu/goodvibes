@@ -22,18 +22,19 @@ import {
   actionDoneLine,
   actionSentence,
   effectiveRisk,
-  isShown,
   listOperatorInput,
   operatorInputFromValues,
   renderTypedLine,
+  riskSentences,
   riskWords,
   rowsFromOutput,
   withoutSecrets,
-  type InputDescription,
 } from '@goodvibes/engine/terminal-shell/command-actions/data';
 import { COMMAND_ACTIONS } from '../../lib/generated/command-actions';
 import { asActionShape, asCommandShape, type ActionData, type CommandActionsData, type InputData } from '../../lib/command-actions-types';
 import { invokeMethod, invokeOwnerMethod } from '../../lib/goodvibes';
+import { capabilityByAction, currentCapabilities, namedByCaller, shownInBrowser, useCapabilityIndex } from '../../lib/place-capabilities';
+import { lastChosenProject } from '../../lib/place-project';
 import { formatError } from '../../lib/errors';
 import { useToast } from '../../lib/toast';
 import { Button } from '../ui/Button';
@@ -43,15 +44,24 @@ import { Field, Input, Textarea } from '../ui/Field';
 import { Radio } from '../ui/Radio';
 import { Select } from '../ui/Select';
 
-/** The command and action a sheet draws, from the generated data; undefined for a name it does not hold. */
+/**
+ * The command and action a sheet draws. What the action is and where it runs is the daemon's (`capabilities.list`, read
+ * at run time: lib/place-capabilities.ts), so a capability no slash command carries, or one moved since the generated
+ * data was written, has its sheet; the generated slash commands only say how it is typed, and stand in until the
+ * daemon's list is read.
+ */
 export function findCommandAction(command: string, actionId: string): { readonly command: CommandActionsData; readonly action: ActionData; readonly typed: boolean } | undefined {
-  // A typed command's action first, then a capability no slash command carries (never typed), by the command it names.
-  for (const [entries, typed] of [[COMMAND_ACTIONS.commands, true], [COMMAND_ACTIONS.capabilities ?? [], false]] as const) {
-    const described = entries.find((entry) => entry.name === command);
-    const action = described?.actions.find((entry) => entry.id === actionId);
-    if (described && action) return { command: described, action, typed };
+  const described = COMMAND_ACTIONS.commands.find((entry) => entry.name === command);
+  const generated = described?.actions.find((entry) => entry.id === actionId);
+  const fromDaemon = capabilityByAction(currentCapabilities(), command, actionId);
+  if (fromDaemon) {
+    return {
+      command: described ?? { name: fromDaemon.command.name, title: fromDaemon.command.title, summary: fromDaemon.command.title, group: fromDaemon.group, actions: [] },
+      action: fromDaemon.action,
+      typed: generated !== undefined,
+    };
   }
-  return undefined;
+  return described && generated ? { command: described, action: generated, typed: true } : undefined;
 }
 
 /** The actions of a command the browser cannot run, with the reason in a sentence (shown greyed under a screen). */
@@ -66,10 +76,20 @@ function invokeNamed(method: string, input: Record<string, unknown>): Promise<un
   return invokeMethod(method as Parameters<typeof invokeMethod>[0], input as never) as Promise<unknown>;
 }
 
-/** The engine's shape of a blank; a list's name is plain text in the generated data, and nothing here reads its brand. */
-function asInput(input: InputData): InputDescription {
-  return input as unknown as InputDescription;
+/**
+ * A capability run (or a list a capability reads) for the project chosen on the rail (lib/place-project.ts), as the
+ * places and the palette's capability runner send it: a sheet opened anywhere acts on the same project.
+ */
+function withChosenProject(method: string, input: Record<string, unknown>): Record<string, unknown> {
+  const project = lastChosenProject();
+  if (!project) return input;
+  if (method === 'capabilities.run' && input.workingDirectory === undefined) return { ...input, workingDirectory: project };
+  // A worktree action's list ("The worktrees of this project") is the daemon's worktrees.snapshot, which takes the
+  // project by name, as the Code and changes place sends it.
+  if (method === 'worktrees.snapshot' && input.project === undefined) return { ...input, project };
+  return input;
 }
+
 
 /** A choice the browser cannot make: one that lasts only one terminal session. */
 function sessionOnly(action: ActionData, input: InputData, value: string): string | undefined {
@@ -97,7 +117,7 @@ export function initialValues(action: ActionData, prefill: Readonly<Record<strin
 export function shownValues(action: ActionData, values: Readonly<Record<string, string>>): Record<string, string> {
   const out: Record<string, string> = {};
   for (const input of action.inputs) {
-    if (!isShown(asInput(input), values)) continue;
+    if (!shownInBrowser(input, values)) continue;
     const value = values[input.id];
     if (value !== undefined && value !== '') out[input.id] = value;
   }
@@ -120,7 +140,10 @@ function ListBlank({ input, values, onChange, onLabel, placeholder }: {
 }) {
   // A live list, not fixed choices (Array.isArray does not narrow a readonly array).
   const list = input.choices && 'list' in input.choices ? input.choices : undefined;
-  const operator = list ? COMMAND_ACTIONS.lists[list.list] : undefined;
+  // The method that returns the list's rows, as the daemon describes the input (capabilities.list `listOperator`);
+  // the generated data only for an action the daemon has not described.
+  const described = (input as { readonly listOperator?: (typeof COMMAND_ACTIONS.lists)[string] }).listOperator;
+  const operator = described ?? (list ? COMMAND_ACTIONS.lists[list.list] : undefined);
   const earlier = list?.dependsOn ? { [list.dependsOn]: values[list.dependsOn] ?? '' } : {};
   const ready = list?.dependsOn ? Boolean(values[list.dependsOn]) : true;
   const rows = useQuery({
@@ -128,7 +151,7 @@ function ListBlank({ input, values, onChange, onLabel, placeholder }: {
     enabled: ready && operator !== undefined && 'method' in operator,
     queryFn: async () => {
       if (!operator || !('method' in operator)) return [];
-      return rowsFromOutput(operator.rows, await invokeNamed(operator.method, listOperatorInput(operator.input, earlier)), earlier);
+      return rowsFromOutput(operator.rows, await invokeNamed(operator.method, withChosenProject(operator.method, listOperatorInput(operator.input, earlier))), earlier);
     },
   });
   const value = values[input.id] ?? '';
@@ -236,7 +259,7 @@ export function Blank({ action, input, values, onChange, onLabel, current }: {
 }
 
 /** The blanks by step: a step whose blanks all have a usual value and that holds four or more is folded. */
-function stepGroups(action: ActionData, shown: readonly InputData[]): readonly { readonly key: string; readonly title?: string | undefined; readonly folded: boolean; readonly inputs: readonly InputData[] }[] {
+export function stepGroups(action: ActionData, shown: readonly InputData[]): readonly { readonly key: string; readonly title?: string | undefined; readonly folded: boolean; readonly inputs: readonly InputData[] }[] {
   const steps = [...new Set(shown.map((input) => input.step ?? 0))].sort((a, b) => a - b);
   const titled = steps.filter((step) => step > 0).length > 1;
   return steps.map((step) => {
@@ -273,6 +296,8 @@ export interface ActionSheetProps {
 }
 
 export function ActionSheet({ open, onClose, command, action: actionId, prefill = {}, current = {}, onDone }: ActionSheetProps) {
+  // The daemon's description of the action, read at run time; the sheet draws again when it arrives.
+  useCapabilityIndex();
   const found = findCommandAction(command, actionId);
   const { toast } = useToast();
   const queryClient = useQueryClient();
@@ -318,7 +343,7 @@ export function ActionSheet({ open, onClose, command, action: actionId, prefill 
     mutationFn: async () => {
       if (!operator) throw new Error('This action is done from a terminal app.');
       if (operator.preview && !fresh) throw new Error('Check it again: what you gave changed since it was read.');
-      return invokeOwnerMethod(operator.method, operator.preview && preview ? preview.input : operatorInputFromValues(operator.fields, sent));
+      return invokeOwnerMethod(operator.method, withChosenProject(operator.method, operator.preview && preview ? preview.input : operatorInputFromValues(operator.fields, sent)));
     },
     onMutate: () => setProblem(null),
     onSuccess: () => {
@@ -337,7 +362,7 @@ export function ActionSheet({ open, onClose, command, action: actionId, prefill 
     },
     onError: (error: unknown) => setProblem(`${found?.action.label ?? 'Action'}: not done. ${formatError(error)}`),
   });
-  const shown = useMemo(() => (found ? found.action.inputs.filter((input) => isShown(asInput(input), values)) : []), [found, values]);
+  const shown = useMemo(() => (found ? found.action.inputs.filter((input) => shownInBrowser(input, values)) : []), [found, values]);
   /** The words of a fixed choice ("Refuse every call") for the sentence; the blank that decides how long it lasts keeps its value. */
   const said = useMemo(() => {
     const out: Record<string, string> = { ...sent, ...labels };
@@ -349,7 +374,8 @@ export function ActionSheet({ open, onClose, command, action: actionId, prefill 
     }
     return out;
   }, [found, sent, labels]);
-  const missing = shown.filter((input) => input.required === true && !values[input.id]);
+  // An input supplied from context (the program asking) is the person's to name here: required, with no default.
+  const missing = shown.filter((input) => (input.required === true || namedByCaller(input)) && !values[input.id]);
   if (!found) return null;
   const shape = asActionShape(found.action);
   const terminalOnly = 'terminalOnly' in found.action.operator ? found.action.operator.terminalOnly : undefined;
@@ -364,7 +390,7 @@ export function ActionSheet({ open, onClose, command, action: actionId, prefill 
       open={open}
       onClose={onClose}
       title={found.action.label}
-      description={risk !== 'none' ? riskWords(risk) : undefined}
+      description={risk !== 'none' ? riskSentences(shape, sent) : undefined}
       footer={(
         <>
           <Button onClick={onClose}>Cancel</Button>

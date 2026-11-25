@@ -85,6 +85,11 @@ export interface WorkstreamCommandService {
   readonly engine: OrchestrationEngine;
   /** Spawn a bounded read-only planning agent to decompose the goal (with automatic heuristic fallback), then hold the draft. Async because the planning agent is real. `isolation` omitted ⇒ the launched contract uses the runner's default isolation (StartContractInput.isolation). */
   proposeDraft(task: string, isolation?: WorkstreamIsolation): Promise<WorkstreamDraft>;
+  /**
+   * Hold a draft whose steps were written already (a plan proposed in a conversation): no planning agent runs.
+   * `after` names the steps each waits on by their place in the list, counting from 1.
+   */
+  holdDraft(task: string, steps: readonly { readonly title: string; readonly brief: string; readonly after: readonly number[] }[]): WorkstreamDraft;
   getDraft(id: string): WorkstreamDraft | undefined;
   listDrafts(): WorkstreamDraft[];
   /** Re-derive a held draft's spec + decomposition from a new task string. Clears any prior approval, an edit must be re-approved. `isolation` omitted ⇒ keeps the draft's current choice (an edit that only changes the task text must not silently reset isolation back to shared). */
@@ -387,6 +392,33 @@ function createDraftFacade(
         createdAt: Date.now(),
       };
       if (drafts.has(draft.id)) throw new RangeError('Workstream draft identity already exists');
+      drafts.set(draft.id, draft);
+      journal(draft, false);
+      return draft;
+    },
+    holdDraft(task, steps) {
+      const ids = steps.map((_, index) => `item-${index + 1}`);
+      const items: WorkItemSpec[] = steps.map((step, index) => {
+        const dependsOn = step.after.map((n) => ids[n - 1]).filter((id): id is string => id !== undefined && id !== ids[index]);
+        return { id: ids[index]!, title: step.title, task: step.brief, ...(dependsOn.length > 0 ? { dependsOn } : {}) };
+      });
+      const phaseId = crypto.randomUUID();
+      const proposal: PlanProposal = {
+        id: crypto.randomUUID(), task, strategy: steps.length > 1 ? 'cohort' : 'single',
+        rationale: `Proposed in a conversation as ${steps.length} step(s).`,
+        phases: [{ id: phaseId, title: 'Execute', order: 0 }],
+        workItems: items.map((item) => ({ id: item.id!, title: item.title, brief: item.task, phaseId, dependsOn: [...(item.dependsOn ?? [])] })),
+        createdAt: Date.now(), source: 'caller-supplied',
+      };
+      const draft: WorkstreamDraft = {
+        id: `wsd_${crypto.randomUUID()}`, task,
+        spec: { title: task, phases: draftPhases(getContractCommitScope(configManager), items.length), items },
+        gate: { decompose: steps.length > 1, strategy: proposal.strategy, reasonCode: 'USER_OVERRIDE' },
+        proposal,
+        provenance: { kind: 'proposed', itemCount: items.length },
+        approved: false,
+        createdAt: Date.now(),
+      };
       drafts.set(draft.id, draft);
       journal(draft, false);
       return draft;

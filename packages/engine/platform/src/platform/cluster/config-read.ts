@@ -48,7 +48,7 @@ function resolveClusterSecret(value: string, secrets: ClusterSecretSource | unde
   }
   logger.warn('cluster.secret names a stored secret that could not be read; this machine sends and takes no election traffic outside a group until it can', {
     reason,
-    next: 'store the phrase with /secrets set and point cluster.secret at it, or clear cluster.secret',
+    next: 'store the phrase with "Store a secret" (Permissions and safety, Secrets) and point cluster.secret at it, or clear cluster.secret',
   });
   return { state: 'unavailable', reason };
 }

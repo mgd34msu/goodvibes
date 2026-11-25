@@ -35,7 +35,7 @@ import type {
   ShellPlanManagerService,
   ShellSessionOrchestrationService,
 } from '@/runtime/index.ts';
-import { createBootstrapCommandShellServices, type RemoteCommandService } from '@/runtime/index.ts';
+import { createBootstrapCommandShellServices } from '@/runtime/index.ts';
 import type { OperatorClient } from '@/runtime/index.ts';
 import type { PeerClient } from '@/runtime/index.ts';
 import type { DirectTransport } from '@/runtime/index.ts';
@@ -80,7 +80,6 @@ export type CreateBootstrapCommandContextOptions = {
   policyRuntimeState: PolicyRuntimeState;
   readModels: UiReadModels;
   shellPaths: ShellPathService;
-  remoteRuntime?: RemoteCommandService;
   fileUndoManager: FileUndoManager;
   workspaceCheckpointManager?: import('@goodvibes/engine/platform/platform/workspace').WorkspaceCheckpointManager;
   processManager?: import('@goodvibes/engine/platform/platform/tools').ProcessManager;

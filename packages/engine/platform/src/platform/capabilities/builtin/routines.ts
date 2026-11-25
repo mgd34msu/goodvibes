@@ -16,8 +16,8 @@ export const ROUTINE_FILES_LIST = 'routines.discovered' as ListName;
 const ROUTINE: InputDescription = pickedInput({ id: 'routine', label: 'Routine', help: 'Your routines', list: ROUTINES_LIST, other: 'a routine id or name' });
 const OPTIONAL = (means: string) => ({ default: '', means });
 const ENABLED: InputDescription = fixedInput({
-  id: 'enabled', label: 'Switched on', help: 'Whether it may be started at once',
-  choices: [{ value: 'no', label: 'Not yet' }, { value: 'yes', label: 'Switched on', help: 'It may run before anyone reviewed it.', risk: 'loosens-a-protection' }],
+  id: 'enabled', label: 'Ready to start', help: 'Whether it may be started at once',
+  choices: [{ value: 'no', label: 'Not yet' }, { value: 'yes', label: 'At once', help: 'It may run before anyone reviewed it.', risk: 'loosens-a-protection' }],
   typed: { flag: '--enabled', switchOn: 'yes' }, optional: { default: 'no', means: 'not yet' },
 });
 const REVIEW_OWNER_ONLY = {
@@ -29,7 +29,7 @@ const words = (id: string, label: string, help: string, flag: `--${string}`, mea
 
 export const ROUTINES_LIST_ALL = storeRead({
   id: 'routines.list', actionId: 'list', label: 'See your routines', word: 'list',
-  inputs: [fixedInput({ id: 'only', label: 'Only', help: 'Some of them', choices: [{ value: 'enabled', label: 'Switched on' }, { value: 'attention', label: 'Needing setup' }], typed: { flag: '--only' }, optional: { default: '', means: 'all of them' } })],
+  inputs: [fixedInput({ id: 'only', label: 'Only', help: 'Some of them', choices: [{ value: 'enabled', label: 'Those on' }, { value: 'attention', label: 'Needing setup' }], typed: { flag: '--only' }, optional: { default: '', means: 'all of them' } })],
   sentence: 'Lists your routines: whether each is on, reviewed and ready, and how often it was started.', example: { only: 'enabled' },
 });
 export const ROUTINES_SHOW = storeRead({
@@ -74,7 +74,7 @@ export const ROUTINES_UPDATE = storeCapability({
 });
 export const ROUTINES_REVIEW = storeCapability({
   id: 'routines.review', actionId: 'review', label: 'Mark a routine reviewed', word: 'review', inputs: [ROUTINE],
-  sentence: 'Routine {routine} is marked reviewed, so it may be switched on and run, until you change it.', example: { routine: 'morning-brief' },
+  sentence: 'Routine {routine} is marked reviewed, so it may be put to use and run, until you change it.', example: { routine: 'morning-brief' },
   risk: 'loosens-a-protection', ownerOnly: REVIEW_OWNER_ONLY, undoneBy: 'stale', repeat: 'safe',
 });
 export const ROUTINES_STALE = storeCapability({
@@ -127,6 +127,8 @@ export const ROUTINES_PROMOTE = storeCapability({
   ],
   sentence: 'Routine {routine} runs on a schedule ({how}: {when}), by itself, whether or not a terminal program is open, until you change it.',
   example: { routine: 'morning-brief', how: 'cron', when: '0 9 * * 1-5' },
+  // A schedule makes it run by itself, with nobody at the screen: it loosens a protection, as switching a routine on does.
+  risk: 'loosens-a-protection',
 });
 export const ROUTINES_RECEIPTS = storeRead({
   id: 'routines.receipts', actionId: 'receipts', label: 'See routines put on a schedule', word: 'receipts', inputs: [], group: 'automation',
@@ -142,9 +144,20 @@ export const ROUTINES_RECONCILE = storeRead({
   sentence: 'Compares the routines put on a schedule with the schedules that exist now, and retires the receipts of schedules that are gone.', example: {},
 });
 
+/**
+ * The daemon's count of a routine's starts, one for every program: a conversation starting a routine (`routines.start`)
+ * counts it here and gets its steps back to run.
+ */
+export const ROUTINES_COUNT_START = storeCapability({
+  id: 'routines.count-start', actionId: 'count-start', label: 'Count a routine as started', word: 'count-start', inputs: [ROUTINE],
+  sentence: 'Routine {routine} is counted as started once more, the one count every program shows, and its steps are given back.',
+  example: { routine: 'morning-brief' },
+});
+
 export const ROUTINES_CAPABILITIES = [
   ROUTINES_LIST_ALL, ROUTINES_SHOW, ROUTINES_SEARCH, ROUTINES_CREATE, ROUTINES_UPDATE, ROUTINES_REVIEW, ROUTINES_STALE, ROUTINES_DELETE,
   ROUTINES_DISCOVER, ROUTINES_IMPORT, ROUTINES_ENABLE, ROUTINES_DISABLE, ROUTINES_PROMOTE, ROUTINES_RECEIPTS, ROUTINES_RECEIPT, ROUTINES_RECONCILE,
+  ROUTINES_COUNT_START,
 ] as const;
 
 /** A routine as starting it reads it. */

@@ -140,7 +140,7 @@ call.
   perform is refused to the model. Authentication, workspace containment, secret
   storage and spending limits still apply. No decision model is consulted.
 - **Plan** (`plan`): read-only. Read-only tools run, and every mutating or exec
-  call is refused; `/plan` toggles it.
+  call is refused; the Plan mode row of This conversation in Permissions and safety toggles it.
 
 The shipped calibration record covers the hosted endpoint and `jev-latest`
 (answered by `jev-1.14.0`). While `jev-decides` is only the default, Jev decides
@@ -148,7 +148,7 @@ only when the endpoint, the model and every fallback target that can answer
 match that record. Choosing `jev-decides` yourself (in `/settings`,
 with Shift+Tab, for a hosted session or in a channel profile)
 lets Jev decide on any working decision model. Waiting for you (the menu) lists, approves or sets aside what
-`just-vibes` held, and its Decisions tab lists what Jev decided for you with undo, never, always and ask.
+`just-vibes` held, and its Decisions tab lists what Jev decided for you with keep, never, always and ask.
 `yolo` still keeps authentication, workspace containment, secret storage and
 spending limits.
 
@@ -202,8 +202,9 @@ The five modes are listed under "How much you are asked" above.
 - **For good:** `/settings` (When GoodVibes asks) saves the default; a channel
   profile can set one per channel.
 - **Waiting for you, Decisions** (the menu) lists what Jev decided for you, and
-  for each one lets you undo it, turn it into a standing rule (never, always,
-  or always ask me), or keep it.
+  for each one lets you turn it into a standing rule (never, always, or always
+  ask me), or keep it. A decision is made before its call runs, so it is not
+  undone from there; a change a turn made is taken back with `/undo`.
 - **Waiting for you, Held calls** lists what `just-vibes` held, and approves or
   sets aside each one.
 - **`/permissions`** shows the permission settings and where each came from,

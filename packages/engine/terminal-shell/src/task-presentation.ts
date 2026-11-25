@@ -61,8 +61,8 @@ export function taskDetailLines(
 ): string[] {
   const { task, origin } = entry;
   return [
-    `Task ${task.id}`,
-    labels.title + task.title,
+    // Named by what it is, never by its id.
+    `Task "${task.title || task.kind}"`,
     `  kind: ${task.kind}`,
     labels.status + task.status,
     labels.owner + task.owner,

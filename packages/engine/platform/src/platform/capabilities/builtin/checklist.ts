@@ -1,7 +1,10 @@
 /**
  * The checklist: the project's running list of things to do that the model
- * keeps with its work_plan tool while it works, and a person adds to, marks
- * and clears. It is one shared file every program reads (the terminal app,
+ * keeps while it works, and a person adds to, marks and clears. It is the
+ * model's own list: these capabilities are not the owner's alone, a model
+ * runs them with nothing asked, and they write the same store, through the
+ * same ProjectWorkPlan, as the model's work_plan and agent_work_plan tools
+ * (one path to one store). It is one shared file every program reads (the terminal app,
  * the Agent and the daemon keep one list per project), and it belongs to the
  * project the conversation is in, so these run in the program holding the
  * conversation (home `session`), on that program's own view of the file.
@@ -34,7 +37,6 @@ export const checklistStateWords = (status: string): string => STATE_WORDS.get(s
 
 /** What an edit with an owner, notes or source of this mark does: clears that detail; empty leaves it. */
 const CLEARS = '-';
-const OWNER_ONLY = { reason: 'the checklist is yours to change by hand', instead: 'The model keeps the checklist with its work_plan tool.' } as const;
 
 const ITEM: InputDescription = {
   id: 'item', label: 'Item', help: 'The items on the checklist', kind: 'choice', choices: { list: CHECKLIST_ITEMS_LIST }, required: true, typed: { position: 1 },
@@ -87,10 +89,11 @@ export const CHECKLIST_EXPORT: Checklist = {
 
 export const CHECKLIST_ADD: Checklist = {
   capability: { id: 'work.checklist-add', group: 'work', home: 'session', repeat: 'unsafe' },
-  actionId: 'checklist-add', label: 'Add an item to the checklist', word: 'checklist-add',
+  ownWorkingState: true,
+  actionId: 'checklist-add', label: 'Put an item on the checklist', word: 'checklist-add',
   inputs: [{ id: 'title', label: 'Title', help: 'What there is to do', kind: 'text', freeTextReason: 'your own words', required: true, typed: { tail: true } }, OWNER, NOTES, SOURCE],
-  sentence: '"{title}" is added to the checklist (your to-do list for this project) until you change it.', done: '',
-  touches: 'this-machine', lasts: 'kept', risk: 'none', ownerOnly: OWNER_ONLY, undoneBy: 'checklist-remove',
+  sentence: '"{title}" is put on the checklist (your to-do list of things to do in this project) as a new item, until you change it.', done: '',
+  touches: 'this-machine', lasts: 'kept', risk: 'none', undoneBy: 'checklist-remove',
   example: { title: 'write the release notes', owner: 'sam' },
   async run(values, services) {
     const added = await storeOf(services).add(values.title!, {
@@ -104,6 +107,7 @@ export const CHECKLIST_ADD: Checklist = {
 
 export const CHECKLIST_EDIT: Checklist = {
   capability: { id: 'work.checklist-edit', group: 'work', home: 'session', repeat: 'safe' },
+  ownWorkingState: true,
   actionId: 'checklist-edit', label: 'Change a checklist item', word: 'checklist-edit',
   inputs: [
     ITEM,
@@ -113,7 +117,7 @@ export const CHECKLIST_EDIT: Checklist = {
     { ...SOURCE, help: `${SOURCE.help}; ${CLEARS} clears it`, required: { default: '', defaultMeans: `stays as it is; ${CLEARS} clears it` } },
   ],
   sentence: 'Item {item} becomes "{title}", with the other details you gave, until you change it.', done: '',
-  touches: 'this-machine', lasts: 'kept', risk: 'none', ownerOnly: OWNER_ONLY,
+  touches: 'this-machine', lasts: 'kept', risk: 'none',
   example: { item: 't-3f2a', title: 'write and post the release notes' },
   async run(values, services) {
     // Empty keeps a detail; the clear mark removes it (null is stored as cleared).
@@ -128,10 +132,11 @@ export const CHECKLIST_EDIT: Checklist = {
 
 export const CHECKLIST_MARK: Checklist = {
   capability: { id: 'work.checklist-mark', group: 'work', home: 'session', repeat: 'safe' },
+  ownWorkingState: true,
   actionId: 'checklist-mark', label: 'Mark a checklist item done, blocked or another state', word: 'checklist-mark',
   inputs: [ITEM, { id: 'state', label: 'State', help: 'Where the item stands', kind: 'choice', choices: STATES, required: true, typed: { position: 2 } }],
   sentence: 'Item {item} is marked {state} until you change it.', done: '',
-  touches: 'this-machine', lasts: 'kept', risk: 'none', ownerOnly: OWNER_ONLY,
+  touches: 'this-machine', lasts: 'kept', risk: 'none',
   example: { item: 't-3f2a', state: 'done' },
   async run(values, services) {
     const updated = await storeOf(services).setStatus(values.item!, values.state as ProjectWorkPlanTaskStatus);
@@ -141,9 +146,10 @@ export const CHECKLIST_MARK: Checklist = {
 
 export const CHECKLIST_NEXT: Checklist = {
   capability: { id: 'work.checklist-next', group: 'work', home: 'session', repeat: 'unsafe' },
+  ownWorkingState: true,
   actionId: 'checklist-next', label: 'Move a checklist item to its next state', word: 'checklist-next', inputs: [ITEM],
   sentence: 'Item {item} moves on one state (not started, in progress, done, then back to not started) until you change it.', done: '',
-  touches: 'this-machine', lasts: 'kept', risk: 'none', ownerOnly: OWNER_ONLY,
+  touches: 'this-machine', lasts: 'kept', risk: 'none',
   example: { item: 't-3f2a' },
   async run(values, services) {
     const cycled = await storeOf(services).cycle(values.item!);
@@ -153,9 +159,11 @@ export const CHECKLIST_NEXT: Checklist = {
 
 export const CHECKLIST_REMOVE: Checklist = {
   capability: { id: 'work.checklist-remove', group: 'work', home: 'session', repeat: 'safe' },
+  ownWorkingState: true,
   actionId: 'checklist-remove', label: 'Take an item off the checklist', word: 'checklist-remove', inputs: [ITEM],
   sentence: 'Item {item} is deleted from the checklist.', done: '',
-  touches: 'this-machine', lasts: 'kept', risk: 'cannot-be-undone', ownerOnly: OWNER_ONLY,
+  // An item of the model's own running list: taken off with nothing asked, as the model's work_plan tool takes one off.
+  touches: 'this-machine', lasts: 'kept', risk: 'none',
   example: { item: 't-3f2a' },
   async run(values, services) {
     const removed = await storeOf(services).remove(values.item!);
@@ -165,9 +173,10 @@ export const CHECKLIST_REMOVE: Checklist = {
 
 export const CHECKLIST_CLEAR_DONE: Checklist = {
   capability: { id: 'work.checklist-clear-done', group: 'work', home: 'session', repeat: 'safe' },
+  ownWorkingState: true,
   actionId: 'checklist-clear-done', label: 'Clear the finished checklist items', word: 'checklist-clear-done', inputs: [],
   sentence: 'Every checklist item that is done or cancelled is deleted.', done: '',
-  touches: 'this-machine', lasts: 'kept', risk: 'cannot-be-undone', ownerOnly: OWNER_ONLY, example: {},
+  touches: 'this-machine', lasts: 'kept', risk: 'none', example: {},
   async run(_values, services) {
     const result = await storeOf(services).clearCompleted();
     const count = result.clearedTaskIds?.length ?? 0;

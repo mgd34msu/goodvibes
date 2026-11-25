@@ -151,7 +151,7 @@ export function handOverLiveSession(deps: {
   }
   deps.sessionManager.closeForWriting();
   if (deps.surface) closeSessionHere(deps.surface, sessionId);
-  deps.notify(`Session ${sessionId} moved to another terminal that asked for it (/session resume ${sessionId} --force). `
+  deps.notify(`Session ${sessionId} moved to another terminal that asked to have it handed over. `
     + (saved ? 'It was saved first. ' : 'Its last save stands; the newest turn here may not be in it. ')
     + 'This terminal no longer writes it: start a new session or resume another to keep working here.');
   return true;

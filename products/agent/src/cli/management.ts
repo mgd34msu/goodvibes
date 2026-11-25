@@ -17,11 +17,13 @@ import { readConnectedHostOperatorToken } from '@goodvibes/engine/terminal-shell
 import { createShellPathService } from '@/runtime/index.ts';
 import { summarizeError } from '@goodvibes/engine/platform/platform/utils';
 import { runCapabilityCommand, type CapabilityCliInvoke } from '@goodvibes/engine/terminal-shell/capability-cli';
-import { createAgentDaemonVerbCaller } from '../runtime/client/daemon-verbs.ts';
+import { connectionNeverMade } from '@goodvibes/engine/terminal-shell/cluster-remote-daemon-target';
+import { ConnectedHostVerbError, DaemonVerbNotSentError, createAgentDaemonVerbCaller } from '../runtime/client/daemon-verbs.ts';
 import { writeFatalLine } from '../utils/fatal-boot-write.ts';
 import type { GoodVibesCliParseResult } from './types.ts';
 import { formatProviderAuthRoute } from './provider-auth-routes.ts';
-import { handleBundleCommand } from './bundle-command.ts';
+import { cliWithFileWorkHere, daemonStartingInvoke, runSupportBundleCommand } from '@goodvibes/engine/terminal-shell/support-bundle-cli';
+import { configuredDaemonIsThisMachine } from '@goodvibes/engine/platform/platform/runtime/client/daemon-target-resolver';
 import { handleImportCommand } from './import-command.ts';
 import { handleSessions, handleTasks, renderPairing, renderSubscriptions, runSecrets, taskSubmitRefusal } from './management-commands.ts';
 import {
@@ -30,11 +32,9 @@ import {
   handleCompatCommand,
   handleDelegateCommand,
 } from './agent-knowledge-command.ts';
-import { handlePersonasCommand } from './personas-command.ts';
 import { handleSkillsCommand } from './skills-command.ts';
 import { handleMemoryCommand } from './memory-command.ts';
 import { handleProfilesCommand } from './profiles-command.ts';
-import { handleRoutinesCommand } from './routines-command.ts';
 import { handleCiCommand } from './ci-command.ts';
 import { handlePrincipalsCommand } from './principals-command.ts';
 import { handleOwnerProfileCommand } from './owner-profile-command.ts';
@@ -63,15 +63,31 @@ interface CliCommandResult {
 /** `do` and `find` reach the connected host the way every Agent verb does (runtime/client/daemon-verbs.ts). */
 function agentCapabilityInvoke(runtime: CliCommandRuntime): CapabilityCliInvoke {
   const caller = createAgentDaemonVerbCaller({ configManager: runtime.configManager, homeDirectory: runtime.homeDirectory });
-  return async (methodId, input, options) => {
+  // A host on another machine: a bundle's or a moved setup's file is read and written on this computer (bundle-file-work.ts).
+  return cliWithFileWorkHere(async (methodId, input, options) => {
     try {
       return { ok: true, data: await caller.invoke(methodId, input, { explicitUserRequest: options.explicitUserRequest }) };
     } catch (error) {
-      const message = summarizeError(error).replace(/^'[^']+' failed:\s*/, '');
       const code = (error as { readonly code?: unknown } | null)?.code;
+      // The host's own refusal, in its words and with its next step, as `goodvibes do` and `goodvibes-daemon do` print it.
+      if (error instanceof ConnectedHostVerbError && error.said && error.code !== 'AUTH_REQUIRED') {
+        return { ok: false, code: typeof code === 'string' ? code : 'refused', error: error.said.error, fix: error.said.next ?? '' };
+      }
+      const message = summarizeError(error).replace(/^'[^']+' failed:\s*/, '');
+      // No answer at all (the connection was refused or dropped): the host was not reached, so nothing was sent to it.
+      const unreached = !(error instanceof ConnectedHostVerbError) && !(error instanceof DaemonVerbNotSentError) && (error as { readonly name?: unknown } | null)?.name !== 'TimeoutError';
+      if (unreached) {
+        // The words `goodvibes do` and `goodvibes-daemon do` say (cluster-remote-daemon-target.ts callDaemonVerb): who was
+        // not reached, why, and for a change whether it may have been applied.
+        const where = configuredDaemonIsThisMachine(runtime.configManager) ? 'the daemon on this machine' : 'the connected host';
+        const change = methodId !== 'capabilities.find'
+          ? (connectionNeverMade(error) ? ' Nothing was sent, so nothing was changed.' : ' This change may or may not have been applied: check before repeating it.')
+          : '';
+        return { ok: false, code: 'unreachable', error: `could not reach ${where}`, fix: `${runtime.cli.binary} status shows the connected host (${message})${change}` };
+      }
       return { ok: false, code: typeof code === 'string' ? code : 'refused', error: message, fix: `${runtime.cli.binary} status shows the connected host` };
     }
-  };
+  }, () => !configuredDaemonIsThisMachine(runtime.configManager), runtime.workingDirectory);
 }
 
 export function getNestedValue(source: unknown, key: string): unknown {
@@ -226,11 +242,6 @@ export async function handleGoodVibesCliCommand(runtime: CliCommandRuntime): Pro
         console.log(result.output);
         return { handled: true, exitCode: result.exitCode };
       }
-      case 'personas': {
-        const result = await handlePersonasCommand(runtime);
-        console.log(result.output);
-        return { handled: true, exitCode: result.exitCode };
-      }
       case 'skills': {
         const result = await handleSkillsCommand(runtime);
         console.log(result.output);
@@ -238,11 +249,6 @@ export async function handleGoodVibesCliCommand(runtime: CliCommandRuntime): Pro
       }
       case 'memory': {
         const result = await handleMemoryCommand(runtime);
-        console.log(result.output);
-        return { handled: true, exitCode: result.exitCode };
-      }
-      case 'routines': {
-        const result = await handleRoutinesCommand(runtime);
         console.log(result.output);
         return { handled: true, exitCode: result.exitCode };
       }
@@ -307,7 +313,8 @@ export async function handleGoodVibesCliCommand(runtime: CliCommandRuntime): Pro
       case 'find':
         return { handled: true, exitCode: await runCapabilityCommand({
           program: 'goodvibes-agent', verb: runtime.cli.command, args: runtime.cli.commandArgs, json: runtime.cli.flags.outputFormat === 'json', caller: 'agent',
-          invoke: agentCapabilityInvoke(runtime), workingDirectory: runtime.workingDirectory,
+          // The daemon on this machine is started first when it is stopped, as the programs and the bundle forms do.
+          invoke: daemonStartingInvoke(agentCapabilityInvoke(runtime), runtime), workingDirectory: runtime.workingDirectory,
         }) };
       case 'ask':
       case 'search': {
@@ -352,11 +359,13 @@ export async function handleGoodVibesCliCommand(runtime: CliCommandRuntime): Pro
         console.log(result.output);
         return { handled: true, exitCode: result.exitCode };
       }
-      case 'bundle': {
-        const result = await handleBundleCommand(runtime);
-        console.log(result.output);
-        return { handled: true, exitCode: result.exitCode };
-      }
+      // The support bundle is the daemon's: bundle.export, bundle.inspect and bundle.import, as `do` runs them.
+      case 'bundle':
+        return { handled: true, exitCode: await runSupportBundleCommand({
+          binary: runtime.cli.binary, command: 'bundle', caller: 'agent', args: runtime.cli.commandArgs,
+          json: runtime.cli.flags.outputFormat === 'json', yes: false,
+          invoke: agentCapabilityInvoke(runtime), configManager: runtime.configManager, workingDirectory: runtime.workingDirectory,
+        }) };
       case 'import': {
         const result = await handleImportCommand(runtime);
         console.log(result.output);

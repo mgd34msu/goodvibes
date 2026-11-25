@@ -9,6 +9,8 @@ import type { EmitterContext } from './index.js';
 
 /** The store-side notice LIST_CHANGED is forwarded from (a host subscribes once and emits each). */
 export { noteListChanged, onListChanged, type ChangedList, type ListChange } from '../list-changes.js';
+/** Money: the daemon's own runs passed the spending alert (runtime/cost/model-usage.ts); the daemon's notifier sends it on. */
+export { onSpendingAlertPassed, type SpendingAlertPassed } from '../cost/model-usage.js';
 
 type NativeRequestChanged = Extract<WorkspaceEvent, { type: 'NATIVE_REQUEST_CHANGED' }>;
 type ListChanged = Extract<WorkspaceEvent, { type: 'LIST_CHANGED' }>;

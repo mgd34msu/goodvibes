@@ -194,7 +194,7 @@ export function createAgentWorkPlanTool(store: AgentWorkPlanStore): Tool {
     definition: {
       name: 'agent_work_plan',
       activity: { doing: 'Organizing', did: 'organized', object: 'work' },
-      description: 'The Agent\'s todo list for this project: track items and their status. It records work; it does not run it (the owner starts work with /work). clear_completed removes done and cancelled items; failed items stay.',
+      description: 'The Agent\'s checklist for this project: track items and their status. It records work; it does not run it (the owner starts work in the Work place). Writing it is never asked about: it is your own working list. clear_completed removes done and cancelled items; failed items stay.',
       parameters: {
         type: 'object',
         properties: {
@@ -213,6 +213,8 @@ export function createAgentWorkPlanTool(store: AgentWorkPlanStore): Tool {
         additionalProperties: false,
       },
       sideEffects: ['state'],
+      // The model's own checklist: its working state, not the person's things. The gate allows every call in every mode.
+      ownWorkingState: true,
     },
     execute: async (rawArgs, options) => {
       const args = captureCatalogData(rawArgs);

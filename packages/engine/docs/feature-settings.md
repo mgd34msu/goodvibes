@@ -43,7 +43,7 @@ configurable capability, never unreachable machinery.
 | Divergence dashboard + enforce gate | `permissions.divergenceDashboard` | `true` | on | no | Tunes via `permissions.divergenceThreshold`, `permissions.maxDivergenceRecords`. |
 | Shell command parsing | `permissions.commandParser` | `ast` | `ast` (on) | no | Per-segment verdicts with automatic fallback to `flat`; catastrophic block identical in both modes. |
 | Policy signing | `policy.requireSignedBundles` | `true` | off | yes | HMAC validation of policy bundles; with it on, a bundle without a valid signature, or any bundle when `GOODVIBES_POLICY_SIGNING_KEY` is unset, is refused. |
-| Policy bundle registry | `policy.registryEnabled` | `true` | off | no | Promote/rollback registry + the policy actions of `/security`; tunes via `policy.bundleSource`, `policy.bundlePath`. |
+| Policy bundle registry | `policy.registryEnabled` | `true` | off | no | Promote/rollback registry + the Policy tab of Permissions and safety; tunes via `policy.bundleSource`, `policy.bundlePath`. |
 | Notification verbosity modes | `behavior.hitlMode` | `quiet`/`balanced`/`operator` | `balanced` (on) | no | `off` keeps the baseline delivery policy and rejects mode changes. |
 | Tool-result reconciliation | `behavior.toolResultReconciliation` | `reconcile` | `reconcile` (on) | no | `warn-only` logs dangling tool calls without synthetic results. |
 | Session compaction | `behavior.compactionStrategy` | `structured`/`distiller` | `structured` (on) | no | `off` runs sessions uncompacted; threshold via `behavior.autoCompactThreshold`. |

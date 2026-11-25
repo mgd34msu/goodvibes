@@ -65,8 +65,6 @@ import { buildSharedOrchestratorCoreServices, refreshMemoryRecallSnapshot } from
 import { createSessionContinuityHintsBuilder } from './runtime/session-continuity-hints.ts';
 import { readLastSessionPointer } from '@/runtime/index.ts';
 import { startRecoveryAutosave } from './runtime/recovery-autosave.ts';
-import { startRecoveryOffer } from './runtime/recovery-prompt.ts';
-import { createStartupTypeaheadGate } from './runtime/startup-typeahead-gate.ts';
 import { buildRecoveryOfferWiring, offerCrashSnapshotOnOpen } from './runtime/recovery-offer-wiring.ts';
 import { whenCrashSnapshotFound } from '@goodvibes/engine/terminal-shell/session-crash-recovery';
 import { handleBlockingShellInput, type PendingPermissionState } from './shell/blocking-input.ts';
@@ -135,7 +133,8 @@ import { keepAwakeHolding } from './core/power-status.ts';
 import { watchDaemonPowerEvents, type PowerState } from '@goodvibes/engine/platform/platform/power';
 import { resolveOperatorRpc } from './input/commands/operator-rpc.ts';
 import { createDaemonVerbCaller, resolveDaemonEndpoint } from './runtime/client/operator-endpoint.ts';
-import { wirePlaces } from '@goodvibes/engine/terminal-shell/places';
+import { spendingAlertWatch, wirePlaces } from '@goodvibes/engine/terminal-shell/places';
+import { programNotices } from '@goodvibes/engine/terminal-shell/places';
 import { sessionsPlaceSources } from '@goodvibes/engine/terminal-shell/places';
 import { recordedRunsPlaceSource } from '@goodvibes/engine/terminal-shell/places';
 import { sessionsPlaceHostOf } from './input/commands/sessions-place-host.ts';
@@ -284,7 +283,6 @@ async function main(prepared: PreparedShellCliRuntime) {
   const deferredRender = createDeferredRender();
   const render = deferredRender.render;
   refreshHerdr = render;
-  const typeahead = createStartupTypeaheadGate(); // keys typed before a startup modal appeared never answer it
 
   let pendingPermission: PendingPermissionState | null = null;
   /** True while $EDITOR owns the terminal: frames and terminal notifications are held until it exits. */
@@ -303,7 +301,7 @@ async function main(prepared: PreparedShellCliRuntime) {
     if (offeredFixSessions.has(fixSessionId)) return; // a repeated run result offers it once
     offeredFixSessions.add(fixSessionId);
     actionOffers.fixSessionId = fixSessionId;
-    systemMessageRouter.high(`[CI] Fix session ready: ${FIX_SESSION_CHORD_LABEL} opens it (or /session resume ${fixSessionId}).`);
+    systemMessageRouter.high(`[CI] Fix session ready: ${FIX_SESSION_CHORD_LABEL} opens it (or /resume ${fixSessionId}).`);
     render();
   };
   type LocalCard = { readonly request: Parameters<typeof buildPendingPermissionExtras>[0]; readonly resolve: Parameters<typeof buildPendingPermissionExtras>[1]; readonly queuedAt: number };
@@ -486,7 +484,7 @@ async function main(prepared: PreparedShellCliRuntime) {
     void runWakeSetupPlan(ctx.services.voiceSetup).then(
       (outcome) => {
         systemMessageRouter.userAction(['Wake-Word Setup', outcome.rendered,
-          ...(proposesSpeechToText(outcome) ? ['(/voice wake-setup --with-speech-to-text installs it now)'] : [])].join('\n'));
+          ...(proposesSpeechToText(outcome) ? ['(Set up the wake word with "Install it too" in the System place, Voice, to install it now.)'] : [])].join('\n'));
         render();
       },
       (error: unknown) => {
@@ -780,7 +778,7 @@ async function main(prepared: PreparedShellCliRuntime) {
     {
       focusTracker: ctx.services.focusTracker,
       configGet: (k: string) => readTuiConfigValue(configManager, k),
-      webhookNotifier: ctx.services.webhookNotifier,
+      notices: programNotices,
       terminalNotifier,
       conversation,
     },
@@ -1291,7 +1289,6 @@ async function main(prepared: PreparedShellCliRuntime) {
           : undefined,
       layers,
     });
-    typeahead.framePainted(); // a startup modal counts as seen from its first painted frame
   };
   let renderRequested = false;
   const renderNow = () => {
@@ -1384,7 +1381,7 @@ async function main(prepared: PreparedShellCliRuntime) {
       worktrees: worktreeStatusLines(ctx.services.worktreeRegistry.lastStartupReport(), workingDir),
     });
   };
-  wireShellUiOpeners({
+  const uiOpeners = wireShellUiOpeners({
     commandContext,
     input,
     views: ctx.views,
@@ -1396,8 +1393,6 @@ async function main(prepared: PreparedShellCliRuntime) {
     mcpRegistry: ctx.services.mcpRegistry,
     subscriptionManager,
     secretsManager,
-    daemonCredentials: ctx.services.daemonCredentials, // a daemon-scoped credential is stored by the daemon, in one verified step
-    daemonConfig: ctx.services.daemonConfig, // a daemon-owned setting is written where the daemon reads it
     serviceRegistry: ctx.services.serviceRegistry,
     memoryEmbeddingRegistry: ctx.services.memoryEmbeddingRegistry,
     workingDirectory: workingDir,
@@ -1450,10 +1445,25 @@ async function main(prepared: PreparedShellCliRuntime) {
     },
     // This app's turns read the daemon's context window sizes again whenever the daemon changes one.
     providerRegistry,
+    // Money, Spending: this conversation's usage and cost, collected since start (views/builtin-views.ts).
+    spending: () => ctx.views.usage,
+    // Settings: the one settings screen both programs show; what this app keeps and the pickers it draws (ui-openers.ts).
+    settings: () => uiOpeners.settings,
     modals: input.surfaceModals,
     requestRender: render,
   });
   unsubs.push(() => places.stop());
+  // /settings, the System place and the menu open the one settings screen (terminal-shell settings-screen).
+  commandContext.openSettingsModal = (target) => places.openSettings(target);
+  // The daemon's spending alert, checked at each turn's end from this app's copy of the daemon's settings: said once in
+  // the conversation when this conversation's cost passes it (the desktop alert, when the window is in the back, is
+  // the budget-breach notifier's).
+  const spendingAlert = spendingAlertWatch(ctx.views.usage);
+  unsubs.push(uiServices.events.turns.on('TURN_COMPLETED', () => {
+    const said = spendingAlert();
+    // Said in the conversation whatever the notice settings: it is the alert the person set.
+    if (said) { systemMessageRouter.userReceipt(said, 'warning'); render(); }
+  }));
   commandContext.openPlaceMenu = places.openMenu;
   commandContext.openPlace = (id, start) => { places.openPlace(id, start); };
   // This conversation's controls a person bound to a key in the composer (Keys place, "This conversation, while writing a message").
@@ -1487,7 +1497,7 @@ async function main(prepared: PreparedShellCliRuntime) {
     lastGitInfoRef,
     buildSessionContinuityHints,
     render,
-    webhookNotifier: ctx.services.webhookNotifier,
+    notices: programNotices,
     focusTracker: ctx.services.focusTracker,
     terminalNotifier,
     runtimeBus: uiServices.runtime.runtimeBus,
@@ -1630,16 +1640,10 @@ async function main(prepared: PreparedShellCliRuntime) {
     },
   });
 
-  const typeaheadHooks = {
-    onModalShown: () => typeahead.arm(),
-    onFlowSettled: () => {
-      const held = typeahead.release();
-      if (held.length > 0) routeInput(held);
-    },
-  };
-  // The crash-recovery offer: at start-up for the newest snapshot (below), and
-  // whenever a session is opened (--continue, --resume, /load, /sessions, the
-  // picker, /session resume) with a crash snapshot newer than its saved copy.
+  // The crash-recovery offer, one line that blocks nothing (Ctrl+R restores): at
+  // start-up for the newest snapshot (below), and whenever a session is opened
+  // (--continue, --resume, /load, /sessions, the picker, /session resume) with a
+  // crash snapshot newer than its saved copy.
   const recoveryOffer = buildRecoveryOfferWiring({
     surface: ctx.services.surface,
     sessionManager: ctx.services.sessionManager,
@@ -1649,9 +1653,8 @@ async function main(prepared: PreparedShellCliRuntime) {
     writeLastSessionPointer,
     sessionSpine: ctx._sessionSpine,
     project: workingDir,
-    receipt: (line) => systemMessageRouter.userReceipt(line),
+    say: (line, level) => systemMessageRouter.userAction(line, level),
     render,
-    typeahead: typeaheadHooks,
   });
   unsubs.push(whenCrashSnapshotFound(conversation, offerCrashSnapshotOnOpen(recoveryOffer)));
   applyInitialTuiCliState({
@@ -1685,6 +1688,9 @@ async function main(prepared: PreparedShellCliRuntime) {
     if (blocking.handled) {
       return;
     }
+    // The crash-recovery offer's keys while it stands: Ctrl+R restores, Esc on an empty composer discards;
+    // typing closes it quietly and goes on to the composer.
+    if (recoveryOffer.handleKey(data, input.prompt.length === 0)) return;
     // The question card's keys (the table's up, down, choose and back; its answers' own keys) while it is
     // on screen and the composer is empty.
     if (input.prompt.length === 0 && ownerQuestionCard.handleInput(data)) return;
@@ -1698,7 +1704,7 @@ async function main(prepared: PreparedShellCliRuntime) {
     if (renderRequested) renderScheduler.flushNow();
   };
   stdin.on('data', (raw: string) => {
-    const data = typeahead.filter(themeProbe.filterInput(raw));
+    const data = themeProbe.filterInput(raw);
     if (data.length > 0) routeInput(data);
   });
   stdin.on('end', () => {
@@ -1719,9 +1725,8 @@ async function main(prepared: PreparedShellCliRuntime) {
   // deliberately no unconditional auto-restore here: a bare launch never
   // loads a saved conversation on its own (owner ruling).
 
-  // Crash-recovery snapshot: asked, never assumed, and opened before the first frame so the composer is never live under it;
-  // keys typed before it was painted are held and replayed into the composer once it is answered (startup-typeahead-gate.ts).
-  void startRecoveryOffer(recoveryOffer);
+  // Crash-recovery snapshot: offered in one line, never assumed and never blocking: Ctrl+R restores it, typing starts a new conversation.
+  recoveryOffer.offer();
   conversation.rebuildHistory();
   render(); // initial render
 

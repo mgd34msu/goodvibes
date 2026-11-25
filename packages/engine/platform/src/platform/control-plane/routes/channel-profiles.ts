@@ -89,7 +89,7 @@ async function ownerActForLoosening(invocation: GatewayMethodInvocation, authori
     binding,
     mode: current,
     requestedMode: next,
-    state: `nothing was changed yet; this loosens the permission mode the sessions from channel ${key} run under, which only the owner does, so it was put to him and applies when he approves it`,
+    state: `nothing was changed yet; this loosens the permission mode the sessions from channel ${key} run under, which only the owner does, so it was put to the owner and applies when the owner approves it`,
     next: [`Watch approval ${approvalId} (approvals.list with approvalId, or the approval-update event).`],
   }, { status: 202 });
 }

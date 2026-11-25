@@ -33,7 +33,7 @@ export const CAPABILITY_GROUPS = [
   { id: 'money', title: 'Money', line: 'cards, purchases, limits, usage and cost',
     about: 'Payment cards, purchases and repeat purchases, spending limits, usage and cost.' },
   { id: 'system', title: 'System', line: 'status, health, updates, setup, settings, help',
-    about: 'Status and health, updates, startup and diagnostics, release information, settings themselves, setup and first run, help, quitting.' },
+    about: 'Status and health, updates, startup and diagnostics, support bundles and moving a setup to another computer, release information, every setting itself (what a setting is set to, change a setting, put a setting back to its default), setup and first run, help, quitting.' },
 ] as const;
 
 export type CapabilityGroupId = (typeof CAPABILITY_GROUPS)[number]['id'];

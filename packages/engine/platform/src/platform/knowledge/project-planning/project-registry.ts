@@ -15,10 +15,23 @@ const nativeApply = Reflect.apply, weakGet = WeakMap.prototype.get, weakSet = We
 const confirmations = new WeakMap<RegisteredProjectIdentity, () => void>();
 export class ProjectIdentityUnavailableError extends Error {
   override readonly name = 'ProjectIdentityUnavailableError';
-  constructor() { super('Project identity is unavailable or conflicts with saved state; preserve the existing bindings and project data before repairing it.'); }
+  constructor(words?: string) { super(words ?? 'Project identity is unavailable or conflicts with saved state; preserve the existing bindings and project data before repairing it.'); }
+}
+/**
+ * A true conflict: this folder has two different project identities, so its saved work could belong to either. The
+ * refusal names both, where each is kept, and the one move that settles it; nothing is chosen or changed for the owner.
+ */
+export function projectIdentityConflict(workspace: string, first: { readonly id: string; readonly where: string }, second: { readonly id: string; readonly where: string }, next: string): ProjectIdentityUnavailableError {
+  return new ProjectIdentityUnavailableError(`${workspace} has two project identities, ${first.id} (${first.where}) and ${second.id} (${second.where}), `
+    + `so it cannot be told which saved work is this folder's; nothing was opened or changed. ${next}`);
 }
 interface ProjectBinding { readonly version: 1; readonly role: 'configured-default'; readonly workspace: string; readonly projectId: string }
-export interface RegisteredProjectIdentity { readonly projectId: string; assertCurrent(): void }
+export interface RegisteredProjectIdentity {
+  readonly projectId: string;
+  /** The binding file that names it, for a refusal that has to say where the identity is kept. */
+  readonly file: string;
+  assertCurrent(): void;
+}
 function sameFile(left: BigIntStats, right: BigIntStats): boolean { return left.dev === right.dev && left.ino === right.ino && left.uid === right.uid && left.gid === right.gid && left.birthtimeNs === right.birthtimeNs; }
 function exactFile(stat: BigIntStats): string { return [stat.dev, stat.ino, stat.mode, stat.uid, stat.gid, stat.nlink, stat.size, stat.birthtimeNs, stat.mtimeNs, stat.ctimeNs].join(':'); }
 function invokeGuard(guard: () => void): void { assertSynchronousJudgmentGuard(guard, () => new ProjectIdentityUnavailableError()); }
@@ -75,7 +88,7 @@ export class ProjectIdentityRegistry {
   inspect(workspace: string): RegisteredProjectIdentity | null {
     if (workspace !== resolve(workspace)) throw new ProjectIdentityUnavailableError();
     if (!this.inspectDirectory()) return null;
-    const names = readdirSync(this.directory).filter(name => name.endsWith('.json'));
+    const names = readdirSync(this.directory).filter(name => name.endsWith('.json')).sort();
     if (names.length > MAX_PROJECT_BINDINGS) throw new ProjectIdentityUnavailableError();
     let selected: RegisteredProjectIdentity | null = null;
     for (const name of names) {
@@ -85,8 +98,13 @@ export class ProjectIdentityRegistry {
       let value: unknown; try { value = JSON.parse(new TextDecoder('utf8', { fatal: true }).decode(source.bytes)); } catch { throw new ProjectIdentityUnavailableError(); }
       const record = binding(value); this.assertCurrent(); if (fileObservationIdentity(path) !== source.physical) throw new ProjectIdentityUnavailableError();
       if (record.workspace !== workspace) continue;
-      if (selected) throw new ProjectIdentityUnavailableError();
-      const original = Object.freeze({ projectId: record.projectId, assertCurrent: () => { this.assertCurrent(); if (fileObservationIdentity(path) !== source.physical) throw new ProjectIdentityUnavailableError(); } });
+      if (selected) {
+        // A second file naming the same identity is the same project: the first one read stays the one used.
+        if (selected.projectId === record.projectId) continue;
+        throw projectIdentityConflict(workspace, { id: selected.projectId, where: selected.file }, { id: record.projectId, where: path },
+          `Keep the identity this folder's work is saved under: move the other binding file out of ${this.directory}, then start again.`);
+      }
+      const original = Object.freeze({ projectId: record.projectId, file: path, assertCurrent: () => { this.assertCurrent(); if (fileObservationIdentity(path) !== source.physical) throw new ProjectIdentityUnavailableError(); } });
       nativeApply(weakSet, confirmations, [original, () => { original.assertCurrent(); confirmFileDurable(path); original.assertCurrent(); }]); selected = original;
     }
     this.assertCurrent(); return selected;
@@ -109,7 +127,12 @@ export class ProjectIdentityRegistry {
     const current = () => { invokeGuard(sourceCurrent); this.assertCurrent(); assertCrossProcessLockCurrent(heldRelease); };
     try {
       current(); const existing = this.inspect(workspace);
-      if (existing) { if (previousId !== null && existing.projectId !== previousId) throw new ProjectIdentityUnavailableError(); existing.assertCurrent(); invokeGuard(() => nativeWriter?.declare('project-default-bindings-v1')); current(); (nativeApply(weakGet, confirmations, [existing]) as () => void)(); current(); return existing; }
+      if (existing) {
+        if (previousId !== null && existing.projectId !== previousId) {
+          throw projectIdentityConflict(workspace, { id: previousId, where: 'the work saved for this folder' }, { id: existing.projectId, where: existing.file },
+            `To keep the saved work, move ${existing.file} out of ${this.directory} and start again: the folder is then given the identity its saved work has.`);
+        }
+        existing.assertCurrent(); invokeGuard(() => nativeWriter?.declare('project-default-bindings-v1')); current(); (nativeApply(weakGet, confirmations, [existing]) as () => void)(); current(); return existing; }
       // Counted before publishing: binding N+1 would make every later read refuse, so the cap refuses here instead.
       const bound = readdirSync(this.directory).filter(name => name.endsWith('.json')).length;
       if (bound >= MAX_PROJECT_BINDINGS) {

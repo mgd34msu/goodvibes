@@ -1,23 +1,15 @@
 import { DAEMON_REPO_RELEASES_LATEST_URL, daemonReleaseDownloadBaseUrl } from '@goodvibes/engine/platform/platform/runtime/client';
-import { applySuiteUpdate, installedSuiteNeedsRepair, rollbackSuiteUpdate, type SuiteUpdateResult } from '@goodvibes/engine/platform/platform/runtime/self-update';
+import { applySuiteUpdate, installedSuiteNeedsRepair, type SuiteUpdateResult } from '@goodvibes/engine/platform/platform/runtime/self-update';
 import { createSelfUpdateCommand, daemonRestartFooter, retainSuiteUpdateConfiguration, formatSuiteUpdateReport, type RunCommand } from '@goodvibes/engine/terminal-shell/release-update-preflight';
 import {
   checkReleaseUpdate,
   prepareReleaseUpdate,
-  requireBinaryUpdateInstall,
   type ReleaseUpdateCheck,
 } from '@goodvibes/engine/terminal-shell/release-update-preflight';
-import { IS_WORKSPACE_DISTRIBUTION, WORKSPACE_UPDATE_GUIDANCE } from '../../runtime/workspace-update-policy.ts';
 import { recordSwapFailure, type UpdateSwapProgress } from '@goodvibes/engine/terminal-shell/launch-auto-update';
-/** `/update` uses the platform's shared suite transaction. Every installed
- * sibling product and its native/browser companions comes from the same
- * release; an explicitly configured installer-owned WebUI keeps its served
- * path. Apply/rollback preserve earlier programs and check saved-data readers
- * before changing live files. Running programs use the replacement on restart.
- * `/update review` prints this install's update state (installed and latest
- * version, install kind, rollback copy) and `/update save-review` saves it to a
- * file; both are built in terminal-shell/release-update-preflight.ts from the
- * facts this app supplies.
+/** The terminal app's launch-time update (cli/launch-auto-update.ts) uses the platform's shared suite transaction.
+ * Every installed sibling product and its native/browser companions comes from the same release; an explicitly
+ * configured installer-owned WebUI keeps its served path. `/update` is the daemon's (capabilities/builtin/system-updates.ts).
  */
 import {
   captureUpdateFileIo,
@@ -25,11 +17,10 @@ import {
   type UpdateFileIo,
 } from '@goodvibes/engine/platform/platform/runtime/self-update';
 import type { CommandContext, CommandRegistry } from '../command-registry.ts';
-import { VERSION } from '../../version.ts';
 import { resolveArtifactNames } from '../../runtime/release-artifacts.ts';
 import { fallbackUpdateCommand, type UpdateFetchLike } from '../../runtime/update-check.ts';
-import type { CliServiceNameSource } from '../../cli/service-posture.ts';
-import { requireProfileManager, requireSecretsManager, requireShellPaths, requireSubscriptionManager } from './runtime-services.ts';
+import type { CliServiceNameSource } from '@goodvibes/engine/platform/platform/support/service-manager-posture';
+import { requireShellPaths } from './runtime-services.ts';
 import { createDaemonVerbCaller } from '../../runtime/client/operator-endpoint.ts';
 import { capabilityBinding } from './capability-binding.ts';
 
@@ -150,49 +141,12 @@ export async function applyUpdate(options: ApplyUpdateOptions): Promise<SuiteUpd
   }
 }
 
-export interface RollbackUpdateOptions {
-  readonly execPath: string;
-  readonly platform: NodeJS.Platform;
-  readonly arch: string;
-  readonly print: (line: string) => void;
-  readonly configManager: CliServiceNameSource;
-  readonly runCommand?: RunCommand;
-  /** Injectable filesystem seam (the platform's UpdateFileIo) so tests observe renames in memory. */
-  readonly io?: UpdateFileIo;
-}
-
-/** Restore the selected suite and its directory assets together. */
-export async function rollbackUpdate(options: RollbackUpdateOptions): Promise<void> {
-  if (!requireBinaryUpdateInstall(options.execPath, options.print, fallbackUpdateCommand, true)) return;
-
-  const configuration = retainSuiteUpdateConfiguration(options.configManager);
-  const result = rollbackSuiteUpdate({ ...options, currentVersion: VERSION,
-    webuiDirectory: configuration.webuiDirectory, assertCurrent: configuration.assertCurrent });
-  options.print(formatSuiteUpdateReport(result, 'restored', await daemonRestartFooter(result, options.platform, options.configManager, options.runCommand)));
-}
-
 export function registerUpdateCommand(registry: CommandRegistry): void {
   registry.register(selfUpdateCommand);
 }
 
+// `/update`: the daemon's capabilities (capabilities/builtin/system-updates.ts); typed by a person it opens System on Updates.
 const selfUpdateCommand = createSelfUpdateCommand<CommandContext>({
-  version: VERSION,
-  workspaceDistribution: IS_WORKSPACE_DISTRIBUTION,
-  workspaceGuidance: WORKSPACE_UPDATE_GUIDANCE,
-  check: checkForUpdate,
-  repairRequired: (version, ctx) => installedSuiteNeedsRepair({ execPath: process.execPath, platform: process.platform, arch: process.arch, version,
-    webuiDirectory: retainSuiteUpdateConfiguration(ctx.platform.configManager).webuiDirectory }),
-  onRecovery: (_error, ctx) => ctx.exit(),
-  apply: async (options, ctx) => { await applyUpdate({ ...options, configManager: ctx.platform.configManager }); },
-  rollback: (options, ctx) => rollbackUpdate({ ...options, configManager: ctx.platform.configManager }),
   daemon: (ctx) => createDaemonVerbCaller({ configManager: ctx.platform.configManager, homeDirectory: () => requireShellPaths(ctx).homeDirectory }),
   capability: capabilityBinding,
-  install: {
-    channel: REPO_RELEASES_LATEST_URL,
-    resolvePath: (ctx, path) => requireShellPaths(ctx).resolveWorkspacePath(path),
-    settings: (ctx) => ctx.platform.configManager,
-    subscriptionProviders: (ctx) => requireSubscriptionManager(ctx).list().map((entry) => entry.provider),
-    savedProfiles: (ctx) => requireProfileManager(ctx).list().length,
-    storedSecrets: async (ctx) => (await requireSecretsManager(ctx).list()).length,
-  },
 });

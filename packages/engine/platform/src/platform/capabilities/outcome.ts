@@ -48,6 +48,18 @@ export function shownValues(action: Pick<Worded, 'inputs'>, values: ActionValues
   return Object.fromEntries(Object.entries(values).map(([id, value]) => [id, secret.has(id) ? hiddenSecret(value) : value]));
 }
 
+/** The values with each one picked from a fixed list shown by its label, as the sentence and the question show it. */
+export function fixedChoiceLabels(action: Pick<Worded, 'inputs'>, values: ActionValues): ActionValues {
+  const shown: Record<string, string> = { ...values };
+  for (const input of action.inputs) {
+    const value = values[input.id];
+    if (value === undefined || !Array.isArray(input.choices) || input.kind === 'secret') continue;
+    const chosen = (input.choices as readonly FixedChoice[]).find((choice) => choice.value === value);
+    if (chosen) shown[input.id] = chosen.label;
+  }
+  return shown;
+}
+
 /**
  * What a run says: the done line, the result's own words, and what the act
  * did. That last line is chosen by what ran, not by the risk class: the
@@ -57,7 +69,7 @@ export function shownValues(action: Pick<Worded, 'inputs'>, values: ActionValues
  * under the command, and the text a model or a script is given.
  */
 export function capabilityOutcomeText(action: Worded, values: ActionValues, result: CapabilityResult): string {
-  const shown = shownValues(action, values);
+  const shown = fixedChoiceLabels(action, shownValues(action, values));
   const done = action.done ? fillSentence(action.done, shown, lastsWords(action, values)) : '';
   const riskDone = result.riskDone !== undefined ? result.riskDone : riskDoneLine(action, values, shown);
   return [done, result.text, riskDone].filter((line) => line.length > 0).join('\n');
@@ -72,11 +84,14 @@ export function capabilityOutcomeText(action: Worded, values: ActionValues, resu
 export function riskDoneLine(action: Pick<Worded, 'risk' | 'riskDone' | 'inputs'>, values: ActionValues, shown: ActionValues = values): string {
   const risk = effectiveRisk(action, values);
   if (risk === 'none') return '';
-  if (action.risk !== 'none') return action.riskDone ? fillSentence(action.riskDone, shown, '') : `This ${RISK_DONE_WORDS[risk]}.`;
+  // "This cannot be undone" warns before an act, in its question: after it, it would be said of a run that removed
+  // nothing as well. Only what the act itself says it did (its own or its choice's `riskDone`) is said then.
+  const fallback = risk === 'cannot-be-undone' ? '' : `This ${RISK_DONE_WORDS[risk]}.`;
+  if (action.risk !== 'none') return action.riskDone ? fillSentence(action.riskDone, shown, '') : fallback;
   for (const input of action.inputs) {
     if (!Array.isArray(input.choices)) continue;
     const chosen = (input.choices as readonly FixedChoice[]).find((choice) => choice.value === values[input.id]);
     if (chosen?.risk === risk && chosen.riskDone) return fillSentence(chosen.riskDone, shown, '');
   }
-  return action.riskDone ? fillSentence(action.riskDone, shown, '') : `This ${RISK_DONE_WORDS[risk]}.`;
+  return action.riskDone ? fillSentence(action.riskDone, shown, '') : fallback;
 }

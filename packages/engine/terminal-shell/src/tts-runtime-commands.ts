@@ -1,4 +1,5 @@
 import { commandRefusal } from './command-confirmation.js';
+import { writeSetting, type SettingWriteContext } from './settings-writes.js';
 import type { ConfigManager } from '@goodvibes/engine/platform/platform/config';
 export interface AlwaysSpeakContext {
   readonly platform: { readonly configManager: Pick<ConfigManager, 'setDynamic'>; readonly voiceService?: unknown };
@@ -11,7 +12,8 @@ export interface AlwaysSpeakContext {
  */
 export function switchAlwaysSpeak(context: AlwaysSpeakContext, enabled: boolean): string {
   if (enabled && !context.platform.voiceService) throw commandRefusal('Speech output is not available in this session, so answers stay unspoken.', 'The System place\'s Voice tab says what the local voice runtime needs.', 'UNAVAILABLE');
-  context.platform.configManager.setDynamic('ui.voiceEnabled', enabled);
+  // Through the daemon's settings.set (settings-writes.ts); a refusal is said there.
+  void writeSetting(context as unknown as SettingWriteContext, 'ui.voiceEnabled', enabled).catch(() => {});
   return enabled
     ? 'Every answer will be played aloud.'
     : 'Answers are no longer played aloud; "Ask and hear the answer spoken" still plays one.';

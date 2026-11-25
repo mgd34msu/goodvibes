@@ -56,8 +56,11 @@ export interface PluginUnappliedTier {
  * The sentence that says why a set tier is not applied and how to apply it,
  * for refusals, capability readings and plugin lists.
  */
-export function describeUnappliedTier(pluginName: string, unapplied: PluginUnappliedTier, command = 'plugin'): string {
-  const again = `set it again with /${command} trust ${pluginName} ${unapplied.tier}`;
+export function describeUnappliedTier(pluginName: string, unapplied: PluginUnappliedTier, typed?: string): string {
+  // In a program, the control (no slash command carries it); the command line passes its own words (`goodvibes plugin`).
+  const again = typed === undefined
+    ? `set it to ${unapplied.tier} again (s on ${pluginName} in the Plugins tab of Tools and extensions)`
+    : `set it again with ${typed} trust ${pluginName} ${unapplied.tier}`;
   if (unapplied.why === 'unbound') {
     return `its tier '${unapplied.tier}' was set by an earlier version, before a tier was bound to a plugin's files, so it runs untrusted; ${again}`;
   }

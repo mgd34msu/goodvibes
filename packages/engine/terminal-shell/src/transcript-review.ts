@@ -107,14 +107,13 @@ export function createTranscriptReviewFormatter(separator: string, detailSeparat
     const total = mode === 'groups' ? groups.length : events.length;
     const size = page.size ?? (mode === 'groups' ? TRANSCRIPT_GROUPS_PAGE : TRANSCRIPT_EVENTS_PAGE);
     const slice = pageRange(total, page, size);
-    const command = `/session ${noun} ${kind}`;
     if ('beyond' in slice) {
-      return [`Not shown: the list has ${total} ${noun}, so it has no row ${page.start}. Run ${command} for the newest ${noun}.`];
+      return [`Not shown: the list has ${total} ${noun}, so it has no row ${page.start}; ask from a row between 1 and ${total}, or from none for the newest ${noun}.`];
     }
-    const sizeFlag = page.size !== undefined ? ` --last ${page.size}` : '';
+    // The pages around this one, by the "From row" they start at (the same kind and page size).
     const navigation: string[] = [];
-    if (slice.first > 1) navigation.push(`  earlier: ${command} ${Math.max(1, slice.first - size)}${sizeFlag}`);
-    if (slice.last < total) navigation.push(`  later: ${command} ${slice.last + 1}${sizeFlag}`);
+    if (slice.first > 1) navigation.push(`  earlier: from row ${Math.max(1, slice.first - size)}`);
+    if (slice.last < total) navigation.push(`  later: from row ${slice.last + 1}`);
     const range = total === 0 ? `  ${noun}${separator}0` : `  ${noun} ${slice.first}-${slice.last} of ${total}`;
 
     if (mode === 'groups') {

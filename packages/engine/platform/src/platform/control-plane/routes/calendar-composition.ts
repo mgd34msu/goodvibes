@@ -48,7 +48,11 @@ import {
   getProcessUntrustedContentLedger,
   type UntrustedContentLedger,
 } from '../../security/untrusted-content.js';
-import type { CalendarGatewayService } from './calendar.js';
+import type {
+  CalendarGatewayCreateInput, CalendarGatewayCreated, CalendarGatewayEventDetail, CalendarGatewayEventSummary, CalendarGatewayIcsImport,
+  CalendarGatewayListInput, CalendarGatewayService,
+} from './calendar.js';
+import { daemonLocalCalendar, type DaemonLocalCalendar } from '../../calendar/local-calendar.js';
 import { GatewayVerbError } from './gateway-verb-error.js';
 import { noteListChanged } from '../../runtime/list-changes.js';
 
@@ -123,8 +127,8 @@ async function noUsableCalendar(deps: CalendarCompositionDeps): Promise<string> 
   sentences.push(noHome
     ? 'Set the two CalDAV settings.'
     : google === undefined
-      ? 'Connect Google with /calendar connect google or Outlook with /calendar connect outlook in the Agent, or set the two CalDAV settings.'
-      : 'Set calendar.google.clientId to the client id of your Google OAuth app, connect Outlook with /calendar connect outlook in the Agent, or set the two CalDAV settings.');
+      ? 'Sign in to a Google or Outlook calendar account under Calendar accounts in Mail, calendar and channels, or set the two CalDAV settings in Settings.'
+      : 'Give your Google app\'s client id ("Use your own calendar app to sign in" under Calendar accounts in Mail, calendar and channels), sign in to an Outlook account there, or set the two CalDAV settings in Settings.');
   return sentences.join(' ');
 }
 
@@ -312,7 +316,7 @@ export function createDaemonCalendarGatewayService(
   };
   const byStart = (left: { readonly start: string }, right: { readonly start: string }): number =>
     (Date.parse(left.start) || 0) - (Date.parse(right.start) || 0);
-  return {
+  const remote: CalendarGatewayService = {
     // async, so a refusal from `select` reaches the caller as a rejection like
     // every other failure of these verbs rather than as a synchronous throw.
     listEvents: (input) => explained(async () => (input.calendarId === undefined
@@ -346,6 +350,211 @@ export function createDaemonCalendarGatewayService(
       }))
       : (await route(input.calendarId)).exportIcs(input))),
     importIcs: (icsContent, calendarId, options) => written('changed', async () => (await route(calendarId)).importIcs(icsContent, calendarId, options)),
+  };
+  // The calendar kept on this computer (its events and the feeds subscribed to), served beside the connected ones.
+  if (homeDirectory === undefined) return remote;
+  const local = daemonLocalCalendar(homeDirectory, {
+    get: async (key) => revealOrNull(await secretsManager.get(key), 'dispatch'),
+    set: async (key, value) => { if (!writeSecret) throw new Error('this daemon cannot write its secret store'); await writeSecret(key, value); },
+    delete: async (key) => { if (!deleteSecret) throw new Error('this daemon cannot write its secret store'); await deleteSecret(key); },
+  }, recordUntrustedIngest);
+  return withLocalCalendar(remote, local, () => noteListChanged({ list: 'calendar', change: 'changed' }));
+}
+
+/** The id of the local calendar, and of each event in it: `local:<event>` (`@<start>` for one occurrence of a series). */
+export const LOCAL_CALENDAR_ID = 'local';
+const LOCAL_PREFIX = 'local:';
+const FEED_PREFIX = 'feed:';
+
+function localEventId(id: string, start: string, repeats: boolean): string {
+  return `${LOCAL_PREFIX}${id}${repeats ? `@${start}` : ''}`;
+}
+/** A local event's own id from a listed id (an occurrence's `@<start>` dropped). */
+function localIdOf(eventId: string): string {
+  const id = eventId.slice(LOCAL_PREFIX.length);
+  const at = id.indexOf('@');
+  return at === -1 ? id : id.slice(0, at);
+}
+
+/** A remote calendar that is not connected is no calendar at all here: the local one answers alone. */
+function notConnected(error: unknown): boolean {
+  return error instanceof GatewayVerbError && (error.code === 'CALENDAR_NOT_CONFIGURED' || error.code === 'CALENDAR_CREDENTIALS_UNREADABLE');
+}
+
+function readOnlyFeed(): GatewayVerbError {
+  return new GatewayVerbError('This event is from a calendar feed you subscribe to, which is read-only here; change it in the calendar it comes from.', 'CALENDAR_EVENT_READ_ONLY', 409);
+}
+
+/**
+ * The one calendar: the connected remote calendars and the calendar on this computer (its events and the feeds
+ * subscribed to). A read with no calendar named lists all of them in one list; a new event goes to the connected
+ * calendar, or here when none is connected or `calendarId` is `local`; an event is changed or removed where it is kept.
+ */
+export function withLocalCalendar(remote: CalendarGatewayService, local: DaemonLocalCalendar, changed: () => void): CalendarGatewayService {
+  const windowOf = (input: CalendarGatewayListInput): { from: Date; to: Date } => {
+    const from = input.from ? new Date(input.from) : new Date(Date.now() - 86_400_000);
+    const to = input.to ? new Date(input.to) : new Date(Date.now() + 30 * 86_400_000);
+    return { from: Number.isNaN(from.getTime()) ? new Date() : from, to: Number.isNaN(to.getTime()) ? new Date(Date.now() + 30 * 86_400_000) : to };
+  };
+  const localEvents = (input: CalendarGatewayListInput): CalendarGatewayEventSummary[] => {
+    const { from, to } = windowOf(input);
+    // The feeds older than their interval are read again first; a feed that cannot be read keeps its last events.
+    const own = local.events.occurrences(from, to).map((occurrence): CalendarGatewayEventSummary => ({
+      id: localEventId(occurrence.event.id, occurrence.start, occurrence.event.recurrence !== undefined), seriesId: occurrence.event.id, title: occurrence.event.title,
+      start: occurrence.start, end: occurrence.end ?? occurrence.start, ...(occurrence.event.allDay ? { allDay: true } : {}),
+      ...(occurrence.event.location ? { location: occurrence.event.location } : {}), ...(occurrence.event.notes ? { description: occurrence.event.notes } : {}),
+    }));
+    const fed = local.feeds.occurrences(from, to).map((occurrence): CalendarGatewayEventSummary => ({
+      id: `${FEED_PREFIX}${occurrence.feed}:${occurrence.event.uid}@${occurrence.start}`, seriesId: `${FEED_PREFIX}${occurrence.feed}:${occurrence.event.uid}`, title:`${occurrence.event.summary || 'Untitled event'} (${occurrence.feed})`,
+      start: occurrence.start, end: occurrence.event.end?.value ?? occurrence.start, ...(occurrence.event.start.kind === 'date' ? { allDay: true } : {}),
+      ...(occurrence.event.location ? { location: occurrence.event.location } : {}),
+      ...(occurrence.repeatsNotShown ? { description: 'It repeats by a rule this version does not expand; it may also fall on other days.' } : {}),
+    }));
+    return [...own, ...fed];
+  };
+  const startOf = (event: { readonly start: string }): number => {
+    const at = Date.parse(event.start.includes('T') ? event.start : `${event.start}T00:00:00`);
+    return Number.isNaN(at) ? 0 : at;
+  };
+  const merged = async (input: CalendarGatewayListInput): Promise<{ events: CalendarGatewayEventSummary[]; more: boolean }> => {
+    // Feeds whose interval passed are read again before the calendar is shown (no timer: a read is the occasion).
+    await local.feeds.refresh(undefined, { force: false }).catch(() => undefined);
+    let remoteEvents: readonly CalendarGatewayEventSummary[] = [];
+    let more = false;
+    try {
+      const page = await remote.listEvents(input);
+      remoteEvents = page.events;
+      more = page.more;
+    } catch (error) {
+      if (!notConnected(error)) throw error;
+    }
+    const events = [...remoteEvents, ...localEvents(input)].sort((left, right) => startOf(left) - startOf(right));
+    const limit = input.limit ?? events.length;
+    return { events: events.slice(0, limit), more: more || events.length > limit };
+  };
+  const detailOfLocal = (eventId: string): CalendarGatewayEventDetail => {
+    const event = local.events.get(localIdOf(eventId));
+    if (!event) throw new GatewayVerbError(`No event ${eventId} is kept on this computer.`, 'CALENDAR_EVENT_NOT_FOUND', 404);
+    const at = eventId.indexOf('@');
+    const start = at === -1 ? event.start : eventId.slice(at + 1);
+    return {
+      id: eventId, uid: event.sourceProvenance ?? event.id, title: event.title, start, end: event.end ?? start, ...(event.allDay ? { allDay: true } : {}),
+      ...(event.location ? { location: event.location } : {}), ...(event.notes ? { description: event.notes } : {}),
+      ...(event.recurrence?.rule ? { recurrence: event.recurrence.rule } : {}), revision: event.updatedAt,
+    };
+  };
+  const detailOfFeed = (eventId: string): CalendarGatewayEventDetail => {
+    const rest = eventId.slice(FEED_PREFIX.length);
+    const at = rest.lastIndexOf('@');
+    const head = at === -1 ? rest : rest.slice(0, at);
+    const colon = head.indexOf(':');
+    const feed = head.slice(0, colon);
+    const uid = head.slice(colon + 1);
+    const found = local.feeds.seeds().find((row) => row.feed === feed && row.event.uid === uid);
+    if (!found) throw new GatewayVerbError(`No event ${eventId} is in the feeds you subscribe to.`, 'CALENDAR_EVENT_NOT_FOUND', 404);
+    const start = at === -1 ? found.event.start.value : rest.slice(at + 1);
+    return {
+      id: eventId, uid, title: `${found.event.summary || 'Untitled event'} (${feed})`, start, end: found.event.end?.value ?? start,
+      ...(found.event.start.kind === 'date' ? { allDay: true } : {}), ...(found.event.location ? { location: found.event.location } : {}),
+      ...(found.event.description ? { description: found.event.description } : {}),
+    };
+  };
+  const createLocal = (input: CalendarGatewayCreateInput): CalendarGatewayCreated => {
+    let event;
+    try {
+      event = local.events.create({ title: input.title, start: input.start, end: input.end, location: input.location, notes: input.description });
+    } catch (error) {
+      throw new GatewayVerbError(error instanceof Error ? error.message : String(error), 'INVALID_ARGUMENT', 400);
+    }
+    changed();
+    return { eventId: localEventId(event.id, event.start, false), uid: event.id, createdAt: event.createdAt };
+  };
+  return {
+    listEvents: async (input) => {
+      if (input.calendarId === LOCAL_CALENDAR_ID) {
+        const events = localEvents(input).sort((left, right) => startOf(left) - startOf(right));
+        const limit = input.limit ?? events.length;
+        return { events: events.slice(0, limit), more: events.length > limit };
+      }
+      return input.calendarId === undefined ? merged(input) : remote.listEvents(input);
+    },
+    getEvent: async (eventId, calendarId) => {
+      if (eventId.startsWith(LOCAL_PREFIX)) return detailOfLocal(eventId);
+      if (eventId.startsWith(FEED_PREFIX)) return detailOfFeed(eventId);
+      return remote.getEvent(eventId, calendarId);
+    },
+    createEvent: async (input) => {
+      if (input.calendarId === LOCAL_CALENDAR_ID) return createLocal(input);
+      try {
+        return await remote.createEvent(input);
+      } catch (error) {
+        // No calendar is connected: the event is kept on this computer.
+        if (input.calendarId === undefined && notConnected(error)) return createLocal(input);
+        throw error;
+      }
+    },
+    updateEvent: async (eventId, changes, calendarId) => {
+      if (eventId.startsWith(FEED_PREFIX)) throw readOnlyFeed();
+      if (eventId.startsWith(LOCAL_PREFIX)) {
+        let event;
+        try {
+          event = local.events.update(localIdOf(eventId), {
+            ...(changes.title !== undefined ? { title: changes.title } : {}), ...(changes.start !== undefined ? { start: changes.start } : {}),
+            ...(changes.end !== undefined ? { end: changes.end } : {}), ...(changes.location !== undefined ? { location: changes.location } : {}),
+            ...(changes.description !== undefined ? { notes: changes.description } : {}),
+          });
+        } catch (error) {
+          throw new GatewayVerbError(error instanceof Error ? error.message : String(error), 'INVALID_ARGUMENT', 400);
+        }
+        if (!event) throw new GatewayVerbError(`No event ${eventId} is kept on this computer.`, 'CALENDAR_EVENT_NOT_FOUND', 404);
+        changed();
+        return { eventId: localEventId(event.id, event.start, false), updatedAt: event.updatedAt };
+      }
+      if (!remote.updateEvent) throw new GatewayVerbError('The configured calendar backend cannot update events.', 'CALENDAR_NOT_SUPPORTED', 501);
+      return remote.updateEvent(eventId, changes, calendarId);
+    },
+    deleteEvent: async (eventId, calendarId) => {
+      if (eventId.startsWith(FEED_PREFIX)) throw readOnlyFeed();
+      if (eventId.startsWith(LOCAL_PREFIX)) {
+        const removed = local.events.delete(localIdOf(eventId));
+        if (removed) changed();
+        return { eventId, deleted: removed !== null };
+      }
+      if (!remote.deleteEvent) throw new GatewayVerbError('The configured calendar backend cannot delete events.', 'CALENDAR_NOT_SUPPORTED', 501);
+      return remote.deleteEvent(eventId, calendarId);
+    },
+    listCalendars: async () => {
+      const own = [{ calendarId: LOCAL_CALENDAR_ID, displayName: 'On this computer' }];
+      if (!remote.listCalendars) return own;
+      try { return [...own, ...await remote.listCalendars()]; } catch (error) {
+        if (notConnected(error) || (error instanceof GatewayVerbError && error.code === 'CALENDAR_NOT_SUPPORTED')) return own;
+        throw error;
+      }
+    },
+    exportIcs: async (input) => {
+      if (input.calendarId === LOCAL_CALENDAR_ID) {
+        const icsContent = local.events.exportIcs();
+        return { icsContent, eventCount: local.events.list().length };
+      }
+      return remote.exportIcs(input);
+    },
+    importIcs: async (icsContent, calendarId, options) => {
+      const importLocal = (): CalendarGatewayIcsImport => {
+        const result = local.events.importIcs(icsContent);
+        if (result.imported.length > 0) changed();
+        return {
+          imported: result.imported.length, eventIds: result.imported.map((event) => localEventId(event.id, event.start, false)),
+          errors: [...result.notParsed, ...(result.secretSkipped > 0 ? [`${result.secretSkipped} event(s) with a secret-looking field were not imported.`] : [])],
+        };
+      };
+      if (calendarId === LOCAL_CALENDAR_ID) return importLocal();
+      try {
+        return await remote.importIcs(icsContent, calendarId, options);
+      } catch (error) {
+        if (calendarId === undefined && notConnected(error)) return importLocal();
+        throw error;
+      }
+    },
   };
 }
 

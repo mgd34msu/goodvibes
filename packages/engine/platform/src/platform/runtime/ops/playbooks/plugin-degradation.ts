@@ -55,9 +55,9 @@ export const pluginDegradationPlaybook: Playbook = {
     },
   ],
   steps: [
-    { step: 1, title: 'See why it failed', action: 'Run /plugin inspect <name> in the goodvibes terminal app for the plugin\'s state, trust and last error.', kind: 'command', command: '/plugin inspect <name>', expectedOutcome: 'The cause is named.', automatable: false },
-    { step: 2, title: 'Reload it', action: 'Fix the cause (a missing dependency, a setting) and reload the plugin from /plugin.', kind: 'command', command: '/plugin', expectedOutcome: 'The plugin is active and its tools are offered again.', automatable: false },
-    { step: 3, title: 'Turn it off', action: 'If it keeps failing, disable it from /plugin so it stops being retried.', kind: 'command', command: '/plugin', expectedOutcome: 'The plugin is disabled; everything else is unaffected.', automatable: false },
+    { step: 1, title: 'See why it failed', action: 'Open Tools and extensions from the menu, Plugins, and press Enter on the plugin for its state, trust and last error.', kind: 'observe', expectedOutcome: 'The cause is named.', automatable: false },
+    { step: 2, title: 'Reload it', action: 'Fix the cause (a missing dependency, a setting), then "load them again" on the Plugins tab of Tools and extensions.', kind: 'observe', expectedOutcome: 'The plugin is active and its tools are offered again.', automatable: false },
+    { step: 3, title: 'Turn it off', action: 'If it keeps failing, switch it off on the Plugins tab of Tools and extensions so it stops being retried.', kind: 'observe', expectedOutcome: 'The plugin is disabled; everything else is unaffected.', automatable: false },
   ],
   escalationCriteria: [
     'A plugin fails again right after a reload',

@@ -79,8 +79,8 @@ export const SECURE_ADDRESS_CHOICES: readonly SecureAddressChoiceWords[] = [
     sends: 'Nothing leaves this computer.',
     caution: 'Installing a certificate on a phone is the one step it needs, and it has not been tried yet on a real iPhone or Android phone.',
     onLead: {
-      does: 'GoodVibes makes a certificate authority on this computer and serves https with a certificate it signs. Because this computer leads a group, that certificate covers the names and private network addresses of every machine in the group as well as this computer\'s own, so a phone that installed the authority once trusts them all. It is made again at each start for the addresses the machines have then.',
-      sends: 'Because this computer leads a group, the certificate and its key are sent, sealed, to each machine in the group, so they serve the same certificate; the certificate authority\'s own key never leaves this computer.',
+      does: 'GoodVibes makes a certificate authority on this computer and serves https with a certificate it signs. Because this computer leads a group, that certificate covers the names and private network addresses of every machine in the group as well as this computer\'s own, so a phone that installed the authority once trusts them all. It is made again at each start for the addresses the machines have then, lasts 90 days and is renewed by itself a month before it ends, and a new one with a new key is made at once when a machine leaves the group or is removed.',
+      sends: 'Because this computer leads a group, the certificate and its key are sent, sealed, to each machine in the group, so they serve the same certificate, with the authority\'s public certificate, so the page /lan-https on each of them offers phones this same authority; the certificate authority\'s own key never leaves this computer.',
     },
   },
 ];
@@ -106,16 +106,54 @@ export const SECURE_ADDRESS_REISSUE_TITLE = 'Issue a new certificate now';
  * weekly limit only while Let's Encrypt is the certificate in force.
  */
 export function secureAddressReissueLine(leadsGroup: boolean, certificate: 'local-authority' | 'own-files' | 'lets-encrypt'): string {
+  // `leadsGroup`: machines follow this computer now (none following, there is no group's machine to name).
   const scope = leadsGroup ? ', for this computer and the machines of its group' : '';
   return certificate === 'lets-encrypt'
     ? `Gets a new certificate from Let's Encrypt with a new key at once${scope}; Let's Encrypt allows only five for the same name a week, so use it when a key may have been seen by someone else.`
     : `Makes a new certificate with a new key at once${scope}, signed by GoodVibes' own certificate authority, so phones that installed it trust the new one as before; use it when a key may have been seen by someone else.`;
 }
 
-/** What a node's screen says; `<lead>` is the lead's name. */
+/** What a member's screen says; `<lead>` is the lead's name. */
 export function secureAddressNodeLine(lead: string): string {
-  return `This machine is a node of ${lead}: its secure address comes from there.`;
+  return `This machine is a member of ${lead}: its secure address comes from there.`;
 }
+
+/** The lead's action that ends a removed machine's trust on phones now, and its one line. */
+export const SECURE_ADDRESS_REPLACE_AUTHORITY_TITLE = 'Replace the authority';
+export const SECURE_ADDRESS_REPLACE_AUTHORITY_LINE =
+  'Makes a new GoodVibes certificate authority and a new certificate signed by it, here and on every machine that follows this one. Every phone must then remove the old GoodVibes certificate and install the new one from the page /lan-https; until it does, it shows a warning for this address. Use it when a machine that left the group or was removed from it must stop being trusted now.';
+/** The question it is put with (opening on No). */
+export const SECURE_ADDRESS_REPLACE_AUTHORITY_QUESTION = 'Replace the authority? Every phone must remove the old GoodVibes certificate and install the new one.';
+
+/**
+ * What the lead's screen says of a machine that held the group's certificate and its key and stopped following (it
+ * left, or was removed): until when it can present that certificate to a phone, and what the person can do, for each
+ * kind of certificate. Dates as every Secure address screen writes them.
+ */
+export function secureAddressFormerHolderLine(holder: { readonly name: string; readonly at: number; readonly until: number; readonly source: 'local-authority' | 'own-files' | 'lets-encrypt' }): string {
+  const gone = `${holder.name} stopped following this computer on ${secureAddressDate(holder.at)} (it left the group or was removed) and still holds the certificate it was given, with its key.`;
+  if (holder.source === 'local-authority') {
+    return `${gone} A phone that installed GoodVibes' own certificate from this computer trusts that copy until ${secureAddressDate(holder.until)}. This computer now serves a new certificate with a new key. To end that trust now, replace the authority (below): every phone then removes the old GoodVibes certificate and installs the new one.`;
+  }
+  if (holder.source === 'lets-encrypt') {
+    return `${gone} It is a Let's Encrypt certificate for your name and every name under it, valid until ${secureAddressDate(holder.until)}: until then any phone trusts it for those names wherever it is presented, and GoodVibes does not revoke it. This computer got a new certificate with a new key from Let's Encrypt at once, and removed from your DNS the address it had written for ${holder.name}, so a phone no longer finds that machine under your name. That machine could still answer for your names on a network that sends them to it. To end that now, give this computer a different name here: its next certificate is for the new name, and the old copy is then good only for a name nothing uses.`;
+  }
+  return `${gone} It is a copy of the certificate you made, valid until ${secureAddressDate(holder.until)}, and GoodVibes cannot replace a certificate you made. To end it sooner, have whoever signed it revoke it, then give this computer a new certificate and key here.`;
+}
+
+/**
+ * What the screen says when other machines are not served, so a phone cannot open the https address yet. `local`: the
+ * daemon listens on this computer only; otherwise it listens on the network and answers this computer alone.
+ */
+export function secureAddressReachLine(local: boolean): string {
+  return local
+    ? 'Phones cannot open this address yet: this daemon listens only on this computer, so a phone on your network gets no answer at all. "Serve other machines" lets phones and your other machines reach it.'
+    : 'Phones cannot open this address yet: this daemon answers only this computer, so a phone that opens it gets the certificate and then the refusal "This daemon serves only its own machine" (the page /lan-https is refused the same way). "Serve other machines" lets phones and your other machines reach it.';
+}
+
+/** The action that serves other machines, and its one line. */
+export const SECURE_ADDRESS_SERVE_TITLE = 'Serve other machines';
+export const SECURE_ADDRESS_SERVE_LINE = 'The daemon listens on your network and answers your other machines and phones, so phones can open the https address; each still needs its own pairing or sign-in.';
 
 /** One choice's words as one paragraph, for a settings description. */
 export function secureAddressChoiceParagraph(choice: SecureAddressChoiceWords): string {

@@ -92,7 +92,7 @@ export function createSettingContext<Modal extends SettingContextModal, Entry ex
       lines.push(text(`${settingChoiceWords(entry.setting.key, value)}: ${descriptions[value]}`));
     lines.push(...policy.detail(entry));
     if (policy.isSecretKey(entry.setting.key))
-      lines.push(text('What you type is hidden and kept in the secret store; the settings file holds only a reference to it. Saving it empty clears it.'));
+      lines.push(text('What you type is hidden and kept in the secret store; the settings file holds only a reference to it. Saving it empty changes nothing: reset on this row removes a stored one (it asks first).'));
     const customEditing = policy.customEditing?.(entry);
     if (customEditing) lines.push(text(customEditing));
     if (description.rest) lines.push(blank, text(description.rest));
@@ -135,7 +135,7 @@ export function settingStateWarnings(entry: {
   const lines: HelpLine[] = [];
   if (entry.metadataUnavailable) lines.push(warning(`This setting cannot be read right now: ${entry.metadataUnavailable}`));
   if (entry.locked) lines.push(warning(entry.lockReason ? `Locked: ${entry.lockReason}` : 'Locked by a setting that takes priority over this one.'));
-  if (entry.conflict) lines.push(warning(`This value disagrees with a synced copy; /settings-sync resolve ${entry.setting.key} local or synced keeps one.`));
+  if (entry.conflict) lines.push(warning(`This value disagrees with a synced copy; Devices and network, Settings sync, settle it keeps one.`));
   return lines;
 }
 export function createSubscriptionContext<Modal extends { readonly subscriptionLogoutConfirmationTarget: string | null }>(policy: {

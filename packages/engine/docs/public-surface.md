@@ -308,7 +308,7 @@ The following table lists the notable platform subpaths. The `exports` map in `p
 | `platform/owner-profile` | The platform's read model of the person who owns it, backed by one Markdown file at daemon scope | beta |
 | `platform/pairing` | Companion token, QR, pairing index | beta |
 | `platform/gate` | The gate: the deterministic boundary, the stakes reading and its batteries, the presets over the stakes table, and surface authority | beta |
-| `platform/gate/policy` | The policy and posture runtimes the TUI and agent call: `/security` and `/permissions` dispatch, the tool policy guard and its allowlists, exec posture, operator policy, execution ledger, tool permission safety | beta |
+| `platform/gate/policy` | The policy and posture runtimes the TUI and agent call: the policy-bundle workflow and `/permissions`, the tool policy guard and its allowlists, exec posture, operator policy, execution ledger, tool permission safety | beta |
 | `platform/permissions` | `PermissionManager` (runs the gate for every tool call), request analysis, prompts and approval briefs | beta |
 | `platform/personal-capture` | Capture authority (whether a turn may write to the owner profile) and the narrow store/service surface a conversational capture tool calls | beta |
 | `platform/plugins` | Plugin API, loader, and manager | beta |
@@ -369,7 +369,7 @@ The following table lists the notable platform subpaths. The `exports` map in `p
 | `platform/web-search` | Web search provider registry, service, and providers | beta |
 | `platform/workflow` | Workflow hook-action executor and automation commands | beta |
 | `platform/workflow/work-ledger` | Host-owned work ledger: revisioned records, opaque actor authority, service and storage contracts | beta |
-| `platform/workspace` | Daemon home and workspace swap manager | beta |
+| `platform/workspace` | Daemon home, workspace registrations and checkpoints | beta |
 
 Subsystems without public subpaths are package implementation. They are consumed by exported domain seams rather than through a catch-all platform import.
 

@@ -77,8 +77,8 @@ export const PRINCIPALS_LIST: CapabilityDefinition<SafetyMethodServices> = {
 
 export const PRINCIPALS_GET: CapabilityDefinition<SafetyMethodServices> = {
   capability: { id: 'principals.get', group: 'safety', home: 'daemon', repeat: 'safe' },
-  actionId: 'get', label: 'See one person, bot or service', word: 'get', inputs: [PRINCIPAL], ...READ,
-  sentence: 'Shows {principal}\'s kind and identities.', effects: ['principals.read'], example: { principal: 'p-sam' },
+  actionId: 'get', label: 'See the details of one known person, bot or service', word: 'get', inputs: [PRINCIPAL], ...READ,
+  sentence: 'Shows the details the daemon knows of {principal}: its kind and its identity on each channel.', effects: ['principals.read'], example: { principal: 'p-sam' },
   async run(values, _services, caller) {
     const principal = record((await call(caller, 'principals.get', { principalId: values.principal })).principal);
     return { text: principalWords(principal), data: { principal } };
@@ -120,7 +120,7 @@ export const PRINCIPALS_CREATE: CapabilityDefinition<SafetyMethodServices> = {
 
 export const PRINCIPALS_UPDATE: CapabilityDefinition<SafetyMethodServices> = {
   capability: { id: 'principals.update', group: 'safety', home: 'daemon', repeat: 'safe' },
-  actionId: 'update', label: 'Change a person, bot or service', word: 'update',
+  actionId: 'update', label: 'Rename or change a known person, bot or service', word: 'update',
   inputs: [
     PRINCIPAL,
     { id: 'name', label: 'Name', help: 'A new name', kind: 'text', freeTextReason: 'a name you choose', required: { default: '', defaultMeans: 'unchanged' }, typed: { flag: '--name' } },
@@ -275,9 +275,9 @@ export const LOCAL_AUTH_PASSWORD: CapabilityDefinition<SafetyMethodServices> = {
 
 export const LOCAL_AUTH_SIGN_OUT: CapabilityDefinition<SafetyMethodServices> = {
   capability: { id: 'local-auth.sign-out', group: 'safety', home: 'daemon', repeat: 'safe' },
-  actionId: 'end-session', label: 'Sign someone out of the web app', word: 'sign-out',
-  inputs: [{ id: 'session', label: 'Session', help: 'Who is signed in now', kind: 'choice', choices: { list: LOCAL_SESSIONS_LIST }, required: true, typed: { position: 1 } }],
-  sentence: 'That sign-in to the web app is ended; whoever uses it in a browser must sign in again.',
+  actionId: 'end-session', label: 'Sign out a browser session of the web app', word: 'sign-out',
+  inputs: [{ id: 'session', label: 'Session', help: 'The browser sessions still signed in now', kind: 'choice', choices: { list: LOCAL_SESSIONS_LIST }, required: true, typed: { position: 1 } }],
+  sentence: 'That browser session, still open and signed in to the web app, is signed out; whoever uses it must sign in again.',
   done: 'Ended that session.',
   touches: 'credential', lasts: 'kept', risk: 'cannot-be-undone', effects: [...AUTH_WRITE, 'record.destroy'], example: { session: 's-1' },
   async run(values, _services, caller) {
@@ -308,16 +308,22 @@ export function ruleWords(rule: Record<string, unknown>): { readonly title: stri
   const tier = text(rule.tier);
   const what = text(rule.description) || text(rule.id);
   const kind = tier === 'never-run' ? 'never run, every mode' : `${text(rule.id).startsWith('owner-') ? 'added' : 'remembered'} (${tier})`;
-  const where = text(rule.project) ? `in ${text(rule.project)}` : 'every project';
-  return { title: `${tool === '*' ? 'any tool' : tool}: ${what}`, detail: `${text(rule.effect)} · ${kind} · ${where}` };
+  // The project by its name (its folder's last part), as a person calls it.
+  const folder = text(rule.project);
+  const carried = text(rule.carried);
+  const where = folder ? `in ${folder.split(/[\\/]/).filter(Boolean).pop() ?? folder}` : carried ? `Every project (carried from ${carried})` : 'every project';
+  // The session whose answer made it, by its title (a runner by its task).
+  const madeIn = text(rule.madeIn);
+  return { title: `${tool === '*' ? 'any tool' : tool}: ${what}`, detail: `${text(rule.effect)} · ${kind}${madeIn ? ` to ${madeIn}` : ''} · ${where}` };
 }
 
 export const PERMISSIONS_RULES: CapabilityDefinition<SafetyMethodServices> = {
   capability: { id: 'permissions.rules', group: 'safety', home: 'daemon', repeat: 'safe' },
   actionId: 'rules', label: 'See the permission rules', word: 'rules', inputs: [], ...READ,
-  sentence: 'Lists every rule that decides a call without asking: what it covers, allow or deny, and where.', effects: ['approvals.read'], example: {},
+  sentence: 'Lists every rule that decides a call here without asking: this project\'s and those of every project, what each covers, allow or deny.', effects: ['approvals.read'], example: {},
   async run(_values, _services, caller) {
-    const rules = rows((await call(caller, 'permissions.rules.list')).rules);
+    // The caller's own project's rules and every project's; another project's rules are not in force here.
+    const rules = rows((await call(caller, 'permissions.rules.list', caller.workingDirectory ? { project: caller.workingDirectory } : {})).rules);
     if (rules.length === 0) return { text: 'No permission rules. Approving an ask with a remember tier stores one; "Add a permission rule" writes one directly.', data: { rules: [] } };
     return {
       text: ['Permission rules:', ...rules.map((rule) => { const words = ruleWords(rule); return `  ${words.title}  (${words.detail})`; })].join('\n'),

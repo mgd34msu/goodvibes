@@ -3,11 +3,14 @@ export class ConnectedHostVerbError extends Error {
   readonly status: number;
   /** The code the host's error body named, when it named one. */
   readonly code: string | undefined;
-  constructor(message: string, status: number, code?: string) {
+  /** The host's own refusal, as it said it (its `error`, and its first `next` step), when its body said one. */
+  readonly said: { readonly error: string; readonly next?: string | undefined } | undefined;
+  constructor(message: string, status: number, code?: string, said?: { readonly error: string; readonly next?: string | undefined }) {
     super(message);
     this.name = 'ConnectedHostVerbError';
     this.status = status;
     this.code = code;
+    this.said = said;
   }
 }
 

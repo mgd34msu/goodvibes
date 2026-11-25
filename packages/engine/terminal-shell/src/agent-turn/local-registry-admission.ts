@@ -4,7 +4,7 @@ import { readFileObservation } from '@goodvibes/engine/platform/platform/utils';
 import type { ShellPathService } from '@goodvibes/engine/platform/platform/runtime/shell';
 import type { MemoryRegistry } from '@goodvibes/engine/platform/platform/state';
 import { MemorySpineClient, type MemoryAccess } from '@goodvibes/engine/platform/platform/runtime/memory-spine';
-import { assertCurrentToolEffect, assertProjectionExecution, ToolInputProjectionError, type ToolInputProjector, type ToolExecuteOptions } from '@goodvibes/engine/platform/platform/tools';
+import { assertCurrentToolEffect, assertCurrentToolInvocation, assertProjectionExecution, ToolInputProjectionError, type ToolInputProjector, type ToolExecuteOptions } from '@goodvibes/engine/platform/platform/tools';
 import { noteStorePath } from './note-registry.js';
 import { personaStorePath } from './persona-registry.js';
 import { routineStorePath } from './routine-registry.js';
@@ -75,15 +75,24 @@ export function createAgentLocalRegistryInputProjector(shellPaths: ShellPathServ
   } };
 }
 
+/**
+ * This call's admission at a write: its own effect admission for a write it makes itself; for one it only routes to a
+ * daemon capability (`routed`: run as a nested capability_run call, which is decided and admitted as that
+ * capability), only that this exact call is still the current admitted one.
+ */
+function admittedFor(args: Record<string, unknown>, options: ToolExecuteOptions | undefined, routed: boolean): boolean {
+  return routed ? assertCurrentToolInvocation(args, options) : assertCurrentToolEffect(args, options, 'write');
+}
+
 /** Native atomic writer callbacks recognize only this invocation's own completed effect. */
-export function createAgentLocalRegistryWriteLifecycle(args: Record<string, unknown>, options?: ToolExecuteOptions): {
+export function createAgentLocalRegistryWriteLifecycle(args: Record<string, unknown>, options?: ToolExecuteOptions, routed = false): {
   readonly assertCurrent: () => void; readonly onEffect: () => void;
 } {
   return {
-    assertCurrent() { assertAgentLocalRegistryWrite(args, options); },
+    assertCurrent() { assertAgentLocalRegistryWrite(args, options, routed); },
     onEffect() {
       options?.signal?.throwIfAborted();
-      if (!assertCurrentToolEffect(args, options, 'write')) throw new ToolInputProjectionError('held');
+      if (!admittedFor(args, options, routed)) throw new ToolInputProjectionError('held');
       const context = options?.inputProjectionContext, binding = context && contexts.get(context);
       if (!context || !binding) throw new ToolInputProjectionError('held');
       assertProjectionExecution(context, args); binding.acceptOwnEffect();
@@ -92,9 +101,9 @@ export function createAgentLocalRegistryWriteLifecycle(args: Record<string, unkn
 }
 
 /** The actual registry-issued context is required at each local durable boundary. */
-export function assertAgentLocalRegistryWrite(args: Record<string, unknown>, options?: ToolExecuteOptions): void {
+export function assertAgentLocalRegistryWrite(args: Record<string, unknown>, options?: ToolExecuteOptions, routed = false): void {
   options?.signal?.throwIfAborted();
-  if (!assertCurrentToolEffect(args, options, 'write')) throw new ToolInputProjectionError('held');
+  if (!admittedFor(args, options, routed)) throw new ToolInputProjectionError('held');
   const context = options?.inputProjectionContext;
   const binding = context && contexts.get(context);
   if (!context || !binding) throw new ToolInputProjectionError('held');

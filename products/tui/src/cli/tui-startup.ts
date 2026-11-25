@@ -3,8 +3,11 @@ import type { CommandContext, CommandRegistry } from '../input/command-registry.
 import type { InputHandler } from '../input/handler.ts';
 import type { SelectionItem } from '../input/selection-modal.ts';
 import type { WorkspaceRegistrationManager, WorkspaceTrustManager } from '@goodvibes/engine/platform/platform/runtime/operations';
-import { readFolderTrustFacts, trustFolderWithNothingOfItsOwn, type FolderTrustFacts } from '@goodvibes/engine/terminal-shell/headless-command';
-import { readOnboardingCheckMarker, readWhoDecidesAsked, writeOnboardingCheckMarker, writeWhoDecidesAsked } from '../runtime/onboarding/index.ts';
+import { decodeFolderTrustChoice, folderTrustCard, readFolderTrustFacts, settleFolderTrustOnOpen, type FolderTrustFacts } from '@goodvibes/engine/terminal-shell/headless-command';
+import { readOnboardingCheckMarker, writeOnboardingCheckMarker } from '../runtime/onboarding/index.ts';
+import { readSetupState } from '@goodvibes/engine/platform/platform/capabilities';
+import { runDaemonCapability } from '@goodvibes/engine/terminal-shell/command-actions';
+import { capabilityBinding } from '../input/commands/capability-binding.ts';
 import { FirstRunModal, firstRunDecisionModel, installSplashAdditions, openWhoDecides, startFirstRun, type FirstRunDeps } from '@goodvibes/engine/terminal-shell/first-run';
 import { requireSecretsManager, requireServiceRegistry, requireSubscriptionManager } from '../input/commands/runtime-services.ts';
 import { scanThisComputerNow } from '../runtime/startup-provider-registration.ts';
@@ -28,47 +31,16 @@ export type FirstOpenTrustLevel = 'trusted' | 'restricted';
  * undecided so the next request asks again.
  */
 export function decodeFirstOpenChoice(id: string | null): FirstOpenTrustLevel | null {
-  if (id === 'trusted') return 'trusted';
-  if (id === 'restricted') return 'restricted';
-  return null;
+  return decodeFolderTrustChoice(id);
 }
 
 /**
- * Build the selection rows for the trust prompt. This used to also offer a
- * "register this directory?" half (a combined 2x2 when both were needed),
- * that half is gone: registration self-records (see
- * selfRecordWorkspaceRegistration below) rather than ever asking a question
- * about a registry the user hasn't met yet.
+ * The selection rows for the trust prompt: the one card both terminal programs
+ * show (terminal-shell native/folder-trust.ts folderTrustCard). Registration is
+ * never asked here: it self-records (selfRecordWorkspaceRegistration below).
  */
 export function buildFirstOpenItems(folder: FolderTrustFacts): { readonly title: string; readonly items: SelectionItem[] } {
-  // What trusting lets run, named from what the folder has; never a sentence about things it does not have.
-  const runs = [
-    ...(folder.hooksFile !== null ? [`the hooks in ${folder.hooksFile} run`] : []),
-    ...(folder.mcpFiles.length > 0
-      ? [`the tool ${folder.mcpServers.length === 1 ? 'server' : 'servers'} (MCP) ${folder.mcpServers.length > 0 ? `${folder.mcpServers.join(', ')} ` : ''}in ${folder.mcpFiles.join(', ')} start`]
-      : []),
-  ];
-  const lets = runs.length > 0
-    ? `Trusting it lets ${runs.join(' and ')}, and lets GoodVibes change files and run commands here.`
-    : 'Trusting it lets GoodVibes change files and run commands here.';
-  const undo = 'Change it later with /security trust-folder or /security restrict-folder.';
-  return {
-    title: `Trust ${folder.shownPath}?`,
-    items: [
-      {
-        id: 'trusted',
-        label: 'Trust this workspace',
-        detail: `${lets} It approves nothing: each action still follows your setting for when GoodVibes asks. ${undo}`,
-        primaryAction: 'select',
-      },
-      {
-        id: 'restricted',
-        label: 'Keep restricted (read-only)',
-        detail: `GoodVibes reads this folder and changes nothing in it: no file is changed and no command runs, and the folder's own hooks and MCP servers stay off, until you trust it. ${undo}`,
-        primaryAction: 'select',
-      },
-    ],
-  };
+  return folderTrustCard(folder);
 }
 
 // What a folder brings of its own, read the same way here and in `run` (terminal-shell native/folder-trust.ts).
@@ -125,18 +97,8 @@ async function askTrustOnOpen(
   requestTrustDecision: (() => Promise<FirstOpenTrustLevel>) | undefined,
   folder: () => FolderTrustFacts,
 ): Promise<void> {
-  if (!manager || !requestTrustDecision) return;
-  try {
-    await manager.load();
-    manager.askWhenRepositoryFilesAppear(requestTrustDecision);
-    const facts = folder();
-    const hasItsOwn = facts.hasItsOwn;
-    // The same rule, recorded the same way, as `run` applies (trustFolderWithNothingOfItsOwn).
-    if (await trustFolderWithNothingOfItsOwn(manager, () => facts)) return;
-    if (!manager.isDecided() || (manager.trustedForNothingToRun() && hasItsOwn)) await manager.trustQuestion(requestTrustDecision).answer;
-  } catch (error) {
-    logger.info('The workspace trust question asked on opening was not answered', { error: summarizeError(error) });
-  }
+  // The same rule as the Agent's start and `run` (terminal-shell native/folder-trust.ts).
+  await settleFolderTrustOnOpen(manager, requestTrustDecision, folder);
 }
 
 export function applyInitialTuiCliState(options: {
@@ -199,7 +161,7 @@ export function applyInitialTuiCliState(options: {
   // `/setup` → Run first-run again: the three steps, whether or not a model is ready.
   commandContext.openFirstRun = () => {
     // Asked for: "Who decides" follows the model whenever it is needed, answered before or not.
-    const deps = { ...firstRunDeps(commandContext, shellPaths, render, true, () => { input.conversationManager?.invalidateRenderedLines(); }), whoDecidesAsked: () => false };
+    const deps = { ...firstRunDeps(commandContext, shellPaths, render, true, () => { input.conversationManager?.invalidateRenderedLines(); }), whoDecidesAsked: () => false, includeWhoDecides: true };
     if (!deps.pushSurfaceModal) return;
     const modal = new FirstRunModal(deps);
     deps.pushSurfaceModal(modal);
@@ -207,12 +169,12 @@ export function applyInitialTuiCliState(options: {
       logger.warn('First run could not start', { error: summarizeError(error) });
     });
   };
-  // The status line's mode segment, while no decision model can be asked: "Who decides", whenever the person wants it.
-  commandContext.openWhoDecides = () => openWhoDecides(firstRunDeps(commandContext, shellPaths, render, true, () => { input.conversationManager?.invalidateRenderedLines(); }));
+  // The status line's mode segment, while no decision model can be asked, and the Setup list's row (always): "Who decides".
+  commandContext.openWhoDecides = (whoOptions) => openWhoDecides(firstRunDeps(commandContext, shellPaths, render, true, () => { input.conversationManager?.invalidateRenderedLines(); }), whoOptions);
   // --continue or bare --resume with no saved conversation: say so, then start
   // as a plain launch would rather than opening an unexplained empty session.
   const nothingToContinue = (): void => {
-    commandContext.print('No previous conversation to continue. This is a new one; /session list shows saved ones.');
+    commandContext.print('No previous conversation to continue. This is a new one; the Sessions place lists saved ones.');
     runFirstRunSteps();
   };
 
@@ -251,9 +213,9 @@ export function applyInitialTuiCliState(options: {
         if (!fork) return;
         // The session is open by now: a failed fork leaves it open as it is, so first run does not start over it.
         try {
-          await commandRegistry.execute('session', ['fork'], commandContext);
+          await commandRegistry.execute('fork', [], commandContext);
         } catch (error) {
-          commandContext.print(`[Fork] Resumed session ${target}, but it was not forked: ${summarizeError(error)}. Later turns are saved to ${target}; run /session fork to make a copy.`);
+          commandContext.print(`[Fork] Resumed session ${target}, but it was not forked: ${summarizeError(error)}. Later turns are saved to ${target}; /fork makes a copy.`);
         }
         render();
       },
@@ -289,8 +251,13 @@ function firstRunDeps(commandContext: CommandContext, shellPaths: TuiStartupShel
     decisionModel: firstRunDecisionModel(commandContext.platform.configManager, requireSecretsManager(commandContext)),
     // "Another decision model…": Settings, on the decision model.
     openDecisionModelSettings: () => { commandContext.openSettingsModal?.('judgment.model'); },
-    whoDecidesAsked: () => readWhoDecidesAsked(shellPaths),
-    recordWhoDecides: (how) => { writeWhoDecidesAsked(shellPaths, how); },
+    // "Who decides" asked once for both programs: the daemon's one setup record (capabilities/builtin/system-setup.ts).
+    whoDecidesAsked: () => readSetupState(shellPaths.homeDirectory).whoDecides !== null,
+    recordWhoDecides: (how) => {
+      void runDaemonCapability('setup.who-decides-asked', { how }, commandContext, capabilityBinding).catch((error: unknown) => {
+        commandContext.print(`"Who decides" could not be recorded with the daemon, so first run may ask it again: ${error instanceof Error ? error.message : String(error)}`);
+      });
+    },
   };
 }
 

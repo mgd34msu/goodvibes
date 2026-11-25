@@ -28,6 +28,7 @@ import { lstatSync } from 'node:fs';
 import { resolve as resolvePath } from 'node:path';
 import { categoryForCode, categoryForStatus, GoodVibesError, httpStatusOf } from '@goodvibes/engine/errors';
 import { createOperatorApiClient, type OperatorApiClient } from '@goodvibes/engine/operator-client';
+import { programCallHeaders } from '@goodvibes/engine/platform/platform/runtime/client';
 import type { OperatorMethodId, OperatorMethodInput, OperatorMethodOutput } from '@goodvibes/engine/platform/contracts';
 import { resolveConnectedHostDialEnabled } from '@goodvibes/engine/platform/platform/config';
 import { resolveConnectedHostAddress, type ConnectedHostAddressKey } from './connected-host-dial.js';
@@ -77,6 +78,12 @@ export function connectedHostRequestDeadline(isRead: boolean, signal?: AbortSign
 
 /** The header the daemon reads the explicit-user-request claim from. */
 export const EXPLICIT_USER_REQUEST_HEADER = 'x-goodvibes-explicit-user-request';
+
+/**
+ * The header a run whose script answers every question sends on a natively admitted method it decided itself: the
+ * daemon (daemon-api control-routes.ts, the same name) reads it from the Agent's credential only.
+ */
+export const DECIDED_IN_RUN_HEADER = 'x-goodvibes-decided-in-run';
 
 /**
  * A refusal in the shape every surface prints: the state, the reason and the
@@ -409,10 +416,11 @@ function clientFor(baseUrl: string, token: string, fetchImpl: FetchLike, validat
   let client = clients.get(key);
   if (!client) {
     // A redirect would carry the credential to wherever the host points; refuse it.
-    // Every call names the Agent, so what the owner does in it is attributed to it (an inbox answer says agent).
+    // Every call names the Agent, so what the owner does in it is attributed to it (an inbox answer says agent), and
+    // carries the Agent's call context: the project it works in and the conversation it holds (call-context.ts).
     const noRedirect = (input: string | URL | Request, init?: RequestInit) => {
       const headers = new Headers(init?.headers ?? (input instanceof Request ? input.headers : undefined));
-      headers.set('x-goodvibes-client', 'agent');
+      for (const [name, value] of Object.entries(programCallHeaders('agent'))) headers.set(name, value);
       return fetchImpl(input, { ...init, headers, redirect: 'error' });
     };
     client = createOperatorApiClient({ baseUrl, authToken: token, fetchImpl: noRedirect, retry: { maxAttempts: 1 }, validateResponses });

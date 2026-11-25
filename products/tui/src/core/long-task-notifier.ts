@@ -21,8 +21,8 @@
  *   1. Desktop notification (linux notify-send / mac osascript) via platform
  *      notifyNow, detected and dispatched by the platform; silently
  *      no-ops when the platform does not support it.
- *   2. Configured outbound webhook channel (ntfy topic / webhook URL) via
- *      WebhookNotifier.sendNotification(), only fires when the user has URLs configured.
+ *   2. The daemon's one list of webhook addresses (ntfy topic / webhook URL),
+ *      through the daemon's `notifications.send` (program-notices.ts).
  *
  * When neither target is available the function is an honest no-op (debug log
  * only; no user-facing error spam).
@@ -39,7 +39,7 @@
 
 import { notifyNow } from '@goodvibes/engine/platform/platform/utils';
 import { logger } from '@goodvibes/engine/platform/platform/utils';
-import type { WebhookNotifier } from '@goodvibes/engine/platform/platform/integrations';
+import type { ProgramNotices } from '@goodvibes/engine/terminal-shell/places';
 import type { FocusTracker } from '@goodvibes/engine/platform/platform/runtime/operations';
 import { NOTIFY_AFTER_SECONDS_SETTING } from '../config/tui-extension-settings.ts';
 import {
@@ -137,7 +137,8 @@ export interface MaybeNotifyLongTaskOptions {
    * (e.g. ntfy.sh topics). Optional, absent means outbound delivery is
    * skipped silently.
    */
-  readonly webhookNotifier?: WebhookNotifier | null;
+  /** This program's notices, sent through the daemon's one webhook list (terminal-shell program-notices.ts). */
+  readonly notices?: Pick<ProgramNotices, 'sendNotification'> | null;
 
   /**
    * Terminal focus tracker. When supplied together with `configGet`,
@@ -163,7 +164,7 @@ export interface MaybeNotifyLongTaskOptions {
  * Text: see the NAMING and PRIVACY rules at the top of this file.
  */
 export function maybeNotifyLongTask(opts: MaybeNotifyLongTaskOptions): boolean {
-  const { elapsedMs, status, kind, sessionId, thresholdSeconds, webhookNotifier, focusTracker, configGet } = opts;
+  const { elapsedMs, status, kind, sessionId, thresholdSeconds, notices, focusTracker, configGet } = opts;
   const notifyDesktop = opts.notifyDesktop ?? notifyNow;
 
   // The threshold gates both deliveries (0 is off); a desktop floor
@@ -217,16 +218,11 @@ export function maybeNotifyLongTask(opts: MaybeNotifyLongTaskOptions): boolean {
   }
 
   // Delivery 2: outbound webhook (ntfy / generic endpoint) if configured.
-  if (webhookNotifier && thresholdMet) {
-    const urls = webhookNotifier.getUrls();
-    if (urls.length > 0) {
-      delivered = true;
-      webhookNotifier.sendNotification({ kind: 'turn', facts }).catch((err: unknown) => {
-        logger.debug('long-task-notifier: webhook send error', { error: String(err) });
-      });
-    } else {
-      logger.debug('long-task-notifier: no webhook URLs configured, skipping outbound delivery');
-    }
+  // Through the daemon's one webhook list; it knows whether any address is set.
+  if (notices && thresholdMet) {
+    notices.sendNotification({ kind: 'turn', facts }, 'turn.completed').catch((err: unknown) => {
+      logger.debug('long-task-notifier: webhook send error', { error: String(err) });
+    });
   }
 
   return delivered;

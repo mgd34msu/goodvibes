@@ -13,11 +13,11 @@
  * words and keeps what only the terminal draws. paint.ts draws it.
  */
 import type { ToolCall } from '@goodvibes/engine/platform/platform/types';
-import { beadName as summaryName } from '@goodvibes/engine/contracts';
+import { beadArgument as summaryArgument, beadName as summaryName } from '@goodvibes/engine/contracts';
 import { toolActivityOf } from '@goodvibes/engine/platform/platform/tools';
+import { movedCapabilityEntries } from '@goodvibes/engine/platform/platform/capabilities';
 
 export {
-    beadArgument,
     beadBody,
     beadStatus,
     beadSummary,
@@ -46,5 +46,23 @@ export type {
  */
 export function beadName(call: Pick<ToolCall, 'name'> & { readonly arguments?: Readonly<Record<string, unknown>> | undefined }): string {
     return summaryName({ name: call.name, arguments: call.arguments, activity: toolActivityOf(call.name) });
+}
+
+/** Each capability's label by its id, read once (the definitions do not change while the program runs). */
+let capabilityLabels: ReadonlyMap<string, string> | undefined;
+function capabilityLabel(id: string): string | undefined {
+    capabilityLabels ??= new Map(movedCapabilityEntries().map((entry) => [entry.id, entry.label] as const));
+    return capabilityLabels.get(id);
+}
+
+/**
+ * The key argument on the bead row: the shared summary's, except that a capability the model runs is named by its
+ * label ("Give a card's security code to a purchase waiting for it"), never by its id ("payments.security-code"). An
+ * id with no label here (a daemon method named directly) stays as written.
+ */
+export function beadArgument(call: Parameters<typeof summaryArgument>[0]): string {
+    const id = call.name === 'capability_run' ? call.arguments?.['id'] : undefined;
+    const label = typeof id === 'string' ? capabilityLabel(id) : undefined;
+    return label ?? summaryArgument(call);
 }
 

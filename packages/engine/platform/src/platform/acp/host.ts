@@ -578,7 +578,8 @@ export class AcpHostService {
         };
         try {
           assertCurrent();
-          admission = await admitExternalRequest(host, { connectionId: record.info.id, destination: record.info.binaryPath, signal, assertCurrent, sessionId: record.info.sessionId },
+          // Decided for the hosted agent's own folder: that project's rules, trust and answers, no other's.
+          admission = await admitExternalRequest(host, { connectionId: record.info.id, destination: record.info.binaryPath, signal, assertCurrent, sessionId: record.info.sessionId, workingDirectory: record.info.cwd },
             { sourceOf: () => operation.source, assertCurrent: () => {} }, {
               tool: owned.toolCall.title ?? 'ACP action', protocolSubject: wire.protocolSubject!,
               args: { ...(owned.toolCall.rawInput && typeof owned.toolCall.rawInput === 'object' && !Array.isArray(owned.toolCall.rawInput)

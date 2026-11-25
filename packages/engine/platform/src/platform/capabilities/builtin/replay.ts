@@ -48,7 +48,7 @@ export const REPLAY_STATUS = replayCapability({
     const snap = engineOf(services).getSnapshot();
     return snap.status === 'idle'
       ? { text: 'No run is loaded. Load one from the recorded runs in the Work place.', data: { status: 'idle' } }
-      : { text: `Loaded run: ${snap.runId}, event ${snap.currentRev} of ${snap.totalRevisions}, ${snap.status}.`, data: { runId: snap.runId, rev: snap.currentRev, total: snap.totalRevisions, status: snap.status } };
+      : { text: `The turn of ${snap.runId} is loaded, at event ${snap.currentRev} of ${snap.totalRevisions}${snap.status === 'exhausted' ? ', its last' : ''}.`, data: { runId: snap.runId, rev: snap.currentRev, total: snap.totalRevisions, status: snap.status } };
   },
 });
 

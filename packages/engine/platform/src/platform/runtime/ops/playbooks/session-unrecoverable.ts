@@ -60,8 +60,8 @@ export const sessionUnrecoverablePlaybook: Playbook = {
     },
   ],
   steps: [
-    { step: 1, title: 'Pick the session by hand', action: 'Run /session list to list saved sessions and /session resume to open the one you want.', kind: 'command', command: '/session list', expectedOutcome: 'The conversation is back.', automatable: false },
-    { step: 2, title: 'Keep a copy first', action: 'Run /session save-file once a session is open to save its transcript before trying anything else.', kind: 'command', command: '/session save-file', expectedOutcome: 'A transcript file exists.', automatable: false },
+    { step: 1, title: 'Pick the session by hand', action: 'Open the Sessions place: it lists your saved sessions, and Enter on one resumes it here (or /resume with its id).', kind: 'command', command: '/resume', expectedOutcome: 'The conversation is back.', automatable: false },
+    { step: 2, title: 'Keep a copy first', action: 'Once a session is open, save its transcript with This conversation, "Save or export this conversation as a file", before trying anything else.', kind: 'observe', expectedOutcome: 'A transcript file exists.', automatable: false },
     { step: 3, title: 'Start fresh', action: 'If the session cannot be opened, start a new one with /clear; the old files stay on disk for review.', kind: 'command', command: '/clear', expectedOutcome: 'A new session starts.', automatable: false },
   ],
   escalationCriteria: [

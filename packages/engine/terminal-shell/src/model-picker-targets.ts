@@ -70,7 +70,7 @@ export function buildConversationModelPickerTargets(
     {
       target: 'tts',
       label: TARGET_LABELS.tts,
-      description: 'Writes the answers that are read aloud (/voice speak); none chosen, the main chat model writes them.',
+      description: 'Writes the answers that are read aloud ("ask and hear it", System place); none chosen, the main chat model writes them.',
       provider: ttsProvider || mainProvider,
       model: ttsModel || mainModel,
       enabled: true,

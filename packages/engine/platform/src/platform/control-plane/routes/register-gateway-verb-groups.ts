@@ -41,6 +41,7 @@ import { registerChannelTestGatewayMethods } from './channel-test.js';
 import { registerWorktreeSetupGatewayMethods } from './worktree-setup.js';
 import { WorktreeRegistry } from '../../runtime/worktree/registry.js';
 import { resolveEffectiveWorktreeSetup } from '../../runtime/worktree/setup.js';
+import { projectWorktreeSettings } from '../../runtime/worktree/project-setup-settings.js';
 import { registerCostGatewayMethods } from './cost.js';
 import { registerPermissionRulesGatewayMethods } from './permission-rules.js';
 import { registerOwnerInboxGatewayMethods, type OwnerInboxGatewayService } from './owner-inbox.js';
@@ -68,6 +69,7 @@ import { registerComposedCheckinGatewayMethods } from './checkin-composition.js'
 import type { CheckinSessionView } from '../../checkin/index.js';
 import type { CheckinContractView } from '../../checkin/state-reader.js';
 import type { ProviderRegistry } from '../../providers/registry.js';
+import { readBudgetAlertUsd } from '../../providers/session-cost.js';
 import type { AutomationManager } from '../../automation/index.js';
 import type { ChannelDeliveryRouter } from '../../channels/delivery-router.js';
 import { composeCiWatchGatewayVerbs } from './ci-watch-composition.js';
@@ -77,7 +79,8 @@ import { logger } from '../../utils/logger.js';
 import { registerFlagsGraduationGatewayMethods } from './flags-graduation.js';
 import { registerRuntimeMetricsGatewayMethods } from './runtime-metrics.js';
 import { registerStepUpGatewayMethods, type StepUpGatewayService } from './stepup.js';
-import { dirname } from 'node:path';
+import { dirname, join } from 'node:path';
+import { readPersistedWorkspaceTrust } from '../../runtime/workspace-trust.js';
 import { registerRewindGatewayMethods } from './rewind.js';
 import {
   createConversationRewindHostBroker,
@@ -151,6 +154,11 @@ export interface GatewayVerbGroupDeps extends FleetCheckpointsSearchGatewayDeps,
    * that never tears down passes nothing and keeps today's behaviour.
    */
   readonly disposal?: AsyncDisposalRegistry | undefined;
+  /**
+   * Where a method that holds its request open while it waits (a long poll) registers the call that ends every such
+   * wait: run when the daemon stops, before its listener closes (which waits for every running request).
+   */
+  readonly longWaits?: { add(label: string, end: () => void): void } | undefined;
   /** The approval broker, the real event source push fans out from. */
   readonly approvalBroker: ApprovalSource;
   /**
@@ -226,7 +234,7 @@ export interface GatewayVerbGroupDeps extends FleetCheckpointsSearchGatewayDeps,
    * read/write. A set flows to surfaces as runtime.permissions via the
    * already-wired mode-change binding.
    */
-  readonly configManager: Pick<ConfigManager, 'get' | 'set' | 'attachProfileFallback'> & Partial<Pick<ConfigManager, 'onDidInvalidate' | 'attachProfilePostalFallback' | 'subscribe' | 'resolveForConsumer' | 'setMany'>>;
+  readonly configManager: Pick<ConfigManager, 'get' | 'set' | 'attachProfileFallback'> & Partial<Pick<ConfigManager, 'onDidInvalidate' | 'attachProfilePostalFallback' | 'subscribe' | 'resolveForConsumer' | 'setMany' | 'getProjectConfigPath'>>;
   /**
    * The mode in force for a chosen mode (the permission manager's
    * modeInForce), so sessions.permissionMode.get reports what decides the
@@ -324,6 +332,8 @@ export interface GatewayVerbGroupDeps extends FleetCheckpointsSearchGatewayDeps,
   /** Cancels native CI continuations whose settings or scope changed; the CI watch poll asks before each pass while a watch carries one. */
   readonly ciNativeContinuationReconcile?: (() => Promise<readonly { readonly continuationId: string; readonly reason: string }[]>) | undefined;
   readonly ciAutonomousHost?: (() => import('../../permissions/external-request.js').ExternalPermissionHost | undefined) | undefined;
+  /** The host a natively admitted daemon method (the owner profile, occasions) is decided by: no folder trust (runtime-graph.ts). */
+  readonly nativeMutationHost?: (() => import('../../permissions/external-request.js').ExternalPermissionHost | undefined) | undefined;
   readonly onCiAutoWatch?: ((observer: (toolName: string, args: Record<string, unknown>, success: boolean) => void) => void) | undefined;
   /**
    * Optional: a daemon-side conversation store port for the conversation half of
@@ -398,6 +408,11 @@ export interface GatewayVerbGroupDeps extends FleetCheckpointsSearchGatewayDeps,
    * the same approval broker. Absent → inbox.* stay cataloged-but-unhandled.
    */
   readonly ownerInbox?: OwnerInboxGatewayService | undefined;
+  /**
+   * Who registered a session (the broker's `registrantOf`): a posted question names a session as its asker only when
+   * its poster registered that session. Absent → no posted question keeps a session as its asker.
+   */
+  readonly sessionRegistrant?: ((sessionId: string) => string | undefined) | undefined;
   /**
    * The contracts this daemon runs (open ones), read by the check-in for a
    * contract waiting on the owner's decision. Absent → the check-in reads none
@@ -542,7 +557,7 @@ export function registerGatewayVerbGroups(catalog: GatewayMethodCatalog, deps: G
     homeDir: dirname(daemonStateDir),
     daemonStateDir,
   });
-  registerWorkspacesGatewayMethods(catalog, workspaceRegistrationStore);
+  registerWorkspacesGatewayMethods(catalog, workspaceRegistrationStore, deps.workingDirectory);
 
   // The cross-channel principal identity registry over a JSON snapshot under
   // the daemon's own control-plane state directory, constructed here like the
@@ -568,7 +583,7 @@ export function registerGatewayVerbGroups(catalog: GatewayMethodCatalog, deps: G
   const calendarGateway = createDaemonCalendarGatewayService(deps);
   if (deps.configManager?.attachProfileFallback !== undefined) {
     const ownerProfile = composeOwnerProfile(catalog, {
-      nativeMutationHost: deps.ciAutonomousHost?.(),
+      nativeMutationHost: deps.nativeMutationHost?.() ?? deps.ciAutonomousHost?.(),
       configManager: deps.configManager,
       postalProviders: deps.providerRegistry,
       occasions: { ...deps, calendarGateway: calendarGateway ?? undefined },
@@ -632,12 +647,41 @@ export function registerGatewayVerbGroups(catalog: GatewayMethodCatalog, deps: G
   if (deps.workingDirectory !== undefined) {
     const worktreeSetupRegistry = new WorktreeRegistry(deps.workingDirectory);
     const sourceRoot = deps.workingDirectory;
+    // A call that names its project (a terminal program's folder, or the project an outside caller chose) acts on
+    // that project's one register file, the one its terminal programs keep, never on the daemon's own by default.
+    // Its setup settings are that project's own settings layer (project-setup-settings.ts), the daemon's for what
+    // that layer does not hold; the project file's setup commands only in a folder the owner trusts (the shared
+    // workspace register). Derived-by-default setup (lockfile → install command, .env carry-over); a setting overrides
+    // the derivation per field, never merely enables it.
+    const forProject = (project: string) => {
+      const settings = () => projectWorktreeSettings(project, {
+        daemonFolder: sourceRoot,
+        daemonProjectFile: deps.configManager.getProjectConfigPath?.(),
+        daemonSetting: (key) => deps.configManager.get(key as ConfigKey),
+        folderTrust: (folder) => {
+          const view = readPersistedWorkspaceTrust({
+            workingDirectory: folder,
+            resolveProjectPath: (...segments) => join(folder, '.goodvibes', ...segments),
+            resolveUserPath: (...segments) => deps.shellPaths.resolveUserPath(...segments),
+          }, deps.surfaceRoot);
+          return view.level === 'trusted' && view.forNothingToRun === true ? 'undecided' : view.level;
+        },
+      });
+      return {
+        registry: new WorktreeRegistry(project),
+        sourceRoot: project,
+        resolveConfig: () => resolveEffectiveWorktreeSetup(settings().get, project),
+        commandsNotUsed: () => settings().commandsNotUsed,
+      };
+    };
+    // The daemon's own folder, named or not, by the same rule.
+    const own = forProject(sourceRoot);
     registerWorktreeSetupGatewayMethods(catalog, {
       registry: worktreeSetupRegistry,
       sourceRoot,
-      // Derived-by-default setup (lockfile → install command, .env carry-over);
-      // user config overrides the derivation per field, never merely enables it.
-      resolveConfig: () => resolveEffectiveWorktreeSetup((key) => deps.configManager.get(key as ConfigKey), deps.workingDirectory!),
+      resolveConfig: own.resolveConfig,
+      commandsNotUsed: own.commandsNotUsed,
+      forProject,
     });
   }
 
@@ -816,13 +860,18 @@ export function registerGatewayVerbGroups(catalog: GatewayMethodCatalog, deps: G
   // counterpart to the decide verbs. Registered only when the raising view of
   // the broker is wired.
   if (deps.approvalRaise) {
-    registerApprovalRaiseGatewayMethods(catalog, deps.approvalRaise);
+    // The card names the paired device that raised it by its name; a raise names a session only when its raiser
+    // registered that session.
+    registerApprovalRaiseGatewayMethods(catalog, deps.approvalRaise, {
+      deviceName: (pairingId) => deps.pairingTokens?.list().find((device) => device.id === pairingId)?.name,
+      ...(deps.sessionRegistrant ? { sessionRegistrant: deps.sessionRegistrant } : {}),
+    });
   }
 
   // inbox.*, the owner inbox: approvals plus questions, claims, purchase
   // windows and queued actions, answered once from any surface.
   if (deps.ownerInbox) {
-    registerOwnerInboxGatewayMethods(catalog, deps.ownerInbox);
+    registerOwnerInboxGatewayMethods(catalog, deps.ownerInbox, deps.sessionRegistrant);
   }
 
   // ops.doctor, a symptom's runbook run against this daemon's live state. The
@@ -904,6 +953,8 @@ export function registerGatewayVerbGroups(catalog: GatewayMethodCatalog, deps: G
   });
   registerRewindConversationHostGatewayMethods(catalog, conversationHosts);
   deps.disposal?.add('conversation rewind hosts', () => conversationHosts.shutdown());
+  // A host's take waits up to 25 s for a question: at stop it ends before the listener is closed, which waits for it.
+  deps.longWaits?.add('conversation rewind hosts', () => conversationHosts.shutdown());
 
   const rewindService = new UnifiedRewindService({
     workspace: deps.workspaceCheckpointManager,
@@ -929,7 +980,9 @@ export function registerGatewayVerbGroups(catalog: GatewayMethodCatalog, deps: G
 
   if (deps.runtimeBus) {
     // LLM + metered-voice usage -> the attribution ledger (see attribution-ingest.ts).
-    deps.disposal?.add('cost attribution ingest', bindCostAttributionIngest(deps.runtimeBus, costAttribution, quotaWindow));
+    // The daemon's own runs are checked against the spending alert as they record (one alert, behavior.budgetAlertUsd).
+    deps.disposal?.add('cost attribution ingest', bindCostAttributionIngest(deps.runtimeBus, costAttribution, quotaWindow,
+      () => readBudgetAlertUsd((key) => deps.configManager.get(key as ConfigKey))));
   }
 }
 

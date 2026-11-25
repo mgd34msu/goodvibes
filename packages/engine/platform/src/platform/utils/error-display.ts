@@ -14,7 +14,7 @@ import {
   type JudgmentPortCapture,
 } from '@goodvibes/engine/errors';
 import { decisionOrClassic } from '../runtime/decision-policy.js';
-import { AppError, ProviderError, type PlatformErrorCategory, type PlatformErrorSource, type ProviderErrorOptions } from '../types/errors.js';
+import { AppError, CONTEXT_REFUSAL_GUIDANCE, ProviderError, type PlatformErrorCategory, type PlatformErrorSource, type ProviderErrorOptions } from '../types/errors.js';
 import type { StructuredDaemonErrorBody } from '../types/daemon-error-contract.js';
 import { captureFailureSnapshot } from '../gate/failure-input-snapshot.js';
 import { assertJudgmentInput, captureOwnedJson, JudgmentInputError } from '../gate/judgment-input.js';
@@ -279,9 +279,12 @@ function normalizeWith(error: unknown, options: ErrorNormalizationOptions, displ
   });
   // A reading that turned a provisional category into billing also replaces
   // the guidance the error was built with for that provisional category.
-  const hint = error instanceof AppError && error.guidance && category === fixed
-    ? error.guidance
-    : inferHint(category, statusCode, fromProvider);
+  // A refusal read as a conversation too long for the model says to shorten it, never to check the request's shape.
+  const hint = fromProvider && options.failure?.contextExceeded === true
+    ? CONTEXT_REFUSAL_GUIDANCE
+    : error instanceof AppError && error.guidance && category === fixed
+      ? error.guidance
+      : inferHint(category, statusCode, fromProvider);
   const retryAfterMs = (error instanceof AppError ? error.retryAfterMs : undefined) ?? options.retryWaitMs;
 
   return {

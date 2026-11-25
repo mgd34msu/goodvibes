@@ -18,7 +18,7 @@ import type { CapabilityMethod } from './operator-input.js';
 import type { CapabilityGroupId } from './groups.js';
 import { effectiveRisk } from './risk.js';
 import type {
-  ActionLasts, ActionRisk, ActionTouches, CapabilityDeclaration, CapabilityDefinition, CapabilityHome, CapabilityRepeat, InputDescription,
+  ActionLasts, ActionRisk, ActionTouches, CapabilityDeclaration, CapabilityDefinition, CapabilityHome, CapabilityRepeat, CapabilitySentenceWhen, CapabilityTightensWhen, InputDescription,
 } from './types.js';
 
 export type CapabilityEntryHome = CapabilityHome | 'terminal';
@@ -45,9 +45,25 @@ export interface CapabilityEntry {
   readonly ownerOnly?: { readonly reason: string; readonly instead: string } | undefined;
   /** The effects its definition states; absent, derived (`capabilityEffects`). */
   readonly effects?: readonly EffectId[] | undefined;
+  /** It only tightens a protection (types.ts `tightens`): a model's call of it is never refused or asked about. */
+  readonly tightens?: true | CapabilityTightensWhen | undefined;
+  /** It writes only the model's own working state (types.ts `ownWorkingState`): a model's call of it is never held or asked about. */
+  readonly ownWorkingState?: true | undefined;
+  /** Whether a run with these values loosens a protection (types.ts `loosensIf`): asked first, opening on No. */
+  readonly loosensIf?: ((values: Readonly<Record<string, string>>) => boolean) | undefined;
+  /** The chosen values with which a run cannot be undone (types.ts `irreversibleWhen`): put to the owner for a model. */
+  readonly irreversibleWhen?: CapabilityTightensWhen | undefined;
+  /** The sentence said instead with some values (types.ts `sentenceWhen`): what will really happen. */
+  readonly sentenceWhen?: CapabilitySentenceWhen | undefined;
   readonly inputs: readonly InputDescription[];
   /** The daemon method that runs it, which input fills which of its fields, and the preview that reads them first. */
   readonly method?: CapabilityMethod | undefined;
+  /** The action id (in the same command) that undoes this one: a screen shows its Undo after the act. */
+  readonly undoneBy?: string | undefined;
+  /** The confirming button's words when the label's verb cannot be read from it ("Put them back"). */
+  readonly button?: string | undefined;
+  /** The titles of its form's steps, in order (a step of usual settings is folded under "More settings"). */
+  readonly stepTitles?: readonly string[] | undefined;
 }
 
 /** An action as the catalog reads it: a described action, or its row in the generated command-actions data. */
@@ -63,9 +79,17 @@ export interface CatalogActionSource {
   readonly lasts: ActionLasts | 'not-a-change';
   readonly ownerOnly?: { readonly reason: string; readonly instead: string } | undefined;
   readonly effects?: readonly EffectId[] | undefined;
+  readonly tightens?: true | CapabilityTightensWhen | undefined;
+  readonly ownWorkingState?: true | undefined;
+  readonly loosensIf?: ((values: Readonly<Record<string, string>>) => boolean) | undefined;
+  readonly irreversibleWhen?: CapabilityTightensWhen | undefined;
+  readonly sentenceWhen?: CapabilitySentenceWhen | undefined;
   readonly inputs: readonly InputDescription[];
-  readonly operator?: { readonly method?: string | undefined; readonly fields?: Readonly<Record<string, string>> | undefined; readonly preview?: string | undefined; readonly terminalOnly?: string | undefined } | undefined;
+  readonly operator?: { readonly method?: string | undefined; readonly fields?: Readonly<Record<string, string>> | undefined; readonly preview?: string | undefined; readonly project?: true | undefined; readonly terminalOnly?: string | undefined } | undefined;
   readonly capability?: CapabilityDeclaration | undefined;
+  readonly undoneBy?: string | undefined;
+  readonly button?: string | undefined;
+  readonly stepTitles?: readonly string[] | undefined;
 }
 
 export interface CatalogCommandSource {
@@ -78,7 +102,9 @@ function entryOf(command: Pick<CatalogCommandSource, 'name' | 'title'>, action: 
   const declared = action.capability;
   const group = declared?.group ?? capabilityGroupOf(command.name, action.id);
   const method: CapabilityMethod | undefined = action.operator?.method
-    ? { id: action.operator.method, fields: action.operator.fields ?? {}, ...(action.operator.preview ? { preview: action.operator.preview } : {}) }
+    ? { id: action.operator.method, fields: action.operator.fields ?? {}, ...(action.operator.preview ? { preview: action.operator.preview } : {}),
+      // What it makes belongs to the caller's project (operator-input.ts `project`).
+      ...(action.operator.project ? { project: true as const } : {}) }
     : undefined;
   const home: CapabilityEntryHome = declared?.home ?? (method ? 'daemon' : 'terminal');
   return {
@@ -99,8 +125,16 @@ function entryOf(command: Pick<CatalogCommandSource, 'name' | 'title'>, action: 
     lasts: action.lasts,
     ...(action.ownerOnly ? { ownerOnly: action.ownerOnly } : {}),
     ...(action.effects ? { effects: action.effects } : {}),
+    ...(action.tightens ? { tightens: action.tightens } : {}),
+    ...(action.ownWorkingState ? { ownWorkingState: action.ownWorkingState } : {}),
+    ...(action.loosensIf ? { loosensIf: action.loosensIf } : {}),
+    ...(action.irreversibleWhen ? { irreversibleWhen: action.irreversibleWhen } : {}),
+    ...(action.sentenceWhen ? { sentenceWhen: action.sentenceWhen } : {}),
     inputs: action.inputs,
     ...(method ? { method } : {}),
+    ...(action.undoneBy ? { undoneBy: action.undoneBy } : {}),
+    ...(action.button ? { button: action.button } : {}),
+    ...(action.stepTitles && action.stepTitles.length > 0 ? { stepTitles: action.stepTitles } : {}),
   };
 }
 

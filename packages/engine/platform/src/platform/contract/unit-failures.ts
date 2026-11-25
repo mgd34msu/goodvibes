@@ -44,6 +44,17 @@ import { isTerminalUnitStatus, type ContractFailureKind, type ContractUnit } fro
 import type { WatchedAgent } from './watchdog.js';
 import { nativeContractPort } from './native-decisions.js';
 
+/** Whether the run waits at a failed step of agent-run work (its pause open), nothing else of it asked. */
+function waitsAtFailedStep(run: ContractRun): boolean {
+  return run.contract.sessionMode !== true && run.contract.status === 'awaiting-owner'
+    && run.contract.escalations.some((entry) => entry.resolvedAt === undefined && entry.failurePause === true && entry.scope === 'unit');
+}
+
+/** A step named as a person reads it: its title, never its id. */
+function stepName(unit: Pick<ContractUnit, 'id' | 'title'>): string {
+  return `"${(unit.title || unit.id).replace(/\s+/g, ' ').trim()}"`;
+}
+
 /** The decision site the transport reading is logged under. */
 export const TRANSPORT_RETRY_SITE = 'contract.transport-retry';
 
@@ -67,6 +78,11 @@ interface RetryDecision {
 
 export interface UnitFailureDeps {
   readonly runs: () => Iterable<ContractRun>;
+  /**
+   * True once the host that runs the work is closing (the daemon stopping): its agents end with it, which is
+   * neither someone stopping the work nor a step failing. The runner keeps a restart checkpoint instead.
+   */
+  readonly hostClosing?: (() => boolean) | undefined;
   readonly agentManager: {
     getStatus(agentId: string): AgentRecord | null;
     cancel(agentId: string, kind?: 'interrupt' | 'kill'): boolean;
@@ -186,6 +202,8 @@ export function createUnitFailureHandling(deps: UnitFailureDeps): UnitFailureHan
 
   function onFailed(agentId: string, error: string): void {
     noteEnded(agentId);
+    // An agent cut off by the host closing has not failed its step.
+    if (deps.hostClosing?.() === true) return;
     const found = locate(agentId);
     if (found === null) return;
     const { run, unit } = found;
@@ -253,10 +271,11 @@ export function createUnitFailureHandling(deps: UnitFailureDeps): UnitFailureHan
     const config = run.env.config();
     if (!decision.retryable || unit.transportRetries >= config.transportRetryLimit) {
       const kind: ContractFailureKind = decision.retryable ? 'transport' : 'other';
+      // Said in the words of the work (the setting's key stays in the decision record, not in the line a person reads).
       const why = decision.retryable
-        ? `a transient failure after ${unit.transportRetries} retr${unit.transportRetries === 1 ? 'y' : 'ies'} (contract.transportRetryLimit is ${config.transportRetryLimit})`
-        : 'a failure a retry cannot clear';
-      failUnit(run, unit, kind, `unit ${unit.id} failed with ${why}: ${message}`, decision.decisionIds);
+        ? `it was tried ${unit.transportRetries + 1} time${unit.transportRetries === 0 ? '' : 's'} and the connection kept failing`
+        : 'a failure that does not clear by itself';
+      failUnit(run, unit, kind, `step ${stepName(unit)} failed (${why}): ${message}`, decision.decisionIds);
       return;
     }
     const delayMs = Math.min(MAX_TRANSPORT_RETRY_DELAY_MS, decision.retryAfterMs ?? config.transportRetryDelayMs * 2 ** unit.transportRetries);
@@ -270,6 +289,8 @@ export function createUnitFailureHandling(deps: UnitFailureDeps): UnitFailureHan
 
   function onCancelled(agentId: string): void {
     noteEnded(agentId);
+    // The host is closing: every agent ends with it; the work stands as it was and is gone on with at the next start.
+    if (deps.hostClosing?.() === true) return;
     for (const run of deps.runs()) {
       for (const runtime of run.unitRuntimes.values()) {
         if (runtime.expectedCancels.delete(agentId)) return;
@@ -277,6 +298,9 @@ export function createUnitFailureHandling(deps: UnitFailureDeps): UnitFailureHan
     }
     // The owner record is the contract as parents and surfaces see it: stopping it stops the contract.
     for (const run of deps.runs()) {
+      // Work stopped at a failed step waits for the person, with nothing of it running: its owner record ending (the
+      // daemon stopping takes every agent with it) is not someone stopping the work. It is stopped by its own control.
+      if (!run.terminal && run.contract.ownerAgentId === agentId && waitsAtFailedStep(run)) return;
       if (!run.terminal && run.contract.ownerAgentId === agentId) {
         deps.cancelContract(run, `the contract's owner record ${agentId} was stopped by an operator`);
         return;
@@ -284,7 +308,10 @@ export function createUnitFailureHandling(deps: UnitFailureDeps): UnitFailureHan
     }
     const found = locate(agentId);
     if (found === null) return;
-    deps.cancelContract(found.run, `unit ${found.unit.id}'s agent ${agentId} was stopped by an operator`);
+    // Work waiting at a failed step keeps waiting: a step's agent lost meanwhile (the daemon stopping) runs again when
+    // the work is picked up again.
+    if (waitsAtFailedStep(found.run)) return;
+    deps.cancelContract(found.run, `the agent working on step ${stepName(found.unit)} was stopped by hand`);
   }
 
   function onSilent(agent: WatchedAgent, silentMs: number): void {
@@ -296,7 +323,7 @@ export function createUnitFailureHandling(deps: UnitFailureDeps): UnitFailureHan
       run.emit({ type: 'CONTRACT_UNIT_SILENT', contractId: run.id, unitId: unit.id, agentId: agent.agentId, silentMs, action: 'failed' });
       run.runtime(unit).expectedCancels.add(agent.agentId);
       deps.agentManager.cancel(agent.agentId, 'kill');
-      failUnit(run, unit, 'other', `unit ${unit.id} went silent twice`);
+      failUnit(run, unit, 'other', `step ${stepName(unit)} failed: its agent stopped answering twice`);
       return;
     }
     run.emit({ type: 'CONTRACT_UNIT_SILENT', contractId: run.id, unitId: unit.id, agentId: agent.agentId, silentMs, action: 'retried' });

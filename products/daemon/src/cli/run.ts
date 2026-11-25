@@ -201,19 +201,31 @@ export async function runDaemonCli(argv: readonly string[], options: DaemonCliOp
       // A capability by id, and the capabilities that serve a need: the running daemon's capabilities.run and capabilities.find.
       case 'do':
       case 'find': {
-        const { daemonTargetInvoke, runCapabilityCli } = await import('@goodvibes/engine/terminal-shell/capability-cli');
+        const [{ daemonTargetInvoke, runCapabilityCli }, { daemonStartingInvoke }, { findDaemonProgram }] = await Promise.all([
+          import('@goodvibes/engine/terminal-shell/capability-cli'), import('@goodvibes/engine/terminal-shell/support-bundle-cli'),
+          import('@goodvibes/engine/platform/platform/runtime/client'),
+        ]);
         const lines: string[] = [];
         const errors: string[] = [];
+        const target = daemonTargetInvoke({ configManager: config, homeDirectory, daemonHomeDirectory },
+          { fetchImpl: remote.fetchImpl, readToken: remote.readToken, flags: { host: cli.flags.host, port: cli.flags.port, token: cli.flags.token } });
         const exitCode = await runCapabilityCli({
           program: 'goodvibes-daemon', verb: cli.command, args: cli.commandArgs, json: cli.flags.json === true,
-          invoke: daemonTargetInvoke({ configManager: config, homeDirectory, daemonHomeDirectory },
-            { fetchImpl: remote.fetchImpl, readToken: remote.readToken, flags: { host: cli.flags.host, port: cli.flags.port, token: cli.flags.token } }),
-          workingDirectory,
+          // The daemon on this machine is started first when it is stopped (never one named by --host), as the programs do.
+          // With no service installed, this program itself is the daemon program started (`serve`, in the background).
+          invoke: cli.flags.host === undefined ? daemonStartingInvoke(target, { configManager: config, workingDirectory }, {
+            say: (line) => { errors.push(line); },
+            daemonProgram: () => findDaemonProgram({ self: true }),
+          }) : target,
+          // The caller's project is the folder this command runs in (the daemon's own folder is no project).
+          workingDirectory: options.cwd ?? process.cwd(),
           stdout: (text) => { lines.push(text); },
           stderr: (text) => { errors.push(text); },
         });
         for (const line of errors) stderr(line);
-        return result({ exitCode, lines });
+        // The command already put each line where it belongs (a refusal on stderr): the waiting answer of exit 3 is
+        // printed on stdout, as `goodvibes do` and `goodvibes-agent do` print it.
+        return result({ exitCode, lines }, stdout);
       }
       case 'update': {
         const { runUpdateCommand } = await import('../daemon/status-command.js');
@@ -315,15 +327,6 @@ export async function runDaemonCli(argv: readonly string[], options: DaemonCliOp
             const currentErrors = prepareDaemonCliServe(active.config, cli.flags);
             if (currentErrors.length) throw new Error('Daemon serving configuration changed before activation');
             signal.throwIfAborted(); return active;
-          }, undefined, undefined,
-          // A working-directory change moves the daemon in this process: the same homes and
-          // command-line settings over the new root. The start option that chose the first root
-          // is still named, since a later start uses it again.
-          (workingDirectory) => {
-            const moved = createDaemonCliConfiguration({ ...cli.flags, workingDir: workingDirectory }, env, options.cwd, { diagnosticMode: 'structural' });
-            const movedErrors = prepareDaemonCliServe(moved.config, cli.flags);
-            if (movedErrors.length) throw new Error(movedErrors.join('; '));
-            return { ...moved, workingDirectoryOverride: configuration.workingDirectoryOverride };
           });
         try { return await processHandle.finished; }
         finally { releaseCrashCapture?.(); }

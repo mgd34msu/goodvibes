@@ -20,7 +20,6 @@ import { createAsyncDisposalScope } from '@goodvibes/engine/platform/platform/ru
 import { HOST_MESSAGE_HEADER } from '@goodvibes/engine/platform/platform/core';
 import { TerminalFrame } from './terminal-frame.ts';
 import { COMPOSER_ECHO } from '../helpers/owner-workspace-startup.ts';
-import { WORKSPACE_REGISTRATION_QUESTION } from '../../shell/workspace-registration-question.ts';
 import { spawnSync } from 'node:child_process';
 import { existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, statSync, writeFileSync } from 'node:fs';
 import { createServer } from 'node:net';
@@ -266,7 +265,7 @@ function mergeJson(path: string, key: string, value: unknown): void {
  * A fresh home with the scripted model registered as a custom provider and
  * selected, onboarding already finished, launch self-update off, and the daemon
  * port pinned to an unused port. The scratch workspace is new to this home, so
- * the first-start workspace question is asked (see answerWorkspaceQuestion).
+ * the Agent registers it as it starts (see awaitWorkspaceRegistered).
  */
 export async function makeHome(model: StubModel): Promise<E2EHome> {
   const root = mkdtempSync(join(tmpdir(), 'gv-agent-e2e-'));
@@ -446,33 +445,21 @@ export function inputAreaVisible(screen: string): boolean {
   return screen.includes('Ask anything, or type / for commands');
 }
 
-/** The first-start question, as it is drawn: a modal titled with the question. */
-export const WORKSPACE_QUESTION = WORKSPACE_REGISTRATION_QUESTION;
+/** The line the Agent says when it registers the folder it started in (shell/startup-wiring.ts). */
+export const WORKSPACE_REGISTERED = 'as a workspace';
 
 /**
- * Wait for the first-start workspace question and answer it: Enter on the
- * preselected "Not here", or move up and Enter for "Register". Returns once the
- * modal is gone and the input area is back.
+ * Wait for the Agent's line that it registered the scratch workspace (nothing is
+ * asked: starting it there is the request), then prove the real composer echoes
+ * unsent input before the owner's first prompt, and clear it.
  */
-export async function answerWorkspaceQuestion(session: AgentSession, answer: 'decline' | 'register'): Promise<string> {
-  const asked = await session.waitForScreen('the workspace question', (s) => {
-    // The title paints before its options; an answer sent before both are on
-    // screen could land on a modal that has not yet taken its selection.
-    const text = screenText(s);
-    return text.includes(WORKSPACE_QUESTION) && text.includes('Not here');
-  });
-  // The question opened by itself, so a key right after it appears is taken as typing for the
-  // composer; Tab is the key that moves to the question, and the keys after it answer it.
-  session.key('Tab');
-  if (answer === 'register') session.key('Up');
-  session.key('Enter');
-  await session.waitForScreen('the question answered', (s) => !screenText(s).includes(WORKSPACE_QUESTION) && inputAreaVisible(s));
-  // First paint can precede stdin subscription. Prove the real composer echoes
-  // unsent input before giving it the owner's first prompt, then clear it.
+export async function awaitWorkspaceRegistered(session: AgentSession): Promise<string> {
+  const said = await session.waitForScreen('the workspace registered', (s) => screenText(s).includes(WORKSPACE_REGISTERED) && inputAreaVisible(s));
+  // First paint can precede stdin subscription.
   await session.waitForScreen('live composer input', s => s.includes(COMPOSER_ECHO), () => { session.key('C-u'); session.type('x'); });
   session.key('C-u');
-  await session.waitForScreen('empty live composer', s => inputAreaVisible(s) && !s.includes(COMPOSER_ECHO) && !s.includes(WORKSPACE_QUESTION));
-  return asked;
+  await session.waitForScreen('empty live composer', s => inputAreaVisible(s) && !s.includes(COMPOSER_ECHO));
+  return said;
 }
 
 /** Words of the screen joined across wraps, for assertions on text that may wrap. */

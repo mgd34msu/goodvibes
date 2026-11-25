@@ -186,6 +186,9 @@ const TOOL_RULE_NOTES = {
 /** Servers connected at once while applying a configuration. */
 const MCP_CONNECT_CONCURRENCY = 4;
 
+/** The MCP files in the person's home folder (config.ts getMcpConfigLocations): his own, never a workspace's. */
+const USER_CONTEXT_KINDS: ReadonlySet<string> = new Set(['global-xdg', 'global-dotdir', 'claude-desktop']);
+
 /** The credential refusal behind a failed connect, if that is what it was (also inside a cause or an aggregate). */
 function mcpAuthRefusal(error: unknown, depth = 0): McpHttpAuthError | undefined {
   if (error instanceof McpHttpAuthError) return error;
@@ -235,6 +238,12 @@ export class McpRegistry {
   private readonly sessionPolicy = new Map<string, { trustMode?: McpTrustMode; role?: McpServerRole; launch: string }>();
   /** The file each configured server was read from, as the last reload found it. */
   private serverSources = new Map<string, string>();
+  /**
+   * The servers the last reload read from the person's own files in his home folder (added for all his projects, or
+   * read from another program's file there), not from the workspace. Such a server is his, not the folder's: it
+   * starts in his home folder, and the workspace's trust (a restricted daemon folder) does not hold it back.
+   */
+  #userContextServers = new Set<string>();
   /** Tools the owner denied this session, by server. Like the session trust mode, they outlive a reconnect or reload. */
   private readonly sessionToolDenials = new Map<string, Set<string>>();
   /** The policy a server runs under: what the owner set this session, else its config, else the defaults. */
@@ -397,6 +406,8 @@ export class McpRegistry {
   async connectServer(serverConfig: McpServerConfig): Promise<void> {
     this.permissionHost?.signal.throwIfAborted();
     serverConfig = structuredClone(serverConfig);
+    // Added by a program, not read from the person's own files: the workspace's trust applies to it.
+    this.#userContextServers.delete(serverConfig.name);
     const previous = this.serverConfigs.get(serverConfig.name);
     this.serverConfigs.set(serverConfig.name, serverConfig); this.#revision++;
     this.syncToolRules(serverConfig.name);
@@ -542,6 +553,7 @@ export class McpRegistry {
     // never delete or reconnect a destination installed while it was awaiting.
     this.serverConfigs = new Map(next); this.#revision++;
     this.serverSources = new Map(entries.map((entry) => [entry.server.name, entry.source.path] as const));
+    this.#userContextServers = new Set(entries.filter((entry) => USER_CONTEXT_KINDS.has(entry.source.kind)).map((entry) => entry.server.name));
     // A trust mode or role set this session for a name now standing for a
     // different program no longer applies, before anything connects under it.
     for (const [name, session] of [...this.sessionPolicy]) {
@@ -632,7 +644,7 @@ export class McpRegistry {
     const entry = effective.servers.find((candidate) => candidate.server.name === serverName);
     if (!entry) {
       const held = effective.held?.find((candidate) => candidate.server.name === serverName);
-      if (held) throw new Error(`it is named in ${held.source.path}, a file in this workspace, which you have not trusted, so it is not started. Run /security trust-folder to start it.`);
+      if (held) throw new Error(`it is named in ${held.source.path}, a file in this workspace, which you have not trusted, so it is not started. "Trust this folder" in Permissions and safety, This folder, starts it.`);
       return;
     }
     await this.connectServer(entry.server);
@@ -1566,8 +1578,18 @@ export class McpRegistry {
     let assertExecutionCurrent: (() => void) | undefined;
     const isolated = !!serverConfig.command && !!this.sandboxConfigManager
       && getSandboxConfigSnapshot(this.sandboxConfigManager).mcpIsolation !== 'disabled';
-    const processCwd = host && isolated ? this.sandboxSessions.getWorkspaceRoot() : process.cwd();
-    if (host && serverConfig.command) {
+    // A server from the person's own files in his home folder (not contained) starts there, in his home context: it is
+    // not the workspace's, so the workspace's trust does not decide whether it starts (a daemon serving a restricted
+    // folder still starts a server added for all your projects). Its tool calls are gated as every call is.
+    const home = this.startedRoots?.homeDirectory;
+    const userContext = !!serverConfig.command && !isolated && this.#userContextServers.has(serverConfig.name) && !!home;
+    // A project's server starts in the workspace its files were read from (a daemon serves many projects from one
+    // process, so its own working folder is no project's); a program's workspace is its own folder, as before.
+    const processCwd = userContext ? home! : host && isolated ? this.sandboxSessions.getWorkspaceRoot() : this.startedRoots?.workingDirectory ?? process.cwd();
+    if (userContext) processSpec = { command: serverConfig.command!, args: [...(serverConfig.args ?? [])], cwd: processCwd };
+    // A host process started for a workspace that is not this process's folder starts in that workspace.
+    else if (serverConfig.command && !isolated && processCwd !== process.cwd()) processSpec = { command: serverConfig.command, args: [...(serverConfig.args ?? [])], cwd: processCwd };
+    if (host && serverConfig.command && !userContext) {
       assertExecutionCurrent = await prepareExternalExecution(host, processCwd, signal);
       assertHostCurrent(); assertExecutionCurrent();
     }
@@ -1585,7 +1607,7 @@ export class McpRegistry {
         throw error;
       }
       sandboxSessionId = resolved?.sessionId ?? null;
-      processSpec = resolved?.processSpec;
+      processSpec = resolved?.processSpec ?? processSpec;
       try { assertHostCurrent(); }
       catch (error) {
         if (sandboxSessionId) {

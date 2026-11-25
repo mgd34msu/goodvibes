@@ -36,9 +36,9 @@ export const handleModelPickerToken = createModelPickerTokenHandler<CommandConte
       state.commandContext?.print?.(
         [
           selected.displayName + ' is not installed yet.',
-          'To use a local model, add a custom provider:',
-          '  /provider add <name> <baseURL>  (e.g. /provider add ollama http://localhost:11434/v1)',
-          'Or sign in to a cloud provider via the provider picker.',
+          'To use a local model, start its server, then in Models and providers choose "Find model servers on this computer",',
+          'or "Add a provider of your own" with its address, such as http://localhost:11434/v1.',
+          'Or sign in to a cloud provider on the Providers tab there.',
         ].join('\n'),
       );
       return true;

@@ -32,9 +32,9 @@ async function readGoogleLanes(context: CommandContext): Promise<GoogleLanes> {
 /** The setup step a lane names when nothing serves it, from the Google connection's actual state. */
 function googleSetupNext(state: AgentGoogleConnectionState, lane: 'inbox' | 'calendar'): string {
   const work = lane === 'inbox' ? 'triage and draft replies' : 'route agenda briefing, conflicts, and reminders';
-  if (state.status === 'connected') return `The connected Google account was not granted ${lane === 'inbox' ? 'mail' : 'calendar'} read access; re-authorize with /google reauthorize, then ${work} through the built-in google tool.`;
+  if (state.status === 'connected') return `The connected Google account was not granted ${lane === 'inbox' ? 'mail' : 'calendar'} read access; ask the owner to press "ask for consent again" on the Google tab of Mail, calendar and channels (capability google.reauthorize), then ${work} through the built-in google tool.`;
   if (state.status === 'unreadable') return 'The credential store could not be read, so whether a Google account is connected is unknown; run google action:"status" to see the reason.';
-  return `Connect a Google account with /google connect, then ${work} through the built-in google tool.`;
+  return `Connect a Google account with "connect" on the Google tab of Mail, calendar and channels (capability google.connect), then ${work} through the built-in google tool.`;
 }
 
 function googleSignal(state: AgentGoogleConnectionState, route: GoogleLaneRoute | null): string {
@@ -240,7 +240,7 @@ async function ownedBuildLanes(
             : calendarEffectReceiptRecords.length > 0
               ? 'Saved calendar provider-effect receipts are available for audit and follow-up; no fresh calendar connector is currently ready.'
         : unavailableCalendarMethods.length > 0
-          ? `The operator contract advertises ${unavailableCalendarMethods.length} calendar method(s), but they are unavailable (route not served by this daemon) and cannot be dispatched. The local Agent calendar (/calendar) remains available.`
+          ? `The operator contract advertises ${unavailableCalendarMethods.length} calendar method(s), but they are unavailable (route not served by this daemon) and cannot be dispatched. The calendar on this computer (the Calendar tab of Mail, calendar and channels) is the daemon's too.`
         : 'No calendar/CalDAV/agenda methods are present in the current GoodVibes platform operator contract.',
       next: google.calendar ? `Read the agenda with ${google.calendar.modelRoute}, brief conflicts in the conversation, and create events only through google action:"calendar.create" under its own admission.`
         : calendarMethods.length > 0 && calendarConnectors.length === 0 && calendarArtifactRecords.length === 0 && calendarEffectReceiptRecords.length === 0

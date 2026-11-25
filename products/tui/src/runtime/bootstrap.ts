@@ -9,7 +9,6 @@ import { createTerminalOrchestrator, terminalCompanionInputHandler } from '@good
 import { buildPluginStartupContext } from '@goodvibes/engine/terminal-shell/plugin-startup';
 import { createPluginStartupTask } from '@goodvibes/engine/terminal-shell/plugin-startup';
 import { ownerInputFor } from '@goodvibes/engine/terminal-shell/companion-input';
-import { wireContractRecoveryNotices } from '@goodvibes/engine/terminal-shell/session-crash-recovery';
 /**
  * Bootstrap composition root for goodvibes-tui.
  *
@@ -29,7 +28,7 @@ import { resolveGoodVibesDaemonHome } from '@goodvibes/engine/platform/platform/
 import { AcpManager } from '@goodvibes/engine/platform/platform/acp';
 import { readTierPromptSupplement } from '@goodvibes/engine/platform/platform/providers';
 import { factsFor } from '@goodvibes/engine/platform/platform/routing';
-import { CONTROL_PLANE_FEATURE_FLAG, resumeContracts } from '@goodvibes/engine/platform/platform/runtime/operations';
+import { CONTROL_PLANE_FEATURE_FLAG } from '@goodvibes/engine/platform/platform/runtime/operations';
 import { logger, summarizeError } from '@goodvibes/engine/platform/platform/utils';
 import type { PermissionRequestHandler } from '@goodvibes/engine/platform/platform/permissions';
 import type { WorkspaceTrustLevel } from '@goodvibes/engine/platform/platform/runtime/operations';
@@ -57,7 +56,7 @@ import { bindWriteLastSessionPointerToSurface, ProcessTaskAdapter } from '@goodv
 import { deriveSpineFooterStatus, forwardCheckpointChangesToDaemon, type SessionSpineClient, type SessionSpineRestConnection } from '@goodvibes/engine/platform/platform/runtime/session-spine';
 import { transportRetryHooks } from '@goodvibes/engine/platform/platform/runtime/emitters';
 import { bindControlCommands } from './control-surfaces.ts';
-import { bindCapabilityHost, hiddenValuePrompt } from '@goodvibes/engine/terminal-shell/capability-host';
+import { bindCapabilityHost, hiddenLineFrom } from '@goodvibes/engine/terminal-shell/capability-host';
 import { sessionCapabilityServices } from '../input/commands/session-capabilities.ts';
 import { formatWorktreeStartupReport } from '@goodvibes/engine/platform/platform/runtime/shell';
 import { createSpineAdoptionSync } from './client/spine-adoption.ts';
@@ -76,7 +75,9 @@ import { bindSessionContextAccounting } from '@goodvibes/engine/platform/platfor
 import {
   autostartInstalledDaemon,
   createDaemonServiceControl,
+  DAEMON_PROGRAM_STARTED_LINE,
   daemonNotInstalledNotice,
+  daemonProgramStartFailedLine,
   describeDaemonAutostart,
   waitForStartingDaemon,
   type DaemonServiceControl,
@@ -139,7 +140,10 @@ export type BootstrapContext = RuntimeContext & {
    * (said in one line). The first turn waits for it, so the model's daemon capabilities have a daemon to run on.
    */
   daemonReady?: Promise<void>;
-  /** The one line that says no daemon is installed here (and how to install it), once the start found that; else undefined. */
+  /**
+   * The one line a headless run says about the local daemon, once the start settled it: none is installed here (and
+   * how to install it), or the daemon program was started here ("Started the GoodVibes daemon.") or failed to; else undefined.
+   */
   daemonMissing?: () => string | undefined;
   /** Load the most recently saved conversation from disk. */
   loadLastConversation: () => { messages: Array<Record<string, unknown>> } | null;
@@ -375,35 +379,10 @@ export async function bootstrapRuntime(stdout: NodeJS.WriteStream, options: Boot
       'warning',
     );
   }
-  // Recovery can await a planner or executor. Let the shell render while it
-  // runs, and stop/drain recovery before shutdown releases its dependencies.
-  const contractRecovery = resumeContracts(services.contractRunner, services.workingDirectory);
-  // A contract whose checkpoint was refused at start is shown to the owner with what to do, not only logged.
-  void contractRecovery.then((report) => {
-    if ('failed' in report) {
-      systemMessageRouter.high(`[Contracts] Saved contracts could not be resumed at start-up: ${report.failed}. They are still on disk; restart to try again, or /agents contracts-view to see them.`, 'error');
-      return;
-    }
-    for (const { refusal } of report.refused) {
-      systemMessageRouter.high(`[Contracts] ${refusal.reason} Now: ${refusal.state}. Next: ${refusal.next.join(' ')}`, 'warning');
-    }
-  });
-  // A contract that was running when the app stopped: one line for the owner, and the same fact for its session's model.
-  bootstrapUnsubs.push(wireContractRecoveryNotices({
-    recovery: contractRecovery,
-    get: (contractId) => services.contractRunner.get(contractId),
-    say: (text, level) => systemMessageRouter.high(text, level),
-    bus: runtimeBus,
-    sessionId: () => runtime.sessionId,
-    hostInstructions: () => conversation.hostInstructions,
-  }));
+  // Work has one runner, the daemon's: this app resumes no contract of its own (a delegation is a piece of work on the
+  // daemon, which runs on whether this app is open; runtime/services.ts).
   // An older decision log carried forward to its smaller form says once how much space came back.
   void services.judgment.decisionLogCarriedForward.then((text) => { if (text) systemMessageRouter.high(`[Decision log] ${text}`); });
-  // The work-plan writes recovery queued are flushed by the graph's contract-runner disposal, which runs after this.
-  bootstrapUnsubs.unshift(async () => {
-    services.contractRunner.dispose();
-    await contractRecovery;
-  });
   const commandRegistry = shell.commandRegistry;
   bindControlCommands(services, commandRegistry);
   const commandContext = shell.commandContext;
@@ -411,10 +390,7 @@ export async function bootstrapRuntime(stdout: NodeJS.WriteStream, options: Boot
   bootstrapUnsubs.push(bindCapabilityHost({
     commands: () => commandRegistry.getAll(), session: () => sessionCapabilityServices(commandContext),
     // The composer's hidden line, once the screen has set it up: a value a model's call needs is typed there.
-    hidden: () => {
-      const begin = commandContext.beginConcealedInput;
-      return begin ? (request) => { commandContext.print(hiddenValuePrompt(request.label)); begin(request); } : undefined;
-    },
+    hidden: () => hiddenLineFrom(commandContext),
   }));
   // A failed or refused turn is a row in the transcript with its next steps on keys: alt+o picks
   // another model for the prompt, alt+i opens its details, alt+s the sign-ins (alt+r is the shell's retry chord).
@@ -564,6 +540,9 @@ export async function bootstrapRuntime(stdout: NodeJS.WriteStream, options: Boot
   const announceAutostart = (outcome: Parameters<typeof describeDaemonAutostart>[0]): void => {
     // A headless run says it on every run (ctx.daemonMissing); the interface once on this machine.
     if (outcome.action === 'not-installed') missingDaemonLine = daemonNotInstalledNotice(outcome);
+    // The daemon program started here, or failed to: said once in this run (a headless run on its standard error).
+    if (outcome.action === 'program-started') missingDaemonLine = DAEMON_PROGRAM_STARTED_LINE;
+    if (outcome.action === 'program-start-failed') missingDaemonLine = daemonProgramStartFailedLine(outcome.reason);
     if (outcome.action === 'not-installed' && !announcements.record(DAEMON_NOT_INSTALLED_ANNOUNCEMENT)) return;
     if (externalServices.daemonStatus.mode === 'external') announcements.forgetMatching((id) => id === DAEMON_NOT_INSTALLED_ANNOUNCEMENT);
     const notice = describeDaemonAutostart(
@@ -619,7 +598,7 @@ export async function bootstrapRuntime(stdout: NodeJS.WriteStream, options: Boot
         control,
         isReachable,
       });
-      if (outcome.action === 'started' || outcome.action === 'came-online') await adoptStartedDaemon();
+      if (outcome.action === 'started' || outcome.action === 'came-online' || outcome.action === 'program-started') await adoptStartedDaemon();
       if (outcome.action === 'starting') adoptWhenStarted(control, outcome.serviceName, outcome.since);
       announceAutostart(outcome);
     } catch (error) {
@@ -747,7 +726,7 @@ export async function bootstrapRuntime(stdout: NodeJS.WriteStream, options: Boot
     commandPaletteKey: services.keybindingsManager.getComboLabel('command-palette'),
   };
 
-  // ── Phase 8: Restore known providers; /scan owns network discovery ──────
+  // ── Phase 8: Restore known providers; scanning is the daemon's ──────
 
   registerStartupProviders({
     configManager,

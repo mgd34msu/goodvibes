@@ -51,13 +51,13 @@ For a personal app the tier does not create a fee. It still shapes the request, 
 
 ## What this integration requests
 
-**Four scopes, asked for together, in one consent.** `/google connect`, the model's `google` tool and `/calendar connect google` all ask for this same list, because they store the same one Google connection that the daemon's calendar and mail read.
+**Four scopes, asked for together, in one consent.** "connect" on the Google tab of Mail, calendar and channels (capability `google.connect`, run by the daemon), the model's `google` tool and "sign in" on Google under Calendar accounts all ask for this same list, because they store the same one Google connection that the daemon's calendar and mail read.
 
 | Scope | Tier | What needs it |
 | --- | --- | --- |
 | `https://www.googleapis.com/auth/gmail.readonly` | restricted | Reading messages (`api-client.ts`), and the inbound-mail history delta (`history-delta.ts`) |
 | `https://www.googleapis.com/auth/gmail.send` | sensitive | Sending through the Gmail API (`messages/send`) |
-| `https://www.googleapis.com/auth/calendar.readonly` | sensitive | Listing the account's calendars (`calendarList`), which `calendar.calendars.list` and `/calendar` read |
+| `https://www.googleapis.com/auth/calendar.readonly` | sensitive | Listing the account's calendars (`calendarList`), which `calendar.calendars.list` and the Calendar tabs read |
 | `https://www.googleapis.com/auth/calendar.events` | sensitive | Reading and writing events |
 
 ### Why all of them at once, and not one at a time

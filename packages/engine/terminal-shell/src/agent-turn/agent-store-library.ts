@@ -239,6 +239,10 @@ function routineOrRefuse(store: AgentRoutineRegistry, idOrName: string): AgentRo
 }
 
 export const ROUTINE_ACTS: Readonly<Record<string, StoreAct>> = {
+  async 'routines.count-start'(values, context) {
+    const started = startRoutine(context.shellPaths, values.routine!);
+    return { text: `Counted routine ${started.name} as started.`, data: { routine: started } };
+  },
   async 'routines.list'(values, context) {
     const store = routinesOf(context);
     if (values.only === 'enabled') return routineList('Routines switched on', store, storeStep(() => store.snapshot().enabledRoutines));

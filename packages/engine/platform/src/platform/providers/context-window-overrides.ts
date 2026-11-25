@@ -141,6 +141,13 @@ export function saveContextWindowOverrides(filePath: string, state: LoadedContex
   }
 }
 
+/** What a provider taught a program about a model's window: a request it refused, or a larger input it accepted. */
+export interface LearnedContextWindow {
+  readonly registryKey: string;
+  readonly kind: 'refused-at' | 'accepted';
+  readonly tokens: number;
+}
+
 /**
  * Owns the per-model window knowledge: lazy disk load, validated set/clear
  * with persistence, observed-limit learning, and the overlay applied to
@@ -156,6 +163,20 @@ export class ContextWindowOverrideStore {
    * over each read of the file, by the same rules as a write would apply, for as long as the process runs.
    */
   private readonly learnedHere: { readonly observed: Map<string, number>; readonly accepted: Map<string, number> } = { observed: new Map(), accepted: new Map() };
+  /** Told what a store that does not write learned here, so the program reports it to the daemon (the file's owner). */
+  private readonly learnedListeners = new Set<(learned: LearnedContextWindow) => void>();
+
+  /** Told each limit or floor this process learns while the daemon owns the file; returns the unsubscribe. */
+  onLearned(listener: (learned: LearnedContextWindow) => void): () => void {
+    this.learnedListeners.add(listener);
+    return () => { this.learnedListeners.delete(listener); };
+  }
+
+  private tellLearned(learned: LearnedContextWindow): void {
+    for (const listener of [...this.learnedListeners]) {
+      try { listener(learned); } catch { /* A listener cannot fail the turn that learned it. */ }
+    }
+  }
 
   /**
    * `writes: false`: the file is the daemon's; this process reads it (again whenever it changed) and never writes it.
@@ -270,7 +291,10 @@ export class ContextWindowOverrideStore {
     const existing = state.observed.get(registryKey);
     if (existing !== undefined && existing <= rounded) return;
     state.observed.set(registryKey, rounded);
-    if (!this.options.writes) this.learnedHere.observed.set(registryKey, rounded);
+    if (!this.options.writes) {
+      this.learnedHere.observed.set(registryKey, rounded);
+      this.tellLearned({ registryKey, kind: 'refused-at', tokens: rounded });
+    }
     this.persist();
     logger.info('[context-window-overrides] Learned context ceiling from provider rejection', {
       registryKey,
@@ -325,6 +349,7 @@ export class ContextWindowOverrideStore {
     if (!this.options.writes) {
       this.learnedHere.accepted.set(registryKey, rounded);
       if (observed !== undefined && rounded > observed) this.learnedHere.observed.delete(registryKey);
+      this.tellLearned({ registryKey, kind: 'accepted', tokens: rounded });
     }
     this.persist();
     logger.info('[context-window-overrides] Recorded accepted context input floor', {

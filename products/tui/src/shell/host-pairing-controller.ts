@@ -4,7 +4,7 @@ import {
 } from '@goodvibes/engine/terminal-shell/host-pairing-controller';
 import { previewTuiHostPairing, type TuiHostPairingPreview, type TuiHostPairingOptions } from '../runtime/tui-host-pairing.ts';
 
-import { formatTuiHostPairing } from '../runtime/tui-host-pairing.ts';
+import { formatTuiHostPairing, REPEAT_LOST_REQUEST } from '../runtime/tui-host-pairing.ts';
 import { readTuiHostPairing } from '../runtime/tui-host-credential-store.ts';
 export type HostPairingUi = PairingUi;
 type PairingRequest = { readonly apply: boolean; readonly name: string; readonly bootstrapShared: boolean };
@@ -22,20 +22,20 @@ export class HostPairingController extends TerminalHostPairingController<Pairing
         },
         format: formatTuiHostPairing,
         readRecovery: readTuiHostPairing,
-        command: '/devices pair host',
+        command: 'Pair something in Devices and network (This program with its daemon)',
         pairedRecovery: (host) =>
           formatTuiHostPairing({
             status: 'paired-unverified',
             host,
             message:
-              'Pairing credential stored for this host. Verification was interrupted; rerun /devices pair host. No second credential will be created.',
+              'Pairing credential stored for this host. Verification was interrupted; pair it again in Devices and network (Pair something, This program with its daemon). No second credential will be created.',
           }),
         unknownRecovery: (host) =>
           formatTuiHostPairing({
             status: 'unknown',
             host,
             message:
-              'The reply to a pairing request was lost. Run /devices pair host --bootstrap-shared to repeat the same request: the host answers it with the credential it made, never a second one. Or run /devices pair host --apply to forget the attempt and pair from scratch.',
+              `The reply to a pairing request was lost. ${REPEAT_LOST_REQUEST} Or pair it again with Apply set to Review and confirm it, to forget the attempt and pair from scratch.`,
           }),
       },
       ui,

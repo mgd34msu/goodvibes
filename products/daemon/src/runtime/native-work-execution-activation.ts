@@ -80,9 +80,12 @@ export function createDaemonNativeWorkExecutionActivation(options: NativeWorkExe
       graph.agentOrchestrator.setDependencies(toolDependencies);
       const owner = native;
       const driver = createNativeWorkSessionDriver({ ...options, runner: owner.runner, toolDependencies, onSlotReleased: releaseSlot,
+        // A unit's turn is assembled the one way (its project's environment from this graph's orchestrator).
+        turnEnvironment: (folder) => graph.agentOrchestrator.acquireTurnEnvironment(folder),
         assertCurrent: contract => { owner.execution.nativeOwner.decisions.authorityOf(contract); } });
       foregroundFleetOwnership = driver.fleetOwnership;
-      options.contractOperator?.attachNative(owner.runner);
+      // This project's Work runner beside the other projects' (the operator reads and answers each project's own work).
+      const detachNative = options.contractOperator?.attachNative(owner.runner);
       cancelForeground = driver.cancel;
       joinForeground = driver.join;
       releaseForeground = driver.release;
@@ -125,9 +128,11 @@ export function createDaemonNativeWorkExecutionActivation(options: NativeWorkExe
       };
       return { execution, close() {
         if (drain) return drain;
-        options.contractOperator?.attachNative(null);
+        detachNative?.();
         // Fence admission, abort foreground turns and cancel background work
-        // before waiting on any one of their drains.
+        // before waiting on any one of their drains. The runner is told first that the daemon is closing: the agents
+        // cancelled here end with it, which neither stops nor fails the work (it stands interrupted at the next start).
+        owner.runner.prepareToClose?.();
         const execution = owner.execution.close();
         const sessions = driver.close();
         cancelAllAgentRuns(graph.agentManager);

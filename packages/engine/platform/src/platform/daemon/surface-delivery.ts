@@ -24,6 +24,8 @@ import { renderNoticeForSurface } from '../email/inbound-notice-channels.js';
 import type { StructuredNotice } from '../email/inbound-notice.js';
 import { readSecretProviderHostConfig, resolveSecretInput } from '../config/secret-refs.js';
 import { resolveSurfaceSecret } from '../channels/builtin/surface-secrets.js';
+import { surfaceLabelForBuiltin } from '../channels/builtin/presentation.js';
+import { hostApprovalPresentation } from '../permissions/ask-facts-host.js';
 import { renderAgentCompletionAnswer } from '../agents/completion-answer.js';
 import {
   deliverDiscordAgentReply,
@@ -37,7 +39,6 @@ import {
   deliverDiscordApprovalUpdate,
   deliverNtfyApprovalUpdate,
   deliverSlackApprovalUpdate,
-  deliverWebhookApprovalUpdate,
   type SurfaceApprovalDeliveryDeps,
 } from './surface-approval-delivery.js';
 
@@ -174,6 +175,11 @@ const MAX_RECOVERED_REPLIES = 1_000;
 const RESEND_DEDUPED_SURFACES: ReadonlySet<string> = new Set(['webhook', 'discord']);
 /** Appended to a channel answer sent again after a restart on a surface that cannot drop a repeat. */
 export const RESENT_AFTER_RESTART_LINE = '(Sent again after a restart; you may see it twice.)';
+
+/** A channel by the name people know it by ("Telegram"). */
+function channelName(kind: string): string {
+  return isChannelSurfaceKind(kind) ? surfaceLabelForBuiltin(kind) : kind;
+}
 
 function truncateUndeliveredBody(body: string): string {
   return body.length <= UNDELIVERED_BODY_EXCERPT_CHARS
@@ -906,9 +912,11 @@ export class DaemonSurfaceDeliveryHelper {
     if (!isOpenApprovalStatus(approval.status)) this.ownerAlertedApprovals.delete(approval.id);
     await this.context.sessionBroker.start();
     await this.context.routeBindings.start();
-    // An ask a guest's turn raised (someone a channel admits who is not its
-    // owner) is the owner's: it goes to his own conversation, never the guest's.
-    const guestChannel = approvalGuestChannel(approval);
+    // An ask is shown on a channel only in a conversation proven to be the
+    // owner's alone. One raised in a guest's turn, or about a conversation that
+    // is not proven his alone (a group, even one only he has written in, or one
+    // someone else wrote in), goes to his own conversations, never to that one.
+    const guestChannel = approvalGuestChannel(approval) ?? this.notOwnersAloneChannelOf(approval);
     const outcome = guestChannel === undefined
       ? await this.deliverApprovalToItsRoute(approval)
       : await this.deliverApprovalToOwner(approval, guestChannel);
@@ -924,10 +932,12 @@ export class DaemonSurfaceDeliveryHelper {
     this.ownerAlertedApprovals.add(approval.id);
     const reason = outcome.reason === 'delivery-failed' && outcome.error ? `delivery-failed: ${outcome.error}` : outcome.reason;
     const webUrl = this.controlPlaneWebUrl({ approvalId: approval.id, sessionId: approval.sessionId });
-    const text = `Approval required for ${approval.request.tool}: ${approval.request.analysis.summary}. `
+    // The ask's own words (permissions/ask-presentation.ts), never the tool's id or its arguments.
+    const asked = hostApprovalPresentation({ configManager: this.context.configManager }, approval.request, approval.sessionId).title;
+    const text = `Waiting for your answer: ${asked} `
       + (guestChannel === undefined ? 'It could not be shown in the conversation it came from. '
-        : `It was asked for by someone on ${guestChannel} who is not you, and none of your own conversations took it. `)
-      + `Answer it in the terminal app or the web UI${webUrl ? `: ${webUrl}` : ''}.`;
+        : `It is about a conversation on ${channelName(guestChannel)} that is not yours alone, so it is not shown there, and none of your own conversations took it. `)
+      + `Answer it in Waiting for you${webUrl ? `, or here: ${webUrl}` : ''}.`;
     const reached = await deliverOwnerAlert(this.context.routeBindings, this, null, text);
     logger.warn('An approval prompt did not reach its conversation', {
       approvalId: approval.id, reason, reachedSurface: reached?.surfaceKind ?? null,
@@ -984,6 +994,27 @@ export class DaemonSurfaceDeliveryHelper {
     return last;
   }
 
+  /**
+   * The channel of the conversation an approval would be shown in, when that
+   * conversation is not proven to be the owner's alone (owner-alert.ts
+   * isOwnerConversation: a group, a shared channel, a webhook route, a voice
+   * pipeline, another person's chat), or someone who is not the channel's owner
+   * took part in the approval's session on that route. Undefined for a
+   * conversation that is not on a channel.
+   */
+  private notOwnersAloneChannelOf(approval: SharedApprovalRecord): string | undefined {
+    const session = approval.sessionId === undefined ? undefined : this.context.sessionBroker.getSession(approval.sessionId);
+    const routeId = approval.routeId ?? session?.routeIds[0];
+    if (!routeId) return undefined;
+    const binding = this.context.routeBindings.getBinding(routeId);
+    if (!binding || !isChannelSurfaceKind(binding.surfaceKind)) return undefined;
+    const owner = this.channelOwner(binding.surfaceKind);
+    if (!isOwnerConversation(binding, owner)) return binding.surfaceKind;
+    const stranger = (session?.participants ?? []).some((participant) => participant.routeId === binding.id
+      && typeof participant.userId === 'string' && participant.userId.length > 0 && participant.userId !== owner);
+    return stranger ? binding.surfaceKind : undefined;
+  }
+
   private async deliverApprovalToItsRoute(approval: SharedApprovalRecord): Promise<SurfaceNoticeDelivery> {
     const routeId = approval.routeId
       ?? this.context.sessionBroker.getSession(approval.sessionId ?? '')?.routeIds[0];
@@ -994,13 +1025,14 @@ export class DaemonSurfaceDeliveryHelper {
   }
 
   private async deliverApprovalToBinding(approval: SharedApprovalRecord, binding: RouteBinding): Promise<SurfaceNoticeDelivery> {
-    // The four surfaces rendered here say whether the prompt got there.
+    // The three surfaces rendered here say whether the prompt got there. A webhook route or a Home Assistant
+    // conversation is never the owner's alone (owner-alert.ts isOwnerConversation), so no approval reaches one.
     const deps = this.approvalDeliveryDeps();
     switch (binding.surfaceKind) {
       case 'slack': return deliverSlackApprovalUpdate(deps, approval, binding);
       case 'discord': return deliverDiscordApprovalUpdate(deps, approval, binding);
       case 'ntfy': return deliverNtfyApprovalUpdate(deps, approval, binding);
-      case 'webhook': return deliverWebhookApprovalUpdate(deps, approval, binding);
+      case 'webhook':
       case 'service': return { delivered: false, reason: 'unsupported-delivery-surface' };
       default: {
         const plugin = await this.context.channelPlugins.notifyApproval(binding.surfaceKind, approval, binding);
@@ -1117,7 +1149,6 @@ export class DaemonSurfaceDeliveryHelper {
       resolveSlackBotToken: () => this.resolveSlackBotToken(),
       resolveNtfyToken: () => this.resolveNtfyToken(),
       resolveDiscordBotToken: () => this.resolveDiscordBotToken(),
-      signWebhookPayload: (body, secret) => this.signWebhookPayload(body, secret),
     };
   }
 
@@ -1131,10 +1162,6 @@ export class DaemonSurfaceDeliveryHelper {
 
   async deliverNtfyApprovalUpdate(approval: SharedApprovalRecord, binding: RouteBinding): Promise<void> {
     await deliverNtfyApprovalUpdate(this.approvalDeliveryDeps(), approval, binding);
-  }
-
-  async deliverWebhookApprovalUpdate(approval: SharedApprovalRecord, binding: RouteBinding): Promise<void> {
-    await deliverWebhookApprovalUpdate(this.approvalDeliveryDeps(), approval, binding);
   }
 
   // Every surface credential is read through the setup schema's statement of

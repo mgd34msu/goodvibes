@@ -310,7 +310,8 @@ export class DeterministicReplayEngine {
       return [];
     }
 
-    const other = source ? `run "${source.runId}"` : 'the replay';
+    // Runs and turns are named in words here; their ids are in the mismatch's own fields (and the saved report).
+    const other = source ? 'the other run' : 'the replay';
     const replayedEntries = [...replayed].sort((a, b) => a.rev - b.rev);
     const mismatches: ReplayMismatch[] = [];
     const maxRev = Math.max(this._entries.length, replayedEntries.length);
@@ -646,7 +647,7 @@ export class DeterministicReplayEngine {
           ownerDomain: 'turn',
           failureMode: 'missing_terminal_summary',
           relatedTurnId: recordedSummary.turnId,
-          description: `Rev ${recordedSummary.terminalRev}: turn "${recordedSummary.turnId}" ended in the loaded run but has no ending in ${other}.`,
+          description: `Rev ${recordedSummary.terminalRev}: the loaded run's turn ended here; ${other} has no ending for that turn.`,
           recordedSummary: `${recordedSummary.outcome}/${recordedSummary.stopReason ?? 'none'}`,
         });
         continue;
@@ -660,7 +661,7 @@ export class DeterministicReplayEngine {
           ownerDomain: 'turn',
           failureMode: 'terminal_outcome_diverged',
           relatedTurnId: recordedSummary.turnId,
-          description: `Rev ${recordedSummary.terminalRev}: turn "${recordedSummary.turnId}" terminal outcome diverged (loaded run ${recordedSummary.outcome}, ${other} ${replayedSummary.outcome}).`,
+          description: `Rev ${recordedSummary.terminalRev}: the turn ended differently (loaded run ${recordedSummary.outcome}, ${other} ${replayedSummary.outcome}).`,
           recordedSummary: `${recordedSummary.outcome}/${recordedSummary.stopReason ?? 'none'}`,
           replayedSummary: `${replayedSummary.outcome}/${replayedSummary.stopReason ?? 'none'}`,
         });
@@ -675,7 +676,7 @@ export class DeterministicReplayEngine {
           ownerDomain: 'turn',
           failureMode: 'stop_reason_diverged',
           relatedTurnId: recordedSummary.turnId,
-          description: `Rev ${recordedSummary.terminalRev}: turn "${recordedSummary.turnId}" stop reason diverged (loaded run ${recordedSummary.stopReason ?? 'none'}, ${other} ${replayedSummary.stopReason ?? 'none'}).`,
+          description: `Rev ${recordedSummary.terminalRev}: the turn stopped for a different reason (loaded run ${recordedSummary.stopReason ?? 'none'}, ${other} ${replayedSummary.stopReason ?? 'none'}).`,
           recordedSummary: `${recordedSummary.outcome}/${recordedSummary.stopReason ?? 'none'}`,
           replayedSummary: `${replayedSummary.outcome}/${replayedSummary.stopReason ?? 'none'}`,
         });

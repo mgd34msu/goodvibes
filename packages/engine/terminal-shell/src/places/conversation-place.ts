@@ -26,10 +26,11 @@ import {
 } from '@goodvibes/engine/platform/platform/capabilities';
 import type { SessionCapabilityServices } from '../agent-turn/capability-tools.js';
 import type { KeyContext } from '../keybindings.js';
-import { actionButton, actionDoneLine, actionSentence, effectiveRisk, isShown, riskWords } from '../command-actions/typed-line.js';
+import { actionButton, actionDoneLine, actionSentence, effectiveRisk, isShown, riskSentences } from '../command-actions/typed-line.js';
 import type { ActionValues } from '../command-actions/types.js';
 import type { PlaceHost, PlaceKeyTable, PlaceProgramSource } from './place-host.js';
-import { definePlace, type PlaceCapabilityAction, type PlaceItem, type PlaceProgramName } from './place-types.js';
+import { definePlace, type PlaceAction, type PlaceCapabilityAction, type PlaceItem, type PlaceList, type PlaceProgramName } from './place-types.js';
+import { PINNED_LINES_ACTIONS, PINNED_LINES_LIST } from './pinned-lines-entries.js';
 
 interface ControlItem extends PlaceItem {
   /** The capability's id: each control's action is shown on its own row only. */
@@ -106,6 +107,8 @@ async function nowOf(id: string, services: SessionCapabilityServices): Promise<s
 /** Whether this program has a control: its piece is in the program's services, and the program does not refuse it. */
 function usableHere(entry: Control, services: SessionCapabilityServices, program: 'tui' | 'agent'): boolean {
   if (entry.programs && !entry.programs.includes(program)) return false;
+  // A control on the hosted session this terminal joined (hosted.send-later) is listed only while one is joined.
+  if (entry.definition.capability.id.startsWith('hosted.') && services.hostedJoin?.joined() !== true) return false;
   const available = entry.definition.available as ((services: SessionCapabilityServices) => boolean) | undefined;
   return !available || available(services);
 }
@@ -181,8 +184,10 @@ export const CONVERSATION_PLACE = definePlace<ControlItem>({
         ...(item.risk ? [{ text: `This ${item.risk}.`, tone: 'warning' as const }] : []),
       ],
     },
+    // The lines pinned in this conversation (pinned-lines-entries.ts, memory-b's).
+    PINNED_LINES_LIST as unknown as PlaceList<ControlItem>,
   ],
-  actions: [...ROW_ACTIONS, ...KEY_ACTIONS],
+  actions: [...ROW_ACTIONS, ...KEY_ACTIONS, ...(PINNED_LINES_ACTIONS as unknown as readonly PlaceAction<ControlItem>[])],
 });
 
 // ---------------------------------------------------------------------------
@@ -225,7 +230,7 @@ export async function runConversationControlKey(host: PlaceHost, action: string,
   if ((risk === 'cannot-be-undone' || risk === 'loosens-a-protection') && !resolved.action.asksItself) {
     const yes = await host.confirm({
       title: `${resolved.action.label}?`,
-      body: `${actionSentence(resolved.action, values)} This ${riskWords(risk)}.`,
+      body: `${actionSentence(resolved.action, values)} ${riskSentences(resolved.action, values)}`,
       confirmLabel: actionButton(resolved.action),
     });
     if (!yes) { host.requestRender(); return; }

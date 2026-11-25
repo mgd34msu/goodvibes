@@ -19,6 +19,14 @@ export interface KnowledgeCapabilityServices {
   readonly knowledge: KnowledgeApi;
   /** Answering a question from it (a model call that reads the sources). */
   readonly knowledgeAsk: KnowledgeService['ask'];
+  /**
+   * A file's content sent by the program that read it on its own machine, kept in the daemon's artifact store so it is
+   * added as a saved artifact is (its type read, its text taken out); `discard` removes it when the add fails.
+   * Absent where the daemon keeps no artifacts: content sent is refused.
+   */
+  readonly knowledgeFiles?: {
+    keep(input: { readonly bytes: Buffer; readonly filename: string }): Promise<{ readonly artifactId: string; discard(): void }>;
+  } | undefined;
 }
 
 type KnowledgeDefinition = CapabilityDefinition<KnowledgeCapabilityServices>;
@@ -33,14 +41,34 @@ const tagsOf = (value: string | undefined): string[] | undefined => {
 };
 const inline = (value: unknown): string => typeof value === 'string' ? value.replace(/\s+/g, ' ').trim() : '';
 const fetchMode = (values: Readonly<Record<string, string>>) => values.private === 'yes' ? 'allow-private-hosts' as const : 'public-only' as const;
-/** A path the caller named, in the caller's project (the daemon reads it there). */
-const pathIn = (path: string, caller: CapabilityCaller): string => caller.workingDirectory ? resolve(caller.workingDirectory, path) : resolve(path);
+/**
+ * A path named by a caller on another machine: that machine's file, which this daemon never reads by path (it reads
+ * by path only what is on its own machine and was named by a caller there). Undefined when the path may be read here.
+ */
+function pathFromElsewhere(path: string | undefined, caller: CapabilityCaller): CapabilityRefusal | undefined {
+  if (!path || caller.elsewhere !== true) return undefined;
+  return new CapabilityRefusal(`Nothing was added: ${path} names a file on the machine that asked, and this daemon reads a file by path only on its own machine.`,
+    'Send the file\'s content instead (the Agent reads a file its turn names on its own machine and sends it), or add it on the daemon\'s own machine');
+}
+/** A path the caller named, in the caller's project (the daemon reads it there), only for a caller on this machine. */
+const pathIn = (path: string, caller: CapabilityCaller): string => {
+  const refused = pathFromElsewhere(path, caller);
+  if (refused) throw refused;
+  return caller.workingDirectory ? resolve(caller.workingDirectory, path) : resolve(path);
+};
+/** A file named by path, or its content sent: exactly one of the two. */
+function oneSource(values: Readonly<Record<string, string | undefined>>, caller: CapabilityCaller): CapabilityRefusal | undefined {
+  if (!values.path === !values.content) return new CapabilityRefusal('Give a file by its path or send its content: one of the two. Nothing was added.');
+  return pathFromElsewhere(values.path, caller);
+}
+/** What an ingest that threw said, as one clause without its closing stop. */
+const reasonOf = (error: unknown): string => (error instanceof Error ? error.message : String(error)).trim().replace(/\.$/, '') || 'no reason given';
 
 /** One report for every ingest: a stored source whose fetch failed is a failure, not an ingest. */
 export function knowledgeIngestLine(source: { readonly id: string; readonly status: string; readonly canonicalUri?: string | undefined; readonly sourceUri?: string | undefined; readonly crawlError?: string | undefined }, fallbackSubject: string): string {
   const subject = source.canonicalUri ?? source.sourceUri ?? fallbackSubject;
   if (source.status === 'failed') {
-    throw new CapabilityRefusal(`The page was not added: ${source.id} ${subject}: ${source.crawlError ?? 'no reason recorded'}. The source is stored with status failed; no content was added to knowledge.`);
+    throw new CapabilityRefusal(`The page was not added: ${source.id} ${subject}: ${(source.crawlError ?? 'no reason recorded').trim().replace(/\.+$/, '')}. The source is stored with status failed; no content was added to knowledge.`);
   }
   return `Added ${source.id} ${subject}.`;
 }
@@ -88,7 +116,14 @@ const text = (id: string, label: string, help: string, why: string, typed: Input
 const TITLE = text('title', 'Title', 'What to call it', 'your own words', { flag: '--title' }, { default: '', means: 'its own title' });
 const TAGS = text('tags', 'Tags', 'Words to find it by, separated by commas', 'your own words', { flag: '--tags' }, { default: '', means: 'none' });
 const FOLDER = text('folder', 'Folder', 'Where it goes in your knowledge', 'a folder path you choose', { flag: '--folder' }, { default: '', means: 'the top' });
-const FILE = text('path', 'File', 'A file on this machine', 'a file path', { position: 1 }, undefined, 'path');
+const FILE = text('path', 'File', 'A file on the daemon\'s machine', 'a file path', { position: 1 }, { default: '', means: 'the content sent with it' }, 'path');
+/** A file's content, read and sent by the program on the machine the file is on (the daemon never reads another's). */
+const CONTENT = text('content', 'Content', 'The file\'s content, sent by the program that read it on its own machine', 'the file\'s own content', { flag: '--content' }, { default: '', means: 'none: the file is read by its path' }, 'long-text');
+const NAME = text('name', 'Name', 'The name of the file whose content is sent', 'a file name', { flag: '--name' }, { default: '', means: 'a name made from its title' });
+const ENCODING: InputDescription = {
+  id: 'encoding', label: 'Content written as', help: 'Whether the content sent is plain text or base64', kind: 'choice',
+  choices: [{ value: 'text', label: 'Plain text' }, { value: 'base64', label: 'Base64' }], required: { default: 'text', defaultMeans: 'plain text' }, typed: { flag: '--encoding' },
+};
 const CONNECTOR: InputDescription = {
   id: 'connector', label: 'Connector', help: 'The knowledge connectors', kind: 'choice',
   choices: { list: 'knowledge.connectors' as ListName, allowOther: { reason: 'a connector id' } }, required: true, typed: { position: 1 },
@@ -105,7 +140,7 @@ const REVIEW_VERDICTS: readonly FixedChoice[] = [
 function read(fields: Pick<KnowledgeDefinition, 'capability' | 'actionId' | 'label' | 'word' | 'sentence' | 'run'> & Partial<Pick<KnowledgeDefinition, 'inputs' | 'example'>>): KnowledgeDefinition {
   return { inputs: [], example: {}, done: '', touches: 'reads', lasts: 'not-a-change', risk: 'none', ...fields };
 }
-function change(fields: Pick<KnowledgeDefinition, 'capability' | 'actionId' | 'label' | 'word' | 'inputs' | 'sentence' | 'example' | 'run'> & Partial<Pick<KnowledgeDefinition, 'risk' | 'lasts' | 'touches' | 'ownerOnly'>>): KnowledgeDefinition {
+function change(fields: Pick<KnowledgeDefinition, 'capability' | 'actionId' | 'label' | 'word' | 'inputs' | 'sentence' | 'example' | 'run'> & Partial<Pick<KnowledgeDefinition, 'risk' | 'lasts' | 'touches' | 'ownerOnly' | 'check'>>): KnowledgeDefinition {
   return { done: '', touches: 'another-machine', lasts: 'kept', risk: 'none', ...fields };
 }
 
@@ -280,29 +315,58 @@ export const KNOWLEDGE_INGEST_URL = change({
 });
 
 export const KNOWLEDGE_IMPORT_URLS = change({
-  capability: daemon('knowledge.import-urls', 'safe'), actionId: 'import-urls', label: 'Add pages from a list of addresses', word: 'import-urls', inputs: [FILE, PRIVATE],
-  sentence: 'Every address in {path} is fetched and added to your knowledge, until you change it.', example: { path: 'links.txt' },
+  capability: daemon('knowledge.import-urls', 'safe'), actionId: 'import-urls', label: 'Add pages from a list of addresses', word: 'import-urls', inputs: [FILE, CONTENT, PRIVATE],
+  sentence: 'Every address in the list is fetched and added to your knowledge, until you change it.', example: { path: 'links.txt' },
+  check: oneSource,
   async run(values, services, caller) {
-    const result = await services.knowledge.ingest.urlsFile({ path: pathIn(values.path!, caller), fetchMode: fetchMode(values) });
+    const refused = oneSource(values, caller);
+    if (refused) throw refused;
+    // A list sent as its content (read on the machine it is on) is read as the URL-list connector reads one.
+    const result = values.content
+      ? await services.knowledge.ingest.connectorInput({ connectorId: 'url-list', content: values.content, fetchMode: fetchMode(values) })
+      : await services.knowledge.ingest.urlsFile({ path: pathIn(values.path!, caller), fetchMode: fetchMode(values) });
     return { text: importLines('the pages in the list', result), data: { imported: result.imported, failed: result.failed } };
   },
 });
 
 export const KNOWLEDGE_IMPORT_BOOKMARKS = change({
-  capability: daemon('knowledge.import-bookmarks', 'safe'), actionId: 'import-bookmarks', label: 'Add pages from a bookmarks file', word: 'import-bookmarks', inputs: [FILE, PRIVATE],
-  sentence: 'Every bookmark in {path} is fetched and added to your knowledge, until you change it.', example: { path: 'bookmarks.html' },
+  capability: daemon('knowledge.import-bookmarks', 'safe'), actionId: 'import-bookmarks', label: 'Add pages from a bookmarks file', word: 'import-bookmarks', inputs: [FILE, CONTENT, PRIVATE],
+  sentence: 'Every bookmark in the file is fetched and added to your knowledge, until you change it.', example: { path: 'bookmarks.html' },
+  check: oneSource,
   async run(values, services, caller) {
-    const result = await services.knowledge.ingest.bookmarksFile({ path: pathIn(values.path!, caller), fetchMode: fetchMode(values) });
+    const refused = oneSource(values, caller);
+    if (refused) throw refused;
+    const result = values.content
+      ? await services.knowledge.ingest.connectorInput({ connectorId: 'bookmark', content: values.content, fetchMode: fetchMode(values) })
+      : await services.knowledge.ingest.bookmarksFile({ path: pathIn(values.path!, caller), fetchMode: fetchMode(values) });
     return { text: importLines('the bookmarked pages', result), data: { imported: result.imported, failed: result.failed } };
   },
 });
 
 export const KNOWLEDGE_INGEST_FILE = change({
-  capability: daemon('knowledge.ingest-file', 'safe'), actionId: 'ingest-file', label: 'Add a file', word: 'ingest-file', inputs: [FILE, TITLE, TAGS, FOLDER],
-  sentence: 'File {path} is added to your knowledge, until you change it.', example: { path: 'notes/plan.md' },
+  capability: daemon('knowledge.ingest-file', 'safe'), actionId: 'ingest-file', label: 'Add a file', word: 'ingest-file', inputs: [FILE, CONTENT, NAME, ENCODING, TITLE, TAGS, FOLDER],
+  sentence: 'The file is added to your knowledge, until you change it.', example: { path: 'notes/plan.md' },
+  check: oneSource,
   async run(values, services, caller) {
-    const result = await services.knowledge.ingest.artifact({ path: pathIn(values.path!, caller), title: values.title || undefined, tags: tagsOf(values.tags), folderPath: values.folder || undefined, connectorId: 'goodvibes-agent-file' });
-    return { text: fold([knowledgeIngestLine(result.source, values.path!), ...(result.source.summary ? [`  ${result.source.summary}`] : [])]), data: { source: result.source.id } };
+    const refused = oneSource(values, caller);
+    if (refused) throw refused;
+    const fields = { title: values.title || undefined, tags: tagsOf(values.tags), folderPath: values.folder || undefined, connectorId: 'goodvibes-agent-file' };
+    if (!values.content) {
+      const result = await services.knowledge.ingest.artifact({ path: pathIn(values.path!, caller), ...fields });
+      return { text: fold([knowledgeIngestLine(result.source, values.path!), ...(result.source.summary ? [`  ${result.source.summary}`] : [])]), data: { source: result.source.id } };
+    }
+    // Content sent by the program that read the file on its own machine: kept as a saved artifact, then added as one.
+    if (!services.knowledgeFiles) throw new CapabilityRefusal('Nothing was added: this daemon keeps no artifacts, so a file\'s content sent to it cannot be added. Add the file on the daemon\'s own machine.');
+    const name = values.name || `${(values.title || 'file').replace(/[^\w.-]+/g, '-')}.txt`;
+    const kept = await services.knowledgeFiles.keep({ bytes: Buffer.from(values.content, values.encoding === 'base64' ? 'base64' : 'utf8'), filename: name });
+    let result: Awaited<ReturnType<KnowledgeApi['ingest']['artifact']>>;
+    try {
+      result = await services.knowledge.ingest.artifact({ artifactId: kept.artifactId, ...fields });
+    } catch (error) {
+      kept.discard();
+      throw new CapabilityRefusal(`${name} was not added: ${reasonOf(error)}. Nothing was added.`);
+    }
+    return { text: fold([knowledgeIngestLine(result.source, name), ...(result.source.summary ? [`  ${result.source.summary}`] : [])]), data: { source: result.source.id } };
   },
 });
 
@@ -311,7 +375,8 @@ export const KNOWLEDGE_INGEST_ARTIFACT = change({
   inputs: [text('artifact', 'Artifact', 'Its id, as the artifact list shows it', 'an artifact id', { position: 1 }), TITLE, TAGS, FOLDER],
   sentence: 'Artifact {artifact} is added to your knowledge, until you change it.', example: { artifact: 'art-1a2b' },
   async run(values, services) {
-    const result = await services.knowledge.ingest.artifact({ artifactId: values.artifact!, title: values.title || undefined, tags: tagsOf(values.tags), folderPath: values.folder || undefined, connectorId: 'goodvibes-agent-artifact-browser' });
+    const result = await services.knowledge.ingest.artifact({ artifactId: values.artifact!, title: values.title || undefined, tags: tagsOf(values.tags), folderPath: values.folder || undefined, connectorId: 'goodvibes-agent-artifact-browser' })
+      .catch((error: unknown) => { throw new CapabilityRefusal(`Artifact ${values.artifact} was not added: ${reasonOf(error)}. Nothing was added.`, 'The saved artifacts are listed in the Memory and knowledge place.'); });
     return { text: fold([knowledgeIngestLine(result.source, values.artifact!), ...(result.source.summary ? [`  ${result.source.summary}`] : [])]), data: { source: result.source.id } };
   },
 });
@@ -361,6 +426,7 @@ export const KNOWLEDGE_INGEST_CONNECTOR = change({
     PRIVATE,
   ],
   sentence: 'What connector {connector} reads from the input, file or text given is added to your knowledge, until you change it.', example: { connector: 'rss', input: 'https://example.com/feed' },
+  check: (values, caller) => pathFromElsewhere(values.path, caller),
   async run(values, services, caller) {
     const trimmed = (values.input ?? '').trim();
     let given: unknown = trimmed || undefined;
@@ -368,7 +434,7 @@ export const KNOWLEDGE_INGEST_CONNECTOR = change({
     if (given === undefined && !values.path && !values.content) throw new CapabilityRefusal('Give the connector something to read: an input, a file or text. Nothing was added.');
     const result = await services.knowledge.ingest.connectorInput({
       connectorId: values.connector!, input: given, ...(values.path ? { path: pathIn(values.path, caller) } : {}), ...(values.content ? { content: values.content } : {}), fetchMode: fetchMode(values),
-    });
+    }).catch((error: unknown) => { throw new CapabilityRefusal(`Connector ${values.connector} added nothing: ${reasonOf(error)}. Nothing was added.`); });
     return { text: fold([`Added through ${values.connector}: ${result.imported} ok, ${result.failed} failed.`, ...result.errors.slice(0, 10).map((error) => `  error: ${error}`)]), data: { imported: result.imported, failed: result.failed } };
   },
 });
@@ -466,7 +532,8 @@ export const KNOWLEDGE_CONSOLIDATE = change({
   sentence: 'A tidying pass merges duplicates and fills gaps in your knowledge now, until you change it.', example: { depth: 'deep' },
   async run(values, services) {
     const run = await services.knowledge.jobs.run(values.depth === 'deep' ? 'knowledge-deep-consolidation' : 'knowledge-light-consolidation', { mode: 'inline' });
-    return { text: `Tidying run ${run.id} finished: ${run.status}.`, data: { run: run.id, status: run.status } };
+    const why = run.status === 'failed' ? ` ${run.error ? `Why: ${run.error}.` : 'No reason was recorded.'} Nothing was changed.` : '';
+    return { text: `Tidying run ${run.id} finished: ${run.status}.${why}`, data: { run: run.id, status: run.status } };
   },
 });
 

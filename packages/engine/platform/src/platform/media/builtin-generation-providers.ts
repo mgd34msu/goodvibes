@@ -457,8 +457,8 @@ function refuseMissingKey(spec: GenerationSpec): RefusalError {
   return new RefusalError(refusal({
     code: 'PROVIDER_NOT_CONFIGURED',
     state: `${spec.label} has no API key`,
-    reason: `${spec.label} has no API key (${spec.keyNames.join(' or ')}); nothing was sent`,
-    next: [`Set ${spec.keyNames.join(' or ')} in the environment or the secret store`],
+    reason: `${spec.label} has no API key stored; nothing was sent`,
+    next: [`Store its key on the Media tab of Models and providers: select ${spec.label} and press "store its key"`],
     status: 409,
   }));
 }
@@ -479,7 +479,8 @@ function createGenerationProvider(spec: GenerationSpec, deps: MediaGenerationDep
     configured,
     detail: spec.detail(configured),
     // Status reads local configuration only; the provider is not contacted.
-    metadata: { verified: false, outputs: [...spec.outputs] },
+    // The names its key is stored under, so the Media tab of Models and providers can store it (never its value).
+    metadata: { verified: false, outputs: [...spec.outputs], ...(spec.keyOptional ? {} : { keyNames: [...spec.keyNames] }) },
   });
 
   /** The provider accepted the job and then the request was cancelled: the remote job is cancelled when the provider can, and the task stays in the result either way. */

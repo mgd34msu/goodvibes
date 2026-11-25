@@ -38,7 +38,7 @@ import {
 } from './settings-io.js';
 import { watchConfigFiles, reloadAndNotifyChanges, type ConfigFileWatchHandle } from './config-file-watcher.js';
 import { isDaemonOwnedConfigKey, listDaemonOwnedConfigPaths, type DaemonOwnedConfigPath } from './config-ownership.js';
-import { DECISION_MODEL_NONE_KEY, DECISION_MODEL_SETTINGS_SET_ASIDE, DECISION_MODEL_SET_ASIDE_KEY, PROGRAM_SETTINGS_ROOTS, RETIRED_NO_DECISION_MODEL_POLICIES, RETIRED_SETTING_KEYS, carriedAnything, carrySettingsForward, describeSettingsCarryForward, type SettingsCarryForward } from './settings-carry-forward.js';
+import { DECISION_MODEL_NONE_KEY, DECISION_MODEL_SETTINGS_SET_ASIDE, DECISION_MODEL_SET_ASIDE_KEY, PROGRAM_SETTINGS_ROOTS, RETIRED_NO_DECISION_MODEL_POLICIES, RETIRED_SETTING_KEYS, carriedAnything, carrySettingsForward, carrySharedDefaults, carryStricterKeptValues, copyKeptProgramKeys, describeSettingsCarryForward, describeSharedDefaultsCarry, describeStricterCarry, type SettingsCarryForward } from './settings-carry-forward.js';
 import { resolveOrCreateDaemonPath } from './daemon-tier-paths.js';
 import { collectDaemonOwnedEntries, daemonConfigPathForHome, overlayDaemonTierFrom, persistDaemonKey, readDaemonTierFile, removeDaemonKey } from './daemon-config-tier.js';
 import { resolveGoodVibesDaemonHome } from './goodvibes-home.js';
@@ -2666,6 +2666,8 @@ export class ConfigManager {
    * was and says so in the log.
    */
   #carryDaemonTierForward(): void {
+    this.#copyKeptProgramKeys();
+    this.#carryStricterKeptValues();
     const file = this.daemonTierPath;
     if (file === null || this.readOnly || !this.daemonTierOwner || file === this.configPath || !existsSync(file)) return;
     let removed: string[];
@@ -2683,6 +2685,51 @@ export class ConfigManager {
     logger.info('Settings an earlier version left were carried forward', { file, keptAs, removed });
     this.migrationReceipt(`carried-forward:${file}:${removed.join(',')}`,
       describeSettingsCarryForward(file, null, { moved: [], copied: [], superseded: [], removed }, keptAs));
+  }
+
+  /**
+   * A protection the programs each kept until 3.5.0 (settings-carry-forward.ts STRICTER_KEPT_KEYS:
+   * `sandbox.mcpIsolation`) is the daemon's as the stricter of the programs' values, whichever program starts first;
+   * when they differed, the owner is told once which was kept. Run by whichever manager loads first on this machine
+   * (a program's or the daemon's); the programs' files are left as they were for a rollback.
+   */
+  #carryStricterKeptValues(): void {
+    const tier = this.daemonTierPath;
+    if (tier === null || this.readOnly || this.homeDirectory === null || tier === this.configPath || this.#daemonIsRemote()) return;
+    const files: Record<string, string> = {};
+    for (const root of PROGRAM_SETTINGS_ROOTS) files[root] = resolveSurfaceDirectory(this.homeDirectory, root, 'settings.json');
+    try {
+      for (const carry of carryStricterKeptValues(files, tier)) this.migrationReceipt(`carried-forward:stricter:${carry.key}`, describeStricterCarry(carry));
+    } catch (error) {
+      logger.warn('A protection the programs kept could not be carried into the daemon\'s settings as the stricter of the two; the daemon keeps what it holds', { file: tier, error: summarizeError(error) });
+    }
+    // The one shared default (model, effort, permission mode): the stricter mode, the terminal app's model and
+    // effort, whichever program starts first; one notice naming both programs' values and what was kept.
+    try {
+      const shared = carrySharedDefaults(files, tier);
+      if (shared !== undefined) this.migrationReceipt('carried-forward:shared-defaults', describeSharedDefaultsCarry(shared));
+    } catch (error) {
+      logger.warn('The programs\' own default model, effort and permission mode could not be carried into the daemon\'s one default; the daemon keeps what it holds', { file: tier, error: summarizeError(error) });
+    }
+  }
+
+  /**
+   * The daemon copies the settings a program's own file held until 3.5.0 and the daemon's file now holds
+   * (settings-carry-forward.ts DAEMON_KEYS_KEPT_FOR_ROLLBACK: the terminal app's spending alert) into its file once,
+   * so they are in force whichever program starts first; the program's file is left as it was for a rollback.
+   */
+  #copyKeptProgramKeys(): void {
+    const tier = this.daemonTierPath;
+    if (tier === null || this.readOnly || !this.daemonTierOwner || this.homeDirectory === null) return;
+    for (const root of PROGRAM_SETTINGS_ROOTS) {
+      const file = resolveSurfaceDirectory(this.homeDirectory, root, 'settings.json');
+      try {
+        const copied = copyKeptProgramKeys(file, tier);
+        if (copied.length > 0) this.migrationReceipt(`carried-forward:kept:${file}`, describeSettingsCarryForward(file, tier, { moved: [], copied, superseded: [], removed: [] }));
+      } catch (error) {
+        logger.warn('A setting a program kept could not be copied into the daemon\'s settings; it stays in the program\'s file', { file, error: summarizeError(error) });
+      }
+    }
   }
 
   /**

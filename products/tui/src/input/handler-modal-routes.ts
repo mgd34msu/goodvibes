@@ -1,57 +1,15 @@
-import { openDecisionRouterSettings } from '@goodvibes/engine/terminal-shell/decision-router-settings-actions';
-import { openSettingsChoice, type SettingsChoiceAction } from '@goodvibes/engine/terminal-shell/settings-choice-actions';
 import { sessionPickerDeleteNamedKey } from '@goodvibes/engine/terminal-shell/searchable-modal-route';
 import {
   createSearchableModalTokenRoute,
   createProfilePickerTokenRoute,
 } from '@goodvibes/engine/terminal-shell/searchable-modal-route';
-import { createSettingsModalRoute } from '@goodvibes/engine/terminal-shell/settings-modal-route';
-import { openPaymentsCardsFromSettings } from '@goodvibes/engine/terminal-shell/payments-settings';
-export const { handleSettingsModalToken } = createSettingsModalRoute<
-  CommandContext,
-  import('./model-picker.ts').ModelPickerTarget,
-  'tts-provider' | 'tts-voice' | 'theme' | SettingsChoiceAction | 'payments-cards'
->({
-  focusKey: 'focusRegion',
-  toggleFocusKey: 'toggleFocusRegion',
-  cancelInlineEditOnEscape: true,
-  toggleFlagCategory: false,
-  openSettingsAction(context, action, requestRender, changed, setExecutionMode, close) {
-    if (action === 'payments-cards') {
-      // The card entry prompts in the composer, so Settings closes first.
-      close();
-      void openPaymentsCardsFromSettings(context).finally(requestRender);
-      return;
-    }
-    if (action === 'decision-router') { openDecisionRouterSettings(context, changed); return; }
-    if (action === 'judgment-provider' || action === 'judgment-model' || action === 'judgment-fallbacks' || action === 'decision-policy' || action === 'permission-mode' || action === 'payments-mode') {
-      openSettingsChoice(context, action, changed, setExecutionMode);
-      return;
-    }
-    if (action === 'tts-provider') {
-      openTtsProviderPicker(context);
-      return;
-    }
-    if (action === 'theme') {
-      openThemePicker(context);
-      return;
-    }
-
-    void openTtsVoicePicker(context).catch((error: unknown) => {
-      context.print('Unable to list TTS voices: ' + summarizeError(error));
-      requestRender();
-    });
-  },
-});
+// The settings screen is the one both programs show (terminal-shell settings-screen), a kit modal that reads its own keys.
 export { handleSelectionModalToken, handleBookmarkModalToken } from '@goodvibes/engine/terminal-shell/modal-input-routes';
 import type { InputToken } from '@goodvibes/engine/platform/platform/core';
 import type { CommandContext } from './command-registry.ts';
 import type { ConfigModal } from './config-modal.ts';
 import { CONFIG_MODAL_ACTION_LEADER } from './config-modal-keys.ts';
-import { openTtsProviderPicker, openTtsVoicePicker } from './tts-settings-actions.ts';
-import { openThemePicker } from './theme-settings-actions.ts';
 import { isTextBackspace } from './delete-key-policy.ts';
-import { summarizeError } from '@goodvibes/engine/platform/platform/utils';
 
 type SessionPickerRouteState = {
   sessionPickerModal: {

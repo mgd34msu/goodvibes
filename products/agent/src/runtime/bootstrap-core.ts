@@ -1,5 +1,6 @@
-import { GOODVIBES_AGENT_KNOWLEDGE_DB_FILE, prepareConfiguredProjectContext } from '@goodvibes/engine/platform/platform/knowledge';
-import { initialTerminalRuntimeFields, keepTerminalDeadLetters } from '@goodvibes/engine/terminal-shell/bootstrap-primitives';
+import { REGULAR_KNOWLEDGE_DB_FILE, prepareConfiguredProjectContext } from '@goodvibes/engine/platform/platform/knowledge';
+import { initialTerminalRuntimeFields } from '@goodvibes/engine/terminal-shell/bootstrap-primitives';
+import { setProgramCallContext } from '@goodvibes/engine/platform/platform/runtime/client';
 import { projectAgentToolDependencies } from '@goodvibes/engine/terminal-shell/bootstrap-command-context';
 import {
   createTerminalFeatureFlags,
@@ -7,7 +8,6 @@ import {
   createTerminalEventState,
   initializeTerminalMemory,
   seedTerminalSession,
-  syncTerminalNotifierQueues,
 } from '@goodvibes/engine/terminal-shell/bootstrap-primitives';
 import {
   initializeTerminalCatalog,
@@ -37,9 +37,7 @@ import { resolveConnectedHostAddress } from '@goodvibes/engine/terminal-shell/ag
 import { ToolRegistry } from '@goodvibes/engine/platform/platform/tools';
 import { registerAllTools } from '@goodvibes/engine/platform/platform/tools';
 import type { PermissionManager } from '@goodvibes/engine/platform/platform/permissions';
-import { createRuntimeNotifier } from './bootstrap-notifier.ts';
 import { readDaemonOperatorToken } from './daemon-operator-token.ts';
-import { readAgentHostSetting } from '../config/host-settings.ts';
 
 import { Compositor } from '../renderer/compositor.ts';
 import type { PermissionRequestHandler } from '@goodvibes/engine/platform/platform/permissions';
@@ -66,7 +64,6 @@ import { registerAgentRuntimeEvents } from './agent-runtime-events.ts';
 import { installAgentOrchestratorDependencies } from './agent-orchestrator-deps.ts';
 import { moveLiveSession, type LiveSessionBindingDeps } from './live-session-binding.ts';
 import { createStartupNotices, type StartupNotices } from './startup-notices.ts';
-import { installAgentGoogleRepair } from './google-repair.ts';
 
 export interface BootstrapCoreState {
   readonly userSessionId: string;
@@ -104,9 +101,8 @@ export interface BootstrapCoreState {
   readonly runtimeSessionIdRef: { value: string };
 }
 
-import { registerWebhookNotifier } from './bootstrap-core-helpers.ts';
-
-export { registerWebhookNotifier } from './bootstrap-core-helpers.ts';
+import { attachRuntimeNotifications } from '@goodvibes/engine/platform/platform/integrations';
+import { programNotices } from '@goodvibes/engine/terminal-shell/places';
 
 /**
  * The runtime state object of an Agent process. Its `sessionId` is not a plain
@@ -143,7 +139,8 @@ export async function initializeBootstrapCore(
   const workingDir = options.workingDir;
   const homeDirectory = options.homeDirectory;
   const configManager = options.configManager;
-  await prepareConfiguredProjectContext(configManager, workingDir, GOODVIBES_AGENT_KNOWLEDGE_DB_FILE, { activate: true });
+  // The daemon's one knowledge store, in the daemon's state folder (runtime/services.ts `knowledge: 'daemon'`).
+  await prepareConfiguredProjectContext(configManager, workingDir, REGULAR_KNOWLEDGE_DB_FILE, { activate: true, inDaemonStateFolder: true });
 
   // Gate states derive from domain settings keys (behavior.*, sandbox.*, ...);
   // the featureFlags config category no longer exists. The live bridge keeps
@@ -329,13 +326,9 @@ export async function initializeBootstrapCore(
     `Saved approvals could not be loaded from ${services.shellPaths.resolveProjectPath(GOODVIBES_AGENT_SURFACE_ROOT, 'control-plane', 'approvals.jsonl')}; approval requests will fail until the file is repaired or removed`,
     () => approvalBroker.start(),
   );
-  // A Google request in this process that meets no connection, a missing scope,
-  // a dead grant or a disabled API repairs it from that request; the consent
-  // link is shown here at once.
-  bootstrapUnsubs.push(installAgentGoogleRepair({
-    configManager, secretsManager: services.secretsManager, homeDirectory, permissionManager,
-    notify: (text) => { systemMessageRouterRef.value?.high(text); },
-  }));
+  // No Google connection is made in this process: connecting, a fresh consent and its repair are the daemon's work
+  // (the Google tab of Mail, calendar and channels; capabilities google.connect, google.reauthorize). A request here that
+  // meets no connection or a missing scope says which control does it.
   // The session's one Google connection (made when the google tool was
   // registered) refreshes once now, so a revoked grant is said at start rather
   // than by the first call that fails. Not connected says nothing.
@@ -343,8 +336,8 @@ export async function initializeBootstrapCore(
   if (googleConnection !== undefined) {
     startupNotices.guard('The Google account could not be checked', async () => {
       const check = await googleConnection.checkAtBoot();
-      // The fact only: the first request that needs Google opens the consent (runtime/google-repair.ts).
-      if (check.needsReauthorization) startupNotices.report(`[Startup] ${check.detail}`);
+      // The fact and the control that renews it: the consent is the daemon's work.
+      if (check.needsReauthorization) startupNotices.report(`[Startup] ${check.detail} "Ask for consent again" on the Google tab of Mail, calendar and channels renews it.`);
     });
   }
   startupNotices.guard(
@@ -396,7 +389,6 @@ export async function initializeBootstrapCore(
 
   providerRegistry.startWatching(runtimeBus);
 
-  const webhookUrls = (configManager.getCategory('notifications') as { webhookUrls?: string[] }).webhookUrls ?? [];
   // A workstream's start and ask come from its own record, so one started
   // before a restart is still announced by its request and real duration.
   const runtimeNotifications = {
@@ -405,41 +397,14 @@ export async function initializeBootstrapCore(
       return contract ? { startedAt: contract.createdAt, name: contract.ask } : undefined;
     },
   };
-  // Failed notifications are kept on disk, so /notify failed and /notify resend
-  // still list them after a restart.
-  const deadLetterDirectory = services.shellPaths.resolveUserPath(GOODVIBES_AGENT_SURFACE_ROOT, 'notification-dead-letters');
-  runtimeUnsubs.push(keepTerminalDeadLetters(services.webhookNotifier, deadLetterDirectory, 'webhooks'));
-  // Always attach the shared notifier (see registerWebhookNotifier), so a URL
-  // added mid-session still receives automatic failure notifications.
-  registerWebhookNotifier(services.webhookNotifier, webhookUrls, runtimeBus, runtimeUnsubs, runtimeNotifications);
-  if (webhookUrls.length > 0) {
-    domainDispatch.syncIntegration(
-      {
-        id: 'webhooks',
-        displayName: 'Webhooks',
-        category: 'communication',
-        status: 'healthy',
-        enabled: true,
-        successCount: 0,
-        errorCount: 0,
-        meta: { urlCount: webhookUrls.length },
-      },
-      'bootstrap.webhooks',
-    );
-  }
+  // This program's agents and work that end are announced through the daemon: its one webhook list and its Slack and
+  // Discord notifier; a notice that fails lands in the daemon's failed list (program-notices.ts). This program keeps
+  // no notifier and no failed list of its own.
+  runtimeUnsubs.push(attachRuntimeNotifications(runtimeBus, (delivery, event) => programNotices.sendNotification(delivery, event), runtimeNotifications));
 
   // Requests to the daemon's Access-protected Cloudflare hostname present the
   // stored Access service token, so turning Access on does not lock this app out.
   runtimeUnsubs.push(installCloudflareAccessFetch(configManager, services.secretsManager));
-
-  const notifier = await createRuntimeNotifier(services.serviceRegistry, (key) => readAgentHostSetting(configManager, key), configManager, services.secretsManager);
-  runtimeUnsubs.push(keepTerminalDeadLetters(notifier, deadLetterDirectory, 'chat'));
-  runtimeUnsubs.push(
-    syncTerminalNotifierQueues(notifier, domainDispatch, () => {
-      notifier.attachToRuntimeBus(runtimeBus, runtimeNotifications);
-      return () => notifier.detach();
-    }),
-  );
 
   await syncConfiguredServices(domainDispatch.syncIntegration, services.serviceRegistry);
 
@@ -536,6 +501,9 @@ export async function initializeBootstrapCore(
   // lease reaches the same end state if this process dies first.
   services.conversationRewindHost.start(runtime.sessionId);
   openSessionRecord(runtime.sessionId);
+  // The Agent's call context, carried on every call it makes to the daemon: its project folder and the conversation it
+  // holds now (call-context.ts). The daemon never takes its own folder for a call that names none.
+  setProgramCallContext({ program: 'agent', project: () => services.shellPaths.workingDirectory, sessionId: () => runtimeSessionIdRef.value });
 
   // Mirror the create into the daemon spine (fire-and-forget; the local
   // broker above stays the source of truth). kind:'agent' is the canonical record

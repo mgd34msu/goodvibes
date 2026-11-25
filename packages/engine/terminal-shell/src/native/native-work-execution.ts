@@ -1,5 +1,8 @@
-import type { WorkLedgerReadSnapshot } from '@goodvibes/engine/platform/platform/workflow/work-ledger';
-import type { OperatorNativeWorkExecutionClient, NativeWorkExecutionIdentity, NativeWorkExecutionSnapshot } from '@goodvibes/engine/platform/platform/workflow/work-ledger/native-execution-client';
+import type { NativeWorkExecutionSnapshot } from '@goodvibes/engine/platform/platform/workflow/work-ledger/native-execution-client';
+
+// The terminal's own controls over a run (start, status, stop, resume from a ledger view) were removed with that
+// view: Work is read from the daemon's `work.list` and acted on through the Work capabilities (builtin/work.ts).
+// What stays is the state a message you typed reports when it became a run (native-conversation-intake.ts).
 
 export type NativeWorkExecutionAction = 'start' | 'status' | 'cancel' | 'resume';
 export interface NativeWorkExecutionState {
@@ -10,206 +13,14 @@ export interface NativeWorkExecutionState {
   readonly snapshot?: NativeWorkExecutionSnapshot;
 }
 
-function failureMessage(error: unknown, action: NativeWorkExecutionAction): string {
-  const known: Readonly<Record<string, string>> = {
-    NATIVE_EXECUTION_NOT_FOUND: 'No admitted native execution exists for this attempt. Start is an explicit separate action.',
-    NATIVE_EXECUTION_UNSUPPORTED_AUTHORITY: 'This operation requires an existing live paired operator with native work execution authority.',
-    NATIVE_EXECUTION_REFUSED: 'Jev refused this execution. It will not be retried automatically.',
-    NATIVE_EXECUTION_DECISION_MODEL_FAILED: 'Not started: the decision model failed before it decided whether to start this work, so nothing ran. Fix the decision model (its notice says what failed and how), then start the work again.',
-    NATIVE_EXECUTION_STALE: 'Native work, attempt or authority changed. Inspect status before choosing a new action.',
-    NATIVE_EXECUTION_CONFLICT: 'Native execution conflicts with the recorded admission. Inspect status before choosing a new action.',
-    NATIVE_EXECUTION_RECOVERY_REQUIRED: 'Host recovery is required. Inspect status, then use explicit resume only if still appropriate.',
-    PAIRED_OWNER_REQUIRED: 'Native execution runs from the daemon\'s own machine (with the operator token this terminal already holds) or from a paired device. Run it there, or pair this terminal with the host (/devices migrate-shared), then try again.',
-    FORBIDDEN: 'This credential lacks the access native execution needs (read:work-ledger and write:fleet). Pair this terminal again with that access, then try again.',
-  };
-  try {
-    const code = error && typeof error === 'object' && 'code' in error ? error.code : undefined;
-    if (typeof code === 'string' && Object.hasOwn(known, code)) return known[code]!;
-  } catch { /* no untrusted error detail is shown */ }
-  return `Native ${action} failed or was interrupted; server outcome is unknown. Check status and daemon authorization before retrying.`;
-}
-
-function resultMessage(snapshot: NativeWorkExecutionSnapshot): string {
-  if (snapshot.kind === 'pending-intent') {
-    if (snapshot.state === 'refused') return 'Admission refused. No execution receipt exists. Recovery requires an explicit resume action.';
-    return snapshot.recovery === 'required'
-      ? 'Admission pending. No execution receipt exists. Recovery requires an explicit resume action.'
-      : 'Admission pending. No execution receipt exists. Inspect status to observe the outcome.';
-  }
-  if (snapshot.kind === 'prevented-before-admission') return 'Cancelled before admission. No execution receipt was created. A new native attempt is required to run this work.';
-  if (snapshot.state !== 'cancelled' && snapshot.settlement?.state === 'published') return 'Verification publication recorded. Explicit resume reconciles this receipt without restarting execution.';
-  if (snapshot.state !== 'cancelled' && snapshot.progress?.status === 'passed') return 'Execution passed. Explicit resume retries verification and publication without restarting execution.';
-  return snapshot.recovery === 'required'
-    ? 'Host recovery required. Resume only through the explicit resume control.'
-    : 'Execution snapshot received. Completion is determined by native ledger verification.';
-}
-
-/** Explicit controls over existing native work. No intake, criteria editing or automatic recovery. */
-export class NativeWorkExecutionControls {
-  state: NativeWorkExecutionState | undefined;
-  private binding: { client: OperatorNativeWorkExecutionClient; projectId: string; snapshot: () => WorkLedgerReadSnapshot | undefined; read: () => Promise<WorkLedgerReadSnapshot>; current: () => boolean } | undefined;
-  private readonly observed = new Map<string, NativeWorkExecutionIdentity>();
-  private generation = 0;
-  private request = 0;
-  private pending: AbortController | undefined;
-  /** The pending request when it is a status read the view made by itself; a key press replaces it. */
-  private automatic: AbortController | undefined;
-  /** The ledger changed while an automatic status read was pending: read once more when it ends. */
-  private readAgain = false;
-  constructor(private readonly changed: () => void) {}
-  /**
-   * `snapshot` is the ledger the view shows: an action reads its attempt from it, never from a
-   * fetch of its own. The host's revision check (`NATIVE_EXECUTION_STALE`) refuses a button
-   * pressed on rows that moved since. `read` serves only a command typed before the view has
-   * read its first snapshot.
-   */
-  bind(client: OperatorNativeWorkExecutionClient, projectId: string, snapshot: () => WorkLedgerReadSnapshot | undefined, read: () => Promise<WorkLedgerReadSnapshot>, current: () => boolean): void {
-    this.clear(); this.binding = { client, projectId, snapshot, read, current };
-  }
-  clear(): void {
-    ++this.generation; ++this.request;
-    const binding = this.binding; this.binding = undefined;
-    const pending = this.pending; this.pending = undefined; this.state = undefined; this.observed.clear();
-    this.automatic = undefined; this.readAgain = false;
-    pending?.abort();
-    try { binding?.client.dispose(); } catch { /* local cleanup cannot retain an old host */ }
-  }
-  observe(snapshot: WorkLedgerReadSnapshot): void {
-    if (!this.binding || snapshot.projectId !== this.binding.projectId) return;
-    // Remember authenticated rows before their first action. A newly fetched
-    // handoff must not silently retarget an explicitly displayed cancellation.
-    for (const { work, attempt } of snapshot.works) {
-      if (this.observed.has(work.id) || !attempt || work.currentAttemptId !== attempt.id || attempt.workId !== work.id) continue;
-      this.observed.set(work.id, { workId: work.id, attemptId: attempt.id, expectedRevision: { work: work.revision, criteria: work.criteriaRevision, attempt: attempt.revision } });
-    }
-  }
-  observedAttempt(workId: string): string | undefined { return this.observed.get(workId)?.attemptId; }
-  /**
-   * Reads the execution status the view shows, with no key pressed: called when the view reads its
-   * first snapshot and on each ledger change. It reads the work last acted on, else the first work
-   * with a current active attempt, else the first with any current attempt. A request a person made
-   * is never interrupted; a change during an automatic read reads once more when it ends.
-   */
-  refresh(snapshot: WorkLedgerReadSnapshot): void {
-    if (!this.binding || snapshot.projectId !== this.binding.projectId) return;
-    if (this.pending) {
-      if (this.pending === this.automatic) this.readAgain = true;
-      return;
-    }
-    const current = ({ work, attempt }: WorkLedgerReadSnapshot['works'][number]): boolean =>
-      attempt !== null && work.currentAttemptId === attempt.id && attempt.workId === work.id;
-    const shown = this.state?.workId;
-    const workId = shown !== undefined && this.observed.has(shown) && snapshot.works.some(view => view.work.id === shown)
-      ? shown
-      : (snapshot.works.find(view => current(view) && view.attempt?.state === 'active') ?? snapshot.works.find(current))?.work.id;
-    if (workId !== undefined) void this.run('status', workId, true);
-  }
-  async run(action: NativeWorkExecutionAction, workId: string, automatic = false): Promise<NativeWorkExecutionState | undefined> {
-    const binding = this.binding;
-    if (!binding) return;
-    const generation = this.generation;
-    // A second mutation is never queued. Explicit Cancel may interrupt a pending
-    // local request and separately ask the host to cancel the selected attempt.
-    // An automatic status read gives way to any key a person presses.
-    if (this.pending && action !== 'cancel' && this.pending !== this.automatic) return;
-    this.pending?.abort();
-    const controller = new AbortController(); this.pending = controller;
-    this.automatic = automatic ? controller : undefined;
-    if (!automatic) this.readAgain = false;
-    const request = ++this.request;
-    const current = (): boolean => binding.current() && generation === this.generation && request === this.request && !controller.signal.aborted;
-    if (!current()) { if (this.pending === controller) this.pending = undefined; controller.abort(); return; }
-    try {
-      let snapshot = binding.snapshot();
-      if (!snapshot) {
-        this.state = { workId, action, busy: true, message: `Reading current native attempt for ${action}…` }; this.changed();
-        snapshot = await binding.read();
-        if (!current()) return;
-      }
-      if (snapshot.projectId !== binding.projectId) throw new Error('project changed');
-      const view = snapshot.works.find(item => item.work.id === workId);
-      const retained = action === 'status' || action === 'cancel' ? this.observed.get(workId) : undefined;
-      if (!retained && (!view?.attempt || view.work.currentAttemptId !== view.attempt.id || view.attempt.workId !== view.work.id)) {
-        this.state = { workId, action, busy: false, message: 'Select an existing native work item with a current attempt.' }; this.changed(); return current() ? this.state : undefined;
-      }
-      const active = view?.attempt?.state === 'active' && view.work.reportedState !== 'complete' && view.work.reportedState !== 'cancelled';
-      if (action === 'start' && !active) {
-        this.state = { workId, action, busy: false, message: 'Start requires an existing active native attempt.' }; this.changed(); return current() ? this.state : undefined;
-      }
-      // Only current authenticated ledger facts become trusted identity fields.
-      // Original goal/criteria never leave this read model as writable input.
-      let identity = retained ?? (view?.attempt ? { workId: view.work.id, attemptId: view.attempt.id, expectedRevision: {
-        work: view.work.revision, criteria: view.work.criteriaRevision, attempt: view.attempt.revision,
-      } } : undefined);
-      if (!identity) return;
-      if (action === 'resume') {
-        // Read the selected current attempt first. A completed ledger may be a
-        // lost publication acknowledgment, so retain its admitted revisions for
-        // exact receipt reconciliation rather than silently retargeting work.
-        const observed = await binding.client.status(identity, { signal: controller.signal });
-        if (!current()) return;
-        const settlement = observed.kind === 'execution' && observed.state !== 'cancelled'
-          && (observed.settlement?.state === 'published' || observed.progress?.status === 'passed');
-        if (settlement) identity = { workId: observed.workId, attemptId: observed.attemptId, expectedRevision: observed.expectedRevision };
-        else if (!active || (observed.kind === 'execution' && (observed.state === 'cancelled' || observed.recovery === 'terminal'))) {
-          this.state = { workId, action, busy: false, snapshot: observed, message: 'This attempt cannot resume execution. Only a passed execution can retry verification or reconcile publication.' };
-          this.changed(); return current() ? this.state : undefined;
-        }
-      }
-      // Retain the observed attempt across handoff/revision drift, including an
-      // uncertain transport result. Only explicit start/resume selects a new one.
-      this.observed.set(workId, identity);
-      // An automatic read keeps the status already shown until its answer replaces it.
-      if (!automatic) { this.state = { workId, action, busy: true, message: `Native ${action} request pending…` }; this.changed(); }
-      if (!current()) return;
-      const result = await binding.client[action](identity, { signal: controller.signal });
-      if (!current()) return;
-      // The retained identity pins the attempt, not its revisions. A status read of that same, still-current
-      // attempt carries the host's current revisions, so a later cancel is not refused as stale by revisions
-      // that advanced while it ran. A different attempt id is never adopted here.
-      if (action === 'status' && result.currentAttempt && result.attemptId === identity.attemptId && result.currentRevision) {
-        this.observed.set(workId, { ...identity, expectedRevision: result.currentRevision });
-      }
-      this.state = { workId, action, busy: false, snapshot: result, message: resultMessage(result) };
-      this.changed();
-      return current() ? this.state : undefined;
-    } catch (error) {
-      if (!current()) return;
-      // Transport errors can contain host URLs or credentials. Keep them out of
-      // terminal output and do not convert an uncertain request into success.
-      this.state = { workId, action, busy: false, message: failureMessage(error, action) };
-      this.changed();
-      return current() ? this.state : undefined;
-    } finally {
-      if (generation === this.generation && request === this.request) {
-        this.pending = undefined;
-        const again = this.automatic === controller && this.readAgain;
-        this.automatic = undefined; this.readAgain = false;
-        const latest = again ? binding.snapshot() : undefined;
-        if (latest && binding.current()) this.refresh(latest);
-      }
-    }
-  }
-}
-
 /** Honest transport progress, separate from work verification and success evidence. */
 export function nativeWorkExecutionLines(state: NativeWorkExecutionState | undefined): string[] {
   if (!state) return [];
-  const lines = [`Native work ${state.workId} · ${state.action}${state.busy ? ' pending' : ''}`, state.message];
-  const snapshot = state.snapshot;
-  if (!snapshot) return lines;
-  const requested = snapshot.expectedRevision; const current = snapshot.currentRevision;
-  const execution = snapshot.kind === 'execution';
-  lines.push(`${execution ? 'Execution attempt' : 'Admission intent'} ${snapshot.attemptId} · ${snapshot.state} · recovery ${snapshot.recovery}`,
-    `${execution ? 'Admitted' : 'Requested'} revisions: work ${requested.work} · criteria ${requested.criteria} · attempt ${requested.attempt}`,
-    current ? `Current revisions: work ${current.work} · criteria ${current.criteria} · attempt ${current.attempt}` : 'Current revisions unavailable.',
-    `Current attempt: ${snapshot.currentAttempt} · stale: ${snapshot.stale}`);
-  if (snapshot.kind !== 'execution') return lines;
-  if (snapshot.receipt) lines.push(`Receipt: contract ${snapshot.receipt.contractId} · owner ${snapshot.receipt.ownerAgentId}`);
-  if (snapshot.settlement) lines.push(`Verification publication: ${snapshot.settlement.state}${snapshot.settlement.evidenceId ? ` · evidence ${snapshot.settlement.evidenceId}` : ''}${snapshot.settlement.reason ? ` · reason ${snapshot.settlement.reason}` : ''}`);
-  const progress = snapshot.progress;
-  if (progress) lines.push(`Progress: ${progress.status} · semantic ${progress.semanticState ?? 'none'} · stage ${progress.stage ?? 'none'} · retrying ${progress.retrying}`,
-    `Units: ${progress.units.passed}/${progress.units.total} passed · ${progress.units.failed} failed`,
-    `Criteria progress: ${progress.criteria.met}/${progress.criteria.total} met · ${progress.criteria.unmet} unmet · ${progress.criteria.unshown} unshown`);
+  // Where the work stands, in the words of the Work place: its steps and its results, never its records' ids.
+  const lines = [state.message];
+  const progress = state.snapshot?.kind === 'execution' ? state.snapshot.progress : undefined;
+  if (progress) {
+    lines.push(`${progress.units.passed} of ${progress.units.total} steps done${progress.units.failed > 0 ? `, ${progress.units.failed} failed` : ''}; ${progress.criteria.met} of ${progress.criteria.total} results met.`);
+  }
   return lines;
 }

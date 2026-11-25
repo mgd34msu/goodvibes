@@ -25,7 +25,6 @@ import type { ConversationManager } from '../core/conversation';
 import { BlockActionsMenu } from '../renderer/block-actions.ts';
 import { ContextInspectorModal } from '../renderer/context-inspector.ts';
 import { BookmarkModal } from './bookmark-modal.ts';
-import { SettingsModal } from './settings-modal.ts';
 import type { McpWorkspace } from './mcp-workspace.ts';
 import { SessionPickerModal } from './session-picker-modal.ts';
 import type { ConfigModal } from './config-modal.ts';
@@ -71,7 +70,7 @@ import { guardCommandPaste, type PasteBurstGuardState } from '@goodvibes/engine/
  *   - `inputHistory`, `conversationManager`, late-wired service handles; synced at
  *     feed() entry only since no in-feed action rewires them
  *   - `pasteRegistry`, `imageRegistry`, owned Maps, never replaced
- *   - `selectionModal`, `bookmarkModal`, `settingsModal`, `sessionPickerModal`,
+ *   - `selectionModal`, `bookmarkModal`, `sessionPickerModal`,
  *     `profilePickerModal`, modal objects constructed once in InputHandler constructor
  *   - `filePicker`, `modelPicker`, `onboardingWizard`,
  *     `contextInspectorModal`, `blockActionsMenu`, `searchManager`, `historySearch`,
@@ -107,7 +106,6 @@ export interface InputFeedContext {
   readonly selectionModal: SelectionModal;
   selectionCallback: ((result: SelectionResult | null) => void) | null;
   readonly bookmarkModal: BookmarkModal;
-  readonly settingsModal: SettingsModal;
   readonly mcpWorkspace: McpWorkspace;
   readonly sessionPickerModal: SessionPickerModal;
   readonly profilePickerModal: ProfilePickerModal;

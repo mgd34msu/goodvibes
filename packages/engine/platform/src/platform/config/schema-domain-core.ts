@@ -308,7 +308,7 @@ export const coreHeadConfigSettings: (ConfigSettingDefinition | ConfigSettingRow
     appliesWhen: 'now',
     type: 'enum',
     description:
-      'How GoodVibes picks a provider for each request: off (the default), manual (it compares but never switches), auto (it picks the best provider that can do the request), or pinned (always the one model named in the next setting). Applies at once from any settings path; /provider-opt commands write this setting.',
+      'How GoodVibes picks a provider for each request: off (the default), manual (it compares but never switches), auto (it picks the best provider that can do the request), or pinned (always the one model named in the next setting). Applies at once from any settings path; the Routing tab of Models and providers writes this setting.',
     enumValues: ['off', 'manual', 'auto', 'pinned'],
   },
   {

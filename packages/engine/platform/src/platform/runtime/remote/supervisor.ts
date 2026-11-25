@@ -84,7 +84,8 @@ export class RemoteSupervisor {
     const recovery: readonly RemoteRecoveryAction[] = deriveRemoteRecoveryActions(connection, contract, heartbeat);
     return buildRemoteSessionStateSnapshot({
       runnerId,
-      label: connection?.label ?? contract?.label ?? runnerId,
+      // The contract names a runner by its task; a connection that went before its agent was known carries only its id.
+      label: contract?.label ?? connection?.label ?? runnerId,
       connection,
       contract,
       heartbeat,

@@ -133,7 +133,7 @@ export function createPreferredSettingsProjector(platform: Pick<CommandContext['
     assertSettingsWriteAllowed(operation, key, value);
     const credentialClear = secretKey && (operation === 'reset' || (typeof value === 'string' && value.trim() === ''));
     if (secretKey && operation === 'set' && typeof value === 'string' && value.trim() && !isSecretReferenceValue(value)) {
-      throw new ToolInputProjectionError('invalid', `The setting ${key} stores a credential, so it takes a secret reference, not the credential itself. Ask the owner to store the value with /secrets set <name> and pass its goodvibes://secrets/... reference.`);
+      throw new ToolInputProjectionError('invalid', `The setting ${key} stores a credential, so it takes a secret reference, not the credential itself. Ask the owner to store the value with "Store a secret" (Permissions and safety, Secrets), or run the capability secrets.set, and pass its goodvibes://secrets/... reference.`);
     }
     const capability = client?.preparedSettings;
     let route: ConfigWriteRoute | undefined;

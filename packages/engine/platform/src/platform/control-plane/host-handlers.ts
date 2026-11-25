@@ -44,6 +44,11 @@ export interface HandlerContextEnvelope {
   readonly isAuthorized?: GatewayMethodInvocation['isAuthorized'];
   /** How the request reached the daemon, as the transport established it; absent for an in-process call. */
   readonly transport?: GatewayMethodInvocationContext['transport'];
+  /**
+   * The Agent's call carries the decision of its run's own answerer (a script answering every question): its native
+   * admission asks nobody again. Only the dispatch sets it, only for the Agent's credential.
+   */
+  readonly decidedInRun?: true | undefined;
 }
 
 /** Typed, host-facing shape of a single method invocation. */
@@ -88,6 +93,8 @@ export function normalizeContext(
     ...(context.principalKind ? { principalKind: context.principalKind } : {}),
     ...(context.credentialKind ? { credentialKind: context.credentialKind } : {}),
     ...(context.transport ? { transport: context.transport } : {}),
+    // Set by the dispatch only for the Agent's credential (daemon/control-plane.ts `decidedInRun`).
+    ...(metadata['decidedInRun'] === true && context.credentialKind === 'agent' ? { decidedInRun: true } : {}),
   };
 }
 

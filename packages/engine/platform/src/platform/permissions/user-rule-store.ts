@@ -25,7 +25,8 @@
 
 import { isDeepStrictEqual } from 'node:util';
 import { existsSync, readFileSync, rmSync, statSync, watch, type FSWatcher } from 'node:fs';
-import { dirname, join, resolve } from 'node:path';
+import { dirname, join } from 'node:path';
+import { projectIdentityOf } from '../workspace/project-identity.js';
 import type { PolicyRule } from '../runtime/permissions/types.js';
 import { PersistentStore } from '../state/persistent-store.js';
 import { StoreWriteQueue } from '../state/store-write-queue.js';
@@ -37,6 +38,7 @@ import { compileRules, ruleCovers, type CompiledRules, type RememberTier } from 
 import { contentDigest } from '../utils/target-ref.js';
 import { noteCarriedForward } from '../state/carried-forward.js';
 import { noteListChanged } from '../runtime/list-changes.js';
+import { VERSION } from '../version.js';
 
 /** One project's rules for evaluation: the committed and remembered lists, and both compiled for matching. */
 export interface CompiledProjectRules {
@@ -60,6 +62,34 @@ export interface StoredUserPermissionRule {
   readonly tool: string;
   /** The project root the rule was remembered in; absent means it applies in every project. */
   readonly project?: string | undefined;
+  /**
+   * `3.5.0`: a rule that refuses (or asks) which 3.5.0 kept for the daemon's own folder and which no record could
+   * place in the project it was made for; it applies in every project, as it refused daemon-run work in every
+   * project under 3.5.0, until the owner places it in one or removes it (permissions/daemon-folder-rules-notice.ts).
+   */
+  readonly carried?: '3.5.0' | undefined;
+  /**
+   * `3.5.0`: a copy, in the form and folder 3.5.0 reads, of a refusing rule this version placed in its real project
+   * (permissions/daemon-folder-rules-notice.ts), so a 3.5.0 daemon put back still refuses that work. This version never
+   * reads it: it is not matched, listed or counted, it is kept in the file as it is, and it goes with its rule
+   * (`of`) when that rule is removed.
+   */
+  readonly keptFor?: { readonly release: '3.5.0'; readonly of: string } | undefined;
+  /** The session whose answer made the rule, when one did. */
+  readonly session?: string | undefined;
+  /** That session's title when the answer was given (a runner by its task, a chat by its title): Rules names it so. */
+  readonly madeIn?: string | undefined;
+  /**
+   * The release that wrote the record, set by this store on every rule it adds or remembers. 3.5.0 never writes it (and
+   * keeps it on the records it rewrites), so a record without it was written by 3.5.0, a rollback's included: the one
+   * mark the carry of the daemon folder's earlier rules (daemon-folder-rules-notice.ts) reads at every start.
+   */
+  readonly writtenBy?: string | undefined;
+}
+
+/** A record as this version writes it: marked with the release that wrote it (`writtenBy`). */
+function writtenHere(record: StoredUserPermissionRule): StoredUserPermissionRule {
+  return record.writtenBy !== undefined ? record : { ...record, writtenBy: VERSION };
 }
 
 /**
@@ -94,10 +124,17 @@ export function previousOwnerPermissionRuleFiles(config: { getHomeDirectory(): s
 
 /** The identity a rule's project key is compared by: the resolved project root path. */
 export function projectIdentity(root: string): string {
-  return resolve(root);
+  // The product's one project identity (workspace/project-identity.ts): a subfolder is in its project.
+  return projectIdentityOf(root);
+}
+
+/** A copy kept in the file only for a 3.5.0 binary put back (`keptFor`): this version never reads it. */
+function readHere(record: StoredUserPermissionRule): boolean {
+  return record.keptFor === undefined;
 }
 
 function appliesIn(record: StoredUserPermissionRule, project: string | null | undefined): boolean {
+  if (!readHere(record)) return false;
   if (record.project === undefined) return true;
   return typeof project === 'string' && project.length > 0 && projectIdentity(project) === record.project;
 }
@@ -233,7 +270,7 @@ export class UserPermissionRuleStore {
       let data = await this.store.load();
       if (data === null && this.#previousFiles.length > 0 && this.store.lockPath !== null) data = await this.#carryForwardPreviousFiles();
       if (data && Array.isArray(data.rules)) {
-        this.records = recordsOf(data);
+        this.records = recordsOf(data).filter(readHere);
       }
     } catch (error) {
       // A corrupt store must not silently grant or deny anything, start
@@ -492,13 +529,14 @@ export class UserPermissionRuleStore {
   }
 
   /** Publish a rule only after persistence succeeds; reject without changing state on failure. */
-  async add(record: StoredUserPermissionRule): Promise<void> {
+  async add(given: StoredUserPermissionRule): Promise<void> {
+    const record = writtenHere(given);
     await this.awaitReady();
     await this.mutate((disk) => {
       const next = [...disk.filter((existing) => existing.rule.id !== record.rule.id), record];
       return { next, publish: () => {
         this.remembered = this.remembered.filter((r) => r.rule.id !== record.rule.id);
-        this.records = [...this.records.filter((r) => r.rule.id !== record.rule.id), record];
+        this.records = [...this.records.filter((r) => r.rule.id !== record.rule.id), ...(readHere(record) ? [record] : [])];
         this.publicationRevision++;
       } };
     });
@@ -511,12 +549,13 @@ export class UserPermissionRuleStore {
    * revision that admitted calls are bound to. Refuses while the file is
    * unreadable, so a write never replaces rules it could not load.
    */
-  async remember(record: StoredUserPermissionRule): Promise<void> {
+  async remember(given: StoredUserPermissionRule): Promise<void> {
+    const record = writtenHere(given);
     await this.awaitReady();
     // A rule already stored for every project, or for this one, that decides
     // everything the answer does (the same rule kept under another id among
     // them): nothing new to keep.
-    const kept = (rules: readonly StoredUserPermissionRule[]): boolean => rules.some((other) => other.rule.id !== record.rule.id
+    const kept = (rules: readonly StoredUserPermissionRule[]): boolean => rules.some((other) => other.rule.id !== record.rule.id && readHere(other)
       && (other.project === undefined || other.project === record.project)
       && (ruleCovers(other.rule, record.rule) || isDeepStrictEqual({ ...other.rule, id: record.rule.id }, record.rule)));
     // Held here and unchanged on disk since (the approval broker keeps an answer's rule before the gate that asked
@@ -526,7 +565,7 @@ export class UserPermissionRuleStore {
     await this.mutate((disk) => {
       if (kept(disk)) return null;
       // Rules of this project the answer now covers go: the list stays one rule per decision the owner made.
-      const covered = new Set(disk.filter((other) => other.rule.id !== record.rule.id && other.project === record.project
+      const covered = new Set(disk.filter((other) => other.rule.id !== record.rule.id && readHere(other) && other.project === record.project
         && ruleCovers(record.rule, other.rule)).map((other) => other.rule.id));
       const next = [...disk.filter((existing) => existing.rule.id !== record.rule.id && !covered.has(existing.rule.id)), record];
       // adoptDisk keeps the written record, as a remembered rule.
@@ -545,7 +584,8 @@ export class UserPermissionRuleStore {
     await this.awaitReady();
     let removed = false;
     await this.mutate((disk) => {
-      const next = disk.filter((record) => record.rule.id !== ruleId);
+      // The copy kept for a 3.5.0 binary goes with its rule: a rule the owner removed is not brought back by a rollback.
+      const next = disk.filter((record) => record.rule.id !== ruleId && record.keptFor?.of !== ruleId);
       const inMemory = this.records.some((record) => record.rule.id === ruleId)
         || this.remembered.some((record) => record.rule.id === ruleId);
       if (next.length === disk.length && !inMemory) return null;
@@ -605,7 +645,7 @@ export class UserPermissionRuleStore {
     const known = new Set([...committed, ...keptRemembered].map((record) => record.rule.id));
     const remembered = [
       ...keptRemembered,
-      ...written.filter((record) => !known.has(record.rule.id)),
+      ...written.filter((record) => readHere(record) && !known.has(record.rule.id)),
     ];
     const dropped = this.records.some((record) => !unchanged(record) && !covered?.has(record.rule.id));
     if (dropped) this.publicationRevision++;

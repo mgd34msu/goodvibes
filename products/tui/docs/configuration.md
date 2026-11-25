@@ -33,9 +33,9 @@ Settings sit next to several other stores that follow the same global-versus-pro
 
 | Path | What it holds |
 | --- | --- |
-| `~/.goodvibes/tui/secrets.enc` and the project's `.goodvibes/tui/secrets.enc` | Secure encrypted secrets; a key in the project's store is used once you stored it there or confirmed it with `/secrets trust <KEY> --yes` |
+| `~/.goodvibes/tui/secrets.enc` and the project's `.goodvibes/tui/secrets.enc` | Secure encrypted secrets; a key in the project's store is used once you stored it there or confirmed it with "Use a secret from this project's store" (Permissions and safety, Secrets) |
 | `~/.goodvibes/goodvibes.secrets.json` and the project's `.goodvibes/goodvibes.secrets.json` | Plaintext compatibility secrets, with the same confirmation rule for the project's file |
-| `~/.goodvibes/tui/services.json` | The service registry, backing auth/account surfaces in the TUI and daemon; a project's `.goodvibes/tui/services.json` adds only services whose credentials are keys in your store, and each one only after you confirm it with `/services trust <name>` (an edit of its keys, header or host needs a new confirmation). A service's credential is sent by name only to its own `baseUrl` origin |
+| `~/.goodvibes/tui/services.json` | The service registry, backing auth/account surfaces in the TUI and daemon; a project's `.goodvibes/tui/services.json` adds only services whose credentials are keys in your store, and each one only after you confirm it with "Use a service this project defines" (Models and providers, Services) (an edit of its keys, header or host needs a new confirmation). A service's credential is sent by name only to its own `baseUrl` origin |
 | `~/.goodvibes/tui/providers/*.json` | Custom provider JSON |
 | `~/.goodvibes/tui/keybindings.json` | Keybinding overrides |
 | `.goodvibes/tui/repl-history.json` | REPL history |
@@ -133,10 +133,10 @@ selecting an execution mode clears it. Per-tool overrides are the separate
 `Shift+Tab` cycles the execution modes of the current session in this order:
 `ask-me` → `jev-decides` → `just-vibes` → `yolo` → `ask-me`. The change lasts for the session and
 asks before entering `yolo` (declining moves on to `ask-me`); the saved `permissions.mode` changes only in
-`/settings` (`/permissions` shows it). The key is `cycle-permission-mode` in the keybindings file. `/plan` toggles plan mode directly and `/plan off`
-returns to the mode you were in when you ran `/plan on` (it does nothing when plan
-mode is not on); `plan` is outside the cycle, and cycling from it, or leaving a plan mode that
-`/plan` did not enter, starts again at `ask-me`.
+`/settings` (`/permissions` shows it). The key is `cycle-permission-mode` in the keybindings file. The Plan mode row of This conversation in
+Permissions and safety toggles plan mode directly, and turning it off returns to the mode you were in when
+you turned it on; `plan` is outside the cycle, and cycling from it, or leaving a plan mode that was not
+entered there, starts again at `ask-me`.
 
 Background and subagent tool calls follow the mode of the session that
 started them, and their asks reach the owner through the same approval prompt
@@ -236,7 +236,7 @@ of them.
 | Key | Type | Default | Meaning |
 | --- | --- | --- | --- |
 | `behavior.notifyAfterSeconds` | number | `60` | Seconds a turn must run before a push notification fires; `0` turns it off. Delivers to the desktop (`notify-send` / `osascript`) and to any configured ntfy/webhook URLs. Notification text is metadata only: task kind, elapsed time, ok/fail, session id. Never conversation content. |
-| `behavior.notifyOnBudgetBreach` | boolean | `true` | Alert when session cost crosses the configured budget (set via the Usage modal's `b` key). `GOODVIBES_COST_BUDGET_USD=<usd>` seeds the budget on first run when no budget has been set yet; it never overrides one you set. |
+| `behavior.notifyOnBudgetBreach` | boolean | `true` | Alert when this conversation's cost passes the spending alert (`behavior.budgetAlertUsd`, the daemon's setting, set in Money, Spending, with `w`). `GOODVIBES_COST_BUDGET_USD=<usd>` seeds the budget on first run when no budget has been set yet; it never overrides one you set. |
 | `behavior.notifyOnAgentFailure` | boolean | `true` | Alert when a delegated or background agent fails. |
 | `behavior.notifyOnChainFailure` | boolean | `true` | Alert when a contract fails or is cancelled. |
 | `behavior.notifyOnApprovalPending` | boolean | `true` | Alert the moment a tool call becomes a real, user-blocking permission prompt. Message text is tool name and permission category only, never the call's arguments. |

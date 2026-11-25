@@ -160,11 +160,6 @@ export interface CreateDaemonFacadeCollaboratorsOptions {
   readonly signWebhookPayload: (body: string, secret: string) => string;
   readonly handleApprovalAction: (approvalId: string, action: 'claim' | 'approve' | 'deny' | 'cancel', req: Request, interaction?: { readonly surface: string; readonly userId: string } | undefined) => Promise<Response>;
   readonly tlsState: () => ResolvedInboundTlsContext | null;
-  /**
-   * WorkspaceSwapManager instance, forwarded from DaemonConfig.swapManager.
-   * Null in embedded/test contexts that don't support live workspace swaps.
-   */
-  readonly swapManager: import('./http/system-route-types.js').WorkspaceSwapManagerLike | null;
   /** Resolve the current provider/model for companion-chat session creation. */
   readonly resolveDefaultProviderModel?: () => { provider: string; model: string; reasoningEffort?: string | null | undefined } | null;
 }

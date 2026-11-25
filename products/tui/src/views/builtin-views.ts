@@ -3,7 +3,7 @@
  *
  * Built once at startup (runtime/bootstrap-shell.ts):
  *   - the UsageTracker, collecting per-turn history and costs from the first
- *     turn whether or not the Usage modal is ever opened;
+ *     turn for the top of Money, Spending (terminal-shell places/conversation-spending.ts);
  *   - the fleet's action callbacks, acts (pick / conflict / discard) and the
  *     ACP spawn controller the Agents modal drives;
  *   - every config-modal surface, registered on the ModalSurfaceRegistry with
@@ -18,7 +18,7 @@
 import type { UserAuthManager } from '@goodvibes/engine/platform/platform/security';
 import type { ConfigManager } from '@goodvibes/engine/platform/platform/config';
 import { GOODVIBES_TUI_SURFACE_ROOT } from '../config/surface.ts';
-import { UsageTracker } from '../runtime/usage-tracker.ts';
+import { UsageTracker } from '@goodvibes/engine/terminal-shell/places';
 import type { FleetActionCallbacks } from '../input/agents-modal.ts';
 import { ModalSurfaceRegistry } from './modal-surface-registry.ts';
 import { registerBuiltinModals } from './builtin-modals.ts';
@@ -67,6 +67,8 @@ export function createShellViews(deps: BuiltinViewDeps): ShellViews {
     getContextTokens: () => deps.orchestrator?.lastInputTokens ?? 0,
     getContextWindow: () => deps.getCtxWindow?.() ?? 0,
     getModelId: () => deps.providerRegistry.getCurrentModel().id,
+    // The key a price of your own is set under (Money, Spending, "your price").
+    getModelKey: () => { const model = deps.providerRegistry.getCurrentModel(); return `${model.provider}:${model.id}`; },
     pricing: deps.providerRegistry,
     getAgentStatus: (id) => ui.agents.agentManager.getStatus(id),
     getFleetCost: () => fleetReadModel.getSnapshot().totalCost,

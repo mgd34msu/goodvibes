@@ -245,6 +245,35 @@ export function grantsCalendarWrite(scopes: readonly string[]): boolean {
   return grants(scopes, CALENDAR_WRITE_SCOPES);
 }
 
+/** What one Google permission lets this product do, in a person's words. */
+const SCOPE_WORDS: Readonly<Record<string, string>> = {
+  'https://www.googleapis.com/auth/gmail.readonly': 'read mail',
+  'https://www.googleapis.com/auth/gmail.send': 'send mail',
+  'https://www.googleapis.com/auth/gmail.compose': 'write drafts and send mail',
+  'https://www.googleapis.com/auth/gmail.modify': 'read mail and change it (labels, read marks)',
+  'https://www.googleapis.com/auth/gmail.labels': 'change mail labels',
+  'https://mail.google.com/': 'full control of the mailbox, deleting mail included',
+  'https://www.googleapis.com/auth/calendar.readonly': 'read calendars',
+  'https://www.googleapis.com/auth/calendar': 'read and change calendars',
+  'https://www.googleapis.com/auth/calendar.events': 'read and change calendar events',
+  'https://www.googleapis.com/auth/calendar.events.readonly': 'read calendar events',
+  'https://www.googleapis.com/auth/userinfo.email': 'know the account\'s address',
+  'https://www.googleapis.com/auth/userinfo.profile': 'know the account\'s name',
+  'openid': 'sign in as the account',
+  'email': 'know the account\'s address',
+  'profile': 'know the account\'s name',
+};
+
+/**
+ * What a credential's granted scopes allow, in a person's words, each once: "read mail, send mail, read calendars".
+ * A scope with no words here is named by its last part ("another Google permission (drive.file)").
+ */
+export function describeGrantedScopes(scopes: readonly string[]): string {
+  const words = scopes.map((scope) => SCOPE_WORDS[scope]
+    ?? `another Google permission (${scope.replace(/^https:\/\/www\.googleapis\.com\/auth\//, '').replace(/[\x00-\x1f\x7f-\x9f]/g, ' ')})`);
+  return [...new Set(words)].join(', ');
+}
+
 /** Treat a token as expired slightly early so a call never races the clock. */
 const EXPIRY_SKEW_MS = 60_000;
 

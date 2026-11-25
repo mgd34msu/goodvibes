@@ -115,9 +115,14 @@ export function defineCommand<Ctx extends CommandActionContext>(description: Com
       const parsed = parseTypedLine(description, args);
       const dialog = ctx.invokedByModel !== true && ctx.openSelection !== undefined;
       const names = description.actions.map((action) => `${action.word} (${action.label})`).join(', ');
+      // A command that stays typed to open its place (`opens`, `place` or `place/list`) opens it when a person types it
+      // with nothing after its name; also a command of one action with no word, whose line is never read as bare.
+      if (dialog && description.opens && ctx.openPlace && ('bare' in parsed || (args.length === 0 && description.actions.length === 1))) {
+        const [place, list] = description.opens.split('/');
+        ctx.openPlace(place!, list ? { list } : undefined);
+        return;
+      }
       if ('bare' in parsed) {
-        // A command that stays typed to open its place (`opens`) opens it: its actions are that place's controls.
-        if (dialog && description.opens && ctx.openPlace) { ctx.openPlace(description.opens); return; }
         // A command whose screen is the point (`/work`) opens it: its other actions are reached from that screen.
         const opens = description.bareOpens ? description.actions.find((action) => action.id === description.bareOpens) : undefined;
         if (dialog && opens) { await runComplete(description, opens, defaultsOf(opens as ActionDescription<never>), ctx); return; }

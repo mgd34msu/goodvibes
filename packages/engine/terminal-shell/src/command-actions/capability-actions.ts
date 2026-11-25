@@ -47,7 +47,7 @@ export interface CapabilityRevealed {
 function refusalOf(error: unknown): Error {
   const message = summarizeError(error).replace(/^'capabilities\.run' failed:\s*/, '');
   const next = (error as { readonly next?: unknown } | null)?.next;
-  return commandRefusal(message, Array.isArray(next) && typeof next[0] === 'string' ? next[0] : undefined);
+  return commandRefusal(message, Array.isArray(next) && typeof next[0] === 'string' ? next[0] : undefined, undefined, error);
 }
 
 function describedFrom<Ctx>(definition: CapabilityDefinition<never>): Omit<ActionDescription<Ctx>, 'run' | 'operator'> {
@@ -59,11 +59,16 @@ function describedFrom<Ctx>(definition: CapabilityDefinition<never>): Omit<Actio
     inputs: definition.inputs,
     sentence: definition.sentence,
     done: definition.done,
+    ...(definition.doneInPlace ? { doneInPlace: definition.doneInPlace } : {}),
     touches: definition.touches,
     lasts: definition.lasts,
     risk: definition.risk,
     ...(definition.riskDone ? { riskDone: definition.riskDone } : {}),
     ...(definition.ownerOnly ? { ownerOnly: definition.ownerOnly } : {}),
+    ...(definition.loosensIf ? { loosensIf: definition.loosensIf } : {}),
+    ...(definition.irreversibleWhen ? { irreversibleWhen: definition.irreversibleWhen } : {}),
+    ...(definition.sentenceWhen ? { sentenceWhen: definition.sentenceWhen } : {}),
+    ...(definition.question ? { question: definition.question } : {}),
     ...(definition.undoneBy ? { undoneBy: definition.undoneBy } : {}),
     ...(definition.button ? { button: definition.button } : {}),
     ...(definition.asksItself ? { asksItself: definition.asksItself } : {}),
@@ -98,20 +103,34 @@ export function daemonCapabilityAction<Ctx extends CommandActionContext>(
       fields: { id: `=${JSON.stringify(id)}`, ...Object.fromEntries(definition.inputs.map((input) => [`inputs.${input.id}`, input.id])) },
     },
     async run(values, ctx) {
-      // What this program does itself around the daemon's change (a plugin stopped here before it is switched off, started here after).
-      const around = PROGRAM_SIDE.get(id);
-      await around?.before?.(values, ctx);
-      const answer = await runDaemonCapability(id, values, ctx, binding);
-      await around?.after?.(values, ctx);
+      const answer = await runDaemonCapabilityHere(id, values, ctx, binding);
       return answer.detail ?? '';
     },
   };
 }
 
+/**
+ * A daemon capability run from this program (a typed line, a form, a place's control), with what this program does
+ * itself around the daemon's change (programSideOf: a plugin stopped here before it is switched off, started here
+ * after; a file the person made opened here). A line the program side says is added to the answer's words.
+ */
+export async function runDaemonCapabilityHere<Ctx extends CommandActionContext>(
+  id: string, values: ActionValues, ctx: Ctx, binding: DaemonCapabilityBinding<Ctx>,
+): Promise<CapabilityAnswer> {
+  const around = PROGRAM_SIDE.get(id);
+  await around?.before?.(values, ctx);
+  const answer = await runDaemonCapability(id, values, ctx, binding);
+  const said = await around?.after?.(values, ctx, answer);
+  if (!said) return answer;
+  const words = answer.detail ?? answer.text ?? '';
+  return { ...answer, detail: words ? `${words}\n${said}` : said };
+}
+
 /** What the program holding the conversation does itself, before or after a daemon capability changed something it runs. */
 export interface ProgramSide {
   readonly before?: ((values: ActionValues, ctx: CommandActionContext) => Promise<void> | void) | undefined;
-  readonly after?: ((values: ActionValues, ctx: CommandActionContext) => Promise<void> | void) | undefined;
+  /** After the daemon answered: the answer is given; a line returned is said with it. */
+  readonly after?: ((values: ActionValues, ctx: CommandActionContext, answer: CapabilityAnswer) => Promise<string | void> | string | void) | undefined;
 }
 const PROGRAM_SIDE = new Map<string, ProgramSide>();
 
@@ -170,7 +189,8 @@ export function sessionCapabilityAction<Ctx extends CommandActionContext, Servic
     async run(values, ctx) {
       let result: CapabilityResult;
       try {
-        result = await definition.run(values, services(ctx), {});
+        // The person's own request unless a model ran the line, as a daemon capability is asked (runDaemonCapability).
+        result = await definition.run(values, services(ctx), { personAsked: ctx.invokedByModel !== true });
       } catch (error) {
         if (error instanceof CapabilityRefusal) throw commandRefusal(error.message, error.next);
         throw error;

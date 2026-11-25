@@ -6,8 +6,8 @@
  * read and find tools hold), the project's tests, and the project's git
  * worktrees (one register file per project, the same one the daemon reads).
  * Re-running a worktree's setup and removing a worktree are the daemon's own
- * methods (`worktrees.setup.run`, `worktrees.discard`): those two run through
- * them (WORKTREE_SETUP, WORKTREE_DISCARD below have no handler of their own).
+ * methods (`worktrees.setup.run`, `worktrees.discard`): those two (home
+ * `daemon`) call them as the same caller, for the caller's project.
  *
  * The program hands in `code` (terminal-shell code-capabilities.ts builds it
  * from its working folder and its own stores); a piece a program does not have
@@ -20,8 +20,7 @@ import type { CodeContextResult, CodeIndexStats } from '../../state/code-index-t
 import type { CodeIndexReindexActivity } from '../../state/code-index-reindex.js';
 import type { ManagedWorktreeMeta, ManagedWorktreeState, WorktreeAttachmentReview, WorktreeOwnershipSummary, WorktreeStatusRecord } from '../../runtime/worktree/registry.js';
 import type { WorktreeSetupResult } from '../../runtime/worktree/setup.js';
-import { CapabilityRefusal, type CapabilityDefinition, type InputDescription, type ListName } from '../types.js';
-import type { MethodCapabilityDefinition } from './method-capability.js';
+import { CapabilityRefusal, type CapabilityCaller, type CapabilityDefinition, type InputDescription, type ListName } from '../types.js';
 
 /** What git says changed in the working folder. */
 export interface CodeGitStatus {
@@ -98,6 +97,8 @@ type KeptInfo = { readonly path: string; readonly summary: string; readonly next
 
 /** The project's worktree register (one file, shared with the daemon). */
 export interface CodeWorktreeServices {
+  /** The register is read here and never changed (the Agent): pause, resume, keep, attach and cleanup are not offered. */
+  readonly readOnly?: true | undefined;
   list(): Promise<readonly WorktreeStatusRecord[]>;
   /** Every record of the register, also those whose worktree is gone. */
   records(): readonly ManagedWorktreeMeta[];
@@ -131,6 +132,8 @@ export interface CodeServices {
   readonly changesView?: { open(source: 'session' | 'working' | 'staged' | 'head'): void } | undefined;
   /** Where a lookup's rows are kept for the place's Results list. */
   readonly results?: { show(title: string, rows: readonly CodeResultRow[]): void } | undefined;
+  /** Told when a turn of this program changes a file (the session's change tracker); returns the unsubscribe. */
+  readonly turnChanges?: { subscribe(listener: () => void): () => void } | undefined;
 }
 
 export interface CodeCapabilityServices {
@@ -208,12 +211,13 @@ export const GIT_DIFF: CodeDefinition = {
   actionId: 'diff', label: 'See changes not yet staged', word: 'diff', inputs: [],
   sentence: 'Counts the changes not yet staged and opens them in the Changes view, where hunks can be staged.', done: '',
   touches: 'reads', lasts: 'not-a-change', risk: 'none', example: {},
-  async run(_values, services) {
+  async run(_values, services, caller) {
     const code = repository(services);
     let counted: Awaited<ReturnType<CodeGitServices['unstaged']>>;
     try { counted = await code.git.unstaged(); } catch (error) { throw new CapabilityRefusal(`The changes could not be read: ${error instanceof Error ? error.message : String(error)}`); }
     if (counted.files === 0) return { text: 'No changes are waiting to be staged.', data: { ...counted } };
-    code.changesView?.open('working');
+    // Only the person's own press opens a screen on his display; a model reads the counts.
+    if (caller.personAsked === true) code.changesView?.open('working');
     return { text: `Not staged: ${plural(counted.files, 'file')}, +${counted.additions} -${counted.deletions}.`, data: { ...counted } };
   },
 };
@@ -351,7 +355,8 @@ export const CODEBASE_BUILD: CodeDefinition = {
     index.scheduleBuild();
     // Asked for, so it is kept current on this session's file writes whatever storage.codeIndexEnabled says.
     index.keepCurrent();
-    return { text: 'Build started; the Code index list in Code and changes shows how it goes, and Your agents lists it under Background services while it runs.' };
+    // The code index announces when a build begins and ends (state/code-index-store.ts), so its list says so by itself.
+    return { text: 'Build started; the Code index list in Code and changes says when it has ended.' };
   },
 };
 
@@ -520,7 +525,8 @@ export const INTELLIGENCE_SYMBOLS: CodeDefinition = {
           return { id: `${symbol.name}:${at.line}`, title: `${symbol.name}  ${at.line + 1}:${at.character + 1}`, detail: [kindWord(symbol.kind)] };
         }
         const tree = symbol as SymbolInfo;
-        return { id: `${tree.name}:${tree.line}`, title: `${tree.name}  ${tree.line + 1}:${tree.column + 1}`, detail: [kindWord(tree.kind)] };
+        // A syntax-tree symbol's line is counted from 1 already (its column from 0).
+        return { id: `${tree.name}:${tree.line}`, title: `${tree.name}  ${tree.line}:${tree.column + 1}`, detail: [kindWord(tree.kind)] };
       });
       return lookupAnswer(services, `Symbols in ${fileName(target)}`,
         `${plural(symbols.length, 'symbol')} in ${fileName(target)}, from ${fromServer ? 'the language server' : 'the syntax tree (the language server gave none or is not set up)'}:`, rows);
@@ -624,7 +630,8 @@ export const INTELLIGENCE_INSTALL: CodeDefinition = {
   actionId: 'install', label: 'Install the language server for a language', word: 'install',
   inputs: [{ id: 'language', label: 'Language', help: 'A language name, or a file of that language', kind: 'text', freeTextReason: 'a language or a file', required: true, typed: { position: 1 } }],
   sentence: 'The language server for {language} is downloaded into your GoodVibes bin folder, and code lookups use it from then on, until you change it.', done: '',
-  touches: 'another-machine', lasts: 'kept', risk: 'none', example: { language: 'typescript' },
+  // A downloaded program that code lookups start by themselves from then on: it loosens a protection.
+  touches: 'another-machine', lasts: 'kept', risk: 'loosens-a-protection', example: { language: 'typescript' },
   available: intelligenceAvailable,
   async run(values, services) {
     return { text: await piece(services, 'intelligence', NO_INTELLIGENCE).install(values.language!) };
@@ -652,6 +659,10 @@ export const CODE_TEST: CodeDefinition = {
 // ---------------------------------------------------------------------------
 
 const NO_WORKTREES = 'The worktree register is not open in this program.';
+
+/** The register is open here and this program may change it (the Agent reads it only). */
+const worktreesWritable = (services: CodeCapabilityServices): boolean =>
+  services.code?.worktrees !== undefined && services.code.worktrees.readOnly !== true;
 
 /** The worktrees of this project (terminal-shell code-capabilities.ts reads it). */
 export const WORKTREES_LIST = 'worktrees' as ListName;
@@ -751,13 +762,15 @@ export const WORKTREE_INSPECT: CodeDefinition = {
   },
 };
 
-function attachmentText(review: WorktreeAttachmentReview, recover: boolean): string {
+function attachmentText(review: WorktreeAttachmentReview, recover: boolean, readOnly = false): string {
   const who = `${review.targetKind} ${review.targetId}`;
   if (review.total === 0) return `No worktrees are tied to ${who}.`;
   return [
     `${plural(review.total, 'worktree')} tied to ${who}: ${review.active} active, ${review.paused} paused, ${review.kept} kept.`,
     ...review.records.map((record) => `  ${record.state.padEnd(7)} ${record.path}${recover ? `: ${record.state === 'paused' ? 'resume it to bring it back' : record.state === 'kept' ? 'it is kept as it is' : 'it is in use'}` : ''}`),
-    ...(recover ? ['Resume or keep each one from the Worktrees list in Code and changes.'] : []),
+    ...(recover ? [readOnly
+      ? 'The terminal app resumes or keeps each one, from its Worktrees list in Code and changes.'
+      : 'Resume or keep each one from the Worktrees list in Code and changes.'] : []),
   ].join('\n');
 }
 
@@ -767,7 +780,7 @@ export const WORKTREE_ATTACH: CodeDefinition = {
   inputs: [WORKTREE, { ...ATTACHED_KIND, typed: { flag: '--to' } }, ATTACHED_ID],
   sentence: '{worktree} is tied to {kind} {id} {lasts}.', done: 'Tied {worktree} to {kind} {id}.',
   touches: 'this-machine', lasts: 'kept', risk: 'none', example: { worktree: '.goodvibes/worktrees/u-2', kind: 'task', id: 't-9' },
-  available: (services) => services.code?.worktrees !== undefined,
+  available: worktreesWritable,
   async run(values, services) {
     try {
       piece(services, 'worktrees', NO_WORKTREES).attach(values.worktree!, values.kind === 'session' ? { sessionId: values.id! } : { taskId: values.id! });
@@ -799,8 +812,9 @@ export const WORKTREE_RECOVER: CodeDefinition = {
   touches: 'reads', lasts: 'not-a-change', risk: 'none', example: { kind: 'task', id: 't-9' },
   available: (services) => services.code?.worktrees !== undefined,
   async run(values, services) {
-    const review = piece(services, 'worktrees', NO_WORKTREES).attachedTo(values.kind as 'session' | 'task', values.id!);
-    return { text: attachmentText(review, true), data: { worktrees: review.records.map((record) => ({ path: record.path, state: record.state })) } };
+    const worktrees = piece(services, 'worktrees', NO_WORKTREES);
+    const review = worktrees.attachedTo(values.kind as 'session' | 'task', values.id!);
+    return { text: attachmentText(review, true, worktrees.readOnly === true), data: { worktrees: review.records.map((record) => ({ path: record.path, state: record.state })) } };
   },
 };
 
@@ -810,7 +824,7 @@ function stateDefinition(id: 'pause' | 'resume' | 'keep', label: string, next: M
     actionId: id, label, word: id, inputs: [WORKTREE], sentence, done,
     touches: 'this-machine', lasts: 'kept', risk: 'none', example: { worktree: '.goodvibes/worktrees/u-2' },
     ...(undoneBy ? { undoneBy } : {}),
-    available: (services) => services.code?.worktrees !== undefined,
+    available: worktreesWritable,
     async run(values, services) {
       try {
         piece(services, 'worktrees', NO_WORKTREES).setState(values.worktree!, next);
@@ -832,31 +846,80 @@ export const WORKTREE_CLEANUP: CodeDefinition = {
   actionId: 'cleanup', label: 'Stop tracking a worktree that is gone', word: 'cleanup', inputs: [WORKTREE],
   sentence: '{worktree}\'s tracking record is removed; use it once the worktree itself is gone.', done: 'Stopped tracking {worktree}.',
   touches: 'this-machine', lasts: 'kept', risk: 'cannot-be-undone', button: 'Stop tracking', example: { worktree: '.goodvibes/worktrees/u-2' },
-  available: (services) => services.code?.worktrees !== undefined,
+  available: worktreesWritable,
   async run(values, services) {
     await piece(services, 'worktrees', NO_WORKTREES).cleanup(values.worktree!);
     return { text: '', data: { worktree: values.worktree } };
   },
 };
 
-/** Run again through the daemon's own method (routes/worktree-setup.ts), which records the outcome on the worktree. */
-export const WORKTREE_SETUP: MethodCapabilityDefinition = {
+/**
+ * The project a daemon-run worktree act is for: the asking program's working folder (supplied from its context, never
+ * asked of the person), or the folder an outside caller names with the request. Never the daemon's own folder by
+ * default: a caller that names none is refused.
+ */
+/** What a caller that names no project is told, before anything is asked (capabilities.run reads `callerNeeds`). */
+const WORKTREE_PROJECT_NEEDED = 'No project folder came with the request, so no worktree was touched. Ask from the project\'s folder, or send workingDirectory with the request.';
+
+function projectOf(caller: CapabilityCaller): string {
+  if (!caller.workingDirectory) {
+    throw new CapabilityRefusal('No project folder came with the request, so no worktree was touched.', 'Ask from the project\'s folder, or send workingDirectory with the request', 'NO_PROJECT');
+  }
+  return caller.workingDirectory;
+}
+
+function methodOf(caller: CapabilityCaller): (methodId: string, body: Record<string, unknown>) => Promise<unknown> {
+  if (!caller.method) throw new CapabilityRefusal('This runs on the daemon, through capabilities.run.');
+  return caller.method;
+}
+
+const asRecord = (value: unknown): Record<string, unknown> => value !== null && typeof value === 'object' && !Array.isArray(value) ? value as Record<string, unknown> : {};
+
+/** Run again through the daemon's own method (routes/worktree-setup.ts) in the caller's project, which records the outcome on the worktree. */
+export const WORKTREE_SETUP: CapabilityDefinition<object> = {
   capability: { id: 'worktree.setup', group: 'code', home: 'daemon', repeat: 'safe' },
   actionId: 'setup', label: 'Run a worktree\'s setup again', word: 'setup', inputs: [WORKTREE],
   sentence: 'The cold-start setup (worktree.setup.commands and carried-over files) runs again in {worktree}.',
-  done: 'The setup ran again in {worktree}; the worktree shows how it went.',
+  done: 'The setup ran again in {worktree}.',
   touches: 'this-machine', lasts: 'not-a-change', risk: 'none', example: { worktree: '.goodvibes/worktrees/u-2' },
-  method: { id: 'worktrees.setup.run', fields: { path: 'worktree' } },
+  callerNeeds: { project: WORKTREE_PROJECT_NEEDED },
+  async run(values, _services, caller) {
+    const answer = asRecord(await methodOf(caller)('worktrees.setup.run', { path: values.worktree!, project: projectOf(caller) }));
+    const setup = answer['setup'] as WorktreeSetupResult | undefined;
+    // The project's own setup commands set aside (its folder is not trusted): said after how it went.
+    const notUsed = typeof answer['projectCommandsNotUsed'] === 'string' ? `\n${answer['projectCommandsNotUsed']}` : '';
+    // How it went, in words with no folder in them (the done line names the worktree).
+    return {
+      text: (setup?.state === 'failed'
+        ? worktreeSetupWords(setup).join('\n')
+        : setup?.state === 'skipped' ? 'There was nothing to run or copy.' : setup?.state === 'succeeded' ? 'It succeeded.' : 'The daemon did not say how it went.') + notUsed,
+      // The method's answer as it came: a screen reads the setup's state, steps and error from it.
+      data: answer,
+    };
+  },
 };
 
-/** The daemon's eviction-preserving removal (`worktrees.discard`): uncommitted work is committed onto the kept branch first. */
-export const WORKTREE_DISCARD: MethodCapabilityDefinition = {
+/** The daemon's eviction-preserving removal (`worktrees.discard`) in the caller's project: uncommitted work is committed onto the kept branch first. */
+export const WORKTREE_DISCARD: CapabilityDefinition<object> = {
   capability: { id: 'worktree.discard', group: 'code', home: 'daemon', repeat: 'safe' },
   actionId: 'discard', label: 'Remove a worktree', word: 'discard', inputs: [WORKTREE],
   sentence: '{worktree} is deleted from disk; its branch is kept and anything uncommitted is saved on it first.',
-  done: 'Removed {worktree}; its branch is kept, with anything uncommitted saved on it.',
+  done: 'Removed {worktree}.',
   touches: 'this-machine', lasts: 'kept', risk: 'cannot-be-undone', button: 'Remove it', example: { worktree: '.goodvibes/worktrees/u-2' },
-  method: { id: 'worktrees.discard', fields: { path: 'worktree' } },
+  callerNeeds: { project: WORKTREE_PROJECT_NEEDED },
+  async run(values, _services, caller) {
+    const receipt = asRecord(await methodOf(caller)('worktrees.discard', { path: values.worktree!, project: projectOf(caller) }));
+    const words = (value: unknown): string => typeof value === 'string' ? value : '';
+    const detail = words(receipt['detail']);
+    if (receipt['ok'] !== true) throw new CapabilityRefusal(`Nothing was removed: ${detail || 'the daemon did not say why'}`);
+    const branch = words(receipt['branch']);
+    const saved = words(receipt['preservedCommit']).slice(0, 7);
+    return {
+      text: `${branch ? `Its branch ${branch} is kept` : 'Its branch is kept'}${saved ? `, with what was uncommitted saved on it as ${saved}` : ''}.`,
+      // The daemon's receipt as it came (ok, branch kept, preservation commit, detail).
+      data: receipt,
+    };
+  },
 };
 
 /** Every code capability that runs in the program holding the conversation. */
@@ -878,5 +941,5 @@ export function codeCommandOf(id: string): { readonly name: string; readonly tit
   return { name: 'test', title: 'Run the tests' };
 }
 
-/** The two that run through the daemon's own worktree methods. */
-export const CODE_METHOD_CAPABILITIES: readonly MethodCapabilityDefinition[] = [WORKTREE_SETUP, WORKTREE_DISCARD];
+/** The two the daemon runs, each through its own worktree method, in the caller's project. */
+export const CODE_DAEMON_CAPABILITIES: readonly CapabilityDefinition<object>[] = [WORKTREE_SETUP, WORKTREE_DISCARD];

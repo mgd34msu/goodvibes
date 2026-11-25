@@ -100,6 +100,10 @@ export function captureScheduleEffect(rawArgs: Record<string, unknown>, options:
         // The revision read when the edit was admitted; the host refuses the update if the job moved since.
         payload = { ...input, expectedMutationRevision: target.revision };
       }
+      // A schedule made here works in this program's project: its folder goes with the create.
+      if (methodId === 'automation.schedules.create' || methodId === 'automation.jobs.create') {
+        payload = { ...payload, workingDirectory: capture.shellPaths.workingDirectory };
+      }
       assertCurrent();
       sent = true;
       // Once the host has answered, its answer is the outcome: no fence runs after it.

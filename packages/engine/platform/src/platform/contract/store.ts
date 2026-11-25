@@ -245,10 +245,70 @@ function historicalContractPath(projectRoot: string, contractId: string): string
 }
 
 /**
+ * The field a checkpoint keeps a piece of the daemon's Work stopped at a failed step in. The release before this one
+ * (3.5.0) cannot answer a stop at a failed step of the daemon's Work, so on disk such work reads as ended work that
+ * failed (which that release shows, and from which the person starts the work again), and what this version holds of
+ * it (its waiting status, the stop at the step, its lines) is kept here, a field that release never reads. This
+ * version reads its own field back: the work is again stopped at its failed step, with run it again and go on.
+ */
+export const HELD_AT_FAILED_STEP_FIELD = 'heldAtFailedStep';
+
+interface HeldAtFailedStep {
+  readonly status: Contract['status'];
+  readonly escalations: Contract['escalations'];
+  readonly statusLine?: string | undefined;
+  readonly error?: string | undefined;
+  readonly failureKind?: Contract['failureKind'];
+  readonly completedAt?: number | undefined;
+}
+
+function isStepStop(entry: Contract['escalations'][number]): boolean {
+  return entry.resolvedAt === undefined && entry.failurePause === true && entry.scope === 'unit';
+}
+
+/** The contract as a checkpoint stores it: the daemon's Work stopped at a failed step reads as failed to 3.5.0. */
+export function storedContractForm(contract: Contract): Contract {
+  if (contract.durableAdmission === undefined || contract.sessionMode === true || contract.status !== 'awaiting-owner') return contract;
+  const stops = contract.escalations.filter(isStepStop);
+  if (stops.length === 0 || contract.escalations.some((entry) => entry.resolvedAt === undefined && !isStepStop(entry))) return contract;
+  const held: HeldAtFailedStep = {
+    status: contract.status, escalations: contract.escalations,
+    ...(contract.statusLine === undefined ? {} : { statusLine: contract.statusLine }),
+    ...(contract.error === undefined ? {} : { error: contract.error }),
+    ...(contract.failureKind === undefined ? {} : { failureKind: contract.failureKind }),
+    ...(contract.completedAt === undefined ? {} : { completedAt: contract.completedAt }),
+  };
+  const steps = stops.map((entry) => contract.units.find((unit) => unit.id === entry.targetId)).map((unit, index) => `"${unit?.title || unit?.brief || stops[index]!.targetId}"`);
+  const reason = contract.units.find((unit) => unit.id === stops[0]!.targetId)?.failureReason;
+  const said = `The work failed at the step ${steps.join(' and ')}${reason ? `: ${reason}` : ''}. Start it again to run it once more.`;
+  return {
+    ...contract, status: 'failed', escalations: contract.escalations.filter((entry) => !isStepStop(entry)),
+    statusLine: said, error: said, completedAt: contract.statusChangedAt ?? contract.createdAt,
+    [HELD_AT_FAILED_STEP_FIELD]: held,
+  } as Contract;
+}
+
+/** This version's own reading of a checkpoint written by {@link storedContractForm}: back at its failed step, in place. */
+function restoreContractForm(contract: Contract): void {
+  const record = contract as unknown as Record<string, unknown>;
+  const held = record[HELD_AT_FAILED_STEP_FIELD];
+  if (held === undefined) return;
+  delete record[HELD_AT_FAILED_STEP_FIELD];
+  if (!isRecord(held) || typeof held['status'] !== 'string' || !Array.isArray(held['escalations'])) return;
+  // Written only for a contract whose status was failed for 3.5.0's sake: any other status means 3.5.0 moved it on.
+  if (contract.status !== 'failed') return;
+  for (const field of ['status', 'escalations', 'statusLine', 'error', 'failureKind', 'completedAt'] as const) {
+    if (held[field] === undefined) delete record[field];
+    else record[field] = held[field];
+  }
+}
+
+/**
  * The envelope as JSON; null when the contract cannot be serialized. A native
  * contract's admission is stored as a reference to its receipt file.
  */
 export function serializeContract(contract: Contract, writtenAt: number): string | null {
+  contract = storedContractForm(contract);
   try {
     const labels = storedCurrentFileLabels(contract);
     const stored = contractWithStoredReviewObservations(contract);
@@ -330,6 +390,7 @@ function parseContractSnapshot(json: string, receipt?: OwnedContractCheckpointRe
   }
   if (raw['schemaVersion'] > maximumVersion) return { rejected: 'future-version' };
   if (!isContractShape(raw['contract'])) return { rejected: 'invalid-contract' };
+  restoreContractForm(raw['contract']);
   if (raw['contract'].nativeDecisions !== undefined && raw['schemaVersion'] < 4) return { rejected: 'invalid-contract' };
   if (raw['contract'].nativeSource !== undefined && raw['schemaVersion'] < 3) return { rejected: 'invalid-contract' };
   try { bindNativeContractSource(raw['contract']); validateNativeDecisionState(raw['contract']); recoverRepeatedStructuralCriteria(raw['contract']); recoverPendingFixIdentities(raw['contract']); } catch { return { rejected: 'invalid-contract' }; }
@@ -486,7 +547,7 @@ type ProgressPath = readonly (string | number)[];
 
 /** The paths a save from `base` to `contract` would write, or null when they cannot be read. Writes nothing. */
 function changedPaths(base: ContractProgressTracker, contract: Contract): ProgressPath[] | null {
-  const change = base.diff(contract, 0, () => 'unwritten');
+  const change = base.diff(storedContractForm(contract), 0, () => 'unwritten');
   if (change.line === null) return [];
   try {
     const ops = (JSON.parse(change.line) as { readonly ops?: readonly { readonly p?: unknown }[] }).ops ?? [];
@@ -766,10 +827,12 @@ export class ContractStore {
     if (!writer.cleared) { this.clearDirectory(writer.dir, tracker, false); writer.cleared = true; }
     const durable = contract.durableAdmission !== undefined;
     const at = this.now();
-    const change = tracker.diff(contract, at, (field, text) => writeCheckpointSideFile(writer.dir, field, text));
+    // What is on disk is the stored form (a stop at a failed step of daemon Work reads as failed to 3.5.0).
+    const stored = storedContractForm(contract);
+    const change = tracker.diff(stored, at, (field, text) => writeCheckpointSideFile(writer.dir, field, text));
     const bytes = change.line === null ? 0 : Buffer.byteLength(change.line) + 1;
     if (tracker.shouldCompact(bytes)) {
-      this.compact(writer, contract, tracker, change, at, durable);
+      this.compact(writer, stored, tracker, change, at, durable);
       return;
     }
     // Nothing changed: nothing is written. The state is still kept, so a copy with the same content is compared by reference next time.
@@ -850,7 +913,7 @@ export class ContractStore {
     // Not read or written by this store yet: what is on disk now, read under the lock.
     // A refused checkpoint was quarantined by the read, so nothing is at the path: the first save writes it new.
     const stored = this.loadAvailable(id);
-    const tracker = stored.kind !== 'present' ? ContractProgressTracker.of(contract, 'none') : this.loadedTrackers.get(stored.value);
+    const tracker = stored.kind !== 'present' ? ContractProgressTracker.of(storedContractForm(contract), 'none') : this.loadedTrackers.get(stored.value);
     if (tracker === undefined) throw new Error('The stored checkpoint could not be read back for comparison');
     this.trackers.set(id, tracker);
     this.trackedCopies.add(contract);
@@ -923,7 +986,7 @@ export class ContractStore {
     publishInitialContractCheckpoint(writer.dir, basename(CHECKPOINT_BASE_FILE, JSON_SUFFIX), text, () => {});
     // The old single file holds an older schema; the new base holds all of it.
     if (replacesSingleFile) removeFile(contractPath(this.projectRoot, contract.id));
-    this.trackers.set(contract.id, ContractProgressTracker.of(contract, 'progress'));
+    this.trackers.set(contract.id, ContractProgressTracker.of(storedContractForm(contract), 'progress'));
     this.trackedCopies.add(contract);
     this.noteSupportedVersion(join(writer.dir, CHECKPOINT_BASE_FILE));
   }
@@ -1037,6 +1100,15 @@ export class ContractStore {
     try { value = JSON.parse(readFileSync(join(contractEndedDir(this.projectRoot), `${contractId}${JSON_SUFFIX}`), 'utf8')); }
     catch { return undefined; }
     if (!isEndedSummary(value, contractId)) return undefined;
+    // 3.5.0 reads the daemon's Work stopped at a failed step as failed (storedContractForm) and, after a rollback, writes
+    // its ended summary. This version reads the checkpoint back at that step: the summary is not true here, and goes.
+    if (value.status === 'failed' && value.durable === true) {
+      const stored = this.load(contractId);
+      if (stored.kind === 'present' && !isTerminalContractStatus(stored.value.status)) {
+        removeFile(join(contractEndedDir(this.projectRoot), `${contractId}${JSON_SUFFIX}`));
+        return undefined;
+      }
+    }
     this.endedSummaries.set(contractId, value);
     return value;
   }
@@ -1208,7 +1280,7 @@ export class ContractStore {
         return this.refuseCheckpoint(contractId, path, 'invalid-contract', source);
       }
       const contract = read.snapshot.contract;
-      const tracker = ContractProgressTracker.of(contract, path === currentPath ? 'single-file' : 'historical');
+      const tracker = ContractProgressTracker.of(storedContractForm(contract), path === currentPath ? 'single-file' : 'historical');
       try { tracker.sourceIdentity = fileObservationIdentity(path); } catch { /* gone since: its first save finds it changed */ }
       tracker.sourceSchemaVersion = read.snapshot.schemaVersion;
       this.loadedTrackers.set(contract, tracker);
@@ -1254,7 +1326,7 @@ export class ContractStore {
         return this.refuseCheckpoint(contractId, basePath, 'invalid-contract', source);
       }
       const assembled = read.assembled!;
-      this.loadedTrackers.set(contract, ContractProgressTracker.of(contract, 'progress', {
+      this.loadedTrackers.set(contract, ContractProgressTracker.of(storedContractForm(contract), 'progress', {
         sources: assembled.sources, log: read.log ?? null, snapshotBytes: assembled.snapshotBytes, appendedBytes: assembled.appendedBytes, damaged: assembled.damaged,
       }));
       this.noteSupportedVersion(basePath);

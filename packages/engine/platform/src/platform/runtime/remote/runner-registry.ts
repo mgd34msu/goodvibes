@@ -134,7 +134,9 @@ function buildContract(agent: AgentRecord, workspaceRoot: string | undefined, co
     orchestrationGraphId: agent.orchestrationGraphId,
     orchestrationNodeId: agent.orchestrationNodeId,
     capabilityCeiling: buildCapabilityCeiling(agent),
-    workspaceRoot: workspaceRoot ?? existing?.workspaceRoot,
+    // The project the runner was started for (kept on its contract, or the agent's own folder) before this
+    // registry's own folder: a runner started in another project never has its contract rewritten to the daemon's.
+    workspaceRoot: existing?.workspaceRoot ?? agent.workingDirectory ?? workspaceRoot,
     createdAt: agent.startedAt,
     lastUpdatedAt: agent.completedAt ?? Date.now(),
     ...(connection

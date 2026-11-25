@@ -58,6 +58,15 @@ import type {
   TriggerEventLogEntry, TriggerFireAction, TriggerRecord, TriggerRecoveryReport, TriggerRunRecord,
 } from './types.js';
 import { validateDefinition } from './validation.js';
+import type { TriggerSpec } from './types.js';
+
+/** A command the definition gives no folder of its own runs in the trigger's project, never the daemon's folder. */
+function inProjectFolder(spec: TriggerSpec, folder: string | undefined): TriggerSpec {
+  if (!folder) return spec;
+  if ((spec.kind === 'stream' || spec.kind === 'on-exit') && spec.cwd === undefined) return { ...spec, cwd: folder };
+  if (spec.kind === 'condition' && spec.probe.kind === 'command' && spec.probe.cwd === undefined) return { ...spec, probe: { ...spec.probe, cwd: folder } };
+  return spec;
+}
 import { retentionFrom, TriggerDisabledError, type TriggerManagerConfig, type TriggerManagerOptions } from './manager-types.js';
 import { WORK_ADMISSION_RECHECK_MS } from '../daemon/work-admission.js';
 
@@ -533,7 +542,7 @@ export class TriggerManager {
     if (this.records.has(validated.id)) {
       throw new RefusalError(refusal({ code: 'TRIGGER_EXISTS', state: `a trigger with the id "${validated.id}" exists`, reason: `A trigger with id "${validated.id}" already exists`, next: ['Pick another id, or cancel the existing trigger first'], status: 409 }));
     }
-    const definition = { ...validated, action: this.captureFireableAction(validated.action) };
+    const definition = { ...validated, spec: inProjectFolder(validated.spec, validated.workingDirectory), action: this.captureFireableAction(validated.action) };
 
     const now = this.now();
     let record: TriggerRecord = {
@@ -918,6 +927,8 @@ export class TriggerManager {
         prompt: prefix.length > 0 ? `${prefix}\n\n${prompt}` : prompt,
         ...(action.model !== undefined ? { model: action.model } : {}),
         ...(action.deliverTo !== undefined ? { deliverTo: action.deliverTo } : {}),
+        // The turn works in the project its trigger was made for.
+        ...(definition.workingDirectory !== undefined ? { workingDirectory: definition.workingDirectory } : {}),
       });
     }
     const verification = verifyGrant([...this.grants.values()], action.grantId, action.digest, action.approvedAction);

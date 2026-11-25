@@ -246,15 +246,21 @@ const WORKTREE_META_SCHEMA = objectSchema({
 
 export const WORKTREE_SETUP_RUN_INPUT_SCHEMA = objectSchema({
   path: STRING_SCHEMA,
+  /** The project the worktree belongs to (its folder's full path); absent: the daemon's own working folder. */
+  project: STRING_SCHEMA,
 }, ['path']);
 
 export const WORKTREE_SETUP_RUN_OUTPUT_SCHEMA = objectSchema({
   path: STRING_SCHEMA,
   setup: WORKTREE_SETUP_RESULT_SCHEMA,
+  /** Present when the project's own settings file gave setup commands that were not used (its folder is not trusted), and why. */
+  projectCommandsNotUsed: STRING_SCHEMA,
 }, ['path', 'setup']);
 
 export const WORKTREE_DISCARD_INPUT_SCHEMA = objectSchema({
   path: STRING_SCHEMA,
+  /** The project the worktree belongs to (its folder's full path); absent: the daemon's own working folder. */
+  project: STRING_SCHEMA,
 }, ['path']);
 
 /** The honest discard receipt: directory removed, branch KEPT, dirty state preserved as a commit. */

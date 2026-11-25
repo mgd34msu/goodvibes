@@ -144,11 +144,16 @@ export async function rankRecommendationCandidates(
       reason: candidate.reason,
       kind: candidate.kind,
       entry,
-      command: `/marketplace review ${candidate.kind} ${entry.id}`,
+      command: marketplaceCheckWords(entry.name || entry.id),
     });
     if (recommendations.length === MAX_RECOMMENDATIONS) break;
   }
   return recommendations;
+}
+
+/** Where a person checks a recommended entry before installing it: its control, named in words (no slash command carries it). */
+export function marketplaceCheckWords(name: string): string {
+  return `"${name}" on the Marketplace tab of Tools and extensions (Enter checks it before installing)`;
 }
 
 /**
@@ -170,7 +175,7 @@ export function unrankedRecommendations(candidates: readonly RecommendationCandi
         reason: `${candidate.reason} Not ranked: no decision model is in use, so this is an uninstalled ${candidate.kind} listed in catalog order, not read for fit.`,
         kind: candidate.kind,
         entry,
-        command: `/marketplace review ${candidate.kind} ${entry.id}`,
+        command: marketplaceCheckWords(entry.name || entry.id),
         unranked: true,
       });
       if (recommendations.length === MAX_RECOMMENDATIONS) return recommendations;

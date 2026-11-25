@@ -17,9 +17,9 @@ import type { CommandActionContext } from '../command-actions/types.js';
 import type { PlaceProgramSource } from './place-host.js';
 import {
   LIVE_RUNNER, RECORDED_RUNS_SOURCE, RUNNER_STATE_WORDS, handedBackItems, listedRunners, poolItems, runnerItems,
-  ARCHETYPES_SOURCE, CONTRACTS_SOURCE, YOUR_AGENTS_SOURCE,
+  ARCHETYPES_SOURCE, YOUR_AGENTS_SOURCE, EVALUATIONS_SOURCE,
 } from './work-agents-entries.js';
-import type { AgentContractServices, AgentTeamServices } from '@goodvibes/engine/platform/platform/capabilities';
+import type { AgentContractServices, AgentTeamServices, EvalSuiteServices } from '@goodvibes/engine/platform/platform/capabilities';
 
 const text = (value: unknown): string => typeof value === 'string' ? value : '';
 const record = (value: unknown): Record<string, unknown> => value !== null && typeof value === 'object' && !Array.isArray(value) ? value as Record<string, unknown> : {};
@@ -27,10 +27,19 @@ const record = (value: unknown): Record<string, unknown> => value !== null && ty
 const plain = (value: unknown): string => text(value).replace(/[\u0000-\u001f\u007f-\u009f]+/g, ' ').trim();
 
 /** What a program's replay engine says for the Recorded runs list: the runs, newest first, and the one loaded. */
-export function recordedRunsOf(engine: DeterministicReplayEngine): { readonly runs: readonly string[]; readonly loaded?: string | undefined; readonly rev?: number | undefined; readonly total?: number | undefined } {
+export function recordedRunsOf(engine: DeterministicReplayEngine): {
+  readonly runs: readonly string[];
+  readonly started: Readonly<Record<string, { readonly at: number; readonly events: number }>>;
+  readonly loaded?: string | undefined; readonly rev?: number | undefined; readonly total?: number | undefined;
+} {
   const snap = engine.getSnapshot();
-  const runs = [...(replayLedgerOf(engine)?.listRunIds() ?? [])].reverse();
-  return snap.status === 'idle' || !snap.runId ? { runs } : { runs, loaded: snap.runId, rev: snap.currentRev, total: snap.totalRevisions };
+  const ledger = replayLedgerOf(engine);
+  const runs = [...(ledger?.listRunIds() ?? [])].reverse();
+  const started: Record<string, { at: number; events: number }> = {};
+  for (const [runId, about] of ledger?.listRunStarts?.() ?? []) {
+    if (Number.isFinite(about.startedAt)) started[runId] = { at: about.startedAt, events: about.events };
+  }
+  return snap.status === 'idle' || !snap.runId ? { runs, started } : { runs, started, loaded: snap.runId, rev: snap.currentRev, total: snap.totalRevisions };
 }
 
 /**
@@ -45,12 +54,12 @@ export function recordedRunsPlaceSource(engine: DeterministicReplayEngine | unde
 /** What a program that runs its own agents gives the Work place (builtin/agents.ts services, from its session). */
 export interface AgentsPlaceServices {
   readonly agentTeam?: Pick<AgentTeamServices, 'archetypes'> | undefined;
-  readonly agentContracts?: Pick<AgentContractServices, 'list' | 'running'> | undefined;
+  readonly agentContracts?: Pick<AgentContractServices, 'started'> | undefined;
 }
 
 /**
- * The Your agents, Work contracts and Archetypes lists' sources, for a program that runs agents of its own (the
- * terminal app): read from its session's services, and told on every change to its agents (`onAgentsChange`).
+ * The Your agents and Archetypes lists' sources, for a program that runs agents of its own (the terminal app): read
+ * from its session's services, and told on every change to its agents (`onAgentsChange`).
  */
 export function agentsPlaceSources(services: (() => AgentsPlaceServices | undefined) | undefined, onAgentsChange?: (listener: () => void) => () => void): Readonly<Record<string, PlaceProgramSource>> {
   const now = services?.();
@@ -58,10 +67,24 @@ export function agentsPlaceSources(services: (() => AgentsPlaceServices | undefi
   const subscribe = (onChange: () => void): (() => void) => onAgentsChange?.(onChange) ?? (() => {});
   return {
     ...(now.agentContracts ? {
-      [YOUR_AGENTS_SOURCE]: { read: () => services?.()?.agentContracts?.running() ?? [], subscribe },
-      [CONTRACTS_SOURCE]: { read: () => services?.()?.agentContracts?.list() ?? [], subscribe },
+      // Every agent started in this session, the ended ones marked ended, so their record can be read.
+      [YOUR_AGENTS_SOURCE]: { read: () => services?.()?.agentContracts?.started() ?? [], subscribe },
     } : {}),
     ...(now.agentTeam ? { [ARCHETYPES_SOURCE]: { read: () => services?.()?.agentTeam?.archetypes() ?? [], subscribe: () => () => {} } } : {}),
+  };
+}
+
+/**
+ * The Evaluations list's source, for a program that runs task suites (the terminal app): the results of this session
+ * from its eval services (builtin/eval.ts), told on every new result.
+ */
+export function evaluationsPlaceSource(services: (() => { readonly evalSuites?: EvalSuiteServices | undefined } | undefined) | undefined): Readonly<Record<string, PlaceProgramSource>> {
+  if (!services?.()?.evalSuites) return {};
+  return {
+    [EVALUATIONS_SOURCE]: {
+      read: () => services()?.evalSuites?.results() ?? [],
+      subscribe: (onChange) => services()?.evalSuites?.subscribe(onChange) ?? (() => {}),
+    },
   };
 }
 
@@ -127,15 +150,17 @@ defineList<CommandActionContext>({
 defineList<CommandActionContext>({
   name: REMOTE_POOL_RUNNERS_LIST,
   async read(ctx, earlier) {
-    const pool = poolItems(await readRunners(ctx)).find((entry) => entry.id === earlier.pool);
-    return (pool?.runners ?? []).map((runnerId): ListRow => ({ value: runnerId, label: runnerId }));
+    const listed = await readRunners(ctx);
+    const pool = poolItems(listed).find((entry) => entry.id === earlier.pool);
+    const names = new Map(runnerItems(listed).map((runner) => [runner.id, runner.label]));
+    return (pool?.runners ?? []).map((runnerId): ListRow => ({ value: runnerId, label: names.get(runnerId) ?? runnerId }));
   },
   operator: { method: 'capabilities.run', input: { id: 'remote.list' }, rows: { from: 'data.pools', where: { field: 'id', equals: '{pool}' }, each: 'runnerIds', value: '.', label: '.' } },
 });
 defineList<CommandActionContext>({
   name: REMOTE_ARTIFACTS_LIST,
   async read(ctx) {
-    return handedBackItems(await readRunners(ctx)).map((artifact): ListRow => ({ value: artifact.id, label: artifact.summary || artifact.id, detail: `runner ${artifact.runner}; tools: ${artifact.tools.join(', ') || 'none'}; task: ${artifact.task}`, state: artifact.state }));
+    return handedBackItems(await readRunners(ctx)).map((artifact): ListRow => ({ value: artifact.id, label: artifact.task || artifact.summary || artifact.id, detail: `runner ${artifact.runnerName}; tools: ${artifact.tools.join(', ') || 'none'}; task: ${artifact.task}`, state: artifact.state }));
   },
   operator: OPERATOR('artifacts', 'id', 'summary', 'status'),
 });

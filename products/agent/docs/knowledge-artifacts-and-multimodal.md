@@ -89,10 +89,10 @@ Related saved-artifact actions:
 
 - "Copy to a file" (`e` on an artifact) copies one artifact to a file of this project, preserves exact bytes for text or binary artifacts, and refuses to write over a file unless you choose so.
 - "Copy into a package" (`k`) copies selected reviewed artifact ids into a workspace package directory or ZIP archive with exact bytes under `artifacts/`, a redacted `manifest.json`, and a README.
-- `/documents attach-artifact` links one reviewed saved artifact id to a document without rewriting the body.
+- "Attach an artifact" (`k` on a draft, Drafts tab of Memory and knowledge) links one reviewed saved artifact id to a document without rewriting the body.
 - "Add a saved artifact" (`j` on the Sources tab of Memory and knowledge) adds one saved artifact id to your knowledge.
 
-`/media make` creates image/video artifacts through configured media providers after confirmation, and `/media collect` collects a job that was still being made. The main conversation can perform the same confirmed action with the `agent_media_generate` tool when the user explicitly asks for generated media. Generated media output is summarized as artifact ids, MIME types, filenames, and source URLs when present; inline base64 is not printed into the transcript.
+"Make an image or a video" (`M` on the Tools tab of Tools and extensions) creates image/video artifacts through the daemon's configured media providers and opens the saved file in the desktop's viewer after your own press, and "collect a media job" in the Work place collects a job that was still being made. The main conversation can perform the same confirmed action with the `agent_media_generate` tool when the user explicitly asks for generated media. Generated media output is summarized as artifact ids, MIME types, filenames, and source URLs when present; inline base64 is not printed into the transcript.
 
 The model can use first-class tools for the common route-selection, Knowledge, document, packet preset, packet share, artifact, autonomy, research, model/provider, computer/browser, device/voice, security, media, and comparison workflows; the full tool catalog with a one-line purpose per tool is in [Tools and commands](tools-and-commands.md). `route action:"plan"` maps a plain user request to the preferred visible Agent route, alternatives, missing fields, confirmation boundary, workspace matches, and harness mode matches without executing tools.
 
@@ -116,7 +116,7 @@ Research reports save one confirmed sourced markdown artifact with a source map,
 
 `agent_artifacts mode:"export"` copies exact saved artifact bytes to a validated workspace path after confirmation and refuses accidental overwrite; `mode:"package"` copies selected saved artifacts into a validated workspace directory with exact bytes, redacted metadata, README, and manifest; `mode:"archive"` writes the same package payload as one ZIP file. `agent_knowledge_ingest` accepts `sourceKind:"artifact"` plus `artifactId` for reviewed saved-artifact promotion.
 
-Blind model comparison can run from a direct prompt or a saved text artifact id, and saves a local JSON artifact with the full prompt, blinded outputs, source artifact metadata, and reveal map while keeping model identities hidden in the transcript until reveal. Saved comparisons are reviewed with `/compare review`, and from there:
+Blind model comparison can run from a direct prompt or a saved text artifact id, and saves a local JSON artifact with the full prompt, blinded outputs, source artifact metadata, and reveal map while keeping model identities hidden in the transcript until reveal. Saved comparisons are listed on the Comparisons tab of Models and providers (the menu), each named by its prompt, and from there:
 
 - rendered as side-by-side reviewer views with related document/artifact excerpts
 - converted into confirmed judgment artifacts
@@ -128,9 +128,9 @@ Blind model comparison can run from a direct prompt or a saved text artifact id,
 - applied to the main model route only through a separate confirmed winner-update action
 - saved as apply-winner or leave-unchanged route-decision receipt artifacts
 
-`/documents timeline` shows a chronological review packet timeline across document, comment, suggestion, attachment, export, compare, judgment, route-decision receipt, packet preset, handoff, and archive events, and `/documents packet-steps` shows the review packet steps: what is ready, what is missing and the line that fixes it.
+"See the review packet timeline" (`h` on the Drafts tab of Memory and knowledge, `documents.timeline`) shows a chronological review packet timeline across document, comment, suggestion, attachment, export, compare, judgment, route-decision receipt, packet preset, handoff, and archive events, and "See the review packet steps" (`t`, `documents.packet-steps`) shows the review packet steps: what is ready, what is missing and what fixes it. The daemon computes both from the project's drafts and the saved artifacts, for every program.
 
-The drafts and artifacts are the Drafts and Artifacts tabs of Memory and knowledge; `/compare` runs comparisons; `/documents readiness` lists what still stands in the way of review (open comments, suggestions waiting, missing sources, hidden comparisons, the handoff) before an export, a handoff or archive, or applying a winner, and every change still asks or names its blanks.
+The drafts and artifacts are the Drafts and Artifacts tabs of Memory and knowledge; comparisons are the Comparisons tab of Models and providers; "Check a draft is ready for review" (`d` on the Drafts tab, `documents.readiness`) lists what still stands in the way of review (open comments, suggestions waiting, missing sources, hidden comparisons, the handoff) before an export, a handoff or archive, or applying a winner, and every change still asks or names its blanks.
 
 `autonomy` adds ongoing-work route selection plus visible queue and item inspection. Lower-level `agent_harness` adds:
 

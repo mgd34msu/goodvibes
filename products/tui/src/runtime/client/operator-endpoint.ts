@@ -44,7 +44,7 @@ import { bearerFor, type DaemonTarget } from '@goodvibes/engine/platform/platfor
 import { configuredDaemonIsThisMachine, configuredDaemonOrigin, resolveDaemonTarget, resolveDaemonTargetProven, type DaemonTargetResolution } from '@goodvibes/engine/platform/platform/runtime/client/daemon-target-resolver';
 import { operatorTokenPath } from '@goodvibes/engine/platform/platform/pairing/companion-token';
 import { readDaemonOperatorBearer } from '@goodvibes/engine/platform/platform/runtime/operations';
-import type { DaemonVerbCaller, DaemonVerbInvokeOptions } from '@goodvibes/engine/platform/platform/runtime/client';
+import { programCallHeaders, type DaemonVerbCaller, type DaemonVerbInvokeOptions } from '@goodvibes/engine/platform/platform/runtime/client';
 import { CAPABILITY_METHOD_IDS } from '@goodvibes/engine/platform/platform/capabilities';
 import { DaemonVerbNotSentError } from '@goodvibes/engine/terminal-shell/agent-turn/connected-host-verb-error';
 
@@ -196,11 +196,12 @@ export function resolveOperatorRpc(deps: {
 }
 
 function operatorClientFor(baseUrl: string, bearer: () => Promise<string>, fetchImpl: typeof fetch | undefined): GoodVibesPlatform {
-  // Every call names this app, so what the owner does here is attributed to the terminal (an inbox answer says tui).
+  // Every call names this app, so what the owner does here is attributed to the terminal (an inbox answer says tui),
+  // and carries this app's call context: the project it works in and the conversation it holds (call-context.ts).
   const base = fetchImpl ?? fetch;
   const named = ((input: Parameters<typeof fetch>[0], init?: RequestInit) => {
     const headers = new Headers(init?.headers ?? (input instanceof Request ? input.headers : undefined));
-    headers.set('x-goodvibes-client', 'tui');
+    for (const [name, value] of Object.entries(programCallHeaders('tui'))) headers.set(name, value);
     return base(input, { ...init, headers });
   }) as typeof fetch;
   const platformClient = createGoodVibesPlatform({ baseUrl, getAuthToken: bearer, fetch: named });

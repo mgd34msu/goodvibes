@@ -2,7 +2,9 @@ import { createModelPickerCommandOpeners } from '@goodvibes/engine/terminal-shel
 import { choosableProviderIds } from '@goodvibes/engine/terminal-shell/first-run';
 import { shortcutGroups } from '../renderer/shortcut-groups.ts';
 import { GOODVIBES_TUI_SURFACE_ROOT } from '../config/surface.ts';
-import { createSettingsWorkspaceOpener } from '@goodvibes/engine/terminal-shell/shell-ui-openers';
+import type { SettingsScreenProgram } from '@goodvibes/engine/terminal-shell/places';
+import { openTtsProviderPicker, openTtsVoicePicker } from '../input/tts-settings-actions.ts';
+import { openThemePicker } from '../input/theme-settings-actions.ts';
 import { modelPickerCatalogServices } from '@goodvibes/engine/terminal-shell/model-picker-targets';
 import { createCommonShellUiOpeners } from '@goodvibes/engine/terminal-shell/shell-ui-openers';
 import { runPickedCommand } from '@goodvibes/engine/terminal-shell/command-registry';
@@ -34,20 +36,18 @@ import type { ServiceInspectionQuery } from '@/runtime/index.ts';
 import type { EmbeddingProviderPickerEntry, ModelPickerTargetInfo } from '../input/model-picker.ts';
 import { openCommandPaletteOn, type PaletteShortcut } from '@goodvibes/engine/terminal-shell/command-palette';
 import type { KeybindingsManager } from '../input/keybindings.ts';
-import { AGENT_VIEW_NAMES, CHANGES_VIEW_NAMES, USAGE_VIEW_NAMES } from '../input/views.ts';
+import { AGENT_VIEW_NAMES, CHANGES_VIEW_NAMES } from '../input/views.ts';
 import { confirmThrough } from '../input/confirm-dialog.ts';
 import { categorizeBuiltinCommands } from '../input/commands.ts';
 import { syncServiceSettingToPlatform } from './service-settings-sync.ts';
-import { classifyServiceSettingChange } from '@goodvibes/engine/terminal-shell/service-setting-change';
 import { takeAppliedThemeMessage } from '../renderer/theme-mode-config.ts';
+import { routeSettingWrites } from '@goodvibes/engine/terminal-shell/settings-writes';
+import { runDaemonCapability } from '@goodvibes/engine/terminal-shell/command-actions';
+import { isSecretConfigKey } from '@goodvibes/engine/platform/platform/config';
+import { capabilityBinding } from '../input/commands/capability-binding.ts';
 import { summarizeError } from '@goodvibes/engine/platform/platform/utils';
 import { buildFirstOpenItems, decodeFirstOpenChoice, readFolderTrustFacts, selfRecordWorkspaceRegistration } from '../cli/tui-startup.ts';
-import type { SettingsDaemonCredentialWriter } from '../input/settings-modal-secrets.ts';
-import type { DaemonOwnedConfigWriter } from '../input/settings-modal-mutations.ts';
 import { WorkspaceTrustDecisionUnsettledError, type WorkspaceTrustLevel } from '@goodvibes/engine/platform/platform/runtime/operations';
-
-/** Longer than one frame of the render coalescer (16 ms), so the "applying" message is on screen first. */
-const SERVICE_APPLY_AFTER_PAINT_MS = 20;
 
 type WireShellUiOpenersOptions = {
   commandContext: CommandContext;
@@ -63,18 +63,6 @@ type WireShellUiOpenersOptions = {
   mcpRegistry: McpRegistry;
   subscriptionManager: SubscriptionManager;
   secretsManager?: Pick<SecretsManager, 'delete' | 'get' | 'set'>;
-  /**
-   * The daemon's credential write. Present when a daemon is configured; a
-   * daemon-scoped credential goes there rather than into this surface's own
-   * store, which the daemon never reads.
-   */
-  daemonCredentials?: SettingsDaemonCredentialWriter | null;
-  /**
-   * Where a daemon-owned setting is written. `surfaces.*`, `watchers.*`,
-   * `automation.*` and the rest are applied by the daemon; writing one into
-   * this surface's own file reports success and configures nothing.
-   */
-  daemonConfig?: DaemonOwnedConfigWriter | null;
   serviceRegistry: Pick<ServiceInspectionQuery, 'getAll'>;
   /** Backs the model picker's 'embeddings' target and its own item-list mode. */
   memoryEmbeddingRegistry: Pick<MemoryEmbeddingProviderRegistry, 'getDefaultProviderId' | 'setDefaultProvider' | 'status'>;
@@ -94,7 +82,6 @@ let commandCategoryMapCache: Map<string, string> | null = null;
 /** The TUI's former view names find the modal that holds them now (the palette's extra search words). */
 const PALETTE_VIEW_KEYWORDS: ReadonlyMap<string, readonly string[]> = new Map([
   ['agents', AGENT_VIEW_NAMES],
-  ['usage', USAGE_VIEW_NAMES],
   ['changes', CHANGES_VIEW_NAMES],
 ]);
 
@@ -122,7 +109,12 @@ function getCommandCategoryMap(): Map<string, string> {
  * Pass preResolvedSecretKeys (from an async SecretsManager batch) to surface the 'secrets' tier.
  */
 
-export function wireShellUiOpeners(options: WireShellUiOpenersOptions): void {
+/** What this app gives the settings screen both programs show (terminal-shell settings-screen), wired with the places. */
+export interface WiredShellUiOpeners {
+  readonly settings: SettingsScreenProgram;
+}
+
+export function wireShellUiOpeners(options: WireShellUiOpenersOptions): WiredShellUiOpeners {
   const {
     commandContext,
     input,
@@ -135,8 +127,6 @@ export function wireShellUiOpeners(options: WireShellUiOpenersOptions): void {
     mcpRegistry,
     subscriptionManager,
     secretsManager,
-    daemonCredentials,
-    daemonConfig,
     serviceRegistry,
     memoryEmbeddingRegistry,
     workingDirectory,
@@ -285,9 +275,7 @@ export function wireShellUiOpeners(options: WireShellUiOpenersOptions): void {
 
   Object.assign(commandContext, createCommonShellUiOpeners({ input, commandContext, render }));
 
-  commandContext.openOnboardingWizard = (modeOrOptions) => {
-    input.openOnboardingWizard(modeOrOptions);
-  };
+  commandContext.openOnboardingWizard = (modeOrOptions) => input.openOnboardingWizard(modeOrOptions);
 
   // Mirrors the Ctrl+F chord's own toggle exactly (handler-shortcuts.ts's
   // 'search' case); the transcript search bar is not a modal on the stack.
@@ -297,58 +285,38 @@ export function wireShellUiOpeners(options: WireShellUiOpenersOptions): void {
     render();
   };
 
-  commandContext.openSettingsModal = createSettingsWorkspaceOpener({
-    configure: () => {
-      input.settingsModal.open(configManager, featureFlags, subscriptionManager, serviceRegistry, mcpRegistry, secretsManager, {
-        // The Connections category probes through this app's catalog, which is
-        // empty by construction, so those rows read 'unreachable' rather than
-        // inventing a settled state nothing established. Retargeting that probe
-        // at the daemon is the remaining half of this seam.
-        ...(commandContext.workspace?.gatewayMethods ? { gatewayMethods: commandContext.workspace.gatewayMethods } : {}),
-        // A daemon-scoped credential goes to the daemon, which writes the secret,
-        // verifies it reads back, and only then points the config key at it.
-        ...(daemonCredentials ? { daemonCredentials } : {}),
-        // A daemon-owned setting is applied by the daemon, so it is written there.
-        ...(daemonConfig ? { daemonConfig } : {}),
-        reportError: (message: string) => {
-          commandContext.print?.(message);
-        },
-        requestRender: render,
-        onSettingApplied: (change) => {
-          // A theme change was applied by the start-up theme subscription
-          // (renderer/terminal-bg-probe.ts); this only reports what it did.
-          const themeMessage = takeAppliedThemeMessage(String(change.key));
-          if (themeMessage !== undefined) return { message: themeMessage };
-          const builtinSetting = configManager.getSchema().find((setting) => setting.key === change.key);
-          if (!builtinSetting) return;
-          const serviceChange = { ...change, key: builtinSetting.key };
-          const serviceRuntime = { configManager, workingDirectory, homeDirectory };
-          if (classifyServiceSettingChange(serviceChange) !== 'changed') return syncServiceSettingToPlatform(serviceRuntime, serviceChange);
-          // The service manager's commands are synchronous (each one time-bounded),
-          // so they run after the "applying" frame is painted rather than inside
-          // this key handler; the result then replaces that message.
-          setTimeout(() => {
-            // A later change of the same setting, made before this one ran, owns
-            // the outcome: its own deferred run applies it, and this one does nothing.
-            const result = JSON.stringify(configManager.get(serviceChange.key)) === JSON.stringify(serviceChange.value)
-              ? syncServiceSettingToPlatform(serviceRuntime, serviceChange)
-              : { handled: true, message: 'A later change to this setting replaced this one before it ran' };
-            const modal = input.settingsModal;
-            if (modal.active) {
-              modal.lastSettingEffectMessage = result.message ?? null;
-              modal.refreshPickerValues();
-            } else if (result.message) {
-              commandContext.print?.(result.message);
-            }
-            render();
-          }, SERVICE_APPLY_AFTER_PAINT_MS);
-          return { message: 'Applying the service change…' };
-        },
-      });
-    },
-    selectTarget: (target) => input.settingsModal.selectTarget(target),
-    render,
+  // A setting this app's own pickers and switches change goes through the daemon's settings.set (settings-writes.ts).
+  routeSettingWrites(async (ctx, key, value) => {
+    await runDaemonCapability('settings.set', { key, value: isSecretConfigKey(key) ? String(value ?? '') : JSON.stringify(value ?? '') }, ctx as CommandContext, capabilityBinding);
   });
+  // The settings screen both programs show (terminal-shell settings-screen), opened through the places
+  // (interactive.ts sets openSettingsModal once they are wired): what this app keeps and the pickers it draws.
+  const settings: SettingsScreenProgram = {
+    program: 'tui',
+    configManager,
+    featureFlags,
+    mcpRegistry,
+    subscriptions: { manager: subscriptionManager, services: serviceRegistry },
+    // Only the providers this runtime registered, as the model picker lists them.
+    models: () => providerRegistry.getSelectableModels().filter((model) => providerRegistry.has(model.provider))
+      .map((model) => ({ id: model.id, provider: model.provider, displayName: model.displayName })),
+    pickers: {
+      theme: (context) => openThemePicker(context as CommandContext),
+      ttsProvider: (context) => openTtsProviderPicker(context as CommandContext),
+      ttsVoice: (context) => openTtsVoicePicker(context as CommandContext),
+    },
+    afterChange: (change) => {
+      // A theme change was applied by the start-up theme subscription
+      // (renderer/terminal-bg-probe.ts); this only reports what it did.
+      const themeMessage = takeAppliedThemeMessage(String(change.key));
+      if (themeMessage !== undefined) return { message: themeMessage };
+      const builtinSetting = configManager.getSchema().find((setting) => setting.key === change.key);
+      if (!builtinSetting) return;
+      // This machine's service follows a change of the service settings (installed, started, stopped, removed):
+      // the daemon keeps the setting, and this app does the service manager's part, after the daemon took it.
+      return syncServiceSettingToPlatform({ configManager, workingDirectory, homeDirectory }, { ...change, key: builtinSetting.key });
+    },
+  };
 
   // Open a config-modal surface by name (or by an old name that redirects to
   // one, e.g. 'accounts' opens 'providers-modal'). Surfaces are registered in
@@ -425,6 +393,7 @@ export function wireShellUiOpeners(options: WireShellUiOpenersOptions): void {
   };
 
   wireViewOpeners({ commandContext, input, views, viewPanelAdapter, render });
+  return { settings };
 }
 
 /** Every row of the shortcut groups, as the help palette lists them. */

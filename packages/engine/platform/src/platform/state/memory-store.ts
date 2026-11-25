@@ -48,6 +48,8 @@ import {
 
 /** Native score for a fresh record, independent of any model judgment. */
 const FRESH_MEMORY_CONFIDENCE = 60;
+/** The memory_meta key that records the one-time attribution of 3.5.0 "this project" records to their project. */
+const PROJECT_ATTRIBUTION_META = 'project-attribution-v1';
 
 export type MemoryClass =
   | 'decision'
@@ -79,6 +81,12 @@ export interface MemoryRecord {
   id: string;
   /** Scope of the record for retrieval and sharing workflows. */
   scope: MemoryScope;
+  /**
+   * The project a "this project" record was saved for (memoryProjectIdentity of its folder): it is given only to
+   * turns in that project. Absent: the person's own, given everywhere (team records, and 3.5.0 records whose
+   * project could not be told, memory-project.ts).
+   */
+  project?: string | undefined;
   /** Memory class, governs retrieval priority and display grouping. */
   cls: MemoryClass;
   /** Brief summary (one sentence). */
@@ -134,6 +142,11 @@ export interface MemoryLink {
 
 export interface MemorySearchFilter {
   scope?: MemoryScope | undefined;
+  /**
+   * The asking project (memoryProjectIdentity): only the person's own records and this project's. Absent: every
+   * record (the owner's view of all memory).
+   */
+  project?: string | undefined;
   cls?: MemoryClass | undefined;
   tags?: string[] | undefined;
   /** Full-text substring match on summary and detail; the matches are ordered by the memory-search rerank. */
@@ -162,6 +175,8 @@ export interface MemoryAddOptions {
    */
   id?: string | undefined;
   scope?: MemoryScope | undefined;
+  /** The project a "this project" record is for (memoryProjectIdentity); absent, the person's own. */
+  project?: string | undefined;
   cls: MemoryClass;
   summary: string;
   detail?: string | undefined;
@@ -195,12 +210,13 @@ export interface MemoryAddInsert {
 }
 
 const ADD_RECORD_COLUMNS = ['id', 'scope', 'cls', 'summary', 'detail', 'tags', 'provenance', 'review_state', 'confidence',
-  'reviewed_at', 'reviewed_by', 'stale_reason', 'created_at', 'updated_at', 'valid_from', 'valid_until'];
+  'reviewed_at', 'reviewed_by', 'stale_reason', 'created_at', 'updated_at', 'valid_from', 'valid_until', 'project'];
 
 /** Whether a stored row is what an add of `opts` would have stored: a resend of the same add. */
 function isSameAdd(stored: MemoryRecord, opts: MemoryAddOptions): boolean {
   const tags = opts.tags ?? [];
   return stored.cls === opts.cls && stored.summary === opts.summary && stored.scope === (opts.scope ?? 'project')
+    && (stored.project ?? undefined) === (opts.project ?? undefined)
     && (stored.detail ?? undefined) === (opts.detail ?? undefined)
     && stored.tags.length === tags.length && stored.tags.every((tag, index) => tag === tags[index]);
 }
@@ -209,13 +225,14 @@ function addRecordParameters(record: MemoryRecord): Array<string | number | null
   return [record.id, record.scope, record.cls, record.summary, record.detail ?? null,
     JSON.stringify(record.tags), JSON.stringify(record.provenance), record.reviewState, record.confidence,
     record.reviewedAt ?? null, record.reviewedBy ?? null, record.staleReason ?? null,
-    record.createdAt, record.updatedAt, record.validFrom ?? null, record.validUntil ?? null];
+    record.createdAt, record.updatedAt, record.validFrom ?? null, record.validUntil ?? null, record.project ?? null];
 }
 
 function authoredRecord(opts: MemoryAddOptions, id: string, at: number): MemoryRecord {
   return {
     id,
     scope: opts.scope ?? 'project',
+    project: opts.project,
     cls: opts.cls,
     summary: opts.summary,
     detail: opts.detail,
@@ -410,8 +427,8 @@ export class MemoryStore {
     try {
       this.runMutation(
         `INSERT INTO memory_records
-           (id, scope, cls, summary, detail, tags, provenance, review_state, confidence, reviewed_at, reviewed_by, stale_reason, created_at, updated_at, valid_from, valid_until)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+           (id, scope, cls, summary, detail, tags, provenance, review_state, confidence, reviewed_at, reviewed_by, stale_reason, created_at, updated_at, valid_from, valid_until, project)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
         parameters,
         operation,
         () => { inserted = true; insert.onInserted?.(stored); },
@@ -435,7 +452,8 @@ export class MemoryStore {
       throw new Error(`MemoryStore: the memory could not be saved to disk (${summarizeError(cause)}); nothing was stored. Retry once the disk can be written.`, { cause });
     }
     logger.info('MemoryStore: record added', { id, cls: opts.cls });
-    noteListChanged({ list: 'memory', change: 'created', id });
+    // A project's record is that project's change; the person's own is everyone's.
+    noteListChanged({ list: 'memory', change: 'created', id, ...(record.project !== undefined ? { project: record.project } : {}) });
     return insert.id !== undefined ? stored : record;
   }
 
@@ -446,7 +464,7 @@ export class MemoryStore {
     if (!this.ready) return null;
 
     const rows = this.sqlite.exec(
-      `SELECT id, scope, cls, summary, detail, tags, provenance, review_state, confidence, reviewed_at, reviewed_by, stale_reason, created_at, updated_at, valid_from, valid_until
+      `SELECT id, scope, cls, summary, detail, tags, provenance, review_state, confidence, reviewed_at, reviewed_by, stale_reason, created_at, updated_at, valid_from, valid_until, project
          FROM memory_records WHERE id = ? LIMIT 1`,
       [id],
     );
@@ -496,6 +514,12 @@ export class MemoryStore {
       params.push(filter.cls);
     }
 
+    // The asking project's records and the person's own; another project's never.
+    if (filter.project !== undefined) {
+      conditions.push('(project IS NULL OR project = ?)');
+      params.push(filter.project);
+    }
+
     if (filter.since) {
       conditions.push('created_at >= ?');
       params.push(filter.since);
@@ -528,7 +552,7 @@ export class MemoryStore {
 
     const where = conditions.length ? `WHERE ${conditions.join(' AND ')}` : '';
     const rows = this.sqlite.exec(
-      `SELECT id, scope, cls, summary, detail, tags, provenance, review_state, confidence, reviewed_at, reviewed_by, stale_reason, created_at, updated_at, valid_from, valid_until
+      `SELECT id, scope, cls, summary, detail, tags, provenance, review_state, confidence, reviewed_at, reviewed_by, stale_reason, created_at, updated_at, valid_from, valid_until, project
          FROM memory_records ${where}
          ORDER BY updated_at DESC, created_at DESC`,
       params,
@@ -645,7 +669,9 @@ export class MemoryStore {
    * `stale` and `contradicted` flags are kept, they only make a record less
    * trusted.
    */
-  async importBundle(bundle: MemoryBundle, options?: MemoryOperationOptions): Promise<MemoryImportResult> {
+  async importBundle(bundle: MemoryBundle, options?: MemoryOperationOptions, intoProject?: string): Promise<MemoryImportResult> {
+    // A file's project names a folder on the machine it was saved on: an imported "this project" record is for the
+    // project that loads it (`intoProject`), and with none it is the person's own.
     const operation = this.captureOperation(options);
     assertMemoryOperationCurrent(operation);
     if (!this.ready) throw new Error('MemoryStore: not initialized');
@@ -667,8 +693,8 @@ export class MemoryStore {
         const flagged = state === 'stale' || state === 'contradicted';
         this.runMutation(
           `INSERT INTO memory_records
-             (id, scope, cls, summary, detail, tags, provenance, review_state, confidence, reviewed_at, reviewed_by, stale_reason, created_at, updated_at, valid_from, valid_until)
-           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+             (id, scope, cls, summary, detail, tags, provenance, review_state, confidence, reviewed_at, reviewed_by, stale_reason, created_at, updated_at, valid_from, valid_until, project)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
           [
             record.id,
             normalizeScope(record.scope),
@@ -686,6 +712,7 @@ export class MemoryStore {
             record.updatedAt,
             record.validFrom ?? null,
             record.validUntil ?? null,
+            normalizeScope(record.scope) === 'project' ? intoProject ?? null : null,
           ],
           operation,
         );
@@ -887,6 +914,8 @@ export class MemoryStore {
     tags?: string[];
     validFrom?: number | null;
     validUntil?: number | null;
+    /** The project a record made "this project" is for (memoryProjectIdentity); a record moved off "this project" is for none. */
+    project?: string | undefined;
     /** Replacing unverified source content must not inherit the old review. */
     resetReview?: true;
   }, options?: MemoryOperationOptions): MemoryRecord | null {
@@ -910,22 +939,27 @@ export class MemoryStore {
     const newValidFrom  = patch.validFrom  === undefined ? existing.validFrom  : (patch.validFrom  ?? undefined);
     const newValidUntil = patch.validUntil === undefined ? existing.validUntil : (patch.validUntil ?? undefined);
     const resetReview = patch.resetReview === true;
+    // Only a "this project" record is for a project.
+    const newProject = newScope === 'project' ? patch.project ?? existing.project : undefined;
+    const projectChanged = newProject !== existing.project;
 
     this.runMutation(
       `UPDATE memory_records
-         SET cls = ?, scope = ?, summary = ?, detail = ?, tags = ?, valid_from = ?, valid_until = ?, updated_at = ?
+         SET cls = ?, scope = ?, summary = ?, detail = ?, tags = ?, valid_from = ?, valid_until = ?, updated_at = ?, project = ?
+         ${projectChanged ? ', gv_revision = lower(hex(randomblob(16)))' : ''}
          ${resetReview ? ", review_state = 'fresh', confidence = " + FRESH_MEMORY_CONFIDENCE + ', reviewed_at = NULL, reviewed_by = NULL, stale_reason = NULL' : ''}
          WHERE id = ?`,
-      [newClass, newScope, newSummary, newDetail ?? null, JSON.stringify(newTags), newValidFrom ?? null, newValidUntil ?? null, now, id],
+      [newClass, newScope, newSummary, newDetail ?? null, JSON.stringify(newTags), newValidFrom ?? null, newValidUntil ?? null, now, newProject ?? null, id],
       operation,
     );
 
-    const updated: MemoryRecord = { ...existing, cls: newClass, scope: newScope, summary: newSummary, detail: newDetail, tags: newTags, validFrom: newValidFrom, validUntil: newValidUntil, updatedAt: now,
+    const updated: MemoryRecord = { ...existing, cls: newClass, scope: newScope, project: newProject, summary: newSummary, detail: newDetail, tags: newTags, validFrom: newValidFrom, validUntil: newValidUntil, updatedAt: now,
       ...(resetReview ? { reviewState: 'fresh', confidence: FRESH_MEMORY_CONFIDENCE, reviewedAt: undefined, reviewedBy: undefined, staleReason: undefined } : {}) };
     this.indexRow(updated);
     this.persist();
     logger.info('MemoryStore: record updated', { id });
-    noteListChanged({ list: 'memory', change: 'changed', id });
+    // One project's record that stayed that project's is that project's change; any other change is everyone's.
+    noteListChanged({ list: 'memory', change: 'changed', id, ...(newProject !== undefined && !projectChanged ? { project: newProject } : {}) });
     return updated;
   }
 
@@ -1056,6 +1090,33 @@ export class MemoryStore {
   }
 
   /**
+   * Once per store: every "this project" record saved before records carried their project (3.5.0) is given the
+   * project `attribute` tells for it (memory-project.ts attributeOldProjectRecord); one it cannot tell stays the
+   * person's own. Returns what was done, or null when it ran before. One read of those rows and one write per
+   * attributed record, on the first start of this version only.
+   */
+  attributeOldProjectRecords(attribute: (record: MemoryRecord) => string | undefined): { readonly attributed: ReadonlyMap<string, number>; readonly keptOwn: number } | null {
+    if (!this.ready || this.readMeta(PROJECT_ATTRIBUTION_META) !== null) return null;
+    const rows = this.sqlite.exec(
+      `SELECT id, scope, cls, summary, detail, tags, provenance, review_state, confidence, reviewed_at, reviewed_by, stale_reason, created_at, updated_at, valid_from, valid_until, project
+         FROM memory_records WHERE scope = 'project' AND project IS NULL`,
+    )[0];
+    const attributed = new Map<string, number>();
+    let keptOwn = 0;
+    for (const values of rows?.values ?? []) {
+      const record = rowToRecord(rows!.columns, values);
+      const project = attribute(record);
+      if (project === undefined) { keptOwn += 1; continue; }
+      this.sqlite.run('UPDATE memory_records SET project = ?, gv_revision = lower(hex(randomblob(16))) WHERE id = ?', [project, record.id]);
+      this.indexRow({ ...record, project });
+      attributed.set(project, (attributed.get(project) ?? 0) + 1);
+    }
+    this.writeMeta(PROJECT_ATTRIBUTION_META, JSON.stringify({ at: Date.now(), attributed: Object.fromEntries(attributed), keptOwn }));
+    if (attributed.size > 0) noteListChanged({ list: 'memory', change: 'changed' });
+    return { attributed, keptOwn };
+  }
+
+  /**
    * Keep consolidation proposals, one row per kind and set of record ids.
    * Returns the proposals that were not already standing, so a pass reports a
    * proposal once however many passes find it again.
@@ -1152,7 +1213,7 @@ export class MemoryStore {
   /** Every row with the revision its trigger stamped, in one query. */
   private vectorEntries(): MemoryVectorEntry[] {
     const result = this.sqlite.exec(
-      `SELECT id, scope, cls, summary, detail, tags, provenance, review_state, confidence, reviewed_at, reviewed_by, stale_reason, created_at, updated_at, valid_from, valid_until, gv_revision
+      `SELECT id, scope, cls, summary, detail, tags, provenance, review_state, confidence, reviewed_at, reviewed_by, stale_reason, created_at, updated_at, valid_from, valid_until, project, gv_revision
          FROM memory_records
          ORDER BY updated_at DESC, created_at DESC`,
     )[0];

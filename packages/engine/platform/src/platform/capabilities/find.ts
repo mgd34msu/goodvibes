@@ -4,7 +4,10 @@
  *
  *  1. The function group. The decision model picks it when one is usable
  *     (`routing.capability-group`); otherwise, silently, the group whose
- *     capabilities share the most words with the need.
+ *     capabilities share the most words with the need. Where groups are
+ *     compared, a word in a capability's id never outweighs the same word in
+ *     another capability's name or sentence: ids are named by group ("conversation.clear"),
+ *     so an id word says which group a capability is in, not what it does.
  *  2. The capabilities. The group's capabilities (and the nearest group's too
  *     when the best match is weak) are ranked on their own words: the need's
  *     words found in each one's id, name, sentence and inputs, more for a word
@@ -74,7 +77,18 @@ function stemOf(word: string): string {
  */
 interface CapabilityWords { readonly id: readonly string[]; readonly label: readonly string[]; readonly says: readonly string[]; readonly inputs: readonly string[] }
 
-const FIELD_WEIGHT = { id: 4, label: 3, says: 2, inputs: 1 } as const;
+/** How much a need's word weighs by the field it is found in; `idHair` is added when the id and the name or sentence both hold it. */
+interface FieldWeights { readonly id: number; readonly label: number; readonly says: number; readonly inputs: number; readonly idHair: number }
+
+/** Ranking within a group, where every id shares the group's prefix: an id word names the capability's own act. */
+const FIELD_WEIGHT: FieldWeights = { id: 4, label: 3, says: 2, inputs: 1, idHair: 0 };
+
+/**
+ * Choosing the group: a word in an id weighs as much as one in a sentence, never more than the same word in another
+ * capability's name or sentence (ids are named by group, so an id word would pull a need toward the group whose
+ * prefix it is). An id that holds a word its name or sentence holds too adds a hair, which only breaks a tie.
+ */
+const GROUP_CHOICE_WEIGHT: FieldWeights = { id: 2, label: 3, says: 2, inputs: 1, idHair: 0.01 };
 
 function capabilityWords(entry: CapabilityEntry): CapabilityWords {
   return {
@@ -94,43 +108,76 @@ function inField(field: readonly string[], term: string): boolean {
   return field.some((word) => stemOf(word) === term || (term.length >= 5 && word.startsWith(term)));
 }
 
-/** The field a term is found in, as its weight (0: not found). */
-function fieldWeight(own: CapabilityWords, term: string): number {
-  return inField(own.id, term) ? FIELD_WEIGHT.id : inField(own.label, term) ? FIELD_WEIGHT.label
-    : inField(own.says, term) ? FIELD_WEIGHT.says : inField(own.inputs, term) ? FIELD_WEIGHT.inputs : 0;
+/** The field a term is found in, as its weight (0: not found): the weightiest field that holds it. */
+function fieldWeight(own: CapabilityWords, term: string, weights: FieldWeights = FIELD_WEIGHT): number {
+  const id = inField(own.id, term);
+  const label = inField(own.label, term);
+  const says = inField(own.says, term);
+  const best = Math.max(id ? weights.id : 0, label ? weights.label : 0, says ? weights.says : 0, inField(own.inputs, term) ? weights.inputs : 0);
+  return id && (label || says) ? best + weights.idHair : best;
 }
 
-interface Ranked<T> { readonly entry: T; readonly matched: number; readonly weight: number; readonly index: number; readonly share: number }
+interface Ranked<T> {
+  readonly entry: T;
+  readonly matched: number;
+  /** 0, or from 1 to 2: how much the need's set-aside words decide (a need left with one meaning word only). */
+  readonly aside: number;
+  readonly weight: number;
+  readonly index: number;
+  readonly share: number;
+}
+
+interface RankOptions {
+  readonly weights?: FieldWeights;
+  /** The need's words left out as filler, as written (see `asideWords`). */
+  readonly aside?: readonly string[];
+}
 
 /**
- * Keyword ranking over each entry's own words: most of the need's words found first; then found where they say
- * most (id, then name, then what it does, then its inputs), a word few entries hold counting for more than one
- * most hold ("weekday" over "run"); then catalog order. How rare a word is is read over `among` (the whole
- * catalog when a group is ranked). `share` is the part of the need's words an entry holds (0 to 1).
+ * Keyword ranking over each entry's own words: most of the need's words found first; then, for a need left with
+ * one meaning word, its set-aside words (as written, in the name or sentence, a rare one counting for more: "old" in
+ * "your old conversations" over "show" in "Shows ..."), which only tell apart entries that hold that word; then
+ * found where they say most (id, then name, then what it does, then its inputs), a word few entries hold counting
+ * for more than one most hold ("weekday" over "run"); then catalog order. How rare a word is is read over `among`
+ * (the whole catalog when a group is ranked). `share` is the part of the need's words an entry holds (0 to 1).
  */
-function rankByOwnWords<T>(entries: readonly T[], terms: readonly string[], words: (entry: T) => CapabilityWords, among: readonly T[] = entries): readonly Ranked<T>[] {
+function rankByOwnWords<T>(entries: readonly T[], terms: readonly string[], words: (entry: T) => CapabilityWords, among: readonly T[] = entries, options: RankOptions = {}): readonly Ranked<T>[] {
   if (terms.length === 0) return [];
+  const weights = options.weights ?? FIELD_WEIGHT;
   const everyOwn = among.map(words);
   const rarity = new Map(terms.map((term) => {
-    const holders = everyOwn.filter((own) => fieldWeight(own, term) > 0).length;
+    const holders = everyOwn.filter((own) => fieldWeight(own, term, weights) > 0).length;
     return [term, Math.log(1 + everyOwn.length / Math.max(1, holders))] as const;
+  }));
+  // One meaning word says too little on its own to tell its holders apart; the need's other words then do.
+  const aside = terms.length === 1 ? options.aside ?? [] : [];
+  const asideWeight = (own: CapabilityWords, word: string) => own.label.includes(word) ? weights.label : own.says.includes(word) ? weights.says : 0;
+  const asideRarity = new Map(aside.map((word) => {
+    const holders = everyOwn.filter((own) => asideWeight(own, word) > 0).length;
+    return [word, Math.log(1 + everyOwn.length / Math.max(1, holders))] as const;
   }));
   return entries.map((entry, index) => {
     const own = words(entry);
     let matched = 0;
     let weight = 0;
     for (const term of terms) {
-      const found = fieldWeight(own, term);
+      const found = fieldWeight(own, term, weights);
       if (found > 0) { matched += 1; weight += found * (rarity.get(term) ?? 1); }
     }
-    return { entry, matched, weight, index, share: matched / terms.length };
+    let other = 0;
+    if (matched > 0) for (const word of aside) other += asideWeight(own, word) * (asideRarity.get(word) ?? 1);
+    return { entry, matched, aside: other > 0 ? 1 + other / (1 + other) : 0, weight, index, share: matched / terms.length };
   }).filter((ranked) => ranked.matched > 0)
-    .sort((a, b) => b.matched - a.matched || b.weight - a.weight || a.index - b.index);
+    .sort((a, b) => b.matched - a.matched || b.aside - a.aside || b.weight - a.weight || a.index - b.index);
 }
 
-/** One ranked entry's standing as a single number, for comparing the best of two groups: words found, then weight. */
-function standing(ranked: { readonly matched: number; readonly weight: number } | undefined, terms: number): number {
-  return ranked === undefined || terms === 0 ? 0 : ranked.matched / terms + Math.min(ranked.weight, 999) / (terms * 10_000);
+/**
+ * One ranked entry's standing as a single number, for comparing the best of two groups: words found, then the
+ * set-aside words (0.1 to 0.2 of a word), then weight (under 0.1 of a word).
+ */
+function standing(ranked: { readonly matched: number; readonly aside: number; readonly weight: number } | undefined, terms: number): number {
+  return ranked === undefined || terms === 0 ? 0
+    : ranked.matched / terms + ranked.aside / (terms * 10) + Math.min(ranked.weight, 999) / (terms * 10_000);
 }
 
 /** Words that say nothing about which capability is meant; keyword ranking leaves them out. */
@@ -146,10 +193,16 @@ function significantTerms(need: string): readonly string[] {
   return [...new Set(kept.length > 0 ? kept : wordsOf(need).map(stemOf))];
 }
 
+/** The need's filler words of three letters or more, as written (not cut to a stem: "old" is not "older"). */
+function asideWords(need: string): readonly string[] {
+  return [...new Set(wordsOf(need).filter((word) => word.length > 2 && FILLER.has(word)))];
+}
+
 /** Keyword ranking: the group whose best capability holds the most of the need's words where they say most. */
 function classicGroup(catalog: CapabilityCatalog, need: string): readonly { readonly group: CapabilityGroupId; readonly best: number }[] {
   const terms = significantTerms(need);
-  const ranked = rankByOwnWords(catalog.list(), terms, capabilityWords);
+  const options: RankOptions = { weights: GROUP_CHOICE_WEIGHT, aside: asideWords(need) };
+  const ranked = rankByOwnWords(catalog.list(), terms, capabilityWords, catalog.list(), options);
   const byGroup = new Map<CapabilityGroupId, { best: number; share: number; count: number }>();
   for (const match of ranked) {
     const held = byGroup.get(match.entry.group);
@@ -158,7 +211,7 @@ function classicGroup(catalog: CapabilityCatalog, need: string): readonly { read
     else byGroup.set(match.entry.group, { best: Math.max(held.best, value), share: Math.max(held.share, match.share), count: held.count + (value >= held.best * 0.75 ? 1 : 0) });
   }
   // What a group holds, in its own words, breaks a tie between groups whose capabilities match alike.
-  const about = new Map(rankByOwnWords(CAPABILITY_GROUPS, terms, (group) => ({ id: [], label: wordsOf(group.title), says: wordsOf(group.about), inputs: [] }))
+  const about = new Map(rankByOwnWords(CAPABILITY_GROUPS, terms, (group) => ({ id: [], label: wordsOf(group.title), says: wordsOf(group.about), inputs: [] }), CAPABILITY_GROUPS, options)
     .map((match) => [match.entry.id as CapabilityGroupId, standing(match, terms.length)]));
   const score = (group: CapabilityGroupId, held: { readonly best: number }) => held.best + (about.get(group) ?? 0) / 4;
   return [...byGroup.entries()].sort((a, b) => score(b[0], b[1]) - score(a[0], a[1]) || b[1].count - a[1].count)
@@ -244,7 +297,7 @@ const WEAK_MATCH = 0.5;
 
 /** A group's capabilities ranked on their own words; `scores` is each one's share of the need's words. */
 function rankIn(entries: readonly CapabilityEntry[], need: string, catalog: CapabilityCatalog): { readonly ids: readonly string[]; readonly scores: Readonly<Record<string, number>> } {
-  const ranked = rankByOwnWords(entries, significantTerms(need), capabilityWords, catalog.list());
+  const ranked = rankByOwnWords(entries, significantTerms(need), capabilityWords, catalog.list(), { aside: asideWords(need) });
   return { ids: ranked.map((match) => match.entry.id), scores: Object.fromEntries(ranked.map((match) => [match.entry.id, match.share])) };
 }
 

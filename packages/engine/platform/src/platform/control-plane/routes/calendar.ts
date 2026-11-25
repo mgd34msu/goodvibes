@@ -45,6 +45,11 @@ export interface CalendarGatewayEventSummary {
   readonly location?: string;
   readonly description?: string;
   readonly attendees?: readonly string[];
+  /**
+   * The series a repeating event's occurrence belongs to, the same for every occurrence of it on every backend (Google's
+   * `recurringEventId`, the CalDAV resource, the local event, the feed's UID): a list counts the series once.
+   */
+  readonly seriesId?: string;
 }
 
 /** One event, in the shape `calendar.events.get` advertises. */
@@ -233,10 +238,12 @@ export function createCalendarEventsGetHandler(service: CalendarGatewayService):
 export function createCalendarEventsCreateHandler(service: CalendarGatewayService): GatewayMethodHandler {
   return async (invocation) => {
     const params = readInvocationParams(invocation);
+    const start = requireStringValue(params.start, 'start');
     return service.createEvent({
       title: requireStringValue(params.title, 'title'),
-      start: requireStringValue(params.start, 'start'),
-      end: requireStringValue(params.end, 'end'),
+      start,
+      // An event given no end ends when it starts.
+      end: readOptionalString(params.end) ?? start,
       description: readOptionalString(params.description),
       location: readOptionalString(params.location),
       attendees: readOptionalStringList(params.attendees),

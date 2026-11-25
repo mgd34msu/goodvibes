@@ -6,7 +6,8 @@
  * risk, or by a chosen input such as a secret kept as plain text) is
  * `loosen-security`, one that cannot be undone `irreversible-operator`, one
  * only the owner does himself `owner-act`; one that only reads is classed a
- * read. Daemon methods a call names directly keep the declarations they had
+ * read; one that only tightens a protection (its `tightens`) is allowed in every
+ * mode and folder, never asked about. Daemon methods a call names directly keep the declarations they had
  * under the method tool this one replaced.
  */
 import { modelNeverRuns, ownerDecidesForModel, type CapabilityEntry } from '../../capabilities/catalog.js';
@@ -26,6 +27,35 @@ export interface CapabilityRunMethodDeclarations {
    * decided twice (it is classed a read here; its owner acts stay refused here).
    */
   readonly routed?: readonly string[] | undefined;
+}
+
+/**
+ * Daemon capabilities that write or run in the caller's project folder, so the folder's trust holds them as it holds a
+ * file write (a restricted folder refuses them; `security.trust-folder` is not here: trusting the folder is asked):
+ * a worktree made or removed in the project, a hosted session, a hosted agent or a runner working there, a local rerun,
+ * media saved into the project's `generated/` folder.
+ */
+const PROJECT_FOLDER_CAPABILITIES: ReadonlySet<string> = new Set([
+  'worktree.setup', 'worktree.discard', 'hosted.new', 'agents.host', 'remote.dispatch', 'remote.dispatch-pool',
+  'remote.rerun-local', 'media.make', 'media.collect', 'startup.support-bundle', 'update.save-review',
+  // The project's own GoodVibes files: its services file (`<project>/.goodvibes/<program>/services.json`) and its
+  // plugin catalog (`<project>/.goodvibes/.../ecosystem`). A plugin's switch and trust are the daemon's: not here.
+  'services.trust', 'services.import', 'plugin.publish-local', 'plugin.unpublish',
+]);
+/**
+ * Families whose changes write the project's own GoodVibes files (`<project>/.goodvibes/`: its hooks file, its tool
+ * server config, its project secret store): every change of theirs is held to the folder.
+ */
+const PROJECT_FOLDER_FAMILIES: readonly string[] = ['hooks.', 'mcp.', 'secrets.'];
+
+/**
+ * Whether a capability's change works in the caller's project folder: one named above, one of a family above, or an
+ * export (it writes a file at a path read against the project folder). A read never is: the folder holds no read.
+ */
+export function capabilityWorksInProjectFolder(entry: Pick<CapabilityEntry, 'id' | 'touches'>): boolean {
+  if (entry.touches === 'reads') return false;
+  if (PROJECT_FOLDER_CAPABILITIES.has(entry.id) || PROJECT_FOLDER_FAMILIES.some((family) => entry.id.startsWith(family))) return true;
+  return /(^|-)export$/.test(entry.id.slice(entry.id.indexOf('.') + 1));
 }
 
 export const CAPABILITY_FIND_TOOL = 'capability_find';
@@ -55,6 +85,13 @@ export function capabilityRunDefinition(entries: readonly CapabilityEntry[], met
       const values = (input.choices as readonly FixedChoice[]).filter((choice) => choice.risk === 'loosens-a-protection').map((choice) => choice.value);
       if (values.length > 0) (loosensWhen[entry.id] ??= []).push({ path: `inputs.${input.id}`, values });
     }
+    // A setting changed in the loosening direction (settings.set, settings.reset, `loosensIf`) is classed by the gate
+    // from the setting's current value (permissions/manager.ts `settingsWriteLoosens`), not by a list here.
+  }
+  // A run that cannot be undone only with some values (a credential's reset: `irreversibleWhen`).
+  const irreversibleWhen: Record<string, { readonly path: string; readonly values: readonly string[] }[]> = {};
+  for (const entry of entries) {
+    if (entry.irreversibleWhen) irreversibleWhen[entry.id] = [{ path: `inputs.${entry.irreversibleWhen.input}`, values: entry.irreversibleWhen.values }];
   }
   const decisions: ToolOwnerDecisions = {
     field: 'id',
@@ -64,6 +101,7 @@ export function capabilityRunDefinition(entries: readonly CapabilityEntry[], met
     // opening on No (a model's call of it is never refused outright, and never run unasked).
     loosens: entries.filter((entry) => entry.risk === 'loosens-a-protection' || ownerDecidesForModel(entry)).map((entry) => entry.id),
     loosensWhen,
+    irreversibleWhen,
     ...(methods.recipients ? { recipients: methods.recipients } : {}),
   };
   // Only the owner does it himself: its own flag, or an effect a model never causes that the owner cannot decide for it.
@@ -72,6 +110,11 @@ export function capabilityRunDefinition(entries: readonly CapabilityEntry[], met
     field: 'id', values: [...ownerOwn.map((entry) => entry.id), ...(methods.ownerActs ?? [])],
     // The refusal names the act in the capability's own words (gate/classify.ts).
     words: Object.fromEntries(ownerOwn.map((entry) => [entry.id, entry.label])),
+    // A capability that is the owner's own act is put to him, opening on No, never refused outright; a daemon method
+    // named directly whose act is his (answering an approval, minting a token) stays refused to a model.
+    asked: ownerOwn.map((entry) => entry.id),
+    // One that hands on a card's detail the owner types is answered each time: never remembered.
+    once: ownerOwn.filter((entry) => (entry.effects ?? []).includes('card.enter')).map((entry) => entry.id),
   };
   return {
     name: CAPABILITY_RUN_TOOL,
@@ -91,7 +134,40 @@ export function capabilityRunDefinition(entries: readonly CapabilityEntry[], met
     },
     sideEffects: ['network', 'state'],
     readModes: { field: 'id', values: [...entries.filter((entry) => entry.touches === 'reads').map((entry) => entry.id), ...(methods.routed ?? [])] },
+    // A capability that only tightens a protection (its definition's `tightens`) is never refused or asked about.
+    tightens: {
+      field: 'id',
+      values: entries.filter((entry) => entry.tightens === true).map((entry) => entry.id),
+      when: Object.fromEntries(entries.flatMap((entry) => entry.tightens && entry.tightens !== true
+        ? [[entry.id, [{ path: `inputs.${entry.tightens.input}`, values: entry.tightens.values }]]] : [])),
+    },
+    // A capability that writes only the model's own working state (the checklist) is never held or asked about.
+    ownWorkingState: { field: 'id', values: entries.filter((entry) => entry.ownWorkingState === true).map((entry) => entry.id) },
     ownerActs,
     ownerDecisions: decisions,
+    // A capability the daemon runs acts on what the daemon holds, in no project folder: the folder's trust neither
+    // refuses nor asks about its call. The call itself is decided as any other (an act of the owner's, asked opening on No).
+    // One that writes or runs in the project folder is not among them: the folder holds it as it holds a file write.
+    outsideFolder: {
+      field: 'id',
+      values: entries.filter((entry) => entry.home === 'daemon' && !capabilityWorksInProjectFolder(entry)).map((entry) => entry.id),
+      // A change of a project-file family (secrets, tool servers) kept for all your projects writes no project file:
+      // outside the folder with that scope named; the project scope (also its default) stays held to it.
+      when: Object.fromEntries(entries.flatMap((entry) => {
+        const otherScopes = entry.home === 'daemon' && capabilityWorksInProjectFolder(entry) ? scopesOutsideProject(entry) : [];
+        return otherScopes.length > 0 ? [[entry.id, [{ path: 'inputs.scope', values: otherScopes }]]] : [];
+      })),
+    },
   };
+}
+
+/**
+ * The values of a project-file family capability's `scope` input that keep the change out of the project (secrets
+ * "All your projects", tool servers "All your projects"); none for any other capability.
+ */
+function scopesOutsideProject(entry: Pick<CapabilityEntry, 'id' | 'inputs'>): readonly string[] {
+  if (!PROJECT_FOLDER_FAMILIES.some((family) => entry.id.startsWith(family))) return [];
+  const scope = entry.inputs.find((input) => input.id === 'scope');
+  if (!scope || !Array.isArray(scope.choices)) return [];
+  return (scope.choices as readonly FixedChoice[]).map((choice) => choice.value).filter((value) => value !== '' && value !== 'project');
 }

@@ -9,7 +9,7 @@ import {
   projectOrchestratorCoreServices,
 } from '@goodvibes/engine/terminal-shell/bootstrap-orchestrator';
 import { buildPluginStartupContext } from '@goodvibes/engine/terminal-shell/plugin-startup';
-import { bindCapabilityHost, hiddenValuePrompt } from '@goodvibes/engine/terminal-shell/capability-host';
+import { bindCapabilityHost, hiddenLineFrom } from '@goodvibes/engine/terminal-shell/capability-host';
 import { sessionCapabilityServices } from '../input/commands/session-capabilities.ts';
 import { ownerInputFor } from '@goodvibes/engine/terminal-shell/companion-input';
 import { createPluginStartupTask } from '@goodvibes/engine/terminal-shell/plugin-startup';
@@ -36,8 +36,7 @@ import type { Compositor } from '../renderer/compositor.ts';
 
 import type { RuntimeContext, BootstrapOptions } from './context.ts';
 import { createTaskManager, emitSessionResumed } from '@/runtime/index.ts';
-import { ProcessTaskAdapter, resumeContracts } from '@goodvibes/engine/platform/platform/runtime/operations';
-import { wireContractRecoveryNotices } from '@goodvibes/engine/terminal-shell/session-crash-recovery';
+import { ProcessTaskAdapter } from '@goodvibes/engine/platform/platform/runtime/operations';
 import { emitSessionRecoveryFailed } from '@goodvibes/engine/platform/platform/runtime/emitters';
 import type { SystemMessageRouter } from '../core/system-message-router.ts';
 import { loadLastConversation } from '@/runtime/index.ts';
@@ -45,7 +44,6 @@ import { bindWriteLastSessionPointerToSurface } from '@/runtime/index.ts';
 import { scheduleMcpSuggestionScan } from './mcp-suggestion-scan.ts';
 import { restoreSavedModel } from '@/runtime/index.ts';
 import { runGatedLanScan } from './lan-scan-consent.ts';
-import { scheduleCalendarSubscriptionBootRefresh } from './calendar-boot-refresh.ts';
 import type { TurnEvent } from '@/runtime/index.ts';
 import type { UiRuntimeServices } from './ui-services.ts';
 import { createDeferredStartupCoordinator } from '@/runtime/index.ts';
@@ -138,7 +136,10 @@ export type BootstrapContext = RuntimeContext & {
    * or another machine's the Agent is paired to), or found missing (said in one line). The first turn waits for it.
    */
   daemonReady: Promise<void>;
-  /** The one line that says no daemon is installed here (and how to install it), once discovery found that; else undefined. */
+  /**
+   * The one line a headless run says about the local daemon, once discovery settled it: none is installed here (and
+   * how to install it), or the daemon program was started here ("Started the GoodVibes daemon.") or failed to; else undefined.
+   */
   daemonMissing: () => string | undefined;
 };
 
@@ -237,7 +238,10 @@ export async function bootstrapRuntime(stdout: NodeJS.WriteStream, options: Boot
     isIdle: () => activePromptTurnId === null,
     watchAnnouncements: async (handlers) => {
       const host = services.resolveConnectedHost();
-      return 'reason' in host ? null : await watchOccasionAnnouncements({ baseUrl: host.baseUrl, token: host.token, ...handlers });
+      // This Agent's own daemon connection: when it is open again (a restarted daemon too), readers that failed read again.
+      return 'reason' in host ? null : await watchOccasionAnnouncements({ baseUrl: host.baseUrl, token: host.token, ...handlers, onBack: announceDaemonAttached,
+        // Read again for every connect: a credential renewed after a daemon restart keeps this signal coming.
+        currentToken: () => { const now = services.resolveConnectedHost(); return 'reason' in now ? null : now.token; } });
     },
   });
   runtimeUnsubs.push(
@@ -494,16 +498,7 @@ export async function bootstrapRuntime(stdout: NodeJS.WriteStream, options: Boot
     if (report.removed.length > 0 || report.attention.length > 0 || report.failed.length > 0) systemMessageRouter.high(`[Worktrees] ${text}`, report.attention.length > 0 || report.failed.length > 0 ? 'warning' : 'info');
     else systemMessageRouter.low(`[Worktrees] ${text}`);
   });
-  // A contract that was running when the app stopped: one line for the owner, and the same fact for its
-  // session's model. The platform started the resume; asking again for this root returns the same report.
-  runtimeUnsubs.push(wireContractRecoveryNotices({
-    recovery: resumeContracts(services.contractRunner, services.workingDirectory),
-    get: (contractId) => services.contractRunner.get(contractId),
-    say: (text, level) => systemMessageRouter.high(text, level),
-    bus: runtimeBus,
-    sessionId: () => runtime.sessionId,
-    hostInstructions: () => conversation.hostInstructions,
-  }));
+  // Work has one runner, the daemon's: the Agent resumes no contract of its own (runtime/services.ts).
   // An older decision log carried forward to its smaller form says once how much space came back.
   void services.judgment.decisionLogCarriedForward.then((text) => { if (text) systemMessageRouter.high(`[Decision log] ${text}`); });
   const commandRegistry = shell.commandRegistry;
@@ -512,10 +507,7 @@ export async function bootstrapRuntime(stdout: NodeJS.WriteStream, options: Boot
   bootstrapUnsubs.push(bindCapabilityHost({
     commands: () => commandRegistry.getAll(), session: () => sessionCapabilityServices(commandContext),
     // The composer's hidden line, once the screen has set it up: a value a model's call needs is typed there.
-    hidden: () => {
-      const begin = commandContext.beginConcealedInput;
-      return begin ? (request) => { commandContext.print(hiddenValuePrompt(request.label)); begin(request); } : undefined;
-    },
+    hidden: () => hiddenLineFrom(commandContext),
   }));
   const inputHistory = shell.inputHistory;
   // A failed or refused turn is a row in the transcript with its next steps on keys:
@@ -711,17 +703,7 @@ export async function bootstrapRuntime(stdout: NodeJS.WriteStream, options: Boot
     shellPaths: services.shellPaths,
     surfaceRoot: GOODVIBES_AGENT_SURFACE_ROOT,
   });
-  // Refresh explicitly-subscribed external calendar feeds that are DUE
-  // per their own bounded interval (conditional 304 requests keep it cheap).
-  // Consent was given at subscribe time ("now and on each refresh"); with no
-  // subscriptions this touches nothing. Non-blocking, boot never waits on it;
-  // one honest aggregate line only when something refreshed or failed.
-  void scheduleCalendarSubscriptionBootRefresh({
-    shellPaths: services.shellPaths,
-    secretsManager: services.secretsManager,
-    systemMessageRouter,
-    requestRender,
-  });
+  // The calendar feeds are the daemon's (calendar/local-calendar.ts): read again when the calendar is read.
   const mcpSuggestions = scheduleMcpSuggestionScan({
     mcpRegistry: services.mcpRegistry,
     systemMessageRouter,

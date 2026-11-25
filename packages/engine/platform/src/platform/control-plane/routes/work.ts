@@ -23,6 +23,7 @@ import type { WorkLedgerReadClient } from '../../workflow/work-ledger/index.js';
 import type { NativeWorkExecutionHost, NativeWorkExecutionObservation } from '../../workflow/work-ledger/native-execution.js';
 import { WorkPlanRefusal, type WorkPlans, type WorkPlanView } from '../../workflow/work-ledger/work-plans.js';
 import { isTerminalContractStatus, type ContractView } from '../../contract/types.js';
+import { canGoOnWithout } from '../../contract/escalation.js';
 import { WORK_LEDGER_READ_SCOPE } from '../method-catalog-work-ledger.js';
 import { GatewayVerbError } from './gateway-verb-error.js';
 import { readInvocationParams } from './invocation-params.js';
@@ -30,18 +31,34 @@ import { requireNativeOwner } from './native-owner.js';
 
 const EXECUTION_SCOPES = ['read:work-ledger', 'write:fleet'] as const;
 
-/** Where a piece of work stands, in the words every surface shows. */
-export type WorkState = 'not-started' | 'plan-waiting' | 'starting' | 'running' | 'needs-you' | 'done' | 'failed' | 'stopped';
+/**
+ * Where a piece of work stands, in the words every surface shows. `interrupted`: the daemon stopped while it was
+ * starting or while parts of it ran; it waits to be gone on with (those parts run again, finished ones are kept). `step-failed`: a step failed and the work stopped
+ * at it, live, asking nothing of anyone; it waits for the step to be run again, gone on without, or the work stopped.
+ */
+export type WorkState = 'not-started' | 'plan-waiting' | 'starting' | 'interrupted' | 'running' | 'needs-you' | 'step-failed' | 'done' | 'failed' | 'stopped';
 
 export interface WorkStepView { readonly id: string; readonly title: string; readonly status: string; readonly role: string; readonly dependsOn: readonly string[] }
-export interface WorkQuestionView { readonly id: string; readonly question: string; readonly failedStep?: string | undefined }
+/** A question the work asks and needs an answer to before it goes on. */
+export interface WorkQuestionView { readonly id: string; readonly question: string }
+/** A step that failed, where the work stopped: what failed, and whether the work can go on without its result. */
+export interface WorkFailedStepView {
+  readonly id: string; readonly title: string; readonly reason: string; readonly canGoOn: boolean;
+  /** The run's record of the stop at this step (what running it again or going on without it answers). */
+  readonly pause: string;
+}
 export interface WorkRunView {
   readonly contractId: string;
   readonly status: string;
   readonly statusLine?: string | undefined;
+  /** What last held a step's change back (a write its view refused), in words with what to do. */
+  readonly held?: string | undefined;
+  /** What the work found or did, in its own words, once it is done (what a conversation that handed it over receives). */
+  readonly answer?: string | undefined;
   readonly steps: readonly WorkStepView[];
   readonly results: readonly { readonly text: string; readonly status: string }[];
   readonly questions: readonly WorkQuestionView[];
+  readonly failedSteps: readonly WorkFailedStepView[];
   readonly budget?: { readonly maxCostUsd?: number | undefined; readonly maxTokens?: number | undefined } | undefined;
 }
 export interface WorkItemView {
@@ -59,6 +76,8 @@ export interface WorkItemView {
   readonly run: WorkRunView | null;
   /** Its plan before it runs, while one is held. */
   readonly plan: WorkPlanView | null;
+  /** Proposed with its plan (`work.propose`) and not yet asked for: approving it asks for the work and starts it with this plan. */
+  readonly proposed?: boolean | undefined;
   readonly createdAt: number;
   readonly updatedAt: number;
 }
@@ -84,26 +103,44 @@ function runOf(contract: ContractView): WorkRunView {
     contractId: contract.id,
     status: contract.status,
     ...(contract.statusLine ? { statusLine: contract.statusLine } : {}),
+    // What last held a step's change back, while the work is live or after it failed: in words, with what to do.
+    ...(contract.heldChange && contract.status !== 'passed' && contract.status !== 'cancelled' ? { held: contract.heldChange.said } : {}),
+    ...(contract.status === 'passed' && contract.answer ? { answer: contract.answer } : {}),
     steps: contract.units.map((unit) => ({ id: unit.id, title: unit.title || unit.brief || unit.id, status: unit.status, role: unit.role, dependsOn: [...unit.dependsOn] })),
     results: contract.criteria.map((criterion) => ({ text: criterion.text, status: String((criterion as { status?: unknown }).status ?? 'unshown') })),
-    questions: contract.escalations.filter((entry) => entry.resolvedAt === undefined).map((entry) => ({
-      id: entry.id, question: entry.question,
-      ...(entry.failurePause === true && entry.scope === 'unit' ? { failedStep: entry.targetId } : {}),
-    })),
+    questions: contract.escalations.filter((entry) => entry.resolvedAt === undefined && !isStepFailure(entry)).map((entry) => ({ id: entry.id, question: entry.question })),
+    // Only live work stops at a failed step: once the run ended, its step's pause is history.
+    failedSteps: isTerminalContractStatus(contract.status) ? [] : contract.escalations.filter((entry) => entry.resolvedAt === undefined && isStepFailure(entry)).map((entry) => {
+      const unit = contract.units.find((candidate) => candidate.id === entry.targetId);
+      return { id: entry.targetId, title: unit?.title || unit?.brief || entry.targetId, reason: unit?.failureReason ?? '', canGoOn: canGoOnWithout(contract, entry.targetId), pause: entry.id };
+    }),
     ...(contract.budget ? { budget: { ...contract.budget } } : {}),
   };
+}
+
+/** A failed step's pause: the work stopped at that step; it is not a question (the Work place shows it with its controls). */
+function isStepFailure(entry: ContractView['escalations'][number]): boolean {
+  return entry.failurePause === true && entry.scope === 'unit';
 }
 
 function stateOf(reported: string, attemptState: string | undefined, observed: NativeWorkExecutionObservation | null, plan: WorkPlanView | null): WorkState {
   if (reported === 'complete') return 'done';
   if (reported === 'cancelled') return 'stopped';
-  if (observed?.kind === 'intent') return observed.intent.state === 'cancelled' ? 'stopped' : 'starting';
+  // Its run ended failed, and the ledger says so with the reason (the attempt's blocker).
+  if (reported === 'blocked') return 'failed';
+  // A start cut off (by a restart of the daemon) waits to be gone on with; one still under way is starting.
+  if (observed?.kind === 'intent') return observed.intent.state === 'cancelled' ? 'stopped' : observed.recovery === 'required' ? 'interrupted' : 'starting';
   if (observed?.kind === 'execution') {
     if (observed.execution.state === 'cancelled') return 'stopped';
     const contract = observed.contract;
     if (contract) {
       if (isTerminalContractStatus(contract.status)) return contract.status === 'passed' ? 'done' : contract.status === 'cancelled' ? 'stopped' : 'failed';
-      if (contract.escalations.some((entry) => entry.resolvedAt === undefined)) return 'needs-you';
+      const open = contract.escalations.filter((entry) => entry.resolvedAt === undefined);
+      // A question the work asks needs you; a failed step alone asks nothing: the work stopped at that step.
+      if (open.some((entry) => !isStepFailure(entry))) return 'needs-you';
+      if (open.length > 0) return 'step-failed';
+      // Its run is kept but not live here: the daemon stopped while parts of it ran. It waits to be gone on with.
+      if (observed.recovery === 'required') return 'interrupted';
       return 'running';
     }
     return observed.execution.state === 'prepared' ? 'starting' : 'running';
@@ -149,6 +186,15 @@ async function works(host: WorkRouteHost, invocation: GatewayMethodInvocation): 
       createdAt: work.createdAt, updatedAt: work.updatedAt,
     });
   }
+  // A piece of work proposed with its plan waits beside the rest, its plan waiting for the owner.
+  for (const proposal of host.plans?.proposals() ?? []) {
+    const { goal, criteria, at, ...plan } = proposal;
+    items.push({
+      id: plan.workId, title: goal.split('\n')[0]!.trim() || goal, goal, criteria: [...criteria], state: 'plan-waiting', imported: false,
+      reported: 'pending', verification: { state: 'unverified', reason: '' }, attention: [], attempt: null, run: null, plan, proposed: true,
+      createdAt: at, updatedAt: at,
+    });
+  }
   return items.sort((a, b) => b.updatedAt - a.updatedAt);
 }
 
@@ -191,7 +237,7 @@ export function registerWorkGatewayMethods(catalog: GatewayMethodCatalog, host: 
     const work = view.work;
     const attempt = view.attempt;
     if (operation === 'execution') {
-      if (!work.currentAttemptId || !attempt) throw new GatewayVerbError(`"${work.title}" has no attempt to act on: it was finished or stopped.`, 'WORK_NO_ATTEMPT', 409, 'work');
+      if (!work.currentAttemptId || !attempt) throw new GatewayVerbError(`"${work.title}" has ended: it was finished or stopped, so there is nothing to start or stop.`, 'WORK_NO_ATTEMPT', 409, 'work');
       return {
         summary: `"${work.title}"`, title: work.title,
         input: { projectId: host.projectId, workId: work.id, attemptId: attempt.id,
@@ -209,6 +255,12 @@ export function registerWorkGatewayMethods(catalog: GatewayMethodCatalog, host: 
   const subject = async (invocation: GatewayMethodInvocation) => {
     readable(invocation);
     const params = readInvocationParams(invocation);
+    // A proposed piece of work is named by its proposal's id; its plan acts are the same.
+    const proposed = typeof params['work'] === 'string' ? host.plans?.proposal(params['work']) : undefined;
+    if (proposed) {
+      const id = params['work'] as string;
+      return { params, work: { id, goal: proposed.goal, criteria: proposed.criteria, title: proposed.goal.split('\n')[0]!.trim() || proposed.goal }, proposed: true };
+    }
     const view = await workNamed(host, params['work']);
     return { params, work: { id: view.work.id, goal: view.work.goal, criteria: view.work.criteria, title: view.work.title } };
   };
@@ -235,7 +287,12 @@ export function registerWorkGatewayMethods(catalog: GatewayMethodCatalog, host: 
     return { title: work.title, plan: await planAct(() => plansOf(host).moveStep(work.id, text(params['step'], 'step'), position)) };
   });
   attach('work.plan.approve', async (invocation) => {
-    const { work } = await subject(invocation);
+    const { params, work, proposed } = await subject(invocation);
+    if (proposed) {
+      // A proposal is approved as the piece of work it was asked for as (`as`): its plan becomes that work's.
+      const as = await workNamed(host, params['as']);
+      return { title: work.title, plan: await planAct(() => { plansOf(host).adopt(work.id, as.work.id); return plansOf(host).approve(as.work.id); }) };
+    }
     return { title: work.title, plan: await planAct(() => plansOf(host).approve(work.id)) };
   });
   attach('work.plan.discard', async (invocation) => {

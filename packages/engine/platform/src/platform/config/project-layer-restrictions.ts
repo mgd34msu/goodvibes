@@ -108,6 +108,13 @@ export function restrictProjectLayer(
       continue;
     }
     const facts = configKeyFacts(key);
+    // A project's own worktree setup commands are not a setting of this program: the daemon runs them for that
+    // project's worktrees, and only once the owner trusts the folder (runtime/worktree/project-setup-settings.ts).
+    if (key === 'worktree.setup.commands') {
+      refuse(key, 'the project\'s own worktree setup commands are not a setting here: the daemon runs them when it sets up this project\'s worktrees, and only once you trust this folder',
+        '"Trust this folder" in Permissions and safety, This folder, lets them run; keep it restricted to keep them off');
+      continue;
+    }
     if (!facts.projectSettable) {
       refuse(key, facts.inSchema
         ? `a project settings file cannot set ${key}; it can set only display, behaviour, contract, worktree and stricter permission settings`

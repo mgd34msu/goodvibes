@@ -18,13 +18,21 @@ export function resolveDaemonCliOwnership(
 ) {
   // Resolve flags without mutating the parent environment or process cwd.
   const homes = resolveGoodVibesHomeOwnership(daemonHomeEnvironment(flags, env, cwd));
-  // Working dir: flag > env > the daemon's saved setting (a working-directory
-  // change saved through POST /config, applied at this start) > cwd.
-  const workingDirectoryOverride = flags.workingDir !== undefined ? '--working-dir'
-    : env.GOODVIBES_WORKING_DIR !== undefined ? 'GOODVIBES_WORKING_DIR' : undefined;
-  const workingDirectory = resolve(cwd, flags.workingDir ?? env.GOODVIBES_WORKING_DIR
+  // The folder the daemon was started in (flag > env > a folder a 3.5.0 daemon saved > cwd) means nothing: the daemon
+  // serves every project at once and makes a project's files, code index, checkpoints and identity only for a project a
+  // call or a turn names. Its own working folder is a folder of its own in its home, which no project is and nobody
+  // works in; its records are in its home too (daemon-records.ts), carried from the folders a 3.5.0 daemon used.
+  const startFolder = resolve(cwd, flags.workingDir ?? env.GOODVIBES_WORKING_DIR
     ?? readDaemonSetting(homes.daemonHomeDirectory, 'runtime.workingDir') ?? cwd);
-  return { ...homes, workingDirectory, workingDirectoryOverride };
+  const workingDirectory = daemonOwnFolder(homes.daemonHomeDirectory);
+  return { ...homes, workingDirectory, startFolder };
+}
+
+/** The daemon's own working folder, in its home: nothing a project does lands here, and it is never a project. */
+export function daemonOwnFolder(daemonHomeDirectory: string): string {
+  const folder = join(daemonHomeDirectory, 'own-folder');
+  try { mkdirSync(folder, { recursive: true, mode: 0o700 }); } catch { /* the start reports an unwritable home itself */ }
+  return folder;
 }
 
 export function createDaemonCliConfiguration(

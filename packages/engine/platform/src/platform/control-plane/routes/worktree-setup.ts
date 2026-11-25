@@ -8,11 +8,12 @@
  * and returns the result. Registered from services.ts, the composition root
  * that holds the worktree registry, the daemon config, and the source root.
  */
-import { realpathSync } from 'node:fs';
-import { resolve } from 'node:path';
+import { existsSync, realpathSync } from 'node:fs';
+import { isAbsolute, resolve } from 'node:path';
+import { GitService } from '../../git/index.js';
 import type { GatewayMethodCatalog } from '../method-catalog.js';
 import type { GatewayMethodHandler } from '../method-catalog-shared.js';
-import type { WorktreeRegistry } from '../../runtime/worktree/registry.js';
+import { listPersistedWorktreeMeta, summarizeWorktreeOwnership, type WorktreeRegistry } from '../../runtime/worktree/registry.js';
 import { runWorktreeSetup, type WorktreeSetupConfig } from '../../runtime/worktree/setup.js';
 import { GatewayVerbError } from './gateway-verb-error.js';
 import { readInvocationParams, requireStringValue } from './invocation-params.js';
@@ -23,6 +24,28 @@ export interface WorktreeSetupGatewayDeps {
   readonly sourceRoot: string;
   /** Resolves the current per-project setup config (read fresh each run so a config change takes effect without a restart). */
   readonly resolveConfig: () => WorktreeSetupConfig;
+  /**
+   * Why the project's own setup commands were not used (its folder is not trusted), read with each run; undefined when
+   * they were used or it has none. Said beside the setup's outcome.
+   */
+  readonly commandsNotUsed?: (() => string | undefined) | undefined;
+  /**
+   * The same three for another project the caller names (`project`: its folder's full path), the one register file
+   * that project's terminal programs keep. Absent: only the daemon's own folder is served.
+   */
+  readonly forProject?: ((project: string) => Omit<WorktreeSetupGatewayDeps, 'forProject'>) | undefined;
+}
+
+/** The project a call names (`project`), or the daemon's own folder when it names none. */
+function depsFor(deps: WorktreeSetupGatewayDeps, params: Record<string, unknown>): Omit<WorktreeSetupGatewayDeps, 'forProject'> {
+  const named = typeof params.project === 'string' ? params.project.trim() : '';
+  if (!named) return deps;
+  if (!isAbsolute(named)) throw new GatewayVerbError(`project is a folder's full path; "${named}" is not, so nothing was run or changed.`, 'INVALID_REQUEST', 400, 'project');
+  if (!deps.forProject) throw new GatewayVerbError('This daemon serves only its own folder\'s worktrees; nothing was run or changed.', 'NOT_FOUND', 404, 'project');
+  if (!existsSync(named) || !GitService.isGitRepo(named)) {
+    throw new GatewayVerbError(`${named} is not a git repository this machine has, so nothing was run or changed.`, 'NOT_FOUND', 404, 'project');
+  }
+  return deps.forProject(named);
 }
 
 /**
@@ -33,7 +56,7 @@ export interface WorktreeSetupGatewayDeps {
  * before anything runs. Discard needs no copy of this: the registry's
  * `discard` refuses the same paths itself, in its receipt.
  */
-async function resolveLinkedWorktree(deps: WorktreeSetupGatewayDeps, rawPath: string): Promise<string> {
+async function resolveLinkedWorktree(deps: Omit<WorktreeSetupGatewayDeps, 'forProject'>, rawPath: string): Promise<string> {
   const absolute = resolve(deps.sourceRoot, rawPath);
   let real = absolute;
   try { real = realpathSync(absolute); } catch { /* a path that is gone cannot match a live worktree below */ }
@@ -56,10 +79,12 @@ export function createWorktreeSetupRunHandler(deps: WorktreeSetupGatewayDeps): G
   return async (invocation) => {
     const params = readInvocationParams(invocation);
     const path = requireStringValue(params.path, 'path');
-    const worktreePath = await resolveLinkedWorktree(deps, path);
-    const setup = await runWorktreeSetup(worktreePath, deps.sourceRoot, deps.resolveConfig());
-    deps.registry.recordSetup(worktreePath, setup);
-    return { path: worktreePath, setup };
+    const project = depsFor(deps, params);
+    const worktreePath = await resolveLinkedWorktree(project, path);
+    const notUsed = project.commandsNotUsed?.();
+    const setup = await runWorktreeSetup(worktreePath, project.sourceRoot, project.resolveConfig());
+    project.registry.recordSetup(worktreePath, setup);
+    return { path: worktreePath, setup, ...(notUsed !== undefined ? { projectCommandsNotUsed: notUsed } : {}) };
   };
 }
 
@@ -74,12 +99,33 @@ export function createWorktreeDiscardHandler(deps: WorktreeSetupGatewayDeps): Ga
   return async (invocation) => {
     const params = readInvocationParams(invocation);
     const path = requireStringValue(params.path, 'path');
-    return await deps.registry.discard(resolve(deps.sourceRoot, path));
+    const project = depsFor(deps, params);
+    return await project.registry.discard(resolve(project.sourceRoot, path));
+  };
+}
+
+/**
+ * `worktrees.snapshot` for the project a call names (`project`: that project's one register file, as its terminal
+ * programs keep it), or the daemon's own folder when it names none. The same records and summary either way.
+ */
+export function createWorktreeSnapshotHandler(deps: WorktreeSetupGatewayDeps): GatewayMethodHandler {
+  return async (invocation) => {
+    const params = readInvocationParams(invocation);
+    const named = typeof params.project === 'string' ? params.project.trim() : '';
+    // A project that is not a git repository has no worktrees: an empty list, not a refusal (nothing is wrong there).
+    if (named && isAbsolute(named) && deps.forProject && (!existsSync(named) || !GitService.isGitRepo(named))) {
+      return { summary: summarizeWorktreeOwnership([]), records: [] };
+    }
+    const project = depsFor(deps, params);
+    const records = listPersistedWorktreeMeta({ workingDirectory: project.sourceRoot });
+    return { summary: summarizeWorktreeOwnership(records), records };
   };
 }
 
 /** Attach the worktree lifecycle handlers to their already-registered descriptors. Missing descriptors are silent no-ops. */
 export function registerWorktreeSetupGatewayMethods(catalog: GatewayMethodCatalog, deps: WorktreeSetupGatewayDeps): void {
+  const snapshot = catalog.get('worktrees.snapshot');
+  if (snapshot) catalog.register(snapshot, createWorktreeSnapshotHandler(deps), { replace: true });
   const setup = catalog.get('worktrees.setup.run');
   if (setup) catalog.register(setup, createWorktreeSetupRunHandler(deps), { replace: true });
   const discard = catalog.get('worktrees.discard');

@@ -88,7 +88,28 @@ export interface ArtifactItem extends PlaceItem {
   readonly purpose: string;
 }
 
-export type MemoryStoreItem = NoteItem | PersonaItem | RoutineItem | DraftItem | ArtifactItem;
+export interface AgentHomeItem extends PlaceItem {
+  readonly kind: 'agent-home';
+  readonly state: 'starts-next' | 'kept';
+  readonly home: string;
+  readonly starter: string;
+  readonly starterName: string;
+  readonly createdAt: string;
+}
+
+export interface StarterItem extends PlaceItem {
+  readonly kind: 'starter';
+  readonly state: 'yours' | 'built-in';
+  readonly name: string;
+  readonly description: string;
+  readonly persona: string;
+  readonly skills: readonly string[];
+  readonly routines: readonly string[];
+  readonly vibe: boolean;
+  readonly path: string;
+}
+
+export type MemoryStoreItem = NoteItem | PersonaItem | RoutineItem | DraftItem | ArtifactItem | AgentHomeItem | StarterItem;
 
 const text = (value: unknown): string => typeof value === 'string' ? value : '';
 const record = (value: unknown): Readonly<Record<string, unknown>> => value !== null && typeof value === 'object' && !Array.isArray(value) ? value as Record<string, unknown> : {};
@@ -150,6 +171,21 @@ export function artifactItems(output: unknown): readonly ArtifactItem[] {
     kind: 'artifact', id: text(artifact['id']), state: plain(artifact['kind']) || 'file', name: plain(artifact['name']) || text(artifact['id']),
     mimeType: plain(artifact['mimeType']), sizeBytes: count(artifact['sizeBytes']), createdAt: text(artifact['createdAt']),
     source: plain(artifact['source']), purpose: plain(artifact['purpose']),
+  }));
+}
+
+export function homeItems(output: unknown): readonly AgentHomeItem[] {
+  return list(dataOf(output)['homes']).filter((home) => text(home['id'])).map((home): AgentHomeItem => ({
+    kind: 'agent-home', id: text(home['id']), state: home['state'] === 'starts-next' ? 'starts-next' : 'kept', home: plain(home['home']),
+    starter: plain(home['starter']), starterName: plain(home['starterName']), createdAt: text(home['createdAt']),
+  }));
+}
+
+export function starterItems(output: unknown): readonly StarterItem[] {
+  return list(dataOf(output)['starters']).filter((starter) => text(starter['id'])).map((starter): StarterItem => ({
+    kind: 'starter', id: text(starter['id']), state: starter['state'] === 'yours' ? 'yours' : 'built-in', name: plain(starter['name']) || text(starter['id']),
+    description: plain(starter['description']), persona: plain(starter['persona']), skills: strings(starter['skills']), routines: strings(starter['routines']),
+    vibe: starter['vibe'] === true, path: plain(starter['path']),
   }));
 }
 
@@ -270,9 +306,9 @@ function ROUTINE_ON_OFF(running: 'on' | 'off'): readonly string[] {
 
 /** The controls of Automation's Routines list: what makes a routine run by itself. */
 export const AUTOMATION_ROUTINE_ACTIONS: readonly PlaceAction<MemoryStoreItem>[] = [
-  { key: 'o', id: 'automation-routine-switch-on', list: 'routines', states: ROUTINE_ON_OFF('off'), capability: 'routines.enable', label: 'switch on', fill: { routine: 'id' } },
-  { key: 'o', id: 'automation-routine-switch-off', list: 'routines', states: ROUTINE_ON_OFF('on'), capability: 'routines.disable', label: 'switch off', fill: { routine: 'id' } },
-  { key: 'e', id: 'automation-routine-schedule', list: 'routines', capability: 'routines.promote', label: 'run on a schedule', fill: { routine: 'id' } },
+  { key: 'u', id: 'automation-routine-switch-on', list: 'routines', states: ROUTINE_ON_OFF('off'), capability: 'routines.enable', label: 'switch on', fill: { routine: 'id' } },
+  { key: 'u', id: 'automation-routine-switch-off', list: 'routines', states: ROUTINE_ON_OFF('on'), capability: 'routines.disable', label: 'switch off', fill: { routine: 'id' } },
+  { key: 'p', id: 'automation-routine-schedule', list: 'routines', capability: 'routines.promote', label: 'run on a schedule', fill: { routine: 'id' } },
   { key: 'j', id: 'automation-routine-receipts', list: 'routines', whole: true, capability: 'routines.receipts', label: 'put on a schedule so far' },
   { key: 'k', id: 'automation-routine-receipt', list: 'routines', whole: true, capability: 'routines.receipt', label: 'one receipt' },
   { key: 'y', id: 'automation-routine-check', list: 'routines', whole: true, capability: 'routines.reconcile', label: 'check against the schedules' },
@@ -333,8 +369,58 @@ const artifactsList: PlaceList<MemoryStoreItem> = {
   },
 };
 
-/** The notes, personas, routines, drafts and saved artifacts lists, in the place's tab order. */
-export const MEMORY_STORE_LISTS: readonly PlaceList<MemoryStoreItem>[] = [notesList, personasList, routinesList, draftsList, artifactsList];
+const agentHomesList: PlaceList<MemoryStoreItem> = {
+  id: 'agent-homes',
+  label: 'Agent homes',
+  noun: 'the Agent\'s separate homes',
+  source: { kind: 'daemon', method: 'capabilities.run', input: run('agent-home.list'), items: homeItems },
+  follows: follow('agent-homes'),
+  empty: 'No separate Agent homes: the Agent starts in its base home. Press w to make one.',
+  row: (item) => {
+    const home = item as AgentHomeItem;
+    return { title: home.id, ...(home.state === 'starts-next' ? { right: 'starts next' } : home.starter ? { right: `from ${home.starter}` } : {}), mark: home.state === 'starts-next' ? 'ok' : 'paused' };
+  },
+  detail: (item) => {
+    const home = item as AgentHomeItem;
+    return [
+      { label: 'Folder', text: home.home },
+      { label: 'Starts next', text: home.state === 'starts-next' ? 'yes, the Agent starts in it' : 'no' },
+      { label: 'Made from', text: home.starterName || home.starter || 'no starter (an empty home)' },
+      { label: 'Made', text: day(home.createdAt) },
+      { text: '' },
+      { text: `Launch it once: goodvibes-agent --agent-profile ${home.id}`, tone: 'muted' as const },
+    ];
+  },
+};
+
+const startersList: PlaceList<MemoryStoreItem> = {
+  id: 'starters',
+  label: 'Starters',
+  noun: 'the starter templates an Agent home is made from',
+  source: { kind: 'daemon', method: 'capabilities.run', input: run('agent-home.starters'), items: starterItems },
+  follows: follow('agent-homes'),
+  empty: 'No starter templates.',
+  row: (item) => {
+    const starter = item as StarterItem;
+    return { title: starter.name, right: starter.state === 'yours' ? 'yours' : 'built in', mark: 'ok' };
+  },
+  detail: (item) => {
+    const starter = item as StarterItem;
+    return [
+      { text: starter.description },
+      { text: '' },
+      { label: 'Persona', text: starter.persona },
+      { label: 'Skills', text: starter.skills.join(', ') || 'none' },
+      { label: 'Routines', text: starter.routines.join(', ') || 'none' },
+      { label: 'VIBE.md', text: starter.vibe ? 'included' : 'not included' },
+      ...(starter.path ? [{ label: 'File', text: starter.path }] : []),
+      { label: 'Id', text: starter.id, tone: 'muted' as const },
+    ];
+  },
+};
+
+/** The notes, personas, routines, drafts, saved artifacts, Agent homes and starters lists, in the place's tab order. */
+export const MEMORY_STORE_LISTS: readonly PlaceList<MemoryStoreItem>[] = [notesList, personasList, routinesList, draftsList, artifactsList, agentHomesList, startersList];
 
 const NOT_REVIEWED: readonly Review[] = ['fresh', 'stale'];
 const NOT_STALE: readonly Review[] = ['fresh', 'reviewed'];
@@ -408,6 +494,9 @@ export const MEMORY_STORE_ACTIONS: readonly PlaceAction<MemoryStoreItem>[] = [
   { key: 'p', id: 'draft-save-preset', list: 'drafts', capability: 'documents.save-preset', label: 'save a review packet preset', fill: { document: 'id' } },
   { key: 'w', id: 'draft-new', list: 'drafts', whole: true, capability: 'documents.create', label: 'new draft' },
   { key: 'f', id: 'draft-search', list: 'drafts', whole: true, capability: 'documents.list', label: 'search' },
+  { key: 'd', id: 'draft-readiness', list: 'drafts', whole: true, capability: 'documents.readiness', label: 'ready for review?' },
+  { key: 't', id: 'draft-packet-steps', list: 'drafts', whole: true, capability: 'documents.packet-steps', label: 'review packet steps' },
+  { key: 'h', id: 'draft-timeline', list: 'drafts', whole: true, capability: 'documents.timeline', label: 'review packet timeline' },
   // Saved artifacts
   { key: 'enter', id: 'artifact-look', list: 'artifacts', capability: 'artifacts.show', label: 'look at it', fill: { artifact: 'id' } },
   { key: 'e', id: 'artifact-copy', list: 'artifacts', capability: 'artifacts.export', label: 'copy to a file', fill: { artifact: 'id' } },
@@ -415,6 +504,22 @@ export const MEMORY_STORE_ACTIONS: readonly PlaceAction<MemoryStoreItem>[] = [
   { key: 'u', id: 'artifact-refresh-preset', list: 'artifacts', capability: 'documents.refresh-preset', label: 'refresh as a preset', fill: { preset: 'id' } },
   { key: 'd', id: 'artifact-send-packet', list: 'artifacts', capability: 'documents.share-packet', label: 'send as a review packet', fill: { archive: 'id' } },
   { key: 'f', id: 'artifact-search', list: 'artifacts', whole: true, capability: 'artifacts.list', label: 'search' },
+  // Agent homes
+  { key: 'enter', id: 'home-show', list: 'agent-homes', capability: 'agent-home.show', label: 'look at it', fill: { home: 'id' } },
+  { key: 'u', id: 'home-use', list: 'agent-homes', states: ['kept'], capability: 'agent-home.use', label: 'start the Agent in it', fill: { home: 'id' } },
+  { key: 'u', id: 'home-use-base', list: 'agent-homes', states: ['starts-next'], capability: 'agent-home.use-base', label: 'start in the base home instead' },
+  { key: 'x', id: 'home-delete', list: 'agent-homes', capability: 'agent-home.delete', label: 'delete', fill: { home: 'id' } },
+  { key: 'w', id: 'home-new', list: 'agent-homes', whole: true, capability: 'agent-home.create', label: 'new Agent home' },
+  { key: 'l', id: 'home-new-learned', list: 'agent-homes', whole: true, capability: 'agent-home.create-learned', label: 'new home from what the Agent learned' },
+  { key: 'm', id: 'home-next', list: 'agent-homes', whole: true, capability: 'agent-home.next', label: 'which starts next' },
+  { key: 'b', id: 'home-base', list: 'agent-homes', whole: true, capability: 'agent-home.use-base', label: 'start in the base home' },
+  // Starter templates
+  { key: 'enter', id: 'starter-show', list: 'starters', capability: 'agent-home.starter', label: 'look at it', fill: { starter: 'id' } },
+  { key: 'w', id: 'starter-new-home', list: 'starters', capability: 'agent-home.create', label: 'make an Agent home from it', fill: { starter: 'id' } },
+  { key: 'e', id: 'starter-export', list: 'starters', capability: 'agent-home.export-starter', label: 'save to a file', fill: { starter: 'id' } },
+  { key: 'i', id: 'starter-import', list: 'starters', whole: true, capability: 'agent-home.import-starter', label: 'add from a file' },
+  { key: 'l', id: 'starter-learned', list: 'starters', whole: true, capability: 'agent-home.starter-learned', label: 'make one from what the Agent learned' },
+  { key: 'g', id: 'starter-guide', list: 'starters', whole: true, capability: 'agent-home.guide', label: 'how to write one' },
 ];
 
 /** What the terminal side of these lists reads (memory-stores-lists.ts: the live lists a form's inputs choose from). */

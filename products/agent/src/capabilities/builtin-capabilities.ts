@@ -93,7 +93,7 @@ export function browserControlDeclaration(options: BuiltinCapabilityOptions): Ca
  * connector resolves credentials from: a client id, a client secret and a
  * refresh token in the encrypted store. A credential file left by another tool
  * (`~/.gmail-mcp`) is NOT one: the connector only reads it when the owner runs
- * `/google adopt`, so it is configuration evidence, which turns the capability
+ * adopting them (`google.adopt`), so it is configuration evidence, which turns the capability
  * into "needs setup" with the adopt step rather than "ready".
  */
 
@@ -134,7 +134,7 @@ function googleAdoptableEvidence(options: BuiltinCapabilityOptions): CapabilityP
   };
 }
 
-const GOOGLE_ACCOUNT_FIX = 'Connect a Google account with: /google connect, it works out the shortest route and asks you to approve one consent link';
+const GOOGLE_ACCOUNT_FIX = 'Connect a Google account with "connect" on the Google tab of Mail, calendar and channels (capability google.connect): it works out the shortest route and asks you to approve one consent link';
 
 function emailSend(options: BuiltinCapabilityOptions): CapabilityDeclaration {
   return {
@@ -188,7 +188,7 @@ function calendarRead(options: BuiltinCapabilityOptions): CapabilityDeclaration 
         availability: { kind: 'model-tool-registered', toolName: 'google' },
       },
       {
-        // A private calendar feed address (/google calendar-address) is
+        // A private calendar feed address (google.calendar-address) is
         // subscribed as a feed; /calendar upcoming reads it with no Google
         // account at all.
         kind: 'model-tool',
@@ -200,7 +200,7 @@ function calendarRead(options: BuiltinCapabilityOptions): CapabilityDeclaration 
             id: 'google-calendar-feed',
             label: 'A private calendar feed address',
             probe: { kind: 'config-value-present', key: GOOGLE_CONFIG_KEYS.calendarIcsUrl, label: 'A private calendar feed address' },
-            fix: 'Store the calendar\'s private address with: /google calendar-address <address>',
+            fix: 'Store the calendar\'s private address with "calendar by private address" on the Google tab of Mail, calendar and channels (capability google.calendar-address)',
           },
         ],
       },

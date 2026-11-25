@@ -115,6 +115,12 @@ export interface RequestSharedApprovalInput {
    */
   readonly localPromptSurface?: string | undefined;
   readonly localPromptActor?: string | undefined;
+  /**
+   * The asker reads the record itself (`record-reader`): a call `capabilities.run` put to the owner, whose caller reads
+   * what came of it by the approval's id. Such an ask stays open across a daemon restart, where an in-process one is
+   * cancelled, so the owner's answer still reaches the call.
+   */
+  readonly readsRecord?: true | undefined;
 }
 
 /** What the approvals port needs of the cross-node relay (approval-relay.ts implements it). */
@@ -481,9 +487,13 @@ function stableJson(value: unknown): string {
   return JSON.stringify(value) ?? 'null';
 }
 
-/** Identical concurrent asks coalesce on this key: one prompt answers all. */
-function approvalCoalesceKey(sessionId: string | undefined, tool: string, args: Record<string, unknown>): string {
-  return `${sessionId ?? ''}|${tool}|${stableJson(args)}`;
+/**
+ * Identical concurrent asks coalesce on this key: one prompt answers all. Two
+ * asks are the same only in the same session AND the same project: an answer
+ * in one project never settles an ask in another.
+ */
+function approvalCoalesceKey(sessionId: string | undefined, tool: string, args: Record<string, unknown>, workingDirectory?: string | undefined): string {
+  return `${sessionId ?? ''}|${workingDirectory ?? ''}|${tool}|${stableJson(args)}`;
 }
 
 /** The broker's own moves (timer, signal, restart) are made by it, on its node. */
@@ -883,16 +893,20 @@ export class ApprovalBroker {
     const keep = approval ? this.#rememberedRule(approval, input.rememberTier, approved, modifiedArgs) : undefined;
     // The change an approve puts in effect runs in the same unit, after the rule and before the record.
     const effect = approved ? this.#approvedEffects.get(approvalId) : undefined;
+    // A record raised over the wire (approvals.raise) settles that one record only: nothing of its answer is
+    // remembered, here or by the surface that reads the decision back.
+    const wire = approval !== undefined && raisedOverWire(approval);
     let withheldAnswer: string | undefined;
-    if (approved && approval?.request.attribution?.kind === 'exec-prompt' && typeof modifiedArgs?.['answer'] === 'string') {
+    // A typed answer never rides in a wire record either: the caller's card kind is not kept, so any typed text is withheld.
+    if (approved && (approval?.request.attribution?.kind === 'exec-prompt' || wire) && typeof modifiedArgs?.['answer'] === 'string') {
       withheldAnswer = modifiedArgs['answer'];
       modifiedArgs = { ...modifiedArgs, answer: WITHHELD_ANSWER };
     }
     const decision: SharedApprovalDecision = {
       approved,
       ...(disposition !== undefined ? { disposition } : { disposition: approved ? 'approved' : 'denied' }),
-      ...(input.remember !== undefined ? { remember: input.remember } : {}),
-      ...(input.rememberTier !== undefined ? { rememberTier: input.rememberTier } : {}),
+      ...(input.remember !== undefined && !wire ? { remember: input.remember } : {}),
+      ...(input.rememberTier !== undefined && !wire ? { rememberTier: input.rememberTier } : {}),
       ...(input.reason !== undefined ? { reason: input.reason } : {}),
       ...(modifiedArgs !== undefined ? { modifiedArgs } : {}),
       ...(argsDigest !== undefined ? { argsDigest } : {}),
@@ -920,7 +934,7 @@ export class ApprovalBroker {
         transition: { to: 'cancelled', actor: BROKER_ACTOR, cause: 'owner-decision-stale', note: 'owner decision no longer current' } });
       throw error.cause instanceof Error ? error.cause : error;
     }
-    if (outcome.applied && approval && input.rememberTier && input.rememberTier !== 'session') {
+    if (outcome.applied && approval && !wire && input.rememberTier && input.rememberTier !== 'session') {
       await this.#sweepRemembered(approval, input, approved);
     }
     return outcome;
@@ -946,6 +960,8 @@ export class ApprovalBroker {
     const swept: TransitionRequest[] = [];
     for (const candidate of [...this.approvals.values()]) {
       if (candidate.id === approval.id || !isOpenApprovalStatus(candidate.status)) continue;
+      // A wire record is answered only by its own answer, never by a rule remembered on another.
+      if (raisedOverWire(candidate)) continue;
       if (approved && candidate.requiresOwnerDecision) continue;
       // The gate's rule for an owner-only item (gate/classify.ts): only an allow given to that
       // same item settles it. An ask that offers nothing to remember is answered one call at a time.
@@ -1391,6 +1407,15 @@ export class ApprovalBroker {
    * cannot be saved leaves the ask waiting and tells the approver why. The gate
    * that asked then finds the rule kept and writes nothing more.
    */
+  /**
+   * The approvals log file: each record's earlier lines are kept there until the log is compacted, its call's
+   * arguments among them (a settled record keeps none in memory). Read only to place rules an earlier release kept
+   * for the daemon's folder (permissions/daemon-folder-rules-notice.ts).
+   */
+  historyPath(): string {
+    return this.logPath;
+  }
+
   keepRememberedRulesIn(store: Pick<UserPermissionRuleStore, 'remember'>): void {
     this.#ruleStore = store;
   }
@@ -1407,6 +1432,8 @@ export class ApprovalBroker {
     const store = this.#ruleStore;
     const request = approval.request;
     if (!store || tier === undefined || tier === 'session') return undefined;
+    // A record raised over the wire is never remembered: what it asks, and for whom, is the caller's word.
+    if (raisedOverWire(approval)) return undefined;
     if (!request.rememberOptions?.some((option) => option.tier === tier) || approval.metadata['deviceCapability'] !== undefined) return undefined;
     if (answeredArgs !== undefined && !isDeepStrictEqual(answeredArgs, request.args)) return undefined;
     const project = request.workingDirectory;
@@ -1414,7 +1441,11 @@ export class ApprovalBroker {
     const rule = buildDurableRuleForDecision({ toolName: request.tool, args: request.args, tier, effect: approved ? 'allow' : 'deny',
       ...(approved && request.ownerOnly ? { ownerOnly: request.ownerOnly } : {}) });
     if (!rule) return undefined;
-    return () => store.remember({ rule, tier, tool: request.tool, createdAt: Date.now(), project: projectIdentity(project) });
+    // With the session that asked and its title as the card named it, so Rules names it (a runner by its task, a chat by its title).
+    let madeIn: string | undefined;
+    try { madeIn = approval.sessionId !== undefined ? this.#presenter?.(request, approval.sessionId).origin?.sessionTitle : undefined; } catch { madeIn = undefined; }
+    return () => store.remember({ rule, tier, tool: request.tool, createdAt: Date.now(), project: projectIdentity(project),
+      ...(approval.sessionId !== undefined ? { session: approval.sessionId } : {}), ...(madeIn ? { madeIn } : {}) });
   }
 
   /**
@@ -1501,6 +1532,15 @@ function denyDirection(status: SharedApprovalStatus): boolean {
 
 function actorOf(input: { readonly actor: string; readonly actorSurface?: string | undefined; readonly actorNode?: string | undefined }): ApprovalActor {
   return { id: input.actor, surface: input.actorSurface ?? 'web', ...(input.actorNode !== undefined ? { node: input.actorNode } : {}) };
+}
+
+/**
+ * Whether a record was raised over the wire (`approvals.raise`): by the broker's own requester kind, or the mark the
+ * route writes (a record kept from before requester kinds). Such a record is never remembered, never sweeps another
+ * ask and is never swept: its answer settles that one record.
+ */
+function raisedOverWire(record: SharedApprovalRecord): boolean {
+  return record.requester?.kind === 'wire' || record.metadata['raisedVia'] === 'approvals.raise';
 }
 
 /** The `presentation` field of a frame or row, when there are words. */

@@ -31,6 +31,6 @@ export interface MethodCapabilityDefinition extends Omit<CapabilityDefinition<ne
 export function methodCapabilityEntry(definition: MethodCapabilityDefinition, command: { readonly name: string; readonly title: string }): CapabilityEntry {
   const { method, ...words } = definition;
   // The catalog reads an action's method from its `operator`, as for a described action.
-  const operator = { method: method.id, fields: method.fields, ...(method.preview ? { preview: method.preview } : {}) };
+  const operator = { method: method.id, fields: method.fields, ...(method.preview ? { preview: method.preview } : {}), ...(method.project ? { project: true as const } : {}) };
   return entryOfDefinition({ ...words, operator } as unknown as CapabilityDefinition<never>, command);
 }

@@ -15,7 +15,6 @@ import { renderSelectionModalOverlay } from './selection-modal-overlay.ts';
 import { renderSearchOverlay } from './search-overlay.ts';
 import { renderHistorySearchOverlay } from '@goodvibes/engine/terminal-shell/history-search-overlay';
 import { renderContextInspector } from './context-inspector.ts';
-import { renderSettingsModal } from './settings-modal.ts';
 import { renderConfigModal } from './config-modal.ts';
 import { renderMcpWorkspace } from './mcp-workspace.ts';
 import { renderSessionPickerModal } from './session-picker-modal.ts';
@@ -44,6 +43,14 @@ function modalOpen(input: InputHandler): boolean {
 }
 
 /**
+ * The setup form opened from something already open (a place's "set it up"): it is drawn as a layer in the stack's
+ * order, above what opened it, instead of as the screen beneath every modal.
+ */
+function onboardingAboveAModal(input: InputHandler): boolean {
+  return input.onboardingWizard.active && input.surfaceModals.modals().indexOf(input.modals.onboarding) > 0;
+}
+
+/**
  * The parts of the conversation area that are rows rather than modals:
  * onboarding (which owns the whole viewport), the @ and slash popups anchored
  * to the composer (never dimmed: you are still typing), and the search bars.
@@ -56,7 +63,7 @@ export function applyConversationOverlays(viewport: Line[], context: Conversatio
     height,
     covered: modalOpen(input),
     mutateSearchRows: true,
-    replaceViewport: input.onboardingWizard.active
+    replaceViewport: input.onboardingWizard.active && !onboardingAboveAModal(input)
       ? () =>
           replaceViewportWithOverlay(
             layerToLines(renderOnboardingWizard(input.onboardingWizard, width, height), width, height),
@@ -106,8 +113,8 @@ export function buildConversationLayers(context: ConversationLayerContext): Surf
   // Onboarding owns the screen; only the pickers it launches draw over it.
   const onboarding = input.onboardingWizard.active;
   const entries: ModalEntry[] = [
+    ['onboarding', onboardingAboveAModal(input), () => renderOnboardingWizard(input.onboardingWizard, w, h)],
     ['modelPicker', input.modelPicker.active, () => renderModelWorkspace(input.modelPicker, w, h)],
-    ['settings', input.settingsModal.active, () => renderSettingsModal(input.settingsModal, w, h)],
     ['mcpWorkspace', input.mcpWorkspace.active, () => renderMcpWorkspace(input.mcpWorkspace, w, h)],
     ['config', !onboarding && input.configModal.active, () => renderConfigModal(input.configModal, w, h)],
     ['sessionPicker', !onboarding && input.sessionPickerModal.active, () => renderSessionPickerModal(input.sessionPickerModal, w, h)],

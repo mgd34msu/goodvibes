@@ -2,6 +2,7 @@ import { bindContractInputAuthority } from '../../contract/input-authority.js';
 import { classicAgentInput } from './classic-policy.js';
 import { decisionModelPolicyState } from '@goodvibes/engine/errors';
 import { currentTurn, withAgentTurn, type TurnContext } from '../../security/turn-boundary.js';
+import { turnInputParty, withOtherPartyInput } from '../../security/turn-input-party.js';
 import type { Actor } from '@goodvibes/engine/daemon-api/http-policy';
 import { currentExecutionModeOwner, detachedFromInvocation, type ExecutionModeOwner } from '../../gate/execution-context.js';
 import { AgentCapacityError } from './capacity-error.js';
@@ -17,7 +18,9 @@ import type { ConversationMessageSnapshot } from '../../core/conversation.js';
 import type { RuntimeEventBus } from '../../runtime/events/index.js';
 import {
   emitAgentCancelled,
+  emitAgentCompleted,
   emitAgentFailed,
+  emitAgentProgress,
   emitAgentRunning,
   emitAgentSpawning,
   emitContractSpawnGuardTriggered,
@@ -25,6 +28,7 @@ import {
 import type { AgentTaskContract } from '../../runtime/events/index.js';
 import { evaluateOrchestrationSpawn } from '../../runtime/orchestration/spawn-policy.js';
 import { logger } from '../../utils/logger.js';
+import { spendingName } from '../../runtime/cost/model-usage.js';
 import type { AgentInput } from './schema.js';
 import { describeErrorInFull, summarizeError } from '../../utils/error-display.js';
 import { OwnedScope } from '../../utils/owned-work.js';
@@ -34,6 +38,8 @@ import { AgentSpawnInputError, requireProviderQualifiedModel, normalizeProviderQ
 import { sameProviderCatalog } from '../../providers/provider-aliases.js';
 import { moveAgentRun, type AgentRecord } from './record.js';
 import { splitContractBinding, startContractOwner, type ContractOwnerBinding, type ContractUnitBinding } from './contract-binding.js';
+import type { AgentWorkDelegation, DelegatedWorkUpdate } from './work-delegation.js';
+import { setAgentProgress } from '../../agents/progress-audience.js';
 
 export type { AgentRecord } from './record.js';
 
@@ -148,6 +154,8 @@ export class AgentManager {
   /** The third-party surface an agent was started for, so a later wake runs under it instead of the waker's. */
   /** The channel turn an agent was started from: its surface, and its actor when that was a guest. */
   private readonly triggerSurfaces = new WeakMap<AgentRecord, { readonly surface: string; readonly actor?: Actor | undefined }>();
+  /** Agents a turn acting on someone else's input started, with who that was (security/turn-input-party.ts). */
+  private readonly otherPartySpawns = new WeakMap<AgentRecord, string>();
   /** The turn whose tool call started each agent: its request, and the id work it leaves is recovered against. */
   private readonly spawnTurns = new WeakMap<AgentRecord, TurnContext>();
   private readonly restoredContractUnits = new Set<string>();
@@ -160,6 +168,8 @@ export class AgentManager {
   private readonly archetypeLoader: Pick<ArchetypeLoader, 'loadArchetype'>;
   private readonly messageBus: Pick<AgentMessageBus, 'registerAgent'> & Partial<Pick<AgentMessageBus, 'unregisterAgent'>>;
   private contractRunner: AgentContractRunner | null;
+  /** A terminal program's way to the daemon's runner, in place of a contract runner (setWorkDelegation). */
+  private workDelegation: AgentWorkDelegation | null = null;
   private executor: AgentExecutor | null;
   private readonly configManager: Pick<ConfigManager, 'get'> | null;
   private readonly additionalFleetOwnership: (() => readonly AgentFleetOwnership[]) | undefined;
@@ -409,7 +419,9 @@ export class AgentManager {
     options.signal?.throwIfAborted();
     const runner = this.contractRunner;
     const startOwned = runner?.startOwnedForOwner;
-    if (!input.outsideContract) {
+    // A terminal program hands it to the daemon as a piece of work; its settlement is the record's, followed there.
+    const delegated = !input.outsideContract && this.delegatesToDaemon();
+    if (!input.outsideContract && !delegated) {
       if (typeof startOwned !== 'function' || typeof this.contractRunner?.assertOwnedExecution !== 'function') {
         throw new OwnedAgentExecutionUnavailableError('Owned agent spawn requires a contract runner with owned execution settlement');
       }
@@ -457,6 +469,12 @@ export class AgentManager {
           if (abortRequested) handle.cancel();
         },
         startContract: async (record, signal) => {
+          if (delegated) {
+            const work = await this.startDelegatedWork(record, signal);
+            cancelContract = (reason) => work.cancel(reason);
+            if (abortRequested || signal.aborted) cancelContract('the owning hook was cancelled');
+            return work;
+          }
           const current = () => {
             if (this.contractRunner !== runner || runner?.startOwnedForOwner !== startOwned)
               throw new OwnedAgentExecutionUnavailableError('The original owned contract driver changed');
@@ -568,7 +586,7 @@ export class AgentManager {
     }
 
     const startsContract = !input.outsideContract && !binding && !ownerBinding;
-    if (startsContract && !this.contractRunner) {
+    if (startsContract && !this.contractRunner && !this.workDelegation) {
       throw new Error('No contract runner is composed: a spawn that is not outside every contract starts a contract, and this AgentManager has no contract runner to start it.');
     }
 
@@ -588,6 +606,11 @@ export class AgentManager {
     const parentNodeId = input.parentNodeId ?? parentRecord?.orchestrationNodeId;
     // The session that started this agent: the spawner's, else its parent's, else (a contract unit) its contract owner's.
     const sessionId = input.sessionId ?? parentRecord?.sessionId ?? (binding ? this.contractSessionId(binding.contractId) : undefined);
+    // What its spending is for (Money, Spending): the host's word, else the agent that started it, else the work it is a
+    // step of; a piece of work's own record is named by what was asked.
+    const spendingSource = input.spendingSource ?? parentRecord?.spendingSource
+      ?? (binding ? this.contractSpendingSource(binding.contractId) : undefined)
+      ?? (ownerBinding || startsContract ? `work "${spendingName(task)}"` : undefined);
     const record: AgentRecord = {
       ...(decisionModelPolicyState().operation === 'no-decision-model' ? { decisionPolicy: decisionModelPolicyState() } : {}),
       id,
@@ -636,6 +659,7 @@ export class AgentManager {
       ...(input.parentAgentId ? { parentAgentId: input.parentAgentId } : {}),
       ...(parentNodeId ? { parentNodeId } : {}),
       ...(sessionId ? { sessionId } : {}),
+      ...(spendingSource ? { spendingSource } : {}),
       ...(binding ? { contractId: binding.contractId, contractRole: 'unit' as const, contractUnitId: binding.contractUnitId } : {}),
       ...(ownerBinding ? { contractId: ownerBinding.contractId, contractRole: 'owner' as const } : {}),
       ...(binding?.routeReason ? { routeReason: binding.routeReason } : {}),
@@ -666,6 +690,9 @@ export class AgentManager {
       if (executionModeOwner) this.executionModeOwners.set(record, executionModeOwner);
       if (triggerSurface !== undefined) this.triggerSurfaces.set(record, { surface: triggerSurface, ...(triggerTurn?.actor !== undefined ? { actor: triggerTurn.actor } : {}) });
       if (triggerTurn) this.spawnTurns.set(record, triggerTurn);
+      // An agent a turn on someone else's input started acts on that input too (security/turn-input-party.ts).
+      const spawnParty = turnInputParty();
+      if (spawnParty.party === 'other') this.otherPartySpawns.set(record, spawnParty.who);
       this.pruneTerminalRecords();
       this.agents.set(id, record);
       return this.reserveExecution(id);
@@ -718,14 +745,17 @@ export class AgentManager {
       if (startsContract) {
         try {
           const starting = owned ? owned.startContract(record, controller.signal)
-            : this.contractRunner!.startForOwner(record, { signal: controller.signal });
+            // A terminal program's spawn (a team's, a recipe's agents): handed to the daemon as a piece of work.
+            : this.delegatesToDaemon() ? this.startDelegatedWork(record, controller.signal)
+              : this.contractRunner!.startForOwner(record, { signal: controller.signal });
+          const notStarted = this.delegatesToDaemon() ? 'It was not handed to the daemon as a piece of work' : 'The contract could not start';
           begin(Promise.resolve(starting).then(started => started.settled).catch(error => {
             // Publish the failed/cancelled record only after startup and its
             // cleanup drained, just as standalone executor settlement does.
-            if (moveAgentRun(record, 'failed')) this.publishFailed(record, `The contract could not start: ${describeErrorInFull(error)}`);
+            if (moveAgentRun(record, 'failed')) this.publishFailed(record, `${notStarted}: ${describeErrorInFull(error)}`);
           }));
         } catch (error) {
-          if (moveAgentRun(record, 'failed')) this.publishFailed(record, `The contract could not start: ${describeErrorInFull(error)}`);
+          if (moveAgentRun(record, 'failed')) this.publishFailed(record, `${this.delegatesToDaemon() ? 'It was not handed to the daemon as a piece of work' : 'The contract could not start'}: ${describeErrorInFull(error)}`);
           throw error;
         }
         return record;
@@ -919,13 +949,15 @@ export class AgentManager {
   private runUnderTriggerSurface<T>(record: AgentRecord, run: () => T): T {
     const trigger = this.triggerSurfaces.get(record);
     const spawnTurn = this.spawnTurns.get(record);
-    return withAgentTurn({
+    const turn = (): T => withAgentTurn({
       agentId: record.id,
       surface: trigger?.surface,
       ...(trigger?.actor !== undefined ? { actor: trigger.actor } : {}),
       sessionId: record.sessionId ?? spawnTurn?.ownerSessionId ?? null,
       requestText: spawnTurn?.requestText ?? null,
     }, run);
+    const otherParty = this.otherPartySpawns.get(record);
+    return otherParty === undefined ? turn() : withOtherPartyInput(otherParty, turn);
   }
 
   /** The id of the turn whose call started an agent; undefined for an agent no turn started (a schedule, a channel spawn outside one). */
@@ -1196,6 +1228,14 @@ export class AgentManager {
     return undefined;
   }
 
+  /** What a contract's spending is for: its owner record's (the work, or the schedule or session that started it). */
+  private contractSpendingSource(contractId: string): string | undefined {
+    for (const agent of this.agents.values()) {
+      if (agent.contractId === contractId && agent.contractRole === 'owner') return agent.spendingSource;
+    }
+    return undefined;
+  }
+
   listByCohort(cohort: string): AgentRecord[] {
     return [...this.agents.values()].filter((agent) => agent.cohort === cohort);
   }
@@ -1247,5 +1287,75 @@ export class AgentManager {
   /** Composes the contract runner that spawns not outside every contract start through. */
   setContractRunner(runner: AgentContractRunner | null): void {
     this.contractRunner = runner;
+  }
+
+  /**
+   * A terminal program's way to the daemon's runner (work-delegation.ts): with it, a spawn that is not outside every
+   * contract becomes a piece of work on the daemon, not a contract here. A program composes it and no contract runner.
+   */
+  setWorkDelegation(delegation: AgentWorkDelegation | null): void {
+    this.workDelegation = delegation;
+  }
+
+  /** True when spawns that are not outside every contract are handed to the daemon as work (a terminal program). */
+  delegatesToDaemon(): boolean {
+    return this.workDelegation !== null && this.contractRunner === null;
+  }
+
+  /**
+   * Stop following the work handed to the daemon (a headless run ending or cancelled): each runs on on the daemon and
+   * its result waits in Work; a cancel of their records after this never stops a work.
+   */
+  stopFollowingDelegatedWork(): void {
+    this.workDelegation?.close?.();
+  }
+
+  /**
+   * Hand a reserved record to the daemon as a piece of work: it runs while the work runs, says where the work stands,
+   * and is settled with its result. A delegation the daemon did not take fails the record with the daemon's words.
+   */
+  private startDelegatedWork(record: AgentRecord, signal: AbortSignal): Promise<{ readonly settled: Promise<void>; cancel(reason: string): boolean }> {
+    const delegation = this.workDelegation!;
+    record.status = 'running';
+    const ctx = { sessionId: record.sessionId ?? 'agent-manager', traceId: `agent-manager:${record.id}:work`, source: 'agent-manager', agentId: record.id };
+    if (this.runtimeBus) emitAgentRunning(this.runtimeBus, ctx, { agentId: record.id });
+    const say = (line: string): void => {
+      setAgentProgress(record, line, 'operator');
+      if (this.runtimeBus) emitAgentProgress(this.runtimeBus, ctx, { agentId: record.id, progress: line, audience: 'operator' });
+    };
+    say('Handing it to the daemon as a piece of work');
+    // The work's end settles the record as a contract's end settled its owner record (contract/runner.ts settleEnded).
+    const report = (update: DelegatedWorkUpdate): void => {
+      if (update.kind === 'progress') {
+        if (record.status !== 'running') return;
+        // Set before the progress is announced, so whoever reads the record on that event sees it waiting.
+        record.delegatedWorkWaiting = update.waiting === true ? update.line : undefined;
+        say(update.line);
+        return;
+      }
+      if (record.status !== 'running') return;
+      record.delegatedWorkWaiting = undefined;
+      record.completedAt = Date.now();
+      const durationMs = Math.max(0, record.completedAt - record.startedAt);
+      if (update.kind === 'done') {
+        record.status = 'completed';
+        record.fullOutput = update.output;
+        say('Done');
+        if (this.runtimeBus) emitAgentCompleted(this.runtimeBus, ctx, { agentId: record.id, durationMs, output: update.output, toolCallsMade: record.toolCallCount, usage: record.usage });
+      } else if (update.kind === 'failed') {
+        record.status = 'failed';
+        record.error = update.error;
+        say(`Failed: ${update.error}`);
+        if (this.runtimeBus) emitAgentFailed(this.runtimeBus, ctx, { agentId: record.id, durationMs, error: update.error });
+      } else {
+        record.status = 'cancelled';
+        say(`Stopped: ${update.reason}`);
+        if (this.runtimeBus) emitAgentCancelled(this.runtimeBus, ctx, { agentId: record.id, reason: update.reason });
+      }
+    };
+    return delegation.delegate(record, { signal, report }).then((work) => {
+      record.delegatedWorkId = work.workId;
+      return { settled: work.settled, cancel: (reason: string) => work.cancel(reason) };
+    });
   }
 }

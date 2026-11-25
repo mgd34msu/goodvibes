@@ -7,6 +7,7 @@ import { logger } from '../../utils/logger.js';
 import { writeJsonFileAtomic } from '../../utils/atomic-json-store.js';
 import { summarizeError } from '../../utils/error-display.js';
 import { resolveScopedDirectory } from '../surface-root.js';
+import { noteListChanged } from '../list-changes.js';
 import type { WorktreeSetupResult } from './setup.js';
 import {
   assessWorktree,
@@ -512,6 +513,9 @@ export function summarizeWorktreeOwnership(records: readonly ManagedWorktreeMeta
 /** Atomically publish the registry while its writer lock is held; taking that lock created the parent directory. */
 function writeStore(store: WorktreeStore, storePath: string): void {
   writeJsonFileAtomic(storePath, store, { durable: false });
+  // A project's worktree register changed (made, set up, paused, kept, tied, removed): a list showing it reads again
+  // (the daemon sends it as LIST_CHANGED `worktrees`, the register file as the id).
+  noteListChanged({ list: 'worktrees', change: 'changed', id: storePath });
 }
 
 /** True when both registers hold the same records (key order does not matter). */

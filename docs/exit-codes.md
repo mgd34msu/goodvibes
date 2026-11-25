@@ -23,7 +23,7 @@ The same number, different meaning:
 
 - `2` is a usage error for `run` and the daemon, but "the owner has to answer"
   for `goodvibes-contract`, which reports usage as `64`.
-- `3` is "the outcome is unknown" for `run`, "not running" for
+- `3` is "the outcome is unknown" for `run`, "waiting for the owner" for `do`, "not running" for
   `goodvibes-daemon service-status`, `install-service`, `start-service` and `restart-service`, and "installed but shadowed on `PATH`" for `install.sh`.
 - `4` is "not installed" for `goodvibes-daemon service-status` and "installed,
   with problems" for `install.sh`.
@@ -32,13 +32,23 @@ The same number, different meaning:
 
 `do` and `find` (`goodvibes`, `goodvibes-agent`, `goodvibes-daemon`) run and find a GoodVibes capability through the
 daemon: `0` it was done (or found), `1` it was refused or failed (a capability that acts on a conversation is refused
-in one line, since it needs the terminal app or the Agent), `2` the command line was wrong. With `--output json`
-(`--json` for the daemon) the answer, or the `{ok:false, code, error, fix}` refusal, is one document on stdout.
+in one line, since it needs the terminal app or the Agent; at a terminal, a change that weakens a protection, cannot be
+undone, spends money, writes a secret or is the owner's own act that was not answered y at the terminal's question,
+code `NOT_CONFIRMED`), `2` the command line was wrong, `3` it waits for the owner:
+the call was an outside caller's (no controlling terminal, as from cron or a service; a command a model's command tool
+ran; or a credential that cannot state that a person asked), the owner's mode put it to him in Waiting for you, and
+nothing ran yet.
+The line names the approval and how to read what came of it, `<program> do <approval id>`, which exits `3` again while
+he has not answered, `0` once it ran and `1` when he said no. With `--output json` (`--json` for the daemon) the
+answer, the waiting answer (`code` `OWNER_APPROVAL_PENDING`, `approvalId`), or the `{ok:false, code, error, fix}`
+refusal, is one document on stdout; without it the waiting line (exit `3`) is printed on stdout and a refusal or failure
+(exit `1`) on stderr, the same in all three programs. A refusal's code is the capability's own (`NOT_FOUND`, `INVALID_ARGUMENT`,
+`UNAVAILABLE`, ...); the exit code is `1` for every refusal, whatever its HTTP status.
 
 Branching rules that hold for every program:
 
 - `0` means the requested effect happened. Anything else means it did not, or
-  (`run` exit `3`) that it is not known.
+  (`run` exit `3`) that it is not known, or (`do` exit `3`) that it waits for the owner.
 - Do not retry on `3` from `run`; inspect first.
 - Standard 128+signal codes are not used except `130`, and `129` and `143` from `install.sh`.
 - `goodvibes-agent doctor` exits `1` for a must-fix (`risk`) finding and `0` otherwise; `--strict` makes any finding exit `1`.

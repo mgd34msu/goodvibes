@@ -1,7 +1,8 @@
 import { isConversationUsageAvailable } from './conversation-usage.ts';
 /**
  * budget-breach-notifier, fires an unfocused-user alert the moment session
- * cost crosses the configured budget threshold (behavior.budgetAlertUsd).
+ * cost crosses the spending alert (behavior.budgetAlertUsd, the daemon's
+ * setting, read at the turn's end from this program's copy of its settings).
  *
  * One-shot semantics: fires exactly once on the false→true edge (crossing
  * into breach), never again while still over budget on every subsequent
@@ -14,7 +15,7 @@ import { isConversationUsageAvailable } from './conversation-usage.ts';
  * (notifyNow) + outbound webhook (WebhookNotifier), both gated by
  * the shared focus/config gating in alert-gating.ts. Skips evaluation
  * entirely when the session model is unpriced, a $0 placeholder cost must
- * never be reported as a real breach (mirrors the usage modal's "unpriced"
+ * never be reported as a real breach (mirrors Money, Spending's "unpriced"
  * display convention).
  *
  * Text (owner ruling 2026-09-29, platform runtime/turn-notification.ts): the
@@ -25,7 +26,7 @@ import { isConversationUsageAvailable } from './conversation-usage.ts';
  */
 import { notifyNow } from '@goodvibes/engine/platform/platform/utils';
 import { logger } from '@goodvibes/engine/platform/platform/utils';
-import type { WebhookNotifier } from '@goodvibes/engine/platform/platform/integrations';
+import type { ProgramNotices } from '@goodvibes/engine/terminal-shell/places';
 import { calcSessionCost, computeBudgetBreach, isModelPriced, type SessionPricing } from '@goodvibes/engine/platform/platform/providers';
 import type { FocusTracker } from '@goodvibes/engine/platform/platform/runtime/operations';
 import {
@@ -48,7 +49,8 @@ export interface BudgetBreachUsageSnapshot {
 export interface BudgetBreachNotifierDeps {
   readonly focusTracker: Pick<FocusTracker, 'shouldAlertWhenUnfocused'>;
   readonly configGet: ConfigGet;
-  readonly webhookNotifier?: WebhookNotifier | null;
+  /** This program's notices, sent through the daemon's one webhook list (terminal-shell program-notices.ts). */
+  readonly notices?: Pick<ProgramNotices, 'sendNotification'> | null;
   readonly sessionId: string;
   /** What the session's totals are priced with when no spent figure is given: the runtime's ProviderRegistry. */
   readonly pricing: SessionPricing;
@@ -127,14 +129,9 @@ function fireBudgetBreachAlert(deps: BudgetBreachNotifierDeps, sessionCost: numb
     logger.debug('budget-breach-notifier: desktop notify error', { error: String(err) });
   }
 
-  const webhookNotifier = deps.webhookNotifier;
-  if (webhookNotifier) {
-    const urls = webhookNotifier.getUrls();
-    if (urls.length > 0) {
-      webhookNotifier.sendNotification({ kind: 'budget', facts }).catch((err: unknown) => {
-        logger.debug('budget-breach-notifier: webhook send error', { error: String(err) });
-      });
-    }
-  }
+  // Through the daemon's one webhook list; it knows whether any address is set.
+  deps.notices?.sendNotification({ kind: 'budget', facts }, 'budget.reached').catch((err: unknown) => {
+    logger.debug('budget-breach-notifier: webhook send error', { error: String(err) });
+  });
   return true;
 }

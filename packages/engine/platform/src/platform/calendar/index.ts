@@ -204,3 +204,10 @@ export type {
   ConnectedAccount,
 } from './oauth-types.js';
 
+// The daemon's calendar on this computer (its events and feeds) and its calendar accounts.
+export {
+  LocalCalendarEvents, LocalCalendarFeeds, carryAgentCalendar, daemonLocalCalendar, localCalendarPaths, agentCalendarPaths, createFeedFetcher,
+  type DaemonLocalCalendar, type LocalEvent, type LocalOccurrence, type FeedStatus, type FeedOccurrence,
+} from './local-calendar.js';
+export { DaemonCalendarAccounts, daemonCalendarAccounts, type CalendarAccountSources, type CalendarSignInStep } from './daemon-accounts.js';
+

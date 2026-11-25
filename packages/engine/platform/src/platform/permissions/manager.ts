@@ -34,12 +34,15 @@ import type { UntrustedContentLedger } from '../security/untrusted-content.js';
 import { currentTurnAuthoritySurface } from '../security/turn-boundary.js';
 import { effectPermittedForProvenance } from '../gate/surface-authority.js';
 import { isStateMutation } from '../gate/policy/state-policy.js';
-import { resolve } from 'node:path';
+import { delimiter, isAbsolute, resolve } from 'node:path';
+import { readFileSync, realpathSync, statSync } from 'node:fs';
+import type { ProductReachProbe } from '../gate/product-commands.js';
 import { extractPathArgs } from '../runtime/permissions/rules/path-scope.js';
 import { buildDurableRuleForDecision, buildRememberOptions, compileRules, sessionApprovalKey, type CompiledRules, type RememberTier } from './approval-rules.js';
 import { undoFactOf } from './ask-consequence.js';
 import { canonicalJson } from '../utils/target-ref.js';
-import { callCommands, callRecipients, changesMcpTrust, classifyCall, classifyPaths, declaredRecoverable, declaredValues, hostDecidesCall, ownerOnlyReason, ownerActWordsOf, recognizeOwnerOnly, type CallClass, type CallFacts, type CallRuleFact, type OwnerOnlyKind } from '../gate/classify.js';
+import { callCommands, callRecipients, changesMcpTrust, classifyCall, classifyPaths, declaredRecoverable, declaredValues, hostDecidesCall, ownerOnlyReason, ownerActAsked, ownerActOnce, ownerActWordsOf, reachesProductPastGate, recognizeOwnerOnly, outsideFolderCall, type CallClass, type CallFacts, type CallRuleFact, type OwnerOnlyKind } from '../gate/classify.js';
+import { resolveGoodVibesDaemonHome, resolveGoodVibesHome } from '../config/goodvibes-home.js';
 import { OWNER_ADDRESS_CONFIG_KEYS, splitRecipients } from '../security/owner-identity.js';
 import { isSecretReferenceValue } from '../config/secret-bearing-config-keys.js';
 import { resolveNotificationWebhookLocally } from '../integrations/notification-webhooks.js';
@@ -48,10 +51,12 @@ import { undeclaredSendRecipients } from '../gate/send-recipients.js';
 import { callShellTexts, neverRunMatchIn, parseNeverRunPattern, type CallShellTexts, type NeverRunMatch, type NeverRunPattern } from '../gate/never-run.js';
 import { toolDecisionOf } from './denial.js';
 import { processHeldForOwner, type HeldForOwnerCall, type HeldForOwnerLedger } from './held-for-owner.js';
-import { MODEL_CHOICE_REASON, MODEL_PRICE_CHANGE_MODE } from './ask-presentation.js';
+import { runAnswersEveryQuestion, runHoldsForOwner } from './run-answerer.js';
+import { MODEL_CHOICE_REASON, MODEL_PRICE_CHANGE_MODE, callActWords } from './ask-presentation.js';
 import { processJevDecisions, type JevDecisionLedger, type JevDecisionRuleEffect } from './jev-decisions.js';
-import { readModeCategory, toolCategoryOf, type ToolDecision, type ToolDefinition } from '../types/tools.js';
+import { callOnlyTightens, callWritesOwnWorkingState, readModeCategory, toolCategoryOf, type ToolDecision, type ToolDefinition } from '../types/tools.js';
 import { projectIdentity, type CompiledProjectRules, type UserPermissionRuleStore } from './user-rule-store.js';
+import { projectOfDecision } from './call-project.js';
 import type { PolicyRuntimeState } from '../runtime/permissions/policy-runtime.js';
 import { LayeredPolicyEvaluator } from '../runtime/permissions/evaluator.js';
 import { exportDecisions } from '../runtime/permissions/decision-otlp.js';
@@ -134,6 +139,8 @@ interface SafetyInput {
   readonly supportingIds?: readonly string[];
   readonly decoratePort?: ((port: JudgmentPort) => JudgmentPort) | undefined;
   readonly attribution?: PermissionAttribution | undefined;
+  /** The call acts on what the daemon holds, in no project folder (hostDecides, outsideFolder): the folder's trust is not asked. */
+  readonly outsideFolder?: boolean | undefined;
   /** The owner confirmed this exact call himself; his confirmation is the approval. */
   readonly ownerConfirmed?: boolean | undefined;
   /** Where the call sends as the owner (callRecipients): an answer to a new recipient covers these for the session. */
@@ -252,6 +259,76 @@ function neverRunPatterns(lookup: CompiledRules): readonly NeverRunPattern[] {
  * decide, in every mode: it is put to him as his standing "ask me" (held for
  * him in just-vibes). A refusal still stands; nothing else settles it.
  */
+/**
+ * The GoodVibes home directories as this process resolves them (`<home>/.goodvibes` and the daemon's home), handed to
+ * the classifier as a fact (gate/product-commands.ts reads no environment). Read per call: a test or a run may point
+ * the home elsewhere while the process lives; two path resolutions, no I/O.
+ */
+function productHomeDirectories(): readonly string[] {
+  try {
+    const root = resolveGoodVibesHome();
+    return [resolve(root, '.goodvibes'), resolve(resolveGoodVibesDaemonHome(root))];
+  } catch {
+    return [];
+  }
+}
+
+/**
+ * An act the owner confirmed himself (a press, a form, a typed line: `ownerConfirmed`) that only plan mode refuses:
+ * plan mode restricts the model, not the person, so it runs. A deny or never-run rule, or any other refusing fact,
+ * still refuses it.
+ */
+function ownersActInPlanMode(input: Pick<SafetyInput, 'ownerConfirmed' | 'mode' | 'decided'>): boolean {
+  if (input.ownerConfirmed !== true || input.mode !== 'plan') return false;
+  return input.decided.kind !== 'fact' || input.decided.basis === 'plan';
+}
+
+/** Where a path really is: its real path, or its nearest existing folder's real path with the rest after it. */
+function realPathOfPath(path: string): string {
+  const rest: string[] = [];
+  let existing = resolve(path);
+  for (;;) {
+    try { return resolve(realpathSync(existing), ...rest.reverse()); } catch {
+      const parent = resolve(existing, '..');
+      if (parent === existing) return resolve(path);
+      rest.push(basenameOf(existing));
+      existing = parent;
+    }
+  }
+}
+
+function basenameOf(path: string): string {
+  return path.slice(path.lastIndexOf('/') + 1);
+}
+
+/** The most of a script file the classifier reads: a larger file is not known not to reach, so it counts. */
+const PROBE_SCRIPT_BYTES = 256 * 1024;
+
+/**
+ * How the classifier may resolve a command's words (gate/product-commands.ts): links followed, a script file read
+ * (bounded; one that cannot be read, or is larger, counts as reaching), the person's home. Read per call.
+ */
+function productReachProbe(): ProductReachProbe {
+  return {
+    realPath: realPathOfPath,
+    readText: (path) => {
+      try {
+        const stat = statSync(path);
+        if (!stat.isFile() || stat.size > PROBE_SCRIPT_BYTES) return undefined;
+        return readFileSync(path, 'utf8');
+      } catch {
+        return undefined;
+      }
+    },
+    ...(process.env['HOME'] ? { home: process.env['HOME'] } : {}),
+  };
+}
+
+/** The folders on this process's program search path. */
+function searchPathFolders(): readonly string[] {
+  return (process.env['PATH'] ?? '').split(delimiter).filter((folder) => isAbsolute(folder));
+}
+
 function askedByOwnerRule(decided: CallClass, asked: boolean): CallClass {
   if (!asked || (decided.kind === 'fact' && !decided.allow)) return decided;
   return decided.kind === 'owner-only' ? decided : { kind: 'owner-only', item: 'standing-ask' };
@@ -457,11 +534,44 @@ function settingsWriteLoosens(toolName: string, args: Record<string, unknown>,
   } else if (toolName === 'goodvibes_settings' && typeof args.key === 'string' && (args.mode === 'set' || args.mode === 'reset')) {
     const key = args.key.trim();
     writes.push({ key, next: args.mode === 'set' ? args.value : readDotPath(DEFAULT_CONFIG, key).value });
+  } else if (toolName === 'capability_run' && (args.id === 'settings.set' || args.id === 'settings.reset')) {
+    // The System settings capabilities (capabilities/builtin/system-settings.ts): the same direction rule, the new value
+    // read as the capability reads its typed text (JSON, then true, false, a number, else the text); a reset puts the default.
+    const inputs = args.inputs && typeof args.inputs === 'object' ? args.inputs as Record<string, unknown> : {};
+    const key = typeof inputs.key === 'string' ? inputs.key.trim() : '';
+    if (key) {
+      const text = typeof inputs.value === 'string' ? inputs.value.trim() : '';
+      const typed = (): unknown => {
+        try { return JSON.parse(text) as unknown; } catch { return /^-?\d+(?:\.\d+)?$/.test(text) ? Number(text) : text; }
+      };
+      writes.push({ key, next: args.id === 'settings.set' ? typed() : readDotPath(DEFAULT_CONFIG, key).value });
+    }
   }
   return writes.some(({ key, next, ...rest }) => {
     const loosens = configKeyFacts(key).loosens;
     return loosens !== undefined && loosens('previous' in rest ? rest.previous : current(key), next);
   });
+}
+
+/**
+ * A System settings change (`capability_run` settings.set / settings.reset) that only puts a protection back: moving
+ * the setting from its current value to the new one does not loosen it, and the move back would (its own facts,
+ * config-key-facts.ts `loosens`). It applies at once, as any act that only tightens a protection does.
+ */
+function settingsWriteOnlyTightens(toolName: string, args: Record<string, unknown>, current: (key: string) => unknown): boolean {
+  if (toolName !== 'capability_run' || (args.id !== 'settings.set' && args.id !== 'settings.reset')) return false;
+  const inputs = args.inputs && typeof args.inputs === 'object' ? args.inputs as Record<string, unknown> : {};
+  const key = typeof inputs.key === 'string' ? inputs.key.trim() : '';
+  const loosens = key ? configKeyFacts(key).loosens : undefined;
+  if (!loosens) return false;
+  let next: unknown;
+  if (args.id === 'settings.reset') next = readDotPath(DEFAULT_CONFIG, key).value;
+  else {
+    const text = typeof inputs.value === 'string' ? inputs.value.trim() : '';
+    try { next = JSON.parse(text) as unknown; } catch { next = /^-?\d+(?:\.\d+)?$/.test(text) ? Number(text) : text; }
+  }
+  const now = current(key);
+  return JSON.stringify(now) !== JSON.stringify(next) && !loosens(now, next) && loosens(next, now);
 }
 
 export interface PermissionConfigReader {
@@ -547,9 +657,19 @@ function capturePermissionConfiguration(reader: PermissionConfigReader, read: ()
 export function createPermissionConfigReader(
   configManager: Pick<ConfigManager, 'get' | 'getRaw' | 'getWorkingDirectory'> & Partial<Pick<ConfigManager, 'getAutonomousPermissionSnapshot' | 'flushConfigFileChanges' | 'isExplicitlySet'>>,
   secrets?: Pick<SecretsManager, 'resolveLocalSecretSync'> | null,
+  /**
+   * The project this reader's decisions are for when it is not the settings
+   * owner's own folder: a session the daemon hosts in a project reads the
+   * daemon's settings, and decides, keeps rules and resolves paths for its own
+   * project. Absent: the settings owner's folder.
+   */
+  project?: string,
 ): PermissionConfigReader {
   const snapshotAccessor = configManager.getAutonomousPermissionSnapshot;
-  const permissionSnapshot = snapshotAccessor?.bind(configManager);
+  const ownSnapshot = snapshotAccessor?.bind(configManager);
+  const permissionSnapshot = ownSnapshot && project !== undefined
+    ? () => ({ ...ownSnapshot(), directory: project })
+    : ownSnapshot;
   const flushPendingChanges = configManager.flushConfigFileChanges?.bind(configManager);
   const reader: PermissionConfigReader = {
     ...(flushPendingChanges ? { flushPendingChanges } : {}),
@@ -561,7 +681,7 @@ export function createPermissionConfigReader(
     getSnapshot: permissionSnapshot
       ? () => ({ permissions: permissionSnapshot().permissions })
       : () => getConfigSnapshot(configManager),
-    getWorkingDirectory: () => configManager.getWorkingDirectory(),
+    getWorkingDirectory: project !== undefined ? () => project : () => configManager.getWorkingDirectory(),
     getSetting: (key) => {
       try { return configManager.get(key as ConfigKey); } catch { return undefined; }
     },
@@ -590,6 +710,13 @@ export interface GateOptions {
    * non-read effects; absent property preserves raw embedding compatibility. */
   readonly workspaceTrust?: (Pick<import('../runtime/workspace-trust.js').WorkspaceTrustManager, 'prepareAutonomousConstraint'>
     & Partial<Pick<import('../runtime/workspace-trust.js').WorkspaceTrustManager, 'isRestricted'>>) | null | undefined;
+  /**
+   * The trust of another project's folder, for a decision made for that
+   * project (permissions/call-project.ts): a daemon deciding for a turn in a
+   * project reads that project's trust, never its own folder's. Absent: every
+   * decision reads `workspaceTrust`.
+   */
+  readonly workspaceTrustFor?: ((projectRoot: string) => GateOptions['workspaceTrust']) | undefined;
   /** Trusted host alternatives; never populated from model-authored executable prose. */
   readonly autonomousChoices?: ((sourceId: string) => AutonomousToolChoices) | undefined;
   /**
@@ -812,6 +939,11 @@ type PermissionRuleStoreAccess = Pick<UserPermissionRuleStore, 'rules' | 'add'>
 /** The hosted session whose call is being decided, so a session-tier answer stays with it. */
 const sessionOfCheck = new AsyncLocalStorage<string | undefined>();
 
+/** The session the permission decision being made is for, when its caller named one: an ask raised in it is that session's. */
+export function sessionOfPermissionDecision(): string | undefined {
+  return sessionOfCheck.getStore();
+}
+
 const OWNER_REVISION_CAPACITY = 10_000;
 /**
  * Settled calls whose claim is still remembered so a replay of the same call is
@@ -835,6 +967,8 @@ export class PermissionManager {
   private readonly autonomousPending = new Set<string>();
   private readonly autonomousEpochs = new Map<string, number>();
   private readonly autonomousClaims = new Set<string>();
+  /** The settings baseline of a source whose call the owner answered himself, taken when he answered (admitAutonomous). */
+  private readonly ownerAnsweredRevisions = new Map<string, { readonly assertOwners: () => void; readonly assertSettings: () => void }>();
   /** Claims of settled calls, oldest first; the only claims that may ever be forgotten. */
   private readonly retiredClaims = new Set<string>();
   private readonly ownerRevisions = new Map<string, { readonly toolName: string; readonly args: Readonly<Record<string, unknown>>; readonly authority: EntryType }>();
@@ -919,7 +1053,8 @@ export class PermissionManager {
     // a decision-model failure cannot move; the decision applies the failure itself (failureAware).
     const mode = this.steady(() => executionOwner ? this.ownerMode(executionOwner)
       : effectivePermissionMode(scope.permissions.mode, scope.autoApprove, this.decisionModelWorks()));
-    const frame = { ...scope, permissions: { ...scope.permissions, mode }, autoApprove: false,
+    // The folder of the project this decision is for (call-project.ts), else the settings owner's.
+    const frame = { ...scope, directory: projectOfDecision() ?? scope.directory, permissions: { ...scope.permissions, mode }, autoApprove: false,
       executionOwnerRevision: executionOwner?.getRevision(), source, surface, rulePublication, policyPublication, policyEnabled,
       exposure,
       exposureCoverage: { complete: coverage.complete, revision: coverage.revision } };
@@ -953,6 +1088,7 @@ export class PermissionManager {
     const executionOwner = currentExecutionModeOwner();
     const ownerRevision = executionOwner?.getRevision();
     const surface = this.gate.surfaceOf?.();
+    // The settings owner's folder (a workspace move changes it); the project a decision is for is held by its frame.
     const directory = this.configReader.getWorkingDirectory();
     const choices = this.gate.autonomousChoices;
     const exposure = (this.gate.ledger ?? getProcessUntrustedContentLedger()).captureTaintEvidence('turn');
@@ -1007,6 +1143,7 @@ export class PermissionManager {
     if (this.autonomousPending.has(sourceId)) return;
     this.autonomousEpochs.delete(sourceId);
     this.ownerRevisions.delete(sourceId);
+    this.ownerAnsweredRevisions.delete(sourceId);
     if (!this.autonomousClaims.has(sourceId)) return;
     this.retiredClaims.delete(sourceId);
     this.retiredClaims.add(sourceId);
@@ -1027,7 +1164,9 @@ export class PermissionManager {
     const assertCurrent = () => {
       assertPermissionActive(signal);
       if (this.autonomousClaims.has(sourceId)) throw new Error('Autonomous preparation authority changed or source was claimed');
-      revisions.assertOwners(); revisions.assertSettings();
+      // Once the owner answered this source's call himself, the settings in force when he answered are the ones held to.
+      const held = this.ownerAnsweredRevisions.get(sourceId) ?? revisions;
+      held.assertOwners(); held.assertSettings();
     };
     let installed: JudgmentPort | undefined;
     const owner = () => {
@@ -1088,14 +1227,17 @@ export class PermissionManager {
 
   private async autonomousWorkspaceConstraint(category: PermissionCategory, signal?: AbortSignal): Promise<() => void> {
     if (!Object.prototype.hasOwnProperty.call(this.gate, 'workspaceTrust')) return () => {};
-    const owner = this.gate.workspaceTrust;
+    // The trust of the project this decision is for (call-project.ts), read once: a check made later reads the same owner.
+    const resolver = projectOfDecision() !== undefined ? this.gate.workspaceTrustFor : undefined;
+    const owner = this.trustHere();
     const prepare = owner?.prepareAutonomousConstraint;
     if (owner === undefined && category !== 'read') throw new Error('Autonomous execution requires an explicit workspace trust capability');
     if (owner != null && typeof prepare !== 'function') throw new Error('Workspace trust capability cannot enforce current policy');
     const guard = await prepare?.call(owner, category, signal);
     const assertCurrent = () => {
       assertPermissionActive(signal);
-      if (this.gate.workspaceTrust !== owner || owner?.prepareAutonomousConstraint !== prepare) throw new Error('Workspace trust capability changed');
+      if ((resolver !== undefined ? this.gate.workspaceTrustFor !== resolver : this.gate.workspaceTrust !== owner)
+        || owner?.prepareAutonomousConstraint !== prepare) throw new Error('Workspace trust capability changed');
       assertProjectionCurrent(guard);
     };
     assertCurrent();
@@ -1128,12 +1270,14 @@ export class PermissionManager {
     const definition = preparedCall?.registry.readPreparedDefinition(preparedCall.call);
     const category = admissionEvidence?.kind === 'agent-settings' ? 'write'
       : preparedCall?.registry.isPreparedReadOnly(preparedCall.call) ? 'read' : this.getCategory(toolName, args, definition);
-    const assertWorkspace = await this.autonomousWorkspaceConstraint(category, signal);
+    // A call the daemon it is sent to decides (`hostDecides`), or one that acts on what the daemon holds
+    // (`outsideFolder`: a daemon capability), does not act in this folder: its trust does not hold it.
+    const assertWorkspace = await this.autonomousWorkspaceConstraint(hostDecidesCall(args, definition) || outsideFolderCall(args, definition) ? 'read' : category, signal);
     const settingsMutation = preparedCall?.registry.readPreparedSettingsMutation(preparedCall.call);
     // The one deep capture: what the decision reads and records. Currentness
     // afterwards is the owners' revisions, compared as integers.
     const rawAuthority = this.autonomousAuthority(sourceId, sourceOf);
-    const revisions = this.authorityRevisions(sourceOf);
+    let revisions = this.authorityRevisions(sourceOf);
     const capturedAuthority = (choiceProjection === undefined ? rawAuthority : Object.freeze({ ...rawAuthority,
       autonomousChoices: this.autonomousChoiceProjections.choices(choiceProjection, sourceId, rawAuthority) })) as AutonomousPermissionOwner & {
         source: AutonomousToolSource; autonomousChoices: AutonomousToolChoices; directory: string | null; permissions: PermissionConfigSnapshot['permissions']; autoApprove: boolean; surface?: string | undefined;
@@ -1161,7 +1305,8 @@ export class PermissionManager {
     // The frame holds the mode in force with the model taken as answering (owner choice and calibration applied).
     const mode = this.failureAware(effectivePermissionMode(permissions?.mode, capturedAuthority.autoApprove === true));
     const preset = presetForMode(mode);
-    const effectReadOnly = preset.readOnly;
+    // Plan mode's read-only effect guard restricts the model, not the person: an act the owner confirmed himself writes.
+    const effectReadOnly = preset.readOnly && options.ownerConfirmed !== true;
     const effectSurface = capturedAuthority.surface;
     const effectWriteDenied = mode !== 'yolo' && permissions.tools?.write === 'deny';
     const owner = { frame: capturedAuthority, assertCurrent };
@@ -1194,14 +1339,22 @@ export class PermissionManager {
       workingDirectory: capturedAuthority.directory ?? undefined, source,
       sourceId, actionRevision: `action-${epoch.toString(36)}`, authorityRevision, authoritySnapshot,
       supportingIds: options.preparationDecisionIds ?? [], decoratePort: options.decoratePort, recipients: ownerFacts.recipients,
+      outsideFolder: hostDecidesCall(args, definition) || outsideFolderCall(args, definition),
       choices: capturedAuthority.autonomousChoices,
       ...(options.ownerConfirmed === true ? { ownerConfirmed: true } : {}),
     });
     const result = safety.result;
+    // The owner answered this call himself: a question waits as long as he takes, and a setting written meanwhile (a
+    // call he approved elsewhere, a change made anywhere) is not a reason to fail his answer. His answer is the decision;
+    // the settings it holds against from here on are the ones in force when he gave it.
+    if (result.sourceLayer === 'user_prompt') {
+      revisions = this.authorityRevisions(sourceOf);
+      this.ownerAnsweredRevisions.set(sourceId, revisions);
+    }
     // The owner answered a channel's request himself: his approval is the authority the channel lacked.
     const ownerDirected = decided.kind === 'owner-only' && decided.item === 'channel-request' && result.approved && result.sourceLayer === 'user_prompt';
     this.policyRuntimeState.recordPermissionDecision({ callId: sourceId, tool: toolName, category, result });
-    this.noteJevDecision(toolName, args, result, definition);
+    this.noteJevDecision(toolName, args, category, result);
     assertCurrent();
     const admission: AutonomousPermissionAdmission = Object.freeze({
       result, revisionIds: Object.freeze(safety.revision ? [safety.revision.ref.id] : []),
@@ -1346,6 +1499,9 @@ export class PermissionManager {
 
   private async assessClassicExecutionSafety(input: SafetyInput): Promise<SafetyOutcome> {
     input.assertCurrent();
+    // Plan mode restricts the model, not the person: an act the owner confirmed himself runs in plan mode. A refusing
+    // rule (deny, never-run) still refuses it.
+    if (ownersActInPlanMode(input)) return this.ownerConfirmedOutcome(input);
     // A fact (including yolo and the plan refusal) is already the decision.
     if (!input.policyResult.approved || input.decided.kind === 'fact' || input.mode === 'plan') return { result: input.policyResult };
     const analysis = input.policyResult.analysis;
@@ -1372,6 +1528,7 @@ export class PermissionManager {
     return this.askOwner(input, analysis, {
       reasons: ownerOnly ? [`Only you decide this: ${ownerOnlyReason(ownerOnly)}.`] : [],
       ownerOnly, revisedDetail: 'Prepare the exact action revised and approved by the owner without a decision model.',
+      ...(input.decided.kind === 'owner-only' && input.decided.once === true ? { single: true } : {}),
     });
   }
 
@@ -1433,8 +1590,21 @@ export class PermissionManager {
       rememberOptions,
       ...(o.ownerOnly ? { ownerOnly: o.ownerOnly } : {}),
       ...(o.containable === true && o.ownerOnly === undefined ? { containable: true as const } : {}),
+      ...(input.outsideFolder === true ? { outsideFolder: true as const } : {}),
     }, { signal: input.signal }), input.signal);
-    input.assertCurrent();
+    // A question waits as long as the owner takes, and a setting written meanwhile (another call he approved, a change
+    // made anywhere) moves the configuration this decision was read under. His recorded answer is the decision: it is
+    // not failed for that, and what he asked to be remembered is kept. Only the call's own end (its signal) stops it.
+    const answered = (): void => assertPermissionActive(input.signal);
+    answered();
+    // Nobody where the call was made can answer (a headless run with nobody answering it): held for the owner, said
+    // where it waits; not his refusal, and nothing is remembered from it.
+    if (asked.heldForOwner === true) {
+      const reason = asked.reason ?? 'held for you: nobody in this run can answer it';
+      return { result: this.result(false, false, 'runtime_mode', 'mode_queued_for_owner', analysis, {
+        detail: reason, decision: { state: 'queued-for-owner', decidedBy: 'mode', reason, next: ['carry on with the work that does not need this call'] },
+      }) };
+    }
     // Only a tier the ask offered is kept: a reply asking to remember anything else stands for this call alone.
     const askedTier = asked.rememberTier ?? (asked.remember === true ? 'session' : undefined);
     const reply: PermissionPromptDecision = askedTier === undefined || rememberOptions.some((option) => option.tier === askedTier)
@@ -1442,14 +1612,14 @@ export class PermissionManager {
     if (reply.settledBy !== undefined) return { result: this.settledBelow(input, analysis, reply, o.containable === true && o.ownerOnly === undefined, o.boundary) };
     const modified = reply.modifiedArgs === undefined ? undefined : captureOwnedJson(reply.modifiedArgs) as Record<string, unknown>;
     const notSaved = await this.rememberReply(input.toolName, input.args, reply, modified, o.ownerOnly);
-    input.assertCurrent();
+    answered();
     // The owner just answered for these agents: the delegation check of the same call takes this answer instead of asking again.
     const delegated = delegatedTasks(input.toolName, modified ?? input.args);
     if (delegated !== undefined) this.answeredDelegations.set(delegated, { approved: reply.approved, ...(reply.reason ? { reason: reply.reason } : {}) });
     // A new recipient the owner allowed and asked to be remembered is his for the rest of the session, whatever is sent there next.
     if (o.ownerOnly === 'new-recipient' && reply.approved && (reply.rememberTier ?? (reply.remember === true ? 'session' : undefined)) !== undefined
       && (modified === undefined || isDeepStrictEqual(modified, input.args))) {
-      const session = sessionOfCheck.getStore() ?? '';
+      const session = `${this.projectKeyPrefix()}${sessionOfCheck.getStore() ?? ''}`;
       for (const recipient of input.recipients ?? []) for (const part of recipientParts(recipient)) this.allowedRecipients.add(`${session}|${part}`);
     }
     const extra = { ...(o.boundary ? { boundary: o.boundary } : {}), ...(o.preset ? { preset: o.preset } : {}) };
@@ -1479,6 +1649,8 @@ export class PermissionManager {
   private async assessDecisionExecutionSafety(input: SafetyInput): Promise<SafetyOutcome> {
     input.assertCurrent();
     const decided = input.decided;
+    // Plan mode restricts the model, not the person (ownersActInPlanMode).
+    if (ownersActInPlanMode(input)) return this.ownerConfirmedOutcome(input);
     if (!input.policyResult.approved || decided.kind === 'fact') return { result: input.policyResult };
     if (this.takeOwnerRevision(input)) {
       return { result: this.result(true, false, 'user_prompt', 'user_approved', input.policyResult.analysis,
@@ -1490,6 +1662,8 @@ export class PermissionManager {
       return this.askOwner(input, input.policyResult.analysis, {
         reasons: [`Only you decide this: ${ownerOnlyReason(decided.item)}.`], ownerOnly: decided.item,
         revisedDetail: 'Prepare the exact action revised and approved by the owner.',
+        // A card's detail he types is answered each time: nothing is offered to remember.
+        ...(decided.once === true ? { single: true } : {}),
       });
     }
     // Plan mode reached here only for a read the defaults did not settle (outside the directories).
@@ -1668,9 +1842,19 @@ export class PermissionManager {
       paths: paths === undefined ? undefined : classifyPaths(paths, i.directory),
       recoverable: declaredRecoverable(i.definition, i.args),
       ownerOnly: i.ownerOnly, untrustedRead: i.untrustedRead, declaredReadOnly: i.declaredReadOnly,
-      ...(i.ownerOnly === 'owner-act' ? { ownerActWords: ownerActWordsOf(i.args, i.definition) } : {}),
-      workspaceRestricted: this.gate.workspaceTrust?.isRestricted?.(),
-      hostDecides: hostDecidesCall(i.args, i.definition),
+      ...(i.ownerOnly === 'owner-act' ? { ownerActWords: ownerActWordsOf(i.args, i.definition), ownerActAsked: ownerActAsked(i.args, i.definition),
+        ownerActOnce: ownerActOnce(i.args, i.definition) } : {}),
+      // A command that runs one of the product's own programs or touches the GoodVibes home: answered each time.
+      ...(i.ownerOnly === 'loosen-security' && reachesProductPastGate(i.toolName, i.args, i.definition, i.directory ?? undefined, productHomeDirectories(), productReachProbe())
+        ? { ownerOnlyOnce: true } : {}),
+      workspaceRestricted: this.trustHere()?.isRestricted?.(),
+      // A run that answers every question itself (`--answer-permissions`) decides such a call here, by its script, and
+      // sends it saying so: the daemon does not ask the owner again (permissions/run-answerer.ts). A run nobody answers
+      // decides it here too, so one the owner must decide is held for him instead of waited on.
+      hostDecides: hostDecidesCall(i.args, i.definition) && !runAnswersEveryQuestion() && !runHoldsForOwner(),
+      onlyTightens: (i.definition?.tightens ? callOnlyTightens(i.definition.tightens, i.args) : false)
+        || settingsWriteOnlyTightens(i.toolName, i.args, (key) => this.configReader.getSetting?.(key)),
+      ownWorkingState: i.definition?.ownWorkingState ? callWritesOwnWorkingState(i.definition.ownWorkingState, i.args) : false,
     };
   }
 
@@ -1773,7 +1957,7 @@ export class PermissionManager {
     if (request.action === 'add' || request.action === 'enable') {
       const command = hook.type === 'command' && typeof (hook as { readonly command?: unknown }).command === 'string' ? (hook as { readonly command: string }).command : undefined;
       const neverRun = command === undefined ? undefined
-        : await this.neverRunMatch({ commands: [{ text: command }], argv: [], code: [], pieces: [] }, this.configReader.getWorkingDirectory() ?? undefined, signal);
+        : await this.neverRunMatch({ commands: [{ text: command }], argv: [], code: [], pieces: [] }, this.directoryHere() ?? undefined, signal);
       if (neverRun) return { approved: false, reason: this.neverRunResult(neverRun, analysis).detail ?? `the never-run rule "${neverRun.rule}" refuses this hook` };
     }
     const configured = (this.configReader.getAutonomousSnapshot?.() ?? this.configReader.getSnapshot()).permissions?.tools;
@@ -1806,7 +1990,7 @@ export class PermissionManager {
     const reply = await awaitPermission(() => this.requestPermission({
       callId: crypto.randomUUID(), tool: 'state', args, category: 'write',
       analysis: { ...analysis, reasons: [...analysis.reasons, `Only you decide this: ${ownerOnlyReason(item)}.`] },
-      workingDirectory: this.configReader.getWorkingDirectory() ?? undefined,
+      workingDirectory: this.directoryHere() ?? undefined,
       // A channel's request is approved one call at a time: no remembered answer can stand in for the owner there.
       rememberOptions: item === 'channel-request' ? [] : buildRememberOptions('state', args, this.rememberedRulesHere()),
       ownerOnly: item,
@@ -1849,7 +2033,7 @@ export class PermissionManager {
     const reply = await awaitPermission(() => this.requestPermission({
       callId: crypto.randomUUID(), tool: 'agent', args, category,
       analysis: { ...analysis, reasons: [...analysis.reasons, question.reason] },
-      workingDirectory: this.configReader.getWorkingDirectory() ?? undefined,
+      workingDirectory: this.directoryHere() ?? undefined,
       rememberOptions: [],
     }, { signal }), signal);
     assertPermissionActive(signal);
@@ -1875,7 +2059,7 @@ export class PermissionManager {
       callId: crypto.randomUUID(), tool: 'model', args, category: 'execute',
       analysis: { classification: 'model-price-change', riskLevel: 'high', summary: `${question.name} is no longer free`,
         reasons: ['The model catalog no longer lists this model as free, so sending to it is charged.'] },
-      workingDirectory: this.configReader.getWorkingDirectory() ?? undefined,
+      workingDirectory: this.directoryHere() ?? undefined,
       rememberOptions: [],
     }, { signal }), signal);
     assertPermissionActive(signal);
@@ -1901,7 +2085,7 @@ export class PermissionManager {
       callId: crypto.randomUUID(), tool: 'google', args, category: 'execute',
       analysis: { classification: 'google-enable-apis', riskLevel: 'medium', summary: `Turn on ${question.services.join(' and ')} on Google Cloud project ${question.project}`,
         reasons: [`A Google request was refused because the API is off on the project. GoodVibes runs ${command} as ${question.account}, then sends the request again.`] },
-      workingDirectory: this.configReader.getWorkingDirectory() ?? undefined,
+      workingDirectory: this.directoryHere() ?? undefined,
       rememberOptions: [],
     }, { signal }), signal);
     assertPermissionActive(signal);
@@ -1953,7 +2137,10 @@ export class PermissionManager {
     const owner = currentExecutionModeOwner();
     const ownerRevision = owner?.getRevision();
     const surface = this.gate.surfaceOf?.();
-    const assertWorkspace = await this.autonomousWorkspaceConstraint(category, signal);
+    // A call the daemon it is sent to decides (`hostDecides`: a daemon method on what the daemon keeps, a schedule or a
+    // channel route), or one that acts on what the daemon holds (`outsideFolder`: a daemon capability), does not act in
+    // this program's folder, so the folder's trust does not hold it: it is held as a read.
+    const assertWorkspace = await this.autonomousWorkspaceConstraint(hostDecidesCall(args, definition) || outsideFolderCall(args, definition) ? 'read' : category, signal);
     const exposure = (this.gate.ledger ?? getProcessUntrustedContentLedger()).captureTaintEvidence('turn');
     const authoritySnapshot = () => this.configReader.getAutonomousSnapshot?.() ?? {
       permissions: this.configReader.getSnapshot().permissions,
@@ -1961,6 +2148,8 @@ export class PermissionManager {
     };
     const config = authoritySnapshot();
     const assertConfiguration = capturePermissionConfiguration(this.configReader, authoritySnapshot, config);
+    // The project this call was asked about (call-project.ts), else the settings owner's folder.
+    const directory = projectOfDecision() ?? config.directory;
     // The call names its owned immutable capture; owner revisions enforce freshness.
     const authorityRevision = callId;
     const assertCurrent = () => {
@@ -1974,30 +2163,31 @@ export class PermissionManager {
     assertCurrent();
     this.policyRuntimeState.recordPermissionRequest({ callId, tool: toolName, category, analysis });
     // The owner's never-run rules decide first, in every mode: nothing below may run what they forbid.
-    const neverRun = await this.neverRunMatch(callShellTexts(toolName, args, definition), config.directory ?? undefined, signal);
+    const neverRun = await this.neverRunMatch(callShellTexts(toolName, args, definition), directory ?? undefined, signal);
     if (neverRun) {
       assertCurrent();
       return this.emitAndReturn(callId, toolName, category, this.neverRunResult(neverRun, analysis), hookOwner);
     }
-    const ownerFacts = this.ownerOnlyFacts(toolName, args, definition, category, config.directory ?? undefined);
-    const ownerOnly = recognizeOwnerOnly(toolName, args, definition, ownerFacts, config.directory ?? undefined);
+    const ownerFacts = this.ownerOnlyFacts(toolName, args, definition, category, directory ?? undefined);
+    const ownerOnly = recognizeOwnerOnly(toolName, args, definition, ownerFacts, directory ?? undefined);
     const rule = await this.ruleFactOf({
       toolName, args, category, mode, tools: config.permissions?.tools, ownerOnly, subjects: callSubjects(args, definition),
       policyEnabled: this.featureFlags?.isEnabled('permissions-policy-engine') === true, options: { signal, assertCurrent },
     });
     const decided = askedByOwnerRule(classifyCall(mode, this.callFacts({
       toolName, args, category, mode, surface, definition, ownerOnly,
-      directory: config.directory, rule,
+      directory, rule,
       untrustedRead: (this.gate.ledger ?? getProcessUntrustedContentLedger()).hasIngestedThisTurn(),
     })), ownerAsk !== undefined);
     const policyResult = this.policyResultOf(decided, analysis);
     const safety = await this.assessExecutionSafety({
       callId, sourceId: callId, toolName, args, category, policyResult, decided, mode, signal, assertCurrent,
-      workingDirectory: config.directory ?? undefined, authorityRevision, authoritySnapshot: captureJsonEntry(config),
+      workingDirectory: directory ?? undefined, authorityRevision, authoritySnapshot: captureJsonEntry({ ...config, directory }),
       actionRevision: callId, attribution, recipients: ownerFacts.recipients,
+      outsideFolder: hostDecidesCall(args, definition) || outsideFolderCall(args, definition),
     });
     assertCurrent();
-    this.noteJevDecision(toolName, args, safety.result, definition);
+    this.noteJevDecision(toolName, args, category, safety.result);
     return this.emitAndReturn(callId, toolName, category, safety.result, hookOwner);
   }
 
@@ -2057,7 +2247,7 @@ export class PermissionManager {
     const mode = this.getMode();
     const category = this.getCategory(toolName, captured, definition);
     const config = this.configReader.getSnapshot();
-    const neverRun = await this.neverRunMatch(callShellTexts(toolName, captured, definition), this.configReader.getWorkingDirectory() ?? undefined, signal);
+    const neverRun = await this.neverRunMatch(callShellTexts(toolName, captured, definition), this.directoryHere() ?? undefined, signal);
     if (neverRun) {
       const description = `your never-run rule "${neverRun.rule}" (${neverRun.why})`;
       return { mode, category, decided: { kind: 'fact', allow: false, basis: 'owner-rule',
@@ -2065,7 +2255,7 @@ export class PermissionManager {
         decision: { state: 'refused', decidedBy: 'rule', reason: `refused by ${description}`, limit: description,
           next: ['carry on without this call and report that it was not run', 'only the owner can remove the rule'] } } };
     }
-    const directory = this.configReader.getWorkingDirectory() ?? undefined;
+    const directory = this.directoryHere() ?? undefined;
     const ownerOnly = recognizeOwnerOnly(toolName, captured, definition, this.ownerOnlyFacts(toolName, captured, definition, category, directory), directory);
     const rule = await this.ruleFactOf({
       toolName, args: captured, category, mode, tools: config.permissions?.tools, ownerOnly, subjects: callSubjects(captured, definition),
@@ -2073,7 +2263,7 @@ export class PermissionManager {
     });
     const decided = classifyCall(mode, this.callFacts({
       toolName, args: captured, category, mode, surface: this.gate.surfaceOf?.(), definition, ownerOnly,
-      directory: this.configReader.getWorkingDirectory(), rule,
+      directory: this.directoryHere(), rule,
       untrustedRead: (this.gate.ledger ?? getProcessUntrustedContentLedger()).hasIngestedThisTurn(),
     }));
     return { mode, category, decided };
@@ -2093,15 +2283,22 @@ export class PermissionManager {
    * reads only when a recipient was found.
    */
   private ownerOnlyFacts(toolName: string, args: Record<string, unknown>, definition: ToolDefinition | undefined,
-    category: PermissionCategory, directory: string | undefined, evidence?: ToolOwnedAdmissionEvidence): { readonly loosensSetting: boolean; readonly newRecipient: boolean; readonly recipients: readonly string[] } {
+    category: PermissionCategory, directory: string | undefined, evidence?: ToolOwnedAdmissionEvidence): { readonly loosensSetting: boolean; readonly newRecipient: boolean; readonly recipients: readonly string[]; readonly productHomes: readonly string[];
+      readonly productProbe?: ProductReachProbe; readonly searchPath: readonly string[] } {
     const declared = callRecipients(args, definition);
-    const read = undeclaredSendRecipients(toolName, args, definition, callCommands(toolName, args, definition), category === 'read', directory);
+    const commands = callCommands(toolName, args, definition);
+    const read = undeclaredSendRecipients(toolName, args, definition, commands, category === 'read', directory);
     const recipients = declared === undefined || read === undefined ? undefined : [...declared, ...read];
     const known = recipients === undefined || recipients.length === 0 ? undefined : this.knownRecipients();
     return {
       loosensSetting: settingsWriteLoosens(toolName, args, evidence, key => this.configReader.getSetting?.(key)),
       newRecipient: recipients === undefined || (known !== undefined && recipients.some((recipient) => recipientParts(recipient).some((part) => !known.has(part)))),
       recipients: recipients ?? [],
+      // Where the GoodVibes home is, read here (the classifier is pure): a command naming a file there reaches past the gate.
+      productHomes: commands.length > 0 ? productHomeDirectories() : [],
+      // How its words resolve (links, script files, the person's home), and where programs are found: read here too.
+      ...(commands.length > 0 ? { productProbe: productReachProbe() } : {}),
+      searchPath: searchPathFolders(),
     };
   }
 
@@ -2111,7 +2308,7 @@ export class PermissionManager {
    * from settings now, and the recipients he allowed earlier in this session.
    */
   private knownRecipients(): ReadonlySet<string> {
-    const session = `${sessionOfCheck.getStore() ?? ''}|`;
+    const session = `${this.projectKeyPrefix()}${sessionOfCheck.getStore() ?? ''}|`;
     const known = new Set<string>();
     for (const entry of this.allowedRecipients) if (entry.startsWith(session)) known.add(entry.slice(session.length));
     for (const key of OWNER_DESTINATION_KEYS) {
@@ -2157,7 +2354,7 @@ export class PermissionManager {
     // answer this process (matched live until the store loads them as committed
     // on restart). An admission's frame holds the publication it was read
     // under, which `current` compares, so the list here is the one it captured.
-    const projectRoot = owner ? owner.frame.directory : this.configReader.getWorkingDirectory();
+    const projectRoot = owner ? owner.frame.directory : this.directoryHere();
     const durable = this.userRuleStore
       ? await view.lookup.match(toolName, args, { signal: options.signal, assertCurrent: current, projectRoot: projectRoot ?? undefined, subjects })
       : null;
@@ -2186,8 +2383,39 @@ export class PermissionManager {
   }
 
   private absoluteReadPath(path: string): string {
-    const directory = this.configReader.getWorkingDirectory();
+    const directory = this.directoryHere();
     return directory ? resolve(directory, path) : path;
+  }
+
+  /**
+   * The folder of the project this decision is for: the one the turn or call
+   * named (call-project.ts), else the settings owner's own. Rules are listed,
+   * kept and matched for it, relative paths resolve in it, and asks name it.
+   */
+  private directoryHere(): string | null {
+    return projectOfDecision() ?? this.configReader.getWorkingDirectory();
+  }
+
+  /** The folder trust of the project this decision is for; a project whose trust cannot be resolved has none (non-reads refuse). */
+  private trustHere(): GateOptions['workspaceTrust'] {
+    const project = projectOfDecision();
+    const resolver = this.gate.workspaceTrustFor;
+    if (project === undefined || resolver === undefined) return this.gate.workspaceTrust;
+    try { return resolver(project); }
+    catch (error) {
+      logger.warn('PermissionManager: the folder trust of a project could not be read; it is decided as having none', { project, error: summarizeError(error) });
+      return undefined;
+    }
+  }
+
+  /**
+   * The project part of a session-answer key: "allow for this session" is kept
+   * for one session in one project, so a session id shared by mistake, or none,
+   * never carries an answer into another project.
+   */
+  private projectKeyPrefix(): string {
+    const project = projectOfDecision();
+    return project === undefined ? '' : `project:${projectIdentity(project)}|`;
   }
 
   /**
@@ -2196,9 +2424,12 @@ export class PermissionManager {
    * a denial from any session restricts, so an answer is never lost to a missing id.
    */
   private sessionDeniesRead(key: string, sessionId: string | undefined): boolean {
-    if (sessionId !== undefined) return this.sessionApprovals.get(`session:${sessionId}|${key}`) === false;
+    const project = this.projectKeyPrefix();
+    if (sessionId !== undefined) return this.sessionApprovals.get(`${project}session:${sessionId}|${key}`) === false;
     for (const [stored, approved] of this.sessionApprovals) {
-      if (approved === false && (stored === key || (stored.startsWith('session:') && stored.endsWith(`|${key}`)))) return true;
+      // Only this project's answers: a denial given in another project says nothing here.
+      const own = project === '' ? stored : stored.startsWith(project) ? stored.slice(project.length) : undefined;
+      if (approved === false && own !== undefined && (own === key || (own.startsWith('session:') && own.endsWith(`|${key}`)))) return true;
     }
     return false;
   }
@@ -2266,7 +2497,8 @@ export class PermissionManager {
     }
     const rule = buildDurableRuleForDecision({ toolName, args, tier, effect: approved ? 'allow' : 'deny', ...(ownerOnly && approved ? { ownerOnly } : {}) });
     const store = this.userRuleStore;
-    const project = this.configReader.getWorkingDirectory();
+    // The project the call was asked about (call-project.ts): "in this project" is that one, never the daemon's folder.
+    const project = this.directoryHere();
     const notSaved = (why: string): string => {
       logger.warn('PermissionManager: remembered decision not kept', { tool: toolName, tier, why });
       return `Your choice to ${approved ? 'allow' : 'deny'} this ${tier === 'tool' ? 'tool' : tier === 'path' ? 'path' : tier === 'command-class' ? 'command class' : 'command'} was not saved (${why}); it applies to this call only, and you will be asked again.`;
@@ -2277,7 +2509,8 @@ export class PermissionManager {
     if (!project) return notSaved('there is no project to scope the rule to');
     try {
       // A rule made here is scoped to the project it was made in.
-      await store.remember({ rule, tier, tool: toolName, createdAt: Date.now(), project: projectIdentity(project) });
+      const session = sessionOfCheck.getStore();
+      await store.remember({ rule, tier, tool: toolName, createdAt: Date.now(), project: projectIdentity(project), ...(session !== undefined ? { session } : {}) });
       return undefined;
     } catch (error: unknown) {
       return notSaved(summarizeError(error));
@@ -2305,14 +2538,14 @@ export class PermissionManager {
   /** The refusal a never-run match gives, recorded as the owner's rule. */
   private neverRunResult(match: NeverRunMatch, analysis: PermissionRequestAnalysis): PermissionCheckResult {
     return this.result(false, true, 'user_rule', 'user_rule_deny', analysis, {
-      detail: `Your never-run rule "${match.rule}" refuses this call: ${match.why} (${match.command}). It applies in every permission mode, yolo included; `
-        + 'only you can remove it, with /permissions rules.',
+      detail: `Your never-run rule "${match.rule}" refuses this call: ${match.why} (${match.command}). It applies in every permission mode, YOLO included; `
+        + 'only you can remove it, in Permissions and safety, Rules.',
     });
   }
 
   /** The rules kept from the owner's answers that apply in this project. */
   private rememberedRulesHere(): readonly PolicyRule[] {
-    const project = this.configReader.getWorkingDirectory();
+    const project = this.directoryHere();
     const store = this.userRuleStore;
     if (!store || !project) return [];
     return [...store.rules(project), ...(store.rememberedRules?.(project) ?? [])].filter((rule) => rule.origin === 'user');
@@ -2356,7 +2589,13 @@ export class PermissionManager {
     const assertConfiguration = capturePermissionConfiguration(this.configReader, snapshot, frame);
     const mode = owner ? this.ownerMode(owner) : effectivePermissionMode(frame.permissions.mode, frame.autoApprove, this.decisionModelWorks());
     return Object.freeze({ mode, assertCurrent: () => {
-      assertConfiguration();
+      // A setting written during the invocation (a call the owner approved while another waited on him, a change made
+      // anywhere) does not end it while the mode in force is the one it started under; a changed mode still does.
+      try {
+        assertConfiguration();
+      } catch (error) {
+        if (!this.sameModeInForce(mode, () => this.getMode())) throw error;
+      }
       if (currentExecutionModeOwner() !== owner || owner?.getRevision() !== ownerRevision
         || (owner && !this.sameModeInForce(mode, () => this.ownerMode(owner)))) {
         throw new Error('Execution mode owner or configuration changed during the invocation');
@@ -2409,7 +2648,12 @@ export class PermissionManager {
    * (toolCategoryOf its registered definition), narrowed by what these
    * arguments do. A tool that declares none is 'delegate'.
    */
-  getCategory(toolName: string, args: Record<string, unknown> = {}, definition?: Pick<ToolDefinition, 'category' | 'readModes'>): PermissionCategory {
+  getCategory(toolName: string, args: Record<string, unknown> = {}, definition?: Pick<ToolDefinition, 'category' | 'readModes' | 'tightens' | 'ownWorkingState'>): PermissionCategory {
+    // A call that only tightens a protection (plan mode on, a folder restricted, a "never" rule) is classed a read:
+    // plan mode and a restricted folder let it through, and classifyCall allows it as a fact.
+    if (definition?.tightens && callOnlyTightens(definition.tightens, args)) return 'read';
+    // So is a write of the model's own checklist: its working state, not the person's things (classifyCall allows it).
+    if (definition?.ownWorkingState && callWritesOwnWorkingState(definition.ownWorkingState, args)) return 'read';
     // inspect's scaffold creates its files through the write tool, which is asked about as a write itself.
     // A state call that writes (a value, a memory, a hook registration, a mode
     // change) is not the read the state tool's category names: it gets the
@@ -2434,7 +2678,7 @@ export class PermissionManager {
     // Session answers belong to the hosted session that gave them: the daemon shares one manager
     // across sessions, so an answer in one must not decide a call in another.
     const key = sessionApprovalKey(toolName, args);
-    return sessionId === undefined ? key : `session:${sessionId}|${key}`;
+    return `${this.projectKeyPrefix()}${sessionId === undefined ? key : `session:${sessionId}|${key}`}`;
   }
 
   /**
@@ -2489,7 +2733,10 @@ export class PermissionManager {
     const key = this.getApprovalKey(input.toolName, input.args);
     const approvalKey = ownerOnly === undefined ? key : ownerOnlySessionKey(ownerOnly, key, input.args);
     // Approving it later is the owner's session answer for this exact call, as if he had been asked now.
-    const held = this.heldForOwner().hold({ key: approvalKey, toolName: input.toolName, summary: analysis.summary, reason, ...(ownerOnly !== undefined ? { ownerOnly } : {}) }, () => {
+    // Held with the project and session it was made in: the list says where, and an approval settles it there only.
+    const project = projectOfDecision(), session = sessionOfCheck.getStore();
+    const held = this.heldForOwner().hold({ key: approvalKey, toolName: input.toolName, summary: analysis.summary, reason, ...(ownerOnly !== undefined ? { ownerOnly } : {}),
+      ...(project !== undefined ? { project } : {}), ...(session !== undefined ? { sessionId: session } : {}) }, () => {
       this.sessionApprovals.set(approvalKey, true);
       this.sessionApprovalRevision++;
     });
@@ -2502,16 +2749,15 @@ export class PermissionManager {
   }
 
   /**
-   * Keep a decision Jev made for the owner (`/decisions`), with what he can do
-   * about it: the standing rules a choice would save, at the narrowest tier
-   * this call allows (built now, so the call's arguments are not kept), and,
-   * when the tool records every change for undo, the files undo restores.
-   * Nothing when another layer decided.
+   * Keep a decision Jev made for the owner (Waiting for you, Decisions), with
+   * what the call does in words and what he can do about it: the standing
+   * rules a choice would save, at the narrowest tier this call allows (built
+   * now, so the call's arguments are not kept). Nothing when another layer decided.
    */
-  private noteJevDecision(toolName: string, args: Record<string, unknown>, result: PermissionCheckResult, definition: ToolDefinition | undefined): void {
+  private noteJevDecision(toolName: string, args: Record<string, unknown>, category: PermissionCategory, result: PermissionCheckResult): void {
     const receipt = result.autonomousDecision;
     if (result.sourceLayer !== 'jev_decision' || !receipt) return;
-    const directory = this.configReader.getWorkingDirectory();
+    const directory = this.directoryHere();
     const option = buildRememberOptions(toolName, args).find((candidate) => candidate.tier !== 'session');
     let scope: string | undefined;
     let remember: ((effect: JevDecisionRuleEffect) => Promise<string>) | undefined;
@@ -2526,12 +2772,11 @@ export class PermissionManager {
         remember = (effect) => this.saveStandingRule(chosen[effect], tier, toolName, directory);
       }
     }
-    const paths = extractPathArgs(args);
-    const undoPaths = result.approved && paths.length > 0 && declaredRecoverable(definition, args)
-      ? paths.map((path) => resolve(directory ?? '', path)) : undefined;
     this.jevDecisions().record({
-      toolName, summary: result.analysis.summary, approved: result.approved, reason: receipt.summary, decisionId: receipt.decisionId,
-      ...(undoPaths ? { undoPaths } : {}),
+      // Jev's reason in words (jevDecisionDetail: what the safety reading found), never the receipt's own summary.
+      toolName, summary: result.analysis.summary, approved: result.approved, reason: result.detail ?? receipt.summary, decisionId: receipt.decisionId,
+      // What the call does, in the words its ask would have used ("Change notes.md"): the decision is said in them.
+      act: callActWords({ tool: toolName, args, category, workingDirectory: directory ?? undefined }),
       ...(scope !== undefined ? { scope } : {}),
     }, remember);
   }
@@ -2604,7 +2849,7 @@ export class PermissionManager {
         mode === 'yolo' ? 'allow-all'
         : mode === 'plan' ? 'plan'
         : 'default',
-      projectRoot: (owner ? owner.frame.directory : this.configReader.getWorkingDirectory()) ?? undefined,
+      projectRoot: (owner ? owner.frame.directory : this.directoryHere()) ?? undefined,
       rules,
       defaultEffect: 'deny',
     });
@@ -2620,7 +2865,7 @@ export class PermissionManager {
    */
   private ruleView(): CompiledProjectRules & { readonly revision: number } {
     const store = this.userRuleStore;
-    const project = this.configReader.getWorkingDirectory();
+    const project = this.directoryHere();
     if (!store) return NO_RULES;
     if (store.evaluationRules) return store.evaluationRules(project);
     // An embedding store without compiled lists: compiled for this check.

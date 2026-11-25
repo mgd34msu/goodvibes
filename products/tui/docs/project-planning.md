@@ -7,7 +7,7 @@ GoodVibes uses two words, and keeps them apart:
 
 ## Plan mode
 
-Plan mode (the permission mode, `Shift+Tab` or `/plan on`) lets the model read and not change anything; it answers with a plan in the conversation and changes nothing until you leave plan mode (`/plan off` or `Shift+Tab`). Plan mode is a mode of the conversation, separate from the plan a piece of work has.
+Plan mode (the permission mode, `Shift+Tab` or the Plan mode row of This conversation in Permissions and safety) lets the model read and not change anything; it answers with a plan in the conversation and changes nothing until you leave plan mode (the Plan mode row of This conversation in Permissions and safety, or `Shift+Tab`). Plan mode is a mode of the conversation, separate from the plan a piece of work has.
 
 ## The checklist
 

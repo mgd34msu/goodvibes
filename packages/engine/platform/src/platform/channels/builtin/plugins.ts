@@ -244,7 +244,7 @@ export function registerBuiltinChannelPlugins(context: BuiltinPluginRegistration
     webhookPath: '/webhook/generic',
     handleInbound: (req) => handleGenericWebhookSurface(req, context.deps.buildGenericWebhookAdapterContext()),
     deliverReply: (pending, message) => context.deps.deliverWebhookAgentReply(pending, message),
-    notifyApproval: (approval, binding) => context.deps.deliverWebhookApprovalUpdate(approval, binding),
+    // No notifyApproval: a webhook route is never a conversation proven the owner's alone, so no approval goes to one.
     getStatus: async () => builtinStatus(context, 'webhook', 'Generic webhook', context.deps.surfaceDeliveryEnabled('webhook'), {
       defaultTarget: displaySettingValue('surfaces.webhook.defaultTarget', context.deps.configManager.get('surfaces.webhook.defaultTarget')),
     }),

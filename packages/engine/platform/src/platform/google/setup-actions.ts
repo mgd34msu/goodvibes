@@ -229,14 +229,14 @@ function gmailVerifyFix(outcome: Awaited<ReturnType<GoogleSetupActionDeps['verif
   if (outcome.failure === 'credentials-rejected') {
     return `Gmail refused the stored app password over ${protocol}. Make a new one: open ${APP_PASSWORD_URL}, delete the "${APP_PASSWORD_LABEL}" entry, `
       + `type ${APP_PASSWORD_LABEL} in the "App name" box, click "Create" and copy the 16-character password; then choose "Store the mailbox password" `
-      + 'in Mail, calendar and channels, paste it, and run /google setup again to check it.';
+      + 'in Mail, calendar and channels, paste it, and press "connect" on the Google tab again to check it.';
   }
   if (outcome.failure === 'unreachable') {
     const server = outcome.server ?? `the ${protocol} server`;
     return `The ${protocol} server ${server} could not be reached, so this machine's network or that address is the cause; `
-      + 'the app password was not checked. Run /google setup again once the network is up; the mailbox settings in Mail, calendar and channels show the address.';
+      + 'the app password was not checked. Press "connect" on the Google tab of Mail, calendar and channels again once the network is up; the mailbox settings there show the address.';
   }
-  return 'Put right what the line above names (the mailbox settings in Mail, calendar and channels show every mail setting), then run /google setup again.';
+  return 'Put right what the line above names (the mailbox settings in Mail, calendar and channels show every mail setting), then press "connect" on the Google tab again.';
 }
 
 function gmailVerifyRunner(deps: GoogleSetupActionDeps): GoogleStepRunner {
@@ -321,8 +321,8 @@ async function obtainClientCredentials(deps: GoogleSetupActionDeps, choice: Goog
 /**
  * Read a client from the chosen intake route and store it, the one way a
  * client the owner hands over (typed values, a client JSON, a downloaded file)
- * or the console walkthrough produced reaches the store. `/google client` and
- * `/google client-file` call this and then run the existing-client path; the
+ * or the console walkthrough produced reaches the store. `google.client` and
+ * `google.client-file` (the daemon's, daemon-work.ts) call this and then run the existing-client path; the
  * OAuth path's client step calls it too.
  */
 export async function registerGoogleClientFromIntake(
@@ -391,7 +391,7 @@ function oauthAuthorizeRunner(deps: GoogleSetupActionDeps): GoogleStepRunner {
       clientId = safeConfigString(deps.config, GOOGLE_CONFIG_KEYS.oauthClientId);
       secret = readString(await deps.secrets.get(GOOGLE_SECRET_KEYS.oauthClientSecret));
       if (clientId === null || secret === null) {
-        return failed('No OAuth client is configured.', 'The client step finished, but no client id and secret are stored.', 'Store the client with /google client <client-id> <client-secret>, then run the setup again.');
+        return failed('No OAuth client is configured.', 'The client step finished, but no client id and secret are stored.', 'Store the client with "use your client id and secret" on the Google tab of Mail, calendar and channels; the consent follows.');
       }
     }
 
@@ -454,7 +454,7 @@ function oauthVerifyRunner(deps: GoogleSetupActionDeps): GoogleStepRunner {
       return failed(
         'There is no refresh token to check.',
         'Authorization did not store a refresh token, so there is nothing to verify.',
-        'Run /google reauthorize to start the consent again.',
+        'Press "ask for consent again" on the Google tab of Mail, calendar and channels to start the consent again.',
       );
     }
 
@@ -466,7 +466,7 @@ function oauthVerifyRunner(deps: GoogleSetupActionDeps): GoogleStepRunner {
       return failed(
         'The credential is stored but does not work yet.',
         proof.problem ?? proof.detail,
-        proof.fix ?? 'Run /google reauthorize to ask for mail and calendar together in one consent.',
+        proof.fix ?? 'Press "ask for consent again" on the Google tab of Mail, calendar and channels to ask for mail and calendar together in one consent.',
       );
     }
     return done(proof.detail, warnings);

@@ -248,11 +248,19 @@ export function createVoiceSetupService(deps: VoiceSetupServiceDeps): VoiceSetup
   };
   const runInstall = async (stopSignal: AbortSignal): Promise<VoiceInstallReceipt> => {
     progress.begin();
+    // Each step of a part (download, check, unpack, done, failed) is announced as the voice list changing, so every
+    // voice view shows the step when it is taken; the bytes within a step are read with it, never announced one by one.
+    const steps = new Map<string, string>();
     try {
       const result = await provision({
         managedRoot: deps.managedVoiceRoot,
         signal: stopSignal,
-        onProgress: (event) => progress.onProgress(event),
+        onProgress: (event) => {
+          progress.onProgress(event);
+          if (steps.get(event.component) === event.phase) return;
+          steps.set(event.component, event.phase);
+          noteListChanged({ list: 'voice', change: 'changed' });
+        },
       });
       let configured: VoiceInstallReceipt['configured'] = { set: [], skipped: [], superseded: [] };
       const notes: string[] = [];

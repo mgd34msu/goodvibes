@@ -4,7 +4,7 @@ GoodVibes can expose a Home Assistant companion surface through the daemon. The 
 
 ## Setup
 
-Run `/setup chat-apps` (Connect chat apps and services), then select `Home Assistant surface`. Each field on the dedicated setup screen writes one config key:
+Run `/setup chat-apps` (Chat apps and services), then select `Home Assistant surface`. Each field on the dedicated setup screen writes one config key:
 
 | Field | Writes | Notes |
 | --- | --- | --- |

@@ -317,6 +317,12 @@ export function createAgentReviewPacketShareTool(
         return output(formatShareResult({ summary, delivery, attached }));
       } catch (error) {
         const message = error instanceof Error ? error.message : String(error);
+        // A web address the delivery refuses (url-safety.ts validateWebhookDeliveryUrl) is refused before any request goes out.
+        if (/^(Webhook URL must use https|Invalid webhook URL|Webhook URL must not include credentials)/.test(message)) {
+          return failure(message.startsWith('Webhook URL must use https')
+            ? 'Nothing was sent: the web address must use https.'
+            : `Nothing was sent: ${message}.`);
+        }
         if (deliveryStarted) {
           return failure(`Review packet share outcome unknown: the delivery was started and then failed (${message}). The message may have been delivered; check the destination before sharing again.`);
         }

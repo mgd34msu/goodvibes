@@ -15,6 +15,7 @@ import type {
   MemorySemanticSearchResult,
 } from './memory-store.js';
 import { isPromptActiveMemory, MIN_PROMPT_MEMORY_CONFIDENCE } from './memory-recall-contract.js';
+import { isMemoryForProject } from './memory-project.js';
 import { normalizeSummary } from './memory-file-projection.js';
 import { decisionOrClassic } from '../runtime/decision-policy.js';
 
@@ -101,17 +102,20 @@ interface ShortlistEntry {
  */
 async function buildShortlist(
   registry: KnowledgeRegistrySource, task: string, writeScope: readonly string[], limit: number, exclude: ReadonlySet<string>,
+  project: string | undefined,
 ): Promise<ShortlistEntry[]> {
   const size = rerankShortlistSize(limit);
   const now = Date.now();
   const shortlist: ShortlistEntry[] = [];
   const seen = new Set<string>(exclude);
   const query = [task, ...writeScope].join(' ');
+  // Only the asking project's records and the person's own (memory-project.ts); another project's are never put forward.
   const semantic = registry.semanticCandidates
-    ? await registry.semanticCandidates({ query, minConfidence: MIN_PROMPT_MEMORY_CONFIDENCE, limit: size })
+    ? await registry.semanticCandidates({ query, minConfidence: MIN_PROMPT_MEMORY_CONFIDENCE, limit: size, ...(project !== undefined ? { project } : {}) })
     : undefined;
   for (const entry of semantic ?? []) {
     if (shortlist.length >= size) break;
+    if (!isMemoryForProject(entry.record, project)) continue;
     if (entry.similarity < KNOWLEDGE_SIMILARITY_FLOOR || seen.has(entry.record.id) || !isPromptActiveMemory(entry.record, now)) continue;
     seen.add(entry.record.id);
     shortlist.push({ record: entry.record, similarity: entry.similarity });
@@ -120,7 +124,7 @@ async function buildShortlist(
   const tokens = lexicalTokens(query);
   if (tokens.size === 0) return shortlist;
   const lexical = registry.getAll()
-    .filter((record) => !seen.has(record.id) && isPromptActiveMemory(record, now))
+    .filter((record) => !seen.has(record.id) && isMemoryForProject(record, project) && isPromptActiveMemory(record, now))
     .map((record) => {
       const words = lexicalTokens([record.summary, record.detail ?? '', ...record.tags].join(' '));
       let hits = 0;
@@ -181,15 +185,20 @@ export async function selectKnowledgeForTaskScored(
   task: string,
   writeScope: readonly string[] = [],
   limit = 3,
-  options: { readonly excludeIds?: ReadonlySet<string> | undefined } = {},
+  options: {
+    readonly excludeIds?: ReadonlySet<string> | undefined;
+    /** The project the work is in (memoryProjectIdentity): its records and the person's own; unknown, only the person's own. */
+    readonly project?: string | undefined;
+  } = {},
 ): Promise<ScoredKnowledgeInjection[]> {
-  return decisionOrClassic(() => selectDecisionKnowledgeForTaskScored(registry, task, writeScope, limit, options.excludeIds ?? new Set()), () => []);
+  return decisionOrClassic(() => selectDecisionKnowledgeForTaskScored(registry, task, writeScope, limit, options.excludeIds ?? new Set(), options.project), () => []);
 }
 
 async function selectDecisionKnowledgeForTaskScored(
   registry: KnowledgeRegistrySource, task: string, writeScope: readonly string[], limit: number, exclude: ReadonlySet<string>,
+  project: string | undefined,
 ): Promise<ScoredKnowledgeInjection[]> {
-  const shortlist = await buildShortlist(registry, task, writeScope, limit, exclude);
+  const shortlist = await buildShortlist(registry, task, writeScope, limit, exclude, project);
   if (shortlist.length === 0) return [];
   const queryKey = JSON.stringify([task, writeScope]);
   const keyOf = (record: MemoryRecord): string => `${queryKey}\0${record.id}\0${record.updatedAt}`;
@@ -237,8 +246,10 @@ export async function selectKnowledgeForTask(
   task: string,
   writeScope: readonly string[] = [],
   limit = 3,
+  /** The project the work is in (memoryProjectIdentity); unknown, only the person's own records. */
+  project?: string,
 ): Promise<KnowledgeInjection[]> {
-  return (await selectKnowledgeForTaskScored(registry, task, writeScope, limit))
+  return (await selectKnowledgeForTaskScored(registry, task, writeScope, limit, project !== undefined ? { project } : {}))
     .map((entry) => entry.injection)
     .slice(0, limit);
 }

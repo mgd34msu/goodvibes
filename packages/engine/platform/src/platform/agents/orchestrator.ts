@@ -56,6 +56,7 @@ import { resolveModelReference } from '../providers/model-id-resolution.js';
 import { readFallbackOrder } from '../providers/failover.js';
 import { runAgentTask, type AgentOrchestratorRunContext } from './orchestrator-runner.js';
 import { forgetProjectFramework } from './orchestrator-observations.js';
+import { decideInProject } from '../permissions/call-project.js';
 export { summarizeToolArgs } from './orchestrator-utils.js';
 
 /**
@@ -106,6 +107,52 @@ function isCaptureBindableTool(
   return typeof (tool as { bindCapture?: unknown }).bindCapture === 'function';
 }
 
+/** How many idle registries of other folders (projects, worktrees) are kept for their next run. */
+const IDLE_REGISTRIES_KEPT = 8;
+
+/** A project's own facilities for the runs in its folder (see `projectFacilities`). */
+export interface AgentProjectFacilities {
+  readonly toolCallHooks?: { fire(event: import('../hooks/types.js').HookEvent): Promise<import('../hooks/types.js').HookResult> } | undefined;
+  readonly overflowHandler?: import('../tools/shared/overflow.js').OverflowHandler | undefined;
+  /** The project's own tool servers (its MCP files and the owner's), started under that project's trust. */
+  readonly mcpRegistry?: import('../mcp/index.js').McpRegistry | undefined;
+  /** The project's checklist (`work_plan`), the same plan a terminal program in that folder keeps. */
+  readonly workPlan?: import('../tools/work-plan/index.js').WorkPlanToolStore | undefined;
+  /** The files the turns in this project changed (the record `/review` and the changed-files view read). */
+  readonly changeTracker?: import('../sessions/change-tracker.js').SessionChangeTracker | undefined;
+  /** After a run or turn in this project: a checkpoint of the project when its files changed (a no-op otherwise). */
+  readonly afterTurn?: ((turn: AgentProjectTurn) => void) | undefined;
+  /** A conversation session works in this project: its TURN_COMPLETED events are checkpointed in the project's store. */
+  readonly bindSession?: ((sessionId: string) => void) | undefined;
+  /** The project's hook dispatcher itself (its hooks file), for a turn engine that fires turn hooks and manages hooks. */
+  readonly hookDispatcher?: import('../hooks/dispatcher.js').HookDispatcher | undefined;
+  /** Resolves once the project's hooks file is read and its checkpoint store holds its baseline (never rejects). */
+  readonly ready?: (() => Promise<void>) | undefined;
+}
+
+/** One finished turn or run in a project, for its checkpoint. */
+export interface AgentProjectTurn {
+  readonly sessionId?: string | undefined;
+  readonly turnId?: string | undefined;
+  readonly agentId?: string | undefined;
+}
+
+/**
+ * A turn's environment in one project (see AgentOrchestrator.acquireTurnEnvironment): the tool registry rooted in the
+ * project, the project's hooks for its tool calls, and the after-turn step (checkpoint). Release it when the turn ends.
+ */
+export interface AgentTurnEnvironment {
+  readonly workingDirectory: string;
+  readonly registry: ToolRegistry;
+  readonly toolCallHooks?: AgentProjectFacilities['toolCallHooks'];
+  /** The project's own hook dispatcher, for a turn engine that fires its turn's hooks itself (a core Orchestrator). */
+  readonly hookDispatcher?: AgentProjectFacilities['hookDispatcher'];
+  /** Resolves once the project's hooks file is read and its checkpoint baseline is taken: awaited before the turn's first tool call. */
+  ready(): Promise<void>;
+  afterTurn(turn: AgentProjectTurn): void;
+  release(): Promise<void>;
+}
+
 type AgentOrchestratorToolDeps = {
   readonly fileCache: FileStateCache;
   readonly projectIndex: ProjectIndex;
@@ -130,8 +177,6 @@ type AgentOrchestratorToolDeps = {
   readonly workPlan?: import('../tools/work-plan/index.js').WorkPlanToolStore | undefined;
   /** The trigger supervisor a worker's `trigger` tool uses (registerAllTools); absent, workers have no `trigger` tool. */
   readonly triggers?: import('../triggers/manager.js').TriggerManager | import('../triggers/operations.js').TriggerOperations | undefined;
-  /** Saves a working-directory change for the next start; `state set runtime.workingDir` uses it (registerAllTools). */
-  readonly workspaceSwap?: import('../tools/state/index.js').StateSwapManager | undefined;
   /** The daemon's capabilities for its own turns (`capability_find`, `capability_run`; registerAllTools); absent, none. */
   readonly capabilityTools?: import('../tools/capability/daemon-tools.js').DaemonCapabilityToolHost | undefined;
   /** Supplying it registers the `profile` capture tool. See registerAllTools. */
@@ -183,6 +228,19 @@ type AgentOrchestratorToolDeps = {
    * Kept apart from `hookDispatcher` so the workers' tools do not gain hook management.
    */
   readonly toolCallHooks?: { fire(event: import('../hooks/types.js').HookEvent): Promise<import('../hooks/types.js').HookResult> } | null | undefined;
+  /**
+   * What a run in another project folder than `workingDirectory` uses in place of the host's own: that project's
+   * hooks (its hooks file, fired for the runs there) and where its long tool output is kept. The host builds each
+   * project's once, on first use, and hands the same back after; absent, such a run fires no hooks of the host's folder.
+   */
+  readonly projectFacilities?: ((workingDirectory: string) => AgentProjectFacilities) | undefined;
+  /**
+   * The host's own folder is a project (a project's Work graph, rooted in that project): its turns and runs there take
+   * that project's facilities as any other project's do, instead of the host's own. Absent: the host's folder is its own.
+   */
+  readonly ownFolderIsProject?: boolean | undefined;
+  /** The host has no terminal screen (the daemon): every run is told so in one line. */
+  readonly screenless?: boolean | undefined;
   readonly permissionManager?:
     | Pick<
         import('../permissions/manager.js').PermissionManager,
@@ -340,6 +398,22 @@ export class AgentOrchestrator {
    * out of a non-default working directory releases its registry.
    */
   private cwdRunCounts = new Map<string, number>();
+  /**
+   * Registries of other folders no run uses now, most recently used last: the next run in the same project reuses
+   * its registry (its tools, index and code intelligence) instead of building it again. The oldest beyond
+   * IDLE_REGISTRIES_KEPT are released.
+   */
+  private idleRegistries: string[] = [];
+  /** Tool sets cut from a full registry, by the names they keep (buildScopedRegistry); dropped with the registry. */
+  private scopedRegistries = new WeakMap<ToolRegistry, Map<string, ToolRegistry>>();
+
+  private async keepIdleRegistry(key: string): Promise<void> {
+    this.idleRegistries = [...this.idleRegistries.filter((idle) => idle !== key), key];
+    while (this.idleRegistries.length > IDLE_REGISTRIES_KEPT) {
+      const oldest = this.idleRegistries.shift()!;
+      if ((this.cwdRunCounts.get(oldest) ?? 0) === 0) await this.releaseRegistry(oldest);
+    }
+  }
   /** Runs working in each non-default directory; at none, its project-framework reading is forgotten. */
   private readonly frameworkDirectoryRuns = new Map<string, number>();
   private fullRegistryChannelVersion = -2;
@@ -530,6 +604,59 @@ export class AgentOrchestrator {
   }
 
   /**
+   * The ONE way a turn this host runs gets its environment in a project (a web chat's turn, a hosted or handed-off
+   * turn; a run of this orchestrator's own agents is built the same way in runAgent): the registry rooted in that
+   * folder with the project's tool servers, checklist, changed-files record and long-output folder, the project's
+   * hooks for its tool calls, and the step after the turn (a checkpoint of the project when its files changed).
+   * Made once per project and reused by every later turn there; the turn releases it when it ends. No folder (or the
+   * host's own): the host's own registry and hooks, as before.
+   */
+  acquireTurnEnvironment(workingDirectory?: string): AgentTurnEnvironment {
+    const defaultCwd = this.toolDeps?.workingDirectory ?? '';
+    const cwd = workingDirectory ?? defaultCwd;
+    if (cwd === defaultCwd && this.toolDeps?.ownFolderIsProject !== true) {
+      const hooks = this.toolDeps?.toolCallHooks ?? undefined;
+      return { workingDirectory: cwd, registry: this.getFullRegistry(), ...(hooks ? { toolCallHooks: hooks } : {}), ready: () => Promise.resolve(), afterTurn: () => {}, release: async () => {} };
+    }
+    // The host's own folder when it is a project (a project's Work graph): its registry is the host's shared one, kept.
+    const own = cwd === defaultCwd;
+    const key = sharedRegistryKey(cwd, undefined);
+    if (!own) this.cwdRunCounts.set(key, (this.cwdRunCounts.get(key) ?? 0) + 1);
+    let registry: ToolRegistry;
+    let project: AgentProjectFacilities | undefined;
+    try {
+      registry = own ? this.getFullRegistry() : this.getFullRegistry(cwd);
+      project = this.toolDeps?.projectFacilities?.(cwd);
+    } catch (error) {
+      if (!own) {
+        const left = (this.cwdRunCounts.get(key) ?? 1) - 1;
+        if (left > 0) this.cwdRunCounts.set(key, left); else this.cwdRunCounts.delete(key);
+      }
+      throw error;
+    }
+    let released = own;
+    return {
+      workingDirectory: cwd,
+      registry,
+      ...(project?.toolCallHooks ? { toolCallHooks: project.toolCallHooks } : {}),
+      ...(project?.hookDispatcher ? { hookDispatcher: project.hookDispatcher } : {}),
+      ready: () => project?.ready?.() ?? Promise.resolve(),
+      afterTurn: (turn) => {
+        try { project?.afterTurn?.(turn); }
+        catch (error) { logger.warn('AgentOrchestrator: the project\'s after-turn step failed', { workingDirectory: cwd, error: summarizeError(error) }); }
+      },
+      release: async () => {
+        if (released) return;
+        released = true;
+        const remaining = (this.cwdRunCounts.get(key) ?? 1) - 1;
+        if (remaining > 0) { this.cwdRunCounts.set(key, remaining); return; }
+        this.cwdRunCounts.delete(key);
+        await this.keepIdleRegistry(key);
+      },
+    };
+  }
+
+  /**
    * Lazily build and cache the full ToolRegistry for `workingDirectory`
    * (default: `this.toolDeps.workingDirectory`, unchanged from before this
    * cache became keyed). A non-default cwd, a spawned agent's dedicated
@@ -613,7 +740,19 @@ export class AgentOrchestrator {
         ...(surface?.settingsAdmissionPolicy !== undefined ? { settingsAdmissionPolicy: surface.settingsAdmissionPolicy } : {}),
         ...(authority && capturedProcessManager ? { processManager: capturedProcessManager } : {}),
         contractRunner: this.toolDeps.contractRunner,
-        projectRoot: defaultCwd,
+        // A run in another project works for that project, never the host's folder: its agent and workflow
+        // tools start contracts there, its capability calls name it, and the host's own work plan and the host's
+        // long-output folder are not its own.
+        projectRoot: isDefaultCwd || authority ? defaultCwd : cwd,
+        // The project's own environment, the same things a terminal conversation in that folder has: its tool
+        // servers, its checklist, its changed-files record and its long-output folder (built once per project).
+        ...((isDefaultCwd && this.toolDeps.ownFolderIsProject !== true) || authority ? {} : ((project) => ({
+          workPlan: project?.workPlan,
+          ...(this.toolDeps!.capabilityTools ? { capabilityTools: { ...this.toolDeps!.capabilityTools, workingDirectory: () => cwd } } : {}),
+          overflowHandler: project?.overflowHandler,
+          ...(project?.mcpRegistry ? { mcpRegistry: project.mcpRegistry } : {}),
+          ...(project?.changeTracker ? { changeTracker: project.changeTracker } : {}),
+        }))(this.toolDeps.projectFacilities?.(cwd))),
         workingDirectory: cwd,
         ...(this.runtimeBus ? { runtimeBus: this.runtimeBus } : {}),
         fileCache: isDefaultCwd && !authority ? this.toolDeps.fileCache : undefined,
@@ -670,7 +809,15 @@ export class AgentOrchestrator {
     fullRegistry: ToolRegistry,
     captureAuthority?: import('../personal-capture/index.js').CaptureAuthorityDecision | undefined,
   ): ToolRegistry {
-    const allowed = new Set(allowedNames.filter((n) => n !== 'agent'));
+    // `agent` stays when the run's list names it (a schedule's or trigger's run is offered a conversation's tools, agent
+    // included): what it starts is held to the fleet's ceiling and depth at the spawn (AgentManager admission).
+    const allowed = new Set(allowedNames);
+    // The same tool set over the same registry is built once and reused by every later run that asks for it (a
+    // schedule's or trigger's run is offered a conversation's tools each time): registering every tool again screens
+    // every definition again on each run. Not when this run's authority is bound onto a tool: that instance is its own.
+    const cacheKey = captureAuthority ? undefined : [...allowed].sort().join('\u0000');
+    const cached = cacheKey === undefined ? undefined : this.scopedRegistries.get(fullRegistry)?.get(cacheKey);
+    if (cached) return cached;
 
     const scopedRegistry = new ToolRegistry();
     for (const tool of fullRegistry.list()) {
@@ -687,6 +834,13 @@ export class AgentOrchestrator {
       scopedRegistry.register(tool, fullRegistry.registrationOptionsFor(tool.definition.name));
     }
 
+    if (cacheKey !== undefined) {
+      const byNames = this.scopedRegistries.get(fullRegistry) ?? new Map<string, ToolRegistry>();
+      // A few tool sets per registry at most (a job's own list, a conversation's); the oldest goes past eight.
+      if (byNames.size >= 8) byNames.delete(byNames.keys().next().value!);
+      byNames.set(cacheKey, scopedRegistry);
+      this.scopedRegistries.set(fullRegistry, byNames);
+    }
     return scopedRegistry;
   }
 
@@ -943,8 +1097,15 @@ export class AgentOrchestrator {
             }
           }
         : undefined;
+      // A run in another project than the host's folder uses that project's own (its hooks), never the host's;
+      // the host's code index describes the host's folder, so such a run is given none rather than the wrong one.
+      const ownFolder = cwd === (this.toolDeps?.workingDirectory ?? '');
+      const projectHere = !authority && (!ownFolder || this.toolDeps?.ownFolderIsProject === true);
+      const project = projectHere ? this.toolDeps?.projectFacilities?.(cwd) : undefined;
+      const turnHooks = !projectHere ? this.toolDeps?.toolCallHooks : project?.toolCallHooks;
       return {
         workingDirectory: cwd,
+        // The run's journal is the host's record, kept with the host's records (never written into the project).
         journalRoot: authority ? contractInputAuthoritySourceRoot(authority) : this.toolDeps?.workingDirectory ?? cwd,
         agentManager: this.toolDeps?.agentManager,
         contextAccountingHolder: this.toolDeps?.contextAccountingHolder,
@@ -965,6 +1126,7 @@ export class AgentOrchestrator {
             }
           : {}),
         surfaceRoot: this.toolDeps?.surfaceRoot ?? '',
+        ...(this.toolDeps?.screenless ? { screenless: true } : {}),
         atRestPolicy: resolveAtRestPolicy(atRestGet),
         ...(configManager ? { configManager } : {}),
         runtimeBus: this.runtimeBus,
@@ -988,16 +1150,16 @@ export class AgentOrchestrator {
         knowledgeService: this.toolDeps?.knowledgeService,
         memoryRegistry: this.toolDeps?.memoryRegistry,
         codeReadAccessFilter: ownerReadAccess,
-        codeIndex: authority ? createCapturedCodeContext({ authority, root: cwd, readAccessFilter: ownerReadAccess, registry: this.toolDeps?.memoryEmbeddingRegistry, signal }) : this.toolDeps?.codeIndex,
+        codeIndex: authority ? createCapturedCodeContext({ authority, root: cwd, readAccessFilter: ownerReadAccess, registry: this.toolDeps?.memoryEmbeddingRegistry, signal }) : ownFolder ? this.toolDeps?.codeIndex : undefined,
         isCodeInjectionSettingEnabled: this.toolDeps?.isCodeInjectionSettingEnabled,
-        // A captured tree is not the shared index; only the shared one is reindexed.
-        onCodeSourcesChanged: !authority && this.toolDeps?.codeIndexReindexScheduler?.schedule
+        // A captured tree is not the shared index; only the shared one is reindexed, and only from its own folder.
+        onCodeSourcesChanged: !authority && ownFolder && this.toolDeps?.codeIndexReindexScheduler?.schedule
           ? (paths) => { for (const path of paths) this.toolDeps?.codeIndexReindexScheduler?.schedule?.(path); }
           : undefined,
         onToolExecuted:
           this.toolDeps?.codeIndexReindexScheduler || this.toolDeps?.toolExecutionObserver
             ? (toolName, args, success) => {
-                if (!authority) this.toolDeps?.codeIndexReindexScheduler?.onToolExecuted(toolName, args, success);
+                if (!authority && ownFolder) this.toolDeps?.codeIndexReindexScheduler?.onToolExecuted(toolName, args, success);
                 this.toolDeps?.toolExecutionObserver?.(toolName, args, success);
               }
             : undefined,
@@ -1023,7 +1185,7 @@ export class AgentOrchestrator {
         providerOptimizer: this.toolDeps?.providerOptimizer,
         providerRegistry: this.toolDeps!.providerRegistry!,
         ...(this.toolDeps?.permissionManager ? { permissionManager: this.toolDeps.permissionManager } : {}),
-        ...(this.toolDeps?.toolCallHooks ? { hookDispatcher: this.toolDeps.toolCallHooks } : {}),
+        ...(turnHooks ? { hookDispatcher: turnHooks } : {}),
         getFullRegistry: () =>
           this.getFullRegistry(
             cwd,
@@ -1101,8 +1263,16 @@ export class AgentOrchestrator {
       const attachments = getSourceAttachments(autonomousSource)
         ?? (record.contractId ? this.toolDeps?.contractRunner.get(record.contractId)?.nativeSource?.attachments : undefined);
       if (attachments && attachments.length > 0) context = { ...context, taskAttachments: { attachments, artifacts: this.toolDeps?.artifacts ?? null } };
-      await runAgentTask(context, record);
+      // Every permission decision of this run is made for its own project (a captured view's: the project it was
+      // captured from): that project's rules, folder trust and session answers, never the folder this daemon started in.
+      const runContext = context;
+      await decideInProject(authority ? contractInputAuthoritySourceRoot(authority) : cwd, () => runAgentTask(runContext, record));
     } finally {
+      // A run in another project ends as a turn there does: a checkpoint of that project when its files changed.
+      if (!authority && (cwd !== defaultCwd || this.toolDeps?.ownFolderIsProject === true)) {
+        try { this.toolDeps?.projectFacilities?.(cwd).afterTurn?.({ agentId: record.id, ...(record.sessionId ? { sessionId: record.sessionId } : {}) }); }
+        catch (error) { logger.warn('AgentOrchestrator: the project\'s after-run step failed', { workingDirectory: cwd, error: summarizeError(error) }); }
+      }
       try {
         // The captured code source belongs to this run; the shared one is not ours to close.
         if (authority) context?.codeIndex?.dispose?.();
@@ -1123,7 +1293,7 @@ export class AgentOrchestrator {
           if (remaining > 0) this.cwdRunCounts.set(countedKey, remaining);
           else {
             this.cwdRunCounts.delete(countedKey);
-            if (cwd !== defaultCwd) await this.releaseRegistry(countedKey);
+            if (cwd !== defaultCwd) await this.keepIdleRegistry(countedKey);
           }
         }
       }

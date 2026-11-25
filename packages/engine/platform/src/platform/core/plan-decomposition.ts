@@ -100,6 +100,11 @@ export interface DecompositionRunnerRequest {
   signal?: AbortSignal | undefined;
   /** Called immediately after spawn, before polling, so ownership can be persisted while the planner runs. Failure cancels and joins the spawned work. */
   onStarted?: ((agentId: string) => void | Promise<void>) | undefined;
+  /**
+   * The agent whose work this plans (a contract's owner): the planning agent's spending is counted as that work's,
+   * or as the schedule's or session's that started it (Money, Spending; AgentRecord.spendingSource).
+   */
+  forAgentId?: string | undefined;
 }
 
 /** A chosen model for the planning agent. */

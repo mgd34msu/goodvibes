@@ -314,6 +314,8 @@ export type {
   WorkspaceTrustManagerOptions,
   WorkspaceTrustPaths,
 } from './workspace-trust.js';
+// A project settings file that gives worktree setup commands is something of the folder's own to run (folder-trust.ts).
+export { projectSetupCommandsFile } from './worktree/project-setup-settings.js';
 
 // Headless hosts ask through the shared broker and read explicit record provenance.
 export {

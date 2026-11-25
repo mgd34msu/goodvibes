@@ -9,9 +9,9 @@ GoodVibes has a layered provider system. Each layer registers providers in a dif
 | Native runtime providers | First-party adapters that speak each vendor's own API and auth scheme |
 | Compatible and gateway providers | OpenAI- or Anthropic-compatible endpoints and aggregator gateways, registered through a shared adapter with a base URL and an API key |
 | Synthetic failover groups | The `synthetic` provider, which groups one model across every backend that serves it and fails over between them |
-| Local discovered providers | Inference servers on your machine or LAN that `/scan` finds and registers as OpenAI-compatible providers |
+| Local discovered providers | Inference servers on your machine (found by "Find model servers on this computer" in Models and providers) or your LAN (the network scan in Devices and network), registered as OpenAI-compatible providers |
 | Search providers | Web-search backends behind the single `web_search` tool surface |
-| Voice providers | Text-to-speech, speech-to-text, and realtime audio backends used by `/voice speak` and voice input |
+| Voice providers | Text-to-speech, speech-to-text, and realtime audio backends used by spoken answers ("ask and hear it", System place) and voice input |
 | Media and multimodal providers | Image-understanding and media-generation backends |
 
 All of these flow into the same runtime routing, picker, metadata, and health surfaces.
@@ -28,7 +28,7 @@ Native providers carry their own client for a vendor's first-party API, rather t
 
 | Provider | What it talks to |
 | --- | --- |
-| `openai` | OpenAI, with two ways of signing in: a ChatGPT subscription (the Codex surface, `/provider sign-in openai`) and an OpenAI API key. One provider, one model list. Requests use the subscription when it is set up, else the API key; with both set up, a request the subscription fails is asked again of the same model through the API key, and the turn says so once |
+| `openai` | OpenAI, with two ways of signing in: a ChatGPT subscription (the Codex surface, signed in on the Providers tab of Models and providers) and an OpenAI API key. One provider, one model list. Requests use the subscription when it is set up, else the API key; with both set up, a request the subscription fails is asked again of the same model through the API key, and the turn says so once |
 | `anthropic` | The Anthropic Messages API with an Anthropic API key |
 | `gemini` | The Google Gemini API |
 | `amazon-bedrock` | AWS Bedrock, authenticated with AWS credentials; the live model list comes from Bedrock's own catalog call |
@@ -38,7 +38,7 @@ Native providers carry their own client for a vendor's first-party API, rather t
 
 ## Compatible and gateway providers
 
-The runtime also supports a broad compatible/gateway layer. Each entry below is registered with a fixed base URL and activates when its API key is present, in the environment variable shown or in `/secrets`. The current built-ins:
+The runtime also supports a broad compatible/gateway layer. Each entry below is registered with a fixed base URL and activates when its API key is present, in the environment variable shown or in your secrets (Permissions and safety, Secrets). The current built-ins:
 
 | Provider | Display name | API key variable |
 | --- | --- | --- |
@@ -81,7 +81,7 @@ The runtime also supports a broad compatible/gateway layer. Each entry below is 
 
 ## Local discovery
 
-Run `/scan` to probe localhost and the LAN for local inference servers and register whatever answers as OpenAI-compatible providers; discovery is not run automatically at startup. Startup restores previously discovered providers from the local cache without probing their hosts or removing unavailable servers. The scan probes each candidate's `/v1/models` endpoint and identifies the server either by its well-known port or by fingerprinting its response headers. Servers with a dedicated adapter get server-specific capability traits (tool calling, streaming, and, for Ollama, LM Studio, and llama.cpp, a four-level `instant/low/medium/high` reasoning ladder); the rest register through the generic OpenAI-compatible adapter with no server-specific reasoning support.
+"Find model servers on this computer" (`m` in Models and providers, in the menu: `Ctrl+G`, then `m`) has the daemon probe this computer for local inference servers and register whatever answers as OpenAI-compatible providers for every program; a running program takes them at once, with no restart. The LAN is scanned by the daemon once you turn the network scan on in Devices and network. Discovery is not run automatically at startup. Startup restores previously discovered providers from the local cache without probing their hosts or removing unavailable servers. The scan probes each candidate's `/v1/models` endpoint and identifies the server either by its well-known port or by fingerprinting its response headers. Servers with a dedicated adapter get server-specific capability traits (tool calling, streaming, and, for Ollama, LM Studio, and llama.cpp, a four-level `instant/low/medium/high` reasoning ladder); the rest register through the generic OpenAI-compatible adapter with no server-specific reasoning support.
 
 | Server | Identified by | Adapter |
 | --- | --- | --- |
@@ -96,7 +96,7 @@ Run `/scan` to probe localhost and the LAN for local inference servers and regis
 | KoboldCpp | Port 5001 | Generic |
 | Aphrodite | Port 2242 | Generic |
 
-Use `/provider add <name> <baseURL>` to register a server manually instead, which probes its `/models` endpoint directly rather than scanning ports.
+Use "Add a provider of your own" (`n` in Models and providers) with a name and the server's address to register a server manually instead, which probes its `/models` endpoint directly rather than scanning ports.
 
 ## Synthetic failover
 
@@ -115,7 +115,7 @@ export OPENROUTER_API_KEY="..."
 export AIHUBMIX_API_KEY="..."
 ```
 
-Then pick any model from the `synthetic` provider. Keys can equally be stored with `/secrets set <NAME> <value>`; environment variables win when both are set.
+Then pick any model from the `synthetic` provider. Keys can equally be stored with "Store a secret" (Permissions and safety, Secrets) or `goodvibes secrets set <NAME> --user`; environment variables win when both are set.
 
 ### What synthetic models are
 
@@ -215,7 +215,7 @@ The model picker has six targets, each writing its own config keys, so a choice 
 | `main` | Main chat | `provider.provider` + `provider.model` | Default provider and model for normal chat turns. |
 | `helper` | Side work | `helper.globalProvider` + `helper.globalModel` (+ `helper.enabled`) | Summaries that keep long sessions going and session titles; empty values use the tool-work model when it is on, else Main chat. |
 | `tool` | Tool work | `tools.llmProvider` + `tools.llmModel` (+ `tools.llmEnabled`) | GoodVibes's own background work (commit messages, repairing a failed edit, summarizing changes); selecting a model enables it. |
-| `tts` | Spoken replies | `tts.llmProvider` + `tts.llmModel` | Optional override for `/voice speak` response generation; empty values use the current chat model. |
+| `tts` | Spoken replies | `tts.llmProvider` + `tts.llmModel` | Optional override for the spoken answers' response generation; empty values use the current chat model. |
 | `decision` | Decision model | `judgment.endpoint` + `judgment.model` + `judgment.keySource` + `judgment.keyName` + `judgment.backend` | The model that decides which actions are safe under Jev decides. Choosing one runs the same steps as the Decision model row in `/settings open` (its address, then where its key comes from); "No decision model" clears it. |
 | `embeddings` | Search index | `provider.embeddingProvider` | Not an LLM route: an embedding provider id only, no model concept, used for memory search and the code index. |
 
@@ -255,9 +255,9 @@ For example:
 
 The `name` is how models are addressed (`name:model`), so it must not contain `:` or any space; a file whose name does is skipped with a warning naming the file.
 
-A model's `contextWindow` is optional. Leave it out when the endpoint does not state one: the model's window is then shown as unknown (the status line reads `context 29.9k / unknown`) and no compaction or small-model prompt is driven by a guessed number. `/provider add` writes it only when the endpoint reported a window. When a provider accepts a request larger than a model's stated window, that window is treated as disproven and shown as unknown too.
+A model's `contextWindow` is optional. Leave it out when the endpoint does not state one: the model's window is then shown as unknown (the status line reads `context 29.9k / unknown`) and no compaction or small-model prompt is driven by a guessed number. "Add a provider of your own" writes it only when the endpoint reported a window. When a provider accepts a request larger than a model's stated window, that window is treated as disproven and shown as unknown too.
 
-Provider JSON is hot-reloaded, so custom provider definitions appear in the model/runtime surfaces without restarting the process. Use `/provider add` for interactive guided setup.
+Provider JSON is hot-reloaded, so custom provider definitions appear in the model/runtime surfaces without restarting the process. Use "Add a provider of your own" (`n` in Models and providers) for a guided setup.
 
 ## Daemon OpenAI-Compatible API
 
@@ -302,9 +302,9 @@ Seven voice providers are built in. Each declares which directions it supports: 
 | `vydra` | `tts` | Yes |
 | `local` | `tts`, `tts-stream`, `stt` | No |
 
-The `local` provider runs free, offline engines: whisper.cpp or faster-whisper for STT, and Piper or Kokoro for TTS. Pointing `voice.local.*` at engine and model paths you installed yourself never downloads anything; it reports `unconfigured` until all three keys for a direction (engine, binary, model path) are set. Running `/voice setup` instead performs a managed one-act install that fetches the Piper TTS engine and a default voice automatically, and the whisper STT engine and model where a bundle is hosted for your platform. See [voice-and-live-tts.md](voice-and-live-tts.md).
+The `local` provider runs free, offline engines: whisper.cpp or faster-whisper for STT, and Piper or Kokoro for TTS. Pointing `voice.local.*` at engine and model paths you installed yourself never downloads anything; it reports `unconfigured` until all three keys for a direction (engine, binary, model path) are set. "Install it" on the Voice tab of the System place instead performs a managed one-act install that fetches the Piper TTS engine and a default voice automatically, and the whisper STT engine and model where a bundle is hosted for your platform. See [voice-and-live-tts.md](voice-and-live-tts.md).
 
-The TUI `/voice speak` command uses providers that advertise `tts-stream` for live local playback. Configure defaults through `/settings open tts`: `tts.provider` chooses the streaming provider, `tts.voice` chooses a provider voice, and `tts.llmProvider` / `tts.llmModel` optionally override the response model. `/voice speak` uses the active chat model by default when no Spoken replies model is chosen. See [Voice and live TTS](voice-and-live-tts.md) for command usage and playback requirements.
+"Ask and hear it" (System place, This session) uses providers that advertise `tts-stream` for live local playback. Configure defaults through `/settings open tts`: `tts.provider` chooses the streaming provider, `tts.voice` chooses a provider voice, and `tts.llmProvider` / `tts.llmModel` optionally override the response model. It uses the active chat model by default when no Spoken replies model is chosen. See [Voice and live TTS](voice-and-live-tts.md) for command usage and playback requirements.
 
 ## Media and multimodal providers
 

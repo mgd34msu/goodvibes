@@ -139,7 +139,7 @@ function renderPlan(plan: BundleActivationPlan, committed: boolean): string {
       `  withheld capabilities: ${plan.quarantine.revokedCapabilities.join(', ')}`,
     );
   } else if (plan.capabilityManifest.denied.length > 0) {
-    lines.push(`  quarantined: no; withheld until its trust tier is limited: ${plan.capabilityManifest.denied.join(', ')} (/plugin trust ${plan.manifest.id} limited)`);
+    lines.push(`  quarantined: no; withheld until its trust tier is limited: ${plan.capabilityManifest.denied.join(', ')} (goodvibes plugin trust ${plan.manifest.id} limited)`);
   } else {
     lines.push('  quarantined: no; every declared capability fit the trust tier');
   }

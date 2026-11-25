@@ -8,6 +8,7 @@
  */
 import type { SelectionItem } from '../selection-modal.js';
 import { askInput, pickFrom } from './ask-input.js';
+import { valuesAsShown } from './lists.js';
 import { actionConsequence, actionSubmitLabel, fixedChoices } from './typed-line.js';
 import type { ActionDescription, ActionValues, CommandActionContext, CommandDescription, InputDescription } from './types.js';
 
@@ -24,7 +25,8 @@ function shownValue(input: InputDescription, values: ActionValues): string {
   if (input.kind === 'secret') return value.split('\n').map(() => '•••').join(', ');
   const choice = fixedChoices(input)?.find((candidate) => candidate.value === value);
   if (choice) return choice.label;
-  return value.split('\n').join(', ');
+  // A value picked from a list reads as its label; the id is what is sent.
+  return value.split('\n').map((part) => valuesAsShown([input], { [input.id]: part })[input.id] ?? part).join(', ');
 }
 
 /** Fill an action's blanks as one form; resolves the values, or back. */

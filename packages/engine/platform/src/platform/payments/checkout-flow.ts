@@ -1177,7 +1177,7 @@ async function runOwnedCheckout(request: PurchaseRequest, reading: RawCheckoutRe
     if (typed === null) {
       await releaseUnlessStopped();
       return refused('security-code-not-given', `Refused: the card security code was not typed within ${deps.approvalMinutes} minutes, so nothing was bought. `
-        + 'Start the purchase again and type the code with /payments pending when asked.');
+        + 'Start the purchase again and type the code in Waiting for you, under Purchases, when asked.');
     }
     typedCode = typed;
   }

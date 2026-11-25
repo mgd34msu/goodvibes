@@ -25,7 +25,7 @@ import { tokenizeSlashCommand } from '../slash-command-parser.js';
 import { beginModal, finishModal, MODAL_MARK_INSET, scrollCountText, standardModalWidth, wrapLines, type KitHint, type SurfaceLayer } from '../renderer/surface-kit.js';
 import { drawList, type KitRow } from '../renderer/surface-kit-list.js';
 import { activeTokens } from '../renderer/theme.js';
-import { listByName } from './lists.js';
+import { listByName, valuesAsShown } from './lists.js';
 import { actionConsequence, actionSubmitLabel, fixedChoices, impliedValue, isShown, listChoices, renderTypedLine, riskWords, withoutSecrets } from './typed-line.js';
 import type { ActionDescription, ActionValues, CommandActionContext, CommandDescription, FirstScreenGroup, InputDescription } from './types.js';
 
@@ -83,6 +83,8 @@ export class GuidedPanel implements SurfaceModal {
   private field = 0;
   private texts: Record<string, string> = {};
   private note = '';
+  /** The blank the note is about (one left empty), drawn under that blank; undefined for a note about the form. */
+  private noteFor: string | undefined;
   private picking = false;
   private settled = false;
   private host: SurfaceModalHost | undefined;
@@ -164,7 +166,8 @@ export class GuidedPanel implements SurfaceModal {
   /** The first blank of the step that still wants an answer (a choice that holds one is passed over). */
   private firstOpenField(): number {
     const values = this.values();
-    const index = this.stepFields().findIndex((input) => !fixedChoices(input) && !values[input.id] && !this.texts[input.id]);
+    // A fixed choice with a usual answer is passed over (the arrows change it); one that must be chosen is opened on.
+    const index = this.stepFields().findIndex((input) => (!fixedChoices(input) || input.required === true) && !values[input.id] && !this.texts[input.id]);
     return Math.max(0, index);
   }
 
@@ -233,7 +236,7 @@ export class GuidedPanel implements SurfaceModal {
         if (result) { this.texts[input.id] = result.item.id; this.field = Math.min(this.field + 1, this.stepFields().length - 1); }
         this.ctx.renderRequest?.();
       });
-    }, () => { this.picking = false; this.note = `Could not read the choices for ${input.label}; type one instead.`; this.ctx.renderRequest?.(); });
+    }, () => { this.picking = false; this.note = `Could not read the choices for ${input.label}; type one instead.`; this.noteFor = input.id; this.ctx.renderRequest?.(); });
   }
 
   private advance(): void {
@@ -241,7 +244,8 @@ export class GuidedPanel implements SurfaceModal {
     const current = fields[this.field];
     if (current && listChoices(current) && !this.texts[current.id]) { this.pick(current); return; }
     const missing = this.missingInStep();
-    if (missing) { this.note = `${missing.label} is needed.`; this.field = Math.max(0, fields.indexOf(missing)); return; }
+    // The empty blank is named under that blank (renderForm), with nothing else said about it.
+    if (missing) { this.note = `${missing.label} is needed.`; this.noteFor = missing.id; this.field = Math.max(0, fields.indexOf(missing)); return; }
     const action = this.action!;
     if (this.stepIndex < stepsOf(action, this.given).length - 1) { this.stepIndex += 1; this.field = this.firstOpenField(); this.note = ''; return; }
     this.settle({ kind: 'run', action, values: this.values() });
@@ -287,6 +291,7 @@ export class GuidedPanel implements SurfaceModal {
       if (listChoices(input) && !listChoices(input)!.allowOther) return;
       this.texts[input.id] = (this.texts[input.id] ?? '') + token.value;
       this.note = '';
+      this.noteFor = undefined;
       return;
     }
     if (token.type !== 'key') return;
@@ -367,8 +372,12 @@ export class GuidedPanel implements SurfaceModal {
     const l = f.l + 1;
     const width = f.r - l + 1;
     let y = f.top;
-    f.canvas.put(l, y, `${action.label}${steps.length > 1 ? ` · step ${this.stepIndex + 1} of ${steps.length}` : ''}`, { fg: t.textMuted });
-    y += 1;
+    // A place's form is titled with the action's label already: under it, only the step, when there are several.
+    const labelled = this.place?.title === action.label;
+    if (!labelled || steps.length > 1) {
+      f.canvas.put(l, y, labelled ? `Step ${this.stepIndex + 1} of ${steps.length}` : `${action.label}${steps.length > 1 ? ` · step ${this.stepIndex + 1} of ${steps.length}` : ''}`, { fg: t.textMuted });
+      y += 1;
+    }
     const question = action.stepTitles?.[this.stepIndex];
     if (question) { f.canvas.put(l, y, `   ${question}`, { fg: t.text }); y += 1; }
     const labelWidth = Math.min(22, Math.max(...fields.map((input) => input.label.length)) + 3);
@@ -417,7 +426,8 @@ export class GuidedPanel implements SurfaceModal {
         x = f.canvas.put(x, y, `‹ ${chosen?.label ?? (input.required === true ? 'choose' : input.required.defaultMeans)} ›`, { fg: focused ? t.brand : t.text });
         if (chosen?.risk && chosen.risk !== 'none') f.canvas.put(x + 2, y, riskWords(chosen.risk), { fg: t.textMuted });
       } else if (typed !== '') {
-        const shown = input.kind === 'secret' ? '•'.repeat(Math.min(typed.length, 24)) : typed;
+        // A value picked from a list reads as its label; the id is what is sent.
+        const shown = input.kind === 'secret' && input.plainWhen?.(values) !== true ? '•'.repeat(Math.min(typed.length, 24)) : valuesAsShown([input], { [input.id]: typed })[input.id] ?? typed;
         x = f.canvas.put(x, y, shown.slice(-(f.r - x - 2)), { fg: t.brand });
         if (focused) f.canvas.put(x, y, '▏', { fg: t.textMuted });
       } else {
@@ -432,9 +442,11 @@ export class GuidedPanel implements SurfaceModal {
         }
       }
       y += 1;
+      // A blank left empty is named right under it.
+      if (this.note && this.noteFor === input.id) { f.canvas.put(l + labelWidth + 3, y, this.note, { fg: t.warning }); y += 1; }
     }
     if (last < fields.length - 1) { y += 1; f.canvas.put(l + 3, y, `↓ ${fields.length - 1 - last} more below (tab)`, { fg: t.textFaint }); }
-    if (this.note) { y += 1; f.canvas.put(l + 3, y, this.note, { fg: t.warning }); }
+    if (this.note && (this.noteFor === undefined || !fields.slice(first, last + 1).some((input) => input.id === this.noteFor))) { y += 1; f.canvas.put(l + 3, y, this.note, { fg: t.warning }); }
     let consequenceY = y + 2;
     for (const row of consequence) {
       if (consequenceY >= f.bottom - 1) break;

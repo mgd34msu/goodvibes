@@ -12,6 +12,8 @@
  * connection comes back. Nothing here waits on a clock.
  */
 import { subscribeDaemonEventFrames } from '@goodvibes/engine/platform/platform/runtime/client';
+import type { LearnedContextWindow } from '@goodvibes/engine/platform/platform/providers';
+import { logger, summarizeError } from '@goodvibes/engine/platform/platform/utils';
 
 export interface ContextWindowsFollowOptions {
   /** The daemon's address and credential for its event stream, or why there is none. */
@@ -19,7 +21,16 @@ export interface ContextWindowsFollowOptions {
   /** Told each time this program's daemon connection comes back; returns the stop. */
   readonly onDaemonBack: (listener: () => void) => () => void;
   /** This program's provider registry. */
-  readonly registry: { contextWindowsChanged(): void };
+  readonly registry: {
+    contextWindowsChanged(): void;
+    /** Told each limit or floor this program's own turns learn from a provider (the daemon owns the file). */
+    onContextWindowLearned?: ((listener: (learned: LearnedContextWindow) => void) => () => void) | undefined;
+  };
+  /**
+   * Reports what this program's turn learned to the daemon (`context.windows.learned.post`), so the one file holds it and
+   * every program has it. A report that does not arrive (no daemon) leaves it in this program's memory, as before.
+   */
+  readonly report?: ((learned: LearnedContextWindow) => Promise<unknown>) | undefined;
 }
 
 /** Follow the daemon's context window sizes for this program's registry; returns the stop. */
@@ -45,8 +56,19 @@ export function followDaemonContextWindows(options: ContextWindowsFollowOptions)
     options.registry.contextWindowsChanged();
     open();
   });
+  // What this program's turn learned goes to the daemon, which keeps it in the one file and announces it.
+  const report = options.report;
+  const stopLearned = report && options.registry.onContextWindowLearned
+    ? options.registry.onContextWindowLearned((learned) => {
+      // Not kept by the daemon: it stays in this program's memory, and the log says why it did not arrive.
+      void report(learned).catch((error: unknown) => {
+        logger.info('A context window limit this program learned did not reach the daemon; it is kept in this program only', { model: learned.registryKey, error: summarizeError(error) });
+      });
+    })
+    : () => {};
   return () => {
     stopped = true;
+    stopLearned();
     stopBack();
     stopStream?.();
     stopStream = null;

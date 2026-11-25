@@ -77,6 +77,7 @@ export type { ProviderRuntimeSnapshot, ProviderRuntimeSnapshotOptions, ProviderU
 export { ProviderNotFoundError } from './provider-not-found-error.js';
 export { CONTEXT_OVERFLOW_RAW_STOP_REASONS, isContextOverflowSignal } from './stop-reason-maps.js';
 export { MAX_CONTEXT_WINDOW_OVERRIDE, isValidContextWindowOverride } from './context-window-overrides.js';
+export type { LearnedContextWindow } from './context-window-overrides.js';
 export { ProviderRegistry } from './registry.js';
 export { readProviderHealth } from './provider-health.js';
 export type { ProviderStatus, ProviderHealthEntry, CompositeHealthStatus } from './provider-health.js';
@@ -257,6 +258,7 @@ export {
   MODEL_PRICES_CONFIG_KEY,
   readBudgetAlertUsd,
   resolvePricing,
+  resolveSessionCost,
   writeManualModelPrice,
 } from './session-cost.js';
 export type {

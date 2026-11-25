@@ -229,6 +229,14 @@ export class WebhookNotifier implements NotificationDeadLetterSource {
     this.queue.persistDeadLetters(path, notificationDeadLetterCodec(this.metadataOnly));
   }
 
+  /**
+   * Take in the failed notifications another file holds (a 3.5.0 terminal program's own list), kept in this
+   * notifier's file from then on; that file is only read. Returns how many were taken in.
+   */
+  adoptDeadLetters(path: string): number {
+    return this.queue.adoptDeadLetters(path, notificationDeadLetterCodec(this.metadataOnly));
+  }
+
   /** The failed notifications, oldest first, in their metadata-only form. URLs are not shown. */
   listDeadLetters(): readonly NotificationDeadLetter[] {
     return describeDeadLetters(this.queue.getDlq(), (payload) => this.queuedEnvelope(payload).describe());

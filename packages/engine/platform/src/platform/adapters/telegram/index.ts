@@ -333,6 +333,8 @@ export async function processTelegramUpdate(
       account: await deps.acquireSourceAccount?.() ?? null,
       edited: Boolean(payload.edited_message || payload.edited_channel_post),
       senderId, providerMessageId: readNumberString(message.message_id) ?? '',
+      ...(senderDisplayName ? { senderName: senderDisplayName } : {}),
+      ...(readString(chat?.title) ? { chatTitle: readString(chat?.title) } : {}),
       readOriginal: () => typeof message.text === 'string' ? message.text : typeof message.caption === 'string' ? message.caption : '',
     });
     return Response.json({ ok: true, acknowledged: true, queued: false, ...result });

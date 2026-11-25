@@ -46,7 +46,15 @@ export interface GoogleSetupFlowDeps {
   /** One runner per step id in the path being run. */
   readonly runners: ReadonlyMap<GoogleStepId, GoogleStepRunner>;
   readonly now?: () => number;
+  /**
+   * Stops the run when the person asks it to (`google.stop`): the step under way ends as its own runner ends on this
+   * signal (the consent closes its listener), no later step starts, and none is handed to the person.
+   */
+  readonly signal?: AbortSignal | undefined;
 }
+
+/** A step a stopped run did not start. */
+const STOPPED_DETAIL = 'Not run: connecting was stopped.';
 
 /** Outcomes that count as "this step is satisfied" for dependency purposes. */
 function satisfied(outcome: GoogleStepOutcome): boolean {
@@ -93,11 +101,12 @@ async function runOwnedGoogleSetupFlow(path: GoogleSetupPath, deps: GoogleSetupF
     // Once the flow has handed off to the human or hit a failure, the rest of
     // the path is recorded as skipped rather than attempted, running steps
     // whose prerequisites are missing produces confusing errors.
-    if (halted) {
+    if (halted || deps.signal?.aborted === true) {
+      halted = true;
       const skipped: GoogleStepResult = {
         id: spec.id,
         outcome: 'skipped',
-        detail: 'Not attempted yet, an earlier step is still outstanding.',
+        detail: deps.signal?.aborted === true ? STOPPED_DETAIL : 'Not attempted yet, an earlier step is still outstanding.',
         elapsedMs: 0,
       };
       outcomes.set(spec.id, 'skipped');
@@ -152,7 +161,10 @@ async function runOwnedGoogleSetupFlow(path: GoogleSetupPath, deps: GoogleSetupF
     warnings.push(...(outcome.warnings ?? []));
     deps.progress.stepFinished(spec, result);
 
-    if (result.outcome === 'needs-human') {
+    if (deps.signal?.aborted === true) {
+      // Stopped by the person: nothing is handed to him, and no later step starts.
+      halted = true;
+    } else if (result.outcome === 'needs-human') {
       waitingOn = spec.id;
       halted = true;
       deps.progress.humanActionNeeded(spec, outcome.fix ?? outcome.problem ?? spec.manualSteps.join(' '));
@@ -241,7 +253,7 @@ export function renderGoogleSetupReport(report: GoogleSetupReport): string {
     lines.push('');
     // Not a repo path. A packaged install has no checkout, so naming the source
     // file sends the owner looking for something that is not on their disk. The
-    // same text is generated from the step plan and printed by /google runbook.
+    // same text is generated from the step plan and shown by "the written steps" on the Google tab.
     lines.push('Ask for the written steps at any point and I will lay them out.');
   }
 

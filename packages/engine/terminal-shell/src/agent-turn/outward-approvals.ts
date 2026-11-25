@@ -15,7 +15,8 @@
  *
  * ── What clears it here ───────────────────────────────────────────────────
  *
- * The owner typing `/google approve` at his own prompt. Two properties make
+ * The owner's own answer to the send in his inbox (Waiting for you, Sends:
+ * places/held-sends-inbox.ts posts each refusal there). Two properties make
  * that a gesture rather than text:
  *
  *  - It is handled by the surface's input layer, not by the model. The words
@@ -57,8 +58,8 @@ export function resetOutwardApprovalStoreForTests(): void {
 
 /** The gesture, in the owner's words. Named once so the refusal cannot drift from it. */
 export const OUTWARD_APPROVAL_GESTURE =
-  'type /google approve at the prompt yourself: it shows the refused message and sends it when you say so. '
-  + 'It is a keystroke rather than a phrase on purpose: anything you could be talked into typing, '
+  'send it yourself from Waiting for you, under Sends (in this Agent, the terminal app, the web UI or a phone): it shows the refused message exactly as it would go out and sends it when you say so. '
+  + 'It is a press of yours rather than a phrase on purpose: anything you could be talked into typing, '
   + 'content that was just read could talk the agent into producing.';
 
 /** What performing an approved action came to. */
@@ -69,7 +70,7 @@ export interface OutwardActionOutcome {
 
 /** A refused outward action the owner can still approve. */
 export interface PendingOutwardAction {
-  /** Its number in `/google approve`. */
+  /** Its number among the sends held here (Waiting for you, Sends, names it by its item). */
   readonly id: number;
   readonly action: string;
   readonly description: string;
@@ -78,7 +79,7 @@ export interface PendingOutwardAction {
   readonly at: number;
   /**
    * Performs this exact action with the recorded content. Run only from the
-   * owner's own `/google approve`, so the bytes approved are the bytes sent.
+   * owner's own "approve" on the send in Waiting for you, so the bytes approved are the bytes sent.
    */
   readonly perform?: (() => Promise<OutwardActionOutcome>) | undefined;
 }
@@ -107,7 +108,7 @@ function contentKey(content: PendingOutwardAction['content']): string {
  * Remember what was just refused.
  *
  * The owner approves an action he has been SHOWN, so the thing he approves has
- * to be recorded at the moment of refusal, otherwise `/google approve` would
+ * to be recorded at the moment of refusal, otherwise his "approve" would
  * be approving whatever came next, which is a blank cheque. Several refusals
  * in one turn each stay approvable; a refusal of the same action with the same
  * content as one already waiting refreshes that entry (keeping its number)

@@ -137,10 +137,6 @@ const SERVICES = {
     path: ['provider', 'benchmarkStore'],
     label: 'provider.benchmarkStore',
   },
-  requireRemoteRuntime: {
-    path: ['ops', 'remoteRuntime'],
-    label: 'ops.remoteRuntime',
-  },
   requireOperatorClient: {
     path: ['clients', 'operator'],
     label: 'clients.operator',

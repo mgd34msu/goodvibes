@@ -2,16 +2,17 @@
  * `/agents`, described once (command-actions/) for both terminal apps. Typed
  * bare by a person it opens the Work place on Your agents; every other action
  * is a capability (platform builtin/agents.ts) with its control in that place:
- * team modes, recipes and archetypes and work contracts run in the terminal
- * app's own session, the coding agents the daemon hosts run in the daemon,
+ * team modes, recipes and archetypes run in the terminal app's own session
+ * (what an agent hands over as work runs on the daemon, in Work), the coding
+ * agents the daemon hosts run in the daemon,
  * and coding work handed to the terminal app is a shared session the daemon
  * makes and keeps the record of (builtin/handed-off.ts).
  */
 import {
   AGENTS_HAND_OFF, AGENTS_HANDED_OFF, AGENTS_HANDED_OFF_LIST,
-  AGENTS_ARCHETYPE, AGENTS_ARCHETYPES, AGENTS_ARCHETYPES_LIST, AGENTS_CONTRACT, AGENTS_CONTRACTS_LIST, AGENTS_GROUPS_LIST, AGENTS_HOST, AGENTS_HOSTABLE,
-  AGENTS_HOSTABLE_LIST, AGENTS_RECIPE, AGENTS_RUNNING_LIST, AGENTS_START, AGENTS_START_ARCHETYPE, AGENTS_STOP_BRANCH, AGENTS_STOP_GROUP, AGENTS_TEAM,
-  type AgentArchetypeRow, type AgentContractRow, type AgentsCapabilityServices, type CapabilityDefinition, type RunningAgentRow,
+  AGENTS_ARCHETYPE, AGENTS_ARCHETYPES, AGENTS_ARCHETYPES_LIST, AGENTS_GROUPS_LIST, AGENTS_HOST, AGENTS_HOSTABLE,
+  AGENTS_HOSTABLE_LIST, AGENTS_RECIPE, AGENTS_RUNNING_LIST, AGENTS_START, AGENTS_START_ARCHETYPE, AGENTS_STOP, AGENTS_STOP_BRANCH, AGENTS_STOP_GROUP, AGENTS_TEAM,
+  type AgentArchetypeRow, type AgentsCapabilityServices, type CapabilityDefinition, type RunningAgentRow,
 } from '@goodvibes/engine/platform/platform/capabilities';
 import { commandRefusal } from './command-confirmation.js';
 import type { TerminalCommandRegistry } from './command-registry.js';
@@ -27,17 +28,17 @@ export { TEAM_MODES, TEAM_RECIPES } from '@goodvibes/engine/platform/platform/ca
 export interface Unavailable { readonly unavailable: string }
 type Can<T> = T | Unavailable;
 
-export type ContractRow = AgentContractRow;
 export type { RunningAgentRow };
 export type ArchetypeRow = AgentArchetypeRow;
 
 /** What one app does for `/agents`. */
 export interface AgentsHost<Ctx> {
-  /** Work contracts and the agents running them. */
+  /** The agents this app started, and stopping them. */
   readonly contracts: Can<{
-    list(ctx: Ctx): readonly ContractRow[];
-    show(ctx: Ctx, contractId: string): string;
     running(ctx: Ctx): readonly RunningAgentRow[];
+    /** Every agent started in this session, the ended ones too. */
+    started(ctx: Ctx): readonly RunningAgentRow[];
+    stop(ctx: Ctx, agentId: string, note: string): string;
     stopGroup(ctx: Ctx, graphId: string): string;
     stopBranch(ctx: Ctx, agentId: string): string;
   }>;
@@ -69,7 +70,8 @@ function agentsServices(ctx: CommandActionContext): AgentsCapabilityServices {
       startArchetype: (name: string, title: string) => team.startArchetype(ctx, name, title),
     } } : {}),
     ...(contracts ? { agentContracts: {
-      list: () => contracts.list(ctx), show: (id: string) => contracts.show(ctx, id), running: () => contracts.running(ctx),
+      running: () => contracts.running(ctx), started: () => contracts.started(ctx),
+      stop: (id: string, note: string) => contracts.stop(ctx, id, note),
       stopGroup: (id: string) => contracts.stopGroup(ctx, id), stopBranch: (id: string) => contracts.stopBranch(ctx, id),
     } } : {}),
   };
@@ -94,13 +96,6 @@ defineList<CommandActionContext>({
     }));
   },
   operator: { method: 'capabilities.run', input: { id: 'agents.handed-off' }, rows: { from: 'data.handedOff', value: 'sessionId', label: 'task', detail: 'createdAt', state: 'state' } },
-});
-defineList<CommandActionContext>({
-  name: AGENTS_CONTRACTS_LIST,
-  async read(ctx) {
-    return readable(installed?.contracts, (contracts) => contracts.list(ctx).map((row): ListRow => ({ value: row.id, label: row.ask.slice(0, 72), state: row.status })), [] as ListRow[]);
-  },
-  operator: { terminalOnly: 'Work contracts are kept by the terminal app that runs them.' },
 });
 defineList<CommandActionContext>({
   name: AGENTS_RUNNING_LIST,
@@ -146,7 +141,7 @@ function agentsCommand(daemon: DaemonCapabilityBinding<CommandActionContext>): C
     actions: [
       doAction<CommandActionContext>({
         id: 'open', label: 'Open Your agents', word: 'open', touches: 'reads', inputs: [],
-        sentence: 'Opens the Work place on Your agents: what is running, the work contracts, the archetypes and the coding agents you can host.',
+        sentence: 'Opens the Work place on Your agents: what is running, the archetypes and the coding agents you can host.',
         operator: { terminalOnly: 'It is a terminal screen; the web UI shows the same in its Work view.' },
         async run(_values, ctx) {
           const open = (ctx as CommandActionContext & PlaceOpener).openPlace;
@@ -159,7 +154,7 @@ function agentsCommand(daemon: DaemonCapabilityBinding<CommandActionContext>): C
       session(AGENTS_TEAM), session(AGENTS_START), session(AGENTS_RECIPE), session(AGENTS_ARCHETYPES), session(AGENTS_ARCHETYPE), session(AGENTS_START_ARCHETYPE),
       daemonCapabilityAction<CommandActionContext>(AGENTS_HAND_OFF, daemon),
       daemonCapabilityAction<CommandActionContext>(AGENTS_HANDED_OFF, daemon),
-      session(AGENTS_CONTRACT), session(AGENTS_STOP_GROUP), session(AGENTS_STOP_BRANCH),
+      session(AGENTS_STOP), session(AGENTS_STOP_GROUP), session(AGENTS_STOP_BRANCH),
     ],
   };
 }

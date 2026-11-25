@@ -17,12 +17,23 @@ export function deriveRemoteRecoveryActions(
   const actions: RemoteRecoveryAction[] = [];
   const taskId = contract?.taskId;
 
-  if (connection?.lastError || contract?.transport?.lastError) {
+  const lostForGood = (connection?.transportState ?? contract?.transport?.state) === 'terminal_failure';
+  // A runner lost for good shows its last error beside its steps; a step repeating it says nothing more.
+  if (!lostForGood && (connection?.lastError || contract?.transport?.lastError)) {
     actions.push({
       id: 'review-health',
-      label: 'Review remote health',
-      command: '/health check remote',
+      label: 'What went wrong',
+      command: 'System, Health: check one area, Remote runners',
       reason: connection?.lastError ?? contract?.transport?.lastError ?? 'Remote transport reported an error.',
+    });
+  }
+  // Lost for good (its agent stopped answering or went away): nothing brings this one back, a new one takes the task up.
+  if (lostForGood) {
+    actions.push({
+      id: 'start-again',
+      label: 'Start it again',
+      command: '/work',
+      reason: 'save what it did first with "save its work" on the Runners tab of the Work place, then start a runner on the same task',
     });
   }
   if (heartbeat?.status === 'stale') {

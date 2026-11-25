@@ -247,7 +247,7 @@ function grantRefusal(pluginName: string, grant: PluginGrant, capability: 'regis
   return new PluginTierRefusalError(unapplied !== undefined
     ? `plugin '${pluginName}' may not register ${what}: ${describeUnappliedTier(pluginName, unapplied)}; that starts it again at the tier`
     : `plugin '${pluginName}' may not register ${what}: its trust tier is '${grant.tier}', and '${capability}' needs 'limited'. `
-      + `Run /plugin trust ${pluginName} limited; that starts it again at that tier`);
+      + `Set what ${pluginName} may do to limited (s on it in the Plugins tab of Tools and extensions); that starts it again at that tier`);
 }
 
 /**
@@ -335,7 +335,7 @@ export function createPluginAPI(ctx: PluginAPIContext): PluginAPI {
     throw new PluginTierRefusalError(unapplied !== undefined
       ? `plugin '${ctx.pluginName}' may not register ${OUTWARD_REGISTRATION[kind]}, and ${describeUnappliedTier(ctx.pluginName, unapplied)}; that starts it again at the tier`
       : `plugin '${ctx.pluginName}' may not register ${OUTWARD_REGISTRATION[kind]}, and its trust tier is 'untrusted'. `
-        + `Run /plugin trust ${ctx.pluginName} limited; that starts it again at that tier`);
+        + `Set what ${ctx.pluginName} may do to limited (s on it in the Plugins tab of Tools and extensions); that starts it again at that tier`);
   };
   return {
     registerCommand(name, description, handler) {

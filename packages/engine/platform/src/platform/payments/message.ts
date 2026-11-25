@@ -399,7 +399,7 @@ export function renderSecurityCodeRequest(facts: Pick<PurchaseFacts, 'item' | 'm
     `  from ${renderMerchant(facts.merchantDomain)}`,
     `  TOTAL: ${formatMinorUnits(facts.totalMinorUnits, facts.currency)}, card ending ${sanitizeNoticeField(facts.cardLast4, 8)}`,
     ``,
-    `Type the code in the terminal app with /payments pending, or in the local web UI. Do not send it in this chat.`,
+    `Type the code in the terminal app or the Agent (Waiting for you, under Purchases), or in the local web UI. Do not send it in this chat.`,
     `If it is not typed in ${expiresInMinutes} minutes I will NOT buy it.`,
   ].join('\n');
 }
@@ -501,7 +501,7 @@ export function renderUnreadOrderMail(input: {
     `No decision model is in use, so I did not read what the mail says (a confirmation, shipping, a cancellation or a refund). Please read it in your mailbox.`,
   ];
   if (input.purchases.some(purchase => purchase.unverified)) {
-    lines.push(`A purchase above is recorded as not confirmed: if the mail says it went through, or that it was cancelled, record that in /payments pending.`);
+    lines.push(`A purchase above is recorded as not confirmed: if the mail says it went through, or that it was cancelled, record that in Waiting for you, under Purchases.`);
   }
   return lines.join('\n');
 }

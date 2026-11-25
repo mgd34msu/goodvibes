@@ -28,8 +28,11 @@ export interface MemorySessionCapabilityServices {
     readonly records: (limit: number) => Promise<readonly MemoryRecord[]>;
     readonly update: (id: string, patch: Readonly<Record<string, unknown>>) => Promise<MemoryRecord | null>;
     readonly delete: (id: string) => Promise<boolean>;
-    /** The memory files folder: the one given, else the setting `memory.projection.dir`, in this project. */
-    readonly filesFolder: (given: string) => string;
+    /**
+     * The memory files folder: the one given, else the setting `memory.projection.dir`, in this program's project. A
+     * folder the person names himself may be anywhere; one a model names must be inside the project.
+     */
+    readonly filesFolder: (given: string, personAsked: boolean) => string;
   } | undefined;
 }
 
@@ -42,8 +45,8 @@ function memoryOf(services: MemorySessionCapabilityServices): NonNullable<Memory
 }
 
 const PROJECTION_DIR: InputDescription = {
-  id: 'dir', label: 'Folder', help: 'Where the memory files are kept', kind: 'path', freeTextReason: 'a folder in this project',
-  required: { default: '', defaultMeans: 'the memory files folder in the settings' }, typed: { flag: '--dir' },
+  id: 'dir', label: 'Folder', help: 'Where the memory files are kept; any folder you name', kind: 'path', freeTextReason: 'a folder',
+  required: { default: '', defaultMeans: 'the memory files folder of this project' }, typed: { flag: '--dir' },
 };
 const plural = (count: number, one: string): string => `${count} ${one}${count === 1 ? '' : 's'}`;
 
@@ -112,9 +115,9 @@ export const MEMORY_SYNC_FILES: SessionDefinition = {
   sentence: 'Each project and team record is written as a file in {dir} and committed in that folder\'s own repository, until you change it; a file you edited is kept as it is.',
   done: '',
   touches: 'this-machine', lasts: 'kept', risk: 'none', example: { dir: 'notes/memory' },
-  async run(values, services) {
+  async run(values, services, caller) {
     const memory = memoryOf(services);
-    const dir = memory.filesFolder(values.dir ?? '');
+    const dir = memory.filesFolder(values.dir ?? '', caller.personAsked === true);
     const { records, complete } = await allRecords(memory);
     let report;
     try {
@@ -141,9 +144,9 @@ export const MEMORY_REVIEW_FILES: SessionDefinition = {
   actionId: 'review-files', label: 'See what edited memory files would change', word: 'review-files', inputs: [PROJECTION_DIR],
   sentence: 'Compares the memory files in {dir} with memory and lists what your edits would change; nothing is changed.', done: '',
   touches: 'reads', lasts: 'not-a-change', risk: 'none', example: { dir: 'notes/memory' },
-  async run(values, services) {
+  async run(values, services, caller) {
     const memory = memoryOf(services);
-    const dir = memory.filesFolder(values.dir ?? '');
+    const dir = memory.filesFolder(values.dir ?? '', caller.personAsked === true);
     if (!existsSync(dir)) throw new CapabilityRefusal(`There are no memory files in ${dir} yet.`, 'Write them first: "Write memory as files" in the Memory place.');
     const { proposals, orphans, unreadable, complete } = await memoryFileProposals(memory, dir);
     const lines = [
@@ -169,9 +172,9 @@ export const MEMORY_APPLY_FILES: SessionDefinition = {
   // A file a model could write would otherwise become memory without the owner reading it.
   ownerOnly: { reason: 'it turns file edits into memory', instead: 'Ask the owner to review the files and apply them; "See what edited memory files would change" lists the changes.' },
   example: { proposal: 'all' },
-  async run(values, services) {
+  async run(values, services, caller) {
     const memory = memoryOf(services);
-    const dir = memory.filesFolder(values.dir ?? '');
+    const dir = memory.filesFolder(values.dir ?? '', caller.personAsked === true);
     if (!existsSync(dir)) throw new CapabilityRefusal(`There are no memory files in ${dir} yet.`, 'Write them first: "Write memory as files" in the Memory place.');
     const { proposals } = await memoryFileProposals(memory, dir);
     const targeted = values.proposal === 'all' ? proposals : proposals.filter((proposal) => proposal.id === values.proposal);

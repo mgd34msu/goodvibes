@@ -96,6 +96,23 @@ export function isSurfaceManagedSession(session: SharedSessionRecord): boolean {
 }
 
 /**
+ * The principal whose `sessions.register` made a session (from its credential), kept in metadata when the session is
+ * made and never changed after: the only principal that may name the session as a question's asker (inbox.post).
+ */
+export const SESSION_REGISTERED_BY_METADATA_KEY = 'registeredBy';
+
+/**
+ * Who registered a session: the principal kept when it was made; a session kept before this was recorded (or made
+ * in this daemon's own process) is this machine's programs' (`local`, the operator token's principal). Undefined for
+ * a session this daemon does not hold: nobody registered it.
+ */
+export function sessionRegistrant(session: SharedSessionRecord | null | undefined, local: string): string | undefined {
+  if (!session) return undefined;
+  const kept = session.metadata?.[SESSION_REGISTERED_BY_METADATA_KEY];
+  return typeof kept === 'string' && kept ? kept : local;
+}
+
+/**
  * True when a participant OTHER than `exclude` (the current input's own surface)
  * was seen within `freshnessMs`. Excluding the sender prevents a steer's own
  * just-attached participant from making a surfaceless session look live.

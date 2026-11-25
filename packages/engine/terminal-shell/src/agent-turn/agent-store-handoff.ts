@@ -99,6 +99,13 @@ export function carryAgentHandOffsOnce(input: { readonly homeDirectory: string; 
   }
 }
 
+/** Where a hand-off stands, in words. */
+const STATE_WORDS: Readonly<Record<string, string>> = {
+  queued: 'it is waiting for the terminal app to take it', delivered: 'the terminal app has taken it', running: 'the terminal app is working on it',
+  failed: 'it failed', cancelled: 'it was stopped', unreadable: 'its session could not be read', unknown: 'where it stands is not known',
+  active: 'its session is open', closed: 'its session is closed', gone: 'its session no longer exists on the daemon',
+};
+
 function excerpt(text: string, max = 400): string {
   const flat = text.replace(/\s+/g, ' ').trim();
   return flat.length > max ? `${flat.slice(0, max - 3)}...` : flat;
@@ -208,13 +215,13 @@ export function handOffActs(deps: { readonly sessions?: HandOffSessions | undefi
         const matches = exact ? [exact] : all.filter((entry) => entry.sessionId.startsWith(wanted));
         if (matches.length !== 1) throw new CapabilityRefusal(`No hand-off has a session matching ${wanted}.`, 'Handed off, in the Work place, lists them.', 'NOT_FOUND');
         const facts = handOffFacts(matches[0]!, deps.sessions);
-        const said = 'answer' in facts && facts.answer ? `its latest answer: ${facts.answer}` : facts.state === 'gone' ? 'its session no longer exists on the daemon' : `its session is ${facts.state}`;
+        const said = 'answer' in facts && facts.answer ? `its latest answer: ${facts.answer}` : facts.state === 'gone' ? 'its session no longer exists on the daemon' : (STATE_WORDS[facts.state] ?? `its session is ${facts.state}`);
         return { text: `"${excerpt(facts.task, 120)}", handed off ${facts.createdAt.slice(0, 16).replace('T', ' ')}: ${said}.`, data: { handedOff: [facts] } };
       }
       const facts = all.map((entry) => handOffFacts(entry, deps.sessions));
       if (facts.length === 0) return { text: 'No work handed off yet.', data: { handedOff: [] } };
       return {
-        text: [`Work handed off (${facts.length}, newest first)`, ...facts.map((entry) => `  ${entry.createdAt.slice(0, 16).replace('T', ' ')}  ${excerpt(entry.task, 72)}  (${entry.state})`)].join('\n'),
+        text: [`Work handed off (${facts.length}, newest first)`, ...facts.map((entry) => `  ${entry.createdAt.slice(0, 16).replace('T', ' ')}  ${excerpt(entry.task, 72)}  (${'answer' in entry && entry.answer ? 'answered' : STATE_WORDS[entry.state] ?? entry.state})`)].join('\n'),
         data: { handedOff: facts },
       };
     },

@@ -371,7 +371,8 @@ export class HttpListener {
     // left nothing bound; never after an intentional stop.
     const watcher = createHostModeRestartWatcher({
       configManager: this.configManager,
-      keys: ['httpListener.hostMode', 'httpListener.host', 'httpListener.port'],
+      // The address and its TLS: a restart of the listener reads both again.
+      keys: ['httpListener.hostMode', 'httpListener.host', 'httpListener.port', 'httpListener.tls.mode', 'httpListener.tls.certFile', 'httpListener.tls.keyFile'],
       onRestart: () => this.restartCycle.request(),
       getIsRunning: () => this.restartCycle.active,
     });

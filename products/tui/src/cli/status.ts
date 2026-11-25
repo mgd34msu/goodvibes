@@ -6,11 +6,11 @@ import { describeConfiguredPermissions } from '../permissions/configured-posture
 import type { ConfigManager } from '@goodvibes/engine/platform/platform/config';
 import { resolveDaemonEnabled } from '@goodvibes/engine/platform/platform/config';
 import type { OnboardingCheckMarkerState } from '../runtime/onboarding/index.ts';
-import { formatRuntimeEndpointBinding, resolveRuntimeEndpointBinding } from '@goodvibes/engine/terminal-shell/cli-endpoints';
+import { formatRuntimeEndpointBinding, resolveRuntimeEndpointBinding } from '@goodvibes/engine/platform/platform/support/service-posture';
 import type { RuntimeEndpointBinding, RuntimeEndpointId } from '@goodvibes/engine/terminal-shell';
-import { classifyBindPosture, isNetworkFacing, resolveWebSurfaceExposure } from '@goodvibes/engine/terminal-shell/cli-network-posture';
+import { classifyBindPosture, isNetworkFacing, resolveWebSurfaceExposure } from '@goodvibes/engine/platform/platform/support/service-posture';
 import type { GoodVibesCliOutputFormat } from '@goodvibes/engine/terminal-shell';
-import type { CliServicePosture } from './service-posture.ts';
+import type { CliServicePosture } from '@goodvibes/engine/platform/platform/support/service-manager-posture';
 import type { InstallSelfCheckFinding } from '../runtime/install-self-check.ts';
 import { getProviderIdFromModel } from '@goodvibes/engine/platform/platform/providers/provider-model';
 import { describeConfiguredEffort } from '../providers/reasoning-effort-surface.ts';
@@ -225,7 +225,7 @@ function renderWorkspaceSection(workspace: CliWorkspaceStatus | null): string[] 
   if (!workspace) return [];
   return [
     'Workspace:',
-    `  trust: ${workspace.trustLevel}${workspace.trustLegacyIgnored ? ' (a trust.json inside this workspace is not honored; choose a level with /security trust-folder or /security restrict-folder)' : ''}`,
+    `  trust: ${workspace.trustLevel}${workspace.trustLegacyIgnored ? ' (a trust.json inside this workspace is not honored; choose a level in Permissions and safety, This folder)' : ''}`,
     ...(workspace.trustFault ? [`  trust record: damaged, autonomous work stays restricted until a level is chosen (${workspace.trustFault})`] : []),
     `  registration: ${registrationLine(workspace)}`,
     `  root: ${workspace.registrationRoot}`,
@@ -267,7 +267,7 @@ function renderRelaySection(relay: CliRelayStatus | null): string[] {
     `  configEnabled (relay.enabled): ${yesNo(relay.configEnabled)}`,
     `  featureEnabled (relay-connect flag): ${yesNo(relay.featureEnabled)}`,
     `  url: ${relay.url || '(not set)'}`,
-    '  rendezvousId: derived from the daemon\'s relay identity key; /devices relay-status shows it while the daemon is registered',
+    '  rendezvousId: derived from the daemon\'s relay identity key; Devices and network, Relay, Is the relay reachable shows it while the daemon is registered',
     `  requireStepUpForMutations: ${yesNo(relay.requireStepUpForMutations)}`,
     '  Threat model: the relay operator sees only ciphertext and connection metadata; self-host your own relay for full control.',
     '',

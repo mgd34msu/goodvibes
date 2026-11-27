@@ -37,7 +37,11 @@ export interface McpProjectConfig {
   effective(): McpEffectiveConfig;
   /** The servers a project file names that wait for the folder's trust. */
   heldForTrust(): Promise<readonly string[]>;
-  upsert(scope: McpConfigScope, server: McpServerConfig): Promise<{ readonly path: string; readonly connected?: boolean | undefined }>;
+  /**
+   * `byOwner` (default true): the person added it with their own press or typed line, so a project file's entry starts without
+   * the folder's trust question; false for a model's call, whose entry waits on that question as it did at v3.5.0.
+   */
+  upsert(scope: McpConfigScope, server: McpServerConfig, options?: { readonly byOwner?: boolean | undefined }): Promise<{ readonly path: string; readonly connected?: boolean | undefined }>;
   remove(scope: McpConfigScope, name: string): Promise<{ readonly path: string; readonly removed: boolean }>;
   storeToolRule(server: string, tool: string, rule: 'exempt' | 'unexempt'): Promise<{ readonly scope: McpConfigScope; readonly path: string; readonly changed: boolean }>;
   storePolicy(server: string, policy: { readonly trustMode: McpTrustMode } | { readonly role: McpRole }): Promise<{ readonly scope: McpConfigScope; readonly path: string; readonly changed: boolean }>;
@@ -248,9 +252,9 @@ export const MCP_ADD: CapabilityDefinition<McpCapabilityServices> = {
   ],
   sentence: '{name} will be added to the {scope} MCP config and started, until you change it.',
   done: 'Added {name}.',
-  // Adding a server installs a program that each program starts by itself (a command on this computer, or an address
-  // its tools are fetched from): it loosens a protection, asked of the owner and opening on No.
-  touches: 'this-machine', lasts: 'kept', risk: 'loosens-a-protection', undoneBy: 'remove-server',
+  // A model's call of `/mcp add` was a judgment at v3.5.0 (class none), and so it is now. What kept that safe is that a model's
+  // entry in a project file is not the owner's: it waits on the folder's trust question before it starts (`byOwner` below).
+  touches: 'this-machine', lasts: 'kept', risk: 'none', undoneBy: 'remove-server',
   example: { name: 'weather', command: 'npx\n-y\n@acme/weather-mcp' },
   async run(values, services, caller) {
     const config = services.mcp.forProject(caller.workingDirectory);
@@ -258,7 +262,7 @@ export const MCP_ADD: CapabilityDefinition<McpCapabilityServices> = {
     const scope = (values.scope || 'project') as McpConfigScope;
     let result;
     try {
-      result = await config.upsert(scope, server);
+      result = await config.upsert(scope, server, { byOwner: caller.personAsked === true });
     } catch (error) {
       refuse(`Tool server ${server.name} was not added: ${summarizeError(error)}`);
     }

@@ -132,8 +132,9 @@ function onOff(on: boolean): CapabilityDefinition<PluginsCapabilityServices> {
     capability: { id: on ? 'plugin.enable' : 'plugin.disable', group: 'tools', home: 'daemon', repeat: 'safe' },
     actionId: on ? 'enable' : 'disable', label: on ? 'Switch a plugin on' : 'Switch a plugin off', word: on ? 'enable' : 'disable', inputs: [PLUGIN],
     sentence: on ? '{plugin} is switched on and starts in every program, under its trust tier, until you change it.' : '{plugin} is switched off and stops in every program, until you change it.', done: '',
-    // Switching a plugin on makes its code start in every program by itself: it loosens a protection. Off does not.
-    touches: 'this-machine', lasts: 'kept', risk: on ? 'loosens-a-protection' : 'none', undoneBy: on ? 'disable' : 'enable', example: { plugin: 'jira' },
+    // A model's `/plugin enable` was a judgment at v3.5.0 (class none), as `/plugin disable` was, and both are now: the
+    // plugin starts under its trust tier, which is what limits what its code may do.
+    touches: 'this-machine', lasts: 'kept', risk: 'none', undoneBy: on ? 'disable' : 'enable', example: { plugin: 'jira' },
     async run(values, services, caller) {
       const project = projectOf(services, caller);
       const name = values.plugin!;
@@ -194,9 +195,8 @@ export const PLUGIN_TRUST_KEY: CapabilityDefinition<PluginsCapabilityServices> =
   actionId: 'trust-key', label: 'Save a plugin publisher\'s key', word: 'trust-key',
   inputs: [PLUGIN, { id: 'key', label: 'Key file', help: 'The publisher\'s Ed25519 public key (.pem)', kind: 'path', freeTextReason: 'a file path on this machine', required: true, typed: { position: 2 } }],
   sentence: 'The key in {key} is saved as {plugin}\'s publisher key, until you change it, so its signature can be checked.', done: '',
-  // A publisher key is what a plugin's signature is trusted by: saving one lets that publisher's code be trusted. It
-  // loosens a protection.
-  touches: 'credential', lasts: 'kept', risk: 'loosens-a-protection', example: { plugin: 'jira', key: 'keys/acme.pem' },
+  // A model's `/plugin trust-key` was a judgment at v3.5.0 (class none), and so it is now.
+  touches: 'credential', lasts: 'kept', risk: 'none', example: { plugin: 'jira', key: 'keys/acme.pem' },
   async run(values, services, caller) {
     const project = projectOf(services, caller);
     const name = values.plugin!;

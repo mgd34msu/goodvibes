@@ -263,8 +263,9 @@ export const MANAGED_APPLY_STAGED = change({
   },
 });
 export const MANAGED_ROLLBACK = change({
-  // A rollback releases the locks its apply set: a loosening, put to the owner for anyone else.
-  id: 'managed.rollback', actionId: 'rollback', label: 'Undo a managed apply: put back the values from before it', word: 'rollback', risk: 'loosens-a-protection',
+  // A model's `/managed rollback` was a judgment at v3.5.0 (class none), and so it is now. What would loosen a protection is held
+  // back unless "Put them back too" is chosen (the choice's own risk raises the run to a loosening, effectiveRisk).
+  id: 'managed.rollback', actionId: 'rollback', label: 'Undo a managed apply: put back the values from before it', word: 'rollback', risk: 'none',
   inputs: [pickedInput({ id: 'token', label: 'Apply', help: 'Past managed applies', list: MANAGED_ROLLBACKS_LIST, other: 'an apply\'s token' }), incomingSecurityInput('Put them back too')],
   sentence: 'The settings apply {token} changed get their earlier values back, until you change it; if one of them would loosen a protection (an organisation\'s tightening undone), nothing is rolled back unless you choose to put those back too.', example: { token: 'rb-3f1c' },
   run: (values, services, caller) => {

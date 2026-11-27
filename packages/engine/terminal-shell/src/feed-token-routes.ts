@@ -20,6 +20,8 @@ import { splitSlashCommand } from './slash-command-parser.js';
 import { commandFailureMessage, unknownCommandMessage } from './command-mode-route.js';
 import { takeSplashEnterAction } from './first-run/splash-state.js';
 import type { NativeConversationInput } from './native/native-conversation-input.js';
+/** A pasted line is a command only when its first word is `/` and then letters, digits or `-`, followed by a space or the end. */
+const COMMAND_SHAPE = /^\/[A-Za-z0-9-]+(?:\s|$)/;
 export interface FeedCommandContext {
   readonly print: (message: string) => void;
   readonly openSelection?: unknown | undefined;
@@ -368,7 +370,9 @@ export function createFeedTokenRoutes<
         // line would be sent as chat. Intent comes from the literal text.
         if (
           !commandMode &&
-          text.startsWith('/') &&
+          // Only a first word of a command's shape (`/` then letters, digits or `-`, then a space or the end) is a command:
+          // `/etc/hosts what is this`, `/home/a/b`, `//comment` and `/usr/bin/x --flag` are pasted text and go to the model.
+          COMMAND_SHAPE.test(text) &&
           state.commandRegistry &&
           state.commandContext?.executeCommand
         ) {

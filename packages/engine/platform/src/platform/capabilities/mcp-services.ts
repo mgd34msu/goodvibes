@@ -105,16 +105,17 @@ export function createMcpCapabilityServices(sources: McpServiceSources): McpCapa
           roots,
           effective: () => loadMcpEffectiveConfig(roots),
           heldForTrust: async () => own ? own.heldForWorkspaceTrust(roots) : [],
-          async upsert(scope, server) {
+          async upsert(scope, server, options) {
+            const byOwner = options?.byOwner !== false;
             if (own) {
-              // The owner's request: a project file's entry the owner added starts without the folder's trust question.
-              const result = await own.upsertServerConfig(roots, scope, server, { byOwner: true });
+              // The owner's request: a project file's entry the owner added starts without the folder's trust question; a model's does not.
+              const result = await own.upsertServerConfig(roots, scope, server, { byOwner });
               return { path: result.path, connected: own.listServerSecurity().find((entry) => entry.name === server.name)?.connected ?? false };
             }
             const written = await withMcpConfigLock(roots, scope, () => {
               const result = upsertMcpServerConfig(roots, scope, server);
               const entry = result.config.servers.find((candidate) => candidate.name === server.name);
-              if (scope === 'project' && entry) recordOwnerAddedServer(roots.homeDirectory, result.path, entry);
+              if (byOwner && scope === 'project' && entry) recordOwnerAddedServer(roots.homeDirectory, result.path, entry);
               return result;
             });
             return { path: written.path };

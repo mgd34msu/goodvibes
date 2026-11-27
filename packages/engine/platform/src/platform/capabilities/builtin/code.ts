@@ -630,8 +630,8 @@ export const INTELLIGENCE_INSTALL: CodeDefinition = {
   actionId: 'install', label: 'Install the language server for a language', word: 'install',
   inputs: [{ id: 'language', label: 'Language', help: 'A language name, or a file of that language', kind: 'text', freeTextReason: 'a language or a file', required: true, typed: { position: 1 } }],
   sentence: 'The language server for {language} is downloaded into your GoodVibes bin folder, and code lookups use it from then on, until you change it.', done: '',
-  // A downloaded program that code lookups start by themselves from then on: it loosens a protection.
-  touches: 'another-machine', lasts: 'kept', risk: 'loosens-a-protection', example: { language: 'typescript' },
+  // A model's `/intelligence install` was a judgment at v3.5.0 (class none), and so it is now.
+  touches: 'another-machine', lasts: 'kept', risk: 'none', example: { language: 'typescript' },
   available: intelligenceAvailable,
   async run(values, services) {
     return { text: await piece(services, 'intelligence', NO_INTELLIGENCE).install(values.language!) };

@@ -89,6 +89,7 @@ export const RETIRED_SETTING_KEYS: readonly string[] = [
  * - `contract.transportRetryDelayMs`: the wait before a failed step ran again; it runs again at once.
  * - `planner.wallTimeoutMs`: the longest writing a plan could take; a plan is written until it is done or stopped.
  * - `planner.adaptive`: the adaptive planner's switch, which changed nothing (a piece of work has its plan).
+ * - `watchers.triggers.runHistoryTtlHours`: the age ceiling on a trigger's kept runs; runs are kept by count only now.
  */
 export const SETTINGS_KEPT_FOR_ROLLBACK: readonly string[] = [
   'contract.gateTimeoutMs',
@@ -96,6 +97,7 @@ export const SETTINGS_KEPT_FOR_ROLLBACK: readonly string[] = [
   'contract.transportRetryDelayMs',
   'planner.adaptive',
   'planner.wallTimeoutMs',
+  'watchers.triggers.runHistoryTtlHours',
 ];
 
 /**

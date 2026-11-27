@@ -323,26 +323,20 @@ function personAsked(invocation: GatewayMethodInvocation): boolean {
 /**
  * A model's delegation from a conversation in the owner's own program on this machine (terminal-shell
  * agent-turn/daemon-work-delegation.ts): the call says so (`delegatedFrom: 'conversation'`, and `otherParty` when that
- * conversation's turn acts on someone else's input). It is honoured only from a terminal program's own registered key
- * (the terminal app's or the Agent's key file on this machine, pairing/terminal-program-registration.ts), over the
- * operator token on this machine (`local`, never one from another machine), for a conversation session that same
- * program registered. From any other caller (a script or `mcp serve` holding the operator token, a key a script made up,
- * a session it registered itself, a remote token holder, a device, a member) the field is ignored and the delegation is
- * decided as that caller's: put to the owner as the owner's own act. Such a delegation is decided under the owner's mode as an
- * agent spawn is, and the work it makes carries that conversation's party.
+ * conversation's turn acts on someone else's input). It is honoured over the operator token on this machine (`local`, never
+ * one from another machine), whether or not the program holds a registration (a registration decides nothing). From any
+ * other caller (a remote token holder, a device, a sign-in) the field is ignored and the call is the user's own. Such a
+ * delegation is a model's: decided under the owner's mode as an agent spawn is, and the work it makes carries that
+ * conversation's party.
  */
-function conversationDelegation(params: Record<string, unknown>, invocation: GatewayMethodInvocation, deps: Pick<CapabilityRouteDeps, 'terminalProgram' | 'sessionRegistrant'>): { readonly otherParty?: string } | undefined {
+function conversationDelegation(params: Record<string, unknown>, invocation: GatewayMethodInvocation, _deps: Pick<CapabilityRouteDeps, 'terminalProgram' | 'sessionRegistrant'>): { readonly otherParty?: string } | undefined {
   if (params['delegatedFrom'] !== 'conversation') return undefined;
   const kind = invocation.context.credentialKind;
   const actor = invocation.context.actor;
   if (kind !== 'local' || actor?.class !== 'owner' || actor.agentFor !== undefined) return undefined;
   if (invocation.context.transport !== undefined && invocation.context.transport !== 'loopback') return undefined;
-  const registration = invocation.context.call?.registration;
-  if (!registration || deps.terminalProgram?.(registration) !== true) return undefined;
-  // A session this same program registered: kept with its registration (`<caller>#<program>`); one kept with none (a
-  // script's, or one from before registrations were kept) is not that program's conversation.
-  const sessionId = invocation.context.call?.sessionId;
-  if (!sessionId || deps.sessionRegistrant?.(sessionId) !== `${callerKey(invocation.context)}${REGISTRATION_MARK}${registration}`) return undefined;
+  // A registration decides nothing (daemon/program-registrations.ts): the operator token on this machine, registered or not,
+  // sends this, and what it says can only tighten (the work is marked as someone else's when it names `otherParty`).
   const other = typeof params['otherParty'] === 'string' ? params['otherParty'].trim() : '';
   return other ? { otherParty: other } : {};
 }
@@ -763,10 +757,12 @@ function createRunHandler(deps: CapabilityRouteDeps, methods: Pick<GatewayMethod
     // The one rule (daemon/method-owner-decision.ts): the owner's own press (their sign-in, or their verified program with
     // their press) or a call their program's gate decided gets it at once; any other caller, the operator token alone
     // included, goes to the gate.
-    const hisOwnPress = ownersOwnPress({
+    // A model's delegation from a conversation (`conversation`, sent by the program with the user's token for its model) is a
+    // model's call: it is decided under the owner's mode as an agent spawn is, never taken as the user's own act.
+    const hisOwnPress = (conversation === undefined && ownersOwnPress({
       actor: invocation.context.actor, credentialKind: invocation.context.credentialKind ?? undefined,
       registration: invocation.context.call?.registration, personAsked: personAsked(invocation),
-    }) || decidedByProgramGate(invocation);
+    })) || decidedByProgramGate(invocation);
     const resultSecret = definition?.resultSecret !== undefined && !hisOwnPress ? definition.resultSecret : undefined;
     if (resultSecret !== undefined) {
       // Carried out to anyone but the owner in person: the owner's own act, refused (a model never gets it: refused above).

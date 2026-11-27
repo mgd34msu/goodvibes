@@ -23,10 +23,13 @@ const model = Bun.serve({ hostname: '127.0.0.1', port: 0, async fetch(request) {
   if (path.endsWith('/models')) return Response.json({ object: 'list', data: [{ id: 'standin-model', object: 'model', context_length: 128000 }] });
   if (!path.endsWith('/chat/completions')) return new Response('not found', { status: 404 });
   const body = await request.json() as { messages: { role: string; content: unknown }[] };
-  // The person's last message: the turn's own `[Host]` note for this request (core/host-instructions.ts) is not what was asked.
+  // What the editor asked now: the turn's own `[Host]` note for this request (core/host-instructions.ts) is not it, and the
+  // message before it carries the whole recent transcript ("User: ..." and "Assistant: ..." turns), of which only the last
+  // turn is the newest prompt; an earlier prompt in the transcript must not decide the answer.
   const said = (content: unknown): string => (typeof content === 'string' ? content : Array.isArray(content)
     ? content.map((part) => (part && typeof part === 'object' && typeof (part as { text?: unknown }).text === 'string' ? (part as { text: string }).text : '')).join('') : '');
-  const asked = JSON.stringify(body.messages.filter((message) => message.role === 'user' && !said(message.content).trimStart().startsWith('[Host]')).at(-1)?.content ?? '');
+  const carried = said(body.messages.filter((message) => message.role === 'user' && !said(message.content).trimStart().startsWith('[Host]')).at(-1)?.content);
+  const asked = carried.split(/\n+(?=(?:User|Assistant): )/).at(-1) ?? '';
   if (asked.includes('Fail this one')) return Response.json({ error: { message: 'the key was refused', type: 'invalid_request_error' } }, { status: 401 });
   const text = asked.includes('Say it again') ? 'Again from the stand-in.' : 'Hello from the stand-in.';
   const chunk = (delta: object, finish: string | null) => `data: ${JSON.stringify({ id: 'c1', object: 'chat.completion.chunk', created: 0, model: 'standin-model', choices: [{ index: 0, delta, finish_reason: finish }] })}\n\n`;
@@ -61,6 +64,8 @@ test("an editor's prompt is answered, the next one too, and a model failure ends
 
     expect(await prompt('Say hello.')).toEqual({ stopReason: 'end_turn', error: null, said: 'Hello from the stand-in.' });
     expect(await prompt('Say it again.')).toEqual({ stopReason: 'end_turn', error: null, said: 'Again from the stand-in.' });
+    // The newest prompt decides the stand-in's answer, though an earlier one in the transcript says otherwise.
+    expect(await prompt('Say hello.')).toEqual({ stopReason: 'end_turn', error: null, said: 'Hello from the stand-in.' });
     const failed = await prompt('Fail this one.');
     expect({ stopReason: failed.stopReason, failedWith401: /^Error: The run failed: .*401/.test(failed.error ?? '') }).toEqual({ stopReason: null, failedWith401: true });
   } finally {

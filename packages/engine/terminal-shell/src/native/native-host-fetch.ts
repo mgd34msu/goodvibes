@@ -18,9 +18,9 @@ export class NativeHostSelectionChangedError extends Error {
 export function createNativeHostFetch(options: { readonly current: () => boolean; readonly fetchImpl?: NativeHostFetch }): NativeHostFetch {
   return async (input, init) => {
     if (!options.current()) throw new NativeHostSelectionChangedError();
-    // This program's call context and the registration the daemon issued it for this credential (call-context.ts): the
-    // daemon gives native authority to the operator token only from the owner's own verified program, never to the
-    // token alone (platform daemon/method-owner-decision.ts `ownersProgramCaller`).
+    // This program's call context and, when the daemon issued one, the registration for this credential (call-context.ts).
+    // A registration is optional and decides nothing: the daemon gives native authority by the kind of credential, so a
+    // program that cannot register sends none and is served the same.
     const headers = new Headers(init?.headers ?? (input instanceof Request ? input.headers : undefined));
     const bearer = headers.get('authorization')?.replace(/^Bearer\s+/i, '').trim();
     const target = input instanceof Request ? input.url : String(input);

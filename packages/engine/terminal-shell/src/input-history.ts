@@ -118,6 +118,36 @@ const BUILTIN_REDACTION_RULES: readonly HistoryRedactionRule[] = [
         replacement: '$1 <redacted>',
     },
 ];
+/** The words of a secret-setting line that are options and not the value. */
+const SECRET_SETTING_OPTIONS: ReadonlySet<string> = new Set(['--user', '--project', '--secure', '--plaintext', '--yes']);
+/**
+ * A typed `/secrets set KEY value ...` line with the value taken out, whether or not the value looks like a credential:
+ * the key and the options stay, every other word after the key becomes one `<redacted>`. Any other line is returned as
+ * it is. A line whose key is left out (`/secrets set`, which asks for the value on a hidden line) has no value to take out.
+ */
+function maskSecretSettingLine(text: string): string {
+    const start = /^(\s*\/secrets\s+set)(\s+|$)/i.exec(text);
+    if (!start)
+        return text;
+    const words = text.slice(start[0].length).split(/\s+/).filter((word) => word !== '');
+    const kept: string[] = [];
+    let key = false;
+    let masked = false;
+    for (const word of words) {
+        if (SECRET_SETTING_OPTIONS.has(word.toLowerCase())) {
+            kept.push(word);
+        }
+        else if (!key) {
+            key = true;
+            kept.push(word);
+        }
+        else if (!masked) {
+            masked = true;
+            kept.push('<redacted>');
+        }
+    }
+    return [start[1]!.trim(), ...kept].join(' ');
+}
 export interface InputHistoryOptions {
     /** Product storage identity; the history algorithm does not choose the product. */
     readonly surfaceRoot?: string | undefined;
@@ -233,7 +263,7 @@ export class InputHistory {
      * Returns the scrubbed text (password arguments replaced with `<redacted>`).
      */
     private applyRedaction(text: string): string {
-        let result = text;
+        let result = maskSecretSettingLine(text);
         for (const rule of this.redactionRules) {
             result = result.replace(rule.pattern, rule.replacement);
         }

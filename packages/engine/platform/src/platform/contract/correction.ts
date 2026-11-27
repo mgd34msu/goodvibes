@@ -830,8 +830,8 @@ export function createCorrection(context: StepContext, escalations: Pick<Escalat
       question: buildOwnerAcceptanceQuestion(run.contract, input),
       retryOrCancel: true,
     });
-    // The caller saves the question's binding and writes the checkpoint once. Accepted by the rule of the mode (outside
-    // Ask me), it waits for nobody, and its done line says so.
+    // The caller saves the question's binding and writes the checkpoint once. The question is asked in every mode as
+    // released, so the work waits for the owner's answer and its line says so.
     if (escalation.resolvedAt === undefined) run.contract.statusLine = 'The work finished; no decision model is in use, so its result waits for you to accept it or stop the work.';
     return escalation.id;
   }
@@ -847,8 +847,7 @@ export function createCorrection(context: StepContext, escalations: Pick<Escalat
       question: buildPublicationPauseQuestion(run.contract, input),
       retryOrCancel: true,
     });
-    // Not put in again (decided at once outside Ask me, a third time): the work ended failed, and its end line says
-    // what failed and what is kept where.
+    // The work may have ended while the question was raised: its end line says what failed and what is kept where.
     if (run.terminal) { context.checkpoint?.(run); return; }
     const what = `The work's result passed its checks but could not be put in the project (${input.note})${input.branch === undefined ? '' : `; it is kept on branch ${input.branch}`}.`;
     // Put to the owner in every mode (contract/escalation.ts `asksOwner`).

@@ -575,14 +575,7 @@ export function createCompletion(context: StepContext, correction: Pick<Correcti
     ];
     // A finished result no decision model checked waits for the owner to accept it, in every mode (as released).
     const unaccepted = source !== undefined && problems.length === 0 && !ownerAccepted(contract, source.source);
-    const ownerAsked: boolean = true;
-    if (unaccepted && !ownerAsked && notJudged !== undefined) {
-      run.control.fail('judgment-unavailable', `its result could not be checked: the decision model failed (${notJudged})`);
-      return null;
-    }
-    const acceptedByRule = unaccepted && !ownerAsked;
-    const awaitingOwner = unaccepted && ownerAsked;
-    if (acceptedByRule) contract.statusLine = 'Done; no decision model checked its result, so it was accepted by the rule of your permission mode.';
+    const awaitingOwner = unaccepted;
     const passed = problems.length === 0 && !awaitingOwner;
     const checkId = `${input.targetId}.k${input.checks.length + 1}`;
     const now = run.env.now();
@@ -612,10 +605,10 @@ export function createCompletion(context: StepContext, correction: Pick<Correcti
       const treeId = source.source.startsWith('tree:') ? source.source.slice('tree:'.length) : workingTreeIdentity(tree);
       if (treeId !== null) {
         const record: AcceptanceRecord = { version: 1, checkId, tree: treeId, fixRounds: contract.fixRounds };
-        decideRecorded(run, 'checked', acceptanceTarget(contract.id), `accepted result recorded (check ${checkId}, tree ${treeId.slice(0, 12)}): ${acceptedByRule ? 'accepted by the rule of the owner\'s permission mode' : 'accepted by the owner'}, not independently checked`, receiptRecord(record));
+        decideRecorded(run, 'checked', acceptanceTarget(contract.id), `accepted result recorded (check ${checkId}, tree ${treeId.slice(0, 12)}): accepted by the owner, not independently checked`, receiptRecord(record));
       }
     }
-    const said = passed ? (source === undefined ? 'pass' : acceptedByRule ? 'pass, accepted by the rule of the owner\'s permission mode' : 'pass, accepted by the owner') : awaitingOwner ? 'the owner is asked to accept the result' : problems.join(', ');
+    const said = passed ? (source === undefined ? 'pass' : 'pass, accepted by the owner') : awaitingOwner ? 'the owner is asked to accept the result' : problems.join(', ');
     run.decide('checked', input.targetId, `check ${checkId} (${input.trigger}): ${said}; ${notJudged === undefined ? 'not independently checked: no decision model is in use' : `not judged: ${notJudged}`}`);
     run.emit({
       type: 'CONTRACT_CHECKED',

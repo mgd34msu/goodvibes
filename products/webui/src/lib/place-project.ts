@@ -13,9 +13,9 @@
  * not choose. The last choice is kept in this browser
  * only (a convenience: a browser that keeps nothing opens on the first).
  */
-import { useQuery } from '@tanstack/react-query';
+import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { useCallback, useEffect, useSyncExternalStore } from 'react';
-import { useEventStreamState } from './event-stream';
+import { subscribeEvents, useEventStreamState } from './event-stream';
 import { chatCallProject, invokeThroughMethod, setCallProject } from './goodvibes';
 import { accountKey } from './account-storage';
 import { subscribeClientLifetime } from './client-lifetime';
@@ -132,12 +132,33 @@ export interface PlaceProjects {
   readonly reason?: string | undefined;
 }
 
+/** Whether a frame of the workspace domain says a project was added or let go (a `workspaces.*` capability ran). */
+function changesProjects(frame: unknown): boolean {
+  const outer = (typeof frame === 'object' && frame !== null ? frame : {}) as { type?: unknown; list?: unknown; id?: unknown; payload?: unknown };
+  const inner = (typeof outer.payload === 'object' && outer.payload !== null ? outer.payload : {}) as { type?: unknown; list?: unknown; id?: unknown };
+  for (const event of [inner, outer]) {
+    if (event.type === 'LIST_CHANGED' && event.list === 'capabilities' && typeof event.id === 'string') return event.id.startsWith('workspaces.');
+  }
+  return false;
+}
+
 export function usePlaceProjects(): PlaceProjects {
   const read = useQuery({ queryKey: PLACE_PROJECTS_KEY, queryFn: readProjects, staleTime: Infinity });
   // Projects that could not be read are read again when the daemon's event stream is live again (no timer).
   const stream = useEventStreamState('app');
   const { isError, refetch } = read;
   useEffect(() => { if (stream.status === 'live' && isError) void refetch(); }, [stream.status, isError, refetch]);
+  // The list follows the daemon the way every place's lists do (hooks/usePlaceLists.ts): a project added or let go is
+  // announced on the event lane and read again; after a lane that dropped comes back, or lost frames, it is read again
+  // too, since a notice may have been missed. No poll and no timer.
+  const queryClient = useQueryClient();
+  useEffect(() => subscribeEvents({
+    domains: ['workspace'],
+    events: ['workspace'],
+    onEvent: (_name, payload) => { if (changesProjects(payload)) void queryClient.invalidateQueries({ queryKey: PLACE_PROJECTS_KEY }); },
+    onReady: (resumed) => { if (resumed) void queryClient.invalidateQueries({ queryKey: PLACE_PROJECTS_KEY }); },
+    onGap: () => { void queryClient.invalidateQueries({ queryKey: PLACE_PROJECTS_KEY }); },
+  }), [queryClient]);
   const current = useSyncExternalStore(subscribe, () => chosen, () => chosen);
   const projects = read.data?.roots ?? [];
   const unreachable = read.data?.unreachable ?? [];

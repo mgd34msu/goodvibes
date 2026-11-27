@@ -385,16 +385,9 @@ function searchPathFolders(): readonly string[] {
 /**
  * A call something outside the permission rules asks the owner about (`ownerAsk`: a tool server set to ask before a
  * call outside its limits, their Pre:tool hook): put to them, with that as why, never as "your rule says to ask you".
- * Asked every time (`once`): nothing is offered to remember, and no remembered answer (a rule or a session's yes, one
- * given on a call inside the server's limits included) settles it, since an allow is turned back into this ask. To
- * allow more, the owner changes the server's limits or its trust level (Tools and extensions), or their hook.
+ * As released it is the owner's own standing "ask me", in every mode (YOLO included; held for them in Just vibes): the
+ * card offers the usual remember options. A refusal stands.
  */
-/** A model's hook change as the one decision path reads it: a grant of access (`dangerous`), acting on the app's state. */
-const HOOK_CHANGE_DEFINITION: ToolDefinition = {
-  name: 'state', description: 'A change to the hooks that run on events: it grants a command, a script or an address access to every event it matches.',
-  parameters: { type: 'object' }, dangerous: true, sideEffects: ['state'],
-};
-
 function askedByOwnerRule(decided: CallClass, ownerAsk: string | undefined): CallClass {
   // As released: the owner's own rule outside the gate (a tool server's "ask on risk" level, their Pre:tool hook) puts the
   // call to them in every mode, YOLO included, as their standing "ask me" (held for them in just-vibes). A refusal stands.
@@ -2201,13 +2194,38 @@ export class PermissionManager {
         });
     assertPermissionActive(signal);
     if (rule?.effect === 'deny') return { approved: false, reason: `refused by ${rule.description}` };
-    // The one decision path every call takes (checkActive): the change is a grant of access (the definition says so),
-    // decided under the owner's mode: YOLO runs it, Jev decides and Just vibes ask Jev told it grants access, Ask me
-    // asks the owner. Nothing beside that path asks or holds it.
-    const result = await this.checkActive('state', args, undefined, signal, undefined, HOOK_CHANGE_DEFINITION);
-    if (result.approved) return { approved: true };
-    void analysis;
-    return { approved: false, reason: result.detail ?? result.userReason ?? `the ${hook.type} hook change was not allowed under your permission mode` };
+    // As released: the change is classified as a call of its own (a grant of access), and no decision model reads it: Ask me
+    // and Jev decides put it to the owner on its own card, Just vibes holds it for the end of the run, YOLO runs it, plan
+    // refuses it.
+    const decided = classifyCall(mode, this.callFacts({
+      toolName: 'the hook change', args, category: 'write', mode, surface: this.gate.surfaceOf?.(), definition: undefined, ownerOnly,
+      directory: this.directoryHere(), rule,
+      untrustedRead: (this.gate.ledger ?? getProcessUntrustedContentLedger()).hasIngestedThisTurn(),
+    }));
+    const refusal = (decision: ToolDecision): string => [decision.reason, ...(decision.next ?? []).slice(0, 1)].join('; ');
+    if (decided.kind === 'fact') return decided.allow ? { approved: true } : { approved: false, reason: refusal(decided.decision) };
+    // The owner-only kind it is put to them as: grant-access, or a channel's request, or their own "always ask me" rule.
+    const item: OwnerOnlyKind = decided.kind === 'owner-only' ? decided.item : ownerOnly;
+    // A just-vibes run does not stop for it: it is held for the owner at the end of the run.
+    if (mode === 'just-vibes') {
+      const held = this.queuedForOwner({ toolName: 'state', args }, analysis, `held for you: ${ownerOnlyReason(item)}`, item);
+      return { approved: false, reason: held.result.decision ? refusal(held.result.decision) : (held.result.detail ?? 'held for the owner') };
+    }
+    const reply = await awaitPermission(() => this.requestPermission({
+      callId: crypto.randomUUID(), tool: 'state', args, category: 'write',
+      analysis: { ...analysis, reasons: [...analysis.reasons, `Only you decide this: ${ownerOnlyReason(item)}.`] },
+      workingDirectory: this.directoryHere() ?? undefined,
+      // A channel's request is approved one call at a time: no remembered answer can stand in for the owner there.
+      rememberOptions: item === 'channel-request' ? [] : buildRememberOptions('state', args, this.rememberedRulesHere()),
+      ownerOnly: item,
+    }, { signal }), signal);
+    assertPermissionActive(signal);
+    // The change itself cannot be edited on the card: an answer that edited it remembers nothing.
+    const modified = reply.modifiedArgs === undefined ? undefined : captureOwnedJson(reply.modifiedArgs) as Record<string, unknown>;
+    const notSaved = item === 'channel-request' ? undefined : await this.rememberReply('state', args, reply, modified, item);
+    assertPermissionActive(signal);
+    if (reply.approved) return { approved: true };
+    return { approved: false, reason: reply.reason ?? `the ${hook.type} hook change was not approved${notSaved ? `. ${notSaved}` : ''}` };
   }
 
   /**

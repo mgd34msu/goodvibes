@@ -349,7 +349,7 @@ export const PAYMENTS_REPEATS: CapabilityDefinition<unknown> = {
     const rows = Array.isArray(answer.authorizations) ? answer.authorizations.map(record) : [];
     return {
       text: rows.length === 0
-        ? 'No repeat purchases: a schedule or trigger buys nothing without one.'
+        ? 'No repeat purchases allowed. A purchase a schedule or trigger starts is decided like any other: your spending limits, and the purchase window past a limit, in every permission mode. "Allow a repeat purchase" says in advance what may be bought.'
         : ['Repeat purchases you have allowed:', ...rows.map((row) => `  ${text(row.item)}${row.live === false ? ' (ended)' : ''}: ${repeatSummary(row)}`)].join('\n'),
       data: { authorizations: rows.map((row) => ({ ...row, name: text(row.item), detail: repeatSummary(row), state: row.live === false ? 'ended' : 'allowed' })) },
     };

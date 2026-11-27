@@ -152,7 +152,7 @@ export interface DevicePostureRuntimeOptions {
   readonly config: DevicePostureConfigSource;
   /**
    * Who answers a request no live grant covers (device-capability-service.ts `DeviceNoGrantAuthority`): the daemon's
-   * 'allow', since the request was decided once before it got here. Absent: the owner is asked.
+   * 'allow' in YOLO and 'ask-owner' in every other mode, as released. Absent: the owner is asked.
    */
   readonly noGrantAuthority?: (() => DeviceNoGrantAuthority) | undefined;
   /** The host's lifetime; aborting it withdraws requests no phone has picked up. */

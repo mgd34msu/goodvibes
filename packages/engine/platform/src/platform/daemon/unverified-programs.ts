@@ -1,8 +1,10 @@
 /**
- * unverified-programs.ts, the folders a terminal program may name where the daemon cannot verify it (macOS, Windows,
- * or a Linux daemon whose program socket could not open: daemon/program-socket.ts `programVerificationAvailable`).
+ * unverified-programs.ts, left in place and doing nothing. Registration is optional and decides nothing: a terminal program
+ * the daemon cannot verify (macOS, Windows, or a Linux daemon whose program socket could not open: daemon/program-socket.ts
+ * `programVerificationAvailable`) names any folder as the user does, and no folder is given, asked about or refused for that.
+ * `createUnverifiedProgramProjects` answers undefined for every call.
  *
- * There, nothing a program says is taken as the owner's and nothing is refused outright for that alone: a call with the
+ * What the rest of this comment describes is the old rule, never reached: a call with the
  * operator token from this machine (`local`) that carries no registration and names a folder it was not given has that
  * folder given to it decided by the daemon's one permission manager under the owner's mode, as a loosening with who
  * asks as a fact (capability-owner-gate.ts `decideGrant`): YOLO gives it, Jev decides and Just vibes ask Jev, Ask me asks
@@ -13,9 +15,8 @@
  * can never be a project, or is not registered, is never given.
  *
  * What this cannot tell apart, said plainly: on such a computer every process of the account holding the operator token
- * is "GoodVibes on this computer" to the daemon; the folder is given to that token, not to one program. Where
- * verification works (Linux), this decides nothing: a caller without a registration is a script, and names no project
- * it was not given.
+ * is "GoodVibes on this computer" to the daemon; the folder is given to that token, not to one program. (Not the rule now:
+ * the token is the user, whatever process holds it.)
  */
 import { join } from 'node:path';
 import type { GatewayMethodCatalog } from '../control-plane/method-catalog.js';
@@ -24,6 +25,9 @@ import { checkCallerProject, whyNeverAProject } from '../workspace/caller-projec
 import { resolveGoodVibesDaemonHome } from '../config/goodvibes-home.js';
 import { decideProjectGrant, giveOutsideAgentProject, type OutsideAgentProjectAnswer } from './outside-agent.js';
 import { isRegisteredProgram } from './program-registrations.js';
+
+/** Whether a program the daemon cannot register has the folders it names decided. It does not: registration decides nothing. */
+const REGISTRATION_DECIDES_FOLDERS = false as boolean;
 
 /** Who the decision names. */
 export const UNVERIFIED_PROGRAM_WORDS = 'GoodVibes on this computer';
@@ -40,7 +44,9 @@ export function createUnverifiedProgramProjects(deps: {
   const facts = { homeDirectory: deps.homeDirectory, goodVibesHome: join(deps.homeDirectory, '.goodvibes'), daemonHome };
 
   return async (caller, folders, signal) => {
-    if (deps.verificationAvailable() || caller.credentialKind !== 'local' || isRegisteredProgram(caller.registration)) return undefined;
+    // Registration decides nothing: the operator token on this machine is the user, who names any folder, with or without a
+    // program's registration, so nothing is given, asked or refused here. What follows is left in place and is never reached.
+    if (!REGISTRATION_DECIDES_FOLDERS || deps.verificationAvailable() || caller.credentialKind !== 'local' || isRegisteredProgram(caller.registration)) return undefined;
     for (const folder of folders) {
       const given = checkCallerProject(folder, { ownersProgram: false, principalId: caller.principalId }, { ...facts, assignedProjects: (who) => store.projectsOf(who) });
       if (given.ok) continue;

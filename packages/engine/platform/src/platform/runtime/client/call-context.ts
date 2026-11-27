@@ -36,9 +36,10 @@ export const CALL_SESSION_HEADER = 'x-goodvibes-session';
 export const CALL_READ_OUTSIDE_HEADER = 'x-goodvibes-read-outside';
 
 /**
- * The header carrying the registration the daemon issued this program over its program socket: what tells the terminal
- * app, the Agent, a command line and a script apart when they hold the same operator token. Issued by the daemon of
- * this machine only, kept in this process's memory only, sent only to that daemon's own listener. Never logged or shown.
+ * The header carrying the registration the daemon issued this program over its program socket: it names which program a
+ * call comes from (a record) and decides nothing; the operator token on this machine is the user with or without it. Issued by
+ * the daemon of this machine only, kept in this process's memory only, sent only to that daemon's own listener. Never
+ * logged or shown. A program that cannot register sends none and works the same.
  */
 export const CALL_PROGRAM_KEY_HEADER = 'x-goodvibes-program-key';
 
@@ -92,8 +93,8 @@ const DELEGATED_LIMIT = 32;
 /**
  * Say that `delegated` (the Agent's own credential, kind `agent` at the daemon) was made with `ordinary` (the credential
  * the program registered with): a call this program makes with `delegated` sends the registration issued for
- * `ordinary`, the only way the daemon takes that credential as this Agent's (platform daemon/method-owner-decision.ts
- * `ownersAgentProgram`).
+ * `ordinary` (a record of which program it is; the daemon takes the credential as this Agent's with or without it,
+ * platform daemon/method-owner-decision.ts `ownersAgentProgram`).
  */
 export function bindDelegatedCredential(delegated: string, ordinary: string): void {
   if (!delegated || !ordinary || delegated === ordinary) return;
@@ -133,29 +134,24 @@ function programSocketPath(): string | undefined {
 }
 
 /**
- * The one sentence a terminal program says at its start where this computer cannot prove it to the daemon (another
- * system, or a daemon that left its note: platform daemon/program-socket.ts UNVERIFIED_NOTE_NAME); undefined where
- * it can.
+ * The sentence a terminal program said at its start where this computer cannot prove it to the daemon. A registration
+ * decides nothing now (the token on this machine is the user), so there is nothing to say: always undefined. Kept so the
+ * programs' start-up code is unchanged.
  */
 export function programVerificationNotice(): string | undefined {
-  const why = programUnverifiedReason();
-  return why === undefined ? undefined
-    : `This computer cannot prove this program to the daemon, so the first act in each folder asks you once, and every act you decide is put to you in Waiting for you (${why}).`;
+  return undefined;
 }
 
 /**
- * The Agent's sentence where this computer cannot prove it to the daemon: its own work (a turn handed to the daemon,
- * Work, purchase windows) needs a program the daemon can prove or a device the owner paired, so it is refused here,
- * and the way through is pairing this computer as the owner's device. Undefined where the program can be proved.
+ * The sentence the Agent said where this computer cannot prove it to the daemon ("the Agent cannot work here yet"). The
+ * Agent works the same without a registration, so it is refused nothing: always undefined.
  */
 export function agentVerificationRefusal(): string | undefined {
-  const why = programUnverifiedReason();
-  return why === undefined ? undefined
-    : `The Agent cannot work here yet: this computer cannot prove this program to the daemon (${why}), and the Agent's own work runs only for a program the daemon can prove or a device you paired yourself. To use it, pair it as your device from your own screen: in your signed-in web UI, Devices and network, Pair something, "Show the sign-in code once"; then run goodvibes-agent setup pair --with-code in a terminal here and type that code. (A pairing someone else asks for and you approve gives it a key of its own, never your device.)`;
+  return undefined;
 }
 
-/** Why this computer cannot prove its programs to the daemon (another system, or the daemon's note); undefined when it can. */
-function programUnverifiedReason(): string | undefined {
+/** Why this computer cannot prove its programs to the daemon (another system, or the daemon's note); no longer read for any notice. */
+export function programUnverifiedReason(): string | undefined {
   if (process.platform !== 'linux') return `on ${process.platform} the daemon has no way to verify the program that connects`;
   try {
     const why = readFileSync(join(resolveGoodVibesDaemonHome(homedir()), 'programs-unverified.txt'), 'utf8').trim();
@@ -349,8 +345,7 @@ let programContext: ProgramCallContext | undefined;
 
 /**
  * The client kind a command line names itself with (`do` and `find` on any program's command line), never `tui` or
- * `agent`. The daemon holds such a call for the owner when it weakens a protection, cannot be undone, spends money,
- * writes a secret or is the owner's own act (capabilities/command-line-hold.ts), whatever registration it carries.
+ * `agent`. It is a record of how the call was made; the daemon decides nothing by it (a typed `do` is the user's own act).
  */
 export const COMMAND_LINE_CLIENT = 'cli';
 let commandLine = false;

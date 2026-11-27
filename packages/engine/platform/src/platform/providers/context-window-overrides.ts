@@ -64,10 +64,18 @@ export function isValidContextWindowOverride(value: number): boolean {
   return Number.isInteger(value) && value > 0 && value <= MAX_CONTEXT_WINDOW_OVERRIDE;
 }
 
+/**
+ * The smallest limit a provider's refusal can teach as a model's window. A smaller figure is a count of something
+ * else (an estimate of tokens sent, a step), never a window: it is not learned, and one already stored in the file
+ * (an earlier version learned 388) is dropped as the file is read, so it is never applied.
+ */
+export const MIN_LEARNED_CONTEXT_WINDOW = 1024;
+
 function readValidEntries(source: Record<string, number> | undefined, label: string): Map<string, number> {
   const map = new Map<string, number>();
   for (const [registryKey, value] of Object.entries(source ?? {})) {
-    if (typeof value === 'number' && isValidContextWindowOverride(value)) {
+    if (typeof value === 'number' && isValidContextWindowOverride(value) &&
+        (label !== 'observed-limit' || value >= MIN_LEARNED_CONTEXT_WINDOW)) {
       map.set(registryKey, value);
     } else {
       logger.warn(`[context-window-overrides] Dropping invalid ${label} entry`, { registryKey, value });
@@ -276,14 +284,15 @@ export class ContextWindowOverrideStore {
   }
 
   /**
-   * A provider rejected a request of ~`rejectedAtTokens` as too long: record
-   * that size as the model's practical ceiling. Only lowers (or sets) the
-   * learned limit, a larger rejection than a known-smaller limit teaches
-   * nothing new.
+   * A provider's refusal stated `statedLimitTokens` as the model's context
+   * limit: record it as the model's ceiling. Only the number the provider's
+   * own words state is passed here, never a count of what was sent. Only lowers
+   * (or sets) the learned limit, a larger limit than a known-smaller one
+   * teaches nothing new.
    */
-  recordRejection(registryKey: string, rejectedAtTokens: number): void {
-    const rounded = Math.floor(rejectedAtTokens);
-    if (!isValidContextWindowOverride(rounded)) return;
+  recordRejection(registryKey: string, statedLimitTokens: number): void {
+    const rounded = Math.floor(statedLimitTokens);
+    if (!isValidContextWindowOverride(rounded) || rounded < MIN_LEARNED_CONTEXT_WINDOW) return;
     const state = this.load();
     // An older accepted request already contradicts a smaller supposed cap.
     const accepted = state.accepted.get(registryKey);

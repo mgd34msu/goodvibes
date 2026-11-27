@@ -284,6 +284,32 @@ export async function isContextSizeExceededError(err: unknown, site = 'types.err
   return (await readErrorFailure(err, site)).contextExceeded;
 }
 
+/** How a provider states its limit inside a context-length refusal; the first number found by the first matching wording. */
+const STATED_CONTEXT_LIMIT_WORDINGS: readonly RegExp[] = [
+  /maximum context length(?: of| is|:)?\s*(\d[\d,_]*)/i,
+  /(?:context|input) (?:length|window|size) (?:limit )?(?:of|is|:|=)\s*(\d[\d,_]*)/i,
+  />\s*(\d[\d,_]*)\s*(?:tokens\s*)?maximum/i,
+  /maximum number of (?:input )?tokens (?:allowed|is|of)?\D{0,6}(\d[\d,_]*)/i,
+  /(?:token|context) limit(?: of| is|:)\s*(\d[\d,_]*)/i,
+  /n_ctx\D{0,6}(\d[\d,_]*)/i,
+];
+
+/**
+ * The context limit a provider's own refusal text states (its maximum, not the size that was sent), or undefined
+ * when the text states none. Only this number is ever learned as a model's window (the store refuses an implausibly
+ * small one): a refusal that names no limit teaches nothing, however it was classified.
+ */
+export function readStatedContextLimit(err: unknown): number | undefined {
+  if (!(err instanceof Error)) return undefined;
+  for (const wording of STATED_CONTEXT_LIMIT_WORDINGS) {
+    const found = wording.exec(err.message)?.[1];
+    if (found === undefined) continue;
+    const stated = Number(found.replace(/[,_]/g, ''));
+    if (Number.isInteger(stated) && stated > 0) return stated;
+  }
+  return undefined;
+}
+
 /**
  * The facts a stream retry carries for its readers, from the error's own
  * fields: its status, whether it was a rate or quota refusal, and the wait the

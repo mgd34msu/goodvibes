@@ -13,8 +13,11 @@
  *   program: {"answer": <the challenge>, "program": "tui"|"agent", "token": <its operator token>}
  *   daemon:  {"read": true}                                 its own step is over: the program closes itself again
  *   program: {"closed": true}
- *   daemon:  {"key": <the registration>, "program", "port"}  or {"refused": <why>, "code": "PROGRAM_NOT_VERIFIED"}
+ *   daemon:  {"key": <the registration>, "program", "port"}  or, when none is issued, the connection simply closes
  * then the connection stays open: the registration lasts exactly as long as it and the program's process.
+ *
+ * A registration is optional and decides nothing: the operator token on this machine is the user, with or without one. A
+ * program the daemon cannot register (or a daemon that cannot open this socket) works exactly the same, and is told nothing.
  *
  * What proves the program (each step is the kernel's word, none the program's):
  *  1. the connecting process: the socket's peer credentials (process, user), taken when it connected, and a handle on
@@ -33,11 +36,9 @@
  * closes, and at every daemon restart. Every handshake is its own: several at once never wait on each other; one ends
  * with its process, its connection, or a newer connection taking its place (HANDSHAKES_LIMIT), never on a clock.
  *
- * Linux only (64-bit): elsewhere no socket is opened, no registration is issued, and the programs' acts that the owner
- * decides are put to the owner (in their signed-in web session, or held for them) like any script's.
+ * Linux only (64-bit): elsewhere no socket is opened and no registration is issued, and nothing differs for the programs.
  */
 import { createHash, createHmac, randomBytes } from 'node:crypto';
-import { daemonHomeCustodyRefusal } from './daemon-home-custody.js';
 import { chmodSync, lstatSync, mkdirSync, rmSync, statSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { logger } from '../utils/logger.js';
@@ -97,15 +98,14 @@ export interface ProgramSocket {
 let running: { readonly path: string; host: ProgramSocketHost; readonly stop: () => void } | undefined;
 
 /**
- * Whether this daemon can verify its programs: its program socket is open. False on another system and where the
- * socket could not open; then the programs' acts are decided as a script's and the first act in each folder asks
- * the owner once (daemon/unverified-programs.ts).
+ * Whether this daemon can register its programs: its program socket is open. False on another system and where the
+ * socket could not open; nothing differs then: no act is decided or asked differently for lacking a registration.
  */
 export function programVerificationAvailable(): boolean {
   return running !== undefined;
 }
 
-/** The daemon does not start: its home, or a folder above it, may be written by another account (the message says which and the fix). */
+/** Never thrown now (the daemon starts whatever other accounts may write); left in place with `daemon-home-custody.ts`. */
 export class DaemonHomeUnsafeError extends Error {
   readonly code = 'DAEMON_HOME_UNSAFE';
   constructor(message: string) { super(message); this.name = 'DaemonHomeUnsafeError'; }
@@ -142,8 +142,8 @@ function proofFor(hello: unknown, challenge: string): string | null {
   return createHmac('sha256', entry.nonce).update(challenge).digest('hex');
 }
 
-/** What the owner does about a refusal, in the words their program shows them at its start (never only a file name). */
-function refusalNext(why: string): string {
+/** What the owner could do about a refusal. No longer sent anywhere: a program is never told it was not verified. */
+export function refusalNext(why: string): string {
   const meanwhile = 'Until then this program works as any script would: what is yours to decide is decided under your permission mode, as any outside caller\'s call is.';
   if (/installer recorded|not one of the product's programs/.test(why)) return `Reinstall GoodVibes (its installer records its programs again), then start the program again. ${meanwhile}`;
   if (/loads other code|runs code|native addon|no file the daemon can check|preloads code/.test(why)) {
@@ -152,7 +152,7 @@ function refusalNext(why: string): string {
   return `Start the program again; if this stays, read the daemon's log for this line. ${meanwhile}`;
 }
 
-/** The note a daemon leaves in its home while it cannot verify its programs; the programs read it at their start. */
+/** The note a daemon leaves in its home while it cannot register its programs. No program reads it or says anything about it. */
 export const UNVERIFIED_NOTE_NAME = 'programs-unverified.txt';
 
 function noteUnverified(daemonHome: string, why: string): void {
@@ -175,27 +175,29 @@ export function startProgramSocket(daemonHome: string, registrations: ProgramReg
   }
   const calls = openUnixPeerCalls();
   if (!calls) {
-    logger.info('[programs] no program socket on this system: the terminal programs are not registered, and their acts the owner decides are put to the owner');
+    logger.info('[programs] no program socket on this system: the terminal programs are not registered, and work the same without it');
     noteUnverified(daemonHome, `this system (${process.platform}) gives the daemon no way to verify the program that connects`);
     return undefined;
   }
   const uid = calls.effectiveUser();
-  // A home another account may write, or a folder above it another account may write, is refused outright: the daemon
-  // does not start there (daemon-home-custody.ts), rather than running on with its programs unverified, which a process
-  // of the account could otherwise bring about with one chmod (gate-review-6 G10, G16).
-  mkdirSync(daemonHome, { recursive: true, mode: 0o700 });
-  const unsafe = daemonHomeCustodyRefusal(daemonHome, uid) ?? (statSync(daemonHome).uid !== uid ? `The daemon will not start: its home ${daemonHome} is not this account's.` : undefined);
-  if (unsafe !== undefined) {
-    logger.error(`[programs] ${unsafe}`);
-    throw new DaemonHomeUnsafeError(unsafe);
+  // Registration is optional and decides nothing, so nothing here may stop the daemon: it starts exactly as it did before
+  // programs could register (no check of what other accounts may write, `daemon-home-custody.ts` is no longer asked, and
+  // `DaemonHomeUnsafeError` is never thrown). Where the socket cannot be opened (a home that is not this account's, anything
+  // that is not this account's own socket at its path, a path too long) no program registers, and every program works as
+  // it does with a registration.
+  try { mkdirSync(daemonHome, { recursive: true, mode: 0o700 }); } catch { /* the home is the daemon's own to make; no socket then */ }
+  let homeUid: number | undefined;
+  try { homeUid = statSync(daemonHome).uid; } catch { homeUid = undefined; }
+  if (homeUid !== uid) {
+    logger.info(`[programs] the daemon's home ${daemonHome} is not this account's: no program socket is opened`);
+    return undefined;
   }
   // A socket left at the path is replaced only when it is this account's own socket (an earlier run's); anything else
-  // there is not the daemon's to remove, and it does not start.
+  // there is not the daemon's to remove: no socket is opened, and the daemon goes on.
   const left = lstatSync(path, { throwIfNoEntry: false });
   if (left && !(left.isSocket() && left.uid === uid)) {
-    const why = `The daemon will not start: ${path} is not a program socket of this account, so it is not the daemon's to replace. Remove it if you put it there: rm ${path}`;
-    logger.error(`[programs] ${why}`);
-    throw new DaemonHomeUnsafeError(why);
+    logger.info(`[programs] ${path} is not a program socket of this account, so it is not the daemon's to replace: no program socket is opened`);
+    return undefined;
   }
   const listen = (): { readonly fd: number; readonly dev: number; readonly ino: number } | undefined => {
     try { rmSync(path, { force: true }); } catch { /* none */ }
@@ -247,8 +249,9 @@ export function startProgramSocket(daemonHome: string, registrations: ProgramReg
     calls.close(connection.handle);
   };
   const refuse = (connection: Connection, why: string): void => {
+    // No registration is issued, and nothing is said to the program: it works the same without one, so it is not told it
+    // was "not verified" (`PROGRAM_NOT_VERIFIED` is never sent; `refusalNext` is left unused).
     logger.info(`[programs] no registration was issued to process ${connection.pid}: ${why}`);
-    write(connection, { refused: `The daemon could not verify this program: ${why}. ${refusalNext(why)}`, code: 'PROGRAM_NOT_VERIFIED' });
     drop(connection);
   };
   /** Whether the connection's process still runs and its connection is open, asked now. */

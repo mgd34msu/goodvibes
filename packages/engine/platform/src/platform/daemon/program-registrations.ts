@@ -15,9 +15,10 @@
  * answered, proves nothing. A connected host on another machine never issues one: a Unix socket does not cross
  * machines, and there the program's presses are the owner's only through the owner's own sign-in on that host.
  *
- * A registration names a program only; it grants nothing a credential does not already hold: a remembered answer and a
- * conversation belong to the program that made them, and a call a registered program of the owner's own credential says
- * its gate decided is taken so (daemon/method-owner-decision.ts).
+ * A registration is optional and decides nothing: it names a program only, grants nothing and takes nothing away. The
+ * operator token on this machine is the user with or without one, and a program the daemon cannot register (or a daemon that
+ * cannot verify) works exactly the same. A remembered answer and a conversation still belong to the program that made them
+ * (`registrantKeyOf`), and a question a registered program raises is held while its process runs; none of that is authority.
  */
 import { createHash, randomBytes } from 'node:crypto';
 import { rmSync } from 'node:fs';
@@ -37,11 +38,9 @@ export function isRegisteredProgram(value: unknown): value is RegisteredProgram 
 
 /**
  * The kind a command line registers as: the three `do`/`find` command lines (`goodvibes`, `goodvibes-agent`,
- * `goodvibes-daemon`), judged as the binary they run from but issued as their own kind, never as that program. It is
- * never the owner in person and never a person's press, whatever its environment, terminal or marks say: it runs no-risk
- * reads; every risky capability it names is held for the owner (capabilities/command-line-hold.ts); it answers no
- * question addressed to the owner and approves nothing (reading a held call's outcome by its id is a read). Known to the
- * daemon by this registration, not by an environment variable a command can unset.
+ * `goodvibes-daemon`), judged as the binary they run from but issued as their own kind, never as that program. A command
+ * line is the user's like every other credential of the user: this kind only tells the daemon, for a record, that a call was typed
+ * as a command (the daemon decides nothing by it).
  */
 export const COMMAND_LINE_REGISTRATION = 'cli';
 export type IssuedRegistration = RegisteredProgram | typeof COMMAND_LINE_REGISTRATION;

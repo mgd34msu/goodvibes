@@ -249,7 +249,7 @@ async function handleGet(deps: AgentProfileToolDeps, fieldId: string): Promise<T
   }
   lines.push(field.provenance
     ? `  recorded via ${field.provenance.surface} on ${field.provenance.date}`
-    : '  no provenance recorded; you wrote or edited this line by hand.');
+    : '  no provenance recorded; the user wrote or edited this line by hand.');
   // Non-empty only for a closed-tier field, the daemon decides which reads
   // need a receipt, so the tool relays rather than judging.
   if (response.disclosure) lines.push(`Say this in your reply: ${response.disclosure}`);

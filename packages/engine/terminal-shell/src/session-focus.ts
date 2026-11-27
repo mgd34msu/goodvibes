@@ -10,8 +10,8 @@
  * Esc inside an agent or process view goes up exactly one level: a process
  * or a top-level agent returns to main; an agent spawned by another agent
  * returns to that agent. Going up never stops or cancels anything. Stopping
- * is ctrl+x: under Ask me (and plan) pressed twice, the first press arms and the
- * second (within STOP_CONFIRM_MS) stops; in every other mode the first press stops.
+ * is ctrl+x, pressed twice in every permission mode: the first press arms and the
+ * second (within STOP_CONFIRM_MS) stops.
  *
  * Pure state plus the live facts it is handed (SessionFocusDeps); nothing
  * here renders or talks to the runtime directly.

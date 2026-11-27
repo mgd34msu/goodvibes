@@ -286,7 +286,8 @@ async function requestWithRetry(ctx: TurnContext, request: Omit<TurnRequest, 'at
         }
         throw error;
       }
-      const delayMs = Math.max(wait, failure.retryAfterMs ?? 0);
+      // The provider's own "retry after" is the wait when it gives one; the ladder is for a failure that names none.
+      const delayMs = failure.retryAfterMs ?? wait;
       ctx.onRetry?.(attempt + 1, delayMs, error, failure, { delaysMs: delays, thenFailover });
       try {
         if (ctx.waitBeforeRetry) await ctx.waitBeforeRetry(delayMs, ctx.signal);

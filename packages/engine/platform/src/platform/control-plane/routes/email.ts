@@ -598,7 +598,7 @@ export function createEmailSendHandler(
    */
   ownerAddresses: OwnerAddressSource = new Set(),
 ): GatewayMethodHandler {
-  const recent = new Map<string, { readonly fingerprint: string; readonly at: number; readonly result: Promise<unknown> }>();
+  const recent = new Map<string, { readonly fingerprint: string; readonly result: Promise<unknown> }>();
   return async (invocation) => {
     // Its descriptor's confirmation (`confirm`) was checked by the catalog before this handler ran.
     const params = readInvocationParams(invocation);
@@ -608,8 +608,6 @@ export function createEmailSendHandler(
     const inReplyTo = readOptionalString(params.inReplyTo);
     const clientSendId = readClientSendId(params.clientSendId);
     if (clientSendId !== undefined) {
-      const now = Date.now();
-      for (const [id, entry] of recent) if (now - entry.at > SEND_ID_RETENTION_MS) recent.delete(id);
       const fingerprint = JSON.stringify([to, subject, body, inReplyTo ?? '']);
       const earlier = recent.get(clientSendId);
       if (earlier) {
@@ -623,7 +621,7 @@ export function createEmailSendHandler(
           ? { ...answer, repeated: true } : answer);
       }
       const result = sendOnce(to, subject, body, inReplyTo, clientSendId);
-      recent.set(clientSendId, { fingerprint, at: now, result });
+      recent.set(clientSendId, { fingerprint, result });
       if (recent.size > SEND_ID_CAPACITY) recent.delete(recent.keys().next().value!);
       // A refusal or a failure before the server took the message frees the id
       // for another try; an unconfirmed delivery keeps it, so a repeat answers
@@ -665,8 +663,11 @@ export function createEmailSendHandler(
   }
 }
 
-/** How long a send's answer is kept for a repeat with the same `clientSendId`. */
-const SEND_ID_RETENTION_MS = 10 * 60_000;
+/**
+ * How many sends' answers are kept for a repeat with the same `clientSendId` (a caller that never heard the first answer
+ * sends again and must not mail the recipients twice). Kept by count, oldest first, never by age; an id whose send was
+ * refused or failed before the server took the message is let go at once.
+ */
 const SEND_ID_CAPACITY = 512;
 const CLIENT_SEND_ID = /^[A-Za-z0-9_-]{8,128}$/;
 

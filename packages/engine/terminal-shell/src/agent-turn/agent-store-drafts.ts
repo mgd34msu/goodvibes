@@ -9,6 +9,7 @@
  */
 import { CapabilityRefusal, type ActionValues } from '@goodvibes/engine/platform/platform/capabilities';
 import type { ArtifactDescriptor } from '@goodvibes/engine/platform/platform/artifacts';
+import { UNTRUSTED_ARTIFACT_NOTICE } from './artifacts-tool.js';
 import { AgentDocumentRegistry } from './document-registry.js';
 import type { AgentDocumentRecord } from './document-registry-types.js';
 import { given, positiveNumber, splitWords, storeStep, type StoreAct, type StoreActContext } from './agent-store-common.js';
@@ -79,8 +80,11 @@ export const DRAFT_ACTS: Readonly<Record<string, StoreAct>> = {
     const limit = positiveNumber(values.limit);
     const skipped = Number(values.from ?? '0');
     const from = Number.isFinite(skipped) && skipped > 0 ? Math.trunc(skipped) : 0;
-    return tool(context, 'agent_artifacts', { mode: 'list', ...(values.words ? { query: values.words } : {}), ...given(values, 'kind', 'mimeType', 'purpose', 'source'), ...(limit ? { limit } : {}), ...(from ? { offset: from } : {}) },
+    const listed = await tool(context, 'agent_artifacts', { mode: 'list', ...(values.words ? { query: values.words } : {}), ...given(values, 'kind', 'mimeType', 'purpose', 'source'), ...(limit ? { limit } : {}), ...(from ? { offset: from } : {}) },
       'list saved artifacts', { artifacts: listedArtifacts(context, values) });
+    // The model's tool leads its list with a warning to the model about names it did not write; a person is shown the list.
+    const warning = `${UNTRUSTED_ARTIFACT_NOTICE}\n`;
+    return { ...listed, text: listed.text.startsWith(warning) ? listed.text.slice(warning.length) : listed.text };
   },
   async 'artifacts.show'(values, context) {
     const previewBytes = positiveNumber(values.bytes);

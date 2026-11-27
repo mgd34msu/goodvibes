@@ -106,7 +106,7 @@ function reasonForPosture(
     return `server '${serverName}' is allowed inside its configured scope and still exposes broad scope`;
   }
   if (trustMode === 'ask-on-risk') {
-    return `server '${serverName}' is allowed inside its configured scope; calls outside it are decided under the owner's permission mode`;
+    return `server '${serverName}' is allowed inside its configured scope; calls outside it are put to the owner`;
   }
   if (allowedPaths.length === 0 || allowedHosts.length === 0) {
     return `server '${serverName}' is constrained but still has an open scope boundary`;
@@ -375,8 +375,9 @@ export class McpPermissionManager {
       ...(outsidePath ? [`${describeScoped(outsidePath)} is outside allowedPaths (${profile.allowedPaths.join(', ')})`] : []),
       ...(outsideHost ? [`${describeScoped(outsideHost)} is not an allowed host (${profile.allowedHosts.join(', ')})`] : []),
     ];
-    // ask-on-risk: a call outside the scope is an item of the owner's list, decided under their mode (permissions/manager.ts
-    // `askedByOwnerRule`): YOLO runs it, Jev decides gives it to Jev, Ask me asks the owner; never refused here.
+    // ask-on-risk: a call outside the scope is the owner's own standing "ask me" (permissions/manager.ts `askedByOwnerRule`),
+    // as released: put to the owner in every mode, YOLO included, and held for the end of the run in Just vibes; Jev never
+    // decides it; never refused here.
     const asks = !allowed && profile.mode === 'ask-on-risk';
     return {
       allowed, verdict: allowed ? 'allow' : asks ? 'ask' : 'deny', profileMode: profile.mode, causes,
@@ -388,7 +389,7 @@ export class McpPermissionManager {
       reason: allowed
         ? `server '${serverName}' permits this tool`
         : asks
-          ? `request exceeds configured scope for server '${serverName}' (ask-on-risk), so it is decided under the owner's permission mode: ${details.join('; ')}.`
+          ? `request exceeds configured scope for server '${serverName}' (ask-on-risk), so the owner decides it: ${details.join('; ')}.`
           : `request exceeds configured scope for server '${serverName}': ${details.join('; ')}. Call it with values inside the scope, or ask the owner to widen the server's scope.`,
     };
   }

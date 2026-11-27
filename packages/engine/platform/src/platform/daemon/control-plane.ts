@@ -1933,7 +1933,8 @@ export class DaemonControlPlaneHelper {
     // credential that is the owner's and keeps a person's claim) says its gate decided this call: one decision, the program's.
     const callerFacts = { actor: context?.actor, credentialKind: credential, registration: input.context?.call?.registration, personAsked: context?.explicitUserRequest === true,
       daemonHosted: input.context?.call?.daemonHosted === true };
-    const ownProgramGate = input.context?.decidedByCapabilityGate === true && input.context.call?.registration !== undefined && ownerHimself(callerFacts);
+    // (Any credential of the user: a registration decides nothing, so the program's mark counts with or without one.)
+    const ownProgramGate = input.context?.decidedByCapabilityGate === true && ownerHimself(callerFacts);
     const callRisk = methodCallRisk(descriptor, input.body);
     // The capability's decision stands for its nested method only as far as it went: the owner's own press, their yes, or
     // a decision that covered this method's class. A stricter class it did not cover (a setting write admitted under the

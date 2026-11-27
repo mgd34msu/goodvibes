@@ -47,7 +47,7 @@ export const contractConfigDefaults: { contract: ContractSettings } = {
  * The keys that moved from the retired review loop's settings (autoCommit, commitScope, maxFixRounds,
  * transportRetryLimit) keep the old validators, so no value migrated from an existing file is refused on its next
  * load. Keys removed since (a step's silence limit, the gate command limit, the transport retry delay) are read past
- * silently and left in the file (config/removed-keys.ts).
+ * silently and left in the file (SETTINGS_KEPT_FOR_ROLLBACK in config/settings-carry-forward.ts).
  */
 export const contractConfigSettings: ConfigSettingDefinition[] = [
   {

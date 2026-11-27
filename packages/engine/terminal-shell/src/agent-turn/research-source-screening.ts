@@ -120,13 +120,13 @@ export function createAgentCredentialReader(homeDirectory: string, settings: Pic
 interface Acquisition { readonly owner: ProtectedSourceOwner; assertCurrent(): void; close(): Promise<void>; }
 
 /** The general sentence, for a refusal raised before any cause is known. */
-export const RESEARCH_SCREENING_UNCONFIGURED_DETAIL = `Research report screening needs ${AGENT_HOSTED_RESEARCH_SCREENING_KEY} turned on and the two screening provider keys (ABACUSAI_API_KEY, TYPESAFE_API_KEY), or no Decision model set.`;
+export const RESEARCH_SCREENING_UNCONFIGURED_DETAIL = `Research report screening needs ${AGENT_HOSTED_RESEARCH_SCREENING_KEY} turned on and the two screening provider keys stored as secrets (ABACUSAI_API_KEY and TYPESAFE_API_KEY, in Permissions and safety, Secrets), or no Decision model set.`;
 /** One fixed sentence per cause; none names a value. */
 const CONSENT_OFF = 'With a decision model set, a report\'s sources are screened by hosted models before it is saved, and that is not allowed. Turn on "Let hosted models screen research sources" among the Agent\'s settings in System (setting tools.hostedResearchScreening).';
 const CONSENT_QUARANTINED = 'The settings file holding tools.hostedResearchScreening could not be read; fix or re-save it, then re-issue the call.';
 const SETTINGS_CHANGED = 'Settings or credentials changed during the call; re-issue it.';
 const SCREENING_CLOSED = 'Report screening is shutting down with this session.';
-const missingKey = (key: string): string => `Set ${key} (environment or the GoodVibes secret store) to screen research reports.`;
+const missingKey = (key: string): string => `Store a secret named ${key} (Permissions and safety, Secrets) to screen research reports.`;
 const unconfigured = (detail: string): never => { throw new ToolInputProjectionError('unconfigured', detail); };
 const changed = (): never => { throw new ToolInputProjectionError('stale', SETTINGS_CHANGED); };
 // Widened so the guard does not narrow the environment string on either branch.

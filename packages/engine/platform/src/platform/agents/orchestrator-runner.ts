@@ -28,7 +28,7 @@ import { collectResponseDelegates, ResponseCompletionGuard, ResponseCompletionEr
 import { createVerificationWriter, reportVerificationUsage } from '../core/verification/writer.js';
 import { VerificationStore } from '../core/verification/store.js';
 import { appendVerificationObservation, beginVerificationConversation } from '../core/verification/archive.js';
-import { isContextSizeExceededError } from '../types/errors.js';
+import { isContextSizeExceededError, readStatedContextLimit } from '../types/errors.js';
 import { httpStatusOf } from '@goodvibes/engine/errors';
 import { AgentSession } from './session.js';
 import {
@@ -1084,12 +1084,12 @@ async function runAgentTaskWithPolicy(context: AgentOrchestratorRunContext, reco
             await isContextSizeExceededError(chatErr, 'agents.orchestrator-runner.context-exceeded')
           ) {
             contextRetried = true;
-            // Learn the endpoint's real ceiling from the rejection so every
-            // consumer's window math stops trusting an over-stated catalog.
-            context.providerRegistry.recordContextWindowRejection(
-              `${activeRoute.provider.name}:${activeRoute.modelId}`,
-              estimateConversationTokens(activeConversation.getMessagesForLLM()),
-            );
+            // Learn the endpoint's real ceiling, only when the provider's own refusal states it, so every
+            // consumer's window math stops trusting an over-stated catalog. A refusal that states none teaches nothing.
+            const statedLimit = readStatedContextLimit(chatErr);
+            if (statedLimit !== undefined) {
+              context.providerRegistry.recordContextWindowRejection(`${activeRoute.provider.name}:${activeRoute.modelId}`, statedLimit);
+            }
             logger.warn(
               `[AgentOrchestrator] context-window awareness: context size exceeded on turn ${turn} - emergency compaction and retry`,
               { agentId: record.id, error: chatErr instanceof Error ? chatErr.message : String(chatErr) },

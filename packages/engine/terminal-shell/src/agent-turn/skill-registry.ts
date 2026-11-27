@@ -178,7 +178,7 @@ export function buildEnabledSkillsPrompt(shellPaths: ShellPathService, preread?:
       ];
     }),
     ...active.slice(0, ENABLED_SKILLS_PROMPT_LIMIT).flatMap((skill) => {
-      // Someone else's words the owner has not accepted, put into the prompt now: the conversation has read outside text.
+      // Someone else's words (not the owner's), put into the prompt now: the conversation has read outside text.
       const others = noteOthersWritingRead('skill', skill.id, skill.author);
       return [
         `### ${skill.name}`,

@@ -23,6 +23,7 @@ import { logger } from '../utils/logger.js';
 import { readDocument, writeDocument } from '../utils/atomic-json-store.js';
 import { defineLifecycle } from '../utils/lifecycle-machine.js';
 import { summarizeError } from '../utils/error-display.js';
+import { outsideEveryCall } from '../utils/outside-every-call.js';
 
 export const WORK_PROPOSAL_SCHEMA_VERSION = 1;
 
@@ -358,11 +359,12 @@ export class WorkProposalStore {
     if (!this.sweepEnabled || this.sweepTimer || this.proposals.size === 0) return;
     // Resolved records are retained until expiry too. Stopping when only
     // resolved records remain would leave them in an idle store indefinitely.
-    this.sweepTimer = setInterval(() => {
+    // Armed in the process's own context: the first proposal is made inside a request, and every later sweep would run as it.
+    this.sweepTimer = outsideEveryCall(() => setInterval(() => {
       const summary = this.reap();
       if (summary.total > 0) void this.persist();
       if (this.proposals.size === 0) this.clearSweep();
-    }, this.sweepInterval);
+    }, this.sweepInterval));
     this.sweepTimer.unref?.();
   }
 

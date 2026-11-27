@@ -17,7 +17,7 @@ import { VerificationStore } from './verification/store.js';
 import type { CacheHitTracker } from '../providers/cache-strategy.js';
 import type { ConfigManager } from '../config/manager.js';
 import { estimateConversationTokens, estimateTokens } from './context-compaction.js';
-import { ProviderError, isContextSizeExceededError, streamRetryFacts } from '../types/errors.js';
+import { ProviderError, isContextSizeExceededError, readStatedContextLimit, streamRetryFacts } from '../types/errors.js';
 import { formatError, formatProviderError } from '../utils/error-display.js';
 import { createTurnFailover, describeFailoverCost, readFallbackOrder } from '../providers/failover.js';
 import { readTurnFailure } from './turn-failure.js';
@@ -867,19 +867,21 @@ export async function executeOrchestratorTurnLoop(context: OrchestratorTurnLoopC
         // The provider rejected the request as exceeding the model's context
         // window (e.g. the OpenAI subscription route's 'context_length_exceeded'). This is the
         // authoritative signal that the effective window is smaller than the
-        // catalog claims: learn the rejected size as the model's practical
-        // ceiling, then compact immediately and retry the request once,
-        // never tell the user to run /compact by hand.
+        // catalog claims: learn the limit the provider's own text states as the
+        // model's practical ceiling (none stated, none learned), then compact
+        // immediately and retry the request once, never tell the user to run
+        // /compact by hand.
         contextOverflowRetried = true;
         const rejectedAtTokens = estimateConversationTokens(context.conversation.getMessagesForLLM());
-        context.providerRegistry.recordContextWindowRejection(model.registryKey, rejectedAtTokens);
+        const statedLimit = readStatedContextLimit(chatErr);
+        if (statedLimit !== undefined) context.providerRegistry.recordContextWindowRejection(model.registryKey, statedLimit);
         context.noteModelContextWindowWarning({
           provider: model.provider,
           model: model.id,
           providerStopReason: 'context_length_exceeded (provider error)',
         });
         context.conversation.addNotice(
-          `${model.displayName} rejected the request as exceeding its context window (~${rejectedAtTokens.toLocaleString()} tokens sent). Learned this as the model's practical limit. Auto-compacting and retrying...`,
+          `${model.displayName} rejected the request as exceeding its context window (~${rejectedAtTokens.toLocaleString()} tokens sent).${statedLimit !== undefined ? ` Its stated limit of ${statedLimit.toLocaleString()} tokens is kept as the model's practical limit.` : ''} Auto-compacting and retrying...`,
           { level: 'warning' }
         );
         context.requestRender();

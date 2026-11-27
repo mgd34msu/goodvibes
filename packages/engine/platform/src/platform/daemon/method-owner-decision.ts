@@ -9,11 +9,10 @@
  * functions below give every one of them the same answer; what limits a credential is its stored scope list, checked where
  * methods are admitted by scope, and nothing here.
  *
- * Who runs an act of a class other than `none` (control-plane/method-risk.ts) at once: the user with a person's press
- * (`ownersOwnPress`: a request on their signed-in session, or the person's claim on a credential that may make it). The user's
- * call without a press is decided by the owner's capability gate exactly as the capability that does the same act: put to
- * the owner, opening on No, or decided under the owner's mode. A `steers-a-model` write from the user is theirs; a model's
- * is decided.
+ * Who runs an act of a class other than `none` (control-plane/method-risk.ts) at once: the user, from any of their credentials,
+ * with or without a person's claim (`ownersOwnPress`). A model's call (`agentFor` set) is decided by the owner's capability gate
+ * under the owner's mode, as the capability that does the same act is. A `steers-a-model` write from the user is theirs; a
+ * model's is decided.
  *
  * Not decided here, so never twice:
  *  - a call nested in a capability that was decided already (`capabilityDecidedMark`), or one the owner approved
@@ -192,9 +191,14 @@ export function partyOfCaller(caller: Pick<CallerFacts, 'actor' | 'credentialKin
     ...(caller.principalId ? { madeFor: caller.principalId } : {}) };
 }
 
-/** The user's own press: a person's claim on a credential that may make it, or anything on a signed-in session. */
+/**
+ * The user's own act: any call from one of the user's credentials ({@link ownerHimself}), with or without a person's claim. A
+ * script with the machine's token, a device or a sign-in calling with no claim is the user acting, exactly as with the claim;
+ * a model's call (`agentFor` set), a guest, a peer and the program itself are never this. (The methods v3.5.0 itself refused
+ * without the claim keep that rule in their own confirmation, control-plane/confirmation-gate.ts, not here.)
+ */
 export function ownersOwnPress(caller: CallerFacts): boolean {
-  return ownersOwnSession(caller) || (caller.personAsked && ownerHimself(caller));
+  return ownersOwnSession(caller) || ownerHimself(caller);
 }
 
 /** Whether the rule runs this caller's act of `risk` at once, by who made it alone (nothing nested or decided before). */

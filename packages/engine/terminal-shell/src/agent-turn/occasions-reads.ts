@@ -180,7 +180,7 @@ export async function handlePlans(deps: AgentOccasionsToolDeps): Promise<ToolOut
   if (!response) return fail([OCCASIONS_RESPONSE_UNREADABLE]);
 
   recordShownDates(response.plans.flatMap((plan) => [{ label: plan.title, date: plan.from }, { label: plan.title, date: plan.to }]));
-  const lines: string[] = [`Your plans (today is ${response.today}):`];
+  const lines: string[] = [`The user's plans (today is ${response.today}):`];
   if (response.plans.length === 0) lines.push('  (none recorded)');
   for (const plan of response.plans) {
     const where = plan.destination ? ` · in ${plan.destination}` : '';
@@ -190,8 +190,8 @@ export async function handlePlans(deps: AgentOccasionsToolDeps): Promise<ToolOut
     lines.push(`  [line ${unparsed.lineIndex} could not be read: ${unparsed.reason}] ${unparsed.text}`);
   }
   lines.push(response.awayNow === null
-    ? '  You are not away today.'
-    : `  You are away today: ${response.awayNow.title}.`);
+    ? '  The user is not away today.'
+    : `  The user is away today: ${response.awayNow.title}.`);
   return ok(lines);
 }
 

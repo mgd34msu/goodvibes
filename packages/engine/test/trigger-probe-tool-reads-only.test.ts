@@ -78,7 +78,7 @@ test('a trigger whose file probe names a file the owner denied is refused at cre
   const root = realpathSync(mkdtempSync(join(tmpdir(), 'gv-probe-path-deny-')));
   try {
     const config = new ConfigManager({ configDir: join(root, 'config'), workingDir: root, surfaceRoot: 'goodvibes' });
-    // Ask me: the one mode where a call the rules leave open goes to the owner (the control below).
+    // Ask me: a call the rules leave open goes to the owner (the control below).
     config.set('permissions.mode', 'ask-me');
     const rules = new UserPermissionRuleStore(':memory:');
     await rules.add({ rule: { id: 'no-secrets', type: 'path-scope', origin: 'user', effect: 'deny', toolPattern: '*', pathPatterns: [join(root, 'secrets')] }, tier: 'exact', createdAt: 1, tool: 'read' });

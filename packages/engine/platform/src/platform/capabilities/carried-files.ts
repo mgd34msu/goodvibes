@@ -272,16 +272,31 @@ function digestOf(content: CarriedContent): string {
 
 /**
  * The carried bases this process has used: a scratch folder lives as long as its call (removed when its run ends, when
- * its call is decided and refused), and a folder a process left behind (it ended mid-call)
- * belongs to nothing once that process is gone: the first use of a base in a new process removes every folder in it,
- * all of them an ended process's. Nothing is removed because time went by.
+ * its call is decided and refused), and a folder a process left behind (it ended mid-call) belongs to nothing once that
+ * process is gone. A scratch folder is named with the id of the process that made it (`call-<pid>-...`), and the first use
+ * of a base in a new process removes the folders whose process is gone, never one a live process (a second daemon on the
+ * same home) still holds. Nothing is removed because time went by.
  */
 const basesClearedThisProcess = new Set<string>();
+
+/** Whether a scratch folder's name says a process that is still running made it (`call-<pid>-...`). */
+function carriedFolderHeld(name: string): boolean {
+  const made = /^call-([1-9]\d*)-/.exec(name);
+  if (!made) return false;
+  const pid = Number(made[1]);
+  if (!Number.isSafeInteger(pid)) return false;
+  if (pid === process.pid) return true;
+  try { process.kill(pid, 0); return true; } catch (error) {
+    // Only "no such process" says it is gone; a process this account may not signal (EPERM) is still running.
+    return (error as NodeJS.ErrnoException).code !== 'ESRCH';
+  }
+}
 
 /**
  * The daemon's folder of scratch folders, inside its own home (`<daemon home>/carried`), owner-only: made 0700 if
  * missing, and refused unless it is a real folder of this account (never a link, never one another account made), its
- * mode put back to 0700. On its first use in this process, the folders an earlier process left are removed.
+ * mode put back to 0700. On its first use in this process, the folders an ended process left are removed (not those of
+ * a process that is still running).
  */
 export function carriedBase(daemonHome: string): string {
   const base = join(daemonHome, 'carried');
@@ -295,6 +310,7 @@ export function carriedBase(daemonHome: string): string {
   if (!basesClearedThisProcess.has(base)) {
     basesClearedThisProcess.add(base);
     for (const entry of readdirSync(base)) {
+      if (carriedFolderHeld(entry)) continue;
       try { rmSync(join(base, entry), { recursive: true, force: true }); } catch { /* gone already */ }
     }
   }
@@ -396,7 +412,8 @@ export async function receiveCarried(entry: Pick<CapabilityEntry, 'id' | 'inputs
     if (total > MAX_CARRIED_BYTES * 1.4) throw new CapabilityRefusal(`The files sent are larger than one call carries (${MAX_CARRIED_BYTES / 1024 / 1024} MiB); nothing was done.`);
     parsed.push([id, whole]);
   }
-  const root = mkdtempSync(join(carriedBase(receipt.daemonHome), 'call-'));
+  // Named with this process's id: another process on the same home removes a folder only when its process is gone.
+  const root = mkdtempSync(join(carriedBase(receipt.daemonHome), `call-${process.pid}-`));
   try {
     const placed = new Map<string, { readonly path: string; readonly name: string; readonly sent: string }>();
     for (const [id, content] of parsed) {

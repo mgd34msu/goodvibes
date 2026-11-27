@@ -327,8 +327,8 @@ sub-work.
    battery. Failing work is held open and the agent is told what is wrong,
    until every criterion reads met.
 5. **Correct.** When nudging stops making progress, the runner plans a fix
-   group, gives the unit a fresh agent, or asks the owner (in Ask me; in every
-   other mode the decision model answers that question in the owner's place). The same
+   group, gives the unit a fresh agent, or asks the owner (in every permission
+   mode, in Waiting for you: no decision model answers it in the owner's place). The same
    holds for "then to the owner" in step 2.
 6. **Finish.** Jev judges each group, then the deliverable. When the
    deliverable passes, the runner commits the contract's work and delivers
@@ -455,9 +455,9 @@ waits.
   warning. A publication the project tree refuses (a merge or rebase in
   progress, a conflict with the owner's edits, a hook that refuses) is undone
   and its result kept on the contract's branch; whether it is tried again is
-  decided by the permission mode (the owner answers `retry` or `cancel` in Ask
-  me; the decision model answers in every other mode, each try running the
-  project's hooks once), and a publication not tried again ends the contract
+  put to the owner in every permission mode (they answer `retry` or `cancel`
+  in Waiting for you, each try running the project's hooks once), and a
+  publication not tried again ends the contract
   failed with its branch named. When the owner
   kept working while the contract ran, Git merges the captured input, the
   owner's tree now and the accepted result: changes to different files are
@@ -494,8 +494,8 @@ waits.
   whose work item ended without it fails with that item's reason.
 - **Concurrency.** `contract.maxActiveContracts` (default 6) contracts run at
   once; the rest wait as `queued`. A native session contract paused on its
-  owner after a failed turn (in Ask me: retry or cancel; in every other mode
-  the decision answers at once) is not running, so it does not count against
+  owner after a failed turn (retry or cancel, asked in every permission mode)
+  is not running, so it does not count against
   the limit; a queued contract takes its place. Answering retry resumes it at
   once, even if that briefly puts more than the limit in flight.
 - **Code context.** A contract's agents get code context from an index built

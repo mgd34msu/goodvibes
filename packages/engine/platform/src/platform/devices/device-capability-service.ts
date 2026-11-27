@@ -77,9 +77,9 @@ export const DEFAULT_DEVICE_CAPABILITY_POLICY: DeviceCapabilityPolicy = {
 };
 
 /**
- * Who answers a request no live grant covers. The daemon answers 'allow': a request reaches the service already decided
- * once (the phone tool's call by the one permission manager under the owner's mode, or the owner in person; anyone else's
- * capture or read is refused at the dispatch). 'ask-owner' (the default when a host sets nothing) asks the owner here.
+ * Who answers a request no live grant covers. As released, a host sets it by the permission mode in force: in YOLO
+ * 'allow' (the owner chose not to be asked), in every other mode 'ask-owner', which asks the owner here ("Use a paired
+ * phone?"); 'ask-owner' is also the default when a host sets nothing.
  */
 export type DeviceNoGrantAuthority = 'ask-owner' | 'allow';
 

@@ -30,6 +30,11 @@ export function createAutomationSpawnTask(
     const record = withConversation(input.exposureKey, () => withInputParty(partyOfRecordedCause(input.cause), () => agentManager.spawn({
       mode: 'spawn',
       task: input.prompt,
+      // A turn, as a conversation's is: its prompt goes to the model. Without this, a spawn with a decision model set
+      // became the owner of a contract (tools/agent/manager.ts `startsContract`; the action binding is no contract
+      // binding): its prompt went to a planner and step agents whose registries did not hold the turn's tools
+      // ("Unknown tool in autonomous preparation"), and the schedule's own turn never reached the model.
+      outsideContract: true,
       ...(input.modelId ? { model: input.modelId } : {}),
       ...(input.modelProvider ? { provider: input.modelProvider } : {}),
       ...(input.fallbackModels !== undefined ? { fallbackModels: [...input.fallbackModels] } : {}),

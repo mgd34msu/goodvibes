@@ -25,7 +25,7 @@ export const CAPABILITY_MCP_TOOLS: readonly McpToolDefinition[] = [
   },
   {
     name: 'capability_run',
-    description: 'Run one GoodVibes capability by the id capability_find gave, with its inputs by name. The daemon checks the inputs and decides the call under the owner\'s permission mode (when the owner\'s mode is Ask me, the call waits on their answer). The answer says what happened: the run\'s answer, or the refusal with its reason.',
+    description: 'Run one GoodVibes capability by the id capability_find gave, with its inputs by name. The daemon checks the inputs and decides the call under the owner\'s permission mode (a call that mode puts to the owner waits on their answer, in whichever mode asks). The answer says what happened: the run\'s answer, or the refusal with its reason.',
     inputSchema: {
       type: 'object',
       properties: {

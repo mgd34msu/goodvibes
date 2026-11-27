@@ -393,10 +393,19 @@ export function prepareAtomicPublicationDirectory(directory: string, options: Pi
   return Object.freeze(prepareAtomicDirectory(absolute, () => synchronous(() => guard?.()), notify ? () => synchronous(() => notify(false)) : undefined, options.mkdirp !== false));
 }
 
-/** Parent directories this process already created or found, so a write does not ask again. */
-const knownAtomicParents = new Set<string>();
-/** Store files whose dead writers' temp files this process already reaped. */
+/**
+ * Store files whose dead writers' temp files this process already reaped, newest last. Bounded by count: past the bound
+ * the oldest entry is forgotten, which at worst reaps that file's leftovers once more.
+ */
 const reapedAtomicTargets = new Set<string>();
+const REAPED_ATOMIC_TARGETS_BOUND = 4096;
+function markReaped(target: string): void {
+  if (reapedAtomicTargets.size >= REAPED_ATOMIC_TARGETS_BOUND) {
+    const oldest = reapedAtomicTargets.values().next();
+    if (!oldest.done) reapedAtomicTargets.delete(oldest.value);
+  }
+  reapedAtomicTargets.add(target);
+}
 
 function completeSynchronously(callback: () => unknown, message: string): void {
   assertSynchronousJudgmentGuard(callback, () => new Error(message));
@@ -408,9 +417,11 @@ function directoryIdentity(path: string): string {
   return `${stat.dev}:${stat.ino}`;
 }
 
-/** Make the parent once per process. Returns the directories this call created, outermost first. */
+/**
+ * Make the parent when it is not there (one `stat` per write, so a folder removed since the last write is made again and
+ * nothing is remembered per folder). Returns the directories this call created, outermost first.
+ */
 function ensureAtomicParent(dir: string, mkdirp: boolean, beforeCreate: (() => void) | undefined): string[] {
-  if (knownAtomicParents.has(dir)) return [];
   let created: string[] = [];
   const existing = statSync(dir, { throwIfNoEntry: false });
   if (existing === undefined) {
@@ -428,7 +439,6 @@ function ensureAtomicParent(dir: string, mkdirp: boolean, beforeCreate: (() => v
   } else if (!existing.isDirectory()) {
     throw Object.assign(new Error(`Atomic file parent is not a directory: ${dir}`), { code: 'ENOTDIR' });
   }
-  knownAtomicParents.add(dir);
   return created;
 }
 
@@ -494,7 +504,7 @@ class AtomicWriteRun {
     this.#created = ensureAtomicParent(this.#dir, this.#mkdirp, this.#onEffect ? () => this.#notify(false) : undefined);
     this.#parentIdentity = this.#guard || this.#onEffect ? directoryIdentity(this.#dir) : undefined;
     if (this.#cleanupStaleTemps && !reapedAtomicTargets.has(absolute)) {
-      reapedAtomicTargets.add(absolute);
+      markReaped(absolute);
       cleanupStaleTempFiles(this.#dir, absolute, () => {}, undefined);
     }
     return createAtomicTempPath(absolute);
@@ -503,7 +513,6 @@ class AtomicWriteRun {
   /** The staging file could not be opened: when the parent was removed since this process first saw it, make it once more. */
   remakeParent(error: unknown): void {
     if (!this.#mkdirp || !atomicMissing(error)) throw error;
-    knownAtomicParents.delete(this.#dir);
     this.#created.push(...ensureAtomicParent(this.#dir, this.#mkdirp, undefined));
   }
 

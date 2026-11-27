@@ -188,44 +188,6 @@ export async function carryFilesHere(body: Record<string, unknown>, cwd: string,
   };
 }
 
-/**
- * What came of such a call that waited for the owner (`capabilities.run { approvalId }`): the file it made is written
- * here, at the name it was asked for (in this program's folder unless it is a full path), as the call that waited would
- * have. A file put at that place meanwhile is kept, and the answer says so. Undefined for any other call.
- */
-async function heldOutcome(body: Record<string, unknown>, cwd: string): Promise<{ readonly after: (answer: unknown) => string | undefined } | undefined> {
-  if (typeof body.approvalId !== 'string' || body.id !== undefined) return undefined;
-  const { atomicWriteFileSync } = await import('@goodvibes/engine/platform/platform/config');
-  const { contentAt, placeContent, sameContent } = await import('@goodvibes/engine/platform/platform/capabilities');
-  return {
-    after: (answer) => {
-      // What a carried call made on the daemon (carryFilesHere): written here at the name it was asked for, unless
-      // something else was put at that place while it waited.
-      const carried = record(record(record(answer).data).carried);
-      for (const value of Object.values(carried)) {
-        const content = record(value) as unknown as ReturnType<typeof contentAt>;
-        if (typeof content.name !== 'string' || (content.kind !== 'file' && content.kind !== 'folder')) continue;
-        const local = isAbsolute(content.name) ? content.name : resolve(cwd, content.name);
-        const there = contentAt(local, content.name);
-        if (there.kind !== 'absent' && !sameContent(there, content) && content.kind === 'file') {
-          return `${local} was put there while the call waited for the owner; it was kept and the file made was not written.`;
-        }
-        placeContent(local, content);
-      }
-      const file = record(record(record(answer).data).file);
-      if (typeof file.name !== 'string' || !file.name || typeof file.content !== 'string') return undefined;
-      const local = isAbsolute(file.name) ? file.name : resolve(cwd, file.name);
-      // Read again after it was written here (the same file): nothing more to do.
-      if (existsSync(local)) {
-        if (readFileSync(local, 'utf-8') === file.content) return undefined;
-        return `${local} was put there while the call waited for the owner; it was kept and the file made was not written.`;
-      }
-      atomicWriteFileSync(local, file.content, { mkdirp: true });
-      return undefined;
-    },
-  };
-}
-
 /** The answer as the program shows it: the file's content stays on this machine's disk, not in what is printed. */
 function shown(answer: unknown): unknown {
   const top = record(answer);
@@ -243,13 +205,6 @@ export function withFileWorkHere(caller: DaemonVerbCaller, remote: () => boolean
     ...(caller.captureSettingsPrecondition ? { captureSettingsPrecondition: caller.captureSettingsPrecondition.bind(caller) } : {}),
     async invoke<T = unknown>(methodId: string, input?: unknown, options?: Parameters<DaemonVerbCaller['invoke']>[2]): Promise<T> {
       if (methodId !== 'capabilities.run' || !remote()) return caller.invoke<T>(methodId, input, options);
-      const held = await heldOutcome(record(input), cwd());
-      if (held) {
-        const answer = await caller.invoke<T>(methodId, input, options);
-        const kept = held.after(answer);
-        if (kept) throw Object.assign(new Error(kept), { code: 'REFUSED', said: { error: kept, next: 'Move that file, then read what came of the call again.' } });
-        return shown(answer) as T;
-      }
       let prepared;
       // A part of a large file goes ahead through the same caller, as one artifact made for the call.
       const upload: CarriedUpload = async (bytes, name) => partIdOf(await caller.invoke('artifacts.create', await carriedPartBody(bytes, name)));
@@ -269,17 +224,6 @@ export function withFileWorkHere(caller: DaemonVerbCaller, remote: () => boolean
 export function cliWithFileWorkHere(invoke: CapabilityCliInvoke, remote: () => boolean, cwd: string): CapabilityCliInvoke {
   return async (methodId, input, options) => {
     if (methodId !== 'capabilities.run' || !remote()) return invoke(methodId, input, options);
-    const held = await heldOutcome(input, cwd);
-    if (held) {
-      const answer = await invoke(methodId, input, options);
-      if (!answer.ok) return answer;
-      let kept: string | undefined;
-      try { kept = held.after(answer.data); } catch (error) {
-        return { ok: false, code: 'refused', error: `The file could not be written on this computer: ${error instanceof Error ? error.message : String(error)}`, fix: 'Check the folder can be written, then read what came of the call again.' };
-      }
-      if (kept) return { ok: false, code: 'refused', error: kept, fix: 'Move that file, then read what came of the call again.' };
-      return { ok: true, data: shown(answer.data) };
-    }
     let prepared;
     // A part of a large file goes ahead through the same invoke, as one artifact made for the call.
     const upload: CarriedUpload = async (bytes, name) => {

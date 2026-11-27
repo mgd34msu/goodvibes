@@ -26,6 +26,14 @@ export function captureCiWatchOwner(operation: ExternalOperationSource | undefin
     ...(operation.signal ? { signal: operation.signal } : {}) });
 }
 
+/** The source of a repair whose watch the user made: the watch itself, as the user's own request. */
+function userWatchOperation(watch: CiWatchSubscription): ExternalOperationSource {
+  const target = watch.prNumber !== undefined ? `pull request #${watch.prNumber} of ${watch.repo}` : `${watch.repo}${watch.ref ? ` at ${watch.ref}` : ''}`;
+  const source = captureAutonomousSource({ goal: `Repair the failing CI of ${target}, which you asked to be watched with a repair on a failure`,
+    criteria: [`The failing jobs of ${target} are fixed`] });
+  return Object.freeze({ sourceOf: () => source, assertCurrent: () => {} });
+}
+
 export interface CiRepairRequest {
   readonly subscription: CiWatchSubscription;
   readonly brief: FixSessionBrief;
@@ -51,8 +59,10 @@ export function startAdmittedCiRepair(host: ExternalPermissionHost | undefined, 
 }
 
 async function startAdmittedCiRepairAs(host: ExternalPermissionHost | undefined, input: CiRepairRequest, starter: FixSessionStarter): Promise<FixSessionStartOutcome> {
-  if (!host || !input.operation) return { error: 'CI repair has no current original-source admission owner', refused: true };
-  const operation = input.operation;
+  // A watch the user made themselves has no model turn behind it: the watch is the source of its repair, under the same
+  // admission (the permission mode's own rules for an agent spawn) as one a turn made.
+  const operation = input.operation ?? (input.subscription.madeByUser === true ? userWatchOperation(input.subscription) : undefined);
+  if (!host || !operation) return { error: 'CI repair has no current original-source admission owner', refused: true };
   const assertCurrent = () => { input.signal.throwIfAborted(); input.assertCurrent(); operation.assertCurrent(); };
   assertCurrent();
   if (!input.brief.jobs?.length) return { error: 'CI repair needs the failing jobs with exact commit, run, and job identities, and the brief names none', refused: true };

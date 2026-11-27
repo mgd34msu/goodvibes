@@ -1,13 +1,8 @@
 import type { ModalSurfaceRegistry } from './modal-surface-registry.ts';
 import type { ResolvedBuiltinViewDeps } from './view-deps.ts';
 import type { ConfigModalSurface, ConfigModalView } from '../input/config-modal-types.ts';
-import { copyToClipboard } from '../utils/clipboard.ts';
-import { pairingNoWebUiLines, pairingOriginUsesStableHost, pairingReachFromSettings, pairingThisMachineLines, refreshStableHostInputs, resolvePairingWebOrigin } from '@goodvibes/engine/platform/platform/pairing';
-import { availablePairingOffers, mintPairingHandoff, defaultPairingTokenName, PAIRING_HANDOFF_OFFER_KINDS, type OriginPosture, type PairingHandoffOfferKind } from '@goodvibes/engine/platform/platform/pairing';
-import { probePairingTailscale, runPairingTailscaleServe, stopPairingTailscaleServe } from '../core/pairing-tailscale-gateway.ts';
+import { pairingOriginUsesStableHost, refreshStableHostInputs } from '@goodvibes/engine/platform/platform/pairing';
 import { createKeybindingsModalSurface } from './modals/keybindings-modal.ts';
-import { createPairingModalSurface, type PairingConnectionRequest, type PairingModalConnectionInfo, type PairingModalUnreachable } from './modals/pairing-modal.ts';
-import { describeOperatorRpcError, invokePressed, resolveOperatorRpc } from '../runtime/client/operator-endpoint.ts';
 
 /**
  * Register the config-modal surfaces and the old names that open them. Called
@@ -57,21 +52,9 @@ export function registerBuiltinModals(
   }));
   manager.registerModalRedirect('docs', 'keybindings-modal');
 
-  const tailscaleGatewayDeps = { configManager: deps.configManager, homeDirectory: ui.environment.shellPaths.homeDirectory };
-  // The pairing link's host ladder needs two slow probes (Tailscale, the `.local`
-  // lookup). Run them in the background now, only when the link will use the
-  // ladder, so opening the modal never waits on them and already has the answer.
+  // The pairing link's host ladder needs two slow probes (Tailscale, the `.local` lookup). Run them in the background now,
+  // only when the link will use the ladder, so Pair something (Devices and network) already has the answer.
   if (pairingOriginUsesStableHost(deps.configManager)) void refreshStableHostInputs();
-  manager.registerModalSurface(createPairingModalSurface({
-    getConnectionInfo: (request) => buildPairingConnectionInfo({ configManager: deps.configManager, pairingTokens: ui.platform.pairingTokens }, request),
-    controlPlaneReadModel: ui.readModels.controlPlane,
-    copyToClipboard,
-    probeTailscale: () => probePairingTailscale(tailscaleGatewayDeps),
-    runTailscaleServe: () => runPairingTailscaleServe(tailscaleGatewayDeps),
-    stopTailscaleServe: () => stopPairingTailscaleServe(tailscaleGatewayDeps),
-    serveToNetwork: (name) => servePairingToNetwork({ configManager: deps.configManager, homeDirectory: ui.environment.shellPaths.homeDirectory }, name),
-  }));
-  manager.registerModalRedirect('qr-code', 'pairing-modal');
 
   // Paired devices are the Devices and network place (terminal-shell places/devices-place.ts).
 
@@ -80,107 +63,6 @@ export function registerBuiltinModals(
   // (no new config-modal surface); the redirect is a plain hand-off, moved here
   // from the deleted ecosystem bridge.
   manager.registerModalRedirect('sessions', 'sessionPicker');
-}
-
-/** What makes a pairing offer: the settings that say where a phone could open it, and the store that holds the offer. */
-export interface PairingMintDeps {
-  readonly configManager: ResolvedBuiltinViewDeps['configManager'];
-  readonly pairingTokens: ResolvedBuiltinViewDeps['uiServices']['platform']['pairingTokens'];
-}
-
-/** The step that makes a new pairing code: the control that opened this screen. */
-const PAIR_AGAIN = 'Press Pair something (A phone or another device) in Devices and network again';
-
-/**
- * Build the companion-pairing connection info lazily (called from the pairing
- * surface's first render, not at registration time). A failure (a token store
- * that cannot be written, a config error, the device cap) is thrown as it is:
- * the pairing modal shows its message, so the cause is not guessed here.
- * Mirrors the retired Qr view factory's construction.
- */
-export function buildPairingConnectionInfo(deps: PairingMintDeps, request: PairingConnectionRequest = {}): PairingModalConnectionInfo | PairingModalUnreachable {
-  const configManager = deps.configManager;
-  // Derived live from the settings (a user-set web.publicBaseUrl wins).
-  const webOrigin = resolvePairingWebOrigin(configManager);
-  // No code is minted for a phone that a phone could not open: the same
-  // decision and the same steps `goodvibes pair` gives, from the settings, with
-  // no probe. When only this machine can open it, the code is for a browser here.
-  if (webOrigin === null) return { kind: 'unreachable', lines: pairingNoWebUiLines(PAIR_AGAIN) };
-  const reach = pairingReachFromSettings(configManager, webOrigin.origin);
-  const thisMachineOnly = reach.otherDevices ? undefined : pairingThisMachineLines(webOrigin.origin, reach, PAIR_AGAIN);
-  const url = webOrigin.alternateOrigin ? `${webOrigin.origin}  (or ${webOrigin.alternateOrigin})` : webOrigin.origin;
-  const held = request.held;
-  // Reopening shows the same offer while nobody has used it and it has not
-  // expired: no new credential, no write. Otherwise the new offer replaces it.
-  if (!request.fresh && held?.tokenId !== undefined && held.url === url && (request.name === undefined || held.tokenName === request.name)
-    && deps.pairingTokens.isOpenOffer(held.tokenId)) {
-    return { ...held, thisMachineOnly };
-  }
-  const offers = availablePairingOffers({
-    relayEnabled: configManager.get('relay.enabled') === true,
-    // The TUI composition always wires a step-up service ⇒ the passkey offer is
-    // presentable; the web app declines it if the device has no authenticator.
-    stepUpAvailable: true,
-  });
-  // Mint a per-device offer and encode the canonical `#pair=` deep link,
-  // the same mint the pairing.handoff.create verb performs, no raw JSON blob.
-  const handoff = mintPairingHandoff({
-    pairingTokens: deps.pairingTokens,
-    name: request.name ?? defaultPairingTokenName(),
-    offers,
-    webOrigin: webOrigin.origin,
-    replacesOffer: held?.tokenId,
-  });
-  return {
-    // The routable address rides beside a name the device may not resolve.
-    url,
-    token: handoff.token.token,
-    tokenName: handoff.token.name,
-    deepLink: handoff.deepLink ?? handoff.fragment,
-    offers: handoff.offers,
-    posture: handoff.posture,
-    tokenId: handoff.token.id,
-    thisMachineOnly,
-  };
-}
-
-/** pairing.handoff.create's answer, the fields the pairing screen shows. */
-interface PairingHandoffAnswer {
-  readonly token: { readonly id: string; readonly name: string; readonly token: string };
-  readonly offers: readonly { readonly kind: PairingHandoffOfferKind }[];
-  readonly fragment: string;
-  readonly deepLink?: string | undefined;
-  readonly posture?: OriginPosture | undefined;
-}
-
-/**
- * The owner's yes to SERVE_TO_NETWORK_QUESTION: the daemon serves its web UI to
- * the network, waits for its own listener to be bound again, and mints the code
- * for the address phones can open, in one request (pairing.handoff.create
- * `serveToNetwork`). It throws with the daemon's reason when it cannot.
- */
-export async function servePairingToNetwork(deps: { readonly configManager: ResolvedBuiltinViewDeps['configManager']; readonly homeDirectory: string }, name?: string): Promise<PairingModalConnectionInfo> {
-  const rpc = resolveOperatorRpc({ configManager: deps.configManager, homeDirectory: deps.homeDirectory });
-  if (!rpc.available) throw new Error(rpc.reason);
-  let answer: PairingHandoffAnswer;
-  try {
-    // The owner's own yes in the modal: their press.
-    answer = await invokePressed<PairingHandoffAnswer>(rpc.platformClient, 'pairing.handoff.create', {
-      name: name ?? defaultPairingTokenName(),
-      offers: [...PAIRING_HANDOFF_OFFER_KINDS],
-      serveToNetwork: true,
-    });
-  } catch (error) { throw new Error(describeOperatorRpcError(error)); }
-  const deepLink = answer.deepLink ?? answer.fragment;
-  return {
-    url: answer.posture?.origin ?? deepLink,
-    token: answer.token.token,
-    tokenName: answer.token.name,
-    deepLink,
-    offers: answer.offers.map((offer) => offer.kind),
-    posture: answer.posture,
-    tokenId: answer.token.id,
-  };
 }
 
 /** A minimal config-modal surface that renders an honest "not wired" degraded

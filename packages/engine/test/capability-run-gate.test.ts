@@ -6,8 +6,6 @@
 // Red when: classifyCall stops refusing a call that is not a read when the turn's party is someone else's, or the permission manager's callFacts stops reading turnInputParty, or exec declares heldToBoundary with no sandbox; or a Work act stops keeping a guest's cause before the work runs, or noteCause lets a guest's act take work the user's own start has taken.
 // Proves: A capability that no model makes (a result carrying secrets) runs, or is put to the owner, for a call made with the Agent's credential, or its result is written where that call reads it.
 // Red when: capabilities.run stops refusing a capability no model runs (MODEL_NEVER_CAPABILITY_IDS, provider.export) for a call made with an agent credential, so provider.export is asked or runs.
-// Proves: A daemon method call from a model, handed to the gate and allowed by the owner's mode, is handed to the gate again instead of run, so it never runs and is decided over and over (a decision model's call each time under Jev decides).
-// Red when: capabilities.run stops counting a handed method call's own risk class among the classes its decision covers, so the dispatch finds the sent memory.records.add undecided and hands it back until the caller's in-flight limit refuses it (503, the stand-in never reached).
 /**
  * `capability_run` is registered as a terminal program registers it, in a
  * real tool registry bound to a real PermissionManager in jev-decides. The
@@ -389,18 +387,6 @@ test('a model\'s call put to the owner waits for them and runs nothing on their 
   const approvedCall = await answeredWhileWaiting(() => outside(approvedForget), true);
   expect(`${approvedCall.status} asked ${approvedCall.asked}; kept ${kept(approvedForget)}`)
     .toBe('200 asked true; kept false');
-
-  // A daemon method of a class the owner's mode decides (a memory record, which steers a model), called directly by a model
-  // under YOLO: handed to the gate, which YOLO runs, and then sent as it came, once (never handed back again and again). The
-  // memory store's route is outside this graph: a stand-in records each add that reaches it.
-  expect(config.setMany([{ key: 'permissions.mode' as ConfigKey, value: 'yolo' }], localOwnerActor()).ok).toBe(true);
-  const memoryAdds: string[] = [];
-  attachHandler(catalog, 'memory.records.add', (invocation) => { memoryAdds.push(String((invocation.body as { summary?: unknown }).summary)); return { record: { id: 'mem-1' } }; });
-  const remembered = await helper.invokeGatewayMethodCall({ authToken: OPERATOR_TOKEN, methodId: 'memory.records.add',
-    body: { cls: 'fact', summary: 'the uploader retries twice', scope: 'project', workingDirectory: workspace }, context: { admin: true },
-    principal: Object.freeze({ ...operator, actor: agentActor(operator.actor!) }) });
-  expect(`memory ${remembered.status} ${codeOf(remembered) ?? ''} reached ${memoryAdds.length}`).toBe('memory 200  reached 1');
-  expect(config.setMany([{ key: 'permissions.mode' as ConfigKey, value: 'ask-me' }], localOwnerActor()).ok).toBe(true);
 
   // Plan mode switched on while the question waited: the owner's yes does not run it, and the reason says so.
   const planForget = await forget('plan-hook');

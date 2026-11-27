@@ -207,7 +207,7 @@ around is **Jev**. The setting `permissions.mode` is a dial from "ask me" to
 | `ask-me` | You are asked about the risky in-between actions: those the decision model reads as critical, hard to undo or weakening security. With no decision model, you are asked about all of them. |
 | `jev-decides` (default) | The decision model settles the in-between actions, and you are asked only what is yours alone. With no working decision model, you are asked as in `ask-me`. |
 | `just-vibes` | Nothing stops to ask you. Anything that needs you is set aside and listed at the end of the run, and Waiting for you (the menu) approves or drops it. |
-| `yolo` | No permission questions, except about a change requested from a chat channel. Spending limits, sign-in, the project boundary and secret storage still apply, and the agent can never answer an approval for you. |
+| `yolo` | The permission check asks nothing, except about a change requested from a chat channel, a tool server's call outside the limits you set it, and a call your own hook asks about. The questions every mode asks still come to you (a folder's trust, a purchase past a limit, Work's questions, a new sender). Spending limits, sign-in, the project boundary and secret storage still apply, and the agent can never answer an approval for you. |
 | `plan` | Read-only: reading tools run, and anything that would change something is refused. |
 
 In `goodvibes`, `Shift+Tab` changes the mode for the current session.

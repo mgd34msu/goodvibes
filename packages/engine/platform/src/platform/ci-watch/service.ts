@@ -80,6 +80,8 @@ export interface CreateCiWatchInput {
   readonly triggerFixSession?: boolean | undefined;
   /** The project folder the watch belongs to (CiWatchSubscription.project). */
   readonly project?: string | undefined;
+  /** Made by the user's own request, not a model's turn (CiWatchSubscription.madeByUser); kept only when no turn's source is behind the call. */
+  readonly madeByUser?: boolean | undefined;
   /** Whose input made it (CiWatchSubscription.party). */
   readonly party?: import('../security/turn-input-party.js').TurnInputParty | undefined;
 }
@@ -284,6 +286,7 @@ export class CiWatchService {
       ...(input.ref ? { ref: input.ref } : {}),
       ...(input.prNumber !== undefined ? { prNumber: input.prNumber } : {}),
       ...(input.project ? { project: input.project } : {}),
+      ...(input.madeByUser === true && owner === undefined ? { madeByUser: true } : {}),
       // Made by a caller's own request (ci.watches.create): the party its door marked it with, never a default.
       ...((input.party ?? markedInputParty()) ? { party: input.party ?? markedInputParty() } : {}),
       deliveryChannel: channel,

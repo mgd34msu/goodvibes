@@ -137,9 +137,11 @@ call.
 - **Just vibes** (`just-vibes`): nothing interrupts you. Jev answers what it
   can; anything that needs you (with no working decision model, every judgment
   call your tool settings do not allow) is held and listed at the end of the run.
-- **YOLO** (`yolo`): nothing asks you, except a change asked for from a
-  channel; purchases outside your limits still come to you, and an act only you
-  perform is refused to the model. Authentication, workspace containment, secret
+- **YOLO** (`yolo`): the permission check asks you nothing, except about a
+  change asked for from a channel, a tool server's call outside the limits you
+  set it, and a call your own hook asks about; the questions every mode asks
+  still come to you (a folder's trust, a purchase outside your limits, Work's
+  questions, a new sender), and an act only you perform is refused to the model. Authentication, workspace containment, secret
   storage and spending limits still apply. No decision model is consulted.
 - **Plan** (`plan`): read-only. Read-only tools run, and every mutating or exec
   call is refused; the Plan mode row of This conversation in Permissions and safety toggles it.

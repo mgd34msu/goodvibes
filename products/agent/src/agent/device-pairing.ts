@@ -24,7 +24,6 @@ import {
   type PairingHandoffOfferKind,
 } from '@goodvibes/engine/platform/platform/pairing';
 import type { DaemonVerbCaller } from '@goodvibes/engine/platform/platform/runtime/client';
-import type { BlockCopy } from '@goodvibes/engine/terminal-shell/terminal-conversation';
 
 /** What `pairing.handoff.create` answers. */
 interface PairingHandoffCreateResult {
@@ -43,26 +42,6 @@ export type AgentDevicePairingOutcome =
   | { readonly ok: true; readonly tokenName: string; readonly tokenId: string; readonly link: string; readonly forThisMachine: boolean; readonly qrShown: boolean; readonly text: string; readonly qr?: string | undefined }
   /** `text`, when present, is the whole answer as the numbered list `pair` prints. */
   | { readonly ok: false; readonly error: string; readonly next: string; readonly text?: string };
-
-/**
- * What the copy key copies from a printed pairing block: the real link, which the block shows
- * masked. When nothing reaches a clipboard, a block with a QR code says to scan it; one without
- * (a link only this computer opens) prints the link in clear, once, saying why, and a later
- * failure points back to it.
- */
-export function pairingLinkCopy(outcome: { readonly link: string; readonly qrShown: boolean }): BlockCopy {
-  let printed = false;
-  return {
-    text: outcome.link,
-    name: 'the pairing link',
-    whenNotCopied: () => {
-      if (outcome.qrShown) return 'Not copied: nothing could reach a clipboard. Scan the QR code above with the phone instead.';
-      if (printed) return 'Not copied: nothing could reach a clipboard. The link is printed in clear above.';
-      printed = true;
-      return `Not copied: nothing could reach a clipboard, and this link has no QR code, so here it is in clear, once:\n  ${outcome.link}`;
-    },
-  };
-}
 
 /** The origin a deep link opens (`<origin>/#pair=...`). */
 function originOf(link: string): string {

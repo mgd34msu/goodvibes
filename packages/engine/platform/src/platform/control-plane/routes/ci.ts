@@ -117,6 +117,8 @@ function createCreateHandler(service: CiWatchGatewayService): GatewayMethodHandl
       const watch = await service.createWatch({
         ...target,
         ...(project !== undefined ? { project } : {}),
+        // A watch made through this method is the caller's own request; the service keeps that only when no turn's source is behind the call.
+        madeByUser: true,
         deliveryChannel: requireString(params, 'deliveryChannel'),
         triggerFixSession: params.triggerFixSession === true,
       });

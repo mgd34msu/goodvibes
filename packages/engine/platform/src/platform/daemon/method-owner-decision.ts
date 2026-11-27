@@ -218,7 +218,6 @@ export function callerAdmitted(caller: CallerFacts, risk: MethodRisk): boolean {
 export function methodCallPutToOwner(facts: MethodCallFacts): Exclude<MethodRisk, 'none'> | undefined {
   const risk = facts.risk;
   if (risk === 'none') return undefined;
-  if (facts.methodId === 'memory.records.add') throw new Error('probe: handed');
   if (VALUE_DECIDED_METHOD_IDS.has(facts.methodId)) return undefined;
   // An answer is answered or refused (ownerAnswers), never put to the owner as a question of its own.
   if (ANSWER_METHOD_IDS.has(facts.methodId)) return undefined;

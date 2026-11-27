@@ -223,8 +223,8 @@ export async function runDaemonCli(argv: readonly string[], options: DaemonCliOp
           stderr: (text) => { errors.push(text); },
         });
         for (const line of errors) stderr(line);
-        // The command already put each line where it belongs (a refusal on stderr): the waiting answer of exit 3 is
-        // printed on stdout, as `goodvibes do` and `goodvibes-agent do` print it.
+        // The command already put each line where it belongs (a refusal on stderr); the answer goes on stdout, as
+        // `goodvibes do` and `goodvibes-agent do` print it. A typed `do` is held for nothing, so it never exits 3.
         return result({ exitCode, lines }, stdout);
       }
       case 'update': {

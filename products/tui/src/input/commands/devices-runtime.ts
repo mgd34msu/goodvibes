@@ -2,7 +2,7 @@ import type { CommandContext, CommandRegistry } from '../command-registry.ts';
 import type { PublicPairingToken } from '@goodvibes/engine/platform/platform/pairing';
 import { readConnectedDaemonOrigin } from '@goodvibes/engine/platform/platform/config/control-plane-base-url';
 import { describeOperatorRpcError } from '../../runtime/client/operator-endpoint.ts';
-import { buildPairingConnectionInfo, servePairingToNetwork } from '../../views/builtin-modals.ts';
+import { buildPairingConnectionInfo, servePairingToNetwork } from '../../runtime/pairing-offer.ts';
 import { SERVE_TO_NETWORK_QUESTION, formatPairingOffers, generateQrMatrix, pairingPostureNotice, renderQrToString } from '@goodvibes/engine/platform/platform/pairing';
 import { getOperatorRpc } from './operator-rpc.ts';
 import { wireDevicesLists, type DeviceTokens, type DevicesPairingHost, type PairRequest, type PairRequestsHost } from '@goodvibes/engine/terminal-shell/devices-command';
@@ -113,7 +113,7 @@ export const TUI_PAIRING: DevicesPairingHost<CommandContext> = {
     const pairingTokens = ctx.platform.pairingTokens;
     if (!pairingTokens) throw commandRefusal('A device cannot be paired here: this program holds no store of pairing offers.');
     const configManager = ctx.platform.configManager;
-    let info = buildPairingConnectionInfo({ configManager, pairingTokens }, { fresh: true, ...(name ? { name } : {}) });
+    let info = buildPairingConnectionInfo({ configManager, pairingTokens }, name ? { name } : {});
     if ('kind' in info) throw commandRefusal(info.lines.join('\n'));
     // A link only this computer can open: the one real question, asked in place (opening on No); yes serves the web UI to the
     // network and makes the code for an address phones can open in the same request.

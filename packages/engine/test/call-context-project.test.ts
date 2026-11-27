@@ -1,15 +1,5 @@
-// Proves: A daemon capability acts in another project than the one its call names, in the daemon's own folder when the call names none, or in a project its caller may not name, also through another input than its project that names a folder a process works in; or a refusing rule is escaped by naming another project.
-// Red when: The daemon stops reading a program's project header into the call's context, capabilities.run stops taking the project from that context or lets it outrank the body's folder, a per-project service takes the daemon's working folder in place of a missing project instead of refusing, the daemon's dispatch runs a paired device's call in the root, the home folder, the daemon home or a project the owner did not give it, or lets its outside coding agent's cwd name such a project, or a deny rule kept in one project stops applying when the call names another.
-// Proves: A member the owner removed keeps the projects the owner gave them, so a user made later with the same name may act in them.
-// Red when: Removing a member who has no sign-in open no longer tells the daemon, so the projects given to that member stay kept under their name.
-// Proves: A caller the owner gave some projects reaches by id another project's web chat, memory record, question waiting for the owner, checkpoint or saved artifact, or a refusal tells it that such a record exists.
-// Red when: The dispatch stops running its one check of what a caller may reach before a method's handler or route, a kind's owner lookup stops giving the record's project or maker, a capability input naming several records by id is not declared or not read one id at a time, or the refusal's words for another project's record differ from those for no record.
-// Proves: A device the owner gave one project, following the daemon's event stream, receives another project's events (its questions, its chats' turns) while the owner works there.
-// Red when: The gateway stops asking each stream's reach before it sends a frame, or an event's question or session no longer resolves to the project it belongs to, so the device given yellow is sent zinc's question or zinc's chat turn.
-// Proves: A route the daemon serves outside its method catalog, or a route reached by its path over the daemon's socket, runs for a caller without the checks of its project and of what it may reach.
-// Red when: The router stops reading an uncatalogued route's declaration in its folder and reach checks, or the socket's method-and-path call goes straight to its route, so the kiosk given yellow follows zinc's chat or starts a task in zinc.
-// Proves: A paired device holding the default scopes is refused starting a session in a project the owner gave it, or starts one in a project the owner did not give it.
-// Red when: sessions.create is held at an admin again (its effect sessions.administer, or write:sessions dropped from the default list), so the default credential is refused in yellow, or the dispatch stops checking the project its body names both by its one project check and by its work-folder check, so it names zinc.
+// Proves: A daemon capability acts in another project than the one its call names, or in the daemon's own folder when the call names none; or a refusing rule is escaped by naming another project.
+// Red when: The daemon stops reading a program's project header into the call's context, capabilities.run stops taking the project from that context or lets it outrank the body's folder, a per-project service takes the daemon's working folder in place of a missing project instead of refusing, or a deny rule kept in one project stops applying when the call names another.
 /**
  * One daemon, its own working folder and two projects. The calls go through the
  * daemon's real pieces: the header reader of its HTTP routes (daemon-api
@@ -21,10 +11,9 @@
  * and an outside caller name it in the body. Either way the call acts there, the
  * body's folder first, and a subfolder of a repository is that repository's
  * project; with no project only the files for every project are read (never the
- * daemon folder's), and the daemon's own folder is used only when a caller names it.
- * A paired device names only a registered project the owner gave it, checked by the
- * daemon's one check of a caller's project before anything runs; and a rule that
- * refuses a capability, kept in one project, is among the rules of every project.
+ * daemon folder's), and the daemon's own folder is used only when a caller names it;
+ * and a rule that refuses a capability, kept in one project, is among the rules of
+ * every project.
  */
 import { afterEach, expect, test } from 'bun:test';
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';

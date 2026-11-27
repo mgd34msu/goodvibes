@@ -44,7 +44,7 @@ The other modes:
 
 - `ask-me`: Jev reads each judgment call's risk; calls it reads as critical, irreversible or security-weakening ask you, and the rest run
 - `just-vibes`: nothing interrupts you; anything that needs you is held and listed at the end of the run, and Waiting for you (the menu) approves or sets it aside
-- `yolo` runs every action without approval prompts, except a change asked for from a channel (authentication, containment, secret storage and payment limits still apply, and an act only you perform is refused to the model)
+- `yolo` runs every action without approval prompts, except a change asked for from a channel, a tool server's call outside the limits you set it, and a call your own hook asks about; the questions every mode asks still come to you (a folder's trust, a purchase past a limit, Work's questions, a new sender) (authentication, containment, secret storage and payment limits still apply, and an act only you perform is refused to the model)
 - `plan` allows read-only tools and refuses every mutating or exec call
 
 Waiting for you, Decisions lists what Jev decided for you, with undo, never, always and ask. An explicit `permissions.tools.<name>` set to `deny` blocks that tool. Older saved values still load: `safe-owner`, `prompt`, `normal`, `accept-edits` and `custom` as `ask-me`, `safe-jev` and `auto` as `jev-decides`, `allow-all` as `yolo`. How the mode combines with the decision model setting is in [decision-model policies](../../docs/decision-model-policy.md#how-much-you-are-asked).

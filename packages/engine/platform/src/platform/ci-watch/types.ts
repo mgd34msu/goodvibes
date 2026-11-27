@@ -97,6 +97,12 @@ export interface CiWatchSubscription {
    * outside any turn): someone else's. Kept on the daemon only; never in a list a caller reads.
    */
   readonly party?: import('../security/turn-input-party.js').TurnInputParty | undefined;
+  /**
+   * Made by the user's own request (a press, a typed line, a script: any call that is not a model's turn), with no model
+   * turn behind it. Its repair is the user's own request too, admitted under the permission mode with the watch itself as
+   * the source (ci-watch/autonomous.ts); a watch a model's turn made has the turn's source and keeps that rule.
+   */
+  readonly madeByUser?: boolean | undefined;
   /** Channel to notify on completion ('surfaceKind' or 'surfaceKind:address'). */
   readonly deliveryChannel: string;
   /** Historical standalone-service opt-in; production always requires original-source Jev admission. */

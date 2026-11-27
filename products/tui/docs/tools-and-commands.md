@@ -728,7 +728,7 @@ Beyond direct local plugins, a local-first curated distribution channel covers p
 > **note.** Operator read/navigate surfaces open as
 > **modals**: providers/health, services, subscription, remote, sandbox,
 > settings-sync and marketplace, plugins, skills, hooks, policy, security,
-> knowledge, memory, docs→keybindings, qr-code→pairing, work-plan,
+> knowledge, memory, docs→keybindings, work-plan,
 > project-planning→planning. The runtime-ops consoles (cockpit, orchestration,
 > tasks, worktrees, approvals, communication, …) open **Your agents**; tokens and
 > cost open **Usage**; git, diff and review open **Changes**. The old names

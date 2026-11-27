@@ -6,6 +6,12 @@
  * about what that caller may cause. The effect table
  * (platform/security/effect-authority.ts `admitEffects`) is the only reader
  * that turns an actor into an answer; nothing else compares credential kinds.
+ *
+ * There is one user per install. Every credential of the user (a sign-in under any
+ * name, a paired device, the machine's token, the Agent's and the MCP set-up's) is
+ * that user; the class only names how much of the effect table the credential's
+ * stored scope list reaches. The parties that are not the user are a chat guest, a
+ * peer node, the program itself, and a model acting for one of them (`agentFor`).
  */
 import type { CredentialKind } from './http-policy.js';
 import { scopeMatches } from './route-helpers.js';
@@ -18,9 +24,9 @@ export type ActorClass =
   | 'admin'
   /** Not assigned: the daemon no longer gives this class to any credential (`scriptActor` is applied nowhere). */
   | 'script'
-  /** A signed-in user without the admin role. */
+  /** A signed-in user without the admin role (still the user: its stored scope list limits it). */
   | 'member'
-  /** A pairing token with a stored scope list. */
+  /** A pairing token with a stored scope list (the user's device, limited by that list). */
   | 'device'
   /** An admitted chat sender who is not the channel's owner. */
   | 'guest'
@@ -72,9 +78,9 @@ export interface ActorPrincipal {
   readonly principalId?: string | null | undefined;
   readonly principalKind?: 'user' | 'bot' | 'service' | 'token' | 'remote-peer' | null | undefined;
   readonly credentialKind?: CredentialKind | null | undefined;
-  /** A device token the owner paired in person through their pairing flow. */
+  /** A device token paired through the pairing flow (origin `owner-pairing`): a label of how it was made, no authority of its own. */
   readonly ownerDevice?: boolean | undefined;
-  /** For an owner's device: the principal ids of the credentials made from it. */
+  /** For a device paired through the pairing flow: the principal ids of the credentials made from it. */
   readonly madeFromIt?: readonly string[] | undefined;
   /** The credential holds the admin role with no narrowing list. */
   readonly admin?: boolean | undefined;

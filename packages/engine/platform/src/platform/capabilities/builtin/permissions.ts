@@ -37,7 +37,7 @@ function causeOf(words: ModeInForceWords): string | undefined {
   const because = words.because ?? '';
   if (because === 'no decision model set') return 'No decision model is set up, so GoodVibes asks you itself. Choose one in Settings: /settings open judgment.model.';
   if (because === 'not measured yet') return `${words.chosen} is only the default here and has not been measured on your decision model. Choose it yourself, or another mode, in Settings: /settings open permissions.mode.`;
-  if (because === 'an old auto-approve setting is on') return 'An old auto-approve setting runs everything without asking. Choosing a mode in Settings clears it: /settings open permissions.mode.';
+  if (because === 'an old auto-approve setting is on') return 'An old auto-approve setting runs calls without asking. Choosing a mode in Settings clears it: /settings open permissions.mode.';
   if (because.startsWith('decision model')) return 'The decision model is not answering, so GoodVibes asks you itself. Choose another in Settings: /settings open judgment.model.';
   return undefined;
 }

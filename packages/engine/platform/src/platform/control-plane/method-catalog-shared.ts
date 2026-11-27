@@ -65,8 +65,9 @@ export interface GatewayMethodDescriptor {
   readonly effect?: GatewayMethodEffect | undefined;
   /**
    * The owner's own act (answering a purchase window or the owner inbox, typing
-   * a card security code, withdrawing access the owner granted): only the owner's
-   * credential makes it; another is refused, or its call put to the owner. For
+   * a card security code, withdrawing access the owner granted): the user makes it
+   * from any of their credentials (limited only by a stored scope list); a guest, a
+   * peer or a model is refused, or its call decided under the permission mode. For
    * a plugin's method, a declared `ownerOnly` means a model never calls it.
    */
   readonly ownerOnly?: boolean | undefined;
@@ -296,13 +297,13 @@ export interface CallContext {
   /** The daemon served the request to itself, in process (a turn it hosts): bound by its router, never from a header. */
   readonly daemonHosted?: true | undefined;
   /**
-   * A daemon-run turn acting on someone else's input (security/turn-input-party.ts: a member's web chat, a guest, a
-   * channel message, work nobody but the owner approved): set in process only, by the daemon's own turn
+   * A daemon-run turn acting on someone else's input (security/turn-input-party.ts: a guest, a channel stranger's
+   * message, text read from outside, work a stranger caused): set in process only, by the daemon's own turn
    * (tools/capability/daemon-tools.ts). Such a turn reaches only the chats and sessions its own caller made
    * (control-plane/caller-reach.ts `reaches`); it only ever narrows what a call reaches.
    */
   readonly othersInput?: true | undefined;
-  /** With `othersInput`: the principal whose own conversation the turn runs in (a member's web chat: that member's), when known. */
+  /** With `othersInput`: the principal whose own conversation the turn runs in (a guest's chat: that guest's), when known. */
   readonly othersInputFor?: string | undefined;
   /**
    * A call nested in one of the daemon's own turns, sent with the daemon's credential (set by the dispatch only for its

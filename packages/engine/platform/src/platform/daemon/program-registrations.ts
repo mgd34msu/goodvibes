@@ -13,7 +13,7 @@
  * so a reused process number is never it), when the connection that proved it closes, and at every daemon restart (it
  * is kept in memory only). A registration presented after its process ended, or another connection's challenge
  * answered, proves nothing. A connected host on another machine never issues one: a Unix socket does not cross
- * machines, and there the program's presses are the owner's only through the owner's own sign-in on that host.
+ * machines, and there the program works the same, as the user's own credential on that host.
  *
  * A registration is optional and decides nothing: it names a program only, grants nothing and takes nothing away. The
  * operator token on this machine is the user with or without one, and a program the daemon cannot register (or a daemon that

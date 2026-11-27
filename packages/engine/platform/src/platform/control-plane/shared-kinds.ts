@@ -3,15 +3,13 @@
  * arrives on them, their knowledge library, their money, their profile, their dates, their home, what the daemon told them, their
  * Cloudflare account, their watchers), and who reaches each.
  *
- * They are the owner's: the owner in person (their signed-in session, their verified program on this machine, their Agent program) and
- * their own turns (a daemon-run turn on their own input) reach them. Anyone else (a paired device, the owner's own phone included, a
- * signed-in member, the outside agent, a script with the operator token, a machine of the group, a turn on someone
- * else's input) reaches a kind ONLY when the owner gave that caller that kind: a per-caller gift, given and taken back in
- * Devices and network on the caller's row as a project is (`devices.give-shared`, `devices.take-shared`), default none,
- * whatever the effect table's scope says (both must admit the call). A caller that tries a kind it was not given puts
- * ONE question to the owner the first time ("Let the paired device "kiosk" read and send your mail?"); on the owner's yes the
- * kind is given and the call can be sent again; on the owner's No nothing is given and it is not asked again while the daemon
- * runs (daemon/shared-kind-gifts.ts). A 3.5.0 device that read these keeps working that way: after the owner's one yes.
+ * They are the user's, and every credential of the user reaches them with no gift and no question: their signed-in session
+ * under any name, any paired device, the machine's token from any process, a typed `do`, the MCP set-up, the Agent, and their own
+ * turns (a daemon-run turn on their own input); the only limit is a credential's stored scope list (the effect table's scope
+ * says which methods it reaches). Only a daemon-run turn on someone else's input (a guest's, a channel stranger's, text read
+ * from outside) reaches a kind by a gift of the caller that turn runs for (`devices.give-shared`, `devices.take-shared`, kept in
+ * `caller-shared.json`); the gift controls, the question the first use of an ungiven kind would put, and `SHARED_KIND_NOT_GIVEN`
+ * remain in the code and answer nothing for the user (daemon/shared-kind-gifts.ts).
  *
  * Which ids are which kind: a method family of control-plane/record-addresses.ts `FAMILIES` that holds the owner's own
  * things, and the capability families that act on the same things (each line below). The other `FAMILIES` lines are

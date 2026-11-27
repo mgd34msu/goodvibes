@@ -67,8 +67,8 @@ export const GATE_PRESETS: Readonly<Record<GatePresetName, GatePresetDefinition>
   },
   yolo: {
     name: 'yolo', label: 'YOLO', mode: 'yolo',
-    summary: 'GoodVibes runs everything without asking; it still keeps to the sandbox, secret storage and payment limits.',
-    short: 'runs everything without asking, inside the sandbox and payment limits',
+    summary: 'GoodVibes runs calls without asking, except a channel\'s change, a tool server set to ask and a hook that asks; it still keeps to the sandbox, secret storage and payment limits.',
+    short: 'runs calls without asking, except a channel\'s change, a tool server set to ask and a hook that asks',
     stakes: { low: 'allow', medium: 'allow', high: 'allow', critical: 'allow' },
     readOnly: false,
   },

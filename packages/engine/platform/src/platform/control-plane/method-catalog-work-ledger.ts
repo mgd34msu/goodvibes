@@ -53,7 +53,7 @@ export const builtinGatewayWorkLedgerMethodDescriptors: readonly GatewayMethodDe
   }),
   methodDescriptor({
     id: 'work.target', title: 'Name A Piece Of Work For An Act', category: 'work-ledger',
-    description: 'Read what an act on one piece of work sends, from the work alone: `operation` "execution" answers the identity start, status, stop and resume take (its current attempt and revisions); "contract" answers the run that answering, running a step again and the spending limit act on; "own" answers only whether this caller may act on the work at all (a paired device, the outside agent or a member acts only on work it asked for itself: WORK_NOT_YOURS otherwise). Every other field is passed through. Answers { summary, input }; nothing is kept.',
+    description: 'Read what an act on one piece of work sends, from the work alone: `operation` "execution" answers the identity start, status, stop and resume take (its current attempt and revisions); "contract" answers the run that answering, running a step again and the spending limit act on; "own" answers only whether this caller may act on the work at all (you may from any of your credentials, a sign-in, a paired device or the machine\'s token; a caller that is not you acts only on work it asked for itself: WORK_NOT_YOURS otherwise). Every other field is passed through. Answers { summary, input }; nothing is kept.',
     effects: ['work.read'],
     http: { method: 'POST', path: '/api/work/target' },
     inputSchema: { type: 'object', additionalProperties: true, required: ['work', 'operation'], properties: {

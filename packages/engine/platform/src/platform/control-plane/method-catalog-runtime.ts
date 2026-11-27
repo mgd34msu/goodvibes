@@ -704,7 +704,7 @@ export const builtinGatewayRuntimeMethodDescriptors: readonly GatewayMethodDescr
   methodDescriptor({
     id: 'memory.records.list',
     title: 'List Memory Records',
-    description: 'Bulk read from the canonical store: a literal (non-semantic) search returning the matching records as a plain array. A call that names a project (its call context, or project in the filter) reads that project\'s records and the ones that belong to no project; a call naming none reads only the records that belong to no project; everyProject (the owner in person only, their place\'s "Every project") reads every record. This is the read a client surface uses instead of opening the store file for its browse/list and knowledge-injection paths.',
+    description: 'Bulk read from the canonical store: a literal (non-semantic) search returning the matching records as a plain array. A call that names a project (its call context, or project in the filter) reads that project\'s records and the ones that belong to no project; a call naming none reads only the records that belong to no project; everyProject (you, from any of your credentials: your place\'s "Every project") reads every record. This is the read a client surface uses instead of opening the store file for its browse/list and knowledge-injection paths.',
     category: 'memory',
     effects: ['memory.read'],
     http: { method: 'POST', path: '/api/memory/records/list' },

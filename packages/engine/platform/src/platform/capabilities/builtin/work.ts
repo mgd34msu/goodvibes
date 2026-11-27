@@ -160,10 +160,12 @@ export interface WorkCauseCapabilityServices {
 }
 
 /**
- * Keep on the work's record who made it run, before it runs: the caller's cause (set by `capabilities.run`); a caller
- * that names none is someone else. The owner's own act makes the work theirs; anyone else's never takes it from them.
- * `made`: the caller handed this work over just now (work.delegate); any other act of someone else's on work with no
- * cause recorded (made before causes were kept, so the owner's) is refused (work-plans.ts `noteCause`).
+ * Keep on the work's record who made it run, before it runs: the caller's cause (always set by `capabilities.run`: the
+ * user's, from any credential of theirs, or a guest's, a peer's or a model's on someone else's input; the `other` fallback
+ * below is for a caller that carries none, which `capabilities.run` never sends). The user's own act makes the work
+ * theirs; a stranger's never takes it from them. `made`: the caller handed this work over just now (work.delegate).
+ * Work with no cause recorded (made before causes were kept) is the user's, and nothing refuses an act on it
+ * (work-plans.ts `noteCause`).
  */
 async function noteCause(services: WorkCauseCapabilityServices, caller: CapabilityCaller, workId: string, made = false): Promise<void> {
   if (!workId) return;
@@ -175,8 +177,8 @@ async function noteCause(services: WorkCauseCapabilityServices, caller: Capabili
     await services.workCauses.note(caller.workingDirectory, workId, caller.cause ?? { party: 'other', who: 'a caller that is not the owner in person' },
       made ? { made: true } : undefined);
   } catch (error) {
-    // Work made before causes were kept is the owner's: it waits on the owner's answer in Waiting for you, or only the
-    // owner starts it.
+    // The plan store refused the act (`WorkPlanRefusal`): its own words say why; `noteCause` itself no longer refuses
+    // an act on work made before causes were kept, which is the user's.
     if (error instanceof Error && error.name === 'WorkPlanRefusal') throw new CapabilityRefusal(error.message, 'Only the owner starts this work, from their own screen.');
     throw error;
   }

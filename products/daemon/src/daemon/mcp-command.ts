@@ -25,8 +25,8 @@
  *
  * WHAT IS SERVED by default is two tools, `capability_find` and
  * `capability_run`, over the daemon's `capabilities.find` and
- * `capabilities.run`: every capability, each run decided by the daemon under
- * the owner's mode. With any of the flags below it serves one tool per method
+ * `capabilities.run`: every capability, each run at once as the user's own call
+ * (its credential is the user's). With any of the flags below it serves one tool per method
  * instead: the agent slice (the session, task, contract and approval methods
  * that only read, plus the session lifecycle) by default, `--allow-write` adds
  * the other methods of the chosen families, `--categories` picks other

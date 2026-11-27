@@ -161,7 +161,7 @@ export class AgentManager {
   private readonly otherPartyMakers = new WeakMap<AgentRecord, string>();
   /**
    * Agents the owner's own turn (or a run marked as theirs) started: their runs are marked the owner's. Neither here nor above:
-   * started where nothing names whose it is, and its runs read as someone else's (unknown leans to someone else).
+   * started where nothing names whose it is, and its runs read as the user's (work with no mark is the user's: security/turn-input-party.ts).
    */
   private readonly ownerPartySpawns = new WeakSet<AgentRecord>();
   /** The turn whose tool call started each agent: its request, and the id work it leaves is recovered against. */
@@ -981,7 +981,7 @@ export class AgentManager {
     const otherParty = this.otherPartySpawns.get(record);
     if (otherParty !== undefined) return withOtherPartyInput(otherParty, turn);
     // Started by the owner's own turn or a run marked the owner's: the owner's. Started where nothing named whose it is: read from its
-    // own turn, which names no owner's input (security/turn-input-party.ts: someone else's).
+    // own turn, which carries no mark of someone else's input (security/turn-input-party.ts: the user's).
     return this.ownerPartySpawns.has(record) ? withInputParty({ party: 'owner' }, turn) : turn();
   }
 
@@ -1039,8 +1039,8 @@ export class AgentManager {
   }
 
   /**
-   * The caller an agent was started for when that was not the owner (its turn's `madeFor`, security/turn-input-party.ts):
-   * a paired device's, a member's or the outside agent's own task. Undefined for the owner's and for one nobody recorded.
+   * The caller an agent was started for when that was not the user (its turn's `madeFor`, security/turn-input-party.ts):
+   * a guest's or a peer's, never one of the user's credentials. Undefined for the user's and for one nobody recorded.
    * The one reach rule reads it (daemon/record-owners.ts): such a caller stops or retries only its own.
    */
   madeByOf(id: string): string | undefined {

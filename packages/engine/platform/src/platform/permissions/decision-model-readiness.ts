@@ -282,7 +282,7 @@ export function describeModeInForceWords(
     return {
       chosen: chosenLabel, inForce: 'YOLO, for now', chosenWhen: `${chosenLabel} once the old auto-approve setting is off`,
       chosenShort: `${chosenLabel}: old auto-approve on`, because: 'an old auto-approve setting is on',
-      sentence: `GoodVibes runs everything without asking for now: an old auto-approve setting is on. Choose a mode in Settings to clear it and use ${chosenLabel}.`,
+      sentence: `GoodVibes runs calls without asking for now: an old auto-approve setting is on. Choose a mode in Settings to clear it and use ${chosenLabel}.`,
       asksBefore,
     };
   }
@@ -306,7 +306,7 @@ function asksBeforeFor(mode: GatePresetName, modelWorks: boolean, configManager:
       : askMeWithoutModel(configManager);
     case 'jev-decides': return 'Jev decides what is safe to run; GoodVibes asks you about anything that destroys data or weakens a safety setting.';
     case 'just-vibes': return 'GoodVibes doesn\'t stop to ask; anything that needs you is held and listed at the end of the run.';
-    case 'yolo': return 'GoodVibes runs everything without asking.';
+    case 'yolo': return 'GoodVibes runs calls without asking, except a channel\'s change, a tool server set to ask and a hook that asks.';
     case 'plan': return 'GoodVibes only reads and plans; it changes nothing.';
   }
 }

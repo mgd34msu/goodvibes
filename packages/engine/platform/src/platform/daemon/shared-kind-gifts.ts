@@ -1,14 +1,15 @@
 /**
- * shared-kind-gifts.ts, the daemon's side of the owner's shared things (control-plane/shared-kinds.ts): whether a call
- * of a caller that is not the owner may reach the shared kind it acts on, and the decision the first time it tries one
- * it was not given.
+ * shared-kind-gifts.ts, the daemon's side of the user's shared things (control-plane/shared-kinds.ts): whether a call
+ * may reach the shared kind it acts on.
  *
  * Read where every call is admitted (the dispatch, daemon/control-plane.ts, and the REST router, daemon/http/router.ts),
- * after the folder and reach checks and before anything runs. The owner in person, their programs and their own turns pass.
- * Anyone else passes with the gift of that kind; without it, giving it is decided by the daemon's one permission
- * manager under the owner's mode, as a loosening with who asks as a fact (capability-owner-gate.ts `decideGrant`):
- * YOLO gives it, Jev decides and Just vibes ask Jev, Ask me asks the owner while the call waits. Given, the kind is kept (in
- * `<daemon home>/caller-shared.json`) and the call goes on. A turn on someone else's input is refused.
+ * after the folder and reach checks and before anything runs. Every credential of the user passes (its reach is everything),
+ * and so do their own turns: nothing is given, asked or decided for them. What remains in the code, reached only by a call
+ * that is not the user's (a daemon-run turn on someone else's input), is the gift of a kind to the caller it runs for: without
+ * it, giving it is decided by the daemon's one permission manager under the owner's mode, as a loosening with who asks as a fact
+ * (capability-owner-gate.ts `decideGrant`): YOLO gives it, Jev decides and Just vibes ask Jev, Ask me asks the owner while the
+ * call waits. Given, the kind is kept (in `<daemon home>/caller-shared.json`) and the call goes on. A turn on someone else's
+ * input that names no caller is refused.
  */
 import { CallerSharedStore, SHARED_KIND_WORDS, knowledgeCallOfProject, setSharedKindGiftReader, sharedKindAsker, sharedKindOfCall, sharedKindOfMethod, sharedKindRefusalWords, type SharedKind, type SharedKindCaller } from '../control-plane/shared-kinds.js';
 import { reacherOf } from '../control-plane/caller-reach.js';

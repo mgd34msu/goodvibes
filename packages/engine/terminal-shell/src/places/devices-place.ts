@@ -671,6 +671,10 @@ export const DEVICES_PLACE = definePlace<Item>({
     // (builtin/service-sessions.ts; Models and providers' capabilities, offered only by a program that keeps such sessions).
     { key: 'i', id: 'service-sign-in', list: 'devices', whole: true, capability: 'accounts.sign-in', label: 'sign in to a daemon or listener' },
     { key: 'o', id: 'service-sign-out', list: 'devices', whole: true, capability: 'accounts.sign-out', label: 'sign out of a daemon or listener' },
+    // Tailscale serve (builtin/tailscale.ts): what Tailscale reports, serving this daemon at its https tailnet address, and stopping it.
+    { key: 'T', id: 'tailscale-status', list: 'devices', whole: true, capability: 'tailscale.status', label: 'can Tailscale serve this' },
+    { key: 'V', id: 'tailscale-serve', list: 'devices', whole: true, capability: 'tailscale.serve', label: 'serve it over Tailscale' },
+    { key: 'K', id: 'tailscale-stop', list: 'devices', whole: true, capability: 'tailscale.stop-serving', label: 'stop serving over Tailscale' },
     // The Secure address screen in Settings, as it is: an https address for phones.
     { key: 's', id: 'secure-address', list: 'devices', capability: 'settings.open', label: 'secure address', fill: { where: () => 'secure address' } },
     { key: 'a', list: 'waiting', states: ['pending'], capability: 'devices.approve', label: 'approve', fill: { request: 'id' } },

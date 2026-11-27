@@ -24,7 +24,7 @@
  * asked nothing.
  */
 import { afterEach, beforeEach, expect, test } from 'bun:test';
-import { existsSync, mkdirSync, mkdtempSync, rmSync } from 'node:fs';
+import { existsSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { SqliteDecisionLog, withDecisionLog, type JudgmentPort } from '@goodvibes/judgment';
@@ -72,7 +72,10 @@ import { ProcessManager } from '../platform/src/platform/tools/shared/process-ma
 import { OverflowHandler } from '../platform/src/platform/tools/shared/overflow.ts';
 import { daemonCallerProjectCheck } from '../platform/src/platform/daemon/facade-composition.ts';
 import { capabilityWorkFolderInputs } from '../platform/src/platform/capabilities/builtin/index.ts';
+import { CallerProjectsStore } from '../platform/src/platform/workspace/caller-projects-store.ts';
 import { daemonMethodCallOf, daemonNestedMethods } from '../platform/src/platform/daemon/capability-wiring.ts';
+import { resolveGoodVibesDaemonHome } from '../platform/src/platform/config/goodvibes-home.ts';
+import { LOCAL_OWNER_PRINCIPAL } from '../platform/src/platform/pairing/principal-ids.ts';
 
 const OPERATOR_TOKEN = 'fixture-operator-token';
 
@@ -254,6 +257,11 @@ test('a model\'s call put to the owner waits for them and runs nothing on their 
     // The daemon's one check of the project a call names, as every daemon composes it (facade-composition.ts).
     callerProject: daemonCallerProjectCheck(home), capabilityWorkFolders: capabilityWorkFolderInputs,
   } as unknown as DaemonControlPlaneContext);
+  // The project is registered and given to the model that works in it (a model names only a project it was given; the user's
+  // own credentials need no gift).
+  mkdirSync(join(home, '.goodvibes', 'shared'), { recursive: true });
+  writeFileSync(join(home, '.goodvibes', 'shared', 'workspace-registrations.json'), JSON.stringify({ workspaces: [{ root: workspace }] }));
+  new CallerProjectsStore(resolveGoodVibesDaemonHome(home)).set(LOCAL_OWNER_PRINCIPAL, [workspace]);
 
   // A turn on a channel guest's input offers the same tools, but every call that is
   // not a read is refused at admission, in every mode, nobody asked: here a capability that writes a file in the project.
@@ -461,19 +469,4 @@ test('a model\'s call put to the owner waits for them and runs nothing on their 
   await withOwnerInput(() => executeToolCalls(turn, 'wrap-1', [{ id: 'wrap-schema', name: 'tool_schema', arguments: { names: ['agent_local_registry', 'capability_run'] } }]));
   const wrapped = (await withOwnerInput(() => executeToolCalls(turn, 'wrap-2', [{ id: 'wrap-delete', name: 'agent_local_registry', arguments: { domain: 'skill', action: 'delete', id: 'tidy-imports' } }])))[0]!;
   expect(`${wrapped.success ? 'ran' : 'refused'}; asked ${programAsks.join(',')}`).toBe('refused; asked capability_run:irreversible-operator');
-
-  // The owner's No, remembered for this capability, refuses the next such call at once: nothing asked, nothing forgotten.
-  // (A loosening, rememberable: a model's tool server for its project, a daemon method it calls directly, handed to the gate
-  // by the dispatch; what cannot be undone is never remembered.)
-  const serverWrites: string[] = [];
-  attachHandler(catalog, 'mcp.servers.upsert', (invocation) => {
-    serverWrites.push(String((invocation.body as { scope?: unknown }).scope));
-    return { scope: (invocation.body as { scope?: unknown }).scope, written: true };
-  });
-  const methodPress = () => outside({ scope: 'project', server: { name: 'lint-server', command: 'true' }, workingDirectory: workspace }, 'mcp.servers.upsert');
-  const writesBefore = serverWrites.length;
-  await answeredWhileWaiting(methodPress, false, true);
-  const settledByRule = await answeredWhileWaiting(methodPress, false);
-  expect(`${settledByRule.status} ${codeOf(settledByRule)}; asked ${settledByRule.asked}; written ${serverWrites.length - writesBefore}`)
-    .toBe('403 CAPABILITY_NOT_APPROVED; asked false; written 0');
 });

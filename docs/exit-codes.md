@@ -32,12 +32,12 @@ The same number, different meaning:
 
 `do` and `find` (`goodvibes`, `goodvibes-agent`, `goodvibes-daemon`) run and find a GoodVibes capability through the
 daemon: `0` it was done (or found), `1` it was refused or failed (a capability that acts on a conversation is refused
-in one line, since it needs the terminal app or the Agent), `2` the command line was wrong. A `do` that weakens a
-protection (installing something that runs by itself included, such as a file named by path that a program runs by
-itself later), cannot be undone, spends money, writes a secret or is the owner's own act is decided by the daemon under
-the owner's permission mode, whoever typed it and wherever: a command line never carries a person's word, and nothing
-is asked at the terminal. YOLO runs it, Just vibes holds it, and under Ask me and Jev decides the owner's one approval card asks it and
-the `do` waits on that answer (`0` once it ran, `1` on the owner's No). Only a read runs at once. With `--output json` (`--json`
+in one line, since it needs the terminal app or the Agent), `2` the command line was wrong. A typed `do` is your own
+act: it carries the machine's token, which is you, so it runs at once in every permission mode (Ask me, Jev decides,
+Just vibes, YOLO and Plan alike), whatever the capability does (a read, a change, one that cannot be undone, one that
+runs by itself later, a loosening, one that is only yours to make). It never waits on a question, prints no
+"Waiting for your answer" line for its own act, holds nothing and never exits `3`; permission modes decide what a
+model does, not what you type. It prints the capability's own result on standard output and exits `0`. With `--output json` (`--json`
 for the daemon) the answer or the `{ok:false, code, error, fix}` refusal is one document on stdout; without it a refusal
 or failure (exit `1`) is printed on stderr, the same in all three programs. A refusal's code is the capability's own
 (`NOT_FOUND`, `INVALID_ARGUMENT`, `UNAVAILABLE`, `CAPABILITY_NOT_APPROVED`, ...); the exit code is `1` for every

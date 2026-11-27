@@ -953,10 +953,10 @@ Roles: `admin` is the only role with a meaning; any other role name (the termina
 - **It is for the first sign-in only.** A sign-in with the generated password makes no session by itself: it is answered `409` `FIRST_SIGN_IN_SETS_PASSWORD` ("Set your own password to finish the first sign-in") until the same sign-in also carries a password of your own (`newPassword`, at least 8 characters; the web UI's sign-in asks for it). That sign-in sets your password, removes the file and signs you in; the generated password never signs in again. Before that first sign-in, any process of your account that can read the file (one outside the sandbox) could make it in your place, so sign in once soon after the first start.
 - **The file is the password.** The generated password signs in only while this file still holds it. Deleting the file, emptying it or clearing it with `goodvibes auth clear-bootstrap` withdraws the password at once: a sign-in with it then gets `401` `BOOTSTRAP_CREDENTIAL_WITHDRAWN` (`this generated password signed in only while the bootstrap credential file held it, and that file was deleted or cleared`), and every sign-in made with it ends within about a second. `admin` keeps its account; give it a password with `goodvibes auth rotate-password admin`.
 - **Another user's sign-in leaves it alone.** While `admin` still has the generated password, nobody else's sign-in deletes the file. The daemon deletes it by itself only once nothing signs in with it any more (the user it names has a password of its own), at the next sign-in with a real password.
-- The one right way to finish with it is the first sign-in itself (above). From a command line, `goodvibes auth rotate-password admin` is the owner's own act and a command line is not the owner's program: it is put to the owner in Waiting for you (exit `3`) and runs on the owner's yes:
+- The one right way to finish with it is the first sign-in itself (above). From a command line, `goodvibes auth rotate-password admin` is your own act: it carries the machine's token, which is you, so it runs at once in every permission mode and asks nothing:
 
 ```sh
-printf '%s\n' '<a new admin password>' | goodvibes auth rotate-password admin --password-stdin   # exit 3: answer it in Waiting for you
+printf '%s\n' '<a new admin password>' | goodvibes auth rotate-password admin --password-stdin   # runs at once
 goodvibes auth clear-bootstrap      # prints "Bootstrap credential file removed." or "... was already absent."
 ```
 

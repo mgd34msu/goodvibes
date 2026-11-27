@@ -259,6 +259,15 @@ To expose the operator surface to an MCP client instead, use `goodvibes-daemon m
 
 Starts the app and opens the view a `goodvibes://open/<view>[?target=<id>[:<kind>]]` link names, the same link "Open a view by its link" (the capability `deeplink.open`) and the Links tab of the System place use. In a process view (agents, tasks, orchestration) the target selects that process; another view opens and says the target was not used. The transcript's first line says what was opened. A missing or unparsable link prints the expected form on stderr and exits `2`. Registering the `goodvibes://` scheme with the operating system, so a click in another program runs this command, is left to the installer.
 
+### `goodvibes find "<what you need>"` and `goodvibes do <capability id> [--input key=value ...]`
+
+`find` names the three to five capabilities that do what you need, with their ids, inputs and risk; nothing runs. `do` runs one by id through the daemon. A typed `do` is your own act: it carries the machine's token, which is you, so it runs at once in every permission mode (Ask me, Jev decides, Just vibes, YOLO and Plan), whatever the capability does. It never waits on a question, prints no "Waiting for your answer" line for its own act, holds nothing and never exits `3`; it prints what the capability found or did on standard output and exits `0`. A capability that acts on a conversation (clear, compact, undo) is refused in one line, since it runs in the terminal app; a refusal or failure prints the reason on stderr and exits `1`; bad usage exits `2`. `--output json` prints the answer, or the `{ok:false, code, error, fix}` refusal, as one document. The permission modes decide what a model does, not what you type. `--answer-permissions` belongs to `run`, not to `do`.
+
+```sh
+goodvibes find "switch off the lint hook"
+goodvibes do hooks.disable --input hook=lint-before-commit
+```
+
 ## Argument terminator
 
 `--` stops flag parsing. All subsequent tokens are passed through as positional arguments or subcommand arguments.
@@ -384,7 +393,7 @@ The GitHub Action passes `--timeout 30m --max-turns 50` to a prompt run unless i
 | `cause` | no | With `kind`, a non-secret reason code: `journal_conflict`, `journal`, `principal`, `network`, `schema`, `host_changed`, `unknown`. |
 | `native` | no | The native intake state: `status`, `message`, `request`, `result`, `execution`; `nextStep` (`retry`, `resume`, `cancel` or `inspect`: run `--intake-<nextStep>`, with `inspect` meaning `--intake-status`) when an earlier input must be moved forward first; `notSent: true` when this run's own text was not sent because of that earlier input; `hostedTurn` (`state`, `sessionId`, and on `failed` a `failure` with `summary` and `retryable`) when the host runs the reply. |
 | `refusal` | no | Present when the run was refused before it started: `code`, `state`, `reason`, `next`. |
-| `heldForOwner` | no | Present when the run held calls for the owner (Just vibes): one `{ id, tool, summary, reason }` per call. None of them ran; the owner approves one in Waiting for you, under Held calls. |
+| `heldForOwner` | no | Present when the run held calls for the owner: Just vibes holds what it does not run, and in any other mode a call the mode puts to the owner while nobody in the run can answer it (no `--answer-permissions`) is held the same way. One `{ id, tool, summary, reason }` per call. None of them ran; the owner approves one in Waiting for you, under Held calls. |
 | `recovery` | no | Present when the run restored its session from a crash snapshot: `sessionId`, `applied`, `refusal` (when not applied: `no-snapshot`, `unusable-snapshot`, `apply-failed`), `snapshotAt` (ISO time the snapshot was written), `snapshotKept` (still on disk), `messages`, `turns` (prompts), `interruptedTurn` (`prompt` masked and cut at 1000 characters, `toolResults` already obtained, `interruptedToolCalls` as `{ callId, tool }`, `partialReply` when a reply was cut off), `lost` (what could not be brought back, one sentence each). |
 | `diagnostics` | no | Present when no decision model was in use: `decisionModel` with `inUse: false`, `policy` (the stored "When the decision model is missing or fails" value: `Hybrid`, `Decision Model Only` or `No Decision Model`), `reason` (`selected` for No Decision Model, `not-set` or `unavailable`), `line` (the sentence also printed on stderr) and, when the set model was failing, `failure` (`model`, `what`, `nextStep`). The exit code is what the work earned; a run that finished without the decision model still exits `0`. |
 

@@ -40,9 +40,10 @@ export interface NativeHeadlessTurnResult {
     /** Set when no decision model was in use for the run: none set, switched off, or the set one failing. */
     readonly decisionModel?: DecisionModelUse | undefined;
     /**
-     * Calls permissions.mode just-vibes held for the owner during the run: not run, and the rest
-     * of the work went on without them. Run again in ask-me (or answer them with --answer-permissions)
-     * to decide each one.
+     * Calls held for the owner during the run: not run, and the rest of the work went on without them. Just vibes holds
+     * what it does not run; in any other mode a call the mode puts to the owner while nobody in the run can answer it
+     * (no --answer-permissions) is held the same way. Run again with --answer-permissions (or approve them in Waiting
+     * for you) to decide each one.
      */
     readonly heldForOwner?: readonly { readonly id: string; readonly tool: string; readonly summary: string; readonly reason: string }[] | undefined;
 }

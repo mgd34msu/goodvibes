@@ -112,6 +112,10 @@ Without `--answer-permissions` nobody in the run can answer, so a call the permi
 
 The turn runs in the process of the `run` command (a fresh runtime that exists only for this invocation), so its tool, permission and usage frames are always the turn's own. A conversation that an interactive Agent session hosts on the daemon is not driven by `run`, and its frames are not part of this stream.
 
+## Running one capability by id: `goodvibes-agent do`
+
+`goodvibes-agent find "<what you need>"` names the capabilities that do it, with their ids, inputs and risk; nothing runs. `goodvibes-agent do <capability id> [--input key=value ...]` runs one by id through the connected daemon. A typed `do` is your own act: it carries the machine's token, which is you, so it runs at once in every permission mode (Ask me, Jev decides, Just vibes, YOLO and Plan), whatever the capability does. It never waits on a question, prints no "Waiting for your answer" line for its own act, holds nothing and never exits `3`; it prints what the capability found or did on standard output and exits `0`. A capability that acts on a conversation (clear, compact, undo) is refused in one line, since it runs inside the Agent's open chat; a refusal or failure exits `1`, bad usage `2`. The permission modes decide what a model does, not what you type; `--answer-permissions` belongs to `run`, not to `do`.
+
 ## Exit codes
 
 One table for all programs, including where the same number means something else: [Exit codes](../../../docs/exit-codes.md).

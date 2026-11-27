@@ -32,6 +32,7 @@ import { ARTIFACTS_CAPABILITIES } from './artifacts.js';
 import { DOCUMENTS_CAPABILITIES } from './documents.js';
 import { AGENT_HOMES_CAPABILITIES } from './agent-homes.js';
 import { DEVICES_CAPABILITIES, DEVICES_MIGRATE_SHARED } from './devices.js';
+import { TAILSCALE_CAPABILITIES } from './tailscale.js';
 import { CALLER_PROJECTS_CAPABILITIES, type CallerProjectsCapabilityServices } from './devices-projects.js';
 import { CALLER_SHARED_CAPABILITIES, type CallerSharedCapabilityServices } from './devices-shared.js';
 import { NETWORK_SIGN_IN_ACCOUNT } from './network-account.js';
@@ -158,6 +159,7 @@ export * from './artifacts.js';
 export * from './documents.js';
 export * from './agent-homes.js';
 export * from './devices.js';
+export * from './tailscale.js';
 export * from './devices-session.js';
 export * from './network-scan.js';
 export * from './settings-sync.js';
@@ -418,6 +420,8 @@ export const METHOD_CAPABILITIES: readonly { readonly definition: MethodCapabili
   ...MESSAGES_METHOD_CAPABILITIES,
   // Devices and network (builtin/devices.ts): paired devices, the relay, devices waiting to pair, phones, grants, captures.
   ...DEVICES_CAPABILITIES.map((definition) => ({ definition, command: { name: 'devices', title: 'Paired devices' } })),
+  // Devices and network (builtin/tailscale.ts): what Tailscale reports, serving this daemon over it, and stopping that.
+  ...TAILSCALE_CAPABILITIES.map((definition) => ({ definition, command: { name: 'tailscale', title: 'Tailscale' } })),
   // Automation (builtin/automation.ts): schedules and their runs, triggers, CI watches and check-ins, each the daemon's own method.
   ...AUTOMATION_METHOD_CAPABILITIES,
   // Models and providers (builtin/models.ts): the model lists, the shared default model, starting and finishing a sign-in, the accounts.

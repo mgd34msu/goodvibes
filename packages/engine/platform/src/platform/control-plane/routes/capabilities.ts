@@ -866,17 +866,30 @@ function createRunHandler(deps: CapabilityRouteDeps, methods: Pick<GatewayMethod
     }
     if (!entry.method || !methodInput) throw new GatewayVerbError(where(entry), 'CAPABILITY_ELSEWHERE', 409, 'id');
     const body = await deps.invokeMethod(entry.method.id, methodInput, withCallOf(at, caller));
-    const data = body !== null && typeof body === 'object' && !Array.isArray(body) ? body as Record<string, unknown> : { result: body };
+    const answered = body !== null && typeof body === 'object' && !Array.isArray(body) ? body as Record<string, unknown> : { result: body };
+    const moved = methodCapability(entry.id);
+    // A value in the answer the person must see once (builtin/method-capability.ts `reveal`, `oneTime`): taken out of the
+    // data, which a script, a model and a log keep, and given only to a caller that is not a model (the user, from any
+    // credential); a model is told where the user sees it and never gets it.
+    let shown: { readonly value: string; readonly qr?: string | undefined } | undefined;
+    try { shown = moved?.reveal?.(answered, values); } catch { shown = undefined; }
+    const data: Record<string, unknown> = moved?.oneTime && moved.oneTime.length > 0
+      ? Object.fromEntries(Object.entries(answered).filter(([field]) => !moved.oneTime!.includes(field))) : answered;
+    const reveal = shown && moved?.reveals ? { ...moved.reveals, ...shown } : undefined;
+    const actorOfCall = at.context.actor ?? systemActor('in-process');
+    const aModel = decidedByProgramGate(at) || (at.context.clientKind === 'daemon-turn' && !at.context.authToken) || actorOfCall.agentFor !== undefined;
+    const toUser = reveal !== undefined && !aModel && isTheUser(actorOfCall);
+    const withheld = reveal && !toUser ? ` The ${moved!.reveals!.label.toLowerCase()} is shown only to the user, in the place that holds it.` : '';
     // A method capability's own words for what ran and how it came out (builtin/method-capability.ts `said`).
     let detail = '';
-    try { detail = methodCapability(entry.id)?.said?.(data, values) ?? ''; } catch { detail = ''; }
+    try { detail = moved?.said?.(answered, values) ?? ''; } catch { detail = ''; }
     // What this run did about what its risk names, when not every run does it (builtin/method-capability.ts `did`).
     let did: string | undefined;
-    try { did = methodCapability(entry.id)?.did?.(data, values); } catch { did = undefined; }
+    try { did = moved?.did?.(answered, values); } catch { did = undefined; }
     const text = capabilityOutcomeText(entry, judged, { text: detail, ...(did !== undefined ? { riskDone: did } : {}) });
     return {
-      id: entry.id, ok: true, text: text || `${entry.label}: done.`, ...(detail ? { detail } : {}), risk, method: entry.method.id,
-      data,
+      id: entry.id, ok: true, text: `${text || `${entry.label}: done.`}${withheld}`, ...(detail ? { detail: `${detail}${withheld}` } : {}), risk, method: entry.method.id,
+      data, ...(toUser ? { reveal } : {}),
     };
     };
     const notApproved = (reason: string | undefined): GatewayVerbError =>

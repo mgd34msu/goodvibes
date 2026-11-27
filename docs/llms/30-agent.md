@@ -100,7 +100,7 @@ Not connected to a GoodVibes host: there is no host token at /home/me/.goodvibes
 The fix, in order:
 
 1. Make sure the daemon is installed and running ("The daemon's background service" in the install part, "Starting the daemon" in the daemon part).
-2. Inside the Agent, open the menu (`Ctrl+G` then `m`), then Devices and network: `h` says how this Agent connects to its daemon, and `p` (Pair something) pairs it again; or ask the Agent "repair my connected host token" and confirm.
+2. Inside the Agent, open the menu (`Ctrl+G` then `m`), then Devices and network: `h` says how this Agent connects to its daemon (on the daemon's own machine it acts with the machine's token and there is nothing to pair or to type), and `p` (Pair something) pairs it with a daemon on another machine; or ask the Agent "repair my connected host token" and confirm.
 3. Or pair this Agent with a daemon on another machine from the command line: `goodvibes-agent setup pair --with-code`, typing the sign-in code your own signed-in screen shows (Devices and network, Pair something, "Show the sign-in code once").
 4. Check with `goodvibes-agent compat` and `goodvibes-agent status`.
 

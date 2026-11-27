@@ -102,8 +102,8 @@ async function callLocalAuth<T>(runtime: CliCommandRuntime, methodId: string, in
     ? ((url, init) => daemon.fetchImpl(url, { ...init, headers: { ...(init?.headers as Record<string, string> | undefined), 'x-goodvibes-explicit-user-request': 'true' } })) as typeof fetch
     : daemon.fetchImpl;
   const answer = await callDaemonMethod<T>(daemon.target, methodId, { input, ...(write ? {} : { readOnly: true }) }, fetchImpl);
-  // Who may sign in is the owner's own act, and a command line never makes it by itself: the daemon decided it under
-  // the owner's permission mode (under Ask me this call waited on their one answer).
+  // Who may sign in is the user's own act: this typed command carries the machine's token, which is the user, so the daemon
+  // runs it at once in every permission mode and asks nothing.
   return answer.ok ? { ok: true, data: answer.data } : signInCallFailure(daemon.target, answer);
 }
 
@@ -162,7 +162,8 @@ interface LocalAuthStatus {
 
 async function renderAuth(runtime: CliCommandRuntime): Promise<AuthCommandResult> {
   const ok = (output: string): AuthCommandResult => ({ output, exitCode: 0 });
-  // A sign-in change put to the owner exits 3, as `do` does (docs/exit-codes.md); any other failure 1.
+  // A sign-in change the daemon did not make exits 1 (`do` never exits 3: it is not held, docs/exit-codes.md); a daemon that
+  // still answers that it put the change to the owner exits 3.
   const notFound = (output: string): AuthCommandResult => ({ output, exitCode: /Answer it in Waiting for you/.test(output) ? 3 : 1 });
   const usage = (output: string): AuthCommandResult => ({ output, exitCode: 2 });
   const call = localAuthCaller(runtime);

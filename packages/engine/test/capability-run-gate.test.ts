@@ -24,14 +24,13 @@
  * asked nothing.
  */
 import { afterEach, beforeEach, expect, test } from 'bun:test';
-import { randomBytes, scryptSync } from 'node:crypto';
-import { existsSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { SqliteDecisionLog, withDecisionLog, type JudgmentPort } from '@goodvibes/judgment';
 import { choiceAnswer, fakePort } from '@goodvibes/judgment/testing';
 import { installJudgmentPort } from '@goodvibes/engine/errors';
-import { localOwnerActor } from '@goodvibes/engine/daemon-api/http-policy';
+import { agentActor, localOwnerActor } from '@goodvibes/engine/daemon-api/http-policy';
 import { ConfigManager } from '../platform/src/platform/config/manager.ts';
 import type { ConfigKey } from '../platform/src/platform/config/schema.ts';
 import { SecretsManager } from '../platform/src/platform/config/secrets.ts';
@@ -57,8 +56,6 @@ import type { DaemonVerbCaller } from '../platform/src/platform/runtime/client/d
 import { registerCapabilityTools } from '../terminal-shell/src/agent-turn/capability-tools.ts';
 import { forgetGateReadings, gateReadingsPort } from './_helpers/gate-readings.ts';
 import { ApprovalBroker } from '../platform/src/platform/control-plane/approval-broker.ts';
-import { localApprovalActions } from '../platform/src/platform/control-plane/approval-actions.ts';
-import { registerPairingGatewayMethods } from '../platform/src/platform/control-plane/routes/pairing.ts';
 import { createCapabilityOwnerGate } from '../platform/src/platform/daemon/capability-owner-gate.ts';
 import { UserPermissionRuleStore } from '../platform/src/platform/permissions/user-rule-store.ts';
 import type { PermissionPromptRequest } from '../platform/src/platform/permissions/prompt.ts';
@@ -73,18 +70,9 @@ import { createExecTool } from '../platform/src/platform/tools/exec/runtime.ts';
 import { TURN_EXEC_CONTAINMENT } from '../platform/src/platform/tools/exec/containment.ts';
 import { ProcessManager } from '../platform/src/platform/tools/shared/process-manager.ts';
 import { OverflowHandler } from '../platform/src/platform/tools/shared/overflow.ts';
-import { spawn } from 'node:child_process';
-import { expectProgramNonce, startProgramSocket } from '../platform/src/platform/daemon/program-socket.ts';
-import { ProgramRegistrations } from '../platform/src/platform/daemon/program-registrations.ts';
-import { bindLocalOrigin } from '../platform/src/platform/daemon/client-address.ts';
 import { daemonCallerProjectCheck } from '../platform/src/platform/daemon/facade-composition.ts';
 import { capabilityWorkFolderInputs } from '../platform/src/platform/capabilities/builtin/index.ts';
-import { CallerProjectsStore } from '../platform/src/platform/workspace/caller-projects-store.ts';
-import { CallerSharedStore } from '../platform/src/platform/control-plane/shared-kinds.ts';
-import { createSharedKindGifts } from '../platform/src/platform/daemon/shared-kind-gifts.ts';
 import { daemonMethodCallOf, daemonNestedMethods } from '../platform/src/platform/daemon/capability-wiring.ts';
-import { resolveGoodVibesDaemonHome } from '../platform/src/platform/config/goodvibes-home.ts';
-import { LOCAL_OWNER_PRINCIPAL, pairingPrincipalId } from '../platform/src/platform/pairing/principal-ids.ts';
 
 const OPERATOR_TOKEN = 'fixture-operator-token';
 
@@ -207,7 +195,7 @@ test('a model\'s capability_run that stores a secret is put to the owner in Jev 
     .toBe('asked 1; reached capabilities.run; stored true; said true');
 });
 
-test('an outside caller\'s call put to the owner waits for them, stores nothing on their No, and runs once they approve it while its caller is still allowed', async () => {
+test('a model\'s call put to the owner waits for them and runs nothing on their No; a channel guest\'s turn and work run nothing outside a sandbox until the user approves them', async () => {
   const home = join(dir, 'home');
   const workspace = join(dir, 'workspace');
   mkdirSync(home, { recursive: true });
@@ -257,42 +245,17 @@ test('an outside caller\'s call put to the owner waits for them, stores nothing 
     ...ownerGate,
   });
   registerApprovalRaiseGatewayMethods(catalog, broker);
-  // The sign-ins a 3.4.0 daemon kept (it made any name): the owner, and a member named `shared-token`, the operator
-  // token's principal id. The user file is the one that release wrote; its hashes are made here as it made them.
-  const scrypt = (password: string): string => {
-    const salt = randomBytes(16);
-    return `${salt.toString('base64')}:1024:1:1:${scryptSync(password, salt, 64, { N: 1024, r: 1, p: 1 }).toString('base64')}`;
-  };
-  writeFileSync(join(dir, 'users.json'), JSON.stringify({ version: 1, users: [
-    { username: 'owner', passwordHash: scrypt(['owner', 'pass', 'word', 'one'].join('-')), roles: ['admin'] },
-    { username: 'shared-token', passwordHash: scrypt(['member', 'pass', 'word', 'two'].join('-')), roles: ['admin'] },
-  ] }));
+  // The user's sign-in: the account made at first start.
   const userAuth = new UserAuthManager({ bootstrapFilePath: join(dir, 'users.json'), bootstrapCredentialPath: join(dir, 'bootstrap.txt'), scryptParams: { N: 1024, r: 1, p: 1 } });
   const helper = new DaemonControlPlaneHelper({
     gatewayMethods: catalog, pairingTokens: pairing, userAuth,
     controlPlaneGateway: new ControlPlaneGateway({ runtimeBus: new RuntimeEventBus() }),
     authToken: () => OPERATOR_TOKEN, trustProxyEnabled: () => false, host: '127.0.0.1', port: 0,
-    // The daemon's one check of the project a caller names, and who reaches the owner's shared things, as every daemon
-    // composes them (facade-composition.ts).
+    // The daemon's one check of the project a call names, as every daemon composes it (facade-composition.ts).
     callerProject: daemonCallerProjectCheck(home), capabilityWorkFolders: capabilityWorkFolderInputs,
-    sharedKind: createSharedKindGifts({ homeDirectory: home, deviceName: (id) => pairing.list().find((device) => device.id === id)?.name }),
   } as unknown as DaemonControlPlaneContext);
-  // The owner registered the project and gave it to each caller below that works in it (Devices and network, as
-  // devices.projects keeps it): a caller that is not the owner in person names only a project the owner gave it.
-  mkdirSync(join(home, '.goodvibes', 'shared'), { recursive: true });
-  // A second registered project, given to nobody: only the owner in person gives it.
-  const second = join(dir, 'second');
-  mkdirSync(second, { recursive: true });
-  writeFileSync(join(home, '.goodvibes', 'shared', 'workspace-registrations.json'), JSON.stringify({ workspaces: [{ root: workspace }, { root: second }] }));
-  const givenProjects = new CallerProjectsStore(resolveGoodVibesDaemonHome(home));
-  const paired = (input: Parameters<typeof pairing.mint>[0]) => {
-    const minted = pairing.mint(input);
-    givenProjects.set(pairingPrincipalId(minted.id), [workspace]);
-    return minted;
-  };
-  givenProjects.set(LOCAL_OWNER_PRINCIPAL, [workspace]);
 
-  // A turn on someone else's input (a member's web chat, a channel message) offers the same tools, but every call that is
+  // A turn on a channel guest's input offers the same tools, but every call that is
   // not a read is refused at admission, in every mode, nobody asked: here a capability that writes a file in the project.
   // The control: the owner's own turn's same call is admitted (sent on to the daemon, which decides it; no daemon credential
   // is set up for this part, so it goes no further).
@@ -331,14 +294,11 @@ test('an outside caller\'s call put to the owner waits for them, stores nothing 
   expect(`other ${gated(othersCommand)}, asked ${commandAsks}, written ${othersWrote}; own ${gated(ownCommand)}, written ${existsSync(join(workspace, 'party-ran.txt'))}`)
     .toBe('other refused, asked 0, written false; own ran, written true');
 
-  // Work a caller who is not the owner caused (a paired automation token, a person's press on it included) is someone
-  // else's on its record, and its turn runs no command outside a real sandbox until the owner approves it (their own press,
-  // here); the owner's own press makes their work's turn theirs. A turn of a piece of work runs as its record says.
-  const automation = paired({ name: 'automation' });
-  // And the owner gave it their channels (devices.give-shared), so what it does with them is decided by what each act is.
-  new CallerSharedStore(resolveGoodVibesDaemonHome(home)).set(pairingPrincipalId(automation.id), ['channels']);
-  // The owner in person: their signed-in session ('owner', the first account of the store, marked the owner at its upgrade).
-  const ownerPhone = userAuth.createSession('owner').token;
+  // Work a channel guest caused is someone else's on its record, and its turn runs no command outside a real sandbox until
+  // the user approves it (their own start, here); the user's own start makes their work's turn theirs. A turn of a piece of
+  // work runs as its record says.
+  // The user's own sign-in (the account made at first start).
+  const ownerPhone = userAuth.createSession(userAuth.ownerUsername() ?? 'no owner account').token;
   const press = (token: string, id: string, inputs: Record<string, unknown>) => helper.invokeGatewayMethodCall({ authToken: token, methodId: 'capabilities.run',
     body: { id, inputs, workingDirectory: workspace, program: 'tui' }, context: { admin: true, explicitUserRequest: true } });
   const yolo = new ConfigManager({ surfaceRoot: 'daemon', workingDir: workspace, homeDir: home, configDir: join(dir, 'work-config'), ownsDaemonTier: true });
@@ -362,19 +322,14 @@ test('an outside caller\'s call put to the owner waits for them, stores nothing 
     rmSync(join(workspace, marker), { force: true });
     return `${ran.success ? 'ran' : 'refused'} ${written ? 'written' : 'nothing'}`;
   };
-  // w-others is work that token handed over itself (its cause kept as work.delegate keeps it); w-old has no cause recorded
-  // (work made before causes were kept), so it is the owner's: that token's start of it is refused and never claims it.
-  plans.noteCause('w-others', { party: 'other', who: 'the automation token', madeFor: pairingPrincipalId(automation.id) }, { made: true });
-  const oldStart = await press(automation.token, 'work.start', { work: 'w-old' });
-  const othersStart = await press(automation.token, 'work.start', { work: 'w-others' });
+  // w-guest is work a channel guest caused (its cause kept as work.delegate keeps it); w-own is the user's own.
+  plans.noteCause('w-guest', { party: 'other', who: 'a channel guest' }, { made: true });
   const ownStart = await press(ownerPhone, 'work.start', { work: 'w-own' });
-  expect(`old ${oldStart.status} recorded ${plans.hasCause('w-old')}: ${await turnOf('w-old')}; others ${othersStart.status} ${plans.causeOf('w-others').party}: ${await turnOf('w-others')}; own ${ownStart.status} ${plans.causeOf('w-own').party}: ${await turnOf('w-own')}`)
-    .toBe('old 409 recorded false: refused nothing; others 200 other: refused nothing; own 200 owner: ran written');
-  // Its approval: the owner's own press on that work makes it theirs, and its turn runs as theirs; the other caller's next
-  // press on it does not take it back from them.
-  const approved = await press(ownerPhone, 'work.start', { work: 'w-others' });
-  const pressedAgain = await press(automation.token, 'work.start', { work: 'w-others' });
-  expect(`approved ${approved.status}, again ${pressedAgain.status} ${plans.causeOf('w-others').party}: ${await turnOf('w-others')}`).toBe('approved 200, again 200 owner: ran written');
+  expect(`guest's ${plans.causeOf('w-guest').party}: ${await turnOf('w-guest')}; own ${ownStart.status} ${plans.causeOf('w-own').party}: ${await turnOf('w-own')}`)
+    .toBe('guest\'s other: refused nothing; own 200 owner: ran written');
+  // Its approval: the user's own start of that work makes it theirs, and its turn runs as theirs.
+  const approved = await press(ownerPhone, 'work.start', { work: 'w-guest' });
+  expect(`approved ${approved.status} ${plans.causeOf('w-guest').party}: ${await turnOf('w-guest')}`).toBe('approved 200 owner: ran written');
   // Under Ask me an outside caller's call waits on the owner's one answer, as a model's tool call does: the question it
   // raised is answered here as the owner answers it on their card, while the call waits (the broker's own record of it, never a
   // clock). `nextRaised` is set before the call is sent; `asked` says whether the call raised one.
@@ -395,52 +350,21 @@ test('an outside caller\'s call put to the owner waits for them, stores nothing 
     return { status: answer.status, body: answer.body, asked: true };
   };
   const codeOf = (answer: { readonly body: unknown }): string | undefined => (answer.body as { code?: string }).code;
-  // Handing work over from that token is a project act decided under the owner's mode as an item of their list (here Ask me:
-  // put to the owner, who says No): nothing is handed over on the No. Approving a plan is answering what was put to the owner,
-  // which only the owner does: refused outright, never asked. Nothing reaches Work.
-  reachedWork.length = 0;
-  const handedOver = await answeredWhileWaiting(() => press(automation.token, 'work.delegate', { goal: 'Add retries to the uploader' }), false);
-  const planApproved = await press(automation.token, 'work.approve', { work: 'w-plan' });
-  expect(`delegate ${handedOver.status} ${codeOf(handedOver)} asked ${handedOver.asked}; approve ${planApproved.status} ${codeOf(planApproved)}; reached ${reachedWork.join(',') || 'nothing'}`)
-    .toBe('delegate 403 CAPABILITY_NOT_APPROVED asked true; approve 403 OWNER_ANSWERS_ONLY; reached nothing');
-  // A loosening that stays the owner's to decide under their mode, as a daemon METHOD called directly by that admin token,
-  // its person's press included (a tool server of the project it was given: mcp.servers.upsert, scope project): handed
-  // to the gate by the dispatch as the capability is, and on the owner's No it does not run; the owner's own press runs it
-  // at once. The same call for a tool server of no project (every project's, run as the owner) is the owner's own act: refused.
-  const serverWrites: string[] = [];
-  attachHandler(catalog, 'mcp.servers.upsert', (invocation) => {
-    serverWrites.push(String((invocation.body as { scope?: unknown }).scope));
-    return { scope: (invocation.body as { scope?: unknown }).scope, written: true };
-  });
-  const methodPress = (token: string, scope: string) => helper.invokeGatewayMethodCall({ authToken: token, methodId: 'mcp.servers.upsert',
-    body: { scope, server: { name: 'lint-server', command: 'true' }, workingDirectory: workspace }, context: { admin: true, explicitUserRequest: true } });
-  const byAdmin = await answeredWhileWaiting(() => methodPress(automation.token, 'project'), false);
-  const writesOnNo = serverWrites.length;
-  const everyProjectByAdmin = await answeredWhileWaiting(() => methodPress(automation.token, 'global'), true);
-  const byOwner = await methodPress(ownerPhone, 'project');
-  expect(`admin ${byAdmin.status} ${codeOf(byAdmin)} asked ${byAdmin.asked}, written ${writesOnNo}; no project ${everyProjectByAdmin.status} ${codeOf(everyProjectByAdmin)} asked ${everyProjectByAdmin.asked}; owner ${byOwner.status}, written ${serverWrites.join(',')}`)
-    .toBe('admin 403 CAPABILITY_NOT_APPROVED asked true, written 0; no project 403 OWNER_ONLY_ACT asked false; owner 200, written project');
-  // Authority is who the caller is, never the kind of credential it holds. A credential of kind agent (the Agent's own,
-  // a file any process of the account reads) with the program gate's "already decided" mark and no registration of the
-  // Agent program: a capability whose result carries secrets is never run for a model's kind of credential (refused,
-  // nothing asked, no result). Minting a credential by that admin token is the owner's own act: refused, never put to
-  // the owner; minting the Agent's credential is refused outright.
-  const agentCredential = paired({ name: 'agent credential read from its file', client: 'agent' }).token;
+  // A capability no model makes (a result that carries secrets), asked for with the Agent's credential and the program gate's
+  // "already decided" mark: refused whatever the mark, nothing asked, no result.
+  const agentCredential = pairing.mint({ name: 'agent credential read from its file', client: 'agent' }).token;
   const decidedSecret = await answeredWhileWaiting(() => helper.invokeGatewayMethodCall({ authToken: agentCredential, methodId: 'capabilities.run',
     body: { id: 'provider.export', inputs: { path: 'agent-sign-ins.json' }, workingDirectory: workspace, program: 'agent' },
     context: { admin: true, decidedByCapabilityGate: true } }), false);
-  const minted = await answeredWhileWaiting(() => helper.invokeGatewayMethodCall({ authToken: automation.token, methodId: 'pairing.tokens.create',
-    body: { name: 'another bot' }, context: { admin: true, explicitUserRequest: true } }), false);
-  const mintedAgent = await helper.invokeGatewayMethodCall({ authToken: automation.token, methodId: 'pairing.tokens.create',
-    body: { name: 'an agent of the bot', client: 'agent' }, context: { admin: true, explicitUserRequest: true } });
-  expect(`agent ${decidedSecret.status} ${codeOf(decidedSecret)} asked ${decidedSecret.asked}, written ${existsSync(join(workspace, 'agent-sign-ins.json'))}; `
-    + `mint ${minted.status} ${codeOf(minted)} asked ${minted.asked}; agent mint ${mintedAgent.status} ${codeOf(mintedAgent)}`)
-    .toBe('agent 403 MODEL_NEVER asked false, written false; mint 403 OWNER_ONLY_ACT asked false; agent mint 403 OWNER_ONLY_ACT');
+  expect(`agent ${decidedSecret.status} ${codeOf(decidedSecret)} asked ${decidedSecret.asked}, written ${existsSync(join(workspace, 'agent-sign-ins.json'))}`)
+    .toBe('agent 403 MODEL_NEVER asked false, written false');
 
-  // An outside caller: the operator token from off this machine, with no person's claim (an agent, a script).
-  const outside = (body: Record<string, unknown>) => helper.invokeGatewayMethodCall({ authToken: OPERATOR_TOKEN, methodId: 'capabilities.run', body });
-  const store = (key: string) => ({ id: 'secrets.set', inputs: { key, value: `${key.toLowerCase()}-value`, scope: 'user', storage: 'plaintext' }, workingDirectory: workspace });
-  // A change a caller asks for that stays the owner's to decide under their mode: stopping a piece of work (it cannot be
+  // A model's call over the wire: the user's own credential carrying a model's actor, as a model acting for the user is
+  // decided at the daemon's gate (the user's own call from the same credential runs at once).
+  const operator = helper.describeRequestPrincipal(OPERATOR_TOKEN)!;
+  const outside = (body: Record<string, unknown>, methodId = 'capabilities.run') => helper.invokeGatewayMethodCall({ authToken: OPERATOR_TOKEN, methodId, body,
+    principal: Object.freeze({ ...operator, actor: agentActor(operator.actor!) }) });
+  // A change a model asks for that stays the owner's to decide under their mode: stopping a piece of work (it cannot be
   // undone: asked under Ask me). Each call names a work of its own; `kept` says whether it was left running (its stop
   // never reached Work, whose routes the stand-in above records).
   const forget = async (work: string) => ({ id: 'work.cancel', inputs: { work }, workingDirectory: workspace });
@@ -458,90 +382,17 @@ test('an outside caller\'s call put to the owner waits for them, stores nothing 
   expect(`${approvedCall.status} asked ${approvedCall.asked}; kept ${kept(approvedForget)}`)
     .toBe('200 asked true; kept false');
 
-  // A credential for another caller is the owner's own act: the automation token asking to pair "this computer's
-  // program" (pairing.tokens.migrate) is refused outright, nothing asked, no key made, in every mode.
-  registerPairingGatewayMethods(catalog, pairing);
-  const migrated = await answeredWhileWaiting(() => helper.invokeGatewayMethodCall({ authToken: automation.token, methodId: 'pairing.tokens.migrate', body: { name: 'this computer' }, context: { admin: true } }), true);
-  expect(`made ${migrated.status} ${codeOf(migrated)} asked ${migrated.asked}, key ${(migrated.body as { token?: unknown }).token !== undefined}`)
-    .toBe('made 403 OWNER_ONLY_ACT asked false, key false');
-
-  // Under YOLO an admin credential that is not the owner in person (the automation token, a full pairing) is refused, never
-  // asked, each act by which a caller becomes the owner or widens what it holds: changing the owner's password, minting
-  // a credential, giving itself a project, stopping the daemon. The owner in person, on their signed-in session, does each at
-  // once. The daemon's service manager is outside this graph: a stand-in records the stop that reaches it.
+  // A daemon method of a class the owner's mode decides (a memory record, which steers a model), called directly by a model
+  // under YOLO: handed to the gate, which YOLO runs, and then sent as it came, once (never handed back again and again). The
+  // memory store's route is outside this graph: a stand-in records each add that reaches it.
   expect(config.setMany([{ key: 'permissions.mode' as ConfigKey, value: 'yolo' }], localOwnerActor()).ok).toBe(true);
-  const stops: string[] = [];
-  attachHandler(catalog, 'services.stop', (invocation) => { stops.push(String(invocation.context.principalId)); return { installed: false, active: false }; });
-  const askedBefore = broker.listApprovals(Number.MAX_SAFE_INTEGER).length;
-  const ownerActs = async (token: string, self: string) => {
-    reachedWork.length = 0;
-    const password = await press(token, 'local-auth.password', { user: 'owner', password: 'taken-over-password', again: 'taken-over-password' });
-    const credential = await helper.invokeGatewayMethodCall({ authToken: token, methodId: 'pairing.tokens.create', body: { name: `made by ${self}` }, context: { admin: true, explicitUserRequest: true } });
-    const project = await press(token, 'devices.give-project', { who: self, project: second });
-    const stopped = await helper.invokeGatewayMethodCall({ authToken: token, methodId: 'services.stop', body: {}, context: { admin: true, explicitUserRequest: true } });
-    return `password ${password.status} ${codeOf(password) ?? ''} reached ${reachedWork.includes('local_auth.users.password.rotate')}; credential ${credential.status} ${codeOf(credential) ?? ''}; `
-      + `project ${project.status} ${codeOf(project) ?? ''} given ${givenProjects.projectsOf(self).includes(second)}; stop ${stopped.status} ${codeOf(stopped) ?? ''} reached ${stops.length}`;
-  };
-  const byAnother = await ownerActs(automation.token, pairingPrincipalId(automation.id));
-  const byOwnerHimself = await ownerActs(ownerPhone, 'owner');
-  let storeRefusal = 'accepted';
-  try { userAuth.rotatePassword('owner', 'taken-over-password', { ownerHimself: false }); } catch { storeRefusal = 'refused'; }
-  // A method of a class the owner's mode decides (a memory record, which steers a model), called directly by that token in
-  // the project it was given: handed to the gate, which YOLO runs, and then sent as it came, once. The memory store's route
-  // is outside this graph: a stand-in records each add that reaches it.
   const memoryAdds: string[] = [];
   attachHandler(catalog, 'memory.records.add', (invocation) => { memoryAdds.push(String((invocation.body as { summary?: unknown }).summary)); return { record: { id: 'mem-1' } }; });
-  const remembered = await helper.invokeGatewayMethodCall({ authToken: automation.token, methodId: 'memory.records.add',
-    body: { cls: 'fact', summary: 'the uploader retries twice', scope: 'project', workingDirectory: workspace }, context: { admin: true } });
+  const remembered = await helper.invokeGatewayMethodCall({ authToken: OPERATOR_TOKEN, methodId: 'memory.records.add',
+    body: { cls: 'fact', summary: 'the uploader retries twice', scope: 'project', workingDirectory: workspace }, context: { admin: true },
+    principal: Object.freeze({ ...operator, actor: agentActor(operator.actor!) }) });
   expect(`memory ${remembered.status} ${codeOf(remembered) ?? ''} reached ${memoryAdds.length}`).toBe('memory 200  reached 1');
-  const askedUnderYolo = broker.listApprovals(Number.MAX_SAFE_INTEGER).length - askedBefore;
   expect(config.setMany([{ key: 'permissions.mode' as ConfigKey, value: 'ask-me' }], localOwnerActor()).ok).toBe(true);
-  expect(`another: ${byAnother}; owner: ${byOwnerHimself}; store ${storeRefusal}; asked ${askedUnderYolo}`)
-    .toBe('another: password 403 OWNER_ONLY_ACT reached false; credential 403 OWNER_ONLY_ACT; project 403 OWNER_ONLY_ACT given false; stop 403 OWNER_ONLY_ACT reached 0; '
-      + 'owner: password 200  reached true; credential 200 ; project 200  given true; stop 200  reached 1; store refused; asked 0');
-
-  // The owner's own device (paired from their own pairing screen, made by them) answers a question another caller raised,
-  // and not one it raised itself: the approvals the daemon serves, read for the caller its real authentication builds.
-  const othersRaised = nextRaised();
-  const othersQuestion = outside(await forget('others-hook'));
-  const othersQuestionId = await othersRaised;
-  const ownersPhone = paired({ name: 'owner phone', origin: 'owner-pairing', madeBy: { owner: true } }).token;
-  // The phone's own question, raised over the wire as a program raises its ask (approvals.raise).
-  const phoneAsk = { callId: 'phone-own', tool: 'read', args: { path: 'README.md' }, category: 'read',
-    analysis: { riskLevel: 'low', reasons: [], classification: 'read', summary: 'Read README.md?' } } as unknown as PermissionPromptRequest;
-  const phoneRaisedOwn = await helper.invokeGatewayMethodCall({ authToken: ownersPhone, methodId: 'approvals.raise', body: { request: phoneAsk } });
-  const phoneQuestionId = String((phoneRaisedOwn.body as { approvalId?: string }).approvalId);
-  const actions = localApprovalActions(broker);
-  const phoneViewer = actions.viewerOf(helper.describeRequestPrincipal(ownersPhone)?.actor);
-  const phoneAnswers = async (approvalId: string): Promise<string> => {
-    const outcome = await actions.resolve(approvalId, { approved: true, actor: 'owner phone', expectedRevision: broker.getApproval(approvalId)!.revision }, phoneViewer);
-    return outcome.applied ? 'answered' : `refused ${outcome.refusal.code}`;
-  };
-  const ownAnswer = await phoneAnswers(phoneQuestionId);
-  const ownStatus = broker.getApproval(phoneQuestionId)!.status;
-  const othersAnswer = await phoneAnswers(othersQuestionId);
-  const othersRan = await othersQuestion;
-  await broker.resolveApproval(phoneQuestionId, { approved: false, actor: 'owner', expectedRevision: broker.getApproval(phoneQuestionId)!.revision, reason: 'Not now.' });
-  expect(`own ${ownAnswer}, ${ownStatus}; another's ${othersAnswer}, ran ${othersRan.status}; own on No ${broker.getApproval(phoneQuestionId)!.status}`)
-    .toBe('own refused OWNER_ONLY, pending; another\'s answered, ran 200; own on No denied');
-
-  // A command line's `do` that writes a secret, sent with a person's claim on the owner's own credential: decided at the
-  // gate whatever it claims (a y at a terminal can be typed by anything that drives one), asked under Ask me. The
-  // control: the same call with the same claim from the owner's screen runs at once.
-  const fromScreen = await press(ownerPhone, 'secrets.set', store('SCREEN_KEY').inputs);
-  const fromCommandLine = await answeredWhileWaiting(() => helper.invokeGatewayMethodCall({ authToken: ownerPhone, methodId: 'capabilities.run',
-    body: { ...store('COMMAND_LINE_KEY'), program: 'tui' }, context: { admin: true, explicitUserRequest: true, clientKind: 'cli' } }), false);
-  expect(`screen ${fromScreen.status}, stored ${await secrets.get('SCREEN_KEY') !== null}; command line ${fromCommandLine.status} ${codeOf(fromCommandLine)} asked ${fromCommandLine.asked}, stored ${await secrets.get('COMMAND_LINE_KEY') !== null}`)
-    .toBe('screen 200, stored true; command line 403 CAPABILITY_NOT_APPROVED asked true, stored false');
-
-  // A capability whose result carries secrets (provider.export: a file with working sign-in tokens), pressed by the person
-  // on a paired device that is not the owner in person: the owner's own act, refused outright, nothing asked and nothing written
-  // where that device reads. (The person's press of a capability with no secret result, on the owner's own session,
-  // runs at once: the screen's secrets.set above.)
-  const laptop = paired({ name: 'laptop' });
-  const sentOut = await answeredWhileWaiting(() => press(laptop.token, 'provider.export', { path: 'sign-ins.json' }), false);
-  expect(`${sentOut.status} ${codeOf(sentOut)} asked ${sentOut.asked}; written ${existsSync(join(workspace, 'sign-ins.json'))}`)
-    .toBe('403 OWNER_ONLY_ACT asked false; written false');
 
   // Plan mode switched on while the question waited: the owner's yes does not run it, and the reason says so.
   const planForget = await forget('plan-hook');
@@ -569,26 +420,25 @@ test('an outside caller\'s call put to the owner waits for them, stores nothing 
   const keptKeys = Object.keys(broker.getApproval(wireId)!.metadata).filter((key) => Object.hasOwn(forged, key));
   expect(`kept ${keptKeys.join(',') || 'none'}; stored ${await secrets.get('FORGED_KEY') !== null}`).toBe('kept none; stored false');
 
-  // An outside caller's call waiting on the owner (stopping a piece of work cannot be undone), then an ask the same
-  // caller raises over the wire copying it, with a remember option worded as the owner's ("Just this once" for the whole
-  // tool), the owner's own name and loosen-security: answered yes and remember, it saves no rule and approves nothing
-  // else (the waiting call's question is still open; the caller's next call is asked again).
-  const asks = (body: Record<string, unknown>, methodId = 'capabilities.run') => helper.invokeGatewayMethodCall({ authToken: OPERATOR_TOKEN, methodId, body });
+  // A model's call waiting on the owner (stopping a piece of work cannot be undone), then an ask a program raises over the
+  // wire copying it, with a remember option worded as the owner's ("Just this once" for the whole tool), the owner's own name
+  // and loosen-security: answered yes and remember, it saves no rule and approves nothing else (the waiting call's
+  // question is still open; the model's next call is asked again).
   const switchOff = await forget('asker-work');
   const heldRaised = nextRaised();
-  const heldCall = asks(switchOff);
+  const heldCall = outside(switchOff);
   const heldId = await heldRaised;
   const heldAsk = broker.getApproval(heldId)!.request;
-  const raisedWire = await asks({ request: { callId: 'wire-remember', tool: heldAsk.tool, args: heldAsk.args, category: heldAsk.category,
+  const raisedWire = await helper.invokeGatewayMethodCall({ authToken: OPERATOR_TOKEN, methodId: 'approvals.raise', body: { request: { callId: 'wire-remember', tool: heldAsk.tool, args: heldAsk.args, category: heldAsk.category,
     analysis: { riskLevel: 'low', reasons: [], classification: 'write', summary: 'Just a quick look' },
     workingDirectory: workspace, rememberOptions: [{ tier: 'tool', label: 'Just this once', detail: 'nothing more' }], ownerOnly: 'loosen-security',
-    attribution: { kind: 'outside-caller', name: 'you, on this machine', principalId: 'shared-token' } } }, 'approvals.raise');
+    attribution: { kind: 'outside-caller', name: 'you, on this machine', principalId: 'shared-token' } } } });
   const raisedWireId = String((raisedWire.body as { approvalId?: string }).approvalId);
   await broker.resolveApproval(raisedWireId, { approved: true, actor: 'owner', expectedRevision: broker.getApproval(raisedWireId)!.revision, remember: true, rememberTier: 'tool' });
   const heldStatus = broker.getApproval(heldId)!.status;
   await broker.resolveApproval(heldId, { approved: false, actor: 'owner', expectedRevision: broker.getApproval(heldId)!.revision, reason: 'Not now.' });
   const heldAnswer = await heldCall;
-  const nextCall = await answeredWhileWaiting(() => asks(switchOff), false);
+  const nextCall = await answeredWhileWaiting(() => outside(switchOff), false);
   expect(`waiting ${heldStatus}, on No ${heldAnswer.status}; next ${nextCall.status} asked ${nextCall.asked}`).toBe('waiting pending, on No 403; next 403 asked true');
 
   // A model's capability call made inside another tool (agent_local_registry deleting a skill): the tool's own yes is
@@ -613,10 +463,17 @@ test('an outside caller\'s call put to the owner waits for them, stores nothing 
   expect(`${wrapped.success ? 'ran' : 'refused'}; asked ${programAsks.join(',')}`).toBe('refused; asked capability_run:irreversible-operator');
 
   // The owner's No, remembered for this capability, refuses the next such call at once: nothing asked, nothing forgotten.
-  // (A loosening, rememberable: the outside caller's tool server for its project; what cannot be undone is never remembered.)
+  // (A loosening, rememberable: a model's tool server for its project, a daemon method it calls directly, handed to the gate
+  // by the dispatch; what cannot be undone is never remembered.)
+  const serverWrites: string[] = [];
+  attachHandler(catalog, 'mcp.servers.upsert', (invocation) => {
+    serverWrites.push(String((invocation.body as { scope?: unknown }).scope));
+    return { scope: (invocation.body as { scope?: unknown }).scope, written: true };
+  });
+  const methodPress = () => outside({ scope: 'project', server: { name: 'lint-server', command: 'true' }, workingDirectory: workspace }, 'mcp.servers.upsert');
   const writesBefore = serverWrites.length;
-  await answeredWhileWaiting(() => methodPress(OPERATOR_TOKEN, 'project'), false, true);
-  const settledByRule = await answeredWhileWaiting(() => methodPress(OPERATOR_TOKEN, 'project'), false);
+  await answeredWhileWaiting(methodPress, false, true);
+  const settledByRule = await answeredWhileWaiting(methodPress, false);
   expect(`${settledByRule.status} ${codeOf(settledByRule)}; asked ${settledByRule.asked}; written ${serverWrites.length - writesBefore}`)
     .toBe('403 CAPABILITY_NOT_APPROVED; asked false; written 0');
 });

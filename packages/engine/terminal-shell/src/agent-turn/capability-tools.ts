@@ -404,14 +404,18 @@ function methodCapabilityAnswer(entry: CapabilityEntry, values: Readonly<Record<
   try { facts = record(JSON.parse(output)); } catch { return output; }
   if (!('body' in facts)) return output;
   const body = facts.body;
-  const data = body !== null && typeof body === 'object' && !Array.isArray(body) ? body as Record<string, unknown> : { result: body };
+  const answered = body !== null && typeof body === 'object' && !Array.isArray(body) ? body as Record<string, unknown> : { result: body };
   const definition = methodCapability(entry.id);
+  // A value the person must see once (`oneTime`) is the person's, never the model's: it is left out of what a model reads.
+  const data: Record<string, unknown> = definition?.oneTime && definition.oneTime.length > 0
+    ? Object.fromEntries(Object.entries(answered).filter(([field]) => !definition.oneTime!.includes(field))) : answered;
   let said = '';
-  try { said = definition?.said?.(data, values) ?? ''; } catch { said = ''; }
+  try { said = definition?.said?.(answered, values) ?? ''; } catch { said = ''; }
   let did: string | undefined;
-  try { did = definition?.did?.(data, values); } catch { did = undefined; }
+  try { did = definition?.did?.(answered, values); } catch { did = undefined; }
+  const withheld = definition?.reveals && definition.reveal ? ` The ${definition.reveals.label.toLowerCase()} is shown only to the user, in the place that holds it.` : '';
   const text = capabilityOutcomeText(entry, values, { text: said, ...(did !== undefined ? { riskDone: did } : {}) }) || `${entry.label}: done.`;
-  return `${text}\n\nData: ${JSON.stringify(data, null, 2)}`;
+  return `${text}${withheld}\n\nData: ${JSON.stringify(data, null, 2)}`;
 }
 
 function createRunTool(registry: ToolRegistry, options: CapabilityToolOptions, host: RunHost): Tool {

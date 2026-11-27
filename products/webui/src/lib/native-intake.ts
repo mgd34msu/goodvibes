@@ -100,17 +100,12 @@ export async function openNativeIntake(
     const auth = await platformClient.operator.invoke("control.auth.current", {}, current);
     check();
     current.throwIfAborted();
-    // The daemon says whether this browser is the owner in person (their sign-in with their
-    // name and password): its one test of who the owner is, never guessed here.
-    // A device the owner paired is not the owner, but does the owner's native work (method-owner-decision.ts
-    // `ownersDevice`), so a paired browser keeps the form.
-    const owner =
-      (auth as { readonly ownerHimself?: unknown }).ownerHimself === true ||
-      (auth as { readonly credential?: unknown }).credential === "device-token";
+    // There is one user: every signed-in session (under any name), every paired device and the machine's token is
+    // that user, so who the browser is decides nothing here. What limits it is what the daemon says it holds:
+    // that it is signed in, that it has the admin role, and its stored scope list, checked below.
     if (
       !auth.authenticated ||
       !auth.admin ||
-      !owner ||
       !auth.principalId ||
       auth.principalId.length > 200 ||
       !(
@@ -124,9 +119,9 @@ export async function openNativeIntake(
         authority === "turn" ? "Sending a message to the daemon" : authority === "execution" ? "Running work on the daemon" : "Asking for work";
       throw Object.assign(
         new Error(
-          owner
-            ? `${feature} needs full access, and this browser's pairing does not have it. Pair it again with full access (Settings, Devices and pairing), then try again.`
-            : `${feature} needs this browser signed in as you or paired as your device: sign in with your name and password, or pair this browser (Settings, Devices and pairing), then try again.`
+          auth.authenticated
+            ? `${feature} needs full access, and this browser's sign-in or pairing does not have it. Sign in with full access, or pair this browser again with full access (Settings, Devices and pairing), then try again.`
+            : `${feature} needs this browser signed in: sign in with your name and password, or pair this browser (Settings, Devices and pairing), then try again.`
         ),
         { code: "PAIRED_OWNER_REQUIRED" }
       );

@@ -9,7 +9,10 @@
  * or the whole plan written again, then approved (that starts the work with
  * exactly that plan) or thrown away. The approved plan travels in the durable
  * run request (`draftPlan`), so the contract keeps its steps and the stored-run
- * check compares them.
+ * check compares them. The setting is the user's own "ask me" rule for a plan, so it
+ * is read as the permission modes read such a rule: Ask me, Jev decides, Just vibes
+ * and Plan hold the plan, YOLO reads no such rule and runs the work (the daemon
+ * passes `showPlanFirst` false in YOLO, products/daemon runtime/service-graph.ts).
  *
  * Drafts live in the daemon's project (the workstream draft store,
  * `.goodvibes/orchestration/drafts/`); which draft is which work's plan is one
@@ -162,6 +165,7 @@ export function createWorkPlans(deps: {
   readonly drafts: WorkstreamDraftService;
   /** The file that says which draft is which work's plan. */
   readonly file: string;
+  /** Whether a plan is shown before the work runs: the setting on and the project's permission mode not YOLO. */
   readonly showPlanFirst: () => boolean;
   /** The project these plans are (its root, as the daemon routes Work): the `work` notice names it. */
   readonly project?: string | undefined;

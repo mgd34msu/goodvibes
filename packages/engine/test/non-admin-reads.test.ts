@@ -108,6 +108,11 @@ test('a non-admin user cannot read transcripts, paired devices or any owner-priv
 const OPEN_TO_NON_ADMIN: ReadonlyMap<string, string> = new Map([
   ['accounts.snapshot', 'provider routes, readiness and freshness; no account identity'],
   ['acp.agents.list', 'which coding agents are installed on PATH'],
+  // A sign-in whose stored scope list holds the read scope reads these (it is the user, limited only by its scope list):
+  // each is a read with no mutation, under artifacts.read (read:artifacts).
+  ['artifacts.content.get', 'a stored artifact\'s bytes; needs read:artifacts'],
+  ['artifacts.get', 'a stored artifact\'s metadata; needs read:artifacts'],
+  ['artifacts.list', 'stored artifact metadata; needs read:artifacts'],
   ['automation.heartbeat.list', 'job names and why each is queued; no prompt or output'],
   ['automation.integration.snapshot', 'job names, schedules and run states; no prompt or output'],
   ['batch.runtime.get', 'the batch queue mode'],
@@ -228,6 +233,17 @@ const OPEN_TO_NON_ADMIN: ReadonlyMap<string, string> = new Map([
   ['voice.wake.model.get', 'the published wake-word model bytes'],
   ['voice.wake.status', 'whether the wake-word model is on disk and verified'],
   ['watchers.list', 'configured watchers and their states'],
+  // Reads under triggers.read (read:watchers) and work.read (read:work-ledger); workLedger.turn.session under sessions.read
+  // (read:sessions). None writes or reveals a secret.
+  ['watchers.triggers.history', 'a trigger\'s newest runs; needs read:watchers'],
+  ['watchers.triggers.list', 'the supervised triggers; needs read:watchers'],
+  ['watchers.triggers.preview', 'the blanks of a trigger read into what would be kept, nothing made; needs read:watchers'],
+  ['work.list', 'the project\'s Work, read only; needs read:work-ledger'],
+  ['work.target', 'which piece of work an act is for, nothing kept; needs read:work-ledger'],
+  ['workLedger.history', 'ledger events after a cursor; needs read:work-ledger'],
+  ['workLedger.project', 'the selected project identity; needs read:work-ledger'],
+  ['workLedger.snapshot', 'the project ledger, read only; needs read:work-ledger'],
+  ['workLedger.turn.session', 'native session ownership lookup; needs read:sessions'],
   ['web_search.providers.list', 'web search provider capabilities'],
   ['workspaces.projects.list', 'registered workspace roots and their labels, as workspaces.registrations.list'],
   ['workspaces.registrations.list', 'registered workspace roots'],

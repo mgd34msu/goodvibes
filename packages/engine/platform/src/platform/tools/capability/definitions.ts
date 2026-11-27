@@ -5,7 +5,7 @@
  * from the capabilities themselves: one that loosens a protection (by its own
  * risk, or by a chosen input such as a secret kept as plain text) is
  * `loosen-security`, one that cannot be undone `irreversible-operator`, one
- * only the owner does himself `owner-act`; one that only reads is classed a
+ * only the owner does in person `owner-act`; one that only reads is classed a
  * read; one that only tightens a protection (its `tightens`) is allowed in every
  * mode and folder, never asked about. Daemon methods a call names directly keep the declarations they had
  * under the method tool this one replaced.
@@ -121,23 +121,33 @@ export function capabilityRunDefinition(entries: readonly CapabilityEntry[], met
     // A routed id is decided once, at the nested method call it becomes, with that method's own declarations.
     runsLater: [...entries.filter((entry) => RUNS_LATER_CAPABILITY_IDS.has(entry.id) || (entry.method !== undefined && RUNS_LATER_METHOD_IDS.has(entry.method.id))).map((entry) => entry.id),
       ...(methods.runsLater ?? [])].filter((id) => !(methods.routed ?? []).includes(id)),
-    // What sends out as the owner or spends his money: after the conversation read text from outside, asked each time in
+    // What sends out as the owner or spends their money: after the conversation read text from outside, asked each time in
     // every mode (security/conversation-exposure.ts). A routed id is decided at its nested method call.
     sendsOrSpends: [...entries.filter((entry) => entry.risk === 'sends-out' || entry.risk === 'spends-money').map((entry) => entry.id),
       ...(methods.sendsOrSpends ?? [])].filter((id) => !(methods.routed ?? []).includes(id)),
     ...(methods.recipients ? { recipients: methods.recipients } : {}),
   };
-  // Only the owner does it himself: its own flag, or an effect a model never causes that the owner cannot decide for it.
+  // Only the owner does it in person: its own flag, or an effect a model never causes that the owner cannot decide for it.
   const ownerOwn = entries.filter((entry) => entry.ownerOnly || modelNeverRuns(entry));
   const ownerActs: ToolOwnerActs = {
     field: 'id', values: [...ownerOwn.map((entry) => entry.id), ...(methods.ownerActs ?? [])],
     // The refusal names the act in the capability's own words (gate/classify.ts).
     words: Object.fromEntries(ownerOwn.map((entry) => [entry.id, entry.label])),
-    // A capability that is the owner's own act is put to him, opening on No, never refused outright; a daemon method
-    // named directly whose act is his (answering an approval, minting a token) stays refused to a model.
-    asked: [...ownerOwn.map((entry) => entry.id), ...(methods.ownerActsAsked ?? [])],
+    // A capability that is the owner's own act is decided under their mode for their own model (an item of their list); one a
+    // model never runs (granting or withdrawing access, a credential, a pairing, a secret read out, the permission
+    // rules: catalog.ts `modelNeverRuns`) is refused to a model in every mode, YOLO and their own turn included, as a
+    // daemon method named directly whose act is theirs (answering an approval, minting a token) is.
+    asked: [...ownerOwn.filter((entry) => !modelNeverRuns(entry)).map((entry) => entry.id), ...(methods.ownerActsAsked ?? [])],
     // One that hands on a card's detail the owner types is answered each time: never remembered.
     once: ownerOwn.filter((entry) => (entry.effects ?? []).includes('card.enter')).map((entry) => entry.id),
+    // A settings write naming the permission mode or a permission rule: no model makes it, in any mode (the daemon refuses
+    // it too: control-plane.ts `namesPermissionSettings`, routes/capabilities.ts `namesPermissionSetting`).
+    // config.setMany names its keys in `entries` (method-catalog-admin.ts), so its call is refused here too, before any card.
+    refusedWhen: {
+      ...Object.fromEntries(['settings.set', 'settings.reset', 'config.set', 'config.reset']
+        .map((id) => [id, { path: 'inputs.key', prefixes: ['permissions'] }])),
+      'config.setMany': { path: 'inputs.entries[].key', prefixes: ['permissions'] },
+    },
   };
   return {
     name: CAPABILITY_RUN_TOOL,

@@ -6,8 +6,8 @@
  * feature, and only one of them is the switch anybody looks for. Turning the
  * feature on while this surface's row is off stores the value correctly,
  * reports success, and opens no microphone, a setting that configures
- * nothing. That cost the owner an entire session: he enabled wake detection,
- * was told it was enabled, and nothing ever listened.
+ * nothing. That cost the owner an entire session: they enabled wake detection,
+ * were told it was enabled, and nothing ever listened.
  *
  * So the write takes its companion with it, and says so. The rule itself is the
  * platform's (platform/voice/wake/settings.ts) so every surface applies the same

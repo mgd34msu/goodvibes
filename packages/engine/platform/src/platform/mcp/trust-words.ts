@@ -10,8 +10,8 @@ export const MCP_TRUST_WORDS_DEFAULT_MODE = 'ask-on-risk';
 
 /** What each level does with a call, one choice each: the label, and the sentence under it. */
 export const MCP_TRUST_LEVEL_WORDS: readonly { readonly value: string; readonly label: string; readonly help: string; readonly loosens: boolean }[] = [
-  { value: 'ask-on-risk', label: 'Ask me about calls outside its limits', loosens: true,
-    help: 'Calls inside its folders and sites go on as your permission mode allows; a call outside them is put to you, in every mode. A server kept with no level set has this one.' },
+  { value: 'ask-on-risk', label: 'Decide calls outside its limits by my mode', loosens: true,
+    help: 'Calls inside its folders and sites go on as your permission mode allows; a call outside them is one of your own decisions, made under your permission mode (YOLO runs it, Jev decides gives it to Jev, Ask me asks you). A server kept with no level set has this one.' },
   { value: 'constrained', label: 'Refuse calls outside its limits', loosens: false,
     help: 'Calls inside its folders and sites go on as your permission mode allows; a call outside them is refused without asking you.' },
   { value: 'blocked', label: 'Refuse every call', loosens: false, help: 'No tool of the server runs.' },
@@ -22,7 +22,7 @@ export const MCP_TRUST_LEVEL_WORDS: readonly { readonly value: string; readonly 
 /** A kept level in words, as a row or a line says it ("<server> asks you about calls outside its limits"). */
 export function mcpTrustWords(mode: string | undefined | null): string {
   const level = mode || MCP_TRUST_WORDS_DEFAULT_MODE;
-  if (level === 'ask-on-risk') return 'asks you about calls outside its limits';
+  if (level === 'ask-on-risk') return 'decides calls outside its limits by your permission mode';
   if (level === 'allow-all') return 'is not held to its limits';
   if (level === 'constrained') return 'refuses calls outside its limits';
   if (level === 'blocked') return 'refuses every call';
@@ -31,7 +31,7 @@ export function mcpTrustWords(mode: string | undefined | null): string {
 
 /**
  * Why a call of a server kept at "Ask me about calls outside its limits" is put to the person: the server's level, never
- * a rule of his ("<server> is set to ask before anything outside its limits").
+ * a rule of theirs ("<server> is set to ask before anything outside its limits").
  */
 export function mcpAskWhy(serverName: string): string {
   return `The tool server ${serverName} is set to ask you before anything outside its limits`;

@@ -104,14 +104,24 @@ export function containmentForTurn(
 }
 
 /**
+ * Whether a command of this turn writes no file anyone keeps: a turn on someone else's input. Its boundary binds its
+ * project read-only and none of the owner's `sandbox.workspaceWritable` extras (sandbox.ts `readOnly`); only the
+ * command's private /tmp takes writes. With {@link containmentForTurn} requiring the boundary, "writes no file" holds
+ * for its commands as it does for write and edit ({@link foreignInputWriteRefusal}).
+ */
+export function turnWritesNoFile(party: TurnInputParty = turnInputParty()): boolean {
+  return party.party !== 'owner';
+}
+
+/**
  * The refusal a file write or edit gets in a turn acting on someone else's input, or null when it may go on (the
- * owner's turn: the gate under his mode decides it). Such a turn writes no file outside a real sandbox, and the write
+ * owner's turn: the gate under their mode decides it). Such a turn writes no file outside a real sandbox, and the write
  * and edit tools have none: what it may change it proposes to the owner instead.
  */
 export function foreignInputWriteRefusal(tool: string, party: TurnInputParty = turnInputParty()): string | null {
   if (party.party === 'owner') return null;
   return `Tool '${tool}' was refused: this turn acts on someone else's input (${party.who}), and such a turn writes no `
-    + 'file outside a real sandbox, whatever the mode. Say what you would change, and the owner can make the change himself.';
+    + 'file outside a real sandbox, whatever the mode. Say what you would change, and the owner can make the change themselves.';
 }
 
 /** The verdict for one command. */

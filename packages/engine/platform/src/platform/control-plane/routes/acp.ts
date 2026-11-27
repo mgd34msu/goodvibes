@@ -27,7 +27,7 @@ function requirePrincipal(invocation: GatewayMethodInvocation): void {
 
 /**
  * Whose input an outside coding agent acts on, from the caller the transport established (never from the body): the
- * owner's when the owner himself started it (an owner-class caller that is not a model acting for him), anyone else's
+ * owner's when the owner in person started it (an owner-class caller that is not a model acting for them), anyone else's
  * otherwise (a paired device, a member, an admin's sign-in, a model): its asks are then decided as someone else's turn,
  * which runs reads only (security/turn-input-party.ts).
  */

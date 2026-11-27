@@ -3,7 +3,7 @@
  *
  * The owner ruled for this surface directly, having been shown what a browser
  * costs that a terminal does not (a PAN on a page, form autofill, password
- * managers, browser history, XSS in our own UI). The option he chose carried
+ * managers, browser history, XSS in our own UI). The option the owner chose carried
  * six conditions; they are part of the ruling, and each one below names the
  * line of code that implements it so a reviewer can check rather than trust.
  * The list itself lives in payments-cards.ts as CARD_ENTRY_CONDITIONS.

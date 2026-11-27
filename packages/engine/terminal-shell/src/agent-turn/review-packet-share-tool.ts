@@ -232,7 +232,7 @@ export function createAgentReviewPacketShareTool(
         additionalProperties: false,
       },
       sideEffects: ['network'],
-      // A webhook URL is chosen in the call: one the owner has not configured or allowed is his to decide.
+      // A webhook URL is chosen in the call: one the owner has not configured or allowed is theirs to decide.
       subjects: { recipients: ['webhook'] },
     },
     execute: async (rawArgs: Record<string, unknown>, executionOptions) => {

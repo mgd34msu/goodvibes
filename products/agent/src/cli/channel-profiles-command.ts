@@ -154,7 +154,7 @@ function ownerPendingText(data: object): string {
   const answer = data as { readonly approvalId?: unknown; readonly state?: unknown };
   const approval = typeof answer.approvalId === 'string' ? ` as approval ${answer.approvalId}` : '';
   const state = typeof answer.state === 'string' ? answer.state : 'nothing was changed yet; this loosens the permission mode, which only the owner does';
-  return `Not applied: ${state}. It was put to the owner${approval}; he approves it from his own app.`;
+  return `Not applied: ${state}. It was put to the owner${approval}; the owner approves it from their own app.`;
 }
 
 async function handleChannelProfilesDelete(runtime: CliCommandRuntime, args: readonly string[]): Promise<CliCommandOutput> {

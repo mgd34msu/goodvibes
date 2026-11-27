@@ -90,6 +90,13 @@ export interface CiWatchSubscription {
    * Its repair session works there, never in the daemon's own folder.
    */
   readonly project?: string | undefined;
+  /**
+   * Whose input made it: for a watch made automatically, the party of the turn whose push made it (the owner's own
+   * chat: the owner's; anyone else's: theirs; security/turn-input-party.ts). Its repair is decided and runs as that party, so a
+   * watch made from someone else's chat repairs nothing. Absent (a watch saved before it was kept, or made by a call
+   * outside any turn): someone else's. Kept on the daemon only; never in a list a caller reads.
+   */
+  readonly party?: import('../security/turn-input-party.js').TurnInputParty | undefined;
   /** Channel to notify on completion ('surfaceKind' or 'surfaceKind:address'). */
   readonly deliveryChannel: string;
   /** Historical standalone-service opt-in; production always requires original-source Jev admission. */

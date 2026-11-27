@@ -156,7 +156,7 @@ export function readConnectedHostOperatorToken(homeDirectory: string, hostUrl?: 
 export function connectedHostTokenRequiredMessage(path: string): string {
   return [
     `Not connected to a GoodVibes host: there is no host token at ${path}.`,
-    '  Start the host on this machine with goodvibes-daemon serve (it writes the token), or pair with a host: goodvibes-agent setup pair shows the plan and goodvibes-agent setup pair --apply pairs.',
+    '  Start the host on this machine with goodvibes-daemon serve (it writes the token), or pair with a host on another machine: goodvibes-agent setup pair --with-code, with the sign-in code your own signed-in screen shows.',
     '  goodvibes-agent setup status shows the connection.',
   ].join('\n');
 }

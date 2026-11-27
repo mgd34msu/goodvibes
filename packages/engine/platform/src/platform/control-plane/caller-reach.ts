@@ -5,7 +5,7 @@
  * of a method served only by its route, and the REST routes (daemon/http/router.ts).
  *
  * Everything the daemon holds belongs to a project, or to no project (the owner's shared things). A caller that is not
- * the owner himself lists, reads, searches, follows or acts on only what belongs to a project the owner gave it
+ * the owner in person lists, reads, searches, follows or acts on only what belongs to a project the owner gave it
  * (workspace/caller-project.ts `checkCallerProject`, the same check a project it NAMES passes), whether it reaches the
  * thing by naming a project, by naming none, or by its id:
  *
@@ -17,7 +17,7 @@
  *   that are the same whether the record is another project's or no record at all (they never say it exists elsewhere);
  * - a list or a search a method declares is filtered to what the caller may reach, by the same rule, after the handler.
  *
- * The owner himself (his sign-in, a device he paired himself, his registered program, a program of his on this machine:
+ * The owner in person (their sign-in, a device they paired in person, their registered program, a program of theirs on this machine:
  * `projectNamerOf`) reaches everything. A daemon-run turn (`clientKind: daemon-turn`, the web chat, a schedule's run, a
  * trigger's) is confined to its own project the same way: it is not the owner at large.
  */
@@ -43,7 +43,7 @@ export interface RecordOwner {
   readonly as?: RecordKind | undefined;
   /**
    * The callers the owner shared this one record with (a hosted session: `sessions.hosted.share`, the owner's own act
-   * or put to him): each reaches THIS record whatever project it is in, nothing else of its project; unsharing ends it.
+   * or put to the owner): each reaches THIS record whatever project it is in, nothing else of its project; unsharing ends it.
    */
   readonly sharedWith?: readonly string[] | undefined;
   /** The record is of several projects at once (a proposal naming records of two): the owner's alone. */
@@ -96,7 +96,7 @@ export const RECORD_KIND_FACTS: Readonly<Record<RecordKind, { readonly words: st
 
 /** Who reaches: the owner at large, or a caller held to some projects (the ones given it, or one daemon turn's own). */
 export interface Reacher {
-  /** The owner himself, or one of his programs on this machine: reaches everything. */
+  /** The owner in person, or one of their programs on this machine: reaches everything. */
   readonly everything: boolean;
   readonly namer: ProjectNamer;
   readonly principalId?: string | undefined;
@@ -109,14 +109,14 @@ export interface Reacher {
    */
   readonly turnOnOthersInput?: boolean | undefined;
   /**
-   * Whom that turn runs for: the maker of its own conversation, as the daemon recorded it (a member's web chat: her;
+   * Whom that turn runs for: the maker of its own conversation, as the daemon recorded it (a member's web chat: that member;
    * call context `othersInputFor`). Undefined when nobody is recorded (a guest, a channel message, Home Assistant's
    * room): the turn then reaches nobody's chat or session.
    */
   readonly turnFor?: string | undefined;
   /**
-   * The owner's own device (daemon-api actor.ts `ownerDevice`; never the owner himself): it reaches the questions waiting
-   * for him, to show and answer them (the approval viewer refuses one it, or a credential made from it, raised), and
+   * The owner's own device (daemon-api actor.ts `ownerDevice`; never the owner in person): it reaches the questions waiting
+   * for the owner, to show and answer them (the approval viewer refuses one it, or a credential made from it, raised), and
    * otherwise only what a project given to it holds.
    */
   readonly ownersDevice?: boolean | undefined;
@@ -153,7 +153,7 @@ export function reacherOf(context: ReachContext, body?: unknown): Reacher {
 /** Whether `who` reaches a record whose owner is `owner` of `kind` (the one rule). */
 export function reaches(who: Reacher, kind: RecordKind, owner: RecordOwner | undefined, rules: Pick<CallerReachRules, 'project'>): boolean {
   if (who.everything) return true;
-  // The owner's own device reads and answers the questions waiting for him (no other record of his).
+  // The owner's own device reads and answers the questions waiting for the owner (no other record of theirs).
   if (kind === 'approval' && who.ownersDevice === true) return true;
   if (owner === undefined || owner.ownerOnly === true) return false;
   const facts = RECORD_KIND_FACTS[owner.as ?? kind];
@@ -162,7 +162,7 @@ export function reaches(who: Reacher, kind: RecordKind, owner: RecordOwner | und
   if (who.turnProject === undefined && who.principalId !== undefined && owner.sharedWith?.includes(who.principalId) === true) return true;
   if (facts.madeBy === 'required' && !madeByIt && who.turnProject === undefined) return false;
   // A daemon turn on someone else's input reads only the conversations and files its own caller made (a member's chat
-  // turn: her chats; a guest's: none of anyone's), never the owner's in the same project. The owner's own turn reaches
+  // turn: that member's chats; a guest's: none of anyone's), never the owner's in the same project. The owner's own turn reaches
   // its project's (below).
   if (who.turnOnOthersInput === true && facts.madeBy !== undefined && (who.turnFor === undefined || owner.madeBy !== who.turnFor)) return false;
   // A record of no project: the person's shared thing, the owner's only, or (a kind that keeps its maker) its maker's.
@@ -178,7 +178,7 @@ export function reaches(who: Reacher, kind: RecordKind, owner: RecordOwner | und
  * The caller's reach as a filter a paged list applies BEFORE it cuts its page (daemon-api `keepReachable`, served with
  * `withRecordReach`): null for the owner at large (nothing is filtered). A kind's lookup that must wait (a store read
  * from disk) cannot be asked inside a list's filter: such a record is left out, as one of no lookup is.
- * Without the rules (a list route wired without them) nothing can be told apart: the owner himself still reads the whole
+ * Without the rules (a list route wired without them) nothing can be told apart: the owner in person still reads the whole
  * list (null), and anyone else is given nothing (a filter that keeps no row). It never fails open.
  */
 export function reachFilterOf(context: ReachContext, rules: CallerReachRules | undefined, body?: unknown): ((kind: string, id: string, known?: RecordOwner) => boolean) | null {
@@ -186,8 +186,8 @@ export function reachFilterOf(context: ReachContext, rules: CallerReachRules | u
   if (who.everything) return null;
   if (!rules) return () => false;
   return (kind, id, known) => {
-    // `shared`: whether the caller reaches the owner's shared kind `id` (his gift; his own turn's), for a store that keeps
-    // his shared records beside a project's (the knowledge library: knowledge/knowledge-reach.ts).
+    // `shared`: whether the caller reaches the owner's shared kind `id` (the owner's gift; the owner's own turn's), for a store that keeps
+    // the owner's shared records beside a project's (the knowledge library: knowledge/knowledge-reach.ts).
     if (kind === 'shared') {
       return isSharedKind(id) && sharedKindReached({ ownersOwn: false, daemonTurn: who.turnProject !== undefined,
         othersInput: who.turnOnOthersInput === true, ...(who.turnFor ? { othersInputFor: who.turnFor } : {}),
@@ -212,6 +212,94 @@ const REACH_PAD_FOLDER = join(tmpdir(), 'goodvibes-no-record', 'project');
 /** The words a refusal says, the same for a record of another project and for none: they never say which. */
 export function notReachableWords(kind: RecordKind, path: string, id: string): string {
   return `${path}: no ${RECORD_KIND_FACTS[kind].words} "${id}" is among what this caller may reach (only what belongs to a project the owner gave it)`;
+}
+
+/**
+ * The calls that only READ a record of a kind whose records of no project every caller reads (`withoutProject:
+ * 'shared'`): a rule that applies everywhere, a memory record of no project, a proposal over such records. Every other
+ * call naming one changes it (an update, a review, a link, a delete, a decision), and a change of the owner's shared
+ * record is made only by the owner in person or their own turn ({@link sharedRecordChangeRefusal}).
+ */
+const SHARED_RECORD_READS: ReadonlySet<string> = new Set(['memory.records.get', 'memory.records.links.list', 'memory.show']);
+
+/**
+ * The calls that MAKE a record of no project of such a kind, and whether this call does (its inputs as given): a rule
+ * for every project, a memory record for every project or the team, a bundle of records loaded at once.
+ */
+const SHARED_RECORD_MAKERS: Readonly<Record<string, (body: Record<string, unknown> | undefined, inputs: Record<string, unknown> | undefined, project: unknown) => boolean>> = {
+  // capabilities (their inputs)
+  'permissions.never': () => true,
+  'memory.add': (_body, inputs) => typeof inputs?.['scope'] === 'string' && inputs['scope'].trim() !== '' && inputs['scope'] !== 'project',
+  // methods (their body)
+  'memory.records.add': (body, _inputs, project) => body?.['scope'] !== 'project' || !(typeof project === 'string' && project.trim()),
+  'memory.records.import': () => true,
+};
+
+/**
+ * The project acts opened below an admin by scope (security/effect-authority.ts, the project-act rows) that CHANGE a
+ * record they name by id (or send something into it): a caller below an admin (a paired device, the outside agent, a
+ * member) makes one only on a record it made itself (the kind's owner lookup gives its maker: a session it made or
+ * registered, a schedule or trigger it caused, an agent task started for it), as it acts only on work it asked for
+ * (routes/work.ts `ownWork`). The owner's records and anyone else's in the same project it reads, never changes. Remote work
+ * is held as the session or schedule it was queued for. A memory record keeps no principal as its maker (only words), so
+ * such a caller changes none: it adds its own. An admin, the
+ * owner and a daemon turn are held by the project rule alone.
+ */
+export const OWN_RECORD_CHANGES: ReadonlySet<string> = new Set([
+  'sessions.close', 'sessions.reopen', 'sessions.detach', 'sessions.delete', 'sessions.messages.create', 'sessions.steer',
+  'sessions.followUp', 'sessions.inputs.cancel', 'sessions.inputs.deliver', 'sessions.checkpoints.changed', 'sessions.register',
+  'tasks.create', 'tasks.cancel', 'tasks.retry', 'fleet.stop', 'fleet.interrupt', 'fleet.resume',
+  'automation.jobs.create', 'automation.jobs.update', 'automation.jobs.delete', 'automation.jobs.enable', 'automation.jobs.disable',
+  'automation.jobs.run', 'automation.runs.cancel', 'automation.runs.retry', 'automation.schedules.create', 'automation.schedules.delete',
+  'automation.schedules.resume', 'automation.schedules.pause', 'automation.schedules.run',
+  'watchers.triggers.cancel', 'watchers.triggers.reset',
+  'memory.records.update', 'memory.records.update-review', 'memory.records.delete', 'memory.records.links.add',
+  'remote.work.cancel',
+]);
+
+/** Whether the caller is below an admin: a paired device, the outside agent or a member (its acting class). */
+function belowAdmin(context: ReachContext): boolean {
+  const acting = context?.actor?.agentFor ?? context?.actor;
+  return acting?.class === 'device' || acting?.class === 'member';
+}
+
+/** Whether a record's kept maker is this caller (a session's registrant may carry `#<program>`; a sign-in is `user:<name>`). */
+function madeByCaller(madeBy: string | undefined, principalId: string | undefined): boolean {
+  if (madeBy === undefined || principalId === undefined) return false;
+  const mark = madeBy.indexOf('#');
+  const maker = mark < 0 ? madeBy : madeBy.slice(0, mark);
+  return maker === principalId || maker === `user:${principalId}`;
+}
+
+/** The words of a refused change of a record this caller did not make (no question is put to anyone). */
+function notOwnRecordWords(kind: RecordKind, path: string, id: string): string {
+  return `${path}: the ${RECORD_KIND_FACTS[kind].words} "${id}" is not one this caller made; a paired device, a member or an outside agent changes only what it made itself, and reads the rest of the project`;
+}
+
+/** Whether `who` is the owner in person, their program, or their own daemon turn: the only callers that change the owner's shared records. */
+function ownersOwnReach(who: Reacher): boolean {
+  return who.everything || (who.turnProject !== undefined && who.turnOnOthersInput !== true);
+}
+
+/** The words of a refused change of one of the owner's shared records (no question is put to anyone). */
+function sharedRecordChangeWords(kind: RecordKind, at: string): string {
+  return `${at}: ${kind === 'rule' ? 'the owner\'s rules that apply in every project' : `the owner's ${RECORD_KIND_FACTS[kind].words}s that apply in every project`} `
+    + 'are changed only by the owner in person or the owner\'s own turn; this caller may read them, not change, add or remove them';
+}
+
+/**
+ * Why this call may not change or make one of the owner's shared records of no project, or undefined (the owner's own,
+ * a read, a record of a project). Read before the handler with the reach check (callerReachRefusal).
+ */
+function sharedRecordMakeRefusal(methodId: string, capabilityId: string, body: unknown, context: ReachContext): string | undefined {
+  const acting = capabilityId || methodId;
+  const makes = SHARED_RECORD_MAKERS[acting];
+  if (!makes) return undefined;
+  const fields = record(body);
+  const inputs = capabilityId ? record(fields?.['inputs']) : undefined;
+  const project = context?.call?.project ?? fields?.['workingDirectory'];
+  if (!makes(capabilityId ? undefined : fields, inputs, project)) return undefined;
+  return sharedRecordChangeWords(acting.startsWith('permissions.') ? 'rule' : 'memory-record', acting);
 }
 
 /** The record ids a call names at each declared input, with their kinds (a list input gives each entry). */
@@ -241,6 +329,26 @@ export async function callerReachRefusal(methodId: string | undefined, body: unk
   const named = namedRecords(methodAddressesOf(methodId), '', body, query);
   const capabilityId = methodId === 'capabilities.run' && typeof record(body)?.['id'] === 'string' ? String(record(body)!['id']).trim() : '';
   if (capabilityId && rules.capabilityAddresses) named.push(...namedRecords(rules.capabilityAddresses(capabilityId), 'inputs.', body, undefined));
+  // The owner's shared records of no project (the owner's rules for every project, the owner's memory for every project or the team):
+  // made, changed or removed only by the owner in person or their own turn; anyone else's call is refused outright.
+  const ownersOwn = ownersOwnReach(who);
+  if (!ownersOwn) {
+    const making = sharedRecordMakeRefusal(methodId, capabilityId, body, context);
+    if (making) return making;
+  }
+  // A session registered below an admin: its id names no session someone else made (registering one is joining it), and
+  // the project it says it is in is one given to the caller (the record keeps it, and who else reaches it follows).
+  if (methodId === 'sessions.register' && who.turnProject === undefined && belowAdmin(context)) {
+    const sessionId = record(body)?.['sessionId'];
+    const existing = typeof sessionId === 'string' && sessionId.trim() ? await rules.recordOwner?.('session')?.(sessionId.trim()) : undefined;
+    if (existing !== undefined && !madeByCaller(existing.madeBy, who.principalId)) return notReachableWords('session', 'sessionId', String(sessionId));
+    const said = record(body)?.['project'];
+    if (typeof said === 'string' && said.trim()) {
+      const verdict = rules.project(said.trim(), who.namer);
+      if (!verdict.ok) return `project: ${verdict.reason}`;
+    }
+  }
+  const reads = SHARED_RECORD_READS.has(capabilityId || methodId);
   // The project the call is made in: a name a project's people chose is looked up as theirs (a trigger's).
   const projectNamed = context?.call?.project ?? record(body)?.['workingDirectory'];
   const where: RecordLookupWhere = typeof projectNamed === 'string' && projectNamed.trim() ? { project: projectNamed.trim() } : {};
@@ -253,6 +361,13 @@ export async function callerReachRefusal(methodId: string | undefined, body: unk
     // project check runs for it too, on a folder no record names, so the answer's time does not say which it was.
     if (owner === undefined) void rules.project(REACH_PAD_FOLDER, who.namer);
     if (!reaches(who, kind, owner, rules)) return notReachableWords(kind, path, id);
+    if (!ownersOwn && !reads && owner?.project === null && RECORD_KIND_FACTS[owner.as ?? kind].withoutProject === 'shared') {
+      return sharedRecordChangeWords(owner.as ?? kind, path);
+    }
+    // A project act's change of a record below an admin: only a record this caller made (`OWN_RECORD_CHANGES`).
+    if (OWN_RECORD_CHANGES.has(methodId) && who.turnProject === undefined && belowAdmin(context) && !madeByCaller(owner?.madeBy, who.principalId)) {
+      return notOwnRecordWords(owner?.as ?? kind, path, id);
+    }
   }
   return undefined;
 }

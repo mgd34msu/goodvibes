@@ -365,7 +365,6 @@ export const builtinGatewayChannelMethodDescriptors: readonly GatewayMethodDescr
       dmPolicy: STRING_SCHEMA,
       groupPolicy: STRING_SCHEMA,
       allowTextCommandsWithoutMention: BOOLEAN_SCHEMA,
-      ownMessagesAsOwner: BOOLEAN_SCHEMA,
       // "Project for this channel": a registered project's folder; empty for none.
       project: STRING_SCHEMA,
       allowlistUserIds: arraySchema(STRING_SCHEMA),

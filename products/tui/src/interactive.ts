@@ -10,8 +10,6 @@ import { createHerdrSessionReporter } from '@goodvibes/engine/terminal-shell';
 import { runPickedCommand } from '@goodvibes/engine/terminal-shell/command-registry';
 import { CommandReadings } from './input/commands/command-readings.ts';
 import { CommandRunSlot } from './input/commands/test-runtime.ts';
-import { wireHostPairingShell } from './shell/host-pairing-shell.ts';
-import type { HostPairingController } from './shell/host-pairing-controller.ts';
 import { isConversationUsageAvailable, isConversationContextAvailable } from './core/conversation-usage.ts';
 import type { NativeConversationIntakeState } from './runtime/native-conversation-intake.ts';
 import type { ProductInputContext } from '@goodvibes/engine/terminal-shell/native';
@@ -288,7 +286,6 @@ async function main(prepared: PreparedShellCliRuntime) {
   let externalEditorOpen = false;
   let inputEpoch = 0;
   let submissionStatus: string | null = null;
-  let hostPairing: HostPairingController | null = null;
   // Actions offered after something the shell did (retry a failed turn, open a
   // started fix session): each runs only on its chord, and the footer shows
   // what is on offer (shell/retry-affordance.ts).
@@ -311,7 +308,6 @@ async function main(prepared: PreparedShellCliRuntime) {
       // An ask that waited behind another card may have been settled meanwhile, on another surface, with an amended or per-hunk answer.
       const settled = settledAskDecision(approvalBroker.listApprovals(Number.MAX_SAFE_INTEGER), request.callId, queuedAt);
       if (settled) { resolve(settled); return false; }
-      hostPairing?.cancelForTakeover();
       // A delegated agent asking the owner is waiting on them until the card is answered;
       // the answer settles its call, so it leaves the wait for that tool call.
       const askingAgent = request.attribution?.kind === 'background-agent' ? request.attribution.agentId : null;
@@ -336,7 +332,6 @@ async function main(prepared: PreparedShellCliRuntime) {
     notify: (message: string) => { systemMessageRouter.high(message); render(); },
     getPending: () => pendingPermission,
     setPending: (next: PendingPermissionState | null) => {
-      if (next) hostPairing?.cancelForTakeover();
       pendingPermission = next;
       if (next === null) localCards.next();
     },
@@ -580,7 +575,7 @@ async function main(prepared: PreparedShellCliRuntime) {
           await describeFailedNativeDispatch(
             state,
             error,
-            `Prompt dispatch failed: ${summarizeError(error)}. Inspect /work intake before retrying.`,
+            `Your message could not be started: ${summarizeError(error)}. Check it in Work, under Unanswered, before trying again.`,
           );
         systemMessageRouter.high(status);
         if (epoch === inputEpoch) submissionStatus = status;
@@ -592,7 +587,6 @@ async function main(prepared: PreparedShellCliRuntime) {
 
   const beginSubmission = (): void => {
     commandReadings.cancelAll();
-    hostPairing?.cancelForTakeover();
     // Acting here after another surface took the session over is what moves the conversation back for rewinds.
     if (ctx.services.conversationRewindHost.resumeIfTakenOver()) {
       systemMessageRouter.high('[Rewind] Another surface had taken over this session; this one is offering its conversation for rewinds again.');
@@ -869,19 +863,6 @@ async function main(prepared: PreparedShellCliRuntime) {
   input.transcriptScroll = { scrolledBack: () => transcript.scrolledBack && !views.active, toBottom: scrollToLiveBottom };
   commandContext.openSessionView = (target) => views.open(target);
 
-  hostPairing = wireHostPairingShell({
-    configManager,
-    homeDirectory,
-    input,
-    commandRegistry,
-    commandContext,
-    conversation,
-    canPresent: () => !lifecycle.isTerminalRestored() && pendingPermission === null && !views.active,
-    render,
-    scroll,
-    toBottom: () => transcript.toBottom(),
-  });
-  unsubs.push(() => hostPairing?.dispose());
   input.setCommandRegistry(commandRegistry, commandContext);
   commandContext.openComposerEditor = makeComposerEditorOpener({
     buffer: input,
@@ -948,7 +929,6 @@ async function main(prepared: PreparedShellCliRuntime) {
   };
 
   const renderFrame = () => {
-    hostPairing?.checkPresentation();
     uiEvents.observe(readUiFrame(input, views.focus.current));
     const width = stdout.columns || 80;
     const height = stdout.rows || 24;
@@ -1013,7 +993,6 @@ async function main(prepared: PreparedShellCliRuntime) {
       waitingForOwner:
         pendingPermission !== null ||
         input.waitingForOwner ||
-        hostPairing?.waitingForOwner === true ||
         currentFleet.some(
           (node) => node.kind === 'agent' && node.sessionRef?.sessionId === runtime.sessionId && node.state === 'awaiting-approval',
         ),
@@ -1652,11 +1631,6 @@ async function main(prepared: PreparedShellCliRuntime) {
   });
 
   const dispatchInput = (data: string): void => {
-    if (hostPairing?.ownsInput) {
-      if (pendingPermission) hostPairing.cancelForTakeover();
-      input.feed(data);
-      return;
-    }
     const blocking = handleBlockingShellInput({
       data,
       pendingPermission,
@@ -1690,11 +1664,9 @@ async function main(prepared: PreparedShellCliRuntime) {
     if (data.length > 0) routeInput(data);
   });
   stdin.on('end', () => {
-    hostPairing?.dispose();
     void exitApp();
   });
   stdin.on('close', () => {
-    hostPairing?.dispose();
     void exitApp();
   });
   process.on('SIGINT', sigintHandler);

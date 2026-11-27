@@ -418,7 +418,7 @@ export function PairingTokensSettings() {
                 className="pairing-token-row"
                 title={token.name}
                 meta={[
-                  // How it came to exist: a device the owner paired himself makes his own acts; an automation token does not.
+                  // How it came to exist: a device the owner paired in person makes their own acts; an automation token does not.
                   token.origin === 'owner-pairing' ? 'owner device' : 'automation token',
                   // Who made it (recorded from this release on).
                   madeByWords((token as { madeBy?: unknown }).madeBy),
@@ -455,8 +455,9 @@ export function PairingTokensSettings() {
 
         {tokens.isSuccess && rows.some((token) => `pairing:${token.id}` === currentPrincipal && token.origin !== 'owner-pairing') && (
           <p className="pairing-token-row__note" role="note">
-            This browser is signed in with an automation token, so it cannot make your own changes (loosening a security,
-            permission, judgment or payment setting, or answering a change put to you). To make it your own device, use
+            This browser is signed in with an automation token, so it is not you: its own changes (loosening a security,
+            permission, judgment or payment setting) are decided under your permission mode as anyone's are, and it never
+            answers a question addressed to you. To make it your own device, use
             "This browser" below with the sign-in code your own screen shows; revoke this automation token afterwards.
           </p>
         )}

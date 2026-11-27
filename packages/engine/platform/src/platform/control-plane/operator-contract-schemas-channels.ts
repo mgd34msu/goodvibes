@@ -360,8 +360,6 @@ export const CHANNEL_POLICY_SCHEMA = objectSchema({
   groupPolicies: arraySchema(CHANNEL_GROUP_POLICY_SCHEMA),
   /** A shared channel: while every allowlist is empty, every sender is admitted and no owner claim is raised. */
   open: BOOLEAN_SCHEMA,
-  /** "Treat my own messages here as me": the owner's own messages in a conversation proven his alone act as him. */
-  ownMessagesAsOwner: BOOLEAN_SCHEMA,
   /** "Project for this channel": the registered project a conversation here works in; absent, none. */
   project: STRING_SCHEMA,
   updatedAt: NUMBER_SCHEMA,

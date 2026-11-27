@@ -499,20 +499,9 @@ async function runRemoteMint(input: RunPairCommandInput, target: RemoteDaemonTar
   );
   if (!outcome.ok) return failure(outcome.error, outcome.fix, flags.json, outcome.code);
 
-  // Making a pairing code mints a credential for someone: the owner's own act. A command line never runs it by itself
-  // (anything that can drive a terminal could have typed it), so the daemon put it to the owner: say why it waits,
-  // where he answers it and its approval id, and end with 3, as `do` does (docs/exit-codes.md).
-  const held = outcome.data as unknown as { readonly code?: unknown; readonly approvalId?: unknown; readonly state?: unknown };
-  if (held.code === 'OWNER_APPROVAL_PENDING' && typeof held.approvalId === 'string') {
-    const where = 'Answer it in Waiting for you: in the terminal app or the Agent, the web UI, or a paired phone.';
-    const why = 'It was not run at once because making a pairing code gives a new device access, which is an act only you make, and a command line never makes it by itself.';
-    const again = `Once you have answered yes, read the code it made: goodvibes-daemon do ${held.approvalId} --json${local ? '' : ` --host ${target.baseUrl}`} (its fragment and deepLink).`;
-    if (flags.json) {
-      return { exitCode: 3, lines: [JSON.stringify({ ok: false, code: 'OWNER_APPROVAL_PENDING', approvalId: held.approvalId, state: held.state, why, answerIn: where, fix: again }, null, 2)] };
-    }
-    return { exitCode: 3, lines: [`${typeof held.state === 'string' ? held.state : `Waiting for the owner (${held.approvalId})`}.`, `  ${why} ${where}`, `  Approval: ${held.approvalId}. ${again}`] };
-  }
-
+  // Making a pairing code mints a credential for someone: the owner's own act. A command line never makes it by itself
+  // (anything that can drive a terminal could have typed it): the daemon decided it under the owner's permission mode
+  // (under Ask me this call waited on the owner's one answer), and a refusal came back as one above.
   const data = outcome.data;
   const offerKinds = data.offers.map((offer) => offer.kind).filter(isPairingOfferKind);
   const mintedLine = `minted a new per-device pairing token ("${data.token.name}") on the daemon at ${target.baseUrl}.`;

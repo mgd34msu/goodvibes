@@ -32,7 +32,8 @@ test('a session another process has open is refused here, survives the lock swee
     'setInterval(() => {}, 1 << 30);',
     '',
   ].join('\n'));
-  const holder = Bun.spawn(['bun', script, where.workingDirectory, where.homeDirectory, session], { stdin: 'ignore', stdout: 'pipe', stderr: 'inherit' });
+  // The runtime running this test, not whatever `bun` the PATH names (a version manager's shim may refuse to start).
+  const holder = Bun.spawn([process.execPath, script, where.workingDirectory, where.homeDirectory, session], { stdin: 'ignore', stdout: 'pipe', stderr: 'inherit' });
   try {
     const reader = holder.stdout.getReader();
     expect(new TextDecoder().decode((await reader.read()).value).trim()).toBe('held');
@@ -69,7 +70,7 @@ test('the session file another process has open is not opened, saved over or del
     'setInterval(() => {}, 1 << 30);',
     '',
   ].join('\n'));
-  const holder = Bun.spawn(['bun', script, root, sessionsDir], { stdin: 'ignore', stdout: 'pipe', stderr: 'inherit' });
+  const holder = Bun.spawn([process.execPath, script, root, sessionsDir], { stdin: 'ignore', stdout: 'pipe', stderr: 'inherit' });
   try {
     const reader = holder.stdout.getReader();
     expect(new TextDecoder().decode((await reader.read()).value).trim()).toBe('saved');

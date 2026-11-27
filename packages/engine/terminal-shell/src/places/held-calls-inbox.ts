@@ -1,6 +1,6 @@
 /**
  * held-calls-inbox.ts, the calls this terminal program's gate holds for the
- * owner (just-vibes: not run, kept for him), posted to the daemon's one owner
+ * owner (just-vibes: not run, kept for them), posted to the daemon's one owner
  * inbox as queued actions, where the daemon already posts the calls its own
  * gate holds. Waiting for you, the web UI and a phone then show them in one
  * list and answer them there; an answer approves or sets aside the call in

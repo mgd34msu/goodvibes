@@ -339,7 +339,7 @@ export class AcpHostService {
       record.lifetime.signal.throwIfAborted();
       assertSpawnCurrent();
       // Started for someone else: the owner's own program (`goodvibes acp`) hosted here reads that from its environment,
-      // so its session's agent is that caller's input, never his turn (acp/connection-party.ts).
+      // so its session's agent is that caller's input, never the owner's turn (acp/connection-party.ts).
       const env = acpChildEnvironment(record.inputParty);
       record.child = spawn([input.agent.binaryPath, ...input.agent.args], { cwd: input.cwd, ...(env ? { env } : {}) });
       const ownedChild = record.child;

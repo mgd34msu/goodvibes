@@ -121,11 +121,9 @@ export interface MemoryApi {
   getAll(): readonly MemoryRecord[];
   link(fromId: string, toId: string, relation: string): Promise<MemoryLink | null>;
   linksFor(id: string): readonly MemoryLink[];
-  /** `by`: who makes the change (memory-store.ts update): someone else's makes it wait for the owner again. */
+  /** `by`: who makes the change (memory-store.ts update): someone else's makes it someone else's words. */
   update(id: string, patch: { scope?: MemoryScope; project?: string | undefined; summary?: string; detail?: string; tags?: string[]; by?: MemoryAuthor }): MemoryRecord | null;
   review(id: string, patch: MemoryReviewPatch): MemoryRecord | null;
-  /** The owner accepts a record someone else wrote; null when there is none. */
-  accept(id: string): MemoryRecord | null;
   delete(id: string): boolean;
   /** `project`: the asking project (memoryProjectIdentity); another project's records are never given. */
   explain(task: string, writeScope?: readonly string[], limit?: number, project?: string): Promise<MemoryExplainResult>;
@@ -361,7 +359,6 @@ export function createMemoryApi(memoryRegistry: MemoryApiRegistry): MemoryApi {
       memoryRegistry.update(id, patch)
     ),
     review: (id: string, patch: MemoryReviewPatch) => memoryRegistry.review(id, patch),
-    accept: (id: string) => memoryRegistry.accept(id),
     delete: (id: string) => memoryRegistry.delete(id),
     explain: async (task: string, writeScope: readonly string[] = [], limit = 3, project?: string): Promise<MemoryExplainResult> => {
       const injections = await selectKnowledgeForTask(memoryRegistry, task, writeScope, limit, project);

@@ -445,6 +445,8 @@ async function runOwnedCheckout(request: PurchaseRequest, reading: RawCheckoutRe
   // ── 0. Terminal gates ───────────────────────────────────────────────────
   const gateRefusal = checkPaymentGates(deps.gates);
   if (gateRefusal !== null) return refused(gateRefusal.code, gateRefusal.reason);
+  // Under `payments.cvvHandling: 'prompt'` the owner types the card's security code at each purchase, in every mode (as
+  // released): the setting is the owner's own choice to be asked.
   const requestedMaximumMinorUnits = request.requestedMax === undefined ? undefined : parseRequestedMaximum(request.requestedMax, deps.budgetCurrency);
   if (requestedMaximumMinorUnits === null) return refused('invalid-requested-maximum', 'Refused: requestedMax must be an exact non-negative amount in the budget currency. Clarify the requested maximum before starting this purchase.');
   const verifyTerms = driver.verifyTerms;
@@ -1292,11 +1294,14 @@ async function runOwnedCheckout(request: PurchaseRequest, reading: RawCheckoutRe
     // owner answers, and the record stays in submit-pending for the same reason. NOT
     // disarmed: the owner is about to be sent back to this very page to complete it,
     // so the redactor must still be watching whatever it shows.
+    // It is the card's bank's (or the shop's) own check of the card holder, shown only when the bank demands it: not
+    // a permission question of GoodVibes, and no permission mode answers it.
     return {
       kind: 'challenge',
       challenge: submission.challenge,
       reason:
-        `The merchant asked for an extra verification step before completing this order. `
+        `Your card's bank (or the shop) asked for its own verification of the card holder before completing this order. `
+        + `This is the bank's check, not a GoodVibes permission question, and it appears only when the bank demands it. `
         + `Nothing further happens until you do it: ${submission.challenge.step}`,
     };
   }

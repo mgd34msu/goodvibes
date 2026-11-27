@@ -41,7 +41,7 @@ import {
 } from './types.js';
 
 /** Why a fresh agent was spawned for a unit (the CONTRACT_UNIT_SPAWNED purpose). */
-export type SpawnPurpose = 'unit' | 'fresh-unit' | 'transport-retry' | 'silence-retry' | 'resume';
+export type SpawnPurpose = 'unit' | 'fresh-unit' | 'transport-retry' | 'resume';
 
 /** A check in flight for a unit. */
 export interface InFlightCheck {
@@ -71,8 +71,6 @@ export interface UnitRuntime {
   readonly expectedCancels: Set<string>;
   /** Why the next agent for this unit will be spawned. */
   nextSpawnPurpose: SpawnPurpose;
-  /** When the active agent was spawned. */
-  agentStartedAt: number;
   /** Where the unit's agent works: its item worktree, or the shared project root. */
   cwd: string;
   /** Aborted when the unit is cancelled or failed; checks run under it. */
@@ -287,7 +285,6 @@ export class ContractRun {
         settlement: null,
         expectedCancels: new Set(),
         nextSpawnPurpose: 'unit',
-        agentStartedAt: this.env.now(),
         cwd: this.contract.worktreePath ?? this.contract.projectRoot,
         abort: new AbortController(),
         evidencePaths: null,

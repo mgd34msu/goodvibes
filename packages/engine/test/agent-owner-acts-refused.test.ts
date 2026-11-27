@@ -29,6 +29,7 @@ import { registerAgentOperatorActionTool } from '../terminal-shell/src/agent-tur
 import { registerAgentOperatorMethodTool } from '../terminal-shell/src/agent-turn/operator-method-tool.ts';
 import { forgetGateReadings, gateReadingsPort } from './_helpers/gate-readings.ts';
 import { localOwnerActor } from '@goodvibes/engine/daemon-api/http-policy';
+import { withOwnerInput } from '../platform/src/platform/security/turn-input-party.ts';
 
 let dir: string;
 let restorePort: () => void;
@@ -80,8 +81,9 @@ test('every owner act is refused by both operator tools with nothing sent and no
     autonomousSource: () => ({ goal: 'Look after the owner\'s purchases and devices', criteria: [] }),
     hookDispatcher: null, runtimeBus: null, sessionId: 'agent-turn', emitterContext: () => ({ sessionId: 'agent-turn', traceId: 'agent-turn', source: 'orchestrator' }) };
   let calls = 0;
+  // The owner's own Agent turn, marked as the daemon marks every run of the owner's it hosts (unmarked work is someone else's).
   const run = async (name: string, args: Record<string, unknown>) =>
-    (await executeToolCalls(deps, `turn-${++calls}`, [{ id: `call-${calls}`, name, arguments: args }]))[0]!;
+    (await withOwnerInput(() => executeToolCalls(deps, `turn-${++calls}`, [{ id: `call-${calls}`, name, arguments: args }])))[0]!;
   // A call the registry refuses before preparing it (an action the tool's schema does not offer) throws; nothing ran.
   const call = (name: string, args: Record<string, unknown>) => run(name, { confirm: true, ...args })
     .catch((error: unknown) => { if (error instanceof Error && error.message.includes('Nothing was executed')) return { success: false }; throw error; });

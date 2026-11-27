@@ -17,6 +17,7 @@
  */
 
 import { join, resolve } from 'node:path';
+import { projectFilesHeld } from '../utils/prompt-loader.js';
 
 /** Where a skill was found: the project, the user's home, or a caller-supplied directory. */
 export type SkillOrigin = 'project-local' | 'global' | 'custom';
@@ -38,7 +39,11 @@ export interface SkillRootPaths {
  * directory is the home directory, each directory is listed once, as the project's.
  */
 export function resolveSkillRoots(paths: SkillRootPaths, surfaceRoot: string): SkillRoot[] {
-  const owners: Array<readonly [string | undefined, SkillOrigin]> = [[paths.workingDirectory, 'project-local'], [paths.homeDirectory, 'global']];
+  // A project's own skills are read only for a project the owner (or the decision in their place) trusted, as its
+  // instruction files are (utils/prompt-loader.ts projectFilesHeld): a cloned folder's skills stay out until then.
+  const projectHeld = paths.workingDirectory !== undefined && paths.homeDirectory !== undefined
+    && projectFilesHeld(paths.workingDirectory, paths.homeDirectory) !== undefined;
+  const owners: Array<readonly [string | undefined, SkillOrigin]> = [[projectHeld ? undefined : paths.workingDirectory, 'project-local'], [paths.homeDirectory, 'global']];
   const roots: SkillRoot[] = [];
   const seen = new Set<string>();
   for (const [owner, origin] of owners) {

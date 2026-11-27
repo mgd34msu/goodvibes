@@ -121,13 +121,13 @@ const WATCHER_METHOD_IDS = new Set<string>([
   'watchers.delete',
 ]);
 
-/** Where the owner does the refused act himself in the Agent app, named for what was refused. */
+/** Where the owner does the refused act in person in the Agent app, named for what was refused. */
 function ownerActRoute(methodId: string): string {
-  if (methodId === 'inbox.answer') return 'he answers it in Waiting for you, in either terminal program or the web UI.';
+  if (methodId === 'inbox.answer') return 'they answer it in Waiting for you, in either terminal program or the web UI.';
   if (methodId === 'approvals.approve' || methodId === 'approvals.deny') {
-    return 'he answers it at the approval prompt, in Waiting for you, or in the web UI.';
+    return 'they answer it at the approval prompt, in Waiting for you, or in the web UI.';
   }
-  return 'he grants or withdraws access himself, from his own app\'s settings or the web UI.';
+  return 'they grant or withdraw access themselves, from their own app\'s settings or the web UI.';
 }
 
 function isRecord(value: unknown): value is JsonRecord {
@@ -371,8 +371,8 @@ function methodsOfRisk(...risks: readonly MethodRisk[]): readonly string[] {
 function methodOwnerActs(): ToolOwnerActs {
   // An answer to something addressed to the owner is never a model's: refused, never asked (method-risk.ts).
   const refused = [...new Set([...ownerOnlyOperatorMethodIds(), ...methodsOfRisk('answers-the-owner')])];
-  // An owner's act the daemon admits natively for his model's own call (his profile, his replies to an occasion's nudge)
-  // is decided there, once, under his mode (`hostDecides`): not asked here as well.
+  // An owner's act the daemon admits natively for their model's own call (their profile, their replies to an occasion's nudge)
+  // is decided there, once, under their mode (`hostDecides`): not asked here as well.
   const hostDecided = (id: string): boolean => NATIVELY_ADMITTED_METHOD_IDS.has(id) && agentCallCredential(id, 'agent') === 'delegated';
   const asked = methodsOfRisk('owner-act').filter((id) => !refused.includes(id) && !hostDecided(id));
   return { field: 'methodId', values: [...refused, ...asked], asked };
@@ -430,7 +430,7 @@ export function createAgentOperatorMethodTool(
       // capability_run and the schedule tools call this one nested, so its admission and credentials stay one path.
       nestedOnly: true,
       // A method a model never calls stays refused; one whose risk class is the owner's own act (platform
-      // control-plane/method-risk.ts) is put to him, opening on No, as a capability that is his own act is.
+      // control-plane/method-risk.ts) is put to the owner, opening on No, as a capability that is their own act is.
       ownerActs: methodOwnerActs(),
       // A method the daemon admits natively for the Agent's credential, and sent with it: the daemon's admission is
       // the one decision, so this gate does not decide it first.
@@ -460,13 +460,13 @@ export function createAgentOperatorMethodTool(
       if (operatorMethodIsOwnerOnly(method.id) && !method.id.startsWith('payments.')) {
         return {
           success: false,
-          error: `operator method '${method.id}' (${method.title ?? method.id}) is the owner's own act: answering what was put to him, or granting or withdrawing access, so a call the model makes is refused whatever approved it. Nothing was sent. Tell the owner what is waiting; ${ownerActRoute(method.id)}`,
+          error: `operator method '${method.id}' (${method.title ?? method.id}) is the owner's own act: answering what was put to them, or granting or withdrawing access, so a call the model makes is refused whatever approved it. Nothing was sent. Tell the owner what is waiting; ${ownerActRoute(method.id)}`,
         };
       }
       if (operatorMethodIsOwnerOnly(method.id)) {
         return {
           success: false,
-          error: `operator method '${method.id}' is the owner's own act (answering a purchase window, typing a card security code, recording what the merchant history shows, or approving a purchase in advance). Nothing was sent. Ask the owner: Waiting for you, under Purchases, answers windows and codes and records what the merchant history shows, "Approve one purchase ahead of time" in the Money place approves a purchase in advance, and the web UI Purchases panel does both. payments.purchase.status and payments.purchases.list can be read here to tell him where it stands; payments.checkout.begin and payments.purchase.cancel can be called here. Standing authorisations for scheduled purchases are his to add with "Allow a repeat purchase" in the Money place; payments.standing.list can be read here, and a scheduled begin names one as standingId.`,
+          error: `operator method '${method.id}' is the owner's own act (answering a purchase window, typing a card security code, recording what the merchant history shows, or approving a purchase in advance). Nothing was sent. Ask the owner: Waiting for you, under Purchases, answers windows and codes and records what the merchant history shows, "Approve one purchase ahead of time" in the Money place approves a purchase in advance, and the web UI Purchases panel does both. payments.purchase.status and payments.purchases.list can be read here to tell the owner where it stands; payments.checkout.begin and payments.purchase.cancel can be called here. Standing authorisations for scheduled purchases are the owner\'s to add with "Allow a repeat purchase" in the Money place; payments.standing.list can be read here, and a scheduled begin names one as standingId.`,
         };
       }
       // A capability's risk is read from the capability itself, by capability_run; through this tool it would not be.
@@ -510,7 +510,7 @@ export function createAgentOperatorMethodTool(
       if (methodSnapshot.id === 'occasions.remove' && route.payload.confirmed !== true) {
         // Removal drops the date with its answers and gift history, which nothing restores: the owner says yes once.
         // Refused here so an unconfirmed call costs no effect admission and no request.
-        return { success: false, error: `Not removed: ${String(route.payload.occasionId ?? 'this occasion')} and everything recorded against it cannot be restored, so the owner confirms once. Ask him once, then call occasions.remove again with input.confirmed:true and input.line set to the occasion's text from occasions.list (only that line is removed). One question, not a negotiation.` };
+        return { success: false, error: `Not removed: ${String(route.payload.occasionId ?? 'this occasion')} and everything recorded against it cannot be restored, so the owner confirms once. Ask the owner once, then call occasions.remove again with input.confirmed:true and input.line set to the occasion's text from occasions.list (only that line is removed). One question, not a negotiation.` };
       }
       const preview = summarizePreview(route);
       if (readFlag(args.dryRun, 'dryRun', false)) {
@@ -576,7 +576,7 @@ export function createAgentOperatorMethodTool(
         bounded = nativelyAdmitted ? undefined : connectedHostRequestDeadline(readOnlyHttp, options?.signal);
         // A run whose script answers every question decided this call here (its gate put it to the script): it is sent
         // saying so, and the daemon does not put it to the owner a second time (permissions/run-answerer.ts).
-        // A run nobody answers decided it here too (what the owner must decide was held for him before it got here).
+        // A run nobody answers decided it here too (what the owner must decide was held for them before it got here).
         const decidedHere = nativelyAdmitted && (runAnswersEveryQuestion() || runHoldsForOwner());
         // This program's call context and the registration this daemon issued it (call-context.ts), sent only to it.
         const programHeaders = await programCallHeadersFor(connection.baseUrl, bearer, connection.fetch ?? fetch);

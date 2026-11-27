@@ -192,7 +192,7 @@ export const DAEMON_OWNED_CONFIG_KEYS: readonly string[] = [
   'daemon.timezone',
   // The hosts on the owner's own network that deliveries may reach: watchers and
   // channel webhooks run in the daemon, notification webhooks in every app, and
-  // all of them read the one list the owner set, wherever he set it from.
+  // all of them read the one list the owner set, wherever they set it from.
   'network.privateDeliveryHosts',
   // Whether this installation replaces its own programs (the daemon's and the
   // Agent's while-running update, the terminal app's and the Agent's update at

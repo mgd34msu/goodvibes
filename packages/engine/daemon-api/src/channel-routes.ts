@@ -35,8 +35,6 @@ const POLICY_BOOLEAN_FIELDS = [
   'allowThreadMessages',
   'allowTextCommandsWithoutMention',
   'open',
-  // "Treat my own messages here as me": the owner's own messages in a conversation proven his alone act as him.
-  'ownMessagesAsOwner',
 ] as const;
 const POLICY_MODE_FIELDS = ['dmPolicy', 'groupPolicy'] as const;
 const POLICY_LIST_FIELDS = ['allowlistUserIds', 'allowlistChannelIds', 'allowlistGroupIds', 'allowedCommands'] as const;
@@ -52,21 +50,6 @@ function channelActionRefusalResponse(outcome: Exclude<ChannelActionOutcomeLike,
   return jsonErrorResponse(
     { error: refusal.reason, code: refusal.code, state: refusal.state, next: refusal.next, status },
     { status },
-  );
-}
-
-/**
- * "Treat my own messages here as me" turned on for a channel kind it does not exist for (no sender the channel
- * authenticates, or no conversation provable the owner's alone: ntfy, a webhook, phone texts and the rest), refused
- * through every door that writes a policy; turning it off is never refused.
- */
-function ownMessagesNotHere(context: DaemonChannelRouteContext, surface: string, fields: { readonly ownMessagesAsOwner?: boolean | undefined }): Response | null {
-  if (fields.ownMessagesAsOwner !== true) return null;
-  const why = context.ownMessagesRefusal ? context.ownMessagesRefusal(surface) : `"Treat my own messages here as me" cannot be checked for ${surface} by this daemon`;
-  if (why === undefined) return null;
-  return jsonErrorResponse(
-    { error: `${why}. Nothing was changed.`, code: 'OWN_MESSAGES_NOT_HERE', state: 'the policy is unchanged', next: ['Every message on this channel stays someone else\'s input: it is read and answered, and changes nothing.'] },
-    { status: 409 },
   );
 }
 
@@ -435,8 +418,6 @@ export function createDaemonChannelRouteHandlers(
       if (body instanceof Response) return body;
       const fields = buildChannelPolicyPatchFields(body, ['groupPolicies', 'project']);
       if (fields instanceof Response) return fields;
-      const ownMessages = ownMessagesNotHere(context, surface, fields);
-      if (ownMessages) return ownMessages;
       // "Project for this channel": a registered project's folder, or empty (or `none`) for none.
       let project: { readonly project: string | undefined } | undefined;
       if (body.project !== undefined) {

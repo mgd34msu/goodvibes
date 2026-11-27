@@ -497,7 +497,7 @@ export class SessionManager {
     agentRecords?: AgentRecord[],
     /** The trees of the contracts started in this session, written after the agent records. */
     contracts?: readonly ContractView[],
-    /** Branches made with /branch; without them a resumed session has only its current transcript. */
+    /** Branches made with "branch it" (This conversation); without them a resumed session has only its current transcript. */
     branches?: SessionBranches,
     options: SessionSaveOptions = {},
   ): { filePath: string; sanitizedName: string } {

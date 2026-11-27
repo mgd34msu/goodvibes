@@ -1,4 +1,4 @@
-// Proves: A remote runner's permission ask reaches the runner as it was answered: the owner's yes lets the runner act, his no, a withdrawn ask and a timed-out ask are told to it as exactly that, and a runner someone else started is refused without anyone being asked.
+// Proves: A remote runner's permission ask reaches the runner as it was answered: the owner's yes lets the runner act, their no, a withdrawn ask and a timed-out ask are told to it as exactly that, and a runner someone else started is refused without anyone being asked.
 // Red when: The runner's connection or its permission wire (acp/connection.ts, acp/permission-wire.ts) sends the runner something other than what was decided, so an approved ask reaches it as cancelled and it never acts, a withdrawn or timed-out ask reaches it as the owner's refusal, or someone else's runner is put to the owner.
 /**
  * Each row is one runner: a real ACP connection (acp/connection.ts) to a stand-in outside agent (a program outside the
@@ -58,7 +58,7 @@ test('a runner\'s permission ask reaches the runner as the owner answered it', a
   await broker.start();
   let answer: Answer = 'nobody';
   let asked = 0;
-  // The owner in Waiting for you: he answers each new ask as the row says (a timed-out one he leaves).
+  // The owner in Waiting for you: they answer each new ask as the row says (a timed-out one they leave).
   broker.subscribe((approval) => {
     if (approval.status !== 'pending') return;
     const owner = { actor: 'owner', actorSurface: 'tui', expectedRevision: approval.revision };

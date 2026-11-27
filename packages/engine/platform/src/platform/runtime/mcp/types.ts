@@ -235,7 +235,7 @@ export interface McpPermission {
   /**
    * Set when the server is trusted `ask-on-risk` and the call is outside its
    * configured scope: the sentence the owner is asked with. The call runs only
-   * when he allows it; with nobody to ask it is refused.
+   * when the owner allows it; with nobody to ask it is refused.
    */
   readonly askOwner?: string | undefined;
   /** Whether the tool call is permitted. */

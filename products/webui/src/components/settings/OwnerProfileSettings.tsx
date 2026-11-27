@@ -10,12 +10,12 @@
  * The panel answers §8.3's three questions on this surface:
  *
  *   "what do you know about me?" , profile.read, rendered by section. Mechanical fields
- *      (§4.3) render as labelled values; everything else renders as the prose it is. His
- *      prose is NOT restyled into a table, the file is a document he wrote, and the writer
+ *      (§4.3) render as labelled values; everything else renders as the prose it is. The owner's
+ *      prose is NOT restyled into a table, the file is a document they wrote, and the writer
  *      never normalises it (§4.5), so neither does this reader.
  *   "where did you get that?"    , profile.provenance, per field, from that field's own
  *      button. Every learned line already shows its compact suffix (§4.2: surface, date,
- *      his verbatim words); the button adds the `<!-- was: … -->` predecessors. Per line,
+ *      the owner's verbatim words); the button adds the `<!-- was: … -->` predecessors. Per line,
  *      never one bulk dump.
  *   "forget that"                , profile.forget, behind a confirm, then a report of what
  *      actually went. Deleting is permanent (§9.2 and

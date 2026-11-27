@@ -77,7 +77,8 @@ export function createWorkPlanTool(store: WorkPlanToolStore, options: WorkPlanTo
       parameters: toRecord(WORK_PLAN_TOOL_SCHEMA),
       category: 'write',
       readModes: { field: 'action', values: ['list'] },
-      // The model's own checklist: its working state, not the person's things. The gate allows every call in every mode.
+      // The model's own checklist: its working state, not the person's things. The gate allows every call in every mode
+      // but plan, which refuses it as it refuses every change (as released).
       ownWorkingState: true,
       sideEffects: ['workflow', 'state'],
       concurrency: 'serial',

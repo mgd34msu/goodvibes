@@ -12,10 +12,12 @@ export const builtinGatewayNativeHostedTurnMethodDescriptors: readonly GatewayMe
   description: operation === 'start' || operation === 'startAgent' ? `Deliver an already admitted native conversation input at most once through a host-owned broker identity and durable dispatch claim bound to the ${operation === 'startAgent' ? 'Agent' : 'WebUI'} settings owner. An optional execution mode initializes only a new session; continuation and replay retain the current session mode. Cross-surface replay is refused. Ambiguous dispatch requires inspection and is never replayed.`
     : operation === 'status' ? 'Read native hosted dispatch status. Does not admit, claim, retry or execute.'
     : 'Persist cancellation of the exact native hosted dispatch and drain its owned turn. Cancellation does not undo effects already performed.',
-  // Starting a turn runs metered model work.
+  // Starting a turn runs metered model work. A project act, as Work is (effect-authority.ts `work.read`, `work.write`,
+  // `sessions.write`): served per project (project-routing.ts), held below an admin to a project given to the caller; the
+  // host binds each dispatch and session to the caller's own native identity (its pairing), so it reaches no one else's.
   effects: operation === 'start' || operation === 'startAgent'
-    ? ['work-ledger.inspect', 'work-ledger.administer', 'sessions.administer', 'outward.send']
-    : ['work-ledger.inspect', 'work-ledger.administer', 'sessions.administer'],
+    ? ['work.read', 'work.write', 'sessions.write', 'outward.send']
+    : ['work.read', 'work.write', 'sessions.write'],
   ...(operation === 'start' || operation === 'startAgent'
     ? { replay: { in: 'body' as const, name: 'inputId', behavior: 'An admitted input (inputId with its sourceRevision) is delivered at most once: a repeat joins or reports the first dispatch instead of starting a second turn. An ambiguous dispatch is never replayed; read it with workLedger.turn.status.' } }
     : { repeat: 'safe' as const }),
@@ -24,7 +26,7 @@ export const builtinGatewayNativeHostedTurnMethodDescriptors: readonly GatewayMe
 })), methodDescriptor({
   id: 'workLedger.turn.session', title: 'Inspect Native Hosted Session', category: 'work-ledger',
   description: 'Read authoritative native session ownership. Only an explicit legacy result permits ordinary session ingress. Native sessions additionally require their current paired owner and native delivery scopes.',
-  effects: ['sessions.inspect'],
+  effects: ['sessions.read'],
   http: { method: 'POST', path: '/api/work-ledger/turn/session' },
   inputSchema: json(nativeHostedSessionRequestSchema), outputSchema: json(nativeHostedSessionLookupSchema),
 })];

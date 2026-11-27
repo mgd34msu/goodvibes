@@ -62,7 +62,8 @@ function otherProcess(name: string, body: readonly string[]) {
     ...body,
     '',
   ].join('\n'));
-  const child = Bun.spawn(['bun', script], { stdin: 'pipe', stdout: 'pipe', stderr: 'pipe' });
+  // The runtime running this test, not whatever `bun` the PATH names (a version manager's shim may refuse to start).
+  const child = Bun.spawn([process.execPath, script], { stdin: 'pipe', stdout: 'pipe', stderr: 'pipe' });
   const firstLine = (async () => {
     const reader = child.stdout.getReader();
     let text = '';
@@ -182,7 +183,7 @@ test('an approval answered through the inbox reaches the waiting call once', asy
   expect(listed.map((item) => [item.id, item.status, item.options])).toEqual([[raised.approval.id, 'open', ['approve', 'deny']]]);
   const shown = listed[0]!.revision!;
 
-  // Another surface claims it after the owner was shown it: his answer to the revision he saw is refused, nothing is decided.
+  // Another surface claims it after the owner was shown it: their answer to the revision they saw is refused, nothing is decided.
   expect((await broker.claimApproval(raised.approval.id, { actor: 'operator', actorSurface: 'web', expectedRevision: shown })).applied).toBe(true);
   const stale = await inbox.answer(raised.approval.id, { option: 'approve', expectedRevision: shown }, { actor: 'owner', surface: 'web' });
   expect(stale.applied).toBe(false);

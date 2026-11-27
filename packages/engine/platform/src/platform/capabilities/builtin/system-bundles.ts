@@ -179,7 +179,7 @@ function bundleFor(values: ActionValues, services: SystemBundleCapabilityService
     routeDaemonSettings: async (_bound, entries) => {
       if (!caller.method) throw new Error('no daemon took the request here');
       const answer = await caller.method('config.setMany', { entries: entries.map(({ key, value }) => ({ key, value })) }) as Record<string, unknown> | undefined;
-      if (answer?.code === 'OWNER_APPROVAL_PENDING') throw new Error('changing them loosens a protection, so they were put to the owner; load the bundle again once he approves');
+      if (answer?.code === 'OWNER_APPROVAL_PENDING') throw new Error('changing them loosens a protection, so they were put to the owner; load the bundle again once the owner approves');
       return { appliedBy: 'daemon' };
     },
   }, {
@@ -622,7 +622,7 @@ export const STARTUP_TRANSFER_IMPORT: Def = {
       if (!caller.method) throw new CapabilityRefusal('This runs in the daemon, and no daemon took the request here; nothing was brought in.', undefined, 'UNAVAILABLE');
       try {
         const answer = await caller.method('config.setMany', { entries: daemonOwned.map((change) => ({ key: change.key, value: change.next })) }) as Record<string, unknown> | undefined;
-        if (answer?.code === 'OWNER_APPROVAL_PENDING') throw new Error('they loosen a protection and were put to the owner; bring the setup in again once he approves');
+        if (answer?.code === 'OWNER_APPROVAL_PENDING') throw new Error('they loosen a protection and were put to the owner; bring the setup in again once the owner approves');
       } catch (error) {
         throw new CapabilityRefusal(`Nothing was brought in: the daemon did not take its ${daemonOwned.length} setting(s) (${errorText(error)}).`);
       }

@@ -349,7 +349,7 @@ export const PAYMENTS_REPEATS: CapabilityDefinition<unknown> = {
     const rows = Array.isArray(answer.authorizations) ? answer.authorizations.map(record) : [];
     return {
       text: rows.length === 0
-        ? 'No repeat purchases: a schedule asks you before every purchase.'
+        ? 'No repeat purchases: a schedule or trigger buys nothing without one.'
         : ['Repeat purchases you have allowed:', ...rows.map((row) => `  ${text(row.item)}${row.live === false ? ' (ended)' : ''}: ${repeatSummary(row)}`)].join('\n'),
       data: { authorizations: rows.map((row) => ({ ...row, name: text(row.item), detail: repeatSummary(row), state: row.live === false ? 'ended' : 'allowed' })) },
     };

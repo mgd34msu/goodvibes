@@ -17,8 +17,9 @@ import { logger } from '../../utils/logger.js';
 import { summarizeError } from '../../utils/error-display.js';
 import { readRefusal } from '@goodvibes/engine/errors';
 const SCOPES = [WORK_LEDGER_READ_SCOPE, WORK_LEDGER_WRITE_SCOPE] as const;
+/** A project act (native-owner.ts `projectAct`): a paired device below an admin holding the scopes captures its own input. */
 function authorize(invocation: GatewayMethodInvocation) {
-  return requireNativeOwner(invocation, SCOPES, 'Native intake');
+  return requireNativeOwner(invocation, SCOPES, 'Native intake', { projectAct: true });
 }
 export function registerNativeConversationIntakeGatewayMethods(catalog: GatewayMethodCatalog, host: Pick<NativeConversationIntakeHost, 'capture' | 'get' | 'admit' | 'resume' | 'cancel'>): void {
   for (const operation of ['capture', 'get', 'admit', 'resume', 'cancel'] as const) {

@@ -278,7 +278,7 @@ export const HOOKS_EXPORT: CapabilityDefinition<HooksCapabilityServices> = {
   inputs: [{ ...FILE, file: 'written', help: 'Where to write the bundle', required: { default: '', defaultMeans: 'the hooks file itself' } }],
   sentence: 'Every managed hook and chain is written to {path} as a bundle: a copy to back up, or to move to another machine.', done: '',
   touches: 'this-machine', lasts: 'not-a-change', risk: 'none', example: { path: 'hooks-bundle.json' },
-  // Written only inside the caller's project (path-inputs.ts, at every door and here); the person may name any place himself.
+  // Written only inside the caller's project (path-inputs.ts, at every door and here); the person may name any place themselves.
   async run(values, services, caller) {
     const api = services.hooks.forProject(caller.workingDirectory);
     const target = values.path ? pathOf(api, caller, values.path) : api.workbench.getFilePath();
@@ -352,7 +352,7 @@ export const HOOKS_TRACE: CapabilityDefinition<HooksCapabilityServices> = {
   async run(values, services, caller) {
     const asked = Number.parseInt(values.limit || '20', 10);
     if (!Number.isFinite(asked) || asked < 1) throw new CapabilityRefusal(`How many: "${values.limit}" is not a whole number from 1.`);
-    // A caller that is not the owner himself: only runs of a project it may reach, or of none, before the latest are cut.
+    // A caller that is not the owner in person: only runs of a project it may reach, or of none, before the latest are cut.
     const reach = currentRecordReach();
     const project = caller.workingDirectory ? { project: resolve(caller.workingDirectory) } : {};
     const runs = reach

@@ -647,6 +647,8 @@ export function createNativeHostedTurnHost(deps: NativeHostedTurnDependencies & 
     return project(record);
   }
   return { start, startAgent, status, cancel, session, continuation,
+    /** Whether a turn of this host is starting or running now (its owner is not let go meanwhile). */
+    busy: (): boolean => active.size > 0 || starting.size > 0,
     async close(): Promise<void> {
       closed = true;
       for (const owned of active.values()) { owned.cancelled = true; owned.controller.abort(); if (owned.sessionId && owned.permit && deps.manager.cancelNative(owned.sessionId, owned.permit) === true) owned.interrupted = true; }

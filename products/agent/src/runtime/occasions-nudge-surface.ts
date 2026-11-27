@@ -3,7 +3,7 @@
  * occasion nudge is delivered on.
  *
  * The owner's ruling (docs/occasions.md §4.2) names Telegram AND the agent, and
- * excludes the TUI in his own words: *"that's more of a 'get work done' kind of
+ * excludes the TUI in the owner's own words: *"that's more of a 'get work done' kind of
  * interface."* The platform enforces the exclusion structurally rather than by
  * convention, `resolveNudgeDestinations` drops a `tui` entry outright, keeping
  * the rest of the list, so this file is not free to reach the owner by pushing
@@ -14,8 +14,8 @@
  * The daemon does not push into this conversation: it is another process. It
  * keeps each reminder as an open item and, when its sweep raises one, tells a
  * connected Agent to read now (runtime/occasions-boot.ts). Every way a reminder
- * arrives here is this read, so there is one answer to "has he been told": the
- * daemon's open item, closed when he answers.
+ * arrives here is this read, so there is one answer to "have they been told": the
+ * daemon's open item, closed when the owner answers.
  *
  * ## How the pull works
  *
@@ -40,9 +40,9 @@
  * below IS named, because the one line that reads it is right here.
  *
  * It also settles quiet hours (§4.7) without a local copy of them: the pull only
- * happens on a turn the owner himself just took, so there is no path by which
- * this speaks into a silent room at 3am. The push half is what reaches him during
- * the hours he is not here, and the daemon applies §4.7 to it before it ever
+ * happens on a turn the owner in person just took, so there is no path by which
+ * this speaks into a silent room at 3am. The push half is what reaches them during
+ * the hours they are not here, and the daemon applies §4.7 to it before it ever
  * calls a sender.
  *
  * ## Why the end of the turn and not the start
@@ -68,7 +68,7 @@
  *  - a gift-giving batch ASKS ("Do you want to sort something for it?") and a
  *    remember-only batch does not. That distinction is the daemon's
  *    (`composeNudge`'s `answerable`), and it is the difference between a question
- *    he can act on and a statement he cannot.
+ *    the owner can act on and a statement they cannot.
  *
  * The platform's `OrchestratorFollowUpRuntime` was the other candidate, and it is the
  * right mechanism for what it does, turning a background milestone into a
@@ -80,10 +80,10 @@
  *
  * ## What happens next is an ordinary conversation
  *
- * His reply is a normal turn. The `occasions` tool relays it, `answer` for
+ * The owner's reply is a normal turn. The `occasions` tool relays it, `answer` for
  * yes/no/later and for `acknowledged` ("I know, it is in hand"), the interview
- * verbs for the short gift interview, and `resolve_conflict` with the date he
- * says is right. Nothing in this file interprets his words.
+ * verbs for the short gift interview, and `resolve_conflict` with the date they
+ * say is right. Nothing in this file interprets their words.
  *
  * ## A failed pull is on the record
  *
@@ -117,7 +117,7 @@ export interface OccasionsNudgeSurfaceDeps {
    * This is the switch, not a rule: no lead window, cadence, quiet-hour or
    * answer-expiry decision is made here or anywhere else in this repo. It is
    * read because the daemon's own enabled check governs whether NEW items are
-   * raised, so an item opened before he turned the feature off would otherwise
+   * raised, so an item opened before the owner turned the feature off would otherwise
    * keep being said by a surface that had not noticed.
    */
   readonly isEnabled: () => boolean;
@@ -134,8 +134,8 @@ export interface OccasionsNudgeSurface {
    */
   readonly raiseNow: () => Promise<number>;
   /**
-   * Called when the owner submits a turn. A pull that was in flight when he did
-   * says nothing: its lines would land after his new message, inside the reply
+   * Called when the owner submits a turn. A pull that was in flight when they did
+   * says nothing: its lines would land after their new message, inside the reply
    * to it. The items stay open on the daemon, so the next completion raises them.
    */
   readonly noteTurnSubmitted: () => void;
@@ -191,7 +191,7 @@ export function createOccasionsNudgeSurface(
     // One message per outstanding thing rather than one joined blob: the daemon
     // has already batched several occasions inside ONE nudge message (§6), so a
     // second level of joining here would glue that batch to an unrelated
-    // conflict and to an interview question, and he would have three subjects in
+    // conflict and to an interview question, and the owner would have three subjects in
     // one paragraph to answer at once.
     for (const line of lines) deps.conversation.addAssistantMessage(line);
     deps.requestRender();

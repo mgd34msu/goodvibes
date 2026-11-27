@@ -97,7 +97,7 @@ import {
 } from './types.js';
 import { createUnitFailureHandling } from './unit-failures.js';
 import { contractAgentIds, noteAgentUsage, ownerRecordUsage, rollUpContractUsage, type PriceUsageFn } from './usage.js';
-import { createUnitWatchdog, type WatchedAgent } from './watchdog.js';
+import { createUnitActivity } from './unit-activity.js';
 import { logger } from '../utils/logger.js';
 import { summarizeError } from '../utils/error-display.js';
 import { nativeContractActionSource, nativeContractPort } from './native-decisions.js';
@@ -467,11 +467,12 @@ export function failureStatusLine(contract: Pick<Contract, 'id' | 'units' | 'gro
   const files = `${count} changed file${count === 1 ? '' : 's'}`;
   const onBranch = contract.isolation === 'worktree' && contract.branch !== undefined;
   const kept = count === 0 ? 'no files were changed'
-    : onBranch ? `${files} kept on branch ${contract.branch}${contract.worktreePath === undefined ? '' : ` (worktree ${contract.worktreePath})`}`
+    : onBranch ? `${files} on its own branch ${contract.branch}`
     : `${files} left in your working tree`;
   const retry = contract.failureKind === 'judgment-unavailable' || contract.failureKind === 'transport'
     ? 'ask for the work again once the model is reachable' : 'ask for the work again, changed to address the reason above';
-  const next = count > 0 && onBranch ? `to keep what it did, merge it with git merge ${contract.branch}; or ${retry}` : retry;
+  // The kept branch is acted on by its controls in Work (merge it in, or discard it), never by a command to type.
+  const next = count > 0 && onBranch ? `in Work, on this work, merge its branch into the project's branch or discard it; or ${retry}` : retry;
   // A reason that ends its own sentence is not given a second full stop.
   return `The work failed: ${reason.trim().replace(/[.]+$/u, '')}${unmetPart}. Kept: ${kept}. Next: ${next}.`;
 }
@@ -680,7 +681,7 @@ export function createContractRunner(deps: ContractRunnerDeps): ContractRunner &
     ...(deps.wait === undefined ? {} : { wait: deps.wait }),
     config: () => readContractConfig(deps.configManager),
     emit,
-    touchAgent: (agentId) => watchdog.touch(agentId),
+    touchAgent: (agentId) => activity.touch(agentId),
     contractMoved: (contract) => setOwnerProgress(contract),
   };
 
@@ -709,10 +710,10 @@ export function createContractRunner(deps: ContractRunnerDeps): ContractRunner &
       const run = item.contractId === undefined ? undefined : runs.get(item.contractId);
       if (run === undefined || run.terminal || run.abort.signal.aborted) return Promise.reject(new DurableContractAdmissionError('boundary'));
       if (run.contract.durableAdmission === undefined) return execute();
-      return withCurrentDurableExecution(run, execute).catch((error: unknown) => {
-        cancelRun(run, 'native execution binding is no longer current');
-        throw error;
-      });
+      // A refusal of the binding ends the run inside `withCurrentDurableExecution` (failed, said why). What rejects
+      // after the binding admitted the step is the step's own agent run (its failure, or the bookkeeping of a failed
+      // run that was replaced): the step's failure handling owns that, and the work is not ended for it here.
+      return withCurrentDurableExecution(run, execute);
     },
     settle(item, agentId, signal) {
       const run = item.contractId === undefined ? undefined : runs.get(item.contractId);
@@ -733,8 +734,7 @@ export function createContractRunner(deps: ContractRunnerDeps): ContractRunner &
         }
         signal.addEventListener('abort', onAbort, { once: true });
         runtime.settlement = entry;
-        // Independent of the silence watchdog (off by default): once the
-        // agent's execution drained, an end that published no event still settles the unit.
+        // Once the agent's execution drained, an end that published no event still settles the unit.
         void deps.agentManager.join?.(agentId).then(() => {
           // The contract keeps what the agent used, whatever later happens to its record.
           noteAgentUsage(run.contract, agentId, getStatus, pricing);
@@ -795,25 +795,16 @@ export function createContractRunner(deps: ContractRunnerDeps): ContractRunner &
     });
   }
 
-  function watched(): WatchedAgent[] {
-    const agents: WatchedAgent[] = [];
-    for (const run of runs.values()) {
-      if (run.terminal) continue;
-      for (const unit of run.allUnits()) {
-        if (unit.activeAgentId === undefined || (unit.status !== 'running' && unit.status !== 'checking' && unit.status !== 'nudged')) continue;
-        const status = getStatus(unit.activeAgentId)?.status;
-        if (status !== 'running' && status !== 'pending') continue;
-        agents.push({ contractId: run.id, unitId: unit.id, agentId: unit.activeAgentId, startedAt: run.runtime(unit).agentStartedAt });
-      }
-    }
-    return agents;
-  }
-
-  const watchdog = createUnitWatchdog({
+  // When each step's agent was last heard from, kept on the step for its row; nothing acts on it by a clock.
+  const activity = createUnitActivity({
     runtimeBus: deps.runtimeBus,
-    timeoutMs: () => env.config().heartbeatTimeoutMs,
-    watched,
-    onSilent: (agent, silentMs) => failures.onSilent(agent, silentMs),
+    heard: (agentId, at) => {
+      for (const run of runs.values()) {
+        if (run.terminal) continue;
+        const found = run.activeUnitOf(agentId);
+        if (found !== null) { found.unit.heardAt = at; return; }
+      }
+    },
     now,
   });
 
@@ -857,7 +848,7 @@ export function createContractRunner(deps: ContractRunnerDeps): ContractRunner &
     messageBus: deps.messageBus,
     configManager: deps.configManager,
     runtimeBus: deps.runtimeBus,
-    watchdog,
+    activity,
     escalations: steps,
     failContract: (run, kind, reason) => fail(run, kind, reason),
     unitPassed: (run, unit) => (run.contract.sessionMode === true ? sessionUnitPassed(run, unit) : groups.unitPassed(run, unit)),
@@ -874,7 +865,7 @@ export function createContractRunner(deps: ContractRunnerDeps): ContractRunner &
     fleetCapacity: deps.fleetCapacity,
     routeSelector: deps.routeSelector,
     getStatus,
-    watchdog,
+    activity,
     settlement,
     steps,
     pricing,
@@ -890,7 +881,6 @@ export function createContractRunner(deps: ContractRunnerDeps): ContractRunner &
     checks,
     failContract: (run, kind, reason) => fail(run, kind, reason),
     cancelContract: (run, reason) => cancelRun(run, reason),
-    requeueUnit: (run, unit, reason, purpose, firstTurn) => groups.requeueUnit(run, unit, reason, purpose, firstTurn),
     pauseFailedUnit: (run, unit, reason) => ownSteps.pauseFailedUnit(run, unit, reason) !== null,
   });
 
@@ -901,7 +891,7 @@ export function createContractRunner(deps: ContractRunnerDeps): ContractRunner &
     if (run.terminal || disposed) return;
     admitted.add(run.id);
     if (run.contract.durableAdmission !== undefined) {
-      void launchDurable(run).catch(() => cancelRun(run, 'native admission is no longer current'));
+      void launchDurable(run).catch((error: unknown) => endOnHostFault(run, 'it could not start from the queue: what it was admitted with no longer holds', error));
     } else void run.work.run('contract work', () => run.contract.resumeFrom === undefined ? activate(run) : resume.continueResumed(run));
   }
 
@@ -1004,7 +994,7 @@ export function createContractRunner(deps: ContractRunnerDeps): ContractRunner &
     } catch (error) {
       boundaryFailed = true;
       boundaryError = error;
-      cancelRun(run, 'native admission boundary failed');
+      endOnHostFault(run, claimLaunch ? 'it could not start: what it was admitted with no longer holds' : 'a step could not be started: what the work was admitted with no longer holds', error);
     } finally { open = false; }
     if (boundaryFailed) {
       // Launch may already have entered an executor. Failed lock release/commit is not drainage.
@@ -1101,7 +1091,7 @@ export function createContractRunner(deps: ContractRunnerDeps): ContractRunner &
           if (activeCount() < env.config().maxActiveContracts) {
             admitted.add(id);
             try { await launchDurable(run); }
-            catch (error) { cancelRun(run, 'native admission launch was not validated'); throw error; }
+            catch (error) { endOnHostFault(run, 'it could not start: what it was admitted with no longer holds', error); throw error; }
           } else {
             queue.push(run);
             run.decide('queued', id, 'waiting for an active-contract slot');
@@ -1110,7 +1100,7 @@ export function createContractRunner(deps: ContractRunnerDeps): ContractRunner &
         return durableResult(admission);
       } catch (error) {
         const run = runs.get(id);
-        if (run !== undefined && creation.owns(run.contract)) cancelRun(run, 'native admission could not start');
+        if (run !== undefined && creation.owns(run.contract)) endOnHostFault(run, 'it could not start', error);
         // Once creation succeeded, terminal settlement alone releases the
         // execution lease. A failed final checkpoint must keep it fenced even
         // after its real drainage barrier has resolved and retired the run.
@@ -1163,7 +1153,7 @@ export function createContractRunner(deps: ContractRunnerDeps): ContractRunner &
       if (activeCount() < env.config().maxActiveContracts) {
         admitted.add(run.id);
         try { await launchDurable(run); }
-        catch (error) { cancelRun(run, 'native admission resume was not validated'); throw error; }
+        catch (error) { endOnHostFault(run, 'it could not go on after the restart: what it was admitted with no longer holds', error); throw error; }
       } else {
         if (contract.status !== 'queued') run.moveContract('queued');
         queue.push(run);
@@ -1195,9 +1185,9 @@ export function createContractRunner(deps: ContractRunnerDeps): ContractRunner &
     return { execution, signal, current };
   }
 
-  function failedStart(id: string, owner: AgentRecord | undefined, creation: ContractCreationReservation): void {
+  function failedStart(id: string, owner: AgentRecord | undefined, creation: ContractCreationReservation, error: unknown): void {
     const run = runs.get(id);
-    if (run !== undefined && creation.owns(run.contract)) { cancelRun(run, 'contract preparation or publication failed'); return; }
+    if (run !== undefined && creation.owns(run.contract)) { endOnHostFault(run, 'it could not be prepared to start', error); return; }
     try { if (owner !== undefined) deps.agentManager.cancel(owner.id); }
     finally {
       if (run === undefined) { const pending = settlements.get(id); pending?.resolve(); if (runs.get(id) === undefined && settlements.get(id) === pending) settlements.delete(id); }
@@ -1218,7 +1208,7 @@ export function createContractRunner(deps: ContractRunnerDeps): ContractRunner &
         prepared.current();
         owner = spawnOwner(captured, id); prepared.current();
         return create(captured, id, owner, { ...prepared, creation });
-      } catch (error) { failedStart(id, owner, creation); throw error; }
+      } catch (error) { failedStart(id, owner, creation, error); throw error; }
       finally { creation.release(); }
     })();
   }
@@ -1319,7 +1309,7 @@ export function createContractRunner(deps: ContractRunnerDeps): ContractRunner &
         prepared.current();
         owner = spawnOwner(rest, id); prepared.current();
         return create(rest, id, owner, { ...prepared, draftPlan, creation });
-      } catch (error) { failedStart(id, owner, creation); throw error; }
+      } catch (error) { failedStart(id, owner, creation, error); throw error; }
       finally { creation.release(); }
     })();
   }
@@ -1361,7 +1351,7 @@ export function createContractRunner(deps: ContractRunnerDeps): ContractRunner &
         startContractOwner(record, { contractId: id, contractRole: 'owner', progress: `Contract ${id}: queued`, settled: reserveSettlement(id).promise }, deps.runtimeBus);
         prepared.current();
         return create(input, id, record, { ...prepared, creation }, requireSettlement);
-      } catch (error) { if (bound) failedStart(id, record, creation); throw error; }
+      } catch (error) { if (bound) failedStart(id, record, creation, error); throw error; }
       finally { creation.release(); }
     })();
   }
@@ -1535,7 +1525,6 @@ export function createContractRunner(deps: ContractRunnerDeps): ContractRunner &
       ...(deps.repositoryMap === undefined ? {} : { repositoryMap: deps.repositoryMap }),
       readAccessFilter: deps.readAccessFilter,
       now,
-      ...(deps.wait === undefined ? {} : { wait: deps.wait }),
       ...(deps.routingChanged === undefined ? {} : { routingChanged: deps.routingChanged }),
     };
   }
@@ -1622,7 +1611,7 @@ export function createContractRunner(deps: ContractRunnerDeps): ContractRunner &
   function proceed(run: ContractRun, outcome: ShapeOutcome | PlanningOutcome): boolean {
     if (outcome.kind === 'shaped' || outcome.kind === 'accepted') return !run.terminal;
     if (outcome.kind === 'failed') settleEnded(run);
-    if (outcome.kind === 'cancelled' && run.contract.nativeSource !== undefined && !run.terminal) cancelRun(run, 'Native judgment was cancelled or superseded');
+    if (outcome.kind === 'cancelled' && run.contract.nativeSource !== undefined && !run.terminal) endOnHostFault(run, 'a decision its plan needed was withdrawn before it answered');
     // A planner stopped while the contract still runs leaves nothing to run: say so instead of waiting.
     else if (outcome.kind === 'cancelled' && !run.terminal) fail(run, 'planning', 'it has no plan: the agent writing its plan was stopped before it wrote one');
     if (outcome.kind === 'awaiting-owner') updateOwnerProgress(run);
@@ -1775,6 +1764,19 @@ export function createContractRunner(deps: ContractRunnerDeps): ContractRunner &
     settleEnded(run);
   }
 
+  /**
+   * The run cannot go on for a fault of its host (what it was admitted with no longer holds, a decision it needed was
+   * withdrawn, its start could not be prepared): it ends failed, saying why. "Stopped" is recorded only for a stop
+   * someone made: the owner's stop or a decision's (whose abort is what reaches here as an abort), or the daemon
+   * closing (it reads "interrupted" in Work, the run kept for its next start).
+   */
+  function endOnHostFault(run: ContractRun, what: string, error?: unknown): void {
+    if (run.terminal) return;
+    const aborted = disposed || hostClosing || run.abort.signal.aborted || (error instanceof Error && error.name === 'AbortError');
+    if (aborted) { cancelRun(run, error === undefined ? what : `${what} (${summarizeError(error)})`); return; }
+    fail(run, 'other', error === undefined ? what : `${what} (${summarizeError(error)})`);
+  }
+
   function cancelRun(run: ContractRun, reason: string): boolean {
     if (run.terminal) return false;
     const { contract } = run;
@@ -1786,10 +1788,10 @@ export function createContractRunner(deps: ContractRunnerDeps): ContractRunner &
     groups.stopRun(run);
     const count = filesModified(contract);
     const files = `${count === 1 ? 'the 1 file' : `the ${count} files`} it changed`;
-    // Said to a person: what became of the files, never an id; the branch only as the command that applies it.
+    // Said to a person: what became of the files, the branch they are on, and the controls in Work that act on it.
     contract.statusLine = count === 0 ? 'The work was stopped before it changed any file.'
       : contract.isolation === 'worktree' && contract.branch !== undefined
-        ? `The work was stopped; ${files} ${count === 1 ? 'is kept on a branch of its own' : 'are kept on a branch of their own'} (to apply ${count === 1 ? 'it' : 'them'} yourself: git merge ${contract.branch}).`
+        ? `The work was stopped; ${files} ${count === 1 ? 'is kept on its own branch' : 'are kept on its own branch'} ${contract.branch}: in Work, History, merge it into the project's branch or discard it.`
         : `The work was stopped; ${files} stay as they are in the project.`;
     run.decide('cancelled', contract.id, reason);
     run.emit({ type: 'CONTRACT_CANCELLED', contractId: contract.id, reason, filesModified: count });
@@ -2039,7 +2041,7 @@ export function createContractRunner(deps: ContractRunnerDeps): ContractRunner &
         if (copy) { retainOriginalReviewDescriptors(run.contract, copy); retainOriginalTreeBaselines(run.contract, copy); }
         disposalCheckpoints.set(run.id, copy);
       }
-      watchdog.dispose();
+      activity.dispose();
       failures.dispose();
       // Disposal preserves a restart checkpoint; explicit cancel persists a
       // terminal outcome instead. Flush and detach writers before in-memory

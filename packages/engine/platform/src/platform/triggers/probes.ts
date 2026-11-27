@@ -56,12 +56,16 @@ export interface ProbeIo {
     args: readonly string[],
     options: { readonly cwd?: string | undefined; readonly timeoutMs: number },
   ) => Promise<ProbeCommandResult>;
-  /** Runs a platform-tool probe's call; `ownerSessionId` is the session that made the trigger, whose tools are preferred. */
+  /**
+   * Runs a platform-tool probe's call; `ownerSessionId` is the session that made the trigger, whose tools are preferred;
+   * `project` the trigger's own project, whose tools only it runs on (probe-tools.ts).
+   */
   readonly callTool: (
     tool: string,
     input: Readonly<Record<string, TriggerValue>>,
     timeoutMs: number,
     ownerSessionId?: string,
+    project?: string,
   ) => Promise<TriggerValue>;
 }
 
@@ -306,7 +310,7 @@ const PROBE_SETTLE_GRACE_MS = 1_000;
 export function runProbe(
   probe: TriggerProbe,
   io: ProbeIo,
-  defaults: { readonly timeoutMs?: number | undefined; readonly ownerSessionId?: string | undefined } = {},
+  defaults: { readonly timeoutMs?: number | undefined; readonly ownerSessionId?: string | undefined; readonly project?: string | undefined } = {},
 ): Promise<TriggerValue> {
   // A stored budget of 0 (accepted before a budget had to be positive) is no budget: it runs with the default.
   const budget = probe.kind === 'file'
@@ -314,10 +318,10 @@ export function runProbe(
     : ((probe.timeoutMs === undefined || probe.timeoutMs === 0 ? undefined : probe.timeoutMs) ?? defaults.timeoutMs ?? DEFAULT_PROBE_TIMEOUT_MS);
   // http and command probes keep their own deadline and report it first; a file
   // read has none, so the budget is its deadline.
-  return withinBudget(probe.kind, budget, runProbeWork(probe, io, budget, defaults.ownerSessionId), probe.kind === 'file' ? 0 : PROBE_SETTLE_GRACE_MS);
+  return withinBudget(probe.kind, budget, runProbeWork(probe, io, budget, defaults.ownerSessionId, defaults.project), probe.kind === 'file' ? 0 : PROBE_SETTLE_GRACE_MS);
 }
 
-async function runProbeWork(probe: TriggerProbe, io: ProbeIo, budget: number, ownerSessionId: string | undefined): Promise<TriggerValue> {
+async function runProbeWork(probe: TriggerProbe, io: ProbeIo, budget: number, ownerSessionId: string | undefined, project: string | undefined): Promise<TriggerValue> {
   switch (probe.kind) {
     case 'http': {
       const init: RequestInit = {
@@ -365,7 +369,7 @@ async function runProbeWork(probe: TriggerProbe, io: ProbeIo, budget: number, ow
     }
 
     case 'platform-tool':
-      return io.callTool(probe.tool, probe.input ?? {}, budget, ownerSessionId);
+      return io.callTool(probe.tool, probe.input ?? {}, budget, ownerSessionId, project);
 
     default:
       return null;

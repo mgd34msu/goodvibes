@@ -1,15 +1,15 @@
 /**
  * Who made a settings change and how it was decided: the record a change keeps wherever it goes (a machine group
- * carries it to every member, which keeps it and shows it). `how`: `press`, the owner's own press; `yes`, his yes to a
- * call that was put to him (`by` is the caller who asked); `rules`, admitted under his rules for the named caller (a
- * paired device, a sign-in, a model acting for him) with nothing asked.
+ * carries it to every member, which keeps it and shows it). `how`: `press`, the owner's own press; `yes`, their yes to a
+ * call that was put to them (`by` is the caller who asked); `rules`, admitted under their rules for the named caller (a
+ * paired device, a sign-in, a model acting for them) with nothing asked.
  *
  * Its own module, with no imports, so the routes and the dispatch share it without an import cycle.
  */
 export interface SettingAct {
   /** The principal that acted (the caller), as the daemon authenticated it. */
   readonly by: string;
-  /** That principal is the owner himself (his own credential, no model acting for him). */
+  /** That principal is the owner in person (their own credential, no model acting for them). */
   readonly owner: boolean;
   /** `carried`: a shared change made before this record existed (released 3.5.0), marked the owner's once at the upgrade. */
   readonly how: 'press' | 'yes' | 'rules' | 'carried';

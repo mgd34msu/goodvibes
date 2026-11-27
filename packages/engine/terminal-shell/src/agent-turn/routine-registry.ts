@@ -5,16 +5,16 @@ import { storeFileChangeStamp } from './store-change-stamp.js';
 import { GOODVIBES_AGENT_SURFACE_ROOT } from './surface.js';
 import { assertNoSecretLikeText, runLockedStoreUpdate } from './persona-registry.js';
 import { formatAgentRecordReviewState } from './record-labels.js';
-import { acceptedAuthor, authorAfterChange, memoryAwaitsOwner, newRecordAuthor, readRecordAuthor, type MemoryAuthor } from '@goodvibes/engine/platform/platform/state';
+import { acceptedAuthor, authorAfterChange, newRecordAuthor, noteOthersWritingRead, readRecordAuthor, type MemoryAuthor } from '@goodvibes/engine/platform/platform/state';
 
 /** The author field of a routine, present only when there is one. */
 function routineAuthorField(author: MemoryAuthor | undefined): { author?: MemoryAuthor } {
   return author === undefined ? {} : { author };
 }
 
-/** A routine its steps may be given to a turn from: reviewed by the owner, and not someone else's words he has not accepted. */
-export function routineGivenToTurns(routine: Pick<AgentRoutineRecord, 'reviewState' | 'author'>): boolean {
-  return routine.reviewState === 'reviewed' && !memoryAwaitsOwner(routine);
+/** A routine its steps may be given to a turn from: reviewed, as released (who wrote it is kept: state/memory-author.ts). */
+export function routineGivenToTurns(routine: Pick<AgentRoutineRecord, 'reviewState'>): boolean {
+  return routine.reviewState === 'reviewed';
 }
 import {
   evaluateAgentSkillReadiness,
@@ -350,7 +350,7 @@ export class AgentRoutineRegistry {
     });
   }
 
-  /** `accept`: the owner himself reviewed it, which accepts a routine someone else wrote (never a model's review). */
+  /** `accept`: the owner in person reviewed it, which accepts a routine someone else wrote (never a model's review). */
   public markReviewed(idOrName: string, options: { readonly accept?: boolean } = {}): AgentRoutineRecord {
     return this.locked(() => {
       const store = this.readStore();
@@ -483,15 +483,20 @@ export function buildEnabledRoutinesPrompt(shellPaths: ShellPathService, snapsho
     '## Enabled GoodVibes Agent Routines',
     'Use only reviewed, setup-ready local reusable routines inside the same serial assistant conversation when they fit the user request. Do not start hidden background jobs because a routine matches.',
     '',
-    ...enabled.slice(0, ENABLED_ROUTINES_PROMPT_LIMIT).flatMap((routine) => [
+    ...enabled.slice(0, ENABLED_ROUTINES_PROMPT_LIMIT).flatMap((routine) => {
+      // Someone else's words, put into the prompt now: the conversation has read outside text.
+      const others = noteOthersWritingRead('routine', routine.id, routine.author);
+      return [
       `### ${routine.name}`,
       `Description: ${routine.description}`,
       `Review: ${formatAgentRecordReviewState(routine.reviewState)}`,
+      ...(others !== undefined ? [`Written by ${others}, not the owner.`] : []),
       `Triggers: ${routine.triggers.join(', ') || '(manual)'}`,
       `Readiness: ${evaluateAgentRoutineReadiness(routine).ready ? 'ready' : `missing ${evaluateAgentRoutineReadiness(routine).missing.map(formatAgentSkillRequirement).join(', ')}`}`,
       routine.steps,
       '',
-    ]),
+      ];
+    }),
     ...(suppressed.length > 0 ? [
       '### Suppressed Routines Pending Review Or Setup',
       'Do not apply these routines until the user reviews them or resolves setup through the learning curator.',

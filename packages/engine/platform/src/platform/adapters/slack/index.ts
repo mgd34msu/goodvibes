@@ -337,9 +337,14 @@ export async function handleSlackSurfacePayload(
         text: ingressAnswer(policy, 'caller').text,
       });
     }
+    // The pressed button's message: its channel, and its thread (a message in a thread names the thread's first message).
+    const pressedOn = (actionPayload.message ?? actionPayload.container) as Record<string, unknown> | undefined;
+    const pressedThread = typeof pressedOn?.['thread_ts'] === 'string' ? pressedOn['thread_ts'] as string : undefined;
+    const pressedChannel = typeof (actionPayload.channel as Record<string, unknown> | undefined)?.id === 'string'
+      ? (actionPayload.channel as Record<string, unknown>).id as string : undefined;
     const message = await context.performInteractiveSurfaceAction(actionId, 'slack', req, typeof (actionPayload.user as Record<string, unknown> | undefined)?.id === 'string'
       ? (actionPayload.user as Record<string, unknown>).id as string
-      : undefined);
+      : undefined, { channelId: pressedChannel, threadId: pressedThread });
     return Response.json({
       response_type: 'ephemeral',
       text: message,

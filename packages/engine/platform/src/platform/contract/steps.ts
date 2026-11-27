@@ -88,6 +88,7 @@ export function createContractSteps(context: StepContext): ContractStepsWithRepl
     unitStalled: correction.unitStalled,
     unitAwaitsOwner: (run, unitId, check) => run.contract.nativeSource === undefined ? escalations.unitAwaitsOwner(run, unitId, check) : correction.unitStalled(run, unitId, check),
     unitMergeConflict: correction.unitMergeConflict,
+    conflictUnresolved: escalations.conflictUnresolved,
     attemptsUndecided: escalations.attemptsUndecided,
     groupUnitsPassed: completion.groupUnitsPassed,
     groupsPassed: completion.groupsPassed,

@@ -1,14 +1,13 @@
 /**
- * Whether an in-flight tool call still counts as a live agent for the
- * contract silence watchdog (`contract.heartbeatTimeoutMs`).
+ * Whether an in-flight tool call counts as its agent being at work, for a
+ * step's row in Work ("quiet since ..."). Nothing stops a quiet agent.
  *
  * An exec-style call bounds itself: each command runs until its own
  * `timeout_ms` (the call's when the command sets none), and a command with no
  * timeout streams its output to a progress file until it finishes or is
- * cancelled. Either way the tool owns its own deadline, so the runner keeps
- * the agent alive while that deadline holds. Every other tool (read, find,
- * analyze, ...) has no bound of its own and stays subject to the watchdog,
- * which is what turns a stalled search into a retry.
+ * cancelled. Either way the tool owns its own deadline, so the runner reports
+ * the agent at work while that deadline holds. Every other tool (read, find,
+ * analyze, ...) has no bound of its own: its row says since when it is quiet.
  */
 
 const SELF_BOUNDED_TOOLS = new Set(['exec', 'precision_exec']);

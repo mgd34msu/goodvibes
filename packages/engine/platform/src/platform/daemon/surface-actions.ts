@@ -141,7 +141,7 @@ interface DaemonSurfaceActionContext {
   /** Purchase windows waiting for the owner's answer; the helper makes its own when absent. */
   readonly paymentReplies?: PaymentReplyInbox | undefined;
   /**
-   * The owner inbox (Waiting for you): the owner's own work proposal that none of his conversations took waits there,
+   * The owner inbox (Waiting for you): the owner's own work proposal that none of their conversations took waits there,
    * accepted or dismissed as an item (surface-conversation-gate.ts WORK_PROPOSAL_ITEM_KEY).
    */
   readonly ownerInbox?: Pick<OwnerInbox, 'postNow' | 'handleAnswers'> | undefined;
@@ -199,7 +199,7 @@ export class DaemonSurfaceActionHelper {
   }
 
   /**
-   * The owner accepted or dismissed, in Waiting for you, his own work proposal that none of his conversations took.
+   * The owner accepted or dismissed, in Waiting for you, their own work proposal that none of their conversations took.
    * Saved before it is acted on; accepted work is claimed, started and recorded as the channel reply does
    * (work-proposal-reply.ts). A proposal that expired or was answered already refuses the answer with the reason.
    */
@@ -281,7 +281,7 @@ export class DaemonSurfaceActionHelper {
           // empty allowlist allows (the generic webhook, Home Assistant naming no user): a
           // guest, since the secret proves the surface, not the person; every chat adapter
           // passes its sender. An identified sender is the operator only as the owner.
-          // A guest's turn (`turn.start` asks the owner) runs with everything beyond a plain read put to him.
+          // A guest's turn (`turn.start` asks the owner) runs with everything beyond a plain read put to the owner.
           const actor = channelSenderActor(decision, input.surface, input.userId);
           const operator = admitEffects(actor, ['turn.start']).kind === 'allowed';
           authorization = { text: input.text ?? '', surface: input.surface, revision: policyRevision(input.surface), actor };
@@ -362,7 +362,7 @@ export class DaemonSurfaceActionHelper {
         }
         : {}),
       ...scope,
-      performInteractiveSurfaceAction: (actionId, surface, request, userId) => this.performInteractiveSurfaceAction(actionId, surface, request, userId),
+      performInteractiveSurfaceAction: (actionId, surface, request, userId, where) => this.performInteractiveSurfaceAction(actionId, surface, request, userId, where),
       queueSurfaceReplyFromBinding: (binding, input) => this.context.queueSurfaceReplyFromBinding(binding, input),
       postNtfyRemoteChatMessage: (input) => this.postNtfyRemoteChatMessage(input),
       postHomeAssistantChatMessage: (input) => this.postHomeAssistantChatMessage(input),
@@ -615,7 +615,7 @@ export class DaemonSurfaceActionHelper {
         replyOnChannel: async (target, notice) => {
           const binding = target.routeId ? this.context.routeBindings.getBinding(target.routeId) : undefined;
           await deliverProposalNotice(this.context, binding, notice);
-          // A guest's proposal was answered by the owner in his own conversation: he hears the outcome there too.
+          // A guest's proposal was answered by the owner in their own conversation: the owner hears the outcome there too.
           const answering = target.answerFrom?.routeId ? this.context.routeBindings.getBinding(target.answerFrom.routeId) : undefined;
           if (answering && answering !== binding) await deliverProposalNotice(this.context, answering, notice);
         },
@@ -779,6 +779,7 @@ export class DaemonSurfaceActionHelper {
     surface: 'slack' | 'discord',
     req: Request,
     userId?: string | undefined,
+    where?: { readonly channelId?: string | undefined; readonly threadId?: string | undefined } | undefined,
   ): Promise<string> {
     const approvalMatch = actionId.match(/^gv:approval:(approve|deny|claim):(.+)$/);
     if (approvalMatch) {
@@ -806,9 +807,29 @@ export class DaemonSurfaceActionHelper {
       // a press whose sender could not be read is refused, and a guest is refused.
       if (!userId?.trim()) return `Not done: ${action} ${runId} was refused. Only the owner of this channel may cancel or retry a run.`;
       const sender = channelSenderActor({ policy: this.context.channelPolicy.getPolicy(surface) }, surface, userId.trim());
-      return this.performRunControl(sender, { action: action as 'cancel' | 'retry', id: runId! }, undefined, 'interactive-surface-cancel');
+      // The conversation the button's message is in, as the typed command's: it acts only on what that one started.
+      return this.performRunControl(sender, { action: action as 'cancel' | 'retry', id: runId! },
+        { routeId: this.pressedRouteId(surface, runId!, where) }, 'interactive-surface-cancel');
     }
     return `No handler for ${surface} action ${actionId}`;
+  }
+
+  /**
+   * The route binding of the conversation a pressed button's message is in (its surface, channel and thread), as the
+   * typed command reads its own: the one of them that started `target` when several bind that channel, else the first;
+   * none known: a route id no binding has, so the control is refused as from a conversation that started nothing.
+   */
+  private pressedRouteId(surface: 'slack' | 'discord', target: string,
+    where: { readonly channelId?: string | undefined; readonly threadId?: string | undefined } | undefined): string {
+    const channel = where?.channelId?.trim();
+    if (!channel) return '';
+    const thread = where?.threadId?.trim();
+    let bindings: ReturnType<RouteBindingManager['listBindings']> = [];
+    try { bindings = this.context.routeBindings.listBindings(); } catch { bindings = []; }
+    const here = bindings.filter((binding) => binding.surfaceKind === surface
+      && (binding.channelId === channel || binding.externalId === channel)
+      && (thread ? binding.threadId === thread || binding.externalId === thread : binding.threadId === undefined || binding.threadId === ''));
+    return (here.find((binding) => this.controlTargetBelongsToRoute(target, binding.id)) ?? here[0])?.id ?? '';
   }
 
   private async postNtfyRemoteChatMessage(input: {

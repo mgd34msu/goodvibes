@@ -84,9 +84,9 @@ export function isProfileAuthority(value: unknown): value is ProfileAuthority {
 
 /**
  * The surface name written into a line's provenance suffix. Distinct from the
- * authority: the authority says whether the fact came from HIM, this says which
- * of his surfaces recorded it. Both this tool and this binary's CLI are the
- * agent; `hand-edit` belongs to lines he types into the file himself.
+ * authority: the authority says whether the fact came from THE OWNER, this says which
+ * of their surfaces recorded it. Both this tool and this binary's CLI are the
+ * agent; `hand-edit` belongs to lines they type into the file by hand.
  */
 export const PROFILE_RECORDING_SURFACE = 'agent';
 

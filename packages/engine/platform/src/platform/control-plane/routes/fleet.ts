@@ -42,8 +42,8 @@ import { GatewayVerbError } from './gateway-verb-error.js';
 import { readInvocationParams, requireString } from './invocation-params.js';
 import { attachHandler } from './attach-handler.js';
 import { summarizeError } from '../../utils/error-display.js';
-import { randomUUID } from 'node:crypto';
 import type { ApprovalRaiseService } from './approvals-raise.js';
+import { randomUUID } from 'node:crypto';
 import { observedAgentRef } from '../../runtime/fleet/adapters/observed.js';
 import type { ObservedAgentRow } from '../../runtime/fleet/observed/source.js';
 import { compareTarget, type TargetRef } from '../../utils/target-ref.js';
@@ -212,7 +212,7 @@ export type FleetSteerCapableRegistry = Pick<ProcessRegistry, 'getNode' | 'steer
 /** The approval broker slice a steer asks through: the same broker tool calls ask through. */
 export type FleetSteerApprovals = Pick<ApprovalRaiseService, 'raiseApproval'>;
 
-/** How long a steer waits for the owner's answer before it is refused unsent. */
+/** How long a steer waits for the owner's answer before it is refused unsent (the released card's own lifetime). */
 const STEER_APPROVAL_TIMEOUT_MS = 5 * 60_000;
 
 /**
@@ -241,12 +241,12 @@ function sameObservedProcess(shown: ProcessNode, shownRef: TargetRef | null, cur
  * can never become a back door to a native agent's steer path.
  *
  * The foreign agent runs with its own permissions, outside this daemon's gate,
- * so typing into it is put to the owner through the approval broker: one ask
- * naming the session, its directory, the exact text and whether it is
- * submitted. "Always" for that session is held in memory until the daemon
- * stops, against that exact process (pid, start time, pane, kind, directory
- * and command line): a new process given the same pid is asked about again. Without `submit: true` the text is typed and left for the person at
- * the pane; no Enter is sent. With no approval broker composed, nothing is sent.
+ * so typing into it is put to the owner through the approval broker in every
+ * mode (as released): one ask naming the session, its directory, the exact text
+ * and whether it is submitted. "Always" for that session is held in memory until
+ * the daemon stops, against that exact process. Without `submit: true` the text
+ * is typed and left for the person at the pane; no Enter is sent. With no
+ * approval broker composed, nothing is sent.
  */
 export function createFleetObservedSteerHandler(
   registry: FleetSteerCapableRegistry,
@@ -310,7 +310,7 @@ export function createFleetObservedSteerHandler(
         return {
           queued: false,
           declined: true,
-          reason: `nothing was sent: the owner did not approve typing into ${node.label}${decision.reason ? ` (${decision.reason})` : ''}`,
+          reason: `nothing was sent: you did not approve typing into ${node.label}${decision.reason ? ` (${decision.reason})` : ''}`,
         };
       }
       // The approval names the process the owner was shown; a different one now under this id gets nothing.

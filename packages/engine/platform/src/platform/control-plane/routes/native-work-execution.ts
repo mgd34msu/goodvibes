@@ -7,12 +7,29 @@ import { nativeWorkExecutionRequestSchema, nativeWorkExecutionSnapshotSchema, NA
 import { GatewayVerbError, withholdCommittedResult } from './gateway-verb-error.js';
 import { readInvocationParams } from './invocation-params.js';
 import { requireNativeOwner } from './native-owner.js';
+import type { WorkCause } from '../../workflow/work-ledger/work-plans.js';
 
 const SCOPES = ['read:work-ledger', 'write:fleet'] as const;
 type NativeGatewayExecution = Pick<NativeWorkExecutionHost, 'start' | 'statusByAttempt' | 'cancel' | 'cancelTarget' | 'resume' | 'settle'>;
 
 function authorize(invocation: GatewayMethodInvocation) {
-  return requireNativeOwner(invocation, SCOPES, 'Native execution');
+  // A project act (effect-authority.ts `work.read`, `fleet.write`): a paired device below an admin, in a project given to
+  // it; a run is bound to the credential that started it, so status, stop and resume reach only its own runs.
+  return requireNativeOwner(invocation, SCOPES, 'Native execution', { projectAct: true });
+}
+
+/**
+ * A caller below an admin starts, stops or resumes only work it caused itself (work-plans.ts `WorkCause.madeFor`): the
+ * owner's work, or anyone else's in the same project, is never started or stopped by it (a run is bound to the credential
+ * that started it besides).
+ */
+function actsOnOwnWork(invocation: GatewayMethodInvocation, causeOf: ((workId: string) => WorkCause) | undefined, workId: string, operation: 'start' | 'cancel' | 'resume'): void {
+  if (invocation.context.admin === true) return;
+  const cause = causeOf?.(workId);
+  if (cause?.madeFor !== undefined && cause.madeFor === invocation.context.principalId) return;
+  const what = operation === 'start' ? 'started' : operation === 'cancel' ? 'stopped' : 'resumed';
+  throw new GatewayVerbError(`The work was not ${what}: it is not work this caller asked for, and a device, a member or an outside agent acts only on work it asked for itself. Nothing was changed.`,
+    'WORK_NOT_YOURS', 403, 'workId');
 }
 function revision(target: NativeWorkExecutionTarget): NativeWorkExecutionRevision {
   return { work: target.workRevision, criteria: target.criteriaRevision, attempt: target.attemptRevision };
@@ -67,6 +84,8 @@ function parse(invocation: GatewayMethodInvocation, projectId: string): NativeWo
 export function registerNativeWorkExecutionGatewayMethods(catalog: GatewayMethodCatalog, host: {
   readonly projectId: string;
   readonly acquire: () => Promise<NativeGatewayExecution>;
+  /** Who caused a piece of work of this project to run (its plans' record), read before a caller below an admin starts, stops or resumes it. */
+  readonly causeOf?: ((workId: string) => WorkCause) | undefined;
 }): void {
   for (const operation of ['start', 'status', 'cancel', 'resume'] as const) {
     const method = `workLedger.execution.${operation}`;
@@ -76,6 +95,7 @@ export function registerNativeWorkExecutionGatewayMethods(catalog: GatewayMethod
       try {
         let authority = authorize(invocation);
         const input = parse(invocation, host.projectId);
+        if (operation !== 'status') actsOnOwnWork(invocation, host.causeOf, input.workId, operation);
         invocation.signal?.throwIfAborted();
         const execution = await host.acquire();
         authority = authorize(invocation); invocation.signal?.throwIfAborted();

@@ -73,7 +73,7 @@ export interface McpApi {
   getToolSchema?(qualifiedName: string, options?: McpToolCallOptions): Promise<McpToolSchema | null>;
   getEffectiveConfig(roots: McpConfigRoots): McpEffectiveConfig;
   reload(roots: McpConfigRoots): Promise<McpReloadResult>;
-  /** `byOwner`: the owner added it with his own command or form; a project file's entry then starts without the trust question. */
+  /** `byOwner`: the owner added it with their own command or form; a project file's entry then starts without the trust question. */
   upsertServerConfig(
     roots: McpConfigRoots,
     scope: McpConfigScope,

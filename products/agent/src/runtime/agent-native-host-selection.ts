@@ -23,7 +23,7 @@ export function createAgentNativeHostSelection(selection: AgentDaemonVerbCallerO
       const host = resolveConnectedHostConnection(selection);
       if ('reason' in host) return host;
       if (host.source === 'operator-file' && !isLocalOrigin(host.baseUrl)) {
-        return { reason: `This Agent has no device credential for ${host.baseUrl}, a daemon on another machine; pair it with goodvibes-agent setup pair.` };
+        return { reason: `This Agent has no device credential for ${host.baseUrl}, a daemon on another machine; pair it with goodvibes-agent setup pair --with-code, with the sign-in code your own signed-in screen shows.` };
       }
       return host;
     },

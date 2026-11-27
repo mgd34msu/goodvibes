@@ -147,7 +147,7 @@ export class HookWorkbench {
 
   /**
    * Hold a hooks file the workspace's repository could have brought until the
-   * owner trusts the workspace, load it the moment he does, and stop its hooks
+   * owner trusts the workspace, load it the moment the owner does, and stop its hooks
    * the moment the workspace is restricted again (here or in another process).
    * Returns the unbinding.
    */

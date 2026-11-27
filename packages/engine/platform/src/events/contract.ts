@@ -172,7 +172,8 @@ export type StallRoute = (typeof STALL_ROUTES)[number];
 export const PLAN_CHECKS = ['structure', 'criterion-trace', 'plan-coverage', 'criterion-shape', 'unit-shape'] as const;
 export type PlanCheck = (typeof PLAN_CHECKS)[number];
 
-export const UNIT_SPAWN_PURPOSES = ['unit', 'fresh-unit', 'transport-retry', 'silence-retry', 'resume'] as const;
+/** Why a unit's agent was spawned. `transport-retry` is no longer made; it stays so an event recorded before still reads. */
+export const UNIT_SPAWN_PURPOSES = ['unit', 'fresh-unit', 'transport-retry', 'resume'] as const;
 export type UnitSpawnPurpose = (typeof UNIT_SPAWN_PURPOSES)[number];
 
 export const CONTRACT_COMMIT_STATUSES = ['committed', 'applied', 'skipped', 'failed'] as const;
@@ -184,14 +185,15 @@ export type UnitRole = (typeof UNIT_ROLES)[number];
 export const GROUP_KINDS = ['work', 'fix', 'integration'] as const;
 export type GroupKind = (typeof GROUP_KINDS)[number];
 
-export const UNIT_SILENCE_ACTIONS = ['retried', 'failed'] as const;
-export type UnitSilenceAction = (typeof UNIT_SILENCE_ACTIONS)[number];
-
 /** How much an unmet criterion matters, read by the unmet-severity battery. */
 export const CRITERION_SEVERITIES = ['critical', 'major', 'minor'] as const;
 export type CriterionSeverity = (typeof CRITERION_SEVERITIES)[number];
 
-/** What a contract decision records the runner did. */
+/**
+ * What a contract decision records the runner did. `silence-retry` is no longer made (no step is stopped for being
+ * quiet), nor `transport-retry` (a failed step is not run again by the runner; its question decides); they stay so a
+ * record written before that still reads.
+ */
 export const CONTRACT_DECISION_ACTIONS = [
   'created', 'queued', 'shaped', 'planned', 'plan-repaired', 'plan-accepted', 'spawned', 'checked',
   'nudged', 'woke', 'regressed', 'stalled', 'fix-planned', 'fresh-agent', 'escalated',
@@ -446,8 +448,6 @@ export type ContractEvent = (
    * is required, and why when it did not pass.
    */
   | { type: 'CONTRACT_GATE_RESULT'; contractId: string; targetId: string; gate: string; passed: boolean; skipped: boolean; durationMs: number; outcome?: GateResultOutcome; required?: boolean; reason?: string }
-  /** A unit's agent produced nothing for `silentMs`; `action` says whether it was retried with a new agent or the unit failed. */
-  | { type: 'CONTRACT_UNIT_SILENT'; contractId: string; unitId: string; agentId: string; silentMs: number; action: UnitSilenceAction }
   /** Merging a unit's branch back conflicted: `branch` and `path` name the unit's worktree and `files` the conflicting files. */
   | { type: 'CONTRACT_MERGE_CONFLICT'; contractId: string; unitId: string; branch: string; path: string; files: readonly string[] }
   /**
@@ -534,7 +534,6 @@ export const CONTRACT_EVENT_TYPES = [
   'CONTRACT_OWNER_REPLIED',
   'CONTRACT_WAITING',
   'CONTRACT_GATE_RESULT',
-  'CONTRACT_UNIT_SILENT',
   'CONTRACT_MERGE_CONFLICT',
   'CONTRACT_ATTEMPTS_SELECTED',
   'CONTRACT_COMMITTED',

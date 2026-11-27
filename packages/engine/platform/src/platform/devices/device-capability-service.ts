@@ -39,6 +39,7 @@ import type { DeviceCapabilityGrant, DeviceGrantStore } from './device-grants.js
 import type { DeviceCaptureArtifact, DeviceCaptureArtifactStore } from './device-capture-artifacts.js';
 import { validateDeviceCapabilityInput } from './device-peer-work.js';
 import { resolveDevicePolicySource, type DevicePolicySource } from './device-policy-source.js';
+import { withTurnMaker } from '../artifacts/turn-maker.js';
 
 /** How the feature behaves overall (`device.capabilities.mode`). */
 export type DeviceCapabilityMode = 'off' | 'ask-every-time' | 'honor-grants';
@@ -76,8 +77,9 @@ export const DEFAULT_DEVICE_CAPABILITY_POLICY: DeviceCapabilityPolicy = {
 };
 
 /**
- * Who answers a request no live grant covers, read from `permissions.mode` per
- * request: 'allow' under yolo, 'ask-owner' in every other mode.
+ * Who answers a request no live grant covers. The daemon answers 'allow': a request reaches the service already decided
+ * once (the phone tool's call by the one permission manager under the owner's mode, or the owner in person; anyone else's
+ * capture or read is refused at the dispatch). 'ask-owner' (the default when a host sets nothing) asks the owner here.
  */
 export type DeviceNoGrantAuthority = 'ask-owner' | 'allow';
 
@@ -562,7 +564,11 @@ export class DeviceCapabilityService {
       let artifact: DeviceCaptureArtifact | undefined;
       if (descriptor.producesArtifact && dispatched.bytes && dispatched.bytes.byteLength > 0) {
         try {
+          // Who made it and for which project (the turn's chat or session, or the caller of the call that asked).
+          const made = withTurnMaker({});
           artifact = await this.artifacts.retain({
+            ...(typeof made['createdBy'] === 'string' ? { createdBy: made['createdBy'] } : {}),
+            ...(typeof made['project'] === 'string' ? { project: made['project'] } : {}),
             nodeId: node.nodeId,
             capabilityId: descriptor.id,
             kind: descriptor.artifactKind,

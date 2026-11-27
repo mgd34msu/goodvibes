@@ -332,10 +332,6 @@
 .gv-command-screen__subhead h4 { margin: 0; font-size: 14px; font-weight: 600; }
 .gv-command-screen__runs { margin: 0; padding-left: 16px; color: var(--text-2); font-size: 0.875em; display: flex; flex-direction: column; gap: 4px; }
 .gv-command-screen__run-at { color: var(--text-3); }
-.gv-command-screen__terminal { color: var(--text-3); font-size: 0.875em; border-top: 1px solid var(--line); padding-top: 8px; }
-.gv-command-screen__terminal summary { cursor: pointer; }
-.gv-command-screen__terminal ul { margin: 6px 0 0; padding-left: 16px; display: flex; flex-direction: column; gap: 4px; }
-.gv-command-screen__terminal-label { color: var(--text-2); }
 .gv-command-screen-drawer { padding: 4px 16px 16px; overflow-y: auto; }
 @media (max-width: 600px) {
   .gv-command-screen .gv-row { flex-wrap: wrap; }

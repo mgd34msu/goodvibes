@@ -181,7 +181,7 @@ export async function restoreCheckpointFiles(
   }
   const question = `Restore the files of "${checkpoint.label}"? Files only: the conversation is unchanged, and the current files are kept in a safety checkpoint first.`;
   // The owner's own command is the request: it restores at once, the state before it kept as a checkpoint
-  // he can restore. Only a restore the model asks for is put to him first.
+  // they can restore. A restore the model asks for is put to them first, in every mode (as released).
   if (context.invokedByModel === true) {
     let confirmed: boolean;
     if (context.previewChanges) {

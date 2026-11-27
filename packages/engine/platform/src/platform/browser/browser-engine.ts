@@ -126,7 +126,7 @@ const PINNED_DROPPED_REQUEST_HEADERS: ReadonlySet<string> = new Set(['host', 'co
 /** The fetched body is handed over decoded and whole, so its encoding and framing headers no longer describe it. */
 const PINNED_DROPPED_RESPONSE_HEADERS: ReadonlySet<string> = new Set(['content-encoding', 'content-length', 'transfer-encoding', 'connection', 'keep-alive', 'set-cookie']);
 
-/** Ranges the owner may allow a page to reach (his own machine and network); metadata, link-local and reserved ranges never. */
+/** Ranges the owner may allow a page to reach (their own machine and network); metadata, link-local and reserved ranges never. */
 const OWNER_APPROVABLE_RANGES: ReadonlySet<ResolvedAddressRange | 'scheme' | 'unresolved'> = new Set(['private', 'loopback', 'unique-local', 'shared']);
 
 /**

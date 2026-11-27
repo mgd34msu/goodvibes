@@ -10,8 +10,6 @@ import { runUnsubscribes, settleInteractiveExit, withShutdownDeadline } from './
 export interface ExitSequenceDeps<Snapshot> {
   /** Releases the herdr pane report; may throw or reject. */
   readonly closeHerdr: () => Promise<void>;
-  /** Cancels a pairing prompt. */
-  readonly disposePairing: () => void;
   /** Closes the paint window so no late frame follows the terminal restore. */
   readonly closePaintWindow: () => void;
   /** Starts the bounded spoken-output drain. */
@@ -60,7 +58,6 @@ export function runExitSequence<Snapshot>(
   let exitCompletion = settleInteractiveExit(Promise.resolve(), Promise.resolve(), herdrRelease);
   let shutdownIncomplete = false;
   try {
-    try { deps.disposePairing(); } catch (error) { deps.warn('Pairing prompt could not be cancelled during exitApp', error); }
     // Gate render() before anything else so no late frame follows the terminal-restore write below.
     try { deps.closePaintWindow(); } catch (error) { deps.warn('Paint window could not be closed during exitApp', error); }
     // Already-playing speech may finish inside a short bounded window instead

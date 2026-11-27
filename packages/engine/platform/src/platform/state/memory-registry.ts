@@ -162,14 +162,6 @@ export class MemoryRegistry {
     return record;
   }
 
-  /** The owner accepts a record someone else wrote (see MemoryStore.accept). */
-  accept(id: string, options?: MemoryOperationOptions): MemoryRecord | null {
-    const operation = captureMemoryOperation(options);
-    const record = this.store.accept(id, operation);
-    if (record) this.notify();
-    return record;
-  }
-
   review(id: string, patch: MemoryReviewPatch, options?: MemoryOperationOptions): MemoryRecord | null {
     // Consolidation treats `reviewedBy: 'consolidation'` as automation that a person's review overrides, so
     // no other caller may claim it; the review still applies, under the neutral operator name.

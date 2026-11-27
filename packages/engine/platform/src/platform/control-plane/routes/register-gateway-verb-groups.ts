@@ -604,7 +604,7 @@ export function registerGatewayVerbGroups(catalog: GatewayMethodCatalog, deps: G
   const channelProfileRegistry = new ChannelProfileRegistry(
     new ChannelProfileStore(controlPlaneStorePath(deps.shellPaths, deps.surfaceRoot, 'channel-profiles.json')),
   );
-  // A binding that loosens the mode a channel's sessions run under is the owner's act, put to him from anyone else.
+  // A binding that loosens the mode a channel's sessions run under is the owner's act, put to the owner from anyone else.
   registerChannelProfilesGatewayMethods(catalog, channelProfileRegistry, {
     hostMode: () => effectivePermissionMode(deps.configManager.get('permissions.mode'), deps.configManager.get('behavior.autoApprove') === true),
     ownerApprovals: deps.approvalRaise,
@@ -790,7 +790,7 @@ export function registerGatewayVerbGroups(catalog: GatewayMethodCatalog, deps: G
   // Retained now that the graph has a shutdown seam: a subscription that
   // outlives the daemon fans pushes out of a torn-down graph.
   const pushSubscriptions: (() => void)[] = [pushService.attachApprovalSource(deps.approvalBroker)];
-  // A question an agent leaves the owner reaches his phone too, once, when push is on.
+  // A question an agent leaves the owner reaches the owner's phone too, once, when push is on.
   if (deps.ownerInbox) pushSubscriptions.push(pushService.attachQuestionSource(deps.ownerInbox));
 
   // Second event source: a fleet node blocked on the operator -> a 'needs-input'

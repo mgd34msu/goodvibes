@@ -23,7 +23,6 @@ import type { ApprovalBroker } from '../../control-plane/index.js';
 import type { PlatformServiceManager } from '../service-manager.js';
 import { toRecord } from '../../utils/record-coerce.js';
 import { unknownChannelAction } from '../../channels/action-outcome.js';
-import { ownMessagesRefusal } from '../../channels/own-messages-proof.js';
 import { channelProjectRefusal } from '../../channels/channel-project.js';
 import { managedLockRefusalText } from '../../runtime/settings/host-setting-policy-read.js';
 import { isSecretBearingConfigKey } from '../../config/secret-bearing-config-keys.js';
@@ -175,8 +174,6 @@ export function buildChannelRouteContext(input: {
     parseOptionalJsonBody: input.parseOptionalJsonBody,
     requireAdmin: input.requireAdmin,
     surfaceRegistry: input.surfaceRegistry,
-    // "Treat my own messages here as me" exists only where the channel proves the sender and a one-to-one conversation.
-    ownMessagesRefusal,
     // "Project for this channel": only a registered project's folder (channels/channel-project.ts).
     channelProjectRefusal: (folder: string) => channelProjectRefusal(folder),
   };
@@ -229,20 +226,20 @@ export function buildSystemRouteContext(input: {
       return lock ? managedLockRefusalText(lock, isSecretBearingConfigKey(key)) : null;
     },
     // The one owner rule, as the daemon's dispatch told this request (daemon/method-owner-decision.ts): admitted at
-    // once, refused by the effect table, or the owner's to decide (the dispatch then puts the same call to his gate).
+    // once, refused by the effect table, or the owner's to decide (the dispatch then puts the same call to the owner's gate).
     settingsLoosenAdmission: (request) => {
       const principal = input.resolveAuthenticatedPrincipal(request);
       const actor = principal?.actor;
       if (actor === undefined) return 'refused';
       if (readOwnerAdmitted(request)) return 'allowed';
       // Served here without the dispatch (the precondition lane): the same rule, read from the request itself. The
-      // owner's own press (his session, or his verified program with his claim), or his program's gate's mark.
+      // owner's own press (their session, or their verified program with their claim), or their program's gate's mark.
       const claims = readRequestClaims(request);
       const credentialKind = (principal as { readonly credentialKind?: string | null } | null)?.credentialKind ?? undefined;
       const caller = { actor, credentialKind, registration: readProgramRegistration(request), personAsked: claims.personAsked,
         daemonHosted: readDaemonHosted(request) };
       if (ownersOwnPress(caller)) return 'allowed';
-      // The gate's mark counts only from the owner's own verified program (his registered terminal program, his Agent
+      // The gate's mark counts only from the owner's own verified program (their registered terminal program, their Agent
       // program, an Agent turn the daemon hosts); the Agent's credential alone is a script.
       if (claims.decidedByProgramGate && (ownersAgentProgram(caller) || ownerHimself(caller))) return 'allowed';
       return admitEffects(actor, ['settings.loosen']).kind === 'refused' ? 'refused' : 'ask-owner';

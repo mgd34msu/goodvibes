@@ -128,7 +128,7 @@ function describeAuthority(
   if (disabled) return `refused: ${disabled}`;
   const askEvery = askEveryRequestSetting(descriptor, policy);
   if (askEvery) return `asks the owner every time, under permissions.mode yolo too (${askEvery})`;
-  if (noGrant === 'allow') return 'runs without asking (permissions.mode is yolo)';
+  if (noGrant === 'allow') return 'runs as this call is decided under the owner\'s permission mode (decided once, at the call)';
   return isAllowAlwaysOffered(descriptor, policy)
     ? 'runs at once under a live grant; otherwise asks the owner, who may allow it always'
     : 'runs at once under a live grant; otherwise asks the owner each time';

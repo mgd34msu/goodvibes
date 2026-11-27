@@ -7,7 +7,7 @@ import {
 } from '@goodvibes/engine/terminal-shell/input-feed-context';
 import { resolveFooterTarget } from '../renderer/footer-targets.ts';
 import { SurfacePointer } from '@goodvibes/engine/terminal-shell/surface-pointer';
-import { InputTokenizer, type InputToken } from '@goodvibes/engine/platform/platform/core';
+import { InputTokenizer } from '@goodvibes/engine/platform/platform/core';
 import { reportDroppedPaste } from '@goodvibes/engine/terminal-shell/input-content';
 import { createOAuthLocalListener } from '@goodvibes/engine/platform/platform/config';
 import {
@@ -82,7 +82,7 @@ import type { InputHandlerLike } from './handler-types.ts';
 import { buildInitialFeedContext } from './feed-context-factory.ts';
 import type { UiRuntimeServices } from '../runtime/ui-services.ts';
 import type { ModelPickerTarget } from './model-picker.ts';
-import { SurfaceModalHost, isTrackedModal } from '@goodvibes/engine/terminal-shell/surface-modal-host';
+import { SurfaceModalHost } from '@goodvibes/engine/terminal-shell/surface-modal-host';
 
 type SelectionModalCallback = (result: SelectionResult | null) => void;
 
@@ -91,7 +91,6 @@ type SelectionModalCallback = (result: SelectionResult | null) => void;
  * Extracted from main.ts and StateManager.
  */
 export class InputHandler extends TerminalInputHandlerState implements InputHandlerLike {
-  public hostPairing: { handleToken(token: InputToken): boolean; cancelForTakeover(): boolean; dispose(): void } | null = null;
   private draft = '';
   public draftRevision = 0;
   public get prompt(): string {
@@ -237,9 +236,8 @@ export class InputHandler extends TerminalInputHandlerState implements InputHand
       modals.blockActions,
       modals.selection,
     );
-    this.surfaceModals.onOpen = (modal, fromEmpty) => {
+    this.surfaceModals.onOpen = (_modal, fromEmpty) => {
       if (fromEmpty) this.modalReturnFocus = this.indicatorFocused ? 'indicator' : 'prompt';
-      if (isTrackedModal(modal)) this.hostPairing?.cancelForTakeover();
     };
     this.initFeedContext();
   }
@@ -460,7 +458,6 @@ export class InputHandler extends TerminalInputHandlerState implements InputHand
       syncFeedContextLiveReferences(this, context);
       // Swap requestRender to buffered version for this feed.
       context.requestRender = bufferedRequestRender;
-      context.handleHostPairingToken = (token) => this.hostPairing?.handleToken(token) ?? false;
       const tokens = this.tokenizer.feed(data);
       reportDroppedPaste(this.tokenizer, this.conversationManager, bufferedRequestRender);
       if (tokens.some((token) => token.type === 'mouse')) {
@@ -504,7 +501,6 @@ export class InputHandler extends TerminalInputHandlerState implements InputHand
 
   /** Begin one line of concealed (masked) composer input. See concealed-input.ts. */
   public beginConcealedInput(request: ConcealedInputRequest): void {
-    this.hostPairing?.cancelForTakeover();
     beginConcealedInputFor(this, request);
   }
   /** True while a concealed-input request is active. */

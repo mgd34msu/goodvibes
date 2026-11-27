@@ -123,7 +123,7 @@ export function createSettingsRows<Modal extends SettingsRowState<Entry, Categor
     if (!rows.length) return { rows: [{ label: 'Nothing in this topic yet.', muted: true }], selected: -1 };
     const selected = clamp(rows.length);
     // Each section's title on a line of its own above its rows (not selectable), so a section a person is sent to
-    // ("secure address") is one he sees named.
+    // ("secure address") is one they see named.
     const drawn: KitRow[] = [];
     let at = -1;
     let section: string | undefined;

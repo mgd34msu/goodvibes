@@ -186,7 +186,7 @@ export interface PermissionPromptDecision {
    * Set by a surface where nobody can answer (a headless run with no
    * `--answer-permissions`): the ask was not answered, the call is held for
    * the owner, and `reason` says where it waits. The gate reports the call as
-   * held for him, never as refused by him.
+   * held for them, never as refused by them.
    */
   heldForOwner?: boolean | undefined;
   /**
@@ -208,10 +208,10 @@ export interface PermissionExecutionOptions {
    */
   readonly definition?: import('../types/tools.js').ToolDefinition | undefined;
   /**
-   * A rule of the owner's outside the gate asks him about this call, in one
-   * sentence: his `Pre:tool:<tool>` hook answered `ask`, or an MCP server he
-   * trusts `ask-on-risk` was called outside its scope. The call is put to the
-   * owner in every mode (held for him in just-vibes) unless a rule refuses it
+   * A rule of the owner's outside the gate asks them about this call, in one
+   * sentence: their `Pre:tool:<tool>` hook answered `ask`, or an MCP server they
+   * trust `ask-on-risk` was called outside its scope. The call is put to the
+   * owner in every mode (held for them in just-vibes) unless a rule refuses it
    * outright.
    */
   readonly ownerAsk?: string | undefined;

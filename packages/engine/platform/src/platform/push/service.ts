@@ -228,7 +228,7 @@ export interface PushServiceDeps {
 /**
  * What a push is about, as the stream frame about the same thing carries it (control-plane/event-reach.ts reads the
  * event's name and payload): a question's id, a session's id. A push that names nothing it can tell apart goes to the
- * owner himself only.
+ * owner in person only.
  */
 export interface PushAbout {
   readonly event: string;
@@ -237,7 +237,7 @@ export interface PushAbout {
 
 /**
  * Who may be told what: for the principal that registered a device, null when it may be told everything (the owner
- * himself), else whether a push about `(event, payload)` may reach it, by the rule every stream frame is sent by. Set
+ * in person), else whether a push about `(event, payload)` may reach it, by the rule every stream frame is sent by. Set
  * once by the daemon where it is composed (it knows its users, devices and the reach rules); unset, no device is told
  * anything (never "no rule, no check").
  */
@@ -492,7 +492,7 @@ export class PushService {
         body: item.title,
         data: { kind: 'needs-input', ...(item.sessionId ? { sessionId: item.sessionId } : {}) },
         urgency: 'normal',
-        // A question left for the owner is his alone, as his inbox's frames are.
+        // A question left for the owner is theirs alone, as their inbox's frames are.
       }, { event: 'owner-inbox-update', payload: { id: item.id } });
     });
   }

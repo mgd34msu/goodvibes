@@ -66,8 +66,11 @@ Important pieces:
   are made one at a time. On cancellation every in-flight call is aborted and
   every unfinished call gets one "Tool invocation cancelled" result.
   A tool that reports progress while it works (`exec` as output arrives) counts
-  as alive to the contract silence watchdog, so a long printing command is not
-  taken for a hang; reports are published at most every five seconds. Each
+  as its agent heard from, so a step's row in Work does not read a long printing
+  command as quiet; reports are published at most every five seconds. Nothing
+  stops a quiet agent: a step ends when its turn ends, its process exits, its
+  connection closes, the provider answers an error, or the owner or a decision
+  stops it. Each
   turn's `llm_response` record in the agent session log carries the turn's
   cache-read and cache-write tokens (`null` when the provider reported none), and
   what stays the same from turn to turn (the system prompt, the owner block, the
@@ -246,13 +249,16 @@ detaches and restarts. Another caller's contract reads as `CONTRACT_NOT_FOUND`
 principals own is refused with `SESSION_NOT_OWNED` (403). `contracts.remove` deletes an ended contract's
 record (`CONTRACT_NOT_ENDED`, 409, while it runs; `CONTRACT_NATIVE`, 409, for
 native work, whose record its native execution keeps).
-A unit that fails (its agent failed past the transport retries, went silent
-twice, or its work item failed) no longer ends the contract: the contract
-waits on its owner with one question, `retry` or `cancel`, the other units'
-work kept and the units depending on the failed one held rather than skipped.
-`retry` gives the unit a fresh agent (a work item the engine already failed is
-reset, so its dependents wait on it again); `cancel` stops the contract. Native
-work, session-mode contracts and best-of-N units keep their own failure rules.
+A unit that fails (its agent failed, for instance on a connection to its model
+that its transport could not make again, or its work item failed; a quiet agent
+is never stopped for being quiet) fails at once with what failed in words; the
+runner starts nothing again by itself. It does not end the contract: the unit's
+question (`retry`, go on without it where nothing still to run needs it, or
+`cancel`) is put to the owner in every permission mode, the other units' work
+kept and the units depending on the failed one held rather than skipped. `retry` gives the unit a fresh agent (a work item the
+engine already failed is reset, so its dependents wait on it again); the owner's
+`cancel` stops the contract. Session-mode contracts and best-of-N units keep
+their own failure rules.
 `contracts.retryUnit` runs one unit of a running contract again: a working
 unit gets a fresh agent, a failed unit is retried as if the owner had replied
 `retry`, a passed unit whose commit failed has its changes committed again
@@ -321,7 +327,9 @@ sub-work.
    battery. Failing work is held open and the agent is told what is wrong,
    until every criterion reads met.
 5. **Correct.** When nudging stops making progress, the runner plans a fix
-   group, gives the unit a fresh agent, or asks the owner.
+   group, gives the unit a fresh agent, or asks the owner (in Ask me; in every
+   other mode the decision model answers that question in the owner's place). The same
+   holds for "then to the owner" in step 2.
 6. **Finish.** Jev judges each group, then the deliverable. When the
    deliverable passes, the runner commits the contract's work and delivers
    the answer.
@@ -441,9 +449,16 @@ waits.
 - **Commit.** When the deliverable passes, `contract.autoCommit` and
   `contract.commitScope` decide whether the contract's changes are committed,
   applied as uncommitted changes, or left in place. A commit failure is a
-  warning on a passed contract, never a failure. A publication the project
-  tree refuses (a merge in progress, a lock) is retried a few times with
-  backoff; after that the owner is asked to retry or cancel. When the owner
+  warning on a passed contract, never a failure; a git lock another process
+  holds is waited for until it goes away (by the lock file's own change, never
+  a clock), and a stale lock whose holder is gone is removed and named in the
+  warning. A publication the project tree refuses (a merge or rebase in
+  progress, a conflict with the owner's edits, a hook that refuses) is undone
+  and its result kept on the contract's branch; whether it is tried again is
+  decided by the permission mode (the owner answers `retry` or `cancel` in Ask
+  me; the decision model answers in every other mode, each try running the
+  project's hooks once), and a publication not tried again ends the contract
+  failed with its branch named. When the owner
   kept working while the contract ran, Git merges the captured input, the
   owner's tree now and the accepted result: changes to different files are
   published with no model request; only files both sides changed are read for
@@ -479,9 +494,10 @@ waits.
   whose work item ended without it fails with that item's reason.
 - **Concurrency.** `contract.maxActiveContracts` (default 6) contracts run at
   once; the rest wait as `queued`. A native session contract paused on its
-  owner after a failed turn (retry or cancel) is not running, so it does not
-  count against the limit; a queued contract takes its place. Answering retry
-  resumes it at once, even if that briefly puts more than the limit in flight.
+  owner after a failed turn (in Ask me: retry or cancel; in every other mode
+  the decision answers at once) is not running, so it does not count against
+  the limit; a queued contract takes its place. Answering retry resumes it at
+  once, even if that briefly puts more than the limit in flight.
 - **Code context.** A contract's agents get code context from an index built
   for that run from the contract's own input, never from your live code index.
   A read-only (captured) input is indexed once per run and serves every turn; a
@@ -503,14 +519,15 @@ waits.
 ### Settings
 
 The runner reads `contract.*` (`config/schema-domain-contract.ts`,
-`contract/config.ts`):
+`contract/config.ts`). Where a row says the owner is asked or decides, that is
+so in every permission mode, as released: a question of a piece of work waits
+for the owner in Waiting for you:
 
 | Key | Default | Meaning |
 | --- | --- | --- |
 | `contract.autoCommit` | `true` | Commit the deliverable when it passes |
 | `contract.commitScope` | `scoped` | `off`, `scoped` (the contract's changes only) or `all` |
-| `contract.gates` | typecheck, lint and build, all off | Quality gate commands run at each completion check; each runs only once you enable it (`enabled: true`). Any gate, `test` included, passes or fails on its command's exit code; under `bun test` its assertion counts are recorded too. A list with a gate that cannot run (missing name or command, a wrong option, a name used twice, an enabled gate with an empty command) is refused when saved, and a contract reports it when it starts. A gate named `test`, enabled or not, is also the command "Run the project's tests" (Code and changes) runs |
-| `contract.gateTimeoutMs` | `900000` (15 minutes) | Timeout per gate, and for a run of the project's tests from Code and changes; a gate past it is stopped and reported unverified; `0` waits until it finishes or is cancelled |
+| `contract.gates` | typecheck, lint and build, all off | Quality gate commands run at each completion check; each runs only once you enable it (`enabled: true`). A gate command runs until it exits or the work is stopped: no clock stops it, so a command left in watch mode runs on, its step shown being checked, until you stop the work. Any gate, `test` included, passes or fails on its command's exit code; under `bun test` its assertion counts are recorded too. A list with a gate that cannot run (missing name or command, a wrong option, a name used twice, an enabled gate with an empty command) is refused when saved, and a contract reports it when it starts. A gate named `test`, enabled or not, is also the command "Run the project's tests" (Code and changes) runs |
 | `contract.acceptanceStakes` | `high` | Which declared pass band the judges use: `high` or `critical` |
 | `contract.midRunChecks` | `true` | Check a unit after turns that write, edit or run commands, once a criterion already reads met (before that nothing can regress) |
 | `contract.evidenceNudgeLimit` | `0` (no limit) | Unsettled checks before the owner is asked; with `0` the owner is not asked on this count, and `contract.stallLimit` still applies |
@@ -524,9 +541,7 @@ The runner reads `contract.*` (`config/schema-domain-contract.ts`,
 | `contract.maxActiveContracts` | `6` | Contracts running at once |
 | `contract.maxParallelUnits` | `64` | Units running at once in one group (worktree mode) |
 | `contract.isolation` | `auto` | `auto`, `worktree` or `shared` |
-| `contract.heartbeatTimeoutMs` | `600000` (10 minutes) | Silence before a running unit agent is restarted once; a second silence fails the unit. A model reply that is streaming is not silence, and neither is an `exec` command that is within its own `timeout_ms` or has none; a read, search or other tool call that runs past this is. `0` turns the watchdog off |
-| `contract.transportRetryLimit` | `3` | Fresh agents after a transient failure (5xx, 408, 429, a connection error: decided from the status and code with no model request; a failure nothing can classify while the decision model is unavailable is retried too) |
-| `contract.transportRetryDelayMs` | `5000` | Wait before the first retry, doubled for each further one (at most a minute); a provider's Retry-After is used instead |
+| `contract.transportRetryLimit` | `3` | Fresh agents for a workstream phase whose agent failed on a connection error, each at once; a contract unit is never started again by it (a failed unit's question decides that, under the permission mode) |
 | `contract.nudgeTtlMs` | `300000` | Lifetime of a mid-run nudge on the message bus |
 | `ui.contractMessages` | `both` | Where `[Contract]` system messages show: `panel`, `conversation` or `both` |
 

@@ -59,7 +59,7 @@ export function OwnerApprovalNotices(): null {
         if (!pendingToasts.current.has(change.approvalId)) {
           pendingToasts.current.set(change.approvalId, toast({
             title: 'Waiting for the owner\'s approval',
-            description: `${change.summary} loosens a setting only the owner changes. Nothing has changed yet; it is applied when he approves it (approval ${change.approvalId}).`,
+            description: `${change.summary} loosens a setting only the owner changes. Nothing has changed yet; it is applied when the owner approves it (approval ${change.approvalId}).`,
             tone: 'info',
             durationMs: 0,
           }));

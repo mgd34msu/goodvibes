@@ -93,7 +93,7 @@ export interface McpEffectiveConfigOptions {
   /** True when this project file waits on the owner's trust of the workspace. */
   readonly holdProjectFile?: ((path: string) => boolean) | undefined;
   /**
-   * True for a server of a project file that the owner added there himself, as
+   * True for a server of a project file that the owner added there in person, as
    * it now stands (mcp/owner-added.ts): it is not held, and a file holding only
    * such servers raises no trust question.
    */
@@ -446,7 +446,7 @@ export function loadMcpConfig(roots: McpConfigRoots): McpConfig {
  * The order the files are merged in, later replacing earlier for a name: the
  * other programs' files first (`~/.mcp/mcp.json`, Claude Desktop's file, the
  * project's `.mcp/mcp.json`), then the owner's own `~/.config/mcp/mcp.json`, so
- * his entry of a name wins outright, then the project's `.goodvibes/mcp.json`
+ * the owner's entry of a name wins outright, then the project's `.goodvibes/mcp.json`
  * (held until the owner trusts the workspace).
  */
 const MCP_MERGE_RANK: Readonly<Record<McpConfigLocation['kind'], number>> = {
@@ -488,8 +488,8 @@ export function loadMcpEffectiveConfig(roots: McpConfigRoots, options: McpEffect
       if (!existsSync(location.path)) continue;
       const config = location.writable ? readMcpConfigAtPath(location.path) : readExternalMcpConfig(location.path);
       const projectScope = location.kind === 'project-mcp' || location.kind === 'project-goodvibes';
-      // A file the repository could have brought starts nothing, and replaces none of the owner's servers, until he trusts the
-      // workspace; the servers he added to it himself are his, and start. A file of only his asks nothing.
+      // A file the repository could have brought starts nothing, and replaces none of the owner's servers, until they trust the
+      // workspace; the servers they added to it in person are theirs, and start. A file of only theirs asks nothing.
       let servers = config.servers;
       if (projectScope && options.holdProjectFile !== undefined) {
         const brought = servers.filter((server) => options.ownerAdded?.(location.path, server) !== true);

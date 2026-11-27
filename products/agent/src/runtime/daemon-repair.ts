@@ -312,7 +312,7 @@ export async function runDaemonRepair(options: DaemonRepairRunOptions): Promise<
   };
 
   // Only the daemon is started: no setting a person chose is changed ("Use the background daemon" is retired, and
-  // "Start the daemon at login" is his).
+  // "Start the daemon at login" is theirs).
   if (!offer.serviceInstalled) {
     const installed = await installDaemonService(options.runDaemonCli ?? createDaemonCliRunner());
     if (!installed.ok) {

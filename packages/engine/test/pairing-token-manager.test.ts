@@ -225,7 +225,7 @@ describe('a token that is too old', () => {
 describe('the folders above a saved device token', () => {
   /**
    * Anyone who can write a folder above the home can swap the store's folder
-   * for one he controls, then read the device token or plant his own. The
+   * for one they control, then read the device token or plant their own. The
    * terminal's pairing store reads every folder above the home first. A
    * folder owned by the namespace's overflow user (real root's folders seen
    * from a rootless container) cannot be changed by anyone here, so it is

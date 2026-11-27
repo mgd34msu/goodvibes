@@ -6,31 +6,27 @@
  *   agent that completed without being held is checked now.
  * - Failed on its turn budget or the circuit breaker: checked with trigger
  *   `agent-failed`; a nudge wakes it.
- * - Failed otherwise: the status and code the agent's record carries decide
- *   first, with no model request (5xx, 408, 429 and connection codes retry;
- *   401, 402, 403, 404 and other refusals of the request do not). Only a
- *   failure those tables cannot place is read by the decision model
- *   (`readFailure`, site `contract.transport-retry`); when that reading cannot
- *   be made (no model, policy off, unreachable) the failure is treated as
- *   transient, since an outage is exactly when agents fail. A transient failure
- *   is retried with a fresh agent, up to `contract.transportRetryLimit`; the
- *   wait is the provider's Retry-After when it gave one, otherwise
- *   `contract.transportRetryDelayMs` doubled for each retry already spent
- *   (at most a minute). Anything else fails the unit (`transport` for a
- *   transient fault past the limit, `other` otherwise): the unit waits on the
- *   owner to retry or cancel when it can, else the contract fails with it.
+ * - Failed otherwise: the step fails at once, with what failed in words (a
+ *   connection to its model that failed and could not be made again, said as
+ *   such, from the status and code its record carries; anything else in the
+ *   agent's own words). Work runs nothing again by itself: the provider's
+ *   transport already tried to make the connection again before the agent
+ *   failed. The step's question (run it again, go on without it, stop) is
+ *   put to the owner, in every mode (as released); a contract that cannot wait
+ *   on it fails.
  * - Cancelled by anyone but the runner: an operator stopped a member, which
  *   stops the whole contract.
- * - Silent past `contract.heartbeatTimeoutMs`: the agent is killed and the unit
- *   retried once; the second time the contract fails.
+ * - Quiet: nothing. A step is never stopped, run again or failed for being
+ *   quiet; it ends on one of the events above, or when the owner or a decision
+ *   stops it.
  *
  * An attempt of a best-of-N unit that fails ends alone: its siblings go on,
  * and the selection reads the ones that passed (best-of-n.ts).
  *
- * A retry is not a stall and not a fix round: the unit keeps its checks, and
- * the fresh agent's brief carries a "Previous checks" section.
+ * A step run again is not a stall and not a fix round: the unit keeps its
+ * checks, and the fresh agent's brief carries a "Previous checks" section.
  */
-import { classifyFailure, judgmentPort, readFailure, transienceFromReading, type FailureEvidence } from '@goodvibes/engine/errors';
+import { classifyFailure, type FailureEvidence } from '@goodvibes/engine/errors';
 import type { AgentEvent } from '../../events/agents.js';
 import type { CommunicationEvent } from '../../events/communication.js';
 import { TURN_BUDGET_EXHAUSTED } from '../agents/turn-budget.js';
@@ -39,10 +35,8 @@ import type { RuntimeEventBus } from '../runtime/events/index.js';
 import type { AgentRecord } from '../tools/agent/index.js';
 import { logger } from '../utils/logger.js';
 import type { UnitCheckLoop } from './agent-hooks.js';
-import type { ContractRun, SpawnPurpose } from './run-context.js';
+import type { ContractRun } from './run-context.js';
 import { isTerminalUnitStatus, type ContractFailureKind, type ContractUnit } from './types.js';
-import type { WatchedAgent } from './watchdog.js';
-import { nativeContractPort } from './native-decisions.js';
 
 /** Whether the run waits at a failed step of agent-run work (its pause open), nothing else of it asked. */
 function waitsAtFailedStep(run: ContractRun): boolean {
@@ -55,25 +49,12 @@ function stepName(unit: Pick<ContractUnit, 'id' | 'title'>): string {
   return `"${(unit.title || unit.id).replace(/\s+/g, ' ').trim()}"`;
 }
 
-/** The decision site the transport reading is logged under. */
+/** The decision site a failed session turn's reading is logged under (the daemon's session driver). */
 export const TRANSPORT_RETRY_SITE = 'contract.transport-retry';
 
-/** The longest a transport retry waits, whatever the backoff or the provider's Retry-After asks. */
-const MAX_TRANSPORT_RETRY_DELAY_MS = 60_000;
-
-/** A failure as the retry decision reads it: the agent's message plus whatever structure its record kept. */
+/** A failed step's failure: the agent's message plus whatever structure its record kept. */
 interface UnitFailureEvidence extends FailureEvidence {
   readonly retryAfterMs?: number | undefined;
-}
-
-/** How the retry decision was reached, for the decision history. */
-type RetryBasis = 'status' | 'reading' | 'no-reading';
-
-interface RetryDecision {
-  readonly retryable: boolean;
-  readonly basis: RetryBasis;
-  readonly retryAfterMs?: number | undefined;
-  readonly decisionIds: readonly string[];
 }
 
 export interface UnitFailureDeps {
@@ -91,12 +72,10 @@ export interface UnitFailureDeps {
   readonly checks: UnitCheckLoop;
   readonly failContract: (run: ContractRun, kind: ContractFailureKind, reason: string) => void;
   readonly cancelContract: (run: ContractRun, reason: string) => void;
-  /** Requeues the unit's work item for a fresh agent (brief plus "Previous checks", then `firstTurn` when given). */
-  readonly requeueUnit: (run: ContractRun, unit: ContractUnit, reason: string, purpose: SpawnPurpose, firstTurn?: string) => void;
   /**
-   * Asks the owner to retry or cancel a failed unit instead of failing the
-   * contract (escalation.ts `pauseFailedUnit`); false when the contract cannot
-   * wait on it, and the unit and the contract fail.
+   * Puts the failed step's question (run it again, go on without it, stop) to whoever decides it under the owner's
+   * mode instead of failing the contract (escalation.ts `pauseFailedUnit`); false when the contract cannot wait on
+   * it, and the unit and the contract fail.
    */
   readonly pauseFailedUnit?: ((run: ContractRun, unit: ContractUnit, reason: string) => boolean) | undefined;
 }
@@ -109,11 +88,10 @@ export interface UnitFailureDeps {
 const RELEASED: ReadonlySet<ContractUnit['status']> = new Set(['fixing', 'awaiting-owner', 'pending', 'blocked']);
 
 export interface UnitFailureHandling {
-  /** The watchdog found an agent silent past the timeout. */
-  onSilent(agent: WatchedAgent, silentMs: number): void;
   /**
-   * Fails one unit. A unit of an agent-run contract waits on the owner (retry or
-   * cancel) when it can; otherwise the contract fails with it. A failed attempt of
+   * Fails one unit. A unit of an agent-run contract has its question (run it
+   * again, go on without it, stop) decided under the owner's mode when it can;
+   * otherwise the contract fails with it. A failed attempt of
    * a best-of-N unit fails alone and is never a candidate.
    */
   failUnit(run: ContractRun, unit: ContractUnit, kind: ContractFailureKind, reason: string): void;
@@ -123,23 +101,6 @@ export interface UnitFailureHandling {
    */
   reconcile(agentId: string): void;
   dispose(): void;
-}
-
-function sleep(ms: number, signal: AbortSignal): Promise<void> {
-  return new Promise((resolve) => {
-    if (signal.aborted) {
-      resolve();
-      return;
-    }
-    const timer = setTimeout(done, ms);
-    timer.unref?.();
-    function done(): void {
-      clearTimeout(timer);
-      signal.removeEventListener('abort', done);
-      resolve();
-    }
-    signal.addEventListener('abort', done, { once: true });
-  });
 }
 
 /** Unit statuses in which the unit waits on its active agent to end. */
@@ -164,9 +125,11 @@ export function createUnitFailureHandling(deps: UnitFailureDeps): UnitFailureHan
 
   function failUnit(run: ContractRun, unit: ContractUnit, kind: ContractFailureKind, reason: string, decisionIds: readonly string[] = []): void {
     if (run.terminal) return;
+    // Kept for the work's end if what comes next is to stop there: it then fails for this, in these words.
+    unit.failureKind = kind;
     // The work already done is kept and the owner decides: one failed unit no longer throws away every unit that passed.
     if (unit.attemptOf === undefined && !isTerminalUnitStatus(unit.status) && deps.pauseFailedUnit?.(run, unit, reason) === true) {
-      run.decide('failed', unit.id, `${reason}; waiting for the owner to retry or cancel`, decisionIds);
+      run.decide('failed', unit.id, `${reason}; the owner is asked whether it runs again`, decisionIds);
       return;
     }
     if (!isTerminalUnitStatus(unit.status)) {
@@ -222,69 +185,23 @@ export function createUnitFailureHandling(deps: UnitFailureDeps): UnitFailureHan
       ...(record?.failureCode === undefined ? {} : { code: record.failureCode }),
       ...(record?.failureRetryAfterMs === undefined ? {} : { retryAfterMs: record.failureRetryAfterMs }),
     };
-    void run.work.run('retry or fail', () => retryOrFail(run, unit, agentId, evidence));
-  }
-
-  /** Whether the unit still waits on this failed agent: nothing released, replaced or ended it meanwhile. */
-  function stillAwaits(run: ContractRun, unit: ContractUnit, agentId: string): boolean {
-    return !run.terminal && unit.activeAgentId === agentId && !isTerminalUnitStatus(unit.status) && unit.status !== 'held-merge' && !RELEASED.has(unit.status);
+    failStep(run, unit, evidence);
   }
 
   /**
-   * Whether a failure is worth a fresh agent. The status and code tables decide
-   * whatever they can place; the model reads only the rest; a reading that
-   * cannot be made counts as transient (bounded by the retry limit).
+   * The step failed: it ends failed at once, with what failed in words. Work runs nothing again on its own: the
+   * provider's transport already tried to make its connection again before the agent failed. What comes next (run it
+   * again, go on without it, or stop) is the failed step's question, put to the owner in every mode
+   * (escalation.ts `pauseFailedUnit`).
    */
-  async function decideRetry(run: ContractRun, unit: ContractUnit, evidence: UnitFailureEvidence): Promise<RetryDecision> {
-    const known = classifyFailure({ status: evidence.status, code: evidence.code, retryAfterMs: evidence.retryAfterMs });
-    if (known !== undefined && known.category !== 'unknown') {
-      return { retryable: known.retryable && known.category !== 'billing', basis: 'status', retryAfterMs: known.retryAfterMs, decisionIds: [] };
-    }
-    const runtime = run.runtime(unit);
-    const signal = AbortSignal.any([run.abort.signal, runtime.abort.signal]);
-    try {
-      const reading = await readFailure(evidence, TRANSPORT_RETRY_SITE, run.contract.nativeSource === undefined ? undefined : {
-        port: nativeContractPort(run.contract, run.env.native, judgmentPort(TRANSPORT_RETRY_SITE), signal), signal,
-      });
-      // Tables only: the decision model did not answer (off, unreachable, refused).
-      if (reading.source === 'classic' && reading.category === 'unknown') return { retryable: true, basis: 'no-reading', decisionIds: [] };
-      const retryable = !reading.billing && (reading.transientNetwork || reading.beforeResponse
-        || (reading.category !== 'unknown' && transienceFromReading(reading).failureClass === 'retryable'));
-      return { retryable, basis: 'reading', decisionIds: reading.decisionId === undefined ? [] : [reading.decisionId] };
-    } catch {
-      signal.throwIfAborted();
-      return { retryable: true, basis: 'no-reading', decisionIds: [] };
-    }
-  }
-
-  async function retryOrFail(run: ContractRun, unit: ContractUnit, agentId: string, evidence: UnitFailureEvidence): Promise<void> {
-    const runtime = run.runtime(unit);
+  function failStep(run: ContractRun, unit: ContractUnit, evidence: UnitFailureEvidence): void {
     const message = evidence.status === undefined ? evidence.message : `HTTP ${evidence.status}: ${evidence.message}`;
-    let decision: RetryDecision;
-    try {
-      decision = await decideRetry(run, unit, evidence);
-    } catch {
-      // Only an abort reaches here: the contract or the unit was stopped meanwhile.
-      return;
-    }
-    if (!stillAwaits(run, unit, agentId)) return;
-    const config = run.env.config();
-    if (!decision.retryable || unit.transportRetries >= config.transportRetryLimit) {
-      const kind: ContractFailureKind = decision.retryable ? 'transport' : 'other';
-      // Said in the words of the work (the setting's key stays in the decision record, not in the line a person reads).
-      const why = decision.retryable
-        ? `it was tried ${unit.transportRetries + 1} time${unit.transportRetries === 0 ? '' : 's'} and the connection kept failing`
-        : 'a failure that does not clear by itself';
-      failUnit(run, unit, kind, `step ${stepName(unit)} failed (${why}): ${message}`, decision.decisionIds);
-      return;
-    }
-    const delayMs = Math.min(MAX_TRANSPORT_RETRY_DELAY_MS, decision.retryAfterMs ?? config.transportRetryDelayMs * 2 ** unit.transportRetries);
-    unit.transportRetries += 1;
-    const basis = decision.basis === 'no-reading' ? ', cause unknown while the decision model is unavailable' : '';
-    run.decide('transport-retry', unit.id, `retry ${unit.transportRetries} of ${config.transportRetryLimit} in ${Math.round(delayMs / 1000)}s${basis}: ${message}`, decision.decisionIds);
-    await sleep(delayMs, runtime.abort.signal);
-    if (!stillAwaits(run, unit, agentId)) return;
-    deps.requeueUnit(run, unit, `transport retry ${unit.transportRetries}`, 'transport-retry');
+    const known = classifyFailure({ status: evidence.status, code: evidence.code, retryAfterMs: evidence.retryAfterMs });
+    const connection = known !== undefined && known.category !== 'unknown' && known.category !== 'billing' && known.retryable;
+    const kind: ContractFailureKind = connection ? 'transport' : 'other';
+    failUnit(run, unit, kind, connection
+      ? `step ${stepName(unit)} failed: the connection to its model failed and could not be made again (${message})`
+      : `step ${stepName(unit)} failed: ${message}`);
   }
 
   function onCancelled(agentId: string): void {
@@ -312,25 +229,6 @@ export function createUnitFailureHandling(deps: UnitFailureDeps): UnitFailureHan
     // the work is picked up again.
     if (waitsAtFailedStep(found.run)) return;
     deps.cancelContract(found.run, `the agent working on step ${stepName(found.unit)} was stopped by hand`);
-  }
-
-  function onSilent(agent: WatchedAgent, silentMs: number): void {
-    const run = [...deps.runs()].find((candidate) => candidate.id === agent.contractId);
-    const unit = run?.unit(agent.unitId);
-    if (run === undefined || unit === undefined || run.terminal || unit.activeAgentId !== agent.agentId) return;
-    const retried = run.contract.decisions.some((decision) => decision.action === 'silence-retry' && decision.targetId === unit.id);
-    if (retried) {
-      run.emit({ type: 'CONTRACT_UNIT_SILENT', contractId: run.id, unitId: unit.id, agentId: agent.agentId, silentMs, action: 'failed' });
-      run.runtime(unit).expectedCancels.add(agent.agentId);
-      deps.agentManager.cancel(agent.agentId, 'kill');
-      failUnit(run, unit, 'other', `step ${stepName(unit)} failed: its agent stopped answering twice`);
-      return;
-    }
-    run.emit({ type: 'CONTRACT_UNIT_SILENT', contractId: run.id, unitId: unit.id, agentId: agent.agentId, silentMs, action: 'retried' });
-    run.decide('silence-retry', unit.id, `agent ${agent.agentId} silent for ${Math.round(silentMs / 1000)}s`);
-    run.runtime(unit).expectedCancels.add(agent.agentId);
-    deps.agentManager.cancel(agent.agentId, 'kill');
-    deps.requeueUnit(run, unit, `silence retry: ${agent.agentId} was silent for ${silentMs} ms`, 'silence-retry');
   }
 
   function onConsumed(messageId: string, agentId: string, turn: number): void {
@@ -372,7 +270,6 @@ export function createUnitFailureHandling(deps: UnitFailureDeps): UnitFailureHan
   ];
 
   return {
-    onSilent,
     failUnit,
     reconcile,
     dispose: () => {

@@ -26,7 +26,7 @@ import { writeHeldFile } from '../capabilities/held-paths.js';
 import { withProcessLockSync } from '../utils/process-lock.js';
 import { containsIssuerCredential } from '../utils/redaction.js';
 import { projectFilesHeld } from '../utils/prompt-loader.js';
-import { acceptedAuthor, authorAfterChange, memoryAwaitsOwner, newRecordAuthor, readRecordAuthor, type MemoryAuthor } from '../state/memory-author.js';
+import { acceptedAuthor, authorAfterChange, newRecordAuthor, readRecordAuthor, type MemoryAuthor } from '../state/memory-author.js';
 import { frontmatterRewriteProblem, parseSkill, serializeSkill, skillContentProblem, type SkillFrontmatterValue } from './model.js';
 import { compareSkillsByOrigin, resolveSkillRoots, type SkillOrigin, type SkillRoot } from './roots.js';
 import type {
@@ -228,7 +228,7 @@ function recordOf(name: string, description: string, body: string, metadata: Rea
 }
 
 /**
- * The author kept in a skill file's frontmatter. No `author` key: none (the owner's; a file he dropped in or one from
+ * The author kept in a skill file's frontmatter. No `author` key: none (the owner's; a file they dropped in or one from
  * before authors were kept). An `author` that is not one of the three reads as someone else's, waiting.
  */
 function skillAuthorOf(metadata: Readonly<Record<string, SkillFrontmatterValue>>): MemoryAuthor | undefined {
@@ -385,7 +385,7 @@ function readLibraryFile(path: string): LibraryFile {
 /**
  * What the owner accepted of a skill that comes from a project's files (`project-local`), kept in this library file
  * by the file's path, never in the file: the file's own `enabled`, `review`, `reviewed-at`, `author` and `source` are a
- * repository's words and are ignored. Valid only while the file's content is the one he accepted (its hash): a changed
+ * repository's words and are ignored. Valid only while the file's content is the one the owner accepted (its hash): a changed
  * file is the project's again, switched off and waiting.
  */
 interface ProjectSkillAcceptance {
@@ -465,7 +465,7 @@ export function locatedSkillMayLoad(skill: { readonly origin: SkillOrigin; reado
   try {
     const acceptance = projectAcceptances(readLibraryFile(skillLibraryPath(join(homeDirectory, '.goodvibes'))).fields)[skill.path];
     if (!acceptance || acceptance.hash !== contentHash(readFileSync(skill.path, 'utf-8'))) return false;
-    return acceptance.enabled && acceptance.reviewState === 'reviewed' && acceptance.author !== undefined && !memoryAwaitsOwner({ author: acceptance.author });
+    return acceptance.enabled && acceptance.reviewState === 'reviewed' && acceptance.author !== undefined;
   } catch {
     return false;
   }
@@ -595,9 +595,8 @@ export class SkillLibrary {
     const bundles = state.library.bundles;
     const enabledSkills = skills.filter((skill) => skill.enabled);
     const enabledBundles = bundles.filter((bundle) => bundle.enabled);
-    // Reviewed, and not someone else's words the owner has not accepted (state/memory-author.ts, the one rule).
-    const given = (record: { readonly reviewState: AgentSkillReviewState; readonly author?: MemoryAuthor | undefined }): boolean =>
-      record.reviewState === 'reviewed' && !memoryAwaitsOwner(record);
+    // Reviewed, as released; who wrote it is kept and marks a conversation it enters (state/memory-author.ts).
+    const given = (record: { readonly reviewState: AgentSkillReviewState }): boolean => record.reviewState === 'reviewed';
     const activeBundles = enabledBundles.filter((bundle) => {
       if (!given(bundle)) return false;
       const readiness = evaluateAgentSkillBundleReadiness(bundle, skills);
@@ -755,7 +754,7 @@ export class SkillLibrary {
     return this.changeBundle(idOrName, (existing) => ({ ...existing, enabled, updatedAt: nowIso() }));
   }
 
-  /** `accept`: the owner himself reviewed it, which accepts a skill someone else wrote (never a model's review). */
+  /** `accept`: the owner in person reviewed it, which accepts a skill someone else wrote (never a model's review). */
   public markReviewed(idOrName: string, options: { readonly accept?: boolean } = {}): AgentSkillRecord {
     return this.changeSkill(idOrName, (existing) => ({
       ...existing, ...reviewedReviewPatch(), updatedAt: nowIso(),

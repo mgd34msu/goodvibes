@@ -23,7 +23,10 @@ const model = Bun.serve({ hostname: '127.0.0.1', port: 0, async fetch(request) {
   if (path.endsWith('/models')) return Response.json({ object: 'list', data: [{ id: 'standin-model', object: 'model', context_length: 128000 }] });
   if (!path.endsWith('/chat/completions')) return new Response('not found', { status: 404 });
   const body = await request.json() as { messages: { role: string; content: unknown }[] };
-  const asked = JSON.stringify(body.messages.filter((message) => message.role === 'user').at(-1)?.content ?? '');
+  // The person's last message: the turn's own `[Host]` note for this request (core/host-instructions.ts) is not what was asked.
+  const said = (content: unknown): string => (typeof content === 'string' ? content : Array.isArray(content)
+    ? content.map((part) => (part && typeof part === 'object' && typeof (part as { text?: unknown }).text === 'string' ? (part as { text: string }).text : '')).join('') : '');
+  const asked = JSON.stringify(body.messages.filter((message) => message.role === 'user' && !said(message.content).trimStart().startsWith('[Host]')).at(-1)?.content ?? '');
   if (asked.includes('Fail this one')) return Response.json({ error: { message: 'the key was refused', type: 'invalid_request_error' } }, { status: 401 });
   const text = asked.includes('Say it again') ? 'Again from the stand-in.' : 'Hello from the stand-in.';
   const chunk = (delta: object, finish: string | null) => `data: ${JSON.stringify({ id: 'c1', object: 'chat.completion.chunk', created: 0, model: 'standin-model', choices: [{ index: 0, delta, finish_reason: finish }] })}\n\n`;

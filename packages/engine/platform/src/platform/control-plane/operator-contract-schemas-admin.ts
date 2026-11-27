@@ -114,7 +114,7 @@ export const SURFACE_RECORD_SCHEMA = objectSchema({
 /**
  * The answer to a change only the owner makes, asked with a paired device's
  * credential (HTTP 202): nothing was changed; the change was put to the owner
- * as approval `approvalId` and is applied when he approves it.
+ * as approval `approvalId` and is applied when the owner approves it.
  */
 export const OWNER_APPROVAL_PENDING_SCHEMA = objectSchema({
   success: { type: 'boolean', const: false },

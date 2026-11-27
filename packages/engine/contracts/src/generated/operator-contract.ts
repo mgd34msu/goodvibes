@@ -12311,7 +12311,7 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
         "description": "Return the raw content bytes for a stored artifact.",
         "category": "artifacts",
         "source": "builtin",
-        "access": "admin",
+        "access": "authenticated",
         "transport": [
           "http"
         ],
@@ -12367,7 +12367,7 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
         "description": "Store a file or attachment artifact for later delivery, analysis, or knowledge ingest. JSON supports small inline bodies and daemon-local path/URI references; HTTP callers can also send multipart/form-data or a raw binary body for large uploads.",
         "category": "artifacts",
         "source": "builtin",
-        "access": "admin",
+        "access": "authenticated",
         "transport": [
           "http",
           "ws"
@@ -12609,7 +12609,7 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
         "description": "Return metadata for a stored artifact.",
         "category": "artifacts",
         "source": "builtin",
-        "access": "admin",
+        "access": "authenticated",
         "transport": [
           "http",
           "ws"
@@ -12736,10 +12736,10 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
       {
         "id": "artifacts.list",
         "title": "List Artifacts",
-        "description": "Return stored artifact metadata for files and attachments.",
+        "description": "Return stored artifact metadata for files and attachments. A caller below an admin is answered the files it stored itself.",
         "category": "artifacts",
         "source": "builtin",
-        "access": "admin",
+        "access": "authenticated",
         "transport": [
           "http",
           "ws"
@@ -13062,7 +13062,7 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
       {
         "id": "local_auth.users.create",
         "title": "Create Local Auth User",
-        "description": "Create a local auth user. roles: omitted creates an admin. scopes: the operator scopes the user holds (for example read:sessions and write:sessions for someone who only chats: she reads her own chats under them; read:transcripts adds anyone else's); omitted, the user holds its role's default set. A narrowed user is not an admin, whatever its roles.",
+        "description": "Create a local auth user. roles: omitted creates an admin. scopes: the operator scopes the user holds (for example read:sessions and write:sessions for someone who only chats: they read their own chats under them; read:transcripts adds anyone else's); omitted, the user holds its role's default set. A narrowed user is not an admin, whatever its roles.",
         "category": "auth",
         "source": "builtin",
         "access": "admin",
@@ -14844,7 +14844,7 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
         "description": "Create a durable automation job. An optional id makes the create repeatable in its project: the job is kept under an id made from that id and the project (`<id>-<8 hex>`, the same for every create of it in that project), and when this project already has that job it is returned unchanged. Another project's job of the same id is never returned, and the id given says nothing about it.",
         "category": "automation",
         "source": "builtin",
-        "access": "admin",
+        "access": "authenticated",
         "transport": [
           "http",
           "ws"
@@ -16196,7 +16196,7 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
         "description": "Delete a durable automation job.",
         "category": "automation",
         "source": "builtin",
-        "access": "admin",
+        "access": "authenticated",
         "transport": [
           "http",
           "ws"
@@ -16254,7 +16254,7 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
         "description": "Disable a durable automation job.",
         "category": "automation",
         "source": "builtin",
-        "access": "admin",
+        "access": "authenticated",
         "transport": [
           "http",
           "ws"
@@ -16311,7 +16311,7 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
         "description": "Enable a durable automation job.",
         "category": "automation",
         "source": "builtin",
-        "access": "admin",
+        "access": "authenticated",
         "transport": [
           "http",
           "ws"
@@ -18033,7 +18033,7 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
         "description": "Trigger an automation job immediately.",
         "category": "automation",
         "source": "builtin",
-        "access": "admin",
+        "access": "authenticated",
         "transport": [
           "http",
           "ws"
@@ -18099,7 +18099,7 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
         "description": "Update a durable automation job. (Renamed from automation.jobs.patch in the 1.0.0 core-verb rename, canonical verb is update, not patch.)",
         "category": "automation",
         "source": "builtin",
-        "access": "admin",
+        "access": "authenticated",
         "transport": [
           "http",
           "ws"
@@ -19404,7 +19404,7 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
         "description": "Cancel an active automation run.",
         "category": "automation",
         "source": "builtin",
-        "access": "admin",
+        "access": "authenticated",
         "transport": [
           "http",
           "ws"
@@ -23436,7 +23436,7 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
         "description": "Retry a completed or failed automation run.",
         "category": "automation",
         "source": "builtin",
-        "access": "admin",
+        "access": "authenticated",
         "transport": [
           "http",
           "ws"
@@ -24431,7 +24431,7 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
         "description": "Create a schedule record.",
         "category": "automation",
         "source": "builtin",
-        "access": "admin",
+        "access": "authenticated",
         "transport": [
           "http",
           "ws"
@@ -25713,7 +25713,7 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
         "description": "Delete a schedule record.",
         "category": "automation",
         "source": "builtin",
-        "access": "admin",
+        "access": "authenticated",
         "transport": [
           "http",
           "ws"
@@ -27556,7 +27556,7 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
         "description": "Stop a schedule from running until it is resumed; it is kept. The same as the schedule.pause capability (Pause in Automation).",
         "category": "automation",
         "source": "builtin",
-        "access": "admin",
+        "access": "authenticated",
         "transport": [
           "http",
           "ws"
@@ -27760,7 +27760,7 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
         "description": "Let a paused schedule run again at its next time, until you change it. The same as the schedule.resume capability (Resume in Automation).",
         "category": "automation",
         "source": "builtin",
-        "access": "admin",
+        "access": "authenticated",
         "transport": [
           "http",
           "ws"
@@ -27814,7 +27814,7 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
         "description": "Trigger a schedule immediately.",
         "category": "automation",
         "source": "builtin",
-        "access": "admin",
+        "access": "authenticated",
         "transport": [
           "http",
           "ws"
@@ -32442,7 +32442,7 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
       {
         "id": "capabilities.run",
         "title": "Run A Capability",
-        "description": "Runs one capability by id with its inputs (names and values as capabilities.find lists them), as the same act would run from any other source: the inputs are checked against its definition, its effects are admitted for the caller, and then a person's own request (a sign-in, a paired device or an app on this machine stating a person asked) runs at once, a call the Agent makes after its own capability gate judged it (the Agent's credential with that gate's mark) runs, and any other caller's call, the Agent's credential without the mark included, is decided under the owner's permission mode (an act that loosens a protection or cannot be undone is put to the owner and opens on No). A capability with its own method runs through that method. workingDirectory is the caller's project (a hooks file, a project secret store); program is the terminal program asking (tui or agent); model is the model that program's conversation uses (provider:model), which a capability on that conversation's model (its context window size) acts on unless its inputs name another. The answer is the text a person reads (detail: the capability's own words without its done line), the facts a script reads (never a secret value), the risk and what a repeat of this capability does; reveal is a value the person must see once (a new device's token, a join key), returned only to the person who asked. A call put to the owner is never held open: the answer is at once 202 with code OWNER_APPROVAL_PENDING, the approvalId of the question waiting for him in Waiting for you, state and next; send approvalId alone (no id), with the same credential, to read what came of it: 202 again while he has not answered, the run's answer once he approved it, or the refusal (403 CAPABILITY_NOT_APPROVED with his reason, or the capability's own refusal). A refusal is never a 500: it keeps the code of what refused it and the status that code stands for (404 NOT_FOUND for what is not held, 422 only for inputs that do not fit, 503 UNAVAILABLE for what this daemon was started without, 409 for any other refusal of the state found, with the capability's own code); a refusal from a method or an outside program the daemon ran for the capability keeps that method's status and code (424 CI_SOURCE_REFUSED for GitHub); 500 is the daemon's own fault. A capability that acts in a project folder is refused at once, 422 CAPABILITY_CALLER_CONTEXT_MISSING, when the call names no workingDirectory: the owner is never asked about a call that would then be refused. The owner's approval of a call put to him stands as the person's request for that call's own nested method that needs one (confirmation owner-request), for that one call only. A call put to him runs on his yes, after a daemon restart too, as the caller it was held for; whatever can refuse it without him (its inputs, its preview) is checked before he is asked. A capability that is the owner's own act is put to him, opening on No, never refused outright: asked for by a caller who is not the owner (an admin's sign-in, a paired device, a member), it is put to him the same way, the question naming who asks, and on his yes it runs with his authority for that one call and its nested methods. Before a held call runs on his yes, the caller it was held for must still be allowed: one whose operator token was replaced, whose device was unpaired, or whose sign-in user or sign-in is gone gets 403 CAPABILITY_CALLER_GONE naming it, and nothing runs; when that cannot be told (after a restart, a caller told only by a credential that is not kept) it is 409 CAPABILITY_ASK_AGAIN. His yes is judged again against the mode and the deny rules as they are when he answers: plan mode switched on, or a rule that now refuses it, refuses it with that reason. A remembered answer to an outside caller's call is kept for that caller only, and none is offered for an act of the owner's own asked by someone who is not the owner. Folder trust is not asked for a daemon capability: it acts on what the daemon keeps, not in a project folder.",
+        "description": "Runs one capability by id with its inputs (names and values as capabilities.find lists them), as the same act would run from any other source: the inputs are checked against its definition, its effects are admitted for the caller, and then a person's own request (a sign-in, a paired device or an app on this machine stating a person asked) runs at once, a call the Agent makes after its own capability gate judged it (the Agent's credential with that gate's mark) runs, and any other caller's call, the Agent's credential without the mark included, is decided under the owner's permission mode with who is asking as a fact: YOLO runs it when the caller's scopes and reach allow it, Jev decides gives it to Jev's permission decision, Ask me raises the one approval card and this call waits on the owner's answer (the caller closing its connection withdraws the question; nothing of it is kept). A capability with its own method runs through that method. workingDirectory is the caller's project (a hooks file, a project secret store); program is the terminal program asking (tui or agent); model is the model that program's conversation uses (provider:model), which a capability on that conversation's model (its context window size) acts on unless its inputs name another. The answer is the text a person reads (detail: the capability's own words without its done line), the facts a script reads (never a secret value), the risk and what a repeat of this capability does; reveal is a value the person must see once (a new device's token, a join key), returned only to the person who asked. A call not allowed is refused, 403 CAPABILITY_NOT_APPROVED with the reason. A refusal is never a 500: it keeps the code of what refused it and the status that code stands for (404 NOT_FOUND for what is not held, 422 only for inputs that do not fit, 503 UNAVAILABLE for what this daemon was started without, 409 for any other refusal of the state found, with the capability's own code); a refusal from a method or an outside program the daemon ran for the capability keeps that method's status and code (424 CI_SOURCE_REFUSED for GitHub); 500 is the daemon's own fault. A capability that acts in a project folder is refused at once, 422 CAPABILITY_CALLER_CONTEXT_MISSING, when the call names no workingDirectory: nothing is decided about a call that would then be refused. Under Ask me the owner's yes stands as the person's request for that call's own nested method that needs one (confirmation owner-request), for that one call only; whatever can refuse it without the owner (its inputs, its preview) is checked before the owner is asked. A capability that is the owner's own act, asked for by a caller who is not the owner (an admin's sign-in, a paired device, a member), is an item of the owner's list decided under the owner's mode with who asks as a fact, never refused outright; allowed, it runs with the owner's authority for that one call and its nested methods. A yes that waited is judged again against the mode and the deny rules as they are when the owner answers: plan mode switched on, or a rule that now refuses it, refuses it with that reason. A remembered answer to an outside caller's call is kept for that caller only, and none is offered for an act of the owner's own asked by someone who is not the owner. Folder trust is not asked for a daemon capability: it acts on what the daemon keeps, not in a project folder.",
         "category": "capabilities",
         "source": "builtin",
         "access": "authenticated",
@@ -32501,9 +32501,6 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
             "everyProject": {
               "type": "boolean"
             },
-            "approvalId": {
-              "type": "string"
-            },
             "delegatedFrom": {
               "type": "string",
               "enum": [
@@ -32514,6 +32511,9 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
               "type": "string"
             }
           },
+          "required": [
+            "id"
+          ],
           "additionalProperties": false
         },
         "outputSchema": {
@@ -32601,64 +32601,6 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
                 "risk"
               ],
               "additionalProperties": false
-            },
-            {
-              "type": "object",
-              "properties": {
-                "success": {
-                  "type": "boolean",
-                  "const": false
-                },
-                "code": {
-                  "type": "string",
-                  "const": "OWNER_APPROVAL_PENDING"
-                },
-                "approvalId": {
-                  "type": "string"
-                },
-                "followable": {
-                  "type": "boolean"
-                },
-                "key": {
-                  "type": "string"
-                },
-                "keys": {
-                  "type": "array",
-                  "items": {
-                    "type": "string"
-                  }
-                },
-                "reasons": {
-                  "type": "array",
-                  "items": {
-                    "type": "string"
-                  }
-                },
-                "sessionId": {
-                  "type": "string"
-                },
-                "mode": {
-                  "type": "string"
-                },
-                "requestedMode": {
-                  "type": "string"
-                },
-                "state": {
-                  "type": "string"
-                },
-                "next": {
-                  "type": "array",
-                  "items": {
-                    "type": "string"
-                  }
-                }
-              },
-              "required": [
-                "code",
-                "approvalId",
-                "state"
-              ],
-              "additionalProperties": true
             }
           ]
         },
@@ -32709,22 +32651,7 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
           {
             "code": "CAPABILITY_NOT_APPROVED",
             "status": 403,
-            "meaning": "Asked of the owner under his mode and not approved (or nobody could be asked); nothing ran."
-          },
-          {
-            "code": "CAPABILITY_CALL_NOT_FOUND",
-            "status": 404,
-            "meaning": "No call put to the owner has this approvalId for this caller (another caller's, or not one capabilities.run made); nothing is said about it."
-          },
-          {
-            "code": "CAPABILITY_CALLER_GONE",
-            "status": 403,
-            "meaning": "The owner approved a held call, and the caller it was held for is no longer allowed (its operator token replaced, its device unpaired, its sign-in user removed or its sign-in ended); the message names that caller, and nothing ran."
-          },
-          {
-            "code": "CAPABILITY_ASK_AGAIN",
-            "status": 409,
-            "meaning": "The owner approved a held call and it cannot run on that yes: it carried a secret value the daemon never writes down and the daemon restarted, whether its caller is still allowed cannot be told after a restart, or that it started could not be written (it could otherwise run twice). Nothing ran; send the call again and the owner is asked again."
+            "meaning": "Decided under the owner's mode and not allowed (refused by a rule, by Jev, by \"When the decision model is missing or fails\" set to Decision Model Only, or by the owner's No on their card); the message says why, and nothing ran."
           }
         ]
       },
@@ -34838,9 +34765,6 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
                   }
                 },
                 "open": {
-                  "type": "boolean"
-                },
-                "ownMessagesAsOwner": {
                   "type": "boolean"
                 },
                 "project": {
@@ -37453,9 +37377,6 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
                   "open": {
                     "type": "boolean"
                   },
-                  "ownMessagesAsOwner": {
-                    "type": "boolean"
-                  },
                   "project": {
                     "type": "string"
                   },
@@ -37574,9 +37495,6 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
               "type": "string"
             },
             "allowTextCommandsWithoutMention": {
-              "type": "boolean"
-            },
-            "ownMessagesAsOwner": {
               "type": "boolean"
             },
             "project": {
@@ -37876,9 +37794,6 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
             "open": {
               "type": "boolean"
             },
-            "ownMessagesAsOwner": {
-              "type": "boolean"
-            },
             "project": {
               "type": "string"
             },
@@ -37942,7 +37857,7 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
       {
         "id": "channels.profiles.delete",
         "title": "Unbind Channel Profile",
-        "description": "Remove a channel profile binding. Returns { deleted: false } when no binding for that key existed, an honest boolean, never a phantom removal. Removing a binding whose permission mode is tighter than the one its channel's sessions would fall back to (the surface-wide binding's, else the host's) loosens it, which is the owner's own act: from a caller who is not the owner it answers 202 OWNER_APPROVAL_PENDING and is removed when he approves it; with no approval path it is 403 OWNER_ONLY.",
+        "description": "Remove a channel profile binding. Returns { deleted: false } when no binding for that key existed, an honest boolean, never a phantom removal. Removing a binding whose permission mode is tighter than the one its channel's sessions would fall back to (the surface-wide binding's, else the host's) loosens it, which is the owner's own act: from a caller who is not the owner it answers 202 OWNER_APPROVAL_PENDING and is removed when the owner approves it; with no approval path it is 403 OWNER_ONLY.",
         "category": "channels",
         "source": "builtin",
         "access": "admin",
@@ -38418,7 +38333,7 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
       {
         "id": "channels.profiles.set",
         "title": "Bind Channel Profile",
-        "description": "Bind (upsert) the model/provider and permission-mode defaults for a channel. Keyed on (surfaceKind, channelId?): field by field, a channelId-scoped binding wins over the surface-wide default; setting the same key again replaces it. A session the daemon originates from the channel uses these values whatever a channels.routing assignment names. A set that loosens the permission mode the channel's sessions run under (against the mode they get now, the host's when no binding sets one; leaving permissionMode out of a set removes the key's own mode) is the owner's own act, as sessions.permissionMode.set is: from a caller who is not the owner it is put to the owner and answers 202 OWNER_APPROVAL_PENDING with approvalId, followable, the current binding, mode, requestedMode, state and next, and applies when he approves it; with no approval path it is 403 OWNER_ONLY and nothing is changed.",
+        "description": "Bind (upsert) the model/provider and permission-mode defaults for a channel. Keyed on (surfaceKind, channelId?): field by field, a channelId-scoped binding wins over the surface-wide default; setting the same key again replaces it. A session the daemon originates from the channel uses these values whatever a channels.routing assignment names. A set that loosens the permission mode the channel's sessions run under (against the mode they get now, the host's when no binding sets one; leaving permissionMode out of a set removes the key's own mode) is the owner's own act, as sessions.permissionMode.set is: from a caller who is not the owner it is put to the owner and answers 202 OWNER_APPROVAL_PENDING with approvalId, followable, the current binding, mode, requestedMode, state and next, and applies when the owner approves it; with no approval path it is 403 OWNER_ONLY and nothing is changed.",
         "category": "channels",
         "source": "builtin",
         "access": "admin",
@@ -46965,7 +46880,7 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
       {
         "id": "config.reset",
         "title": "Reset Config Value",
-        "description": "Remove the explicit value of one config key through the daemon API so it reads as its default again, in every settings file that holds it. The response reports the value the host now holds and which file and tier it came from. Refuses a key that holds a credential (use credentials.delete), a key the host does not know, a key locked by managed policy, and runtime.workingDir (no caller moves the daemon). A change that loosens a security, permission, judgment or payment setting is the owner's own act: asked with a token minted for automation (one minted through the API by another token, such as pairing.tokens.create or pairing.tokens.migrate, or with narrowed scopes or for a named client; pairing.tokens.list shows it as origin automation) it is not made, but put to the owner as an approval only his own credential answers, and the answer is 202 with code OWNER_APPROVAL_PENDING and the `approvalId`; the change is applied when he approves it, and lapses after a day unanswered or if the daemon restarts first. The owner himself (his sign-in, his own terminal program with a verified registration) makes it at once; any paired device, his own included, is put to him.",
+        "description": "Remove the explicit value of one config key through the daemon API so it reads as its default again, in every settings file that holds it. The response reports the value the host now holds and which file and tier it came from. Refuses a key that holds a credential (use credentials.delete), a key the host does not know, a key locked by managed policy, and runtime.workingDir (no caller moves the daemon). A change that loosens a security, permission, judgment or payment setting is the owner's own act: asked with a token minted for automation (one minted through the API by another token, such as pairing.tokens.create or pairing.tokens.migrate, or with narrowed scopes or for a named client; pairing.tokens.list shows it as origin automation) it is not made, but put to the owner as an approval only the owner's own credential answers, and the answer is 202 with code OWNER_APPROVAL_PENDING and the `approvalId`; the change is applied when the owner approves it, and lapses after a day unanswered or if the daemon restarts first. The owner in person (their sign-in, their own terminal program with a verified registration) makes it at once; any paired device, the owner's own included, is put to the owner.",
         "category": "config",
         "source": "builtin",
         "access": "admin",
@@ -47117,7 +47032,7 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
       {
         "id": "config.set",
         "title": "Set Config Value",
-        "description": "Write one config value on the daemon: `{ key, value }`, where value is any JSON the key accepts. The response reports the value the host now holds and which file and tier it is in; a value that did not take is refused with what the host holds instead. A key that holds a credential takes only a goodvibes://secrets/ reference (store the secret with credentials.set); runtime.workingDir is refused (409 WORKSPACE_CHANGE_UNAVAILABLE): the daemon serves every project at once and no caller moves it, so a call names its project itself. The same route also serves the settings clients' lane, which answers with its own object: `{ settingsPrecondition }` takes action `capture` (read the facts a change would act on) or `write` (make it, optionally only while `ifServing` and `ifIncarnation` still hold; a repeated `requestId` returns the first answer). A change that loosens a security, permission, judgment or payment setting is the owner's own act: asked with a token minted for automation (one minted through the API by another token, such as pairing.tokens.create or pairing.tokens.migrate, or with narrowed scopes or for a named client; pairing.tokens.list shows it as origin automation) it is not made, but put to the owner as an approval only his own credential answers, and the answer is 202 with code OWNER_APPROVAL_PENDING and the `approvalId`; the change is applied when he approves it, and lapses after a day unanswered or if the daemon restarts first. The owner himself (his sign-in, his own terminal program with a verified registration) makes it at once; any paired device, his own included, is put to him.",
+        "description": "Write one config value on the daemon: `{ key, value }`, where value is any JSON the key accepts. The response reports the value the host now holds and which file and tier it is in; a value that did not take is refused with what the host holds instead. A key that holds a credential takes only a goodvibes://secrets/ reference (store the secret with credentials.set); runtime.workingDir is refused (409 WORKSPACE_CHANGE_UNAVAILABLE): the daemon serves every project at once and no caller moves it, so a call names its project itself. The same route also serves the settings clients' lane, which answers with its own object: `{ settingsPrecondition }` takes action `capture` (read the facts a change would act on) or `write` (make it, optionally only while `ifServing` and `ifIncarnation` still hold; a repeated `requestId` returns the first answer). A change that loosens a security, permission, judgment or payment setting is the owner's own act: asked with a token minted for automation (one minted through the API by another token, such as pairing.tokens.create or pairing.tokens.migrate, or with narrowed scopes or for a named client; pairing.tokens.list shows it as origin automation) it is not made, but put to the owner as an approval only the owner's own credential answers, and the answer is 202 with code OWNER_APPROVAL_PENDING and the `approvalId`; the change is applied when the owner approves it, and lapses after a day unanswered or if the daemon restarts first. The owner in person (their sign-in, their own terminal program with a verified registration) makes it at once; any paired device, the owner's own included, is put to the owner.",
         "category": "config",
         "source": "builtin",
         "access": "admin",
@@ -47398,7 +47313,7 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
       {
         "id": "config.setMany",
         "title": "Set Several Config Values",
-        "description": "Write several config values on the daemon as one update: `{ entries: [{ key, value }] }`. Every entry is admitted before anything is written, each settings file is written once and the configuration revision moves once, so a pair of settings that only make sense together never lands half-applied. A refusal names the setting, the reason and the next step, and says what was saved (nothing, unless a later settings file could not be written after an earlier one was). The answer lists, per key, the value the host now holds and which file and tier it is in; when a key does not hold the value asked for (a higher tier overrides it, or it was coerced), the answer is 409 CONFIG_SET_NOT_APPLIED naming those keys in `notApplied`, with the revision written and every entry's held value. A key that holds a credential takes only a goodvibes://secrets/ reference; runtime.workingDir is refused (409 WORKSPACE_CHANGE_UNAVAILABLE), as with config.set. A change that loosens a security, permission, judgment or payment setting is the owner's own act: asked with a token minted for automation (one minted through the API by another token, such as pairing.tokens.create or pairing.tokens.migrate, or with narrowed scopes or for a named client; pairing.tokens.list shows it as origin automation) it is not made, but put to the owner as an approval only his own credential answers, and the answer is 202 with code OWNER_APPROVAL_PENDING and the `approvalId`; the change is applied when he approves it, and lapses after a day unanswered or if the daemon restarts first. The owner himself (his sign-in, his own terminal program with a verified registration) makes it at once; any paired device, his own included, is put to him.",
+        "description": "Write several config values on the daemon as one update: `{ entries: [{ key, value }] }`. Every entry is admitted before anything is written, each settings file is written once and the configuration revision moves once, so a pair of settings that only make sense together never lands half-applied. A refusal names the setting, the reason and the next step, and says what was saved (nothing, unless a later settings file could not be written after an earlier one was). The answer lists, per key, the value the host now holds and which file and tier it is in; when a key does not hold the value asked for (a higher tier overrides it, or it was coerced), the answer is 409 CONFIG_SET_NOT_APPLIED naming those keys in `notApplied`, with the revision written and every entry's held value. A key that holds a credential takes only a goodvibes://secrets/ reference; runtime.workingDir is refused (409 WORKSPACE_CHANGE_UNAVAILABLE), as with config.set. A change that loosens a security, permission, judgment or payment setting is the owner's own act: asked with a token minted for automation (one minted through the API by another token, such as pairing.tokens.create or pairing.tokens.migrate, or with narrowed scopes or for a named client; pairing.tokens.list shows it as origin automation) it is not made, but put to the owner as an approval only the owner's own credential answers, and the answer is 202 with code OWNER_APPROVAL_PENDING and the `approvalId`; the change is applied when the owner approves it, and lapses after a day unanswered or if the daemon restarts first. The owner in person (their sign-in, their own terminal program with a verified registration) makes it at once; any paired device, the owner's own included, is put to the owner.",
         "category": "config",
         "source": "builtin",
         "access": "admin",
@@ -51672,6 +51587,25 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
                             "items": {
                               "type": "string"
                             }
+                          },
+                          "conflict": {
+                            "type": "object",
+                            "properties": {
+                              "branch": {
+                                "type": "string"
+                              },
+                              "files": {
+                                "type": "array",
+                                "items": {
+                                  "type": "string"
+                                }
+                              }
+                            },
+                            "required": [
+                              "branch",
+                              "files"
+                            ],
+                            "additionalProperties": false
                           }
                         },
                         "required": [
@@ -53741,6 +53675,25 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
                       "failureReason": {
                         "type": "string"
                       },
+                      "failureKind": {
+                        "type": "string",
+                        "enum": [
+                          "transport",
+                          "max_turns",
+                          "planning",
+                          "budget",
+                          "owner-rejected",
+                          "judgment-unavailable",
+                          "zombie",
+                          "other"
+                        ]
+                      },
+                      "dropped": {
+                        "type": "string"
+                      },
+                      "heardAt": {
+                        "type": "number"
+                      },
                       "attemptOf": {
                         "type": "string"
                       },
@@ -55051,6 +55004,25 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
                             },
                             "failureReason": {
                               "type": "string"
+                            },
+                            "failureKind": {
+                              "type": "string",
+                              "enum": [
+                                "transport",
+                                "max_turns",
+                                "planning",
+                                "budget",
+                                "owner-rejected",
+                                "judgment-unavailable",
+                                "zombie",
+                                "other"
+                              ]
+                            },
+                            "dropped": {
+                              "type": "string"
+                            },
+                            "heardAt": {
+                              "type": "number"
                             },
                             "attemptOf": {
                               "type": "string"
@@ -59949,6 +59921,25 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
                         "items": {
                           "type": "string"
                         }
+                      },
+                      "conflict": {
+                        "type": "object",
+                        "properties": {
+                          "branch": {
+                            "type": "string"
+                          },
+                          "files": {
+                            "type": "array",
+                            "items": {
+                              "type": "string"
+                            }
+                          }
+                        },
+                        "required": [
+                          "branch",
+                          "files"
+                        ],
+                        "additionalProperties": false
                       }
                     },
                     "required": [
@@ -62018,6 +62009,25 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
                   "failureReason": {
                     "type": "string"
                   },
+                  "failureKind": {
+                    "type": "string",
+                    "enum": [
+                      "transport",
+                      "max_turns",
+                      "planning",
+                      "budget",
+                      "owner-rejected",
+                      "judgment-unavailable",
+                      "zombie",
+                      "other"
+                    ]
+                  },
+                  "dropped": {
+                    "type": "string"
+                  },
+                  "heardAt": {
+                    "type": "number"
+                  },
                   "attemptOf": {
                     "type": "string"
                   },
@@ -63328,6 +63338,25 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
                         },
                         "failureReason": {
                           "type": "string"
+                        },
+                        "failureKind": {
+                          "type": "string",
+                          "enum": [
+                            "transport",
+                            "max_turns",
+                            "planning",
+                            "budget",
+                            "owner-rejected",
+                            "judgment-unavailable",
+                            "zombie",
+                            "other"
+                          ]
+                        },
+                        "dropped": {
+                          "type": "string"
+                        },
+                        "heardAt": {
+                          "type": "number"
                         },
                         "attemptOf": {
                           "type": "string"
@@ -68206,6 +68235,25 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
                               "items": {
                                 "type": "string"
                               }
+                            },
+                            "conflict": {
+                              "type": "object",
+                              "properties": {
+                                "branch": {
+                                  "type": "string"
+                                },
+                                "files": {
+                                  "type": "array",
+                                  "items": {
+                                    "type": "string"
+                                  }
+                                }
+                              },
+                              "required": [
+                                "branch",
+                                "files"
+                              ],
+                              "additionalProperties": false
                             }
                           },
                           "required": [
@@ -70275,6 +70323,25 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
                         "failureReason": {
                           "type": "string"
                         },
+                        "failureKind": {
+                          "type": "string",
+                          "enum": [
+                            "transport",
+                            "max_turns",
+                            "planning",
+                            "budget",
+                            "owner-rejected",
+                            "judgment-unavailable",
+                            "zombie",
+                            "other"
+                          ]
+                        },
+                        "dropped": {
+                          "type": "string"
+                        },
+                        "heardAt": {
+                          "type": "number"
+                        },
                         "attemptOf": {
                           "type": "string"
                         },
@@ -71585,6 +71652,25 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
                               },
                               "failureReason": {
                                 "type": "string"
+                              },
+                              "failureKind": {
+                                "type": "string",
+                                "enum": [
+                                  "transport",
+                                  "max_turns",
+                                  "planning",
+                                  "budget",
+                                  "owner-rejected",
+                                  "judgment-unavailable",
+                                  "zombie",
+                                  "other"
+                                ]
+                              },
+                              "dropped": {
+                                "type": "string"
+                              },
+                              "heardAt": {
+                                "type": "number"
                               },
                               "attemptOf": {
                                 "type": "string"
@@ -76746,6 +76832,25 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
                             "items": {
                               "type": "string"
                             }
+                          },
+                          "conflict": {
+                            "type": "object",
+                            "properties": {
+                              "branch": {
+                                "type": "string"
+                              },
+                              "files": {
+                                "type": "array",
+                                "items": {
+                                  "type": "string"
+                                }
+                              }
+                            },
+                            "required": [
+                              "branch",
+                              "files"
+                            ],
+                            "additionalProperties": false
                           }
                         },
                         "required": [
@@ -78815,6 +78920,25 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
                       "failureReason": {
                         "type": "string"
                       },
+                      "failureKind": {
+                        "type": "string",
+                        "enum": [
+                          "transport",
+                          "max_turns",
+                          "planning",
+                          "budget",
+                          "owner-rejected",
+                          "judgment-unavailable",
+                          "zombie",
+                          "other"
+                        ]
+                      },
+                      "dropped": {
+                        "type": "string"
+                      },
+                      "heardAt": {
+                        "type": "number"
+                      },
                       "attemptOf": {
                         "type": "string"
                       },
@@ -80125,6 +80249,25 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
                             },
                             "failureReason": {
                               "type": "string"
+                            },
+                            "failureKind": {
+                              "type": "string",
+                              "enum": [
+                                "transport",
+                                "max_turns",
+                                "planning",
+                                "budget",
+                                "owner-rejected",
+                                "judgment-unavailable",
+                                "zombie",
+                                "other"
+                              ]
+                            },
+                            "dropped": {
+                              "type": "string"
+                            },
+                            "heardAt": {
+                              "type": "number"
                             },
                             "attemptOf": {
                               "type": "string"
@@ -83061,6 +83204,7 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
                             "enum": [
                               "none",
                               "loosens-a-protection",
+                              "runs-later",
                               "steers-a-model",
                               "cannot-be-undone",
                               "spends-money",
@@ -84046,6 +84190,7 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
                   "enum": [
                     "none",
                     "loosens-a-protection",
+                    "runs-later",
                     "steers-a-model",
                     "cannot-be-undone",
                     "spends-money",
@@ -84405,6 +84550,7 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
                     "enum": [
                       "none",
                       "loosens-a-protection",
+                      "runs-later",
                       "steers-a-model",
                       "cannot-be-undone",
                       "spends-money",
@@ -90503,7 +90649,7 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
         "description": "Gracefully interrupt one fleet node: an agent ends its current turn, a trigger or schedule is paused. Answers the node ids acted on. A node whose capabilities do not include interruptible is refused with FLEET_ACTION_UNAVAILABLE; an unknown id with FLEET_NODE_NOT_FOUND.",
         "category": "fleet",
         "source": "builtin",
-        "access": "admin",
+        "access": "authenticated",
         "transport": [
           "ws"
         ],
@@ -91219,7 +91365,7 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
         "description": "Re-arm one paused trigger or schedule (for a trigger with an open breaker, this is the reset the breaker waits for). Answers the node ids acted on. A node whose capabilities do not include resumable is refused with FLEET_ACTION_UNAVAILABLE; an unknown id with FLEET_NODE_NOT_FOUND.",
         "category": "fleet",
         "source": "builtin",
-        "access": "admin",
+        "access": "authenticated",
         "transport": [
           "ws"
         ],
@@ -91823,7 +91969,7 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
         "description": "Hard-stop one fleet node through its owning manager (agent cancel, background process stop, watcher stop, workflow cancel, trigger or schedule remove, contract cancel, hosted ACP agent stop). `cascade: true` stops its descendants first. Answers the node ids actually acted on. A node whose capabilities do not include killable is refused with FLEET_ACTION_UNAVAILABLE; an unknown id with FLEET_NODE_NOT_FOUND.",
         "category": "fleet",
         "source": "builtin",
-        "access": "admin",
+        "access": "authenticated",
         "transport": [
           "ws"
         ],
@@ -118821,13 +118967,13 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
         "description": "Persist a meaningful project decision record for future TUI and agent context.",
         "category": "knowledge",
         "source": "builtin",
-        "access": "admin",
+        "access": "authenticated",
         "transport": [
           "http",
           "ws"
         ],
         "scopes": [
-          "write:knowledge"
+          "write:work-ledger"
         ],
         "http": {
           "method": "POST",
@@ -120176,13 +120322,13 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
         "description": "Remove completed project work-plan tasks. Defaults to clearing status done only.",
         "category": "knowledge",
         "source": "builtin",
-        "access": "admin",
+        "access": "authenticated",
         "transport": [
           "http",
           "ws"
         ],
         "scopes": [
-          "write:knowledge"
+          "write:work-ledger"
         ],
         "http": {
           "method": "POST",
@@ -121125,13 +121271,13 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
         "description": "Create a durable project-scoped work-plan task for TUI, WebUI, APK, daemon planning, or contract correlation.",
         "category": "knowledge",
         "source": "builtin",
-        "access": "admin",
+        "access": "authenticated",
         "transport": [
           "http",
           "ws"
         ],
         "scopes": [
-          "write:knowledge"
+          "write:work-ledger"
         ],
         "http": {
           "method": "POST",
@@ -121896,13 +122042,13 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
         "description": "Delete a durable project-scoped work-plan task.",
         "category": "knowledge",
         "source": "builtin",
-        "access": "admin",
+        "access": "authenticated",
         "transport": [
           "http",
           "ws"
         ],
         "scopes": [
-          "write:knowledge"
+          "write:work-ledger"
         ],
         "http": {
           "method": "DELETE",
@@ -122799,13 +122945,13 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
         "description": "Set a task's status and optional reason.",
         "category": "knowledge",
         "source": "builtin",
-        "access": "admin",
+        "access": "authenticated",
         "transport": [
           "http",
           "ws"
         ],
         "scopes": [
-          "write:knowledge"
+          "write:work-ledger"
         ],
         "http": {
           "method": "POST",
@@ -123492,13 +123638,13 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
         "description": "Patch a durable project-scoped work-plan task. Returns the task before and after and the plan revision; read the snapshot for the whole plan.",
         "category": "knowledge",
         "source": "builtin",
-        "access": "admin",
+        "access": "authenticated",
         "transport": [
           "http",
           "ws"
         ],
         "scopes": [
-          "write:knowledge"
+          "write:work-ledger"
         ],
         "http": {
           "method": "PATCH",
@@ -124469,13 +124615,13 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
         "description": "Replace task ordering for the current project work plan. Returns the tasks whose position changed and the plan revision.",
         "category": "knowledge",
         "source": "builtin",
-        "access": "admin",
+        "access": "authenticated",
         "transport": [
           "http",
           "ws"
         ],
         "scopes": [
-          "write:knowledge"
+          "write:work-ledger"
         ],
         "http": {
           "method": "POST",
@@ -132352,7 +132498,7 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
         "description": "Add a memory record to the daemon-owned canonical store. The daemon is the single writer for its store; a client surface routes its writes here instead of opening the store file, so two processes never write the same sql.js file. New records default to confidence 60 (the recall floor) and reviewState fresh unless the review block overrides them. An optional caller-generated id (mem_<base36 time>_<8 hex>) makes the add safe to resend: the same id with the same record returns the stored row, the same id with a different record is refused.",
         "category": "memory",
         "source": "builtin",
-        "access": "admin",
+        "access": "authenticated",
         "transport": [
           "http",
           "ws"
@@ -132602,7 +132748,7 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
         "description": "Permanently delete a memory record and its links from the canonical store. Delete means delete: the record is removed from the store and the semantic index, not merely flagged. Returns { deleted: false } when no record with that id existed, an honest boolean, never a 200 that pretends a phantom row was removed.",
         "category": "memory",
         "source": "builtin",
-        "access": "admin",
+        "access": "authenticated",
         "transport": [
           "http",
           "ws"
@@ -133351,7 +133497,7 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
         "description": "Create a directed relation (e.g. \"supersedes\", \"caused\") from the path record to a target record. Returns 404 when either endpoint does not exist, never a 200 that pretends a link was made between records that do not both exist.",
         "category": "memory",
         "source": "builtin",
-        "access": "admin",
+        "access": "authenticated",
         "transport": [
           "http",
           "ws"
@@ -133495,7 +133641,7 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
       {
         "id": "memory.records.list",
         "title": "List Memory Records",
-        "description": "Bulk read from the canonical store: a literal (non-semantic) search returning the matching records as a plain array. A call that names a project (its call context, or project in the filter) reads that project's records and the ones that belong to no project; a call naming none reads only the records that belong to no project; everyProject (the owner himself only, his place's \"Every project\") reads every record. This is the read a client surface uses instead of opening the store file for its browse/list and knowledge-injection paths.",
+        "description": "Bulk read from the canonical store: a literal (non-semantic) search returning the matching records as a plain array. A call that names a project (its call context, or project in the filter) reads that project's records and the ones that belong to no project; a call naming none reads only the records that belong to no project; everyProject (the owner in person only, their place's \"Every project\") reads every record. This is the read a client surface uses instead of opening the store file for its browse/list and knowledge-injection paths.",
         "category": "memory",
         "source": "builtin",
         "access": "authenticated",
@@ -134269,7 +134415,7 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
         "description": "Edit a record's content fields (class, scope, summary, detail, tags) and its temporal validity window (validFrom, validUntil) in the canonical store; a changed class refiles the record in place, keeping its id. This is distinct from the review update: it changes the record itself, e.g. moving scope project→team promotes a record to the shared surface. For validFrom/validUntil a number sets the bound, null clears it, and an omitted field leaves it unchanged, so a proposal that changes only the window can be applied. Returns 404 when no record with that id exists.",
         "category": "memory",
         "source": "builtin",
-        "access": "admin",
+        "access": "authenticated",
         "transport": [
           "http",
           "ws"
@@ -134481,7 +134627,7 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
         "description": "Update a record's review signal (reviewState, confidence, reviewer, staleReason) in the canonical store. Marking a record stale or contradicted flags it so the recall-honesty contract will never inject it into a prompt again regardless of confidence. Returns 404 when no record with that id exists.",
         "category": "memory",
         "source": "builtin",
-        "access": "admin",
+        "access": "authenticated",
         "transport": [
           "http",
           "ws"
@@ -138241,7 +138387,7 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
       {
         "id": "pairing.handoff.create",
         "title": "Create Pairing Hand-off",
-        "description": "The owner's pairing flow. Mint a per-device token AND assemble the set-up OFFER SET this daemon can satisfy (notifications, carrying the VAPID public key; relay; passkey step-up), so a freshly-paired surface can complete them in one pass. Returns the offer set, the `#pair=<token>` deep-link fragment (the exact URL-fragment shape the web app consumes, token in `pair=`, offers in `offers=`), a full deep link when a web origin is configured, and that origin's honest TLS/capability POSTURE: the one plain-http-on-LAN notice line (stated here, never a nag) plus per-capability availability labels so surfaces render \"needs https: set up a secure address in Settings, General, Secure address (...)\" instead of dead buttons. The token secret is returned exactly once. When a paired device asks, the new token records that device (mintedBy) and is revoked with it; a device whose own pairing is gone is refused with 403 PAIRING_TOKEN_NOT_FOUND. Each offer is independently declinable at completion. A pairing minted narrower than full authority cannot complete a hand-off (pairing.handoff.complete needs what stepup.credentials.register needs), so it is offered nothing to complete and gets its token alone. The device it pairs is recorded as the owner's own (origin owner-pairing, madeBy owner) only when the owner himself asks (his signed-in session, or his own terminal program with a verified registration) with full authority; from anyone else (an admin, a script, the operator token alone, any device, the Agent's credential, a narrowed caller, a call run on his yes to another's request) it is recorded as automation. `fromSharedToken: true` is how a client signed in with the shared operator token (the owner's own browser) moves onto its own token: it pairs itself here, exempt from device.nodes.maxPaired as pairing.tokens.migrate is, and the token it gets is an owner device; only a caller on the shared token may send it (400 INVALID_ARGUMENT otherwise). No code is made that a phone could not open: when the daemon's web address is reachable only from its own machine (a loopback address, or controlPlane.enabled off without web.publicBaseUrl naming it), the call is refused with 409 PAIRING_CODE_UNREACHABLE, saying why and the command to run in a terminal on the daemon's machine (goodvibes-daemon webui enable --lan); pairing.posture.get gives the same decision with numbered steps before anything is minted. `serveToNetwork: true` is the owner's yes to \"Phones on your network cannot reach GoodVibes yet. Serve it to your network?\", which a pairing surface asks in place of that refusal: the daemon writes what goodvibes-daemon webui enable --lan writes, waits for its own listener to report it is bound again (TRANSPORT_CONNECTED; no sleep, no poll), and then mints for the address phones can open, in the same call; refused 409 PAIRING_CODE_UNREACHABLE only when it still cannot be reached. `fromSharedToken: true`, and `forThisMachine: true` (a code for a browser on the daemon's own machine), are not refused for that.",
+        "description": "The owner's pairing flow. Mint a per-device token AND assemble the set-up OFFER SET this daemon can satisfy (notifications, carrying the VAPID public key; relay; passkey step-up), so a freshly-paired surface can complete them in one pass. Returns the offer set, the `#pair=<token>` deep-link fragment (the exact URL-fragment shape the web app consumes, token in `pair=`, offers in `offers=`), a full deep link when a web origin is configured, and that origin's honest TLS/capability POSTURE: the one plain-http-on-LAN notice line (stated here, never a nag) plus per-capability availability labels so surfaces render \"needs https: set up a secure address in Settings, General, Secure address (...)\" instead of dead buttons. The token secret is returned exactly once. When a paired device asks, the new token records that device (mintedBy) and is revoked with it; a device whose own pairing is gone is refused with 403 PAIRING_TOKEN_NOT_FOUND. Each offer is independently declinable at completion. A pairing minted narrower than full authority cannot complete a hand-off (pairing.handoff.complete needs what stepup.credentials.register needs), so it is offered nothing to complete and gets its token alone. The device it pairs is recorded as the owner's own (origin owner-pairing, madeBy owner) only when the owner in person asks (their signed-in session, or their own terminal program with a verified registration) with full authority; from anyone else (an admin, a script, the operator token alone, any device, the Agent's credential, a narrowed caller, a call run on the owner's yes to another's request) it is recorded as automation. `fromSharedToken: true` is how a client signed in with the shared operator token (the owner's own browser) moves onto its own token: it pairs itself here, exempt from device.nodes.maxPaired as pairing.tokens.migrate is, and the token it gets is an owner device; only a caller on the shared token may send it (400 INVALID_ARGUMENT otherwise). No code is made that a phone could not open: when the daemon's web address is reachable only from its own machine (a loopback address, or controlPlane.enabled off without web.publicBaseUrl naming it), the call is refused with 409 PAIRING_CODE_UNREACHABLE, saying why and the command to run in a terminal on the daemon's machine (goodvibes-daemon webui enable --lan); pairing.posture.get gives the same decision with numbered steps before anything is minted. `serveToNetwork: true` is the owner's yes to \"Phones on your network cannot reach GoodVibes yet. Serve it to your network?\", which a pairing surface asks in place of that refusal: the daemon writes what goodvibes-daemon webui enable --lan writes, waits for its own listener to report it is bound again (TRANSPORT_CONNECTED; no sleep, no poll), and then mints for the address phones can open, in the same call; refused 409 PAIRING_CODE_UNREACHABLE only when it still cannot be reached. `fromSharedToken: true`, and `forThisMachine: true` (a code for a browser on the daemon's own machine), are not refused for that.",
         "category": "pairing",
         "source": "builtin",
         "access": "authenticated",
@@ -138447,7 +138593,7 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
       {
         "id": "pairing.outsideAgent.issue",
         "title": "Issue the Outside Agent Credential",
-        "description": "The one credential this daemon gives `goodvibes-daemon mcp serve`, asked for with the operator token: a paired-device token named \"Outside agent (goodvibes-daemon mcp serve)\" (origin automation), with no person's claim, answered once with `token` and `id`. Making it is the owner's own act: from anyone but him it is put to him as ONE question, \"Let the outside agent \"goodvibes-daemon mcp serve\" work in <project>?\" when the call names the folder it was started in (`project`), else its credential for shared things only; his yes issues it and gives it that project. A second ask while it is kept is refused 409 OUTSIDE_AGENT_ISSUED (revoke it among the paired devices to have a new one issued). Every act of it the owner decides is put to him, and the first time it names a project it was not given he is asked whether it may work there.",
+        "description": "The one credential this daemon gives `goodvibes-daemon mcp serve`, asked for with the operator token: a paired-device token named \"Outside agent (goodvibes-daemon mcp serve)\" (origin automation), with no person's claim, answered once with `token` and `id`. Making it is the owner's own act: from anyone but the owner it is put to the owner as ONE question, \"Let the outside agent \"goodvibes-daemon mcp serve\" work in <project>?\" when the call names the folder it was started in (`project`), else its credential for shared things only; the owner's yes issues it and gives it that project. A second ask while it is kept is refused 409 OUTSIDE_AGENT_ISSUED (revoke it among the paired devices to have a new one issued). Every act of it the owner decides is put to the owner, and the first time it names a project it was not given the owneris asked whether it may work there.",
         "category": "pairing",
         "source": "builtin",
         "access": "admin",
@@ -138769,7 +138915,7 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
       {
         "id": "pairing.tokens.create",
         "title": "Mint Paired Device Token",
-        "description": "Mint a new named per-device operator token and return its plaintext secret EXACTLY ONCE (for a QR / pairing hand-off). Only a hash is persisted; the secret is never listed or returned again. The name is user-visible and editable. When a paired device asks, the new token records that device (mintedBy) and is revoked with it; a device whose own pairing is gone is refused with 403 PAIRING_TOKEN_NOT_FOUND. client \"agent\" mints the GoodVibes Agent's credential for the calls it makes on the owner's behalf: the daemon reports it as credential \"agent\" and judges every call made with it; it is listed with client \"agent\" and does not count toward device.nodes.maxPaired. Send an attemptId and send the same one again when a reply is lost: while the token that attempt produced is unused, the repeat returns that token (same id) under a new secret. scopes limits the device to that list of operator scopes (for example read:sessions and write:sessions for a phone that only chats: it reads the chats it made under them); left out, the device holds full operator authority. A caller grants only scopes it holds: a narrowed caller's token inherits its list when scopes is left out, and naming a scope the caller does not hold is 403 MISSING_SCOPE. A token minted here is automation (origin automation): it does not make the owner's own acts, such as loosening a security, permission, judgment or payment setting. A device the owner pairs himself is paired with pairing.handoff.create.",
+        "description": "Mint a new named per-device operator token and return its plaintext secret EXACTLY ONCE (for a QR / pairing hand-off). Only a hash is persisted; the secret is never listed or returned again. The name is user-visible and editable. When a paired device asks, the new token records that device (mintedBy) and is revoked with it; a device whose own pairing is gone is refused with 403 PAIRING_TOKEN_NOT_FOUND. client \"agent\" mints the GoodVibes Agent's credential for the calls it makes on the owner's behalf: the daemon reports it as credential \"agent\" and judges every call made with it; it is listed with client \"agent\" and does not count toward device.nodes.maxPaired. Send an attemptId and send the same one again when a reply is lost: while the token that attempt produced is unused, the repeat returns that token (same id) under a new secret. scopes limits the device to that list of operator scopes (for example read:sessions and write:sessions for a phone that only chats: it reads the chats it made under them); left out, the device holds full operator authority. A caller grants only scopes it holds: a narrowed caller's token inherits its list when scopes is left out, and naming a scope the caller does not hold is 403 MISSING_SCOPE. A token minted here is automation (origin automation): it does not make the owner's own acts, such as loosening a security, permission, judgment or payment setting. A device the owner pairs in person is paired with pairing.handoff.create.",
         "category": "pairing",
         "source": "builtin",
         "access": "authenticated",
@@ -138852,7 +138998,7 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
       {
         "id": "pairing.tokens.delete",
         "title": "Revoke Paired Device Token",
-        "description": "Revoke (permanently delete) one paired device token. Revocation is immediate: the token fails the very next request with a 401, and every token this device minted is revoked with it (listed in alsoRevoked); every other paired device keeps working. An unknown id is a 404 PAIRING_TOKEN_NOT_FOUND, never a 200-noop. A token the caller minted, or the caller's own token, is revoked at once; any other token (a device the owner paired, another principal's) is the owner's own act: from an admin who is not the owner it is put to the owner (202 OWNER_APPROVAL_PENDING) and revoked when he approves it, and any other credential is refused 403 OWNER_ONLY.",
+        "description": "Revoke (permanently delete) one paired device token. Revocation is immediate: the token fails the very next request with a 401, and every token this device minted is revoked with it (listed in alsoRevoked); every other paired device keeps working. An unknown id is a 404 PAIRING_TOKEN_NOT_FOUND, never a 200-noop. A token the caller minted, or the caller's own token, is revoked at once; any other token (a device the owner paired, another principal's) is the owner's own act: from an admin who is not the owner it is put to the owner (202 OWNER_APPROVAL_PENDING) and revoked when the owner approves it, and any other credential is refused 403 OWNER_ONLY.",
         "category": "pairing",
         "source": "builtin",
         "access": "authenticated",
@@ -138968,7 +139114,7 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
       {
         "id": "pairing.tokens.list",
         "title": "List Paired Device Tokens",
-        "description": "List the per-pairing operator tokens (paired devices/browsers) as redacted views: id, user-visible name, created timestamp, last-seen timestamp, mintedBy (the paired device that minted it, when one did), scopes (the operator scopes it holds, when it was paired with a narrower list; absent means full operator authority) and origin: `owner-pairing` for a device the owner paired himself (pairing.handoff.create or the pairing screen asked by the owner himself, his sign-in or his verified program, with full authority, completed with the code his own screen showed; pairing.tokens.migrate by the owner himself), which answers an approval another caller raised and does his native work, and is never the owner himself (its own risky acts are put to him), or `automation` for every other token (pairing.tokens.create, a migration or mint made on his yes to someone else's request, a narrowed list, the Agent's credential, and every token minted before origin was recorded), which answers nothing. Origin is recorded at the mint and never changes; to make a device an owner device, pair it again from the pairing screen and revoke the old token. The token secret is never stored in listable form and is never returned.",
+        "description": "List the per-pairing operator tokens (paired devices/browsers, and each one made that no device has used yet and that has not expired, marked waitingForFirstUse so it can be revoked before its first use) as redacted views: id, user-visible name, created timestamp, last-seen timestamp, mintedBy (the paired device that minted it, when one did), scopes (the operator scopes it holds, when it was paired with a narrower list; absent means full operator authority) and origin: `owner-pairing` for a device the owner paired in person (pairing.handoff.create or the pairing screen asked by the owner in person, their sign-in or their verified program, with full authority, completed with the code their own screen showed; pairing.tokens.migrate by the owner in person), which answers an approval another caller raised and does the owner's native work, and is never the owner in person (its own risky acts are put to the owner), or `automation` for every other token (pairing.tokens.create, a migration or mint made on the owner's yes to someone else's request, a narrowed list, the Agent's credential, and every token minted before origin was recorded), which answers nothing. Origin is recorded at the mint and never changes; to make a device an owner device, pair it again from the pairing screen and revoke the old token. The token secret is never stored in listable form and is never returned.",
         "category": "pairing",
         "source": "builtin",
         "access": "authenticated",
@@ -139019,6 +139165,9 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
                       "owner-pairing",
                       "automation"
                     ]
+                  },
+                  "waitingForFirstUse": {
+                    "type": "boolean"
                   }
                 },
                 "required": [
@@ -139169,7 +139318,7 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
       {
         "id": "pairing.tokens.revokeShared",
         "title": "Revoke The Legacy Shared Token",
-        "description": "Revoke the shared operator token by replacing it: every copy handed to another device stops working immediately, and the daemon writes the new value to its operator-tokens.json, where the apps on its own machine read it, so they stay signed in. Other devices use per-device pairing tokens (or user sessions). The owner's own act (access.withdraw): any credential but the owner's own (the operator token, a device he paired himself, his sign-in) is refused 403 OWNER_ONLY, an admin's with the reason that it is the owner's to decide. Refused with SHARED_TOKEN_NOT_REPLACEABLE (409) when the daemon serves a token set by GOODVIBES_DAEMON_TOKEN. Not safe to repeat: each call replaces the shared token again.",
+        "description": "Revoke the shared operator token by replacing it: every copy handed to another device stops working immediately, and the daemon writes the new value to its operator-tokens.json, where the apps on its own machine read it, so they stay signed in. Other devices use per-device pairing tokens (or user sessions). The owner's own act (access.withdraw): any credential but the owner's own (the operator token, a device the owner paired in person, the owner's sign-in) is refused 403 OWNER_ONLY, an admin's with the reason that it is the owner's to decide. Refused with SHARED_TOKEN_NOT_REPLACEABLE (409) when the daemon serves a token set by GOODVIBES_DAEMON_TOKEN. Not safe to repeat: each call replaces the shared token again.",
         "category": "pairing",
         "source": "builtin",
         "access": "admin",
@@ -141465,7 +141614,7 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
       {
         "id": "payments.standing.create",
         "title": "Authorise a Purchase in Advance",
-        "description": "The owner authorises, in advance, a purchase a schedule or trigger may start without asking him: the item in his words, the shops, the most one purchase may come to, the most all of them may come to every periodDays days, and an optional last day. Amounts are read in the budget currency. Every other limit still applies to each purchase: the budgets, the per-purchase ceiling and the veto or approval window. Its confirmation is owner-request: confirm: true from a credential that states a person asked, else CONFIRMATION_REQUIRED; the Money place (payments.repeat) sends both. The owner's own act: an agent cannot add one.",
+        "description": "The owner authorises, in advance, a purchase a schedule or trigger may start without asking them: the item in the owner's words, the shops, the most one purchase may come to, the most all of them may come to every periodDays days, and an optional last day. Amounts are read in the budget currency. Every other limit still applies to each purchase: the budgets, the per-purchase ceiling and the veto or approval window. Its confirmation is owner-request: confirm: true from a credential that states a person asked, else CONFIRMATION_REQUIRED; the Money place (payments.repeat) sends both. The owner's own act: an agent cannot add one.",
         "category": "payments",
         "source": "builtin",
         "access": "admin",
@@ -141685,7 +141834,7 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
       {
         "id": "payments.standing.list",
         "title": "Standing Purchase Authorisations",
-        "description": "The purchases the owner authorised in advance for runs nobody starts in the moment (a schedule or a trigger): for each, its id, the item in his words, the shops it may be bought from, the most one purchase may come to, the most all of them may come to over its period, what is spent or held in the current period and what is left, and when it expires. A scheduled purchase names one of these ids as standingId on payments.checkout.begin.",
+        "description": "The purchases the owner authorised in advance for runs nobody starts in the moment (a schedule or a trigger): for each, its id, the item in the owner's words, the shops it may be bought from, the most one purchase may come to, the most all of them may come to over its period, what is spent or held in the current period and what is left, and when it expires. A scheduled purchase names one of these ids as standingId on payments.checkout.begin.",
         "category": "payments",
         "source": "builtin",
         "access": "authenticated",
@@ -142954,7 +143103,7 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
       {
         "id": "profile.forget",
         "title": "Forget Profile Line",
-        "description": "Delete a mechanical field and every retained history comment for it, or one prose line addressed by its section plus its exact text. Never by line position: the owner edits this file himself, so an index taken from an earlier read may name a different line by the time the delete arrives. Text that no longer matches removes nothing and says so, rather than deleting the nearest thing. No tombstone, no deleted flag, no retention window, delete means delete. Forgetting something that was not there reports that honestly instead of returning success. Authority-gated exactly like a write: an injection that cannot add a fact must not be able to remove one.",
+        "description": "Delete a mechanical field and every retained history comment for it, or one prose line addressed by its section plus its exact text. Never by line position: the owner edits this file by hand, so an index taken from an earlier read may name a different line by the time the delete arrives. Text that no longer matches removes nothing and says so, rather than deleting the nearest thing. No tombstone, no deleted flag, no retention window, delete means delete. Forgetting something that was not there reports that honestly instead of returning success. Authority-gated exactly like a write: an injection that cannot add a fact must not be able to remove one.",
         "category": "profile",
         "source": "builtin",
         "access": "admin",
@@ -150882,16 +151031,16 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
       {
         "id": "remote.work.cancel",
         "title": "Cancel Remote Work",
-        "description": "Cancel a remote work item.",
+        "description": "Cancel a remote work item. A caller below an admin cancels only work queued for a session or schedule of its own.",
         "category": "remote",
         "source": "builtin",
-        "access": "admin",
+        "access": "authenticated",
         "transport": [
           "http",
           "ws"
         ],
         "scopes": [
-          "write:remote"
+          "write:sessions"
         ],
         "http": {
           "method": "POST",
@@ -159744,7 +159893,7 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
         "description": "A terminal program that runs its own session (the terminal app, the Agent) tells the daemon it made, pruned or removed a workspace checkpoint for that session, so clients subscribed to the daemon hear of it: the daemon announces it as the runtime event LIST_CHANGED with `list: \"checkpoints\"`, the `change` given and `checkpointId` as its `id`. Nothing is stored and nothing is read from disk; the notice only announces. The session must be one the daemon knows (registered with sessions.register): another id is refused 404 SESSION_NOT_FOUND and nothing is announced. A repeat announces again, which is harmless: a client reads the checkpoint list again.",
         "category": "sessions",
         "source": "builtin",
-        "access": "admin",
+        "access": "authenticated",
         "transport": [
           "http",
           "ws"
@@ -159809,7 +159958,7 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
         "description": "Mark a shared session as closed.",
         "category": "sessions",
         "source": "builtin",
-        "access": "admin",
+        "access": "authenticated",
         "transport": [
           "http",
           "ws"
@@ -160209,10 +160358,10 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
       {
         "id": "sessions.create",
         "title": "Create Shared Session",
-        "description": "Create a shared session for a surface, route, or web client.",
+        "description": "Create a shared session for a surface, route, or web client. `workingDirectory` names the project it belongs to (checked as every call's project is); the session is its caller's, kept as who made it. A caller below an admin makes one only in a project the owner gave it, or one of no project that only it and the owner reach.",
         "category": "sessions",
         "source": "builtin",
-        "access": "admin",
+        "access": "authenticated",
         "transport": [
           "http",
           "ws"
@@ -160238,6 +160387,9 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
               "type": "string"
             },
             "surfaceId": {
+              "type": "string"
+            },
+            "workingDirectory": {
               "type": "string"
             }
           },
@@ -160426,7 +160578,7 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
         "description": "Permanently remove a shared session record and its queued inputs/messages from the home-scoped store. A distinct, explicit hard-delete verb, NEVER triggered by close; closed sessions stay listable (includeClosed) and deletionRetentionMs semantics for non-deleted records are untouched. Requires the session to already be closed: deleting a still-active session is rejected with 409 SESSION_ACTIVE (close it, then delete). An unknown or already-deleted id is a 404 SESSION_NOT_FOUND, never a 200-noop. Emits control.session_update (session-deleted) so subscribers drop the row live.",
         "category": "sessions",
         "source": "builtin",
-        "access": "admin",
+        "access": "authenticated",
         "transport": [
           "http",
           "ws"
@@ -160493,7 +160645,7 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
         "description": "Remove a surface's participant and its route binding from a session so that surface stops receiving updates, WITHOUT closing or killing the session (detach != close != kill). Every participant carrying the given surfaceId is removed and any route binding they alone held is unbound; the session and all other participants keep running. Idempotent: detaching an already-detached surface, or detaching from a closed session, is a no-op success. An unknown session is a 404.",
         "category": "sessions",
         "source": "builtin",
-        "access": "admin",
+        "access": "authenticated",
         "transport": [
           "http",
           "ws"
@@ -160715,7 +160867,7 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
         "description": "Queue a deferred follow-up for a shared session so it runs after the current agent completes, or spawn immediately when the session is idle.",
         "category": "sessions",
         "source": "builtin",
-        "access": "admin",
+        "access": "authenticated",
         "transport": [
           "http",
           "ws"
@@ -163313,7 +163465,7 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
         "description": "Cancel a queued shared-session input before it is delivered or spawned. An input already being answered (delivered/spawned) or already ended is refused with 409 `CANCEL_NOT_ALLOWED`, the input in its actual state, and no cancel event; an already-cancelled input answers 200.",
         "category": "sessions",
         "source": "builtin",
-        "access": "admin",
+        "access": "authenticated",
         "transport": [
           "http",
           "ws"
@@ -163586,7 +163738,7 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
         "description": "A live registered surface reports that it collected a queued input (moves it to `delivered`) or finished acting on it (`consumed:true` moves it to `completed`). This is how a surface-managed session, where steer/follow-up inputs queue for the surface rather than spawn a daemon executor, closes the input lifecycle honestly. Only queued/delivered inputs advance; a report on an input that already ended (cancelled, failed, answered by a daemon agent) is refused with 409 `INPUT_NOT_DELIVERABLE` naming its state, binds no agent and forwards no answer. One exception: an input a daemon restart cancelled while a surface in another process was answering it completes on that surface's `consumed:true` report. `agentId` names the agent the surface is running for this input: it binds the reply so a message that arrived over a channel gets its answer routed back to that conversation, the same binding the daemon makes for the executors it spawns itself. `surfaceInstance`, sent with `agentId`, names the surface process running that agent; it is kept in the input's `metadata.deliveringSurfaceInstance` (cleared by a report that names none), so a surface that restarted can fail the inputs a process that is gone was answering. `answer` (sent with `consumed:true`, optionally with `status`) is the output that agent finished with, the daemon writes it into the session and delivers it to the channel. `claim:true` is how a surface takes an input before it starts work on it: it succeeds for one caller only, for a `queued` input, or for a `delivered` one with no agent bound for at least two minutes (a claimant that died before starting it). Any other caller is refused with 409 `INPUT_NOT_CLAIMABLE` naming the state, and nothing changes. A granted claim is recorded as the input's `metadata.claimEpoch` (1 for the first claimant, one more for each later one): that number is the claimant's token. `claim:true` with `claimEpoch` renews the caller's own claim (restarts the two-minute lease, epoch unchanged) while no agent is bound; a surface holds its claim this way while its work waits for capacity. Every other report on a claimed input must carry the current `claimEpoch`: a report from a claimant that was superseded is refused with 409 `INPUT_NOT_CLAIMABLE` and binds nothing.",
         "category": "sessions",
         "source": "builtin",
-        "access": "admin",
+        "access": "authenticated",
         "transport": [
           "http",
           "ws"
@@ -164667,7 +164819,7 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
         "description": "Append a user message to a shared session. Omitted `kind` defaults to `message` conversation routing; send `kind: \"task\"` to request agent or contract task continuation.",
         "category": "sessions",
         "source": "builtin",
-        "access": "admin",
+        "access": "authenticated",
         "transport": [
           "http",
           "ws"
@@ -165810,7 +165962,7 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
       {
         "id": "sessions.permissionMode.set",
         "title": "Set Session Permission Mode",
-        "description": "Set ask-me, jev-decides, just-vibes, or yolo execution, or enter the read-only plan posture. Admin only, because it can loosen security: yolo runs every action without safety denials, and for the local runtime session (no hosted or channel mode of its own) it rewrites the daemon-wide permissions.mode. A hosted session and a channel session with its own mode change only that session; a web chat (companion-chat) has no mode of its own, so setting it rewrites the daemon-wide permissions.mode. Emits runtime.gate (PRESET_CHANGED) so every surface stays in sync. Other session ids answer 404 SESSION_NOT_LOCAL. A looser mode asked with a token minted for automation is not set (a device the owner paired himself sets it at once): it is put to the owner as an approval only his own credential answers, the answer is 202 with code OWNER_APPROVAL_PENDING, the unchanged `mode` and the `approvalId`, and the mode changes when he approves it.",
+        "description": "Set ask-me, jev-decides, just-vibes, or yolo execution, or enter the read-only plan posture. Admin only, because it can loosen security: yolo runs every action without safety denials, and for the local runtime session (no hosted or channel mode of its own) it rewrites the daemon-wide permissions.mode. A hosted session and a channel session with its own mode change only that session; a web chat (companion-chat) has no mode of its own, so setting it rewrites the daemon-wide permissions.mode. Emits runtime.gate (PRESET_CHANGED) so every surface stays in sync. Other session ids answer 404 SESSION_NOT_LOCAL. A looser mode asked with a token minted for automation is not set (a device the owner paired in person sets it at once): it is put to the owner as an approval only the owner's own credential answers, the answer is 202 with code OWNER_APPROVAL_PENDING, the unchanged `mode` and the `approvalId`, and the mode changes when the owner approves it.",
         "category": "sessions",
         "source": "builtin",
         "access": "admin",
@@ -166163,7 +166315,7 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
         "description": "Idempotently register (or heartbeat) a session keyed on a caller-supplied id, carrying its kind, project, and participant identity. Re-calling with the same id advances the participant lastSeenAt (heartbeat). Registering against a CLOSED session does NOT silently reopen it, the heartbeat is recorded and the still-closed record is returned with reopened=false and conflict={status:closed}; pass reopen=true to reopen. A titled session is never renamed by the heartbeat. An unknown kind is rejected (400), not coerced. Prefer this over sessions.create for external runtimes that own their session id.",
         "category": "sessions",
         "source": "builtin",
-        "access": "admin",
+        "access": "authenticated",
         "transport": [
           "http",
           "ws"
@@ -166453,7 +166605,7 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
         "description": "Reopen a previously closed shared session.",
         "category": "sessions",
         "source": "builtin",
-        "access": "admin",
+        "access": "authenticated",
         "transport": [
           "http",
           "ws"
@@ -166906,7 +167058,7 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
         "description": "Deliver a live steering message to the active agent for a shared session, optionally falling back to spawn when explicitly allowed.",
         "category": "sessions",
         "source": "builtin",
-        "access": "admin",
+        "access": "authenticated",
         "transport": [
           "http",
           "ws"
@@ -168776,7 +168928,7 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
         "description": "Cancel an in-flight runtime task.",
         "category": "tasks",
         "source": "builtin",
-        "access": "admin",
+        "access": "authenticated",
         "transport": [
           "http",
           "ws"
@@ -168942,7 +169094,7 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
         "description": "Start an agent on `task`. Without `sessionId`, `routeId` or `surfaceKind` the agent runs on its own and the answer (202) carries `agentId`, `status`, `task`, `model` and `tools`. With `sessionId` the task goes to that existing session: an id this daemon does not hold is 404 SESSION_NOT_FOUND and nothing is recorded or started, a closed session is 409 SESSION_CLOSED; leave `sessionId` out (with `routeId` or `surfaceKind`) to start a new session, whose id the answer carries. In a session the answer (202) carries `mode`: `spawn` (an agent was started, `agentId`), `continued-live` or `queued-follow-up` (handed to the agent already running, `inputId`), `queued-for-surface` (queued for the live surface that runs the session's turns, `inputId`, `agentId: null`; no daemon agent starts), or 409 with `mode` `rejected` and `acknowledged: false`. `tools` or routing's `tools` sent as `[]` is 400: an empty list selects no tool; leave it out for the default tools. `model`, `provider` and `tools` choose what the agent runs on, and win over the same choice in `routing`; routing's `modelId`, `providerId`, `tools`, `fallbackModels`, `providerSelection`, `providerFailurePolicy`, `executionIntent` and `reasoningEffort` are applied. An unknown or ambiguous model is 400 MODEL_NOT_FOUND or MODEL_AMBIGUOUS and nothing starts.",
         "category": "tasks",
         "source": "builtin",
-        "access": "admin",
+        "access": "authenticated",
         "transport": [
           "http",
           "ws"
@@ -169603,7 +169755,7 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
         "description": "Retry a failed or cancelled agent task: a new agent runs the same task on the model, provider, tools, routing (fallback models, provider selection and failure policy, reasoning effort), execution limits and contract settings the task was started with, in the session that started it. The task keeps its id and its `owner` becomes the new agent, returned as `agentId`. When the record of the agent that ran it is no longer held, nothing is started (409 TASK_SETTINGS_UNAVAILABLE).",
         "category": "tasks",
         "source": "builtin",
-        "access": "admin",
+        "access": "authenticated",
         "transport": [
           "http",
           "ws"
@@ -174698,7 +174850,7 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
         "description": "Cancel a trigger; a command an on-exit trigger supervises is stopped.",
         "category": "watchers",
         "source": "builtin",
-        "access": "admin",
+        "access": "authenticated",
         "transport": [
           "ws"
         ],
@@ -174832,7 +174984,7 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
         "description": "Create a trigger from a definition { id, label, description?, spec, action?, ownerSessionId? }. spec.kind is on-exit, stream or condition; commands are argv, never a shell line. The action defaults to an agent turn, whose answer goes to the channel its deliverTo names (telegram, slack:C123) or else to the owner inbox; an action-grant action names a grant the owner registered. Needs watchers.triggers.enabled.",
         "category": "watchers",
         "source": "builtin",
-        "access": "admin",
+        "access": "authenticated",
         "transport": [
           "ws"
         ],
@@ -175210,7 +175362,7 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
         "description": "The newest runs of one trigger (default 20, at most 200): when, outcome, detail and how a watched command ended.",
         "category": "watchers",
         "source": "builtin",
-        "access": "admin",
+        "access": "authenticated",
         "transport": [
           "ws"
         ],
@@ -175372,10 +175524,10 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
       {
         "id": "watchers.triggers.list",
         "title": "List triggers",
-        "description": "List the supervised triggers: id, label, kind, what each watches, state, how often it fired and its last error.",
+        "description": "List the supervised triggers: id, label, kind, what each watches, state, how often it fired and its last error. A caller below an admin is answered the triggers of the projects the owner gave it.",
         "category": "watchers",
         "source": "builtin",
-        "access": "admin",
+        "access": "authenticated",
         "transport": [
           "ws"
         ],
@@ -175472,7 +175624,7 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
         "description": "Read the blanks of \"Watch for something\" (the inputs of the triggers.watch capability by name: name, kind finishes|prints|page|file|written, command one word per line, match, url, path, every, then ask|run, say, deliver, grant, definition) into what would be kept: summary is what it watches and does in one sentence, and input is the body of watchers.triggers.create ({ definition }). Nothing is made. A grant is looked up among the commands the owner let triggers run.",
         "category": "watchers",
         "source": "builtin",
-        "access": "admin",
+        "access": "authenticated",
         "transport": [
           "ws"
         ],
@@ -175623,7 +175775,7 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
         "description": "Close the breaker of a trigger that stopped after repeated failures, once the cause is fixed. Refused, with the reason, when the trigger is not stopped.",
         "category": "watchers",
         "source": "builtin",
-        "access": "admin",
+        "access": "authenticated",
         "transport": [
           "ws"
         ],
@@ -176476,12 +176628,112 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
         "idempotent": true
       },
       {
+        "id": "work.branch.discard",
+        "title": "Discard A Work's Kept Branch",
+        "description": "Throw away the branch an ended piece of work kept, with the work's own folder and whatever they hold. It cannot be undone.",
+        "category": "work-ledger",
+        "source": "builtin",
+        "access": "authenticated",
+        "transport": [
+          "http",
+          "ws"
+        ],
+        "scopes": [
+          "read:work-ledger",
+          "write:work-ledger"
+        ],
+        "http": {
+          "method": "POST",
+          "path": "/api/work/branch/discard"
+        },
+        "inputSchema": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "work"
+          ],
+          "properties": {
+            "work": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 200
+            }
+          }
+        },
+        "outputSchema": {
+          "type": "object",
+          "additionalProperties": true,
+          "properties": {
+            "title": {
+              "type": "string"
+            },
+            "branch": {
+              "type": "string"
+            }
+          }
+        },
+        "effect": "write",
+        "invokable": true,
+        "repeat": "safe",
+        "idempotent": true
+      },
+      {
+        "id": "work.branch.merge",
+        "title": "Merge A Work's Kept Branch In",
+        "description": "Merge the branch an ended piece of work kept (its commits are not in the project's branch) into the project's current branch, then remove that branch and the work's own folder. A merge that conflicts is undone and nothing changes.",
+        "category": "work-ledger",
+        "source": "builtin",
+        "access": "authenticated",
+        "transport": [
+          "http",
+          "ws"
+        ],
+        "scopes": [
+          "read:work-ledger",
+          "write:work-ledger"
+        ],
+        "http": {
+          "method": "POST",
+          "path": "/api/work/branch/merge"
+        },
+        "inputSchema": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "work"
+          ],
+          "properties": {
+            "work": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 200
+            }
+          }
+        },
+        "outputSchema": {
+          "type": "object",
+          "additionalProperties": true,
+          "properties": {
+            "title": {
+              "type": "string"
+            },
+            "branch": {
+              "type": "string"
+            }
+          }
+        },
+        "effect": "write",
+        "invokable": true,
+        "repeat": "safe",
+        "idempotent": true
+      },
+      {
         "id": "work.list",
         "title": "List Your Work",
         "description": "Every piece of work of this daemon's project, read in one call: what it is, what done means, where it stands (not started, its plan waiting, starting, its start cut off, running, needs you, a step failed, done, failed, stopped), its plan as steps with their state, the questions it waits on, the step it stopped at when one failed (what failed, and whether the work can go on without it), its spending limit and its results; and each piece of work proposed with its plan (`proposed: true`, not yet asked for). What the Work place, the web Work view and an agent read. No mutation and no execution.",
         "category": "work-ledger",
         "source": "builtin",
-        "access": "admin",
+        "access": "authenticated",
         "transport": [
           "http",
           "ws"
@@ -176606,7 +176858,7 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
         "description": "Throw away the waiting plan of a piece of work; the work stays, not started, and its next start writes a new plan.",
         "category": "work-ledger",
         "source": "builtin",
-        "access": "admin",
+        "access": "authenticated",
         "transport": [
           "http",
           "ws"
@@ -176653,7 +176905,7 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
         "description": "Write the waiting plan of a piece of work again from its goal and what done means (the planning agent splits it into steps again). It waits for approval again.",
         "category": "work-ledger",
         "source": "builtin",
-        "access": "admin",
+        "access": "authenticated",
         "transport": [
           "http",
           "ws"
@@ -176699,7 +176951,7 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
         "description": "Take one step out of a waiting plan (and out of what the other steps wait on); the last step stays. The plan waits for approval again.",
         "category": "work-ledger",
         "source": "builtin",
-        "access": "admin",
+        "access": "authenticated",
         "transport": [
           "http",
           "ws"
@@ -176751,7 +177003,7 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
         "description": "Change what one step of a waiting plan does. The plan waits for approval again.",
         "category": "work-ledger",
         "source": "builtin",
-        "access": "admin",
+        "access": "authenticated",
         "transport": [
           "http",
           "ws"
@@ -176808,7 +177060,7 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
         "description": "Move one step of a waiting plan to another place, counting from 1. The plan waits for approval again.",
         "category": "work-ledger",
         "source": "builtin",
-        "access": "admin",
+        "access": "authenticated",
         "transport": [
           "http",
           "ws"
@@ -176862,10 +177114,10 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
       {
         "id": "work.target",
         "title": "Name A Piece Of Work For An Act",
-        "description": "Read what an act on one piece of work sends, from the work alone: `operation` \"execution\" answers the identity start, status, stop and resume take (its current attempt and revisions); \"contract\" answers the run that answering, running a step again and the spending limit act on. Every other field is passed through. Answers { summary, input }; nothing is kept.",
+        "description": "Read what an act on one piece of work sends, from the work alone: `operation` \"execution\" answers the identity start, status, stop and resume take (its current attempt and revisions); \"contract\" answers the run that answering, running a step again and the spending limit act on; \"own\" answers only whether this caller may act on the work at all (a paired device, the outside agent or a member acts only on work it asked for itself: WORK_NOT_YOURS otherwise). Every other field is passed through. Answers { summary, input }; nothing is kept.",
         "category": "work-ledger",
         "source": "builtin",
-        "access": "admin",
+        "access": "authenticated",
         "transport": [
           "http",
           "ws"
@@ -176894,7 +177146,8 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
               "type": "string",
               "enum": [
                 "execution",
-                "contract"
+                "contract",
+                "own"
               ]
             },
             "zone": {
@@ -176933,7 +177186,7 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
         "description": "Persist cancellation for the selected existing attempt, including a pending initial admission. A distinct prevented-before-admission result carries no receipt; admitted execution cancellation waits for actual drainage. A lost response does not establish success.",
         "category": "work-ledger",
         "source": "builtin",
-        "access": "admin",
+        "access": "authenticated",
         "transport": [
           "http",
           "ws"
@@ -177880,7 +178133,7 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
         "description": "Explicitly resume an interrupted/refused intent with a fresh evaluation or recover one prepared execution under current paired authority. Original target stays fixed. Cancelled intents require a new legitimate attempt; launch-claimed effects are never replayed.",
         "category": "work-ledger",
         "source": "builtin",
-        "access": "admin",
+        "access": "authenticated",
         "transport": [
           "http",
           "ws"
@@ -178831,7 +179084,7 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
         "description": "Start one existing complete native work attempt using host-owned source and paired authority. Exact replays preserve identity; interrupted or refused intents require explicit resume, and cancelled intents never restart.",
         "category": "work-ledger",
         "source": "builtin",
-        "access": "admin",
+        "access": "authenticated",
         "transport": [
           "http",
           "ws"
@@ -179782,7 +180035,7 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
         "description": "Inspect a bounded execution or admission-intent projection for an existing native attempt. Intent projections contain no receipt or execution progress. Returns stored revisions even if the caller revision is stale.",
         "category": "work-ledger",
         "source": "builtin",
-        "access": "admin",
+        "access": "authenticated",
         "transport": [
           "http",
           "ws"
@@ -180729,7 +180982,7 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
         "description": "Read at most 100 events after an exclusive cursor, pinned to a history high-water mark. Advance with cursor while hasMore is true. No mutations or execution.",
         "category": "work-ledger",
         "source": "builtin",
-        "access": "admin",
+        "access": "authenticated",
         "transport": [
           "http",
           "ws"
@@ -182385,7 +182638,7 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
         "description": "Start the single initial semantic admission of captured conversation text. Replay joins the current operation or reports recovery required. Does not start execution.",
         "category": "work-ledger",
         "source": "builtin",
-        "access": "admin",
+        "access": "authenticated",
         "transport": [
           "http",
           "ws"
@@ -183727,7 +183980,8 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
                   "type": "string",
                   "enum": [
                     "semantic",
-                    "exhausted"
+                    "exhausted",
+                    "decision-model"
                   ]
                 }
               },
@@ -184594,7 +184848,7 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
         "description": "Persist a terminal intake cancellation before work admission. If admission already committed, return its immutable work receipt. Does not claim cancellation of admitted work or execution.",
         "category": "work-ledger",
         "source": "builtin",
-        "access": "admin",
+        "access": "authenticated",
         "transport": [
           "http",
           "ws"
@@ -185936,7 +186190,8 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
                   "type": "string",
                   "enum": [
                     "semantic",
-                    "exhausted"
+                    "exhausted",
+                    "decision-model"
                   ]
                 }
               },
@@ -186799,7 +187054,7 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
         "description": "Persist exact original conversation text and unsupported-source disclosures on the selected authoritative host. Exact replay preserves the original source identity. Does not route, admit work, or execute. Complete encoded input is limited to 262144 bytes without truncation.",
         "category": "work-ledger",
         "source": "builtin",
-        "access": "admin",
+        "access": "authenticated",
         "transport": [
           "http",
           "ws"
@@ -188289,7 +188544,8 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
                   "type": "string",
                   "enum": [
                     "semantic",
-                    "exhausted"
+                    "exhausted",
+                    "decision-model"
                   ]
                 }
               },
@@ -189156,7 +189412,7 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
         "description": "Read the current conversation intake or immutable admitted-work receipt by original input ID. Does not route, retry, resume, admit, or execute.",
         "category": "work-ledger",
         "source": "builtin",
-        "access": "admin",
+        "access": "authenticated",
         "transport": [
           "http",
           "ws"
@@ -190494,7 +190750,8 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
                       "type": "string",
                       "enum": [
                         "semantic",
-                        "exhausted"
+                        "exhausted",
+                        "decision-model"
                       ]
                     }
                   },
@@ -191374,7 +191631,7 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
         "description": "Explicitly recover captured conversation admission with a fresh semantic operation after interruption. Preserves source identity and terminal outcomes. Does not start execution.",
         "category": "work-ledger",
         "source": "builtin",
-        "access": "admin",
+        "access": "authenticated",
         "transport": [
           "http",
           "ws"
@@ -192716,7 +192973,8 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
                   "type": "string",
                   "enum": [
                     "semantic",
-                    "exhausted"
+                    "exhausted",
+                    "decision-model"
                   ]
                 }
               },
@@ -193583,7 +193841,7 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
         "description": "Read only the selected host project identity. Does not confer execution eligibility or authority.",
         "category": "work-ledger",
         "source": "builtin",
-        "access": "admin",
+        "access": "authenticated",
         "transport": [
           "http",
           "ws"
@@ -193624,10 +193882,10 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
       {
         "id": "workLedger.snapshot",
         "title": "Read Native Work Ledger",
-        "description": "Read the selected host project ledger, without mutation authority or allowedActions. Requires an owner operator and the dedicated read scope.",
+        "description": "Read the selected host project ledger, without mutation authority or allowedActions. Requires the dedicated read scope; a caller below an admin reads only a project given to it.",
         "category": "work-ledger",
         "source": "builtin",
-        "access": "admin",
+        "access": "authenticated",
         "transport": [
           "http",
           "ws"
@@ -194602,7 +194860,7 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
         "description": "Look up an immutable native submission receipt by the original request ID on the selected authoritative host. Use after a lost submit response. Does not submit, retry, resume, or start execution.",
         "category": "work-ledger",
         "source": "builtin",
-        "access": "admin",
+        "access": "authenticated",
         "transport": [
           "http",
           "ws"
@@ -194867,7 +195125,7 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
         "description": "Persist one bounded explicit-source goal and ordered criteria on the selected authoritative host. Exact request replay returns the immutable submission receipt. Does not start execution or grant verification authority. Complete encoded input is limited to 262144 bytes without truncation.",
         "category": "work-ledger",
         "source": "builtin",
-        "access": "admin",
+        "access": "authenticated",
         "transport": [
           "http",
           "ws"
@@ -195152,7 +195410,7 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
         "description": "Persist cancellation of the exact native hosted dispatch and drain its owned turn. Cancellation does not undo effects already performed.",
         "category": "work-ledger",
         "source": "builtin",
-        "access": "admin",
+        "access": "authenticated",
         "transport": [
           "http",
           "ws"
@@ -195326,7 +195584,7 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
         "description": "Read authoritative native session ownership. Only an explicit legacy result permits ordinary session ingress. Native sessions additionally require their current paired owner and native delivery scopes.",
         "category": "work-ledger",
         "source": "builtin",
-        "access": "admin",
+        "access": "authenticated",
         "transport": [
           "http",
           "ws"
@@ -195415,7 +195673,7 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
         "description": "Deliver an already admitted native conversation input at most once through a host-owned broker identity and durable dispatch claim bound to the WebUI settings owner. An optional execution mode initializes only a new session; continuation and replay retain the current session mode. Cross-surface replay is refused. Ambiguous dispatch requires inspection and is never replayed.",
         "category": "work-ledger",
         "source": "builtin",
-        "access": "admin",
+        "access": "authenticated",
         "transport": [
           "http",
           "ws"
@@ -195603,7 +195861,7 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
         "description": "Deliver an already admitted native conversation input at most once through a host-owned broker identity and durable dispatch claim bound to the Agent settings owner. An optional execution mode initializes only a new session; continuation and replay retain the current session mode. Cross-surface replay is refused. Ambiguous dispatch requires inspection and is never replayed.",
         "category": "work-ledger",
         "source": "builtin",
-        "access": "admin",
+        "access": "authenticated",
         "transport": [
           "http",
           "ws"
@@ -195791,7 +196049,7 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
         "description": "Read native hosted dispatch status. Does not admit, claim, retry or execute.",
         "category": "work-ledger",
         "source": "builtin",
-        "access": "admin",
+        "access": "authenticated",
         "transport": [
           "http",
           "ws"
@@ -195993,6 +196251,9 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
                   },
                   "daemonFolder": {
                     "type": "boolean"
+                  },
+                  "reachable": {
+                    "type": "boolean"
                   }
                 },
                 "required": [
@@ -196092,6 +196353,9 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
                     "generation"
                   ],
                   "additionalProperties": false
+                },
+                "reachable": {
+                  "type": "boolean"
                 }
               },
               "required": [
@@ -196185,6 +196449,9 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
                       "generation"
                     ],
                     "additionalProperties": false
+                  },
+                  "reachable": {
+                    "type": "boolean"
                   }
                 },
                 "required": [
@@ -200587,10 +200854,10 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
       }
     ],
     "schemaCoverage": {
-      "methods": 679,
-      "typedInputs": 674,
+      "methods": 681,
+      "typedInputs": 676,
       "genericInputs": 5,
-      "typedOutputs": 677,
+      "typedOutputs": 679,
       "genericOutputs": 2
     },
     "eventCoverage": {
@@ -200599,8 +200866,8 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
       "withWireEvents": 36
     },
     "validationCoverage": {
-      "methods": 679,
-      "validated": 672,
+      "methods": 681,
+      "validated": 674,
       "skippedGeneric": 0,
       "skippedUntyped": 7
     }

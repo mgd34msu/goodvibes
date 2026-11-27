@@ -3,18 +3,18 @@
  * starts in the moment: "order dog food from shop.example, at most 60 a time and
  * 120 a month, until June".
  *
- * A purchase is normally admitted only when the owner asks for it in his own
+ * A purchase is normally admitted only when the owner asks for it in their own
  * words, now (gates.ts, `isOwnerDirectRequest`). A scheduled or triggered run
  * has no such request, so without this store it could never buy anything. An
  * entry here is the owner's answer given in advance: created only by the
  * owner's own command (`payments.standing.create`, confirmation-gated, owner-only),
  * it lets a begin that names it pass the origin gate when the item, the
- * merchant and the amount match what he wrote. Everything after the origin gate
+ * merchant and the amount match what the owner wrote. Everything after the origin gate
  * is unchanged: budgets, the per-purchase ceiling, the veto or approval window,
  * the cart and merchant checks all still apply.
  *
  * The item, merchants and maximums are the owner's typed text, so a purchase
- * bound to an entry carries his words, not anything read from a page; the
+ * bound to an entry carries their words, not anything read from a page; the
  * maximum the purchase may come to is the smaller of the entry's per-purchase
  * maximum and what is left of its per-period maximum, and a total above it
  * opens an approval window that silence denies.

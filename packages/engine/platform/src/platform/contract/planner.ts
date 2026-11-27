@@ -1,6 +1,5 @@
 import { judgedOrNot } from './judged-or-not.js';
 import { bindContractPlanConsumer } from '../tools/agent/contract-binding.js';
-import { waitForTaskRecovery } from '../core/response-completion.js';
 import { assertOwnedContractSource, checkOwnedSourcePlan, hasDerivedAcceptanceChecks } from './owned-source.js';
 import { nativeContractTaskSource } from './native-source.js';
 import { captureReviewInventory, assignedReviewPaths, reviewInventoryForPlanner, type ReviewInventory } from './review-inventory.js';
@@ -87,8 +86,6 @@ export interface ContractPlannerDeps {
   readonly repositoryMap?: ((projectRoot: string) => Promise<string>) | undefined;
   readonly readAccessFilter?: ReadAccessFilter | undefined;
   readonly now?: (() => number) | undefined;
-  /** Backs off before a retry; defaults to a timer. The runner passes its own wait so one clock serves every back-off. */
-  readonly wait?: ((ms: number, signal: AbortSignal) => Promise<void>) | undefined;
   /**
    * Resolves the next time what a route is chosen from changes (providers,
    * models, provider health). With it, a contract no model can be routed to
@@ -314,8 +311,8 @@ export const NATIVE_REPEAT_STOP_ANSWERS: readonly string[] = ['stop', 'cancel', 
 
 /**
  * The question a native work asks when its planner offers again a plan already refused: it is put to the owner once,
- * and his words are a correction for the derived plan (the work's own request and results stay fixed), or a stop.
- * The plan is the last fenced JSON block, so the planner is shown the plan his words change.
+ * and the owner's words are a correction for the derived plan (the work's own request and results stay fixed), or a stop.
+ * The plan is the last fenced JSON block, so the planner is shown the plan the owner's words change.
  */
 export function buildNativeRepeatQuestion(goal: string, problems: readonly PlanProblem[], planJson: string): string {
   return [
@@ -413,6 +410,7 @@ class PlanningContext {
     };
     contract.escalations.push(escalation);
     this.move('awaiting-owner');
+    // Put to the owner in every mode, as escalation.ts records its own questions.
     this.decide('escalated', `${reason}: asked the owner`, decisionIds);
     this.deps.emit({
       type: 'CONTRACT_ESCALATED',
@@ -522,14 +520,13 @@ function describeShape(shape: RequestShape): string {
 
 /** The `planner.*` bounds, with the finite-positive guard the decomposition service uses. */
 export function readPlannerBounds(configManager: ContractConfigReader): DecompositionBounds {
-  const read = (key: 'planner.maxTurns' | 'planner.tokenCeiling' | 'planner.wallTimeoutMs', fallback: number): number => {
+  const read = (key: 'planner.maxTurns' | 'planner.tokenCeiling', fallback: number): number => {
     const value: unknown = configManager.get(key);
     return typeof value === 'number' && Number.isFinite(value) && value >= 0 ? value : fallback;
   };
   return {
     maxTurns: read('planner.maxTurns', 0),
     tokenCeiling: read('planner.tokenCeiling', 0),
-    wallTimeoutMs: read('planner.wallTimeoutMs', 0),
   };
 }
 
@@ -717,33 +714,24 @@ export async function planContract(contract: Contract, deps: ContractPlannerDeps
     try { await authorizeContractInputPath(authority, path, filter, signal); return true; }
     catch { return false; }
   };
+  /**
+   * The reads the planning made still allowed by the owner's rules. A read a rule now refuses is decided at once: a
+   * model cannot repair it and nothing announces a change of the rules, so the planning fails there, saying why
+   * (`ContractInputReadDeniedError`, said as `READ_DENIED_REASON`), instead of trying again on a clock.
+   */
   const assertReadAccess = async (): Promise<void> => {
     if (!authority) return;
-    let waiting = false, delay = 250;
-    for (;;) {
-      await assertCurrent();
-      try {
-        await assertContractInputReadAccess(authority, filter, signal);
-        if (waiting) { context.decide('resumed', 'Captured input read access is current; continue the existing planning attempt.'); deps.native?.changed(contract); }
-        return;
-      } catch (error) {
-        if (!(error instanceof ContractInputReadDeniedError) || signal?.aborted) throw error;
-        if (!waiting) {
-          context.decide('stalled', 'Captured input read access changed; waiting for current permission before starting another planner.');
-          deps.native?.changed(contract); waiting = true;
-        }
-        // A model cannot repair a denied native read. Keep its original input,
-        // await an actual policy change, and let cancellation drain this wait.
-        await backOff(deps, delay, signal);
-        delay = Math.min(delay * 2, 5_000);
-      }
-    }
+    await assertCurrent();
+    await assertContractInputReadAccess(authority, filter, signal);
   };
   const map = () => deps.repositoryMap !== undefined ? deps.repositoryMap(workingDirectory)
     : contract.reviewInventory ? Promise.resolve('The repository\'s files are summarized in Native review inventory below. Use read-only tools for exact names, source bodies, symbols or dependency details as needed.')
     : defaultRepositoryMap(workingDirectory, readAccessFilter, authority ? readAccessFilter : undefined);
   const repositoryMap = await (authority ? withContractInputReadBatch(authority, () => withContractInputAuthority(authority, map)) : map());
-  await assertReadAccess();
+  try { await assertReadAccess(); } catch (error) {
+    if (error instanceof ContractInputReadDeniedError && signal?.aborted !== true) return context.fail('planning', READ_DENIED_REASON);
+    throw error;
+  }
   const bounds = readPlannerBounds(deps.configManager);
   const systemPrompt = buildContractPlannerPrompt();
   if (contract.nativeSource !== undefined) return planNativeContract(context, input, route, repositoryMap, bounds, systemPrompt, { workingDirectory, authority, assertCurrent, assertView, assertReadAccess });
@@ -752,6 +740,8 @@ export async function planContract(contract: Contract, deps: ContractPlannerDeps
   const rejectedTexts = new Map<string, readonly PlanProblem[]>();
   let repair = 0;
   let previous: { readonly problems: readonly PlanProblem[]; readonly previousPlan: string } | undefined;
+  /** Why the last planner run failed to finish, while the runs keep failing: a second failure the same way ends it. */
+  let lastFailure: string | undefined;
   try {
     for (;;) {
       if (signal?.aborted) return { kind: 'cancelled' };
@@ -794,7 +784,14 @@ export async function planContract(contract: Contract, deps: ContractPlannerDeps
       const checked = run.status === 'completed' ? await checkPlanOwned(context, run.output, repair, signal, assertCurrent, rejectedTexts)
         : { text: run.output, plan: undefined, verdict: undefined,
           problems: [{ code: 'unparseable' as const, message: runFailureReason(run) + '. Repair this failed planning attempt; the original request remains active.' }] };
-      if (run.status !== 'completed') await backOff(deps, Math.min(250 * (repair + 1), 5_000), signal);
+      // A planner run that failed to finish (its model unreachable after the transport's own tries, which keep the
+      // provider's Retry-After) is run again at once, never after a delay; failing the same way twice running, it is
+      // not run a third time.
+      if (run.status !== 'completed') {
+        const failure = runFailureReason(run);
+        if (failure === lastFailure) return context.fail('planning', sameFailureTwice(failure));
+        lastFailure = failure;
+      } else lastFailure = undefined;
       await assertCurrent();
       if (checked.problems.length === 0 && checked.plan !== undefined) {
         await assertView();
@@ -803,7 +800,7 @@ export async function planContract(contract: Contract, deps: ContractPlannerDeps
           checked.verdict?.unchecked === true ? PLAN_UNCHECKED_REASON : undefined);
         return { kind: 'accepted', plan: checked.plan, decisionIds };
       }
-      // A run that failed to finish (an outage, a refused call) is retried with a backoff; only a plan the planner actually returned can repeat.
+      // A run that failed to finish (an outage, a refused call) is run again at once (above); only a plan the planner actually returned can repeat.
       // A repeated rejected plan, or the same problems on the same targets two rounds running: the planner is
       // not converging, so the owner is asked now (whatever the repair limit) rather than repairing in a loop.
       const repeated = run.status === 'completed' && (checked.unchanged === true || repeatsRejectedPlan(rejectedPlans, checked));
@@ -828,14 +825,19 @@ export async function planContract(contract: Contract, deps: ContractPlannerDeps
     }
   } catch (error) {
     if (isAbort(error, signal)) return { kind: 'cancelled' };
+    if (error instanceof ContractInputReadDeniedError) return context.fail('planning', READ_DENIED_REASON);
     const reason = judgmentFailureReason(error);
     if (reason === undefined) throw error;
     return context.fail('judgment-unavailable', reason);
   }
 }
 
-function backOff(deps: ContractPlannerDeps, ms: number, signal: AbortSignal | undefined): Promise<void> {
-  return deps.wait === undefined ? waitForTaskRecovery(ms, signal) : deps.wait(ms, signal ?? new AbortController().signal);
+/** A read the planning made, refused now by the owner's rules (`assertReadAccess`). */
+const READ_DENIED_REASON = 'the planner may no longer read a file it read for this work: a permission rule refuses it now, so the work is not planned further. Change the rule, then ask for the work again';
+
+/** The planner failed to finish twice running for the same reason: it is not run a third time. */
+function sameFailureTwice(failure: string): string {
+  return `${failure}, the same way twice running, so it is not run again`;
 }
 
 function priorOwnerReadContext(contract: Contract, deps: ContractPlannerDeps): string {
@@ -853,10 +855,12 @@ async function planNativeContract(context: PlanningContext, input: PlanContractI
   const budgetKey = 'plan';
   const rejectedPlans = new Map<string, readonly PlanProblem[]>();
   let output = state.plannerOutputs[budgetKey];
-  // The owner's correction (his answer to a repeated plan) is a new planner run, never the stored output checked again.
+  // The owner's correction (their answer to a repeated plan) is a new planner run, never the stored output checked again.
   let needsPlan = output === undefined || input.ownerInstruction !== undefined;
-  /** The output being checked is a planner failure to retry after a backoff, not a plan to be revised. */
+  /** The output being checked is a planner failure to run again, not a plan to be revised. */
   let failedRun = false;
+  /** Why the last planner run failed to finish, while the runs keep failing. */
+  let lastFailure: string | undefined;
   let previous: { readonly problems: readonly PlanProblem[]; readonly previousPlan: string } | undefined;
   try {
     for (;;) {
@@ -885,13 +889,19 @@ async function planNativeContract(context: PlanningContext, input: PlanContractI
         await admitted.assertReadAccess();
         failedRun = run.status !== 'completed';
         output = run.status === 'completed' ? run.output : JSON.stringify({ plannerFailure: runFailureReason(run), partialProposal: run.output });
-        if (run.status !== 'completed') await backOff(deps, Math.min(250 * attempt, 5_000), signal);
+        // A run that failed to finish goes to the repair decision below at once, never after a delay (the transport's
+        // own tries keep the provider's Retry-After); failing the same way twice running, it is not run a third time.
+        if (failedRun) {
+          const failure = runFailureReason(run);
+          if (failure === lastFailure) return context.fail('planning', sameFailureTwice(failure));
+          lastFailure = failure;
+        } else lastFailure = undefined;
         state.plannerOutputs[budgetKey] = output; deps.native?.changed(contract);
       }
       const checked = await checkPlanOwned(context, output!, nativeSpent(contract, budgetKey) - 1, signal, admitted.assertCurrent, failedRun ? undefined : rejectedPlans);
       await admitted.assertCurrent();
-      // A repeated refused plan is put to the owner once: his words correct the derived plan (the native roots stay
-      // fixed, and nothing approves the plan), or he stops the work. Repairing again would only meet the same objections.
+      // A repeated refused plan is put to the owner once: their words correct the derived plan (the native roots stay
+      // fixed, and nothing approves the plan), or they stop the work. Repairing again would only meet the same objections.
       if (!failedRun && rejectedPlans.has(checked.text)) {
         if (checked.plan === undefined) return context.fail('planning', `the planner's answer was not a readable plan: ${checked.problems.map(entry => entry.message).join(' ')}`);
         const escalation = context.escalate('plan', 'plan-unresolved',
@@ -929,6 +939,7 @@ async function planNativeContract(context: PlanningContext, input: PlanContractI
     }
   } catch (error) {
     if (isAbort(error, signal)) return { kind: 'cancelled' };
+    if (error instanceof ContractInputReadDeniedError) return context.fail('planning', READ_DENIED_REASON);
     const reason = judgmentFailureReason(error);
     if (reason === undefined) throw error;
     return context.fail('judgment-unavailable', reason);

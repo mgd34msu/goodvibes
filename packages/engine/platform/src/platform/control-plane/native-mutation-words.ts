@@ -85,8 +85,8 @@ function question(method: string, request: Fields, target: Fields, zone: string,
       const timing = timingOf(target['schedule'], zone);
       return `Add a schedule${name ? ` "${clip(name, 60)}"` : ''}${timing ? `, ${timing}` : ''}?`;
     }
-    // A credential asked for by someone other than the owner himself (the card names who asks): what his yes gives that
-    // caller, in plain words. A yes to someone else's request never makes his own device (gate-review-6 G1).
+    // A credential asked for by someone other than the owner in person (the card names who asks): what the owner's yes gives that
+    // caller, in plain words. A yes to someone else's request never makes the owner's own device (gate-review-6 G1).
     case 'pairing.tokens.migrate':
     case 'pairing.tokens.create':
     case 'pairing.handoff.create': {

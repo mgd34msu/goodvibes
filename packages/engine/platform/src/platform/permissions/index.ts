@@ -5,6 +5,7 @@ export * from './denial.js';
 export * from './held-for-owner.js';
 export * from './jev-decisions.js';
 export * from './manager.js';
+export * from './owner-is-asked.js';
 export { capabilityCommandsResolver, type CapabilityCommandsResolver } from './capability-commands.js';
 export * from './prompt.js';
 export * from './types.js';

@@ -12,14 +12,6 @@ export const COMMAND_LINE_ASK_ARG = 'askedAs';
 /** Its value. */
 export const COMMAND_LINE_ASK = 'command-line';
 
-/** The argument the gate adds when it put such a call to the owner while plan mode was on (the card says so). */
-export const COMMAND_LINE_PLAN_ARG = 'planMode';
-
-/** Whether a command line's held call was put to the owner while plan mode was on. */
-export function commandLineAskInPlanMode(request: Pick<PermissionPromptRequest, 'tool' | 'args' | 'ownerOnly' | 'attribution'>): boolean {
-  return isCommandLineAsk(request) && request.args[COMMAND_LINE_PLAN_ARG] === 'on';
-}
-
 /** Whether an ask is a command line's call the capability gate held for the owner. */
 export function isCommandLineAsk(request: Pick<PermissionPromptRequest, 'tool' | 'args' | 'ownerOnly' | 'attribution'>): boolean {
   return request.tool === 'capability_run' && request.args[COMMAND_LINE_ASK_ARG] === COMMAND_LINE_ASK

@@ -98,7 +98,7 @@ export async function handleBrowserCommand(runtime: CliCommandRuntime): Promise<
       homeDirectory: home,
       destinationConfig: runtime.configManager,
     }),
-    // The owner typed this command: a file: address is his own read, so the
+    // The owner typed this command: a file: address is their own read, so the
     // model's read policy has nothing to decide here.
     readAccess: async () => true,
   });

@@ -10,6 +10,25 @@ import { isRecord } from '../../utils/record-coerce.js';
 import { normalizeAtSchedule, normalizeCronSchedule, normalizeEverySchedule } from '../../automation/schedules.js';
 import { parseCreateAutomationJobInput, parseUpdateAutomationJobInput } from './runtime-routes.js';
 import { previewScheduleAction, ScheduleValuesError } from '../../automation/schedule-values.js';
+import { sharedKindReached, sharedKindRefusalWords } from '../../control-plane/shared-kinds.js';
+
+/**
+ * A schedule made or changed below an admin (a project act, effect-authority.ts `automation.write`) that delivers its
+ * answer through a channel of the owner's (a `surface` or `integration` target: Slack, Telegram and the others) uses the
+ * owner's channels, a shared kind (control-plane/shared-kinds.ts): only with the owner's gift of channels. Refused
+ * otherwise, before anything is kept; a webhook or link target, or none, is the caller's own.
+ */
+function refuseChannelDelivery(body: Record<string, unknown>, context: { readonly admin: boolean; readonly principalId: string; readonly actor?: { readonly class: string } | undefined }): void {
+  if (context.admin === true || (context.actor !== undefined && context.actor.class !== 'device' && context.actor.class !== 'member')) return;
+  const delivery = isRecord(body.delivery) ? body.delivery : undefined;
+  if (delivery === undefined) return;
+  const targets: unknown[] = [...(Array.isArray(delivery.targets) ? delivery.targets : []), ...(Array.isArray(delivery.fallbackTargets) ? delivery.fallbackTargets : [])];
+  const throughChannels = delivery.mode === 'surface' || delivery.mode === 'integration'
+    || targets.some((target) => isRecord(target) && (target.kind === 'surface' || target.kind === 'integration'));
+  if (!throughChannels) return;
+  if (sharedKindReached({ ownersOwn: false, daemonTurn: false, othersInput: false, principalId: context.principalId }, 'channels')) return;
+  throw new GatewayVerbError(`Not done: its answer would be delivered through ${sharedKindRefusalWords('channels', false)}. Nothing was kept.`, 'SHARED_KIND_NOT_GIVEN', 403, 'delivery');
+}
 
 function nativeClockMeaning(value: number | undefined): string | { readonly iso: string; readonly fractionalMillisecond: number } | undefined {
   if (value === undefined) return undefined;
@@ -75,6 +94,7 @@ export function registerNativeAutomationGatewayMethods(catalog: GatewayMethodCat
     if (!isRecord(body) || typeof body.jobId !== 'string' || !body.jobId.trim()) throw new GatewayVerbError('An automation job id is required.', 'INVALID_ARGUMENT', 400);
     if (body.expectedMutationRevision !== undefined && (typeof body.expectedMutationRevision !== 'string' || !body.expectedMutationRevision.trim())) throw new GatewayVerbError('expectedMutationRevision must be a nonempty string.', 'INVALID_ARGUMENT', 400);
     if (isDelegatedCaller(context) && typeof body.expectedMutationRevision !== 'string') throw new GatewayVerbError('An update the Agent makes on your behalf needs the selected job revision (expectedMutationRevision from automation.schedules.list).', 'AUTOMATION_JOB_REVISION_REQUIRED', 409);
+    refuseChannelDelivery(body, context);
     const jobId = body.jobId;
     const { manager, host } = input;
     const current = () => { context.signal?.throwIfAborted(); };
@@ -101,6 +121,7 @@ export function registerNativeAutomationGatewayMethods(catalog: GatewayMethodCat
   for (const method of ['automation.jobs.create', 'automation.schedules.create']) {
     disposals.push(registerCatalogHandler<unknown, unknown>(catalog, method, async ({ body, context }) => {
       if (!isRecord(body) || typeof body.prompt !== 'string' || !body.prompt.trim()) throw new GatewayVerbError('An automation prompt is required.', 'INVALID_ARGUMENT', 400);
+      refuseChannelDelivery(body, context);
       const { manager, host } = input;
       const current = () => { context.signal?.throwIfAborted(); };
       current();

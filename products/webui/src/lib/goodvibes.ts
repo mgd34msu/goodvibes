@@ -582,7 +582,7 @@ async function invokeOperator<
 async function invokeOperator(methodId: string, input?: unknown, signal?: AbortSignal, idempotencyKey?: string): Promise<unknown> {
   const answer = await invokeOperatorOnce(methodId, input, signal, idempotencyKey);
   // A loosening change asked from a token minted for automation is put to the
-  // owner (202 OWNER_APPROVAL_PENDING): it is shown as waiting for him, never as saved.
+  // owner (202 OWNER_APPROVAL_PENDING): it is shown as waiting for them, never as saved.
   return OWNER_APPROVAL_WRITES.has(methodId) ? acceptOwnerApprovalAnswer(answer) : answer;
 }
 
@@ -647,8 +647,8 @@ async function invokeOperatorOnce(methodId: string, input?: unknown, signal?: Ab
 /**
  * Every method this page sends that changes something is the person's own request: the page changes nothing by itself
  * (its effects, queries and timers only read: the 2026-11-26 audit of every call the web UI makes with no press). The
- * daemon runs an act it decides for the owner at once only on his own press in his own program (his sign-in), so a
- * change sent without the claim would be put to him as if someone else had asked. A read sent with it changes nothing.
+ * daemon runs an act it decides for the owner at once only on their own press in their own program (their sign-in), so a
+ * change sent without the claim would be put to them as if someone else had asked. A read sent with it changes nothing.
  */
 const PERSONS_REQUEST_HEADERS: Readonly<Record<string, string>> = { 'x-goodvibes-explicit-user-request': 'true' };
 
@@ -1676,7 +1676,7 @@ export const client = {
     // ledger, and the requirement that a verbatim owner utterance exists, still run.
     //
     // CONTAINMENT: `person` takes a NAME and there is deliberately no enumerate-all
-    // counterpart (§10), `read` returns everything and is for the owner looking at his
+    // counterpart (§10), `read` returns everything and is for the owner looking at their
     // own profile, never for a composition path assembling outbound content.
     profile: {
       read: () => invokeOperator('profile.read', {}),
@@ -2592,11 +2592,17 @@ export function releaseAtSignOut(release: () => Promise<void>): () => void {
  * daemon session is ended with `POST /logout`, which also clears the direct-route cookie,
  * so the old credential stops working everywhere.
  */
-export function signOut(): Promise<SignOutOutcome> {
+export async function signOut(): Promise<SignOutOutcome> {
   // What this browser kept for the person signing out (the project chosen, the chats listed, preferences): gone, read
   // while the sign-in marker still names them (account-storage.ts). Nothing of theirs reaches the next sign-in.
   const leaving = accountStorageOwner();
   clearAccountStorage(leaving);
+  // What the daemon holds for this browser under the person leaving (its push subscription, push-client.ts) is let go
+  // first, while their sign-in still works and its replies are still read; one that cannot be is made harmless by its
+  // own release.
+  for (const release of [...signOutReleases]) {
+    try { await release(); } catch { /* each release makes its own failure harmless */ }
+  }
   ++credentialEpoch;
   // A new identity generation even when nothing was held: a sign-in still in flight is older and is dropped.
   invalidateClientLifetime();
@@ -2604,11 +2610,6 @@ export function signOut(): Promise<SignOutOutcome> {
   clearHeldInputs();
   clearChatDrafts();
   return inCredentialOrder(async () => {
-    // What the daemon holds for this browser under the person leaving (its push subscription, push-client.ts) is let go
-    // while their sign-in still works; one that cannot be is made harmless by its own release.
-    for (const release of [...signOutReleases]) {
-      try { await release(); } catch { /* each release makes its own failure harmless */ }
-    }
     const bearer = await tokenStore.getToken();
     await tokenStore.clearToken();
     // The bearer held for the relay route, and the cookie the marker says this browser holds (both, after a route change).

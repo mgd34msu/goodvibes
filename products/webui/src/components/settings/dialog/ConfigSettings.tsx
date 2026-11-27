@@ -187,7 +187,7 @@ export function ConfigSettingsProvider({ enabled = true, children }: { enabled?:
           tone: 'success',
         });
       } catch (error) {
-        // A change put to the owner is shown as waiting for him (OwnerApprovalNotices), not as a failure.
+        // A change put to the owner is shown as waiting for them (OwnerApprovalNotices), not as a failure.
         if (!(error instanceof OwnerApprovalPendingError)) toast({ title: 'Failed to save config', description: formatError(error), tone: 'danger' });
         throw error;
       }
@@ -210,7 +210,7 @@ export function ConfigSettingsProvider({ enabled = true, children }: { enabled?:
         ]);
         toast({ title: 'Config saved', description: `${keys.join(' and ')} updated together.`, tone: 'success' });
       } catch (error) {
-        // A change put to the owner is shown as waiting for him (OwnerApprovalNotices), not as a failure.
+        // A change put to the owner is shown as waiting for them (OwnerApprovalNotices), not as a failure.
         if (!(error instanceof OwnerApprovalPendingError)) toast({ title: 'Failed to save config', description: formatError(error), tone: 'danger' });
         throw error;
       }

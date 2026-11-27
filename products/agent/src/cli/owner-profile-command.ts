@@ -15,7 +15,7 @@ import { commandArgsWithLiteralMarker } from '@goodvibes/engine/terminal-shell/c
  *   for a field that was not there; both exit non-zero with the daemon's own
  *   reason printed, and neither is ever reported as done (§9.2).
  * - No retry with a different authority.
- * - Values that come back are printed for HIM, at his own terminal. Nothing in
+ * - Values that come back are printed for THE OWNER, at their own terminal. Nothing in
  *   this file logs a value, and `status` prints counts and field names only.
  */
 
@@ -52,10 +52,10 @@ const OWNER_PROFILE_USAGE = [
 ].join('\n');
 
 /**
- * A command-line edit is him editing his own file, so it carries owner-direct
- * authority, the only one the daemon accepts, and, when he does not quote
- * himself with --said, the same kind of stand-in a settings-UI edit uses (§7
- * layer 3, §9.3). It is a truthful record of where the line came from: he typed
+ * A command-line edit is the owner editing their own file, so it carries owner-direct
+ * authority, the only one the daemon accepts, and, when they do not quote
+ * themselves with --said, the same kind of stand-in a settings-UI edit uses (§7
+ * layer 3, §9.3). It is a truthful record of where the line came from: they typed
  * it here, not in conversation.
  */
 const CLI_EDIT_SAID = '(edited from the command line)';
@@ -79,7 +79,7 @@ function gatewayFor(runtime: CliCommandRuntime): ProfileGatewayInvoke {
   // The CLI process composes no gateway catalog of its own, so every call goes
   // to the connected host that owns the file.
   return createProfileGatewayInvoke({
-    // The owner's own command: his writes present the ordinary credential, not the Agent's delegated one.
+    // The owner's own command: their writes present the ordinary credential, not the Agent's delegated one.
     remote: connectedHostFamilyRemote({ configManager: runtime.configManager, homeDirectory: runtime.homeDirectory, actor: 'owner' }),
   });
 }
@@ -107,7 +107,7 @@ async function handleRead(
   // output reach a model. Run as `/owner-profile` or through the workspace card
   // (or with stdout captured) it can land where a later turn composes from, so
   // People are counted and `person <name>` is the way through; at a terminal it
-  // is his own file, listed in full. The containment is applied to the data, so
+  // is the owner's own file, listed in full. The containment is applied to the data, so
   // `--json` discloses exactly what the text does.
   const shown: ContainedProfileRead = outputEntersModelContext ? withholdPeople(response) : response;
   const lines: string[] = [`Owner profile (${shown.state.path})`];
@@ -261,7 +261,7 @@ async function handleSet(runtime: CliCommandRuntime, invoke: ProfileGatewayInvok
   };
 }
 
-/** A prose line is added to a section in his own words, the CLI counterpart of the TUI `/profile note`. */
+/** A prose line is added to a section in the owner's own words, the CLI counterpart of the TUI `/profile note`. */
 async function handleNote(runtime: CliCommandRuntime, invoke: ProfileGatewayInvoke, args: readonly string[]): Promise<CliCommandOutput> {
   const parsed = parseOperatorCommandArgs(args, ['section', 'text', 'said']);
   const section = operatorFlagValue(parsed, 'section');
@@ -304,7 +304,7 @@ async function handleUndo(runtime: CliCommandRuntime, invoke: ProfileGatewayInvo
 
 /**
  * A mechanical field goes by id; a prose line goes by its section and its exact
- * text, never by position (§9.2). He edits this file himself, so a line number
+ * text, never by position (§9.2). The owner edits this file by hand, so a line number
  * from an earlier read can point at a different line by the time the delete
  * runs, and a stale index is well-formed, so nothing could catch it. Content
  * re-resolves against the document as it is now.
@@ -331,7 +331,7 @@ async function handleForget(runtime: CliCommandRuntime, invoke: ProfileGatewayIn
   if (!response) return { output: jsonOrText(runtime, result, PROFILE_RESPONSE_UNREADABLE), exitCode: 1 };
   if (!response.ok) {
     // Covers refusal, "there was nothing to forget", and a prose line whose
-    // text no longer matches because he changed it. None is ok, the daemon's
+    // text no longer matches because the owner changed it. None is ok, the daemon's
     // own reason says which, and this never claims a deletion.
     const failure = [`Not done: ${target} was not deleted.`, `  reason: ${response.reason ?? 'no reason given'}`].join('\n');
     return { output: jsonOrText(runtime, response, failure), exitCode: 1 };

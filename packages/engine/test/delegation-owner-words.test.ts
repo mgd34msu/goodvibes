@@ -1,12 +1,12 @@
-// Proves: Whether agents start is decided by what the owner said in the conversation: agents he asked for earlier start though a later message speaks of something else, and agents he forbade earlier do not start though a later message speaks of something else.
-// Red when: The agent tool reads only the owner's latest message (or lets a later message that says nothing about agents replace an earlier one that did), so the agents he asked for are refused or the agents he forbade start, whatever the decision model then answers.
+// Proves: Whether agents start is decided by what the owner said in the conversation: agents they asked for earlier start though a later message speaks of something else, and agents they forbade earlier do not start though a later message speaks of something else.
+// Red when: The agent tool reads only the owner's latest message (or lets a later message that says nothing about agents replace an earlier one that did), so the agents the owner asked for are refused or the agents they forbade start, whatever the decision model then answers.
 /**
  * The real composition (services, permission manager, every built-in tool in a
  * strict registry, the one tool-batch executor), a real ConversationManager and
  * the orchestrator's tool round (handleToolResponseOutcome). The decision model
  * is a loopback server on the System One wire that answers the delegation
- * question against the owner's words: told the owner forbade agents where he
- * asked for them, told to go where he forbade them. Only the owner's own words,
+ * question against the owner's words: told the owner forbade agents where the
+ * owner asked for them, told to go where the owner forbade them. Only the owner's own words,
  * read by the product, can make each row come out right.
  */
 import { afterEach, describe, expect, test } from 'bun:test';
@@ -30,6 +30,7 @@ import { ToolRegistry } from '../platform/src/platform/tools/registry.ts';
 import type { ToolCall } from '../platform/src/platform/types/tools.ts';
 import { seedBenchmarkCache } from './_helpers/benchmark-cache.ts';
 import { planningPort } from './contract/plan-support.ts';
+import { withOwnerInput } from '../platform/src/platform/security/turn-input-party.ts';
 
 const SESSION = 'owner-session';
 /** What the decision model stand-in answers the delegation question: the opposite of what the owner said. */
@@ -60,7 +61,7 @@ async function compose(root: string, decisionEndpoint: string) {
   const services = composeRuntimeServices({
     surface: 'tui', roots: options, hostSeams: options, memoryStore: 'home',
     workspaceTrust: { kind: 'surface', requestTrustDecision: async () => 'trusted' },
-    // The owner is never asked in these rows; an ask would be the product leaving his words unread.
+    // The owner is never asked in these rows; an ask would be the product leaving the owner's words unread.
     permissionHost: { raiseApproval: () => async () => ({ approved: false }) },
   } as never);
   const toolRegistry = new ToolRegistry(services.permissionManager);
@@ -88,10 +89,11 @@ async function compose(root: string, decisionEndpoint: string) {
   return { services, toolRegistry, runtimeBus, workingDir, dispose };
 }
 
-/** One owner turn: his message joins the conversation and the model's one tool call runs through the orchestrator's tool round. */
+/** One owner turn: the owner's message joins the conversation and the model's one tool call runs through the orchestrator's tool round. */
 async function ownerTurn(app: Awaited<ReturnType<typeof compose>>, conversation: ConversationManager, ownerText: string, call: ToolCall) {
   conversation.addUserMessage(ownerText);
-  const round = await handleToolResponseOutcome({
+  // The owner's own turn, as the product marks an owner's turn: a call outside any turn is someone else's and only reads.
+  const round = await withOwnerInput(() => handleToolResponseOutcome({
     toolRegistry: app.toolRegistry, conversation, agentManager: app.services.agentManager, planManager: null,
     configManager: app.services.configManager, runtimeBus: app.runtimeBus,
     providerRegistry: { getCurrentModel: () => ({ displayName: 'loopback', provider: 'loopback', capabilities: { multimodal: false } }) } as never,
@@ -103,13 +105,13 @@ async function ownerTurn(app: Awaited<ReturnType<typeof compose>>, conversation:
       runtimeBus: app.runtimeBus, sessionId: SESSION, emitterContext: (eid) => createEmitterContext(SESSION, eid), workingDirectory: app.workingDir,
     }, id, calls),
     setPendingToolCalls: () => {}, messageQueueLength: 0, requestRender: () => {}, sessionId: SESSION,
-  });
+  }));
   return round.results.find((result) => result.callId === call.id);
 }
 
 const batch = (id: string, tasks: readonly string[]): ToolCall => ({ id, name: 'agent', arguments: { mode: 'batch-spawn', tasks: tasks.map((task) => ({ task, outsideContract: true })) } });
 
-describe('the owner\'s words about agents stand until he speaks about agents again', () => {
+describe('the owner\'s words about agents stand until they speak about agents again', () => {
   const cleanup: (() => Promise<void> | void)[] = [];
   afterEach(async () => { for (const step of cleanup.splice(0).reverse()) await step(); });
 

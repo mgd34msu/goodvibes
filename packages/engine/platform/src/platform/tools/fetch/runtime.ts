@@ -29,6 +29,7 @@ import { createTimeoutController, sanitizeUrlForLog } from '../../utils/fetch-wi
 import { recordFetchedPagesAsUntrusted } from './untrusted-ingest.js';
 import { toRecord } from '../../utils/record-coerce.js';
 import { mapWithConcurrency, sleep } from '../../utils/concurrency.js';
+import { storedCredentialRefusal } from '../../security/stored-credentials.js';
 
 export interface FetchRuntimeDeps {
   readonly serviceRegistry?: Pick<ServiceRegistry, 'resolveAuthFor'> | null | undefined;
@@ -532,6 +533,9 @@ async function prepareFetchRequest(
       throw new CredentialMissingError(`auth type "${urlInput.auth.type}" has no ${missingAuthField(urlInput.auth)}, so no credential would be sent. Nothing was sent for this entry.`);
     }
   } else if (urlInput.service) {
+    // The owner's stored credential is sent only by their own turn (or a caller they gave the service's shared kind).
+    const notTheOwners = storedCredentialRefusal(urlInput.service);
+    if (notTheOwners) throw new CredentialMissingError(notTheOwners);
     // A named service's credential goes only to that service's own origin.
     const answer = await deps.serviceRegistry?.resolveAuthFor(urlInput.service, urlInput.url);
     if (answer && 'refused' in answer) throw new CredentialMissingError(answer.refused);

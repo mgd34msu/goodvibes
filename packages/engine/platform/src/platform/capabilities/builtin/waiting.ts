@@ -1,11 +1,11 @@
 /**
  * Waiting for you: what waits on the owner's answer, in the one owner inbox
  * (`~/.goodvibes/shared/owner-inbox.sqlite`, the daemon's `inbox.*`), and what
- * was decided for him.
+ * was decided for them.
  *
  * Home `daemon` (the inbox is the daemon's, one store for every program):
  * seeing what waits, everything ever asked, one item in full, answering one,
- * withdrawing a request for approval he raised, the calls Jev decided, and
+ * withdrawing a request for approval the caller raised, the calls Jev decided, and
  * what each kind of approval asks about. An answer and a withdrawal run
  * through the daemon's own methods (`inbox.answer`, `approvals.cancel`) as the
  * same caller, so a purchase window keeps the authority it is answered under
@@ -83,7 +83,7 @@ export function formatInboxDelivery(delivery: OwnerAnswerDelivery): string {
   return `not deliverable to ${to}${delivery.reason ? `: ${plainInboxText(delivery.reason)}` : ''}`;
 }
 
-/** What the owner is told about an answer he just gave. */
+/** What the owner is told about an answer they just gave. */
 function deliveryNotice(delivery: OwnerAnswerDelivery | undefined): string {
   if (delivery === undefined) return '';
   const to = plainInboxText(delivery.to);
@@ -224,7 +224,7 @@ const ITEM: InputDescription = {
 /**
  * The inbox items the caller may reach (control-plane/caller-reach.ts): a question waiting for the owner as that
  * question (its project); every other item (an ask, a claim, a purchase window, a decision) is the owner's own: only
- * he sees it. The owner himself sees every one.
+ * the owner sees it. The owner in person sees every one.
  */
 function reachableItems<T extends Pick<OwnerItem, 'kind' | 'id'>>(items: readonly T[]): T[] {
   const reach = currentRecordReach();
@@ -410,7 +410,7 @@ export const DECISIONS_LIST: CapabilityDefinition<WaitingCapabilityServices> = {
       listEveryOwnerItem(inbox, { status: 'closed' }),
     ]);
     const inWindow = (at: number): boolean => window === undefined || (at >= window.from && at < window.to);
-    // What the caller may reach, before the latest are cut (Jev's decisions are the owner's own: only he sees them).
+    // What the caller may reach, before the latest are cut (Jev's decisions are the owner's own: only the owner sees them).
     const open = reachableItems(allOpen).filter((item) => inWindow(item.createdAt)).slice(0, limit);
     const closed = reachableItems(allClosed).filter((item) => inWindow(item.closedAt ?? item.createdAt)).slice(0, limit);
     const data = { open: open.map(itemData), decided: closed.map(itemData) };

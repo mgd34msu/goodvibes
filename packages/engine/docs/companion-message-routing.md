@@ -155,11 +155,14 @@ A chat is never closed for being idle: the daemon drops an unused chat's history
 
 ### Companion chat rate limit
 
-Remote companion-chat sessions accept a bounded number of messages per 60-second
-window per session. The limit comes from `runtime.companionChatLimiter.perSessionLimit`
+A companion chat holds a bounded number of messages waiting to be answered (queued
+or running); one more is refused with 429 `COMPANION_CHAT_SESSION_RATE_LIMIT` until
+one of them is answered. There is no clock: a person who waits for each answer is
+never refused. The bound comes from `runtime.companionChatLimiter.perSessionLimit`
 when that key is set to a positive integer. Otherwise the daemon reads the
 `GOODVIBES_CHAT_LIMITER_THRESHOLD` environment variable once at startup, and
-falls back to its built-in default of 10 when neither is set.
+falls back to its built-in default of 10 when neither is set. One client holds at
+most 30 messages waiting across its chats (`COMPANION_CHAT_CLIENT_RATE_LIMIT`).
 
 ## Next reads
 

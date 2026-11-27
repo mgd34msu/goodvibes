@@ -169,7 +169,7 @@ export class DaemonConfigRejectedError extends Error {
  * Thrown when the daemon did not apply the write but put it to the owner: the
  * change loosens a security, permission, judgment or payment setting and this
  * process holds a token minted for automation. Nothing changed; it is applied
- * when the owner approves approval `approvalId` from his own app.
+ * when the owner approves approval `approvalId` from their own app.
  */
 export class DaemonConfigOwnerApprovalPendingError extends Error {
   readonly code = 'OWNER_APPROVAL_PENDING';

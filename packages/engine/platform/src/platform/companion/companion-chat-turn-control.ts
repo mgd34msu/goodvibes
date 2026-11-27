@@ -411,9 +411,9 @@ export interface CompanionPostMessageOptions {
    */
   readonly ownerDirect?: boolean | undefined;
   /**
-   * The owner's own input without his being at the screen: a channel message from his account in a conversation proven
-   * his alone, on a channel where he chose "Treat my own messages here as me" (daemon/owner-channel-conversation.ts).
-   * Its turn may change files and run commands under his mode (security/turn-input-party.ts); unlike `ownerDirect` it
+   * The owner's own input without the owner being at the screen: a channel message from their account in a conversation proven
+   * theirs alone, on a channel that proves its sender (daemon/owner-channel-conversation.ts). Its turn is the owner's
+   * (security/turn-input-party.ts); a change it asks for is put to the owner as a channel request; unlike `ownerDirect` it
    * starts no new untrusted-content turn.
    */
   readonly ownerParty?: boolean | undefined;
@@ -442,4 +442,6 @@ export interface QueuedCompanionTurn {
   readonly providerContent: Parameters<ConversationManager['addUserMessage']>[0];
   /** In-process tap for this turn's incremental events (rides the queue entry). */
   readonly onTurnEvent?: ((event: CompanionChatTurnEvent) => void) | undefined;
+  /** The client that sent it: its messages waiting to be answered are counted (companion-chat-rate-limiter.ts). */
+  readonly clientId?: string | undefined;
 }

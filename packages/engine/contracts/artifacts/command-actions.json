@@ -1212,8 +1212,8 @@
               "choices": [
                 {
                   "value": "ask-on-risk",
-                  "label": "Ask me about calls outside its limits",
-                  "help": "Calls inside its folders and sites go on as your permission mode allows; a call outside them is put to you, in every mode. A server kept with no level set has this one.",
+                  "label": "Decide calls outside its limits by my mode",
+                  "help": "Calls inside its folders and sites go on as your permission mode allows; a call outside them is one of your own decisions, made under your permission mode (YOLO runs it, Jev decides gives it to Jev, Ask me asks you). A server kept with no level set has this one.",
                   "risk": "loosens-a-protection"
                 },
                 {
@@ -1767,8 +1767,8 @@
               "choices": [
                 {
                   "value": "ask-on-risk",
-                  "label": "Ask me about calls outside its limits",
-                  "help": "Calls inside its folders and sites go on as your permission mode allows; a call outside them is put to you, in every mode. A server kept with no level set has this one.",
+                  "label": "Decide calls outside its limits by my mode",
+                  "help": "Calls inside its folders and sites go on as your permission mode allows; a call outside them is one of your own decisions, made under your permission mode (YOLO runs it, Jev decides gives it to Jev, Ask me asks you). A server kept with no level set has this one.",
                   "risk": "loosens-a-protection"
                 },
                 {
@@ -3349,7 +3349,6 @@
                   "watchers.triggers.maxConcurrentChecks",
                   "watchers.triggers.observationRingSize",
                   "watchers.triggers.runHistoryLimit",
-                  "watchers.triggers.runHistoryTtlHours",
                   "watchers.triggers.eventLogLimit",
                   "watchers.triggers.eventLogTtlHours",
                   "watchers.triggers.sweepIntervalMs",
@@ -3868,7 +3867,6 @@
                   "watchers.triggers.maxConcurrentChecks",
                   "watchers.triggers.observationRingSize",
                   "watchers.triggers.runHistoryLimit",
-                  "watchers.triggers.runHistoryTtlHours",
                   "watchers.triggers.eventLogLimit",
                   "watchers.triggers.eventLogTtlHours",
                   "watchers.triggers.sweepIntervalMs",
@@ -4375,7 +4373,6 @@
                   "watchers.triggers.maxConcurrentChecks",
                   "watchers.triggers.observationRingSize",
                   "watchers.triggers.runHistoryLimit",
-                  "watchers.triggers.runHistoryTtlHours",
                   "watchers.triggers.eventLogLimit",
                   "watchers.triggers.eventLogTtlHours",
                   "watchers.triggers.sweepIntervalMs",
@@ -5036,9 +5033,15 @@
             {
               "id": "answer",
               "label": "Answer",
-              "help": "Your answer, in your own words (retry or cancel for a failed step)",
-              "kind": "long-text",
-              "freeTextReason": "your own words",
+              "help": "Choose its answer, or answer in your own words",
+              "kind": "choice",
+              "choices": {
+                "list": "work.answers",
+                "dependsOn": "question",
+                "allowOther": {
+                  "reason": "your own words"
+                }
+              },
               "required": true,
               "typed": {
                 "tail": true
@@ -5449,7 +5452,7 @@
           "risk": "none",
           "ownerOnly": {
             "reason": "approving a plan starts the work as yours",
-            "instead": "the owner approves it himself in Work, or answers yes when it is put to him"
+            "instead": "the owner approves it in Work, or answers yes when it is put to them"
           },
           "undoneBy": "cancel",
           "operator": {
@@ -5496,6 +5499,86 @@
             "method": "capabilities.run",
             "fields": {
               "id": "=\"work.plan-discard\"",
+              "inputs.work": "work"
+            }
+          },
+          "inputs": [
+            {
+              "id": "work",
+              "label": "Work",
+              "help": "Your work, by what you asked for",
+              "kind": "choice",
+              "choices": {
+                "list": "work.items"
+              },
+              "required": true,
+              "typed": {
+                "position": 1
+              }
+            }
+          ]
+        },
+        {
+          "id": "branch-merge",
+          "capability": {
+            "id": "work.branch-merge",
+            "group": "work",
+            "home": "daemon",
+            "repeat": "safe"
+          },
+          "label": "Merge a work's kept branch in",
+          "word": "branch-merge",
+          "line": "/work branch-merge <work>",
+          "sentence": "The changes {work} kept on its own branch are merged into the project's branch; that branch and the work's folder are then removed.",
+          "done": "",
+          "touches": "this-machine",
+          "lasts": "kept",
+          "risk": "none",
+          "operator": {
+            "method": "capabilities.run",
+            "fields": {
+              "id": "=\"work.branch-merge\"",
+              "inputs.work": "work"
+            }
+          },
+          "inputs": [
+            {
+              "id": "work",
+              "label": "Work",
+              "help": "Your work, by what you asked for",
+              "kind": "choice",
+              "choices": {
+                "list": "work.items"
+              },
+              "required": true,
+              "typed": {
+                "position": 1
+              }
+            }
+          ]
+        },
+        {
+          "id": "branch-discard",
+          "capability": {
+            "id": "work.branch-discard",
+            "group": "work",
+            "home": "daemon",
+            "repeat": "safe"
+          },
+          "label": "Discard a work's kept branch",
+          "button": "Discard it",
+          "word": "branch-discard",
+          "line": "/work branch-discard <work>",
+          "sentence": "Every change {work} kept on its own branch is thrown away, with the work's own folder, and the other side of a conflict it kept on a branch of its own.",
+          "done": "",
+          "touches": "this-machine",
+          "lasts": "kept",
+          "risk": "cannot-be-undone",
+          "riskWords": "cannot be undone",
+          "operator": {
+            "method": "capabilities.run",
+            "fields": {
+              "id": "=\"work.branch-discard\"",
               "inputs.work": "work"
             }
           },
@@ -8176,6 +8259,22 @@
         "value": "id",
         "label": "id",
         "detail": "command"
+      }
+    },
+    "work.answers": {
+      "method": "capabilities.run",
+      "input": {
+        "id": "work.list"
+      },
+      "rows": {
+        "from": "data.works",
+        "each": "run.answerChoices",
+        "eachWhere": {
+          "field": "question",
+          "equals": "{question}"
+        },
+        "value": "value",
+        "label": "label"
       }
     },
     "work.checklist": {

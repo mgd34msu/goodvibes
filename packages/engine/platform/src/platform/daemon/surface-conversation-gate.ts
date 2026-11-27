@@ -79,7 +79,7 @@ export interface SurfaceIngressOrigin {
   readonly guest?: true | undefined;
 }
 
-/** One of the owner's own conversations, with the id he writes from there. */
+/** One of the owner's own conversations, with the id the owner writes from there. */
 export interface OwnerConversation {
   readonly binding: AutomationRouteBinding;
   /** The channel owner's user id on that surface; absent where the surface has no sender ids (ntfy). */
@@ -118,8 +118,8 @@ export interface ConversationGateDeps {
    */
   readonly ownerConversations?: ((surface: string) => readonly OwnerConversation[]) | undefined;
   /**
-   * The owner inbox (Waiting for you). The owner's own request made in a conversation not his alone, when none of
-   * his own conversations takes its proposal, is put here as an item he accepts or dismisses (the answer is applied
+   * The owner inbox (Waiting for you). The owner's own request made in a conversation not theirs alone, when none of
+   * their own conversations takes its proposal, is put here as an item they accept or dismiss (the answer is applied
    * by the surface-action helper's WORK_PROPOSAL_ITEM_KEY effect). Absent: such a proposal is not acted on.
    */
   readonly ownerInbox?: Pick<OwnerInbox, 'postNow'> | undefined;
@@ -251,8 +251,9 @@ async function gateOwnedSurfaceSpawn(
     return spawnConversational();
   }
 
+  // As released: a request for work on a channel is shown to the owner for agreement first, in every mode.
   if (!store) throw new Error('Conversation gate proposal store is unavailable');
-  // A guest's work is the owner's to agree to: with no conversation of his to
+  // A guest's work is the owner's to agree to: with no conversation of the owner's to
   // put it to, the guest's message is answered as conversation instead.
   if (origin?.guest === true && !deps.ownerConversations) return spawnConversational();
   const summary = summarizeWorkRequest(inboundText);
@@ -280,14 +281,14 @@ async function gateOwnedSurfaceSpawn(
   // The store may have folded an earlier pending request from this conversation into this proposal; the notice names both.
   // A guest's proposal goes to the owner's own conversation, the only place it
   // can be answered; the guest is told it was put to the owner.
-  // The owner's own request in a conversation not proven his alone (a group, a shared channel): as an approval, the
-  // proposal is never posted there for the others to see; it goes to his own conversations, answered from there.
+  // The owner's own request in a conversation not proven theirs alone (a group, a shared channel): as an approval, the
+  // proposal is never posted there for the others to see; it goes to their own conversations, answered from there.
   const ownersElsewhere = origin !== null && origin.guest !== true && binding !== undefined && deps.ownerConversations !== undefined
     && !deps.ownerConversations(origin.surface).some((conversation) => conversation.binding.id === binding.id);
   const guestAsk = origin?.guest === true
     ? await deliverGuestProposal(deps, origin, proposal, config.proposalTtlMs)
     : ownersElsewhere && origin !== null
-      // None of his own conversations took it: it waits for him in Waiting for you instead.
+      // None of the owner's own conversations took it: it waits for them in Waiting for you instead.
       ? await deliverOwnersProposalElsewhere(deps, origin, proposal, config.proposalTtlMs)
         .then((sent) => sent.delivery.delivered ? sent : putOwnersProposalInInbox(deps, origin, proposal, sent))
       : undefined;
@@ -510,7 +511,7 @@ export function resolveOriginBinding(
 }
 
 /**
- * Put a guest's proposal to the owner: his own conversations, those on the
+ * Put a guest's proposal to the owner: their own conversations, those on the
  * guest's surface first, until one accepts it. The one that did is the only
  * conversation that answers it (`answerFrom`).
  */
@@ -542,8 +543,8 @@ async function deliverGuestProposal(
 }
 
 /**
- * The owner's own request made in a conversation that is not his alone (a group, a shared channel): the proposal is
- * put to his own conversations (owner-alert.ts isOwnerConversation), those on the same surface first, naming where it
+ * The owner's own request made in a conversation that is not theirs alone (a group, a shared channel): the proposal is
+ * put to their own conversations (owner-alert.ts isOwnerConversation), those on the same surface first, naming where it
  * was asked, and answered from the one that took it. Nothing is posted where others can read it.
  */
 async function deliverOwnersProposalElsewhere(
@@ -577,8 +578,8 @@ export const WORK_PROPOSAL_ITEM_KEY = 'work-proposal:';
 export const OWNER_INBOX_ANSWER_SURFACE = 'owner-inbox';
 
 /**
- * The owner's own request in a conversation not his alone, when none of his own conversations took the proposal: it
- * is put in the owner inbox (Waiting for you, Questions) as an item he accepts or dismisses there, answered from there
+ * The owner's own request in a conversation not theirs alone, when none of their own conversations took the proposal: it
+ * is put in the owner inbox (Waiting for you, Questions) as an item they accept or dismiss there, answered from there
  * only. Nothing is posted in the conversation it was asked in. The earlier refusal stands when there is no inbox or
  * the item could not be posted.
  */
@@ -597,8 +598,9 @@ function putOwnersProposalInInbox(
       detail: `You asked for it in a conversation on ${origin.surface} that is not yours alone, and none of your own conversations `
         + 'could take the question, so it waits here; nothing was posted in that conversation. Accept starts the work; dismiss leaves it undone.',
       options: ['accept', 'dismiss'],
-      askedBy: `your ${origin.surface} conversation`,
+      // It ends with the proposal it holds (conversationGate.proposalTtlMs).
       expiresAt: proposal.expiresAt,
+      askedBy: `your ${origin.surface} conversation`,
       metadata: { proposalId: proposal.id, surface: origin.surface },
     }, 'conversation gate');
     return {
@@ -663,7 +665,7 @@ export async function startAgreedWork(
   assertSynchronousCurrent(deps.readingOptions?.beforeAttempt);
   const task = note ? `${proposal.task}\n\nAdditional direction from the owner: ${note}` : proposal.task;
   // A guest's proposal is answered from elsewhere by someone else (the owner); the owner's own proposal answered from
-  // his own conversation or from Waiting for you keeps his id, and his agreed work is his turn.
+  // their own conversation or from Waiting for you keeps their id, and their agreed work is their turn.
   const guest = proposal.answerFrom !== undefined && proposal.answerFrom.userId !== proposal.userId;
   const binding = proposal.routeId ? deps.routeBindings.getBinding(proposal.routeId) : undefined;
   // The owner's own conversation on a channel with no project works in its own automatic project.
@@ -673,7 +675,7 @@ export async function startAgreedWork(
     return 'not-started';
   }
   // A guest's agreed work is still the guest's turn: the owner agreed to the
-  // request, not to letting its text direct changes, so each change is still his.
+  // request, not to letting its text direct changes, so each change is still the owner's to decide.
   const start = () => deps.trySpawnAgent(placed, 'ConversationGate.startAgreedWork', proposal.sessionId);
   const spawned = guest ? withGuestTurn(proposal.surfaceKind, start) : start();
   // The daemon is restarting into an update: the proposal stays accepted and unstarted, and is started after the restart.

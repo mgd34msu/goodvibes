@@ -67,7 +67,7 @@ export const CONTROL_AUTH_CURRENT_RESPONSE_SCHEMA = objectSchema({
   scopes: STRING_LIST_SCHEMA,
   roles: STRING_LIST_SCHEMA,
   expiresAt: nullableSchema(NUMBER_SCHEMA),
-  /** Whether the caller is the owner himself (daemon/method-owner-decision.ts `ownerHimself`), so a client offers his own acts. */
+  /** Whether the caller is the owner in person (daemon/method-owner-decision.ts `ownerHimself`), so a client offers the owner's own acts. */
   ownerHimself: BOOLEAN_SCHEMA,
 }, [
   'authenticated',

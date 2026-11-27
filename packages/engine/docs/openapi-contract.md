@@ -18,11 +18,11 @@ daemon of the same release.
 - Every cataloged operator method. The counts below are taken from the contract
   itself.
   <!-- openapi-counts:start -->
-  Methods with a dedicated REST binding appear as path operations (544 operations, one per
+  Methods with a dedicated REST binding appear as path operations (546 operations, one per
   method's declared HTTP verb and path); methods without one are reachable only through the
-  generic invoke endpoint (`POST /api/control-plane/methods/{methodId}/invoke`, operation 545,
+  generic invoke endpoint (`POST /api/control-plane/methods/{methodId}/invoke`, operation 547,
   135 methods) and are listed on it under `x-invoke-only-methods`.
-  `x-operator-methods` is a flat index of all 679 cataloged methods, REST-bound
+  `x-operator-methods` is a flat index of all 681 cataloged methods, REST-bound
   or invoke-only, each with its category, access level, resolved REST route (or
   `null` for invoke-only), and schema coverage.
   <!-- openapi-counts:end -->

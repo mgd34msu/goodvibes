@@ -186,7 +186,7 @@ const TOOL_RULE_NOTES = {
 /** Servers connected at once while applying a configuration. */
 const MCP_CONNECT_CONCURRENCY = 4;
 
-/** The MCP files in the person's home folder (config.ts getMcpConfigLocations): his own, never a workspace's. */
+/** The MCP files in the person's home folder (config.ts getMcpConfigLocations): their own, never a workspace's. */
 const USER_CONTEXT_KINDS: ReadonlySet<string> = new Set(['global-xdg', 'global-dotdir', 'claude-desktop']);
 
 /** The credential refusal behind a failed connect, if that is what it was (also inside a cause or an aggregate). */
@@ -239,9 +239,9 @@ export class McpRegistry {
   /** The file each configured server was read from, as the last reload found it. */
   private serverSources = new Map<string, string>();
   /**
-   * The servers the last reload read from the person's own files in his home folder (added for all his projects, or
-   * read from another program's file there), not from the workspace. Such a server is his, not the folder's: it
-   * starts in his home folder, and the workspace's trust (a restricted daemon folder) does not hold it back.
+   * The servers the last reload read from the person's own files in their home folder (added for all their projects, or
+   * read from another program's file there), not from the workspace. Such a server is theirs, not the folder's: it
+   * starts in their home folder, and the workspace's trust (a restricted daemon folder) does not hold it back.
    */
   #userContextServers = new Set<string>();
   /** Tools the owner denied this session, by server. Like the session trust mode, they outlive a reconnect or reload. */
@@ -294,8 +294,28 @@ export class McpRegistry {
     this.permissionHost = host;
     // A revoked owner ends every scheduled reconnect; a replaced one no longer speaks for this registry.
     const revoked = () => { if (this.permissionHost === host) this.#lifecycle.stopAll('the MCP connection owner was revoked'); };
+    // The owner's signal outlives a project's registry (the daemon's): the listener goes when the owner is replaced or
+    // the registry is let go (`release`), so a let-go registry is not kept by it.
+    this.#forgetHost?.();
+    this.#forgetHost = undefined;
     if (host.signal.aborted) revoked();
-    else host.signal.addEventListener('abort', revoked, { once: true });
+    else {
+      host.signal.addEventListener('abort', revoked, { once: true });
+      this.#forgetHost = () => { host.signal.removeEventListener('abort', revoked); };
+    }
+  }
+  #forgetHost: (() => void) | undefined;
+
+  /**
+   * Stops every server (disconnectAll) and lets go of what this registry hung on the host's own long-lived things (its
+   * permission owner's signal, the sandbox setting's subscription): a project's registry is let go with its project.
+   */
+  async release(): Promise<void> {
+    this.#forgetHost?.();
+    this.#forgetHost = undefined;
+    this.#unsubscribeIsolation?.();
+    this.#unsubscribeIsolation = undefined;
+    await this.disconnectAll();
   }
   private elicitationHandler: McpElicitationHandler | null = null;
 
@@ -434,7 +454,7 @@ export class McpRegistry {
   /**
    * Start no server a project file names, and let none of them stand in for an
    * owner's server of the same name, until the owner trusts the workspace; start
-   * them the moment he does, and stop them the moment the workspace is
+   * them the moment the owner does, and stop them the moment the workspace is
    * restricted again (here or in another process). Returns the unbinding.
    */
   bindRepositoryTrust(gate: RepositoryFileGate): () => void {
@@ -510,8 +530,8 @@ export class McpRegistry {
 
   /**
    * Write a server's entry and bring the running servers in line. `byOwner`:
-   * the owner added it with his own command or form, so a project file's entry
-   * is his request and starts without the workspace trust question
+   * the owner added it with their own command or form, so a project file's entry
+   * is their request and starts without the workspace trust question
    * (mcp/owner-added.ts); a model's or a script's write is not.
    */
   async upsertServerConfig(
@@ -1384,7 +1404,7 @@ export class McpRegistry {
    * servers were started from unless given.
    *
    * A looser trust mode loosens what a server may do: every caller that
-   * reaches this method for one is the owner's own act (Settings, his own
+   * reaches this method for one is the owner's own act (Settings, their own
    * command, which asks once when a model runs it), never a model's tool.
    */
   async storeServerPolicy(
@@ -1578,7 +1598,7 @@ export class McpRegistry {
     let assertExecutionCurrent: (() => void) | undefined;
     const isolated = !!serverConfig.command && !!this.sandboxConfigManager
       && getSandboxConfigSnapshot(this.sandboxConfigManager).mcpIsolation !== 'disabled';
-    // A server from the person's own files in his home folder (not contained) starts there, in his home context: it is
+    // A server from the person's own files in their home folder (not contained) starts there, in their home context: it is
     // not the workspace's, so the workspace's trust does not decide whether it starts (a daemon serving a restricted
     // folder still starts a server added for all your projects). Its tool calls are gated as every call is.
     const home = this.startedRoots?.homeDirectory;

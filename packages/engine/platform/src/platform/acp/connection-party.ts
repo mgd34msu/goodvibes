@@ -1,7 +1,7 @@
 /**
  * connection-party.ts, whose input an ACP connection to the owner's own program (`goodvibes acp`) carries.
  *
- * The owner's own connection (his editor launched his program) makes the session's agent his turn; a `goodvibes acp`
+ * The owner's own connection (their editor launched their program) makes the session's agent their turn; a `goodvibes acp`
  * the daemon starts for anyone else (a hosted agent or a runner a device, a member or an outside caller asked for) is
  * that caller's input, so its agent runs reads only (security/turn-input-party.ts). The daemon says so in the started
  * program's environment; the mark can only tighten: present, someone else's; absent, the program decides as for its own
@@ -14,7 +14,7 @@ export const ACP_STARTED_FOR_ENV = 'GOODVIBES_ACP_STARTED_FOR';
 
 /**
  * The party of an ACP connection of the owner's own program: someone else's when the daemon started it for someone
- * else (the environment says who), else his own.
+ * else (the environment says who), else the owner's own.
  */
 export function acpConnectionParty(env: Readonly<Record<string, string | undefined>>): TurnInputParty {
   const startedFor = env[ACP_STARTED_FOR_ENV];

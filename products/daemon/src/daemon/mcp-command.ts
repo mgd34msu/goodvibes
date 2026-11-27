@@ -23,8 +23,8 @@
  * again). Its calls are an outside caller's, decided by the daemon under the
  * owner's mode, and an answer remembered for it settles nobody else's call. The
  * first time it names a project it was not given (the folder it was started
- * in, unless that can never be a project), the daemon asks the owner once
- * whether it may work there. `--token` gives a credential by hand instead (a
+ * in, unless that can never be a project), whether it may work there is
+ * decided under the owner's mode. `--token` gives a credential by hand instead (a
  * paired device's, for a daemon on another machine).
  *
  * WHAT IS SERVED by default is two tools, `capability_find` and
@@ -131,53 +131,15 @@ function keptCredentials(daemonHomeDir: string): Record<string, { readonly id?: 
   }
 }
 
-/** The question this server's credential waits on, by daemon identity (`<daemon home>/mcp-serve-pending.json`). */
-function pendingFile(daemonHomeDir: string): string {
-  return join(daemonHomeDir, 'mcp-serve-pending.json');
-}
-
-/** The owner's question a start waits on: its id, and the project it names (none: a credential for shared things only). */
-interface PendingQuestion { readonly approvalId: string; readonly project?: string }
-
-function keptPending(daemonHomeDir: string): Record<string, PendingQuestion> {
-  try {
-    const parsed = JSON.parse(readFileSync(pendingFile(daemonHomeDir), 'utf8')) as unknown;
-    if (parsed === null || typeof parsed !== 'object' || Array.isArray(parsed)) return {};
-    const kept: Record<string, PendingQuestion> = {};
-    for (const [identity, value] of Object.entries(parsed as Record<string, unknown>)) {
-      const entry = value !== null && typeof value === 'object' ? value as { approvalId?: unknown; project?: unknown } : {};
-      if (typeof entry.approvalId !== 'string' || !entry.approvalId) continue;
-      kept[identity] = { approvalId: entry.approvalId, ...(typeof entry.project === 'string' && entry.project ? { project: entry.project } : {}) };
-    }
-    return kept;
-  } catch {
-    return {};
-  }
-}
-
-function keepPending(daemonHomeDir: string, identity: string, question: PendingQuestion | undefined): void {
-  try {
-    const next = { ...keptPending(daemonHomeDir) };
-    if (question === undefined) delete next[identity]; else next[identity] = question;
-    mkdirSync(daemonHomeDir, { recursive: true, mode: 0o700 });
-    writeFileSync(pendingFile(daemonHomeDir), `${JSON.stringify(next, null, 2)}\n`, { mode: 0o600 });
-    chmodSync(pendingFile(daemonHomeDir), 0o600);
-  } catch {
-    // Not kept: the next start asks the daemon again, which answers with the question that waits.
-  }
-}
-
-/** What the server has of its own credential: the credential, the owner's question it waits on, or why it has none. */
-type OwnCredential = { readonly token: string; readonly mintedId?: string; readonly project?: string } | { readonly pending: string; readonly project?: string } | { readonly refusal: string; readonly fix: string };
+/** What the server has of its own credential: the credential, or why it has none. */
+type OwnCredential = { readonly token: string; readonly mintedId?: string; readonly project?: string } | { readonly refusal: string; readonly fix: string };
 
 /**
  * The outside agent's own credential for this daemon: the one kept for the daemon's identity (whatever address names
  * it), or the one the daemon issues (`pairing.outsideAgent.issue`, asked with the operator token and no person's
- * claim). Making a credential is the owner's own act, so the ask is put to him as ONE question that also names the
- * project the server was started in ("Let the outside agent ... work in <project>?"; with none, its credential for
- * shared things only): on his yes the credential is issued and given that project at once, and nothing about the
- * project is asked again. Until he answers, the question it waits on (kept by daemon identity, read again at every
- * call and every start). Never the operator token for the agent's calls.
+ * claim), decided by the daemon under the owner's permission mode as ONE decision that names the project the server was
+ * started in. Allowed, the credential is issued with no project: a project is given only by the owner in person (Devices and
+ * network, on its row). Under Ask me this start waits on the owner's one answer. Never the operator token for the agent's calls.
  */
 async function outsideAgentCredential(target: { readonly baseUrl: string; readonly token: string }, daemonHomeDir: string, fetchImpl: McpFetch,
   project?: string): Promise<OwnCredential> {
@@ -185,34 +147,16 @@ async function outsideAgentCredential(target: { readonly baseUrl: string; readon
   const kept = keptCredentials(daemonHomeDir)[identity];
   if (kept) return { token: kept.token };
   let minted: { readonly id?: unknown; readonly token?: unknown } | undefined;
-  const asked = keptPending(daemonHomeDir)[identity];
-  const waiting = asked?.approvalId;
   try {
     const transport = createHttpJsonTransport({ baseUrl: target.baseUrl, authToken: target.token, fetchImpl });
-    const answer = waiting !== undefined
-      // The question asked before (this start or an earlier one): its outcome, read once. One question at a time:
-      // a start in another folder waits on it too, and that folder is asked about once the credential exists.
-      ? await transport.requestJson('/api/control-plane/methods/capabilities.run/invoke', {
-        method: 'POST', methodId: 'capabilities.run', body: { body: { approvalId: waiting } },
-      }) as { readonly id?: unknown; readonly token?: unknown; readonly code?: unknown; readonly approvalId?: unknown } | null
-      : await transport.requestJson('/api/control-plane/methods/pairing.outsideAgent.issue/invoke', {
-        method: 'POST', methodId: 'pairing.outsideAgent.issue', body: { body: project !== undefined ? { project } : {} },
-      }) as { readonly id?: unknown; readonly token?: unknown; readonly code?: unknown; readonly approvalId?: unknown } | null;
-    if (answer?.code === 'OWNER_APPROVAL_PENDING') {
-      const approvalId = typeof answer.approvalId === 'string' ? answer.approvalId : waiting;
-      if (approvalId === undefined) return { refusal: `the daemon at ${target.baseUrl} put its credential to the owner and named no question`, fix: 'check Waiting for you, then start it again' };
-      const about = approvalId === waiting ? asked?.project : project;
-      if (approvalId !== waiting) keepPending(daemonHomeDir, identity, { approvalId, ...(about !== undefined ? { project: about } : {}) });
-      return { pending: approvalId, ...(about !== undefined ? { project: about } : {}) };
-    }
+    const answer = await transport.requestJson('/api/control-plane/methods/pairing.outsideAgent.issue/invoke', {
+      method: 'POST', methodId: 'pairing.outsideAgent.issue', body: { body: project !== undefined ? { project } : {} },
+    }) as { readonly id?: unknown; readonly token?: unknown } | null;
     minted = answer ?? undefined;
-    if (waiting !== undefined) keepPending(daemonHomeDir, identity, undefined);
   } catch (error) {
     const said = error instanceof Error ? error.message : String(error);
-    // The owner's No (or the question ended): forgotten, so the next start asks once more.
-    if (waiting !== undefined) keepPending(daemonHomeDir, identity, undefined);
-    if (waiting !== undefined && /CAPABILITY_NOT_APPROVED|not approved|No\b/.test(said)) {
-      return { refusal: `the owner did not let the outside agent have a credential of its own (${said})`, fix: 'start it again to ask him once more, or give a paired device\'s token with --token' };
+    if (/CAPABILITY_NOT_APPROVED|not approved/.test(said)) {
+      return { refusal: `the daemon did not let the outside agent have a credential of its own under your permission mode (${said})`, fix: 'give a paired device\'s token with --token, or start it again under a mode that allows it' };
     }
     if (/OUTSIDE_AGENT_ISSUED|already has its credential/.test(said)) {
       return { refusal: `this daemon issued its credential before (the paired device "${OUTSIDE_AGENT_NAME}") and it is not kept in ${credentialsFile(daemonHomeDir)}`,
@@ -234,9 +178,8 @@ async function outsideAgentCredential(target: { readonly baseUrl: string; readon
     return { refusal: `its own credential could not be kept in ${credentialsFile(daemonHomeDir)} (${error instanceof Error ? error.message : String(error)})`,
       fix: 'make that folder writable for this account; the credential made now is listed among the paired devices, where it can be revoked' };
   }
-  // The project the owner's yes gave with it: the one his question named.
-  const given = waiting !== undefined ? asked?.project : project;
-  return { token: minted.token, ...(typeof minted.id === 'string' ? { mintedId: minted.id } : {}), ...(given !== undefined ? { project: given } : {}) };
+  // The project given with it: the one the decision named.
+  return { token: minted.token, ...(typeof minted.id === 'string' ? { mintedId: minted.id } : {}), ...(project !== undefined ? { project } : {}) };
 }
 
 /**
@@ -280,20 +223,18 @@ export async function runMcpCommand(input: RunMcpCommandInput): Promise<number> 
   // The folder it was started in is the project its calls name when they name none, unless it can never be one.
   const started = startProject(input.workingDirectory ?? process.cwd(), input.daemonHomeDir);
   // A credential of its own, never the operator token (see the header); one given by hand is used as given. Its first
-  // start puts ONE question to the owner: its credential, with the project it was started in.
-  let own: OwnCredential | undefined = input.flags.token === undefined ? await outsideAgentCredential(resolved.target, input.daemonHomeDir, fetchImpl, started.project) : undefined;
+  // start is ONE decision under the owner's mode: its credential, with the project it was started in.
+  const own: OwnCredential | undefined = input.flags.token === undefined ? await outsideAgentCredential(resolved.target, input.daemonHomeDir, fetchImpl, started.project) : undefined;
   if (own !== undefined && 'refusal' in own) return refuse(own.refusal, own.fix);
-  if (own !== undefined && 'pending' in own) {
-    input.stderr(`goodvibes-daemon mcp serve: having a credential of its own is your act, so you have been asked once in Waiting for you (approval ${own.pending}): ${own.project !== undefined ? `whether it may work in ${own.project}` : 'whether it may have one, for shared things only'}; each call is answered that it waits for you until you answer`);
-  }
   const ownToken = (): string | undefined => own !== undefined && 'token' in own ? own.token : undefined;
   const target = ownToken() !== undefined ? { ...resolved.target, token: ownToken()! } : resolved.target;
-  // Issued just now, on his yes: with the project he said yes to, if it was started in one.
+  // Issued just now. Its project is given only by the owner in person (daemon/capability-wiring.ts, the issue's handler):
+  // this program asks with the operator token, so none is given with it, whatever folder it was started in.
   if (own !== undefined && 'mintedId' in own && own.mintedId !== undefined) {
-    input.stderr(`goodvibes-daemon mcp serve: it has a credential of its own now, listed among your paired devices as "${OUTSIDE_AGENT_NAME}"${own.project !== undefined ? `, working in ${own.project}` : ', for shared things only'}`);
+    input.stderr(`goodvibes-daemon mcp serve: it has a credential of its own now, listed among your paired devices as "${OUTSIDE_AGENT_NAME}"; it acts on shared things only until you give it a project in Devices and network, on its row${own.project !== undefined ? ` (it was started in ${own.project})` : ''}`);
   }
   if (started.project === undefined) {
-    input.stderr(`goodvibes-daemon mcp serve: started in ${input.workingDirectory ?? process.cwd()}, which cannot be a project (${started.why}): it acts on shared things only; a call that needs a project names one (workingDirectory), and you are asked once whether it may work there, or you give it one in Devices and network, on its row`);
+    input.stderr(`goodvibes-daemon mcp serve: started in ${input.workingDirectory ?? process.cwd()}, which cannot be a project (${started.why}): it acts on shared things only; a call that needs a project names one (workingDirectory), and whether it may work there is decided under your permission mode, or you give it one in Devices and network, on its row`);
   }
   // Prove the daemon answers and accepts the token before the first frame, so a
   // client sees a failed launch rather than a server whose every tool errors.
@@ -317,24 +258,11 @@ export async function runMcpCommand(input: RunMcpCommandInput): Promise<number> 
   const perMethod = (input.flags.categories ?? []).length > 0 || input.flags.allowWrite === true || input.flags.allowDestructive === true;
   if (!perMethod) {
     const workingDirectory = started.project;
-    let transport = createHttpJsonTransport({ baseUrl: target.baseUrl, authToken: target.token, fetchImpl });
+    const transport = createHttpJsonTransport({ baseUrl: target.baseUrl, authToken: target.token, fetchImpl });
     const server = new OperatorMcpServer({
       toolSet: CAPABILITY_MCP_TOOL_SET,
       // Reached by id over the daemon's invoke endpoint, behind the same access gate; the client's cancel aborts it.
       invoke: async (methodId, params, { signal }) => {
-        // Waiting for the owner's one question: read its outcome now; until he answers, the call says so.
-        if (own !== undefined && 'pending' in own) {
-          const waitingOn = own.pending;
-          own = await outsideAgentCredential(resolved.target, input.daemonHomeDir, fetchImpl, started.project);
-          if ('pending' in own) {
-            return { ok: false, code: 'OWNER_APPROVAL_PENDING', approvalId: own.pending,
-              state: `Not done yet: the owner has been asked in Waiting for you (approval ${own.pending}) whether the outside agent may have a credential of its own${own.project !== undefined ? ` and work in ${own.project}` : ''}; nothing ran.`,
-              next: ['The owner answers it in Waiting for you (the terminal app or the Agent, the web UI, or a paired phone).', 'Send the same call again after he answers.'] };
-          }
-          if ('refusal' in own) throw new Error(`${own.refusal}; ${own.fix}`);
-          transport = createHttpJsonTransport({ baseUrl: resolved.target.baseUrl, authToken: own.token, fetchImpl });
-          input.stderr(`goodvibes-daemon mcp serve: the owner answered approval ${waitingOn}; it has a credential of its own now${own.project !== undefined ? `, working in ${own.project}` : ', for shared things only'}`);
-        }
         return transport.requestJson(`/api/control-plane/methods/${encodeURIComponent(methodId)}/invoke`, {
           method: 'POST', methodId, signal,
           body: { body: methodId === 'capabilities.run' && workingDirectory !== undefined && typeof params['workingDirectory'] !== 'string' ? { ...params, workingDirectory } : params },
@@ -348,10 +276,6 @@ export async function runMcpCommand(input: RunMcpCommandInput): Promise<number> 
     return 0;
   }
 
-  // One tool per method needs its credential at start: while the owner has not answered, it does not start.
-  if (own !== undefined && 'pending' in own) {
-    return refuse(`its own credential waits for your answer in Waiting for you (approval ${own.pending})`, 'answer it, then start it again');
-  }
   const contract = getOperatorContract();
   const known = new Set(contract.operator.methods.map((method) => method.category));
   const requested = (input.flags.categories ?? []).flatMap((entry) => entry.split(',')).map((entry) => entry.trim()).filter(Boolean);

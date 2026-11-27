@@ -1,12 +1,8 @@
 /**
- * own-messages-proof.ts, the channel kinds "Treat my own messages here as me" (channels/types.ts `ownMessagesAsOwner`)
- * exists for: a kind whose messages carry a sender the channel itself authenticates (never a name the message or a
- * caller writes), and where a conversation can be proven the owner's alone (the channel says a message is a direct
- * message, never a group, a channel or a thread). Any other kind never offers the switch, refuses it when it is
- * turned on through any door, and ignores it when a policy file holds it anyway (daemon/owner-channel-conversation.ts).
- *
- * One table, read by the channel route that writes the switch (every door: the capability, the method, the REST route),
- * by the reader that applies it, and by the capability's own words.
+ * own-messages-proof.ts, the channel kinds on which a message can be the owner's own (daemon/owner-channel-conversation.ts):
+ * a kind whose messages carry a sender the channel itself authenticates (never a name the message or a caller writes),
+ * and where a conversation can be proven the owner's alone (the channel says a message is a direct message, never a
+ * group, a channel or a thread). On any other kind every message is someone else's input.
  */
 import type { ChannelSurface } from './types.js';
 
@@ -40,20 +36,7 @@ export const OWN_MESSAGES_PROOF: Readonly<Record<ChannelSurface, OwnMessagesProo
   web: { qualifies: false, sender: 'not a channel: the web UI signs in with the owner\'s own credential', alone: 'not a channel' },
 };
 
-/** The channel kinds the switch exists for (a place offers it only on their rows). */
-export const OWN_MESSAGES_CHANNELS: readonly string[] = Object.entries(OWN_MESSAGES_PROOF)
-  .filter(([, proof]) => proof.qualifies).map(([surface]) => surface);
-
-/** Whether "Treat my own messages here as me" exists for this channel kind. */
+/** Whether a message on this channel kind can be the owner's own. */
 export function ownMessagesQualifies(surface: string): boolean {
   return Object.hasOwn(OWN_MESSAGES_PROOF, surface) && OWN_MESSAGES_PROOF[surface as ChannelSurface].qualifies;
-}
-
-/** Why the switch does not exist for this channel kind, in words; undefined when it does. */
-export function ownMessagesRefusal(surface: string): string | undefined {
-  if (ownMessagesQualifies(surface)) return undefined;
-  const proof = Object.hasOwn(OWN_MESSAGES_PROOF, surface) ? OWN_MESSAGES_PROOF[surface as ChannelSurface] : undefined;
-  return proof
-    ? `"Treat my own messages here as me" does not exist for ${surface}: what proves the sender is ${proof.sender}; what proves the conversation is yours alone is ${proof.alone}`
-    : `"Treat my own messages here as me" does not exist for ${surface}: it is not a channel this daemon knows`;
 }

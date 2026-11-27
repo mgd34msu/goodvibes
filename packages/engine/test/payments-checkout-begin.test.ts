@@ -21,6 +21,7 @@
  */
 import { afterEach, beforeEach, expect, test } from 'bun:test';
 import { randomUUID } from 'node:crypto';
+import { localOwnerActor } from '@goodvibes/engine/daemon-api/http-policy';
 import { mkdirSync } from 'node:fs';
 import { join } from 'node:path';
 import { makeProjectTempDir } from './_helpers/project-temp.ts';
@@ -66,8 +67,11 @@ const OWNER_AUTHORITY: NativeExecutionAuthority = {
   revokeContinuation: () => {},
 };
 function asOwner(body: Record<string, unknown>, explicitUserRequest = true): GatewayMethodInvocation {
+  // The owner in person (their signed-in session, the one test `ownerHimself`): they reach every record by id
+  // (control-plane/caller-reach.ts); a caller with no actor is no one the daemon established, and reaches none.
   return { body, nativeExecutionAuthority: OWNER_AUTHORITY, isAuthorized: () => true,
     context: { principalId: 'local-owner', principalKind: 'token', admin: true, scopes: ['read:payments', 'write:payments'],
+      credentialKind: 'user-session', actor: localOwnerActor(),
       authToken: 'fixture-local-owner', metadata: { explicitUserRequest } } } as GatewayMethodInvocation;
 }
 

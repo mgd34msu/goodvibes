@@ -6,8 +6,9 @@ import { nativeHostedTurnRequestSchema, nativeHostedTurnStartRequestSchema, nati
 import { GatewayVerbError, withholdCommittedResult } from './gateway-verb-error.js';
 import { readInvocationParams } from './invocation-params.js';
 import { isNativeOwner, requireNativeOwner } from './native-owner.js';
+/** A project act (native-owner.ts `projectAct`): a paired device below an admin holding the scopes delivers its own turns. */
 function authorize(invocation: GatewayMethodInvocation) {
-  return requireNativeOwner(invocation, NATIVE_HOSTED_TURN_SCOPES, 'Native hosted delivery');
+  return requireNativeOwner(invocation, NATIVE_HOSTED_TURN_SCOPES, 'Native hosted delivery', { projectAct: true });
 }
 export function registerNativeHostedTurnGatewayMethods(catalog: GatewayMethodCatalog, host: NativeHostedTurnHost): void {
   const discovery = catalog.get('workLedger.turn.session');
@@ -17,7 +18,7 @@ export function registerNativeHostedTurnGatewayMethods(catalog: GatewayMethodCat
     const parsed = nativeHostedSessionRequestSchema.safeParse(readInvocationParams(invocation));
     if (!parsed.success) throw new GatewayVerbError('Invalid session identity', 'INVALID_ARGUMENT', 400);
     try {
-      const result = await host.session(parsed.data.sessionId, invocation.nativeExecutionAuthority, { isAuthorized: () => isNativeOwner(invocation, NATIVE_HOSTED_TURN_SCOPES) });
+      const result = await host.session(parsed.data.sessionId, invocation.nativeExecutionAuthority, { isAuthorized: () => isNativeOwner(invocation, NATIVE_HOSTED_TURN_SCOPES, { projectAct: true }) });
       if (invocation.isAuthorized?.(['read:sessions']) !== true) throw new GatewayVerbError('Session discovery authority changed', 'FORBIDDEN', 403);
       return nativeHostedSessionLookupSchema.parse(result);
     } catch (error) {
@@ -36,7 +37,7 @@ export function registerNativeHostedTurnGatewayMethods(catalog: GatewayMethodCat
         const parsed = (operation === 'start' || operation === 'startAgent' ? nativeHostedTurnStartRequestSchema : nativeHostedTurnRequestSchema).safeParse(input);
         if (!parsed.success) throw new GatewayVerbError('Invalid native hosted turn identity', 'INVALID_ARGUMENT', 400);
         invocation.signal?.throwIfAborted();
-        const result = await host[operation](parsed.data, authority, { ...(invocation.signal ? { signal: invocation.signal } : {}), isAuthorized: () => isNativeOwner(invocation, NATIVE_HOSTED_TURN_SCOPES) });
+        const result = await host[operation](parsed.data, authority, { ...(invocation.signal ? { signal: invocation.signal } : {}), isAuthorized: () => isNativeOwner(invocation, NATIVE_HOSTED_TURN_SCOPES, { projectAct: true }) });
         if (operation === 'status') authorize(invocation);
         else {
           try { authorize(invocation); } catch (revoked) { withholdCommittedResult(revoked, `The ${operation} request was applied.`); }

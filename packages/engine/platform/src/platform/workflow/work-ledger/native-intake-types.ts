@@ -33,7 +33,7 @@ export interface NativeConversationCapture extends NativeConversationKey {
   readonly generation: number; readonly state: 'captured' | 'processing' | 'turn' | 'blocked' | 'refused' | 'associated' | 'cancelled';
   readonly stage: 'routing' | 'extracting' | 'checking' | 'deciding' | 'waiting' | null;
   readonly route: 'converse' | 'answer' | 'contract' | null;
-  readonly reason: 'unsupported-source' | 'missing-context' | 'semantic' | 'exhausted' | null;
+  readonly reason: 'unsupported-source' | 'missing-context' | 'semantic' | 'exhausted' | 'decision-model' | null;
   readonly proposalsSpent: number; readonly proposal: NativeConversationProposal | null;
   readonly decisions: readonly NativeConversationDecision[]; readonly association: NativeConversationAssociation | null;
   /** Only on a `turn`: its hosted turn has ended, so this input can never be dispatched again. Final. */
@@ -178,7 +178,7 @@ const captureFields = {
   owner: strictObject({ authorityId: id, authorityRevision: id, authorityScopes: array(id).max(1000), scopeId: id, scopeRevision: id, projectRoot: string().min(1).max(4096) }),
   generation: revision.min(1), state: enumSchema(['captured', 'processing', 'turn', 'blocked', 'refused', 'associated', 'cancelled']),
   stage: enumSchema(['routing', 'extracting', 'checking', 'deciding', 'waiting']).nullable(),
-  route: enumSchema(['converse', 'answer', 'contract']).nullable(), reason: enumSchema(['unsupported-source', 'missing-context', 'semantic', 'exhausted']).nullable(),
+  route: enumSchema(['converse', 'answer', 'contract']).nullable(), reason: enumSchema(['unsupported-source', 'missing-context', 'semantic', 'exhausted', 'decision-model']).nullable(),
   proposalsSpent: revision.max(NATIVE_CONVERSATION_MAX_PROPOSALS), proposal: proposalSchema.nullable(),
   association: strictObject({ workId: id, attemptId: id, ledgerRevision: revision.min(1) }).nullable(),
   settled: literal(true).optional(),

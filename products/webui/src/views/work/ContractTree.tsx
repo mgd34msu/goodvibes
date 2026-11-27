@@ -145,7 +145,9 @@ function UnitTree({ unit, scope, index, attempt = false }: { unit: Unit; scope: 
       { label: 'Attempt of', value: unit.attemptOf }, { label: 'Attempt index', value: unit.attemptIndex },
       { label: 'Agent ids', value: <Ids values={unit.agentIds} /> }, { label: 'Active agent', value: unit.activeAgentId },
       { label: 'Files', value: <Ids values={unit.files} /> }, { label: 'Touched paths', value: <Ids values={unit.touchedPaths} /> },
-      { label: 'Fix rounds', value: unit.fixRounds }, { label: 'Fresh agents', value: unit.freshAgents }, { label: 'Transport retries', value: unit.transportRetries },
+      { label: 'Fix rounds', value: unit.fixRounds }, { label: 'Fresh agents', value: unit.freshAgents }, 
+      // Work no longer counts these (a failed step run again is its question's answer); older work that counted some still shows them.
+      { label: 'Transport retries', value: unit.transportRetries > 0 ? unit.transportRetries : undefined },
     ]} />
     <DetailSection title="Unit goal">{unit.goal ? <Text>{unit.goal}</Text> : <Empty>No unit goal recorded.</Empty>}</DetailSection>
     <Disclosure summary="Unit brief">{unit.brief ? <Text>{unit.brief}</Text> : <Empty>No unit brief recorded.</Empty>}</Disclosure>

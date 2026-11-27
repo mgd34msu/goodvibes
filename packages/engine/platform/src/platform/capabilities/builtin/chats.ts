@@ -37,7 +37,7 @@ export const CHATS_LIST: CapabilityDefinition<object> = {
   touches: 'reads', lasts: 'not-a-change', risk: 'none', example: {},
   async run() {
     // Only the chats the caller may reach, by the one check of what a caller may reach (control-plane/caller-reach.ts):
-    // a web chat as itself, a channel conversation as its session; the owner himself sees every one.
+    // a web chat as itself, a channel conversation as its session; the owner in person sees every one.
     const chats = keepReachable(listChats(projectsHere()), 'session', (chat) => chat.id);
     if (chats.length === 0) return { text: 'No chat yet.', data: { chats } };
     return {

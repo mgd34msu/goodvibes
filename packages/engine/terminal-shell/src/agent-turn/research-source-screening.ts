@@ -122,7 +122,7 @@ interface Acquisition { readonly owner: ProtectedSourceOwner; assertCurrent(): v
 /** The general sentence, for a refusal raised before any cause is known. */
 export const RESEARCH_SCREENING_UNCONFIGURED_DETAIL = `Research report screening needs ${AGENT_HOSTED_RESEARCH_SCREENING_KEY} turned on and the two screening provider keys (ABACUSAI_API_KEY, TYPESAFE_API_KEY), or no Decision model set.`;
 /** One fixed sentence per cause; none names a value. */
-const CONSENT_OFF = 'Turn on "Let hosted models screen research sources" in the Agent\'s settings (/settings, or S in System; setting tools.hostedResearchScreening).';
+const CONSENT_OFF = 'With a decision model set, a report\'s sources are screened by hosted models before it is saved, and that is not allowed. Turn on "Let hosted models screen research sources" among the Agent\'s settings in System (setting tools.hostedResearchScreening).';
 const CONSENT_QUARANTINED = 'The settings file holding tools.hostedResearchScreening could not be read; fix or re-save it, then re-issue the call.';
 const SETTINGS_CHANGED = 'Settings or credentials changed during the call; re-issue it.';
 const SCREENING_CLOSED = 'Report screening is shutting down with this session.';

@@ -27,13 +27,13 @@ export interface CallerPathRules {
 
 /**
  * The rules a catalog holds while the daemon has set none (a catalog built without them): unknown is someone else's,
- * so the owner himself (his own program) names any folder, and anyone else names none and reaches no project's record.
+ * so the owner in person (their own program) names any folder, and anyone else names none and reaches no project's record.
  * Never "no rules, no check".
  */
 export const CALLER_RULES_ABSENT: CallerPathRules = Object.freeze({
   project: (raw: string, who: ProjectNamer): CallerProjectVerdict => who.ownersProgram
     ? { ok: true, project: raw }
-    : { ok: false, reason: `${raw} is not a project this caller may name: this daemon has no rule set for which projects a caller may name, so only the owner himself names one` },
+    : { ok: false, reason: `${raw} is not a project this caller may name: this daemon has no rule set for which projects a caller may name, so only the owner in person names one` },
 });
 
 /** Who names the paths (workspace/caller-project.ts `projectNamerOf`, on the one owner definition). */

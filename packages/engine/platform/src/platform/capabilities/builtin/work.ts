@@ -14,9 +14,11 @@
  *
  * Each act that makes a piece of work run (hand over, start, approve, go on, run a step again, go on without one) first
  * keeps on the work's record who caused it (`caller.cause`, workflow/work-ledger/work-plans.ts `WorkCause`): its turns
- * are the owner's own only when he himself asked for it or approved it; anyone else's work runs reads only and no
- * command outside a real sandbox until he does. Handing work over and approving a plan are his own acts: anyone but
- * the person is put to him, opening on No (a model's delegation from his own conversation is decided under his mode).
+ * are the owner's own only when the owner in person asked for it or approved it; anyone else's work runs reads only and no
+ * command outside a real sandbox until the owner does. Approving a plan is the owner's own answer. Handing work over is decided
+ * under the owner's mode as an item of their list; a caller below an admin (a paired device, the outside agent, a member)
+ * hands it over, starts, changes and stops work only in a project given to it, and only work it caused itself
+ * (routes/work.ts `ownWork`, routes/native-work-execution.ts).
  */
 import { CapabilityRefusal, type CapabilityCaller, type CapabilityDefinition, type InputDescription, type ListName } from '../types.js';
 import type { WorkCause } from '../../workflow/work-ledger/work-plans.js';
@@ -26,6 +28,8 @@ import { stampExposure } from '../../security/conversation-exposure.js';
 export const WORK_ITEMS_LIST = 'work.items' as ListName;
 /** The open questions of one piece of work, after it is chosen. */
 export const WORK_QUESTIONS_LIST = 'work.questions' as ListName;
+/** The answers the chosen question takes as choices (the stuck conflict's three); empty for a question answered in words. */
+export const WORK_ANSWERS_LIST = 'work.answers' as ListName;
 /** The steps of one piece of work's plan (its run's, or its waiting plan's), after it is chosen. */
 export const WORK_STEPS_LIST = 'work.steps' as ListName;
 /** The failed steps of one piece of work's run, after it is chosen: what "run a failed step again" chooses from. */
@@ -152,24 +156,28 @@ function progressWords(snapshot: Answer, reading: WorkReading | undefined): stri
 
 /** Where who caused a piece of work to run is kept: on its record in the caller's project's Work (work-plans.ts). */
 export interface WorkCauseCapabilityServices {
-  readonly workCauses?: { note(project: string | undefined, workId: string, cause: WorkCause): Promise<void> } | undefined;
+  readonly workCauses?: { note(project: string | undefined, workId: string, cause: WorkCause, options?: { readonly made?: boolean | undefined }): Promise<void> } | undefined;
 }
 
 /**
  * Keep on the work's record who made it run, before it runs: the caller's cause (set by `capabilities.run`); a caller
- * that names none is someone else. The owner's own act makes the work his; anyone else's never takes it from him.
+ * that names none is someone else. The owner's own act makes the work theirs; anyone else's never takes it from them.
+ * `made`: the caller handed this work over just now (work.delegate); any other act of someone else's on work with no
+ * cause recorded (made before causes were kept, so the owner's) is refused (work-plans.ts `noteCause`).
  */
-async function noteCause(services: WorkCauseCapabilityServices, caller: CapabilityCaller, workId: string): Promise<void> {
+async function noteCause(services: WorkCauseCapabilityServices, caller: CapabilityCaller, workId: string, made = false): Promise<void> {
   if (!workId) return;
   // Work handed over from a conversation that read text from outside starts with what it read: what its steps make that
   // runs later, sends, spends or loosens is asked of the owner (security/conversation-exposure.ts).
   stampExposure(`work:${workId}`);
   if (!services.workCauses) return;
   try {
-    await services.workCauses.note(caller.workingDirectory, workId, caller.cause ?? { party: 'other', who: 'a caller that is not the owner himself' });
+    await services.workCauses.note(caller.workingDirectory, workId, caller.cause ?? { party: 'other', who: 'a caller that is not the owner in person' },
+      made ? { made: true } : undefined);
   } catch (error) {
-    // Work made before causes were kept waits on the owner's answer in Waiting for you: it runs nothing until then.
-    if (error instanceof Error && error.name === 'WorkPlanRefusal') throw new CapabilityRefusal(error.message, 'Answer "keep it as mine" or "drop it" in Waiting for you.');
+    // Work made before causes were kept is the owner's: it waits on the owner's answer in Waiting for you, or only the
+    // owner starts it.
+    if (error instanceof Error && error.name === 'WorkPlanRefusal') throw new CapabilityRefusal(error.message, 'Only the owner starts this work, from their own screen.');
     throw error;
   }
 }
@@ -259,13 +267,21 @@ export const WORK_ANSWER: Work = daemonWork({
   inputs: [
     WORK,
     { id: 'question', label: 'Question', help: 'The questions it is waiting on', kind: 'choice', choices: { list: WORK_QUESTIONS_LIST, dependsOn: 'work' }, required: true, typed: { position: 2 } },
-    { id: 'answer', label: 'Answer', help: 'Your answer, in your own words (retry or cancel for a failed step)', kind: 'long-text', freeTextReason: 'your own words', required: true, typed: { tail: true } },
+    // A question that takes only certain answers (the stuck conflict: keep the first change, keep the second, stop) offers
+    // them to choose; any other is answered in your own words.
+    { id: 'answer', label: 'Answer', help: 'Choose its answer, or answer in your own words', kind: 'choice', choices: { list: WORK_ANSWERS_LIST, dependsOn: 'question', allowOther: { reason: 'your own words' } }, required: true, typed: { tail: true } },
   ],
   sentence: 'Your answer "{answer}" to the question {work} asks you ({question}); the work goes on from there.', example: { work: 'work-1a2b', question: 'esc-1', answer: 'yes, keep the old setting too' },
   async run(values, _services, caller) {
     const { title, input } = await target(caller, values.work!, 'contract', { escalationId: values.question, text: values.answer });
     const reply = await runnerAct(caller, title, 'contracts.reply', input);
-    return { text: `"${title}" has your answer${text(reply['action']) ? ` (read as: ${text(reply['action'])})` : ''}.`, data: reply };
+    // What the work did with it, in words (the runner's own word for it stays in the data).
+    const did: Readonly<Record<string, string>> = {
+      approved: 'it goes on as it is', amended: 'it goes on with your answer', stopped: 'the work is stopped',
+      'asked-again': 'it asks again, in other words', refused: 'it was not taken',
+    };
+    const said = did[text(reply['action'])];
+    return { text: `"${title}" has your answer${said ? `: ${said}` : ''}.`, data: reply };
   },
 });
 
@@ -371,6 +387,39 @@ export const WORK_PLAN_DISCARD = planAct('work.plan-discard', 'plan-discard', 'T
   [WORK], { work: 'work-1a2b' }, 'work.plan.discard', () => ({}), (title) => `Threw away the plan of "${title}"; it stays, not started.`, { risk: 'cannot-be-undone' });
 
 /**
+ * An ended piece of work whose commits are not in the project's branch keeps them on a branch of its own: merge it in
+ * (the work's changes land in the project's branch, and its branch and folder go), or discard it (they are deleted).
+ */
+export const WORK_BRANCH_MERGE: Work = daemonWork({
+  id: 'work.branch-merge', repeat: 'safe', actionId: 'branch-merge', label: 'Merge a work\'s kept branch in', word: 'branch-merge', inputs: [WORK], lasts: 'kept',
+  sentence: 'The changes {work} kept on its own branch are merged into the project\'s branch; that branch and the work\'s folder are then removed.',
+  example: { work: 'work-1a2b' },
+  async run(values, _services, caller) {
+    const answer = record(await methodOf(caller)('work.branch.merge', { work: values.work }));
+    const title = text(answer['title']) || values.work!;
+    return { text: `Merged the changes of "${title}" into ${text(answer['into']) || 'the project\'s branch'}${text(answer['commit']) ? ` (commit ${text(answer['commit'])})` : ''}; its own branch was removed.`, data: answer };
+  },
+});
+
+export const WORK_BRANCH_DISCARD: Work = daemonWork({
+  id: 'work.branch-discard', repeat: 'safe', actionId: 'branch-discard', label: 'Discard a work\'s kept branch', word: 'branch-discard', inputs: [WORK], lasts: 'kept',
+  sentence: 'Every change {work} kept on its own branch is thrown away, with the work\'s own folder, and the other side of a conflict it kept on a branch of its own.',
+  example: { work: 'work-1a2b' }, risk: 'cannot-be-undone', button: 'Discard it',
+  async run(values, _services, caller) {
+    const answer = record(await methodOf(caller)('work.branch.discard', { work: values.work }));
+    const title = text(answer['title']) || values.work!;
+    const branch = text(answer['branch']);
+    const left = Array.isArray(answer['left']) ? answer['left'].filter((path): path is string => typeof path === 'string') : [];
+    const others = Array.isArray(answer['others']) ? answer['others'].filter((name): name is string => typeof name === 'string') : [];
+    // Both branches named: the work's own, and the other change of its conflict, which goes with it.
+    const both = others.length > 0
+      ? ` on its own branch${branch ? ` ${branch}` : ''}, and the other change of its conflict on ${others.join(', ')} with ${others.length === 1 ? 'it' : 'them'}; nothing of the work is left on disk.`
+      : ' on its own branch.';
+    return { text: `Discarded the changes "${title}" kept${both}${left.length > 0 ? ` ${left.join(', ')} ${left.length === 1 ? 'was' : 'were'} changed since and ${left.length === 1 ? 'stays' : 'stay'} as ${left.length === 1 ? 'it is' : 'they are'}.` : ''}`, data: answer };
+  },
+});
+
+/**
  * Approving a waiting plan starts the work with exactly that plan. A proposed piece of work (`work.propose`) is not
  * yet a piece of work: approving it asks for the work first (what you want done and its results, as proposed), then
  * its plan becomes that work's approved plan and the work starts with it.
@@ -378,9 +427,9 @@ export const WORK_PLAN_DISCARD = planAct('work.plan-discard', 'plan-discard', 'T
 export const WORK_APPROVE: Work = daemonWork({
   id: 'work.approve', repeat: 'safe', actionId: 'approve', label: 'Approve a plan and start the work', word: 'approve', inputs: [WORK],
   sentence: 'The plan of {work} is approved and the work starts with exactly its steps.', undoneBy: 'cancel', example: { work: 'work-1a2b' },
-  // Approving is the owner's own act: anyone but the person (a model, a device, a member, a script) is put to him,
-  // opening on No, and what he approves runs as his own.
-  ownerOnly: { reason: 'approving a plan starts the work as yours', instead: 'the owner approves it himself in Work, or answers yes when it is put to him' },
+  // Approving is the owner's own act: anyone but the person (a model, a device, a member, a script) is put to the owner,
+  // opening on No, and what the owner approves runs as their own.
+  ownerOnly: { reason: 'approving a plan starts the work as yours', instead: 'the owner approves it in Work, or answers yes when it is put to them' },
   ownersAct: true,
   async run(values, services, caller) {
     const method = methodOf(caller);
@@ -493,12 +542,12 @@ export const WORK_DELEGATE: Work = daemonWork({
   sentence: 'The task "{goal}" is handed over as a piece of work for this project: its plan is written and its steps run on the daemon; it shows in Work, and its result goes back to the conversation that asked.',
   undoneBy: 'cancel',
   example: { goal: 'Add retries to the uploader', criteria: 'an upload that fails twice still finishes' },
-  noControl: 'It is how a model or an outside agent hands a task over; a person asks for work with New work in the Work place, or in the conversation.',
-  // Work handed over runs as whoever caused it: anyone but the person (a model, a device, a member, a script, an outside
-  // agent) is put to the owner, opening on No; a model's delegation from his own conversation is decided under his mode
+  noControl: 'It is how a model or an outside agent hands a task over; a person asks for work with New work in the Work place (in the web view, New, "Ask for work to be done", runs this act as their own), or in the conversation.',
+  // Work handed over runs as whoever caused it: anyone but the person (a model, a device, a member, an outside agent, in a
+  // project given to it) is decided under the owner's mode as an item of the owner's list, and its work runs as that caller's,
+  // reads only, until the owner adopts it; a model's delegation from the owner's own conversation is decided under their mode
   // as an agent spawn (routes/capabilities.ts conversationDelegation) and carries that conversation's party.
-  ownerOnly: { reason: 'work handed over runs on your machine as yours', instead: 'the owner hands the task over himself, or answers yes when it is put to him' },
-  ownersAct: true,
+  ownerOnly: { reason: 'work handed over runs on your machine', instead: 'the owner hands the task over in person, or answers yes when it is put to them' },
   async run(values, services, caller) {
     const method = methodOf(caller);
     const goal = (values.goal ?? '').trim();
@@ -525,8 +574,8 @@ export const WORK_DELEGATE: Work = daemonWork({
         throw error;
       }
     }
-    // Who handed it over is on its record before anything of it runs.
-    await noteCause(services, caller, workId);
+    // Who handed it over is on its record before anything of it runs: work this caller made just now.
+    await noteCause(services, caller, workId, true);
     let title = workId;
     try {
       // Started as it is now: a start that met the work a moment after it changed reads it again and starts it.
@@ -554,9 +603,33 @@ export const WORK_DELEGATE: Work = daemonWork({
   },
 });
 
+/**
+ * The acts that change one piece of work (start, stop, go on, a step run again or left out, its plan, its kept branch): a
+ * caller below an admin makes them only on work it caused itself. Read before anything is decided (`refusedBefore`), so
+ * nobody is asked about an act on someone else's work that is refused whatever the answer (routes/work.ts `ownWork`,
+ * the method's own check stands besides).
+ */
+const OWN_WORK_ACTS: ReadonlySet<string> = new Set([
+  'work.start', 'work.cancel', 'work.resume', 'work.retry', 'work.go-on-without', 'work.plan-redo', 'work.step-edit',
+  'work.step-drop', 'work.step-move', 'work.plan-discard', 'work.branch-merge', 'work.branch-discard',
+]);
+
+async function ownWorkFirst(values: Readonly<Record<string, string>>, _services: WorkCauseCapabilityServices, caller: CapabilityCaller): Promise<CapabilityRefusal | undefined> {
+  if (!values.work) return undefined;
+  try {
+    await methodOf(caller)('work.target', { work: values.work, operation: 'own' });
+    return undefined;
+  } catch (error) {
+    // Only the answer that it is someone else's work refuses here; any other failure is the act's own to meet.
+    if (text(record(error)['code']) === 'WORK_NOT_YOURS') return new CapabilityRefusal(error instanceof Error ? error.message : 'It is not work this caller asked for. Nothing was changed.', undefined, 'WORK_NOT_YOURS', 403);
+    return undefined;
+  }
+}
+
 /** Every Work capability the daemon runs. */
 export const WORK_METHOD_CAPABILITIES: readonly Work[] = [
   WORK_LIST, WORK_START, WORK_STATUS, WORK_CANCEL, WORK_RESUME, WORK_ANSWER, WORK_RETRY, WORK_GO_ON_WITHOUT, WORK_BUDGET,
   WORK_PLAN_REDO, WORK_STEP_EDIT, WORK_STEP_DROP, WORK_STEP_MOVE, WORK_APPROVE, WORK_PLAN_DISCARD,
+  WORK_BRANCH_MERGE, WORK_BRANCH_DISCARD,
   WORK_PROPOSE as unknown as Work,
-];
+].map((definition) => OWN_WORK_ACTS.has(definition.capability.id) ? { ...definition, refusedBefore: ownWorkFirst } : definition);

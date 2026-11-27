@@ -90,7 +90,6 @@ import type { FocusTracker } from '@/runtime/index.ts';
  * references are service handles whose identity never changes after construction.
  */
 export interface InputFeedContext {
-  handleSetupPairingToken?: (token: InputToken) => boolean;
   prompt: string;
   cursorPos: number;
   inputScrollTop: number;
@@ -183,7 +182,6 @@ export const feedInputTokens = createFeedInputTokens<InputFeedContext>({
   // Every token goes to an open kit modal, mouse included: a click on one was already made its
   // keys by the pointer (handler.ts, terminal-shell/surface-pointer), and nothing reaches the transcript underneath.
   surfaceModalTokens: 'all',
-  pairing: (context, token) => context.handleSetupPairingToken?.(token) ?? false,
   modal: (context, token, { history }) => handleModalTokenRoutes(
     {
       ...captureModalFeedState(context, token, history),

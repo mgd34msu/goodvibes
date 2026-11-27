@@ -85,7 +85,7 @@ export function createSpineAdoptionSync(
         // The conversation is registered with this program's own registration (the session spine's REST transport sends
         // the call context and the key the daemon issued this program, as the Agent's does): the daemon then knows the
         // conversation as this program's, so a model's delegation from it is decided under the owner's mode
-        // (control-plane/routes/capabilities.ts conversationDelegation), not put to him as a script's.
+        // (control-plane/routes/capabilities.ts conversationDelegation), not put to the owner as a script's.
         // Pinned to this daemon: a close owed to it is sent only through a transport for it.
         sessionTransport: { ...createSessionSpineRestTransport({ resolveConnection: () => ({ baseUrl, token: authToken || null }) }), targetId: () => parseDaemonOrigin(baseUrl)?.baseUrl ?? baseUrl },
         inboundInputs: {

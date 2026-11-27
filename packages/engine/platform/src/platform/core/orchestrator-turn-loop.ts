@@ -1048,7 +1048,7 @@ export async function executeOrchestratorTurnLoop(context: OrchestratorTurnLoopC
     };
   };
 
-  // Calls just-vibes held for the owner this turn, listed for him when the turn ends.
+  // Calls just-vibes held for the owner this turn, listed for them when the turn ends.
   const heldThisTurn = new Map<string, { readonly tool: string; readonly reason: string }>();
   const outcome = await runTurn({
     signal: signal ?? new AbortController().signal,

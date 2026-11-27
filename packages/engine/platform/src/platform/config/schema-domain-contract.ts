@@ -25,7 +25,6 @@ export const contractConfigDefaults: { contract: ContractSettings } = {
       { name: 'lint', command: 'npx eslint . --max-warnings 0', enabled: false },
       { name: 'build', command: 'npm run build', enabled: false },
     ],
-    gateTimeoutMs: 900_000,
     acceptanceStakes: 'high',
     midRunChecks: true,
     evidenceNudgeLimit: 0,
@@ -39,17 +38,16 @@ export const contractConfigDefaults: { contract: ContractSettings } = {
     maxActiveContracts: 6,
     maxParallelUnits: 64,
     isolation: 'auto',
-    heartbeatTimeoutMs: 600_000,
     transportRetryLimit: 3,
-    transportRetryDelayMs: 5000,
     nudgeTtlMs: 300_000,
   },
 };
 
 /**
- * The keys that move from the retired review loop's settings (autoCommit, commitScope, maxFixRounds,
- * heartbeatTimeoutMs, the transport retry pair) keep the old validators, so no
- * value migrated from an existing file is refused on its next load.
+ * The keys that moved from the retired review loop's settings (autoCommit, commitScope, maxFixRounds,
+ * transportRetryLimit) keep the old validators, so no value migrated from an existing file is refused on its next
+ * load. Keys removed since (a step's silence limit, the gate command limit, the transport retry delay) are read past
+ * silently and left in the file (config/removed-keys.ts).
  */
 export const contractConfigSettings: ConfigSettingDefinition[] = [
   {
@@ -64,13 +62,6 @@ export const contractConfigSettings: ConfigSettingDefinition[] = [
     type: 'enum',
     description: 'What a passing contract commits: off (never commit; the work is left as uncommitted changes), scoped (only the contract\'s own changes, default), all (the whole working tree in shared mode)',
     enumValues: ['off', 'scoped', 'all'],
-  },
-  {
-    key: 'contract.gateTimeoutMs',
-    label: 'Longest a quality check may run (ms)',
-    type: 'number',
-    description: 'Timeout in ms for each quality gate command and for a run of the project\'s tests from Code and changes (default 15 minutes); a gate past it is stopped and reported unverified; 0 runs until completion or cancellation',
-    ...intRange(0, 2_147_483_647),
   },
   {
     key: 'contract.acceptanceStakes',
@@ -163,26 +154,11 @@ export const contractConfigSettings: ConfigSettingDefinition[] = [
     enumValues: ['auto', 'worktree', 'shared'],
   },
   {
-    key: 'contract.heartbeatTimeoutMs',
-    label: 'Restart a silent unit after (ms)',
-    type: 'number',
-    description: 'Silence in ms after which a running unit agent is restarted once, then failed. An exec command within its own timeout_ms, or without one, is not silence. 0 = off.',
-    validate: (v) => typeof v === 'number' && Number.isFinite(v) && v >= 0,
-    validationHint: 'finite number >= 0',
-  },
-  {
     key: 'contract.transportRetryLimit',
     label: 'Retries after a connection error',
     type: 'number',
-    description: 'How many times a unit whose agent failed on a transient error (a 5xx, 408 or 429 answer, a connection error, or a failure nothing could classify while the decision model is unavailable) is restarted with a fresh agent before the contract fails. 0 disables the retry.',
+    description: 'How many times a workstream phase agent that failed on a connection error is started again at once before its item fails. 0 disables it. A step of a piece of work is never started again by this: a failed step ends failed, and whether it runs again is decided by your permission mode.',
     ...numRange(0, 5),
-  },
-  {
-    key: 'contract.transportRetryDelayMs',
-    label: 'Wait before retrying after a connection error (ms)',
-    type: 'number',
-    description: 'Wait in ms before the first restart of a unit after a transient failure; it doubles for each further restart (at most 60000). A Retry-After the provider sent is used instead.',
-    ...numRange(0, 60000),
   },
   {
     key: 'contract.nudgeTtlMs',

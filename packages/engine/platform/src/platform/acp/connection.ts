@@ -188,7 +188,7 @@ export class AcpConnection {
 
       // 1. Spawn child process with piped stdio
       // A runner started for someone else: the owner's own program (`goodvibes acp`) reads that from its environment,
-      // so its session's agent is that caller's input, never his turn (acp/connection-party.ts).
+      // so its session's agent is that caller's input, never the owner's turn (acp/connection-party.ts).
       const childEnv = acpChildEnvironment(this.task.inputParty ?? turnInputParty());
       const spawned = Bun.spawn(this.spawnCmd, {
         // In the runner's project folder, never the folder the starting process runs in.
@@ -505,8 +505,9 @@ export class AcpConnection {
                 destination: { command: this.spawnCmd, cwd: this.task.workingDirectory, runnerTask: this.task.description } },
             });
           admission = await (this.task.inputParty ? withInputParty(this.task.inputParty, decide) : decide());
-          // An ask nobody answered (withdrawn, or left until its deadline) is told to the runner as exactly that: cancelled,
-          // never as the owner's refusal. A refusal the gate gave a reason for keeps its words on the run (who started it).
+          // An ask nobody answered (withdrawn: the runner or its run went) is told to the runner as exactly that: cancelled,
+          // never as the owner's refusal. The runner's ask carries no deadline (it is raised with none); `timed-out` is read
+          // only for a question some other raiser gave one. A refusal the gate gave a reason for keeps its words on the run.
           const unanswered = admission.result.unanswered;
           if (!admission.result.approved && (unanswered !== undefined || admission.result.detail)) {
             this.noteRefusal(unanswered === 'withdrawn' ? 'nobody answered: the ask was withdrawn'

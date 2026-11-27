@@ -127,7 +127,7 @@ export async function handleSurfacesCommand(runtime: CliCommandRuntime): Promise
  * The secret store this command reads and writes ntfy topic names in. A topic
  * name is a credential (declared secret-bearing), so it is kept in the daemon
  * tier and its setting holds a reference; this command is the owner's own, so
- * it shows the names he must subscribe to.
+ * it shows the names they must subscribe to.
  */
 function ntfyTopicSecrets(runtime: CliCommandRuntime) {
   return createRuntimeSecretsManager({
@@ -305,7 +305,7 @@ async function surfacesCommand(runtime: CliCommandRuntime): Promise<{ readonly o
     };
   });
   const filteredSurfaces = !target ? externalSurfaces : externalSurfaces.filter((surface) => surface.id === externalTarget);
-  // The owner's own command shows the topic names he subscribes to; each is read from the secret store its setting names.
+  // The owner's own command shows the topic names they subscribe to; each is read from the secret store its setting names.
   const showsNtfy = filteredSurfaces.some((surface) => surface.id === 'ntfy');
   const topicSecrets = showsNtfy ? ntfyTopicSecrets(runtime) : null;
   const topicNames = topicSecrets

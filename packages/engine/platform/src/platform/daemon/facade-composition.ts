@@ -17,7 +17,9 @@ import { withGuestTurn } from '../security/turn-boundary.js';
 import { conversationalTurnConfigReaderFrom, conversationalTurnSpawnOptions } from '../personal-capture/spawn-contract.js';
 import { logger } from '../utils/logger.js';
 import { spendingName } from '../runtime/cost/model-usage.js';
-import { existsSync } from 'node:fs';
+import { existsSync, statSync } from 'node:fs';
+import { operatorTokenPath } from '../pairing/companion-token.js';
+import { registeredWorkspaceRoots } from '../workspace/project-identity.js';
 import { pairingTokenIdOfPrincipal } from '../pairing/principal-ids.js';
 import { readHeldCompanionTurn } from './held-companion-turn.js';
 import { daemonOperationLog, daemonOperationsPath } from './operations-log.js';
@@ -87,7 +89,10 @@ import { setPushAudience } from '../push/index.js';
 import type { Actor } from '@goodvibes/engine/daemon-api/http-policy';
 import { createOutsideAgentProjects } from './outside-agent.js';
 import { createUnverifiedProgramProjects } from './unverified-programs.js';
-import { createSharedKindGifts, setDaemonSharedKindRule } from './shared-kind-gifts.js';
+import { createSharedKindGifts, setDaemonSharedKindRule, sharedKindScopes, sharedKindsOfScopes, type ExistingCredential } from './shared-kind-gifts.js';
+import { catalogGrantedScopes } from './http/gateway-binding-gate.js';
+import { setOwnerModeInForce } from '../permissions/owner-is-asked.js';
+import { projectSettingsInForce } from '../config/project-view.js';
 import { setExposureFile } from '../security/conversation-exposure.js';
 import { programVerificationAvailable } from './program-socket.js';
 import { channelWorkProject, daemonAutomaticProjects, setWebChatHost } from './automatic-project-hosts.js';
@@ -110,6 +115,18 @@ export function daemonCallerProjectCheck(homeDirectory: string): (raw: string, w
   const assigned = new CallerProjectsStore(daemonHome);
   const facts = { homeDirectory, goodVibesHome: join(homeDirectory, '.goodvibes'), daemonHome, assignedProjects: (id: string) => assigned.projectsOf(id) };
   return (raw, who) => checkCallerProject(raw, who, facts);
+}
+
+/**
+ * Whether this home's operator token was written by an earlier version: its file was there before this process started
+ * (a home 3.5.0 ran in). A token this start wrote (a fresh install) is not.
+ */
+function operatorTokenFromEarlierVersion(homeDirectory: string): boolean {
+  try {
+    return statSync(operatorTokenPath(resolveGoodVibesDaemonHome(homeDirectory))).mtimeMs < performance.timeOrigin;
+  } catch {
+    return false;
+  }
 }
 
 /** Forget what the owner gave these principals (a device unpaired, a member removed): caller-projects-store.ts. */
@@ -487,7 +504,7 @@ export function resolveDaemonFacadeRuntime(
     turnEnvironment: (project) => runtimeServices.agentOrchestrator.acquireTurnEnvironment(project),
     // A chat with no project gets its own, made the first time the owner's own message there needs somewhere to work.
     automaticProject: (ask) => daemonAutomaticProjects(runtimeServices).ensure(ask, false),
-    // The owner among the sign-in users: an older chat he made (kept before its maker was) is his model's.
+    // The owner among the sign-in users: an older chat the owner made (kept before its maker was) is their model's.
     ownerUsername: () => (config.userAuth ?? runtimeServices.localUserAuthManager).ownerUsername?.() ?? null,
     configManager: runtimeServices.configManager,
     // Asks ride the daemon's approval broker like every other background caller's, so a tool call that needs
@@ -818,7 +835,7 @@ export function createDaemonFacadeCollaborators(
     approvalBroker: runtime.approvalBroker,
     resolveDefaultProviderModel: options.resolveDefaultProviderModel,
     workProposals,
-    // The owner's own work proposal none of his conversations took waits in Waiting for you, answered there.
+    // The owner's own work proposal none of their conversations took waits in Waiting for you, answered there.
     ...(runtime.runtimeServices.ownerInbox ? { ownerInbox: runtime.runtimeServices.ownerInbox } : {}),
     deliverSurfaceNotice: (binding, text) => surfaceDeliveryHelper.deliverSurfaceNotice(binding, text),
     // The owner's own conversation on a channel with no project works in its own automatic project.
@@ -829,13 +846,71 @@ export function createDaemonFacadeCollaborators(
   runtime.sessionBroker.setGuestSenderRule((surfaceKind, userId) => surfaceActionHelper.senderIsGuest(surfaceKind, userId));
   // One store answers repeats of every write that takes the shared Idempotency-Key, on each path a call arrives by.
   const idempotentReplay = new IdempotentReplayStore(controlPlaneStorePath(runtime.runtimeServices.shellPaths, runtime.runtimeServices.surfaceRoot, 'idempotent-replay'));
+  // Every credential that is not the owner's own, now: each paired device and each member but the owner, with the scopes it
+  // holds (a pairing with no list, or an admin member with none, has full authority).
+  const credentialsNow = (): ExistingCredential[] => {
+    const owner = runtime.userAuth?.ownerUsername?.() ?? null;
+    const readScopes = catalogGrantedScopes(runtime.gatewayMethods, false);
+    const devices: ExistingCredential[] = (runtime.runtimeServices.pairingTokens?.list() ?? [])
+      .map((token) => ({ principalId: `pairing:${token.id}`, scopes: token.scopes === undefined ? 'all' as const : token.scopes }));
+    const members: ExistingCredential[] = (runtime.userAuth?.listUsers?.() ?? []).filter((user) => user.username !== owner)
+      .map((user) => ({ principalId: user.username, scopes: user.roles.includes('admin') && user.scopes === undefined ? 'all' as const : user.scopes ?? readScopes }));
+    return [...devices, ...members];
+  };
   // The owner's shared things: who reaches each, and the one question the first time (shared-kind-gifts.ts). One rule,
   // read by the dispatch and the REST router.
   const sharedKindRule = createSharedKindGifts({
-    homeDirectory: runtime.runtimeServices.shellPaths.homeDirectory, broker: runtime.approvalBroker,
+    homeDirectory: runtime.runtimeServices.shellPaths.homeDirectory,
     deviceName: (pairingId) => runtime.runtimeServices.pairingTokens?.list().find((device) => device.id === pairingId)?.name,
+    // The upgrade from 3.5.0, once per home: every paired device and member that exists now keeps the shared kinds its
+    // released scopes let it use (a pairing with no list, or an admin member, had full authority), carried and shown so.
+    carryFrom350: () => {
+      const home = runtime.runtimeServices.shellPaths.homeDirectory;
+      const projects = new CallerProjectsStore(resolveGoodVibesDaemonHome(home));
+      const kindScopes = sharedKindScopes(runtime.gatewayMethods.list());
+      const credentials = credentialsNow();
+      if (projects.carryDone()) {
+        // After a rollback: a device or member the released 3.5.0 made while this version was not running (not among the
+        // credentials this version knew when it last stopped) existed in 3.5.0 at this upgrade too, so it is carried the
+        // same way. Without a record of the last stop (it stopped uncleanly) nothing is carried: nothing is taken either.
+        const known = projects.takeKnownAtStop();
+        const unseen = known === undefined ? [] : credentials.filter((credential) => !known.includes(credential.principalId));
+        if (unseen.length > 0) {
+          const shared = new CallerSharedStore(resolveGoodVibesDaemonHome(home));
+          const roots = registeredWorkspaceRoots(home);
+          for (const credential of unseen) {
+            projects.giveCarried(credential.principalId, roots);
+            shared.giveCarried(credential.principalId, sharedKindsOfScopes(credential.scopes, kindScopes));
+          }
+          logger.info('[shared] credentials 3.5.0 made during a rollback carried like the others', { callers: unseen.length });
+        }
+        return { existing: [], kindScopes };
+      }
+      // The machine's operator token, carried like the others when an earlier version wrote it (its file is older than this
+      // start: a home 3.5.0 ran in). In 3.5.0 any holder of it had everything; the upgrade neither adds to nor takes from
+      // that but the owner-only acts. Its two principals: on this machine (`local`) and from another one (`shared-token`).
+      const operatorToken: ExistingCredential[] = operatorTokenFromEarlierVersion(home)
+        ? [{ principalId: 'local', scopes: 'all' }, { principalId: 'shared-token', scopes: 'all' }] : [];
+      const existing = [...credentials, ...operatorToken];
+      // And the projects: 3.5.0 had none per caller (every credential worked in every folder), so each credential that
+      // exists now is given every workspace registered now, once, carried and shown so (caller-projects-store.ts).
+      // Once per daemon home, at the first start of this version (a fresh install carries nothing and is marked done too).
+      const carried = projects.carryFrom350(existing.map((credential) => credential.principalId), registeredWorkspaceRoots(home));
+      const count = Object.keys(carried).length;
+      if (count > 0) logger.info('[projects] workspaces carried from 3.5.0 to the credentials that existed', { callers: count });
+      return { existing, kindScopes };
+    },
   });
   setDaemonSharedKindRule(sharedKindRule);
+  // The owner's mode in force for a step's project (permissions/owner-is-asked.ts): the project named, else the
+  // decision's in scope, as the permission manager decides that project's calls (config/project-view.ts
+  // `projectSettingsInForce`); the daemon's own value for a step of no project.
+  const modeInForceFor = (project: string | undefined): unknown => {
+    const folder = project ?? projectOfDecision();
+    const settings = folder !== undefined && folder.trim() !== '' ? projectSettingsInForce(runtime.configManager, folder) : runtime.configManager;
+    return settings.get('permissions.mode');
+  };
+  setOwnerModeInForce(modeInForceFor);
   // What each conversation read from outside, kept in the daemon's home: it survives a restart
   // (security/conversation-exposure.ts).
   setExposureFile(join(resolveGoodVibesDaemonHome(runtime.runtimeServices.shellPaths.homeDirectory), 'conversation-exposure.json'));
@@ -862,16 +937,21 @@ export function createDaemonFacadeCollaborators(
     // A capability's inputs a turn or process works in, checked as the caller's projects (capabilities/work-folders.ts).
     capabilityWorkFolders: capabilityWorkFolderInputs,
     forgetCallerProjects: daemonCallerProjectsForget(runtime.runtimeServices.shellPaths.homeDirectory),
-    // The outside agent's first project: one question to the owner, the call held until he answers (outside-agent.ts).
+    // The credentials that exist as the daemon stops cleanly: one found at the next start that is not among them was made
+    // while this version did not run (3.5.0 after a rollback) and is carried as the others were (carryFrom350 above).
+    onStop: () => new CallerProjectsStore(resolveGoodVibesDaemonHome(runtime.runtimeServices.shellPaths.homeDirectory))
+      .noteKnownAtStop(credentialsNow().map((credential) => credential.principalId)),
+    // The outside agent works only in the projects the owner in person gave it; any other folder it names is refused
+    // (outside-agent.ts), never registered or given.
     outsideAgentProject: createOutsideAgentProjects({
-      homeDirectory: runtime.runtimeServices.shellPaths.homeDirectory, broker: runtime.approvalBroker, gatewayMethods: runtime.gatewayMethods,
+      homeDirectory: runtime.runtimeServices.shellPaths.homeDirectory,
     }),
-    // Where this daemon cannot verify its programs: the first act in each folder asks the owner once (unverified-programs.ts).
+    // Where this daemon cannot verify its programs: each folder's first use decided the same way (unverified-programs.ts).
     unverifiedProgramProject: createUnverifiedProgramProjects({
-      homeDirectory: runtime.runtimeServices.shellPaths.homeDirectory, broker: runtime.approvalBroker, gatewayMethods: runtime.gatewayMethods,
+      homeDirectory: runtime.runtimeServices.shellPaths.homeDirectory, gatewayMethods: runtime.gatewayMethods,
       verificationAvailable: programVerificationAvailable,
     }),
-    // The owner's shared things: his own, and anyone else's only with his gift of that kind (shared-kind-gifts.ts); the
+    // The owner's shared things: their own, and anyone else's only with the owner's gift of that kind (shared-kind-gifts.ts); the
     // same rule the REST router reads.
     sharedKind: sharedKindRule,
   });
@@ -890,6 +970,17 @@ export function createDaemonFacadeCollaborators(
     tasks: runtime.agentManager,
     runtimeTaskOwner: (taskId) => runtime.runtimeServices.runtimeStore.getState().tasks.tasks.get(taskId)?.owner,
     artifacts: runtime.runtimeServices.artifactStore,
+  });
+  // Whose session a frame is, for a stream that follows only its principal's own (`read:own-sessions`, or a person's
+  // sessions scopes: gateway-scope-enforcement.ts): a web chat or a session that principal made (the owner lookups
+  // above). A lookup that must wait cannot be asked inside a frame's delivery: such a frame is not sent.
+  runtime.controlPlaneGateway.setSessionOwnership((sessionId, principalId) => {
+    const rules = runtime.gatewayMethods.reachRules();
+    for (const kind of ['chat', 'session'] as const) {
+      const owner = rules.recordOwner?.(kind)?.(sessionId);
+      if (owner !== undefined && !(owner instanceof Promise) && owner.madeBy === principalId) return true;
+    }
+    return false;
   });
   // A channel route binding, and work queued for a remote peer, are held as the first record they name that this
   // daemon holds: the session, else the schedule, else the run (else the question); naming none, the owner's.
@@ -924,8 +1015,8 @@ export function createDaemonFacadeCollaborators(
     return artifact ? { project: runnerFolder(artifact.runnerContract) } : undefined;
   });
   // The same rule for what a caller follows: every stream, feed and replay delivers to a caller that is not the owner
-  // himself only events about records it may reach (control-plane/event-reach.ts).
-  // A frame about one of the owner's shared things goes to a caller only when he gave it that kind (shared-kinds.ts).
+  // in person only events about records it may reach (control-plane/event-reach.ts).
+  // A frame about one of the owner's shared things goes to a caller only when the owner gave it that kind (shared-kinds.ts).
   const sharedGifts = new CallerSharedStore(resolveGoodVibesDaemonHome(runtime.runtimeServices.shellPaths.homeDirectory));
   const sharedKindGiven = (principalId: string, kind: SharedKind): boolean => sharedGifts.has(principalId, kind);
   const eventReachRules = (): EventReachRules | undefined => {
@@ -934,8 +1025,8 @@ export function createDaemonFacadeCollaborators(
   };
   runtime.controlPlaneGateway.setEventReachRules(eventReachRules);
   // A notification goes only to the devices of people who may see what it is about, by the same rule (push/service.ts):
-  // each device by the principal that registered it, as that principal follows a stream. The owner himself is told
-  // everything; his own paired device what his device may follow; anyone else what its projects and gifts reach.
+  // each device by the principal that registered it, as that principal follows a stream. The owner in person is told
+  // everything; their own paired device what that device may follow; anyone else what its projects and gifts reach.
   setPushAudience((principalId) => {
     if (principalId === (runtime.userAuth?.ownerUsername?.() ?? null)) return null;
     let context: EventReachContext;

@@ -69,7 +69,7 @@ import { validateDefinition } from './validation.js';
 import type { TriggerSpec } from './types.js';
 
 /**
- * The id a trigger is stored under: the name a person chose and a part made from his project (its identity) and that
+ * The id a trigger is stored under: the name a person chose and a part made from their project (its identity) and that
  * name alone (`<name>-<8 hex>`). It is made the same way whatever any other project holds, so it never says whether
  * another project has a trigger of that name; the chosen name is kept beside it (`chosenId`) and is what people see.
  */
@@ -91,7 +91,8 @@ function inProjectFolder(spec: TriggerSpec, folder: string | undefined): Trigger
 }
 import { retentionFrom, TriggerDisabledError, type TriggerManagerConfig, type TriggerManagerOptions } from './manager-types.js';
 import { WORK_ADMISSION_RECHECK_MS } from '../daemon/work-admission.js';
-import { stampExposure } from '../security/conversation-exposure.js';
+import { clearExposure, stampExposure } from '../security/conversation-exposure.js';
+import { partyOfRecordedCause, recordedCauseInScope } from '../security/turn-input-party.js';
 
 export * from './manager-types.js';
 
@@ -504,6 +505,8 @@ export class TriggerManager {
     let record = this.records.get(id);
     try {
       if (!record) {
+        // What the trigger had read from outside goes with its record (security/conversation-exposure.ts).
+        clearExposure(`trigger:${id}`);
         if (this.stored.has(id)) {
           this.store.remove(id); this.stored.delete(id);
           // The removal names the project the trigger was of: only that project's screens read again.
@@ -585,12 +588,28 @@ export class TriggerManager {
    * detach. A probe prefers the registry of the session that made its trigger.
    * Nothing to attach to when the host composed no probe tool host.
    */
-  attachProbeTools(registry: import('./probe-tools.js').ProbeToolRegistry, session?: () => string | undefined): () => void {
-    return this.options.probeTools?.attach(registry, session) ?? (() => {});
+  attachProbeTools(registry: import('./probe-tools.js').ProbeToolRegistry, session?: () => string | undefined, project?: string): () => void {
+    return this.options.probeTools?.attach(registry, session, project) ?? (() => {});
   }
   private async createOwned(input: unknown): Promise<TriggerRecord> {
     this.ensureOwner('create a trigger');
-    const validated = validateDefinition(input);
+    // Who made it, from the caller in scope (never a field of the definition): someone other than the owner makes a
+    // trigger whose fired turns are theirs, and one that runs no command at all (a watched command, a command probe or a
+    // command a grant allows runs outside every turn's sandbox: their words never run a command as the owner).
+    const { cause: _claimed, ...sent } = validateDefinition(input);
+    void _claimed;
+    const cause = recordedCauseInScope();
+    const validated: TriggerDefinition = cause ? { ...sent, cause } : sent;
+    if (cause) {
+      const spec = validated.spec;
+      const runsCommand = spec.kind === 'on-exit' || spec.kind === 'stream' || (spec.kind === 'condition' && spec.probe.kind === 'command')
+        || validated.action.kind === 'action-grant';
+      if (runsCommand) {
+        throw new RefusalError(refusal({ code: 'NOT_OWNERS_COMMAND', state: 'a trigger made by someone other than the owner runs no command', status: 403,
+          reason: `No trigger was made: it is made by ${cause.who}, and a trigger anyone but the owner makes never runs a command (a watched command, a command probe or an allowed command run outside every sandbox, as the owner)`,
+          next: ['Watch with an http, file or tool probe, with a turn as its action'] }));
+      }
+    }
     // A trigger works in a project: none, or the daemon's own folder, is refused (whoever asks: a route, a tool).
     const homeless = this.options.projectRefusal?.(validated.workingDirectory);
     if (homeless) {
@@ -600,7 +619,7 @@ export class TriggerManager {
     if (validated.spec.kind === 'condition' && validated.spec.probe.kind === 'platform-tool') {
       const probe = validated.spec.probe;
       const refused = this.options.probeTools
-        ? this.options.probeTools.refusal(probe.tool, probe.input ?? {}, validated.ownerSessionId)
+        ? await this.options.probeTools.refusalOpening(probe.tool, probe.input ?? {}, validated.ownerSessionId, validated.workingDirectory)
         : 'Platform-tool probes run on the tools of a session, and this trigger host has none; use an http, file or command probe, or create the trigger in the daemon.';
       if (refused) throw new RefusalError(refusal({ code: 'TRIGGER_PROBE_TOOL', state: `the probe's ${probe.tool} call cannot run here`, reason: refused, next: ['Probe with a tool that only reads, or with an http, file or command probe'], status: 422 }));
     }
@@ -620,7 +639,7 @@ export class TriggerManager {
     }
     // Stored under an id made from the name and this project alone (`<name>-<8 hex>`), the same way whatever any other
     // project holds: the id never says whether another project has a trigger of that name. The name the person chose
-    // is kept beside it (never taken from the caller): it is what his project shows and what he types (`resolveName`).
+    // is kept beside it (never taken from the caller): it is what their project shows and what they type (`resolveName`).
     let id = storedTriggerId(validated.id, project);
     if (this.records.has(id)) id = `${validated.id}-${randomUUID().replace(/-/g, '').slice(0, 8)}`;
     const { chosenId: _sent, ...chosen } = validated;
@@ -834,6 +853,8 @@ export class TriggerManager {
       const raw = await runProbe(spec.probe, io, {
         timeoutMs: this.config.probeTimeoutMs ?? 15_000,
         ...(record.definition.ownerSessionId !== undefined ? { ownerSessionId: record.definition.ownerSessionId } : {}),
+        // Its own project's tools only (probe-tools.ts): the record's project, never the first registry made.
+        ...(record.definition.workingDirectory !== undefined ? { project: record.definition.workingDirectory } : {}),
       });
       const value = runExtract(spec.extract, raw);
       // The trigger was removed, and maybe made again under its id, while the
@@ -1038,7 +1059,14 @@ export class TriggerManager {
         ...(action.deliverTo !== undefined ? { deliverTo: action.deliverTo } : {}),
         // The turn works in the project its trigger was made for.
         ...(definition.workingDirectory !== undefined ? { workingDirectory: definition.workingDirectory } : {}),
+        // Who made the trigger, when not the owner: the fired turn is that caller's (types.ts `cause`).
+        ...(definition.cause !== undefined ? { cause: definition.cause } : {}),
       });
+    }
+    // A trigger someone else made runs no command (refused at its making; one kept with a grant action stays unrun).
+    if (definition.cause !== undefined) {
+      throw new RefusalError(refusal({ code: 'NOT_OWNERS_COMMAND', state: 'a trigger made by someone other than the owner runs no command', retryable: false,
+        reason: `Not run: this trigger was made by ${(partyOfRecordedCause(definition.cause) as { readonly who?: string }).who ?? 'someone other than the owner'}, and a trigger anyone but the owner makes never runs a command`, next: ['Make it again with a turn as its action'] }));
     }
     const verification = verifyGrant([...this.grants.values()], action.grantId, action.digest, action.approvedAction);
     if (!verification.ok) {

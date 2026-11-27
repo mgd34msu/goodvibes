@@ -48,7 +48,7 @@ export interface OccasionsGatewayResult {
   readonly ok: boolean;
   /** Raw daemon payload; the caller narrows it (the engine's terminal-shell agent-turn/occasions-types.ts). */
   readonly data: unknown;
-  /** Present only when `ok` is false. Safe to show him, it never carries a date. */
+  /** Present only when `ok` is false. Safe to show the owner, it never carries a date. */
   readonly error?: string | undefined;
   /** Which route the call actually took, for honest "where did this answer come from". */
   readonly route: 'in-process' | 'connected-host' | 'unavailable';

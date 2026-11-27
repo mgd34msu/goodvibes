@@ -1,7 +1,7 @@
 /** Durable original-input ownership before native work exists. Never starts execution. */
 import { nativeSelectedDiffSelector, type NativeSelectedDiffSelector } from './native-diff-context.js';
 import { decisionModelPolicyState } from '@goodvibes/engine/errors';
-import { activateClassicFallback, isClassicOperation, withConfiguredDecisionModelPolicy } from '../../runtime/decision-policy.js';
+import { activateClassicFallback, isClassicOperation, takesDecisionFallback, withConfiguredDecisionModelPolicy } from '../../runtime/decision-policy.js';
 import { captureNativeConversationContinuation, nativeConversationContinuationSchema, type NativeConversationContinuation } from './native-continuation-context.js';
 import { randomUUID } from 'node:crypto';
 import { realpathSync } from 'node:fs';
@@ -205,7 +205,7 @@ export function createNativeConversationIntakeHost(deps: {
       case 'turn': if (record.route === 'converse' || record.route === 'answer') return { kind: 'turn', ...common, route: record.route, text: record.text, ...(record.continuation ? { continuation: nativeConversationContinuationSchema.parse(record.continuation) } : {}),
         ...(record.attachments ? { attachments: record.attachments.map(attachment => ({ ...attachment })) } : {}) }; break;
       case 'blocked': return { kind: 'blocked', ...common, reason: record.reason === 'unsupported-source' ? 'unsupported-source' : 'missing-context', recovery: 'required', next: 'cancel-and-resubmit' };
-      case 'refused': return { kind: 'refused', ...common, reason: record.reason === 'exhausted' ? 'exhausted' : 'semantic' };
+      case 'refused': return { kind: 'refused', ...common, reason: record.reason === 'exhausted' || record.reason === 'decision-model' ? record.reason : 'semantic' };
       case 'cancelled': return { kind: 'cancelled', ...common };
       case 'associated': return { kind: 'work', ...common, receipt: await receipt(record) };
     }
@@ -382,6 +382,12 @@ export function createNativeConversationIntakeHost(deps: {
       assertCurrent();
       if (!terminalUpdate && !record.association && !record.decisions.some(entry => entry.decision.outcome === 'reject') && activateClassicFallback(error))
         return await classicConversation();
+      // The decision model could not answer and "When the decision model is missing or fails" is Decision Model Only: the message is refused, said
+      // as such, never left "still being taken" (an unknown outcome) for a person to settle.
+      if (!terminalUpdate && !record.association && takesDecisionFallback(error)) {
+        await update({ state: 'refused', stage: null, reason: 'decision-model' });
+        return projection(record);
+      }
       throw error;
     }
   }

@@ -10,7 +10,7 @@ import { scheduleNextRouteLines } from './schedule-next-routes.js';
 import { runDaemonMethodNested } from './capability-tools.js';
 import { confirmParameter, requestParameter } from './effect-admission.js';
 
-/** The actions whose method the contract publishes as the owner's own act (answering an approval put to him). */
+/** The actions whose method the contract publishes as the owner's own act (answering an approval put to them). */
 function ownerActionIds(): readonly string[] {
   const ownerOnly = new Set(ownerOnlyOperatorMethodIds());
   return OPERATOR_ACTION_IDS.filter((action) => ownerOnly.has(action));
@@ -21,7 +21,7 @@ function ownerActionIds(): readonly string[] {
  * cancelled; an approval cancelled). Each runs as a nested `capability_run` call naming the action's method, so it is
  * judged by that method's own declarations (a delete that cannot be undone is asked), the one gate a model's daemon
  * call goes through; this call only routes it and is classed a read, so the method's question is the only one.
- * Answering an approval or a question put to the owner is his own answer: refused here, with no question, whatever
+ * Answering an approval or a question put to the owner is their own answer: refused here, with no question, whatever
  * approved the call.
  */
 export function createAgentOperatorActionTool(
@@ -41,7 +41,7 @@ export function createAgentOperatorActionTool(
           action: {
             type: 'string',
             enum: Object.keys(getOperatorActions()).filter((action) => !ownerActs.includes(action)),
-            description: 'Exact allowlisted public operator method id to execute. Answering an approval put to the owner is his own act, not an action here.',
+            description: 'Exact allowlisted public operator method id to execute. Answering an approval put to the owner is their own act, not an action here.',
           },
           targetId: {
             type: 'string',
@@ -88,7 +88,7 @@ export function createAgentOperatorActionTool(
       if (!parsed.ok) return { success: false, error: parsed.error };
       const descriptor = parsed.descriptor;
       if (ownerActs.includes(descriptor.action)) {
-        return { success: false, error: `${descriptor.action} answers an approval that was put to the owner, which only he does; a call the model makes is refused whatever approved it. Nothing was sent. Tell the owner approval ${parsed.targetId} is waiting: he answers it in the approval prompt, in Waiting for you, or in the web UI.` };
+        return { success: false, error: `${descriptor.action} answers an approval that was put to the owner, which only the owner does; a call the model makes is refused whatever approved it. Nothing was sent. Tell the owner approval ${parsed.targetId} is waiting: they answer it in the approval prompt, in Waiting for you, or in the web UI.` };
       }
       try {
         assertSafeOperatorPathValue(parsed.targetId, descriptor.targetField);

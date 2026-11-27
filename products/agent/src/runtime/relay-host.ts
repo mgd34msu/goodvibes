@@ -160,7 +160,7 @@ export async function mintRelayPairing(
   options: { readonly ask?: ((configuredUrl: string) => Promise<RelayTurnOnAnswer>) | undefined; readonly url?: string | undefined } = {},
 ): Promise<RelayPairAnswer> {
   return await mintRelayPairingInOneRun<RelayPairAnswer>(
-    // Only from the person's own command or press: his request.
+    // Only from the person's own command or press: their request.
     <T>(method: string, input: Record<string, unknown>) => verbs.invoke<T>(method, input, { explicitUserRequest: true }),
     { name, configuredUrl: options.url, ask: options.ask },
   );

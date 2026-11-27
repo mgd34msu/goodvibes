@@ -497,6 +497,7 @@ function callerProjectsServices(homeDirectory: string): NonNullable<DaemonCapabi
     { ...facts, assignedProjects: () => ['/'] });
   return {
     list: () => store.list(),
+    carriedOf: (principalId) => store.carriedOf(principalId),
     give(principalId, folder) {
       const verdict = projectOf(folder);
       if (!verdict.ok) return { ok: false, reason: verdict.reason };
@@ -653,15 +654,15 @@ export function createDaemonCapabilityServices(sources: DaemonCapabilityServiceS
     callerProjects: callerProjectsServices(sources.homeDirectory ?? (sources.shellPaths as Partial<Pick<ShellPathService, 'homeDirectory'>> | undefined)?.homeDirectory ?? resolveGoodVibesHome()),
     // What of the owner's shared things each caller may reach (control-plane/shared-kinds.ts), in the same daemon home.
     callerShared: new CallerSharedStore(resolveGoodVibesDaemonHome(sources.homeDirectory ?? (sources.shellPaths as Partial<Pick<ShellPathService, 'homeDirectory'>> | undefined)?.homeDirectory ?? resolveGoodVibesHome())),
-    // The daemon's one owner inbox (builtin/waiting.ts): what waits on the owner, and what was decided for him.
+    // The daemon's one owner inbox (builtin/waiting.ts): what waits on the owner, and what was decided for them.
     ...(sources.ownerInbox ? { ownerInbox: sources.ownerInbox } : {}),
     // Work (builtin/work.ts): a piece of work proposed with its plan waits among the daemon's plans before they run.
     // Kept per project: the caller's project's plans when the daemon keeps Work per project, else its one set.
     // A daemon keeps Work per project only (it has none of its own folder): a call naming no project is refused.
     ...(sources.workPlans || sources.workPlansFor ? { workProposals: { propose: async (proposal, project) => (await workPlansOf(project)).propose(proposal) } } : {}),
     // Who caused a piece of work to run, kept on its record in the same project's Work (work-plans.ts `WorkCause`).
-    ...(sources.workPlans || sources.workPlansFor ? { workCauses: { note: async (project: string | undefined, workId: string, cause: import('../workflow/work-ledger/work-plans.js').WorkCause) =>
-      (await workPlansOf(project)).noteCause(workId, cause) } } : {}),
+    ...(sources.workPlans || sources.workPlansFor ? { workCauses: { note: async (project: string | undefined, workId: string, cause: import('../workflow/work-ledger/work-plans.js').WorkCause, options?: { readonly made?: boolean | undefined }) =>
+      (await workPlansOf(project)).noteCause(workId, cause, options) } } : {}),
     // Permissions and safety (builtin/permissions.ts, security.ts): the one rule store, the token audit, folder trust.
     permissionRules: {
       add: (record) => {

@@ -1,17 +1,19 @@
 /**
  * Runtime-neutral policy facts. The platform owns configuration and operation scopes.
- * The stored values of `judgment.policy` ("If Jev can't answer", only meaningful in
- * Jev decides and Just vibes): `Hybrid` is shown as "Ask me" (the default) and
- * `Decision Model Only` as "Refuse the action".
+ * The stored values of `judgment.policy` ("When the decision model is missing or fails", its released label), shown
+ * by their own names as released: `Hybrid` (the default) and `Decision Model Only`.
  */
 export type DecisionModelPolicy = 'Decision Model Only' | 'Hybrid';
 export const DECISION_MODEL_POLICIES = ['Hybrid', 'Decision Model Only'] as const;
-/** The shipped default: use a decision model when one is set and answers, and continue without it otherwise. */
+/**
+ * The shipped default, as released: while a set decision model fails, each decision takes its own fallback (a
+ * permission call comes to the owner instead, or is held to the end of the run in Just vibes).
+ */
 export const DEFAULT_DECISION_MODEL_POLICY: DecisionModelPolicy = 'Hybrid';
 /** What a person reads for each stored value. */
 export const DECISION_MODEL_POLICY_LABELS: Readonly<Record<DecisionModelPolicy, string>> = Object.freeze({
-  Hybrid: 'Ask me',
-  'Decision Model Only': 'Refuse the action',
+  Hybrid: 'Hybrid',
+  'Decision Model Only': 'Decision Model Only',
 });
 /** How a policy value is shown to a person; the default carries "(default)", which is never stored. */
 export function decisionModelPolicyLabel(policy: DecisionModelPolicy): string {
@@ -19,7 +21,7 @@ export function decisionModelPolicyLabel(policy: DecisionModelPolicy): string {
   return policy === DEFAULT_DECISION_MODEL_POLICY ? `${label} (default)` : label;
 }
 export function parseDecisionModelPolicy(value: unknown): DecisionModelPolicy {
-  if (value === undefined) return 'Hybrid';
+  if (value === undefined) return DEFAULT_DECISION_MODEL_POLICY;
   if (value === 'Decision Model Only' || value === 'Hybrid') return value;
   throw new Error('Invalid decision-model policy');
 }
@@ -74,7 +76,7 @@ function readFailure(value: unknown): DecisionModelFailureState | undefined {
 }
 
 const defaultState: DecisionModelPolicyState = Object.freeze({
-  policy: 'Hybrid', operation: 'decision', reason: null, revision: 0,
+  policy: DEFAULT_DECISION_MODEL_POLICY, operation: 'decision', reason: null, revision: 0,
 });
 let observe: () => DecisionModelPolicyState = () => defaultState;
 let fallback: (error: unknown) => boolean = () => false;
@@ -148,7 +150,7 @@ export function runDecisionOrClassic<T>(decision: () => Promise<T>, classic: (fa
  */
 export function decisionModelFailingLine(failure: Pick<DecisionModelFailureState, 'model' | 'what' | 'nextStep'>, policy: DecisionModelPolicy): string {
   const then = policy === 'Decision Model Only'
-    ? 'so a tool call it cannot decide is refused and every other decision takes its fallback until it answers again (you chose Refuse the action for "If Jev can\'t answer"; Ask me would bring such calls to you)'
+    ? 'so a tool call it cannot decide is refused and every other decision takes its fallback until it answers again (you chose Decision Model Only for "When the decision model is missing or fails"; Hybrid would decide such calls without it)'
     : 'so work continues without it until it answers again';
   const step = failure.nextStep.trim().replace(/\.$/, '');
   return `The decision model ${failure.model} is not answering (${failure.what}), ${then}; to fix it, ${step.charAt(0).toLowerCase()}${step.slice(1)}.`;

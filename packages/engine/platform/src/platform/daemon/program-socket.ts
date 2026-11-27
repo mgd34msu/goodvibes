@@ -30,11 +30,11 @@
  * The token names the principal the registration is bound to (the operator token, from this machine: `local`).
  *
  * The registration ends when the program's process ends (its handle becomes readable), when the proving connection
- * closes, and at every daemon restart. Every handshake is its own: several at once never wait on each other, and none
- * lasts beyond HANDSHAKE_LIMIT_MS of the daemon's clock.
+ * closes, and at every daemon restart. Every handshake is its own: several at once never wait on each other; one ends
+ * with its process, its connection, or a newer connection taking its place (HANDSHAKES_LIMIT), never on a clock.
  *
  * Linux only (64-bit): elsewhere no socket is opened, no registration is issued, and the programs' acts that the owner
- * decides are put to him (in his signed-in web session, or held for him) like any script's.
+ * decides are put to the owner (in their signed-in web session, or held for them) like any script's.
  */
 import { createHash, createHmac, randomBytes } from 'node:crypto';
 import { daemonHomeCustodyRefusal } from './daemon-home-custody.js';
@@ -50,9 +50,11 @@ import { openUnixPeerCalls, POLLERR, POLLHUP, POLLIN, POLLNVAL, POLLRDHUP } from
 export const PROGRAM_SOCKET_NAME = 'programs.sock';
 /** The loopback door a program names its secret at before it connects (runtime/client/call-context.ts sends it). */
 export const PROGRAM_NONCE_PATH = '/api/control-plane/programs/expect';
-/** A handshake that has not ended by then is closed (the daemon's own clock). */
-const HANDSHAKE_LIMIT_MS = 5000;
-/** At most this many handshakes in flight at once; a further connection is refused at once. */
+/**
+ * At most this many handshakes in flight at once: a further connection takes the place of the oldest one still waiting
+ * on its program's part (`accept`). No clock ends a handshake: its process ending, its connection closing, a newer
+ * connection taking its place, or its own refusal does.
+ */
 const HANDSHAKES_LIMIT = 16;
 /** How often the daemon looks at its socket with nothing in flight, and while a handshake is. */
 const IDLE_STEP_MS = 50;
@@ -115,31 +117,34 @@ export class DaemonHomeUnsafeError extends Error {
  * its challenge under the secret, that it is the daemon behind that listener. A socket someone else put at the path
  * cannot (it never saw the secret), so the program opens itself and sends its token to the daemon alone.
  */
-const expected = new Map<string, { readonly nonce: string; readonly until: number }>();
+const expected = new Map<string, { readonly nonce: string }>();
+/**
+ * Secrets kept at once. No clock ends one: it is spent by the one connection that proves it, or, when the table is
+ * full, the oldest gives way to the next. Only a program of this machine holding the operator token names one (the
+ * router's door refuses anyone else and every browser page), so nobody else can push a program's secret out.
+ */
 const EXPECTED_LIMIT = 64;
-const EXPECTED_LIFETIME_MS = 10_000;
 
 /** Keep one program's secret for its next connection (the router's loopback-only door). False when it is malformed. */
-export function expectProgramNonce(nonce: unknown, now: number = Date.now()): boolean {
+export function expectProgramNonce(nonce: unknown): boolean {
   if (typeof nonce !== 'string' || !/^[0-9a-f]{64}$/.test(nonce)) return false;
-  for (const [hash, entry] of expected) if (entry.until <= now) expected.delete(hash);
   while (expected.size >= EXPECTED_LIMIT) { const oldest = expected.keys().next().value; if (oldest === undefined) break; expected.delete(oldest); }
-  expected.set(createHash('sha256').update(nonce).digest('hex'), { nonce, until: now + EXPECTED_LIFETIME_MS });
+  expected.set(createHash('sha256').update(nonce).digest('hex'), { nonce });
   return true;
 }
 
-/** The daemon's proof for one connection: the HMAC of its challenge under the program's secret, or null. */
-function proofFor(hello: unknown, challenge: string, now: number = Date.now()): string | null {
+/** The daemon's proof for one connection: the HMAC of its challenge under the program's secret (spent), or null. */
+function proofFor(hello: unknown, challenge: string): string | null {
   if (typeof hello !== 'string') return null;
   const entry = expected.get(hello);
-  if (!entry || entry.until <= now) return null;
+  if (!entry) return null;
   expected.delete(hello);
   return createHmac('sha256', entry.nonce).update(challenge).digest('hex');
 }
 
-/** What the owner does about a refusal, in the words his program shows him at its start (never only a file name). */
+/** What the owner does about a refusal, in the words their program shows them at its start (never only a file name). */
 function refusalNext(why: string): string {
-  const meanwhile = 'Until then this program works as any script would: what you decide is put to you in Waiting for you.';
+  const meanwhile = 'Until then this program works as any script would: what is yours to decide is decided under your permission mode, as any outside caller\'s call is.';
   if (/installer recorded|not one of the product's programs/.test(why)) return `Reinstall GoodVibes (its installer records its programs again), then start the program again. ${meanwhile}`;
   if (/loads other code|runs code|native addon|no file the daemon can check|preloads code/.test(why)) {
     return `Start the program on its own, with nothing loaded into it: no LD_PRELOAD, LD_AUDIT, BUN_OPTIONS or NODE_OPTIONS in its environment, no preload in a bunfig.toml where you start it, and no library or add-on from your own folders. If you loaded nothing, something on this computer did: look at what starts the program. ${meanwhile}`;
@@ -170,7 +175,7 @@ export function startProgramSocket(daemonHome: string, registrations: ProgramReg
   }
   const calls = openUnixPeerCalls();
   if (!calls) {
-    logger.info('[programs] no program socket on this system: the terminal programs are not registered, and their acts the owner decides are put to him');
+    logger.info('[programs] no program socket on this system: the terminal programs are not registered, and their acts the owner decides are put to the owner');
     noteUnverified(daemonHome, `this system (${process.platform}) gives the daemon no way to verify the program that connects`);
     return undefined;
   }
@@ -259,8 +264,16 @@ export function startProgramSocket(daemonHome: string, registrations: ProgramReg
       const fd = calls.accept(listener);
       if (fd === undefined) return;
       const peer = calls.peerCredentials(fd);
-      const pending = [...connections.values()].filter((entry) => entry.phase !== 'registered').length;
-      if (!peer || peer.uid !== uid || peer.pid <= 0 || pending >= HANDSHAKES_LIMIT || !calls.passCredentials(fd)) {
+      if (!peer || peer.uid !== uid || peer.pid <= 0 || !calls.passCredentials(fd)) {
+        calls.close(fd);
+        continue;
+      }
+      // Handshakes in flight are bounded by count, never by a clock: a new connection replaces the oldest one still
+      // waiting on its program's part (a stalled peer cannot hold the door shut; a real program finishes at once). The
+      // daemon's own judging is never cut. A handshake also ends when its process ends or its connection closes.
+      const waiting = [...connections.values()].filter((entry) => entry.phase === 'challenged' || entry.phase === 'reading');
+      if (waiting.length >= HANDSHAKES_LIMIT) refuse(waiting[0]!, 'a newer connection took its place before it finished the exchange');
+      if ([...connections.values()].filter((entry) => entry.phase !== 'registered').length >= HANDSHAKES_LIMIT) {
         calls.close(fd);
         continue;
       }
@@ -372,16 +385,12 @@ export function startProgramSocket(daemonHome: string, registrations: ProgramReg
       ...list.flatMap((connection) => [{ fd: connection.fd, events: POLLIN | POLLRDHUP }, { fd: connection.handle, events: POLLIN }])]);
     if (!ready) return;
     if ((ready[0]! & POLLIN) !== 0) accept();
-    const now = Date.now();
     list.forEach((connection, index) => {
       if (!connections.has(connection.fd)) return;
       const socketReady = ready[1 + index * 2]!;
       const processReady = ready[2 + index * 2]!;
-      // The process ended: its registration with it.
+      // The process ended: its registration with it (and a handshake it never finished).
       if ((processReady & (POLLIN | POLLHUP | POLLERR)) !== 0) { drop(connection); return; }
-      // The program's part of the exchange is bounded by the daemon's clock (the daemon's own judging, a first hash of a
-      // large executable, is not the program's to bound).
-      if ((connection.phase === 'challenged' || connection.phase === 'reading') && now - connection.openedAt > HANDSHAKE_LIMIT_MS) { refuse(connection, 'it did not finish the exchange in time'); return; }
       if (connection.outgoing.length > 0) flush(connection);
       if ((socketReady & POLLIN) !== 0) {
         const got = calls.receive(connection.fd, 4096);

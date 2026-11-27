@@ -159,7 +159,7 @@ export function ownerInboxStorePath(shellPaths: { resolveUserPath(...segments: s
 /**
  * Unanswered closed items (withdrawn or expired) kept for the history view. An
  * answered item is never dropped: the answer is the owner's own (a typed answer,
- * a choice, a purchase approved) or what he was told (a report he read).
+ * a choice, a purchase approved) or what the owner was told (a report the owner read).
  */
 const MAX_CLOSED_ENTRIES = 500;
 const STORED_KINDS: ReadonlySet<string> = new Set<StoredOwnerItemKind>(['question', 'claim', 'purchase', 'queued-action', 'decision', 'report']);

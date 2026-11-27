@@ -1,5 +1,5 @@
 import { freshReviewPatch, parseAgentReviewState, reviewedReviewPatch, staleReviewPatch } from './review-state.js';
-import { acceptedAuthor, authorAfterChange, memoryAwaitsOwner, newRecordAuthor, readRecordAuthor, type MemoryAuthor } from '@goodvibes/engine/platform/platform/state';
+import { acceptedAuthor, authorAfterChange, newRecordAuthor, noteOthersWritingRead, readRecordAuthor, type MemoryAuthor } from '@goodvibes/engine/platform/platform/state';
 import type { ShellPathService } from '@goodvibes/engine/platform/platform/runtime/shell';
 import {
   readJsonStore,
@@ -327,7 +327,7 @@ export class AgentPersonaRegistry {
     });
   }
 
-  /** `accept`: the owner himself reviewed it, which accepts a persona someone else wrote (never a model's review). */
+  /** `accept`: the owner in person reviewed it, which accepts a persona someone else wrote (never a model's review). */
   public markReviewed(idOrName: string, options: { readonly accept?: boolean } = {}): AgentPersonaRecord {
     return this.locked(() => {
       const store = this.readStore();
@@ -433,9 +433,9 @@ export class AgentPersonaRegistry {
   }
 }
 
-/** A persona whose text may steer a turn: reviewed, and not someone else's words the owner has not accepted (state/memory-author.ts, the one rule). */
-export function personaGivenToTurns(persona: Pick<AgentPersonaRecord, 'reviewState' | 'author'>): boolean {
-  return persona.reviewState === 'reviewed' && !memoryAwaitsOwner(persona);
+/** A persona whose text may steer a turn: reviewed, as released (who wrote it is kept: state/memory-author.ts). */
+export function personaGivenToTurns(persona: Pick<AgentPersonaRecord, 'reviewState'>): boolean {
+  return persona.reviewState === 'reviewed';
 }
 
 export function buildActivePersonaPrompt(shellPaths: ShellPathService, snapshot?: AgentPersonaSnapshot): string | null {
@@ -449,11 +449,14 @@ export function buildActivePersonaPrompt(shellPaths: ShellPathService, snapshot?
       'This persona is active but not applied because it is not reviewed. Use the learning curator or persona review route before allowing it to steer assistant behavior.',
     ].join('\n');
   }
+  // Someone else's words, put into the prompt now: the conversation has read outside text.
+  const others = noteOthersWritingRead('persona', active.id, active.author);
   return [
     '## Active GoodVibes Agent Persona',
     `Name: ${active.name}`,
     `Description: ${active.description}`,
     `Review: ${formatAgentRecordReviewState(active.reviewState)}`,
+    ...(others !== undefined ? [`Written by ${others}, not the owner.`] : []),
     '',
     active.body,
     '',

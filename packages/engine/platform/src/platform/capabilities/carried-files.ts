@@ -10,14 +10,13 @@
  * Who may carry is the daemon's to decide (routes/capabilities.ts): a caller on another machine, or the owner's own
  * program. Whose file it is, and on which machine, is said on the owner's card from the principal the daemon
  * authenticated, never from anything the caller sent (`machine` is not read). The scratch folders are in the daemon's
- * home, owner-only (`carriedBase`), never the shared temp folder, and a held call keeps its folder (and `CarriedKept`
- * on its question) so the owner's yes after a restart runs on that content (`resumeCarried`). Content larger than one
+ * home, owner-only (`carriedBase`), never the shared temp folder, and live only as long as the call. Content larger than one
  * request body carries travels ahead as uploads in parts (`CARRIED_UPLOAD_PURPOSE`, `uploadCarriedParts`), named in
  * the call by their ids.
  */
 import { createHash } from 'node:crypto';
 import { chmodSync, existsSync, lstatSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
-import { basename, dirname, isAbsolute, join, normalize, relative } from 'node:path';
+import { basename, dirname, isAbsolute, join, normalize } from 'node:path';
 import { CapabilityRefusal, type CapabilityEntry } from './types.js';
 
 /**
@@ -44,8 +43,12 @@ export const CARRIED_INLINE_BYTES = 512 * 1024;
 export const CARRIED_PART_BYTES = 512 * 1024;
 /** The purpose an uploaded part carries (artifact metadata): the daemon reads, and removes, only such an upload. */
 export const CARRIED_UPLOAD_PURPOSE = 'carried-file';
-/** How long an uploaded part is kept if the call never comes (the daemon removes it once read). */
-export const CARRIED_UPLOAD_RETENTION_MS = 24 * 60 * 60 * 1000;
+/**
+ * How many uploaded parts whose call has not read them yet the daemon keeps (it removes each once read): past it, the
+ * oldest go (a program that ended between sending its parts and its call). 1024 parts is 512 MiB, eight calls at the most
+ * one call carries; nothing is removed because time went by.
+ */
+export const CARRIED_UPLOADS_KEPT = 1024;
 /** The archive form a folder travels in. */
 const FOLDER_FORMAT = 'goodvibes-folder-v1';
 
@@ -259,14 +262,6 @@ export function carriedNameShown(name: string): string {
   return line.length <= 160 ? line : `${line.slice(0, 159)}…`;
 }
 
-/** What a held call keeps with its question to run on its carried content after a restart (never the content itself). */
-export interface CarriedKept {
-  /** The call's own scratch folder, inside the daemon's carried base. */
-  readonly root: string;
-  /** Each carried path input: its scratch path, the caller's name for it, and what was sent there (a digest). */
-  readonly inputs: Readonly<Record<string, { readonly path: string; readonly name: string; readonly sent: string }>>;
-}
-
 /** What a content is, as a digest: what came back is compared with what was sent by it. */
 function digestOf(content: CarriedContent): string {
   const hash = createHash('sha256').update(content.kind);
@@ -276,17 +271,19 @@ function digestOf(content: CarriedContent): string {
 }
 
 /**
- * How long a scratch folder may outlive its call: one whose run never came (refused before it started, or held for an
- * owner who never answered: an ask expires within 12 hours) is removed the next time content is carried after this.
+ * The carried bases this process has used: a scratch folder lives as long as its call (removed when its run ends, when
+ * its call is decided and refused), and a folder a process left behind (it ended mid-call)
+ * belongs to nothing once that process is gone: the first use of a base in a new process removes every folder in it,
+ * all of them an ended process's. Nothing is removed because time went by.
  */
-const SCRATCH_LIFETIME_MS = 24 * 60 * 60 * 1000;
+const basesClearedThisProcess = new Set<string>();
 
 /**
  * The daemon's folder of scratch folders, inside its own home (`<daemon home>/carried`), owner-only: made 0700 if
  * missing, and refused unless it is a real folder of this account (never a link, never one another account made), its
- * mode put back to 0700. Every scratch folder older than its lifetime is removed.
+ * mode put back to 0700. On its first use in this process, the folders an earlier process left are removed.
  */
-export function carriedBase(daemonHome: string, now = Date.now()): string {
+export function carriedBase(daemonHome: string): string {
   const base = join(daemonHome, 'carried');
   mkdirSync(base, { recursive: true, mode: 0o700 });
   const stat = lstatSync(base);
@@ -295,9 +292,11 @@ export function carriedBase(daemonHome: string, now = Date.now()): string {
     throw new CapabilityRefusal('The daemon\'s folder for files sent with a call is not its own (a link, or another account\'s); nothing was done.');
   }
   if ((stat.mode & 0o777) !== 0o700) chmodSync(base, 0o700);
-  for (const entry of readdirSync(base)) {
-    const path = join(base, entry);
-    try { if (now - lstatSync(path).mtimeMs > SCRATCH_LIFETIME_MS) rmSync(path, { recursive: true, force: true }); } catch { /* gone already */ }
+  if (!basesClearedThisProcess.has(base)) {
+    basesClearedThisProcess.add(base);
+    for (const entry of readdirSync(base)) {
+      try { rmSync(join(base, entry), { recursive: true, force: true }); } catch { /* gone already */ }
+    }
   }
   return base;
 }
@@ -312,8 +311,6 @@ export interface CarriedRun {
   readonly names: Readonly<Record<string, string>>;
   /** The carried path inputs whose content is a folder (the card says "folder named", not "file named"). */
   readonly folders: readonly string[];
-  /** What a held call keeps with its question to run on this content after a restart. */
-  readonly kept: CarriedKept;
   /**
    * The values with each carried path as the caller named it (its full path, not the scratch copy's last name): what the
    * call's risk, its command-line hold and the gate are judged on, as the card shows it.
@@ -321,7 +318,7 @@ export interface CarriedRun {
   asNamed(values: Readonly<Record<string, string>>): Record<string, string>;
   /** What the run made or changed at each carried path, by input id, to send back. */
   collect(): Record<string, CarriedContent>;
-  /** Words with each scratch path written as the caller named it (the answer names his file, not the daemon's copy). */
+  /** Words with each scratch path written as the caller named it (the answer names the caller's file, not the daemon's copy). */
   named(text: string): string;
   /** Remove the scratch folder. */
   dispose(): void;
@@ -337,7 +334,6 @@ function carriedRunOver(root: string, values: Readonly<Record<string, string>>, 
     roots: [root],
     names,
     folders: [...placed].filter(([, { path }]) => { try { return lstatSync(path).isDirectory(); } catch { return false; } }).map(([id]) => id),
-    kept: { root, inputs: Object.fromEntries([...placed].map(([id, entry]) => [id, { ...entry }])) },
     asNamed: (given) => {
       const out: Record<string, string> = { ...given };
       for (const [id, { path, name }] of placed) if (out[id] === path) out[id] = name;
@@ -418,27 +414,3 @@ export async function receiveCarried(entry: Pick<CapabilityEntry, 'id' | 'inputs
   }
 }
 
-/**
- * A held call's carried content, kept in its scratch folder while the question waited, taken up again for the owner's
- * yes after a restart: undefined when what was kept cannot be read back or its folder is gone (the call is then asked
- * again; it never runs on the daemon's own disk). The folder must be one of the daemon's own scratch folders.
- */
-export function resumeCarried(kept: unknown, values: Readonly<Record<string, string>>, daemonHome: string): CarriedRun | undefined {
-  const record = kept as Partial<CarriedKept> | null;
-  if (record === null || typeof record !== 'object' || typeof record.root !== 'string' || record.inputs === null || typeof record.inputs !== 'object') return undefined;
-  let base: string;
-  try { base = realpathSync(carriedBase(daemonHome)); } catch { return undefined; }
-  const root = record.root;
-  if (!existsSync(root) || lstatSync(root).isSymbolicLink()) return undefined;
-  const within = (path: string, folder: string): boolean => { const rel = relative(folder, path); return rel !== '' && !rel.startsWith('..') && !isAbsolute(rel); };
-  if (!within(realPathOrSelf(root), base)) return undefined;
-  const placed = new Map<string, { readonly path: string; readonly name: string; readonly sent: string }>();
-  for (const [id, entry] of Object.entries(record.inputs as Record<string, unknown>)) {
-    const input = entry as Partial<{ path: unknown; name: unknown; sent: unknown }> | null;
-    if (input === null || typeof input !== 'object' || typeof input.path !== 'string' || typeof input.name !== 'string' || typeof input.sent !== 'string') return undefined;
-    if (!within(realPathOrSelf(input.path), realPathOrSelf(root))) return undefined;
-    placed.set(id, { path: input.path, name: input.name, sent: input.sent });
-  }
-  if (placed.size === 0) return undefined;
-  return carriedRunOver(root, values, placed);
-}

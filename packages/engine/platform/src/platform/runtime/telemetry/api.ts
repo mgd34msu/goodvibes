@@ -54,7 +54,7 @@ function telemetryRecordReachable(record: Pick<TelemetryRecord, 'sessionId' | 'a
   return record.agentId !== undefined && reach('task', record.agentId);
 }
 
-/** The records the request's caller may reach (all of them for the owner himself). */
+/** The records the request's caller may reach (all of them for the owner in person). */
 function reachableTelemetryRecords(records: readonly TelemetryRecord[]): readonly TelemetryRecord[] {
   const reach = currentRecordReach();
   return reach ? records.filter((record) => telemetryRecordReachable(record, reach)) : records;
@@ -352,7 +352,7 @@ export class TelemetryApiService {
     rawAccessible = rawAccessible && this.isRawEnabled();
     const state = this.runtimeStore.getState();
     const limit = clampLimit(filter.limit, 20);
-    // A caller that is not the owner himself: every count is of what it may reach (control-plane/caller-reach.ts).
+    // A caller that is not the owner in person: every count is of what it may reach (control-plane/caller-reach.ts).
     if (currentRecordReach() !== undefined) return this.reachableSnapshot(filter, view, rawAccessible, limit);
     return {
       version: 1,
@@ -396,7 +396,7 @@ export class TelemetryApiService {
   }
 
   /**
-   * The snapshot for a caller that is not the owner himself: the records, errors and spans it may reach (sessions and
+   * The snapshot for a caller that is not the owner in person: the records, errors and spans it may reach (sessions and
    * agents of the projects given it), and every count made of those (tasks, agents and waiting questions by the same
    * rule; turns, tool calls, tokens and errors from the kept records it may reach). The daemon's own lifetime counters,
    * which keep no session, are the owner's.

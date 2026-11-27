@@ -101,7 +101,7 @@ export interface ConfirmController {
   element: ReactElement | null;
 }
 
-/** A promise-returning confirm gate; render `element` anywhere in the view. */
+/** A promise-returning confirm gate; render `element` anywhere in the view. It asks in every mode, as released. */
 export function useConfirm(): ConfirmController {
   const [request, setRequest] = useState<ConfirmRequest | null>(null);
   const resolverRef = useRef<((confirmed: boolean) => void) | null>(null);

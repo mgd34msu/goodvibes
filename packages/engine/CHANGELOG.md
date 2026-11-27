@@ -3106,7 +3106,7 @@ This file tracks breaking changes, additions, fixes, and migration steps for eac
   answer was no, the gate off, `sandbox.enabled` off, or the host unable to
   provide one, the command ran directly on the host with an honest note. For a
   terminal that is right; for a daemon-hosted conversational turn it was how one
-  reached the whole process table, the owner's `/proc`, and his terminal. A
+  reached the whole process table, the owner's `/proc`, and their terminal. A
   composition now states a CONTAINMENT POSTURE: `host-allowed` is the unchanged
   default, and `required` refuses the command instead, naming why the boundary
   was absent. `background: true` is refused under `required` too, since a
@@ -3146,7 +3146,7 @@ This file tracks breaking changes, additions, fixes, and migration steps for eac
 - `CONVERSATIONAL_DIAGNOSIS_SECTION`, the DO half of the conversational
   contract, issued to conversational spawns and to a hosted session's base
   prompt: report the state and propose the fix rather than performing it
-  uninvited, never restart the owner's applications or type into his terminal,
+  uninvited, never restart the owner's applications or type into their terminal,
   and back a "fixed" claim with the live evidence it rests on.
 
 ## [2.0.9] - 2026-08-05
@@ -3176,7 +3176,7 @@ This file tracks breaking changes, additions, fixes, and migration steps for eac
   lead boundary and at most once on the day; between those it stays open and
   enumerable but quiet. Replying to a reminder records an acknowledgment in
   the same turn and mutes that occurrence; a remember-only occasion about the
-  owner himself never pushes at all. Machines already over-nudged reconcile
+  owner in person never pushes at all. Machines already over-nudged reconcile
   on first boot, receipted. The complaint remedy ladder is contract: mute the
   occurrence, adjust the occasion, and whole-feature-off only on an explicit
   feature-naming yes.
@@ -3217,7 +3217,7 @@ This file tracks breaking changes, additions, fixes, and migration steps for eac
   `profile.get` leaked two internal properties past a strict schema, so every
   strict client's profile reads failed ("Ensure the daemon is running the
   matching GoodVibes contract version"), the daemon could not tell its owner
-  his own address. The response is now an explicit wire projection, `section`
+  their own address. The response is now an explicit wire projection, `section`
   is a declared contract property, and `profile.provenance` correctly declares
   its null for hand-edited fields. A conformance test runs the real route
   handlers' responses through the same validator clients use, across the whole
@@ -3268,7 +3268,7 @@ This file tracks breaking changes, additions, fixes, and migration steps for eac
 - **A conversational turn is told to understand what it captures, not just
   file it.** The capture contract now instructs the turn to read what a shared
   thing implies and fold that into the same answer, an itinerary also means
-  an away-span said back in plain words, travelers who are people in his life,
+  an away-span said back in plain words, travelers who are people in the owner's life,
   and durable facts about the destination, and then to USE what it stored:
   name collisions with existing plans and offer the obviously useful next
   things once (a reminder before departure, weather at the destination).
@@ -4679,13 +4679,13 @@ its description says, in every consumer.
 
 - **Occasions and plans, the daemon raises important dates on its own, before
   they matter.** A new `## Important dates` section and a new `## Plans` section
-  in the owner profile hold his own declarations, as prose lines he can hand-edit
+  in the owner profile hold the owner's own declarations, as prose lines they can hand-edit
   and that nothing rewrites. The daemon reads them, works out which are entering
   their lead window, batches them into one message, and delivers it, with the
   answer remembered so it does not keep asking, and remembered only until the
   date passes, because birthdays are annual. See `docs/occasions.md`.
 
-  - **The kind is his, and is never inferred.** `gift-giving`, `remember-only`
+  - **The kind is the owner's, and is never inferred.** `gift-giving`, `remember-only`
     or `neither`, chosen in the same interaction that confirms the date.
     `occasions.confirm` refuses without one: no rule that reads a label tells a
     birthday from a death anniversary, and a cheerful "you'll probably want to
@@ -4715,13 +4715,13 @@ its description says, in every consumer.
   - **Nothing unresolved is ever dropped.** One open-item mechanism behind all
     three cases: an unanswered nudge continues on its own rhythm, a "later"
     comes back roughly halfway to the date, a conflict between two declared
-    dates is re-raised until he settles it, and a gift interview he walked away
-    from resumes at the question he did not answer.
+    dates is re-raised until the owner settles it, and a gift interview they
+    walked away from resumes at the question they did not answer.
   - **A yes opens a short interview, not a shopping trip.** Three questions that
-    guide him to his own idea, opened from what his profile already says about
-    the person, recording what he landed on so year three is not steered by year
+    guide the owner to their own idea, opened from what their profile already
+    says about the person, recording what they landed on so year three is not steered by year
     one. It never recommends anything.
-  - **The machine's bookkeeping stays out of his file.** Answers, gift history,
+  - **The machine's bookkeeping stays out of the owner's file.** Answers, gift history,
     open items, interviews and calendar mirror records live in a separate
     machine-owned store that is bounded, validated record by record, reaped on
     schedule, swept, and discloses what it holds through `occasions.state`.
@@ -5508,16 +5508,16 @@ release necessary rather than optional, and it is the larger part of the work.
   the tier: a phisher who owns their domain and configures DNS correctly passes
   DKIM, SPF and DMARC.
 
-- **A send to the owner himself is exempt from the taint refusal** (owner
-  ruling: he is the trust root, not a third party, and telling him what arrived
-  is the point of an assistant reading his mail, "what came in overnight"
+- **A send to the owner in person is exempt from the taint refusal** (owner
+  ruling: the owner is the trust root, not a third party, and telling them what
+  arrived is the point of an assistant reading their mail, "what came in overnight"
   necessarily reuses the words of what came in). The exemption is drawn as
   narrowly as it can be, and every narrowing is tested as an attack that must
-  fail: his configured addresses only, never a domain (that would exempt every
+  fail: the owner's configured addresses only, never a domain (that would exempt every
   colleague, and a forward to a colleague is third-party disclosure), never a
   pattern (no plus-address folding), and never partial, a send to the owner AND
-  anyone else is refused, because naming him first and slipping a second
-  recipient in beside him is exactly how this would be used. Identity comes from
+  anyone else is refused, because naming the owner first and slipping a second
+  recipient in beside them is exactly how this would be used. Identity comes from
   configuration alone (`email.fromAddress`, `email.username`,
   `surfaces.email.from`/`.user`/`.username`) and never from a `From:` header,
   `Reply-To:`, delivery evidence, the ledger or the body. Nothing configured

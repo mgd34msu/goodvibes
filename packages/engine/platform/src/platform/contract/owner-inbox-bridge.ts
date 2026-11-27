@@ -22,7 +22,7 @@
 import type { ContractEvent } from '../../events/contract.js';
 import type { RuntimeEventBus } from '../runtime/events/index.js';
 import { logger } from '../utils/logger.js';
-import { ACCEPTANCE_ANSWERS, isOwnerAcceptance, isRepeatedPlanPause, type OwnerReplyOutcome } from './escalation.js';
+import { ACCEPTANCE_ANSWERS, CONFLICT_ANSWERS, isConflictPause, isOwnerAcceptance, isRepeatedPlanPause, type OwnerReplyOutcome } from './escalation.js';
 import type { ContractView } from './types.js';
 
 /** Key prefix of the inbox items this bridge posts; the escalation id follows. */
@@ -72,6 +72,7 @@ function keyOf(escalationId: string): string {
 function optionsFor(escalation: Escalation): readonly string[] {
   // A repeated plan takes the owner's words (what to change) or "stop": a written reply.
   if (escalation.failurePause !== true || isRepeatedPlanPause(escalation)) return [];
+  if (isConflictPause(escalation)) return CONFLICT_ANSWERS;
   return isOwnerAcceptance(escalation) ? ACCEPTANCE_ANSWERS : FAILURE_ANSWERS;
 }
 
@@ -89,6 +90,7 @@ function titleFor(contract: ContractView, escalation: Escalation): string {
   const lead = escalation.failurePause !== true ? 'A piece of work needs your answer'
     : isOwnerAcceptance(escalation) ? 'Accept a piece of work\'s result that was not checked?'
       : isRepeatedPlanPause(escalation) ? 'The planner offered the same plan again'
+      : isConflictPause(escalation) ? (escalation.question.split('\n')[0] ?? 'Two changes could not be combined').replace(/\.$/, '')
       : 'Run again or stop a piece of work that failed?';
   const title = what.length > 0 ? `${lead}: ${what}` : lead;
   return title.length <= TITLE_CHARS ? title : `${title.slice(0, TITLE_CHARS - 3)}...`;

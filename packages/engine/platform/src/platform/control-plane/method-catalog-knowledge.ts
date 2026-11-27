@@ -786,7 +786,9 @@ export const builtinGatewayKnowledgeMethodDescriptors: readonly GatewayMethodDes
     title: 'Record Project Decision',
     description: 'Persist a meaningful project decision record for future TUI and agent context.',
     category: 'knowledge',
-    effects: ['knowledge.administer'],
+    // A project's plan is a project act (effect-authority.ts `work.write`: Work and its plan are one): below an admin, the
+    // plan of a project the owner gave the caller (every planning call names its project, checked by the one folder check).
+    effects: ['work.write'],
     http: { method: 'POST', path: '/api/projects/planning/decisions' },
     workFolders: ['workingDirectory'],
     inputSchema: bodyEnvelopeSchema({
@@ -873,7 +875,7 @@ export const builtinGatewayKnowledgeMethodDescriptors: readonly GatewayMethodDes
     title: 'Create Project Work Plan Task',
     description: 'Create a durable project-scoped work-plan task for TUI, WebUI, APK, daemon planning, or contract correlation.',
     category: 'knowledge',
-    effects: ['knowledge.administer'],
+    effects: ['work.write'],
     http: { method: 'POST', path: '/api/projects/planning/work-plan/tasks' },
     workFolders: ['workingDirectory'],
     inputSchema: bodyEnvelopeSchema({
@@ -891,7 +893,7 @@ export const builtinGatewayKnowledgeMethodDescriptors: readonly GatewayMethodDes
     title: 'Update Project Work Plan Task',
     description: 'Patch a durable project-scoped work-plan task. Returns the task before and after and the plan revision; read the snapshot for the whole plan.',
     category: 'knowledge',
-    effects: ['knowledge.administer'],
+    effects: ['work.write'],
     http: { method: 'PATCH', path: '/api/projects/planning/work-plan/tasks/{taskId}' },
     workFolders: ['workingDirectory'],
     inputSchema: bodyEnvelopeSchema({
@@ -910,7 +912,7 @@ export const builtinGatewayKnowledgeMethodDescriptors: readonly GatewayMethodDes
     title: 'Set Project Work Plan Task Status',
     description: 'Set a task\'s status and optional reason.',
     category: 'knowledge',
-    effects: ['knowledge.administer'],
+    effects: ['work.write'],
     http: { method: 'POST', path: '/api/projects/planning/work-plan/tasks/{taskId}/status' },
     workFolders: ['workingDirectory'],
     inputSchema: bodyEnvelopeSchema({
@@ -931,7 +933,7 @@ export const builtinGatewayKnowledgeMethodDescriptors: readonly GatewayMethodDes
     title: 'Reorder Project Work Plan Tasks',
     description: 'Replace task ordering for the current project work plan. Returns the tasks whose position changed and the plan revision.',
     category: 'knowledge',
-    effects: ['knowledge.administer'],
+    effects: ['work.write'],
     http: { method: 'POST', path: '/api/projects/planning/work-plan/tasks/reorder' },
     workFolders: ['workingDirectory'],
     inputSchema: bodyEnvelopeSchema({
@@ -949,7 +951,7 @@ export const builtinGatewayKnowledgeMethodDescriptors: readonly GatewayMethodDes
     title: 'Delete Project Work Plan Task',
     description: 'Delete a durable project-scoped work-plan task.',
     category: 'knowledge',
-    effects: ['knowledge.administer'],
+    effects: ['work.write'],
     http: { method: 'DELETE', path: '/api/projects/planning/work-plan/tasks/{taskId}' },
     workFolders: ['workingDirectory'],
     inputSchema: objectSchema({
@@ -967,7 +969,7 @@ export const builtinGatewayKnowledgeMethodDescriptors: readonly GatewayMethodDes
     title: 'Clear Completed Project Work Plan Tasks',
     description: 'Remove completed project work-plan tasks. Defaults to clearing status done only.',
     category: 'knowledge',
-    effects: ['knowledge.administer'],
+    effects: ['work.write'],
     http: { method: 'POST', path: '/api/projects/planning/work-plan/clear-completed' },
     workFolders: ['workingDirectory'],
     inputSchema: bodyEnvelopeSchema({

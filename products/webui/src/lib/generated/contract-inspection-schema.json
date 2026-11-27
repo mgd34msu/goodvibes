@@ -3469,6 +3469,25 @@
                 "items": {
                   "type": "string"
                 }
+              },
+              "conflict": {
+                "type": "object",
+                "properties": {
+                  "branch": {
+                    "type": "string"
+                  },
+                  "files": {
+                    "type": "array",
+                    "items": {
+                      "type": "string"
+                    }
+                  }
+                },
+                "required": [
+                  "branch",
+                  "files"
+                ],
+                "additionalProperties": false
               }
             },
             "required": [
@@ -5538,6 +5557,25 @@
           "failureReason": {
             "type": "string"
           },
+          "failureKind": {
+            "type": "string",
+            "enum": [
+              "transport",
+              "max_turns",
+              "planning",
+              "budget",
+              "owner-rejected",
+              "judgment-unavailable",
+              "zombie",
+              "other"
+            ]
+          },
+          "dropped": {
+            "type": "string"
+          },
+          "heardAt": {
+            "type": "number"
+          },
           "attemptOf": {
             "type": "string"
           },
@@ -6848,6 +6886,25 @@
                 },
                 "failureReason": {
                   "type": "string"
+                },
+                "failureKind": {
+                  "type": "string",
+                  "enum": [
+                    "transport",
+                    "max_turns",
+                    "planning",
+                    "budget",
+                    "owner-rejected",
+                    "judgment-unavailable",
+                    "zombie",
+                    "other"
+                  ]
+                },
+                "dropped": {
+                  "type": "string"
+                },
+                "heardAt": {
+                  "type": "number"
                 },
                 "attemptOf": {
                   "type": "string"

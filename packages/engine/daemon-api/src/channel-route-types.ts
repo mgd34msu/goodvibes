@@ -78,8 +78,6 @@ export interface ChannelPolicyPatch {
   readonly allowThreadMessages?: boolean;
   readonly allowTextCommandsWithoutMention?: boolean;
   readonly open?: boolean;
-  /** "Treat my own messages here as me" (off by default): see the platform's channels/types.ts ChannelPolicyRecord. */
-  readonly ownMessagesAsOwner?: boolean;
   /** "Project for this channel": a registered project's folder; empty clears it (none). */
   readonly project?: string | undefined;
   readonly dmPolicy?: ChannelConversationPolicy;
@@ -202,12 +200,6 @@ export interface DaemonChannelRouteContext {
   readonly parseOptionalJsonBody: (req: Request) => Promise<JsonRecord | null | Response>;
   readonly requireAdmin: (req: Request) => Response | null;
   readonly surfaceRegistry: SurfaceRegistryLike;
-  /**
-   * Why "Treat my own messages here as me" does not exist for a channel kind (its sender is not one the channel
-   * authenticates, or a conversation cannot be proven the owner's alone), in words; undefined where it does. Turning it
-   * on for such a kind is refused through every door. Absent: it is refused for every kind.
-   */
-  readonly ownMessagesRefusal?: ((surface: string) => string | undefined) | undefined;
   /**
    * Why a folder cannot be a channel's project ("Project for this channel": a registered project's absolute folder), in
    * words; undefined when it can. Absent: no project can be chosen.

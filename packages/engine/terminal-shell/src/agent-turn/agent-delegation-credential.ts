@@ -8,7 +8,7 @@
  *
  * It is minted once per host with the Agent's ordinary credential and the
  * registration the host issued this Agent's process (the host makes it only
- * for the owner himself), kept in a file only this user can read, and reused.
+ * for the owner in person), kept in a file only this user can read, and reused.
  * The file is no authority by itself: every call made with the credential
  * carries that registration, and the host takes a call with the credential
  * alone for a script's (call-context.ts `bindDelegatedCredential`). The mint carries an attempt id saved before
@@ -129,8 +129,8 @@ async function mintDelegation(connection: CapturedOperatorConnection, homeDirect
   }
   let response: Response;
   try {
-    // The daemon makes the Agent's credential only for the owner himself: this Agent's registered program (its
-    // registration, sent with the call), a device he paired, or a turn the daemon hosts.
+    // The daemon makes the Agent's credential only for the owner in person: this Agent's registered program (its
+    // registration, sent with the call), a device they paired, or a turn the daemon hosts.
     const programHeaders = await programCallHeadersFor(host, connection.token, connection.fetch ?? fetch, 'agent');
     // `pairing.tokens.create` has no route of its own in the operator contract.
     // The connection's own transport: the network, or the daemon's request path in a turn it hosts.

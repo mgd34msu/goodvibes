@@ -96,9 +96,10 @@ async function askTrustOnOpen(
   manager: Pick<WorkspaceTrustManager, 'load' | 'isDecided' | 'trustQuestion' | 'setLevel' | 'trustedForNothingToRun' | 'askWhenRepositoryFilesAppear'> | undefined,
   requestTrustDecision: (() => Promise<FirstOpenTrustLevel>) | undefined,
   folder: () => FolderTrustFacts,
+  say?: (line: string) => void,
 ): Promise<void> {
   // The same rule as the Agent's start and `run` (terminal-shell native/folder-trust.ts).
-  await settleFolderTrustOnOpen(manager, requestTrustDecision, folder);
+  await settleFolderTrustOnOpen(manager, requestTrustDecision, folder, say);
 }
 
 export function applyInitialTuiCliState(options: {
@@ -127,7 +128,8 @@ export function applyInitialTuiCliState(options: {
   // workspace" (the person came to work here). After "Keep restricted" nothing
   // in the folder is changed: a restriction refuses every write and command.
   const trustSettled = askTrustOnOpen(commandContext.workspace?.workspaceTrustManager, options.requestTrustDecision,
-    () => readFolderTrustFacts(shellPaths.workingDirectory, shellPaths.homeDirectory, String(commandContext.platform.configManager.get('tools.hooksFile') ?? '')));
+    () => readFolderTrustFacts(shellPaths.workingDirectory, shellPaths.homeDirectory, String(commandContext.platform.configManager.get('tools.hooksFile') ?? '')),
+    (line) => commandContext.print(line));
 
   // Registration self-records on every launch of an already-trusted
   // workspace (fire-and-forget, never blocks or gates startup, never a

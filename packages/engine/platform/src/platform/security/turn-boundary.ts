@@ -151,7 +151,7 @@ export interface TurnContext {
   readonly actor?: Actor | undefined;
   readonly origin: TurnInputOrigin | undefined;
   /**
-   * The host established that the owner himself gave this turn's input (his keyboard, an operator input marked owner-
+   * The host established that the owner in person gave this turn's input (their keyboard, an operator input marked owner-
    * direct): the one positive fact a turn with no surface is the owner's by (security/turn-input-party.ts). Absent: no
    * host said so, and such a turn is someone else's.
    */
@@ -216,7 +216,7 @@ export function currentTurn(): TurnContext | undefined {
  * a turn of its own: it carries the surface and whose turn started it (a
  * guest stays a guest), and nothing else of that turn (not its request text,
  * not its owner's authority). `sessionId`: the channel conversation it was
- * started for, so "Treat my own messages here as me" can read whose it is
+ * started for, so whether it is the owner's own message can be read
  * (security/turn-input-party.ts); never a grant by itself.
  */
 export function withTurnSurfaceId<T>(surface: string | undefined, fn: () => T, actor?: Actor | undefined, sessionId?: string | undefined): T {

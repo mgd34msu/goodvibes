@@ -1,7 +1,7 @@
 import type { ExternalOperationSource } from '../permissions/external-request.js';
 import type { UnattendedRuns } from './unattended-runs.js';
 import { captureAutomationSource } from './action-source.js';
-import { stampExposure } from '../security/conversation-exposure.js';
+import { clearExposure, stampExposure } from '../security/conversation-exposure.js';
 import { ConfigManager } from '../config/manager.js';
 import { logger } from '../utils/logger.js';
 import { outsideEveryCall } from '../utils/outside-every-call.js';
@@ -794,6 +794,8 @@ export class AutomationManager {
     await this.commitJob(selected, null, { signal: options.signal, assertCurrent: current, withPublication: options.withPublication });
     // Removed from the group's record too before the owner is told it is gone, as a create or update is.
     await this.removeJobRecord(jobId, 'job-removed');
+    // What the schedule had read from outside goes with it (security/conversation-exposure.ts).
+    clearExposure(`schedule:${jobId}`);
     return true;
   }
 

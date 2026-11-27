@@ -5,10 +5,13 @@ import { HookDispatcher } from '../hooks/dispatcher.js';
 import type { HookEvent } from '../hooks/types.js';
 import {
   authenticateOperatorRequest,
+  credentialKindOf,
   extractOperatorAuthToken,
+  operatorPrincipalGrant,
   operatorRequestActor,
   type PairingTokenAuthenticator,
 } from '../security/http-auth.js';
+import { pathNamerOf, type CallerPathRules } from '../control-plane/caller-paths.js';
 import { NO_OWNER_USER, type Actor } from '@goodvibes/engine/daemon-api/http-policy';
 import { admitEffects } from '../security/effect-authority.js';
 import { UserAuthManager } from '../security/user-auth.js';
@@ -93,6 +96,10 @@ interface HttpListenerConfig {
   isOperatorToken?: ((token: string) => boolean) | undefined;
   /** Told when a request was refused for presenting the operator token (the host reports it to the owner once). */
   onOperatorTokenRefused?: (() => void) | undefined;
+  /** Fires an event on one project's own hooks (its hooks file under the owner's trust): a webhook naming that project. */
+  projectHooks?: ((folder: string, event: HookEvent) => Promise<Awaited<ReturnType<HookDispatcher['fire']>>>) | undefined;
+  /** The daemon's caller rules (its one project check), read at each request naming a project. */
+  callerRules?: (() => CallerPathRules | undefined) | undefined;
 }
 
 /** The refusal for a webhook sender that presented the operator token. Names no path, value or account. */
@@ -545,13 +552,13 @@ export class HttpListener {
           error: `Firing a hook needs ${missing === 'admin' ? 'an admin credential' : missing === 'owner' ? 'the owner' : missing}; this credential does not hold it. Nothing was fired.`,
           code: admission.kind === 'refused' ? (missing === 'admin' ? 'ADMIN_REQUIRED' : admission.code) : 'OWNER_ONLY',
           category: 'authorization', status: 403, effect: admission.effect, missing,
-          next: [admission.kind === 'refused' ? admission.next : 'Ask the owner to fire it from his own credential.'],
+          next: [admission.kind === 'refused' ? admission.next : 'Ask the owner to fire it from their own credential.'],
         }, { status: 403 });
       }
       // Firing a hook starts work: during a self-update's hold it is refused with the router's code and fired by a retry.
       const closed = this.config.workAdmission?.refusalResponse();
       if (closed) return closed;
-      return this.handleWebhook(req);
+      return this.handleWebhook(req, actor);
     }
 
     if (pathname === '/health' && method === 'GET') {
@@ -561,9 +568,28 @@ export class HttpListener {
     return Response.json({ error: 'Not found' }, { status: 404 });
   }
 
-  private async handleWebhook(req: Request): Promise<Response> {
+  private async handleWebhook(req: Request, actor: Actor): Promise<Response> {
     const body = await parseDaemonJsonBody(req);
     if (body instanceof Response) return body;
+    // Whose event it is, and which project's hooks it fires: the project its call names (the project header, or `project`
+    // in the body), checked as every call naming a project is; only that project's hooks file (under the owner's trust of
+    // it) runs. The owner's own hooks for every project fire for the owner's own events only (their sign-in, their program,
+    // the listener's own token they gave their senders).
+    const ownersOwn = actor.class === 'owner' && actor.agentFor === undefined;
+    const headerProject = req.headers.get('x-goodvibes-project');
+    let named: string | undefined;
+    try { named = headerProject ? decodeURIComponent(headerProject).trim() || undefined : undefined; } catch { named = undefined; }
+    if (named === undefined && typeof body.project === 'string' && body.project.trim()) named = body.project.trim();
+    if (named === undefined && !ownersOwn) {
+      return Response.json({ error: 'This credential fires only the hooks of a project it was given: name that project (the x-goodvibes-project header, or "project" in the body). Nothing was fired.',
+        code: 'NO_PROJECT', category: 'authorization', status: 422 }, { status: 422 });
+    }
+    if (named !== undefined) {
+      const refusal = this.webhookProjectRefusal(req, named, ownersOwn);
+      if (refusal) {
+        return Response.json({ error: `${refusal} Nothing was fired.`, code: 'PROJECT_NOT_GIVEN', category: 'authorization', status: 403 }, { status: 403 });
+      }
+    }
 
     // Construct a HookEvent from the incoming payload
     const eventType = typeof body.event === 'string' ? body.event : 'webhook';
@@ -585,7 +611,11 @@ export class HttpListener {
       payload: body,
     };
 
-    if (!this.hookDispatcher) {
+    // A project's event fires that project's hooks; the owner's own event naming no project fires their own hooks.
+    const fire = named !== undefined
+      ? (this.config.projectHooks ? (event: HookEvent) => this.config.projectHooks!(named!, event) : undefined)
+      : this.hookDispatcher ? (event: HookEvent) => this.hookDispatcher!.fire(event) : undefined;
+    if (!fire) {
       // No dispatcher wired, acknowledge without processing
       logger.info('HttpListener: no HookDispatcher wired, acknowledging without processing', {
         event: eventType,
@@ -597,7 +627,7 @@ export class HttpListener {
     }
 
     try {
-      const result = await this.hookDispatcher.fire(hookEvent);
+      const result = await fire(hookEvent);
       return Response.json(
         {
           acknowledged: true,
@@ -614,5 +644,22 @@ export class HttpListener {
       logger.error('HttpListener: hook dispatch failed', { error: message });
       return Response.json({ error: `Hook dispatch failed: ${message}` }, { status: 500 });
     }
+  }
+
+  /**
+   * Why this caller may not fire the hooks of project `folder`, or undefined: the one project check every call naming a
+   * project passes (the daemon's caller rules), with the caller the request authenticated as. No check wired: only the
+   * owner's own events name a project.
+   */
+  private webhookProjectRefusal(req: Request, folder: string, ownersOwn: boolean): string | undefined {
+    if (!this.config.projectHooks) return 'This listener fires no project\'s hooks.';
+    if (ownersOwn) return undefined;
+    const rules = this.config.callerRules?.();
+    const authenticated = authenticateOperatorRequest(req, { sharedToken: this.authToken, userAuth: this.userAuth, pairingTokens: this.config.pairingTokens });
+    if (!rules || !authenticated) return `The project ${folder} is not among the projects given to this credential.`;
+    const grant = operatorPrincipalGrant(authenticated, this.config.grantedScopes ?? (() => []));
+    const verdict = rules.project(folder, pathNamerOf({ credentialKind: credentialKindOf(authenticated), principalId: grant.principalId,
+      actor: this.checkAuth(req) ?? undefined }));
+    return verdict.ok ? undefined : `The project ${folder} is not among the projects given to this credential (${verdict.reason}).`;
   }
 }

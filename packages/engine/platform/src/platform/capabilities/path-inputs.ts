@@ -1,13 +1,13 @@
 /**
  * path-inputs.ts, where a file a capability is given by path may be, and the ONE place a capability turns a path a
- * caller gave into the file it acts on. For anyone but the person himself (a model, a paired device, a script, another
+ * caller gave into the file it acts on. For anyone but the person themselves (a model, a paired device, a script, another
  * agent) the file is inside the caller's project, as the file really is (a link in the project, `/proc/self/root`, `~`
  * or `..` followed to what it names); the project is the one the daemon checked for that caller
  * (workspace/caller-project.ts `checkCallerProject`), never a folder it merely named. Checked at every door before
  * anything is asked or run: `capabilities.run` (control-plane/routes/capabilities.ts), the program's `capability_run`
  * (terminal-shell agent-turn/capability-tools.ts) and the daemon's own turns (tools/capability/daemon-tools.ts); and
  * again by the handler, which acts only on the path `callerPathOf` gives it, so no handler resolves a path its own way.
- * The person names any file himself, from his own terminal or screen.
+ * The person names any file themselves, from their own terminal or screen.
  *
  * A file that cannot be used is said in the product's words only (`unreadableFile`, `readCallerJson`): never a parser's
  * or the system's message, which can quote the file's own text, and never the file's text.
@@ -59,8 +59,8 @@ export interface CallerPathOptions {
   readonly label?: string | undefined;
   /**
    * For a capability that runs in the program holding the conversation (home `session`), never in the daemon: that
-   * program places the person's relative path itself, in the folder it was opened in (his project), so with no project
-   * named his path is handed on as he typed it. Everywhere else a relative path with no project is refused: nothing is
+   * program places the person's relative path itself, in the folder it was opened in (their project), so with no project
+   * named their path is handed on as they typed it. Everywhere else a relative path with no project is refused: nothing is
    * placed in the daemon's own folder.
    */
   readonly personPathAsTyped?: boolean | undefined;
@@ -72,7 +72,7 @@ export interface CallerPathOptions {
  * The file a path input names, as the capability acts on it, for this caller; refused (CapabilityRefusal) when the
  * caller may not name it:
  * - a caller on another machine names a file on that machine: the daemon acts on a path only for a caller on its own;
- * - the person: the path as he typed it (`~` expanded, a relative one in his project; with no project refused);
+ * - the person: the path as they typed it (`~` expanded, a relative one in their project; with no project refused);
  * - anyone else: the real path, which must be inside the caller's checked project.
  */
 export function callerPathOf(caller: CapabilityCaller, raw: string, options: CallerPathOptions = {}): string {
@@ -89,8 +89,8 @@ export function callerPathOf(caller: CapabilityCaller, raw: string, options: Cal
       'The program on that machine reads or writes the file there itself and sends or receives its content; or name it from the daemon\'s own machine');
   }
   const project = caller.workingDirectory?.trim() || undefined;
-  // The person names any file himself only from the owner's own program; a person on a paired device or a member's
-  // sign-in names a file inside the caller's project, as anyone else does (or sends his own file's content).
+  // The person names any file themselves only from the owner's own program; a person on a paired device or a member's
+  // sign-in names a file inside the caller's project, as anyone else does (or sends their own file's content).
   if (caller.personAsked === true && caller.namesAnyFile !== false) {
     const given = expanded(named, project ? resolve(project) : undefined);
     if (given !== undefined) return given;

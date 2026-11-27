@@ -76,7 +76,7 @@ export interface GoogleWorkState {
   readonly steps: readonly GoogleWorkStep[];
   /** What it said as it went (the plan, what it installs), oldest first. */
   readonly notes: readonly string[];
-  /** The one thing the person does now, when it waits on him. */
+  /** The one thing the person does now, when it waits on them. */
   readonly needs?: string | undefined;
   /** How it ended. */
   readonly summary?: string | undefined;
@@ -358,7 +358,7 @@ export class DaemonGoogleWork {
     };
   }
 
-  /** Whether an address's host is one the owner approved on his own network (`network.privateDeliveryHosts`). */
+  /** Whether an address's host is one the owner approved on their own network (`network.privateDeliveryHosts`). */
   privateHostApproved(raw: string): boolean {
     try {
       const host = new URL(raw.trim().replace(/^webcals?:\/\//i, 'https://')).hostname.replace(/^\[|\]$/g, '').toLowerCase();
@@ -466,7 +466,7 @@ export class DaemonGoogleWork {
     if (running && (running.state === 'running' || running.state === 'consent')) return Promise.resolve({ busy: running });
     let state: GoogleWorkState = { id: randomUUID(), kind, label, startedAt: Date.now(), state: 'running', steps: [], notes: [] };
     this.#consentUrl = null;
-    // The person's stop (google.stop): the step under way ends on it, no later step starts, nothing is handed to him.
+    // The person's stop (google.stop): the step under way ends on it, no later step starts, nothing is handed to them.
     const controller = new AbortController();
     const stopped = (): boolean => controller.signal.aborted;
     let endRun: () => void = () => undefined;

@@ -31,7 +31,7 @@ export interface MemorySessionCapabilityServices {
     readonly delete: (id: string) => Promise<boolean>;
     /**
      * The memory files folder: the one given, else the setting `memory.projection.dir`, in this program's project. A
-     * folder the person names himself may be anywhere; one a model names must be inside the project.
+     * folder the person names themselves may be anywhere; one a model names must be inside the project.
      */
     readonly filesFolder: (given: string, personAsked: boolean) => string;
   } | undefined;

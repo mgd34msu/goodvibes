@@ -43,7 +43,7 @@ export interface PersonalOpsReceiptWritten {
 
 /**
  * Why a receipt's save did not happen, in plain words for "Its record was not saved: …": the owner's own rule ("a rule
- * of yours refuses saves (<its description>)"), his No, or the failure's own words without the wrappers a save's path
+ * of yours refuses saves (<its description>)"), the owner's No, or the failure's own words without the wrappers a save's path
  * adds ("The artifact was not saved:", "Save an artifact was not done:") or a leading code (`outcome_unknown:`).
  */
 function whyNotSaved(message: string): string {

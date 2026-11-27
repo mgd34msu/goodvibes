@@ -13,12 +13,12 @@ import { getContractActionSource, getContractActionPort, hasContractPlanConsumer
  *
  * Completion is the agent's own `join`, so the result is read the moment the
  * run settles. The bounds are checked on a slower tick while it runs:
- *   - wall-clock: optional positive timeout cancels once `now() >= start + wallTimeoutMs`
  *   - token ceiling: `cancel()` once input+output tokens exceed the ceiling
  *   - turns: `cancel()` once `usage.turnCount` exceeds `maxTurns`
- * All three collapse to a `'cancelled'` run result (with a `detail`), which the
- * service turns into an honest `fallbackReason`. Without `join` the tick alone
- * finds completion.
+ * Both collapse to a `'cancelled'` run result (with a `detail`), which the
+ * service turns into an honest `fallbackReason`. No clock stops a planner: it
+ * ends when its run ends, a bound above is passed, or its caller stops it.
+ * Without `join` the tick alone finds completion.
  */
 
 import type { AgentManager } from '../tools/agent/manager.js';
@@ -42,7 +42,7 @@ export interface AgentManagerDecompositionRunnerDeps {
   now?: () => number;
   /** Injectable sleep (tests). */
   sleep?: (ms: number) => Promise<void>;
-  /** How often the token, turn and wall-clock bounds are checked, in ms (default 500 with `join`, 50 without). */
+  /** How often the token and turn bounds are checked, in ms (default 500 with `join`, 50 without). */
   pollIntervalMs?: number;
   /** Optional model registry key override for the planner agent. */
   model?: string | undefined;
@@ -151,7 +151,6 @@ export function createAgentManagerDecompositionRunner(
         }
       }
 
-      const deadline = start + request.bounds.wallTimeoutMs;
       let stopDetail: string | undefined;
       // Settles when the run does, or when the caller stops it, so neither waits out a tick.
       const woken = Promise.race([
@@ -183,18 +182,12 @@ export function createAgentManagerDecompositionRunner(
           deps.agentManager.cancel(agentId, 'kill');
           break;
         }
-        if (request.bounds.wallTimeoutMs > 0 && now() >= deadline) {
-          stopDetail = `wall-timeout ${request.bounds.wallTimeoutMs}ms`;
-          deps.agentManager.cancel(agentId, 'kill');
-          break;
-        }
         if (request.signal?.aborted === true) {
           stopDetail = 'stopped by its caller';
           deps.agentManager.cancel(agentId, 'kill');
           break;
         }
-        const untilDeadline = request.bounds.wallTimeoutMs > 0 ? Math.max(0, deadline - now()) : pollIntervalMs;
-        const tick = sleep(Math.min(pollIntervalMs, untilDeadline));
+        const tick = sleep(pollIntervalMs);
         // Once woken has settled it is only a tick: a status that lags its join must not spin this loop.
         await (wokenSettled ? tick : Promise.race([tick, woken]));
       }

@@ -1019,8 +1019,8 @@ const ROUTE_CODE_MEANINGS: Readonly<Record<string, string>> = {
   BROWSER_REQUEST_FAILED: 'The browser failed the request; the message is its error',
   CLUSTER_SHARING_OFF: 'A machine-group action was refused because sharing inbound work with the group is switched off on this machine; nothing was changed; send it again with turnOnSharing true (the owner\'s yes), and it is kept and finishes when the daemon restarts',
   CLOUDFLARE_ERROR: 'A Cloudflare operation failed; the message names the step, what was done before it, and that nothing was rolled back',
-  COMPANION_CHAT_CLIENT_RATE_LIMIT: 'This client has sent its limit of companion chat messages in the last minute; wait the seconds the message names',
-  COMPANION_CHAT_SESSION_RATE_LIMIT: 'This chat session has sent its limit of messages in the last minute; wait the seconds the message names, or start a new session',
+  COMPANION_CHAT_CLIENT_RATE_LIMIT: 'This client already has its limit of companion chat messages waiting to be answered across its chats; send again once one is answered',
+  COMPANION_CHAT_SESSION_RATE_LIMIT: 'This chat already has its limit of messages waiting to be answered; send again once one is answered, or stop its turn',
   EMAIL_CREDENTIALS_UNREADABLE: 'The secret store on this computer could not be read, so the mail password could not be read; nothing is read from or sent through the mailbox until it can be, and nothing already given is asked for again',
   EMAIL_DELIVERY_UNCONFIRMED:'The mail server did not confirm it took the message, so it may have been sent; the same clientSendId answers this again instead of mailing twice',
   EMAIL_MAILBOX_UNAVAILABLE: 'The mail server reported the mailbox unavailable; nothing was sent',
@@ -1062,7 +1062,7 @@ const ROUTE_REFUSAL_SOURCES: Readonly<Record<string, number>> = {
  */
 const ROUTE_CODE_ANSWERED_ELSEWHERE: Readonly<Record<string, string>> = {
   // The gateway gate (daemon/http/gateway-binding-gate.ts) refuses an owner-only method called with the Agent's credential before any route runs.
-  OWNER_ONLY: '<method> is the owner\'s own act; a call the Agent makes for him is refused. The owner does it from his own app. A settings change the Agent makes that would loosen security is refused with this code too, naming the setting',
+  OWNER_ONLY: '<method> is the owner\'s own act; a call the Agent makes for the owner is refused. The owner does it from their own app. A settings change the Agent makes that would loosen security is refused with this code too, naming the setting',
 };
 
 /** Where the status alone would mislead about retrying: what has to change first. */

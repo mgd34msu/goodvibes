@@ -1,95 +1,50 @@
 /**
- * capability-owner-gate.ts, how `capabilities.run` puts an outside caller's
- * call to the owner (control-plane/routes/capabilities.ts), and where what
- * came of it is kept.
+ * capability-owner-gate.ts, how `capabilities.run` (control-plane/routes/capabilities.ts) decides an outside caller's
+ * call, and a first use given to a caller (a project, one of the owner's shared things, typing into an observed agent):
+ * this daemon's instance of the one permission manager, under the owner's mode, with who is asking as a fact.
  *
- * The decision is this daemon's permission gate under the owner's mode, in a
- * permission manager of its own: the daemon's shared one asks through the
- * folder-trust gate of the daemon's working directory, and a daemon
- * capability does not work in a project folder (it acts on what the daemon
- * keeps), so the caller's first write was asked about twice, the folder's
- * trust and then the call, and a restricted folder refused the call with a
- * thrown error (an HTTP 500). Here the question is the call's own, raised
- * straight on the owner's approvals: exactly one decision.
+ * YOLO runs the call when its scopes and reach allow it; Jev decides gives it to Jev's permission decision, told who
+ * asks; Ask me raises an approval through the daemon's one approval broker, the same card a model's tool call raises,
+ * and the request waits on that one answer as a model's tool call does. The caller's connection closing withdraws the
+ * question (the request's signal); nothing of it is kept across a restart, and nothing is answered before the owner decides.
  *
- * The approval is raised without the caller's request signal: the caller is
- * answered when the question is raised, and the question waits for the owner
- * in Waiting for you. What came of the call (its answer, or the refusal) is
- * kept in memory for the caller to read by the approval's id, and its words
- * on the approval record itself (`capabilityOutcome`), so a person looking at
- * the answered question sees whether the work ran.
- *
- * A held call outlives a daemon restart. What it needs to run is kept with
- * its question in the daemon's approvals store (`capabilityCall`: the
- * capability, its inputs, the caller's project and program), and the question
- * is one its asker reads itself (`record-reader`), so a restart leaves it
- * open. Approved after a restart, it runs on the yes as the caller it was held
- * for, if that caller is still allowed (no credential is ever written down:
- * only what tells whether it is still current, see `heldCredential`).
- * A secret input's value is never written: a held call that carried one is,
- * after a restart, ended with the words that it must be asked again and why.
- * The moment it starts is written on the question too (`capabilityStarted`),
- * so a call the daemon stopped in the middle of says what is known; a call
- * whose start cannot be written does not run.
- *
- * Only a question this gate raised is ever run on a yes. It is known by what
- * the broker keeps beside the record and no caller can set (its requester is
- * `record-reader`, which only an in-process raise with `readsRecord` gets;
- * `approvals.raise` keeps only display keys of a caller's metadata and its
- * asks are `wire`), never by the metadata alone.
+ * The manager is one of its own: the daemon's shared one asks through the folder-trust gate of the daemon's working
+ * directory, and a daemon capability does not work in a project folder (it acts on what the daemon keeps), so the
+ * caller's first write was asked about twice, the folder's trust and then the call. Here the question is the call's own:
+ * exactly one decision.
  */
 import { AsyncLocalStorage } from 'node:async_hooks';
+import { randomUUID } from 'node:crypto';
 import type { RuntimeServices } from '../runtime/services.js';
 import { createBrokeredPermissionManager, type UserPermissionRuleAccess } from '../runtime/permissions/permission-composition.js';
-import type { ApprovedHeldCall, CapabilityGateRequest, HeldCallerRefusal, HeldCallOutcome, HeldCallReading, HeldCaller, HeldCapabilityCalls } from '../control-plane/routes/capabilities.js';
-import type { SharedApprovalRecord } from '../control-plane/approval-broker.js';
-import type { Actor } from './http-policy.js';
-import { isOpenApprovalStatus } from '../control-plane/approval-lifecycle.js';
+import type { CapabilityGateRequest, GateCaller, GateDecision } from '../control-plane/routes/capabilities.js';
 import { daemonCapabilityCatalog } from '../capabilities/daemon-catalog.js';
+import type { CapabilityEntry } from '../capabilities/catalog.js';
+import { withUntrustedContentScope } from '../security/untrusted-content.js';
+import { asCallOutsideTurn } from '../security/turn-input-party.js';
 import { hiddenSecret } from '../capabilities/outcome.js';
-import { CARRIED_FROM_ARG, RESULT_LEAVES_ARG } from '../capabilities/ask-words.js';
-import type { CapabilityCaller } from '../capabilities/types.js';
+import { CARRIED_FROM_ARG, GRANT_LABEL_ARG, GRANT_SENTENCE_ARG, RESULT_LEAVES_ARG } from '../capabilities/ask-words.js';
 import { capabilityRunDefinition, CAPABILITY_RUN_TOOL } from '../tools/capability/definitions.js';
 import { toolAskWords } from '../permissions/tool-ask-words.js';
 import { decideInProject } from '../permissions/call-project.js';
-import { COMMAND_LINE_ASK, COMMAND_LINE_ASK_ARG as ASKED_AS_ARG, COMMAND_LINE_PLAN_ARG } from '../permissions/command-line-ask.js';
-import { randomUUID } from 'node:crypto';
+import { COMMAND_LINE_ASK, COMMAND_LINE_ASK_ARG as ASKED_AS_ARG } from '../permissions/command-line-ask.js';
 import type { ToolDefinition } from '../types/tools.js';
 import type { PermissionAttribution } from '../permissions/prompt.js';
 import type { UserPermissionRuleStore } from '../permissions/user-rule-store.js';
 import type { PolicyRule } from '../runtime/permissions/types.js';
 import { LOCAL_OWNER_PRINCIPAL, pairingTokenIdOfPrincipal } from '../pairing/principal-ids.js';
+import { noticeWaiting } from '@goodvibes/engine/daemon-api/control-routes';
 import { logger } from '../utils/logger.js';
 import { summarizeError } from '../utils/native-error-summary.js';
-import { heldMethodCallProject } from '../control-plane/held-method-call.js';
 
 /** Approval metadata naming a question `capabilities.run` raised: which capability, and who asked. */
 const SOURCE = 'capabilities.run';
-const OUTCOME_KEY = 'capabilityOutcome';
-/** What the call needs to run on the owner's yes, kept with the question: its inputs (never a secret's value) and the caller's project and program. */
-const CALL_KEY = 'capabilityCall';
-/** The labels of the secret inputs the call carried, whose values were never written. */
-const SECRETS_KEY = 'capabilitySecretInputs';
-/** When the approved call started (ISO time): written before it runs. */
-const STARTED_KEY = 'capabilityStarted';
-/** Why a held call from before a restart must be asked again, written when it was ended for that. */
-const ASK_AGAIN_KEY = 'capabilityAskAgain';
 /** The argument naming who asked, added to the call the gate decides: a remembered answer is kept for that caller only. */
 const ASKED_BY_ARG = 'askedBy';
 /** The words naming that caller (`callerName`), for the rule's description only: never matched on. */
 const ASKED_BY_NAME_ARG = 'askedByName';
-/** A held call's carried content, kept while its question waits (carried-files.ts `CarriedKept`): never the content. */
-const CARRIED_KEY = 'capabilityCarried';
-/**
- * The form a question is kept in: one raised before carried content was kept with its question holds a carried
- * file's shown name as its value, so it is ended as ask-again at start, never run on the daemon's own disk.
- */
-const HELD_FORM_KEY = 'capabilityHeldForm';
-const HELD_FORM = 2;
-
-function earlierFormWords(capabilityId: string): string {
-  return `${capabilityId} must be asked again: it was put to you by an earlier version of the daemon, which did not keep what the call needs to run as it was asked. Nothing ran.`;
-}
+/** Who asked, written on the question, so the card names the caller. */
+const ASKED_BY_KEY = 'capabilityAskedBy';
 
 /**
  * A carried file as the owner's card names it: the file of the caller the daemon authenticated, by the name that caller
@@ -101,127 +56,17 @@ function callersFile(askedBy: string | undefined, name: string, kind: 'file' | '
 }
 
 type GateRuntime = Pick<RuntimeServices, 'approvalBroker' | 'configManager' | 'policyRuntimeState' | 'hookDispatcher' | 'featureFlags' | 'userPermissionRuleStore' | 'secretsManager'>
-  // The paired devices: a device that asked is named by its name, and must still be paired when the owner says yes;
-  // the shared operator token, told by its fingerprint whether it was replaced since the call was held.
-  & { readonly pairingTokens?: Pick<RuntimeServices['pairingTokens'], 'list' | 'refusesSharedToken' | 'sharedTokenFingerprint' | 'refusesSharedTokenFingerprint'>
-    & Partial<Pick<RuntimeServices['pairingTokens'], 'servesSharedTokenFingerprint'>> | undefined };
+  // The paired devices: a device that asks is named by its name on the card.
+  & { readonly pairingTokens?: Pick<RuntimeServices['pairingTokens'], 'list'> | undefined };
 
-/** Whether a held caller is a sign-in: told by the kind of credential, never by its name (a user name is its principal id). */
-function isSignIn(caller: HeldCaller | undefined): boolean {
-  return caller?.principalKind === 'user' || caller?.credentialKind === 'user-session';
-}
-
-/** The daemon's sign-in users, as a held call reads them: who a sign-in is, and whether it is still there. */
-export interface HeldCallUsers {
-  getUser(username: string): object | null;
+/** The daemon's sign-in users, as the card names a sign-in: the owner's own, or another user's. */
+export interface CallerUsers {
   ownerUsername?(): string | null;
-  /** The sign-in session a token is, or null once it ended (signed out, expired, the user removed). */
-  validateSession?(token: string): { readonly id?: string } | null;
-  /** The sign-in sessions alive now, by id: a held call's session is told current by its id alone. */
-  listSessions?(): readonly { readonly id: string }[];
 }
 
-/** Who asked, written on the question, so the words survive the caller (a device's name after it is unpaired). */
-const ASKED_BY_KEY = 'capabilityAskedBy';
-/** How many times the caller sent this same call while its question waited (1: once): one question, a counter on it. */
-const ASKED_TIMES_KEY = 'capabilityAskedTimes';
-
-interface AskScope {
-  readonly onAsked?: ((approvalId: string) => void) | undefined;
-  readonly metadata: Readonly<Record<string, unknown>>;
-}
-
-/** The words of an outcome kept on the approval record: never the run's data, which goes only to the caller. */
-function outcomeWords(outcome: HeldCallOutcome): Record<string, unknown> {
-  return outcome.ok
-    ? { ok: true, text: typeof outcome.answer['text'] === 'string' ? outcome.answer['text'] : '' }
-    : { ok: false, code: outcome.code, status: outcome.status, error: outcome.error };
-}
-
-function stringOf(value: unknown): string | undefined {
-  return typeof value === 'string' && value.length > 0 ? value : undefined;
-}
-
-function recordOf(value: unknown): Record<string, unknown> | undefined {
-  return value !== null && typeof value === 'object' && !Array.isArray(value) ? value as Record<string, unknown> : undefined;
-}
-
-/** A reason as written: one that ends a sentence gets no second full stop. */
-function sentence(words: string): string {
-  const said = words.trim();
-  return /[.!?]["')\]]?$/.test(said) ? said : `${said}.`;
-}
-
-/**
- * Whether this gate raised the question: only such a record holds a call it runs on a yes. Known by the broker's own
- * requester kind (`record-reader`, given only to an in-process raise that asks for it) and by no `approvals.raise`
- * mark, never by the metadata's `source` alone, which a caller could once write.
- */
-function raisedByGate(record: SharedApprovalRecord | null | undefined): record is SharedApprovalRecord {
-  return record !== null && record !== undefined && record.requester?.kind === 'record-reader'
-    && record.metadata['source'] === SOURCE && record.metadata['raisedVia'] === undefined;
-}
-
-/** The caller facts a call runs with, as kept on its question: only these four, each a string. */
-function keptCaller(caller: CapabilityCaller): Record<string, string> {
-  const kept: Record<string, string> = {};
-  if (caller.workingDirectory) kept['workingDirectory'] = caller.workingDirectory;
-  if (caller.program) kept['program'] = caller.program;
-  if (caller.model) kept['model'] = caller.model;
-  if (caller.sessionId) kept['sessionId'] = caller.sessionId;
-  return kept;
-}
-
-/** A record of strings read back from the store; anything else in it is dropped. */
-function stringsOf(value: unknown): Record<string, string> {
-  return Object.fromEntries(Object.entries(recordOf(value) ?? {}).filter((entry): entry is [string, string] => typeof entry[1] === 'string'));
-}
-
-/** Who the call runs as, kept with the question: the caller as the transport established it, never a credential. */
-const RUNS_AS_KEY = 'capabilityRunsAs';
-
-/** The actor classes a held call may run as: a caller's, as the transport established it; never the daemon's own. */
-const HELD_ACTOR_CLASSES: ReadonlySet<string> = new Set(['owner', 'admin', 'script', 'device', 'member', 'guest', 'peer']);
-
-function keptActor(actor: Actor): Record<string, unknown> {
-  return { class: actor.class, id: actor.id, via: actor.via, scopes: actor.scopes === 'all' ? 'all' : [...actor.scopes],
-    ...(actor.agentFor ? { agentFor: keptActor(actor.agentFor) } : {}) };
-}
-
-/** An actor read back from a question; a `system` actor, or one of no known class, is never one a held call runs as. */
-function actorOf(value: unknown): Actor | undefined {
-  const kept = recordOf(value);
-  if (!kept || typeof kept['id'] !== 'string' || typeof kept['class'] !== 'string' || typeof kept['via'] !== 'string') return undefined;
-  if (!HELD_ACTOR_CLASSES.has(kept['class'])) return undefined;
-  const scopes = kept['scopes'] === 'all' ? 'all' as const
-    : new Set(Array.isArray(kept['scopes']) ? (kept['scopes'] as unknown[]).filter((scope): scope is string => typeof scope === 'string') : []);
-  const agentFor = kept['agentFor'] === undefined ? undefined : actorOf(kept['agentFor']);
-  if (kept['agentFor'] !== undefined && agentFor === undefined) return undefined;
-  return { class: kept['class'] as Actor['class'], id: kept['id'], via: kept['via'] as Actor['via'], scopes, ...(agentFor ? { agentFor } : {}) };
-}
-
-function keptRunsAs(runsAs: HeldCaller): Record<string, unknown> {
-  return { ...runsAs, ...(runsAs.scopes ? { scopes: [...runsAs.scopes] } : {}), ...(runsAs.actor ? { actor: keptActor(runsAs.actor) } : {}) };
-}
-
-function runsAsOf(value: unknown): HeldCaller {
-  const kept = recordOf(value) ?? {};
-  const actor = actorOf(kept['actor']);
-  const scopes = Array.isArray(kept['scopes']) ? (kept['scopes'] as unknown[]).filter((scope): scope is string => typeof scope === 'string') : undefined;
-  const credential = recordOf(kept['credential']);
-  const credentialKind = credential?.['kind'];
-  const credentialId = credential?.['id'];
-  const keptCredential = (credentialKind === 'shared-token' || credentialKind === 'session') && typeof credentialId === 'string'
-    ? { kind: credentialKind, id: credentialId } : undefined;
-  return {
-    ...(typeof kept['principalId'] === 'string' ? { principalId: kept['principalId'] } : {}),
-    ...(typeof kept['principalKind'] === 'string' ? { principalKind: kept['principalKind'] as HeldCaller['principalKind'] } : {}),
-    ...(typeof kept['credentialKind'] === 'string' ? { credentialKind: kept['credentialKind'] as HeldCaller['credentialKind'] } : {}),
-    ...(typeof kept['admin'] === 'boolean' ? { admin: kept['admin'] } : {}),
-    ...(scopes ? { scopes } : {}), ...(actor ? { actor } : {}), ...(keptCredential ? { credential: keptCredential } : {}),
-    ...(typeof kept['registration'] === 'string' ? { registration: kept['registration'] } : {}),
-    ...(kept['commandLine'] === true ? { commandLine: true } : {}),
-  };
+/** Whether a caller is a sign-in: told by the kind of credential, never by its name (a user name is its principal id). */
+function isSignIn(caller: GateCaller | undefined): boolean {
+  return caller?.principalKind === 'user' || caller?.credentialKind === 'user-session';
 }
 
 /**
@@ -229,21 +74,16 @@ function runsAsOf(value: unknown): HeldCaller {
  * when it sent its registration (the terminal app, the Agent), so an answer given for one holder of the operator token
  * never settles another's call (a script's, an outside agent's).
  */
-function rememberedCallerKey(runsAs: HeldCaller | undefined): string {
+function rememberedCallerKey(runsAs: GateCaller | undefined): string {
   const who = `${runsAs?.credentialKind ?? runsAs?.principalKind ?? 'caller'}:${runsAs?.principalId ?? 'unknown'}`;
   return runsAs?.registration ? `${who}#${runsAs.registration}` : who;
 }
 
-function askAgainWords(capabilityId: string, secrets: readonly string[]): string {
-  const named = secrets.length === 1 ? `a secret value (${secrets[0]})` : `secret values (${secrets.join(', ')})`;
-  return `${capabilityId} must be asked again: it carried ${named}, which the daemon never writes down, and the daemon restarted before it ran, so the value is gone. Nothing ran.`;
-}
-
 /**
- * Who asked, as the owner reads it on the question: a sign-in by its user name, a paired device by its name, the
- * operator token as a program using it. `pairingTokens` and `users` are read in memory; no I/O.
+ * Who asked, as the owner reads it on the question and Jev is told it: a sign-in by its user name, a paired device by
+ * its name, the operator token as a program using it. `pairingTokens` and `users` are read in memory; no I/O.
  */
-function callerName(runsAs: HeldCaller | undefined, runtime: GateRuntime, users: HeldCallUsers | undefined): string | undefined {
+function callerName(runsAs: GateCaller | undefined, runtime: GateRuntime, users: CallerUsers | undefined): string | undefined {
   const principalId = runsAs?.principalId;
   if (!principalId) return undefined;
   // A sign-in first, by its kind: a user name that reads like another credential's id is still a user's.
@@ -251,10 +91,12 @@ function callerName(runsAs: HeldCaller | undefined, runtime: GateRuntime, users:
     return users?.ownerUsername?.() === principalId ? `you, signed in as ${principalId}` : `${principalId}, signed in`;
   }
   if (principalId === LOCAL_OWNER_PRINCIPAL) {
-    // A command line (`do`): its call is held whoever typed it, since anything that drives a terminal can type there.
+    // A command line (`do`): decided whoever typed it, since anything that drives a terminal can type there.
     if (runsAs?.commandLine === true) return 'a do command typed on this machine';
     if (runsAs?.registration) return 'one of your GoodVibes programs on this machine';
-    return runsAs?.credentialKind === 'local' ? 'you, on this machine' : 'a program or script using your operator token';
+    // The operator token alone is held by every command line and script of the account: never "you".
+    return runsAs?.credentialKind === 'local' ? 'a program or script on this machine using your operator token (not one of your verified programs)'
+      : 'a program or script using your operator token from another machine';
   }
   const deviceId = pairingTokenIdOfPrincipal(principalId);
   if (deviceId !== undefined) {
@@ -262,67 +104,6 @@ function callerName(runsAs: HeldCaller | undefined, runtime: GateRuntime, users:
     return device ? `the paired device "${device.name}"` : `a paired device (${deviceId})`;
   }
   return principalId;
-}
-
-/**
- * What tells later whether the credential a call was held for is still current, without keeping the credential: the
- * shared operator token's fingerprint (its hash, which the token store keeps too), or the sign-in session's id. A
- * paired device is told by its id, already in its principal. Undefined when the credential is neither.
- */
-function heldCredential(runsAs: HeldCaller | undefined, authToken: string | undefined, runtime: GateRuntime, users: HeldCallUsers | undefined): HeldCaller['credential'] {
-  if (!authToken || !runsAs?.principalId) return undefined;
-  if (runsAs.credentialKind === 'user-session') {
-    const session = users?.validateSession?.(authToken);
-    return typeof session?.id === 'string' ? { kind: 'session', id: session.id } : undefined;
-  }
-  if (isSignIn(runsAs)) return undefined;
-  if (runsAs.principalId === LOCAL_OWNER_PRINCIPAL && runtime.pairingTokens) return { kind: 'shared-token', id: runtime.pairingTokens.sharedTokenFingerprint(authToken) };
-  return undefined;
-}
-
-/**
- * Whether the caller a held call was put for may still have it run, now that the owner said yes: its token was not
- * replaced, its device is still paired, its sign-in user and session are still there. With the caller's credential in
- * hand (the request is still this process's) it is read again; without it (a call kept from before a restart) by what
- * was kept with the question. When that cannot be told, the call does not run either: it must be asked again.
- */
-function callerRefusal(caller: HeldCaller, authToken: string | undefined, runtime: GateRuntime, users: HeldCallUsers | undefined): { readonly gone: string } | { readonly unknown: string } | undefined {
-  const principalId = caller.principalId;
-  if (!principalId) return authToken ? undefined : { unknown: 'it was not kept who asked' };
-  // A sign-in is told apart by its kind before any name is read: a user named like the operator token's or a device's
-  // principal id is still a user, and is judged as one.
-  if (!isSignIn(caller) && principalId === LOCAL_OWNER_PRINCIPAL) {
-    const tokens = runtime.pairingTokens;
-    if (authToken) return tokens?.refusesSharedToken(authToken) === true ? { gone: 'the operator token it used was replaced' } : undefined;
-    if (!tokens) return { unknown: 'this daemon cannot read its operator token' };
-    if (caller.credential?.kind !== 'shared-token') return { unknown: 'it was not kept which operator token it used' };
-    if (tokens.refusesSharedTokenFingerprint(caller.credential.id)) return { gone: 'the operator token it used was replaced' };
-    // The token it came with against the one this daemon serves now, however that one changed (revoked and replaced,
-    // a regenerated token file, a value set through the environment and a restart).
-    const serves = tokens.servesSharedTokenFingerprint?.(caller.credential.id);
-    if (serves === false) return { gone: 'the operator token it used is no longer the one this daemon serves' };
-    if (serves === undefined) return { unknown: 'this daemon cannot tell which operator token it serves' };
-    return undefined;
-  }
-  const deviceId = isSignIn(caller) ? undefined : pairingTokenIdOfPrincipal(principalId);
-  if (deviceId !== undefined) {
-    if (!runtime.pairingTokens) return { unknown: 'this daemon cannot read its paired devices' };
-    return runtime.pairingTokens.list().some((token) => token.id === deviceId) ? undefined : { gone: 'its pairing was revoked' };
-  }
-  if (isSignIn(caller)) {
-    if (!users) return { unknown: 'this daemon cannot read its sign-ins' };
-    if (users.getUser(principalId) === null) return { gone: 'that sign-in user was removed' };
-    if (authToken) {
-      if (caller.credentialKind === 'user-session' && users.validateSession && users.validateSession(authToken) === null) return { gone: 'its sign-in ended' };
-      return undefined;
-    }
-    if (caller.credentialKind !== 'user-session') return undefined;
-    if (caller.credential?.kind !== 'session' || !users.listSessions) return { unknown: 'it was not kept which sign-in it used' };
-    const sessionId = caller.credential.id;
-    return users.listSessions().some((session) => session.id === sessionId) ? undefined : { gone: 'its sign-in ended' };
-  }
-  // Any other caller (the Agent's credential, a peer): told only with its credential in hand.
-  return authToken ? undefined : { unknown: 'whether that caller is still allowed cannot be told once the daemon restarted' };
 }
 
 /**
@@ -352,30 +133,100 @@ function callerScopedRules(store: UserPermissionRuleAccess | null): UserPermissi
   return view;
 }
 
+/** What a first use given to a caller is decided on (see `daemonGrantDecision`). */
+export interface GrantRequest {
+  /** The grant's id, as its rule is kept: `outside-agent.project`, `unverified-program.project`, `shared-kind.<kind>`. */
+  readonly id: string;
+  /** The act in the owner's words ("Let the paired device "kiosk" read and send your mail"). */
+  readonly label: string;
+  readonly sentence: string;
+  /** The project it is decided for (a project grant names its folder). */
+  readonly project?: string | undefined;
+  /** Who asks, as the transport established it. */
+  readonly runsAs: GateCaller;
+  /** The asking request's signal: its connection closing withdraws a question Ask me raised for it. */
+  readonly signal?: AbortSignal | undefined;
+}
+export type GrantDecision = (request: GrantRequest) => Promise<{ readonly approved: boolean; readonly reason?: string | undefined }>;
+
+/**
+ * The call a first use is needed for, when the dispatch decides that first use (one act, one decision): the first use
+ * and the call are decided together, by one decision that names both, with the call's own class (a stricter one than a
+ * loosening is the decision's class). `covered` is set when that decision allowed both: the call is then not decided
+ * again. A call with no class of its own (a read) needs no second decision anyway; an answer and an owner-only act are
+ * never covered (each keeps its flat rule).
+ */
+export interface FirstUseCall {
+  readonly label: string;
+  readonly risk: 'none' | 'loosens-a-protection' | 'runs-later' | 'steers-a-model' | 'cannot-be-undone' | 'spends-money' | 'writes-a-secret' | 'owner-act' | 'answers-the-owner';
+  covered: boolean;
+}
+const firstUseCallScope = new AsyncLocalStorage<FirstUseCall>();
+
+/** Runs `fn` (a first use's admission) with `call` as the call it is needed for (see {@link FirstUseCall}). */
+export function withFirstUseCall<T>(call: FirstUseCall, fn: () => Promise<T>): Promise<T> {
+  return firstUseCallScope.run(call, fn);
+}
+
+/** The capability risk a first use decided with its call is decided as: the call's when stricter than a loosening. */
+function firstUseRisk(call: FirstUseCall | undefined): CapabilityEntry['risk'] {
+  if (call?.risk === 'cannot-be-undone' || call?.risk === 'spends-money') return call.risk;
+  return 'loosens-a-protection';
+}
+
+/**
+ * Whether a first use decided with `call` decides the call too (one act, one decision): a call that loosens, cannot be
+ * undone, spends, writes a secret or writes what steers a model, whose class the one decision is made in (the first
+ * use is an owner item, never weaker than the call's own class). Never an answer or an owner-only act (each keeps its
+ * flat rule).
+ */
+function coversCall(call: FirstUseCall | undefined): call is FirstUseCall {
+  // Any call but an answer and an owner-only act: a change of no class of its own (a capability run, a judgment) is
+  // decided with its first use too, so the act is decided once, never the first use and then the call again.
+  return call !== undefined && call.risk !== 'owner-act' && call.risk !== 'answers-the-owner';
+}
+
+let daemonGrant: GrantDecision | undefined;
+/**
+ * The decision of a first use given to a caller, by this daemon's one permission manager under the owner's mode (set
+ * when the capability gate is made). Undefined before then: the caller is refused, never asked.
+ */
+export function daemonGrantDecision(): GrantDecision | undefined { return daemonGrant; }
+
+/** Decide a first use: YOLO, Jev or a rule at once; Ask me when the owner answers. Without the daemon's decision: refused. */
+export async function decideGrant(request: GrantRequest): Promise<{ readonly approved: boolean; readonly reason?: string | undefined }> {
+  const decide = daemonGrant;
+  if (!decide) return { approved: false, reason: 'this daemon has no permission decision for it yet' };
+  return decide(request);
+}
+
 /** A refusal by a gate check that changed while the owner was deciding: the call is judged again as things are now. */
 const CHANGED_WHILE_DECIDING = /changed while (deciding|reading)|evidence changed during comparison/i;
 
-export function createCapabilityOwnerGate(runtime: GateRuntime, options: { readonly users?: HeldCallUsers | undefined } = {}): {
-  readonly gate: (request: CapabilityGateRequest) => Promise<{ readonly approved: boolean; readonly reason?: string | undefined }>;
-  readonly held: HeldCapabilityCalls;
+export function createCapabilityOwnerGate(runtime: GateRuntime, options: { readonly users?: CallerUsers | undefined } = {}): {
+  readonly gate: (request: CapabilityGateRequest) => Promise<GateDecision>;
 } {
   const users = options.users;
-  const scope = new AsyncLocalStorage<AskScope>();
   const broker = runtime.approvalBroker;
+  const scope = new AsyncLocalStorage<{ readonly metadata: Record<string, unknown> }>();
+  /** The question each call raised (Ask me), by the metadata object handed to the manager for it. */
+  const raisedFor = new WeakMap<object, string>();
   const manager = createBrokeredPermissionManager({
     // No folder trust: the question is the call's own (see the header).
     workspaceTrust: null,
     requestApproval: async (input) => {
-      const asking = scope.getStore();
       // The question as the capability words it (ask-words.ts), on the record itself too, never "capability_run".
       const words = toolAskWords(input.request.tool, input.request.args);
       // `outsideFolder` is the gate's in-process word to the folder's trust (none here): never kept on the record.
       const { outsideFolder: _inProcess, ...asked } = input.request;
       const request = words ? { ...asked, analysis: { ...asked.analysis, summary: words.question } } : asked;
-      // Its caller reads the record itself, so a restart leaves the question open (see the header).
-      const raised = await broker.raiseApproval({ ...input, request, metadata: { ...(input.metadata ?? {}), ...(asking?.metadata ?? {}) }, readsRecord: true });
-      if (asking) raisedHere.add(raised.approval.id);
-      asking?.onAsked?.(raised.approval.id);
+      // Raised as a model's call raises it, with the caller's request signal: its connection closing withdraws it.
+      const asking = scope.getStore();
+      const raised = await broker.raiseApproval({ ...input, request, metadata: { ...(input.metadata ?? {}), ...(asking?.metadata ?? {}) } });
+      if (asking) raisedFor.set(asking.metadata, raised.approval.id);
+      // A caller that asked to be told (`goodvibes do`) hears now, in the same answer, that its call waits on this card.
+      noticeWaiting({ question: request.analysis?.summary ?? `${input.request.tool} is put to you`,
+        where: 'answer it in GoodVibes: the approval in your terminal app or Agent, Waiting for you, or the web view' });
       return raised.decision;
     },
     configManager: runtime.configManager,
@@ -385,11 +236,14 @@ export function createCapabilityOwnerGate(runtime: GateRuntime, options: { reado
     userRuleStore: callerScopedRules(runtime.userPermissionRuleStore),
     secretsManager: runtime.secretsManager,
   });
+  /** The metadata of the call being decided, read by `requestApproval` above in that call's own async scope. */
+  const withAsking = <T>(metadata: Record<string, unknown>, check: () => Promise<T>): Promise<T> => scope.run({ metadata }, check);
   let runDefinition: Promise<ToolDefinition> | undefined;
-  /** The definitions held method calls are decided by, by method id and class (a handful, made once each). */
+  /** The definitions method calls are decided by, by method id and class (a handful, made once each). */
   const methodDefinitions = new Map<string, Promise<ToolDefinition>>();
   const definitionWith = (entry: CapabilityGateRequest['entry']): Promise<ToolDefinition> => daemonCapabilityCatalog().then((catalog) => {
-    if (catalog.get(entry.id)) return runDefinition!;
+    runDefinition ??= Promise.resolve(capabilityRunDefinition(catalog.list()));
+    if (catalog.get(entry.id)) return runDefinition;
     const key = `${entry.id}\u0000${entry.risk}\u0000${entry.ownerOnly ? 'own' : ''}\u0000${entry.touches}`;
     let made = methodDefinitions.get(key);
     if (!made) {
@@ -398,355 +252,154 @@ export function createCapabilityOwnerGate(runtime: GateRuntime, options: { reado
     }
     return made;
   });
-  /** What came of each call, whole (its data included), for the caller who made it; gone with this process. */
-  const outcomes = new Map<string, HeldCallOutcome>();
-  /** Approved and running now. */
-  const running = new Set<string>();
-  /** Questions this process put: their call is in its hands, so an approval of one is run here, not on a read. */
-  const raisedHere = new Set<string>();
 
-  /** What came of a held call, kept for its caller and written on its question (a failure to write it is logged). */
-  const settle = async (approvalId: string, outcome: HeldCallOutcome): Promise<void> => {
-    running.delete(approvalId);
-    outcomes.set(approvalId, outcome);
-    try {
-      await broker.recordRemoteUpdate(approvalId, {
-        actor: SOURCE, actorSurface: 'daemon',
-        note: outcome.ok ? 'the call ran after the owner answered' : `the call did not run: ${outcome.error}`,
-        metadata: { [OUTCOME_KEY]: outcomeWords(outcome) },
-      });
-    } catch (error) {
-      logger.warn('[capabilities] what came of a call put to the owner could not be written on its approval; the caller still reads it', { approvalId, error: summarizeError(error) });
-    }
-  };
-
-  // A held call from before a restart that carried a secret input cannot run on a yes: its value was never written.
-  // It is ended now, with the words its caller reads, so the owner is not asked a question whose yes does nothing.
-  void broker.start().then(async () => {
-    for (const record of broker.listApprovals(Number.MAX_SAFE_INTEGER)) {
-      if (!raisedByGate(record) || !isOpenApprovalStatus(record.status) || raisedHere.has(record.id)) continue;
-      const secrets = Array.isArray(record.metadata[SECRETS_KEY]) ? (record.metadata[SECRETS_KEY] as unknown[]).filter((label): label is string => typeof label === 'string') : [];
-      // A question an earlier daemon raised kept a carried file's name in place of its content: never run on its yes.
-      const earlier = record.metadata[HELD_FORM_KEY] !== HELD_FORM;
-      if (secrets.length === 0 && !earlier) continue;
-      const words = earlier ? earlierFormWords(stringOf(record.metadata['capabilityId']) ?? 'The call')
-        : askAgainWords(stringOf(record.metadata['capabilityId']) ?? 'The call', secrets);
-      await broker.recordRemoteUpdate(record.id, { actor: SOURCE, actorSurface: 'daemon', note: words, metadata: { [ASK_AGAIN_KEY]: words } });
-      await broker.cancelApproval(record.id, { actor: SOURCE, actorSurface: 'daemon', expectedRevision: undefined, note: words });
-    }
-  }).catch((error: unknown) => {
-    logger.warn('[capabilities] held calls kept from before a restart could not be checked for secret inputs', { error: summarizeError(error) });
-  });
-
-  // A held call approved while no request of this process holds it (put before a restart): run on the yes, as kept.
-  let runApproved: ((call: ApprovedHeldCall) => Promise<void>) | undefined;
-  const runIfApprovedHere = (record: SharedApprovalRecord): void => {
-    if (!runApproved || !raisedByGate(record) || record.status !== 'approved' || raisedHere.has(record.id)) return;
-    if (running.has(record.id) || outcomes.has(record.id) || record.metadata[STARTED_KEY] !== undefined || record.metadata[OUTCOME_KEY] !== undefined) return;
-    const reading = held.read(record.id);
-    if (reading.state !== 'approved-not-run') {
-      // Approved, and it cannot run on the yes (a secret it carried is gone): what came of it is that answer.
-      if (reading.state === 'settled' && !reading.outcome.ok && reading.outcome.code === 'CAPABILITY_ASK_AGAIN') void held.record(record.id, reading.outcome);
-      return;
-    }
-    const runsAs = runsAsOf(record.metadata[RUNS_AS_KEY]);
-    // Who it runs as was kept by this gate from the transport; one it cannot read back (or the daemon's own actor) is
-    // never filled in: the call does not run, and is asked again.
-    if (!runsAs.actor) {
-      void settle(record.id, { ok: false, status: 409, code: 'CAPABILITY_ASK_AGAIN',
-        error: `${reading.capabilityId} was not run: who asked for it could not be read back from its question, so it does not run on the owner's yes. Nothing ran.`,
-        next: ['Send the call again; the owner is asked again.'] });
-      return;
-    }
-    const run = runApproved;
-    void run({ approvalId: record.id, capabilityId: reading.capabilityId, values: reading.values, caller: reading.caller, runsAs }).catch((error: unknown) => {
-      logger.warn('[capabilities] a held call the owner approved could not be run', { approvalId: record.id, error: summarizeError(error) });
-    });
-  };
-  broker.subscribe(runIfApprovedHere);
-
-  const gate = async ({ entry, values, signal, onAsked, requestedBy, caller, runsAs, ownerAct, asSpawn, authToken, carriedNames, carriedFolders, carriedKept, resultSecret }: CapabilityGateRequest) => {
-    runDefinition ??= daemonCapabilityCatalog().then((catalog) => capabilityRunDefinition(catalog.list()));
-    // A method call the dispatch put to the owner (control-plane/held-method-call.ts) is no capability of the catalog:
+  const gate = async ({ entry, values, signal, requestedBy, caller, runsAs, ownerAct, asSpawn, carriedNames, carriedFolders, resultSecret, project: namedProject }: CapabilityGateRequest): Promise<GateDecision> => {
+    // A method call the dispatch handed over (routes/capabilities.ts `methodCallEntry`) is no capability of the catalog:
     // decided with its own entry beside them, so its class is read as a capability's risk is.
     const declared = await definitionWith(entry);
-    // A model's delegation from a conversation in the owner's own program is decided under his mode as an agent spawn
-    // is (routes/capabilities.ts conversationDelegation): handing work over is not taken as his own act here.
+    // A model's delegation from a conversation in the owner's own program is decided under the owner's mode as an agent spawn
+    // is (routes/capabilities.ts conversationDelegation): handing work over is not taken as the owner's own act here.
     const decidedBy: ToolDefinition = asSpawn === true && declared.ownerActs
       ? { ...declared, ownerActs: { ...declared.ownerActs,
         values: declared.ownerActs.values.filter((id) => id !== entry.id),
         asked: (declared.ownerActs.asked ?? []).filter((id) => id !== entry.id),
         once: (declared.ownerActs.once ?? []).filter((id) => id !== entry.id) } }
       : declared;
-    // An act only the owner makes, asked for by a caller who is not the owner: put to him as his own act (asked in
-    // every mode, opening on No; plan mode still refuses a change). Nothing is offered to remember (`once`): his
-    // answer is for this caller's one call.
-    const acts = decidedBy.ownerActs;
+    // An act that was the owner's own, asked for by a caller who is not the owner: an item of the owner's list ("owner act"),
+    // decided under the owner's mode as an owner item, with who asked as a fact (YOLO runs it, Ask me and Jev decides put
+    // it on the owner's card, Just vibes holds it for them; plan mode refuses a change). Nothing is offered to remember (`once`): an answer is for this caller's one call.
+    // What the run definition refuses to a model by its arguments (`refusedWhen`: a write of a permission setting) is a
+    // model's refusal only: this gate decides callers that are not a model, so it is not read here.
+    const acts = decidedBy.ownerActs ? { ...decidedBy.ownerActs, refusedWhen: undefined } : undefined;
+    // This gate decides callers that are not a model (a model's own call was decided at its turn's gate, and what no model
+    // makes was refused before this: routes/capabilities.ts): an act the run definition refuses to a model is decided here
+    // under the mode, as an item of the owner's list. What only the owner in person makes never reaches here from anyone else.
+    const refusedOnlyToModels = acts !== undefined && acts.values.includes(entry.id) && !(acts.asked ?? []).includes(entry.id);
     const definition: ToolDefinition = ownerAct === true && acts
       ? { ...decidedBy, ownerActs: { ...acts,
         values: (acts.values.includes(entry.id) ? acts.values : [...acts.values, entry.id]),
         asked: (acts.asked ?? []).includes(entry.id) ? acts.asked : [...(acts.asked ?? []), entry.id],
         once: (acts.once ?? []).includes(entry.id) ? acts.once : [...(acts.once ?? []), entry.id],
         words: { ...(acts.words ?? {}), [entry.id]: entry.label } } }
-      : decidedBy;
-    // The project the question is about: the caller's, else the one a held method call names (the folder the outside
-    // agent's credential is asked for). It is decided there and named as its place, never the daemon's own folder.
-    const project = caller.workingDirectory ?? heldMethodCallProject(entry.id, values);
-    // The question names who is asking.
+      : refusedOnlyToModels && acts
+        ? { ...decidedBy, ownerActs: { ...acts, asked: [...(acts.asked ?? []), entry.id] } }
+        : acts ? { ...decidedBy, ownerActs: acts } : decidedBy;
+    // The project the question is about: the caller's, else the one a method call names (the folder the outside agent's
+    // credential is asked for). It is decided there and named as its place, never the daemon's own folder.
+    const project = caller.workingDirectory ?? namedProject;
     const askedBy = callerName(runsAs, runtime, users);
     const attribution: PermissionAttribution | undefined = askedBy && runsAs?.principalId ? { kind: 'outside-caller', name: askedBy, principalId: runsAs.principalId } : undefined;
     // A secret input is secret for these values unless its `plainWhen` says not (a setting's new value, for a setting
-    // that holds no password or key): such a value is shown in the question and read by the gate, so a change that
-    // only tightens a protection applies at once and one that loosens is asked with what it would set.
+    // that holds no password or key): such a value is shown in the question and read by the gate.
     const secret = new Set(entry.inputs.filter((input) => input.kind === 'secret' && input.plainWhen?.(values) !== true).map((input) => input.id));
-    // What it needs to run on his yes, kept with the question: never a secret's value, only that one was given.
-    const kept = Object.fromEntries(Object.entries(values).filter(([id]) => !secret.has(id)));
-    const secrets = entry.inputs.filter((input) => secret.has(input.id) && values[input.id] !== undefined && values[input.id] !== '').map((input) => input.label);
-    const credential = heldCredential(runsAs, authToken, runtime, users);
-    const metadata = {
+    const metadata: Record<string, unknown> = {
       source: SOURCE, capabilityId: entry.id, capabilityLabel: entry.label, ...(requestedBy ? { requestedBy } : {}),
-      // A command line's call keeps that it was one: its paths are the person's, as shown on the card, after a restart too.
-      [CALL_KEY]: { values: kept, caller: { ...keptCaller(caller), ...(runsAs?.commandLine === true ? { commandLine: 'true' } : {}) } },
-      ...(runsAs ? { [RUNS_AS_KEY]: keptRunsAs({ ...runsAs, ...(credential ? { credential } : {}) }) } : {}),
-      ...(secrets.length > 0 ? { [SECRETS_KEY]: secrets } : {}),
       ...(askedBy ? { [ASKED_BY_KEY]: askedBy } : {}),
-      // Its carried content's scratch folder, kept while the question waits: a yes after a restart runs on it.
-      ...(carriedKept ? { [CARRIED_KEY]: carriedKept } : {}),
-      [HELD_FORM_KEY]: HELD_FORM,
     };
-    // The call as decided: the capability, its inputs (never a secret's value), and who asks, so an answer remembered
-    // for it covers that caller's calls only (approval-rules.ts) and a rule given for another caller never settles it.
     const who = rememberedCallerKey(runsAs);
-    // A carried path is decided as the caller named it (its full path: a file that runs by itself is read from it, as a
-    // write's path is) and shown as the caller's own file, named by the caller the daemon authenticated, never as a path
-    // on this computer and never with a machine name the caller sent (ask-words.ts `carriedFrom`).
+    // A carried path is decided as the caller named it and shown as the caller's own file, named by the caller the daemon
+    // authenticated, never as a path on this computer (ask-words.ts `carriedFrom`).
     const carried = carriedNames ?? {};
     const shownValue = (id: string, value: string): string => secret.has(id) ? hiddenSecret(value) : carried[id] ?? value;
-    // Its name as the owner reads it (a paired device by its name, a sign-in by its user) goes with it, so a rule kept
-    // for this caller is listed by that name in Rules, never by the key it is matched on.
     const args = { id: entry.id, inputs: Object.fromEntries(Object.entries(values).map(([id, value]) => [id, shownValue(id, value)])), [ASKED_BY_ARG]: who,
       ...(askedBy ? { [ASKED_BY_NAME_ARG]: askedBy } : {}),
       ...(Object.keys(carried).length > 0 ? { [CARRIED_FROM_ARG]: Object.fromEntries(Object.entries(carried).map(([id, name]) => [id, callersFile(askedBy, name,
-        // A folder sent, or one the run makes where the input names a folder (nothing there yet).
         carriedFolders?.includes(id) || /^folder$/i.test(entry.inputs.find((input) => input.id === id)?.label ?? '') ? 'folder' : 'file')])) } : {}),
       // A result that carries a secret, leaving for a caller that is not the owner's own program: said in plain words.
       ...(resultSecret ? { [RESULT_LEAVES_ARG]: `This sends ${resultSecret} to ${askedBy ?? 'the caller that asked'}.` } : {}),
-      // Typed as a command (`do`): the card says so (ask-presentation.ts), and in plan mode it is still his to answer.
+      // Typed as a command (`do`): the card says so (ask-presentation.ts).
       ...(runsAs?.commandLine === true ? { [ASKED_AS_ARG]: COMMAND_LINE_ASK } : {}) };
-    // The owner's card names the capability and its inputs (ask-words.ts), never a secret value, and who asked.
-    let raisedId: string | undefined;
-    const asked = (approvalId: string): void => { raisedId = approvalId; onAsked?.(approvalId); };
-    // A command typed at a command line while plan mode is on: plan mode keeps the model's changes from running, and
-    // this is not the model's; it is put to the owner as typed, the card saying plan mode is on, and runs only on his yes.
-    if (runsAs?.commandLine === true) {
-      const now = await decideInProject(project, () => manager.previewDecision(CAPABILITY_RUN_TOOL, args, definition, signal)).catch(() => undefined);
-      if (now !== undefined && now.mode === 'plan' && now.decided.kind === 'fact' && !now.decided.allow && now.decided.basis === 'plan') {
-        const words = toolAskWords(CAPABILITY_RUN_TOOL, args);
-        const raised = await broker.raiseApproval({
-          request: {
-            callId: randomUUID(), tool: CAPABILITY_RUN_TOOL, args: { ...args, [COMMAND_LINE_PLAN_ARG]: 'on' }, category: 'write',
-            analysis: { classification: 'write', riskLevel: 'high', summary: words?.question ?? `${entry.label}?`, reasons: [] },
-            ...(project ? { workingDirectory: project } : {}),
-            ...(attribution ? { attribution } : {}), ownerOnly: 'owner-act', rememberOptions: [],
-          },
-          metadata, readsRecord: true,
-        });
-        raisedHere.add(raised.approval.id);
-        asked(raised.approval.id);
-        const decision = await raised.decision;
-        return { approved: decision.approved === true, ...(decision.approved === true ? {} : { reason: decision.reason ?? 'the owner did not approve it' }) };
-      }
-    }
     let result: Awaited<ReturnType<typeof manager.checkDetailed>>;
     try {
       // Decided for the caller's project when it named one (call-project.ts): an answer "in this project" is kept, and a
       // rule matched, for that project, never the folder the daemon started in.
-      result = await scope.run({ onAsked: asked, metadata }, () => decideInProject(project, () => manager.checkDetailed(CAPABILITY_RUN_TOOL, args,
+      result = await withAsking(metadata, () => decideInProject(project, () => manager.checkDetailed(CAPABILITY_RUN_TOOL, args,
         attribution, { definition, ...(signal ? { signal } : {}) })));
     } catch (error) {
-      // A held question stays open for as long as the owner takes, and the gate's own check that nothing moved while
-      // it decided (a setting written meanwhile, a call that ran on another yes) then fails after he answered. That by
-      // itself does not fail the call: his recorded answer stands, judged again against the mode and the deny rules as
-      // they are now (plan mode, or a rule that now refuses it, refuses it with that reason). Any other failure, or a
-      // check that failed before he answered, refuses the call: a check that throws is never a yes.
+      // The gate's own check that nothing moved while it decided (a setting written meanwhile) can fail after the owner
+      // answered a question that waited. The owner's recorded answer stands, judged again against the mode and the deny rules
+      // as they are now. Any other failure refuses the call: a check that throws is never a yes.
+      const raisedId = raisedFor.get(metadata);
       const answered = raisedId !== undefined ? broker.getApproval(raisedId) : null;
-      if (answered?.status === 'denied') return { approved: false, reason: stringOf(answered.decision?.reason) ?? 'the owner did not approve it' };
-      const why = summarizeError(error);
+      if (answered?.status === 'denied') return { approved: false, reason: typeof answered.decision?.reason === 'string' && answered.decision.reason ? answered.decision.reason : 'the owner did not approve it' };
       if (answered?.status !== 'approved' || !CHANGED_WHILE_DECIDING.test(error instanceof Error ? error.message : String(error))) {
-        logger.warn('[capabilities] the decision on an outside caller\'s call failed; it is refused', { capabilityId: entry.id, error: why });
-        return { approved: false, reason: 'its permission check failed, so it was not run; ask again' };
+        logger.warn('[capabilities] the decision on an outside caller\'s call failed; it is refused', { capabilityId: entry.id, error: summarizeError(error) });
+        return { approved: false, reason: signal?.aborted ? 'the caller left before it was decided' : 'its permission check failed, so it was not run; ask again' };
       }
-      const refused = await refusalNow(entry.id, args, definition, project, signal);
-      return refused === undefined ? { approved: true } : { approved: false, reason: refused };
+      const refused = await refusalNow(args, definition, project, signal);
+      return refused === undefined ? { approved: true, askedId: raisedId, ...answeredBy(raisedId) } : { approved: false, reason: refused };
     }
-    return { approved: result.approved, ...(result.approved ? {} : { reason: result.detail ?? result.userReason ?? 'the owner did not approve it' }) };
+    // One line per decision in the daemon's activity log: what was decided, for whom, and how (one call, one decision).
+    logger.info(`[decision] ${entry.id} asked by ${askedBy ?? 'a caller'}: ${result.approved ? 'allowed' : 'refused'} (${result.sourceLayer}/${result.reasonCode})`);
+    const raisedId = raisedFor.get(metadata);
+    if (!result.approved) {
+      // Refused with no question put (plan mode, a rule): said as what refused it, never as the owner's No.
+      const why = raisedId === undefined && result.reasonCode === 'plan-mode' ? 'plan mode is on, so nothing that changes anything runs until the owner leaves it'
+        : raisedId === undefined ? 'the permission mode or a rule in force refused it' : 'the owner did not approve it';
+      return { approved: false, reason: result.detail ?? result.userReason ?? why };
+    }
+    return { approved: true, ...(raisedId !== undefined ? { askedId: raisedId, ...answeredBy(raisedId) } : {}) };
   };
+
+  /** Who answered a question yes (the owner's principal), as the broker recorded it. */
+  function answeredBy(approvalId: string | undefined): { readonly answeredBy?: string } {
+    const by = approvalId !== undefined ? broker.getApproval(approvalId)?.resolvedBy : undefined;
+    return typeof by === 'string' && by ? { answeredBy: by } : {};
+  }
 
   /**
    * An approved call judged again against the mode and the deny and never-run rules as they are now, for the call as
-   * the gate decided it (its arguments, who asked included) in its caller's project: the words that refuse it (plan
-   * mode, a rule), or undefined while it may run. A check that cannot be read refuses it. The one judgement for a yes
-   * whose own check failed while the question waited and for a yes to a call held from before a restart.
+   * the gate decided it in its caller's project: the words that refuse it (plan mode, a rule), or undefined while it
+   * may run. A check that cannot be read refuses it.
    */
-  async function refusalNow(capabilityId: string, args: Record<string, unknown>, definition: ToolDefinition, workingDirectory: string | undefined, signal?: AbortSignal): Promise<string | undefined> {
+  async function refusalNow(args: Record<string, unknown>, definition: ToolDefinition, workingDirectory: string | undefined, signal?: AbortSignal): Promise<string | undefined> {
     try {
       const now = await decideInProject(workingDirectory, () => manager.previewDecision(CAPABILITY_RUN_TOOL, args, definition, signal));
-      // A command typed while plan mode was on was put to him saying so (its card), and his yes is the decision: plan
-      // mode refuses it no more after a restart than before it.
-      if (args[COMMAND_LINE_PLAN_ARG] === 'on' && now.mode === 'plan' && now.decided.kind === 'fact' && !now.decided.allow && now.decided.basis === 'plan') return undefined;
-      // Plan mode, a deny or never-run rule: what refuses the call now, in the words the gate gives it.
       if (now.decided.kind === 'fact' && !now.decided.allow) {
         return now.mode === 'plan' ? 'plan mode was switched on while the question waited, and plan mode runs no change'
           : now.decided.decision.reason ?? 'a rule now refuses it';
       }
       return undefined;
     } catch (recheck) {
-      logger.warn('[capabilities] an approved call could not be judged again; it is refused', { capabilityId, error: summarizeError(recheck) });
+      logger.warn('[capabilities] an approved call could not be judged again; it is refused', { error: summarizeError(recheck) });
       return 'whether it is still allowed could not be read after the question waited; ask again';
     }
   }
 
-  /** How many times the same call was sent again while its question waited, by approval (written on it, at most once a second). */
-  const askedTimes = new Map<string, { count: number; writing: boolean }>();
-  const held: HeldCapabilityCalls = {
-    openOf(requester) {
-      let open = 0;
-      for (const record of broker.listApprovals(Number.MAX_SAFE_INTEGER)) {
-        if (raisedByGate(record) && isOpenApprovalStatus(record.status) && record.metadata['requestedBy'] === requester) open += 1;
-      }
-      return open;
-    },
-    async askedAgain(approvalId) {
-      const kept = askedTimes.get(approvalId) ?? { count: Number(broker.getApproval(approvalId)?.metadata[ASKED_TIMES_KEY] ?? 1) || 1, writing: false };
-      kept.count += 1;
-      askedTimes.set(approvalId, kept);
-      if (kept.writing) return;
-      kept.writing = true;
-      // Written once per burst: a thousand repeats are one number on the question, not a thousand entries in its history.
-      await new Promise<void>((done) => { setTimeout(done, 1000).unref?.(); });
-      kept.writing = false;
-      const record = broker.getApproval(approvalId);
-      if (!record || !isOpenApprovalStatus(record.status)) { askedTimes.delete(approvalId); return; }
-      try {
-        await broker.recordRemoteUpdate(approvalId, { actor: SOURCE, actorSurface: 'daemon', metadata: { [ASKED_TIMES_KEY]: kept.count } });
-      } catch (error) {
-        logger.warn('[capabilities] how many times a call was asked again could not be written on its question', { approvalId, error: summarizeError(error) });
-      }
-    },
-    async refusedNow(approvalId) {
-      const record = broker.getApproval(approvalId);
-      if (!raisedByGate(record)) return 'its question could not be read back';
-      runDefinition ??= daemonCapabilityCatalog().then((catalog) => capabilityRunDefinition(catalog.list()));
-      const call = recordOf(record.metadata[CALL_KEY]);
-      // The call as the gate decided it, kept on its question (its arguments name who asked), in its caller's project.
-      return refusalNow(stringOf(record.metadata['capabilityId']) ?? 'capability', { ...record.request.args }, await runDefinition,
-        stringsOf(call?.['caller'])['workingDirectory'] ?? heldMethodCallProject(stringOf(record.metadata['capabilityId']) ?? '', recordOf(call?.['values'])));
-    },
-    callerGone(approvalId, caller, authToken): HeldCallerRefusal | undefined {
-      const refusal = callerRefusal(caller, authToken, runtime, users);
-      if (refusal === undefined) return undefined;
-      const record = broker.getApproval(approvalId);
-      const who = stringOf(record?.metadata[ASKED_BY_KEY]) ?? callerName(caller, runtime, users) ?? caller.principalId ?? 'the caller';
-      const capabilityId = stringOf(record?.metadata['capabilityId']) ?? 'The call';
-      if ('gone' in refusal) {
-        return { code: 'CAPABILITY_CALLER_GONE', status: 403,
-          error: `${capabilityId} was not run: ${who} asked for it, and that caller is no longer allowed here (${refusal.gone}). The owner's yes was for that caller, so nothing ran.` };
-      }
-      return { code: 'CAPABILITY_ASK_AGAIN', status: 409,
-        error: `${capabilityId} was not run: ${who} asked for it, and ${refusal.unknown}, so whether it may still have it run is not known. Nothing ran; it must be asked again.` };
-    },
-    approvedBy(approvalId) {
-      return stringOf(broker.getApproval(approvalId)?.resolvedBy);
-    },
-    carriedOf(approvalId) {
-      const record = broker.getApproval(approvalId);
-      return raisedByGate(record) ? record.metadata[CARRIED_KEY] : undefined;
-    },
-    runApprovedWith(run) {
-      runApproved = run;
-      // Approved before this process could run it (it stopped between the yes and the start): run now.
-      void broker.start().then(() => { for (const record of broker.listApprovals(Number.MAX_SAFE_INTEGER)) runIfApprovedHere(record); })
-        .catch((error: unknown) => logger.warn('[capabilities] approved held calls could not be read at start', { error: summarizeError(error) }));
-    },
-    async start(approvalId) {
-      if (running.has(approvalId) || outcomes.has(approvalId)) return false;
-      const record = broker.getApproval(approvalId);
-      if (record?.metadata[STARTED_KEY] !== undefined || record?.metadata[OUTCOME_KEY] !== undefined) return false;
-      running.add(approvalId);
-      try {
-        await broker.recordRemoteUpdate(approvalId, { actor: SOURCE, actorSurface: 'daemon', note: 'the call started after the owner approved it',
-          metadata: { [STARTED_KEY]: new Date().toISOString() } });
-      } catch (error) {
-        // Without the mark a restart would take the call as never started and run it again: it does not run now.
-        logger.warn('[capabilities] that an approved call started could not be written on its approval; it was not run', { approvalId, error: summarizeError(error) });
-        const capabilityId = stringOf(record?.metadata['capabilityId']) ?? 'The call';
-        await settle(approvalId, { ok: false, status: 409, code: 'CAPABILITY_ASK_AGAIN',
-          error: `${capabilityId} was not run: the daemon could not write on its question that it started, and without that a restart could run it a second time. Nothing ran.`,
-          next: ['Send the call again; the owner is asked again.'] });
-        return false;
-      }
-      return true;
-    },
-    record: settle,
-    read(approvalId): HeldCallReading {
-      const record = broker.getApproval(approvalId);
-      if (!raisedByGate(record)) return { state: 'unknown' };
-      const capabilityId = stringOf(record.metadata['capabilityId']) ?? 'capability';
-      const requestedBy = stringOf(record.metadata['requestedBy']);
-      const who = requestedBy ? { requestedBy } : {};
-      const kept = outcomes.get(approvalId);
-      if (kept) return { state: 'settled', ...who, capabilityId, outcome: kept };
-      const label = stringOf(record.metadata['capabilityLabel']);
-      // The question the owner's card asks (the broker keeps the card's own words as the record's summary): what the
-      // caller is told is waiting, never the method's bare title.
-      const question = stringOf(record.request.analysis.summary);
-      const asked = { ...(label ? { label } : {}), ...(question ? { question } : {}) };
-      if (isOpenApprovalStatus(record.status)) return { state: 'waiting', ...who, capabilityId, ...asked };
-      if (running.has(approvalId)) return { state: 'waiting', ...who, capabilityId, ...asked, approved: true };
-      // Kept on the record by an earlier run of this daemon: its words (the data went with that process).
-      const said = recordOf(record.metadata[OUTCOME_KEY]);
-      if (said) {
-        if (said['ok'] === true) return { state: 'settled', ...who, capabilityId, outcome: { ok: true, answer: { id: capabilityId, ok: true, text: stringOf(said['text']) ?? `${capabilityId}: done.` } } };
-        return { state: 'settled', ...who, capabilityId, outcome: { ok: false, status: typeof said['status'] === 'number' ? said['status'] : 403,
-          code: stringOf(said['code']) ?? 'CAPABILITY_NOT_APPROVED', error: stringOf(said['error']) ?? `${capabilityId} was not run.` } };
-      }
-      const askAgain = stringOf(record.metadata[ASK_AGAIN_KEY]);
-      if (askAgain) {
-        return { state: 'settled', ...who, capabilityId, outcome: { ok: false, status: 409, code: 'CAPABILITY_ASK_AGAIN', error: askAgain,
-          next: [record.metadata[HELD_FORM_KEY] === HELD_FORM ? 'Send the call again with its secret input; the owner is asked again.' : 'Send the call again; the owner is asked again.'] } };
-      }
-      if (record.status === 'approved') {
-        const started = stringOf(record.metadata[STARTED_KEY]);
-        if (started) {
-          // Approved and started, then the daemon stopped before it said what came of it.
-          return { state: 'settled', ...who, capabilityId, outcome: { ok: false, status: 409, code: 'CAPABILITY_OUTCOME_UNKNOWN',
-            error: `The owner approved ${capabilityId} and it started at ${started}; the daemon stopped before it said what came of it, so whether it took effect is not known. It is not run again by itself.`,
-            next: [`Read the current state of what ${capabilityId} acts on before asking again.`] } };
-        }
-        // Approved in this process: it is about to start here.
-        if (raisedHere.has(approvalId)) return { state: 'waiting', ...who, capabilityId, ...(label ? { label } : {}), approved: true };
-        const secrets = Array.isArray(record.metadata[SECRETS_KEY]) ? (record.metadata[SECRETS_KEY] as unknown[]).filter((entry): entry is string => typeof entry === 'string') : [];
-        if (secrets.length > 0) {
-          return { state: 'settled', ...who, capabilityId, outcome: { ok: false, status: 409, code: 'CAPABILITY_ASK_AGAIN', error: askAgainWords(capabilityId, secrets),
-            next: ['Send the call again with its secret input; the owner is asked again.'] } };
-        }
-        // Approved while down, raised by an earlier daemon: asked again, never run as that daemon kept it.
-        if (record.metadata[HELD_FORM_KEY] !== HELD_FORM) {
-          return { state: 'settled', ...who, capabilityId, outcome: { ok: false, status: 409, code: 'CAPABILITY_ASK_AGAIN', error: earlierFormWords(capabilityId),
-            next: ['Send the call again; the owner is asked again.'] } };
-        }
-        const call = recordOf(record.metadata[CALL_KEY]);
-        if (call) return { state: 'approved-not-run', ...who, capabilityId, values: stringsOf(call['values']), caller: stringsOf(call['caller']) };
-        return { state: 'settled', ...who, capabilityId, outcome: { ok: false, status: 409, code: 'CAPABILITY_OUTCOME_UNKNOWN',
-          error: `The owner approved ${capabilityId}, and the daemon stopped before it said what came of it; read the current state before asking again.` } };
-      }
-      const why = record.status === 'denied'
-        ? stringOf(record.decision?.reason) ?? 'the owner did not approve it'
-        : record.status === 'expired' ? 'the question expired before the owner answered it'
-          : record.cause === 'requester-restarted' ? 'the question ended when the daemon restarted, before the owner answered it'
-            : 'the question ended before the owner answered it (it was withdrawn)';
-      return { state: 'settled', ...who, capabilityId, outcome: { ok: false, status: 403, code: 'CAPABILITY_NOT_APPROVED', error: `${capabilityId} was not run: ${sentence(why)}` } };
-    },
+  // A first use given to a caller (a project for the outside agent or for a program this computer cannot verify, one of
+  // the owner's shared things for a device, a member or a script, typing into an observed agent): decided by this same
+  // permission manager under the owner's mode, as a loosening of a protection with who asks as a fact. YOLO gives it;
+  // Jev decides and Just vibes ask Jev; Ask me asks the owner and the asking request waits on their answer.
+  daemonGrant = async ({ id, label: grantLabel, sentence: grantSentence, project, runsAs, signal }) => {
+    // The call this first use is needed for, decided with it in this one decision (one act, one decision): named on the
+    // card and told to Jev, its class the decision's when stricter; allowed, the call is not decided again.
+    const call = firstUseCallScope.getStore();
+    const withCall = coversCall(call) ? call : undefined;
+    const label = withCall ? `${grantLabel}, and do this now: ${withCall.label}` : grantLabel;
+    const sentence = withCall ? `${grantSentence} The call it is needed for runs at once with it: ${withCall.label}.` : grantSentence;
+    const entry: CapabilityEntry = {
+      id, group: 'system', home: 'daemon', command: '', commandTitle: label, actionId: id, word: '', label, sentence, done: '',
+      risk: firstUseRisk(withCall), touches: 'this-machine', lasts: 'kept', effects: ['control-plane.write'], inputs: [],
+    };
+    const definition = await definitionWith(entry);
+    const askedBy = callerName(runsAs, runtime, users);
+    const attribution: PermissionAttribution | undefined = askedBy && runsAs.principalId ? { kind: 'outside-caller', name: askedBy, principalId: runsAs.principalId } : undefined;
+    // The card names the act in the owner's words (ask-words.ts `GRANT_LABEL_ARG`), never the grant's id.
+    const args = { id, inputs: {}, [ASKED_BY_ARG]: rememberedCallerKey(runsAs), ...(askedBy ? { [ASKED_BY_NAME_ARG]: askedBy } : {}),
+      [GRANT_LABEL_ARG]: label, [GRANT_SENTENCE_ARG]: sentence };
+    try {
+      // A caller's own request over the wire, decided at its door: in a window of its own, as no turn.
+      const result = await withUntrustedContentScope(`grant:${randomUUID()}`, () => asCallOutsideTurn(() =>
+        withAsking({ source: 'grant', grant: id, ...(runsAs.principalId ? { requestedBy: runsAs.principalId } : {}) },
+          () => decideInProject(project, () => manager.checkDetailed(CAPABILITY_RUN_TOOL, args, attribution, { definition, ...(signal ? { signal } : {}) })))));
+      logger.info(`[decision] ${id}${withCall ? ` with its call (${withCall.label})` : ''} asked by ${askedBy ?? 'a caller'}: ${result.approved ? 'allowed' : 'refused'} (${result.sourceLayer}/${result.reasonCode})`);
+      if (result.approved && withCall) withCall.covered = true;
+      return { approved: result.approved, ...(result.approved ? {} : { reason: result.detail ?? result.userReason ?? 'it was not allowed under your permission mode' }) };
+    } catch (error) {
+      logger.warn('[capabilities] the decision on a first use for a caller failed; it is refused', { grant: id, error: summarizeError(error) });
+      return { approved: false, reason: signal?.aborted ? 'the caller left before it was decided' : 'its permission check failed, so nothing was given; ask again' };
+    }
   };
-  return { gate, held };
+
+  return { gate };
 }

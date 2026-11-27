@@ -71,8 +71,8 @@ export interface HostedSessionsClient {
   detach(sessionId: string): Promise<HostedSessionRecord>;
   kill(sessionId: string): Promise<HostedSessionRecord>;
   /**
-   * Send a message into a running hosted session, the ordinary steer verb. `personAsked`: the person typed it himself;
-   * only then does the call carry a person's claim (the daemon then runs it as his own turn in the session's project).
+   * Send a message into a running hosted session, the ordinary steer verb. `personAsked`: the person typed it themselves;
+   * only then does the call carry a person's claim (the daemon then runs it as their own turn in the session's project).
    */
   steer(sessionId: string, body: string, personAsked?: boolean): Promise<void>;
   /** Queue a message for after the current turn, the ordinary follow-up verb (`personAsked` as for `steer`). */

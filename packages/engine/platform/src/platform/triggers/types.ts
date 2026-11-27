@@ -343,6 +343,12 @@ export interface TriggerDefinition {
    * the release before, keeps its id). Its project's people see and type the name they chose (`resolveName`).
    */
   readonly chosenId?: string | undefined;
+  /**
+   * Who made it when it was not the owner (security/turn-input-party.ts `recordedCauseInScope`, from the authenticated
+   * caller; a value sent in the definition is dropped): its fired turns are that caller's turns, never the owner's, and
+   * it watches or runs no command. Absent: the owner's own (and every trigger kept before makers were recorded).
+   */
+  readonly cause?: import('../security/turn-input-party.js').RecordedCause | undefined;
 }
 
 // ─── Termination metadata ─────────────────────────────────────────────────────

@@ -8,7 +8,7 @@
  * to the page on the https address with the certificate's fingerprint in it (`#fp=`, never sent over the network); the
  * page there reads the certificate over that connection, checks it against that fingerprint in the phone's browser, and
  * offers it only when they match; a certificate that does not match is refused with words. The plain page says only
- * where to find that link. Then, on the phone, the certificate's own fingerprint is compared with the one on his screen
+ * where to find that link. Then, on the phone, the certificate's own fingerprint is compared with the one on the owner's screen
  * once more when it is installed.
  */
 import { X509Certificate } from 'node:crypto';

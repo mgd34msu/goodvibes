@@ -30,6 +30,7 @@ import {
 } from '../../hosted-sessions/manager.js';
 import type { HostedSessionAttachment } from '../../hosted-sessions/manager.js';
 import { ModelReferenceError } from '../../providers/model-id-resolution.js';
+import { makesOwnerOnlyAct } from '../../daemon/method-owner-decision.js';
 import type {
   CreateHostedSessionInput,
   HostedDetachPolicy,
@@ -191,8 +192,13 @@ export function createHostedSessionCreateHandler(service: HostedSessionVerbServi
         'originSurface',
       );
     }
+    // Who made it, from the credential the daemon established for this call: the owner in person or the owner's own command
+    // line (their signed-in session, their verified program, their typed `do`: method-owner-decision.ts
+    // `makesOwnerOnlyAct`, the one test) makes a session that is theirs (types.ts `madeByOwner`).
+    const madeByOwner = makesOwnerOnlyAct({ actor: invocation.context.actor, credentialKind: invocation.context.credentialKind ?? undefined, registration: invocation.context.call?.registration });
     try {
       const session = await service.create({
+        ...(madeByOwner ? { madeByOwner: true as const } : {}),
         workspaceRoot: requireString(params, 'workspaceRoot'),
         ...(title === undefined ? {} : { title }),
         ...(modelId === undefined ? {} : { modelId }),

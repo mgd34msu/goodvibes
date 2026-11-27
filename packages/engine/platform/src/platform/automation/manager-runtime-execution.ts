@@ -318,6 +318,8 @@ export async function executeAutomationJob(
       ...(effectiveJob.execution.workingDirectory ? { workingDirectory: effectiveJob.execution.workingDirectory } : {}),
       // What the conversation that made it had read, its runs start with (security/conversation-exposure.ts).
       exposureKey: `schedule:${effectiveJob.id}`,
+      // Who caused it, when not the owner: the run is that caller's turn (jobs.ts `cause`).
+      ...(effectiveJob.cause ? { cause: effectiveJob.cause } : {}),
     }, operation));
     spawnedAgentId = agentId;
     const runningRun: AutomationRun = {
@@ -645,6 +647,13 @@ export async function resolveSharedSessionExecution(
     readonly updatedJob?: AutomationJob | undefined;
   },
 ): Promise<ResolvedAutomationExecution> {
+  // A schedule someone other than the owner caused (jobs.ts `cause`) runs as its own turn only: its words are never put
+  // into a conversation as confirmed work (the input below is marked authorized and continues whatever runs there).
+  if (job.cause) {
+    throw new RefusalError(refusal({ code: 'NOT_OWNERS_SCHEDULE', state: 'the schedule was made or changed by someone other than the owner', status: 403,
+      reason: `Not run: this schedule was made or changed by ${job.cause.who}, so it runs only as its own turn on that caller's words, never inside a conversation`,
+      next: ['Make it again with a target of its own (not a session or a conversation)'] }));
+  }
   const route = input.routeId
     ? context.routeBindings.getBinding(input.routeId)
     : resolveRouteForTarget(context, input.target, job);

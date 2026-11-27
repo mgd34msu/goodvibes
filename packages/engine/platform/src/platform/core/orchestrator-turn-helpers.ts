@@ -275,7 +275,7 @@ type ToolResponseOutcomeArgs = {
 };
 
 export async function handleToolResponseOutcome(args: ToolResponseOutcomeArgs): Promise<{ results: ToolResult[] }> {
-  // The owner's authority is everything he said in this conversation, not only this turn's message.
+  // The owner's authority is everything they said in this conversation, not only this turn's message.
   const recorded = args.conversation.getOwnerMessages();
   const ownerMessages = recorded.length > 0 ? recorded : args.userText.trim() ? [args.userText] : [];
   const request = standingWorkRequest(ownerMessages);

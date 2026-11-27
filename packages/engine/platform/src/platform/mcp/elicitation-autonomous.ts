@@ -1,6 +1,7 @@
 import { captureMcpElicitationRequest, readProtocolRequest } from '../permissions/protocol-request.js';
 /** Autonomous MCP input resolution over current host facts and the canonical Jev decision owner. */
 import { randomUUID } from 'node:crypto';
+import { AsyncResource } from 'node:async_hooks';
 import { isDeepStrictEqual } from 'node:util';
 import type { EntryType } from '@goodvibes/judgment';
 import { decideAutonomous } from '../gate/autonomous-decision.js';
@@ -127,7 +128,11 @@ function logResolution(request: McpElicitationRequest, action: McpElicitationOut
 
 type FactResolution = { readonly outcome?: McpElicitationOutcome; readonly reason: string };
 
-function createFactElicitationHandler(host: ExternalPermissionHost): (request: McpElicitationRequest, context?: McpElicitationContext) => Promise<FactResolution> {
+/**
+ * Answers a server's form from the call's own facts. With `confirmation`, a form with no fields is answered with an
+ * empty accept instead, admitted the same way (the one manager, under the owner's mode).
+ */
+function createFactElicitationHandler(host: ExternalPermissionHost, confirmation = false): (request: McpElicitationRequest, context?: McpElicitationContext) => Promise<FactResolution> {
   return async (request, context) => {
     const unanswered = (reason: string): FactResolution => ({ reason });
     if (!context?.operation) return unanswered('the question arrived outside a tool call the program can attribute');
@@ -154,7 +159,9 @@ function createFactElicitationHandler(host: ExternalPermissionHost): (request: M
       const facts = snapshotJudgmentInput(operation.inputFacts ?? []) as readonly Record<string, unknown>[];
       const current = () => { assertCurrent(); if (!sourceIsCurrent(operation.sourceOf())
         || !isDeepStrictEqual(captureOwnedJson(operation.inputFacts ?? []), facts)) throw new Error('MCP source or facts changed'); };
-      const candidates = facts.map(fact => elicitationContent(owned.requestedSchema, fact)).filter((value): value is Record<string, unknown> => value !== null);
+      const candidates = confirmation
+        ? (formFieldNames(owned.requestedSchema).length === 0 ? [{}] : [])
+        : facts.map(fact => elicitationContent(owned.requestedSchema, fact)).filter((value): value is Record<string, unknown> => value !== null);
       const unique: Record<string, unknown>[] = [];
       for (const value of candidates) {
         if (!unique.some(prior => isDeepStrictEqual(prior, value))) unique.push(value);
@@ -185,12 +192,16 @@ function createFactElicitationHandler(host: ExternalPermissionHost): (request: M
         tool: `mcp:${owned.serverName}:elicitation`, args: { content, destination: scope.destination }, protocolSubject, supportingDecisionIds,
       });
       current();
-      if (!admission.result.approved) return { outcome: { action: 'decline' }, reason: 'admission refused returning the matching fact to this server' };
+      if (!admission.result.approved) return { outcome: { action: 'decline' }, reason: confirmation ? 'a plain confirmation, refused under the owner\'s permission mode' : 'admission refused returning the matching fact to this server' };
       const outcome: McpElicitationOutcome = Object.freeze({ action: 'accept', content });
       const committed = admission;
-      commits.set(outcome, { assertCurrent: current, claim() { current(); committed.claim(); unsubscribe(); }, close() { committed.close(); unsubscribe(); } });
+      // The answer is written later, on the connection's own loop: its last check and claim run in the scope it was
+      // decided in (the call's turn and whose input it acts on), or the manager reads them as nobody's work.
+      const decidedIn = new AsyncResource('McpElicitationAnswer');
+      commits.set(outcome, { assertCurrent: () => decidedIn.runInAsyncScope(current),
+        claim() { decidedIn.runInAsyncScope(() => { current(); committed.claim(); }); unsubscribe(); }, close() { committed.close(); unsubscribe(); } });
       admission = undefined; transferred = true;
-      return { outcome, reason: 'answered from the call\'s own arguments' };
+      return { outcome, reason: confirmation ? 'a plain confirmation, agreed under the owner\'s permission mode' : 'answered from the call\'s own arguments' };
     } catch (error) {
       if (signal.aborted) return { outcome: { action: 'cancel' }, reason: 'the call ended before the question was answered' };
       return unanswered(`answering from facts failed (${summarizeError(error)})`);

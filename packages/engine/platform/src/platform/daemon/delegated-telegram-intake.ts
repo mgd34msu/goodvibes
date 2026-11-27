@@ -51,7 +51,7 @@ const routeFacts = (route: AutomationRouteBinding) => Object.freeze([route.id, r
 /**
  * A chat the owner set up for delegated review, saved so it holds across restarts. `retentionMs` is the
  * owner's own choice of how long a third party's message may wait in memory for review; the owner's grant
- * (his live paired authority) is not saved, since it rests on his credential: after a restart he confirms the chat again.
+ * (their live paired authority) is not saved, since it rests on their credential: after a restart the owner confirms the chat again.
  */
 interface Selection { readonly chatId: string; readonly threadId?: string; readonly retentionMs?: number; }
 /** A message that arrived after a restart, kept in memory only, until the owner confirms the chat again or its time runs out. */
@@ -237,7 +237,7 @@ export class DelegatedTelegramIntake implements DelegatedTelegramAdapter {
     const config: Configuration = { id: `telegram-config-${randomUUID()}`, choice: Object.freeze({ ...choice }), owner, expected, account,
       revision: randomUUID(), controller, timer, expiresAt: Date.now() + choice.configurationLifetimeMs };
     this.configurations.set(key, config); this.assertConfiguration(config);
-    // The owner's retention choice is saved with the chat, so after a restart a third party's message waits for him.
+    // The owner's retention choice is saved with the chat, so after a restart a third party's message waits for the owner.
     const saved = this.selected.get(key);
     if (saved && saved.retentionMs !== choice.pendingRetentionMs) {
       this.selected.set(key, { ...saved, retentionMs: choice.pendingRetentionMs });
@@ -284,7 +284,7 @@ export class DelegatedTelegramIntake implements DelegatedTelegramAdapter {
   }
   /**
    * A message in a selected chat with no live configuration (the owner's grant ends with the process): it is
-   * kept in memory for the retention the owner chose for this chat, and the owner is told it waits for him to
+   * kept in memory for the retention the owner chose for this chat, and the owner is told it waits for them to
    * confirm the chat again. A chat whose retention was never chosen holds the message without keeping it.
    */
   private waitForConfirmation(input: DelegatedTelegramIngress): DelegatedTelegramAcceptance {
@@ -312,10 +312,10 @@ export class DelegatedTelegramIntake implements DelegatedTelegramAdapter {
     } catch (error) {
       logger.warn('Delegated Telegram: the owner could not be told a message waits', { error: summarizeError(error) });
     }
-    return delegatedHold('no-configuration', { message: 'Held in memory for the owner\'s review until he confirms this chat again.', nextStep: 'Call inbound.telegram.configure for this chat; the waiting messages are then put to the owner for review.' });
+    return delegatedHold('no-configuration', { message: 'Held in memory for the owner\'s review until the owner confirms this chat again.', nextStep: 'Call inbound.telegram.configure for this chat; the waiting messages are then put to the owner for review.' });
   }
 
-  /** The owner confirmed the chat: the messages that waited are put to him for review, and the notice is withdrawn. */
+  /** The owner confirmed the chat: the messages that waited are put to the owner for review, and the notice is withdrawn. */
   private replayWaiting(key: string, handle: TelegramSourceAccountHandle): void {
     const slot = this.waiting.get(key);
     if (!slot) return;

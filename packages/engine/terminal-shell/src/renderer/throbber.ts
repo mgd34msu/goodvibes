@@ -121,7 +121,7 @@ export interface ThrobberActivityInput {
     readonly compactingSinceMs?: number | undefined;
     /** The permission prompt the turn is blocked on. */
     readonly pendingApproval?: (ThrobberToolCall | null) | undefined;
-    /** A question put to the owner that is not a tool approval (the workspace trust choice): the turn waits on him. */
+    /** A question put to the owner that is not a tool approval (the workspace trust choice): the turn waits on them. */
     readonly ownerChoice?: (string | null) | undefined;
     /**
      * The tool the turn is executing now (the oldest, when several run), when

@@ -494,9 +494,9 @@ tasks as blocked-and-retriable on the next run for that space.
 ## Without a decision model
 
 Every knowledge and Home Graph verb works when no decision model is in use
-(none is set, or the set model failed during the operation and "If Jev can't
-answer" is Ask me). Each result says that nothing in it was read or checked by
-a decision model. Under Refuse the action a failing model's error stands.
+(none is set, or the set model failed during the operation under Hybrid). Each
+result says that nothing in it was read or checked by a decision model. Under
+Decision Model Only a failing model's error stands.
 
 - Ask (knowledge and Home Graph): the records that share the most words with
   the question, each with the passages of its stored text that mention them,

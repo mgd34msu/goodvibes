@@ -23,7 +23,7 @@ export type { PreparedConfigMutation, PreparedConfigMutationTransition, Prepared
 export type { HostBooleanSetting, HostBooleanSettingHandle, HostBooleanSettingResolved, HostManagedSettingLocks, HostNumberSetting, HostSetting, HostSettingValue, HostStringSetting } from './host-settings.js';
 export type { DeepReadonly, ConfigKeyTier, ConfigKeySource, DaemonConfigPatch } from './manager.js';
 export type { ConfigChange, ConfigSetOptions, DaemonWritePending, DaemonWritePress, DaemonWriteRefusal, DaemonWriteRoute, SetResult } from './manager.js';
-// Who a settings write is from (ConfigManager.setMany): the owner at his own surface, the program, or a model acting for someone.
+// Who a settings write is from (ConfigManager.setMany): the owner at their own surface, the program, or a model acting for someone.
 export { agentActor, localOwnerActor, systemActor } from '@goodvibes/engine/daemon-api/http-policy';
 export type { Actor } from '@goodvibes/engine/daemon-api/http-policy';
 export { configKeyFacts, displaySettingValue, isProtectedConfigValue, isProjectRestrictedKey } from './config-key-facts.js';

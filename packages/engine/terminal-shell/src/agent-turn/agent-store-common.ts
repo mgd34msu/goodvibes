@@ -19,7 +19,7 @@ export interface StoreActContext {
   readonly memory?: Pick<MemoryAccess, 'add'> | undefined;
   /** Add a web page to the daemon's one knowledge store (the act of `knowledge.ingest-url`); absent where it has none. */
   readonly ingestUrl?: ((input: { readonly url: string; readonly tags: readonly string[]; readonly folderPath: string }) => Promise<{ readonly source: { readonly id: string; readonly title?: string | undefined } }>) | undefined;
-  /** The person asked it himself (not a model, a script or another agent): a file outside the project is his to name. */
+  /** The person asked it themselves (not a model, a script or another agent): a file outside the project is theirs to name. */
   readonly personAsked?: boolean | undefined;
   /**
    * Who writes what this act keeps that steers the owner's turns (a memory record, a persona, a note, a routine, a
@@ -61,9 +61,8 @@ export async function storeStepAsync<T>(work: () => Promise<T>): Promise<T> {
 
 /** Comma- or newline-separated words, trimmed, empty ones dropped. */
 /**
- * A record's provenance with who wrote it when that was not the owner himself ("Command, written by someone else (...),
- * waiting for your review"): the Memory and knowledge place shows it, and a persona, note, routine or skill reaches no
- * prompt until the owner reviews it (his own act).
+ * A record's provenance with who wrote it when that was not the owner in person ("Command, written by someone else
+ * (...)"): the Memory and knowledge place shows it.
  */
 export function provenanceBy(context: Pick<StoreActContext, 'author'>, base: string): string {
   const words = authorWords(context.author);
@@ -76,12 +75,12 @@ export function writtenBy(context: Pick<StoreActContext, 'author'>): RecordAutho
 }
 
 /**
- * Marking a persona, note or routine reviewed lets its text reach the prompt: it counts only from the owner himself
- * (his own press, his yes in Waiting for you), never from another credential's claim to be a person.
+ * Marking a persona, note or routine reviewed lets its text reach the prompt: it counts only from the owner in person
+ * (their own press, their yes in Waiting for you), never from another credential's claim to be a person.
  */
 export function ownersOwnReview(context: Pick<StoreActContext, 'author'>, what: string): void {
   if (context.author?.kind === 'owner') return;
-  throw new CapabilityRefusal(`${what} is the owner's decision that its text may reach the prompt, so it counts only when the owner does it himself; nothing was changed.`,
+  throw new CapabilityRefusal(`${what} is the owner's decision that its text may reach the prompt, so it counts only when the owner does it in person; nothing was changed.`,
     'Ask the owner to review it in Memory and knowledge.', 'OWNER_REVIEW_REQUIRED');
 }
 

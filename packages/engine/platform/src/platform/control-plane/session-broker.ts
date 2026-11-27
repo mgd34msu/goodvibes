@@ -9,6 +9,7 @@ import type { GatePresetName } from '../gate/presets.js';
 import { summarizeError } from '../utils/error-display.js';
 import { sessionsActive } from '../runtime/metrics.js';
 import { forgetVerificationJournal } from '../core/verification/store.js';
+import { clearExposure } from '../security/conversation-exposure.js';
 import type { PersistentStore } from '../state/persistent-store.js';
 import { durableAfter, type Durable } from '../state/operation.js';
 import type { RuntimeEventBus } from '../runtime/events/index.js';
@@ -904,6 +905,10 @@ export class SharedSessionBroker {
     this.deferred.delete(sessionId);
     this.historyTouchedAt.delete(sessionId);
     forgetVerificationJournal(session.project, sessionId);
+    // What the session had read from outside goes with its record (security/conversation-exposure.ts): as a hosted
+    // session, and as a program's conversation whose calls named it.
+    clearExposure(`session:${sessionId}`);
+    clearExposure(`conversation:${sessionId}`);
     return this.releaseSessionRoutes(sessionId);
   }
 

@@ -44,7 +44,7 @@ import { mintedPairingScopes } from './pairing.js';
 import type { Actor } from '@goodvibes/engine/daemon-api/http-policy';
 import { admitEffects } from '../../security/effect-authority.js';
 import { PAIRING_HANDOFF_COMPLETE_EFFECTS } from '../method-catalog-pairing.js';
-import { ownerHimself } from '../../daemon/method-owner-decision.js';
+import { makesOwnerOnlyAct } from '../../daemon/method-owner-decision.js';
 
 /** What the hand-off verbs need from the surrounding composition. */
 export interface PairingHandoffDeps {
@@ -109,7 +109,7 @@ function availableOffers(deps: PairingHandoffDeps): Set<PairingHandoffOfferKind>
 /**
  * The actor a freshly minted pairing token will be (daemon-api actor.ts): a
  * full pairing is an admin (the owner's own device too: a device is never the
- * owner himself), a narrowed one a device holding its list.
+ * owner in person), a narrowed one a device holding its list.
  */
 function mintedActor(scopes: readonly string[] | undefined): Actor {
   return {
@@ -147,7 +147,7 @@ function createHandoffCreateHandler(deps: PairingHandoffDeps): GatewayMethodHand
     let webOrigin = deps.webOrigin?.();
     if (webOrigin && !fromSharedToken && params.forThisMachine !== true) {
       let reach = reachAnswer(deps, webOrigin);
-      // The owner said yes to serving the web UI to his network: the daemon does it, waits for its listener, and pairs in the same call.
+      // The owner said yes to serving the web UI to their network: the daemon does it, waits for its listener, and pairs in the same call.
       if (reach !== undefined && !reach.otherDevices && params.serveToNetwork === true && deps.serveToNetwork) {
         await deps.serveToNetwork();
         webOrigin = deps.webOrigin?.() ?? webOrigin;
@@ -164,14 +164,16 @@ function createHandoffCreateHandler(deps: PairingHandoffDeps): GatewayMethodHand
     }
     const available = availableOffers(deps);
     const scopes = mintedPairingScopes(invocation.context, undefined);
-    // The owner's pairing flow: a device is his only when the owner himself starts the pairing (his verified program
-    // or his signed-in session, method-owner-decision.ts `ownerHimself`) with full authority, and the code this call
-    // returns to his own screen is what the device uses. From anyone else (an admin who is not the owner, a script, a
-    // device, his own device included, the Agent's credential, a narrowed caller, a call made on his yes to someone
+    // The owner's pairing flow: a device is the owner's only when the owner in person starts the pairing (their verified program
+    // or their signed-in session, method-owner-decision.ts `ownerHimself`) with full authority, and the code this call
+    // returns to their own screen is what the device uses. From anyone else (an admin who is not the owner, a script, a
+    // device, the owner's own device included, the Agent's credential, a narrowed caller, a call made on the owner's yes to someone
     // else's request) it is automation. Recorded at the mint with its maker and never changed afterwards.
     const context = invocation.context;
+    // The owner in person or the owner's own command line (`goodvibes pair`, a typed `do`): method-owner-decision.ts
+    // `makesOwnerOnlyAct`, the one test of who makes an act only the owner makes.
     const ownerPairing = scopes === undefined
-      && ownerHimself({ actor: context.actor, credentialKind: context.credentialKind ?? undefined, registration: context.call?.registration });
+      && makesOwnerOnlyAct({ actor: context.actor, credentialKind: context.credentialKind ?? undefined, registration: context.call?.registration });
     // Offered only what the paired device can complete: the completion's own effects, judged
     // for the actor the minted token will be (a narrowed pairing cannot complete, so it is offered nothing).
     const completable = admitEffects(mintedActor(scopes), PAIRING_HANDOFF_COMPLETE_EFFECTS).kind === 'allowed';
@@ -250,7 +252,7 @@ function createPostureGetHandler(deps: PairingHandoffDeps): GatewayMethodHandler
 }
 
 /**
- * pairing.serve.network, the owner's yes to serving the web UI to his network:
+ * pairing.serve.network, the owner's yes to serving the web UI to their network:
  * the daemon does it and answers once its listener is bound again, with the
  * posture of the address a pairing code now carries.
  */

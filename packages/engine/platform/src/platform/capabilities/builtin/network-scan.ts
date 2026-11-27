@@ -1,7 +1,7 @@
 /**
  * Scanning your local network for model servers (discovery/network-scan.ts):
  * one decision, held by the daemon, and the scan, run by the daemon. Turning it
- * on is the owner's consent to probe the other devices on his network, so a
+ * on is the owner's consent to probe the other devices on their network, so a
  * model may read it and turn it off, never on.
  */
 import {

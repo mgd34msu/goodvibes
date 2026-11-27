@@ -65,12 +65,12 @@ test('a project\'s memory is given to work in that project only, and none is kep
     // The daemon's one check of the project a caller names, as every daemon composes it (facade-composition.ts).
     callerProject: daemonCallerProjectCheck(home),
   } as unknown as DaemonControlPlaneContext);
-  // The owner himself: his signed-in session (the account made at first start). The operator token alone is a script.
+  // The owner in person: their signed-in session (the account made at first start). The operator token alone is a script.
   const ownerName = userAuth.ownerUsername();
   if (ownerName === null) throw new Error('the user store made no owner account at first start');
   const owner = userAuth.createSession(ownerName).token;
   const run = async (id: string, inputs: Record<string, string>, project?: string): Promise<{ ok: boolean; status: number; body: Record<string, unknown> }> => {
-    // The owner's own press on his own screen, in the project he names.
+    // The owner's own press on their own screen, in the project they name.
     const answer = await helper.invokeGatewayMethodCall({ authToken: owner, methodId: 'capabilities.run',
       body: { id, inputs, ...(project ? { workingDirectory: project } : {}) }, context: { admin: true, explicitUserRequest: true } });
     return { ok: answer.ok, status: answer.status, body: answer.body as Record<string, unknown> };

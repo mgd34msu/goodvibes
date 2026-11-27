@@ -149,7 +149,7 @@ export function createRelayReadAccessors(verbs: DaemonVerbCaller): RelayReadAcce
     async mintRelayPairing(name, options = {}) {
       try {
         const answer = await mintRelayPairingInOneRun<{ pairing: unknown; status: string; codeId?: string; codeName?: string }>(
-          // Only from the person's own command or press: his request.
+          // Only from the person's own command or press: their request.
           <T>(method: string, input: Record<string, unknown>) => verbs.invoke<T>(method, input, { explicitUserRequest: true }),
           { name, configuredUrl: options.configuredUrl, ask: options.ask },
         );

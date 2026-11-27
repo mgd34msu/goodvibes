@@ -63,10 +63,14 @@ interface CliCommandResult {
 /** `do` and `find` reach the connected host the way every Agent verb does (runtime/client/daemon-verbs.ts). */
 function agentCapabilityInvoke(runtime: CliCommandRuntime): CapabilityCliInvoke {
   const caller = createAgentDaemonVerbCaller({ configManager: runtime.configManager, homeDirectory: runtime.homeDirectory });
+  // A `do` has no time limit of its own: its act may wait on the owner's card, answered in a program or the web; Ctrl+C withdraws it.
+  const waiting = createAgentDaemonVerbCaller({ configManager: runtime.configManager, homeDirectory: runtime.homeDirectory, invokeSignal: () => new AbortController().signal });
   // A host on another machine: a bundle's or a moved setup's file is read and written on this computer (bundle-file-work.ts).
   return cliWithFileWorkHere(async (methodId, input, options) => {
     try {
-      return { ok: true, data: await caller.invoke(methodId, input, { explicitUserRequest: options.explicitUserRequest }) };
+      return { ok: true, data: await (methodId === 'capabilities.run' ? waiting : caller).invoke(methodId, input, { explicitUserRequest: options.explicitUserRequest,
+        // A `do` says on standard error when its act starts waiting on a card, as the terminal app's does.
+        ...(methodId === 'capabilities.run' ? { waitingLines: true } : {}) }) };
     } catch (error) {
       const code = (error as { readonly code?: unknown } | null)?.code;
       // The host's own refusal, in its words and with its next step, as `goodvibes do` and `goodvibes-daemon do` print it.

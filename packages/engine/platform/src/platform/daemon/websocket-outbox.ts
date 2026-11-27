@@ -20,9 +20,6 @@ const SOCKET_HIGH_WATER_BYTES = 4 * 1024 * 1024;
 
 interface SpillFile { readonly fd: number; readonly path: string; written: number; pending: number }
 
-/** One queued event that a connected client does not take within this long means it has stopped reading. */
-const DEFAULT_STALL_TIMEOUT_MS = 2 * 60 * 1000;
-
 const OUTBOX_DIRECTORY_PREFIX = 'goodvibes-ws-';
 /** A spill directory this old belongs to no running process, whatever pid its name carries. */
 const STALE_OUTBOX_AGE_MS = 24 * 60 * 60 * 1000;
@@ -78,7 +75,8 @@ export function sweepStaleWebSocketOutboxes(
 
 /**
  * A socket that is behind spills queued events to a private file, without losing events or retaining
- * their bodies in memory. A socket that keeps up never touches the file.
+ * their bodies in memory. A socket that keeps up never touches the file. A client that stops reading is
+ * closed when what waits for it passes the byte bound (`maxPendingBytes`), or when it goes; no clock closes it.
  */
 export class WebSocketOutbox {
   private readonly lifetime = new AbortController();
@@ -94,7 +92,6 @@ export class WebSocketOutbox {
     private readonly maxPendingBytes = DEFAULT_MAX_PENDING_BYTES,
     /** Told how many frames were discarded undelivered, so ops output can show real loss. */
     private readonly onDropped?: (count: number) => void,
-    private readonly stallTimeoutMs = DEFAULT_STALL_TIMEOUT_MS,
   ) {}
   send(text: string): void {
     if (this.lifetime.signal.aborted) { this.onDropped?.(1); return; }
@@ -180,7 +177,6 @@ export class WebSocketOutbox {
   /** Sends `first` (the rest of a message that never touched disk) and then every spilled record, in order. */
   private async drain(first?: Iterable<string>): Promise<void> {
     this.running = true;
-    let stall: AbortSignal | undefined;
     try {
       let text: string | Iterable<string> | undefined = first;
       while (!this.lifetime.signal.aborted) {
@@ -198,17 +194,12 @@ export class WebSocketOutbox {
           this.release(record.file);
           text = bytes.toString('utf8');
         }
-        stall = AbortSignal.timeout(this.stallTimeoutMs);
-        await sendWebSocketMessage(this.socket, text, AbortSignal.any([this.lifetime.signal, stall]));
+        await sendWebSocketMessage(this.socket, text, this.lifetime.signal);
         text = undefined;
       }
     } catch (error) {
       // An abort came from close() or the pending-bytes cap, which already closed the socket.
-      if (!this.lifetime.signal.aborted && stall?.aborted) {
-        logger.warn('WebSocket client stopped reading; closing it', { stallTimeoutMs: this.stallTimeoutMs, pendingBytes: this.pendingBytes });
-        this.onDropped?.(this.records.length + 1);
-        this.lifetime.abort(); this.records.length = 0; this.pendingBytes = 0; this.socket.close?.(1013, 'WebSocket client is too slow');
-      } else if (!this.lifetime.signal.aborted) {
+      if (!this.lifetime.signal.aborted) {
         logger.warn('WebSocket delivery failed; closing the connection', { error: error instanceof Error ? error.message : String(error) });
         // The record being sent was taken off the queue before it failed.
         this.onDropped?.(this.records.length + 1);

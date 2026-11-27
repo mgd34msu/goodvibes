@@ -303,23 +303,23 @@ included: the turn may read files inside the allowed directories and answer,
 and every other call is an approval for the owner, in every permission mode and
 with or without a decision model. Its approvals go to the owner's own direct
 conversations (that surface's first), never to the guest's chat, and are listed
-in the owner inbox; the owner answers from any of his direct conversations.
-Work a guest asks for is proposed to the owner the same way, and only his
-answer starts it; the agreed work still runs as the guest's turn. A guest's
+in the owner inbox; the owner answers from any of their direct conversations.
+Work a guest asks for is proposed to the owner the same way, and only the
+owner's answer starts it; the agreed work still runs as the guest's turn. A guest's
 message is never handed to an agent already running in the conversation.
 
 A channel conversation can ask the assistant to read, search and summarize. A
 request that would change something (write a file, run a command, send a
 message) is not refused: it becomes an approval for the owner, shown on the
 terminal apps and the web UI (Waiting for you), and on a channel only in a
-conversation proven to be the owner's alone (his direct conversation with the
-bot): an approval about a group, even one only he has written in, or a shared
-channel goes to his own direct conversation, never to that conversation. It is
+conversation proven to be the owner's alone (their direct conversation with the
+bot): an approval about a group, even one only the owner has written in, or a
+shared channel goes to the owner's own direct conversation, never to that conversation. It is
 asked each time; an answer is not
 remembered for later calls. Email, webhook and ntfy are the exception, as is
 anything read from a web page or another source that is not a channel: anyone
 can write to them, so a change asked for there is refused and no approval is
-raised; the owner asks for it himself on a command surface.
+raised; the owner asks for it in person on a command surface.
 
 An approval prompt that cannot be shown in the conversation it belongs to (no
 route, a refused or failed send) is taken to the owner's other conversations,

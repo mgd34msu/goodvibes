@@ -15,9 +15,9 @@
  *
  * Zero is the most safe number. The capability can be fully configured, card
  * entered, addresses set, channels chosen, and still buy nothing without the
- * owner's yes until he affirmatively names an amount: while a limit is 0 every
- * purchase asks him first, and the first time a purchase meets it the owner
- * inbox offers to set it (payments/host/limit-offer.ts). A purchase he does not
+ * owner's yes until they affirmatively name an amount: while a limit is 0 every
+ * purchase asks them first, and the first time a purchase meets it the owner
+ * inbox offers to set it (payments/host/limit-offer.ts). A purchase they do not
  * approve is refused naming the limit, the setting and the amount.
  *
  * Design rule: the two toggles below keep the owner's values directly, the

@@ -61,6 +61,8 @@ export function daemonStartingInvoke(
     const answer = await invoke(methodId, input, callOptions);
     // No answer, or no operator token yet (the daemon on this machine never ran, so it never wrote one): started either way.
     if (answer.ok || (answer.code !== 'unreachable' && answer.code !== 'token-missing') || !configuredDaemonIsThisMachine(runtime.configManager)) return answer;
+    // A daemon that answers at its address is running: the call was lost, not the daemon (never "not installed").
+    if (answer.code === 'unreachable' && await daemonAddressAnswers(runtime.configManager)) return answer;
     // The program is not here: every call says that, never "could not reach".
     if (missing) return { ok: false, code: 'unreachable', error: missing, fix: '' };
     if (started) return answer;

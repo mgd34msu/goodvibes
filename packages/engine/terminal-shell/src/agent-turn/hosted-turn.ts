@@ -244,12 +244,12 @@ export const AGENT_PROCESS_TOOL_NAMES: readonly string[] = Object.freeze([...AGE
 
 const SHELL_REFUSAL = {
   reason: 'This tool works through the GoodVibes Agent\'s own slash-command registry and session (its CommandContext), which exist only in the Agent\'s own process; this turn is hosted by the daemon.',
-  next: 'Use the platform tool here that covers the same facts (goodvibes_settings for settings, state mode=memory for memory, exec for commands and processes, web_search and fetch for research, query to ask the owner), or tell the owner the tool runs when he continues in the GoodVibes Agent itself.',
+  next: 'Use the platform tool here that covers the same facts (goodvibes_settings for settings, state mode=memory for memory, exec for commands and processes, web_search and fetch for research, query to ask the owner), or tell the owner the tool runs when they continue in the GoodVibes Agent itself.',
 };
 
 const NOT_YET_HOSTED_REFUSAL = {
   reason: 'This Agent tool reaches the daemon through the GoodVibes Agent\'s own connected-host client and is not composed in a daemon-hosted turn.',
-  next: 'Tell the owner which tool the request needs and that it runs when he continues in the GoodVibes Agent itself (with hostedSessions.routeConversationTurns off the Agent answers in its own process).',
+  next: 'Tell the owner which tool the request needs and that it runs when they continue in the GoodVibes Agent itself (with hostedSessions.routeConversationTurns off the Agent answers in its own process).',
 };
 
 /** The one section a hosted Agent turn's prompt adds: what it is and what it cannot do here. */
@@ -427,7 +427,7 @@ export function createAgentHostedTurn(deps: AgentHostedTurnDeps): HostedSurfaceT
       if (!browser) {
         registry.declareElsewhere(['browser'], {
           reason: 'This daemon was composed without a browser (it has no home directory to keep browser profiles in), so there is no browser for this turn to drive.',
-          next: 'Use fetch or web_search to read a page, or tell the owner the browser runs when he continues in the GoodVibes Agent itself.',
+          next: 'Use fetch or web_search to read a page, or tell the owner the browser runs when they continue in the GoodVibes Agent itself.',
         });
       }
       registry.declareElsewhere(AGENT_SHELL_TOOL_NAMES, SHELL_REFUSAL);

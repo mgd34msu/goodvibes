@@ -107,7 +107,7 @@ export const MEDIA_MAKE: CapabilityDefinition<MediaCollectServices> = {
     if (artifacts.length === 0 && plain(pending['taskId'])) {
       const resume = Object.entries(record(pending['resume'])).map(([key, value]) => `${key}=${plain(value)}`).join(' ');
       return {
-        text: `${plain(pending['providerId'])} accepted the job (${plain(pending['taskId'])}) and is still making it; it is paid for and keeps running. Collect it with "collect a media job" in the Work place: provider ${plain(pending['providerId'])}, job ${plain(pending['taskId'])}${resume ? `, resume values ${resume}` : ''}.`,
+        text: `${plain(pending['providerId'])} accepted the job (${plain(pending['taskId'])}) and is still making it; it is paid for and keeps running. Collect it with "collect a media job" in Work and agents, Daemon tasks: provider ${plain(pending['providerId'])}, job ${plain(pending['taskId'])}${resume ? `, resume values ${resume}` : ''}.`,
         data: { pending },
       };
     }

@@ -34,8 +34,8 @@ const PROVIDERS = [
   { id: 'laya', label: 'Laya', detail: 'A local Laya decision service using its declared protocol.' },
 ] as const;
 const POLICY_DETAILS: Readonly<Record<string, string>> = {
-  Hybrid: 'In Jev decides and Just vibes, a call Jev would decide comes to you while the decision model fails (in Just vibes it is held to the end of the run). The failure is shown once with the model, what failed and the next step.',
-  'Decision Model Only': 'In Jev decides and Just vibes, a call Jev would decide is refused with the reason while the decision model fails, and the turn goes on.',
+  Hybrid: 'While the decision model fails, a call it would read or decide is decided as Ask me decides it, asking you where Ask me asks (in Just vibes it is held to the end of the run). The failure is shown once with the model, what failed and the next step.',
+  'Decision Model Only': 'While the decision model fails, a call it would read or decide is refused with the reason, in every mode, and the turn goes on.',
   'ask-me': 'With a working decision model, ordinary work runs automatically and dangerous actions and owner-only decisions ask you; without one, every action asks you except a read inside the workspace and a change to files inside it that can be undone.',
   'jev-decides': 'A decision model decides every action the permission rules do not settle, critical ones included; owner-only decisions ask you. With no working decision model it behaves as Ask me.',
   'just-vibes': 'Does as much as it can without interrupting you; anything that needs you is held and listed at the end.',
@@ -47,7 +47,7 @@ const POLICY_DETAILS: Readonly<Record<string, string>> = {
 const NO_DECISION_MODEL = {
   id: '__none__',
   label: 'No decision model',
-  detail: 'Nothing is sent to a decision model, even with a decision model key or server address in this computer\'s environment; Jev decides asks you instead. What is set up stays as it is; choosing a decision model here again uses it.',
+  detail: 'Nothing is sent to a decision model, even with a decision model key or server address in this computer\'s environment; decisions take their fallbacks (Jev decides asks you as Ask me does, Just vibes holds what needs a decision). What is set up stays as it is; choosing a decision model here again uses it.',
 } as const;
 
 /** The entry that puts back the decision model an earlier version had set up while decision models were switched off (judgment.setAside). */
@@ -141,7 +141,7 @@ export function openSettingsChoice(
   const save = (patch: ReadonlyArray<readonly [ConfigKey, unknown]>) => {
     if (!current()) return;
     const changes: ConfigChange[] = patch.map(([key, value]) => ({ key, value }));
-    // The person's own choice on the screen: his press goes with the daemon's keys.
+    // The person's own choice on the screen: their press goes with the daemon's keys.
     const result = config.setMany(changes, localOwnerActor(), { press: { personAsked: true } });
     if (!result.ok) ctx.print(`Not saved: ${result.refusal.reason} ${result.refusal.next.join(' ')}`.trim());
     if (result.saved.length > 0) changed();
@@ -186,7 +186,7 @@ export function openSettingsChoice(
     const key = action === 'decision-policy' ? 'judgment.policy' : 'permissions.mode';
     const setting = CONFIG_SCHEMA.find(entry => entry.key === key);
     const values = setting?.enumValues ?? [];
-    open(action === 'decision-policy' ? 'If Jev can\'t answer' : 'When GoodVibes asks',
+    open(action === 'decision-policy' ? 'When the decision model is missing or fails' : 'When GoodVibes asks',
       // The schema's word for each stored value; the default carries "(default)", which is never stored. A mode's row says what it does.
       values.map(value => ({ id: value, label: key === 'permissions.mode' ? gatePresetLabel(value)
         : `${setting?.enumLabels?.[value] ?? value}${value === setting?.default ? ' (default)' : ''}`,

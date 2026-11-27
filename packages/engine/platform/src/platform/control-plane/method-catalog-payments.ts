@@ -171,7 +171,7 @@ export const builtinGatewayPaymentsMethodDescriptors: readonly GatewayMethodDesc
     id: 'payments.standing.list',
     title: 'Standing Purchase Authorisations',
     description:
-      'The purchases the owner authorised in advance for runs nobody starts in the moment (a schedule or a trigger): for each, its id, the item in his words, the shops it may be bought from, the most one purchase may come to, the most all of them may come to over its period, what is spent or held in the current period and what is left, and when it expires. A scheduled purchase names one of these ids as standingId on payments.checkout.begin.',
+      'The purchases the owner authorised in advance for runs nobody starts in the moment (a schedule or a trigger): for each, its id, the item in the owner\'s words, the shops it may be bought from, the most one purchase may come to, the most all of them may come to over its period, what is spent or held in the current period and what is left, and when it expires. A scheduled purchase names one of these ids as standingId on payments.checkout.begin.',
     category: 'payments',
     effects: ['payments.read'],
     http: { method: 'GET', path: '/api/payments/standing' },
@@ -184,7 +184,7 @@ export const builtinGatewayPaymentsMethodDescriptors: readonly GatewayMethodDesc
     confirmation: 'owner-request',
     title: 'Authorise a Purchase in Advance',
     description:
-      'The owner authorises, in advance, a purchase a schedule or trigger may start without asking him: the item in his words, the shops, the most one purchase may come to, the most all of them may come to every periodDays days, and an optional last day. Amounts are read in the budget currency. Every other limit still applies to each purchase: the budgets, the per-purchase ceiling and the veto or approval window. Its confirmation is owner-request: confirm: true from a credential that states a person asked, else CONFIRMATION_REQUIRED; the Money place (payments.repeat) sends both. The owner\'s own act: an agent cannot add one.',
+      'The owner authorises, in advance, a purchase a schedule or trigger may start without asking them: the item in the owner\'s words, the shops, the most one purchase may come to, the most all of them may come to every periodDays days, and an optional last day. Amounts are read in the budget currency. Every other limit still applies to each purchase: the budgets, the per-purchase ceiling and the veto or approval window. Its confirmation is owner-request: confirm: true from a credential that states a person asked, else CONFIRMATION_REQUIRED; the Money place (payments.repeat) sends both. The owner\'s own act: an agent cannot add one.',
     category: 'payments',
     effects: ['purchase.approve'],
     dangerous: true,

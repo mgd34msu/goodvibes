@@ -17,7 +17,7 @@
  */
 import {
   CHECKLIST_CAPABILITIES, CHECKLIST_ITEMS_LIST, TASKS_CAPABILITIES, WORK_INTAKE_CAPABILITIES, WORK_ITEMS_LIST, WORK_METHOD_CAPABILITIES, WORK_QUESTIONS_LIST,
-  WORK_STEPS_LIST, WORK_FAILED_STEPS_LIST, checklistStateWords,
+  WORK_ANSWERS_LIST, WORK_STEPS_LIST, WORK_FAILED_STEPS_LIST, checklistStateWords,
   type CapabilityDefinition, type ChecklistCapabilityServices, type TasksCapabilityServices, type WorkIntakeCapabilityServices,
 } from '@goodvibes/engine/platform/platform/capabilities';
 import { tasksServices } from '../tasks-runtime-commands.js';
@@ -216,6 +216,7 @@ interface ListedWork {
   readonly id?: unknown; readonly title?: unknown; readonly state?: unknown;
   readonly run?: {
     readonly questions?: readonly { readonly id?: unknown; readonly question?: unknown }[];
+    readonly answerChoices?: readonly { readonly question?: unknown; readonly value?: unknown; readonly label?: unknown }[];
     readonly steps?: readonly { readonly id?: unknown; readonly title?: unknown; readonly status?: unknown }[];
     readonly failedSteps?: readonly { readonly id?: unknown; readonly title?: unknown }[];
   } | null;
@@ -241,9 +242,23 @@ defineList<CommandActionContext>({
   name: WORK_QUESTIONS_LIST,
   async read(ctx, earlier) {
     const work = (await listedWork(ctx)).find((entry) => text(entry.id) === earlier.work);
-    return (work?.run?.questions ?? []).filter((entry) => text(entry.id)).map((entry): ListRow => ({ value: text(entry.id), label: text(entry.question) }));
+    // A question is chosen by its first line (what it is about); its whole text, with its answers, is in the work's detail.
+    return (work?.run?.questions ?? []).filter((entry) => text(entry.id)).map((entry): ListRow => ({ value: text(entry.id),
+      label: text(String(entry.question ?? '').split('\n').find((line) => line.trim() !== '') ?? '') || text(entry.question) }));
   },
   operator: { method: 'capabilities.run', input: { id: 'work.list' }, rows: { from: 'data.works', where: { field: 'id', equals: '{work}' }, each: 'run.questions', value: 'id', label: 'question' } },
+});
+defineList<CommandActionContext>({
+  name: WORK_ANSWERS_LIST,
+  async read(ctx, earlier) {
+    const work = (await listedWork(ctx)).find((entry) => text(entry.id) === earlier.work);
+    // The answers the chosen question takes as choices (the stuck conflict's three); none for a question answered in words.
+    return (work?.run?.answerChoices ?? []).filter((entry) => text(entry.question) === earlier.question && text(entry.value))
+      .map((entry): ListRow => ({ value: text(entry.value), label: text(entry.label) || text(entry.value) }));
+  },
+  // Picked by the question alone: a form hands a list only the answer it depends on (the question), and a question's id
+  // names its one work (`<contract>.e<n>`), so no `{work}` blank is needed (the web's sheet does not fill it).
+  operator: { method: 'capabilities.run', input: { id: 'work.list' }, rows: { from: 'data.works', each: 'run.answerChoices', eachWhere: { field: 'question', equals: '{question}' }, value: 'value', label: 'label' } },
 });
 defineList<CommandActionContext>({
   name: WORK_STEPS_LIST,

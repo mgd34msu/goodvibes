@@ -1,8 +1,8 @@
 /**
  * Whether the owner's own words let the coordinator start agents now.
  *
- * The owner's authority is everything he said in the conversation that still
- * stands, not his latest message: an instruction to use agents given earlier is
+ * The owner's authority is everything they said in the conversation that still
+ * stands, not their latest message: an instruction to use agents given earlier is
  * not withdrawn by a later message about something else. A later message
  * narrows or withdraws an earlier one only when it speaks about agents itself.
  *
@@ -11,17 +11,17 @@
  *   agents, delegate) and nothing later forbade or limited them: they start;
  * - the owner asked for a number of agents and this call starts no more: they start;
  * - the owner forbade agents in plain words (do not use agents, do it yourself,
- *   do not delegate) and nothing later asked for them: refused, quoting him.
- * Plain code cannot tell what the owner meant when he said nothing about agents
+ *   do not delegate) and nothing later asked for them: refused, quoting the owner.
+ * Plain code cannot tell what the owner meant when they said nothing about agents
  * (an indirect restriction may still be there), when one message both asks for
  * and restricts agents, when a restriction is indirect (without agents, only
- * one), or whether a call above a number he named exceeds it (the number may
+ * one), or whether a call above a number they named exceeds it (the number may
  * have been for earlier work). Only then is the decision model asked, once per
  * state of the conversation, and its answer is "go" or one named change.
  *
  * When the decision model cannot answer, the owner's permission mode decides:
  * yolo and just-vibes start the agents; ask-me and jev-decides put the call to
- * the owner once, and his answer stands for the rest of the conversation.
+ * the owner once, and their answer stands for the rest of the conversation.
  */
 import { defineBattery, oneOf, STAKES_BANDS } from '@goodvibes/judgment';
 import { captureJudgmentPort, decisionModelPolicyState } from '@goodvibes/engine/errors';
@@ -122,9 +122,9 @@ export function standingDelegation(ownerMessages: readonly string[]): OwnerDeleg
 }
 
 /**
- * The work a delegation carries out, as the owner asked for it: his latest
- * message that asked for agents, else the first thing he asked in this
- * conversation. Never his latest message only because it is the latest (a
+ * The work a delegation carries out, as the owner asked for it: their latest
+ * message that asked for agents, else the first thing they asked in this
+ * conversation. Never their latest message only because it is the latest (a
  * remark, a complaint or a one-word reply is not the work).
  */
 export function standingWorkRequest(ownerMessages: readonly string[]): string {
@@ -191,7 +191,7 @@ export interface DelegationProposal {
   /** The conversation the agents would belong to. */
   readonly sessionId: string;
   /**
-   * What the owner said in this conversation, oldest first, his own messages
+   * What the owner said in this conversation, oldest first, their own messages
    * only (never a host-made message in a user slot). For an agent that is
    * itself delegating, its own task.
    */
@@ -200,7 +200,7 @@ export interface DelegationProposal {
   readonly tasks: readonly string[];
 }
 
-/** Puts the delegation to the owner, in the product's ordinary ask; resolves with his answer. */
+/** Puts the delegation to the owner, in the product's ordinary ask; resolves with their answer. */
 export type DelegationOwnerAsk = (question: { readonly tasks: readonly string[]; readonly reason: string },
   options: { readonly signal?: AbortSignal | undefined }) => Promise<{ readonly approved: boolean; readonly asked: boolean; readonly reason?: string | undefined }>;
 
@@ -220,7 +220,7 @@ export type DelegationVerdict =
   | { readonly start: false; readonly refusal: DelegationRefusal };
 
 interface SessionMemory {
-  /** The owner's answer when he was asked; it stands for the rest of the conversation. */
+  /** The owner's answer when they were asked; it stands for the rest of the conversation. */
   answered?: { readonly approved: boolean; readonly reason?: string | undefined };
   /** Decision model verdicts, keyed by what it was shown. */
   readonly readings: Map<string, DelegationVerdict>;
@@ -305,7 +305,7 @@ export async function decideDelegation(owner: object, proposal: DelegationPropos
   if (known) return known;
 
   // The gate's own no-model path already decided this exact call (it asked the
-  // owner in ask-me, unless his settings allow agent calls): nothing more to ask.
+  // owner in ask-me, unless their settings allow agent calls): nothing more to ask.
   const modelInUse = decisionModelPolicyState().operation === 'decision';
   let read: DelegationVerdict | undefined;
   let failure: string | undefined;
@@ -323,7 +323,7 @@ export async function decideDelegation(owner: object, proposal: DelegationPropos
   const why = failure ?? 'it was unsure';
   if (decisionModelPolicyState().policy === 'Decision Model Only') {
     return refuse({ decidedBy: 'mode', accepted: 'the owner asks for agents in a message (that starts them without the decision model), or the decision model answers again.',
-      what: `Not started: nothing the owner said in this conversation settles whether to start ${agentsWord(count)}, the decision model could not read it (${why}), and the owner chose Refuse the action for "If Jev can't answer".` });
+      what: `Not started: nothing the owner said in this conversation settles whether to start ${agentsWord(count)}, the decision model could not read it (${why}), and the owner chose Decision Model Only for "When the decision model is missing or fails".` });
   }
   const mode = currentExecutionMode();
   if (mode === 'yolo' || mode === 'just-vibes' || options.ask === undefined) return { start: true, basis: `the decision model could not answer (${why}); ${mode ?? 'this'} mode starts agents without asking` };

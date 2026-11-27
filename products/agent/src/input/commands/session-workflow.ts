@@ -46,7 +46,7 @@ async function printSessionExport(
   // A transcript is the one place a value the model was handed becomes a
   // durable document. The canonical redactor carries the platform's credential
   // patterns AND, in a process that has loaded the owner profile, that
-  // profile's closed-tier values, his address, his contact details, the People
+  // profile's closed-tier values, the owner's address, their contact details, the People
   // section, so an exported session cannot become the copy of the dossier that
   // the file itself is careful not to be (docs/owner-profile.md §10, §11.3).
   const redacted = await redactSensitiveDataAsync(formatted, { ...(signal ? { signal } : {}), purpose: 'export' });

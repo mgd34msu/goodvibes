@@ -65,7 +65,7 @@ export interface GatewayMethodDescriptor {
   readonly effect?: GatewayMethodEffect | undefined;
   /**
    * The owner's own act (answering a purchase window or the owner inbox, typing
-   * a card security code, withdrawing access he granted): only the owner's
+   * a card security code, withdrawing access the owner granted): only the owner's
    * credential makes it; another is refused, or its call put to the owner. For
    * a plugin's method, a declared `ownerOnly` means a model never calls it.
    */
@@ -89,8 +89,8 @@ export interface GatewayMethodDescriptor {
   readonly changesContract?: boolean | undefined;
   /**
    * Where in the input the recipients a call sends to as the owner sit, as
-   * argument paths (`to`, `attendees[]`): an agent's send to one he has not
-   * allowed is his to decide (`new-recipient`).
+   * argument paths (`to`, `attendees[]`): an agent's send to one the owner has not
+   * allowed is the owner's to decide (`new-recipient`).
    */
   readonly recipients?: readonly string[] | undefined;
   /** The header or body field that makes a retry safe; the route that reads it is its owner. */
@@ -302,7 +302,7 @@ export interface CallContext {
    * (control-plane/caller-reach.ts `reaches`); it only ever narrows what a call reaches.
    */
   readonly othersInput?: true | undefined;
-  /** With `othersInput`: the principal whose own conversation the turn runs in (a member's web chat: hers), when known. */
+  /** With `othersInput`: the principal whose own conversation the turn runs in (a member's web chat: that member's), when known. */
   readonly othersInputFor?: string | undefined;
   /**
    * A call nested in one of the daemon's own turns, sent with the daemon's credential (set by the dispatch only for its
@@ -620,9 +620,9 @@ function defaultMethodEffect(scopes: readonly string[]): GatewayMethodEffect {
 
 /**
  * Read scopes over the owner's content: mail, the owner profile, purchases and
- * cards, the dates he keeps, memory, transcripts, paired devices and peers,
- * his calendar, approvals and the questions waiting on him, the people he
- * named, workspace file contents, and the records of his browser, knowledge,
+ * cards, the dates the owner keeps, memory, transcripts, paired devices and peers,
+ * the owner's calendar, approvals and the questions waiting on the owner, the people the owner
+ * named, workspace file contents, and the records of the owner's browser, knowledge,
  * channels, automations, fleet and skills. They are not in the default grant
  * of a credential without the admin role (method-catalog.ts
  * `grantedGatewayScopes`); a paired device whose pairing stores its own scope
@@ -641,7 +641,7 @@ function defaultMethodEffect(scopes: readonly string[]): GatewayMethodEffect {
  *   titles come from what was said and whose participants name the people in
  *   each conversation. A person's own web chat is not someone else's
  *   transcript: its maker reads it (the companion chat reads, effect
- *   `chat.read`) under the sessions scope she made it with, `read:sessions`
+ *   `chat.read`) under the sessions scope they made it with, `read:sessions`
  *   or `write:sessions`; every other chat stays behind `read:transcripts`.
  * - `read:pairing`, `read:remote`: paired devices, device nodes and their
  *   grants, remote peers, their pair requests and the work sent to them.

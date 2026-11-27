@@ -158,7 +158,7 @@ function gateOutcome(preview: GatePreview | undefined): {
       status: 'owner_decides',
       reason: `This is the owner's to decide (${decided.item}). ${preview.mode === 'just-vibes'
         ? 'In just-vibes mode the call is queued for the owner and the work carries on.'
-        : 'The owner is asked once when the call is made; his answer is remembered.'}`,
+        : 'You are asked once when the call is made; your answer is remembered.'}`,
       next: ['make the call and let the gate ask the owner', 'carry on with work that does not need it'],
     };
   }

@@ -1,7 +1,7 @@
 /**
  * event-reach.ts, the ONE rule of what a caller may reach (control-plane/caller-reach.ts) applied to what it follows:
  * every event the gateway fans out (the control-plane event stream, the runtime-domain feeds over SSE and WebSocket,
- * a session's or a web chat's own stream, their replay after a reconnect) goes to a caller that is not the owner himself
+ * a session's or a web chat's own stream, their replay after a reconnect) goes to a caller that is not the owner in person
  * only when every record the event names is one that caller may reach, by the same `reaches` an answer is filtered by.
  *
  * What an event names (`eventSubjectsOf`): the project it says it is about (`project`, `workingDirectory`: a change
@@ -9,7 +9,7 @@
  * names by id, the session or web chat it belongs to (the envelope's `sessionId`, a session record's `id`), a memory
  * record or trigger a change notice names, and what an event declares it is about (its `about`, events/about.ts: a
  * contract, a watcher, a work plan or its task, with the project it belongs to). An id no store holds (the daemon's own `control-plane`, `daemon` sessions)
- * names nothing. An event that names nothing the daemon can tell apart is delivered only to the owner himself (and his
+ * names nothing. An event that names nothing the daemon can tell apart is delivered only to the owner in person (and their
  * programs on this machine): it may be about anything. So is one that names, beside what is told apart, anything this
  * rule does not recognise (another key naming a record by id, a list of records, a kind with no lookup, a lookup that
  * must wait): a frame naming the caller's project and another project's record under another key never goes out.
@@ -48,7 +48,7 @@ export type EventReach = (event: string, payload: unknown) => boolean;
 /**
  * The reach rules a stream is filtered by: the one check's, and who was given which of the owner's shared things
  * (control-plane/shared-kinds.ts `CallerSharedStore`). Without the second, a frame about a shared thing goes to the owner
- * himself only.
+ * in person only.
  */
 export type EventReachRules = CallerReachRules & {
   readonly sharedKindGiven?: ((principalId: string, kind: SharedKind) => boolean) | undefined;
@@ -56,7 +56,7 @@ export type EventReachRules = CallerReachRules & {
 
 /**
  * Change notices about the owner's shared things (list-changes.ts `ChangedList`), by the kind they are about. Such a
- * notice names no project (it is about none), so it is not "every project's": it goes to the owner and to a caller he gave
+ * notice names no project (it is about none), so it is not "every project's": it goes to the owner and to a caller the owner gave
  * that kind, and to nobody else.
  */
 const LIST_SHARED_KIND: Readonly<Record<string, SharedKind | undefined>> = {
@@ -86,7 +86,7 @@ export function sharedKindOfFrame(event: string, payload: unknown): SharedKind |
   return undefined;
 }
 
-/** Events that are the owner's alone whatever they name (his inbox: what waits for him). */
+/** Events that are the owner's alone whatever they name (the owner's inbox: what waits for the owner). */
 const OWNER_ONLY_EVENTS: ReadonlySet<string> = new Set(['owner-inbox-update']);
 
 /** A change notice's list whose `id` names a record of a kind (list-changes.ts). */
@@ -106,7 +106,7 @@ const NAMED_KEYS: ReadonlySet<string> = new Set(['project', 'workingDirectory', 
  * Keys that name a part of what the event is already about (a turn, a message, a tool call of its session), or a kind
  * of thing rather than a record of anyone's (a provider, a model, a plugin, a tool server, a transport): they name no
  * record of their own. Every other key that names something by id (`...Id`, `...Ids`, `id` where no kind is known) is
- * one this rule cannot tell apart, and the event goes to the owner himself only (`unrecognised`).
+ * one this rule cannot tell apart, and the event goes to the owner in person only (`unrecognised`).
  */
 const PART_KEYS: ReadonlySet<string> = new Set([
   'turnId', 'callId', 'toolCallId', 'messageId', 'providerRequestId', 'streamId', 'requestId', 'eventId', 'entryId',
@@ -209,7 +209,7 @@ export function eventSubjectsOf(event: string, payload: unknown): readonly Event
  * Each subject's owner, read by the kinds' lookups; a record no store holds is left out (it names nothing). Undefined
  * when the event names something that cannot be told apart: a key no lookup reads (`unrecognised`), a kind with no
  * lookup here, or a lookup that must wait (a store read from disk cannot decide a frame being sent). Such a frame goes
- * to the owner himself only.
+ * to the owner in person only.
  */
 function resolveSubjects(subjects: readonly EventSubject[], rules: CallerReachRules): readonly ResolvedSubject[] | undefined {
   const out: ResolvedSubject[] = [];
@@ -236,7 +236,7 @@ function reachesProject(who: Reacher, project: string, rules: CallerReachRules):
 }
 
 /**
- * The reach of one stream's caller: null when it reaches everything (the owner himself, a program of his on this
+ * The reach of one stream's caller: null when it reaches everything (the owner in person, a program of theirs on this
  * machine), else whether it may receive an event. `rules` are read again per frame (the daemon may set them later).
  */
 export function createEventReach(context: EventReachContext | undefined, rules: () => EventReachRules | undefined): EventReach | null {
@@ -247,9 +247,9 @@ export function createEventReach(context: EventReachContext | undefined, rules: 
     const current = rules();
     // No rules set (no daemon): nothing to tell apart, nothing named is reachable.
     if (!current) return false;
-    // A frame about one of the owner's shared things (his mail, calendar, channels, knowledge, money, profile, dates,
-    // home, notifications, Cloudflare, watchers): only a caller he gave that kind receives it (control-plane/shared-
-    // kinds.ts), whatever else it names; a caller he did not give it never does, not even a "shared" notice.
+    // A frame about one of the owner's shared things (their mail, calendar, channels, knowledge, money, profile, dates,
+    // home, notifications, Cloudflare, watchers): only a caller the owner gave that kind receives it (control-plane/shared-
+    // kinds.ts), whatever else it names; a caller the owner did not give it never does, not even a "shared" notice.
     const kind = sharedKindOfFrame(event, payload);
     if (kind !== undefined) {
       const principal = who.principalId;

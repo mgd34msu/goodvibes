@@ -1,6 +1,6 @@
-// Proves: A paired device or member that does not own a hosted session reads or rewrites the owner's queued messages, or cancels his turn or a running tool call.
+// Proves: A paired device or member that does not own a hosted session reads or rewrites the owner's queued messages, or cancels the owner's turn or a running tool call.
 // Red when: A live-turn verb (sessions.queuedMessages.list, edit, delete, sessions.turns.cancel, sessions.toolCalls.cancel) acts on a hosted session without admitting the caller against that session's owners.
-// Proves: A paired device or member that does not own a hosted session rewinds its conversation, cutting the owner's messages, or undoes his rewind.
+// Proves: A paired device or member that does not own a hosted session rewinds its conversation, cutting the owner's messages, or undoes the owner's rewind.
 // Red when: rewind.plan or rewind.apply with scope conversation or both, or rewind.undo, reaches the conversation without admitting the caller against that session's owners.
 /**
  * The catalog gate admits these verbs for any credential holding write:sessions
@@ -138,7 +138,7 @@ test('a device that does not own a hosted session cannot plan, apply or undo a r
     state: { messages: 5, cuts: 0, restored: [] },
   });
 
-  // The control: the owner applies the rewind he planned.
+  // The control: the owner applies the rewind they planned.
   const applied = await call('pairing:alice-phone', apply, { sessionId: SESSION, scope: 'conversation', confirmToken: token }) as { receipt: { conversation: { rewound: boolean } } };
   expect(applied.receipt.conversation.rewound).toBe(true);
   // Another device cannot undo it, bringing back what the owner cut; the owner can.

@@ -312,7 +312,7 @@ const KNOWLEDGE_OPTIONS = [
 ];
 const COMMAND_OPTIONS: Partial<Record<GoodVibesCliCommand, readonly CommandOptionSpec[]>> = {
   doctor: options('strict'),
-  onboarding: [...options('apply', 'with-code'), ...valued('name')],
+  onboarding: [...options('with-code'), ...valued('name')],
   profiles: options('description', 'include-vibe', 'name', 'persona', 'profile-name', 'replace', 'routines', 'skills', 'starter', 'starter-id', 'template', 'template-id', 'yes'),
   skills: options('description', 'enabled', 'name', 'procedure', 'provenance', 'requires-command', 'requires-commands', 'requires-env', 'skills', 'tags', 'triggers', 'yes'),
   memory: [...valued(...MEMORY_VALUE_OPTIONS), ...options(...MEMORY_FLAG_OPTIONS)],

@@ -364,7 +364,7 @@ export const builtinGatewayOwnerProfileMethodDescriptors: readonly GatewayMethod
     repeat: 'safe',
     effects: ['profile.administer'],
     title: 'Forget Profile Line',
-    description: 'Delete a mechanical field and every retained history comment for it, or one prose line addressed by its section plus its exact text. Never by line position: the owner edits this file himself, so an index taken from an earlier read may name a different line by the time the delete arrives. Text that no longer matches removes nothing and says so, rather than deleting the nearest thing. No tombstone, no deleted flag, no retention window, delete means delete. Forgetting something that was not there reports that honestly instead of returning success. Authority-gated exactly like a write: an injection that cannot add a fact must not be able to remove one.',
+    description: 'Delete a mechanical field and every retained history comment for it, or one prose line addressed by its section plus its exact text. Never by line position: the owner edits this file by hand, so an index taken from an earlier read may name a different line by the time the delete arrives. Text that no longer matches removes nothing and says so, rather than deleting the nearest thing. No tombstone, no deleted flag, no retention window, delete means delete. Forgetting something that was not there reports that honestly instead of returning success. Authority-gated exactly like a write: an injection that cannot add a fact must not be able to remove one.',
     category: 'profile',
     http: { method: 'POST', path: '/api/profile/forget' },
     inputSchema: PROFILE_FORGET_INPUT_SCHEMA,

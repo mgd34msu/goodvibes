@@ -264,7 +264,7 @@ export class ArchetypeLoader {
     const declaredBy = new Map<string, string>();
     // A project's own agent files (its .goodvibes/agents) are the project's: used only for a project the owner trusted,
     // each opened as a held path (a link out of the project gives nothing), under a size limit (utils/prompt-loader.ts,
-    // the same rule as its AGENTS.md). Files under the owner's own home are his.
+    // the same rule as its AGENTS.md). Files under the owner's own home are theirs.
     const projectRoot = projectIdentityOf(this.dir);
     const homeDirectory = homedir();
     const ownersOwn = realOrResolved(projectRoot) === realOrResolved(homeDirectory) || !realOrResolved(this.dir).startsWith(`${realOrResolved(projectRoot)}/`);

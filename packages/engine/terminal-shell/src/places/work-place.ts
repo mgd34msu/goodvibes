@@ -30,7 +30,13 @@ import { definePlace, type PlaceAction, type PlaceDetailLine, type PlaceFollow, 
  */
 type WorkState = 'not-started' | 'plan-waiting' | 'starting' | 'interrupted' | 'running' | 'needs-you' | 'step-failed' | 'step-failed-go-on' | 'done' | 'failed' | 'stopped';
 
-interface WorkStep { readonly id: string; readonly title: string; readonly status: string; readonly dependsOn: readonly string[] }
+interface WorkStep {
+  readonly id: string; readonly title: string; readonly status: string; readonly dependsOn: readonly string[];
+  /** Its change to a conflicting file was dropped, the other side kept (said in place of its state). */
+  readonly dropped?: string | undefined;
+  /** While it runs: when its agent was last heard from (epoch ms). */
+  readonly heardAt?: number | undefined;
+}
 /** The step the work stopped at when it failed. */
 interface FailedStep { readonly id: string; readonly title: string; readonly reason: string; readonly canGoOn: boolean }
 interface WorkItem extends PlaceItem {
@@ -47,6 +53,8 @@ interface WorkItem extends PlaceItem {
   readonly steps: readonly WorkStep[];
   readonly results: readonly { readonly text: string; readonly status: string }[];
   readonly questions: readonly string[];
+  /** The ids of the questions it waits on, in the order of `questions`. */
+  readonly questionIds: readonly string[];
   readonly failedSteps: readonly FailedStep[];
   readonly statusLine?: string | undefined;
   /** What last held a step's change back, in words with what to do. */
@@ -54,6 +62,10 @@ interface WorkItem extends PlaceItem {
   readonly budget?: string | undefined;
   /** Its plan before it runs, while one is held. */
   readonly plan?: { readonly state: string; readonly how: string; readonly reason?: string | undefined; readonly steps: readonly WorkStep[] } | undefined;
+  /** Ended work whose commits are not in the project's branch: its own branch, and the project's branch by name. */
+  readonly keptBranch?: { readonly branch: string; readonly into: string } | undefined;
+  /** "yes" while it has a kept branch: what the merge and discard keys are offered on. */
+  readonly keptBranchSaid: string;
 }
 
 interface ChecklistItem extends PlaceItem {
@@ -68,6 +80,7 @@ interface TaskItem extends PlaceItem {
   readonly title: string;
   readonly taskKind: string;
   readonly owner: string;
+  readonly description?: string | undefined;
   readonly error?: string | undefined;
 }
 
@@ -96,7 +109,7 @@ const STATE_WORDS: Readonly<Record<WorkState, string>> = {
 const ROW_WORDS: Partial<Readonly<Record<WorkState, string>>> = { 'plan-waiting': 'plan waits', interrupted: 'cut off', 'step-failed': 'step failed', 'step-failed-go-on': 'step failed' };
 
 const STEP_WORDS: Readonly<Record<string, string>> = {
-  pending: 'waiting', blocked: 'waiting on another step', running: 'running', checking: 'being checked', held: 'held', nudged: 'running',
+  pending: 'waiting', blocked: 'waiting on another step', running: 'running', checking: 'being checked', held: 'finished, being checked (its checks run until they end; "stop" on this work ends them)', nudged: 'running',
   fixing: 'being fixed', 'awaiting-owner': 'needs you', 'held-merge': 'done, waiting to merge', passed: 'done', failed: 'failed', cancelled: 'stopped',
 };
 
@@ -111,7 +124,20 @@ function budgetWords(value: unknown): string | undefined {
 
 const stepsOf = (value: unknown): readonly WorkStep[] => list(value).map(record).map((step) => ({
   id: plain(step['id']), title: plain(step['title']) || plain(step['id']), status: plain(step['status']), dependsOn: list(step['dependsOn']).map(plain).filter(Boolean),
+  ...(plain(step['dropped']) ? { dropped: plain(step['dropped']) } : {}),
+  ...(typeof step['heardAt'] === 'number' && Number.isFinite(step['heardAt']) ? { heardAt: step['heardAt'] } : {}),
 }));
+
+/** A running step quiet this long has its row say since when: a word for the person, never a limit that stops it. */
+const QUIET_SAID_AFTER_MS = 60_000;
+
+/** "running, quiet since 14:32; ..." for a running step not heard from for a while; nothing else otherwise. */
+function quietWords(step: WorkStep, now: number): string {
+  if (step.heardAt === undefined || (step.status !== 'running' && step.status !== 'nudged') || now - step.heardAt < QUIET_SAID_AFTER_MS) return '';
+  const at = new Date(step.heardAt);
+  const clock = `${String(at.getHours()).padStart(2, '0')}:${String(at.getMinutes()).padStart(2, '0')}`;
+  return `, quiet since ${clock}; it is not stopped for that: "stop" on this work ends it`;
+}
 
 function works(output: unknown): readonly WorkItem[] {
   return list(record(output)['works']).map(record).filter((work) => plain(work['id'])).map((work): WorkItem => {
@@ -121,6 +147,8 @@ function works(output: unknown): readonly WorkItem[] {
     const failedSteps = list(run['failedSteps']).map(record).filter((step) => plain(step['id'])).map((step): FailedStep => ({
       id: plain(step['id']), title: plain(step['title']) || plain(step['id']), reason: plain(step['reason']), canGoOn: step['canGoOn'] === true,
     }));
+    const kept = record(run['keptBranch']);
+    const keptBranch = plain(kept['branch']) && plain(kept['into']) ? { branch: plain(kept['branch']), into: plain(kept['into']) } : undefined;
     const said = STATES.has(work['state'] as WorkState) ? work['state'] as WorkState : 'not-started';
     // A failed step the work can go on without has its own word here, so "go on without it" shows only there.
     const state: WorkState = said === 'step-failed' && failedSteps.length > 0 && failedSteps.every((step) => step.canGoOn) ? 'step-failed-go-on' : said;
@@ -139,12 +167,15 @@ function works(output: unknown): readonly WorkItem[] {
       steps: stepsOf(run['steps']),
       results: list(run['results']).map(record).map((result) => ({ text: plain(result['text']), status: plain(result['status']) })),
       questions: list(run['questions']).map(record).map((question) => plain(question['question'])).filter(Boolean),
+      questionIds: list(run['questions']).map(record).filter((question) => plain(question['question'])).map((question) => plain(question['id'])),
       failedSteps,
       // The run words its own status line in the words of a piece of work (contract/runner.ts `workStatusWords`).
       ...(plain(run['statusLine']) ? { statusLine: plain(run['statusLine']) } : {}),
       ...(plain(run['held']) ? { held: plain(run['held']) } : {}),
       ...(budgetWords(run['budget']) ? { budget: budgetWords(run['budget']) } : {}),
       ...(plan ? { plan: { state: plain(plan['state']), how: plain(plan['how']), ...(plain(plan['reason']) ? { reason: plain(plan['reason']) } : {}), steps: stepsOf(plan['steps']) } } : {}),
+      ...(keptBranch ? { keptBranch } : {}),
+      keptBranchSaid: keptBranch ? 'yes' : '',
     };
   });
 }
@@ -169,6 +200,7 @@ function tasks(raw: unknown): readonly TaskItem[] {
   return list(raw).map(record).filter((task) => plain(task['id'])).map((task): TaskItem => ({
     kind: 'task', id: plain(task['id']), state: plain(task['status']) || 'queued', title: plain(task['title']) || plain(task['id']),
     taskKind: plain(task['kind']), owner: plain(task['owner']), ...(plain(task['error']) ? { error: plain(task['error']) } : {}),
+    ...(plain(task['description']) ? { description: plain(task['description']) } : {}),
   }));
 }
 const daemonTasks = (output: unknown): readonly TaskItem[] => tasks(record(output)['tasks']);
@@ -197,8 +229,13 @@ function planLines(label: string, steps: readonly WorkStep[], work?: WorkItem): 
     // The step the work stopped at failed (its record waits on you, but nothing is asked); one stopped in live work was left out.
     // In work cut off by the daemon stopping, a step that was running is not running now: it runs again on go on.
     const cutOff = work?.state === 'interrupted' && ['running', 'checking', 'nudged', 'fixing'].includes(step.status);
-    const words = failed.has(step.id) ? 'failed, the work stopped here' : cutOff ? 'cut off, runs again when you go on'
-      : live && step.status === 'cancelled' ? 'left out' : STEP_WORDS[step.status] ?? step.status;
+    // A finished step held while the work asks its question (the stuck conflict's repair) is not being checked: it waits.
+    const waitsOnAnswer = work?.state === 'needs-you' && step.status === 'held';
+    const words = step.dropped ? step.dropped : failed.has(step.id) ? 'failed, the work stopped here' : cutOff ? 'cut off, runs again when you go on'
+      : waitsOnAnswer ? 'finished, waits for the answer to its question'
+      // A step a failed (or done) work ended with was not stopped by anyone: it ended unfinished with the work.
+      : !live && work !== undefined && work.state !== 'stopped' && step.status === 'cancelled' ? 'not finished: it ended with the work'
+      : live && step.status === 'cancelled' ? 'left out' : `${STEP_WORDS[step.status] ?? step.status}${live ? quietWords(step, Date.now()) : ''}`;
     const state = step.status ? `: ${words}` : '';
     return { label: index === 0 ? label : '', text: `${index + 1}. ${step.title}${state}${after.length > 0 ? ` (after ${after.join(', ')})` : ''}` };
   });
@@ -217,7 +254,11 @@ function workDetail(item: Item): readonly PlaceDetailLine[] {
       { label: '', text: step.canGoOn ? 'Run it again, go on without it, or stop the work.' : 'Run it again or stop the work: the steps after it need its result.', tone: 'muted' as const },
     ]),
     ...work.questions.map((question) => ({ label: 'It asks', text: question, tone: 'warning' as const })),
-    ...(work.blocker ? [{ label: 'Held up by', text: work.blocker, tone: 'warning' as const }] : []),
+    // Its changes, kept apart from the project's branch: what merge it in and discard it act on.
+    // Said once: not again when its own line already names the branch.
+    ...(work.keptBranch && !(work.statusLine ?? '').includes(work.keptBranch.branch) ? [{ label: 'Its changes', text: `kept on its own branch ${work.keptBranch.branch}, not in ${work.keptBranch.into}: merge it into ${work.keptBranch.into}, or discard it`, tone: 'warning' as const }] : []),
+    // Said once: a blocker that is the work's own line already reads under "Now".
+    ...(work.blocker && !(work.statusLine ?? '').startsWith(work.blocker.replace(/\.\.\.$|…$/u, '')) ? [{ label: 'Held up by', text: work.blocker, tone: 'warning' as const }] : []),
     // A reason the blocker line already says is not said twice (a waiting plan was both).
     ...work.attention.filter((reason) => reason !== work.blocker).map((reason) => ({ label: 'Needs a look', text: reason, tone: 'warning' as const })),
     ...(work.budget ? [{ label: 'May spend', text: work.budget }] : []),
@@ -248,10 +289,16 @@ function workDetail(item: Item): readonly PlaceDetailLine[] {
 
 function workRow(item: Item) {
   const work = item as WorkItem;
+  // Running work whose every running step is quiet says since when (the earliest); the detail names the step.
+  const now = Date.now();
+  const running = work.steps.filter((step) => step.status === 'running' || step.status === 'nudged');
+  const quiet = work.state === 'running' && running.length > 0 && running.every((step) => quietWords(step, now) !== '')
+    ? Math.min(...running.map((step) => step.heardAt ?? now)) : undefined;
+  const quietClock = quiet === undefined ? '' : `quiet since ${String(new Date(quiet).getHours()).padStart(2, '0')}:${String(new Date(quiet).getMinutes()).padStart(2, '0')}`;
   return {
     title: work.title,
     // The row's word is short (a narrow window keeps the title); the detail says it in full.
-    ...(work.state === 'running' ? {} : { right: work.imported ? 'carried in' : ROW_WORDS[work.state] ?? STATE_WORDS[work.state] }),
+    ...(work.state === 'running' ? (quietClock ? { right: quietClock } : {}) : { right: work.imported ? 'carried in' : ROW_WORDS[work.state] ?? STATE_WORDS[work.state] }),
     mark: work.state === 'needs-you' || work.state === 'plan-waiting' || work.state === 'interrupted' ? 'waiting' as const
       : work.state === 'failed' || work.state === 'step-failed' || work.state === 'step-failed-go-on' ? 'attention' as const
         : work.state === 'running' || work.state === 'starting' ? 'running' as const : work.state === 'stopped' || work.state === 'not-started' ? 'paused' as const : 'ok' as const,
@@ -312,12 +359,17 @@ function taskRow(item: Item) {
     mark: task.state === 'failed' ? 'attention' as const : task.state === 'running' || task.state === 'queued' ? 'running' as const : task.state === 'blocked' ? 'paused' as const : 'ok' as const,
   };
 }
+/** What does a task, in words: its kind said plainly; never the owner's id (an agent's or a session's). */
+const TASK_KIND_WORDS: Readonly<Record<string, string>> = {
+  agent: 'an agent, working on this task', exec: 'a command', acp: 'a coding agent', scheduler: 'a schedule', daemon: 'the daemon',
+  mcp: 'a connected tool server', plugin: 'a plugin', integration: 'a connected service',
+};
 function taskDetail(item: Item): readonly PlaceDetailLine[] {
   const task = item as TaskItem;
   return [
     { label: 'State', text: TASK_WORDS[task.state] ?? task.state },
-    { label: 'Kind', text: task.taskKind || 'not said' },
-    { label: 'For', text: task.owner || 'not said' },
+    { label: 'What it is for', text: task.description || task.title },
+    { label: 'Done by', text: TASK_KIND_WORDS[task.taskKind] ?? (task.taskKind || 'not said') },
     ...(task.error ? [{ label: 'What went wrong', text: task.error, tone: 'warning' as const }] : []),
   ];
 }
@@ -371,9 +423,16 @@ const unansweredList: PlaceList<Item> = {
 
 const STEP_FAILED: readonly WorkState[] = ['step-failed', 'step-failed-go-on'];
 /** Work that is under way: started and not ended, a failed step included (the work stopped at it, still live). */
-const LIVE: readonly WorkState[] = ['starting', 'interrupted', 'running', 'needs-you', ...STEP_FAILED];
+/** Offered only on ended work that kept its commits on its own branch (`keptBranchSaid` reads "yes"). */
+const KEPT_BRANCH = { field: 'keptBranchSaid', isOneOf: ['yes'] } as const;
+const LIVE: readonly WorkState[] =['starting', 'interrupted', 'running', 'needs-you', ...STEP_FAILED];
 /** The step the work stopped at (its first, when several failed). */
 const failedStep = (item: Item): string => (item as WorkItem).failedSteps[0]?.id ?? '';
+/** The question it waits on when it waits on one only: already chosen in the answer's form; several are chosen there. */
+const onlyQuestion = (item: Item): string => {
+  const ids = (item as WorkItem).questionIds;
+  return ids.length === 1 ? ids[0]! : '';
+};
 const OPEN_TASK = ['queued', 'running', 'blocked'];
 
 const WORK_ACTIONS: readonly PlaceAction<Item>[] = [
@@ -399,11 +458,16 @@ const WORK_ACTIONS: readonly PlaceAction<Item>[] = [
   // Go on: a start cut off by a restart goes on; a failed step is gone on without only where nothing after it needs its result.
   { key: 'g', id: 'go-on', list: 'work', states: ['interrupted'], capability: 'work.resume', label: 'go on', fill: { work: 'id' }, outcomeFollowsItem: true },
   { key: 'g', id: 'go-on-without-step', list: 'work', states: ['step-failed-go-on'], capability: 'work.go-on-without', label: 'go on without it', fill: { work: 'id', step: failedStep }, outcomeFollowsItem: true },
-  { key: 'a', id: 'answer', list: 'work', states: ['needs-you'], capability: 'work.answer', label: 'answer', fill: { work: 'id' }, outcomeFollowsItem: true },
+  { key: 'a', id: 'answer', list: 'work', states: ['needs-you'], capability: 'work.answer', label: 'answer', fill: { work: 'id', question: onlyQuestion }, outcomeFollowsItem: true },
   { key: 't', id: 'step-again', list: 'work', states: [...STEP_FAILED], capability: 'work.retry', label: 'run this step again', fill: { work: 'id', step: failedStep }, outcomeFollowsItem: true },
   { key: 'b', id: 'spending-limit', list: 'work', states: [...LIVE], capability: 'work.budget', label: 'spending limit', fill: { work: 'id' } },
   { key: 'v', id: 'check', list: 'work', states: [...LIVE, 'failed'], capability: 'work.status', label: 'check', fill: { work: 'id' } },
   { key: 'v', id: 'check-past', list: 'history', states: ['done', 'stopped', 'failed'], capability: 'work.status', label: 'check', fill: { work: 'id' } },
+  // Ended work whose commits are not in the project's branch keeps them on its own branch (named in its detail).
+  { key: 'm', id: 'merge-kept-branch', list: 'history', states: ['done', 'stopped'], offeredWhen: KEPT_BRANCH, capability: 'work.branch-merge', label: 'merge it in', fill: { work: 'id' } },
+  { key: 'D', id: 'discard-kept-branch', list: 'history', states: ['done', 'stopped'], offeredWhen: KEPT_BRANCH, capability: 'work.branch-discard', label: 'discard it', fill: { work: 'id' } },
+  { key: 'm', id: 'merge-failed-branch', list: 'work', states: ['failed'], offeredWhen: KEPT_BRANCH, capability: 'work.branch-merge', label: 'merge it in', fill: { work: 'id' } },
+  { key: 'D', id: 'discard-failed-branch', list: 'work', states: ['failed'], offeredWhen: KEPT_BRANCH, capability: 'work.branch-discard', label: 'discard it', fill: { work: 'id' } },
   // A plan that waits for you.
   { key: 'enter', id: 'approve', list: 'work', states: ['plan-waiting'], capability: 'work.approve', label: 'approve and start', fill: { work: 'id' }, outcomeFollowsItem: true },
   { key: 'e', id: 'change-step', list: 'work', states: ['plan-waiting'], capability: 'work.step-edit', label: 'change a step', fill: { work: 'id' } },

@@ -75,8 +75,26 @@ type HookDispatcherLike = {
 // a session runs one turn at a time, so a session keeps the identities of its
 // current turn and the one before it; older turns can never present a call
 // again. The WeakMap releases everything when the manager becomes unreachable.
+// A session's identities go with the session: when it is removed (a web chat deleted,
+// forgetAutonomousInvocationSession), and in any case the sessions are bounded by count (the
+// least recently used goes first, past RETAINED_SESSIONS): a long-lived manager (the daemon's)
+// serves every chat, schedule and hosted run, and without this each session ever served kept
+// two Maps (its turns and its calls) for the life of the process. A session evicted by the count
+// has had no tool call while thousands of others had theirs: its turn is over.
 const autonomousInvocationSources = new WeakMap<object, Map<string, Map<string, Map<string, string>>>>();
 const RETAINED_TURNS_PER_SESSION = 2;
+const RETAINED_SESSIONS = 4_096;
+/** Each manager's table of sessions, so a removed session is let go from all of them. */
+const sessionTables = new Set<WeakRef<Map<string, Map<string, Map<string, string>>>>>();
+
+/** The session was removed (its record deleted): the identities of its tool calls go with it. */
+export function forgetAutonomousInvocationSession(session: string): void {
+  for (const ref of sessionTables) {
+    const table = ref.deref();
+    if (!table) { sessionTables.delete(ref); continue; }
+    table.delete(session);
+  }
+}
 
 function autonomousInvocationSource(manager: object, session: string, turn: string, call: string): string {
   // Admit the original references before lookup, even on an existing tuple.
@@ -85,9 +103,13 @@ function autonomousInvocationSource(manager: object, session: string, turn: stri
     { id: session, revision: turn }, { id: call, revision: 'tool-call' },
   ] });
   let sessions = autonomousInvocationSources.get(manager);
-  if (!sessions) { sessions = new Map(); autonomousInvocationSources.set(manager, sessions); }
+  if (!sessions) { sessions = new Map(); autonomousInvocationSources.set(manager, sessions); sessionTables.add(new WeakRef(sessions)); }
   let turns = sessions.get(session);
-  if (!turns) { turns = new Map(); sessions.set(session, turns); }
+  // Most recently used last: the count bound lets the least recently used session go.
+  if (turns) sessions.delete(session);
+  else turns = new Map();
+  sessions.set(session, turns);
+  while (sessions.size > RETAINED_SESSIONS) sessions.delete(sessions.keys().next().value!);
   let calls = turns.get(turn);
   if (!calls) {
     calls = new Map(); turns.set(turn, calls);
@@ -822,7 +844,7 @@ async function executeToolCallsInMode(
         let outcome: StopOutcome<ToolResult>;
         try {
         // The person's stop of this call ends the wait at once (untilStopped); the time limit and the turn's cancel do not.
-        // The owner himself said yes to exactly this call, as his card showed it (his prompt's answer, the arguments
+        // The owner in person said yes to exactly this call, as their card showed it (their prompt's answer, the arguments
         // unchanged): a one-call grant, read by the daemon for this call's own nested methods (gate/admitted-decision.ts).
         const ownersOneCallYes = checkResult.approved && checkResult.sourceLayer === 'user_prompt' && checkResult.modifiedArgs === undefined;
         outcome = await untilStopped(withAdmittedToolDecision(admittedDecision, () => withExternalOperationSource(sourceOf && autonomous ? {

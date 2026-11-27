@@ -159,7 +159,7 @@ async function servePairingToNetwork(deps: ResolvedBuiltinViewDeps, name?: strin
   if (!rpc.available) throw new Error(rpc.reason);
   let answer: PairingHandoffAnswer;
   try {
-    // The owner's own yes in the modal: his press.
+    // The owner's own yes in the modal: their press.
     answer = await invokePressed<PairingHandoffAnswer>(rpc.platformClient, 'pairing.handoff.create', {
       name: name ?? defaultPairingTokenName(),
       offers: [...PAIRING_HANDOFF_OFFER_KINDS],

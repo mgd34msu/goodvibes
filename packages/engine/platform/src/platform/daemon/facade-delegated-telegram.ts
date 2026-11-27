@@ -17,7 +17,7 @@ import {
 } from '../control-plane/delegated-inbound-wire.js';
 import { z } from 'zod/v4';
 const scopes = ['read:work-ledger', 'write:work-ledger'] as const;
-/** The one native owner rule (routes/native-owner.ts): the owner's machine, a device he paired, or the owner himself signed in. */
+/** The one native owner rule (routes/native-owner.ts): the owner's machine, a device the owner paired, or the owner in person signed in. */
 function owner(invocation: GatewayMethodInvocation) {
   const authority = requireNativeOwner(invocation, scopes, 'Delegated Telegram intake');
   const current = authority.current();
@@ -103,7 +103,7 @@ export function composeDelegatedTelegramIntake(runtime: ResolvedDaemonFacadeRunt
     beforeReviewOwnerWrite: () => runtime.runtimeServices.nativeDataWriter?.declare('delegated-review-owner-v2'),
     selectionPath: runtime.runtimeServices.shellPaths.resolveProjectPath('goodvibes', 'channels', 'telegram-delegated-selection.json'),
     receiptPath: runtime.runtimeServices.shellPaths.resolveProjectPath('goodvibes', 'channels', 'telegram-delegated-review.json'),
-    // The owner is told in his inbox when a message waits for him to confirm the chat again after a restart.
+    // The owner is told in their inbox when a message waits for them to confirm the chat again after a restart.
     notices: runtime.runtimeServices.ownerInbox,
   });
   registerDelegatedTelegramCommands(runtime.gatewayMethods, host); return host;

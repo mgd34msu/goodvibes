@@ -60,7 +60,7 @@ export async function runAcpCommand(input: RunAcpCommandInput): Promise<number> 
       // The same tree root every other entry point uses, so an editor that
       // launches this with HOME unset or GOODVIBES_HOME blank still reaches the
       // installed settings and accounts rather than the project directory.
-      // Whose input the editor's prompts are: the owner's own program on a connection his editor started is his turn;
+      // Whose input the editor's prompts are: the owner's own program on a connection their editor started is their turn;
       // a `goodvibes acp` the daemon started for anyone else (its hosted agents and runners say who) is theirs.
       const served = await serveAcpAgent({ homeDirectory: resolveGoodVibesHome(input.env), inputParty: acpConnectionParty(input.env) }, input.stdio);
       dispose = served.dispose;

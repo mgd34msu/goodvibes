@@ -39,7 +39,7 @@ import { nativeHostedConversationProjects } from './native-hosted-conversation-c
  *
  * When no boundary can be applied, what happens depends on whose input drives
  * the turn, never on the door: the owner's turns run commands by the one rule
- * (`TURN_EXEC_CONTAINMENT`: the sandbox setting and his mode), and a turn acting
+ * (`TURN_EXEC_CONTAINMENT`: the sandbox setting and the owner's mode), and a turn acting
  * on someone else's input (an outside caller's message into a hosted session) runs
  * no command outside a real sandbox and writes no file (security/turn-input-party.ts,
  * tools/exec/containment.ts `containmentForTurn`).

@@ -379,7 +379,7 @@ function rankedChannelGuideChannels(channels: readonly AgentChannelStatus[]): re
 
 /**
  * The channel the guide is about: one the owner named, else the first channel
- * he enabled (or whose configuration could not be read). Nothing enabled means
+ * the owner enabled (or whose configuration could not be read). Nothing enabled means
  * no channel has been chosen yet, so the guide starts at "Choose channel".
  */
 function currentGuideChannel(channels: readonly AgentChannelStatus[]): AgentChannelStatus | null {

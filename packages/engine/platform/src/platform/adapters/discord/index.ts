@@ -242,7 +242,8 @@ async function dispatchDiscordInteraction(
           data: { content: ingressAnswer(policy, 'caller').text, flags: EPHEMERAL_MESSAGE_FLAG },
         });
       }
-      const message = await context.performInteractiveSurfaceAction(customId, 'discord', req, interaction.userId);
+      // The pressed button's message is in the interaction's channel (a Discord thread is a channel of its own).
+      const message = await context.performInteractiveSurfaceAction(customId, 'discord', req, interaction.userId, { channelId: interaction.channelId });
       return Response.json({
         type: DiscordInteractionResponseType.ChannelMessageWithSource,
         data: { content: message },

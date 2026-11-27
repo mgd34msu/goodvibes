@@ -31,6 +31,7 @@ import { executeToolCalls } from '../platform/src/platform/core/orchestrator-too
 import { createEmitterContext } from '../platform/src/platform/core/orchestrator-runtime.js';
 import { runTurn, type TurnModelResponse } from '../platform/src/platform/core/turn-loop.js';
 import type { ToolCall, ToolResult } from '../platform/src/platform/types/tools.js';
+import { withOwnerInput } from '../platform/src/platform/security/turn-input-party.ts';
 import { seedBenchmarkCache } from './_helpers/benchmark-cache.ts';
 import { trackDisposables } from './_helpers/disposables.ts';
 
@@ -103,7 +104,9 @@ async function composeApp() {
 async function turn(app: Awaited<ReturnType<typeof composeApp>>, calls: ToolCall[]) {
   const responses: TurnModelResponse[] = [{ content: '', toolCalls: calls }, { content: 'Done.', toolCalls: [] }];
   const results: ToolResult[] = [];
-  const outcome = await runTurn({
+  // The owner's own turn, marked the way the product marks one (companion-chat-manager.ts runs the owner's turn in withOwnerInput):
+  // a turn not marked as theirs is someone else's input, whose calls change nothing.
+  const outcome = await withOwnerInput(() => runTurn({
     signal: new AbortController().signal,
     async request() { return responses.shift()!; },
     conversation: { addAssistantMessage: () => {}, addToolResults: (landed) => { results.push(...landed); } },
@@ -119,7 +122,7 @@ async function turn(app: Awaited<ReturnType<typeof composeApp>>, calls: ToolCall
       workingDirectory: app.workingDir,
       onToolSettled: onSettled,
     }, 'turn-1', batch),
-  }, { speaker: 'owner', budget: {}, completion: { maxRejectedDrafts: 0 }, delegates: 'return', sink: { delta: () => {} } });
+  }, { speaker: 'owner', budget: {}, completion: { maxRejectedDrafts: 0 }, delegates: 'return', sink: { delta: () => {} } }));
   return { outcome, results: new Map(results.map((result) => [result.callId, result])) };
 }
 

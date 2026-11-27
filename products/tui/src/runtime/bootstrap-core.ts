@@ -159,7 +159,7 @@ export async function initializeBootstrapCore(
   const workingDir = options.workingDir;
   const homeDirectory = options.homeDirectory;
   const configManager = options.configManager;
-  // This program is the person at his own keyboard: work in it that no turn or mark names is his (unknown is someone
+  // This program is the person at their own keyboard: work in it that no turn or mark names is theirs (unknown is someone
   // else's everywhere else, the daemon included: security/turn-input-party.ts).
   declareUnmarkedWorkIsOwners();
   await prepareConfiguredProjectContext(configManager, workingDir, REGULAR_KNOWLEDGE_DB_FILE, { activate: true });
@@ -423,7 +423,7 @@ export async function initializeBootstrapCore(
 
   const permissionManager = createTuiTurnPermissionManager(services, () => services.requestTrustDecision());
   // A bad hooks file must not stop the product from starting; it runs without file hooks until fixed.
-  // One in a workspace the owner has not trusted waits for that trust, and he is told once.
+  // One in a workspace the owner has not trusted waits for that trust, and the owner is told once.
   try {
     await hookWorkbench.loadAndApplyManagedHooks();
   } catch (err) {

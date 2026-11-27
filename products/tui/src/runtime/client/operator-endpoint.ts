@@ -346,9 +346,9 @@ function withGatewayRouteForWsOnlyVerbs(
 }
 
 /**
- * A method the person asked for with a press of his own (a key in a place, a modal's button), as his request: the
- * daemon runs an act it decides for the owner at once only on his own press in his own program, and puts the same
- * call made without one to him. Through this client's generic route, which carries the claim.
+ * A method the person asked for with a press of their own (a key in a place, a modal's button), as their request: the
+ * daemon runs an act it decides for the owner at once only on the owner's own press in their own program, and puts the
+ * same call made without one to the owner. Through this client's generic route, which carries the claim.
  */
 export function invokePressed<T = unknown>(client: GoodVibesPlatform, methodId: string, input: unknown): Promise<T> {
   return (client.operator.invoke as unknown as (id: string, body: unknown, options: DaemonVerbInvokeOptions) => Promise<T>)(methodId, input, { explicitUserRequest: true });

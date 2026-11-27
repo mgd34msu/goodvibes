@@ -69,6 +69,14 @@ export async function readTextBodyWithinLimit(
   }
 
   if (!req.body) return '';
+  // A declared length within the limit bounds what is read: the body is taken whole. A reader is used only for a body
+  // of no declared length (its size known only as it arrives): bun keeps a request whose body was read through a
+  // reader alive for good when that body is not off the wire (a request the daemon makes in process), so every such
+  // call would be kept.
+  if (req.headers.has('content-length') && Number.isFinite(contentLength) && contentLength <= maxBytes) {
+    const text = await req.text();
+    return Buffer.byteLength(text) > maxBytes ? payloadTooLargeResponse(maxBytes) : text;
+  }
   const reader = req.body.getReader();
   const decoder = new TextDecoder();
   let total = 0;

@@ -98,7 +98,7 @@ function confinedPath(ctx: MemoryCommandContext, path: string, byModel: boolean)
   if (resolved === undefined) throw new CapabilityRefusal(`${path} is outside the project. Memory files are kept in a folder of the project; nothing was read or written.`, 'Name a folder inside the project.');
   // A folder of the project, in a call that holds what it names (capabilities/held-paths.ts): held from here to the end
   // of the call and worked on in place through its handle, so a link put in its place, or planted inside it, leads
-  // nowhere. A folder the person named outside the project is his own and is used as he named it.
+  // nowhere. A folder the person named outside the project is their own and is used as they named it.
   if (!paths.isWithinWorkingDirectory(resolved)) return resolved;
   let projectReal: string;
   try { projectReal = realpathSync(paths.workingDirectory); } catch { return resolved; }

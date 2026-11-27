@@ -656,10 +656,10 @@ export const runtimeSecondaryConfigSettings: ConfigSettingDefinition[] = [
   },
   {
     key: 'runtime.companionChatLimiter.perSessionLimit',
-    label: 'Most chat messages per minute',
+    label: 'Most chat messages waiting',
     type: 'number',
     description:
-      'Max companion chat messages per 60-second window per session. ' +
+      'Most companion chat messages one chat holds waiting to be answered (queued or running); one more is refused until one is answered. ' +
       '0 (the default) means unset: the GOODVIBES_CHAT_LIMITER_THRESHOLD env var (read once at daemon startup) applies, else 10. ' +
       'A positive integer overrides the env var and is read on each check() call.',
     ...intRange(0, 100_000),

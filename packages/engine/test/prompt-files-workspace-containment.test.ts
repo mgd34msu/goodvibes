@@ -37,7 +37,7 @@ test('a VIBE.md or AGENTS.md linked out of the repository is not read into the p
   writeFileSync(join(repo, '.goodvibes', 'GOODVIBES.md'), 'Keep the changelog current.');
 
   const paths = createShellPathService({ workingDirectory: repo, homeDirectory: home });
-  // Project files are read only for a project the owner trusted: he trusts this one.
+  // Project files are read only for a project the owner trusted: the owner trusts this one.
   const trust = new WorkspaceTrustManager({ shellPaths: paths, surfaceRoot: 'agent' });
   await trust.load();
   await trust.setLevel('trusted');

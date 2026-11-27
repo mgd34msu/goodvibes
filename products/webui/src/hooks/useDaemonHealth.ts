@@ -80,7 +80,7 @@ function scopeCovers(granted: string, required: string): boolean {
 /**
  * The WORKING axis from the sign-in's own grant, as auth.current reports it: the
  * conversation reads need `read:transcripts`, and a person's own web chats are
- * read under the sessions scopes she makes them with (`read:sessions` or
+ * read under the sessions scopes they make them with (`read:sessions` or
  * `write:sessions`). A daemon that reports no scope list is not judged.
  */
 const CONVERSATION_READ_SCOPES = ['read:transcripts', 'read:sessions', 'write:sessions'] as const;

@@ -21,11 +21,11 @@ import type { EffectId } from '../security/effect-authority.js';
 export type ActionTouches = 'reads' | 'this-machine' | 'another-machine' | 'credential';
 /**
  * The one risk word an action carries, shown in lists, in help and with the
- * result. A line the owner typed in full, or a form he submitted, is the
+ * result. A line the owner typed in full, or a form they submitted, is the
  * request and runs at once whatever its risk, its result saying what the risk
  * did; a line a model runs is put to the owner first when its risk is not `none`.
  */
-export type ActionRisk = 'none' | 'loosens-a-protection' | 'cannot-be-undone' | 'spends-money' | 'sends-out';
+export type ActionRisk = 'none' | 'loosens-a-protection' | 'cannot-be-undone' | 'spends-money' | 'sends-out' | 'runs-later';
 /** How long a change lasts; `byInput` names the input whose chosen value decides it. */
 export type ActionLasts = 'session' | 'kept' | { readonly byInput: string };
 export type InputKind = 'choice' | 'text' | 'long-text' | 'secret' | 'number' | 'money' | 'date-time' | 'path' | 'yes-no' | 'list';
@@ -153,6 +153,9 @@ export const RISK_WORDS: Readonly<Record<Exclude<ActionRisk, 'none'>, string>> =
   'cannot-be-undone': 'cannot be undone',
   'spends-money': 'spends money',
   'sends-out': 'sends something outside this machine',
+  // A schedule, a trigger, a watcher: decided as any other change (a judgment under the mode, as a model's schedule or
+  // trigger was in 3.5.0), never as a loosened protection.
+  'runs-later': 'sets something to run by itself later',
 };
 
 /** The risk words said with the result of an action that ran: "This loosened a protection." */
@@ -161,6 +164,7 @@ export const RISK_DONE_WORDS: Readonly<Record<Exclude<ActionRisk, 'none'>, strin
   'cannot-be-undone': 'cannot be undone',
   'spends-money': 'spent money',
   'sends-out': 'sent something outside this machine',
+  'runs-later': 'set something to run by itself later',
 };
 
 /**
@@ -214,7 +218,7 @@ export interface CapabilityResult {
   /**
    * The value the person must see once (a capability that declares `reveals`): a new device's one-time token, the
    * group's join key. Never in `text` or `data`: `capabilities.run` returns it only to the person who asked, a place
-   * shows it in its own pane until he leaves it, and nothing writes it to a log, a transcript, a frame or an outcome line.
+   * shows it in its own pane until the person leaves it, and nothing writes it to a log, a transcript, a frame or an outcome line.
    */
   readonly reveal?: { readonly value: string; readonly qr?: string | undefined } | undefined;
   /**
@@ -234,7 +238,7 @@ export interface CapabilityReveal {
 
 /**
  * Who wrote a record that steers the owner's turns (state/memory-store.ts MemoryAuthor has the same shape): `owner`
- * (his own press or typed words), `owner-model` (his model in his own turn) or `other` (a device, a member, an outside
+ * (their own press or typed words), `owner-model` (their model in their own turn) or `other` (a device, a member, an outside
  * agent, a script or command line with no person, a turn on someone else's input), with who in words.
  */
 export interface RecordAuthor {
@@ -250,7 +254,7 @@ export function authorWords(author: RecordAuthor | undefined): string {
   const by = author ?? UNNAMED_AUTHOR;
   if (by.kind === 'owner') return '';
   if (by.kind === 'owner-model') return 'written by your model in your own conversation';
-  return `written by someone else (${by.who ?? 'not named'}), waiting for your review`;
+  return `written by someone else (${by.who ?? 'not named'})`;
 }
 
 /** Facts about who asked, read by a handler that acts on the caller's project or program. */
@@ -266,11 +270,11 @@ export interface CapabilityCaller {
   readonly model?: string | undefined;
   /** The asking program's conversation, when a terminal program asked: what a capability records as where a thing came from. */
   readonly sessionId?: string | undefined;
-  /** The person asked it himself (a key pressed, a form submitted, a line typed): not a model, not another agent. */
+  /** The person asked it themselves (a key pressed, a form submitted, a line typed): not a model, not another agent. */
   readonly personAsked?: boolean | undefined;
   /**
-   * The owner himself chose "Every project" in his place's project chooser (no project named): a read of per-project
-   * things (memory) covers every project. Set by the daemon's `capabilities.run` only for the owner himself; absent,
+   * The owner in person chose "Every project" in their place's project chooser (no project named): a read of per-project
+   * things (memory) covers every project. Set by the daemon's `capabilities.run` only for the owner in person; absent,
    * a call naming no project reads only what belongs to no project.
    */
   readonly everyProject?: boolean | undefined;
@@ -282,9 +286,9 @@ export interface CapabilityCaller {
    */
   readonly namesAnyFile?: boolean | undefined;
   /**
-   * The owner himself made the call (his sign-in, a device he paired himself, his registered program:
-   * daemon/method-owner-decision.ts `ownerHimself`), never his model or a daemon turn: an act only he makes (a record
-   * moved out of the project it belongs to). Set by the daemon's `capabilities.run`.
+   * The owner made the call in person or from their own command line (their sign-in, their registered program, their typed
+   * `do`: daemon/method-owner-decision.ts `makesOwnerOnlyAct`, the one test), never their model or a daemon turn: an act
+   * only the owner makes (a record moved out of the project it belongs to). Set by the daemon's `capabilities.run`.
    */
   readonly ownerHimself?: boolean | undefined;
   /**
@@ -301,19 +305,19 @@ export interface CapabilityCaller {
   readonly carried?: readonly string[] | undefined;
   /**
    * Who caused this run, for an act that makes work run (builtin/work.ts keeps it on the work's record): the owner
-   * himself (his own press or typed line, his answer in Waiting for you, a model of his own conversation) or someone
+   * in person (their own press or typed line, their answer in Waiting for you, a model of their own conversation) or someone
    * else. Set by the daemon's `capabilities.run`; absent anywhere else, which is read as someone else's.
    */
   readonly cause?: import('../workflow/work-ledger/work-plans.js').WorkCause | undefined;
   /**
    * Who writes what this run keeps that later steers the owner's turns (a memory record, a persona, a note, a routine,
-   * a skill), from the credential the daemon authenticated, never a field the caller sends: the owner himself (his own
-   * press or typed words, his yes in Waiting for you), his model in his own turn, or someone else. Set by the daemon's
+   * a skill), from the credential the daemon authenticated, never a field the caller sends: the owner in person (their own
+   * press or typed words, their yes in Waiting for you), their model in their own turn, or someone else. Set by the daemon's
    * `capabilities.run`; absent anywhere else, which is read as someone else's.
    */
   readonly author?: RecordAuthor | undefined;
   /**
-   * Who made this run's act and how it was decided (his press, his yes to a call put to him, or admitted under his rules
+   * Who made this run's act and how it was decided (the owner's press, their yes to a call put to them, or admitted under their rules
    * for the caller named), for a shared setting it sends to a machine group, which keeps the record on every member.
    * Set by the daemon's `capabilities.run`; absent elsewhere.
    */
@@ -390,15 +394,15 @@ export interface CapabilityDefinition<Services> {
   readonly riskDone?: string | undefined;
   readonly ownerOnly?: { readonly reason: string; readonly instead: string } | undefined;
   /**
-   * Only the owner himself does it, whoever else holds the access: any other caller's call (a paired device, a member,
-   * an admin's sign-in, a person's press on a credential that is not the owner's) is put to him as his own act, opening
-   * on No, and runs on his yes (routes/capabilities.ts). Set with `ownerOnly`, which puts a model's call to him.
+   * Only the owner in person does it, whoever else holds the access: any other caller's call (a paired device, a member,
+   * an admin's sign-in, a person's press on a credential that is not the owner's) is put to the owner as their own act, opening
+   * on No, and runs on their yes (routes/capabilities.ts). Set with `ownerOnly`, which puts a model's call to the owner.
    */
   readonly ownersAct?: true | undefined;
   /**
-   * The act is the owner's own for these values only (a change to one of his shared memory records, which belong to no
-   * project): any caller but the owner himself and his own turns is put to him as his own act, as `ownersAct` puts every
-   * call (routes/capabilities.ts). Read before anything is asked; true means put to him.
+   * The act is the owner's own for these values only (a change to one of the owner's shared memory records, which belong to no
+   * project): any caller but the owner in person and their own turns is put to the owner as their own act, as `ownersAct` puts every
+   * call (routes/capabilities.ts). Read before anything is asked; true means put to the owner.
    */
   readonly ownersActWhen?: ((values: ActionValues, services: Services) => boolean) | undefined;
   /**
@@ -424,14 +428,14 @@ export interface CapabilityDefinition<Services> {
   readonly asksItself?: true | undefined;
   /**
    * Its outcome carries a value the person must see once (the result's `reveal`): a place shows it whole in its own
-   * pane, with the copy key, until he leaves it; `capabilities.run` returns it only to the person who asked.
+   * pane, with the copy key, until the person leaves it; `capabilities.run` returns it only to the person who asked.
    */
   readonly reveals?: CapabilityReveal | undefined;
   /**
    * What its result carries that is secret, in words for the owner's card ("your sign-in tokens", "the group's join
    * key"): a file it writes with working tokens, a value it reveals. When the result would go to a caller that is not
    * the owner's own program (a paired device or a member: carried back to its machine, revealed to its person, written
-   * where it reads), the run is the owner's own act, put to him opening on No, the card saying "This sends <it> to
+   * where it reads), the run is the owner's own act, put to them opening on No, the card saying "This sends <it> to
    * <that caller>." (routes/capabilities.ts). Every capability whose result is secret declares it.
    */
   readonly resultSecret?: string | undefined;
@@ -466,7 +470,7 @@ export interface CapabilityDefinition<Services> {
    * The chosen values of one input with which a run writes a secret although the action itself does not always (a
    * setting that holds a credential: its new value goes to the secret store): such a run has the `secret.write` effect
    * (catalog.ts `capabilityEffects`), the writes-a-secret class of the one owner decision, so anyone but the owner
-   * himself is put to him, once, before it runs.
+   * in person is put to the owner, once, before it runs.
    */
   readonly secretWhen?: CapabilityTightensWhen | undefined;
   /**
@@ -511,9 +515,15 @@ export interface CapabilityDefinition<Services> {
    * For a capability that applies a file: the file read once, in the daemon, before anything is asked. It answers the
    * refusal the file's content already earns (a setting in it locked as managed), or the values with that content in
    * them (`filesAt: program`, `content`), so the owner is asked about exactly what then runs and the run never reads the
-   * file again. Not run again for the call's run on his yes (it runs on the values kept with the question).
+   * file again. Not run again for the call's run on the owner's yes (it runs on the values kept with the question).
    */
   readonly readsFileBefore?: ((values: ActionValues, services: Services, caller: CapabilityCaller) => ActionValues | CapabilityRefusal | undefined) | undefined;
+  /**
+   * A refusal the daemon can read only by asking (a piece of work this caller did not cause: builtin/work.ts), read in
+   * `capabilities.run` before anything is decided or asked, with `caller.method` set: a call refused whatever the answer is
+   * refused before any question. Returns the refusal, or undefined when the call may go on.
+   */
+  readonly refusedBefore?: ((values: ActionValues, services: Services, caller: CapabilityCaller) => Promise<CapabilityRefusal | undefined>) | undefined;
   /**
    * Why no place has a control for it, when that is meant: it exists for a model or a program (a model proposing work
    * with its plan, a program counting a routine it started), and a person reaches what it does by another control,

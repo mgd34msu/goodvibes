@@ -12,6 +12,7 @@ import { executeCapturedFileOperations } from './captured-exec-file-ops.js';
 import { computeCapturedMasks } from './captured-exec-masks.js';
 import { CapturedBoundaryRefusal, capturedRefusalText } from './captured-exec-refusal.js';
 import { createSafeRegex } from '../../utils/safe-regex.js';
+import { turnWritesNoFile } from './containment.js';
 import { runInteractiveCommand, type ExecInteractionRuntime } from './interactive.js';
 import { projectCapturedExecDependencies, type CapturedExecDependencyInput } from './captured-exec-dependencies.js';
 /**
@@ -263,7 +264,8 @@ export async function runCapturedCommand(
   const combined = binding.signal && signal ? AbortSignal.any([binding.signal, signal]) : binding.signal ?? signal;
   const operations = new AbortController();
   const operationSignal = combined ? AbortSignal.any([combined, operations.signal]) : operations.signal;
-  const mutable = contractInputAuthorityMutable(binding.authority);
+  // Work someone else caused writes no file either (containment.ts `turnWritesNoFile`): its view is read-only.
+  const mutable = contractInputAuthorityMutable(binding.authority) && !turnWritesNoFile();
   const candidate = observer.repairCandidate;
   let temporary: string | undefined;
   let placeholder: string | undefined;

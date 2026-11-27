@@ -22,13 +22,15 @@ export interface ListRow {
  * How the web UI turns an operator method's answer into rows, as data (it is
  * written to the generated command-actions file): the array at `from` (a dot
  * path), kept where `where.field` equals `where.equals` (`{input}` blanks are
- * the earlier answers), each entry's `each` array taken instead when given,
- * and each row's fields read from the named properties (`.` is the entry itself).
+ * the earlier answers), each entry's `each` array taken instead when given
+ * (only its entries matching `eachWhere`, when given), and each row's fields read from the named properties (`.` is the entry itself).
  */
 export interface ListRowsFromOutput {
   readonly from: string;
   readonly where?: { readonly field: string; readonly equals: string } | undefined;
   readonly each?: string | undefined;
+  /** Of the `each` entries, only those where this field equals the value (`{input}` blanks filled). */
+  readonly eachWhere?: { readonly field: string; readonly equals: string } | undefined;
   readonly value: string;
   readonly label: string;
   readonly detail?: string | undefined;
@@ -67,7 +69,8 @@ export function rowsFromOutput(spec: ListRowsFromOutput, output: unknown, earlie
   const list = readPath(output, spec.from);
   if (!Array.isArray(list)) return [];
   const kept = spec.where ? list.filter((entry) => String(readPath(entry, spec.where!.field)) === fillBlanks(spec.where!.equals, earlier)) : list;
-  const entries = spec.each ? kept.flatMap((entry) => { const inner = readPath(entry, spec.each!); return Array.isArray(inner) ? inner : []; }) : kept;
+  const inner = spec.each ? kept.flatMap((entry) => { const each = readPath(entry, spec.each!); return Array.isArray(each) ? each : []; }) : kept;
+  const entries = spec.eachWhere ? inner.filter((entry) => String(readPath(entry, spec.eachWhere!.field)) === fillBlanks(spec.eachWhere!.equals, earlier)) : inner;
   const seen = new Set<string>();
   // One row per value: a shop bought from twice is one shop.
   return entries.map((entry): ListRow => {

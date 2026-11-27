@@ -7,13 +7,11 @@
  *
  * The owner types a command line and presses Enter through the terminal's real
  * command route (command-mode-route.ts, the same handler both apps build), with
- * the real command registry, the real `/secrets` command and the real input
- * history persisting to a file in a temp directory. What is on disk afterwards,
- * and what a fresh history recalls from it, must not hold the value; the rest
- * of the line is kept so it can still be recalled and corrected.
- *
- * Also covered: a command this app does not register (an Agent has no
- * `/local-auth`) and a token flag typed on any command line.
+ * the real command registry and the real input history persisting to a file in
+ * a temp directory. What is on disk afterwards, and what a fresh history
+ * recalls from it, must not hold the value; the rest of the line is kept so it
+ * can still be recalled and corrected: a token flag typed on any command line,
+ * also on a command this app does not register.
  *
  * A pasted block in a sent message is kept by the same history: a message is
  * sent through the real prompt key route with a forty-line paste folded in
@@ -25,7 +23,6 @@ import { afterEach, expect, test } from 'bun:test';
 import { mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { SecretsManager } from '../platform/src/platform/config/secrets.ts';
 import { createCommandModeTokenHandler, type CommandRouteContext } from '../terminal-shell/src/command-mode-route.ts';
 import { createTerminalCommandRegistry } from '../terminal-shell/src/command-registry.ts';
 import {
@@ -40,15 +37,14 @@ import { expandPrompt, registerPasteForHost } from '../terminal-shell/src/input-
 import { TerminalInputHandlerState } from '../terminal-shell/src/input-handler-state.ts';
 import { InputHistory } from '../terminal-shell/src/input-history.ts';
 import { getWrappedPromptInfo } from '../terminal-shell/src/prompt-buffer.ts';
-import { createSecretsCommand, type SecretsCommandContext } from '../terminal-shell/src/secrets-command.ts';
 import { splitSlashCommand } from '../terminal-shell/src/slash-command-parser.ts';
 
-interface Ctx extends CommandRouteContext, SecretsCommandContext {}
+type Ctx = CommandRouteContext & { readonly print: (text: string) => void };
 
 const roots: string[] = [];
 afterEach(() => { for (const root of roots.splice(0)) rmSync(root, { recursive: true, force: true }); });
 
-/** One terminal: registry with /secrets, a persisted history, and the command route, ready to take one line. */
+/** One terminal: the command registry, a persisted history, and the command route, ready to take one line. */
 function terminal() {
   const root = realpathSync(mkdtempSync(join(tmpdir(), 'gv-history-secrets-')));
   roots.push(root);
@@ -57,23 +53,13 @@ function terminal() {
   mkdirSync(home, { recursive: true });
   mkdirSync(project, { recursive: true });
   const historyPath = join(home, 'input-history.json');
-  const secrets = new SecretsManager({ surfaceRoot: 'goodvibes', globalHome: home, projectRoot: project });
   const { CommandRegistry } = createTerminalCommandRegistry<Ctx>();
   const registry = new CommandRegistry();
-  // Storing a secret runs in the daemon (capability secrets.set); no daemon runs here, so the line is refused after the
-  // history has taken it, which is all this proof reads.
-  registry.register(createSecretsCommand<Ctx>({
-    writeScope: (_key, requested) => requested, deleteScope: (_key, requested) => requested, relocationNote: () => '',
-  }, {
-    daemon: () => ({ probe: () => ({ available: false, reason: 'no daemon in this proof' }), invoke: async () => { throw new Error('no daemon in this proof'); } }),
-    caller: () => ({ workingDirectory: project, program: 'tui' }),
-  }));
 
   let settled: () => void = () => {};
   const done = new Promise<void>((resolve) => { settled = resolve; });
   const context: Ctx = {
     workspace: { shellPaths: { workingDirectory: project, homeDirectory: home } },
-    platform: { secretsManager: secrets },
     print: () => settled(),
     executeCommand: async () => false,
   };
@@ -113,14 +99,6 @@ function remembered(historyPath: string): string {
   for (let entry = fresh.up(''); entry !== null; entry = fresh.up(entry.text)) recalled.push(entry.text);
   return `${readFileSync(historyPath, 'utf8')}\n${recalled.join('\n')}`;
 }
-
-test('a value given to /secrets set is not written to history; the command line is', async () => {
-  const term = terminal();
-  await term.enter('/secrets set OPENAI_API_KEY sk-typed-secret-4f9a2c --scope user');
-  const kept = remembered(term.historyPath);
-  expect(kept).not.toContain('sk-typed-secret-4f9a2c');
-  expect(kept).toContain('/secrets set OPENAI_API_KEY');
-});
 
 test('a token flag on any command line is not written', async () => {
   const term = terminal();

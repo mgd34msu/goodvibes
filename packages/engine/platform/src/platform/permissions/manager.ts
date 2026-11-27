@@ -148,7 +148,7 @@ interface SafetyInput {
   readonly attribution?: PermissionAttribution | undefined;
   /** The call acts on what the daemon holds, in no project folder (hostDecides, outsideFolder): the folder's trust is not asked. */
   readonly outsideFolder?: boolean | undefined;
-  /** The owner confirmed this exact call himself; his confirmation is the approval. */
+  /** The owner confirmed this exact call in person; their confirmation is the approval. */
   readonly ownerConfirmed?: boolean | undefined;
   /** Where the call sends as the owner (callRecipients): an answer to a new recipient covers these for the session. */
   readonly recipients?: readonly string[] | undefined;
@@ -176,6 +176,22 @@ function jevDecisionDetail(outcome: string, reading: Awaited<ReturnType<typeof r
   if (outcome === 'revise') return `Jev chose a narrower alternative instead of this call, because ${because}.`;
   if (outcome === 'defer') return `Jev's reason: ${because}. It may run once its condition changes.`;
   return `Jev's reason: ${because}. A narrower call that avoids this may be allowed.`;
+}
+
+/**
+ * Who is asking and from where, as the permission decision is given it: the surface the instruction came from, the
+ * caller outside the daemon's own programs (a paired device, a member, the outside agent, a script with the token, a
+ * typed command) by the name the daemon authenticated, the project, and whether the conversation has read text from
+ * outside and where. Facts for the decision; none of them asks anyone.
+ */
+function decisionProvenance(surface: string | undefined, attribution: PermissionAttribution | undefined, workingDirectory: string | undefined): Record<string, string> {
+  const readOutside = exposureWordsNow() ?? (conversationExposedNow() ? 'this conversation has read text from outside' : undefined);
+  return {
+    surface: surface ?? 'owner-direct',
+    caller: attribution?.kind === 'outside-caller' ? attribution.name : surface === undefined ? 'your own model, in your own conversation' : `a sender on ${surface}`,
+    ...(workingDirectory ? { project: workingDirectory } : {}),
+    ...(readOutside ? { readOutside } : {}),
+  };
 }
 
 interface SafetyOutcome {
@@ -214,7 +230,7 @@ interface RememberedDecision {
   readonly reason: PermissionDecisionReasonCode;
   /** What the answer or rule covers, as the agent is told it. */
   readonly description: string;
-  /** Set when the answer was the owner's to an item only he decides. */
+  /** Set when the answer was the owner's to an item only the owner decides. */
   readonly ownerOnly?: OwnerOnlyKind | undefined;
   assertCurrent(): void;
 }
@@ -266,9 +282,9 @@ function neverRunPatterns(lookup: CompiledRules): readonly NeverRunPattern[] {
 
 /**
  * A call the owner's own rule outside the gate asks about (a `Pre:tool` hook's
- * `ask`, an `ask-on-risk` MCP server called outside its scope) is his to
- * decide, in every mode: it is put to him as his standing "ask me" (held for
- * him in just-vibes). A refusal still stands; nothing else settles it.
+ * `ask`, an `ask-on-risk` MCP server called outside its scope) is the owner's to
+ * decide, in every mode: it is put to them as their standing "ask me" (held for
+ * them in just-vibes). A refusal still stands; nothing else settles it.
  */
 /**
  * The GoodVibes home directories as this process resolves them (`<home>/.goodvibes` and the daemon's home), handed to
@@ -314,16 +330,6 @@ function installedProductFiles(): readonly string[] {
   files.push(resolve(folder, 'lib', `sqlite-vec-${process.platform}-${process.arch}`));
   installedFilesCache = files;
   return files;
-}
-
-/**
- * An act the owner confirmed himself (a press, a form, a typed line: `ownerConfirmed`) that only plan mode refuses:
- * plan mode restricts the model, not the person, so it runs. A deny or never-run rule, or any other refusing fact,
- * still refuses it.
- */
-function ownersActInPlanMode(input: Pick<SafetyInput, 'ownerConfirmed' | 'mode' | 'decided'>): boolean {
-  if (input.ownerConfirmed !== true || input.mode !== 'plan') return false;
-  return input.decided.kind !== 'fact' || input.decided.basis === 'plan';
 }
 
 /** Where a path really is: its real path, or its nearest existing folder's real path with the rest after it. */
@@ -378,18 +384,26 @@ function searchPathFolders(): readonly string[] {
 
 /**
  * A call something outside the permission rules asks the owner about (`ownerAsk`: a tool server set to ask before a
- * call outside its limits, his Pre:tool hook): put to him, with that as why, never as "your rule says to ask you".
+ * call outside its limits, their Pre:tool hook): put to them, with that as why, never as "your rule says to ask you".
  * Asked every time (`once`): nothing is offered to remember, and no remembered answer (a rule or a session's yes, one
  * given on a call inside the server's limits included) settles it, since an allow is turned back into this ask. To
- * allow more, the owner changes the server's limits or its trust level (Tools and extensions), or his hook.
+ * allow more, the owner changes the server's limits or its trust level (Tools and extensions), or their hook.
  */
+/** A model's hook change as the one decision path reads it: a grant of access (`dangerous`), acting on the app's state. */
+const HOOK_CHANGE_DEFINITION: ToolDefinition = {
+  name: 'state', description: 'A change to the hooks that run on events: it grants a command, a script or an address access to every event it matches.',
+  parameters: { type: 'object' }, dangerous: true, sideEffects: ['state'],
+};
+
 function askedByOwnerRule(decided: CallClass, ownerAsk: string | undefined): CallClass {
+  // As released: the owner's own rule outside the gate (a tool server's "ask on risk" level, their Pre:tool hook) puts the
+  // call to them in every mode, YOLO included, as their standing "ask me" (held for them in just-vibes). A refusal stands.
   if (ownerAsk === undefined || (decided.kind === 'fact' && !decided.allow)) return decided;
-  return decided.kind === 'owner-only' ? decided : { kind: 'owner-only', item: 'standing-ask', because: outsideAskBecause(ownerAsk), once: true };
+  return decided.kind === 'owner-only' ? decided : { kind: 'owner-only', item: 'standing-ask', because: outsideAskBecause(ownerAsk) };
 }
 
 /**
- * Why something outside the gate asks him (a tool server's level, his hook), shown to him with the call: once. When it
+ * Why something outside the gate asks the owner (a tool server's level, their hook), shown to them with the call: once. When it
  * is already the card's "Only you decide this" cause (askedByOwnerRule), it is not repeated among the reasons.
  */
 function withOwnerAsk(analysis: PermissionRequestAnalysis, ownerAsk: string | undefined, decided: CallClass): PermissionRequestAnalysis {
@@ -520,9 +534,9 @@ function ownerOnlySessionKey(kind: OwnerOnlyKind, key: string, args: Record<stri
 }
 
 /**
- * The settings that name where the owner sends himself: his mail addresses,
- * his notification webhooks and the default recipients his surfaces deliver
- * to. A recipient found here is his own destination, not a new one.
+ * The settings that name where the owner sends things to themselves: their mail addresses,
+ * their notification webhooks and the default recipients their surfaces deliver
+ * to. A recipient found here is the owner's own destination, not a new one.
  */
 const OWNER_DESTINATION_KEYS: readonly string[] = [
   ...OWNER_ADDRESS_CONFIG_KEYS, 'notifications.webhookUrls', 'surfaces.googleChat.webhookUrl',
@@ -878,7 +892,7 @@ export interface AutonomousPermissionOptions extends PermissionExecutionOptions 
   /** Exact registry-owned call. Required to authenticate a strict tool body. */
   readonly preparedCall?: Readonly<{ registry: ToolRegistry; call: PreparedToolCall }> | undefined;
   /**
-   * The owner confirmed this exact call himself: a form he filled in and
+   * The owner confirmed this exact call in person: a form they filled in and
    * answered yes to (`ToolRegistry.executeOwnerConfirmed`). A fact (a deny
    * rule, plan mode, a refused decision) still decides; nobody is asked again.
    */
@@ -1098,7 +1112,7 @@ export class PermissionManager {
   private readonly autonomousPending = new Set<string>();
   private readonly autonomousEpochs = new Map<string, number>();
   private readonly autonomousClaims = new Set<string>();
-  /** The settings baseline of a source whose call the owner answered himself, taken when he answered (admitAutonomous). */
+  /** The settings baseline of a source whose call the owner answered in person, taken when they answered (admitAutonomous). */
   private readonly ownerAnsweredRevisions = new Map<string, { readonly assertOwners: () => void; readonly assertSettings: () => void }>();
   /** Claims of settled calls, oldest first; the only claims that may ever be forgotten. */
   private readonly retiredClaims = new Set<string>();
@@ -1115,8 +1129,8 @@ export class PermissionManager {
   /** Recipients the owner allowed for the rest of a session, keyed `<session>|<recipient>`. */
   private readonly allowedRecipients = new Set<string>();
   /**
-   * The owner's answer to an agent call the gate put to him, keyed by its tasks,
-   * until the delegation check of that call takes it (askDelegation): he is asked
+   * The owner's answer to an agent call the gate put to them, keyed by its tasks,
+   * until the delegation check of that call takes it (askDelegation): the owner is asked
    * about one delegation once, not by the gate and then again by the check.
    */
   private readonly answeredDelegations = new Map<string, { readonly approved: boolean; readonly reason?: string }>();
@@ -1295,7 +1309,7 @@ export class PermissionManager {
     const assertCurrent = () => {
       assertPermissionActive(signal);
       if (this.autonomousClaims.has(sourceId)) throw new Error('Autonomous preparation authority changed or source was claimed');
-      // Once the owner answered this source's call himself, the settings in force when he answered are the ones held to.
+      // Once the owner answered this source's call in person, the settings in force when they answered are the ones held to.
       const held = this.ownerAnsweredRevisions.get(sourceId) ?? revisions;
       held.assertOwners(); held.assertSettings();
     };
@@ -1441,7 +1455,7 @@ export class PermissionManager {
     // The frame holds the mode in force with the model taken as answering (owner choice and calibration applied).
     const mode = this.failureAware(effectivePermissionMode(permissions?.mode, capturedAuthority.autoApprove === true));
     const preset = presetForMode(mode);
-    // Plan mode's read-only effect guard restricts the model, not the person: an act the owner confirmed himself writes.
+    // Plan mode's read-only effect guard restricts the model, not the person: an act the owner confirmed in person writes.
     const effectReadOnly = preset.readOnly && options.ownerConfirmed !== true;
     // Plan mode admits a call whose category is a read (gate/classify.ts): its own request out (a `fetch` reads a page
     // with one GET, its effect `send`) is that read, never a change, so the guard holds only what writes. Before, plan mode
@@ -1488,19 +1502,19 @@ export class PermissionManager {
       choices: capturedAuthority.autonomousChoices,
       ...(options.ownerConfirmed === true ? { ownerConfirmed: true } : {}),
     });
-    // His yes is to the call as he saw it, under the rules then: a rule put in force while the question waited that
+    // The owner's yes is to the call as they saw it, under the rules then: a rule put in force while the question waited that
     // refuses it (a never-run rule, a deny rule, the tool set to refuse) still refuses it.
     const answeredYes = safety.result.approved && safety.result.sourceLayer === 'user_prompt';
     const result = (answeredYes ? await this.refusedSinceAsked({ toolName, args, definition, category, mode, ownerOnly,
       directory: capturedAuthority.directory ?? undefined, analysis, signal }) : undefined) ?? safety.result;
-    // The owner answered this call himself: a question waits as long as he takes, and a setting written meanwhile (a
-    // call he approved elsewhere, a change made anywhere) is not a reason to fail his answer. His answer is the decision;
-    // the settings it holds against from here on are the ones in force when he gave it.
+    // The owner answered this call in person: a question waits as long as they take, and a setting written meanwhile (a
+    // call they approved elsewhere, a change made anywhere) is not a reason to fail their answer. Their answer is the decision;
+    // the settings it holds against from here on are the ones in force when they gave it.
     if (result.sourceLayer === 'user_prompt') {
       revisions = this.authorityRevisions(sourceOf);
       this.ownerAnsweredRevisions.set(sourceId, revisions);
     }
-    // The owner answered a channel's request himself: his approval is the authority the channel lacked.
+    // The owner answered a channel's request in person: their approval is the authority the channel lacked.
     const ownerDirected = decided.kind === 'owner-only' && decided.item === 'channel-request' && result.approved && result.sourceLayer === 'user_prompt';
     this.policyRuntimeState.recordPermissionDecision({ callId: sourceId, tool: toolName, category, result, project: this.directoryHere() ?? undefined });
     this.noteJevDecision(toolName, args, category, result);
@@ -1616,6 +1630,8 @@ export class PermissionManager {
       const result = await this.assessDecisionExecutionSafety(input);
       if (result.result.autonomousDecision?.outcome === 'reject') rememberDecisionRefusal(this.captureRefusalAction(input));
       return result;
+    // As released: a set model that fails under Decision Model Only refuses this one call; otherwise (Hybrid, or no
+    // model set) the classic path decides.
     }, (failure) => failure !== undefined && decisionModelPolicyState().policy === 'Decision Model Only'
       ? this.refusedWithoutDecision(input, failure)
       : this.assessClassicExecutionSafety(input));
@@ -1630,7 +1646,7 @@ export class PermissionManager {
     input.assertCurrent();
     const why = failure instanceof Error ? failure.message : String(failure);
     return { result: this.result(false, false, 'safety_check', 'jev_defer', input.policyResult.analysis, {
-      detail: `Not run: the decision model could not decide this call (${why}), and "If Jev can't answer" is set to Refuse the action. Fix the decision model, or choose Ask me for "If Jev can't answer" in the decision model settings to have such calls come to you.` }) };
+      detail: `Not run: the decision model could not decide this call (${why}), and "When the decision model is missing or fails" is set to Decision Model Only. Fix the decision model, or choose Hybrid for "When the decision model is missing or fails" in the decision model settings to have such calls decided without it.` }) };
   }
 
   private captureRefusalAction(input: SafetyInput): RefusedDecisionAction {
@@ -1648,9 +1664,6 @@ export class PermissionManager {
 
   private async assessClassicExecutionSafety(input: SafetyInput): Promise<SafetyOutcome> {
     input.assertCurrent();
-    // Plan mode restricts the model, not the person: an act the owner confirmed himself runs in plan mode. A refusing
-    // rule (deny, never-run) still refuses it.
-    if (ownersActInPlanMode(input)) return this.ownerConfirmedOutcome(input);
     // A fact (including yolo and the plan refusal) is already the decision.
     if (!input.policyResult.approved || input.decided.kind === 'fact' || input.mode === 'plan') return { result: input.policyResult };
     const analysis = input.policyResult.analysis;
@@ -1670,12 +1683,13 @@ export class PermissionManager {
     }
     if (this.takeOwnerRevision(input)) return { result: this.result(true, false, 'user_prompt', 'user_approved', analysis) };
     if (input.ownerConfirmed === true) return this.ownerConfirmedOutcome(input);
-    // just-vibes interrupts no one: with decision models off, what needs the owner is held for the end of the run.
+    // just-vibes interrupts no one: with no decision model to answer, what needs the owner is held for the end of the run
+    // (as released). Jev decides reaches here as Ask me (effectivePermissionMode) and asks below.
     if (input.mode === 'just-vibes') {
       const approvedOnce = this.heldOnceApproved(input);
       if (approvedOnce) return approvedOnce;
       return this.queuedForOwner(input, analysis,
-        ownerOnly ? `held for you: ${ownerOnlyWords(ownerOnly, because)}` : 'held for you: this needs a decision and decision models are off', ownerOnly);
+        ownerOnly ? `held for you: ${ownerOnlyWords(ownerOnly, because)}` : 'held for you: this needs a decision and no decision model can answer', ownerOnly);
     }
     return this.askOwner(input, analysis, {
       reasons: ownerOnly ? [`Only you decide this: ${ownerOnlyWords(ownerOnly, because)}.`] : [],
@@ -1687,7 +1701,7 @@ export class PermissionManager {
   /**
    * just-vibes held an owner-only call that is answered each time (what runs later, made after the turn read text anyone
    * can write; a card's detail), and the owner approved that exact held call: good once, for the same call made again
-   * (as the boundary's held send is). Never remembered past that one call. Without this his yes could never take effect:
+   * (as the boundary's held send is). Never remembered past that one call. Without this the owner's yes could never take effect:
    * such a call reads no session answer, so it was held again each time it was made.
    */
   private heldOnceApproved(input: SafetyInput): SafetyOutcome | undefined {
@@ -1701,11 +1715,11 @@ export class PermissionManager {
       { detail: 'The owner approved this exact call after just-vibes held it; good for this one call.' }) };
   }
 
-  /** A call the owner confirmed himself in a form: his yes is the approval, recorded as his. */
+  /** A call the owner confirmed in person in a form: their yes is the approval, recorded as theirs. */
   private ownerConfirmedOutcome(input: SafetyInput): SafetyOutcome {
     input.assertCurrent();
     return { result: this.result(true, false, 'user_prompt', 'user_approved', input.policyResult.analysis,
-      { detail: 'The owner confirmed this exact action in a form he filled in.' }) };
+      { detail: 'The owner confirmed this exact action in a form they filled in.' }) };
   }
 
   /**
@@ -1731,8 +1745,8 @@ export class PermissionManager {
   }
 
   /**
-   * Ask the owner about one call and keep what he asked to be remembered. An
-   * answer to an owner-only item is remembered as covering that item, so he is
+   * Ask the owner about one call and keep what they asked to be remembered. An
+   * answer to an owner-only item is remembered as covering that item, so the owner is
    * asked once. Revised arguments become a revision the caller prepares again.
    */
   private async askOwner(input: SafetyInput, analysis: PermissionRequestAnalysis, o: {
@@ -1768,13 +1782,13 @@ export class PermissionManager {
       ...(o.containable === true && o.ownerOnly === undefined ? { containable: true as const } : {}),
       ...(input.outsideFolder === true ? { outsideFolder: true as const } : {}),
     }, { signal: input.signal }), input.signal);
-    // A question waits as long as the owner takes, and a setting written meanwhile (another call he approved, a change
-    // made anywhere) moves the configuration this decision was read under. His recorded answer is the decision: it is
-    // not failed for that, and what he asked to be remembered is kept. Only the call's own end (its signal) stops it.
+    // A question waits as long as the owner takes, and a setting written meanwhile (another call they approved, a change
+    // made anywhere) moves the configuration this decision was read under. Their recorded answer is the decision: it is
+    // not failed for that, and what they asked to be remembered is kept. Only the call's own end (its signal) stops it.
     const answered = (): void => assertPermissionActive(input.signal);
     answered();
     // Nobody where the call was made can answer (a headless run with nobody answering it): held for the owner, said
-    // where it waits; not his refusal, and nothing is remembered from it.
+    // where it waits; not the owner's refusal, and nothing is remembered from it.
     if (asked.heldForOwner === true) {
       const reason = asked.reason ?? 'held for you: nobody in this run can answer it';
       return { result: this.result(false, false, 'runtime_mode', 'mode_queued_for_owner', analysis, {
@@ -1792,7 +1806,7 @@ export class PermissionManager {
     // The owner just answered for these agents: the delegation check of the same call takes this answer instead of asking again.
     const delegated = delegatedTasks(input.toolName, modified ?? input.args);
     if (delegated !== undefined) this.answeredDelegations.set(delegated, { approved: reply.approved, ...(reply.reason ? { reason: reply.reason } : {}) });
-    // A new recipient the owner allowed and asked to be remembered is his for the rest of the session, whatever is sent there next.
+    // A new recipient the owner allowed and asked to be remembered is theirs for the rest of the session, whatever is sent there next.
     if (o.ownerOnly === 'new-recipient' && reply.approved && (reply.rememberTier ?? (reply.remember === true ? 'session' : undefined)) !== undefined
       && (modified === undefined || isDeepStrictEqual(modified, input.args))) {
       const session = `${this.projectKeyPrefix()}${sessionOfCheck.getStore() ?? ''}`;
@@ -1826,14 +1840,14 @@ export class PermissionManager {
   private async assessDecisionExecutionSafety(input: SafetyInput): Promise<SafetyOutcome> {
     input.assertCurrent();
     const decided = input.decided;
-    // Plan mode restricts the model, not the person (ownersActInPlanMode).
-    if (ownersActInPlanMode(input)) return this.ownerConfirmedOutcome(input);
     if (!input.policyResult.approved || decided.kind === 'fact') return { result: input.policyResult };
     if (this.takeOwnerRevision(input)) {
       return { result: this.result(true, false, 'user_prompt', 'user_approved', input.policyResult.analysis,
         { detail: 'The owner approved these exact revised arguments.' }) };
     }
     if (input.ownerConfirmed === true) return this.ownerConfirmedOutcome(input);
+    // An item of the owner's list (classify.ts), as released: asked in every mode that reaches here, held for the end of
+    // the run in Just vibes; Jev is never asked to decide it.
     if (decided.kind === 'owner-only') {
       if (input.mode === 'just-vibes') {
         const approvedOnce = this.heldOnceApproved(input);
@@ -1843,7 +1857,7 @@ export class PermissionManager {
       return this.askOwner(input, input.policyResult.analysis, {
         reasons: [`Only you decide this: ${ownerOnlyWords(decided.item, decided.because)}.`], ownerOnly: decided.item, ownerOnlyBecause: decided.because,
         revisedDetail: 'Prepare the exact action revised and approved by the owner.',
-        // A card's detail he types is answered each time: nothing is offered to remember.
+        // A card's detail the owner types is answered each time: nothing is offered to remember.
         ...(decided.once === true ? { single: true } : {}),
       });
     }
@@ -1907,11 +1921,10 @@ export class PermissionManager {
     // A refusal by the boundary is not Jev's to overrule in any mode. Wholesale destruction and
     // card details are refused outright; a refusal the boundary marks approvable (card details it
     // is unsure of, content that may repeat untrusted text) is cleared only by the owner's answer
-    // for these exact arguments: asked now, or held for him in just-vibes.
+    // for these exact arguments: asked now, or held for the owner in just-vibes (as released).
     if (!boundary.passed && boundary.refusedBy !== 'judgment-input') {
-      const code = BOUNDARY_REFUSAL_CODES[boundary.refusedBy];
       if (!boundary.approvable) {
-        return { result: this.result(false, false, 'boundary', code, analysis, { boundary: boundaryResult, detail: boundary.reason }) };
+        return { result: this.result(false, false, 'boundary', BOUNDARY_REFUSAL_CODES[boundary.refusedBy], analysis, { boundary: boundaryResult, detail: boundary.reason }) };
       }
       const heldKey = ownerOnlySessionKey('untrusted-derived-send', this.getApprovalKey(input.toolName, input.args), input.args);
       if (this.sessionApprovals.get(heldKey) === true) {
@@ -1929,7 +1942,7 @@ export class PermissionManager {
     }
     // A shell command the boundary could not tell from wholesale destruction is the owner's in every
     // mode the gate reads: Jev is never offered to run it. Asked for this one call (nothing is
-    // offered to remember), or held for the end of the run in just-vibes.
+    // offered to remember), or held for the end of the run in just-vibes (as released).
     if (reading?.boundary.catastrophic === 'uncertain') {
       const item: OwnerOnlyKind = 'unrecoverable-delete';
       const reason = 'This command may destroy the machine or your data wholesale, and the reading could not rule it out.';
@@ -1944,8 +1957,8 @@ export class PermissionManager {
         preset: { preset: input.mode, action: 'ask' }, revisedDetail: 'Prepare the exact action revised and approved by the owner.',
       });
     }
-    // What the reading puts on the owner's own list goes to him as an item code recognizes does:
-    // asked in ask-me and jev-decides, held for the end of the run in just-vibes; Jev is not asked.
+    // What the reading puts on the owner's own list goes to them as an item code recognizes does:
+    // asked in ask-me and jev-decides, held for the end of the run in just-vibes; Jev is not asked (as released).
     const readingItem = reading ? ownerOnlyFromReading(reading) : undefined;
     if (readingItem !== undefined) {
       const answered = this.sessionApprovals.get(ownerOnlySessionKey(readingItem, this.getApprovalKey(input.toolName, input.args), input.args));
@@ -1991,7 +2004,8 @@ export class PermissionManager {
           beyondProject: reading.beyondProject, weakensSecurity: reading.weakensSecurity, obfuscated: reading.obfuscated,
           boundary: reading.boundary } } : {}) },
         constraints: { mode: input.mode, ownerPolicyAllowed: input.policyResult.approved },
-        provenance: { surface: this.gate.surfaceOf?.() ?? 'owner-direct' } }) as unknown as EntryType,
+        // Facts for the existing decision: the surface, who is asking, the project and the outside read.
+        provenance: decisionProvenance(this.gate.surfaceOf?.(), input.attribution, input.workingDirectory) }) as unknown as EntryType,
       evidence: [{ id: 'requested-tool-input', revision: input.actionRevision }, { id: 'live-authority', revision: input.authorityRevision }],
       // The host alternatives and resume conditions defined for this call are offered, so Jev can revise or defer.
       supportingDecisionIds: supportingIds, choices: input.choices ?? {}, allowAct: input.policyResult.approved,
@@ -2001,13 +2015,13 @@ export class PermissionManager {
     const receipt = decision.decision;
     // What the acting model reads: the outcome and the reading it rests on.
     const detail = jevDecisionDetail(receipt.outcome, reading);
-    // just-vibes does not refuse what Jev would not run: the owner decides it at the end of the run.
+    // just-vibes does not refuse what Jev would not run: the owner decides it at the end of the run (as released).
     if (input.mode === 'just-vibes' && receipt.outcome !== 'act') {
       return { ...this.queuedForOwner(input, analysis, `held for you: ${detail}`), recordClaim: () => decision.recordClaim() };
     }
     return {
       result: this.result(receipt.outcome === 'act', false, 'jev_decision', `jev_${receipt.outcome}`, analysis,
-        { boundary: boundaryResult, autonomousDecision: receipt, detail,
+        { boundary: boundaryResult, autonomousDecision: receipt, detail: receipt.outcome === 'act' ? receipt.summary : detail,
           preset: { preset: input.mode, action: receipt.outcome === 'act' ? 'allow' : 'deny' } }),
       recordClaim: () => decision.recordClaim(),
       ...(decision.revision ? { revision: decision.revision } : {}),
@@ -2034,13 +2048,13 @@ export class PermissionManager {
     // conversation (security/conversation-exposure.ts): an owner-only call of those kinds, and a capability that sends or
     // spends, is asked each time in every mode, never settled by a remembered yes or by the mode.
     // And a file write of what steers a model in a later conversation (a project's instruction file, a skill, an agent
-    // definition): his acceptance before it exists, not after (security/conversation-exposure.ts).
+    // definition): the owner's acceptance before it exists, not after (security/conversation-exposure.ts).
     const sendsSpendsLoosensFromRead = !runsLaterFromRead && i.untrustedRead && i.ownerOnly !== 'owner-act'
       && ((i.ownerOnly !== undefined && EXPOSED_ASKED_KINDS.has(i.ownerOnly)) || sendsOrSpendsCall(i.args, i.definition)
         || (i.category === 'write' && (paths ?? []).some(steersAModelPath)));
     const ownerOnly = runsLaterFromRead ? 'loosen-security' as const
       : sendsSpendsLoosensFromRead ? (i.ownerOnly ?? 'untrusted-derived-send') : i.ownerOnly;
-    // The owner's card says the conversation read text from outside, and where (the line he is asked with).
+    // The owner's card says the conversation read text from outside, and where (the line the owner is asked with).
     const exposedWords = runsLaterFromRead || sendsSpendsLoosensFromRead ? exposureWordsNow() : undefined;
     const ownerOnlyBecause = runsLaterFromRead ? [RUNS_LATER_FROM_READ_BECAUSE, exposedWords].filter(Boolean).join('. ')
       : sendsSpendsLoosensFromRead ? [i.ownerOnlyBecause ?? SENDS_FROM_READ_BECAUSE, exposedWords].filter(Boolean).join('. ') : i.ownerOnlyBecause;
@@ -2063,7 +2077,7 @@ export class PermissionManager {
       workspaceRestricted: this.restrictedHere(),
       // A run that answers every question itself (`--answer-permissions`) decides such a call here, by its script, and
       // sends it saying so: the daemon does not ask the owner again (permissions/run-answerer.ts). A run nobody answers
-      // decides it here too, so one the owner must decide is held for him instead of waited on.
+      // decides it here too, so one the owner must decide is held for them instead of waited on.
       hostDecides: hostDecidesCall(i.args, i.definition) && !runAnswersEveryQuestion() && !runHoldsForOwner(),
       onlyTightens: (i.definition?.tightens ? callOnlyTightens(i.definition.tightens, i.args) : false)
         || settingsWriteOnlyTightens(i.toolName, i.args, (key) => this.configReader.getSetting?.(key)),
@@ -2073,8 +2087,8 @@ export class PermissionManager {
 
   /**
    * The one rule lookup of a decision, reported as the rule fact the
-   * classifier reads: the owner's per-tool setting, managed policy, his answers
-   * this session and his saved rules (the rule store's compiled list, handed
+   * classifier reads: the owner's per-tool setting, managed policy, their answers
+   * this session and their saved rules (the rule store's compiled list, handed
    * over by reference), and where a path's link leads. A deny is reported over
    * an ask or an allow: a tool setting, then managed policy, then a denying
    * answer or rule (including where a link leads), then an answer or rule, then
@@ -2151,9 +2165,9 @@ export class PermissionManager {
    * of access (owner-only `grant-access`), classified like any call: plan mode refuses it (it is a
    * write), yolo allows it, a surface that cannot direct changes cannot direct this one, a deny (a
    * setting that denies the tool the hook would use, or a remembered deny) refuses it, and otherwise the
-   * owner is asked. He is asked once: an answer he chose to remember is his answer to this kind, so the
-   * same change is not asked again for as long as he chose (this exact change for the session, or a rule).
-   * just-vibes holds it for him at the end of the run.
+   * owner is asked. The owner is asked once: an answer they chose to remember is their answer to this kind, so the
+   * same change is not asked again for as long as they chose (this exact change for the session, or a rule).
+   * just-vibes holds it for them at the end of the run.
    */
   async checkHookChange(request: import('../tools/state/index.js').HookChangeRequest, options?: PermissionExecutionOptions): Promise<{ approved: boolean; reason?: string }> {
     this.assertSelectedModeCurrent();
@@ -2186,39 +2200,18 @@ export class PermissionManager {
           policyEnabled: this.featureFlags?.isEnabled('permissions-policy-engine') === true, options: { signal },
         });
     assertPermissionActive(signal);
-    const decided = classifyCall(mode, {
-      tool: 'the hook change', category: 'write', sideEffects: undefined, surface: this.gate.surfaceOf?.(), rule,
-      recoverable: false, ownerOnly,
-      untrustedRead: (this.gate.ledger ?? getProcessUntrustedContentLedger()).hasIngestedThisTurn() || conversationExposedNow(),
-    });
-    const refusal = (decision: ToolDecision): string => [decision.reason, ...(decision.next ?? []).slice(0, 1)].join('; ');
-    if (decided.kind === 'fact') return decided.allow ? { approved: true } : { approved: false, reason: refusal(decided.decision) };
-    // The owner-only kind it is put to him as: grant-access, or a channel's request, or his own "always ask me" rule.
-    const item: OwnerOnlyKind = decided.kind === 'owner-only' ? decided.item : ownerOnly;
-    // A just-vibes run does not stop for it: it is held for the owner at the end of the run.
-    if (mode === 'just-vibes') {
-      const held = this.queuedForOwner({ toolName: 'state', args }, analysis, `held for you: ${ownerOnlyReason(item)}`, item);
-      return { approved: false, reason: held.result.decision ? refusal(held.result.decision) : (held.result.detail ?? 'held for the owner') };
-    }
-    const reply = await awaitPermission(() => this.requestPermission({
-      callId: crypto.randomUUID(), tool: 'state', args, category: 'write',
-      analysis: { ...analysis, reasons: [...analysis.reasons, `Only you decide this: ${ownerOnlyReason(item)}.`] },
-      workingDirectory: this.directoryHere() ?? undefined,
-      // A channel's request is approved one call at a time: no remembered answer can stand in for the owner there.
-      rememberOptions: item === 'channel-request' ? [] : buildRememberOptions('state', args, this.rememberedRulesHere()),
-      ownerOnly: item,
-    }, { signal }), signal);
-    assertPermissionActive(signal);
-    // The change itself cannot be edited on the card: an answer that edited it remembers nothing.
-    const modified = reply.modifiedArgs === undefined ? undefined : captureOwnedJson(reply.modifiedArgs) as Record<string, unknown>;
-    const notSaved = item === 'channel-request' ? undefined : await this.rememberReply('state', args, reply, modified, item);
-    assertPermissionActive(signal);
-    if (reply.approved) return { approved: true };
-    return { approved: false, reason: reply.reason ?? `the ${hook.type} hook change was not approved${notSaved ? `. ${notSaved}` : ''}` };
+    if (rule?.effect === 'deny') return { approved: false, reason: `refused by ${rule.description}` };
+    // The one decision path every call takes (checkActive): the change is a grant of access (the definition says so),
+    // decided under the owner's mode: YOLO runs it, Jev decides and Just vibes ask Jev told it grants access, Ask me
+    // asks the owner. Nothing beside that path asks or holds it.
+    const result = await this.checkActive('state', args, undefined, signal, undefined, HOOK_CHANGE_DEFINITION);
+    if (result.approved) return { approved: true };
+    void analysis;
+    return { approved: false, reason: result.detail ?? result.userReason ?? `the ${hook.type} hook change was not allowed under your permission mode` };
   }
 
   /**
-   * Puts a delegation to the owner when nothing he said settles it and the
+   * Puts a delegation to the owner when nothing they said settles it and the
    * decision model could not read it (agents/delegation-authority.ts): which
    * agents, how many, to do what, yes or no. yolo and just-vibes run without
    * asking, so they start it; plan mode starts nothing; ask-me and jev-decides
@@ -2232,7 +2225,7 @@ export class PermissionManager {
     const mode = this.getMode();
     if (mode === 'yolo' || mode === 'just-vibes') return { approved: true, asked: false };
     if (mode === 'plan') return { approved: false, asked: false, reason: 'plan mode is on, and agents are not started while planning' };
-    // The gate put this very call to the owner a moment ago: his answer is the answer.
+    // The gate put this very call to the owner a moment ago: their answer is the answer.
     const key = JSON.stringify(question.tasks);
     const answered = this.answeredDelegations.get(key);
     if (answered !== undefined) {
@@ -2256,7 +2249,7 @@ export class PermissionManager {
   /**
    * Puts a model whose price moved away from free since it was chosen to the
    * owner before the first send to it (providers/model-price-changes.ts), in
-   * the ordinary approval prompt, when his mode has him decide (Ask me, Plan,
+   * the ordinary approval prompt, when their mode has them decide (Ask me, Plan,
    * and Jev decides without a working decision model; core/orchestrator.ts
    * decidePriceChange routes the other modes). With no one to answer (a headless
    * run that answers no prompts) it is refused, as every such ask is. Nothing
@@ -2281,10 +2274,10 @@ export class PermissionManager {
   }
 
   /**
-   * Puts enabling a Google API on the owner's Cloud project to him, in the
-   * ordinary approval prompt on its normal default, when his mode has him
+   * Puts enabling a Google API on the owner's Cloud project to them, in the
+   * ordinary approval prompt on its normal default, when their mode has them
    * decide (google/connection-repair.ts decideGoogleApiEnable routes the other
-   * modes). A request of his was refused because the API is off; a yes runs
+   * modes). A request of theirs was refused because the API is off; a yes runs
    * `gcloud services enable` as the signed-in gcloud account and the request
    * is sent again. With no one to answer it is refused, as every such ask is.
    */
@@ -2330,7 +2323,7 @@ export class PermissionManager {
   async checkDetailed(toolName: string, args: Record<string, unknown>, attribution?: PermissionAttribution, options?: PermissionExecutionOptions): Promise<PermissionCheckResult> {
     this.assertSelectedModeCurrent();
     // A model's capability call that runs the project's commands is decided as those commands, once. A caller the daemon
-    // put to the owner (`outside-caller`) is decided as the capability, as every other act of his.
+    // put to the owner (`outside-caller`) is decided as the capability, as every other act of theirs.
     const asCommands = attribution?.kind === 'outside-caller' ? undefined : await this.capabilityCommandsOf(toolName, args, options?.signal);
     if (asCommands !== undefined) return this.checkDetailed('exec', { commands: asCommands }, attribution, { ...(options ?? {}), definition: undefined });
     const signal = options?.signal;
@@ -2423,7 +2416,7 @@ export class PermissionManager {
       outsideFolder: hostDecidesCall(args, definition) || outsideFolderCall(args, definition),
     });
     assertCurrent();
-    // His yes, after a wait, never outweighs a refusal put in force meanwhile (refusedSinceAsked).
+    // The owner's yes, after a wait, never outweighs a refusal put in force meanwhile (refusedSinceAsked).
     const answeredYes = safety.result.approved && safety.result.sourceLayer === 'user_prompt';
     const result = (answeredYes ? await this.refusedSinceAsked({ toolName, args, definition, category, mode, ownerOnly,
       directory: directory ?? undefined, analysis: policyResult.analysis, signal }) : undefined) ?? safety.result;
@@ -2512,8 +2505,8 @@ export class PermissionManager {
   /**
    * The facts the owner-only list reads from this process's settings and the
    * owner's answers: whether the call is a settings write that loosens its key,
-   * and whether it sends to a recipient that is neither one of his configured
-   * destinations nor one he allowed this session. The recipients are the ones
+   * and whether it sends to a recipient that is neither one of the owner's configured
+   * destinations nor one they allowed this session. The recipients are the ones
    * the tool declares (callRecipients) and the ones code reads from a call no
    * declaration covers: a shell command that mails or posts a message, a
    * `fetch` to a messaging service, an MCP or plugin tool's recipient
@@ -2545,9 +2538,9 @@ export class PermissionManager {
   }
 
   /**
-   * Where the owner sends himself: his mail addresses, his notification
-   * webhooks and the default recipients his surfaces are set up with, read
-   * from settings now, and the recipients he allowed earlier in this session.
+   * Where the owner sends things to themselves: their mail addresses, their notification
+   * webhooks and the default recipients their surfaces are set up with, read
+   * from settings now, and the recipients they allowed earlier in this session.
    */
   private knownRecipients(): ReadonlySet<string> {
     const session = `${this.projectKeyPrefix()}${sessionOfCheck.getStore() ?? ''}|`;
@@ -2789,9 +2782,9 @@ export class PermissionManager {
   }
 
   /**
-   * After the owner's yes to a call that waited on him: the refusal of a rule in force now (a never-run rule, a deny rule
-   * kept or remembered, the tool set to refuse in the settings as they are now), or undefined when none refuses it. His
-   * yes settles what he was asked; it never outweighs a refusal put in force while he was asked.
+   * After the owner's yes to a call that waited on them: the refusal of a rule in force now (a never-run rule, a deny rule
+   * kept or remembered, the tool set to refuse in the settings as they are now), or undefined when none refuses it. Their
+   * yes settles what they were asked; it never outweighs a refusal put in force while they were asked.
    */
   private async refusedSinceAsked(i: {
     readonly toolName: string; readonly args: Record<string, unknown>; readonly definition: ToolDefinition | undefined;
@@ -2865,7 +2858,7 @@ export class PermissionManager {
     const assertConfiguration = capturePermissionConfiguration(this.configReader, snapshot, frame);
     const mode = owner ? this.ownerMode(owner) : effectivePermissionMode(frame.permissions.mode, frame.autoApprove, this.decisionModelWorks());
     return Object.freeze({ mode, assertCurrent: () => {
-      // A setting written during the invocation (a call the owner approved while another waited on him, a change made
+      // A setting written during the invocation (a call the owner approved while another waited on them, a change made
       // anywhere) does not end it while the mode in force is the one it started under; a changed mode still does.
       try {
         assertConfiguration();
@@ -2926,7 +2919,7 @@ export class PermissionManager {
    */
   getCategory(toolName: string, args: Record<string, unknown> = {}, definition?: Pick<ToolDefinition, 'category' | 'readModes' | 'tightens' | 'ownWorkingState'>): PermissionCategory {
     // A call that only tightens a protection (plan mode on, a folder restricted, a "never" rule) is classed a read:
-    // plan mode and a restricted folder let it through, and classifyCall allows it as a fact.
+    // a restricted folder lets it through and classifyCall allows it as a fact; plan mode still refuses it (as released).
     if (definition?.tightens && callOnlyTightens(definition.tightens, args)) return 'read';
     // So is a write of the model's own checklist: its working state, not the person's things (classifyCall allows it).
     if (definition?.ownWorkingState && callWritesOwnWorkingState(definition.ownWorkingState, args)) return 'read';
@@ -3012,7 +3005,7 @@ export class PermissionManager {
   private queuedForOwner(input: Pick<SafetyInput, 'toolName' | 'args'>, analysis: PermissionRequestAnalysis, reason: string, ownerOnly?: OwnerOnlyKind): SafetyOutcome {
     const key = this.getApprovalKey(input.toolName, input.args);
     const approvalKey = ownerOnly === undefined ? key : ownerOnlySessionKey(ownerOnly, key, input.args);
-    // Approving it later is the owner's session answer for this exact call, as if he had been asked now.
+    // Approving it later is the owner's session answer for this exact call, as if they had been asked now.
     // Held with the project and session it was made in: the list says where, and an approval settles it there only.
     const project = projectOfDecision(), session = sessionOfCheck.getStore();
     const held = this.heldForOwner().hold({ key: approvalKey, toolName: input.toolName, summary: analysis.summary, reason, ...(ownerOnly !== undefined ? { ownerOnly } : {}),
@@ -3030,7 +3023,7 @@ export class PermissionManager {
 
   /**
    * Keep a decision Jev made for the owner (Waiting for you, Decisions), with
-   * what the call does in words and what he can do about it: the standing
+   * what the call does in words and what the owner can do about it: the standing
    * rules a choice would save, at the narrowest tier this call allows (built
    * now, so the call's arguments are not kept). Nothing when another layer decided.
    */

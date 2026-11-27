@@ -15,7 +15,7 @@
  */
 import type { GatewayMethodCatalog } from '../method-catalog.js';
 import type { GatewayMethodHandler, GatewayMethodInvocation } from '../method-catalog-shared.js';
-import { ownerHimself, ownersAgentProgram, ownersOwnPress } from '../../daemon/method-owner-decision.js';
+import { makesOwnerOnlyAct, ownersAgentProgram, ownersOwnPress } from '../../daemon/method-owner-decision.js';
 import { authorAfterChange, newRecordAuthor, readRecordAuthor, type MemoryAuthor } from '../../state/memory-author.js';
 import { GatewayVerbError } from './gateway-verb-error.js';
 import { readInvocationParams, requireString } from './invocation-params.js';
@@ -82,28 +82,29 @@ const REVIEW_KEYS = ['review', 'reviewed-at', 'enabled'] as const;
 
 /**
  * Who writes through this call (state/memory-author.ts), from the credential the daemon checked: the owner's own press
- * (method-owner-decision.ts `ownersOwnPress`), his model (the Agent's credential for him), or anyone else, named.
+ * (method-owner-decision.ts `ownersOwnPress`), the owner's model (the Agent's credential for the owner), or anyone else, named.
  */
 function writerOf(invocation: GatewayMethodInvocation): MemoryAuthor {
   const actor = invocation.context.actor;
-  // His signed-in session is his press on every request; elsewhere, a person's claim in his own program.
+  // The owner's signed-in session is their press on every request; elsewhere, a person's claim in their own program.
   const press = ownersOwnPress({
     actor, credentialKind: invocation.context.credentialKind ?? undefined, registration: invocation.context.call?.registration,
     personAsked: invocation.context.metadata?.['explicitUserRequest'] === true,
   });
   if (press) return { kind: 'owner' };
-  // His model, by who calls (method-owner-decision.ts): his Agent program (its credential with its registration, or a
-  // turn the daemon hosts), or his registered terminal program with no person's press. The Agent's credential alone is
+  // The owner's model, by who calls (method-owner-decision.ts): their Agent program (its credential with its registration, or a
+  // turn the daemon hosts), or their registered terminal program with no person's press. The Agent's credential alone is
   // a script, named below.
   const caller = { actor, credentialKind: invocation.context.credentialKind ?? undefined, registration: invocation.context.call?.registration,
     daemonHosted: invocation.context.call?.daemonHosted === true };
-  if (ownersAgentProgram(caller) || (caller.registration !== undefined && ownerHimself(caller))) return { kind: 'owner-model' };
-  return { kind: 'other', who: `a caller that is not the owner himself (${actor ? `${actor.class} ${actor.id}` : 'not named'})` };
+  // Their registered program or their own command line (method-owner-decision.ts `makesOwnerOnlyAct`, the one test).
+  if (ownersAgentProgram(caller) || (caller.registration !== undefined && makesOwnerOnlyAct(caller))) return { kind: 'owner-model' };
+  return { kind: 'other', who: `a caller that is not the owner in person (${actor ? `${actor.class} ${actor.id}` : 'not named'})` };
 }
 
 /**
  * The frontmatter a skills.* write keeps: the caller's own keys, never an author it claims, and the review marks only
- * when the owner himself writes; the author is who writes it (a change by someone else makes it his words, waiting).
+ * when the owner in person writes; the author is who writes it (a change by someone else makes it that caller's words, waiting).
  */
 function keptMetadata(
   given: Readonly<Record<string, SkillFrontmatterValue>> | undefined,

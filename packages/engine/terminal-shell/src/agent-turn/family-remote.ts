@@ -6,7 +6,7 @@
  * (in-process-host.ts). One route for both, so a hosted call presents the
  * credentials the Agent's call presents, by the one rule
  * (agent-call-credential.ts):
- * - a read, and anything the owner does himself, carries the Agent's ordinary
+ * - a read, and anything the owner does in person, carries the Agent's ordinary
  *   credential for the host;
  * - a profile or occasions write the Agent makes for the owner carries the
  *   Agent's delegated credential. The daemon authenticates it as the Agent's
@@ -32,7 +32,7 @@ export interface ConnectedHostFamilyRemoteOptions {
   readonly configManager: ConnectedHostConfigReader;
   /** The home whose Agent credential stores the call uses. */
   readonly homeDirectory: string;
-  /** Who makes the calls on this route: `agent` for the Agent's tools, `owner` for his own command or a view shown to him. */
+  /** Who makes the calls on this route: `agent` for the Agent's tools, `owner` for their own command or a view shown to them. */
   readonly actor: AgentCallActor;
   /** The daemon hosting this turn, reached through its own request path; absent in the Agent's own process. */
   readonly inProcess?: AgentInProcessHost | undefined;

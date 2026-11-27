@@ -77,10 +77,10 @@ export function describeCliCommandPolicy(commandName: string): CommandExecutionP
       confirmation,
       // The `profile` tool is the model's route, not this CLI. It calls the same
       // nine control-plane verbs the CLI does, and it carries the parts a shell
-      // command cannot: the authority naming where a fact came from, his
+      // command cannot: the authority naming where a fact came from, the owner's
       // verbatim words, and the one-line disclosure that goes back in the reply.
       preferredModelTool: 'profile',
-      boundary: 'The owner profile is one Markdown file at daemon scope that only the daemon writes. Reads run without confirmation; every write carries an authority naming where the fact came from and is refused unless it came from him directly, and mutating CLI subcommands require --yes. The CLI is his own maintenance path for the file, during a conversation the model records facts through the `profile` tool rather than shelling out.',
+      boundary: 'The owner profile is one Markdown file at daemon scope that only the daemon writes. Reads run without confirmation; every write carries an authority naming where the fact came from and is refused unless it came from the owner directly, and mutating CLI subcommands require --yes. The CLI is the owner\'s own maintenance path for the file, during a conversation the model records facts through the `profile` tool rather than shelling out.',
     };
   }
   if (root === 'ci' || root === 'principals' || root === 'channel-profiles') {

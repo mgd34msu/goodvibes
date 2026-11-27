@@ -361,7 +361,7 @@ export const DAEMON_CAPABILITIES: readonly Moved<DaemonCapabilityServices>[] = [
   ...CALLER_SHARED_CAPABILITIES.map((definition) => ({ definition: definition as CapabilityDefinition<DaemonCapabilityServices>, command: { name: 'devices', title: 'Paired devices' } })),
   // The account that signs in from other devices, made on Addresses and ports (builtin/network-account.ts).
   { definition: NETWORK_SIGN_IN_ACCOUNT as CapabilityDefinition<DaemonCapabilityServices>, command: { name: 'devices', title: 'Paired devices' } },
-  // Waiting for you, Purchases (builtin/purchases.ts): the purchases that wait on the owner, and what he does on each.
+  // Waiting for you, Purchases (builtin/purchases.ts): the purchases that wait on the owner, and what they do on each.
   ...PURCHASES_CAPABILITIES.map((definition) => ({ definition: definition as CapabilityDefinition<DaemonCapabilityServices>, command: { name: 'payments', title: 'Purchases waiting for you' } })),
   // The sends the Agent's content check refused, posted to the owner inbox (builtin/waiting.ts).
   { definition: GOOGLE_WAITING as CapabilityDefinition<DaemonCapabilityServices>, command: { name: 'google', title: 'Gmail and Google Calendar' } },

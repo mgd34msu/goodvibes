@@ -570,7 +570,7 @@ function policySaid(policy: Readonly<Record<string, unknown>>): string {
     const list = Array.isArray(policy[key]) ? (policy[key] as unknown[]).map(word).filter(Boolean) : [];
     return list.length > 0 ? list.join(', ') : 'anyone';
   };
-  return `${word(policy['surface'])}: messages ${policy['enabled'] === true ? 'accepted' : 'refused'}; only when mentioned: ${on('requireMention')}; direct messages: ${on('allowDirectMessages')}; groups: ${on('allowGroupMessages')}; users: ${names('allowlistUserIds')}; your own messages act as you: ${on('ownMessagesAsOwner')}; project: ${projectSaid(policy['project'])}`;
+  return `${word(policy['surface'])}: messages ${policy['enabled'] === true ? 'accepted' : 'refused'}; only when mentioned: ${on('requireMention')}; direct messages: ${on('allowDirectMessages')}; groups: ${on('allowGroupMessages')}; users: ${names('allowlistUserIds')}; project: ${projectSaid(policy['project'])}`;
 }
 
 /** A channel's project as the rules line names it: the project's folder name, or none ("Project for this channel"). */
@@ -786,37 +786,6 @@ export const CHANNELS_SET_RULES: MethodCapabilityDefinition = {
 };
 
 /**
- * "Treat my own messages here as me" on one channel (off by default, channels/types.ts `ownMessagesAsOwner`). A message on
- * a channel is someone else's input, also from the owner's own verified account; with this on, his own messages in a
- * conversation that is his alone act as him. Turning it on loosens a protection: a model's call is put to the owner,
- * opening on No.
- */
-export const CHANNELS_OWN_MESSAGES: MethodCapabilityDefinition = {
-  capability: { id: 'channels.own-messages', group: 'messages', home: 'daemon', repeat: 'safe' },
-  actionId: 'own-messages', word: 'own-messages', label: 'Treat my own messages here as me',
-  inputs: [
-    { ...CHANNEL, step: 1 },
-    { id: 'as-me', label: 'Treat my own messages here as me', help: 'Whether a message you send from your own account here, in a conversation that is yours alone, acts as you',
-      kind: 'choice', choices: [{ value: 'off', label: 'No' }, { value: 'on', label: 'Yes', risk: 'loosens-a-protection' }],
-      required: { default: 'off', defaultMeans: 'no: every message here is someone else\'s input' }, typed: { flag: '--as-me' }, step: 2 },
-  ],
-  sentence: 'With this on, a message you send from your own verified account on {channel}, in a conversation that is yours alone (a direct message; never a group, a channel or a thread), acts as you: it can change files and run commands under your mode. Off, every message there is someone else\'s input: it is read and answered, and changes nothing.',
-  done: '',
-  touches: 'another-machine', lasts: 'kept', risk: 'loosens-a-protection',
-  riskDone: 'Whether your own messages on {channel} act as you is now what you gave.',
-  // Turning it on is the owner's own act through every door: a model's call and any other caller's (an admin pairing,
-  // a member, a device not his) are put to him, opening on No. It exists only for a channel that proves the sender and
-  // a one-to-one conversation (channels/own-messages-proof.ts); the channel route refuses it for any other.
-  ownerOnly: { reason: 'it lets your own messages on a channel change files and run commands as you', instead: 'Ask the owner to turn it on in Mail, calendar and channels, on the channel\'s row.' },
-  ownersAct: true,
-  example: { channel: 'telegram', 'as-me': 'on' },
-  method: { id: 'channels.policies.update', fields: { surface: 'channel', ownMessagesAsOwner: 'as-me:onoff' } },
-  said: (answer) => answer['ownMessagesAsOwner'] === true
-    ? `Your own messages on ${word(answer['surface'])}, in a conversation that is yours alone, now act as you: they can change files and run commands under your mode.`
-    : `Every message on ${word(answer['surface'])} is someone else's input, also yours: it is read and answered, and changes nothing.`,
-};
-
-/**
  * "Project for this channel": the registered project a conversation on the channel works in (its files, commands and
  * tool servers). None by default: a turn there that would read or write a file, run a command or reach anything else
  * that needs a place is refused, naming this control (channels/channel-project.ts); nothing is done in the daemon's own
@@ -1015,6 +984,6 @@ export const CHANNELS_HANDLER_CAPABILITIES: readonly CapabilityDefinition<Messag
 /** Every capability of the group that runs through its own daemon method. */
 export const MESSAGES_METHOD_CAPABILITIES: readonly { readonly definition: MethodCapabilityDefinition; readonly command: { readonly name: string; readonly title: string } }[] = [
   ...[CALENDAR_GET, CALENDAR_ADD, CALENDAR_CHANGE, CALENDAR_DELETE].map((definition) => ({ definition, command: { name: 'calendar', title: 'Calendar' } })),
-  ...[CHANNELS_STATUS, CHANNELS_SETUP, CHANNELS_DOCTOR, CHANNELS_TEST, CHANNELS_ACCOUNTS, CHANNELS_RULES, CHANNELS_SET_RULES, CHANNELS_OWN_MESSAGES, CHANNELS_PROJECT, CHANNELS_PROFILES, CHANNELS_PROFILE, CHANNELS_REMOVE_PROFILE]
+  ...[CHANNELS_STATUS, CHANNELS_SETUP, CHANNELS_DOCTOR, CHANNELS_TEST, CHANNELS_ACCOUNTS, CHANNELS_RULES, CHANNELS_SET_RULES, CHANNELS_PROJECT, CHANNELS_PROFILES, CHANNELS_PROFILE, CHANNELS_REMOVE_PROFILE]
     .map((definition) => ({ definition, command: { name: 'channels', title: 'Channels' } })),
 ];

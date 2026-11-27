@@ -216,7 +216,7 @@ export const GIT_DIFF: CodeDefinition = {
     let counted: Awaited<ReturnType<CodeGitServices['unstaged']>>;
     try { counted = await code.git.unstaged(); } catch (error) { throw new CapabilityRefusal(`The changes could not be read: ${error instanceof Error ? error.message : String(error)}`); }
     if (counted.files === 0) return { text: 'No changes are waiting to be staged.', data: { ...counted } };
-    // Only the person's own press opens a screen on his display; a model reads the counts.
+    // Only the person's own press opens a screen on their display; a model reads the counts.
     if (caller.personAsked === true) code.changesView?.open('working');
     return { text: `Not staged: ${plural(counted.files, 'file')}, +${counted.additions} -${counted.deletions}.`, data: { ...counted } };
   },

@@ -280,7 +280,7 @@ export function foundCapability(entry: CapabilityEntry): FoundCapability {
       ...(Array.isArray(input.choices) ? { choices: (input.choices as readonly FixedChoice[]).map((choice) => choice.value) } : {}),
       ...(input.required !== true && input.required.default !== '' ? { default: input.required.default } : {}),
     })),
-    risk: entry.ownerOnly ? `${entry.risk}; only the owner does it himself` : risk(entry),
+    risk: entry.ownerOnly ? `${entry.risk}; only the owner does it in person` : risk(entry),
   };
 }
 

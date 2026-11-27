@@ -1,22 +1,22 @@
 /**
- * shared-kinds.ts, the owner's shared things (what belongs to no project: his mail, his calendar, his channels and what
- * arrives on them, his knowledge library, his money, his profile, his dates, his home, what the daemon told him, his
- * Cloudflare account, his watchers), and who reaches each.
+ * shared-kinds.ts, the owner's shared things (what belongs to no project: their mail, their calendar, their channels and what
+ * arrives on them, their knowledge library, their money, their profile, their dates, their home, what the daemon told them, their
+ * Cloudflare account, their watchers), and who reaches each.
  *
- * They are his: the owner himself (his signed-in session, his verified program on this machine, his Agent program) and
- * his own turns (a daemon-run turn on his own input) reach them. Anyone else (a paired device, his own phone included, a
+ * They are the owner's: the owner in person (their signed-in session, their verified program on this machine, their Agent program) and
+ * their own turns (a daemon-run turn on their own input) reach them. Anyone else (a paired device, the owner's own phone included, a
  * signed-in member, the outside agent, a script with the operator token, a machine of the group, a turn on someone
  * else's input) reaches a kind ONLY when the owner gave that caller that kind: a per-caller gift, given and taken back in
  * Devices and network on the caller's row as a project is (`devices.give-shared`, `devices.take-shared`), default none,
  * whatever the effect table's scope says (both must admit the call). A caller that tries a kind it was not given puts
- * ONE question to the owner the first time ("Let the paired device "kiosk" read and send your mail?"); on his yes the
- * kind is given and the call can be sent again; on his No nothing is given and it is not asked again while the daemon
- * runs (daemon/shared-kind-gifts.ts). A 3.5.0 device that read these keeps working that way: after his one yes.
+ * ONE question to the owner the first time ("Let the paired device "kiosk" read and send your mail?"); on the owner's yes the
+ * kind is given and the call can be sent again; on the owner's No nothing is given and it is not asked again while the daemon
+ * runs (daemon/shared-kind-gifts.ts). A 3.5.0 device that read these keeps working that way: after the owner's one yes.
  *
  * Which ids are which kind: a method family of control-plane/record-addresses.ts `FAMILIES` that holds the owner's own
  * things, and the capability families that act on the same things (each line below). The other `FAMILIES` lines are
  * not the owner's shared things and are not listed here: a part of a record of a kind the one reach rule holds
- * (`sessions.`, `tasks.`, `approvals.`, `companion.chat.`, `routes.bindings.`, `checkpoints.`, `rewind.`, `memory.`,
+ * (`sessions.`, `tasks.`, `approvals.`, `companion.chat.`, `checkpoints.`, `rewind.`, `memory.`,
  * `memory.consolidation.`, `deliveries.`, `telemetry.`, `fleet.`, `ci.`, `batch.`, `artifacts.`, `inbox.`,
  * `contracts.`, `remote.` work), Work and planning routed by project (`workLedger.`, `projectPlanning.`), or the daemon's
  * own facilities and settings, held by the effect table and the owner decision classes (`automation.` routes,
@@ -57,6 +57,9 @@ const METHOD_FAMILIES: readonly (readonly [string, SharedKind])[] = [
   ['calendar.', 'calendar'],
   ['channels.', 'channels'],
   ['inbound.telegram.', 'channels'],
+  // A route binding ties a thread of the owner's channel accounts to a session: routing it is using the owner's channels.
+  // Its records are still held by the one reach rule (a binding is its project's record).
+  ['routes.bindings.', 'channels'],
   ['knowledge.', 'knowledge'],
   ['payments.', 'payments'],
   ['profile.', 'profile'],
@@ -65,7 +68,7 @@ const METHOD_FAMILIES: readonly (readonly [string, SharedKind])[] = [
   ['homeGraph.', 'home'],
   ['notifications.', 'notifications'],
   ['cloudflare.', 'cloudflare'],
-  // His watchers (a feed, a file, a webhook watch: none keeps a project). Not his triggers (`watchers.triggers.*`):
+  // The owner's watchers (a feed, a file, a webhook watch: none keeps a project). Not their triggers (`watchers.triggers.*`):
   // a trigger is a record of its project (`trigger`, control-plane/caller-reach.ts), held by the one reach rule.
   ['watchers.', 'watchers'],
 ];
@@ -91,6 +94,26 @@ const CAPABILITY_FAMILIES: readonly (readonly [string, SharedKind])[] = [
   ['cloudflare.', 'cloudflare'],
 ];
 
+/**
+ * The owner's registered services (config/service-registry.ts) that are one of their shared kinds, by the service's name
+ * (letters and digits only, lower case): a gift of that kind lets a caller's turn send that service's stored credential
+ * (security/stored-credentials.ts). Every other service is the owner's alone: no gift reaches it.
+ */
+const SERVICE_KINDS: readonly (readonly [RegExp, SharedKind])[] = [
+  [/^(slack|telegram|discord|matrix|signal|whatsapp|mattermost|msteams|teams|ntfy|twilio)/, 'channels'],
+  [/^(homeassistant|hass)/, 'home'],
+  [/^(gmail|googlemail|email|mail|imap|smtp|fastmail|outlook)/, 'mail'],
+  [/^(calendar|googlecalendar|gcal|caldav)/, 'calendar'],
+  [/^(stripe|payments|paypal)/, 'payments'],
+  [/^cloudflare/, 'cloudflare'],
+];
+
+/** The shared kind a registered service of the owner's is, or undefined (the owner's alone). */
+export function sharedKindOfService(serviceName: string): SharedKind | undefined {
+  const name = serviceName.toLowerCase().replace(/[^a-z0-9]/g, '');
+  return SERVICE_KINDS.find(([pattern]) => pattern.test(name))?.[1];
+}
+
 /** The shared kind a daemon method acts on, or undefined (none of the owner's shared things). */
 export function sharedKindOfMethod(methodId: string): SharedKind | undefined {
   if (PROJECT_FAMILIES_INSIDE.some((prefix) => methodId.startsWith(prefix))) return undefined;
@@ -114,7 +137,30 @@ export function sharedKindOfCall(methodId: string, body: unknown): SharedKind | 
   return typeof id === 'string' ? sharedKindOfCapability(id.trim()) : undefined;
 }
 
-interface CallerSharedFile { readonly version: 1; readonly callers: Record<string, readonly SharedKind[]> }
+interface CallerSharedFile {
+  readonly version: 1;
+  readonly callers: Record<string, readonly SharedKind[]>;
+  /** Of those, the kinds carried from 3.5.0 at the upgrade (`carryFrom350`), per caller, while it still has them. */
+  readonly carried?: Record<string, readonly SharedKind[]> | undefined;
+  /** When the one-time carry from 3.5.0 ran (it runs once per daemon home). */
+  readonly carriedAt?: number | undefined;
+  /**
+   * The machine's operator token was among the credentials carried (a home 3.5.0 ran in): the outside agent's first
+   * credential, which replaces that token for `goodvibes-daemon mcp serve`, is issued with what it was carried
+   * (daemon/outside-agent.ts).
+   */
+  readonly operatorTokenCarried?: true | undefined;
+}
+
+/** The words a carried kind is shown with in Devices and network. */
+export const CARRIED_FROM_350_WORDS = 'carried from 3.5.0';
+
+/** A kept caller list read back: only the kinds this version knows. */
+function kindLists(value: unknown): Record<string, readonly SharedKind[]> {
+  const lists = value !== null && typeof value === 'object' && !Array.isArray(value) ? value as Record<string, unknown> : {};
+  return Object.fromEntries(Object.entries(lists).filter(([, list]) => Array.isArray(list))
+    .map(([id, list]) => [id, (list as readonly unknown[]).filter(isSharedKind)]));
+}
 
 /**
  * The kinds the owner gave each caller, kept in the daemon home beside the projects it gave (`<daemon home>/
@@ -128,12 +174,66 @@ export class CallerSharedStore {
   private read(): CallerSharedFile {
     try {
       const parsed = JSON.parse(readFileSync(this.path, 'utf-8')) as Partial<CallerSharedFile>;
-      const callers = parsed && typeof parsed.callers === 'object' && parsed.callers !== null ? parsed.callers : {};
-      return { version: 1, callers: Object.fromEntries(Object.entries(callers).filter(([, list]) => Array.isArray(list))
-        .map(([id, list]) => [id, (list as readonly unknown[]).filter(isSharedKind)])) };
+      return { version: 1, callers: kindLists(parsed?.callers),
+        ...(parsed?.carried !== undefined ? { carried: kindLists(parsed.carried) } : {}),
+        ...(typeof parsed?.carriedAt === 'number' ? { carriedAt: parsed.carriedAt } : {}),
+        ...(parsed?.operatorTokenCarried === true ? { operatorTokenCarried: true as const } : {}) };
     } catch {
       return { version: 1, callers: {} };
     }
+  }
+
+  private write(file: CallerSharedFile): void {
+    atomicWriteFileSync(this.path, `${JSON.stringify(file, null, 2)}\n`, { mkdirp: true });
+  }
+
+  /** The kinds `principalId` still has that were carried from 3.5.0 (shown so in Devices and network). */
+  carriedOf(principalId: string): readonly SharedKind[] {
+    const file = this.read();
+    const has = file.callers[principalId] ?? [];
+    return (file.carried?.[principalId] ?? []).filter((kind) => has.includes(kind));
+  }
+
+  /**
+   * The one-time carry at the upgrade from 3.5.0: every caller that exists then (`existing`, each with the shared kinds
+   * its released scopes let it use) is given those kinds, recorded as carried from 3.5.0; each is removable in Devices and
+   * network like any gift. It runs once per daemon home (`carriedAt`): a credential made afterwards gets none by default.
+   * Returns what was carried (empty when it ran before).
+   */
+  carryFrom350(existing: readonly { readonly principalId: string; readonly kinds: readonly SharedKind[] }[], at = Date.now()): Readonly<Record<string, readonly SharedKind[]>> {
+    const file = this.read();
+    if (file.carriedAt !== undefined) return {};
+    const callers = { ...file.callers };
+    const carried: Record<string, readonly SharedKind[]> = { ...(file.carried ?? {}) };
+    const done: Record<string, readonly SharedKind[]> = {};
+    for (const { principalId, kinds } of existing) {
+      const had = callers[principalId] ?? [];
+      const added = SHARED_KINDS.filter((kind) => kinds.includes(kind) && !had.includes(kind));
+      if (added.length === 0) continue;
+      callers[principalId] = SHARED_KINDS.filter((kind) => had.includes(kind) || added.includes(kind));
+      carried[principalId] = added;
+      done[principalId] = added;
+    }
+    const operatorToken = existing.some((credential) => credential.principalId === 'local');
+    this.write({ version: 1, callers, carried, carriedAt: at, ...(operatorToken ? { operatorTokenCarried: true as const } : {}) });
+    return done;
+  }
+
+  /** Whether the machine's operator token was carried from 3.5.0 in this daemon home (see `operatorTokenCarried`). */
+  operatorTokenCarried(): boolean {
+    return this.read().operatorTokenCarried === true;
+  }
+
+  /** Give `principalId` these kinds as carried from 3.5.0 (the outside agent's first credential: daemon/outside-agent.ts). */
+  giveCarried(principalId: string, kinds: readonly SharedKind[]): readonly SharedKind[] {
+    const file = this.read();
+    const had = file.callers[principalId] ?? [];
+    const added = SHARED_KINDS.filter((kind) => kinds.includes(kind) && !had.includes(kind));
+    if (added.length === 0) return had;
+    const callers = { ...file.callers, [principalId]: SHARED_KINDS.filter((kind) => had.includes(kind) || added.includes(kind)) };
+    const carried = { ...(file.carried ?? {}), [principalId]: [...(file.carried?.[principalId] ?? []), ...added] };
+    this.write({ ...file, callers, carried });
+    return callers[principalId]!;
   }
 
   /** The kinds given to `principalId`; empty when none. */
@@ -157,14 +257,20 @@ export class CallerSharedStore {
     const callers = { ...file.callers };
     if (kept.length === 0) delete callers[principalId];
     else callers[principalId] = kept;
-    atomicWriteFileSync(this.path, `${JSON.stringify({ version: 1, callers }, null, 2)}\n`, { mkdirp: true });
+    // A carried kind taken away is no longer carried (given again, it is the owner's gift of now).
+    const carried = { ...(file.carried ?? {}) };
+    const stillCarried = (carried[principalId] ?? []).filter((kind) => kept.includes(kind));
+    if (stillCarried.length === 0) delete carried[principalId];
+    else carried[principalId] = stillCarried;
+    this.write({ version: 1, callers, ...(file.carried !== undefined ? { carried } : {}), ...(file.carriedAt !== undefined ? { carriedAt: file.carriedAt } : {}),
+      ...(file.operatorTokenCarried === true ? { operatorTokenCarried: true as const } : {}) });
     return kept;
   }
 }
 
 /** Who asks to reach a shared kind, as the dispatch established it. */
 export interface SharedKindCaller {
-  /** The owner himself or his own program (control-plane/caller-reach.ts `reacherOf(...).everything`). */
+  /** The owner in person or their own program (control-plane/caller-reach.ts `reacherOf(...).everything`). */
   readonly ownersOwn: boolean;
   /** A daemon-run turn (its in-process call, or one nested in it that the dispatch marked). */
   readonly daemonTurn: boolean;
@@ -176,7 +282,7 @@ export interface SharedKindCaller {
 }
 
 /**
- * Whom a call reaches a shared kind as: undefined when it is the owner's own (himself, his program, his own turn);
+ * Whom a call reaches a shared kind as: undefined when it is the owner's own (in person, their program, their own turn);
  * otherwise the principal whose gift it needs (a turn on someone else's input: the caller it runs for; none recorded:
  * nobody, so it is refused).
  */
@@ -192,8 +298,8 @@ let giftReader: ((principalId: string, kind: SharedKind) => boolean) | undefined
 export function setSharedKindGiftReader(reader: ((principalId: string, kind: SharedKind) => boolean) | undefined): void { giftReader = reader; }
 
 /**
- * Whether this caller reaches the owner's shared kind now, without asking anything: the owner himself, his programs and
- * his own turns; anyone else only with his gift of that kind (a turn on someone else's input: the gift of the caller it
+ * Whether this caller reaches the owner's shared kind now, without asking anything: the owner in person, their programs and
+ * their own turns; anyone else only with the owner's gift of that kind (a turn on someone else's input: the gift of the caller it
  * runs for). No reader: only the owner's own. Read by a filter that keeps the owner's shared records out of what a
  * caller is given (knowledge/knowledge-reach.ts: the owner's shared knowledge beside a project's).
  */
@@ -204,10 +310,26 @@ export function sharedKindReached(caller: SharedKindCaller, kind: SharedKind): b
 }
 
 /**
+ * Whether the owner gave `principalId` the shared kind `methodId` acts on (its own gift, read as the gift filters read it).
+ * The gift is the gate of that kind's methods: a caller given the kind uses its reads and its acts, whatever its class
+ * and scopes (daemon/http/gateway-binding-gate.ts `admittedAs`); the owner's own acts among them stay the owner's.
+ */
+export function sharedKindGiven(methodId: string, principalId: string | undefined): boolean {
+  const kind = sharedKindOfMethod(methodId);
+  return kind !== undefined && principalId !== undefined && giftReader?.(principalId, kind) === true;
+}
+
+/** The same gate for a capability of a shared kind (`sharedKindOfCapability`): the owner gave `principalId` its kind. */
+export function sharedKindGivenForCapability(capabilityId: string, principalId: string | undefined): boolean {
+  const kind = sharedKindOfCapability(capabilityId);
+  return kind !== undefined && principalId !== undefined && giftReader?.(principalId, kind) === true;
+}
+
+/**
  * Knowledge has three kinds of record, each with its own rule: a PROJECT's knowledge (made from that project's files,
  * turns or calls: its sources keep the project) is reached like any other record of that project, by a caller given the
- * project, with no gift; the OWNER's shared knowledge (added outside any project) is his shared kind, reached only by
- * his gift; nothing else exists. So the knowledge calls below are not stopped by the gift before the project filter
+ * project, with no gift; the OWNER's shared knowledge (added outside any project) is the owner's shared kind, reached only by
+ * the owner's gift; nothing else exists. So the knowledge calls below are not stopped by the gift before the project filter
  * runs: each is a read the knowledge reach filters record by record (knowledge/knowledge-reach.ts, through
  * `prepareKnowledgeScopeSelection` and `getItem`: a project's records by the project check, the owner's shared ones by
  * the gift, nodes and issues as the sources they are drawn from), or an addition that lands in the project its call
@@ -242,8 +364,8 @@ export function knowledgeCallOfProject(methodId: string, body: unknown, named: b
 
 /** The words of a refusal: what the caller was not given, and how the owner gives it. */
 export function sharedKindRefusalWords(kind: SharedKind, asked: boolean): string {
-  return `this caller was not given your ${kind} (to ${SHARED_KIND_WORDS[kind]}): it is yours, and only the owner himself, his own programs and his own turns reach it`
-    + (asked ? '' : '; he gives it in Devices and network, on the caller\'s row ("Let a device or member reach something of yours")');
+  return `this caller was not given your ${kind} (to ${SHARED_KIND_WORDS[kind]}): it is yours, and only you, your own programs and your own turns reach it`
+    + (asked ? '' : '; you give it in Devices and network, on the caller\'s row ("Let a device or member reach something of yours")');
 }
 
 /** The code of a call refused because its caller was not given the shared kind it acts on. */

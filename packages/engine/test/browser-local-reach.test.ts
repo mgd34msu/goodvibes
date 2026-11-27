@@ -8,7 +8,7 @@
  * (purpose `browser-page`): the host is resolved and every answer checked, so
  * a name that resolves to a private or metadata address is caught, not only an
  * address written as one. The owner's `fetch.allowedPrivateHosts` lets a name
- * reach his own network, never the metadata endpoint.
+ * reach their own network, never the metadata endpoint.
  *
  * The tool's own navigation asks the same rule first: a metadata address is
  * never opened, and a local file or private address is not opened once text a
@@ -54,7 +54,7 @@ const DNS: Readonly<Record<string, readonly string[]>> = {
   // One public answer and one private: every answer is checked, not the first.
   'split.test': ['93.184.215.14', '192.168.1.1'],
   'example.com': ['93.184.215.14'],
-  // The owner listed this name; it may reach his network, never the metadata endpoint.
+  // The owner listed this name; it may reach the owner's network, never the metadata endpoint.
   'nas.home.test': ['192.168.1.20'],
   'nas-metadata.home.test': ['169.254.169.254'],
 };

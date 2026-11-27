@@ -171,8 +171,10 @@ export const SCHEDULE_ADD: MethodCapabilityDefinition = {
   ],
   sentence: '"{prompt}" will run at the times you gave, whether or not a program is open, until you change it.',
   done: 'Scheduled.',
-  // A schedule makes work run by itself later, with nobody at the screen: it loosens a protection.
-  touches: 'this-machine', lasts: 'kept', risk: 'loosens-a-protection', undoneBy: 'remove',
+  // A schedule makes work run by itself later, with nobody at the screen: decided as a change under the mode (a judgment),
+  // as a model's schedule was in 3.5.0; what it runs is decided at each run under the project's mode.
+  touches: 'this-machine', lasts: 'kept', risk: 'runs-later', undoneBy: 'remove',
+  riskDone: 'This set something to run by itself later, with nobody at the screen.',
   example: { prompt: 'summarise open pull requests', when: 'every weekday at 9am' },
   // The daemon reads the blanks (a described time included) into what it keeps; the web UI's sheet shows the reading first.
   method: {
@@ -224,7 +226,8 @@ export const SCHEDULE_RESUME: MethodCapabilityDefinition = {
   sentence: '{schedule} is turned back on and runs again at its next time, {lasts}.',
   done: 'Resumed {schedule}.',
   // It runs by itself again: it loosens a protection, as adding it does.
-  touches: 'this-machine', lasts: 'kept', risk: 'loosens-a-protection', undoneBy: 'pause',
+  touches: 'this-machine', lasts: 'kept', risk: 'runs-later', undoneBy: 'pause',
+  riskDone: 'This set {schedule} to run by itself again, with nobody at the screen.',
   example: { schedule: 'weekly-report' },
   method: { id: 'automation.schedules.resume', fields: { scheduleId: 'schedule' } },
 };
@@ -272,7 +275,8 @@ export const SCHEDULE_CHANGE: MethodCapabilityDefinition = {
   sentence: '{schedule} will run with what you changed, until you change it again.',
   done: 'Changed {schedule}.',
   // New words for what runs by itself later: it loosens a protection, as adding it does.
-  touches: 'this-machine', lasts: 'kept', risk: 'loosens-a-protection',
+  touches: 'this-machine', lasts: 'kept', risk: 'runs-later',
+  riskDone: 'This changed what runs by itself later, with nobody at the screen.',
   example: { schedule: 'weekly-report', cron: '0 8 * * 1' },
   method: {
     id: 'automation.jobs.update',
@@ -367,8 +371,9 @@ export const TRIGGERS_WATCH: MethodCapabilityDefinition = {
   sentence: '{name} will watch what you gave (a command when it finishes, a line it prints, a page or a file when it changes) and act each time it fires, telling you or running a command, until you change it.',
   done: 'Watching: {name}.',
   // A trigger runs by itself later (a watched command is started by it, a turn or a command follows when it fires):
-  // it loosens a protection.
-  touches: 'another-machine', lasts: 'kept', risk: 'loosens-a-protection', undoneBy: 'stop',
+  // decided as a change under the mode (a judgment), as a model's trigger was in 3.5.0.
+  touches: 'another-machine', lasts: 'kept', risk: 'runs-later', undoneBy: 'stop',
+  riskDone: 'This set something to run by itself each time it fires, with nobody at the screen.',
   example: { name: 'Build finished', command: 'npm\nrun\nbuild' },
   // The daemon reads the blanks into the trigger's definition (and the approved command's digest) before it is made.
   method: {
@@ -426,7 +431,8 @@ export const TRIGGERS_RESTART: MethodCapabilityDefinition = {
   sentence: '{trigger}, which stopped after repeated failures, will watch again {lasts}; fix what made it fail first.',
   done: 'Started {trigger} again.',
   // It runs by itself again: it loosens a protection, as making it does.
-  touches: 'another-machine', lasts: 'kept', risk: 'loosens-a-protection',
+  touches: 'another-machine', lasts: 'kept', risk: 'runs-later',
+  riskDone: 'This set {trigger} to run by itself again each time it fires, with nobody at the screen.',
   example: { trigger: 'build-finished' },
   method: { id: 'watchers.triggers.reset', fields: { id: 'trigger' } },
   said(answer) {
@@ -461,8 +467,9 @@ export const TRIGGERS_ALLOW_COMMAND: MethodCapabilityDefinition = {
   ],
   sentence: 'A trigger may run {command} as {name} when it fires, with nobody asked, until you change it.',
   done: 'Triggers may run {name}.',
-  // It loosens a protection: a model's call of it is put to the owner in every mode, opening on No (never refused outright).
+  // It loosens a protection: a model's call of it is an item of the owner's list, decided under their mode (never refused outright).
   touches: 'another-machine', lasts: 'kept', risk: 'loosens-a-protection',
+  riskDone: 'A trigger may now run {name} by itself when it fires, with nobody asked.',
   example: { name: 'deploy', command: 'make\ndeploy' },
   method: { id: 'watchers.triggers.grant.register', fields: { id: 'name', command: 'command:first', args: 'command:rest', description: 'name' } },
   said(answer) {

@@ -2138,7 +2138,7 @@
    "post": {
     "operationId": "sessions.create",
     "summary": "Create Shared Session",
-    "description": "Create a shared session for a surface, route, or web client.",
+    "description": "Create a shared session for a surface, route, or web client. `workingDirectory` names the project it belongs to (checked as every call's project is); the session is its caller's, kept as who made it. A caller below an admin makes one only in a project the owner gave it, or one of no project that only it and the owner reach.",
     "tags": [
      "sessions"
     ],
@@ -2192,6 +2192,9 @@
           "type": "string"
          },
          "surfaceId": {
+          "type": "string"
+         },
+         "workingDirectory": {
           "type": "string"
          }
         },
@@ -3426,7 +3429,7 @@
    "post": {
     "operationId": "sessions.permissionMode.set",
     "summary": "Set Session Permission Mode",
-    "description": "Set ask-me, jev-decides, just-vibes, or yolo execution, or enter the read-only plan posture. Admin only, because it can loosen security: yolo runs every action without safety denials, and for the local runtime session (no hosted or channel mode of its own) it rewrites the daemon-wide permissions.mode. A hosted session and a channel session with its own mode change only that session; a web chat (companion-chat) has no mode of its own, so setting it rewrites the daemon-wide permissions.mode. Emits runtime.gate (PRESET_CHANGED) so every surface stays in sync. Other session ids answer 404 SESSION_NOT_LOCAL. A looser mode asked with a token minted for automation is not set (a device the owner paired himself sets it at once): it is put to the owner as an approval only his own credential answers, the answer is 202 with code OWNER_APPROVAL_PENDING, the unchanged `mode` and the `approvalId`, and the mode changes when he approves it.\n\nReplay key: request header `Idempotency-Key`. Send a key (1 to 255 characters of letters, digits, \".\", \"_\", \":\" or \"-\") chosen once per logical request, and the same key on every retry: a repeat of the same request (for a multipart or raw upload: the same fields and file content, whatever the encoding) under the same key by the same credential, within a day and across a daemon restart, returns the first answer (with the Idempotent-Replayed: true header) instead of acting again. The same key with a different request is 409 IDEMPOTENCY_KEY_REUSED; a repeat while the first is still running is 409 IDEMPOTENCY_KEY_IN_FLIGHT (send it again with the same key after the Retry-After header's seconds, also in the body as retryAfterMs; the SDK does this within its retries); a repeat after the daemon stopped in the middle of the first is 409 IDEMPOTENCY_OUTCOME_UNKNOWN, and a repeat of a first request that failed partway is 500 IDEMPOTENCY_OUTCOME_UNKNOWN (either way: check the state, do not send again). A refusal (4xx) is not remembered, so the same key may be sent again. Over the method-invoke envelope or a WebSocket call frame the key may be sent as `idempotencyKey` beside `body`.",
+    "description": "Set ask-me, jev-decides, just-vibes, or yolo execution, or enter the read-only plan posture. Admin only, because it can loosen security: yolo runs every action without safety denials, and for the local runtime session (no hosted or channel mode of its own) it rewrites the daemon-wide permissions.mode. A hosted session and a channel session with its own mode change only that session; a web chat (companion-chat) has no mode of its own, so setting it rewrites the daemon-wide permissions.mode. Emits runtime.gate (PRESET_CHANGED) so every surface stays in sync. Other session ids answer 404 SESSION_NOT_LOCAL. A looser mode asked with a token minted for automation is not set (a device the owner paired in person sets it at once): it is put to the owner as an approval only the owner's own credential answers, the answer is 202 with code OWNER_APPROVAL_PENDING, the unchanged `mode` and the `approvalId`, and the mode changes when the owner approves it.\n\nReplay key: request header `Idempotency-Key`. Send a key (1 to 255 characters of letters, digits, \".\", \"_\", \":\" or \"-\") chosen once per logical request, and the same key on every retry: a repeat of the same request (for a multipart or raw upload: the same fields and file content, whatever the encoding) under the same key by the same credential, within a day and across a daemon restart, returns the first answer (with the Idempotent-Replayed: true header) instead of acting again. The same key with a different request is 409 IDEMPOTENCY_KEY_REUSED; a repeat while the first is still running is 409 IDEMPOTENCY_KEY_IN_FLIGHT (send it again with the same key after the Retry-After header's seconds, also in the body as retryAfterMs; the SDK does this within its retries); a repeat after the daemon stopped in the middle of the first is 409 IDEMPOTENCY_OUTCOME_UNKNOWN, and a repeat of a first request that failed partway is 500 IDEMPOTENCY_OUTCOME_UNKNOWN (either way: check the state, do not send again). A refusal (4xx) is not remembered, so the same key may be sent again. Over the method-invoke envelope or a WebSocket call frame the key may be sent as `idempotencyKey` beside `body`.",
     "tags": [
      "sessions"
     ],
@@ -7718,6 +7721,25 @@
            "items": {
             "type": "string"
            }
+          },
+          "conflict": {
+           "type": "object",
+           "properties": {
+            "branch": {
+             "type": "string"
+            },
+            "files": {
+             "type": "array",
+             "items": {
+              "type": "string"
+             }
+            }
+           },
+           "required": [
+            "branch",
+            "files"
+           ],
+           "additionalProperties": false
           }
          },
          "required": [
@@ -7937,6 +7959,25 @@
         "failureReason": {
          "type": "string"
         },
+        "failureKind": {
+         "type": "string",
+         "enum": [
+          "transport",
+          "max_turns",
+          "planning",
+          "budget",
+          "owner-rejected",
+          "judgment-unavailable",
+          "zombie",
+          "other"
+         ]
+        },
+        "dropped": {
+         "type": "string"
+        },
+        "heardAt": {
+         "type": "number"
+        },
         "attemptOf": {
          "type": "string"
         },
@@ -8091,6 +8132,25 @@
            },
            "failureReason": {
             "type": "string"
+           },
+           "failureKind": {
+            "type": "string",
+            "enum": [
+             "transport",
+             "max_turns",
+             "planning",
+             "budget",
+             "owner-rejected",
+             "judgment-unavailable",
+             "zombie",
+             "other"
+            ]
+           },
+           "dropped": {
+            "type": "string"
+           },
+           "heardAt": {
+            "type": "number"
            },
            "attemptOf": {
             "type": "string"

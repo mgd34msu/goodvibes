@@ -686,7 +686,7 @@ function WorkViewContent({ contractScope, tab, subscriptionActive = true, sessio
           {!archived && waitingCount > 0 && (
             <Chip tone="warn" className="work-header__chip">{waitingCount} waiting for you</Chip>
           )}
-          <NewWorkMenu lifetime={contractScope} onCreated={(key) => { dismissedRef.current = true; setSelectedKey(workKey(key)); }} onSchedules={openSchedules} />
+          <NewWorkMenu onCreated={(key) => { dismissedRef.current = true; setSelectedKey(workKey(key)); }} onSchedules={openSchedules} />
         </span>
       )}
       filters={(

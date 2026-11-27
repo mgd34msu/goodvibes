@@ -58,7 +58,6 @@ export class TriggerStoreOwnershipError extends RefusalError {
 export interface TriggerRetentionPolicy {
   readonly observationRingSize: number;
   readonly runHistoryLimit: number;
-  readonly runHistoryTtlMs: number;
   readonly eventLogLimit: number;
   readonly eventLogTtlMs: number;
 }
@@ -66,7 +65,6 @@ export interface TriggerRetentionPolicy {
 export const DEFAULT_RETENTION: TriggerRetentionPolicy = {
   observationRingSize: 200,
   runHistoryLimit: 50,
-  runHistoryTtlMs: 168 * 60 * 60 * 1000,
   eventLogLimit: 500,
   eventLogTtlMs: 24 * 60 * 60 * 1000,
 };
@@ -242,12 +240,12 @@ export interface BoundResult {
   readonly observationsReaped: number;
 }
 
-/** Applies the count cap AND the age TTL to one record's retained state. */
-export function boundRecord(record: TriggerRecord, policy: TriggerRetentionPolicy, now: number): BoundResult {
-  const runCutoff = now - policy.runHistoryTtlMs;
-  const keptRuns = record.runs
-    .filter((run) => run.at >= runCutoff)
-    .slice(-policy.runHistoryLimit);
+/**
+ * Applies the count caps to one record's retained state: its newest `runHistoryLimit` runs and `observationRingSize`
+ * readings. No age removes a run: a trigger's history goes with the trigger, or as newer runs push it past the count.
+ */
+export function boundRecord(record: TriggerRecord, policy: TriggerRetentionPolicy, _now: number): BoundResult {
+  const keptRuns = record.runs.slice(-policy.runHistoryLimit);
   const keptObservations = record.observations.slice(-policy.observationRingSize);
   const runsReaped = record.runs.length - keptRuns.length;
   const observationsReaped = record.observations.length - keptObservations.length;

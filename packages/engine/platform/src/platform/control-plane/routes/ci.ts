@@ -98,9 +98,11 @@ function createStatusHandler(service: CiWatchGatewayService): GatewayMethodHandl
 function createListHandler(service: CiWatchGatewayService): GatewayMethodHandler {
   return async () => {
     const watches = await service.listWatches();
-    // A caller that is not the owner himself: only the watches of projects it may reach (control-plane/caller-reach.ts).
+    // A caller that is not the owner in person: only the watches of projects it may reach (control-plane/caller-reach.ts).
     const reach = currentRecordReach();
-    return { watches: reach ? watches.filter((watch) => reach('ci-watch', watch.id, { project: typeof watch.project === 'string' && watch.project.trim() ? watch.project : null })) : watches };
+    const reached = reach ? watches.filter((watch) => reach('ci-watch', watch.id, { project: typeof watch.project === 'string' && watch.project.trim() ? watch.project : null })) : watches;
+    // Whose input made a watch is the daemon's own record (its repair's party), not part of the list.
+    return { watches: reached.map(({ party: _party, ...shown }) => shown) };
   };
 }
 
@@ -114,7 +116,8 @@ function createCreateHandler(service: CiWatchGatewayService): GatewayMethodHandl
         deliveryChannel: requireString(params, 'deliveryChannel'),
         triggerFixSession: params.triggerFixSession === true,
       });
-      return { watch };
+      const { party: _party, ...shown } = watch;
+      return { watch: shown };
     } catch (error) {
       rethrow(error);
     }

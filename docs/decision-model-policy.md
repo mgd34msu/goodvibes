@@ -21,10 +21,12 @@ decision takes its stated fallback, such as asking you; a target that misses the
 deadline three times in a row is skipped for a minute. A target whose address
 refuses the connection is not asked a second time for the same decision.
 
-**If Jev can't answer** (`judgment.policy`, in the same section) matters only in
-Jev decides and Just vibes: while a set decision model gives no usable answer, a
-call Jev would decide comes to you (**Ask me**, the default; held to the end of
-the run in Just vibes) or is refused with the reason (**Refuse the action**).
+**When the decision model is missing or fails** (`judgment.policy`, in the same
+section): while a set decision model gives no usable answer, a call it would read
+or decide is decided as Ask me decides it (**Hybrid (default)**; held to the end
+of the run in Just vibes) or is refused with the reason in every mode
+(**Decision Model Only**). With no decision model set, Jev decides behaves as Ask
+me whatever this setting.
 
 When the set decision model gives no usable answer, for any reason (unreachable,
 too slow, a request too large for it, an HTTP error, a refused or missing key, a

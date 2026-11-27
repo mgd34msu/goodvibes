@@ -122,7 +122,7 @@ const MEMORY_SEARCH_FILTER_FIELDS = {
   provenanceKinds: arraySchema(MEMORY_PROVENANCE_KIND_SCHEMA),
   staleOnly: BOOLEAN_SCHEMA,
   limit: NUMBER_SCHEMA,
-  // Every project's records at once: the owner's own choice (his place's "Every project"), refused from anyone else.
+  // Every project's records at once: the owner's own choice (their place's "Every project"), refused from anyone else.
   everyProject: BOOLEAN_SCHEMA,
 } as const;
 
@@ -362,9 +362,11 @@ export const builtinGatewayRuntimeMethodDescriptors: readonly GatewayMethodDescr
     id: 'remote.work.cancel',
     repeat: 'safe',
     title: 'Cancel Remote Work',
-    description: 'Cancel a remote work item.',
+    description: 'Cancel a remote work item. A caller below an admin cancels only work queued for a session or schedule of its own.',
     category: 'remote',
-    effects: ['remote.administer'],
+    // A project act (effect-authority.ts, held as the session it was queued for: `sessions.write`); the one reach rule holds
+    // a caller below an admin to work queued for a record it made (control-plane/caller-reach.ts `OWN_RECORD_CHANGES`).
+    effects: ['sessions.write'],
     http: { method: 'POST', path: '/api/remote/work/{workId}/cancel' },
     inputSchema: REMOTE_WORK_CANCEL_INPUT_SCHEMA,
     outputSchema: REMOTE_WORK_OUTPUT_SCHEMA,
@@ -616,7 +618,9 @@ export const builtinGatewayRuntimeMethodDescriptors: readonly GatewayMethodDescr
     title: 'Add Memory Record',
     description: 'Add a memory record to the daemon-owned canonical store. The daemon is the single writer for its store; a client surface routes its writes here instead of opening the store file, so two processes never write the same sql.js file. New records default to confidence 60 (the recall floor) and reviewState fresh unless the review block overrides them. An optional caller-generated id (mem_<base36 time>_<8 hex>) makes the add safe to resend: the same id with the same record returns the stored row, the same id with a different record is refused.',
     category: 'memory',
-    effects: ['memory.administer'],
+    // A project act (effect-authority.ts `memory.write`): below an admin, a "this project" record in a project given to
+    // the caller (control-plane/caller-reach.ts refuses a record of no project to anyone but the owner).
+    effects: ['memory.write'],
     http: { method: 'POST', path: '/api/memory/records' },
     inputSchema: bodyEnvelopeSchema({
       id: STRING_SCHEMA,
@@ -675,7 +679,7 @@ export const builtinGatewayRuntimeMethodDescriptors: readonly GatewayMethodDescr
     title: 'Update Memory Record Review',
     description: 'Update a record\'s review signal (reviewState, confidence, reviewer, staleReason) in the canonical store. Marking a record stale or contradicted flags it so the recall-honesty contract will never inject it into a prompt again regardless of confidence. Returns 404 when no record with that id exists.',
     category: 'memory',
-    effects: ['memory.administer'],
+    effects: ['memory.write'],
     http: { method: 'POST', path: '/api/memory/records/{id}/review' },
     inputSchema: bodyEnvelopeSchema({
       id: STRING_SCHEMA,
@@ -689,7 +693,7 @@ export const builtinGatewayRuntimeMethodDescriptors: readonly GatewayMethodDescr
   methodDescriptor({
     id: 'memory.records.delete',
     repeat: 'safe',
-    effects: ['memory.administer', 'record.destroy'],
+    effects: ['memory.write', 'record.destroy'],
     title: 'Delete Memory Record',
     description: 'Permanently delete a memory record and its links from the canonical store. Delete means delete: the record is removed from the store and the semantic index, not merely flagged. Returns { deleted: false } when no record with that id existed, an honest boolean, never a 200 that pretends a phantom row was removed.',
     category: 'memory',
@@ -700,7 +704,7 @@ export const builtinGatewayRuntimeMethodDescriptors: readonly GatewayMethodDescr
   methodDescriptor({
     id: 'memory.records.list',
     title: 'List Memory Records',
-    description: 'Bulk read from the canonical store: a literal (non-semantic) search returning the matching records as a plain array. A call that names a project (its call context, or project in the filter) reads that project\'s records and the ones that belong to no project; a call naming none reads only the records that belong to no project; everyProject (the owner himself only, his place\'s "Every project") reads every record. This is the read a client surface uses instead of opening the store file for its browse/list and knowledge-injection paths.',
+    description: 'Bulk read from the canonical store: a literal (non-semantic) search returning the matching records as a plain array. A call that names a project (its call context, or project in the filter) reads that project\'s records and the ones that belong to no project; a call naming none reads only the records that belong to no project; everyProject (the owner in person only, their place\'s "Every project") reads every record. This is the read a client surface uses instead of opening the store file for its browse/list and knowledge-injection paths.',
     category: 'memory',
     effects: ['memory.read'],
     http: { method: 'POST', path: '/api/memory/records/list' },
@@ -765,7 +769,7 @@ export const builtinGatewayRuntimeMethodDescriptors: readonly GatewayMethodDescr
     title: 'Update Memory Record',
     description: 'Edit a record\'s content fields (class, scope, summary, detail, tags) and its temporal validity window (validFrom, validUntil) in the canonical store; a changed class refiles the record in place, keeping its id. This is distinct from the review update: it changes the record itself, e.g. moving scope project→team promotes a record to the shared surface. For validFrom/validUntil a number sets the bound, null clears it, and an omitted field leaves it unchanged, so a proposal that changes only the window can be applied. Returns 404 when no record with that id exists.',
     category: 'memory',
-    effects: ['memory.administer'],
+    effects: ['memory.write'],
     http: { method: 'POST', path: '/api/memory/records/{id}/update' },
     inputSchema: bodyEnvelopeSchema({
       id: STRING_SCHEMA,
@@ -795,7 +799,7 @@ export const builtinGatewayRuntimeMethodDescriptors: readonly GatewayMethodDescr
     title: 'Link Memory Records',
     description: 'Create a directed relation (e.g. "supersedes", "caused") from the path record to a target record. Returns 404 when either endpoint does not exist, never a 200 that pretends a link was made between records that do not both exist.',
     category: 'memory',
-    effects: ['memory.administer'],
+    effects: ['memory.write'],
     http: { method: 'POST', path: '/api/memory/records/{id}/links' },
     inputSchema: bodyEnvelopeSchema({
       id: STRING_SCHEMA,

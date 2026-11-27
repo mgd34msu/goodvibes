@@ -24,7 +24,7 @@
  * no `edit`, no `exec`. Nothing here can start a workstream or change the
  * project tree. What it can do is read project files (`read`, `find`), look
  * things up on the web (`fetch`), and record what the owner just said about
- * himself (`profile`). `profile` and `fetch` are given only to a channel the
+ * themselves (`profile`). `profile` and `fetch` are given only to a channel the
  * owner has declared theirs: a message from any other channel is untrusted
  * text, and with both `read` and `fetch` it could be steered into sending
  * what it read to an address of its choosing.

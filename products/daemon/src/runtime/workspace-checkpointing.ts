@@ -6,6 +6,7 @@ import type { RuntimeEventBus, SessionSurface } from './index.js';
 import { createSessionSurface, formerCheckpointsDirs } from '@goodvibes/engine/platform/platform/runtime/operations';
 import { GOODVIBES_DAEMON_SURFACE_ROOT } from '../config/surface.js';
 import { logger, outsideEveryCall } from '@goodvibes/engine/platform/platform/utils';
+import { onConversationCleared } from '@goodvibes/engine/platform/platform/security';
 import { readCheckpointGuardSettings, readCheckpointRegistrationSetting } from '../config/checkpoint-settings.js';
 import { createWorkspaceRegistrationLiveChecker, type StoreShellPaths } from './trust/checkpoint-eligibility.js';
 
@@ -219,10 +220,12 @@ export interface DaemonWorkspaceCheckpoints {
   ownsSession(workspaceRoot: string, options?: { readonly daemonOwn?: boolean }): (sessionId: string | undefined) => boolean;
   /** The open checkpointing of a hosted workspace, opened on first use; null for the daemon's own workspace (its manager covers it). */
   acquire(workspaceRoot: string): WorkspaceCheckpointing | null;
+  /** A project's facilities hold the workspace's checkpointing open (one hold per `pin`, let go by `release`). */
+  pin(workspaceRoot: string): void;
   /**
-   * Close a workspace's checkpointing that nothing uses now (its project's turn environment let go when idle,
-   * project-turn-facilities.ts): kept open while a session is bound to it, whose review and rewind read it. Opened again
-   * on its next use.
+   * A project's facilities let the workspace's checkpointing go (project-turn-facilities.ts): once nothing holds it and no
+   * live session is bound to it (a session whose review and rewind read it), it is closed. Opened again on its next use.
+   * A session's binding ends when its record is deleted (security/conversation-exposure.ts `onConversationCleared`).
    */
   release(workspaceRoot: string): Promise<void>;
   /** Whether `workspaceRoot` is the daemon's own (its manager already covers it). */
@@ -254,6 +257,26 @@ export function daemonWorkspaceCheckpoints(runtimeBus: RuntimeEventBus): DaemonW
     return recorded === undefined || !isAbsolute(recorded) ? undefined : resolve(recorded);
   };
   const isDaemonRoot = (root: string): boolean => daemonRoot !== undefined && root === daemonRoot;
+  // The holds of each workspace's checkpointing by its project's facilities (`pin`, let go by `release`).
+  const pins = new Map<string, number>();
+  /** Closes a workspace's checkpointing that nothing holds and no session is bound to: the events that end its use. */
+  const closeIfUnused = async (root: string): Promise<void> => {
+    const open = workspaces.get(root);
+    if (!open || (pins.get(root) ?? 0) > 0 || [...sessions.values()].includes(root)) return;
+    workspaces.delete(root);
+    await open.close().catch((error: unknown) => {
+      logger.warn('a workspace\'s checkpoints did not close cleanly', { workspaceRoot: root, error: error instanceof Error ? error.message : String(error) });
+    });
+  };
+  // A conversation deleted (a web chat, a session: security/conversation-exposure.ts, cleared where each record is
+  // deleted) is no longer bound to its workspace; a store only it kept open is closed.
+  onConversationCleared((key) => {
+    const sessionId = /^(?:companion-chat|session|conversation):(.+)$/.exec(key)?.[1];
+    const root = sessionId === undefined ? undefined : sessions.get(sessionId);
+    if (root === undefined) return;
+    sessions.delete(sessionId!);
+    void closeIfUnused(root);
+  });
   const acquire = (workspaceRoot: string): WorkspaceCheckpointing | null => {
     const root = resolve(workspaceRoot);
     if (isDaemonRoot(root)) return null;
@@ -294,14 +317,15 @@ export function daemonWorkspaceCheckpoints(runtimeBus: RuntimeEventBus): DaemonW
       };
     },
     acquire,
+    pin(workspaceRoot) {
+      const root = resolve(workspaceRoot);
+      pins.set(root, (pins.get(root) ?? 0) + 1);
+    },
     async release(workspaceRoot) {
       const root = resolve(workspaceRoot);
-      const open = workspaces.get(root);
-      if (!open || [...sessions.values()].includes(root)) return;
-      workspaces.delete(root);
-      await open.close().catch((error: unknown) => {
-        logger.warn('a workspace\'s checkpoints did not close cleanly', { workspaceRoot: root, error: error instanceof Error ? error.message : String(error) });
-      });
+      const left = (pins.get(root) ?? 1) - 1;
+      if (left > 0) pins.set(root, left); else pins.delete(root);
+      await closeIfUnused(root);
     },
     isDaemonWorkspace(workspaceRoot) {
       return isDaemonRoot(resolve(workspaceRoot));

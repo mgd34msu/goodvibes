@@ -455,6 +455,7 @@ and exits with status `3`. The programs are installed and the service is set up;
 | `0` | Installed (or uninstalled) and every command name reaches the installed copy. Notes printed with `NOTE:` did not fail the install. |
 | `1` | Refused or failed. The message ends with an id such as `(INSTALL_E036)`. If the failure came after programs began to be replaced, the previous programs were put back unless the message says otherwise. |
 | `3` | Installed, but another copy earlier on `PATH` still answers a command name. |
+| `4` | Installed, with the problems listed above it (the daemon service not set up or not running, a restart not done, a choice not saved). |
 | `129`, `130`, `143` | Interrupted by a hang-up, Ctrl-C or a termination signal. The installer first undid any partial replacement. |
 
 Every refusal is printed to standard error as `install.sh: <sentence> (INSTALL_E###)`. The id never changes meaning between releases; look it up in [Installer errors and their fixes](#installer-errors-and-their-fixes).
@@ -1355,7 +1356,7 @@ Re-run to update from the current checkout. Use ./scripts/uninstall.sh to remove
 | `--workspace DIR` | the checkout directory | The project the installer pairs the terminal app in (the daemon's service starts in the home: the daemon has no working folder). Must be an existing directory, not the home directory, not `/`, and not inside the program or data directory. |
 | `--port PORT` | `3421`; on an update, the daemon's current `controlPlane.port` | The daemon's port (`controlPlane.port`), 1024 to 65535. |
 | `--no-service` / `--service` | `--service`; on an update, the daemon's current `service.enabled` | Whether to install and start the daemon's systemd user unit (`goodvibes.service`, or the name set in `service.serviceName`). |
-| `--decision-policy POLICY` | unchanged | `Hybrid` or `Decision Model Only` (the "If Jev can't answer" choices Ask me and Refuse the action), saved as `judgment.policy`. |
+| `--decision-policy POLICY` | unchanged | `Hybrid` or `Decision Model Only` (the "When the decision model is missing or fails" choices), saved as `judgment.policy`. |
 | `--uninstall [--prefix DIR] [--purge]` | | Must be the first argument. Runs `scripts/uninstall.sh` with the remaining arguments. |
 | `--help`, `-h` | | Prints the help. Must be the first argument. |
 
@@ -1651,7 +1652,7 @@ Sections, in order:
 | --- | --- |
 | header | `workingDir` and `homeDir`. |
 | `Provider:` | The provider, the model (`provider:model`), the reasoning effort and what this model supports, the sign-in in use (for example `API key (OPENROUTER_API_KEY)`), and where the model list comes from. |
-| `Decision model:` | The "If Jev can't answer" choice (`judgment.policy`) and whether a decision model is in use. |
+| `Decision model:` | The "When the decision model is missing or fails" choice (`judgment.policy`) and whether a decision model is in use. |
 | `Auth:` | The permission mode with its meaning, `behavior.autoApprove`, the secret storage policy, and whether the local user store, the bootstrap credential and the operator token file exist (with their paths). |
 | `Service:` | `service.enabled`, `service.autostart`, `service.restartOnFailure`, the platform, whether the service is installed and running, its pid, the definition path and the log path. |
 | `Surfaces:` | Whether the control plane, the HTTP listener and the web surface are on, with their addresses (defaults `127.0.0.1:3421`, `127.0.0.1:3422`, `127.0.0.1:3423`), and whether other machines are served (`controlPlane.enabled`). The web UI itself is served on the control plane's address. |
@@ -1704,7 +1705,7 @@ Severity `note` describes the arrangement and never fails. `risk` is must-fix. T
 | --- | --- | --- | --- |
 | `external-runtime-unreachable` | warning | The daemon does not answer at the address. | Start the daemon (`goodvibes-daemon start-service`, or by hand), then `goodvibes-agent status`. |
 | `external-runtime-incompatible` | warning | The daemon answers, but its Agent routes are unavailable or incompatible, or they could not be checked because the Agent has no operator token or the daemon refused its status request. A reachable daemon with no token therefore shows this together with `external-runtime-token-missing`. | Pair first (next row); if it remains, update the daemon to the same release. |
-| `external-runtime-token-missing` | warning | None of the four credential sources gave a token (see [Pairing the Agent with the daemon](#pairing-the-agent-with-the-daemon) for the order): no token variable, no pairing record for the address, and no `operator-tokens.json` in the daemon home. Reported whether or not the daemon answers. | Pair: `goodvibes-agent setup pair --apply` (see [Pairing the Agent with the daemon](#pairing-the-agent-with-the-daemon)). |
+| `external-runtime-token-missing` | warning | None of the four credential sources gave a token (see [Pairing the Agent with the daemon](#pairing-the-agent-with-the-daemon) for the order): no token variable, no pairing record for the address, and no `operator-tokens.json` in the daemon home. Reported whether or not the daemon answers. | Pair: `goodvibes-agent setup pair --with-code` (see [Pairing the Agent with the daemon](#pairing-the-agent-with-the-daemon)). |
 | `agent-knowledge-route-not-ready` | warning | The daemon answers, the Agent has a token, the routes were checked, and the Agent Knowledge route is not ready. | Update the daemon; check `goodvibes-agent compat`. |
 | `runtime-connection-<slug>` | warning | An issue the Agent's service check reported (the slug is made from its text). | Follow its action line. |
 | `runtime-posture-<slug>` | note | An advisory about the arrangement. | None, unless it is not what was intended. |
@@ -1920,22 +1921,21 @@ The Agent's first start runs the same three-step first run as the terminal app (
 
 ### Pairing the Agent with the daemon
 
-The Agent needs its own credential for the daemon (`goodvibes-agent doctor` reports `external-runtime-token-missing` until it has one). Pair it on the machine where the daemon runs:
+On the daemon's own machine the Agent needs no pairing: it is the owner's program there. An Agent on another machine needs its own credential for the daemon (`goodvibes-agent doctor` reports `external-runtime-token-missing` until it has one). Start a sign-in code where you are signed in as yourself (that daemon's web UI, Devices and network, Pair something, "Show the sign-in code once"), then on the Agent's machine:
 
 ```sh
-goodvibes-agent setup pair                 # preview: what would be paired, nothing changes
-goodvibes-agent setup pair --apply         # asks you to type a confirmation word, then pairs
-goodvibes-agent setup pair --name laptop --apply   # names the device (default "GoodVibes Agent")
-goodvibes-agent setup unpair               # forgets the stored credential for the selected daemon
+goodvibes-agent setup pair --with-code               # type or paste the code when asked
+goodvibes-agent setup pair --name laptop --with-code # names the device (default "GoodVibes Agent")
+goodvibes-agent setup unpair                         # forgets the stored credential (or a lost attempt) for the selected daemon
 ```
 
-`--apply` needs an interactive terminal and a typed confirmation; it cannot be scripted (`--yes` is refused) and refuses `--json` output. Usage errors exit `2`. The daemon address is `daemon.connectedHost.url`, else this machine's daemon (default `http://127.0.0.1:3421`); `--runtime-url <url>` selects another for one run. Pairing other devices and remote daemons is covered in the daemon part of this file.
+The code is read from an interactive terminal, never from an argument; nothing else is asked. Usage errors, no terminal and Enter alone exit `2`; a code the daemon did not take (used, older than 15 minutes, or never one) exits `1`. The daemon address is `daemon.connectedHost.url`, else this machine's daemon (default `http://127.0.0.1:3421`); `--runtime-url <url>` selects another for one run. Pairing other devices and remote daemons is covered in the daemon part of this file.
 
 The Agent picks the credential it sends to the daemon in this order; the first step that applies decides:
 
 1. The environment variable `GOODVIBES_CONNECTED_HOST_TOKEN`, when set and not empty.
 2. The environment variable `GOODVIBES_DAEMON_TOKEN`, when set and not empty.
-3. The Agent's stored pairing for that daemon address (written by `goodvibes-agent setup pair --apply`). When a pairing record exists but its token cannot be used, the search stops here with the reason: a lost pairing reply (`goodvibes-agent setup pair` repeats the request) or an unreadable pairing store.
+3. The Agent's stored pairing for that daemon address (written by `goodvibes-agent setup pair --with-code`). When a pairing record exists but its token cannot be used, the search stops here with the reason: a lost pairing reply (`goodvibes-agent setup unpair` forgets it; then pair with a new code) or an unreadable pairing store.
 4. The `token` field of `operator-tokens.json` in the daemon home (`~/.goodvibes/daemon/operator-tokens.json`, or the directory `GOODVIBES_DAEMON_HOME` names, or `<GOODVIBES_AGENT_HOME>/.goodvibes/daemon/`). This file exists on the machine where the daemon runs, and is used only when the daemon address is this machine (a loopback address or one of its own interface addresses); it is never sent to a daemon elsewhere.
 
 `goodvibes-agent doctor` shows the source on its `access token:` line (`env:GOODVIBES_CONNECTED_HOST_TOKEN`, `env:GOODVIBES_DAEMON_TOKEN`, `Agent host-bound pairing store` or the file path). A token from step 1 or 2 hides a stored pairing; unset both variables to use the pairing.

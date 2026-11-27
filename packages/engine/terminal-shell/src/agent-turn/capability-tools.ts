@@ -129,7 +129,7 @@ export interface CapabilityToolOptions {
   /** Called with a listener the catalog's owner calls when the catalog changes (the program bound its commands). */
   readonly onCatalogChange?: ((listener: () => void) => void) | undefined;
   /**
-   * Ask the person for a value on the program's hidden line: what he typed, null when he went back, undefined when
+   * Ask the person for a value on the program's hidden line: what they typed, null when they went back, undefined when
    * there is no screen to ask on. A secret input the model left out is asked for here, so its value never passes
    * through the model.
    */
@@ -219,7 +219,7 @@ function runDefinitionFor(catalog: () => CapabilityCatalog): () => ReturnType<ty
     if (held?.catalog === current && held.holds === holds) return held.definition;
     const entries = current.list();
     // In a run nobody answers, an action whose own method the daemon admits by asking the owner is decided as this
-    // call (its own risk, under the mode): one the owner must decide is then held for him through the daemon's
+    // call (its own risk, under the mode): one the owner must decide is then held for them through the daemon's
     // capabilities.run (native/headless-held-calls.ts), never sent on to wait at the daemon.
     // A method that makes something run by itself later, or spends money, is decided HERE, by this program's gate, as the
     // daemon's own turns decide it (tools/capability/daemon-tools.ts): only this program sees what its conversation read
@@ -423,8 +423,6 @@ function createRunTool(registry: ToolRegistry, options: CapabilityToolOptions, h
     if (!sent.ok) return { success: false, error: sent.error };
     const sink = nestedAnswers.getStore();
     if (sink) sink.body = sent.body;
-    // Put to the owner by the daemon: nothing ran yet, never reported as done.
-    if (sent.body.code === 'OWNER_APPROVAL_PENDING') return { success: false, error: `${typeof sent.body.state === 'string' ? sent.body.state : `${String(input.id)} is waiting for the owner`}.` };
     return { success: true, output: typeof sent.body.text === 'string' && sent.body.text ? sent.body.text : `${String(input.id)}: done.` };
   };
   // An action's preview: the daemon reads the values into the method's body, or refuses what will not run.
@@ -621,7 +619,6 @@ export function daemonCapabilityRunner(outside?: { readonly shellPaths: ShellPat
   const answerOf = (sent: Posted, id: string): DaemonCapabilityAnswer => {
     if (!sent.ok) return { ok: false, error: sent.error };
     const text = typeof sent.body.text === 'string' ? sent.body.text : '';
-    if (sent.body.code === 'OWNER_APPROVAL_PENDING') return { ok: false, error: typeof sent.body.state === 'string' ? `${sent.body.state}.` : `${id} is waiting for the owner.` };
     if (sent.body.ok === false) return { ok: false, error: text || `${id} was not done.` };
     return { ok: true, text, data: record(sent.body.data) };
   };

@@ -25,7 +25,7 @@ import type { AgentRecord } from '../tools/agent/record.js';
 import type { UnattendedRuns } from '../automation/unattended-runs.js';
 import { summarizeError } from '../utils/error-display.js';
 import { logger } from '../utils/logger.js';
-import { withOwnerInput } from '../security/turn-input-party.js';
+import { partyOfRecordedCause, withInputParty } from '../security/turn-input-party.js';
 import { withConversation } from '../security/conversation-exposure.js';
 import { ProbeTimeoutError, type ProbeIo } from './probes.js';
 
@@ -226,11 +226,13 @@ export function createTriggerActionExecutor(deps: {
 }): TriggerActionExecutor {
   return {
     runAgentTurn(input) {
-      const tools = [...(deps.unattendedRuns?.connectedTools() ?? []), ...(deps.conversationTools?.() ?? [])];
-      // A trigger's turn is the owner's own, marked so (security/turn-input-party.ts: unmarked work is someone else's):
-      // every trigger is his, made by him or on his yes (control-plane/method-risk.ts: anyone else's is put to him).
+      // The owner's connected tools (their mail, their calendar) only for a trigger of their own.
+      const tools = [...(input.cause === undefined ? deps.unattendedRuns?.connectedTools() ?? [] : []), ...(deps.conversationTools?.() ?? [])];
+      // A trigger's turn is the turn of whoever made the trigger, marked so (security/turn-input-party.ts: unmarked work is
+      // someone else's): the owner's own (made by them, their own turn, or kept from before makers were recorded), or that
+      // caller's (types.ts `TriggerDefinition.cause`): reads only, no stored credential, whatever the mode.
       // Inside the trigger's own conversation key: with what the conversation that made it had read.
-      const record = withConversation(`trigger:${input.triggerId}`, () => withOwnerInput(() => deps.agents.spawn({
+      const record = withConversation(`trigger:${input.triggerId}`, () => withInputParty(partyOfRecordedCause(input.cause), () => deps.agents.spawn({
         mode: 'spawn',
         task: input.prompt,
         // A turn, as a conversation's is: its prompt goes to the model. Without this, a spawn with a decision model set

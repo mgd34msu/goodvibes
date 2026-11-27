@@ -1,5 +1,5 @@
 import type { AgentManager } from '../tools/agent/index.js';
-import { withOwnerInput } from '../security/turn-input-party.js';
+import { partyOfRecordedCause, withInputParty } from '../security/turn-input-party.js';
 import { withConversation } from '../security/conversation-exposure.js';
 import { automationActionBinding } from './action-source.js';
 import type { SpawnAutomationTaskInput } from './manager-runtime-helpers.js';
@@ -20,12 +20,14 @@ export function createAutomationSpawnTask(
   connectedTools: () => readonly string[] = () => [],
 ): (input: SpawnAutomationTaskInput) => string {
   return (input) => {
-    const extra = input.toolAllowlist?.length ? [] : connectedTools();
-    // A schedule's run is the owner's own, marked so (security/turn-input-party.ts: unmarked work is someone else's):
-    // every schedule is his, made by him or on his yes (anyone else's make, change or enable of one is put to him:
-    // control-plane/method-risk.ts class `loosens-a-protection`, gate/classify.ts runs-later).
+    // The owner's connected tools (their mail, their calendar) are their runs' only: never a run someone else caused.
+    const extra = input.toolAllowlist?.length || input.cause !== undefined ? [] : connectedTools();
+    // A schedule's run is the turn of whoever caused the schedule, marked so (security/turn-input-party.ts: unmarked
+    // work is someone else's): the owner's own (made by them, their own turn, or kept from before makers were recorded),
+    // or, when a paired device, a member, the outside agent, a script or a turn on someone else's input made, changed or
+    // resumed it (jobs.ts `cause`), that caller's: reads only, no stored credential, whatever the mode.
     // Inside the schedule's own conversation key: it starts with what the conversation that made it had read.
-    const record = withConversation(input.exposureKey, () => withOwnerInput(() => agentManager.spawn({
+    const record = withConversation(input.exposureKey, () => withInputParty(partyOfRecordedCause(input.cause), () => agentManager.spawn({
       mode: 'spawn',
       task: input.prompt,
       ...(input.modelId ? { model: input.modelId } : {}),

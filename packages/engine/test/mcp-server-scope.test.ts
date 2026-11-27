@@ -1,12 +1,12 @@
 // Proves: A call outside an MCP server's allowed paths or hosts, to a blocked or quarantined server, or to a tool the owner denied, is sent.
 // Red when: The registry sends a tool call its scope check refused (a path outside allowedPaths, by `..`, relative or direct, or a host outside allowedHosts), one to a blocked server or a quarantined one the owner has not approved, or one to a tool the owner denied with `/mcp deny`.
-// Proves: Another program's MCP file replaces the owner's server of the same name, so the tools he denied and the trust he set stop applying.
+// Proves: Another program's MCP file replaces the owner's server of the same name, so the tools the owner denied and the trust they set stop applying.
 // Red when: The merge of MCP files lets Claude Desktop's or ~/.mcp's entry win over the owner's own file, or a later file of a name drops a tool an earlier one denied or loosens its trust mode.
 // Proves: A trust mode the owner set this session for one MCP program applies to another program that later takes the same server name.
 // Red when: A reload that puts a different program (file, command, arguments, address or environment) behind a server name keeps the trust mode set this session for the earlier one, so a call outside the new server's scope is sent.
 /**
  * An MCP server is third-party code; the scope the owner gives it (allowed
- * paths and hosts, its trust mode, a quarantine, a tool he denied) is his only hold on what it
+ * paths and hosts, its trust mode, a quarantine, a tool the owner denied) is the owner's only hold on what it
  * is asked to do. The real registry and client, connected over stdio to a
  * stand-in MCP server that records every tool call it receives, show which
  * calls reach it.
@@ -83,9 +83,9 @@ test('only calls inside the server\'s scope reach it; a blocked or unapproved qu
 /**
  * Other programs' MCP files (~/.mcp, Claude Desktop's) name a server the owner
  * also configured. The owner's own entry is the one that runs, with the trust
- * he set; a denial any of the files made is kept, so a file can only tighten.
+ * the owner set; a denial any of the files made is kept, so a file can only tighten.
  */
-test('another program\'s MCP file of the same name neither replaces the owner\'s server nor drops a tool he denied', () => {
+test('another program\'s MCP file of the same name neither replaces the owner\'s server nor drops a tool the owner denied', () => {
   const root = realpathSync(mkdtempSync(join(tmpdir(), 'gv-mcp-merge-')));
   cleanups.push(() => rmSync(root, { recursive: true, force: true }));
   const home = join(root, 'home'), project = join(root, 'project');
@@ -101,9 +101,9 @@ test('another program\'s MCP file of the same name neither replaces the owner\'s
 });
 
 /**
- * The owner sets allow-all for his own server this session; a reload then puts a
- * repository's program behind the same name (a workspace he trusts defines a
- * server called the same). The trust he gave belongs to his program: a reload
+ * The owner sets allow-all for their own server this session; a reload then puts a
+ * repository's program behind the same name (a workspace they trust defines a
+ * server called the same). The trust they gave belongs to their program: a reload
  * that keeps it keeps the trust, one that changes it ends it before it connects.
  */
 test('allow-all set this session for one program does not pass to another program that takes its name', async () => {

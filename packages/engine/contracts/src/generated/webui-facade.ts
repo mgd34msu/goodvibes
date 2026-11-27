@@ -10,7 +10,7 @@ import type { OperatorMethodId } from './operator-method-ids.js';
  * call sites) hand-written on top of these generated primitives.
  *
  * Contract product version: 3.5.0
- * Methods: 679 total, 544 REST-routed, 135 ws-only invoke.
+ * Methods: 681 total, 546 REST-routed, 135 ws-only invoke.
  */
 
 export type WebuiHttpMethod = 'GET' | 'POST' | 'PATCH' | 'DELETE';
@@ -2084,6 +2084,14 @@ export const WEBUI_METHOD_ROUTES: Readonly<Record<string, WebuiRouteDefinition>>
     "method": "POST",
     "path": "/api/web-search/query"
   },
+  "work.branch.discard": {
+    "method": "POST",
+    "path": "/api/work/branch/discard"
+  },
+  "work.branch.merge": {
+    "method": "POST",
+    "path": "/api/work/branch/merge"
+  },
   "work.list": {
     "method": "GET",
     "path": "/api/work"
@@ -3003,6 +3011,8 @@ export const WEBUI_METHOD_DISPOSITION: Readonly<Record<string, WebuiMethodDispos
   "watchers.update": "rest",
   "web_search.providers.list": "rest",
   "web_search.query": "rest",
+  "work.branch.discard": "rest",
+  "work.branch.merge": "rest",
   "work.list": "rest",
   "work.plan.approve": "rest",
   "work.plan.discard": "rest",
@@ -8677,7 +8687,6 @@ export const WEBUI_METHOD_SAMPLES: Readonly<Record<string, WebuiMethodSample>> =
       "model": "sample",
       "sessionId": "sample",
       "everyProject": false,
-      "approvalId": "sample",
       "delegatedFrom": "conversation",
       "otherParty": "sample"
     },
@@ -9118,7 +9127,6 @@ export const WEBUI_METHOD_SAMPLES: Readonly<Record<string, WebuiMethodSample>> =
           }
         ],
         "open": false,
-        "ownMessagesAsOwner": false,
         "project": "sample",
         "updatedAt": 0,
         "metadata": {}
@@ -9673,7 +9681,6 @@ export const WEBUI_METHOD_SAMPLES: Readonly<Record<string, WebuiMethodSample>> =
             }
           ],
           "open": false,
-          "ownMessagesAsOwner": false,
           "project": "sample",
           "updatedAt": 0,
           "metadata": {}
@@ -9693,7 +9700,6 @@ export const WEBUI_METHOD_SAMPLES: Readonly<Record<string, WebuiMethodSample>> =
       "dmPolicy": "sample",
       "groupPolicy": "sample",
       "allowTextCommandsWithoutMention": false,
-      "ownMessagesAsOwner": false,
       "project": "sample",
       "allowlistUserIds": [
         "sample"
@@ -9784,7 +9790,6 @@ export const WEBUI_METHOD_SAMPLES: Readonly<Record<string, WebuiMethodSample>> =
         }
       ],
       "open": false,
-      "ownMessagesAsOwner": false,
       "project": "sample",
       "updatedAt": 0,
       "metadata": {}
@@ -11956,7 +11961,13 @@ export const WEBUI_METHOD_SAMPLES: Readonly<Record<string, WebuiMethodSample>> =
               "targetId": "sample",
               "criterionIds": [
                 "sample"
-              ]
+              ],
+              "conflict": {
+                "branch": "sample",
+                "files": [
+                  "sample"
+                ]
+              }
             },
             "dependsOn": [
               "sample"
@@ -12363,6 +12374,9 @@ export const WEBUI_METHOD_SAMPLES: Readonly<Record<string, WebuiMethodSample>> =
               ]
             },
             "failureReason": "sample",
+            "failureKind": "transport",
+            "dropped": "sample",
+            "heardAt": 0,
             "attemptOf": "sample",
             "attemptIndex": 0,
             "attemptSelection": {
@@ -12633,6 +12647,9 @@ export const WEBUI_METHOD_SAMPLES: Readonly<Record<string, WebuiMethodSample>> =
                   ]
                 },
                 "failureReason": "sample",
+                "failureKind": "transport",
+                "dropped": "sample",
+                "heardAt": 0,
                 "attemptOf": "sample",
                 "attemptIndex": 0,
                 "attemptSelection": {
@@ -13202,7 +13219,13 @@ export const WEBUI_METHOD_SAMPLES: Readonly<Record<string, WebuiMethodSample>> =
             "targetId": "sample",
             "criterionIds": [
               "sample"
-            ]
+            ],
+            "conflict": {
+              "branch": "sample",
+              "files": [
+                "sample"
+              ]
+            }
           },
           "dependsOn": [
             "sample"
@@ -13609,6 +13632,9 @@ export const WEBUI_METHOD_SAMPLES: Readonly<Record<string, WebuiMethodSample>> =
             ]
           },
           "failureReason": "sample",
+          "failureKind": "transport",
+          "dropped": "sample",
+          "heardAt": 0,
           "attemptOf": "sample",
           "attemptIndex": 0,
           "attemptSelection": {
@@ -13879,6 +13905,9 @@ export const WEBUI_METHOD_SAMPLES: Readonly<Record<string, WebuiMethodSample>> =
                 ]
               },
               "failureReason": "sample",
+              "failureKind": "transport",
+              "dropped": "sample",
+              "heardAt": 0,
               "attemptOf": "sample",
               "attemptIndex": 0,
               "attemptSelection": {
@@ -14447,7 +14476,13 @@ export const WEBUI_METHOD_SAMPLES: Readonly<Record<string, WebuiMethodSample>> =
                 "targetId": "sample",
                 "criterionIds": [
                   "sample"
-                ]
+                ],
+                "conflict": {
+                  "branch": "sample",
+                  "files": [
+                    "sample"
+                  ]
+                }
               },
               "dependsOn": [
                 "sample"
@@ -14854,6 +14889,9 @@ export const WEBUI_METHOD_SAMPLES: Readonly<Record<string, WebuiMethodSample>> =
                 ]
               },
               "failureReason": "sample",
+              "failureKind": "transport",
+              "dropped": "sample",
+              "heardAt": 0,
               "attemptOf": "sample",
               "attemptIndex": 0,
               "attemptSelection": {
@@ -15124,6 +15162,9 @@ export const WEBUI_METHOD_SAMPLES: Readonly<Record<string, WebuiMethodSample>> =
                     ]
                   },
                   "failureReason": "sample",
+                  "failureKind": "transport",
+                  "dropped": "sample",
+                  "heardAt": 0,
                   "attemptOf": "sample",
                   "attemptIndex": 0,
                   "attemptSelection": {
@@ -15728,7 +15769,13 @@ export const WEBUI_METHOD_SAMPLES: Readonly<Record<string, WebuiMethodSample>> =
               "targetId": "sample",
               "criterionIds": [
                 "sample"
-              ]
+              ],
+              "conflict": {
+                "branch": "sample",
+                "files": [
+                  "sample"
+                ]
+              }
             },
             "dependsOn": [
               "sample"
@@ -16135,6 +16182,9 @@ export const WEBUI_METHOD_SAMPLES: Readonly<Record<string, WebuiMethodSample>> =
               ]
             },
             "failureReason": "sample",
+            "failureKind": "transport",
+            "dropped": "sample",
+            "heardAt": 0,
             "attemptOf": "sample",
             "attemptIndex": 0,
             "attemptSelection": {
@@ -16405,6 +16455,9 @@ export const WEBUI_METHOD_SAMPLES: Readonly<Record<string, WebuiMethodSample>> =
                   ]
                 },
                 "failureReason": "sample",
+                "failureKind": "transport",
+                "dropped": "sample",
+                "heardAt": 0,
                 "attemptOf": "sample",
                 "attemptIndex": 0,
                 "attemptSelection": {
@@ -27698,7 +27751,8 @@ export const WEBUI_METHOD_SAMPLES: Readonly<Record<string, WebuiMethodSample>> =
           "scopes": [
             "sample"
           ],
-          "origin": "owner-pairing"
+          "origin": "owner-pairing",
+          "waitingForFirstUse": false
         }
       ],
       "legacySharedRevoked": false
@@ -32197,7 +32251,8 @@ export const WEBUI_METHOD_SAMPLES: Readonly<Record<string, WebuiMethodSample>> =
     "input": {
       "title": "sample",
       "surfaceKind": "sample",
-      "surfaceId": "sample"
+      "surfaceId": "sample",
+      "workingDirectory": "sample"
     },
     "output": {
       "session": {
@@ -35159,6 +35214,24 @@ export const WEBUI_METHOD_SAMPLES: Readonly<Record<string, WebuiMethodSample>> =
       "metadata": {}
     }
   },
+  "work.branch.discard": {
+    "input": {
+      "work": "sample"
+    },
+    "output": {
+      "title": "sample",
+      "branch": "sample"
+    }
+  },
+  "work.branch.merge": {
+    "input": {
+      "work": "sample"
+    },
+    "output": {
+      "title": "sample",
+      "branch": "sample"
+    }
+  },
   "work.list": {
     "input": {},
     "output": {
@@ -36167,7 +36240,8 @@ export const WEBUI_METHOD_SAMPLES: Readonly<Record<string, WebuiMethodSample>> =
         {
           "root": "sample",
           "label": "sample",
-          "daemonFolder": false
+          "daemonFolder": false,
+          "reachable": false
         }
       ]
     }
@@ -36190,7 +36264,8 @@ export const WEBUI_METHOD_SAMPLES: Readonly<Record<string, WebuiMethodSample>> =
           "id": "sample",
           "canonicalRoot": "sample",
           "generation": 0
-        }
+        },
+        "reachable": false
       },
       "alreadyRegistered": false,
       "nativeScopeGranted": false
@@ -36210,7 +36285,8 @@ export const WEBUI_METHOD_SAMPLES: Readonly<Record<string, WebuiMethodSample>> =
             "id": "sample",
             "canonicalRoot": "sample",
             "generation": 0
-          }
+          },
+          "reachable": false
         }
       ],
       "declines": [

@@ -27,6 +27,7 @@ import { composeJudgment } from '../platform/src/platform/runtime/judgment-servi
 import { forgetGateReadings, gateReadingAnswers } from './_helpers/gate-readings.ts';
 import { syntheticCredential } from '../platform/src/platform/utils/fixture-credentials.ts';
 import { localOwnerActor } from '@goodvibes/engine/daemon-api/http-policy';
+import { withOwnerInput } from '../platform/src/platform/security/turn-input-party.ts';
 
 // Credential-shaped values are assembled at run time (utils/fixture-credentials.ts), so no
 // file holds a whole shape a secret scanner reports.
@@ -65,7 +66,10 @@ test('no secret in a call reaches the decision model and the call is not approve
     disposal: { add: (_label, dispose) => { teardowns.push(dispose); } } });
   const reader = createPermissionConfigReader(config);
   expect(reader.isDecisionModelReady?.()).toBe(true);
-  const manager = new PermissionManager(async () => ({ approved: false }), reader, new PolicyRuntimeState(), null, null, null, {});
+  const permissions = new PermissionManager(async () => ({ approved: false }), reader, new PolicyRuntimeState(), null, null, null, {});
+  // Each call is the owner's own turn, as the product marks an owner's turn: a call outside any turn is someone else's
+  // and only reads, refused before the decision model is reached.
+  const manager = { checkDetailed: (tool: string, args: Record<string, unknown>) => withOwnerInput(() => permissions.checkDetailed(tool, args)) };
   const exec = (cmd: string) => ['exec', { commands: [{ cmd }] }] as const;
   const secrets: ReadonlyArray<readonly [string, string, Record<string, unknown>]> = [
     ['a declared credential field', 'mcp_fixture_login', { username: 'owner', password: 'correct-horse-battery' }],

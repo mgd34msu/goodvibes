@@ -127,7 +127,7 @@ export function AttemptComparison({ open, group, onClose, onPicked }: AttemptCom
             </Button>
           }
         >
-          <p className="attempt-cmp__note">This is a proposal only; a human still confirms.</p>
+          <p className="attempt-cmp__note">This is a proposal only; you still confirm the winner.</p>
           {judgeUnavailable && (
             <p className="attempt-cmp__note" role="note">No judge model is configured on this engine, pick manually.</p>
           )}

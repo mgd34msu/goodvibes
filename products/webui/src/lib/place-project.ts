@@ -24,7 +24,7 @@ const STORAGE_KEY = 'goodvibes.places.project' as const;
 
 /**
  * The chooser's "Every project": the owner's own choice to read every project's per-project things (memory) at once.
- * No project is named then; the call says `everyProject`, which the daemon takes only from the owner himself (from
+ * No project is named then; the call says `everyProject`, which the daemon takes only from the owner in person (from
  * anyone else it reads only what belongs to no project). A list bound to one project asks for a project instead.
  */
 export const EVERY_PROJECT = '*every-project*';
@@ -92,17 +92,39 @@ export function chooseProject(project: string): void {
   for (const listener of [...listeners]) listener();
 }
 
+interface ProjectsRead {
+  readonly roots: readonly string[];
+  /** The projects whose folder cannot be reached now (`reachable: false`: a disk not mounted, a parent folder renamed). */
+  readonly unreachable: readonly string[];
+}
+
 /** The projects the daemon knows (`workspaces.projects.list`), its own folder first. */
-async function readProjects(): Promise<readonly string[]> {
+async function readProjects(): Promise<ProjectsRead> {
   const answer = await invokeThroughMethod('workspaces.projects.list', {});
   const rows = answer && typeof answer === 'object' && Array.isArray((answer as { projects?: unknown }).projects) ? (answer as { projects: unknown[] }).projects : [];
-  const roots = rows.map((row) => (row && typeof row === 'object' ? (row as { root?: unknown }).root : undefined));
-  return [...new Set(roots.filter((root): root is string => typeof root === 'string' && root.trim() !== ''))];
+  const read = rows.flatMap((row) => {
+    const root = row && typeof row === 'object' ? (row as { root?: unknown }).root : undefined;
+    return typeof root === 'string' && root.trim() !== '' ? [{ root, unreachable: (row as { reachable?: unknown }).reachable === false }] : [];
+  });
+  return {
+    roots: [...new Set(read.map((row) => row.root))],
+    unreachable: [...new Set(read.filter((row) => row.unreachable).map((row) => row.root))],
+  };
+}
+
+/** The words beside a project whose folder cannot be reached now; nothing of it is lost, and it is the same project when its folder is back. */
+const NOT_REACHABLE_NOW = 'not reachable now';
+
+/** A project's name in a chooser: its last folder, with "not reachable now" when its folder cannot be reached. */
+export function projectChoiceLabel(places: PlaceProjects, project: string, name: string = projectName(project)): string {
+  return places.unreachable.includes(project) ? `${name} (${NOT_REACHABLE_NOW})` : name;
 }
 
 export interface PlaceProjects {
   /** The folders to choose from (empty until read, or when the daemon names none). */
   readonly projects: readonly string[];
+  /** The ones whose folder cannot be reached now, shown "not reachable now" (still the same projects). */
+  readonly unreachable: readonly string[];
   /** The project in use: the chosen one when the daemon still knows it, else the first it names. */
   readonly project: string | undefined;
   readonly choose: (project: string) => void;
@@ -117,13 +139,14 @@ export function usePlaceProjects(): PlaceProjects {
   const { isError, refetch } = read;
   useEffect(() => { if (stream.status === 'live' && isError) void refetch(); }, [stream.status, isError, refetch]);
   const current = useSyncExternalStore(subscribe, () => chosen, () => chosen);
-  const projects = read.data ?? [];
+  const projects = read.data?.roots ?? [];
+  const unreachable = read.data?.unreachable ?? [];
   const project = current && (projects.includes(current) || current === EVERY_PROJECT) ? current : projects[0];
   // The project in use is the one every call names, also when it is the first the daemon offers (none chosen yet).
   useEffect(() => { setCallProject(project); }, [project]);
   const choose = useCallback((next: string) => chooseProject(next), []);
   return {
-    projects, project, choose,
+    projects, unreachable, project, choose,
     status: read.isError ? 'failed' : read.data ? 'ready' : 'reading',
     ...(read.isError ? { reason: read.error instanceof Error ? read.error.message : String(read.error) } : {}),
   };

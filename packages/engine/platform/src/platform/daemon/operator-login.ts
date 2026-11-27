@@ -179,7 +179,7 @@ export async function handleOperatorLogin(req: Request, clientAddress: string, d
         state: 'your password was not set; no session was made', next: ['Choose a password of at least 8 characters, then sign in again'],
       }, { status: 400 });
     }
-    logger.info('First sign-in: the owner set his own password; the first-run file was removed and its password retired', { username: user.username });
+    logger.info('First sign-in: the owner set their own password; the first-run file was removed and its password retired', { username: user.username });
   }
   const session = deps.userAuth.createSession(user.username);
   authSuccessTotal.add(1);

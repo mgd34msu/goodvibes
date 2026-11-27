@@ -27,7 +27,8 @@ import { notifyCompletion } from '../utils/notify.js';
 import { logger } from '../utils/logger.js';
 import type { PermissionManager } from '../permissions/manager.js';
 import { currentTurn, inputOriginIsOwnerDirect, startTurnForOwnerInput, turnSurfaceOf, withTurn } from '../security/turn-boundary.js';
-import { withConversation } from '../security/conversation-exposure.js';
+import { noteExposure, withConversation } from '../security/conversation-exposure.js';
+import { turnInputParty } from '../security/turn-input-party.js';
 import type { Actor } from '@goodvibes/engine/daemon-api/http-policy';
 import {
   isPassiveCodeInjectionEnabled,
@@ -1077,14 +1078,21 @@ export class Orchestrator {
       surface: guest ? guest.surface : turnSurfaceOf(origin),
       ...(guest ? { actor: guest.actor } : {}),
       origin,
-      // The owner gave this input himself (his keyboard, input marked owner-direct): what makes a turn with no surface his.
+      // The owner gave this input in person (their keyboard, input marked owner-direct): what makes a turn with no surface theirs.
       ...(ownerRequest ? { ownerInput: true as const } : {}),
       requestText: text,
       ownerRequestText: ownerRequest ? text : null,
       // A turn of this conversation runs as no agent; an agent's own loop sets its id.
       callerAgentId: currentTurn()?.callerAgentId ?? null,
       ownerSessionId: this.currentSessionId || null,
-    }, () => this.runTurn(text, content, options, nativeTurn, resume, turnId)));
+    }, () => {
+      // Words someone other than the owner wrote (a channel message, a guest's, a device's or member's input, a message
+      // an outside caller put into a session) are put into this conversation now: it has read outside text from this
+      // moment, the same mark a fetched page sets, so its later turns, the owner's included, are decided with that fact.
+      const party = turnInputParty();
+      if (party.party === 'other' && text.trim() !== '') noteExposure('channel-message', party.who);
+      return this.runTurn(text, content, options, nativeTurn, resume, turnId);
+    }));
   }
 
   private async runTurn(

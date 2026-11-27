@@ -16,7 +16,8 @@
  * (runtime-graph.ts); this is for every other project.
  */
 import { isAbsolute, join, relative } from 'node:path';
-import { checkCallerProject, projectIdentityOf } from '@goodvibes/engine/platform/platform/workspace';
+import { randomUUID } from 'node:crypto';
+import { checkCallerProject, holdProjectIdentity, projectIdentityOf } from '@goodvibes/engine/platform/platform/workspace';
 import { HookActivityTracker, HookDispatcher, type HookRunnerDeps } from '@goodvibes/engine/platform/platform/hooks';
 import type { OverflowHandlerConfig } from '@goodvibes/engine/platform/platform/tools';
 import {
@@ -87,7 +88,7 @@ export interface ProjectTurnFacilitiesOptions {
     readonly enabled: () => boolean;
   } | undefined;
   /** The daemon's checkpoint stores, one per workspace (workspace-checkpointing.ts). */
-  readonly checkpoints?: Pick<DaemonWorkspaceCheckpoints, 'acquire' | 'bindSession' | 'release'> | undefined;
+  readonly checkpoints?: Pick<DaemonWorkspaceCheckpoints, 'acquire' | 'bindSession' | 'pin' | 'release'> | undefined;
   /** The daemon's home (`<home>/.goodvibes/daemon` unless moved): no folder in or above it is a project. */
   readonly daemonHome: string;
 }
@@ -99,14 +100,21 @@ export interface ProjectTurnFacilities {
    * project was checked at its door, and nothing reaches here that would start tool servers or take a baseline there.
    */
   readonly forFolder: (folder: string) => AgentProjectFacilities;
-  /** `forFolder`, held for good (a project's Work graph keeps its project's facilities while the daemon runs). */
+  /** `forFolder`, held until `unhold` (a project's Work graph keeps its project's facilities while it is made). */
   hold(folder: string): AgentProjectFacilities;
+  /** The Work graph that held the project's facilities let go (project-work-set.ts, its idle release). */
+  unhold(folder: string): void;
   /**
    * The orchestrator let the folder's last registry go (agents/orchestrator.ts `releaseProjectFacilities`): once no
    * folder of its project is held, the project's tool servers stop, its hooks and code index are let go and its
-   * checkpoint store closes; the next run there builds them again. A project's Work graph holds its own for good.
+   * checkpoint store closes; the next run there builds them again. A project's Work graph holds its own until it is let go.
    */
   release(folder: string): void;
+  /**
+   * Fires `event` on the project's own hooks (its hooks file, under the owner's trust of it), holding the project's
+   * facilities for the firing only: the webhook listener's event of a project (daemon/http-listener.ts).
+   */
+  fireHooks(folder: string, event: HookEvent): Promise<HookResult>;
   close(): Promise<void>;
 }
 
@@ -214,6 +222,8 @@ export function createProjectTurnFacilities(options: ProjectTurnFacilitiesOption
     let store: { settled?(): Promise<void> } | undefined;
     try {
       const opened = checkpoints?.acquire(key);
+      // Held open by this set of facilities until it is let go (`releaseProject`).
+      if (opened) checkpoints?.pin(key);
       store = opened?.manager;
       // The store's init takes the project's baseline; a turn awaits it (`ready`) before its first tool call, so the
       // first edit in a project lands after the baseline and its turn's checkpoint holds it.
@@ -291,58 +301,94 @@ export function createProjectTurnFacilities(options: ProjectTurnFacilitiesOption
   // held for good (a project's Work graph, `hold`).
   const held = new Map<string, Set<string>>();
   const pinned = new Set<string>();
+  // Each held folder keeps the project it had when first held (workspace/project-identity.ts `holdProjectIdentity`):
+  // a register change re-keys it only once nothing holds it, so a running turn's project never changes under it and
+  // no second set is built over the same files.
+  // One per holder (a folder the orchestrator holds, or one hook firing's own token).
+  const identityHolds = new Map<string, () => void>();
   const facts = { homeDirectory: options.homeDirectory, goodVibesHome: join(options.homeDirectory, '.goodvibes'), daemonHome: options.daemonHome, assignedProjects: () => [] };
+  /** The project's facilities for `folder`, held by `holder` (the folder itself, or a token of its own) until let go. */
+  const acquire = (folder: string, holder: string): AgentProjectFacilities & { readonly release: () => Promise<void> } => {
+    // Only a folder that can be a project: the never-a-project rules of the one check (the owner's own program's, the
+    // widest: a device's or member's project was narrowed further at its door).
+    const checked = checkCallerProject(folder, { ownersProgram: true }, facts);
+    if (!checked.ok) throw new Error(`Not started: ${checked.reason}, so no tool server, hook or checkpoint is made for it.`);
+    const key = keyOf(folder);
+    const folders = held.get(key) ?? new Set<string>();
+    folders.add(holder);
+    held.set(key, folders);
+    if (!identityHolds.has(holder)) identityHolds.set(holder, holdProjectIdentity(folder));
+    const known = projects.get(key);
+    if (known) return known;
+    // Made by whichever turn or request first works there: built in the process's own context, so its tool servers,
+    // its watchers and everything they start later are no caller's (engine utils/outside-every-call.ts).
+    const made = outsideEveryCall(() => build(key));
+    projects.set(key, made);
+    return made;
+  };
+  /** `holder` lets the project `key` go; the last holder's going releases its facilities (below). */
+  const letGo = (key: string, holder: string): void => {
+    const folders = held.get(key);
+    folders?.delete(holder);
+    identityHolds.get(holder)?.();
+    identityHolds.delete(holder);
+    if ((folders && folders.size > 0) || pinned.has(key)) return;
+    releaseProject(key);
+  };
   const facilities: ProjectTurnFacilities = {
+    // The Work graph's hold is a holder of its own: a turn letting the same folder go never ends it.
     hold(folder) {
-      const project = facilities.forFolder(folder);
+      const project = acquire(folder, `${folder}\u0000work`);
       pinned.add(keyOf(folder));
       return project;
     },
-    forFolder(folder) {
-      // Only a folder that can be a project: the never-a-project rules of the one check (the owner's own program's, the
-      // widest: a device's or member's project was narrowed further at its door).
-      const checked = checkCallerProject(folder, { ownersProgram: true }, facts);
-      if (!checked.ok) throw new Error(`Not started: ${checked.reason}, so no tool server, hook or checkpoint is made for it.`);
+    unhold(folder) {
       const key = keyOf(folder);
-      const folders = held.get(key) ?? new Set<string>();
-      folders.add(folder);
-      held.set(key, folders);
-      const known = projects.get(key);
-      if (known) return known;
-      // Made by whichever turn or request first works there: built in the process's own context, so its tool servers,
-      // its watchers and everything they start later are no caller's (engine utils/outside-every-call.ts).
-      const made = outsideEveryCall(() => build(key));
-      projects.set(key, made);
-      return made;
+      pinned.delete(key);
+      letGo(key, `${folder}\u0000work`);
     },
-    release(folder) {
+    async fireHooks(folder, event) {
+      // A holder of its own for this one firing, so it never ends another holder's hold on the same folder.
+      const holder = `${folder}\u0000hook-fire:${randomUUID()}`;
+      const project = acquire(folder, holder);
       const key = keyOf(folder);
-      const folders = held.get(key);
-      folders?.delete(folder);
-      if ((folders && folders.size > 0) || pinned.has(key)) return;
-      held.delete(key);
-      const project = projects.get(key);
-      if (!project) return;
-      projects.delete(key);
-      // One ordered thing per project: releases run one after another, and a new set made for the project meanwhile
-      // (a turn arriving during the release) keeps its checkpoint store: it is closed only while nothing holds the project.
-      // The release queue is the daemon's own, whichever run let the project go.
-      const done: Promise<void> = outsideEveryCall(() => (releasing.get(key) ?? Promise.resolve())
-        .then(() => project.release())
-        .then(async () => { if (!projects.has(key)) await options.checkpoints?.release(key); })
-        .catch((error: unknown) => {
-          logger.warn('[daemon] a project\'s facilities were not let go cleanly', { project: key, error: summarizeError(error) });
-        })
-        .finally(() => { if (releasing.get(key) === done) releasing.delete(key); }));
-      releasing.set(key, done);
+      try {
+        return await (project.toolCallHooks ?? project.hookDispatcher!).fire(event);
+      } finally {
+        letGo(key, holder);
+      }
+    },
+    forFolder: (folder) => acquire(folder, folder),
+    release(folder) {
+      letGo(keyOf(folder), folder);
     },
     async close() {
       const open = [...projects.values()];
       projects.clear();
       held.clear();
       pinned.clear();
+      for (const release of identityHolds.values()) release();
+      identityHolds.clear();
       await Promise.all([...open.map((project) => project.release()), ...releasing.values()]);
     },
   };
+  function releaseProject(key: string): void {
+    held.delete(key);
+    const project = projects.get(key);
+    if (!project) return;
+    projects.delete(key);
+    // One ordered thing per project: releases run one after another, and a new set made for the project meanwhile
+    // (a turn arriving during the release) keeps its checkpoint store: it is closed only while nothing holds the project.
+    // The release queue is the daemon's own, whichever run let the project go.
+    const done: Promise<void> = outsideEveryCall(() => (releasing.get(key) ?? Promise.resolve())
+      .then(() => project.release())
+      // This set's hold on the checkpoint store goes; a set made meanwhile holds it with its own.
+      .then(async () => { await options.checkpoints?.release(key); })
+      .catch((error: unknown) => {
+        logger.warn('[daemon] a project\'s facilities were not let go cleanly', { project: key, error: summarizeError(error) });
+      })
+      .finally(() => { if (releasing.get(key) === done) releasing.delete(key); }));
+    releasing.set(key, done);
+  }
   return facilities;
 }

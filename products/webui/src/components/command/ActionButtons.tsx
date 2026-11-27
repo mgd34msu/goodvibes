@@ -3,7 +3,7 @@
  * a tool, a schedule), named as the terminal names them. Each opens the
  * action's sheet with what the row already knows filled in. Actions that are
  * rarely wanted sit in the row's "More" menu, each with its risk words. An
- * action only a terminal can do is shown disabled with its reason.
+ * action only a terminal can do is not drawn.
  */
 import { useState } from 'react';
 import { MoreHorizontal } from 'lucide-react';
@@ -43,13 +43,13 @@ export function ActionButtons({ command, actions, menu = [], menuLabel, prefill 
   // What each action is and where it runs is read from the daemon (lib/place-capabilities.ts); the row draws again then.
   useCapabilityIndex();
   const needsMore = (action: ActionData) => action.inputs.some((input) => input.required === true && prefill[input.id] === undefined);
-  const inMenu = menu.flatMap((id) => findCommandAction(command, id)?.action ?? []);
+  const inMenu = menu.flatMap((id) => findCommandAction(command, id)?.action ?? []).filter((action) => terminalOnly(action) === undefined);
   return (
     <span className="gv-action-buttons">
       {actions.map((id, index) => {
         const found = findCommandAction(command, id);
-        if (!found) return null;
-        const why = terminalOnly(found.action);
+        // An act only a terminal program can do is not drawn: the web draws no control that cannot be used here.
+        if (!found || terminalOnly(found.action) !== undefined) return null;
         const words = short && !needsMore(found.action) ? actionButton(asActionShape(found.action)) : `${found.action.label}${needsMore(found.action) ? '…' : ''}`;
         return (
           <Button
@@ -57,8 +57,7 @@ export function ActionButtons({ command, actions, menu = [], menuLabel, prefill 
             size="sm"
             // Red only for what cannot be undone; other risks say their words in the title and the sheet.
             variant={found.action.risk === 'cannot-be-undone' ? 'quiet-danger' : primary && index === 0 ? 'primary' : 'secondary'}
-            disabled={why !== undefined}
-            title={why ?? (found.action.riskWords ? `${found.action.label} (${riskWords(found.action.risk)})` : found.action.label)}
+            title={found.action.riskWords ? `${found.action.label} (${riskWords(found.action.risk)})` : found.action.label}
             data-action={id}
             onClick={() => setOpen(id)}
           >
@@ -73,7 +72,7 @@ export function ActionButtons({ command, actions, menu = [], menuLabel, prefill 
           trigger={(props) => <IconButton {...props} size="sm" label={menuLabel ?? 'More'} icon={<MoreHorizontal />} />}
         >
           {inMenu.map((action) => (
-            <MenuItem key={action.id} danger={action.risk === 'cannot-be-undone'} disabled={terminalOnly(action) !== undefined} onSelect={() => setOpen(action.id)}>
+            <MenuItem key={action.id} danger={action.risk === 'cannot-be-undone'} onSelect={() => setOpen(action.id)}>
               {action.label}{needsMore(action) ? '…' : ''}{action.riskWords ? ` (${action.riskWords})` : ''}
             </MenuItem>
           ))}

@@ -427,7 +427,7 @@ describe('a purchase reaches the merchant once, with the card, or not at all', (
       expect(outcome.kind).toBe('purchased');
       if (outcome.kind !== 'purchased') throw new Error('unreachable');
       // TWO sends, deliberately: the veto notice BEFORE the money moves, and
-      // the completion report AFTER the charge. He would otherwise get a
+      // the completion report AFTER the charge. The owner would otherwise get a
       // notice, ten minutes of silence, a charge, and nothing.
       expect(harness.notices[0]?.kind).toBe('veto');
       expect(merchant.submissions.length).toBe(1);
@@ -494,7 +494,7 @@ describe('a purchase reaches the merchant once, with the card, or not at all', (
     expect(alpha.submissions.length).toBe(0);
 
     // A shop the owner said always to ask about gets the approval window however established the reading calls it,
-    // in whatever form he wrote it.
+    // in whatever form the owner wrote it.
     for (const written of ['bestbuy.com', 'www.bestbuy.com', 'https://www.bestbuy.com/']) {
       const excluded = await buildHarness({ merchant: alpha, answer: null });
       const unanswered = await runCheckout(excluded.request, await readFixtureCheckout(alpha), excluded.controls,
@@ -521,11 +521,11 @@ describe('a purchase reaches the merchant once, with the card, or not at all', (
     expect(outcome.challenge.kind).toBe('3d-secure');
     expect(alpha.submissions.length).toBe(0);
     // Nothing recorded as a purchase, and the money stays held, because the
-    // order may still complete once he answers.
+    // order may still complete once the owner answers.
     expect(harness.recorded().length).toBe(0);
     expect(harness.ledger.state().reservations.length).toBe(1);
     // Regression: the redactor stays ARMED, not disarmed, while a
-    // challenge is pending. He is about to be sent back to this very page to
+    // challenge is pending. The owner is about to be sent back to this very page to
     // finish 3-D Secure, and the typed card digits are still sitting in its
     // DOM (no click ever reached the merchant to clear them). Disarming here,
     // as this used to, would leave a screenshot, an extract, or a readText of

@@ -22,7 +22,7 @@ interface ProjectPlanningRouteContext {
   readonly requireAdmin: (req: Request) => Response | null;
   /**
    * The one folder check of every call (control-plane/caller-paths.ts), for the project a planning call names: why
-   * this caller may not name it, or undefined. Absent: only the owner himself names one (never "no rule, no check").
+   * this caller may not name it, or undefined. Absent: only the owner in person names one (never "no rule, no check").
    */
   readonly refuseProject?: ((req: Request, folder: string) => string | undefined) | undefined;
   /** The plan identity of a project folder (knowledge/project-planning/configured-project.ts `projectIdentityOfFolder`). */
@@ -92,7 +92,7 @@ export class ProjectPlanningRoutes {
           status: 422,
         }));
       }
-      const refused = this.context.refuseProject ? this.context.refuseProject(req, folder) : 'this daemon has no rule for which projects a caller may name, so only the owner himself names one';
+      const refused = this.context.refuseProject ? this.context.refuseProject(req, folder) : 'this daemon has no rule for which projects a caller may name, so only the owner in person names one';
       if (refused !== undefined) {
         throw new RefusalError(refusal({ code: 'PROJECT_NOT_ALLOWED', state: 'nothing was read or changed', reason: refused,
           next: ['Name a project the owner gave this caller (Devices and network, on its row)'], status: 403 }));
@@ -209,9 +209,13 @@ export class ProjectPlanningRoutes {
     }
   }
 
-  private async admin(req: Request, fn: () => Promise<Response>): Promise<Response> {
-    const adminError = this.context.requireAdmin(req);
-    if (adminError) return adminError;
+  /**
+   * A change of a project's plan is a project act (effect-authority.ts `work.write`), admitted by its effects at the
+   * router's binding gate; the one folder check above held the caller to a project the owner gave it. No admin is asked
+   * for here. The plan is the project's one shared list: whoever was given the project changes it (its entries keep no
+   * maker).
+   */
+  private async admin(_req: Request, fn: () => Promise<Response>): Promise<Response> {
     return fn();
   }
 

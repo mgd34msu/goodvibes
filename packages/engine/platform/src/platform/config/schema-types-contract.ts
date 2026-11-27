@@ -9,7 +9,6 @@ export interface ContractSettings {
   autoCommit: boolean;
   commitScope: 'off' | 'scoped' | 'all';
   gates: QualityGate[];
-  gateTimeoutMs: number;
   acceptanceStakes: 'high' | 'critical';
   midRunChecks: boolean;
   evidenceNudgeLimit: number;
@@ -23,8 +22,6 @@ export interface ContractSettings {
   maxActiveContracts: number;
   maxParallelUnits: number;
   isolation: 'auto' | 'worktree' | 'shared';
-  heartbeatTimeoutMs: number;
   transportRetryLimit: number;
-  transportRetryDelayMs: number;
   nudgeTtlMs: number;
 }

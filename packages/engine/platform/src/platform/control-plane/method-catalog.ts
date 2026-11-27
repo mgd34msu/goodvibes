@@ -288,7 +288,7 @@ function normalizeEventDescriptor(descriptor: GatewayEventDescriptor): GatewayEv
  * and write; any other signed-in user holds every read scope except those over
  * the owner's content (OWNER_PRIVATE_READ_SCOPES: mail, profile, purchases,
  * dates, memory, transcripts, paired devices and peers, calendar, approvals,
- * named people, workspace file contents, and the records of his browser,
+ * named people, workspace file contents, and the records of the owner's browser,
  * knowledge, channels, automations, fleet and skills) and no write scope. A
  * pairing or user that stores its own scope list is granted that list, never
  * more than its role's default (daemon/control-plane.ts `principalFor`). What
@@ -357,7 +357,7 @@ export class GatewayMethodCatalog {
 
   /**
    * The rules set by `setCallerPathRules`, for a door that reaches a route without a handler (the dispatch, REST). While
-   * none are set, the rules of a catalog without them (caller-paths.ts `CALLER_RULES_ABSENT`): only the owner himself
+   * none are set, the rules of a catalog without them (caller-paths.ts `CALLER_RULES_ABSENT`): only the owner in person
    * names a folder or reaches a record; never no check.
    */
   pathRules(): CallerPathRules {
@@ -392,7 +392,7 @@ export class GatewayMethodCatalog {
   /**
    * The rules of the one check of what a caller may reach (control-plane/caller-reach.ts): the project check the daemon
    * set, each kind's owner lookup, and the capabilities' declared record inputs. While the daemon set no rules, those of
-   * a catalog without them (`CALLER_RULES_ABSENT`): anyone but the owner himself reaches nothing.
+   * a catalog without them (`CALLER_RULES_ABSENT`): anyone but the owner in person reaches nothing.
    */
   reachRules(): CallerReachRules {
     const paths = this.pathRules();

@@ -40,7 +40,7 @@ export type AuthenticatedOperatorRequest =
       readonly client?: 'agent' | undefined;
       /** The scope list the pairing stores, when narrower than full operator authority. */
       readonly scopes?: readonly string[] | undefined;
-      /** A device the owner paired himself through his pairing flow, recorded when it was minted. */
+      /** A device the owner paired in person through their pairing flow, recorded when it was minted. */
       readonly ownerDevice?: true | undefined;
       /** For an owner's device: the principal ids of the credentials made from it (pairing-token-store `madeFromIt`). */
       readonly madeFromIt?: readonly string[] | undefined;
@@ -297,8 +297,8 @@ export interface OperatorPrincipalGrant {
   readonly admin: boolean;
   readonly scopes: readonly string[];
   /**
-   * A device the owner paired himself (no client named). It is never the owner himself: it answers a question another
-   * caller raised (never its own, nor one of a credential made from it) and does his native work.
+   * A device the owner paired in person (no client named). It is never the owner in person: it answers a question another
+   * caller raised (never its own, nor one of a credential made from it) and does the owner's native work.
    */
   readonly ownerDevice?: true | undefined;
   /** For an owner's device: the principal ids of the credentials made from it. */

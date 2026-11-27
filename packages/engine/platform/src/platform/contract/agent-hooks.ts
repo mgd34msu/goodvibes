@@ -57,7 +57,7 @@ import { describeStall } from './progress.js';
 import { failureFromError, isAbortError, type ContractRun, type InFlightCheck, type UnitRuntime } from './run-context.js';
 import { isTerminalUnitStatus, type CheckTrigger, type ContractFailureKind, type ContractUnit } from './types.js';
 import { addJudgmentUsage } from './usage.js';
-import type { UnitWatchdog } from './watchdog.js';
+import type { UnitActivity } from './unit-activity.js';
 import type { OwnerEvidenceReader } from './owner-evidence.js';
 
 /**
@@ -128,7 +128,7 @@ export interface UnitCheckLoopDeps {
   readonly messageBus: Pick<AgentMessageBus, 'send'>;
   readonly configManager: ContractConfigReader;
   readonly runtimeBus: RuntimeEventBus;
-  readonly watchdog: UnitWatchdog;
+  readonly activity: UnitActivity;
   readonly escalations: UnitCheckEscalations;
   readonly failContract: (run: ContractRun, kind: ContractFailureKind, reason: string) => void;
   /** A unit reached passed (or held-merge): the group may be done. */
@@ -200,7 +200,7 @@ export function createUnitCheckLoop(deps: UnitCheckLoopDeps): UnitCheckLoop {
       }
     }
     if (observed) deps.checkpoint?.(run);
-    deps.watchdog.touch(record.id);
+    deps.activity.touch(record.id);
     if (!turn.toolCalls.some((call) => CHANGING_TOOLS.has(call.name))) return;
     if (!run.env.config().midRunChecks || !WORKING.has(unit.status)) return;
     // A mid-run check cannot pass or fail the unit; what it exists to catch is
@@ -244,6 +244,7 @@ export function createUnitCheckLoop(deps: UnitCheckLoopDeps): UnitCheckLoop {
    */
   async function settleConflictThenCheck(run: ContractRun, unit: ContractUnit, cwd: string, conflict: MergeConflictRepair, candidateOutput?: string): Promise<void> {
     const standing = await readConflictStanding(cwd, conflict);
+    logger.info('contract runner: the conflict repair step ended its turn', { contractId: run.id, unitId: unit.id, standing: standing.kind, branch: conflict.branch });
     if (run.terminal || unit.status !== 'held') return;
     if (standing.kind === 'unresolved') {
       run.decide('stalled', unit.id, `its turn ended with the two changes to ${standing.files.join(', ')} not combined: the owner is asked which to keep`);
@@ -619,7 +620,7 @@ export function createUnitCheckLoop(deps: UnitCheckLoopDeps): UnitCheckLoop {
     unit.activeAgentId = turnId;
     unit.agentIds.push(turnId);
     runtime.cwd = run.contract.projectRoot;
-    runtime.agentStartedAt = run.env.now();
+    unit.heardAt = run.env.now();
     unit.baseline ??= takeBaseline(run.contract.projectRoot);
     selectBaselineExecutionRoot(unit.baseline, runtime.cwd);
     return record;

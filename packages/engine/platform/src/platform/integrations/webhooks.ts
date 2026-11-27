@@ -399,7 +399,7 @@ export class WebhookNotifier implements NotificationDeadLetterSource {
     assertDeliveryCurrent(lifetime);
     this.assertOpen();
     // SSRF tier filter, block requests to internal/private hosts. Every entry
-    // is the owner's own target, so a host he listed in
+    // is the owner's own target, so a host they listed in
     // network.privateDeliveryHosts is left to the delivery's own check below,
     // which admits it and pins the request to the address it checked.
     const approvedPrivateHosts = this.privateDeliveryHosts();

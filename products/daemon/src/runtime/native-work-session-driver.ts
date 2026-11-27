@@ -1,6 +1,6 @@
 /** Drive no-delegation native units through the real foreground turn loop. */
 import { ConversationManager, Orchestrator } from '@goodvibes/engine/platform/platform/core';
-import { createContractIntake, isTerminalContractStatus, readContractConfig, TRANSPORT_RETRY_SITE, type ContractRunner, type ContractView } from '@goodvibes/engine/platform/platform/contract';
+import { createContractIntake, isTerminalContractStatus, TRANSPORT_RETRY_SITE, type ContractRunner, type ContractView } from '@goodvibes/engine/platform/platform/contract';
 import { readFailureTransience } from '@goodvibes/engine/errors';
 import type { AgentOrchestrator, AgentTurnEnvironment } from '@goodvibes/engine/platform/platform/agents';
 import { ToolRegistry } from '@goodvibes/engine/platform/platform/tools';
@@ -37,16 +37,16 @@ export interface NativeSessionDriverOptions {
   readonly assertCurrent: (contract: ContractView) => void;
   /**
    * Who caused the piece of work a run's session belongs to, from the work's record (work-plans.ts `WorkCause`): its
-   * turns run as that party. The owner's own only when he himself asked for it or approved it.
+   * turns run as that party. The owner's own only when the owner in person asked for it or approved it.
    */
   readonly workCauseOf: (sessionId: string | undefined) => WorkCause;
   /** Told when a turn's work ends and its owner stops holding a fleet slot. */
   readonly onSlotReleased?: (() => void) | undefined;
-  /** A failed turn is retried with doubling backoff; the seams exist so tests never wait on a real timer. */
+  /** A failed turn is tried again at once, up to the limit; the seams exist so tests never wait on a real timer. */
   readonly retry?: {
     /** Retries after the first failed attempt. Default 3. */
     readonly limit?: number | undefined;
-    /** First backoff in ms; default `contract.transportRetryDelayMs`. Each retry doubles it. */
+    /** A wait before each retry in ms, doubling; default 0 (none: Work keeps no clock of its own). */
     readonly delayMs?: number | undefined;
     /** Resolves after `ms`, or as soon as `signal` aborts. */
     readonly sleep?: ((ms: number, signal: AbortSignal) => Promise<void>) | undefined;
@@ -89,7 +89,7 @@ export function createNativeWorkSessionDriver(options: NativeSessionDriverOption
   };
   const retries = options.retry?.limit ?? DEFAULT_TURN_RETRIES;
   const sleep = options.retry?.sleep ?? abortableSleep;
-  const firstDelayMs = () => options.retry?.delayMs ?? readContractConfig(options.configManager).transportRetryDelayMs;
+  const firstDelayMs = () => options.retry?.delayMs ?? 0;
   /** A contract of this project's work: the project's session, or a piece of work's own session under it. */
   const ownSession = (sessionId: string | undefined): boolean => sessionId === options.sessionId || (sessionId?.startsWith(`${options.sessionId}:`) ?? false);
   const waitingUnit = (contract: ContractView) => contract.sessionMode === true && !isTerminalContractStatus(contract.status)
@@ -270,9 +270,9 @@ export function createNativeWorkSessionDriver(options: NativeSessionDriverOption
       });
       // The project's hooks are read and its checkpoint baseline taken before the unit's first call changes anything.
       // Its turn runs as whoever caused the work, read from the work's record at each attempt (security/turn-input-party.ts):
-      // work the owner himself asked for or approved is his turn, changing files and running commands under his mode as
-      // his conversation in the project would; anyone else's runs reads only and no command outside a real sandbox,
-      // whatever the mode, until he approves it. Every decision on its calls is made for its project.
+      // work the owner in person asked for or approved is their turn, changing files and running commands under their
+      // mode as their conversation in the project would; anyone else's runs reads only and no command outside a real
+      // sandbox, whatever the mode, until the owner approves it. Every decision on its calls is made for its project.
       const party = options.workCauseOf(contract.sessionId);
       const origin = party.party === 'owner'
         ? { source: 'native-work', surface: 'service', ownerDirect: true }
@@ -299,7 +299,8 @@ export function createNativeWorkSessionDriver(options: NativeSessionDriverOption
           pauseForOwner(contract.id, session, describeError(failure.error), tries + 1);
           return;
         }
-        await sleep(firstDelayMs() * 2 ** tries, backoff.signal);
+        // Tried again at once, bounded by the retry limit: Work keeps no clock of its own.
+        if (firstDelayMs() > 0) await sleep(firstDelayMs() * 2 ** tries, backoff.signal);
       }
     }).catch(error => {
       if (!session.selectionChanged && !halted()) options.runner.cancel(contract.id, `Native session turn failed: ${describeError(error)}`);

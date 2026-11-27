@@ -7,6 +7,7 @@ import {
   handleSharedSessionLifecycle,
 } from './runtime-session-lifecycle-routes.js';
 import { withAdmin } from './auth-helpers.js';
+import { readProgramRegistration, registrantKeyOf } from './control-routes.js';
 import { jsonErrorResponse } from './error-response.js';
 import { agentRetrySpawnInput } from './tasks.js';
 import { EngineErrorCodes, isOperationKey, OPERATION_KEY_RULE } from '@goodvibes/engine/errors';
@@ -38,6 +39,51 @@ function invalidChoice(field: string, value: unknown, accepted: readonly string[
     code: 'INVALID_ARGUMENT',
     field,
   }, { status: 400 });
+}
+
+/**
+ * Whether the request's caller is below an admin (a paired device, the outside agent, a member). The session and task acts
+ * here are project acts (effect-authority.ts `sessions.write`, `tasks.write`): the router's binding gate admits them by
+ * their effects and scopes, and the dispatch's project check and the one reach rule hold such a caller to the projects the
+ * owner gave it and to its own sessions and tasks (control-plane/caller-reach.ts `OWN_RECORD_CHANGES`); no admin is asked
+ * for here. What such a caller may not name at all is refused below.
+ */
+function belowAdmin(context: DaemonRuntimeRouteContext, req: Request): boolean {
+  return context.requireAdmin(req) !== null;
+}
+
+/** The surfaces that are a caller's own program, never one of the owner's channel accounts or services. */
+const CALLER_OWN_SURFACE_KINDS: readonly string[] = ['tui', 'web', 'agent', 'webui', 'companion', 'automation'];
+
+/**
+ * Why a caller below an admin may not make this session or task, or null: a channel route (`routeId`) or a channel
+ * surface of the owner's (Slack, Telegram and the others) is the owner's channels, a shared kind (control-plane/
+ * shared-kinds.ts), never reached by a project act; and a standalone task names the project it works in, never the
+ * daemon's own folder.
+ */
+function belowAdminRefusal(body: JsonRecord, standaloneTask: boolean): Response | null {
+  const surface = typeof body.surfaceKind === 'string' ? body.surfaceKind : undefined;
+  if (typeof body.routeId === 'string' || (surface !== undefined && !CALLER_OWN_SURFACE_KINDS.includes(surface))) {
+    return jsonErrorResponse({
+      error: 'Not done: a channel route or a channel of the owner\'s (Slack, Telegram and the others) is the owner\'s own; this credential acts only in the projects the owner gave it, on its own sessions. Nothing was made or sent.',
+      code: 'SHARED_KIND_NOT_GIVEN',
+    }, { status: 403 });
+  }
+  if (standaloneTask && typeof body.sessionId !== 'string' && (typeof body.workingDirectory !== 'string' || !body.workingDirectory.trim())) {
+    return jsonErrorResponse({
+      error: 'Not done: name the project the agent works in (workingDirectory, a project the owner gave this credential), or send the task into a session of yours (sessionId). Nothing was started.',
+      code: 'NO_PROJECT',
+    }, { status: 422 });
+  }
+  return null;
+}
+
+/** The refusal of `belowAdminRefusal` for this request's caller and body, or null (an admin, or nothing refused). */
+async function refusedBelowAdmin(context: DaemonRuntimeRouteContext, req: Request, standaloneTask = false): Promise<Response | null> {
+  if (!belowAdmin(context, req)) return null;
+  const body = await context.parseJsonBody(req.clone());
+  // A body that does not parse is the handler's own 400.
+  return body instanceof Response ? null : belowAdminRefusal(body, standaloneTask);
 }
 
 /** The surface a message comes from: absent is the web surface; a name no transport has is a 400. */
@@ -325,24 +371,25 @@ export function createDaemonRuntimeSessionRouteHandlers(
   context: DaemonRuntimeRouteContext,
 ): DaemonRuntimeSessionRouteHandlers & DaemonRuntimeTaskRouteHandlers {
   return {
-    createSharedSession: async (request) => withAdmin(context, request, () => handleCreateSharedSession(context, request)),
-    registerSharedSession: async (request) => withAdmin(context, request, () => handleRegisterSharedSession(context, request)),
-    postTask: async (request) => withAdmin(context, request, () => handlePostTask(context, request)),
+    // Project acts (see `belowAdmin`): admitted by their effects, held to the caller's projects and own sessions.
+    createSharedSession: async (request) => (await refusedBelowAdmin(context, request)) ?? handleCreateSharedSession(context, request),
+    registerSharedSession: async (request) => handleRegisterSharedSession(context, request),
+    postTask: async (request) => (await refusedBelowAdmin(context, request, true)) ?? handlePostTask(context, request),
     getSharedSession: async (sessionId, request) => (await refuseUnreadableSession(context, sessionId, request)) ?? handleGetSharedSession(context, sessionId),
-    closeSharedSession: (sessionId, request) => withAdmin(context, request, () => handleSharedSessionLifecycle(context, sessionId, 'close')),
-    reopenSharedSession: (sessionId, request) => withAdmin(context, request, () => handleSharedSessionLifecycle(context, sessionId, 'reopen')),
-    detachSharedSession: (sessionId, request) => withAdmin(context, request, () => handleSharedSessionDetach(context, sessionId, request)),
-    deleteSharedSession: (sessionId, request) => withAdmin(context, request, () => handleDeleteSharedSession(context, sessionId)),
+    closeSharedSession: (sessionId) => handleSharedSessionLifecycle(context, sessionId, 'close'),
+    reopenSharedSession: (sessionId) => handleSharedSessionLifecycle(context, sessionId, 'reopen'),
+    detachSharedSession: (sessionId, request) => handleSharedSessionDetach(context, sessionId, request),
+    deleteSharedSession: (sessionId) => handleDeleteSharedSession(context, sessionId),
     getSharedSessionMessages: async (sessionId, url, request) => (await refuseUnreadableSession(context, sessionId, request)) ?? handleGetSharedSessionMessages(context, sessionId, url),
     // What was typed or sent into the session is its transcript: read only as its messages are.
     getSharedSessionInputs: async (sessionId, url, request) => (await refuseUnreadableSession(context, sessionId, request)) ?? handleGetSharedSessionInputs(context, sessionId, url),
-    postSharedSessionMessage: (sessionId, request) => withAdmin(context, request, () => handlePostSharedSessionMessage(context, sessionId, request)),
-    postSharedSessionSteer: (sessionId, request) => withAdmin(context, request, () => handlePostSharedSessionSteer(context, sessionId, request)),
-    postSharedSessionFollowUp: (sessionId, request) => withAdmin(context, request, () => handlePostSharedSessionFollowUp(context, sessionId, request)),
-    cancelSharedSessionInput: (sessionId, inputId, request) => withAdmin(context, request, () => handleCancelSharedSessionInput(context, sessionId, inputId)),
-    deliverSharedSessionInput: (sessionId, inputId, request) => withAdmin(context, request, () => handleDeliverSharedSessionInput(context, sessionId, inputId, request)),
+    postSharedSessionMessage: async (sessionId, request) => (await refusedBelowAdmin(context, request)) ?? handlePostSharedSessionMessage(context, sessionId, request),
+    postSharedSessionSteer: async (sessionId, request) => (await refusedBelowAdmin(context, request)) ?? handlePostSharedSessionSteer(context, sessionId, request),
+    postSharedSessionFollowUp: async (sessionId, request) => (await refusedBelowAdmin(context, request)) ?? handlePostSharedSessionFollowUp(context, sessionId, request),
+    cancelSharedSessionInput: (sessionId, inputId) => handleCancelSharedSessionInput(context, sessionId, inputId),
+    deliverSharedSessionInput: (sessionId, inputId, request) => handleDeliverSharedSessionInput(context, sessionId, inputId, request),
     getRuntimeTask: (taskId) => handleGetRuntimeTask(context, taskId),
-    runtimeTaskAction: (taskId, action, request) => withAdmin(context, request, () => handleRuntimeTaskAction(context, taskId, action, request)),
+    runtimeTaskAction: (taskId, action, request) => handleRuntimeTaskAction(context, taskId, action, request),
     getTaskStatus: (agentId) => handleGetTaskStatus(context, agentId),
     getSharedSessionEvents: (sessionId, request) => withAdmin(context, request, () => handleGetSharedSessionEvents(context, sessionId, request)),
   };
@@ -389,10 +436,21 @@ async function handleCreateSharedSession(context: DaemonRuntimeRouteContext, req
   if (participantSurface !== undefined && !isOneOf(SESSION_SURFACE_KINDS, participantSurface)) {
     return invalidChoice('surfaceKind', participantSurface, SESSION_SURFACE_KINDS);
   }
+  // Whose it is, from the credential the listener authenticated (never the body): kept as the session's registrant
+  // (session-broker-sessions.ts `SESSION_REGISTERED_BY_METADATA_KEY`, `registeredBy`), so the one reach rule holds it as this
+  // caller's. A body's own `registeredBy` is dropped. The project is the body's `workingDirectory`, which the dispatch and the
+  // router checked for this caller (the method's `workFolders`).
+  const principal = context.requestPrincipalId?.(req);
+  const callerMetadata = Object.fromEntries(Object.entries(typeof body.metadata === 'object' && body.metadata !== null ? body.metadata as Record<string, unknown> : {})
+    .filter(([key]) => key !== 'registeredBy'));
+  const project = typeof body.workingDirectory === 'string' && body.workingDirectory.trim() ? body.workingDirectory.trim() : undefined;
+  // A caller below an admin never picks the id: an id already taken would answer with that session, whoever's it is.
+  const chosenId = typeof body.id === 'string' && !belowAdmin(context, req) ? body.id : undefined;
   const session = await context.sessionBroker.createSession({
-    id: typeof body.id === 'string' ? body.id : undefined,
+    id: chosenId,
     title: typeof body.title === 'string' ? body.title : undefined,
-    metadata: typeof body.metadata === 'object' && body.metadata !== null ? body.metadata as Record<string, unknown> : {},
+    ...(project ? { project } : {}),
+    metadata: { ...callerMetadata, ...(principal ? { registeredBy: registrantKeyOf(principal, readProgramRegistration(req)) } : {}) },
     routeBinding,
     participant: participantSurface !== undefined && typeof body.surfaceId === 'string'
       ? {
@@ -690,7 +748,7 @@ async function handlePostSharedSessionMessage(context: DaemonRuntimeRouteContext
     return jsonErrorResponse({ error: 'Missing shared session message body' }, { status: 400 });
   }
 
-  const input = buildSharedSessionMessageInput(sessionId, body, message, context.ownerTypedAtProgram?.(req) === true);
+  const input = buildSharedSessionMessageInput(sessionId, body, message, senderOf(context, req));
   if (input instanceof Response) return input;
 
   // kind='followup', always queues/spawns a follow-up turn via followUpMessage()
@@ -829,7 +887,7 @@ async function handlePostSharedSessionSteer(context: DaemonRuntimeRouteContext, 
   if (!message) {
     return jsonErrorResponse({ error: 'Missing shared session steer body' }, { status: 400 });
   }
-  const input = buildSharedSessionMessageInput(sessionId, body, message, context.ownerTypedAtProgram?.(req) === true);
+  const input = buildSharedSessionMessageInput(sessionId, body, message, senderOf(context, req));
   if (input instanceof Response) return input;
   const submission = await callOrSessionClosed(() => context.sessionBroker.steerMessage({
     ...input,
@@ -848,7 +906,7 @@ async function handlePostSharedSessionFollowUp(context: DaemonRuntimeRouteContex
   if (!message) {
     return jsonErrorResponse({ error: 'Missing shared session follow-up body' }, { status: 400 });
   }
-  const input = buildSharedSessionMessageInput(sessionId, body, message, context.ownerTypedAtProgram?.(req) === true);
+  const input = buildSharedSessionMessageInput(sessionId, body, message, senderOf(context, req));
   if (input instanceof Response) return input;
   const submission = await callOrSessionClosed(() => context.sessionBroker.followUpMessage(input));
   if (submission instanceof Response) return submission;
@@ -902,27 +960,39 @@ export function readSharedSessionMessageBody(body: JsonRecord): string {
 }
 
 /**
- * The input metadata key saying the owner typed this message into his own program (a terminal app or the Agent)
+ * The input metadata key saying the owner typed this message into their own program (a terminal app or the Agent)
  * attached to the session. Only the daemon writes it, from `ownerTypedAtProgram` where the request entered: a value a
  * caller puts in its own metadata is removed. A hosted session runs such a message as the owner's own turn in its
  * project (hosted-sessions/session-runtime.ts).
  */
 export const OWNER_TYPED_METADATA_KEY = 'ownerTypedAtProgram';
 
-function callerMetadataOf(body: JsonRecord, ownerTyped: boolean): Record<string, unknown> | undefined {
+/**
+ * The input metadata key saying the owner in person sent this message (their signed-in session or their verified program,
+ * the one definition `ownerHimself`). Only the daemon writes it, where the request entered; a caller's own value is
+ * removed. A hosted session the owner made in person runs such a message as their own turn (hosted-sessions/spine-intake.ts).
+ */
+export const OWNER_HIMSELF_METADATA_KEY = 'ownerHimselfSent';
+
+interface MessageSender { readonly ownerTyped: boolean; readonly ownerHimself: boolean }
+function senderOf(context: { readonly ownerTypedAtProgram?: ((req: Request) => boolean) | undefined; readonly ownerHimself?: ((req: Request) => boolean) | undefined }, req: Request): MessageSender {
+  return { ownerTyped: context.ownerTypedAtProgram?.(req) === true, ownerHimself: context.ownerHimself?.(req) === true };
+}
+
+function callerMetadataOf(body: JsonRecord, sender: MessageSender): Record<string, unknown> | undefined {
   const given = typeof body.metadata === 'object' && body.metadata !== null && !Array.isArray(body.metadata)
     ? { ...(body.metadata as Record<string, unknown>) }
     : undefined;
-  if (given) delete given[OWNER_TYPED_METADATA_KEY];
-  if (!ownerTyped) return given;
-  return { ...(given ?? {}), [OWNER_TYPED_METADATA_KEY]: true };
+  if (given) { delete given[OWNER_TYPED_METADATA_KEY]; delete given[OWNER_HIMSELF_METADATA_KEY]; }
+  if (!sender.ownerTyped && !sender.ownerHimself) return given;
+  return { ...(given ?? {}), ...(sender.ownerTyped ? { [OWNER_TYPED_METADATA_KEY]: true } : {}), ...(sender.ownerHimself ? { [OWNER_HIMSELF_METADATA_KEY]: true } : {}) };
 }
 
 function buildSharedSessionMessageInput(
   sessionId: string,
   body: JsonRecord,
   message: string,
-  ownerTyped = false,
+  sender: MessageSender = { ownerTyped: false, ownerHimself: false },
 ): SharedSessionMessageInput | Response {
   const routing = readSharedSessionRoutingIntent(body.routing);
   if (routing instanceof Response) return routing;
@@ -932,7 +1002,7 @@ function buildSharedSessionMessageInput(
   // broker answers a repeat with the receipt of the input it already holds.
   const clientMessageId = readClientMessageId(body.messageId);
   if (clientMessageId instanceof Response) return clientMessageId;
-  const metadata = callerMetadataOf(body, ownerTyped);
+  const metadata = callerMetadataOf(body, sender);
   return {
     sessionId,
     surfaceKind,

@@ -7,6 +7,7 @@
  */
 import { dirname } from 'node:path';
 import type { ShellPathService } from '@goodvibes/engine/platform/platform/runtime/shell';
+import { noteOthersWritingRead } from '@goodvibes/engine/platform/platform/state';
 import {
   SkillLibrary,
   evaluateAgentSkillBundleReadiness,
@@ -176,15 +177,20 @@ export function buildEnabledSkillsPrompt(shellPaths: ShellPathService, preread?:
         '',
       ];
     }),
-    ...active.slice(0, ENABLED_SKILLS_PROMPT_LIMIT).flatMap((skill) => [
-      `### ${skill.name}`,
-      `Description: ${skill.description}`,
-      `Review: ${formatAgentRecordReviewState(skill.reviewState)}`,
-      `Triggers: ${skill.triggers.join(', ') || '(manual)'}`,
-      `Readiness: ${evaluateAgentSkillReadiness(skill).ready ? 'ready' : `missing ${evaluateAgentSkillReadiness(skill).missing.map(formatAgentSkillRequirement).join(', ')}`}`,
-      skill.procedure,
-      '',
-    ]),
+    ...active.slice(0, ENABLED_SKILLS_PROMPT_LIMIT).flatMap((skill) => {
+      // Someone else's words the owner has not accepted, put into the prompt now: the conversation has read outside text.
+      const others = noteOthersWritingRead('skill', skill.id, skill.author);
+      return [
+        `### ${skill.name}`,
+        `Description: ${skill.description}`,
+        `Review: ${formatAgentRecordReviewState(skill.reviewState)}`,
+        ...(others !== undefined ? [`Written by ${others}, not the owner.`] : []),
+        `Triggers: ${skill.triggers.join(', ') || '(manual)'}`,
+        `Readiness: ${evaluateAgentSkillReadiness(skill).ready ? 'ready' : `missing ${evaluateAgentSkillReadiness(skill).missing.map(formatAgentSkillRequirement).join(', ')}`}`,
+        skill.procedure,
+        '',
+      ];
+    }),
     ...(beyondLimit ? [beyondLimit, ''] : []),
     ...(suppressedBundles.length > 0 || suppressedSkills.length > 0 ? [
       '### Suppressed Skills Pending Review Or Setup',

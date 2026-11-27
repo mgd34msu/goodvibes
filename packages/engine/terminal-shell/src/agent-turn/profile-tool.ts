@@ -7,9 +7,9 @@
  * §7, untrusted sources stay barred. The daemon enforces that, and this tool
  * neither weakens nor re-implements it. Every write carries recorded native delegation. Optional `authority`
  * names external provenance and remains restrictive: a fact
- * out of an email body, a web page, a channel message from anyone but him, or a
+ * out of an email body, a web page, a channel message from anyone but the owner, or a
  * document carries THAT surface, the daemon refuses the write, and the refusal
- * and its reason are handed back for him to see. There is no retry with a
+ * and its reason are handed back for the owner to see. There is no retry with a
  * different authority anywhere in this file, and no path that turns a refusal
  * into a success.
  *
@@ -24,7 +24,7 @@
  * an external-source label (email, web page, channel, document) is forwarded as
  * given, together with `said`, so the daemon can refuse it for what it is.
  *
- * §8.2, it tells him what it recorded. The daemon returns a one-line
+ * §8.2, it tells the owner what it recorded. The daemon returns a one-line
  * disclosure; every write result carries it forward as the line to say, naming
  * the field and never quoting the value back.
  *
@@ -34,7 +34,7 @@
  * `profile.read` "the ONE read that returns closed-tier content in bulk, which
  * is why it is never callable from a message-composition path", and a model
  * turn can compose an outbound message. People stay reachable one at a time
- * through `person`, and only when his own message this turn names the person
+ * through `person`, and only when the owner's own message this turn names the person
  * (or contains the words that point at them): the runtime hands the tool that
  * message and the tool checks it, so a web page or an email that steers the
  * model toward someone reaches nothing. Every such read is disclosed.
@@ -71,7 +71,7 @@ import {
 import { readString } from './tool-args.js';
 
 /**
- * The section whose lines are about people other than him. Held back from
+ * The section whose lines are about people other than the owner. Held back from
  * `read` (§10) and reachable only through `person`.
  */
 const PEOPLE_SECTION = 'people';
@@ -83,7 +83,7 @@ const PEOPLE_SECTION = 'people';
  * `fieldId` used to be a free-form string with two ids as examples, and the
  * model filled it with the names a person would use: `full_name`,
  * `preferred_name`, `home_address`, `timezone`, `wife`. Every one was refused by
- * the daemon, correctly, since none of them is a field, and the facts he had
+ * the daemon, correctly, since none of them is a field, and the facts the owner had
  * just given ended up as prose instead of records. The parameter now carries the
  * whole catalog as an `enum`, so the ids are in front of the model at the moment
  * it fills the argument in.
@@ -101,7 +101,7 @@ const PROFILE_FIELD_IDS: readonly string[] = PROFILE_FIELDS.map((field) => field
  *
  * The enum alone says which ids exist; it does not say which one holds the fact
  * in hand. Grouping them by the section they live in, each next to the label
- * written in the file, is what lets "where he lives" reach `location.city`
+ * written in the file, is what lets "where I live" reach `location.city`
  * rather than a guess.
  */
 function describeProfileFieldCatalog(): string {
@@ -223,7 +223,7 @@ async function handleRead(deps: AgentProfileToolDeps): Promise<ToolOutcome> {
     if (section.heading.trim().toLowerCase() === PEOPLE_SECTION) {
       const count = section.prose.length + section.fields.length;
       lines.push(`  ${count} ${count === 1 ? 'person' : 'people'} recorded. Not listed here.`);
-      lines.push('  Look one up with action:"person" only when he named that person in this turn.');
+      lines.push('  Look one up with action:"person" only when the owner named that person in this turn.');
       continue;
     }
     if (section.fields.length === 0 && section.prose.length === 0) lines.push('  (nothing recorded)');
@@ -249,7 +249,7 @@ async function handleGet(deps: AgentProfileToolDeps, fieldId: string): Promise<T
   }
   lines.push(field.provenance
     ? `  recorded via ${field.provenance.surface} on ${field.provenance.date}`
-    : '  no provenance recorded; he wrote or edited this line by hand.');
+    : '  no provenance recorded; you wrote or edited this line by hand.');
   // Non-empty only for a closed-tier field, the daemon decides which reads
   // need a receipt, so the tool relays rather than judging.
   if (response.disclosure) lines.push(`Say this in your reply: ${response.disclosure}`);
@@ -264,22 +264,22 @@ async function handlePerson(
 ): Promise<ToolOutcome> {
   if (!name) return fail(['`name` is required. There is no call that lists everyone.']);
   // §10 makes this structural rather than a judgement call: a People line
-  // reaches a turn only because HE pointed at that person in this turn's own
+  // reaches a turn only because THE OWNER pointed at that person in this turn's own
   // message. The message comes from the runtime, so text the model read
   // elsewhere cannot stand in for it. "Email the vendor and cc anyone relevant"
   // names nobody and reaches nothing.
   if (!ownerMessage) {
     return fail([
-      `Nothing was read about ${name}: there is no message from him in this turn to check the name against.`,
-      'Look someone up only in a turn where he named them.',
+      `Nothing was read about ${name}: there is no message from the owner in this turn to check the name against.`,
+      'Look someone up only in a turn where the owner named them.',
     ]);
   }
   if (!messageNames(ownerMessage, name) && !(namedInInstruction && messageNames(ownerMessage, namedInInstruction))) {
     return fail([
-      `Nothing was read: he did not name ${name} this turn.`,
+      `Nothing was read: the owner did not name ${name} this turn.`,
       namedInInstruction
-        ? `"${namedInInstruction}" is not in his message either. Pass in namedInInstruction the exact words of his message that point at this person (for example "my wife").`
-        : 'If he referred to them another way (for example "my wife"), pass those exact words of his message as namedInInstruction.',
+        ? `"${namedInInstruction}" is not in the owner's message either. Pass in namedInInstruction the exact words of their message that point at this person (for example "my partner").`
+        : 'If the owner referred to them another way (for example "my partner"), pass those exact words of their message as namedInInstruction.',
     ]);
   }
   const result = await deps.invoke(PROFILE_METHOD_IDS.person, { name });
@@ -291,7 +291,7 @@ async function handlePerson(
     `${response.name}:`,
     ...response.lines.map(renderProseLine),
     response.disclosure ? `Say this in your reply: ${response.disclosure}` : '',
-    'Use these details only for what he asked for this turn; do not carry them into anything else.',
+    'Use these details only for what the owner asked for this turn; do not carry them into anything else.',
   ]);
 }
 
@@ -371,7 +371,7 @@ function notDoneOutcome(what: string, reason: string | null | undefined, authori
     `Not done: ${what}.`,
     `  reason: ${scrubPaths(reason ?? 'no reason given')}`,
     `  authority sent: ${authority}`,
-    'Tell him this happened and why, in the daemon\'s own words above.',
+    'Tell the owner this happened and why, in the daemon\'s own words above.',
     'Never retry with a different authority, and never report this as done.',
   ]);
 }
@@ -392,7 +392,7 @@ function isOutcome(value: { readonly authority: ToolProfileAuthority } | ToolOut
 function disclosureOutcome(disclosure: string, fallbackLine: string): ToolOutcome {
   return ok([
     `Say this in your reply: ${disclosure || fallbackLine}`,
-    'One line, and do not quote the value back unless he asks for it.',
+    'One line, and do not quote the value back unless the owner asks for it.',
   ]);
 }
 
@@ -445,7 +445,7 @@ async function handleAppend(
 /**
  * A prose line is named by its CONTENT, never by its position (§9.2).
  *
- * He edits this file himself while a turn is running, so an index taken from a
+ * The owner edits this file by hand while a turn is running, so an index taken from a
  * read is only valid against the exact document that produced it. Insert one
  * line above and every index below shifts: a positional delete then removes a
  * different line and reports success, which is the false receipt §9.2 exists to
@@ -465,8 +465,8 @@ async function handleForget(
     return fail([
       'Say what to forget: either `fieldId` for a mechanical field, or `section` plus the exact `text` of the line.',
       '  A note, a person, a place or a work line is addressed by its text, not by its position;',
-      '  he edits this file himself, so a line number from an earlier read may point at a different line now.',
-      '  Read the profile first and pass the line back in his words. A list marker is not part of the line.',
+      '  the owner edits this file by hand, so a line number from an earlier read may point at a different line now.',
+      '  Read the profile first and pass the line back in the owner\'s words. A list marker is not part of the line.',
       '  The match is on the whole line, so a paraphrase or a partial line finds nothing.',
     ]);
   }
@@ -522,7 +522,7 @@ export function createAgentProfileTool(deps: AgentProfileToolDeps): Tool {
         + ' Two kinds of content, and which one it is decides the action.'
         + ' A MECHANICAL FIELD holds one keyed fact: action:"set" with a'
         + ' fieldId from the list on that parameter, and nothing else is a field.'
-        + ' A PROSE SECTION holds lines in his own words: action:"append" with'
+        + ' A PROSE SECTION holds lines in the owner\'s own words: action:"append" with'
         + ` section and text. The prose sections are ${PROSE_SECTION_LIST}.`
         + ' No field id exists for a relationship, a person, or a birthday, and'
         + ' that is by design: people belong in People prose, dates in'
@@ -547,8 +547,8 @@ export function createAgentProfileTool(deps: AgentProfileToolDeps): Tool {
           text: { type: 'string', description: 'The note to append, or the line to forget, without its list marker.' },
           // No lineIndex: a prose line is named by its content. See handleForget.
 
-          name: { type: 'string', description: 'One person, by a name he used in his message this turn. There is no list-everyone call.' },
-          namedInInstruction: { type: 'string', description: 'person: when his message points at them without the name (for example "my wife"), those exact words of his message. Checked against his message.' },
+          name: { type: 'string', description: 'One person, by a name the owner used in their message this turn. There is no list-everyone call.' },
+          namedInInstruction: { type: 'string', description: 'person: when the owner\'s message points at them without the name (for example "my partner"), those exact words of their message. Checked against their message.' },
           authority: {
             type: 'string',
             enum: [...PROFILE_AUTHORITIES],

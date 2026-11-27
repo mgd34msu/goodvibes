@@ -15,6 +15,8 @@ import { DECISION_MODEL_POLICIES, DECISION_MODEL_POLICY_LABELS } from '@goodvibe
 export const judgmentConfigDefaults: { judgment: JudgmentSettings } = {
   judgment: {
     volumeMonitor: captureJudgmentVolumeMonitorControl({}),
+    // "When the decision model is missing or fails": Hybrid by default, as released. An install that never set it follows
+    // this default; one that set it keeps its value.
     policy: 'Hybrid',
     endpoint: '',
     keySource: 'env',
@@ -60,10 +62,10 @@ export const judgmentConfigSettings: (ConfigSettingDefinition | ConfigSettingRow
   },
   {
     key: 'judgment.policy', type: 'enum',
-    label: 'If Jev can\'t answer',
+    label: 'When the decision model is missing or fails',
     enumValues: [...DECISION_MODEL_POLICIES],
     enumLabels: DECISION_MODEL_POLICY_LABELS,
-    description: 'Only for Jev decides and Just vibes: what happens to a call Jev would decide when the decision model fails. Ask me (default): it comes to you (in Just vibes it is held to the end of the run), and the failure is shown once with the model, what failed and the next step. Refuse the action: it is refused with the reason, and the turn goes on.',
+    description: 'Who answers is set in one place, When GoodVibes asks (permissions.mode); this setting only says what happens while a set decision model fails. Hybrid (default): while it fails, each decision takes its own fallback (a permission call comes to you instead, or is held to the end of the run in Just vibes), and the failure is shown once with the model, what failed and the next step. Decision Model Only: while it fails, a call it would have decided is refused with its error and the turn goes on. With no decision model set up, Jev decides asks you as Ask me does and Just vibes holds what needs a decision to the end of the run, whatever this says. YOLO asks no decision model, so this setting does not change it.',
   },
   {
     key: 'judgment.endpoint',
@@ -133,6 +135,6 @@ export const judgmentConfigSettings: (ConfigSettingDefinition | ConfigSettingRow
     key: 'judgment.noDecisionModel',
     label: 'No decision model',
     type: 'boolean',
-    description: 'On: no decision model is asked, whatever this computer\'s environment holds (a decision model key or server address there is not used), so nothing is sent to one; Jev decides then asks you, as Ask me does. Choosing No decision model in Settings turns it on, as does carrying forward an earlier version\'s No Decision Model; choosing a decision model in Settings turns it off. Off (the default): a decision model set here or found in the environment is used',
+    description: 'On: no decision model is asked, whatever this computer\'s environment holds (a decision model key or server address there is not used), so nothing is sent to one; every decision takes its fallback (Jev decides asks you as Ask me does, Just vibes holds the call to the end of the run). Choosing No decision model in Settings turns it on, as does carrying forward an earlier version\'s No Decision Model; choosing a decision model in Settings turns it off. Off (the default): a decision model set here or found in the environment is used',
   },
 ];

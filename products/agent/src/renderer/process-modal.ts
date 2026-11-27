@@ -137,10 +137,11 @@ export class ProcessModal {
     return this.entries[this.selectedIndex];
   }
 
-  /** Ask to stop the selected process; true when it is running and now waits for `y`. */
+  /** Ask to stop the selected process; true when it is running and now waits for `y` (in every mode, as released). */
   armStop(): boolean {
     const entry = this.getSelected();
-    this.stopArmedId = entry && (entry.outcome ?? 'running') === 'running' ? entry.id : null;
+    const running = entry && (entry.outcome ?? 'running') === 'running' ? entry.id : null;
+    this.stopArmedId = running;
     return this.stopArmedId !== null;
   }
 

@@ -44,6 +44,10 @@ import { whyNeverAProject } from '../caller-project.js';
 import { acquireCrossProcessLock, CrossProcessLockBusyError, withCrossProcessLockSync } from '../checkpoint/cross-process-lock.js';
 import { broadRootReason } from '../checkpoint/root-guard.js';
 import { normalizeWorkspaceRoot, resolveWorkspaceRegistration } from './resolution.js';
+import { projectsKeptInside } from '../project-identity.js';
+import { releaseProjectIdentity } from '../../knowledge/project-planning/project-registry.js';
+import { logger } from '../../utils/logger.js';
+import { summarizeError } from '../../utils/error-display.js';
 import {
   WorkspaceRegistrationError,
   NativeWorkspaceScopeError,
@@ -569,7 +573,20 @@ export class WorkspaceRegistrationStore {
       };
       // Registering a root clears any remembered decline at exactly that root.
       const declines = state.declines.filter((d) => d.root !== target);
-      await this.persist({ ...next, workspaces: [...state.workspaces, record], declines });
+      // A project that exists inside the new root (a folder that is its own project with records, or one something
+      // holds now) keeps its identity: it is registered beside the root, so the root becomes the project only of folders
+      // that were none (workspace/project-identity.ts `projectsKeptInside`). Nothing already a project is merged.
+      const registeredRoots = state.workspaces.map((w) => canonicalDirectory(w.root) ?? w.root);
+      const kept: RegisteredWorkspaceRecord[] = [];
+      for (const folder of projectsKeptInside(target, registeredRoots)) {
+        const keptRoot = normalizeWorkspaceRoot(folder);
+        if (keptRoot === target || state.workspaces.some((w) => w.root === keptRoot) || kept.some((w) => w.root === keptRoot)) continue;
+        const keptCanonical = canonicalDirectory(keptRoot);
+        if (keptCanonical === null || broadRootReason(keptCanonical, this.homeDir, this.daemonStateDir)) continue;
+        kept.push({ root: keptRoot, registeredAt: record.registeredAt, origin: 'kept-project',
+          nativeScope: { id: `workspace:${randomUUID()}`, canonicalRoot: keptCanonical, generation: next.scopeGeneration! } });
+      }
+      await this.persist({ ...next, workspaces: [...state.workspaces, ...kept, record], declines });
       return { record, alreadyRegistered: false };
     });
   }
@@ -583,6 +600,18 @@ export class WorkspaceRegistrationStore {
       const removed = workspaces.length !== state.workspaces.length;
       // The generation moves, so a root registered again later gets a new scope.
       if (removed) await this.persist({ ...advance(state), workspaces });
+      // The owner removed the project: its identity binding goes with it (knowledge/project-planning/project-registry.ts),
+      // so the identity register holds only projects that are still the owner's. A test's in-memory register has no home's.
+      // The registration is removed either way: a register that cannot be read keeps the binding, and says so.
+      if (removed && this.path !== ':memory:') {
+        const canonical = canonicalDirectory(target);
+        try {
+          await releaseProjectIdentity(this.homeDir, target);
+          if (canonical !== null && canonical !== target) await releaseProjectIdentity(this.homeDir, canonical);
+        } catch (error) {
+          logger.warn('workspace-registrations: the removed project\'s identity binding was kept', { root: target, error: summarizeError(error) });
+        }
+      }
       return { root: target, removed };
     });
   }

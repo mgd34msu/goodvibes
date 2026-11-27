@@ -333,7 +333,7 @@ interface BaseRule {
    */
   effect: 'allow' | 'deny' | 'ask';
   /**
-   * Set when the rule records the owner's answer to an item only he decides
+   * Set when the rule records the owner's answer to an item only the owner decides
    * (gate/classify.ts OwnerOnlyKind). Only such an allow settles that item
    * again; an allow without it never does.
    */

@@ -19,7 +19,7 @@ import { configuredCredentialEnvScrub } from '../tools/exec/credential-env-confi
 import { summarizeError } from '../utils/error-display.js';
 import { logger } from '../utils/logger.js';
 import { declaredPackageManager, isDeclaredPackageManager, PACKAGE_MANAGER_LOCKFILES, type DeclaredPackageManager } from '../utils/project-test-runner.js';
-import { CONTRACT_CONFIG_DEFAULTS, getContractGates, getContractGateTimeoutMs, getEnabledContractGates, type ContractConfigReader } from './config.js';
+import { getContractGates, getEnabledContractGates, type ContractConfigReader } from './config.js';
 import { emitContractEvent } from './events.js';
 import { captureGateInput, linkProjectDependencies, type GateSourceInputIdentity } from './gate-input.js';
 import { bunTestCommand, junitCompletion, protocolCompletion, type GateCompletion } from './gate-receipts.js';
@@ -73,7 +73,7 @@ interface GateCommandResult {
   readonly output: string;
   readonly stdout: string;
   readonly exitCode: number | null;
-  readonly kind: 'completed' | 'timeout' | 'tool-error';
+  readonly kind: 'completed' | 'tool-error';
   /** Where the command ran; absent when it could not be started. */
   readonly backend?: 'bubblewrap' | 'host' | undefined;
 }
@@ -157,7 +157,6 @@ export function unverifiedGates(results: readonly QualityGateResult[] | undefine
 /** What the nudge tells a worker about a required gate that has no current evidence, including how to supply it when that is possible. */
 export function unverifiedGateAdvice(result: QualityGateResult): string {
   switch (result.reason) {
-    case 'timeout': return 'timeout: the gate command did not finish within contract.gateTimeoutMs and was stopped; a test runner in watch mode never finishes';
     case 'source-changed-during-check': return 'source-changed-during-check: files the check covers changed while the gate ran; the gate runs again at the next check';
     case 'inconsistent-check-result': return 'inconsistent-check-result: the command\'s exit code and its reported assertion counts disagree';
     default: return result.reason ?? 'unverified check completion';
@@ -283,27 +282,24 @@ export interface GateCommandOptions {
  * toolchain directories every boundary shows read-only, exec/sandbox-home.ts),
  * or on the host where no boundary exists, which the result's `backend` states. `cwd`
  * is the unit's worktree in worktree mode, so the gate sees the unit's
- * isolated changes. A positive `timeoutMs` is the contract.gateTimeoutMs
- * deadline; zero waits for completion or cancellation. An expired or cancelled
- * command's whole process group is killed; an expired one fails, with the
- * timeout stated at the end of its output.
+ * isolated changes. It runs until it exits or `signal` stops it (the work
+ * stopped by the owner or a decision): no clock stops it, so a command left in
+ * watch mode runs on, visible as its step being checked, until it is stopped. A
+ * stopped command's whole process group is killed.
  */
 export async function executeGateCommand(
   command: string,
   cwd: string,
-  timeoutMs: number = CONTRACT_CONFIG_DEFAULTS.gateTimeoutMs,
   signal: AbortSignal | undefined,
   options: GateCommandOptions,
 ): Promise<GateCommandResult> {
   try {
     signal?.throwIfAborted();
-    const deadline = timeoutMs > 0 ? AbortSignal.timeout(timeoutMs) : undefined;
-    const stop = deadline && signal ? AbortSignal.any([deadline, signal]) : deadline ?? signal;
     const run = await runContained({
       argv: ['/bin/sh', '-c', command],
       cwd,
       env: options.environment,
-      ...(stop ? { signal: stop } : {}),
+      ...(signal ? { signal } : {}),
       origin: 'project',
       containment: {
         boundary: 'host-allowed',
@@ -314,13 +310,12 @@ export async function executeGateCommand(
       },
     });
     signal?.throwIfAborted();
-    const timedOut = deadline?.aborted === true && run.exitCode === null;
-    const output = [run.stdout, run.stderr, timedOut ? `Gate timed out after ${timeoutMs} ms and was stopped.` : '', run.hint ?? '']
+    const output = [run.stdout, run.stderr, run.hint ?? '']
       .filter(Boolean)
       .join('\n')
       .trim();
-    return { passed: run.exitCode === 0 && !timedOut, output, stdout: run.stdout, exitCode: run.exitCode,
-      kind: timedOut ? 'timeout' : run.exitCode === null ? 'tool-error' : 'completed', backend: run.applied.backend };
+    return { passed: run.exitCode === 0, output, stdout: run.stdout, exitCode: run.exitCode,
+      kind: run.exitCode === null ? 'tool-error' : 'completed', backend: run.applied.backend };
   } catch (error) {
     signal?.throwIfAborted();
     const output = error instanceof ContainmentUnavailableError ? `${error.reason} ${error.next}` : summarizeError(error);
@@ -389,8 +384,8 @@ function firstCannotRun(contractId: string, gate: string): boolean {
 }
 
 /**
- * Runs every enabled `contract.gates` entry in order against `cwd`, each under
- * `contract.gateTimeoutMs`. The source is identified once before the gates
+ * Runs every enabled `contract.gates` entry in order against `cwd`, each until
+ * it exits or the work is stopped. The source is identified once before the gates
  * and once after; when it changed meanwhile, every result reads unverified.
  * A gate passes or fails on its command's exit code; an assertion gate under
  * `bun test` or the completion protocol also carries its counts, and fails
@@ -401,7 +396,6 @@ export async function runContractGates(options: RunContractGatesOptions): Promis
   const changed = options.changedPaths;
   const gates = enabled.filter(gate => changed === undefined || gateChecks(gate, changed)).map(gate => Object.freeze({ ...gate }));
   if (gates.length === 0) return [];
-  const timeoutMs = getContractGateTimeoutMs(options.configManager);
   // The definition is every enabled gate's, whichever of them this work needs, so a result stays comparable with the setting.
   const definitionBefore = gateDefinitionId(enabled);
   // A worktree has no installed dependencies of its own: the project's are linked in where git ignores them, as the project runs its scripts.
@@ -440,7 +434,7 @@ export async function runContractGates(options: RunContractGatesOptions): Promis
         const runId = randomUUID();
         // The daemon's own variables (provider keys, tokens) are withheld, as for every exec.
         const scrubbed = await scrubCredentialEnv(hostEnvironment(), resolveCredentialEnvScrub(configuredCredentialEnvScrub(options.configManager)));
-        const run = await executeGateCommand(instrumented ?? gate.command, options.cwd, timeoutMs, options.signal, {
+        const run = await executeGateCommand(instrumented ?? gate.command, options.cwd, options.signal, {
           environment: { ...scrubbed.env, GOODVIBES_GATE_NAME: gate.name, GOODVIBES_GATE_RUN_ID: runId },
           // The owner's extra paths reach a gate as they reach every exec command.
           writable: [directory, ...getSandboxWritableExtras(options.configManager)],

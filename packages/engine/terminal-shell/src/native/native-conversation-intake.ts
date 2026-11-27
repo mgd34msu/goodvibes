@@ -152,6 +152,16 @@ const attachmentsOf = (source: NativeConversationInput): { readonly attachments?
 const terminal = (result: NativeConversationIntakeResult) => ['turn', 'work', 'blocked', 'refused', 'cancelled'].includes(result.kind);
 /** A hosted turn the host will not run again: completed, cancelled, or failed without a retry. */
 const hostedTurnEnded = (turn: Exclude<NativeHostedTurnLookup, { kind: 'not-found' }>) => turn.state === 'completed' || turn.state === 'cancelled' || (turn.state === 'failed' && turn.failure?.retryable !== true);
+/** A hosted message not yet answered, as Unanswered says it, with the one step that moves it on. */
+function hostedUnansweredWords(turn: NativeHostedTurnLookup): { readonly message: string; readonly nextStep: NativeIntakeNextStep } {
+    if ('kind' in turn)
+        return { nextStep: 'retry', message: 'The daemon took this message but never started answering it. Try it again to have it answered, or drop it.' };
+    if (turn.state === 'recovery-required')
+        return { nextStep: 'cancel', message: 'The daemon\'s answer to this message stopped halfway, so whether it finished is not known, and it is not run again by itself. Drop it here, then send it again if it still needs an answer.' };
+    if (turn.state === 'failed')
+        return { nextStep: 'retry', message: `The daemon's answer to this message failed before changing anything${turn.failure?.summary ? ` (${turn.failure.summary})` : ''}. Try it again, or drop it.` };
+    return { nextStep: 'inspect', message: 'The daemon is still answering this message; its answer is in the conversation on the daemon. Check it here; it leaves this list when the answer ends.' };
+}
 const sameCommand = (left: NativeConversationIntakeCaptureRequest, right: NativeConversationIntakeCaptureRequest) => JSON.stringify(left) === JSON.stringify(right);
 /** Persist exact input first. Interrupted processing requires an explicit resume. */
 export class NativeConversationIntakeControls implements NativeConversationIntakeActions {
@@ -414,8 +424,12 @@ export class NativeConversationIntakeControls implements NativeConversationIntak
                         return;
                     if (!('kind' in hostedTurn) && hostedTurn.state === 'failed' && hostedTurn.failure?.retryable === true)
                         return { status: 'recorded', message: `Your previous message failed on the daemon before changing anything${hostedTurn.failure?.summary ? ` (${hostedTurn.failure.summary})` : ''}. Try it again or drop it in Work, under Unanswered. This new message was not sent.`, request: request(), result, hostedTurn, hostedCurrent, nextStep: 'retry', notSent: true };
-                    if ('kind' in hostedTurn || !hostedTurnEnded(hostedTurn))
-                        return { status: 'recorded', message: 'Your previous message is still running on the daemon. Check it or drop it in Work, under Unanswered. This new message was not sent.', request: request(), result, hostedTurn, hostedCurrent, nextStep: 'inspect', notSent: true };
+                    if ('kind' in hostedTurn || !hostedTurnEnded(hostedTurn)) {
+                        const said = hostedUnansweredWords(hostedTurn);
+                        return { status: 'recorded', message: said.nextStep === 'inspect'
+                                ? 'Your previous message is still being answered on the daemon. Check it or drop it in Work, under Unanswered. This new message was not sent.'
+                                : `Your previous message has no answer: ${said.message} It is in Work, under Unanswered. This new message was not sent.`, request: request(), result, hostedTurn, hostedCurrent, nextStep: said.nextStep, notSent: true };
+                    }
                     if (options?.delivery === 'hosted' && nextContinuation === undefined && hostedTurn.sessionId)
                         nextContinuation = hostedTurn.sessionId;
                 }
@@ -620,6 +634,24 @@ export class NativeConversationIntakeControls implements NativeConversationIntak
                     if (!current())
                         return;
                 }
+                // Dropped while the daemon never started answering it: nothing ran and nothing can from here (only
+                // this saved copy could ask for the answer), so its record goes and the next message can be sent.
+                else if ('kind' in hostedTurn && mode === 'cancel') {
+                    await settled();
+                    if (!current())
+                        return;
+                    return { status: 'recorded', message: removeFailed
+                            ? 'Dropped this message, but its saved copy could not be removed now; the next message replaces it.'
+                            : 'Dropped this message; the daemon never started answering it. Send it again if it still needs an answer.', request: request(), result };
+                }
+                // Not ended, and not this run's own message in flight (the program closed while the daemon took it, or
+                // the daemon cannot say how it ended): listed in Unanswered with the one step that moves it on, so it is
+                // never hidden while it holds the next message back.
+                else if ('kind' in hostedTurn || hostedTurn.state === 'recovery-required' || hostedTurn.state === 'failed'
+                    || (!hostedTurnEnded(hostedTurn) && this.retained?.command.requestId !== command.requestId)) {
+                    const said = hostedUnansweredWords(hostedTurn);
+                    return { status: 'recorded', message: said.message, request: request(), result, hostedTurn, hostedCurrent, nextStep: said.nextStep };
+                }
             }
             else if (result.kind === 'blocked' || result.kind === 'refused' || result.kind === 'cancelled') {
                 // The host holds a terminal answer: nothing is left to resume, retry or dispatch from here.
@@ -660,6 +692,23 @@ export class NativeConversationIntakeControls implements NativeConversationIntak
                             return;
                     }
                 }
+            }
+            // A turn this program claimed to run itself and never finished, claimed by an earlier run of the program (it
+            // closed during the turn; this run holds no such message): its end is not known, so it is listed in
+            // Unanswered and said as such, never shown as answered. It is not run again from here (the claim may have
+            // acted); dropping it clears the way for the next message.
+            if (delivery !== 'hosted' && result.kind === 'turn' && !turnReady && stored?.dispatch
+                && stored.command.requestId === command.requestId && this.retained?.command.requestId !== command.requestId) {
+                if (mode === 'cancel') {
+                    // The person dropped it: its record goes, and the next message can be sent.
+                    await settled();
+                    if (!current())
+                        return;
+                    return { status: 'recorded', message: removeFailed
+                            ? 'Dropped this message, but its saved copy could not be removed now; the next message replaces it.'
+                            : 'Dropped this message. Nothing more is run for it; send it again if it still needs an answer.', request: request(), result };
+                }
+                return { status: 'recorded', message: 'This message was being answered in this program when it closed, so whether it finished is not known, and it is not run again by itself. Drop it here, then send it again if it still needs an answer.', request: request(), result, nextStep: 'inspect' };
             }
             const turnPermit = turnReady ? binding.client.bindTurn(result) : undefined;
             const finishTurn = async (): Promise<void> => {
@@ -736,7 +785,9 @@ function describeResult(result: NativeConversationIntakeResult, turnReady: boole
         case 'processing': return 'The daemon is still taking your message. Check it or go on with it in Work, under Unanswered.';
         case 'turn': return turnReady ? 'Your message is answered here, in the conversation.' : dispatched ? 'This message may already have been answered, so it is not sent again. Look at the conversation before sending a new message.' : 'The daemon took your message as part of the conversation, but it was not answered yet. Try it again in Work, under Unanswered.';
         case 'blocked': return `Your message was not taken: ${result.reason}. Nothing changed; send a new message.`;
-        case 'refused': return `Your message was refused: ${result.reason}. It cannot become work.`;
+        case 'refused': return result.reason === 'decision-model'
+            ? 'Your message was refused because the decision model could not answer, and "When the decision model is missing or fails" (judgment.policy) is set to Decision Model Only. Nothing was run. Set a working decision model, or set that setting to Hybrid, then send it again.'
+            : `Your message was refused: ${result.reason}. It cannot become work.`;
         case 'cancelled': return 'Your message was dropped. Nothing was run.';
         case 'work': return 'Your message became a piece of work: it is in Work.';
     }

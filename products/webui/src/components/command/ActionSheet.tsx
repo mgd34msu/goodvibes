@@ -5,8 +5,7 @@
  * folded under "More settings"), a blank shown only while the choice it
  * belongs to is made, the same sentence above the button, and after it runs
  * the same "what happened" line with the terminal line under it. A choice the
- * browser cannot make (a rule that lasts one terminal session) is shown greyed
- * with the reason.
+ * browser cannot make (a rule that lasts one terminal session) is not drawn.
  *
  * An action whose description names a `preview` method (a schedule described
  * in words, a trigger's definition) is read by the daemon first: the sheet
@@ -62,12 +61,6 @@ export function findCommandAction(command: string, actionId: string): { readonly
     };
   }
   return described && generated ? { command: described, action: generated, typed: true } : undefined;
-}
-
-/** The actions of a command the browser cannot run, with the reason in a sentence (shown greyed under a screen). */
-export function terminalOnlyActions(command: string): readonly { readonly label: string; readonly reason: string }[] {
-  const described = COMMAND_ACTIONS.commands.find((entry) => entry.name === command);
-  return (described?.actions ?? []).flatMap((action) => ('terminalOnly' in action.operator ? [{ label: action.label, reason: action.operator.terminalOnly }] : []));
 }
 
 /** Call a read the generated data names (a list's source, a preview): the contract check holds every name to a real method. */
@@ -185,17 +178,15 @@ export function Blank({ action, input, values, onChange, onLabel, current }: {
       return (
         <fieldset className="gv-action-sheet__choices">
           <legend>{input.label}</legend>
-          {choices.map((choice) => {
-            const why = sessionOnly(action, input, choice.value);
-            return (
-              <div key={choice.value} className="gv-action-sheet__choice">
-                <Radio name={`${action.id}-${input.id}`} checked={value === choice.value} disabled={why !== undefined} onChange={() => onChange(choice.value)}>
-                  {choice.label}{choice.risk && choice.risk !== 'none' ? ` (${riskWords(choice.risk)})` : ''}
-                </Radio>
-                {why || choice.help ? <p className="gv-action-sheet__hint">{why ?? choice.help}</p> : null}
-              </div>
-            );
-          })}
+          {/* A choice only a terminal session can make (a rule that lasts one session) is not drawn here. */}
+          {choices.filter((choice) => sessionOnly(action, input, choice.value) === undefined).map((choice) => (
+            <div key={choice.value} className="gv-action-sheet__choice">
+              <Radio name={`${action.id}-${input.id}`} checked={value === choice.value} onChange={() => onChange(choice.value)}>
+                {choice.label}{choice.risk && choice.risk !== 'none' ? ` (${riskWords(choice.risk)})` : ''}
+              </Radio>
+              {choice.help ? <p className="gv-action-sheet__hint">{choice.help}</p> : null}
+            </div>
+          ))}
         </fieldset>
       );
     }
@@ -204,7 +195,7 @@ export function Blank({ action, input, values, onChange, onLabel, current }: {
     const chosenHelp = choices.find((choice) => choice.value === value)?.help;
     return (
       <Field label={input.label} help={help}>
-        <Select aria-label={input.label} value={value} onChange={onChange} options={[...usual, ...choices.map((choice) => ({ value: choice.value, label: choice.label }))]} />
+        <Select aria-label={input.label} value={value} onChange={onChange} options={[...usual, ...choices.filter((choice) => sessionOnly(action, input, choice.value) === undefined).map((choice) => ({ value: choice.value, label: choice.label }))]} />
         {chosenHelp ? <p className="gv-action-sheet__hint">{chosenHelp}</p> : null}
       </Field>
     );

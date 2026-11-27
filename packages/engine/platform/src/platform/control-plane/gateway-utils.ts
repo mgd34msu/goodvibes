@@ -152,7 +152,7 @@ export interface ControlPlaneReplayClientOptions {
   readonly admin?: boolean | undefined;
 }
 
-const DISCONNECTED_CLIENT_TTL_MS = 30 * 60 * 1000;
+/** Disconnected clients' records kept at once (the most recently seen): a count bound, never an age. */
 const MAX_DISCONNECTED_CLIENTS = 200;
 
 export function serializeEnvelope(envelope: RuntimeEventEnvelope<AnyRuntimeEvent['type'], AnyRuntimeEvent>): Record<string, unknown> {
@@ -242,19 +242,18 @@ export function stripReplayScope(event: ScopedControlPlaneRecentEvent): ControlP
   };
 }
 
+/**
+ * Forget disconnected clients past the most recently seen MAX_DISCONNECTED_CLIENTS (a client that reconnects is
+ * connected again and never counted). `_now` is kept for callers; no age decides anything.
+ */
 export function pruneDisconnectedClientRecords(
   clients: Map<string, ControlPlaneClientRecord>,
-  now = Date.now(),
+  _now = Date.now(),
 ): void {
   const disconnected = [...clients.values()]
     .filter((client) => !client.connected)
     .sort((a, b) => (b.lastSeenAt ?? 0) - (a.lastSeenAt ?? 0));
-  for (let i = 0; i < disconnected.length; i++) {
-    const client = disconnected[i]!;
-    const ageMs = now - (client.lastSeenAt ?? now);
-    if (ageMs <= DISCONNECTED_CLIENT_TTL_MS && i < MAX_DISCONNECTED_CLIENTS) continue;
-    clients.delete(client.id);
-  }
+  for (let i = MAX_DISCONNECTED_CLIENTS; i < disconnected.length; i++) clients.delete(disconnected[i]!.id);
 }
 
 /**

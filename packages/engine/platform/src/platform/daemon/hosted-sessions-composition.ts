@@ -68,12 +68,17 @@ export interface DaemonHostedSessionsOptions {
   /**
    * Native turns per project: the catalog the native turn methods are registered on, which runs each request in the
    * project it names (control-plane/project-routing.ts), and that project's turn dependencies (its intake, its
-   * journal), made once. A request that names no project is served by `nativeConversation` when the product gives one;
-   * without it (the daemon: its own folder is no project) such a request is refused NO_PROJECT.
+   * journal). A request that names no project is served by `nativeConversation` when the product gives one; without it
+   * (the daemon: its own folder is no project) such a request is refused NO_PROJECT. One turn host is made per set of
+   * dependencies `forProject` gives: when the project's dependencies are made again (its Work closed and made again),
+   * so is its host, and the old one goes with what owned it (`adopt`).
    */
   readonly nativeConversationProjects?: {
     readonly route: (catalog: import('../control-plane/method-catalog.js').GatewayMethodCatalog) => import('../control-plane/method-catalog.js').GatewayMethodCatalog;
-    readonly forProject: (folder: string) => NativeHostedTurnDependencies;
+    readonly forProject: (folder: string) => NativeHostedTurnDependencies & {
+      /** Takes the turn host made over these dependencies: their owner asks it whether a turn runs and closes it with them. */
+      readonly adopt?: ((host: NativeHostedTurnHost) => void) | undefined;
+    };
   } | undefined;
   /**
    * How a workspace floor is built. Required, see the module header for why
@@ -210,19 +215,24 @@ export function composeHostedSessions(input: HostedSessionCompositionInput): Hos
     if (!projects) {
       if (own) registerNativeHostedTurnGatewayMethods(input.gatewayMethods, own);
     } else {
-      // Each project's turns: its own host over its own intake and journal, made on its first request.
-      const hosts = new Map<string, NativeHostedTurnHost>();
+      // Each project's turns: its own host over its own intake and journal, made on its first request and kept with
+      // those dependencies (keyed by them, so a project's Work made again gets a host of its own, and the closed one's
+      // host is let go with it, never kept here).
+      const hosts = new WeakMap<object, NativeHostedTurnHost>();
       const hostFor = (folder: string | undefined): NativeHostedTurnHost => {
         if (folder === undefined) {
           if (own) return own;
           throw new GatewayVerbError('No project folder came with the request, so no project\'s native turn was read or changed. Send workingDirectory, the absolute path of the project folder. Nothing was done.',
             'NO_PROJECT', 422, 'workingDirectory');
         }
-        let host = hosts.get(folder);
+        const { adopt, ...deps } = projects.forProject(folder);
+        const owner = deps.intake;
+        let host = hosts.get(owner);
         if (!host) {
-          host = createNativeHostedTurnHost({ ...projects.forProject(folder), manager, broker });
-          hosts.set(folder, host);
-          projectNative.push(host);
+          host = createNativeHostedTurnHost({ ...deps, manager, broker });
+          hosts.set(owner, host);
+          // Closed with its owner when it has one; else with the daemon.
+          if (adopt) adopt(host); else projectNative.push(host);
         }
         return host;
       };

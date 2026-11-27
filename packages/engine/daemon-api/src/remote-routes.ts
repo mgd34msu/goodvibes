@@ -386,7 +386,7 @@ export function createDaemonRemoteRouteHandlers(
     rotateRemotePeerToken: async (peerId, request) => handleRotateRemotePeerToken(context, peerId, request),
     revokeRemotePeerToken: async (peerId, request) => handleRevokeRemotePeerToken(context, peerId, request),
     disconnectRemotePeer: async (peerId, request) => handleDisconnectRemotePeer(context, peerId, request),
-    // A work item is of the session, schedule, run and question it names: a caller that is not the owner himself is
+    // A work item is of the session, schedule, run and question it names: a caller that is not the owner in person is
     // listed only those it may reach every one of (pagination.ts keepReachableNaming, control-plane/caller-reach.ts).
     getRemoteWork: () => {
       const work = context.distributedRuntime.listWork();
@@ -870,8 +870,8 @@ async function handleInvokeRemotePeer(context: DaemonRemoteRouteContext, peerId:
 }
 
 async function handleCancelRemoteWork(context: DaemonRemoteRouteContext, workId: string, req: Request): Promise<Response> {
-  const admin = context.requireAdmin(req);
-  if (admin) return admin;
+  // A project act (`sessions.write`), admitted by its effects; the one reach rule held a caller below an admin to work
+  // queued for a session or schedule of its own before this runs.
   const body = await context.parseJsonBody(req);
   if (body instanceof Response) return body;
   const input = remoteBodySchemas.operatorNote.parse(body);

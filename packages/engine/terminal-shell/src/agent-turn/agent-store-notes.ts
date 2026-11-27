@@ -4,7 +4,7 @@
  */
 import { CapabilityRefusal, type ActionValues } from '@goodvibes/engine/platform/platform/capabilities';
 import type { MemoryAuthor, MemoryClass, MemoryScope } from '@goodvibes/engine/platform/platform/state';
-import { memoryAwaitsOwner, memoryProjectIdentity } from '@goodvibes/engine/platform/platform/state';
+import { memoryProjectIdentity, othersWritingBy } from '@goodvibes/engine/platform/platform/state';
 import { AgentNoteRegistry, type AgentNoteRecord } from './note-registry.js';
 import { AgentPersonaRegistry } from './persona-registry.js';
 import { AgentSkillRegistry } from './skill-registry.js';
@@ -100,11 +100,11 @@ function recordMade(context: StoreActContext, note: AgentNoteRecord, domain: Mad
 const change = (note: AgentNoteRecord, text: string) => ({ text, data: { note: noteFacts(note) } });
 
 /**
- * The author of a record made from a note: someone else's note the owner has not accepted stays someone else's in what
- * is made from it; otherwise who makes it (state/memory-author.ts).
+ * The author of a record made from a note: someone else's note the owner has not reviewed in person stays someone
+ * else's in what is made from it; otherwise who makes it (state/memory-author.ts).
  */
 function madeFromNoteBy(note: AgentNoteRecord, context: StoreActContext): MemoryAuthor {
-  return memoryAwaitsOwner(note) && note.author ? note.author : writtenBy(context);
+  return othersWritingBy(note.author) !== undefined && note.author ? note.author : writtenBy(context);
 }
 
 export const NOTE_ACTS: Readonly<Record<string, StoreAct>> = {
@@ -142,7 +142,7 @@ export const NOTE_ACTS: Readonly<Record<string, StoreAct>> = {
       scope, ...(scope === 'project' ? { project: memoryProjectIdentity(context.shellPaths.workingDirectory) } : {}),
       cls: (values.class || 'fact') as MemoryClass, summary: note.title,
       detail: note.sourceUrl ? `${note.body}\n\nOrigin URL: ${note.sourceUrl}` : note.body, tags: noteTags(note), provenance: [],
-      // Who keeps it as a memory writes it: someone else's waits for the owner's review before any turn is given it.
+      // Who keeps it as a memory writes it: someone else's stays marked someone else's.
       author: madeFromNoteBy(note, context),
     }));
     recordMade(context, note, 'memory', record.id);

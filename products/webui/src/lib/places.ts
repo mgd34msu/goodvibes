@@ -64,42 +64,11 @@ function webActions(place: AnyPlace): readonly PlaceCapabilityAction<PlaceItem>[
   return place.actions.filter((action): action is PlaceCapabilityAction<PlaceItem> => action.kind !== 'program' && forWeb(action));
 }
 
-const PROGRAM_WORDS: Readonly<Record<string, string>> = { tui: 'the terminal app', agent: 'the Agent' };
-
-/**
- * An action of a place that runs only in a terminal program, shown greyed in the browser with where it runs: its
- * words, and the one line that says where.
+/*
+ * An act that runs only in a terminal program (a program's own screen, a control declared for the terminal programs,
+ * a capability that runs where a conversation is) is not drawn in the browser at all, not even greyed: the web draws
+ * no control that cannot be used there. Only acts that run on the daemon are drawn (PlacesView `resolve`).
  */
-export interface ElsewhereAction {
-  readonly label: string;
-  readonly where: string;
-}
-
-/**
- * Where an action runs when the browser cannot run it: a program action (the program's own screen), a control
- * declared for the terminal programs only, or a capability that runs where a conversation is (or only inside a
- * terminal program for now). Undefined: the browser runs it.
- */
-export function elsewhereOf(action: PlaceAction<PlaceItem>, runsIn: 'daemon' | 'session' | 'terminal' | undefined, group?: string | undefined): string | undefined {
-  if (action.kind === 'program') return 'Runs in the terminal app, on its own screen there.';
-  if (!forWeb(action)) {
-    const named = (action.programs ?? []).filter((program) => program !== 'web').map((program) => PROGRAM_WORDS[program] ?? program);
-    return `Runs in ${named.length > 0 ? named.join(' and ') : 'a terminal program'}.`;
-  }
-  if (runsIn === 'session') {
-    return group === 'conversation' || group === 'sessions'
-      ? 'Runs in the terminal app, on the conversation there.'
-      : 'Runs in the terminal app or the Agent, on what that program holds.';
-  }
-  if (runsIn === 'terminal') return 'Runs in the terminal app or the Agent for now.';
-  return undefined;
-}
-
-/** Every action of a place on a list the browser shows (or on the place), the program ones included. */
-export function allActionsOf(place: AnyPlace): readonly PlaceAction<PlaceItem>[] {
-  const shown = new Set(webListsOf(place).shown.map((list) => list.id));
-  return place.actions.filter((action) => action.list === undefined || shown.has(action.list));
-}
 
 /** The place's lists the browser shows, and the labels of those it leaves to the terminal programs. */
 export function webListsOf(place: AnyPlace): { readonly shown: readonly PlaceList<PlaceItem>[]; readonly elsewhere: readonly string[] } {
@@ -128,7 +97,7 @@ export async function readSource(list: PlaceList<PlaceItem>, project?: string | 
   if (list.source.kind !== 'daemon') throw new Error(`${list.noun} is kept by the terminal program you work in`);
   const { method, input } = list.source;
   // A capability's read is bound to the project the person chose (place-project.ts), never the daemon's own folder;
-  // "Every project" names none and says so (the daemon takes it from the owner himself only).
+  // "Every project" names none and says so (the daemon takes it from the owner in person only).
   if (method === 'capabilities.run') {
     return invokeOwnerMethod(method, project === EVERY_PROJECT ? { ...input, everyProject: true } : project ? { ...input, workingDirectory: project } : input, signal);
   }
@@ -140,7 +109,7 @@ export async function readSource(list: PlaceList<PlaceItem>, project?: string | 
     if (!project) throw new Error('no project is chosen yet');
     return invokeThroughMethod(method, { ...input, [projectAs]: project }, signal);
   }
-  // "Every project": a read of per-project memory says so (the daemon takes it from the owner himself only); no
+  // "Every project": a read of per-project memory says so (the daemon takes it from the owner in person only); no
   // project is named, so every other read covers what belongs to no project.
   if (project === EVERY_PROJECT && EVERY_PROJECT_READS.has(method)) return invokeThroughMethod(method, { ...input, everyProject: true }, signal);
   // The method id is the declaration's, held to the daemon's catalog; it goes through the typed signature as itself.

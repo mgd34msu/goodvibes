@@ -237,7 +237,7 @@ edited paths). An answer that edited the arguments remembers nothing. A
 remembered allow suppresses the next ask wherever an ask is the only thing
 left to decide (operation without a decision model). An item only the owner
 decides (a hook change, a declared-dangerous tool, an MCP trust change) is
-settled again only by an answer he gave to that item, so he is asked once;
+settled again only by an answer the owner gave to that item, so they are asked once;
 a change asked for in a channel is approved one call at a time, and its ask
 carries an empty remember list so no surface offers to remember it. A
 remembered deny is enforced in every mode. A later "deny for session" or deny rule applies from

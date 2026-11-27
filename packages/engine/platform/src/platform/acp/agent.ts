@@ -138,8 +138,8 @@ export interface AcpAgentOptions {
   /** Substrate override; defaults to `createEmbeddedSession`. */
   readonly sessionFactory?: EmbeddedSessionFactory | undefined;
   /**
-   * Whose input this connection's prompts are (security/turn-input-party.ts). The owner's when this is his own program
-   * on a connection he started (`goodvibes acp` launched by his editor: products/tui `acp-command.ts`); someone else's
+   * Whose input this connection's prompts are (security/turn-input-party.ts). The owner's when this is their own program
+   * on a connection they started (`goodvibes acp` launched by their editor: products/tui `acp-command.ts`); someone else's
    * when the program was started for anyone else (the daemon's runner or hosted agent for another caller says so:
    * acp/connection-party.ts `ACP_STARTED_FOR_ENV`). Absent: someone else's.
    */

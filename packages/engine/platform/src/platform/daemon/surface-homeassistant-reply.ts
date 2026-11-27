@@ -58,7 +58,7 @@ export interface HomeAssistantReplyDeps {
   readonly routeBindings: RouteBindingManager;
   readonly companionChatManager: CompanionChatManager | null;
   readonly resolveDefaultProviderModel?: (() => { provider: string; model: string } | null) | undefined;
-  /** The channel policies: Home Assistant's "Treat my own messages here as me" (daemon/owner-channel-conversation.ts). */
+  /** The channel policies: Home Assistant's owner, for whether a message is the owner's own (daemon/owner-channel-conversation.ts). */
   readonly channelPolicy?: Pick<ChannelPolicyManager, 'getPolicy'> | undefined;
 }
 

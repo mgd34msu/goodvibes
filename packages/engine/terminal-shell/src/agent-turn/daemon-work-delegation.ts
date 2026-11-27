@@ -74,7 +74,7 @@ export function createDaemonWorkDelegation(options: DaemonWorkDelegationOptions)
 
   /**
    * One Work capability run through this program's own daemon credential, the one a person's press in the Work place
-   * uses: the work it makes is the owner's, so he reads, answers and stops it in Work as any of his work (a model's
+   * uses: the work it makes is the owner's, so they read, answer and stop it in Work as any of their work (a model's
    * delegated credential would make it that credential's, which the owner's Work then cannot read). No person's claim:
    * the daemon decides it under the owner's mode, as any caller's.
    */
@@ -96,7 +96,6 @@ export function createDaemonWorkDelegation(options: DaemonWorkDelegationOptions)
       return { ok: false, error: `The daemon did not answer, so nothing was handed over (${summarizeError(error)}).` };
     }
     const body = record(await response.json().catch(() => null));
-    if (body['code'] === 'OWNER_APPROVAL_PENDING') return { ok: false, error: text(body['state']) || `${id} waits for the owner in Waiting for you.` };
     if (!response.ok || body['ok'] === false) {
       const next = Array.isArray(body['next']) && typeof body['next'][0] === 'string' ? ` ${body['next'][0]}` : '';
       return { ok: false, error: `${text(body['error']) || text(body['text']) || `The daemon answered ${response.status}.`}${next}` };

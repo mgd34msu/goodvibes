@@ -30,6 +30,7 @@ import { createDefaultProbeIo, type ProbeHostPolicy } from '../platform/src/plat
 import { TRIGGER_TOOL_DEFINITION } from '../platform/src/platform/triggers/trigger-tool.ts';
 import { UserPermissionRuleStore } from '../platform/src/platform/permissions/user-rule-store.ts';
 import { executeToolCalls } from '../platform/src/platform/core/orchestrator-tool-runtime.ts';
+import { withOwnerInput } from '../platform/src/platform/security/turn-input-party.ts';
 
 function registryWith(calls: string[]): ToolRegistry {
   const registry = new ToolRegistry();
@@ -77,6 +78,8 @@ test('a trigger whose file probe names a file the owner denied is refused at cre
   const root = realpathSync(mkdtempSync(join(tmpdir(), 'gv-probe-path-deny-')));
   try {
     const config = new ConfigManager({ configDir: join(root, 'config'), workingDir: root, surfaceRoot: 'goodvibes' });
+    // Ask me: the one mode where a call the rules leave open goes to the owner (the control below).
+    config.set('permissions.mode', 'ask-me');
     const rules = new UserPermissionRuleStore(':memory:');
     await rules.add({ rule: { id: 'no-secrets', type: 'path-scope', origin: 'user', effect: 'deny', toolPattern: '*', pathPatterns: [join(root, 'secrets')] }, tier: 'exact', createdAt: 1, tool: 'read' });
     let asked = 0;
@@ -86,9 +89,10 @@ test('a trigger whose file probe names a file the owner denied is refused at cre
     registry.register({ definition: TRIGGER_TOOL_DEFINITION, async execute(args) { created.push(JSON.stringify(args)); return { success: true, output: 'created' }; } });
     const deps = { permissionManager: manager, toolRegistry: registry, autonomousSource: () => ({ goal: 'Watch the project', criteria: [] }),
       hookDispatcher: null, runtimeBus: null, sessionId: 'probe-path', emitterContext: () => ({ sessionId: 'probe-path', traceId: 'probe-path', source: 'orchestrator' as const }) };
-    const create = async (path: string) => (await executeToolCalls(deps, `turn-${path}`, [{ id: `call-${created.length}-${asked}`, name: 'trigger', arguments: {
+    // The owner's own turn makes the trigger: work no turn names is someone else's and only reads (turn-input-party.ts).
+    const create = async (path: string) => (await withOwnerInput(() => executeToolCalls(deps, `turn-${path}`, [{ id: `call-${created.length}-${asked}`, name: 'trigger', arguments: {
       action: 'create', definition: { id: 'watch', spec: { kind: 'condition', probe: { kind: 'file', path }, rule: { op: 'changed' } } },
-    } }]))[0]!;
+    } }])))[0]!;
 
     expect((await create(join(root, 'secrets', 'id_ed25519'))).success).toBe(false);
     expect({ created: created.length, asked }).toEqual({ created: 0, asked: 0 });

@@ -36,8 +36,13 @@ import { SETUP_INTENT_CONTRACT_PROMPT } from '../../runtime/setup-contract.js';
 import { CAPABILITY_GROUPS_PROMPT } from '../../capabilities/groups.js';
 import { redactConfigValue, redactObjectByPath } from './credential-redaction.js';
 import { executeAdmittedAgentSettings } from './settings-admission.js';
+import { turnInputParty } from '../../security/turn-input-party.js';
 
 type JsonRecord = Record<string, unknown>;
+
+/** What a turn on someone else's input is told it reaches of GoodVibes itself (goodvibes_context). */
+const OTHERS_CONTEXT_WORDS = 'such a turn is shown only its own project and the tools and settings it has (modes "tools" and "config_schema"), '
+  + 'never the owner\'s setting values, their channel accounts\' state, their Cloudflare account or where their home is.';
 
 /** Redact known secret keys and classify ambiguous values through credential-redaction.ts. */
 const REDACTION_CONCURRENCY = 8;
@@ -126,6 +131,20 @@ export function createGoodVibesContextTool(deps: GoodVibesRuntimeToolDeps): Tool
   async function execute(args: JsonRecord): Promise<{ success: boolean; output?: string; error?: string }> {
     try {
       const mode = readString(args.mode);
+      // A turn on someone else's input reaches only what that turn may reach: its project's context (the tools it has,
+      // what the settings are), never the owner's setting values, their channel accounts' state, their Cloudflare account
+      // or where their home is (security/turn-input-party.ts).
+      const party = turnInputParty();
+      if (party.party !== 'owner') {
+        if (mode === 'tools') return ok(buildToolSnapshot(deps, args));
+        if (mode === 'config_schema') {
+          const key = readString(args.key);
+          if (key && !isValidConfigKey(key)) return { success: false, error: UNKNOWN_CONFIG_KEY_ERROR };
+          return ok(await buildConfigSchema(deps, args));
+        }
+        if (mode === 'summary') return ok({ project: deps.workingDirectory, note: OTHERS_CONTEXT_WORDS });
+        return { success: false, error: `goodvibes_context ${String(args.mode)} was refused: this turn acts on someone else's input (${party.who}), and ${OTHERS_CONTEXT_WORDS}` };
+      }
       switch (mode) {
         case 'summary':
           return ok(await buildRuntimeSummary(deps));

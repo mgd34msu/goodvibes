@@ -5986,7 +5986,6 @@ export const MOCK_DAEMON_FIXTURES: MockDaemonFixtureMap = {
           }
         ],
         "open": false,
-        "ownMessagesAsOwner": false,
         "project": "sample",
         "updatedAt": 0,
         "metadata": {}
@@ -6541,7 +6540,6 @@ export const MOCK_DAEMON_FIXTURES: MockDaemonFixtureMap = {
             }
           ],
           "open": false,
-          "ownMessagesAsOwner": false,
           "project": "sample",
           "updatedAt": 0,
           "metadata": {}
@@ -6605,7 +6603,6 @@ export const MOCK_DAEMON_FIXTURES: MockDaemonFixtureMap = {
         }
       ],
       "open": false,
-      "ownMessagesAsOwner": false,
       "project": "sample",
       "updatedAt": 0,
       "metadata": {}
@@ -8771,7 +8768,13 @@ export const MOCK_DAEMON_FIXTURES: MockDaemonFixtureMap = {
               "targetId": "sample",
               "criterionIds": [
                 "sample"
-              ]
+              ],
+              "conflict": {
+                "branch": "sample",
+                "files": [
+                  "sample"
+                ]
+              }
             },
             "dependsOn": [
               "sample"
@@ -9178,6 +9181,9 @@ export const MOCK_DAEMON_FIXTURES: MockDaemonFixtureMap = {
               ]
             },
             "failureReason": "sample",
+            "failureKind": "transport",
+            "dropped": "sample",
+            "heardAt": 0,
             "attemptOf": "sample",
             "attemptIndex": 0,
             "attemptSelection": {
@@ -9448,6 +9454,9 @@ export const MOCK_DAEMON_FIXTURES: MockDaemonFixtureMap = {
                   ]
                 },
                 "failureReason": "sample",
+                "failureKind": "transport",
+                "dropped": "sample",
+                "heardAt": 0,
                 "attemptOf": "sample",
                 "attemptIndex": 0,
                 "attemptSelection": {
@@ -10019,7 +10028,13 @@ export const MOCK_DAEMON_FIXTURES: MockDaemonFixtureMap = {
             "targetId": "sample",
             "criterionIds": [
               "sample"
-            ]
+            ],
+            "conflict": {
+              "branch": "sample",
+              "files": [
+                "sample"
+              ]
+            }
           },
           "dependsOn": [
             "sample"
@@ -10426,6 +10441,9 @@ export const MOCK_DAEMON_FIXTURES: MockDaemonFixtureMap = {
             ]
           },
           "failureReason": "sample",
+          "failureKind": "transport",
+          "dropped": "sample",
+          "heardAt": 0,
           "attemptOf": "sample",
           "attemptIndex": 0,
           "attemptSelection": {
@@ -10696,6 +10714,9 @@ export const MOCK_DAEMON_FIXTURES: MockDaemonFixtureMap = {
                 ]
               },
               "failureReason": "sample",
+              "failureKind": "transport",
+              "dropped": "sample",
+              "heardAt": 0,
               "attemptOf": "sample",
               "attemptIndex": 0,
               "attemptSelection": {
@@ -11266,7 +11287,13 @@ export const MOCK_DAEMON_FIXTURES: MockDaemonFixtureMap = {
                 "targetId": "sample",
                 "criterionIds": [
                   "sample"
-                ]
+                ],
+                "conflict": {
+                  "branch": "sample",
+                  "files": [
+                    "sample"
+                  ]
+                }
               },
               "dependsOn": [
                 "sample"
@@ -11673,6 +11700,9 @@ export const MOCK_DAEMON_FIXTURES: MockDaemonFixtureMap = {
                 ]
               },
               "failureReason": "sample",
+              "failureKind": "transport",
+              "dropped": "sample",
+              "heardAt": 0,
               "attemptOf": "sample",
               "attemptIndex": 0,
               "attemptSelection": {
@@ -11943,6 +11973,9 @@ export const MOCK_DAEMON_FIXTURES: MockDaemonFixtureMap = {
                     ]
                   },
                   "failureReason": "sample",
+                  "failureKind": "transport",
+                  "dropped": "sample",
+                  "heardAt": 0,
                   "attemptOf": "sample",
                   "attemptIndex": 0,
                   "attemptSelection": {
@@ -12546,7 +12579,13 @@ export const MOCK_DAEMON_FIXTURES: MockDaemonFixtureMap = {
               "targetId": "sample",
               "criterionIds": [
                 "sample"
-              ]
+              ],
+              "conflict": {
+                "branch": "sample",
+                "files": [
+                  "sample"
+                ]
+              }
             },
             "dependsOn": [
               "sample"
@@ -12953,6 +12992,9 @@ export const MOCK_DAEMON_FIXTURES: MockDaemonFixtureMap = {
               ]
             },
             "failureReason": "sample",
+            "failureKind": "transport",
+            "dropped": "sample",
+            "heardAt": 0,
             "attemptOf": "sample",
             "attemptIndex": 0,
             "attemptSelection": {
@@ -13223,6 +13265,9 @@ export const MOCK_DAEMON_FIXTURES: MockDaemonFixtureMap = {
                   ]
                 },
                 "failureReason": "sample",
+                "failureKind": "transport",
+                "dropped": "sample",
+                "heardAt": 0,
                 "attemptOf": "sample",
                 "attemptIndex": 0,
                 "attemptSelection": {
@@ -24179,7 +24224,8 @@ export const MOCK_DAEMON_FIXTURES: MockDaemonFixtureMap = {
           "scopes": [
             "sample"
           ],
-          "origin": "owner-pairing"
+          "origin": "owner-pairing",
+          "waitingForFirstUse": false
         }
       ],
       "legacySharedRevoked": false
@@ -31520,6 +31566,30 @@ export const MOCK_DAEMON_FIXTURES: MockDaemonFixtureMap = {
       "metadata": {}
     }
   },
+  "work.branch.discard": {
+    "methodId": "work.branch.discard",
+    "http": {
+      "method": "POST",
+      "path": "/api/work/branch/discard"
+    },
+    "status": 200,
+    "body": {
+      "title": "sample",
+      "branch": "sample"
+    }
+  },
+  "work.branch.merge": {
+    "methodId": "work.branch.merge",
+    "http": {
+      "method": "POST",
+      "path": "/api/work/branch/merge"
+    },
+    "status": 200,
+    "body": {
+      "title": "sample",
+      "branch": "sample"
+    }
+  },
   "work.list": {
     "methodId": "work.list",
     "http": {
@@ -32535,7 +32605,8 @@ export const MOCK_DAEMON_FIXTURES: MockDaemonFixtureMap = {
         {
           "root": "sample",
           "label": "sample",
-          "daemonFolder": false
+          "daemonFolder": false,
+          "reachable": false
         }
       ]
     }
@@ -32558,7 +32629,8 @@ export const MOCK_DAEMON_FIXTURES: MockDaemonFixtureMap = {
           "id": "sample",
           "canonicalRoot": "sample",
           "generation": 0
-        }
+        },
+        "reachable": false
       },
       "alreadyRegistered": false,
       "nativeScopeGranted": false
@@ -32583,7 +32655,8 @@ export const MOCK_DAEMON_FIXTURES: MockDaemonFixtureMap = {
             "id": "sample",
             "canonicalRoot": "sample",
             "generation": 0
-          }
+          },
+          "reachable": false
         }
       ],
       "declines": [

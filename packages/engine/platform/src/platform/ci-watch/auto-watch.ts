@@ -2,6 +2,7 @@ import { nativeCiWatchOwner } from './native-owner.js';
 import { captureCiWatchOwner } from './autonomous.js';
 import { currentExternalOperationSource } from '../permissions/external-operation-scope.js';
 import type { ExternalOperationSource } from '../permissions/external-request.js';
+import { turnInputParty, type TurnInputParty } from '../security/turn-input-party.js';
 /**
  * ci-watch/auto-watch.ts, CI watches mint themselves at the push/PR seam.
  *
@@ -245,7 +246,9 @@ export class CiWatchAutoMinter {
       // The push's own directory (`git -C`, a `cd` before it) names the repository, not the exec's.
       const cwd = detected.dir !== undefined ? resolve(execCwd, detected.dir) : execCwd;
       try {
-        void this.mint(cwd, detected, captureCiWatchOwner(currentExternalOperationSource()), project).catch((error) => {
+        // Whose input the pushing turn acted on, read now, in its scope (the owner's own chat: the owner's; anyone else's:
+        // theirs): the watch's repair is decided and runs as that party.
+        void this.mint(cwd, detected, captureCiWatchOwner(currentExternalOperationSource()), project, turnInputParty()).catch((error) => {
           logger.warn('[ci-watch] auto-mint failed', { command, error: summarizeError(error) });
         });
       } catch (error) { logger.warn('[ci-watch] auto-mint refused', { error: summarizeError(error) }); }
@@ -257,17 +260,17 @@ export class CiWatchAutoMinter {
   onGitPushed(input: { readonly cwd: string; readonly branch?: string | undefined; readonly project?: string | undefined }): void {
     if (!input.project || resolve(input.project) === resolve(this.deps.workingDirectory)) return;
     try {
-      void this.mint(input.cwd, { kind: 'push', branch: input.branch }, captureCiWatchOwner(currentExternalOperationSource()), input.project).catch((error) => {
+      void this.mint(input.cwd, { kind: 'push', branch: input.branch }, captureCiWatchOwner(currentExternalOperationSource()), input.project, turnInputParty()).catch((error) => {
         logger.warn('[ci-watch] auto-mint failed', { cwd: input.cwd, error: summarizeError(error) });
       });
     } catch (error) { logger.warn('[ci-watch] auto-mint refused', { error: summarizeError(error) }); }
   }
 
-  private mint(cwd: string, detected: DetectedCiPush, operation: ExternalOperationSource | undefined, project: string): Promise<CiWatchSubscription | null> {
-    const pending = this.mintQueue.then(() => this.mintOwned(cwd, detected, operation, project));
+  private mint(cwd: string, detected: DetectedCiPush, operation: ExternalOperationSource | undefined, project: string, party: TurnInputParty): Promise<CiWatchSubscription | null> {
+    const pending = this.mintQueue.then(() => this.mintOwned(cwd, detected, operation, project, party));
     this.mintQueue = pending.catch(() => {}); return pending;
   }
-  private async mintOwned(cwd: string, detected: DetectedCiPush, operation: ExternalOperationSource | undefined, project: string): Promise<CiWatchSubscription | null> {
+  private async mintOwned(cwd: string, detected: DetectedCiPush, operation: ExternalOperationSource | undefined, project: string, party: TurnInputParty): Promise<CiWatchSubscription | null> {
     const repo = await (this.deps.resolveRepoSlug
       ? this.deps.resolveRepoSlug(cwd)
       : runGit(cwd, ['remote', 'get-url', 'origin']).then((url) => (url ? parseGitHubSlug(url) : null)));
@@ -290,6 +293,7 @@ export class CiWatchAutoMinter {
       ref: branch,
       deliveryChannel: this.deps.deliveryChannel ?? DEFAULT_AUTO_WATCH_CHANNEL,
       project,
+      party,
     }, operation);
     logger.info('[ci-watch] watch self-minted at the push seam', { repo, ref: branch, id: watch.id });
     return watch;

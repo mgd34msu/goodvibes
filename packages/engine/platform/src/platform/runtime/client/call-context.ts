@@ -203,7 +203,8 @@ function exchange(path: string, token: string, program: 'tui' | 'agent' | 'daemo
   // opens itself or sends its token, so a socket another process put at the path gets nothing (gate-review-6 G10).
   const nonce = randomBytes(32).toString('hex');
   const named = origin === undefined ? Promise.resolve(false)
-    : fetch(new URL(PROGRAM_NONCE_PATH, origin), { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ nonce }), redirect: 'error' })
+    // With the operator token (the daemon names the secret only for a holder of it on this machine).
+    : fetch(new URL(PROGRAM_NONCE_PATH, origin), { method: 'POST', headers: { 'content-type': 'application/json', authorization: `Bearer ${token}` }, body: JSON.stringify({ nonce }), redirect: 'error' })
       .then((response) => { void response.body?.cancel(); return response.status === 204; }, () => false);
   return named.then((ok) => ok ? exchangeProved(path, token, program, onEnded, asCommandLine, nonce) : undefined);
 }
@@ -291,7 +292,7 @@ function exchangeProved(path: string, token: string, program: 'tui' | 'agent' | 
  * This program's registration for a call to the daemon at `target` with the credential `sent`: asked for the first
  * time over this machine's program socket, then the same one while its connection lasts. Undefined when no program
  * context is set (and this is no program's command line), for a daemon address that is not this machine's (a connected host on another
- * machine never issues one: there the owner's presses are his only through his own sign-in on that host), for a
+ * machine never issues one: there the owner's presses are theirs only through their own sign-in on that host), for a
  * listener that is not the registering daemon's, or when the daemon issues none: the program's calls then carry none,
  * as a script's.
  */
@@ -349,7 +350,7 @@ let programContext: ProgramCallContext | undefined;
 /**
  * The client kind a command line names itself with (`do` and `find` on any program's command line), never `tui` or
  * `agent`. The daemon holds such a call for the owner when it weakens a protection, cannot be undone, spends money,
- * writes a secret or is his own act (capabilities/command-line-hold.ts), whatever registration it carries.
+ * writes a secret or is the owner's own act (capabilities/command-line-hold.ts), whatever registration it carries.
  */
 export const COMMAND_LINE_CLIENT = 'cli';
 let commandLine = false;

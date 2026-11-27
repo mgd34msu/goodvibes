@@ -1,6 +1,7 @@
 /**
  * The Work page's one primary action: "New", a menu of what can be started
- * from here, each in a kit Dialog, named by what it gets done. Task
+ * from here, each in a kit Dialog, named by what it gets done. Work
+ * (work.delegate through capabilities.run, always a piece of Work), task
  * (tasks.create), session in a folder (sessions.hosted.create, offered only the
  * folders sessions.hosted.workspaces names; the detach policy defaults to the
  * daemon's own setting and is omitted from the call unless chosen; the
@@ -21,22 +22,74 @@ import { useToast } from '../../lib/toast';
 import { Button } from '../../components/ui/Button';
 import { Checkbox } from '../../components/ui/Checkbox';
 import { Dialog } from '../../components/ui/Dialog';
-import { Field, Input } from '../../components/ui/Field';
+import { Field, Input, Textarea } from '../../components/ui/Field';
 import { Menu, MenuItem } from '../../components/ui/Menu';
 import { Select } from '../../components/ui/Select';
 import { CiReportDetail, type CiReport } from './CiWatchDetail';
-import { NativeIntakeForm } from './NativeIntakeForm';
 import { ActionSheet, findCommandAction } from '../../components/command/ActionSheet';
-import type { ClientLifetime } from '../../lib/client-lifetime';
+import { projectChoiceLabel, usePlaceProjects } from '../../lib/place-project';
+import { runPlaceCapability } from '../../lib/place-capabilities';
 
 type NewKind = 'native' | 'task' | 'hosted' | 'ci-watch' | 'ci-status';
 
 export interface NewWorkMenuProps {
-  lifetime: ClientLifetime;
   /** A created item to open: its Work key (`hosted:<id>`, ...). */
   onCreated: (key: string) => void;
   /** Open the schedules screen (the Scheduled group's own management). */
   onSchedules?: () => void;
+}
+
+/**
+ * New work, as the owner asks for it: what they want done and, if they say, what done means. It is the daemon's own
+ * hand-over (`work.delegate`, the act a terminal program's New work and a model's hand-off reach), run as their request
+ * for the project they chose, so it is always a piece of Work: never a conversation turn a model may answer instead.
+ */
+function WorkRequestForm({ onDone }: { onDone: () => void }) {
+  const queryClient = useQueryClient();
+  const { toast } = useToast();
+  const places = usePlaceProjects();
+  const [goal, setGoal] = useState('');
+  const [criteria, setCriteria] = useState('');
+  const [chosen, setChosen] = useState('');
+  const folders = places.projects;
+  const project = chosen || (places.project && places.project.startsWith('/') ? places.project : folders[0]) || '';
+  const create = useMutation({
+    mutationFn: () => runPlaceCapability('work.delegate', { goal: goal.trim(), criteria: criteria.trim() }, project),
+    onSuccess: async (answer) => {
+      setGoal('');
+      setCriteria('');
+      await queryClient.invalidateQueries({ queryKey: queryKeys.tasks });
+      toast({ title: answer.text || 'The work is asked for; it shows in Work.', tone: 'success' });
+      onDone();
+    },
+    onError: (error: unknown) => toast({ title: 'The work was not asked for', description: formatError(error), tone: 'danger' }),
+  });
+  const submit = (event: SyntheticEvent<HTMLFormElement>) => {
+    event.preventDefault();
+    if (goal.trim() && project && !create.isPending) create.mutate();
+  };
+  return (
+    <form className="work-form" onSubmit={submit}>
+      <Field label="What you want done" help="In your own words: it becomes a piece of work, planned and run on the daemon.">
+        <Textarea autoFocus rows={4} value={goal} onChange={(e) => setGoal(e.target.value)} disabled={create.isPending} />
+      </Field>
+      <Field label="Done when (optional)" help="The results that mean it is done, one per line. Left empty, it is done when it is done as asked.">
+        <Textarea rows={3} value={criteria} onChange={(e) => setCriteria(e.target.value)} disabled={create.isPending} />
+      </Field>
+      {folders.length > 1 ? (
+        <Field label="Project">
+          <Select aria-label="Project" value={project} onChange={setChosen} disabled={create.isPending}
+            options={folders.map((root) => ({ value: root, label: projectChoiceLabel(places, root, root) }))} />
+        </Field>
+      ) : null}
+      {places.status !== 'reading' && !project ? <p role="alert">The daemon names no project to do work in.</p> : null}
+      <div className="work-form__actions">
+        <Button type="submit" variant="primary" disabled={!goal.trim() || !project || create.isPending}>
+          {create.isPending ? 'Asking…' : 'Ask for it'}
+        </Button>
+      </div>
+    </form>
+  );
 }
 
 function TaskForm({ onDone }: { onDone: () => void }) {
@@ -287,7 +340,7 @@ const TITLES: Record<NewKind, { title: string; description: string }> = {
   'ci-status': { title: 'Check CI status', description: 'Look up any repository, ref or pull request once, without creating a watch.' },
 };
 
-export function NewWorkMenu({ onCreated, lifetime, onSchedules }: NewWorkMenuProps) {
+export function NewWorkMenu({ onCreated, onSchedules }: NewWorkMenuProps) {
   const [open, setOpen] = useState<NewKind | null>(null);
   const [scheduling, setScheduling] = useState(false);
   // The words are /schedule's own (its description), so the menu says what the terminal says.
@@ -325,7 +378,7 @@ export function NewWorkMenu({ onCreated, lifetime, onSchedules }: NewWorkMenuPro
         title={open ? TITLES[open].title : ''}
         description={open ? TITLES[open].description : undefined}
       >
-        {open === 'native' && <NativeIntakeForm lifetime={lifetime} onOpenSession={(id) => done(`hosted:${id}`)} />}
+        {open === 'native' && <WorkRequestForm onDone={() => done()} />}
         {open === 'task' && <TaskForm onDone={() => done()} />}
         {open === 'hosted' && <HostedForm onDone={done} />}
         {open === 'ci-watch' && <CiWatchForm onDone={done} />}

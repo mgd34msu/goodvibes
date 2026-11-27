@@ -226,7 +226,7 @@ export const SECRETS_LINK: CapabilityDefinition<SecretsCapabilityServices> = {
   done: '{key} now reads from {reference}.',
   touches: 'credential', lasts: 'kept', risk: 'none', undoneBy: 'delete-secret',
   // It writes the secret store (which value a key reads from), as storing a secret does: the owner decides it for a
-  // model, and it is his own act when a device asks.
+  // model, and it is the owner's own act when a device asks.
   effects: ['control-plane.write', 'secret.write'],
   example: { key: 'OPENAI_API_KEY', reference: 'goodvibes://secrets/env/OPENAI_API_KEY' },
   async run(values, services, caller) {

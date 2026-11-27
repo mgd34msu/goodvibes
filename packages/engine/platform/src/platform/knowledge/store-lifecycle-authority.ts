@@ -41,7 +41,7 @@ export function prepareKnowledgeIssueUpsert(
   const next = readSubjectRevision(input.metadata);
   // A resolved issue stored before its producer labelled revisions, and resolved by
   // no review, cannot show it saw this revision: a labelled open report of it starts
-  // a lifecycle. One the owner reviewed keeps his answer.
+  // a lifecycle. One the owner reviewed keeps their answer.
   const resolvedBeforeLabels = !mutation && previous === undefined && next !== undefined && existing?.status === 'resolved'
     && input.status !== 'resolved' && typeof readRecord(existing.metadata.review).action !== 'string';
   const changed = Boolean(previous && next && previous !== next) || resolvedBeforeLabels;

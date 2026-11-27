@@ -43,7 +43,7 @@
  * Not seen: what a program does on its own once started (a git alias defined
  * before the rule, a compiled program, a script in another language that
  * assembles the words), tools of MCP servers, and commands the owner types
- * himself.
+ * in person.
  *
  * Cost: nothing for a call when no never-run rule exists or the call carries
  * no command; otherwise one parse of each command text the call carries, and

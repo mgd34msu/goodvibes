@@ -71,8 +71,8 @@ export interface EmbedSessionOptions {
   readonly boot?: Partial<Omit<BootDaemonOptions, 'workingDir' | 'homeDirectory' | 'token'>> | undefined;
   /**
    * Whose input this session's submissions are (security/turn-input-party.ts): the party of the connection that
-   * started it. The owner's only when the embedder is his own program on his own connection (`goodvibes acp` started by
-   * his editor, not for anyone else: acp/agent.ts); absent, someone else's, so its agents run reads only.
+   * started it. The owner's only when the embedder is their own program on their own connection (`goodvibes acp` started by
+   * their editor, not for anyone else: acp/agent.ts); absent, someone else's, so its agents run reads only.
    */
   readonly inputParty?: TurnInputParty | undefined;
 }

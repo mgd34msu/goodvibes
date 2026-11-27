@@ -20,10 +20,11 @@ function cursor(value: unknown, field: string): number {
   return value;
 }
 function params(invocation: GatewayMethodInvocation, reader: WorkLedgerReadClient, history: boolean): Record<string, unknown> {
-  // Defense in depth: direct catalog invocations must not bypass owner/scope auth.
-  if (!invocation.context.admin || !invocation.context.principalId
+  // Defense in depth: direct catalog invocations must not bypass scope auth. A caller below an admin reads a project given
+  // to it: the dispatch's project check held it there before this (effect-authority.ts `work.read`).
+  if (!invocation.context.principalId
     || !invocation.context.scopes?.some(scope => scope === WORK_LEDGER_READ_SCOPE || scope === '*')) {
-    throw new GatewayVerbError('Native ledger read requires owner access and read:work-ledger', 'FORBIDDEN', 403);
+    throw new GatewayVerbError('Native ledger read requires read:work-ledger', 'FORBIDDEN', 403);
   }
   const input = readInvocationParams(invocation);
   const allowed = new Set(history ? ['projectId', 'afterSequence', 'throughSequence'] : ['projectId']);
@@ -64,10 +65,10 @@ export function registerWorkLedgerGatewayMethods(catalog: GatewayMethodCatalog, 
     catalog.register(descriptor, handler, { replace: true });
   };
   attach('workLedger.project', async invocation => {
-    if (!invocation.context.admin || !invocation.context.principalId
+    if (!invocation.context.principalId
       || !invocation.context.scopes?.some(scope => scope === WORK_LEDGER_READ_SCOPE || scope === '*')
       || invocation.isAuthorized?.([WORK_LEDGER_READ_SCOPE]) !== true) {
-      throw new GatewayVerbError('Native ledger discovery requires current owner access and read:work-ledger', 'FORBIDDEN', 403);
+      throw new GatewayVerbError('Native ledger discovery requires current read:work-ledger', 'FORBIDDEN', 403);
     }
     const input = readInvocationParams(invocation);
     for (const key of Object.keys(input)) invalid(key);

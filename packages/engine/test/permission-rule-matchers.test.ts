@@ -23,6 +23,7 @@ import { evaluatePrefixRule, extractCommandArgs } from '../platform/src/platform
 import { evaluateNetworkScopeRule } from '../platform/src/platform/runtime/permissions/rules/network-scope.ts';
 import { evaluatePathScopeRule } from '../platform/src/platform/runtime/permissions/rules/path-scope.ts';
 import { buildDurableRuleForDecision } from '../platform/src/platform/permissions/approval-rules.ts';
+import { withOwnerInput } from '../platform/src/platform/security/turn-input-party.ts';
 import type {
   NetworkScopeRule, PathScopeRule, PrefixRule,
 } from '../platform/src/platform/runtime/permissions/types.ts';
@@ -123,8 +124,10 @@ describe('a remembered folder grant for edits', () => {
     }));
     const permissions = new PermissionManager(async () => ({ approved: false }), settings, new PolicyRuntimeState(), null, null, store);
     const edit = (...paths: string[]) => ({ edits: paths.map((path) => ({ path, find: 'a', replace: 'b' })) });
+    // Each edit is the owner's own turn, as the product marks an owner's turn: a call outside any turn is someone else's
+    // and only reads, refused before any remembered rule is read.
     const settledByGrant = async (args: Record<string, unknown>) => {
-      const decision = await permissions.checkDetailed('edit', args);
+      const decision = await withOwnerInput(() => permissions.checkDetailed('edit', args));
       return decision.approved && decision.sourceLayer === 'user_rule';
     };
     expect({

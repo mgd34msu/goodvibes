@@ -18,6 +18,7 @@ import type { UserAuthManager } from '../../security/user-auth.js';
 import { OPERATOR_SESSION_COOKIE_NAME, buildIdentityMarkerCookie, buildOperatorSessionCookie, extractOperatorAuthToken, readIdentityMarker, type CredentialRefusal } from '../../security/http-auth.js';
 import { webAppLink } from '../web-app-link.js';
 import { callerKey, LOCAL_OWNER_PRINCIPAL } from '../../pairing/principal-ids.js';
+import { ownersOwnPress } from '../method-owner-decision.js';
 import type { AgentManager } from '../../tools/agent/index.js';
 import {
   normalizeAtSchedule,
@@ -103,7 +104,7 @@ import { VERSION } from '../../version.js';
 import type { CompanionChatManager } from '../../companion/companion-chat-manager.js';
 import { principalHasScope, type RequestContext, type RequestPrincipal } from '../http-policy.js';
 import { memoryAuthorOfRequest, requestMayNameSession } from './memory-route-author.js';
-import { ownerHimselfOf, ownerTypedAtProgram } from './owner-typed.js';
+import { makesOwnerOnlyActOf, ownerHimselfOf, ownerTypedAtProgram } from './owner-typed.js';
 import { projectNamerOf, type CallerProjectVerdict, type ProjectNamer } from '../../workspace/caller-project.js';
 import { admitEffects } from '../../security/effect-authority.js';
 import { dispatchCompanionChatRoutes, isCompanionChatPath } from '../../companion/companion-chat-routes.js';
@@ -549,9 +550,14 @@ export class DaemonHttpRouter {
     }
     // A program of this machine names a secret of its own here, just before it connects to the program socket, so the
     // daemon can prove over the socket that it is the daemon behind this listener (program-socket.ts `expected`). From
-    // this machine only (as the listener established it); it grants nothing and needs no credential.
+    // this machine only (as the listener established it), with the operator token of this machine (the token the
+    // program sends over the socket next), and never from a browser page: any page in a browser on this machine can post
+    // to a loopback address (a plain POST needs no preflight, and the listener reads it as local), and its request
+    // carries an Origin header. Anyone else could otherwise fill the table and keep the owner's programs from registering.
     if (url.pathname === PROGRAM_NONCE_PATH && req.method === 'POST') {
-      if (!isLocalOrigin(req)) return jsonErrorResponse({ error: 'Only a program on the daemon\'s own machine names its secret here.', code: 'FORBIDDEN' }, { status: 403 });
+      if (!isLocalOrigin(req) || req.headers.has('origin') || this.principalOf(req)?.credentialKind !== 'local') {
+        return jsonErrorResponse({ error: 'Only a program on the daemon\'s own machine, holding its operator token, names its secret here.', code: 'FORBIDDEN' }, { status: 403 });
+      }
       let nonce: unknown;
       try { nonce = ((await req.json()) as { nonce?: unknown } | null)?.nonce; } catch { nonce = undefined; }
       return expectProgramNonce(nonce) ? new Response(null, { status: 204 }) : jsonErrorResponse({ error: 'nonce must be 64 hex characters', code: 'INVALID_ARGUMENT' }, { status: 400 });
@@ -737,7 +743,7 @@ export class DaemonHttpRouter {
    * the credential that made the call, before the route reads the body. The refusal, or null.
    */
   private async refuseUncheckedFolders(req: Request): Promise<Response | null> {
-    // No rules to read is never no check: only the owner himself names a folder then (caller-paths.ts).
+    // No rules to read is never no check: only the owner in person names a folder then (caller-paths.ts).
     const rules = this.context.gatewayMethods.pathRules?.() ?? CALLER_RULES_ABSENT;
     const url = new URL(req.url);
     // Every route: a method's binding, an alias of one, or an effect row with its declared folders (route-manifest.ts).
@@ -808,7 +814,7 @@ export class DaemonHttpRouter {
    * reads it, in the words that never say whether it exists. Null: it may reach every one it names.
    */
   private async refuseUnreachableRecords(req: Request): Promise<Response | null> {
-    // No rules to read is never no check: only the owner himself reaches a record by id then (caller-reach.ts).
+    // No rules to read is never no check: only the owner in person reaches a record by id then (caller-reach.ts).
     const rules = this.context.gatewayMethods.reachRules?.() ?? CALLER_RULES_ABSENT;
     const reach = this.reachOfRequest(req);
     if (!reach) return null;
@@ -823,13 +829,8 @@ export class DaemonHttpRouter {
     // The owner's shared things by their REST routes too (control-plane/shared-kinds.ts): the same rule the dispatch
     // reads. A public or peer route is admitted by its own proof.
     if (reach.descriptor.access === 'public' || reach.descriptor.access === 'remote-peer') return null;
-    const shared = await sharedKindAdmission(daemonSharedKindRule(), reach.descriptor.id, body ?? reach.params, reach.context);
+    const shared = await sharedKindAdmission(daemonSharedKindRule(), reach.descriptor.id, body ?? reach.params, reach.context, req.signal);
     if (shared.ok) return null;
-    if (shared.pendingApprovalId !== undefined) {
-      return Response.json({ id: reach.descriptor.id, ok: false, success: false, code: 'OWNER_APPROVAL_PENDING', approvalId: shared.pendingApprovalId,
-        state: `Not done yet: ${shared.reason}.`,
-        next: ['The owner answers it in Waiting for you (the terminal app or the Agent, the web UI, or a paired phone).', 'Send the same call again after he answers.'] }, { status: 202 });
-    }
     return Response.json(buildErrorResponseBody({ message: `Not done: ${shared.reason}. Nothing was read or changed.`, code: SHARED_KIND_NOT_GIVEN, status: 403 }), { status: 403 });
   }
 
@@ -837,7 +838,7 @@ export class DaemonHttpRouter {
    * A knowledge call over REST (the family of the owner's shared kind `knowledge`, control-plane/shared-kinds.ts): the
    * project it names (`x-goodvibes-project`, else `workingDirectory` in its body or query), held by the one project
    * check for its caller, and the caller, kept as what it adds is recorded (knowledge/knowledge-reach.ts: that project's
-   * knowledge; naming none, the owner's shared knowledge, which only he and those he gave it add to). The refusal of a
+   * knowledge; naming none, the owner's shared knowledge, which only the owner and those the owner gave it add to). The refusal of a
    * project it may not name, or null.
    */
   private async refuseKnowledgeProject(req: Request): Promise<Response | null> {
@@ -1041,7 +1042,7 @@ export class DaemonHttpRouter {
       resolveDefaultProviderModel: context.resolveDefaultProviderModel,
       requireAdmin,
       requireScope: (request, scope) => this.requireCallerScope(request, scope),
-      // Whose input a message is (security/turn-input-party.ts): the owner himself (his sign-in, a device he paired, his
+      // Whose input a message is (security/turn-input-party.ts): the owner in person (their sign-in, a device they paired, their
       // own registered terminal program: owner-typed.ts), or someone else's; the operator token alone is a script.
       isOwnerCaller: (request) => ownerHimselfOf(this.principalOf(request), readProgramRegistration(request)),
       ...(context.callerProject ? { checkProject: (request: Request, raw: string) => context.callerProject!(raw, this.projectNamerOfRequest(request)) } : {}),
@@ -1149,7 +1150,7 @@ export class DaemonHttpRouter {
         controlPlaneGateway: this.context.controlPlaneGateway,
         extractAuthToken: this.context.extractAuthToken,
         resolveAuthenticatedPrincipal: (request) => this.principalOf(request),
-        // `control.auth.current` says whether the caller is the owner himself, so the web offers his own acts.
+        // `control.auth.current` says whether the caller is the owner in person, so the web offers the owner's own acts.
         ownerHimself: (request: Request) => ownerHimselfOf(this.principalOf(request), readProgramRegistration(request)),
         gatewayMethods: this.context.gatewayMethods,
         getOperatorContract: () => buildOperatorContract(this.context.gatewayMethods),
@@ -1172,8 +1173,10 @@ export class DaemonHttpRouter {
           const verdict = this.context.callerProject!(folder, this.projectNamerOfRequest(request));
           return verdict.ok ? undefined : verdict.reason;
         } } : {}),
-        // Only the owner himself reads every project's memory at once (his place's "Every project" choice).
+        // Only the owner in person reads every project's memory at once (their place's "Every project" choice).
         ownerHimself: (request: Request) => ownerHimselfOf(this.principalOf(request), readProgramRegistration(request)),
+        // Only an act the owner makes changes the owner's own password: in person, or the owner's own command line (`do`).
+        makesOwnerOnlyAct: (request: Request) => makesOwnerOnlyActOf(this.principalOf(request), readProgramRegistration(request)),
         memoryConsolidation: this.context.memoryConsolidation ?? null,
         parseJsonBody: (request) => this.parseJsonBody(request),
         providerRuntime: {
@@ -1247,6 +1250,15 @@ export class DaemonHttpRouter {
         parseOptionalJsonBody: (request) => this.parseOptionalJsonBody(request),
         recordApiResponse: (request, path, response) => this.recordApiResponse(request, path, response),
         requireAdmin: (request) => this.context.requireAdmin(request),
+        // Whose request it is, as the work it starts carries it: the owner's own press is theirs (method-owner-decision.ts).
+        requestParty: (request) => {
+          const principal = this.principalOf(request);
+          const call = this.checkedCallOf(request);
+          const actor = principal?.actor;
+          if (actor && ownersOwnPress({ actor, credentialKind: principal?.credentialKind, registration: call?.registration, personAsked: false })) return { party: 'owner' as const };
+          return { party: 'other' as const, who: `a caller that is not the owner in person (${actor ?`${actor.class} ${actor.id}` : 'unknown'})`,
+            ...(principal?.principalId ? { madeFor: principal.principalId } : {}) };
+        },
         sessionBroker: buildRouterSessionBrokerAdapter(this.context.sessionBroker),
         mayReadSession: (request, session) => this.mayReadSession(request, session),
         // Kept with its kind (a sign-in user named `shared-token` is never this machine's token).
@@ -1308,9 +1320,11 @@ export class DaemonHttpRouter {
           req,
           { clientPrefix: 'shared-session', sessionId, ...this.streamAuthority(req) },
         ),
-        // The owner typed this into his own program: the owner, with a person's credential, a terminal app or the
+        // The owner typed this into their own program: the owner, with a person's credential, a terminal app or the
         // Agent by its label, and a person's claim (runtime-session-routes.ts OWNER_TYPED_METADATA_KEY).
         ownerTypedAtProgram: (req) => ownerTypedAtProgram(this.principalOf(req), req.headers, readProgramRegistration(req)),
+        // The owner in person sent it (runtime-session-routes.ts OWNER_HIMSELF_METADATA_KEY): in a hosted session the owner made, their turn.
+        ownerHimself: (req) => ownerHimselfOf(this.principalOf(req), readProgramRegistration(req)),
       },
       remote: {
         resolveAuthenticatedPrincipal: (request) => this.principalOf(request),
@@ -1392,7 +1406,7 @@ export class DaemonHttpRouter {
         requireAdmin: (request) => this.context.requireAdmin(request),
         resolveDefaultProviderModel: this.context.resolveDefaultProviderModel,
         homeGraph: this.context.homeGraphService,
-        // "Treat my own messages here as me" on Home Assistant (daemon/owner-channel-conversation.ts).
+        // Home Assistant's owner: whether a message is the owner's own (daemon/owner-channel-conversation.ts).
         channelPolicy: () => this.context.channelPolicy.getPolicy('homeassistant'),
       });
     }

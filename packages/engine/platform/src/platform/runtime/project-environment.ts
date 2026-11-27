@@ -6,7 +6,7 @@
  *
  * What a project's environment is, built here and nowhere else:
  *  - its hooks: the project's hooks file (at the project's root, also for a folder below it), loaded into the host's
- *    dispatcher once the owner trusts the folder (held until then, applied when he does);
+ *    dispatcher once the owner trusts the folder (held until then, applied when they do);
  *  - its tool servers: the project's MCP files and the owner's own, started in `folder` (the project, or a captured copy
  *    of it a step of planned work runs in), in sandbox sessions rooted there, the project's files held until the owner
  *    trusts the folder, every call decided by the host's permission owner for the project;
@@ -136,7 +136,7 @@ export function createProjectToolServers(options: ProjectToolServersOptions): Pr
     }),
     release: async () => {
       try { unbind(); } catch { /* the trust watch ends with its host */ }
-      await registry.disconnectAll().catch((error: unknown) => {
+      await registry.release().catch((error: unknown) => {
         logger.warn('[project] the project\'s tool servers did not stop cleanly', { folder: options.folder, error: summarizeError(error) });
       });
     },

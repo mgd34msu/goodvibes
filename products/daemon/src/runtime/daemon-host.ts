@@ -334,12 +334,15 @@ export function createDaemonHost(options: DaemonHostOptions, factories: DaemonHo
         const http = options.httpListener;
         const serving = daemon;
         // The first sender refused this run for presenting the operator token is
-        // put in the owner's inbox once, so he learns a webhook sender needs the
+        // put in the owner's inbox once, so they learn a webhook sender needs the
         // listener token; later refusals answer the sender only.
         let operatorTokenReported = false;
         listener = (factories.createListener ?? ((config) => new HttpListener(config)))({
           host: http.host, port: http.port, configManager: runtime.configManager,
           userAuth: runtime.localUserAuthManager, hookDispatcher: runtime.hookDispatcher,
+          // A webhook naming a project fires that project's own hooks, for a caller given the project (the one check).
+          ...(runtime.projectHooks ? { projectHooks: runtime.projectHooks } : {}),
+          callerRules: () => runtime.gatewayMethods.reachRules?.(),
           pairingTokens: runtime.pairingTokens, runtimeBus: runtime.runtimeBus,
           // The catalog's default grant: a credential is judged here as the control plane judges it.
           grantedScopes: (includeWrite) => runtime.gatewayMethods.grantedScopes(includeWrite),

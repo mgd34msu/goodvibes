@@ -165,7 +165,7 @@ export function createAgentReminderScheduleTool(
       // as its record (record-of-decided-call.ts). Classed a read: one act, one question.
       sideEffects: ['state'],
       category: 'read',
-      // A webhook target is chosen in the call: one the owner has not configured or allowed is his to decide.
+      // A webhook target is chosen in the call: one the owner has not configured or allowed is theirs to decide.
       subjects: { recipients: ['deliveryWebhook'] },
     },
     execute: async (rawArgs, options) => {

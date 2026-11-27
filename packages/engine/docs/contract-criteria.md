@@ -188,7 +188,7 @@ A criterion line looks like this:
 - [u1.c1] The export command writes orders.csv (serves [c1] The CLI has an export command that writes all orders to orders.csv)
 ```
 
-The brief never asks the agent to list constraints or review itself. The criteria belong to the contract, so nothing the agent writes can add, rename or drop one. A fresh agent on a unit that was already checked (a transport or silence retry, a fresh-agent correction, a respawn after a restart) gets the brief followed by a "Previous checks" section with the latest verdicts (`briefWithPreviousChecks`).
+The brief never asks the agent to list constraints or review itself. The criteria belong to the contract, so nothing the agent writes can add, rename or drop one. A fresh agent on a unit that was already checked (a failed unit run again, a fresh-agent correction, a respawn after a restart) gets the brief followed by a "Previous checks" section with the latest verdicts (`briefWithPreviousChecks`).
 
 ---
 
@@ -202,7 +202,7 @@ The brief never asks the agent to list constraints or review itself. The criteri
 |---|---|---|
 | `turn-end` | A turn whose tool calls include `write`, `edit` or `exec`, when `contract.midRunChecks` is on and an earlier check read one of the unit's criteria as met (before that, nothing can regress, so no check runs) | diff and commands; no gates or claims yet |
 | `completion` | The agent tries to finish; the runner holds it at that point | diff, claim verification, gates, output |
-| `agent-failed` | The agent hit its turn budget or a circuit breaker, or the watchdog stopped a silent agent | full |
+| `agent-failed` | The agent hit its turn budget or a circuit breaker | full |
 | `fix-passed` | The unit's planned-fix group passed | full |
 | `resume` | The runner restarted while the unit was held, checking or nudged | full |
 | `owner-amend` | The owner changed the unit's criteria | full |

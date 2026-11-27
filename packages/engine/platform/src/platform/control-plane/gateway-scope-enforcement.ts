@@ -69,6 +69,12 @@ export function ownApprovalReadable(grant: EventGrant, event: string): boolean {
  * frames stay withheld.
  */
 export { OWN_SESSIONS_SCOPE };
+/**
+ * The scopes that let a credential without `read:events` follow the sessions its principal owns, frame by frame:
+ * `read:own-sessions`, and a person's sessions scopes (one who chats follows their own chat live; nothing else of the
+ * event stream is opened by them).
+ */
+export const OWN_SESSION_FOLLOW_SCOPES: readonly string[] = [OWN_SESSIONS_SCOPE, 'read:sessions', 'write:sessions'];
 /** Runtime domains `read:own-sessions` opens, frame by frame, to the sessions the principal owns. */
 export const OWN_SESSION_DOMAINS: ReadonlySet<RuntimeEventDomain> = new Set<RuntimeEventDomain>(['turn', 'tools', 'gate', 'session']);
 /** Broadcast events `read:own-sessions` opens, event by event, to the sessions the principal owns. */
@@ -117,7 +123,7 @@ export function resolveEventGrant(client: Omit<ScopedClientView, 'kind'>): Event
   }
   return {
     all: false, domains, wireEvents,
-    ...(missingScopes(client.scopes, [OWN_SESSIONS_SCOPE]).length === 0 ? { ownSessions: true as const } : {}),
+    ...(OWN_SESSION_FOLLOW_SCOPES.some((scope) => missingScopes(client.scopes, [scope]).length === 0) ? { ownSessions: true as const } : {}),
     ...(missingScopes(client.scopes, ['read:approvals']).length === 0 ? { readApprovals: true as const } : {}),
   };
 }

@@ -124,7 +124,9 @@ export const builtinGatewayControlAutomationMethodDescriptors: readonly GatewayM
     title: 'Create Automation Job',
     description: 'Create a durable automation job. An optional id makes the create repeatable in its project: the job is kept under an id made from that id and the project (`<id>-<8 hex>`, the same for every create of it in that project), and when this project already has that job it is returned unchanged. Another project\'s job of the same id is never returned, and the id given says nothing about it.',
     category: 'automation',
-    effects: ['automation.administer'],
+    // A project act (effect-authority.ts `automation.write`): below an admin, in a project given to the caller; its runs
+    // are that caller's turns, and it changes only schedules it made (caller-reach.ts `OWN_RECORD_CHANGES`).
+    effects: ['automation.write'],
     http: { method: 'POST', path: '/api/automation/jobs' },
     events: [runtimeEventId('automation')],
     // Its runs' turns work in this project (control-plane dispatch and the router check it for the caller).
@@ -171,7 +173,7 @@ export const builtinGatewayControlAutomationMethodDescriptors: readonly GatewayM
     title: 'Update Automation Job',
     description: 'Update a durable automation job. (Renamed from automation.jobs.patch in the 1.0.0 core-verb rename, canonical verb is update, not patch.)',
     category: 'automation',
-    effects: ['automation.administer'],
+    effects: ['automation.write'],
     http: { method: 'PATCH', path: '/api/automation/jobs/{jobId}' },
     events: [runtimeEventId('automation')],
     inputSchema: bodyEnvelopeSchema({
@@ -206,7 +208,7 @@ export const builtinGatewayControlAutomationMethodDescriptors: readonly GatewayM
   methodDescriptor({
     id: 'automation.jobs.delete',
     repeat: 'safe',
-    effects: ['automation.administer', 'record.destroy'],
+    effects: ['automation.write', 'record.destroy'],
     title: 'Delete Automation Job',
     description: 'Delete a durable automation job.',
     category: 'automation',
@@ -222,7 +224,7 @@ export const builtinGatewayControlAutomationMethodDescriptors: readonly GatewayM
     title: 'Enable Automation Job',
     description: 'Enable a durable automation job.',
     category: 'automation',
-    effects: ['automation.administer'],
+    effects: ['automation.write'],
     http: { method: 'POST', path: '/api/automation/jobs/{jobId}/enable' },
     events: [runtimeEventId('automation')],
     inputSchema: objectSchema({ jobId: STRING_SCHEMA, expectedMutationRevision: STRING_SCHEMA }, ['jobId']),
@@ -234,7 +236,7 @@ export const builtinGatewayControlAutomationMethodDescriptors: readonly GatewayM
     title: 'Disable Automation Job',
     description: 'Disable a durable automation job.',
     category: 'automation',
-    effects: ['automation.administer'],
+    effects: ['automation.write'],
     http: { method: 'POST', path: '/api/automation/jobs/{jobId}/disable' },
     events: [runtimeEventId('automation')],
     inputSchema: objectSchema({ jobId: STRING_SCHEMA, expectedMutationRevision: STRING_SCHEMA }, ['jobId']),
@@ -250,7 +252,7 @@ export const builtinGatewayControlAutomationMethodDescriptors: readonly GatewayM
   methodDescriptor({
     id: 'automation.jobs.run',
     replay: IDEMPOTENCY_KEY_REPLAY,
-    effects: ['automation.administer', 'outward.send'],
+    effects: ['automation.write', 'outward.send'],
     title: 'Run Automation Job Now',
     description: 'Trigger an automation job immediately.',
     category: 'automation',
@@ -289,7 +291,7 @@ export const builtinGatewayControlAutomationMethodDescriptors: readonly GatewayM
     title: 'Cancel Automation Run',
     description: 'Cancel an active automation run.',
     category: 'automation',
-    effects: ['automation.administer'],
+    effects: ['automation.write'],
     http: { method: 'POST', path: '/api/automation/runs/{runId}/cancel' },
     inputSchema: objectSchema({ runId: STRING_SCHEMA }, ['runId']),
     outputSchema: AUTOMATION_RUN_ACTION_OUTPUT_SCHEMA,
@@ -297,7 +299,7 @@ export const builtinGatewayControlAutomationMethodDescriptors: readonly GatewayM
   methodDescriptor({
     id: 'automation.runs.retry',
     replay: IDEMPOTENCY_KEY_REPLAY,
-    effects: ['automation.administer', 'outward.send'],
+    effects: ['automation.write', 'outward.send'],
     title: 'Retry Automation Run',
     description: 'Retry a completed or failed automation run.',
     category: 'automation',
@@ -365,7 +367,7 @@ export const builtinGatewayControlAutomationMethodDescriptors: readonly GatewayM
     title: 'Create Schedule',
     description: 'Create a schedule record.',
     category: 'automation',
-    effects: ['automation.administer'],
+    effects: ['automation.write'],
     http: { method: 'POST', path: '/api/automation/schedules' },
     // Its runs' turns work in this project (control-plane dispatch and the router check it for the caller).
     workFolders: ['workingDirectory'],
@@ -440,7 +442,7 @@ export const builtinGatewayControlAutomationMethodDescriptors: readonly GatewayM
   methodDescriptor({
     id: 'automation.schedules.delete',
     repeat: 'safe',
-    effects: ['automation.administer', 'record.destroy'],
+    effects: ['automation.write', 'record.destroy'],
     title: 'Delete Schedule',
     description: 'Delete a schedule record.',
     category: 'automation',
@@ -455,7 +457,7 @@ export const builtinGatewayControlAutomationMethodDescriptors: readonly GatewayM
     title: 'Resume a Schedule',
     description: 'Let a paused schedule run again at its next time, until you change it. The same as the schedule.resume capability (Resume in Automation).',
     category: 'automation',
-    effects: ['automation.administer'],
+    effects: ['automation.write'],
     http: { method: 'POST', path: '/api/automation/schedules/{scheduleId}/resume' },
     inputSchema: objectSchema({ scheduleId: STRING_SCHEMA, expectedMutationRevision: STRING_SCHEMA }, ['scheduleId']),
     outputSchema: objectSchema({ id: STRING_SCHEMA, enabled: BOOLEAN_SCHEMA }, ['id', 'enabled'], { additionalProperties: true }),
@@ -466,7 +468,7 @@ export const builtinGatewayControlAutomationMethodDescriptors: readonly GatewayM
     title: 'Pause a Schedule',
     description: 'Stop a schedule from running until it is resumed; it is kept. The same as the schedule.pause capability (Pause in Automation).',
     category: 'automation',
-    effects: ['automation.administer'],
+    effects: ['automation.write'],
     http: { method: 'POST', path: '/api/automation/schedules/{scheduleId}/pause' },
     inputSchema: objectSchema({ scheduleId: STRING_SCHEMA, expectedMutationRevision: STRING_SCHEMA }, ['scheduleId']),
     outputSchema: objectSchema({ id: STRING_SCHEMA, enabled: BOOLEAN_SCHEMA }, ['id', 'enabled'], { additionalProperties: true }),
@@ -474,7 +476,7 @@ export const builtinGatewayControlAutomationMethodDescriptors: readonly GatewayM
   methodDescriptor({
     id: 'automation.schedules.run',
     replay: IDEMPOTENCY_KEY_REPLAY,
-    effects: ['automation.administer', 'outward.send'],
+    effects: ['automation.write', 'outward.send'],
     title: 'Run Schedule Now',
     description: 'Trigger a schedule immediately.',
     category: 'automation',

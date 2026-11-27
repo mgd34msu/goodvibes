@@ -4,7 +4,6 @@ import { createRequire } from 'node:module';
 import { createServer } from 'node:net';
 import { chmodSync, copyFileSync, cpSync, existsSync, mkdirSync, readFileSync, readdirSync, realpathSync, rmSync, statSync, symlinkSync } from 'node:fs';
 import { dirname, join, resolve } from 'node:path';
-import { PAIRING_DEFERRED_EXIT } from '../products/tui/scripts/pairing-exit.ts';
 import { COMMANDS, CommandError, PACKAGE, assertOwnedFiles, atomicWrite, contained, dataOwner, discardAbandonedFirstInstall, isReleaseInUse, readDaemonService, readDaemonSetting, recordFirstInstallStaging, stagingRecordPath, plainPath, present, quote, readDataId, readInstallation, receiptPath, recoverInterruptedUpdate, recoverPendingService, recoverPendingSettings, run, serviceUnit, stopService, switchRelease, unitPath, validateLayout, withLock, type Installation, type PendingSetting, type Run, type ServiceLayout } from './installation.ts';
 
 /**
@@ -198,8 +197,6 @@ export interface InstallHooks {
   ready?: typeof ready;
   /** Stands in for `goodvibes-daemon refresh-service` (which needs the built daemon): the unit text it would write. */
   renderUnit?: (options: Options) => Promise<string>;
-  /** Replaces the installed-host pairing step (the real one needs a live daemon). */
-  pairHost?: Run;
 }
 /** Recovery for the install currently in flight; the failure path and the signal path both run exactly this. */
 let activeRecovery: (() => void) | undefined;
@@ -433,18 +430,8 @@ export async function install(options: Options, hooks: InstallHooks = {}): Promi
         execute('systemctl', ['--user', 'enable', serviceUnit(options)]);
         execute('systemctl', ['--user', 'restart', serviceUnit(options)]);
         await (hooks.ready ?? ready)(options, readFileSync(join(release, 'webui/index.html'), 'utf8'), execute);
-        if (hooks.pairHost || !hooks.stage) {
-          const pairArguments = [join(ROOT, 'products/tui/scripts/pair-installed-host.ts'), options.prefix, options.dataDir, String(options.port), options.workspace ?? ROOT];
-          try { (hooks.pairHost ?? execute)(join(release, 'runtime/bun'), pairArguments, { cwd: options.dataDir }); }
-          catch (error) {
-            // Exit 75 means a pairing attempt was recorded and left unresolved. The store has no reset (a token may
-            // already be minted), so a retry cannot succeed until the owner clears it, and failing here would roll
-            // back an install that is otherwise complete and running. The pairing script has already printed what
-            // happened and how to clear it; finish the install and name the one command that pairs later.
-            if (!(error instanceof CommandError) || error.status !== PAIRING_DEFERRED_EXIT) throw error;
-            console.warn(`TUI pairing was skipped (it needs the owner's attention, see above); the installation itself is complete and the daemon is running.\nAfter clearing the recorded attempt, pair with: ${[quote(join(options.prefix, 'current/runtime/bun')), ...pairArguments.map(quote)].join(' ')}`);
-          }
-        }
+        // Nothing is paired: the terminal app and the Agent on this machine are the owner's own programs by their verified
+        // registration with this daemon (the program socket), so they need no key of their own.
       } else if (old?.service && present(unitPath(old))) {
         // Absent when the owner already removed it (goodvibes-daemon uninstall-service).
         execute('systemctl', ['--user', 'disable', serviceUnit(old)]);

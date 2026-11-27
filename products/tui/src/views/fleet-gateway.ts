@@ -101,7 +101,7 @@ export function createFleetGateway(deps: FleetGatewayDeps): FleetGatewayResoluti
     listAttempts: (workstreamId) => platformClient.operator.invoke('fleet.attempts.list', { workstreamId }),
     pick: (input) => platformClient.operator.invoke('fleet.attempts.pick', input),
     resolveConflict: (itemId) => platformClient.operator.invoke('fleet.conflicts.resolve', { itemId }),
-    // Only from the person's own key (D on the row, fleet-acts.ts): his press.
+    // Only from the person's own key (D on the row, fleet-acts.ts): their press.
     discardWorktree: (path) => invokePressed<FleetWorktreeDiscardReceipt>(platformClient, 'worktrees.discard', { path }),
     listWorktreePaths: async () => (await platformClient.operator.invoke('worktrees.snapshot', {})).records.map((record) => record.path),
     getGraph: (workstreamId) => platformClient.operator.invoke('fleet.graph.get', { workstreamId }),

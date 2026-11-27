@@ -156,15 +156,12 @@ export function createDaemonMediaRouteHandlers(
       return Response.json({ providers: status.providers, ...(status.defaultProviderId === null ? {} : { defaultProviderId: status.defaultProviderId }) });
     },
     postWebSearch: async (request) => handleWebSearch(context, request),
-    getArtifacts: (request) => {
-      const admin = context.requireAdmin(request);
-      if (admin) return admin;
-      return Response.json({ artifacts: context.artifactStore.list() });
-    },
+    // Files are project acts (effect-authority.ts `artifacts.read`, `artifacts.write`), admitted by their effects at the
+    // router's binding gate: a caller below an admin lists, reads and stores only files it made itself (the one reach
+    // rule, control-plane/caller-reach.ts: a file is its maker's, `createdBy`), and the list is filtered to those.
+    getArtifacts: () => Response.json({ artifacts: context.artifactStore.list() }),
     postArtifact: async (request) => handleArtifactCreate(context, request),
-    getArtifact: (artifactId, request) => {
-      const admin = context.requireAdmin(request);
-      if (admin) return admin;
+    getArtifact: (artifactId) => {
       const artifact = context.artifactStore.get(artifactId);
       return artifact
         ? Response.json({ artifact })
@@ -473,15 +470,29 @@ async function handleMediaAnalyze(context: DaemonMediaRouteContext, req: Request
   }
 }
 
+/**
+ * A caller's metadata without the fields the store stamps itself: the project a file belongs to and who made it are
+ * read from the call (the one reach rule reads both), never from what the caller wrote.
+ */
+function withoutCallerStamps(metadata: Record<string, unknown> | undefined): Record<string, unknown> | undefined {
+  if (metadata === undefined) return undefined;
+  const { project: _project, createdBy: _createdBy, ...rest } = metadata;
+  return rest;
+}
+
 async function handleArtifactCreate(context: DaemonMediaRouteContext, req: Request): Promise<Response> {
-  const admin = context.requireAdmin(req);
-  if (admin) return admin;
+  // A project act (`artifacts.write`), admitted by its effects; a daemon-local path or file: URI is held to the caller's
+  // projects by the folder check (the method's `daemonFiles`), and reaching a private host stays an admin's (below).
   // Who stores it is who it belongs to (platform control-plane/caller-reach.ts): the authenticated caller, never the body.
   const createdBy = context.callerPrincipal?.(req);
   if (isArtifactUploadRequest(req)) {
     const store = context.artifactStore;
-    // The upload's own metadata, with who stored it.
-    const withMaker = <T extends { readonly metadata?: Record<string, unknown> | undefined }>(input: T): T => createdBy ? { ...input, metadata: { ...(input.metadata ?? {}), createdBy } } : input;
+    // The upload's own metadata, with who stored it; a project or maker the caller wrote is never kept (the store stamps
+    // both: artifacts/turn-maker.ts).
+    const withMaker = <T extends { readonly metadata?: Record<string, unknown> | undefined }>(input: T): T => {
+      const metadata = withoutCallerStamps(input.metadata);
+      return createdBy ? { ...input, metadata: { ...(metadata ?? {}), createdBy } } : { ...input, ...(metadata ? { metadata } : {}) };
+    };
     const uploaded = await createArtifactFromUploadRequest({
       create: (input) => store.create(withMaker(input)),
       ...(store.getMaxBytes ? { getMaxBytes: () => store.getMaxBytes!() } : {}),
@@ -518,7 +529,7 @@ async function handleArtifactCreate(context: DaemonMediaRouteContext, req: Reque
       ...(privateHostFetchOptions ?? {}),
       ...(typeof body.retentionMs === 'number' ? { retentionMs: body.retentionMs } : {}),
       ...(typeof body.metadata === 'object' && body.metadata !== null || createdBy
-        ? { metadata: { ...(typeof body.metadata === 'object' && body.metadata !== null ? body.metadata as Record<string, unknown> : {}), ...(createdBy ? { createdBy } : {}) } } : {}),
+        ? { metadata: { ...(withoutCallerStamps(typeof body.metadata === 'object' && body.metadata !== null && !Array.isArray(body.metadata) ? body.metadata as Record<string, unknown> : undefined) ?? {}), ...(createdBy ? { createdBy } : {}) } } : {}),
     });
     return Response.json({ artifact }, { status: 201 });
   } catch (error) {
@@ -530,7 +541,7 @@ async function handleArtifactCreate(context: DaemonMediaRouteContext, req: Reque
 const KNOWLEDGE_INGEST_UPLOAD_PURPOSE = 'knowledge-ingest';
 
 /**
- * Discard a file a program uploaded so the owner could be asked to add it to his knowledge, once he said No (or the
+ * Discard a file a program uploaded so the owner could be asked to add it to their knowledge, once they said No (or the
  * add was refused): the upload is the program's own, made a moment before for that one question. Any other artifact
  * is refused (409), so this never deletes what the owner saved. Admin, as the upload is.
  */
@@ -556,8 +567,7 @@ function handleArtifactDiscard(context: DaemonMediaRouteContext, artifactId: str
 const INLINE_SAFE_MEDIA_TYPE = /^(?:image\/(?:png|jpe?g|gif|webp|avif|bmp)|audio\/[a-z0-9.+-]+|video\/[a-z0-9.+-]+|text\/plain|application\/json)$/;
 
 async function handleArtifactContent(context: DaemonMediaRouteContext, artifactId: string, req: Request): Promise<Response> {
-  const admin = context.requireAdmin(req);
-  if (admin) return admin;
+  // A project act (`artifacts.read`): the one reach rule held the caller to a file it may reach before this runs.
   // Only an unknown id is "not found"; a failure reading a known artifact is a server fault.
   if (!context.artifactStore.get(artifactId)) return jsonErrorResponse({ error: `Unknown artifact: ${artifactId}` }, { status: 404 });
   try {

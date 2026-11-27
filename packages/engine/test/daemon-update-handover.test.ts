@@ -15,7 +15,7 @@ describe('daemon update source', () => {
     const root = mkdtempSync(join(tmpdir(), 'update-source-'));
     try {
       const manager = new ConfigManager({ configDir: join(root, 'surface'), daemonTierPath: join(root, 'daemon', 'settings.json'), ownsDaemonTier: true });
-      // The owner at this machine, as the daemon's own settings writes name him.
+      // The owner at this machine, as the daemon's own settings writes name them.
       const owner = localOwnerActor();
       const key = 'update.releasesUrl' as ConfigKey;
       for (const foreign of ['https://github.com/someone-else/goodvibes/releases/latest', 'https://example.com/mgd34msu/goodvibes/releases/latest',

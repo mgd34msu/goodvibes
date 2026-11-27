@@ -86,7 +86,7 @@ test('an update keeps the organizer and every unchanged attendee line as stored,
   expect(server.store.body).toContain('SUMMARY:Quarterly planning');
   expect(participants(server.store.body)).toEqual([ORGANIZER, JANE, BOB]);
 
-  // The attendee list named: Jane stays as she answered, Bob goes, a new guest is added.
+  // The attendee list named: Jane stays with the answer Jane gave, Bob goes, a new guest is added.
   await calendar.updateEvent!(HREF, { attendees: ['jane@example.test', 'new@example.test'] });
   const after = participants(server.store.body);
   expect(after.filter((line) => !/new@example\.test/i.test(line))).toEqual([ORGANIZER, JANE]);

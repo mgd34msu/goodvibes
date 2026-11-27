@@ -111,6 +111,13 @@ export interface HostedSessionRecord {
    */
   readonly originSurface?: string | undefined;
   /**
+   * The session's maker was the owner in person (daemon/method-owner-decision.ts `ownerHimself`: their signed-in session or
+   * their verified program), recorded by the daemon at `sessions.hosted.create` from the credential that made it, never
+   * from anything the caller wrote. In their own session, what they send in person is their own turn, decided under their mode
+   * (hosted-sessions/spine-intake.ts); a session anyone else made stays someone else's input whoever types into it.
+   */
+  readonly madeByOwner?: true | undefined;
+  /**
    * The contracts this session started, oldest first
    * (docs/design/contract-runner.md section 7.1). Their trees live in the
    * contract store; a record persisted before contracts existed loads with none.
@@ -214,4 +221,9 @@ export interface CreateHostedSessionInput {
    * host created for itself.
    */
   readonly originSurface?: string | undefined;
+  /**
+   * Set by the create route only: the credential that asked is the owner in person (`ownerHimself`). The record keeps
+   * it ({@link HostedSessionRecord.madeByOwner}) and the first prompt runs as their own turn.
+   */
+  readonly madeByOwner?: true | undefined;
 }

@@ -1,5 +1,5 @@
-// Proves: A piece of Work whose planner offers again a plan already refused dies or loops instead of waiting for the owner once, so the work he asked for is lost.
-// Red when: The repeated refused plan ends the work failed, crashes it on an illegal move, asks the owner more than once or runs the planner again unasked, or the owner's answer does not run the planner again on his words or does not stop the work on "stop".
+// Proves: A piece of Work whose planner offers again a plan already refused dies or loops instead of waiting for the owner once, so the work the owner asked for is lost.
+// Red when: The repeated refused plan ends the work failed, crashes it on an illegal move, asks the owner more than once or runs the planner again unasked, or the owner's answer does not run the planner again on their words or does not stop the work on "stop".
 import { afterEach, expect, test } from 'bun:test';
 import { rmSync } from 'node:fs';
 import { makeHarness, makeRepo, oneUnitPlan, type Harness } from './runner-support.js';
@@ -32,9 +32,9 @@ function until(h: Harness, contractId: string, ready: (contract: ContractView) =
 }
 const settledOrAsking = (contract: ContractView) => ['awaiting-owner', 'failed', 'cancelled', 'passed'].includes(contract.status);
 
-test('a repeated refused plan is put to the owner once; his words plan it again, and "stop" stops it', async () => {
+test('a repeated refused plan is put to the owner once; the owner\'s words plan it again, and "stop" stops it', async () => {
   const root = makeRepo(); roots.push(root);
-  // The planner, for the model: one plan that rewrites the owner's goal (refused every time), until it is told his words.
+  // The planner, for the model: one plan that rewrites the owner's goal (refused every time), until it is told the owner's words.
   const refused: DraftPlan = { ...oneUnitPlan(1), goal: 'A different goal', criteria: [{ id: 'c1', text: 'Something else exists', quote: 'something else' }] };
   const passing: DraftPlan = { ...oneUnitPlan(1), ...nativeSourcePlan({ goal: GOAL, criteria: [CRITERION] }) } as DraftPlan;
   const requests: DecompositionRunnerRequest[] = [];
@@ -59,7 +59,7 @@ test('a repeated refused plan is put to the owner once; his words plan it again,
 
   const changed = await h.runner.reply(first.contract.id, open[0]!.id, CORRECTION);
   expect(changed.action).toBe('amended');
-  // Running its new plan, or ended, or asking again (a plan written again without his words repeats the refused one).
+  // Running its new plan, or ended, or asking again (a plan written again without the owner's words repeats the refused one).
   const replanned = await until(h, first.contract.id, (contract) => contract.status === 'running' || ['failed', 'cancelled', 'passed'].includes(contract.status)
     || contract.escalations.some((entry) => entry.resolvedAt === undefined));
   expect(replanned.status).toBe('running');

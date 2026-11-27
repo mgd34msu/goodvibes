@@ -103,6 +103,8 @@ export interface SpawnAutomationTaskInput {
    * made it had read, and what a run reads stays read for the next (security/conversation-exposure.ts).
    */
   readonly exposureKey?: string | undefined;
+  /** Who caused the schedule when it was not the owner (jobs.ts `cause`): the run is that caller's turn. */
+  readonly cause?: import('../security/turn-input-party.js').RecordedCause | undefined;
 }
 
 export function sortJobs(jobs: Iterable<AutomationJob>): AutomationJob[] {
@@ -519,7 +521,19 @@ export function normalizeJobRecord(job: AutomationJob, configManager: ConfigMana
     runCount: job.runCount ?? 0,
     successCount: job.successCount ?? 0,
     failureCount: job.failureCount ?? 0,
+    // Who caused it, as kept (jobs.ts `cause`, on disk or from the group's record): absent is the owner's (every record
+    // kept before makers were recorded); anything present that is not a readable cause is someone else's, never the owner's.
+    ...(Object.hasOwn(job, 'cause') ? normalizedCause((job as { readonly cause?: unknown }).cause) : {}),
   };
+}
+
+/** A kept `cause` read back: a readable one as it is, anything else present as someone else's (fails toward reads only). */
+function normalizedCause(value: unknown): { readonly cause?: AutomationJob['cause'] } {
+  if (value === undefined) return {};
+  const record = value !== null && typeof value === 'object' && !Array.isArray(value) ? value as Record<string, unknown> : {};
+  const who = typeof record['who'] === 'string' && record['who'].trim() ? record['who'] : 'a maker that could not be read';
+  const madeFor = typeof record['madeFor'] === 'string' && record['madeFor'] ? record['madeFor'] : undefined;
+  return { cause: { party: 'other', who, ...(madeFor ? { madeFor } : {}) } };
 }
 
 export function normalizeRunRecord(run: AutomationRun, job?: AutomationJob): AutomationRun {

@@ -144,6 +144,11 @@ export interface SurfaceAdapterContext {
     req: Request,
     /** The platform user id the surface's verified payload names as the person who pressed the button. */
     userId?: string | undefined,
+    /**
+     * Where the pressed button's message is, as the verified payload names it (its channel, and its thread when it is
+     * in one): a run button acts only on what that conversation started, as the typed command does.
+     */
+    where?: { readonly channelId?: string | undefined; readonly threadId?: string | undefined } | undefined,
   ) => Promise<string>;
   readonly trySpawnAgent: (...args: Parameters<TrySpawnAgentFn>) => TrySpawnAgentResult | Promise<TrySpawnAgentResult>;
   readonly queueSurfaceReplyFromBinding: (

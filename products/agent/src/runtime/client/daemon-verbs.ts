@@ -52,6 +52,8 @@ import {
 import { resolveConnectedHostAddress } from '@goodvibes/engine/terminal-shell/agent-turn/connected-host-dial';
 import { configuredDaemonIsThisMachine } from '@goodvibes/engine/platform/platform/runtime/client/daemon-target-resolver';
 import { ConnectedHostVerbError, DaemonVerbNotSentError } from '@goodvibes/engine/terminal-shell/agent-turn/connected-host-verb-error';
+import { waitingLinesRead } from '@goodvibes/engine/terminal-shell/capability-cli';
+import { WAITING_LINES_HEADER } from '@goodvibes/engine/daemon-api/control-routes';
 
 export interface AgentDaemonVerbCallerOptions {
   readonly configManager: ConfigManager;
@@ -66,7 +68,7 @@ export interface AgentDaemonVerbCallerOptions {
    * connection and never answers would otherwise hang the caller forever.
    */
   readonly invokeTimeoutMs?: number;
-  /** Test seam: the signal that bounds one verb call. Overrides `invokeTimeoutMs`. */
+  /** The signal that bounds one verb call (a `do` passes one that never ends: no limit of its own). Overrides `invokeTimeoutMs`. */
   readonly invokeSignal?: () => AbortSignal;
   /**
    * Why the attached host may not be used, when it was judged too old for this
@@ -230,6 +232,11 @@ export interface AgentDaemonVerbInvokeOptions {
   readonly explicitUserRequest?: boolean | undefined;
   /** The Agent's own gate decided the model's call this is part of: sent as its mark. */
   readonly decidedByProgramGate?: boolean | undefined;
+  /**
+   * A `do`: told in the same answer when its act starts waiting on a card (daemon-api control-routes.ts
+   * `WAITING_LINES_HEADER`), one line on standard error for each (terminal-shell capability-cli.ts `waitingLinesRead`).
+   */
+  readonly waitingLines?: boolean | undefined;
 }
 
 /** The engine's verb caller, whose `invoke` also takes {@link AgentDaemonVerbInvokeOptions}. */
@@ -305,6 +312,7 @@ export function createAgentDaemonVerbCaller(options: AgentDaemonVerbCallerOption
               // The Agent's own gate decided the model's call this write is part of: its mark (believed only from its
               // registration, or the Agent's credential).
               ...(invokeOptions?.decidedByProgramGate === true ? { [PROGRAM_GATE_DECIDED_HEADER]: 'true' } : {}),
+              ...(invokeOptions?.waitingLines === true ? { [WAITING_LINES_HEADER]: '1' } : {}),
             },
             // The envelope the route requires: `body` must be PRESENT even when
             // empty, or the route refuses with a 400 naming the shape it wanted.
@@ -312,6 +320,7 @@ export function createAgentDaemonVerbCaller(options: AgentDaemonVerbCallerOption
             signal,
           },
         );
+        if (invokeOptions?.waitingLines === true) response = await waitingLinesRead(response);
         payload = await response.json().catch(() => null) as unknown;
         // A stalled body surfaces as a swallowed parse failure; the abort is the
         // truth, and a null payload must not pass as a successful empty answer.

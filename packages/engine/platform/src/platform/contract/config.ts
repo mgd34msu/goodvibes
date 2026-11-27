@@ -22,8 +22,6 @@ export interface ContractConfig {
   readonly autoCommit: boolean;
   readonly commitScope: ContractCommitScope;
   readonly gates: readonly QualityGate[];
-  /** Per gate. */
-  readonly gateTimeoutMs: number;
   /** Which declared pass band the judges use. */
   readonly acceptanceStakes: ContractAcceptanceStakes;
   /** Turn-end checks while a unit agent works. */
@@ -53,14 +51,7 @@ export interface ContractConfig {
   /** Phase capacity per group in worktree mode. */
   readonly maxParallelUnits: number;
   readonly isolation: ContractIsolationSetting;
-  /**
-   * Unit-agent silence watchdog; 0 turns it off. An exec command running within
-   * its own timeout (or streaming without one) keeps its agent alive, so this
-   * catches stalled model calls and stalled reads and searches.
-   */
-  readonly heartbeatTimeoutMs: number;
   readonly transportRetryLimit: number;
-  readonly transportRetryDelayMs: number;
   /** Message-bus time to live for a mid-run nudge. */
   readonly nudgeTtlMs: number;
 }
@@ -75,8 +66,6 @@ export const CONTRACT_CONFIG_DEFAULTS: ContractConfig = {
     { name: 'lint', command: 'npx eslint . --max-warnings 0', enabled: false },
     { name: 'build', command: 'npm run build', enabled: false },
   ],
-  // A gate that never exits (a runner left in watch mode) is stopped and reported, not waited on.
-  gateTimeoutMs: 900_000,
   acceptanceStakes: 'high',
   midRunChecks: true,
   evidenceNudgeLimit: 0,
@@ -92,10 +81,8 @@ export const CONTRACT_CONFIG_DEFAULTS: ContractConfig = {
   maxActiveContracts: 6,
   maxParallelUnits: 64,
   isolation: 'auto',
-  heartbeatTimeoutMs: 600_000,
-  // Three fresh agents, waiting 5 s, 10 s and 20 s: a provider outage of half a minute does not end the contract.
+  // Three fresh agents, each at once (or when the provider's Retry-After says): Work keeps no clock of its own.
   transportRetryLimit: 3,
-  transportRetryDelayMs: 5_000,
   nudgeTtlMs: 300_000,
 };
 
@@ -152,7 +139,6 @@ export function readContractConfig(configManager: ContractConfigReader): Contrac
     autoCommit: pick('autoCommit', boolean),
     commitScope: pick('commitScope', oneOf(COMMIT_SCOPES)),
     gates: Array.isArray(rawGates) ? rawGates.filter(isQualityGate) : CONTRACT_CONFIG_DEFAULTS.gates,
-    gateTimeoutMs: numberSetting('gateTimeoutMs'),
     acceptanceStakes: pick('acceptanceStakes', oneOf(ACCEPTANCE_STAKES)),
     midRunChecks: pick('midRunChecks', boolean),
     evidenceNudgeLimit: numberSetting('evidenceNudgeLimit'),
@@ -166,9 +152,7 @@ export function readContractConfig(configManager: ContractConfigReader): Contrac
     maxActiveContracts: numberSetting('maxActiveContracts'),
     maxParallelUnits: numberSetting('maxParallelUnits'),
     isolation: pick('isolation', oneOf(ISOLATION_SETTINGS)),
-    heartbeatTimeoutMs: numberSetting('heartbeatTimeoutMs'),
     transportRetryLimit: numberSetting('transportRetryLimit'),
-    transportRetryDelayMs: numberSetting('transportRetryDelayMs'),
     nudgeTtlMs: numberSetting('nudgeTtlMs'),
   };
 }
@@ -199,10 +183,6 @@ export function contractGateProblems(configManager: ContractConfigReader): strin
 /** The gates a check runs. */
 export function getEnabledContractGates(configManager: ContractConfigReader): readonly QualityGate[] {
   return getContractGates(configManager).filter((gate) => gate.enabled);
-}
-
-export function getContractGateTimeoutMs(configManager: ContractConfigReader): number {
-  return readContractConfig(configManager).gateTimeoutMs;
 }
 
 export function getContractAcceptanceStakes(configManager: ContractConfigReader): ContractAcceptanceStakes {
@@ -253,16 +233,8 @@ export function getContractIsolation(configManager: ContractConfigReader): Contr
   return readContractConfig(configManager).isolation;
 }
 
-export function getContractHeartbeatTimeoutMs(configManager: ContractConfigReader): number {
-  return readContractConfig(configManager).heartbeatTimeoutMs;
-}
-
 export function getContractTransportRetryLimit(configManager: ContractConfigReader): number {
   return readContractConfig(configManager).transportRetryLimit;
-}
-
-export function getContractTransportRetryDelayMs(configManager: ContractConfigReader): number {
-  return readContractConfig(configManager).transportRetryDelayMs;
 }
 
 export function getContractNudgeTtlMs(configManager: ContractConfigReader): number {

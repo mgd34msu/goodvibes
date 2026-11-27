@@ -18,6 +18,7 @@
  * counts those changes.
  */
 import { randomUUID } from 'node:crypto';
+import { AsyncResource } from 'node:async_hooks';
 import { captureMcpInputRequired, readProtocolRequest } from '../permissions/protocol-request.js';
 import { snapshotJudgmentInput } from '../gate/judgment-input.js';
 import type { ExternalOperationSource, ExternalRequestScope } from '../permissions/external-request.js';
@@ -91,6 +92,11 @@ interface InflightCall {
   readonly questions: McpUnansweredQuestion[];
   /** Pauses the call's deadline while a server question waits; returns the resume. */
   readonly onServerQuestion?: (() => () => void) | undefined;
+  /**
+   * The scope the call was made in (its turn, whose input it acts on, its project). A question the server sends arrives
+   * on the connection's read loop, outside that scope; it is decided inside it, as part of the call that caused it.
+   */
+  readonly scope: AsyncResource;
 }
 
 const DEFAULT_TIMEOUT_MS = 0;
@@ -204,8 +210,10 @@ export class McpClient {
       const resumeDeadline = call?.onServerQuestion?.();
       let outcome: McpElicitationOutcome;
       try {
-        outcome = await awaitPermission(() => resolver({ serverName, id, params: owned,
-          context: { scope: { connectionId, destination, signal, assertCurrent }, ...(owner ? { operation: owner } : {}) } }), signal);
+        const resolve = () => resolver({ serverName, id, params: owned,
+          context: { scope: { connectionId, destination, signal, assertCurrent }, ...(owner ? { operation: owner } : {}) } });
+        // Decided in the scope of the call it belongs to (its turn and whose input it acts on), not the read loop's.
+        outcome = await awaitPermission(() => call ? call.scope.runInAsyncScope(resolve) : resolve(), signal);
       } finally { resumeDeadline?.(); }
       held = outcome;
       assertCurrent();
@@ -485,7 +493,7 @@ export class McpClient {
     const boundOperation: ExternalOperationSource | undefined = operation
       ? { ...operation, operationId: randomUUID(), signal, assertCurrent: () => { signal.throwIfAborted(); operation.assertCurrent(); } }
       : undefined;
-    const call: InflightCall = { operation: boundOperation, questions: [], onServerQuestion: options.onServerQuestion };
+    const call: InflightCall = { operation: boundOperation, questions: [], onServerQuestion: options.onServerQuestion, scope: new AsyncResource('McpToolCall') };
     let responses: Record<string, unknown> | null = null;
     this.#inflight.add(call);
     try {

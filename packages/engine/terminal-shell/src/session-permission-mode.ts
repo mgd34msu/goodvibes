@@ -34,7 +34,7 @@ export interface ModeWordsSource {
 /**
  * The words now, kept current. When they change (a mode chosen anywhere, a
  * decision model failing or answering again) the segment flashes, so a change
- * the owner did not make is seen as surely as one he did.
+ * the owner did not make is seen as surely as one they did.
  */
 export function createModeWordsSource(configManager: ModeSettings, onChange: () => void, flash?: ModeFlash | undefined): ModeWordsSource {
   let words = describeModeInForceWords(configManager);

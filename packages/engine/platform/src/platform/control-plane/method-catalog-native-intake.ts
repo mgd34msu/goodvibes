@@ -17,7 +17,9 @@ const descriptions = {
 } as const;
 export const builtinGatewayNativeConversationIntakeMethodDescriptors: readonly GatewayMethodDescriptor[] = (['capture', 'get', 'admit', 'resume', 'cancel'] as const).map(operation => methodDescriptor({
   id: `workLedger.intake.${operation}`, title: `${operation[0]!.toUpperCase()}${operation.slice(1)} Native Conversation Intake`, category: 'work-ledger',
-  description: descriptions[operation], effects: ['work-ledger.inspect', 'work-ledger.administer'],
+  // A project act, as Work is (effect-authority.ts `work.read`, `work.write`): served per project (project-routing.ts), held
+  // below an admin to a project given to the caller; its native identity is its own pairing, so it reaches only its own input.
+  description: descriptions[operation], effects: ['work.read', 'work.write'],
   ...(operation === 'capture' || operation === 'admit' || operation === 'resume'
     ? { replay: { in: 'body' as const, name: 'inputId', behavior: 'One input id is captured and admitted once: an exact repeat returns the original source identity or joins the operation already running instead of acting again.' } }
     : { repeat: 'safe' as const }),

@@ -13,7 +13,7 @@
  * so a reused process number is never it), when the connection that proved it closes, and at every daemon restart (it
  * is kept in memory only). A registration presented after its process ended, or another connection's challenge
  * answered, proves nothing. A connected host on another machine never issues one: a Unix socket does not cross
- * machines, and there the program's presses are the owner's only through his own sign-in on that host.
+ * machines, and there the program's presses are the owner's only through the owner's own sign-in on that host.
  *
  * A registration names a program only; it grants nothing a credential does not already hold: a remembered answer and a
  * conversation belong to the program that made them, and a call a registered program of the owner's own credential says
@@ -38,9 +38,9 @@ export function isRegisteredProgram(value: unknown): value is RegisteredProgram 
 /**
  * The kind a command line registers as: the three `do`/`find` command lines (`goodvibes`, `goodvibes-agent`,
  * `goodvibes-daemon`), judged as the binary they run from but issued as their own kind, never as that program. It is
- * never the owner himself and never a person's press, whatever its environment, terminal or marks say: it runs no-risk
+ * never the owner in person and never a person's press, whatever its environment, terminal or marks say: it runs no-risk
  * reads; every risky capability it names is held for the owner (capabilities/command-line-hold.ts); it answers no
- * question addressed to him and approves nothing (reading a held call's outcome by its id is a read). Known to the
+ * question addressed to the owner and approves nothing (reading a held call's outcome by its id is a read). Known to the
  * daemon by this registration, not by an environment variable a command can unset.
  */
 export const COMMAND_LINE_REGISTRATION = 'cli';

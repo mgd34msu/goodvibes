@@ -213,7 +213,7 @@ Zero is the safest number here. The capability can be fully configured and still
 buys nothing without the owner's yes until an amount is set affirmatively: while
 the daily item budget or the per-purchase ceiling is 0, every purchase asks the
 owner first. The first time a purchase meets one of them at 0, the owner inbox
-offers, once per limit, to set it (§8.2); a purchase he does not approve is
+offers, once per limit, to set it (§8.2); a purchase the owner does not approve is
 refused naming the limit, the setting and the amount.
 
 **Note on the billing address.** It sits in config rather than in the secret

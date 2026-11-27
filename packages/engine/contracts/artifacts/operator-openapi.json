@@ -3,7 +3,7 @@
   "info": {
     "title": "GoodVibes Operator API",
     "version": "3.5.0",
-    "description": "Generated from the operator contract (packages/contracts/artifacts/operator-contract.json). 679 cataloged methods: 544 with dedicated REST bindings, 135 reachable only through the generic invoke endpoint. Regenerate with `bun run openapi:generate`; drift fails `contracts:check`."
+    "description": "Generated from the operator contract (packages/contracts/artifacts/operator-contract.json). 681 cataloged methods: 546 with dedicated REST bindings, 135 reachable only through the generic invoke endpoint. Regenerate with `bun run openapi:generate`; drift fails `contracts:check`."
   },
   "servers": [
     {
@@ -6419,7 +6419,7 @@
             "$ref": "#/components/responses/Error"
           }
         },
-        "x-access": "admin",
+        "x-access": "authenticated",
         "x-transport": [
           "http"
         ],
@@ -6563,7 +6563,7 @@
             "$ref": "#/components/responses/Error"
           }
         },
-        "x-access": "admin",
+        "x-access": "authenticated",
         "x-transport": [
           "http",
           "ws"
@@ -6699,7 +6699,7 @@
       "get": {
         "operationId": "artifacts.list",
         "summary": "List Artifacts",
-        "description": "Return stored artifact metadata for files and attachments.",
+        "description": "Return stored artifact metadata for files and attachments. A caller below an admin is answered the files it stored itself.",
         "tags": [
           "artifacts"
         ],
@@ -6813,7 +6813,7 @@
             "$ref": "#/components/responses/Error"
           }
         },
-        "x-access": "admin",
+        "x-access": "authenticated",
         "x-transport": [
           "http",
           "ws"
@@ -6940,7 +6940,7 @@
             "$ref": "#/components/responses/Error"
           }
         },
-        "x-access": "admin",
+        "x-access": "authenticated",
         "x-transport": [
           "http",
           "ws"
@@ -7179,7 +7179,7 @@
       "post": {
         "operationId": "local_auth.users.create",
         "summary": "Create Local Auth User",
-        "description": "Create a local auth user. roles: omitted creates an admin. scopes: the operator scopes the user holds (for example read:sessions and write:sessions for someone who only chats: she reads her own chats under them; read:transcripts adds anyone else's); omitted, the user holds its role's default set. A narrowed user is not an admin, whatever its roles.",
+        "description": "Create a local auth user. roles: omitted creates an admin. scopes: the operator scopes the user holds (for example read:sessions and write:sessions for someone who only chats: they read their own chats under them; read:transcripts adds anyone else's); omitted, the user holds its role's default set. A narrowed user is not an admin, whatever its roles.",
         "tags": [
           "auth"
         ],
@@ -9862,7 +9862,7 @@
             "$ref": "#/components/responses/Error"
           }
         },
-        "x-access": "admin",
+        "x-access": "authenticated",
         "x-transport": [
           "http",
           "ws"
@@ -12123,7 +12123,7 @@
             "$ref": "#/components/responses/Error"
           }
         },
-        "x-access": "admin",
+        "x-access": "authenticated",
         "x-transport": [
           "http",
           "ws"
@@ -12976,7 +12976,7 @@
             "$ref": "#/components/responses/Error"
           }
         },
-        "x-access": "admin",
+        "x-access": "authenticated",
         "x-transport": [
           "http",
           "ws"
@@ -13526,7 +13526,7 @@
             "$ref": "#/components/responses/Error"
           }
         },
-        "x-access": "admin",
+        "x-access": "authenticated",
         "x-transport": [
           "http",
           "ws"
@@ -13606,7 +13606,7 @@
             "$ref": "#/components/responses/Error"
           }
         },
-        "x-access": "admin",
+        "x-access": "authenticated",
         "x-transport": [
           "http",
           "ws"
@@ -13693,7 +13693,7 @@
             "$ref": "#/components/responses/Error"
           }
         },
-        "x-access": "admin",
+        "x-access": "authenticated",
         "x-transport": [
           "http",
           "ws"
@@ -14714,7 +14714,7 @@
             "$ref": "#/components/responses/Error"
           }
         },
-        "x-access": "admin",
+        "x-access": "authenticated",
         "x-transport": [
           "http",
           "ws"
@@ -18799,7 +18799,7 @@
             "$ref": "#/components/responses/Error"
           }
         },
-        "x-access": "admin",
+        "x-access": "authenticated",
         "x-transport": [
           "http",
           "ws"
@@ -19659,7 +19659,7 @@
             "$ref": "#/components/responses/Error"
           }
         },
-        "x-access": "admin",
+        "x-access": "authenticated",
         "x-transport": [
           "http",
           "ws"
@@ -21968,7 +21968,7 @@
             "$ref": "#/components/responses/Error"
           }
         },
-        "x-access": "admin",
+        "x-access": "authenticated",
         "x-transport": [
           "http",
           "ws"
@@ -22045,7 +22045,7 @@
             "$ref": "#/components/responses/Error"
           }
         },
-        "x-access": "admin",
+        "x-access": "authenticated",
         "x-transport": [
           "http",
           "ws"
@@ -22125,7 +22125,7 @@
             "$ref": "#/components/responses/Error"
           }
         },
-        "x-access": "admin",
+        "x-access": "authenticated",
         "x-transport": [
           "http",
           "ws"
@@ -22212,7 +22212,7 @@
             "$ref": "#/components/responses/Error"
           }
         },
-        "x-access": "admin",
+        "x-access": "authenticated",
         "x-transport": [
           "http",
           "ws"
@@ -29119,9 +29119,6 @@
                         "open": {
                           "type": "boolean"
                         },
-                        "ownMessagesAsOwner": {
-                          "type": "boolean"
-                        },
                         "project": {
                           "type": "string"
                         },
@@ -32037,9 +32034,6 @@
                           "open": {
                             "type": "boolean"
                           },
-                          "ownMessagesAsOwner": {
-                            "type": "boolean"
-                          },
                           "project": {
                             "type": "string"
                           },
@@ -32280,9 +32274,6 @@
                     "open": {
                       "type": "boolean"
                     },
-                    "ownMessagesAsOwner": {
-                      "type": "boolean"
-                    },
                     "project": {
                       "type": "string"
                     },
@@ -32399,9 +32390,6 @@
                     "type": "string"
                   },
                   "allowTextCommandsWithoutMention": {
-                    "type": "boolean"
-                  },
-                  "ownMessagesAsOwner": {
                     "type": "boolean"
                   },
                   "project": {
@@ -32563,7 +32551,7 @@
       "delete": {
         "operationId": "channels.profiles.delete",
         "summary": "Unbind Channel Profile",
-        "description": "Remove a channel profile binding. Returns { deleted: false } when no binding for that key existed, an honest boolean, never a phantom removal. Removing a binding whose permission mode is tighter than the one its channel's sessions would fall back to (the surface-wide binding's, else the host's) loosens it, which is the owner's own act: from a caller who is not the owner it answers 202 OWNER_APPROVAL_PENDING and is removed when he approves it; with no approval path it is 403 OWNER_ONLY.",
+        "description": "Remove a channel profile binding. Returns { deleted: false } when no binding for that key existed, an honest boolean, never a phantom removal. Removing a binding whose permission mode is tighter than the one its channel's sessions would fall back to (the surface-wide binding's, else the host's) loosens it, which is the owner's own act: from a caller who is not the owner it answers 202 OWNER_APPROVAL_PENDING and is removed when the owner approves it; with no approval path it is 403 OWNER_ONLY.",
         "tags": [
           "channels"
         ],
@@ -33072,7 +33060,7 @@
       "post": {
         "operationId": "channels.profiles.set",
         "summary": "Bind Channel Profile",
-        "description": "Bind (upsert) the model/provider and permission-mode defaults for a channel. Keyed on (surfaceKind, channelId?): field by field, a channelId-scoped binding wins over the surface-wide default; setting the same key again replaces it. A session the daemon originates from the channel uses these values whatever a channels.routing assignment names. A set that loosens the permission mode the channel's sessions run under (against the mode they get now, the host's when no binding sets one; leaving permissionMode out of a set removes the key's own mode) is the owner's own act, as sessions.permissionMode.set is: from a caller who is not the owner it is put to the owner and answers 202 OWNER_APPROVAL_PENDING with approvalId, followable, the current binding, mode, requestedMode, state and next, and applies when he approves it; with no approval path it is 403 OWNER_ONLY and nothing is changed.",
+        "description": "Bind (upsert) the model/provider and permission-mode defaults for a channel. Keyed on (surfaceKind, channelId?): field by field, a channelId-scoped binding wins over the surface-wide default; setting the same key again replaces it. A session the daemon originates from the channel uses these values whatever a channels.routing assignment names. A set that loosens the permission mode the channel's sessions run under (against the mode they get now, the host's when no binding sets one; leaving permissionMode out of a set removes the key's own mode) is the owner's own act, as sessions.permissionMode.set is: from a caller who is not the owner it is put to the owner and answers 202 OWNER_APPROVAL_PENDING with approvalId, followable, the current binding, mode, requestedMode, state and next, and applies when the owner approves it; with no approval path it is 403 OWNER_ONLY and nothing is changed.",
         "tags": [
           "channels"
         ],
@@ -41350,7 +41338,7 @@
       "post": {
         "operationId": "config.set",
         "summary": "Set Config Value",
-        "description": "Write one config value on the daemon: `{ key, value }`, where value is any JSON the key accepts. The response reports the value the host now holds and which file and tier it is in; a value that did not take is refused with what the host holds instead. A key that holds a credential takes only a goodvibes://secrets/ reference (store the secret with credentials.set); runtime.workingDir is refused (409 WORKSPACE_CHANGE_UNAVAILABLE): the daemon serves every project at once and no caller moves it, so a call names its project itself. The same route also serves the settings clients' lane, which answers with its own object: `{ settingsPrecondition }` takes action `capture` (read the facts a change would act on) or `write` (make it, optionally only while `ifServing` and `ifIncarnation` still hold; a repeated `requestId` returns the first answer). A change that loosens a security, permission, judgment or payment setting is the owner's own act: asked with a token minted for automation (one minted through the API by another token, such as pairing.tokens.create or pairing.tokens.migrate, or with narrowed scopes or for a named client; pairing.tokens.list shows it as origin automation) it is not made, but put to the owner as an approval only his own credential answers, and the answer is 202 with code OWNER_APPROVAL_PENDING and the `approvalId`; the change is applied when he approves it, and lapses after a day unanswered or if the daemon restarts first. The owner himself (his sign-in, his own terminal program with a verified registration) makes it at once; any paired device, his own included, is put to him.\n\nReplay key: request header `Idempotency-Key`. Send a key (1 to 255 characters of letters, digits, \".\", \"_\", \":\" or \"-\") chosen once per logical request, and the same key on every retry: a repeat of the same request (for a multipart or raw upload: the same fields and file content, whatever the encoding) under the same key by the same credential, within a day and across a daemon restart, returns the first answer (with the Idempotent-Replayed: true header) instead of acting again. The same key with a different request is 409 IDEMPOTENCY_KEY_REUSED; a repeat while the first is still running is 409 IDEMPOTENCY_KEY_IN_FLIGHT (send it again with the same key after the Retry-After header's seconds, also in the body as retryAfterMs; the SDK does this within its retries); a repeat after the daemon stopped in the middle of the first is 409 IDEMPOTENCY_OUTCOME_UNKNOWN, and a repeat of a first request that failed partway is 500 IDEMPOTENCY_OUTCOME_UNKNOWN (either way: check the state, do not send again). A refusal (4xx) is not remembered, so the same key may be sent again. Over the method-invoke envelope or a WebSocket call frame the key may be sent as `idempotencyKey` beside `body`.",
+        "description": "Write one config value on the daemon: `{ key, value }`, where value is any JSON the key accepts. The response reports the value the host now holds and which file and tier it is in; a value that did not take is refused with what the host holds instead. A key that holds a credential takes only a goodvibes://secrets/ reference (store the secret with credentials.set); runtime.workingDir is refused (409 WORKSPACE_CHANGE_UNAVAILABLE): the daemon serves every project at once and no caller moves it, so a call names its project itself. The same route also serves the settings clients' lane, which answers with its own object: `{ settingsPrecondition }` takes action `capture` (read the facts a change would act on) or `write` (make it, optionally only while `ifServing` and `ifIncarnation` still hold; a repeated `requestId` returns the first answer). A change that loosens a security, permission, judgment or payment setting is the owner's own act: asked with a token minted for automation (one minted through the API by another token, such as pairing.tokens.create or pairing.tokens.migrate, or with narrowed scopes or for a named client; pairing.tokens.list shows it as origin automation) it is not made, but put to the owner as an approval only the owner's own credential answers, and the answer is 202 with code OWNER_APPROVAL_PENDING and the `approvalId`; the change is applied when the owner approves it, and lapses after a day unanswered or if the daemon restarts first. The owner in person (their sign-in, their own terminal program with a verified registration) makes it at once; any paired device, the owner's own included, is put to the owner.\n\nReplay key: request header `Idempotency-Key`. Send a key (1 to 255 characters of letters, digits, \".\", \"_\", \":\" or \"-\") chosen once per logical request, and the same key on every retry: a repeat of the same request (for a multipart or raw upload: the same fields and file content, whatever the encoding) under the same key by the same credential, within a day and across a daemon restart, returns the first answer (with the Idempotent-Replayed: true header) instead of acting again. The same key with a different request is 409 IDEMPOTENCY_KEY_REUSED; a repeat while the first is still running is 409 IDEMPOTENCY_KEY_IN_FLIGHT (send it again with the same key after the Retry-After header's seconds, also in the body as retryAfterMs; the SDK does this within its retries); a repeat after the daemon stopped in the middle of the first is 409 IDEMPOTENCY_OUTCOME_UNKNOWN, and a repeat of a first request that failed partway is 500 IDEMPOTENCY_OUTCOME_UNKNOWN (either way: check the state, do not send again). A refusal (4xx) is not remembered, so the same key may be sent again. Over the method-invoke envelope or a WebSocket call frame the key may be sent as `idempotencyKey` beside `body`.",
         "tags": [
           "config"
         ],
@@ -41647,7 +41635,7 @@
       "post": {
         "operationId": "config.reset",
         "summary": "Reset Config Value",
-        "description": "Remove the explicit value of one config key through the daemon API so it reads as its default again, in every settings file that holds it. The response reports the value the host now holds and which file and tier it came from. Refuses a key that holds a credential (use credentials.delete), a key the host does not know, a key locked by managed policy, and runtime.workingDir (no caller moves the daemon). A change that loosens a security, permission, judgment or payment setting is the owner's own act: asked with a token minted for automation (one minted through the API by another token, such as pairing.tokens.create or pairing.tokens.migrate, or with narrowed scopes or for a named client; pairing.tokens.list shows it as origin automation) it is not made, but put to the owner as an approval only his own credential answers, and the answer is 202 with code OWNER_APPROVAL_PENDING and the `approvalId`; the change is applied when he approves it, and lapses after a day unanswered or if the daemon restarts first. The owner himself (his sign-in, his own terminal program with a verified registration) makes it at once; any paired device, his own included, is put to him.\n\nReplay key: request header `Idempotency-Key`. Send a key (1 to 255 characters of letters, digits, \".\", \"_\", \":\" or \"-\") chosen once per logical request, and the same key on every retry: a repeat of the same request (for a multipart or raw upload: the same fields and file content, whatever the encoding) under the same key by the same credential, within a day and across a daemon restart, returns the first answer (with the Idempotent-Replayed: true header) instead of acting again. The same key with a different request is 409 IDEMPOTENCY_KEY_REUSED; a repeat while the first is still running is 409 IDEMPOTENCY_KEY_IN_FLIGHT (send it again with the same key after the Retry-After header's seconds, also in the body as retryAfterMs; the SDK does this within its retries); a repeat after the daemon stopped in the middle of the first is 409 IDEMPOTENCY_OUTCOME_UNKNOWN, and a repeat of a first request that failed partway is 500 IDEMPOTENCY_OUTCOME_UNKNOWN (either way: check the state, do not send again). A refusal (4xx) is not remembered, so the same key may be sent again. Over the method-invoke envelope or a WebSocket call frame the key may be sent as `idempotencyKey` beside `body`.",
+        "description": "Remove the explicit value of one config key through the daemon API so it reads as its default again, in every settings file that holds it. The response reports the value the host now holds and which file and tier it came from. Refuses a key that holds a credential (use credentials.delete), a key the host does not know, a key locked by managed policy, and runtime.workingDir (no caller moves the daemon). A change that loosens a security, permission, judgment or payment setting is the owner's own act: asked with a token minted for automation (one minted through the API by another token, such as pairing.tokens.create or pairing.tokens.migrate, or with narrowed scopes or for a named client; pairing.tokens.list shows it as origin automation) it is not made, but put to the owner as an approval only the owner's own credential answers, and the answer is 202 with code OWNER_APPROVAL_PENDING and the `approvalId`; the change is applied when the owner approves it, and lapses after a day unanswered or if the daemon restarts first. The owner in person (their sign-in, their own terminal program with a verified registration) makes it at once; any paired device, the owner's own included, is put to the owner.\n\nReplay key: request header `Idempotency-Key`. Send a key (1 to 255 characters of letters, digits, \".\", \"_\", \":\" or \"-\") chosen once per logical request, and the same key on every retry: a repeat of the same request (for a multipart or raw upload: the same fields and file content, whatever the encoding) under the same key by the same credential, within a day and across a daemon restart, returns the first answer (with the Idempotent-Replayed: true header) instead of acting again. The same key with a different request is 409 IDEMPOTENCY_KEY_REUSED; a repeat while the first is still running is 409 IDEMPOTENCY_KEY_IN_FLIGHT (send it again with the same key after the Retry-After header's seconds, also in the body as retryAfterMs; the SDK does this within its retries); a repeat after the daemon stopped in the middle of the first is 409 IDEMPOTENCY_OUTCOME_UNKNOWN, and a repeat of a first request that failed partway is 500 IDEMPOTENCY_OUTCOME_UNKNOWN (either way: check the state, do not send again). A refusal (4xx) is not remembered, so the same key may be sent again. Over the method-invoke envelope or a WebSocket call frame the key may be sent as `idempotencyKey` beside `body`.",
         "tags": [
           "config"
         ],
@@ -41815,7 +41803,7 @@
       "post": {
         "operationId": "config.setMany",
         "summary": "Set Several Config Values",
-        "description": "Write several config values on the daemon as one update: `{ entries: [{ key, value }] }`. Every entry is admitted before anything is written, each settings file is written once and the configuration revision moves once, so a pair of settings that only make sense together never lands half-applied. A refusal names the setting, the reason and the next step, and says what was saved (nothing, unless a later settings file could not be written after an earlier one was). The answer lists, per key, the value the host now holds and which file and tier it is in; when a key does not hold the value asked for (a higher tier overrides it, or it was coerced), the answer is 409 CONFIG_SET_NOT_APPLIED naming those keys in `notApplied`, with the revision written and every entry's held value. A key that holds a credential takes only a goodvibes://secrets/ reference; runtime.workingDir is refused (409 WORKSPACE_CHANGE_UNAVAILABLE), as with config.set. A change that loosens a security, permission, judgment or payment setting is the owner's own act: asked with a token minted for automation (one minted through the API by another token, such as pairing.tokens.create or pairing.tokens.migrate, or with narrowed scopes or for a named client; pairing.tokens.list shows it as origin automation) it is not made, but put to the owner as an approval only his own credential answers, and the answer is 202 with code OWNER_APPROVAL_PENDING and the `approvalId`; the change is applied when he approves it, and lapses after a day unanswered or if the daemon restarts first. The owner himself (his sign-in, his own terminal program with a verified registration) makes it at once; any paired device, his own included, is put to him.\n\nReplay key: request header `Idempotency-Key`. Send a key (1 to 255 characters of letters, digits, \".\", \"_\", \":\" or \"-\") chosen once per logical request, and the same key on every retry: a repeat of the same request (for a multipart or raw upload: the same fields and file content, whatever the encoding) under the same key by the same credential, within a day and across a daemon restart, returns the first answer (with the Idempotent-Replayed: true header) instead of acting again. The same key with a different request is 409 IDEMPOTENCY_KEY_REUSED; a repeat while the first is still running is 409 IDEMPOTENCY_KEY_IN_FLIGHT (send it again with the same key after the Retry-After header's seconds, also in the body as retryAfterMs; the SDK does this within its retries); a repeat after the daemon stopped in the middle of the first is 409 IDEMPOTENCY_OUTCOME_UNKNOWN, and a repeat of a first request that failed partway is 500 IDEMPOTENCY_OUTCOME_UNKNOWN (either way: check the state, do not send again). A refusal (4xx) is not remembered, so the same key may be sent again. Over the method-invoke envelope or a WebSocket call frame the key may be sent as `idempotencyKey` beside `body`.",
+        "description": "Write several config values on the daemon as one update: `{ entries: [{ key, value }] }`. Every entry is admitted before anything is written, each settings file is written once and the configuration revision moves once, so a pair of settings that only make sense together never lands half-applied. A refusal names the setting, the reason and the next step, and says what was saved (nothing, unless a later settings file could not be written after an earlier one was). The answer lists, per key, the value the host now holds and which file and tier it is in; when a key does not hold the value asked for (a higher tier overrides it, or it was coerced), the answer is 409 CONFIG_SET_NOT_APPLIED naming those keys in `notApplied`, with the revision written and every entry's held value. A key that holds a credential takes only a goodvibes://secrets/ reference; runtime.workingDir is refused (409 WORKSPACE_CHANGE_UNAVAILABLE), as with config.set. A change that loosens a security, permission, judgment or payment setting is the owner's own act: asked with a token minted for automation (one minted through the API by another token, such as pairing.tokens.create or pairing.tokens.migrate, or with narrowed scopes or for a named client; pairing.tokens.list shows it as origin automation) it is not made, but put to the owner as an approval only the owner's own credential answers, and the answer is 202 with code OWNER_APPROVAL_PENDING and the `approvalId`; the change is applied when the owner approves it, and lapses after a day unanswered or if the daemon restarts first. The owner in person (their sign-in, their own terminal program with a verified registration) makes it at once; any paired device, the owner's own included, is put to the owner.\n\nReplay key: request header `Idempotency-Key`. Send a key (1 to 255 characters of letters, digits, \".\", \"_\", \":\" or \"-\") chosen once per logical request, and the same key on every retry: a repeat of the same request (for a multipart or raw upload: the same fields and file content, whatever the encoding) under the same key by the same credential, within a day and across a daemon restart, returns the first answer (with the Idempotent-Replayed: true header) instead of acting again. The same key with a different request is 409 IDEMPOTENCY_KEY_REUSED; a repeat while the first is still running is 409 IDEMPOTENCY_KEY_IN_FLIGHT (send it again with the same key after the Retry-After header's seconds, also in the body as retryAfterMs; the SDK does this within its retries); a repeat after the daemon stopped in the middle of the first is 409 IDEMPOTENCY_OUTCOME_UNKNOWN, and a repeat of a first request that failed partway is 500 IDEMPOTENCY_OUTCOME_UNKNOWN (either way: check the state, do not send again). A refusal (4xx) is not remembered, so the same key may be sent again. Over the method-invoke envelope or a WebSocket call frame the key may be sent as `idempotencyKey` beside `body`.",
         "tags": [
           "config"
         ],
@@ -45900,6 +45888,25 @@
                                 "items": {
                                   "type": "string"
                                 }
+                              },
+                              "conflict": {
+                                "type": "object",
+                                "properties": {
+                                  "branch": {
+                                    "type": "string"
+                                  },
+                                  "files": {
+                                    "type": "array",
+                                    "items": {
+                                      "type": "string"
+                                    }
+                                  }
+                                },
+                                "required": [
+                                  "branch",
+                                  "files"
+                                ],
+                                "additionalProperties": false
                               }
                             },
                             "required": [
@@ -47969,6 +47976,25 @@
                           "failureReason": {
                             "type": "string"
                           },
+                          "failureKind": {
+                            "type": "string",
+                            "enum": [
+                              "transport",
+                              "max_turns",
+                              "planning",
+                              "budget",
+                              "owner-rejected",
+                              "judgment-unavailable",
+                              "zombie",
+                              "other"
+                            ]
+                          },
+                          "dropped": {
+                            "type": "string"
+                          },
+                          "heardAt": {
+                            "type": "number"
+                          },
                           "attemptOf": {
                             "type": "string"
                           },
@@ -49279,6 +49305,25 @@
                                 },
                                 "failureReason": {
                                   "type": "string"
+                                },
+                                "failureKind": {
+                                  "type": "string",
+                                  "enum": [
+                                    "transport",
+                                    "max_turns",
+                                    "planning",
+                                    "budget",
+                                    "owner-rejected",
+                                    "judgment-unavailable",
+                                    "zombie",
+                                    "other"
+                                  ]
+                                },
+                                "dropped": {
+                                  "type": "string"
+                                },
+                                "heardAt": {
+                                  "type": "number"
                                 },
                                 "attemptOf": {
                                   "type": "string"
@@ -54172,6 +54217,25 @@
                                       "items": {
                                         "type": "string"
                                       }
+                                    },
+                                    "conflict": {
+                                      "type": "object",
+                                      "properties": {
+                                        "branch": {
+                                          "type": "string"
+                                        },
+                                        "files": {
+                                          "type": "array",
+                                          "items": {
+                                            "type": "string"
+                                          }
+                                        }
+                                      },
+                                      "required": [
+                                        "branch",
+                                        "files"
+                                      ],
+                                      "additionalProperties": false
                                     }
                                   },
                                   "required": [
@@ -56241,6 +56305,25 @@
                                 "failureReason": {
                                   "type": "string"
                                 },
+                                "failureKind": {
+                                  "type": "string",
+                                  "enum": [
+                                    "transport",
+                                    "max_turns",
+                                    "planning",
+                                    "budget",
+                                    "owner-rejected",
+                                    "judgment-unavailable",
+                                    "zombie",
+                                    "other"
+                                  ]
+                                },
+                                "dropped": {
+                                  "type": "string"
+                                },
+                                "heardAt": {
+                                  "type": "number"
+                                },
                                 "attemptOf": {
                                   "type": "string"
                                 },
@@ -57551,6 +57634,25 @@
                                       },
                                       "failureReason": {
                                         "type": "string"
+                                      },
+                                      "failureKind": {
+                                        "type": "string",
+                                        "enum": [
+                                          "transport",
+                                          "max_turns",
+                                          "planning",
+                                          "budget",
+                                          "owner-rejected",
+                                          "judgment-unavailable",
+                                          "zombie",
+                                          "other"
+                                        ]
+                                      },
+                                      "dropped": {
+                                        "type": "string"
+                                      },
+                                      "heardAt": {
+                                        "type": "number"
                                       },
                                       "attemptOf": {
                                         "type": "string"
@@ -62440,6 +62542,25 @@
                                     "items": {
                                       "type": "string"
                                     }
+                                  },
+                                  "conflict": {
+                                    "type": "object",
+                                    "properties": {
+                                      "branch": {
+                                        "type": "string"
+                                      },
+                                      "files": {
+                                        "type": "array",
+                                        "items": {
+                                          "type": "string"
+                                        }
+                                      }
+                                    },
+                                    "required": [
+                                      "branch",
+                                      "files"
+                                    ],
+                                    "additionalProperties": false
                                   }
                                 },
                                 "required": [
@@ -64509,6 +64630,25 @@
                               "failureReason": {
                                 "type": "string"
                               },
+                              "failureKind": {
+                                "type": "string",
+                                "enum": [
+                                  "transport",
+                                  "max_turns",
+                                  "planning",
+                                  "budget",
+                                  "owner-rejected",
+                                  "judgment-unavailable",
+                                  "zombie",
+                                  "other"
+                                ]
+                              },
+                              "dropped": {
+                                "type": "string"
+                              },
+                              "heardAt": {
+                                "type": "number"
+                              },
                               "attemptOf": {
                                 "type": "string"
                               },
@@ -65819,6 +65959,25 @@
                                     },
                                     "failureReason": {
                                       "type": "string"
+                                    },
+                                    "failureKind": {
+                                      "type": "string",
+                                      "enum": [
+                                        "transport",
+                                        "max_turns",
+                                        "planning",
+                                        "budget",
+                                        "owner-rejected",
+                                        "judgment-unavailable",
+                                        "zombie",
+                                        "other"
+                                      ]
+                                    },
+                                    "dropped": {
+                                      "type": "string"
+                                    },
+                                    "heardAt": {
+                                      "type": "number"
                                     },
                                     "attemptOf": {
                                       "type": "string"
@@ -68414,6 +68573,7 @@
                                     "enum": [
                                       "none",
                                       "loosens-a-protection",
+                                      "runs-later",
                                       "steers-a-model",
                                       "cannot-be-undone",
                                       "spends-money",
@@ -69409,6 +69569,7 @@
                           "enum": [
                             "none",
                             "loosens-a-protection",
+                            "runs-later",
                             "steers-a-model",
                             "cannot-be-undone",
                             "spends-money",
@@ -69775,6 +69936,7 @@
                             "enum": [
                               "none",
                               "loosens-a-protection",
+                              "runs-later",
                               "steers-a-model",
                               "cannot-be-undone",
                               "spends-money",
@@ -99830,13 +99992,13 @@
             "$ref": "#/components/responses/Error"
           }
         },
-        "x-access": "admin",
+        "x-access": "authenticated",
         "x-transport": [
           "http",
           "ws"
         ],
         "x-scopes": [
-          "write:knowledge"
+          "write:work-ledger"
         ],
         "x-effect": "write",
         "x-idempotent": true,
@@ -101694,13 +101856,13 @@
             "$ref": "#/components/responses/Error"
           }
         },
-        "x-access": "admin",
+        "x-access": "authenticated",
         "x-transport": [
           "http",
           "ws"
         ],
         "x-scopes": [
-          "write:knowledge"
+          "write:work-ledger"
         ],
         "x-effect": "write",
         "x-idempotent": true,
@@ -102709,13 +102871,13 @@
             "$ref": "#/components/responses/Error"
           }
         },
-        "x-access": "admin",
+        "x-access": "authenticated",
         "x-transport": [
           "http",
           "ws"
         ],
         "x-scopes": [
-          "write:knowledge"
+          "write:work-ledger"
         ],
         "x-effect": "write",
         "x-replay-key": {
@@ -103810,13 +103972,13 @@
             "$ref": "#/components/responses/Error"
           }
         },
-        "x-access": "admin",
+        "x-access": "authenticated",
         "x-transport": [
           "http",
           "ws"
         ],
         "x-scopes": [
-          "write:knowledge"
+          "write:work-ledger"
         ],
         "x-effect": "write",
         "x-idempotent": true,
@@ -104757,13 +104919,13 @@
             "$ref": "#/components/responses/Error"
           }
         },
-        "x-access": "admin",
+        "x-access": "authenticated",
         "x-transport": [
           "http",
           "ws"
         ],
         "x-scopes": [
-          "write:knowledge"
+          "write:work-ledger"
         ],
         "x-effect": "write",
         "x-idempotent": true,
@@ -105494,13 +105656,13 @@
             "$ref": "#/components/responses/Error"
           }
         },
-        "x-access": "admin",
+        "x-access": "authenticated",
         "x-transport": [
           "http",
           "ws"
         ],
         "x-scopes": [
-          "write:knowledge"
+          "write:work-ledger"
         ],
         "x-effect": "write",
         "x-idempotent": true,
@@ -106213,13 +106375,13 @@
             "$ref": "#/components/responses/Error"
           }
         },
-        "x-access": "admin",
+        "x-access": "authenticated",
         "x-transport": [
           "http",
           "ws"
         ],
         "x-scopes": [
-          "write:knowledge"
+          "write:work-ledger"
         ],
         "x-effect": "write",
         "x-idempotent": true,
@@ -113894,7 +114056,7 @@
             "$ref": "#/components/responses/Error"
           }
         },
-        "x-access": "admin",
+        "x-access": "authenticated",
         "x-transport": [
           "http",
           "ws"
@@ -114053,7 +114215,7 @@
             "$ref": "#/components/responses/Error"
           }
         },
-        "x-access": "admin",
+        "x-access": "authenticated",
         "x-transport": [
           "http",
           "ws"
@@ -114863,7 +115025,7 @@
             "$ref": "#/components/responses/Error"
           }
         },
-        "x-access": "admin",
+        "x-access": "authenticated",
         "x-transport": [
           "http",
           "ws"
@@ -114992,7 +115154,7 @@
       "post": {
         "operationId": "memory.records.list",
         "summary": "List Memory Records",
-        "description": "Bulk read from the canonical store: a literal (non-semantic) search returning the matching records as a plain array. A call that names a project (its call context, or project in the filter) reads that project's records and the ones that belong to no project; a call naming none reads only the records that belong to no project; everyProject (the owner himself only, his place's \"Every project\") reads every record. This is the read a client surface uses instead of opening the store file for its browse/list and knowledge-injection paths.",
+        "description": "Bulk read from the canonical store: a literal (non-semantic) search returning the matching records as a plain array. A call that names a project (its call context, or project in the filter) reads that project's records and the ones that belong to no project; a call naming none reads only the records that belong to no project; everyProject (the owner in person only, their place's \"Every project\") reads every record. This is the read a client surface uses instead of opening the store file for its browse/list and knowledge-injection paths.",
         "tags": [
           "memory"
         ],
@@ -115950,7 +116112,7 @@
             "$ref": "#/components/responses/Error"
           }
         },
-        "x-access": "admin",
+        "x-access": "authenticated",
         "x-transport": [
           "http",
           "ws"
@@ -116188,7 +116350,7 @@
             "$ref": "#/components/responses/Error"
           }
         },
-        "x-access": "admin",
+        "x-access": "authenticated",
         "x-transport": [
           "http",
           "ws"
@@ -122480,7 +122642,7 @@
       "post": {
         "operationId": "payments.standing.create",
         "summary": "Authorise a Purchase in Advance",
-        "description": "The owner authorises, in advance, a purchase a schedule or trigger may start without asking him: the item in his words, the shops, the most one purchase may come to, the most all of them may come to every periodDays days, and an optional last day. Amounts are read in the budget currency. Every other limit still applies to each purchase: the budgets, the per-purchase ceiling and the veto or approval window. Its confirmation is owner-request: confirm: true from a credential that states a person asked, else CONFIRMATION_REQUIRED; the Money place (payments.repeat) sends both. The owner's own act: an agent cannot add one.\n\nReplay key: request header `Idempotency-Key`. Send a key (1 to 255 characters of letters, digits, \".\", \"_\", \":\" or \"-\") chosen once per logical request, and the same key on every retry: a repeat of the same request (for a multipart or raw upload: the same fields and file content, whatever the encoding) under the same key by the same credential, within a day and across a daemon restart, returns the first answer (with the Idempotent-Replayed: true header) instead of acting again. The same key with a different request is 409 IDEMPOTENCY_KEY_REUSED; a repeat while the first is still running is 409 IDEMPOTENCY_KEY_IN_FLIGHT (send it again with the same key after the Retry-After header's seconds, also in the body as retryAfterMs; the SDK does this within its retries); a repeat after the daemon stopped in the middle of the first is 409 IDEMPOTENCY_OUTCOME_UNKNOWN, and a repeat of a first request that failed partway is 500 IDEMPOTENCY_OUTCOME_UNKNOWN (either way: check the state, do not send again). A refusal (4xx) is not remembered, so the same key may be sent again. Over the method-invoke envelope or a WebSocket call frame the key may be sent as `idempotencyKey` beside `body`.",
+        "description": "The owner authorises, in advance, a purchase a schedule or trigger may start without asking them: the item in the owner's words, the shops, the most one purchase may come to, the most all of them may come to every periodDays days, and an optional last day. Amounts are read in the budget currency. Every other limit still applies to each purchase: the budgets, the per-purchase ceiling and the veto or approval window. Its confirmation is owner-request: confirm: true from a credential that states a person asked, else CONFIRMATION_REQUIRED; the Money place (payments.repeat) sends both. The owner's own act: an agent cannot add one.\n\nReplay key: request header `Idempotency-Key`. Send a key (1 to 255 characters of letters, digits, \".\", \"_\", \":\" or \"-\") chosen once per logical request, and the same key on every retry: a repeat of the same request (for a multipart or raw upload: the same fields and file content, whatever the encoding) under the same key by the same credential, within a day and across a daemon restart, returns the first answer (with the Idempotent-Replayed: true header) instead of acting again. The same key with a different request is 409 IDEMPOTENCY_KEY_REUSED; a repeat while the first is still running is 409 IDEMPOTENCY_KEY_IN_FLIGHT (send it again with the same key after the Retry-After header's seconds, also in the body as retryAfterMs; the SDK does this within its retries); a repeat after the daemon stopped in the middle of the first is 409 IDEMPOTENCY_OUTCOME_UNKNOWN, and a repeat of a first request that failed partway is 500 IDEMPOTENCY_OUTCOME_UNKNOWN (either way: check the state, do not send again). A refusal (4xx) is not remembered, so the same key may be sent again. Over the method-invoke envelope or a WebSocket call frame the key may be sent as `idempotencyKey` beside `body`.",
         "tags": [
           "payments"
         ],
@@ -122653,7 +122815,7 @@
       "get": {
         "operationId": "payments.standing.list",
         "summary": "Standing Purchase Authorisations",
-        "description": "The purchases the owner authorised in advance for runs nobody starts in the moment (a schedule or a trigger): for each, its id, the item in his words, the shops it may be bought from, the most one purchase may come to, the most all of them may come to over its period, what is spent or held in the current period and what is left, and when it expires. A scheduled purchase names one of these ids as standingId on payments.checkout.begin.",
+        "description": "The purchases the owner authorised in advance for runs nobody starts in the moment (a schedule or a trigger): for each, its id, the item in the owner's words, the shops it may be bought from, the most one purchase may come to, the most all of them may come to over its period, what is spent or held in the current period and what is left, and when it expires. A scheduled purchase names one of these ids as standingId on payments.checkout.begin.",
         "tags": [
           "payments"
         ],
@@ -123836,7 +123998,7 @@
       "post": {
         "operationId": "profile.forget",
         "summary": "Forget Profile Line",
-        "description": "Delete a mechanical field and every retained history comment for it, or one prose line addressed by its section plus its exact text. Never by line position: the owner edits this file himself, so an index taken from an earlier read may name a different line by the time the delete arrives. Text that no longer matches removes nothing and says so, rather than deleting the nearest thing. No tombstone, no deleted flag, no retention window, delete means delete. Forgetting something that was not there reports that honestly instead of returning success. Authority-gated exactly like a write: an injection that cannot add a fact must not be able to remove one.",
+        "description": "Delete a mechanical field and every retained history comment for it, or one prose line addressed by its section plus its exact text. Never by line position: the owner edits this file by hand, so an index taken from an earlier read may name a different line by the time the delete arrives. Text that no longer matches removes nothing and says so, rather than deleting the nearest thing. No tombstone, no deleted flag, no retention window, delete means delete. Forgetting something that was not there reports that honestly instead of returning success. Authority-gated exactly like a write: an injection that cannot add a fact must not be able to remove one.",
         "tags": [
           "profile"
         ],
@@ -131311,7 +131473,7 @@
       "post": {
         "operationId": "remote.work.cancel",
         "summary": "Cancel Remote Work",
-        "description": "Cancel a remote work item.",
+        "description": "Cancel a remote work item. A caller below an admin cancels only work queued for a session or schedule of its own.",
         "tags": [
           "remote"
         ],
@@ -131581,13 +131743,13 @@
             "$ref": "#/components/responses/Error"
           }
         },
-        "x-access": "admin",
+        "x-access": "authenticated",
         "x-transport": [
           "http",
           "ws"
         ],
         "x-scopes": [
-          "write:remote"
+          "write:sessions"
         ],
         "x-effect": "write",
         "x-idempotent": true,
@@ -136489,7 +136651,7 @@
             "$ref": "#/components/responses/Error"
           }
         },
-        "x-access": "admin",
+        "x-access": "authenticated",
         "x-transport": [
           "http",
           "ws"
@@ -136733,7 +136895,7 @@
       "post": {
         "operationId": "sessions.create",
         "summary": "Create Shared Session",
-        "description": "Create a shared session for a surface, route, or web client.",
+        "description": "Create a shared session for a surface, route, or web client. `workingDirectory` names the project it belongs to (checked as every call's project is); the session is its caller's, kept as who made it. A caller below an admin makes one only in a project the owner gave it, or one of no project that only it and the owner reach.",
         "tags": [
           "sessions"
         ],
@@ -136922,7 +137084,7 @@
             "$ref": "#/components/responses/Error"
           }
         },
-        "x-access": "admin",
+        "x-access": "authenticated",
         "x-transport": [
           "http",
           "ws"
@@ -136945,6 +137107,9 @@
                     "type": "string"
                   },
                   "surfaceId": {
+                    "type": "string"
+                  },
+                  "workingDirectory": {
                     "type": "string"
                   }
                 },
@@ -137246,7 +137411,7 @@
             "$ref": "#/components/responses/Error"
           }
         },
-        "x-access": "admin",
+        "x-access": "authenticated",
         "x-transport": [
           "http",
           "ws"
@@ -137789,7 +137954,7 @@
             "$ref": "#/components/responses/Error"
           }
         },
-        "x-access": "admin",
+        "x-access": "authenticated",
         "x-transport": [
           "http",
           "ws"
@@ -138359,7 +138524,7 @@
             "$ref": "#/components/responses/Error"
           }
         },
-        "x-access": "admin",
+        "x-access": "authenticated",
         "x-transport": [
           "http",
           "ws"
@@ -138786,7 +138951,7 @@
             "$ref": "#/components/responses/Error"
           }
         },
-        "x-access": "admin",
+        "x-access": "authenticated",
         "x-transport": [
           "http",
           "ws"
@@ -139090,7 +139255,7 @@
             "$ref": "#/components/responses/Error"
           }
         },
-        "x-access": "admin",
+        "x-access": "authenticated",
         "x-transport": [
           "http",
           "ws"
@@ -140280,7 +140445,7 @@
             "$ref": "#/components/responses/Error"
           }
         },
-        "x-access": "admin",
+        "x-access": "authenticated",
         "x-transport": [
           "http",
           "ws"
@@ -140925,7 +141090,7 @@
       "post": {
         "operationId": "sessions.permissionMode.set",
         "summary": "Set Session Permission Mode",
-        "description": "Set ask-me, jev-decides, just-vibes, or yolo execution, or enter the read-only plan posture. Admin only, because it can loosen security: yolo runs every action without safety denials, and for the local runtime session (no hosted or channel mode of its own) it rewrites the daemon-wide permissions.mode. A hosted session and a channel session with its own mode change only that session; a web chat (companion-chat) has no mode of its own, so setting it rewrites the daemon-wide permissions.mode. Emits runtime.gate (PRESET_CHANGED) so every surface stays in sync. Other session ids answer 404 SESSION_NOT_LOCAL. A looser mode asked with a token minted for automation is not set (a device the owner paired himself sets it at once): it is put to the owner as an approval only his own credential answers, the answer is 202 with code OWNER_APPROVAL_PENDING, the unchanged `mode` and the `approvalId`, and the mode changes when he approves it.\n\nReplay key: request header `Idempotency-Key`. Send a key (1 to 255 characters of letters, digits, \".\", \"_\", \":\" or \"-\") chosen once per logical request, and the same key on every retry: a repeat of the same request (for a multipart or raw upload: the same fields and file content, whatever the encoding) under the same key by the same credential, within a day and across a daemon restart, returns the first answer (with the Idempotent-Replayed: true header) instead of acting again. The same key with a different request is 409 IDEMPOTENCY_KEY_REUSED; a repeat while the first is still running is 409 IDEMPOTENCY_KEY_IN_FLIGHT (send it again with the same key after the Retry-After header's seconds, also in the body as retryAfterMs; the SDK does this within its retries); a repeat after the daemon stopped in the middle of the first is 409 IDEMPOTENCY_OUTCOME_UNKNOWN, and a repeat of a first request that failed partway is 500 IDEMPOTENCY_OUTCOME_UNKNOWN (either way: check the state, do not send again). A refusal (4xx) is not remembered, so the same key may be sent again. Over the method-invoke envelope or a WebSocket call frame the key may be sent as `idempotencyKey` beside `body`.",
+        "description": "Set ask-me, jev-decides, just-vibes, or yolo execution, or enter the read-only plan posture. Admin only, because it can loosen security: yolo runs every action without safety denials, and for the local runtime session (no hosted or channel mode of its own) it rewrites the daemon-wide permissions.mode. A hosted session and a channel session with its own mode change only that session; a web chat (companion-chat) has no mode of its own, so setting it rewrites the daemon-wide permissions.mode. Emits runtime.gate (PRESET_CHANGED) so every surface stays in sync. Other session ids answer 404 SESSION_NOT_LOCAL. A looser mode asked with a token minted for automation is not set (a device the owner paired in person sets it at once): it is put to the owner as an approval only the owner's own credential answers, the answer is 202 with code OWNER_APPROVAL_PENDING, the unchanged `mode` and the `approvalId`, and the mode changes when the owner approves it.\n\nReplay key: request header `Idempotency-Key`. Send a key (1 to 255 characters of letters, digits, \".\", \"_\", \":\" or \"-\") chosen once per logical request, and the same key on every retry: a repeat of the same request (for a multipart or raw upload: the same fields and file content, whatever the encoding) under the same key by the same credential, within a day and across a daemon restart, returns the first answer (with the Idempotent-Replayed: true header) instead of acting again. The same key with a different request is 409 IDEMPOTENCY_KEY_REUSED; a repeat while the first is still running is 409 IDEMPOTENCY_KEY_IN_FLIGHT (send it again with the same key after the Retry-After header's seconds, also in the body as retryAfterMs; the SDK does this within its retries); a repeat after the daemon stopped in the middle of the first is 409 IDEMPOTENCY_OUTCOME_UNKNOWN, and a repeat of a first request that failed partway is 500 IDEMPOTENCY_OUTCOME_UNKNOWN (either way: check the state, do not send again). A refusal (4xx) is not remembered, so the same key may be sent again. Over the method-invoke envelope or a WebSocket call frame the key may be sent as `idempotencyKey` beside `body`.",
         "tags": [
           "sessions"
         ],
@@ -141549,7 +141714,7 @@
             "$ref": "#/components/responses/Error"
           }
         },
-        "x-access": "admin",
+        "x-access": "authenticated",
         "x-transport": [
           "http",
           "ws"
@@ -141833,7 +141998,7 @@
             "$ref": "#/components/responses/Error"
           }
         },
-        "x-access": "admin",
+        "x-access": "authenticated",
         "x-transport": [
           "http",
           "ws"
@@ -142399,7 +142564,7 @@
             "$ref": "#/components/responses/Error"
           }
         },
-        "x-access": "admin",
+        "x-access": "authenticated",
         "x-transport": [
           "http",
           "ws"
@@ -144031,7 +144196,7 @@
             "$ref": "#/components/responses/Error"
           }
         },
-        "x-access": "admin",
+        "x-access": "authenticated",
         "x-transport": [
           "http",
           "ws"
@@ -144149,7 +144314,7 @@
             "$ref": "#/components/responses/Error"
           }
         },
-        "x-access": "admin",
+        "x-access": "authenticated",
         "x-transport": [
           "http",
           "ws"
@@ -144913,7 +145078,7 @@
             "$ref": "#/components/responses/Error"
           }
         },
-        "x-access": "admin",
+        "x-access": "authenticated",
         "x-transport": [
           "http",
           "ws"
@@ -151379,6 +151544,138 @@
         }
       }
     },
+    "/api/work/branch/discard": {
+      "post": {
+        "operationId": "work.branch.discard",
+        "summary": "Discard A Work's Kept Branch",
+        "description": "Throw away the branch an ended piece of work kept, with the work's own folder and whatever they hold. It cannot be undone.",
+        "tags": [
+          "work-ledger"
+        ],
+        "responses": {
+          "200": {
+            "description": "Success",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "additionalProperties": true,
+                  "properties": {
+                    "title": {
+                      "type": "string"
+                    },
+                    "branch": {
+                      "type": "string"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "default": {
+            "$ref": "#/components/responses/Error"
+          }
+        },
+        "x-access": "authenticated",
+        "x-transport": [
+          "http",
+          "ws"
+        ],
+        "x-scopes": [
+          "read:work-ledger",
+          "write:work-ledger"
+        ],
+        "x-effect": "write",
+        "x-idempotent": true,
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "additionalProperties": false,
+                "required": [
+                  "work"
+                ],
+                "properties": {
+                  "work": {
+                    "type": "string",
+                    "minLength": 1,
+                    "maxLength": 200
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/work/branch/merge": {
+      "post": {
+        "operationId": "work.branch.merge",
+        "summary": "Merge A Work's Kept Branch In",
+        "description": "Merge the branch an ended piece of work kept (its commits are not in the project's branch) into the project's current branch, then remove that branch and the work's own folder. A merge that conflicts is undone and nothing changes.",
+        "tags": [
+          "work-ledger"
+        ],
+        "responses": {
+          "200": {
+            "description": "Success",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "additionalProperties": true,
+                  "properties": {
+                    "title": {
+                      "type": "string"
+                    },
+                    "branch": {
+                      "type": "string"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "default": {
+            "$ref": "#/components/responses/Error"
+          }
+        },
+        "x-access": "authenticated",
+        "x-transport": [
+          "http",
+          "ws"
+        ],
+        "x-scopes": [
+          "read:work-ledger",
+          "write:work-ledger"
+        ],
+        "x-effect": "write",
+        "x-idempotent": true,
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "additionalProperties": false,
+                "required": [
+                  "work"
+                ],
+                "properties": {
+                  "work": {
+                    "type": "string",
+                    "minLength": 1,
+                    "maxLength": 200
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/api/work": {
       "get": {
         "operationId": "work.list",
@@ -151444,7 +151741,7 @@
             "$ref": "#/components/responses/Error"
           }
         },
-        "x-access": "admin",
+        "x-access": "authenticated",
         "x-transport": [
           "http",
           "ws"
@@ -151553,7 +151850,7 @@
             "$ref": "#/components/responses/Error"
           }
         },
-        "x-access": "admin",
+        "x-access": "authenticated",
         "x-transport": [
           "http",
           "ws"
@@ -151616,7 +151913,7 @@
             "$ref": "#/components/responses/Error"
           }
         },
-        "x-access": "admin",
+        "x-access": "authenticated",
         "x-transport": [
           "http",
           "ws"
@@ -151678,7 +151975,7 @@
             "$ref": "#/components/responses/Error"
           }
         },
-        "x-access": "admin",
+        "x-access": "authenticated",
         "x-transport": [
           "http",
           "ws"
@@ -151746,7 +152043,7 @@
             "$ref": "#/components/responses/Error"
           }
         },
-        "x-access": "admin",
+        "x-access": "authenticated",
         "x-transport": [
           "http",
           "ws"
@@ -151819,7 +152116,7 @@
             "$ref": "#/components/responses/Error"
           }
         },
-        "x-access": "admin",
+        "x-access": "authenticated",
         "x-transport": [
           "http",
           "ws"
@@ -151867,7 +152164,7 @@
       "post": {
         "operationId": "work.target",
         "summary": "Name A Piece Of Work For An Act",
-        "description": "Read what an act on one piece of work sends, from the work alone: `operation` \"execution\" answers the identity start, status, stop and resume take (its current attempt and revisions); \"contract\" answers the run that answering, running a step again and the spending limit act on. Every other field is passed through. Answers { summary, input }; nothing is kept.",
+        "description": "Read what an act on one piece of work sends, from the work alone: `operation` \"execution\" answers the identity start, status, stop and resume take (its current attempt and revisions); \"contract\" answers the run that answering, running a step again and the spending limit act on; \"own\" answers only whether this caller may act on the work at all (a paired device, the outside agent or a member acts only on work it asked for itself: WORK_NOT_YOURS otherwise). Every other field is passed through. Answers { summary, input }; nothing is kept.",
         "tags": [
           "work-ledger"
         ],
@@ -151903,7 +152200,7 @@
             "$ref": "#/components/responses/Error"
           }
         },
-        "x-access": "admin",
+        "x-access": "authenticated",
         "x-transport": [
           "http",
           "ws"
@@ -151934,7 +152231,8 @@
                     "type": "string",
                     "enum": [
                       "execution",
-                      "contract"
+                      "contract",
+                      "own"
                     ]
                   },
                   "zone": {
@@ -152836,7 +153134,7 @@
             "$ref": "#/components/responses/Error"
           }
         },
-        "x-access": "admin",
+        "x-access": "authenticated",
         "x-transport": [
           "http",
           "ws"
@@ -153799,7 +154097,7 @@
             "$ref": "#/components/responses/Error"
           }
         },
-        "x-access": "admin",
+        "x-access": "authenticated",
         "x-transport": [
           "http",
           "ws"
@@ -154766,7 +155064,7 @@
             "$ref": "#/components/responses/Error"
           }
         },
-        "x-access": "admin",
+        "x-access": "authenticated",
         "x-transport": [
           "http",
           "ws"
@@ -155733,7 +156031,7 @@
             "$ref": "#/components/responses/Error"
           }
         },
-        "x-access": "admin",
+        "x-access": "authenticated",
         "x-transport": [
           "http",
           "ws"
@@ -157434,7 +157732,7 @@
             "$ref": "#/components/responses/Error"
           }
         },
-        "x-access": "admin",
+        "x-access": "authenticated",
         "x-transport": [
           "http",
           "ws"
@@ -158799,7 +159097,8 @@
                           "type": "string",
                           "enum": [
                             "semantic",
-                            "exhausted"
+                            "exhausted",
+                            "decision-model"
                           ]
                         }
                       },
@@ -159658,7 +159957,7 @@
             "$ref": "#/components/responses/Error"
           }
         },
-        "x-access": "admin",
+        "x-access": "authenticated",
         "x-transport": [
           "http",
           "ws"
@@ -161024,7 +161323,8 @@
                           "type": "string",
                           "enum": [
                             "semantic",
-                            "exhausted"
+                            "exhausted",
+                            "decision-model"
                           ]
                         }
                       },
@@ -161883,7 +162183,7 @@
             "$ref": "#/components/responses/Error"
           }
         },
-        "x-access": "admin",
+        "x-access": "authenticated",
         "x-transport": [
           "http",
           "ws"
@@ -163245,7 +163545,8 @@
                           "type": "string",
                           "enum": [
                             "semantic",
-                            "exhausted"
+                            "exhausted",
+                            "decision-model"
                           ]
                         }
                       },
@@ -164104,7 +164405,7 @@
             "$ref": "#/components/responses/Error"
           }
         },
-        "x-access": "admin",
+        "x-access": "authenticated",
         "x-transport": [
           "http",
           "ws"
@@ -165620,7 +165921,8 @@
                               "type": "string",
                               "enum": [
                                 "semantic",
-                                "exhausted"
+                                "exhausted",
+                                "decision-model"
                               ]
                             }
                           },
@@ -166496,7 +166798,7 @@
             "$ref": "#/components/responses/Error"
           }
         },
-        "x-access": "admin",
+        "x-access": "authenticated",
         "x-transport": [
           "http",
           "ws"
@@ -167852,7 +168154,8 @@
                           "type": "string",
                           "enum": [
                             "semantic",
-                            "exhausted"
+                            "exhausted",
+                            "decision-model"
                           ]
                         }
                       },
@@ -168711,7 +169014,7 @@
             "$ref": "#/components/responses/Error"
           }
         },
-        "x-access": "admin",
+        "x-access": "authenticated",
         "x-transport": [
           "http",
           "ws"
@@ -168791,7 +169094,7 @@
             "$ref": "#/components/responses/Error"
           }
         },
-        "x-access": "admin",
+        "x-access": "authenticated",
         "x-transport": [
           "http",
           "ws"
@@ -168807,7 +169110,7 @@
       "get": {
         "operationId": "workLedger.snapshot",
         "summary": "Read Native Work Ledger",
-        "description": "Read the selected host project ledger, without mutation authority or allowedActions. Requires an owner operator and the dedicated read scope.",
+        "description": "Read the selected host project ledger, without mutation authority or allowedActions. Requires the dedicated read scope; a caller below an admin reads only a project given to it.",
         "tags": [
           "work-ledger"
         ],
@@ -169760,7 +170063,7 @@
             "$ref": "#/components/responses/Error"
           }
         },
-        "x-access": "admin",
+        "x-access": "authenticated",
         "x-transport": [
           "http",
           "ws"
@@ -170030,7 +170333,7 @@
             "$ref": "#/components/responses/Error"
           }
         },
-        "x-access": "admin",
+        "x-access": "authenticated",
         "x-transport": [
           "http",
           "ws"
@@ -170296,7 +170599,7 @@
             "$ref": "#/components/responses/Error"
           }
         },
-        "x-access": "admin",
+        "x-access": "authenticated",
         "x-transport": [
           "http",
           "ws"
@@ -170508,7 +170811,7 @@
             "$ref": "#/components/responses/Error"
           }
         },
-        "x-access": "admin",
+        "x-access": "authenticated",
         "x-transport": [
           "http",
           "ws"
@@ -170627,7 +170930,7 @@
             "$ref": "#/components/responses/Error"
           }
         },
-        "x-access": "admin",
+        "x-access": "authenticated",
         "x-transport": [
           "http",
           "ws"
@@ -170803,7 +171106,7 @@
             "$ref": "#/components/responses/Error"
           }
         },
-        "x-access": "admin",
+        "x-access": "authenticated",
         "x-transport": [
           "http",
           "ws"
@@ -171007,7 +171310,7 @@
             "$ref": "#/components/responses/Error"
           }
         },
-        "x-access": "admin",
+        "x-access": "authenticated",
         "x-transport": [
           "http",
           "ws"
@@ -171211,7 +171514,7 @@
             "$ref": "#/components/responses/Error"
           }
         },
-        "x-access": "admin",
+        "x-access": "authenticated",
         "x-transport": [
           "http",
           "ws"
@@ -171312,6 +171615,9 @@
                             "generation"
                           ],
                           "additionalProperties": false
+                        },
+                        "reachable": {
+                          "type": "boolean"
                         }
                       },
                       "required": [
@@ -171434,6 +171740,9 @@
                               "generation"
                             ],
                             "additionalProperties": false
+                          },
+                          "reachable": {
+                            "type": "boolean"
                           }
                         },
                         "required": [
@@ -172121,10 +172430,7 @@
               "AUTH_REQUIRED",
               "CANCELLED",
               "CANCEL_NOT_ALLOWED",
-              "CAPABILITY_ASK_AGAIN",
               "CAPABILITY_CALLER_CONTEXT_MISSING",
-              "CAPABILITY_CALLER_GONE",
-              "CAPABILITY_CALL_NOT_FOUND",
               "CAPABILITY_ELSEWHERE",
               "CAPABILITY_INPUT_INVALID",
               "CAPABILITY_NOT_APPROVED",
@@ -172559,7 +172865,7 @@
     {
       "id": "artifacts.content.get",
       "category": "artifacts",
-      "access": "admin",
+      "access": "authenticated",
       "rest": "GET /api/artifacts/{artifactId}/content",
       "inputSchemaCoverage": "typed",
       "outputSchemaCoverage": "typed"
@@ -172567,7 +172873,7 @@
     {
       "id": "artifacts.create",
       "category": "artifacts",
-      "access": "admin",
+      "access": "authenticated",
       "rest": "POST /api/artifacts",
       "inputSchemaCoverage": "typed",
       "outputSchemaCoverage": "typed"
@@ -172575,7 +172881,7 @@
     {
       "id": "artifacts.get",
       "category": "artifacts",
-      "access": "admin",
+      "access": "authenticated",
       "rest": "GET /api/artifacts/{artifactId}",
       "inputSchemaCoverage": "typed",
       "outputSchemaCoverage": "typed"
@@ -172583,7 +172889,7 @@
     {
       "id": "artifacts.list",
       "category": "artifacts",
-      "access": "admin",
+      "access": "authenticated",
       "rest": "GET /api/artifacts",
       "inputSchemaCoverage": "typed",
       "outputSchemaCoverage": "typed"
@@ -172679,7 +172985,7 @@
     {
       "id": "automation.jobs.create",
       "category": "automation",
-      "access": "admin",
+      "access": "authenticated",
       "rest": "POST /api/automation/jobs",
       "inputSchemaCoverage": "typed",
       "outputSchemaCoverage": "typed"
@@ -172687,7 +172993,7 @@
     {
       "id": "automation.jobs.delete",
       "category": "automation",
-      "access": "admin",
+      "access": "authenticated",
       "rest": "DELETE /api/automation/jobs/{jobId}",
       "inputSchemaCoverage": "typed",
       "outputSchemaCoverage": "typed"
@@ -172695,7 +173001,7 @@
     {
       "id": "automation.jobs.disable",
       "category": "automation",
-      "access": "admin",
+      "access": "authenticated",
       "rest": "POST /api/automation/jobs/{jobId}/disable",
       "inputSchemaCoverage": "typed",
       "outputSchemaCoverage": "typed"
@@ -172703,7 +173009,7 @@
     {
       "id": "automation.jobs.enable",
       "category": "automation",
-      "access": "admin",
+      "access": "authenticated",
       "rest": "POST /api/automation/jobs/{jobId}/enable",
       "inputSchemaCoverage": "typed",
       "outputSchemaCoverage": "typed"
@@ -172719,7 +173025,7 @@
     {
       "id": "automation.jobs.run",
       "category": "automation",
-      "access": "admin",
+      "access": "authenticated",
       "rest": "POST /api/automation/jobs/{jobId}/run",
       "inputSchemaCoverage": "typed",
       "outputSchemaCoverage": "typed"
@@ -172727,7 +173033,7 @@
     {
       "id": "automation.jobs.update",
       "category": "automation",
-      "access": "admin",
+      "access": "authenticated",
       "rest": "PATCH /api/automation/jobs/{jobId}",
       "inputSchemaCoverage": "typed",
       "outputSchemaCoverage": "typed"
@@ -172735,7 +173041,7 @@
     {
       "id": "automation.runs.cancel",
       "category": "automation",
-      "access": "admin",
+      "access": "authenticated",
       "rest": "POST /api/automation/runs/{runId}/cancel",
       "inputSchemaCoverage": "typed",
       "outputSchemaCoverage": "typed"
@@ -172759,7 +173065,7 @@
     {
       "id": "automation.runs.retry",
       "category": "automation",
-      "access": "admin",
+      "access": "authenticated",
       "rest": "POST /api/automation/runs/{runId}/retry",
       "inputSchemaCoverage": "typed",
       "outputSchemaCoverage": "typed"
@@ -172767,7 +173073,7 @@
     {
       "id": "automation.schedules.create",
       "category": "automation",
-      "access": "admin",
+      "access": "authenticated",
       "rest": "POST /api/automation/schedules",
       "inputSchemaCoverage": "typed",
       "outputSchemaCoverage": "typed"
@@ -172775,7 +173081,7 @@
     {
       "id": "automation.schedules.delete",
       "category": "automation",
-      "access": "admin",
+      "access": "authenticated",
       "rest": "DELETE /api/automation/schedules/{scheduleId}",
       "inputSchemaCoverage": "typed",
       "outputSchemaCoverage": "typed"
@@ -172791,7 +173097,7 @@
     {
       "id": "automation.schedules.pause",
       "category": "automation",
-      "access": "admin",
+      "access": "authenticated",
       "rest": "POST /api/automation/schedules/{scheduleId}/pause",
       "inputSchemaCoverage": "typed",
       "outputSchemaCoverage": "typed"
@@ -172807,7 +173113,7 @@
     {
       "id": "automation.schedules.resume",
       "category": "automation",
-      "access": "admin",
+      "access": "authenticated",
       "rest": "POST /api/automation/schedules/{scheduleId}/resume",
       "inputSchemaCoverage": "typed",
       "outputSchemaCoverage": "typed"
@@ -172815,7 +173121,7 @@
     {
       "id": "automation.schedules.run",
       "category": "automation",
-      "access": "admin",
+      "access": "authenticated",
       "rest": "POST /api/automation/schedules/{scheduleId}/run",
       "inputSchemaCoverage": "typed",
       "outputSchemaCoverage": "typed"
@@ -174447,7 +174753,7 @@
     {
       "id": "fleet.interrupt",
       "category": "fleet",
-      "access": "admin",
+      "access": "authenticated",
       "rest": null,
       "inputSchemaCoverage": "typed",
       "outputSchemaCoverage": "typed"
@@ -174471,7 +174777,7 @@
     {
       "id": "fleet.resume",
       "category": "fleet",
-      "access": "admin",
+      "access": "authenticated",
       "rest": null,
       "inputSchemaCoverage": "typed",
       "outputSchemaCoverage": "typed"
@@ -174487,7 +174793,7 @@
     {
       "id": "fleet.stop",
       "category": "fleet",
-      "access": "admin",
+      "access": "authenticated",
       "rest": null,
       "inputSchemaCoverage": "typed",
       "outputSchemaCoverage": "typed"
@@ -175295,7 +175601,7 @@
     {
       "id": "projectPlanning.decisions.record",
       "category": "knowledge",
-      "access": "admin",
+      "access": "authenticated",
       "rest": "POST /api/projects/planning/decisions",
       "inputSchemaCoverage": "typed",
       "outputSchemaCoverage": "typed"
@@ -175327,7 +175633,7 @@
     {
       "id": "projectPlanning.workPlan.clearCompleted",
       "category": "knowledge",
-      "access": "admin",
+      "access": "authenticated",
       "rest": "POST /api/projects/planning/work-plan/clear-completed",
       "inputSchemaCoverage": "typed",
       "outputSchemaCoverage": "typed"
@@ -175343,7 +175649,7 @@
     {
       "id": "projectPlanning.workPlan.task.create",
       "category": "knowledge",
-      "access": "admin",
+      "access": "authenticated",
       "rest": "POST /api/projects/planning/work-plan/tasks",
       "inputSchemaCoverage": "typed",
       "outputSchemaCoverage": "typed"
@@ -175351,7 +175657,7 @@
     {
       "id": "projectPlanning.workPlan.task.delete",
       "category": "knowledge",
-      "access": "admin",
+      "access": "authenticated",
       "rest": "DELETE /api/projects/planning/work-plan/tasks/{taskId}",
       "inputSchemaCoverage": "typed",
       "outputSchemaCoverage": "typed"
@@ -175367,7 +175673,7 @@
     {
       "id": "projectPlanning.workPlan.task.status",
       "category": "knowledge",
-      "access": "admin",
+      "access": "authenticated",
       "rest": "POST /api/projects/planning/work-plan/tasks/{taskId}/status",
       "inputSchemaCoverage": "typed",
       "outputSchemaCoverage": "typed"
@@ -175375,7 +175681,7 @@
     {
       "id": "projectPlanning.workPlan.task.update",
       "category": "knowledge",
-      "access": "admin",
+      "access": "authenticated",
       "rest": "PATCH /api/projects/planning/work-plan/tasks/{taskId}",
       "inputSchemaCoverage": "typed",
       "outputSchemaCoverage": "typed"
@@ -175391,7 +175697,7 @@
     {
       "id": "projectPlanning.workPlan.tasks.reorder",
       "category": "knowledge",
-      "access": "admin",
+      "access": "authenticated",
       "rest": "POST /api/projects/planning/work-plan/tasks/reorder",
       "inputSchemaCoverage": "typed",
       "outputSchemaCoverage": "typed"
@@ -175639,7 +175945,7 @@
     {
       "id": "memory.records.add",
       "category": "memory",
-      "access": "admin",
+      "access": "authenticated",
       "rest": "POST /api/memory/records",
       "inputSchemaCoverage": "typed",
       "outputSchemaCoverage": "typed"
@@ -175647,7 +175953,7 @@
     {
       "id": "memory.records.delete",
       "category": "memory",
-      "access": "admin",
+      "access": "authenticated",
       "rest": "DELETE /api/memory/records/{id}",
       "inputSchemaCoverage": "typed",
       "outputSchemaCoverage": "typed"
@@ -175679,7 +175985,7 @@
     {
       "id": "memory.records.links.add",
       "category": "memory",
-      "access": "admin",
+      "access": "authenticated",
       "rest": "POST /api/memory/records/{id}/links",
       "inputSchemaCoverage": "typed",
       "outputSchemaCoverage": "typed"
@@ -175719,7 +176025,7 @@
     {
       "id": "memory.records.update",
       "category": "memory",
-      "access": "admin",
+      "access": "authenticated",
       "rest": "POST /api/memory/records/{id}/update",
       "inputSchemaCoverage": "typed",
       "outputSchemaCoverage": "typed"
@@ -175727,7 +176033,7 @@
     {
       "id": "memory.records.update-review",
       "category": "memory",
-      "access": "admin",
+      "access": "authenticated",
       "rest": "POST /api/memory/records/{id}/review",
       "inputSchemaCoverage": "typed",
       "outputSchemaCoverage": "typed"
@@ -176607,7 +176913,7 @@
     {
       "id": "remote.work.cancel",
       "category": "remote",
-      "access": "admin",
+      "access": "authenticated",
       "rest": "POST /api/remote/work/{workId}/cancel",
       "inputSchemaCoverage": "typed",
       "outputSchemaCoverage": "typed"
@@ -176943,7 +177249,7 @@
     {
       "id": "sessions.checkpoints.changed",
       "category": "sessions",
-      "access": "admin",
+      "access": "authenticated",
       "rest": null,
       "inputSchemaCoverage": "typed",
       "outputSchemaCoverage": "typed"
@@ -176951,7 +177257,7 @@
     {
       "id": "sessions.close",
       "category": "sessions",
-      "access": "admin",
+      "access": "authenticated",
       "rest": "POST /api/sessions/{sessionId}/close",
       "inputSchemaCoverage": "typed",
       "outputSchemaCoverage": "typed"
@@ -176967,7 +177273,7 @@
     {
       "id": "sessions.create",
       "category": "sessions",
-      "access": "admin",
+      "access": "authenticated",
       "rest": "POST /api/sessions",
       "inputSchemaCoverage": "typed",
       "outputSchemaCoverage": "typed"
@@ -176975,7 +177281,7 @@
     {
       "id": "sessions.delete",
       "category": "sessions",
-      "access": "admin",
+      "access": "authenticated",
       "rest": "DELETE /api/sessions/{sessionId}",
       "inputSchemaCoverage": "typed",
       "outputSchemaCoverage": "typed"
@@ -176983,7 +177289,7 @@
     {
       "id": "sessions.detach",
       "category": "sessions",
-      "access": "admin",
+      "access": "authenticated",
       "rest": "POST /api/sessions/{sessionId}/detach",
       "inputSchemaCoverage": "typed",
       "outputSchemaCoverage": "typed"
@@ -176991,7 +177297,7 @@
     {
       "id": "sessions.followUp",
       "category": "sessions",
-      "access": "admin",
+      "access": "authenticated",
       "rest": "POST /api/sessions/{sessionId}/follow-up",
       "inputSchemaCoverage": "typed",
       "outputSchemaCoverage": "typed"
@@ -177079,7 +177385,7 @@
     {
       "id": "sessions.inputs.cancel",
       "category": "sessions",
-      "access": "admin",
+      "access": "authenticated",
       "rest": "POST /api/sessions/{sessionId}/inputs/{inputId}/cancel",
       "inputSchemaCoverage": "typed",
       "outputSchemaCoverage": "typed"
@@ -177087,7 +177393,7 @@
     {
       "id": "sessions.inputs.deliver",
       "category": "sessions",
-      "access": "admin",
+      "access": "authenticated",
       "rest": "POST /api/sessions/{sessionId}/inputs/{inputId}/deliver",
       "inputSchemaCoverage": "typed",
       "outputSchemaCoverage": "typed"
@@ -177119,7 +177425,7 @@
     {
       "id": "sessions.messages.create",
       "category": "sessions",
-      "access": "admin",
+      "access": "authenticated",
       "rest": "POST /api/sessions/{sessionId}/messages",
       "inputSchemaCoverage": "typed",
       "outputSchemaCoverage": "typed"
@@ -177175,7 +177481,7 @@
     {
       "id": "sessions.register",
       "category": "sessions",
-      "access": "admin",
+      "access": "authenticated",
       "rest": "POST /api/sessions/register",
       "inputSchemaCoverage": "typed",
       "outputSchemaCoverage": "typed"
@@ -177183,7 +177489,7 @@
     {
       "id": "sessions.reopen",
       "category": "sessions",
-      "access": "admin",
+      "access": "authenticated",
       "rest": "POST /api/sessions/{sessionId}/reopen",
       "inputSchemaCoverage": "typed",
       "outputSchemaCoverage": "typed"
@@ -177199,7 +177505,7 @@
     {
       "id": "sessions.steer",
       "category": "sessions",
-      "access": "admin",
+      "access": "authenticated",
       "rest": "POST /api/sessions/{sessionId}/steer",
       "inputSchemaCoverage": "typed",
       "outputSchemaCoverage": "typed"
@@ -177279,7 +177585,7 @@
     {
       "id": "tasks.cancel",
       "category": "tasks",
-      "access": "admin",
+      "access": "authenticated",
       "rest": "POST /api/tasks/{taskId}/cancel",
       "inputSchemaCoverage": "typed",
       "outputSchemaCoverage": "typed"
@@ -177287,7 +177593,7 @@
     {
       "id": "tasks.create",
       "category": "tasks",
-      "access": "admin",
+      "access": "authenticated",
       "rest": "POST /task",
       "inputSchemaCoverage": "typed",
       "outputSchemaCoverage": "typed"
@@ -177311,7 +177617,7 @@
     {
       "id": "tasks.retry",
       "category": "tasks",
-      "access": "admin",
+      "access": "authenticated",
       "rest": "POST /api/tasks/{taskId}/retry",
       "inputSchemaCoverage": "typed",
       "outputSchemaCoverage": "typed"
@@ -177503,7 +177809,7 @@
     {
       "id": "watchers.triggers.cancel",
       "category": "watchers",
-      "access": "admin",
+      "access": "authenticated",
       "rest": null,
       "inputSchemaCoverage": "typed",
       "outputSchemaCoverage": "typed"
@@ -177511,7 +177817,7 @@
     {
       "id": "watchers.triggers.create",
       "category": "watchers",
-      "access": "admin",
+      "access": "authenticated",
       "rest": null,
       "inputSchemaCoverage": "typed",
       "outputSchemaCoverage": "typed"
@@ -177535,7 +177841,7 @@
     {
       "id": "watchers.triggers.history",
       "category": "watchers",
-      "access": "admin",
+      "access": "authenticated",
       "rest": null,
       "inputSchemaCoverage": "typed",
       "outputSchemaCoverage": "typed"
@@ -177543,7 +177849,7 @@
     {
       "id": "watchers.triggers.list",
       "category": "watchers",
-      "access": "admin",
+      "access": "authenticated",
       "rest": null,
       "inputSchemaCoverage": "typed",
       "outputSchemaCoverage": "typed"
@@ -177551,7 +177857,7 @@
     {
       "id": "watchers.triggers.preview",
       "category": "watchers",
-      "access": "admin",
+      "access": "authenticated",
       "rest": null,
       "inputSchemaCoverage": "typed",
       "outputSchemaCoverage": "typed"
@@ -177559,7 +177865,7 @@
     {
       "id": "watchers.triggers.reset",
       "category": "watchers",
-      "access": "admin",
+      "access": "authenticated",
       "rest": null,
       "inputSchemaCoverage": "typed",
       "outputSchemaCoverage": "typed"
@@ -177597,9 +177903,25 @@
       "outputSchemaCoverage": "typed"
     },
     {
+      "id": "work.branch.discard",
+      "category": "work-ledger",
+      "access": "authenticated",
+      "rest": "POST /api/work/branch/discard",
+      "inputSchemaCoverage": "typed",
+      "outputSchemaCoverage": "typed"
+    },
+    {
+      "id": "work.branch.merge",
+      "category": "work-ledger",
+      "access": "authenticated",
+      "rest": "POST /api/work/branch/merge",
+      "inputSchemaCoverage": "typed",
+      "outputSchemaCoverage": "typed"
+    },
+    {
       "id": "work.list",
       "category": "work-ledger",
-      "access": "admin",
+      "access": "authenticated",
       "rest": "GET /api/work",
       "inputSchemaCoverage": "typed",
       "outputSchemaCoverage": "typed"
@@ -177615,7 +177937,7 @@
     {
       "id": "work.plan.discard",
       "category": "work-ledger",
-      "access": "admin",
+      "access": "authenticated",
       "rest": "POST /api/work/plan/discard",
       "inputSchemaCoverage": "typed",
       "outputSchemaCoverage": "typed"
@@ -177623,7 +177945,7 @@
     {
       "id": "work.plan.redo",
       "category": "work-ledger",
-      "access": "admin",
+      "access": "authenticated",
       "rest": "POST /api/work/plan/redo",
       "inputSchemaCoverage": "typed",
       "outputSchemaCoverage": "typed"
@@ -177631,7 +177953,7 @@
     {
       "id": "work.plan.step.drop",
       "category": "work-ledger",
-      "access": "admin",
+      "access": "authenticated",
       "rest": "POST /api/work/plan/step/drop",
       "inputSchemaCoverage": "typed",
       "outputSchemaCoverage": "typed"
@@ -177639,7 +177961,7 @@
     {
       "id": "work.plan.step.edit",
       "category": "work-ledger",
-      "access": "admin",
+      "access": "authenticated",
       "rest": "POST /api/work/plan/step/edit",
       "inputSchemaCoverage": "typed",
       "outputSchemaCoverage": "typed"
@@ -177647,7 +177969,7 @@
     {
       "id": "work.plan.step.move",
       "category": "work-ledger",
-      "access": "admin",
+      "access": "authenticated",
       "rest": "POST /api/work/plan/step/move",
       "inputSchemaCoverage": "typed",
       "outputSchemaCoverage": "typed"
@@ -177655,7 +177977,7 @@
     {
       "id": "work.target",
       "category": "work-ledger",
-      "access": "admin",
+      "access": "authenticated",
       "rest": "POST /api/work/target",
       "inputSchemaCoverage": "typed",
       "outputSchemaCoverage": "typed"
@@ -177663,7 +177985,7 @@
     {
       "id": "workLedger.execution.cancel",
       "category": "work-ledger",
-      "access": "admin",
+      "access": "authenticated",
       "rest": "POST /api/work-ledger/execution/cancel",
       "inputSchemaCoverage": "typed",
       "outputSchemaCoverage": "typed"
@@ -177671,7 +177993,7 @@
     {
       "id": "workLedger.execution.resume",
       "category": "work-ledger",
-      "access": "admin",
+      "access": "authenticated",
       "rest": "POST /api/work-ledger/execution/resume",
       "inputSchemaCoverage": "typed",
       "outputSchemaCoverage": "typed"
@@ -177679,7 +178001,7 @@
     {
       "id": "workLedger.execution.start",
       "category": "work-ledger",
-      "access": "admin",
+      "access": "authenticated",
       "rest": "POST /api/work-ledger/execution/start",
       "inputSchemaCoverage": "typed",
       "outputSchemaCoverage": "typed"
@@ -177687,7 +178009,7 @@
     {
       "id": "workLedger.execution.status",
       "category": "work-ledger",
-      "access": "admin",
+      "access": "authenticated",
       "rest": "POST /api/work-ledger/execution/status",
       "inputSchemaCoverage": "typed",
       "outputSchemaCoverage": "typed"
@@ -177695,7 +178017,7 @@
     {
       "id": "workLedger.history",
       "category": "work-ledger",
-      "access": "admin",
+      "access": "authenticated",
       "rest": "GET /api/work-ledger/history",
       "inputSchemaCoverage": "typed",
       "outputSchemaCoverage": "typed"
@@ -177703,7 +178025,7 @@
     {
       "id": "workLedger.intake.admit",
       "category": "work-ledger",
-      "access": "admin",
+      "access": "authenticated",
       "rest": "POST /api/work-ledger/intake/admit",
       "inputSchemaCoverage": "typed",
       "outputSchemaCoverage": "typed"
@@ -177711,7 +178033,7 @@
     {
       "id": "workLedger.intake.cancel",
       "category": "work-ledger",
-      "access": "admin",
+      "access": "authenticated",
       "rest": "POST /api/work-ledger/intake/cancel",
       "inputSchemaCoverage": "typed",
       "outputSchemaCoverage": "typed"
@@ -177719,7 +178041,7 @@
     {
       "id": "workLedger.intake.capture",
       "category": "work-ledger",
-      "access": "admin",
+      "access": "authenticated",
       "rest": "POST /api/work-ledger/intake/capture",
       "inputSchemaCoverage": "typed",
       "outputSchemaCoverage": "typed"
@@ -177727,7 +178049,7 @@
     {
       "id": "workLedger.intake.get",
       "category": "work-ledger",
-      "access": "admin",
+      "access": "authenticated",
       "rest": "POST /api/work-ledger/intake/get",
       "inputSchemaCoverage": "typed",
       "outputSchemaCoverage": "typed"
@@ -177735,7 +178057,7 @@
     {
       "id": "workLedger.intake.resume",
       "category": "work-ledger",
-      "access": "admin",
+      "access": "authenticated",
       "rest": "POST /api/work-ledger/intake/resume",
       "inputSchemaCoverage": "typed",
       "outputSchemaCoverage": "typed"
@@ -177743,7 +178065,7 @@
     {
       "id": "workLedger.project",
       "category": "work-ledger",
-      "access": "admin",
+      "access": "authenticated",
       "rest": "GET /api/work-ledger/project",
       "inputSchemaCoverage": "typed",
       "outputSchemaCoverage": "typed"
@@ -177751,7 +178073,7 @@
     {
       "id": "workLedger.snapshot",
       "category": "work-ledger",
-      "access": "admin",
+      "access": "authenticated",
       "rest": "GET /api/work-ledger/snapshot",
       "inputSchemaCoverage": "typed",
       "outputSchemaCoverage": "typed"
@@ -177759,7 +178081,7 @@
     {
       "id": "workLedger.submission.get",
       "category": "work-ledger",
-      "access": "admin",
+      "access": "authenticated",
       "rest": "POST /api/work-ledger/submissions/get",
       "inputSchemaCoverage": "typed",
       "outputSchemaCoverage": "typed"
@@ -177767,7 +178089,7 @@
     {
       "id": "workLedger.submit",
       "category": "work-ledger",
-      "access": "admin",
+      "access": "authenticated",
       "rest": "POST /api/work-ledger/submissions",
       "inputSchemaCoverage": "typed",
       "outputSchemaCoverage": "typed"
@@ -177775,7 +178097,7 @@
     {
       "id": "workLedger.turn.cancel",
       "category": "work-ledger",
-      "access": "admin",
+      "access": "authenticated",
       "rest": "POST /api/work-ledger/turn/cancel",
       "inputSchemaCoverage": "typed",
       "outputSchemaCoverage": "typed"
@@ -177783,7 +178105,7 @@
     {
       "id": "workLedger.turn.session",
       "category": "work-ledger",
-      "access": "admin",
+      "access": "authenticated",
       "rest": "POST /api/work-ledger/turn/session",
       "inputSchemaCoverage": "typed",
       "outputSchemaCoverage": "typed"
@@ -177791,7 +178113,7 @@
     {
       "id": "workLedger.turn.start",
       "category": "work-ledger",
-      "access": "admin",
+      "access": "authenticated",
       "rest": "POST /api/work-ledger/turn/start",
       "inputSchemaCoverage": "typed",
       "outputSchemaCoverage": "typed"
@@ -177799,7 +178121,7 @@
     {
       "id": "workLedger.turn.startAgent",
       "category": "work-ledger",
-      "access": "admin",
+      "access": "authenticated",
       "rest": "POST /api/work-ledger/turn/startAgent",
       "inputSchemaCoverage": "typed",
       "outputSchemaCoverage": "typed"
@@ -177807,7 +178129,7 @@
     {
       "id": "workLedger.turn.status",
       "category": "work-ledger",
-      "access": "admin",
+      "access": "authenticated",
       "rest": "POST /api/work-ledger/turn/status",
       "inputSchemaCoverage": "typed",
       "outputSchemaCoverage": "typed"

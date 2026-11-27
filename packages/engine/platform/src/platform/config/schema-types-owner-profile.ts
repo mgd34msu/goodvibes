@@ -25,7 +25,7 @@ export interface OwnerProfileConfig {
   reloadThrottleMs: number;
   /** Absolute path override. Empty means the default under the daemon home. */
   path: string;
-  /** Whether a conversational turn may record what the owner says about himself. */
+  /** Whether a conversational turn may record what the owner says about themselves. */
   conversationalCapture: boolean;
   /** Comma-separated channels that carry the owner's own voice. Empty inherits the nudge channels. */
   ownerChannels: string;

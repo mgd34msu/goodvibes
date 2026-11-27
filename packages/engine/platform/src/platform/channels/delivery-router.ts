@@ -126,7 +126,7 @@ export function createDefaultChannelDeliveryStrategies(
   secretsManager: Pick<SecretsManager, 'get' | 'getGlobalHome'>,
 ): ChannelDeliveryStrategy[] {
   return [
-    // The owner's own targets may name a host he approved on his network (`network.privateDeliveryHosts`).
+    // The owner's own targets may name a host they approved on their network (`network.privateDeliveryHosts`).
     createWebhookDeliveryStrategy(configManager, artifactStore, secretsManager, {
       privateDeliveryHosts: () => parseApprovedHosts(configManager.get(PRIVATE_DELIVERY_HOSTS_SETTING)),
     }),

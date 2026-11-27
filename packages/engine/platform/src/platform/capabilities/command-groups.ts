@@ -5,7 +5,7 @@
  * elsewhere. An action that has moved declares its group itself
  * (CapabilityDeclaration); this table places every other one, so find covers
  * every group while the actions move. The engineer of a group corrects rows
- * here as he reads each action.
+ * here as they read each action.
  */
 import type { CapabilityGroupId } from './groups.js';
 

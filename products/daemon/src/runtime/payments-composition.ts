@@ -338,7 +338,7 @@ export function createPaymentsServices(options: PaymentsCompositionOptions): Pay
       controlPlaneStorePath(options.shellPaths, GOODVIBES_DAEMON_SURFACE_ROOT, 'payments-approvals.json'),
     ),
     // The owner's standing authorisations, which let a scheduled or triggered
-    // run begin a purchase he authorised in advance (/payments repeats).
+    // run begin a purchase the owner authorised in advance (/payments repeats).
     standing: new DaemonStandingAuthorizations(
       controlPlaneStorePath(options.shellPaths, GOODVIBES_DAEMON_SURFACE_ROOT, 'payments-standing.json'),
     ),

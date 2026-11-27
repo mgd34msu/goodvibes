@@ -464,7 +464,7 @@ export async function runInteractiveCommand(input: InteractiveRunInput): Promise
       await sleep(QUIET_POLL_INTERVAL_MS);
       if (exited || timedOut || cancelled || promptDeclined) continue;
       if (pendingPrompt !== undefined && transcript.length !== pendingPromptAtLength) pendingPrompt = undefined;
-      // While the owner is being asked, his answer is what ends the wait; stopping
+      // While the owner is being asked, their answer is what ends the wait; stopping
       // the run then would throw the answer away.
       if (askInFlight) continue;
       // With no timeout_ms nothing else ends a prompt nobody answers.
@@ -527,7 +527,7 @@ export async function runInteractiveCommand(input: InteractiveRunInput): Promise
       ? `Stopped: no timeout_ms was set and the prompt ${JSON.stringify(pendingPrompt)} stayed unanswered (${Math.round((interaction.unansweredPromptLimitMs ?? DEFAULT_UNANSWERED_PROMPT_LIMIT_MS) / 1000)}s with no new output). Answer it by passing input the command can read, or run it again with a timeout_ms.`
       : declinedPrompt
         ? declinedPrompt.unattended
-          ? `Stopped: the command asked ${JSON.stringify(declinedPrompt.prompt)} and no one is attached to answer it. Run it again with the value supplied non-interactively (a flag, an environment variable or piped input).`
+          ? `Stopped: the command asked ${JSON.stringify(declinedPrompt.prompt)}, and a command's question in a model's run is put to a person only under Ask me with someone at the screen. Run it again with the value supplied non-interactively (a flag, an environment variable or piped input).`
           : `Stopped: the command asked ${JSON.stringify(declinedPrompt.prompt)} and the answer was declined, so nothing was typed.`
         : '',
     success: !timedOut && !cancelled && !promptDeclined && exitCode === 0,

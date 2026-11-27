@@ -150,7 +150,7 @@ export function connectedHostAuthNextAction(posture: SetupConnectedHostAuthPostu
     case 'review-bootstrap-credential':
       return 'Review auth status and clear or rotate the compatibility bootstrap credential through the owning GoodVibes host if it is no longer needed.';
     case 'needs-owner-pairing':
-      return `${posture.nativeIntake.detail} Only the owner can grant it, from his own screen: ask the owner to show a sign-in code in his signed-in web UI (Devices and network, Pair something, "Show the sign-in code once") and type it into goodvibes-agent setup pair --with-code in a terminal here; that pairs this Agent as his own device. (${OWNER_PAIRING_CONTROL} or setup pair --apply, previewed by ${PAIRING_PREVIEW_ROUTE}, gives it a key of its own he approves, which is not his device and does no native work.) The model and nested commands cannot grant it, and checking host status again does not change it.`;
+      return `${posture.nativeIntake.detail} Only the owner can grant it, from their own screen: ask the owner to show a sign-in code in their signed-in web UI (Devices and network, Pair something, "Show the sign-in code once") and type it into goodvibes-agent setup pair --with-code in a terminal here; that pairs this Agent as the owner's own device. The model and nested commands cannot grant it, and checking host status again does not change it.`;
     case 'needs-token':
       return posture.operatorToken.present
         ? 'Run the confirmed connected-host token provisioning route to repair the local token file, then rerun auth review and connected-host status.'

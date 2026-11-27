@@ -71,7 +71,7 @@ async function guarded(run: () => CapabilityResult | Promise<CapabilityResult>):
   }
 }
 
-/** A model is refused marking reviewed outright (nothing is put to the owner for it): the review is his own act. */
+/** A model is refused marking reviewed outright (nothing is put to the owner for it): the review is the owner's own act. */
 const REVIEW_IS_THE_OWNERS = {
   reason: 'marking it reviewed is your decision that its text may reach the prompt',
   instead: 'Ask the owner to mark it reviewed in Tools and extensions.',
@@ -80,7 +80,7 @@ const REVIEW_IS_THE_OWNERS = {
 /** Who made or changed a skill, as its provenance says it: the person's own press or line, else the model. */
 /**
  * Who made or changed a skill, in its provenance, from who wrote it as the daemon authenticated the caller
- * (CapabilityCaller.author): the owner, his model in his own turn, or someone else, named. Never the person's claim alone:
+ * (CapabilityCaller.author): the owner, their model in their own turn, or someone else, named. Never the person's claim alone:
  * a paired device's press carries the claim too.
  */
 function byWhom(caller: CapabilityCaller, made: 'Made' | 'Changed'): string {
@@ -92,15 +92,15 @@ function byWhom(caller: CapabilityCaller, made: 'Made' | 'Changed'): string {
 function madeBy(caller: CapabilityCaller): string {
   return byWhom(caller, 'Made');
 }
-/** A skill's source: the owner's own, or written for him (his model's, or someone else's). */
+/** A skill's source: the owner's own, or written for them (their model's, or someone else's). */
 function sourceOf(caller: CapabilityCaller): 'user' | 'agent' {
   return caller.author?.kind === 'owner' ? 'user' : 'agent';
 }
 
-/** Marking reviewed, and switching on what nobody reviewed, count only from the owner himself (his press, his yes). */
+/** Marking reviewed, and switching on what nobody reviewed, count only from the owner in person (their press, their yes). */
 function ownerMay(caller: CapabilityCaller, what: string): void {
   if (caller.author?.kind === 'owner') return;
-  throw new CapabilityRefusal(`${what} is the owner's decision that its text may reach the prompt, so it counts only when the owner does it himself; nothing was changed.`,
+  throw new CapabilityRefusal(`${what} is the owner's decision that its text may reach the prompt, so it counts only when the owner does it in person; nothing was changed.`,
     'Ask the owner to do it in Tools and extensions, on the skill.', 'OWNER_REVIEW_REQUIRED');
 }
 

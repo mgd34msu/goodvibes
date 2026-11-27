@@ -29,7 +29,8 @@ import type { CallContext, GatewayMethodInvocationContext } from '../control-pla
 import { CALLER_RULES_ABSENT, callerPathRefusal, pathNamerOf } from '../control-plane/caller-paths.js';
 import { hasArtifactMaker, withArtifactMaker, type ArtifactTurnMaker } from '../artifacts/turn-maker.js';
 import { callerReachRefusal, reachableAnswer, reachFilterOf } from '../control-plane/caller-reach.js';
-import { SHARED_KIND_NOT_GIVEN, type SharedKind, type SharedKindCaller } from '../control-plane/shared-kinds.js';
+import { SHARED_KIND_NOT_GIVEN, sharedKindGiven, type SharedKind, type SharedKindCaller } from '../control-plane/shared-kinds.js';
+import { catalogPathname } from './http/route-manifest.js';
 import { callReachesKnowledge } from '../knowledge/knowledge-reach.js';
 import { daemonSharedKindRule, sharedKindAdmission, type SharedKindAnswer } from './shared-kind-gifts.js';
 import { withRecordReach } from '@goodvibes/engine/daemon-api';
@@ -58,9 +59,14 @@ import { decidedMarkAct, decidedMarkCovers, ownerApprovalCovers, spendCapability
 
 /** The settings writes that keep who made them and how it was decided (daemon-api control-routes.ts `SettingAct`). */
 const SETTING_WRITE_METHOD_IDS: ReadonlySet<string> = new Set(['config.set', 'config.setMany', 'config.reset', 'credentials.set', 'credentials.delete']);
-import { methodCallRisk, riskOfDescriptor, VALUE_DECIDED_METHOD_IDS, type MethodRisk } from '../control-plane/method-risk.js';
+import { methodCallRisk, OWNER_ONLY_WHERE, ownerOnlyMethodArea, riskOfDescriptor, VALUE_DECIDED_METHOD_IDS, type MethodRisk } from '../control-plane/method-risk.js';
+import { modelNeverMakes } from '../security/effect-authority.js';
 import { isCommandLineRegistration, isRegisteredProgram } from './program-registrations.js';
-import { AGENT_CREDENTIAL_OWNER_ONLY_WORDS, ANSWER_METHOD_IDS, callerAdmitted, methodCallPutToOwner, mintsAgentCredential, nestedAnswerAdmitted, OWNER_ANSWERS_ONLY, OWNER_ANSWERS_ONLY_WORDS, OWNER_DECISION_NEEDED, OWNER_DEVICE_ANSWER_METHOD_IDS, ownerAnswers, ownerHimself, ownersAgentProgram, ownersDevice, ownersOwnSession, ownersProgramCaller, wellFormedActor } from './method-owner-decision.js';
+import { AGENT_CREDENTIAL_OWNER_ONLY_WORDS, ANSWER_METHOD_IDS, callerAdmitted, methodCallPutToOwner, mintsAgentCredential, nestedAnswerAdmitted, OWNER_ANSWERS_ONLY, OWNER_ANSWERS_ONLY_WORDS, OWNER_DECISION_NEEDED, OWNER_DEVICE_ANSWER_METHOD_IDS, ownerAnswers, ownerHimself, ownersAgentProgram, ownersDevice, ownersOwnSession, ownersProgramCaller, partyOfCaller, wellFormedActor,
+  makesOwnerOnlyAct, MODEL_NEVER, modelNeverWords, OWNER_ONLY_ACT, ownerOnlyActWords, ownersCommandLine } from './method-owner-decision.js';
+import { asCallOutsideTurn, turnInputParty } from '../security/turn-input-party.js';
+import { decideInProject } from '../permissions/call-project.js';
+import { withFirstUseCall, type FirstUseCall } from './capability-owner-gate.js';
 import { bindOwnerAdmitted, bindProgramRegistration, bindSettingAct, readProgramRegistration, type SettingAct } from '@goodvibes/engine/daemon-api/control-routes';
 import { isInProcessRequest } from './client-address.js';
 
@@ -86,21 +92,23 @@ const CAPABILITY_RUN_METHOD = 'capabilities.run';
 const CREDENTIAL_MINT_METHOD_IDS: ReadonlySet<string> = new Set(['pairing.tokens.create', 'pairing.tokens.migrate', 'pairing.outsideAgent.issue']);
 
 /**
- * Who makes a credential: the owner himself (his sign-in, his registered program, the daemon's own act), or the caller
- * it was put to him for, on his yes (his own device included: a device is never the owner himself); undefined for
- * anyone else (such a mint is held for him first). A yes gives that caller what its card said, never his device.
+ * Who makes a credential: the owner in person (their sign-in, their registered program, the daemon's own act), or the caller
+ * it was put to the owner for, on the owner's yes (the owner's own device included: a device is never the owner in person); undefined for
+ * anyone else (such a mint is held for the owner first). A yes gives that caller what its card said, never the owner's device.
  */
 function credentialMakerOf(authenticated: { readonly principalId: string; readonly credentialKind?: CredentialKind | null | undefined; readonly actor?: Actor | undefined } | null | undefined,
   caller: { readonly actor: Actor | undefined; readonly registration: string | undefined }, ownerApproved: boolean): { readonly owner: true } | { readonly caller: string; readonly ownersYes: true } | undefined {
-  // The daemon's own in-process act is not the owner being there: it records no maker (never his device).
+  // The daemon's own in-process act is not the owner being there: it records no maker (never the owner's device).
   if (caller.actor?.class === 'system') return undefined;
-  if (authenticated && ownerHimself({ actor: authenticated.actor, credentialKind: authenticated.credentialKind ?? undefined, registration: caller.registration })) return { owner: true };
+  // The owner in person or the owner's own command line (method-owner-decision.ts `makesOwnerOnlyAct`, the one test).
+  if (authenticated && makesOwnerOnlyAct({ actor: authenticated.actor, credentialKind: authenticated.credentialKind ?? undefined, registration: caller.registration })) return { owner: true };
   if (ownerApproved) return { caller: authenticated?.principalId ?? 'a caller the daemon could not name', ownersYes: true };
   return undefined;
 }
 
 const METHOD_RISK_WORDS: Readonly<Record<Exclude<MethodRisk, 'none'>, string>> = {
-  'loosens-a-protection': 'loosens a protection', 'steers-a-model': 'writes what steers a model in the owner\'s turns',
+  'loosens-a-protection': 'loosens a protection', 'runs-later': 'sets something to run by itself later',
+  'steers-a-model': 'writes what steers a model in the owner\'s turns',
   'cannot-be-undone': 'cannot be undone', 'spends-money': 'spends money',
   'writes-a-secret': 'writes a secret', 'owner-act': 'is an act only the owner makes',
   'answers-the-owner': 'answers something addressed to the owner',
@@ -152,7 +160,7 @@ export interface ControlPlaneWebSocketData {
   principalKind: 'user' | 'bot' | 'service' | 'token' | null;
   /** Which credential the socket authenticated with; null before in-band auth. */
   credentialKind?: CredentialKind | null | undefined;
-  /** A device the owner paired himself; see RequestPrincipal.ownerDevice. */
+  /** A device the owner paired in person; see RequestPrincipal.ownerDevice. */
   ownerDevice?: true | undefined;
   /** Who the socket's principal is as a cause of effects; null before in-band auth. */
   actor?: Actor | null | undefined;
@@ -239,20 +247,25 @@ export interface DaemonControlPlaneContext {
    */
   readonly forgetCallerProjects?: ((principalIds: readonly string[]) => void) | undefined;
   /**
+   * Run once as the daemon stops cleanly (`dispose`): it keeps which credentials exist then, so the next start tells one made
+   * while this version did not run (facade-composition.ts, the carry from 3.5.0 after a rollback).
+   */
+  readonly onStop?: (() => void) | undefined;
+  /**
    * The outside agent's projects (daemon/outside-agent.ts): for the folders a call of its own credential names, go on
    * (given, or given now on the owner's yes) or the refusal; undefined for any other caller. Absent: never asked.
    */
-  readonly outsideAgentProject?: ((principalId: string, folders: readonly string[]) => Promise<{ readonly ok: true } | { readonly ok: false; readonly reason: string; readonly pendingApprovalId?: string } | undefined>) | undefined;
+  readonly outsideAgentProject?: ((principalId: string, folders: readonly string[], signal?: AbortSignal) => Promise<{ readonly ok: true } | { readonly ok: false; readonly reason: string } | undefined>) | undefined;
   /**
    * Where this daemon cannot verify its programs (daemon/unverified-programs.ts): for the folders a call of the
    * operator token from this machine without a registration names, go on (given, or given now on the owner's yes) or
    * the question's id; undefined where verification works or for any other caller. Absent: never asked.
    */
-  readonly unverifiedProgramProject?: ((caller: { readonly principalId: string; readonly credentialKind: string | undefined; readonly registration: string | undefined }, folders: readonly string[]) => Promise<{ readonly ok: true } | { readonly ok: false; readonly reason: string; readonly pendingApprovalId?: string } | undefined>) | undefined;
+  readonly unverifiedProgramProject?: ((caller: { readonly principalId: string; readonly credentialKind: string | undefined; readonly registration: string | undefined }, folders: readonly string[], signal?: AbortSignal) => Promise<{ readonly ok: true } | { readonly ok: false; readonly reason: string } | undefined>) | undefined;
   /**
    * The owner's shared things (control-plane/shared-kinds.ts, daemon/shared-kind-gifts.ts): whether this caller may
-   * reach the shared kind a call acts on, or the refusal, or the one question's id. Absent: nobody but the owner himself,
-   * his programs and his own turns reaches one (never "no rule, no check").
+   * reach the shared kind a call acts on, or the refusal, or the one question's id. Absent: nobody but the owner in person,
+   * their programs and their own turns reaches one (never "no rule, no check").
    */
   readonly sharedKind?: ((caller: SharedKindCaller, kind: SharedKind) => Promise<SharedKindAnswer>) | undefined;
 }
@@ -403,7 +416,7 @@ interface GatewayMethodCallInput {
   readonly decidedUpstream?: object | undefined;
   /**
    * In process only: the method's own handler found the call's value is the owner's to decide for a caller the rule
-   * does not admit (method-owner-decision.ts `OWNER_DECISION_NEEDED`): the same call is now put to his gate.
+   * does not admit (method-owner-decision.ts `OWNER_DECISION_NEEDED`): the same call is now put to the owner's gate.
    */
   readonly ownerDecisionNeeded?: true | undefined;
   /**
@@ -625,7 +638,11 @@ export class DaemonControlPlaneHelper {
       this.recordRefusedCredential(req);
       return authenticationRequiredResponse();
     }
-    if (!principal.admin) {
+    // A route of one of the owner's shared kinds is opened by the owner's gift of that kind (control-plane/shared-kinds.ts
+    // `sharedKindGiven`, the same gate the method's access check applies: http/gateway-binding-gate.ts `admittedAs`).
+    const served = principal.actor.agentFor === undefined
+      ? this.context.gatewayMethods.findByHttpBinding(req.method, catalogPathname(new URL(req.url).pathname)) : undefined;
+    if (!principal.admin && !(served !== undefined && sharedKindGiven(served.id, principal.principalId))) {
       return jsonErrorResponse({ error: 'Admin role required', code: 'ADMIN_REQUIRED',
         state: 'this credential is not an admin', next: ['Sign in with an admin account or use the operator token'] }, { status: 403 });
     }
@@ -644,7 +661,7 @@ export class DaemonControlPlaneHelper {
     const close = (principalIds: readonly string[]): void => {
       for (const principalId of principalIds) gateway.closeClientsOf(principalId);
     };
-    // A device unpaired keeps no project; a member keeps his while he is a member (all his sessions ended is not removal).
+    // A device unpaired keeps no project; a member keeps theirs while they are a member (all their sessions ended is not removal).
     const forget = this.context.forgetCallerProjects;
     const unpaired = (principalIds: readonly string[]): void => { close(principalIds); forget?.(principalIds); };
     const signedOut = (principalIds: readonly string[]): void => {
@@ -662,7 +679,14 @@ export class DaemonControlPlaneHelper {
   dispose(): void {
     this.#stopRevocationWatch?.();
     this.#stopRevocationWatch = undefined;
+    const onStop = this.context.onStop;
+    if (onStop && !this.#stopped) {
+      this.#stopped = true;
+      try { onStop(); } catch { /* not kept: the next start carries nothing it cannot tell, and takes nothing */ }
+    }
   }
+
+  #stopped = false;
 
   /**
    * Capture after request-body awaits, using only actual auth owners.
@@ -874,17 +898,17 @@ export class DaemonControlPlaneHelper {
    *
    * `credentialKind` is what the transport established for this request, and
    * `ownersProgram` who the caller is (method-owner-decision.ts
-   * `ownersProgramCaller`: his registered terminal program, his Agent program, a
-   * device he paired himself, a turn the daemon hosts; or a call the owner
+   * `ownersProgramCaller`: their registered terminal program, their Agent program, a
+   * device they paired in person, a turn the daemon hosts; or a call the owner
    * approved). Authority comes from who, never from the credential's kind: the
    * `local` credential (the operator token from this machine) gets the owner's
-   * own machine's authority only from his own program, while that token is still
+   * own machine's authority only from their own program, while that token is still
    * the operator token; it is looked up on first use, so a call that never
-   * reaches native work pays nothing for it. The owner himself on his sign-in
+   * reaches native work pays nothing for it. The owner in person on their sign-in
    * (`ownerSession`: the one owner definition, method-owner-decision.ts
-   * `ownersOwnSession`) holds the same authority as his own machine, the owner's
-   * one native identity, while that session is still current and still his. A
-   * pairing token is native as itself only for his own device or his Agent
+   * `ownersOwnSession`) holds the same authority as their own machine, the owner's
+   * one native identity, while that session is still current and still theirs. A
+   * pairing token is native as itself only for the owner's own device or their Agent
    * program; a script, an admin's or a member's pairing, and the Agent's
    * credential alone hold none.
    * While the native identity holds and the catalog's scopes do not move,
@@ -1357,16 +1381,17 @@ export class DaemonControlPlaneHelper {
 
   /**
    * Who made a settings write and how it was decided: what the capability it is nested in recorded (its run's act), else
-   * the owner's yes to this call put to him, the owner's own press, or admitted under his rules for the caller. A paired
+   * the owner's yes to this call put to them, the owner's own press, or admitted under the owner's rules for the caller. A paired
    * device is named as the owner reads it, from its token; nothing else is looked up.
    */
   private settingActOf(authToken: string, context: { readonly actor?: Actor | undefined; readonly principalId?: string | undefined; readonly explicitUserRequest?: boolean | undefined } | undefined,
-    upstream: SettingAct | undefined, ownerApproved: boolean, himself: boolean): SettingAct {
+    upstream: SettingAct | undefined, ownerApproved: boolean, inPerson: boolean): SettingAct {
     const actor = context?.actor;
     const by = upstream?.by ?? context?.principalId ?? actor?.id ?? 'unknown';
-    // The owner himself (his signed-in session or his verified program: method-owner-decision.ts `ownerHimself`), never
-    // a credential's class alone: this record is what the group's other machines read as his own act (gate-review-6 G2).
-    const owner = upstream?.owner ?? himself;
+    // The owner in person (their signed-in session or their verified program: method-owner-decision.ts `ownerHimself`) or the
+    // owner's own verified command line (`ownersCommandLine`), never a credential's class alone: this record is what the
+    // group's other machines read as the owner's own act (gate-review-6 G2).
+    const owner = upstream?.owner ?? inPerson;
     const how = upstream?.how ?? (ownerApproved ? 'yes' : context?.explicitUserRequest === true && owner ? 'press' : 'rules');
     let name: string | undefined;
     try {
@@ -1470,14 +1495,16 @@ export class DaemonControlPlaneHelper {
     try {
       let request: Request;
       try {
+        const sent = input.body !== undefined ? JSON.stringify(input.body) : undefined;
         request = new Request(url.toString(), {
           method: input.method,
           headers: {
             ...(input.headers ?? {}),
             Authorization: `Bearer ${input.authToken}`,
-            ...(input.body !== undefined ? { 'Content-Type': 'application/json' } : {}),
+            // Its length declared, so the route reads it whole (utils/request-body.ts), not through a reader.
+            ...(sent !== undefined ? { 'Content-Type': 'application/json', 'Content-Length': String(Buffer.byteLength(sent)) } : {}),
           },
-          ...(input.body !== undefined ? { body: JSON.stringify(input.body) } : {}),
+          ...(sent !== undefined ? { body: sent } : {}),
           signal,
         });
       } catch (error: unknown) {
@@ -1617,7 +1644,11 @@ export class DaemonControlPlaneHelper {
     // A program's call from its conversation (its session, as it names it) runs inside that conversation, marked with
     // what the program says its own turn read from outside (security/conversation-exposure.ts): the daemon decides it,
     // and every later call of that conversation, as for its own turn after such a read. It only tightens.
-    const programSession = input.context?.call?.sessionId?.trim();
+    // Only a conversation this caller may reach (the one reach rule: the owner at large, or a session it registered or
+    // was given): naming another's session marks nothing of it, and the call is one call of its own.
+    const namedSession = input.context?.call?.sessionId?.trim();
+    const programSession = namedSession && (reachFilter === null || reachFilter('session', namedSession) || reachFilter('chat', namedSession))
+      ? namedSession : undefined;
     const carried = decodeCarriedExposure(input.context?.call?.readOutside);
     const inConversation = async <T>(fn: () => Promise<T>): Promise<T> => {
       if (input.daemonTurn === true) return fn();
@@ -1634,13 +1665,55 @@ export class DaemonControlPlaneHelper {
     return inConversation(() => withRecordReach(reachFilter, () => withArtifactMaker(knowledgeMaker, () => withUntrustedContentScope(scope, async () => {
       const result = await this.dispatchGatewayMethodCall(input, principal);
       // A value-deciding method's handler found the value is the owner's to decide for this caller (it changed nothing):
-      // the same call goes to his gate, the one decision every other held call gets.
+      // the same call goes to the owner's gate, the one decision every other held call gets.
       const code = result.body !== null && typeof result.body === 'object' ? (result.body as { readonly code?: unknown }).code : undefined;
       if (result.status === 409 && code === OWNER_DECISION_NEEDED && VALUE_DECIDED_METHOD_IDS.has(input.methodId) && input.ownerDecisionNeeded !== true) {
+        // That value is the owner's own act (a setting loosened, a looser permission mode, access withdrawn that the
+        // caller neither holds nor minted): anyone but the owner in person and their own model's turn is refused here, in
+        // every mode, never put to the owner; their own program's call goes on to their gate.
+        if (!makesOwnerOnlyAct({ actor: principal?.actor, credentialKind: principal?.credentialKind ?? undefined,
+          registration: input.context?.call?.registration, ownersOwnTurn: this.ownersOwnTurnCall(input, principal) })) {
+          const said = (result.body as { readonly error?: unknown }).error;
+          const reason = typeof said === 'string' ? said.replace(/[\s:;,.]*the owner decides (that change|it)\.?\s*$/i, '').trim() : input.methodId;
+          return { status: 403, ok: false, body: refusalBody(ownerOnlyActWords(`This change (${reason})`, OWNER_ONLY_WHERE[ownerOnlyMethodArea(input.methodId)]), OWNER_ONLY_ACT, 403) };
+        }
         return this.dispatchGatewayMethodCall({ ...input, ownerDecisionNeeded: true }, principal);
       }
       return result;
     }))));
+  }
+
+  /**
+   * A model is behind this call: a call nested in one of the daemon's own turns (its model's tool call), or one made
+   * with the Agent's credential (the owner's model in their program, or a script holding that credential). Read from the
+   * credential and the turn, never from the actor a grant put on the call.
+   */
+  private modelBehind(input: GatewayMethodCallInput, principal: GatewayMethodCallInput['principal'] | null): boolean {
+    return input.daemonTurn === true || principal?.credentialKind === 'agent' || principal?.actor?.agentFor !== undefined;
+  }
+
+  /**
+   * The owner's own model in their own turn (method-owner-decision.ts `makesOwnerOnlyAct`): a call nested in one of the
+   * daemon's turns, or a turn it hosts, on the owner's own input (security/turn-input-party.ts); or their Agent program's
+   * model (its credential with its program's checked registration) in a conversation on their own input.
+   */
+  private ownersOwnTurnCall(input: GatewayMethodCallInput, principal: GatewayMethodCallInput['principal'] | null): boolean {
+    const call = input.context?.call;
+    if (input.daemonTurn === true || (call?.daemonHosted === true && principal?.credentialKind === 'local')) return turnInputParty().party === 'owner';
+    return ownersAgentProgram({ actor: principal?.actor, credentialKind: principal?.credentialKind ?? undefined, registration: call?.registration,
+      daemonHosted: call?.daemonHosted === true }) && call?.othersInput !== true;
+  }
+
+  /** A settings write naming a permission setting (the mode, the rules): a model never makes it (`modelNeverWords`). */
+  private namesPermissionSettings(methodId: string, body: unknown): boolean {
+    if (methodId !== 'config.set' && methodId !== 'config.setMany' && methodId !== 'config.reset') return false;
+    const record = body !== null && typeof body === 'object' && !Array.isArray(body) ? body as Record<string, unknown> : {};
+    const keyOf = (change: unknown): unknown => change !== null && typeof change === 'object' ? (change as Record<string, unknown>)['key'] : undefined;
+    // config.setMany names its keys in `entries` (method-catalog-admin.ts); `changes` and `keys` are read too.
+    const keys = [record['key'], ...(Array.isArray(record['entries']) ? record['entries'].map(keyOf) : []),
+      ...(Array.isArray(record['changes']) ? record['changes'].map(keyOf) : []),
+      ...(Array.isArray(record['keys']) ? record['keys'] : [])];
+    return keys.some((key) => typeof key === 'string' && (key === 'permissions' || key.startsWith('permissions.')));
   }
 
   /** A knowledge call's maker: its caller, and the project its call context, body or query names, as the one check reads it. */
@@ -1747,7 +1820,7 @@ export class DaemonControlPlaneHelper {
       // or minted it (`script` class; daemon-api actor.ts). Every door: a request, a socket's call, a nested call.
       const ownKinds = principal.credentialKind === 'local' || principal.credentialKind === 'shared-token' || principal.credentialKind === 'agent';
       // A verified command line (`cli`) is the owner's program for where it works, never a person (method-owner-decision.ts
-      // `ownersCommandLine`): its actor stays his; it is not a script.
+      // `ownersCommandLine`): its actor stays the owner's; it is not a script.
       if (ownKinds && context.actor !== undefined && context.actor.class !== 'script' && !isRegisteredProgram(input.context?.call?.registration)
         && !isCommandLineRegistration(input.context?.call?.registration)
         && input.context?.call?.daemonHosted !== true && input.daemonTurn !== true) {
@@ -1758,10 +1831,10 @@ export class DaemonControlPlaneHelper {
     if (descriptor.effects?.includes('card.enter') && !mayCrossWithCardDetails(authenticated?.transport)) {
       return { status: 403, ok: false, body: refusalBody(describeCardTransportRefusal(), 'CARD_ENTRY_TRANSPORT', 403) };
     }
-    // A call the owner approved (in Waiting for you, or on the card his program put to him): his approval is the
-    // person's request for its own nested method that needs one, and that method's act is admitted as his, for this
-    // one call only (control-plane/owner-approved-call.ts). When the caller is not the owner and the act was his, the
-    // grant carries his actor: this nested call is made with his authority, never the caller's.
+    // A call the owner approved (in Waiting for you, or on the card their program put to them): the owner's approval is the
+    // person's request for its own nested method that needs one, and that method's act is admitted as the owner's, for this
+    // one call only (control-plane/owner-approved-call.ts). When the caller is not the owner and the act was the owner's, the
+    // grant carries the owner's actor: this nested call is made with the owner's authority, never the caller's.
     const offered = input.ownerApproved;
     const granted = offered !== undefined && (offered.owner !== undefined || (context?.explicitUserRequest === true && ownerApprovalCovers(descriptor)))
       ? spendOwnerApprovalGrant(offered) : undefined;
@@ -1786,38 +1859,51 @@ export class DaemonControlPlaneHelper {
       && ((credential !== 'user-session' && credential !== 'device-token' && credential !== 'local') || (credential === 'local' && !registeredProgram))) {
       context = { ...context, explicitUserRequest: undefined };
     }
-    // The outside agent's own credential naming a project it was not given (daemon/outside-agent.ts): one question to the
-    // owner per project, the call held until he answers; on his yes it is given that project and the call goes on.
+    // A model never makes what the effect table says no model causes (granting or withdrawing access, a sign-in, a
+    // credential, a pairing, the permission rules, a card): refused for any model in every mode, the owner's own turn
+    // included, whatever its call was decided as or carries (a grant from the owner's yes included). Answers keep their own rule.
+    // Before anything else is decided (a first use, a project, the gate), so it is never put to anyone.
+    if (!ANSWER_METHOD_IDS.has(descriptor.id) && this.modelBehind(input, authenticated)
+      && ((descriptor.effects ?? []).some(modelNeverMakes) || this.namesPermissionSettings(descriptor.id, input.body))) {
+      return { status: 403, ok: false, body: refusalBody(modelNeverWords(`${descriptor.title} (${descriptor.id})`), MODEL_NEVER, 403) };
+    }
+    // An act only the owner makes (method-risk.ts `owner-act`; a write of the permission mode or rules): refused for anyone
+    // but the owner in person and their own model's turn, in every mode, before anything is decided or put to anyone
+    // (method-owner-decision.ts `makesOwnerOnlyAct`).
+    if ((methodCallRisk(descriptor, input.body) === 'owner-act' || this.namesPermissionSettings(descriptor.id, input.body))
+      && !makesOwnerOnlyAct({ actor: authenticated?.actor, credentialKind: credential ?? undefined,
+        registration: input.context?.call?.registration, ownersOwnTurn: this.ownersOwnTurnCall(input, authenticated) })) {
+      const area = methodCallRisk(descriptor, input.body) === 'owner-act' ? ownerOnlyMethodArea(descriptor.id) : 'permissions';
+      return { status: 403, ok: false, body: refusalBody(ownerOnlyActWords(`${descriptor.title} (${descriptor.id})`, OWNER_ONLY_WHERE[area]), OWNER_ONLY_ACT, 403) };
+    }
+    // A first use this call needs (a project for the outside agent or an unverified program, one of the owner's shared
+    // things) is decided together with the call, in one decision naming both (capability-owner-gate.ts `FirstUseCall`):
+    // allowed, the call is not decided again below. One act, one decision.
+    // A capability run is named by the capability it runs (its id), as the owner's card names it.
+    const runsCapability = descriptor.id === CAPABILITY_RUN_METHOD && typeof (input.body as { id?: unknown } | null | undefined)?.id === 'string'
+      ? String((input.body as { id: string }).id) : undefined;
+    const firstUse: FirstUseCall = { label: runsCapability !== undefined ? `run ${runsCapability}` : `${descriptor.title} (${descriptor.id})`,
+      risk: methodCallRisk(descriptor, input.body), covered: false };
+    // The outside agent's own credential naming a project it was not given (daemon/outside-agent.ts): giving it that
+    // project is decided under the owner's mode (under Ask me the call waits on the owner's answer); given, the call goes on.
     if (this.context.outsideAgentProject && authenticated?.principalId) {
       const record = (value: unknown): Record<string, unknown> | undefined => value !== null && typeof value === 'object' && !Array.isArray(value) ? value as Record<string, unknown> : undefined;
       const folders = [record(input.body)?.['workingDirectory'], record(input.query)?.['workingDirectory'], input.context?.call?.project]
         .filter((folder): folder is string => typeof folder === 'string' && folder.trim() !== '').map((folder) => folder.trim());
-      const answer = folders.length > 0 ? await this.context.outsideAgentProject(authenticated.principalId, [...new Set(folders)]) : undefined;
-      if (answer && !answer.ok && answer.pendingApprovalId !== undefined) {
-        // Asked, never held open: the call is answered at once that the owner was asked, where, and to call again.
-        return { status: 202, ok: true, body: {
-          id: descriptor.id, ok: false, success: false, code: 'OWNER_APPROVAL_PENDING', approvalId: answer.pendingApprovalId,
-          state: `Not done yet: ${answer.reason}.`,
-          next: ['The owner answers it in Waiting for you (the terminal app or the Agent, the web UI, or a paired phone).', 'Send the same call again after he answers.'],
-        } };
-      }
+      const outsideAgentProject = this.context.outsideAgentProject;
+      const principalId = authenticated.principalId;
+      const answer = folders.length > 0 ? await withFirstUseCall(firstUse, () => outsideAgentProject(principalId, [...new Set(folders)], input.signal)) : undefined;
       if (answer && !answer.ok) return { status: 403, ok: false, body: refusalBody(`Not done: ${answer.reason}. Nothing was read or changed.`, 'PROJECT_NOT_ALLOWED', 403) };
     }
-    // A program this daemon cannot verify (another system, or no program socket) naming a folder it was not given: one
-    // question per folder to the owner, answered at once with its id (daemon/unverified-programs.ts).
+    // A program this daemon cannot verify (another system, or no program socket) naming a folder it was not given: decided
+    // the same way (daemon/unverified-programs.ts).
     if (this.context.unverifiedProgramProject && authenticated?.principalId) {
       const record = (value: unknown): Record<string, unknown> | undefined => value !== null && typeof value === 'object' && !Array.isArray(value) ? value as Record<string, unknown> : undefined;
       const folders = [record(input.body)?.['workingDirectory'], record(input.query)?.['workingDirectory'], input.context?.call?.project]
         .filter((folder): folder is string => typeof folder === 'string' && folder.trim() !== '').map((folder) => folder.trim());
-      const answer = folders.length > 0 ? await this.context.unverifiedProgramProject({ principalId: authenticated.principalId, credentialKind: authenticated.credentialKind,
-        registration: input.context?.call?.registration }, [...new Set(folders)]) : undefined;
-      if (answer && !answer.ok && answer.pendingApprovalId !== undefined) {
-        return { status: 202, ok: true, body: {
-          id: descriptor.id, ok: false, success: false, code: 'OWNER_APPROVAL_PENDING', approvalId: answer.pendingApprovalId,
-          state: `Not done yet: ${answer.reason}.`,
-          next: ['The owner answers it in Waiting for you (the web UI signed in as him, or a paired phone).', 'Send the same call again after he answers.'],
-        } };
-      }
+      const unverifiedProgramProject = this.context.unverifiedProgramProject;
+      const asker = { principalId: authenticated.principalId, credentialKind: authenticated.credentialKind, registration: input.context?.call?.registration };
+      const answer = folders.length > 0 ? await withFirstUseCall(firstUse, () => unverifiedProgramProject(asker, [...new Set(folders)], input.signal)) : undefined;
       if (answer && !answer.ok) return { status: 403, ok: false, body: refusalBody(`Not done: ${answer.reason}. Nothing was read or changed.`, 'PROJECT_NOT_ALLOWED', 403) };
     }
     // The project the caller named, checked once for every handler (workspace/caller-project.ts): refused before any
@@ -1829,7 +1915,7 @@ export class DaemonControlPlaneHelper {
     // again for a call that reaches a handler, and is what the daemon's own in-process calls pass): here before
     // anything else reads the call, so a call that will be refused is never put to the owner first, and a method served
     // only by its route is checked too (control-plane/caller-paths.ts).
-    // No rules to read is never no check (caller-paths.ts `CALLER_RULES_ABSENT`): only the owner himself names a folder.
+    // No rules to read is never no check (caller-paths.ts `CALLER_RULES_ABSENT`): only the owner in person names a folder.
     const pathRules = this.context.gatewayMethods.pathRules?.() ?? CALLER_RULES_ABSENT;
     const pathRefusal = callerPathRefusal(descriptor, input.body, input.query,
       { ...(authenticated?.credentialKind ? { credentialKind: authenticated.credentialKind } : {}), ...(authenticated ? { principalId: authenticated.principalId } : {}),
@@ -1846,20 +1932,13 @@ export class DaemonControlPlaneHelper {
     const reachRefusal = await callerReachRefusal(descriptor.id, input.body, input.query, reachContext, reachRules);
     if (reachRefusal !== undefined) return { status: 403, ok: false, body: refusalBody(`Not done: ${reachRefusal}. Nothing was read or changed.`, RECORD_NOT_YOURS, 403) };
     const reachable = async (answer: unknown): Promise<unknown> => reachableAnswer(descriptor.id, answer, reachContext, reachRules, input.body);
-    // The owner's shared things (his mail, calendar, channels, knowledge, money, profile, dates, home, notifications):
-    // his, his programs' and his own turns'; anyone else's only with his gift of that kind, else one question to him
-    // the first time (control-plane/shared-kinds.ts). Before anything is put to the owner or run.
+    // The owner's shared things (their mail, calendar, channels, knowledge, money, profile, dates, home, notifications):
+    // theirs, their programs' and their own turns'; anyone else's only with the owner's gift of that kind, its first use decided under
+    // the owner's mode (control-plane/shared-kinds.ts). Before anything else is decided or run.
     // A public or peer method (an inbound webhook a provider signs, a peer's own call) is admitted by its own proof.
     const shared = descriptor.access === 'public' || descriptor.access === 'remote-peer' ? { ok: true as const }
-      : await sharedKindAdmission(this.context.sharedKind ?? daemonSharedKindRule(), descriptor.id, input.body,
-        { ...reachContext, ...(context?.actor ? { actor: context.actor } : {}), ...(input.daemonTurn === true ? { daemonTurn: true } : {}) });
-    if (!shared.ok && shared.pendingApprovalId !== undefined) {
-      return { status: 202, ok: true, body: {
-        id: descriptor.id, ok: false, success: false, code: 'OWNER_APPROVAL_PENDING', approvalId: shared.pendingApprovalId,
-        state: `Not done yet: ${shared.reason}.`,
-        next: ['The owner answers it in Waiting for you (the terminal app or the Agent, the web UI, or a paired phone).', 'Send the same call again after he answers.'],
-      } };
-    }
+      : await withFirstUseCall(firstUse, () => sharedKindAdmission(this.context.sharedKind ?? daemonSharedKindRule(), descriptor.id, input.body,
+        { ...reachContext, ...(context?.actor ? { actor: context.actor } : {}), ...(input.daemonTurn === true ? { daemonTurn: true } : {}) }, input.signal));
     if (!shared.ok) return { status: 403, ok: false, body: refusalBody(`Not done: ${shared.reason}. Nothing was read or changed.`, SHARED_KIND_NOT_GIVEN, 403) };
     // The owner's own Agent program, by who it is: its credential with the registration the daemon issued the Agent
     // process it verified, or a turn the daemon hosts (method-owner-decision.ts `ownersAgentProgram`). The credential
@@ -1870,8 +1949,8 @@ export class DaemonControlPlaneHelper {
     const decidedInRun = input.context?.decidedInRun === true && agentProgram;
     // The program's capability gate decided this call: kept only from the owner's own Agent program.
     const decidedByCapabilityGate = input.context?.decidedByCapabilityGate === true && agentProgram;
-    // The Agent's credential is made only for the owner himself (method-owner-decision.ts `mintsAgentCredential`):
-    // anyone else asking is refused here, before anything is put to the owner, since no yes of his makes it theirs.
+    // The Agent's credential is made only for the owner in person (method-owner-decision.ts `mintsAgentCredential`):
+    // anyone else asking is refused here, before anything is put to the owner, since no yes of the owner's makes it the asker's.
     const agentCredentialMint = descriptor.id === 'pairing.tokens.create' && input.body !== null && typeof input.body === 'object'
       && (input.body as Record<string, unknown>)['client'] === 'agent';
     if (agentCredentialMint && !mintsAgentCredential({ actor: context?.actor, credentialKind: credential ?? undefined,
@@ -1895,20 +1974,20 @@ export class DaemonControlPlaneHelper {
       }
     }
     // The method's risk class, decided as the capability that does the same act would be (method-owner-decision.ts):
-    // anyone but the owner's own program with a person's press is put to the owner's gate, through `capabilities.run`,
-    // which answers 202 with the question's id at once and runs the call as it came on his yes. Decided here only,
+    // anyone but the owner's own program with a person's press is handed to the daemon's gate, through `capabilities.run`,
+    // which decides it under the owner's mode and runs the call as it came when allowed. Decided here only,
     // once: a call nested in a decided capability, one the owner approved, or one the program's gate decided is not.
     // Who made the capability's act this call is nested in, and how it was decided (read before the mark is spent).
     const upstreamAct = decidedMarkAct(input.decidedUpstream);
     const upstreamCovers = decidedMarkCovers(input.decidedUpstream);
     const spentUpstream = spendCapabilityDecidedMark(input.decidedUpstream);
     // The owner's own terminal program (its registration checked by the router, daemon/program-registrations.ts, on a
-    // credential that is his and keeps a person's claim) says its gate decided this call: one decision, the program's.
+    // credential that is the owner's and keeps a person's claim) says its gate decided this call: one decision, the program's.
     const callerFacts = { actor: context?.actor, credentialKind: credential, registration: input.context?.call?.registration, personAsked: context?.explicitUserRequest === true,
       daemonHosted: input.context?.call?.daemonHosted === true };
     const ownProgramGate = input.context?.decidedByCapabilityGate === true && input.context.call?.registration !== undefined && ownerHimself(callerFacts);
     const callRisk = methodCallRisk(descriptor, input.body);
-    // The capability's decision stands for its nested method only as far as it went: the owner's own press, his yes, or
+    // The capability's decision stands for its nested method only as far as it went: the owner's own press, their yes, or
     // a decision that covered this method's class. A stricter class it did not cover (a setting write admitted under the
     // rules that stores a credential through credentials.set) is decided here, by the method's own class.
     const decidedUpstream = spentUpstream && (callRisk === 'none' || upstreamCovers === undefined
@@ -1918,18 +1997,20 @@ export class DaemonControlPlaneHelper {
     if ((callRisk !== 'none' || ANSWER_METHOD_IDS.has(descriptor.id)) && !ownerApproved && !decidedUpstream && !wellFormedActor(context?.actor)) {
       return { status: 403, ok: false, body: refusalBody(`${descriptor.id} was not run: the daemon could not name who is calling, and an act the owner decides is never made by nobody. Nothing was changed.`, 'OWNER_ONLY', 403) };
     }
+    // Its first use, decided just now together with it (above), decided it: not decided again.
+    const decidedWithFirstUse = firstUse.covered && firstUse.risk === callRisk;
     const putToOwner = methodCallPutToOwner({
-      ...callerFacts, methodId: descriptor.id, risk: callRisk, ownerApproved, decidedUpstream, decidedInRun,
+      ...callerFacts, methodId: descriptor.id, risk: callRisk, ownerApproved, decidedUpstream: decidedUpstream || decidedWithFirstUse, decidedInRun,
       decidedByProgramGate: decidedByCapabilityGate || ownProgramGate, agentCredentialMint,
     });
     // A method whose class depends on its value is told whether the rule admits this caller at once; when its handler
     // finds the value is the owner's to decide for a caller it does not admit, the same call comes back here held.
-    const ownerAdmitted = ownerApproved || decidedUpstream || decidedInRun || decidedByCapabilityGate || ownProgramGate
+    const ownerAdmitted = ownerApproved || decidedUpstream || decidedWithFirstUse || decidedInRun || decidedByCapabilityGate || ownProgramGate
       || callerAdmitted(callerFacts, callRisk === 'none' ? 'loosens-a-protection' : callRisk);
-    // Answering a question addressed to the owner is never itself a question: his own press or his sign-in answers at
+    // Answering a question addressed to the owner is never itself a question: the owner's own press or sign-in answers at
     // once, anyone else is refused outright (method-owner-decision.ts `ownerAnswers`).
     // Nested in a capability run, it answers only when that run's caller was admitted as the owner answering (or it ran
-    // on his own press or his yes): a run decided any other way (under the mode, by a program's gate) answers nothing.
+    // on the owner's own press or yes): a run decided any other way (under the mode, by a program's gate) answers nothing.
     const upstreamAnswered = spentUpstream && nestedAnswerAdmitted({ covers: upstreamCovers, how: upstreamAct?.how });
     // The owner's own device answers an approval some other caller raised: its answer goes on to the approval route,
     // whose viewer refuses a question it, or a credential made from it, raised (approval-actions.ts). Nothing else.
@@ -1937,9 +2018,9 @@ export class DaemonControlPlaneHelper {
     if (ANSWER_METHOD_IDS.has(descriptor.id) && !ownerApproved && !deviceAnswering && !ownerAnswers(callerFacts, { decidedInRun, decidedUpstream: upstreamAnswered })) {
       return { status: 403, ok: false, body: refusalBody(OWNER_ANSWERS_ONLY_WORDS, OWNER_ANSWERS_ONLY, 403) };
     }
-    const heldMethod = putToOwner === undefined && input.ownerDecisionNeeded !== true ? undefined : { id: descriptor.id, body: input.body ?? {}, query: input.query ?? {} };
+    const heldMethod =putToOwner === undefined && input.ownerDecisionNeeded !== true ? undefined : { id: descriptor.id, body: input.body ?? {}, query: input.query ?? {} };
     if (heldMethod && !this.context.gatewayMethods.hasHandler(CAPABILITY_RUN_METHOD)) {
-      return { status: 403, ok: false, body: refusalBody(`${descriptor.id} was not run: it ${METHOD_RISK_WORDS[putToOwner ?? (callRisk === 'none' ? 'owner-act' : callRisk)]}, so it is the owner's to decide, and this daemon has no way to ask him. Nothing was changed.`, 'OWNER_ONLY', 403) };
+      return { status: 403, ok: false, body: refusalBody(`${descriptor.id} was not run: it ${METHOD_RISK_WORDS[putToOwner ?? (callRisk === 'none' ? 'owner-act' : callRisk)]}, so it is the owner's to decide, and this daemon has no way to ask the owner. Nothing was changed.`, 'OWNER_ONLY', 403) };
     }
     // A fresh owner request resets the untrusted-content window; automated
     // work deliberately does not. It runs only once the call is known, the
@@ -1948,6 +2029,17 @@ export class DaemonControlPlaneHelper {
     // The approved call is still the caller's work: it does not start a new turn for the owner.
     startTurnForOwnerRequest(ownerApproved ? undefined : context?.explicitUserRequest);
     const caller = callerKey(input.context?.connectionId, context?.principalId ?? authenticated?.principalId);
+    // Whose call this is, from the authenticated caller (never a field): what it makes that runs later (a schedule, a
+    // trigger) keeps it, and those runs are that caller's turn (method-owner-decision.ts `partyOfCaller`). A turn's
+    // nested call keeps its turn's party; `capabilities.run` marks its own run by who caused it (routes/capabilities.ts).
+    const callParty = heldMethod || descriptor.id === CAPABILITY_RUN_METHOD || input.daemonTurn === true ? undefined
+      : partyOfCaller({ actor: granted?.owner !== undefined ? authenticated?.actor : context?.actor, credentialKind: authenticated?.credentialKind ?? undefined,
+        registration: input.context?.call?.registration, daemonHosted: input.context?.call?.daemonHosted === true,
+        principalId: authenticated?.principalId, othersInput: input.context?.call?.othersInput === true });
+    // And every step of it that reads the owner's mode or rules does so for the project the call names (checked above:
+    // permissions/call-project.ts `decideInProject`; permissions/owner-is-asked.ts), never the daemon's own settings alone.
+    const callProject = input.context?.call?.project;
+    const asCaller = <T>(fn: () => T): T => decideInProject(callProject, () => callParty ? asCallOutsideTurn(fn, callParty) : fn());
 
     if (heldMethod || this.context.gatewayMethods.hasHandler(input.methodId)) {
       // ONE contract: no call arm is unbounded. The registered-handler branch
@@ -1958,9 +2050,9 @@ export class DaemonControlPlaneHelper {
       const refused = this.admitCall(caller);
       if (refused) return refused;
       try {
-        // A call put to the owner goes to `capabilities.run` as that held method call (in process only: the handler
-        // reads `methodCall` from metadata the dispatch builds, never from a body), which asks his gate once.
-        const body = await this.context.gatewayMethods.invoke(heldMethod ? CAPABILITY_RUN_METHOD : input.methodId, {
+        // A call handed to the gate goes to `capabilities.run` as that method call (in process only: the handler reads
+        // `methodCall` from metadata the dispatch builds, never from a body), which decides it once.
+        const body = await asCaller(() => this.context.gatewayMethods.invoke(heldMethod ? CAPABILITY_RUN_METHOD : input.methodId, {
           body: heldMethod ? {} : input.body,
           query: heldMethod ? undefined : input.query,
           signal: input.signal,
@@ -1970,13 +2062,16 @@ export class DaemonControlPlaneHelper {
           // Native authority by who the caller is (method-owner-decision.ts `ownersProgramCaller`), or the owner's yes.
           nativeExecutionAuthority: this.createNativeExecutionAuthority(input.authToken, context?.scopes ?? [], authenticated?.credentialKind,
             ownersOwnSession({ actor: authenticated?.actor, credentialKind: authenticated?.credentialKind ?? undefined }),
-            // The owner's own daemon turn acting with his administrative authority (capability-wiring.ts `ownersAdmin`:
-            // his clean turn, or the one call he said yes to in an exposed one) does his native work as his program does.
+            // The owner's own daemon turn acting with their administrative authority (capability-wiring.ts `ownersAdmin`:
+            // their clean turn, or the one call they said yes to in an exposed one) does their native work as their program does.
             ownerApproved || (input.daemonTurn === true && context?.admin === true)
             || ownersProgramCaller({ actor: authenticated?.actor, credentialKind: authenticated?.credentialKind ?? undefined,
               registration: input.context?.call?.registration, daemonHosted: input.context?.call?.daemonHosted === true })
-              // His own device does his native work (his turns under his mode); it is not him for anything else.
-              || ownersDevice({ actor: authenticated?.actor, credentialKind: authenticated?.credentialKind ?? undefined })) ?? undefined,
+              // The owner's own device does their native work (their turns under their mode); it is not the owner for anything else.
+              || ownersDevice({ actor: authenticated?.actor, credentialKind: authenticated?.credentialKind ?? undefined })
+              // Any paired device that is still current submits and runs work as itself (its own pairing's identity, never
+              // the owner's machine's): its request, each step of the work then decided under the owner's mode as any call is.
+              || (authenticated?.credentialKind === 'device-token' && descriptor.id.startsWith('workLedger.'))) ?? undefined,
           isAuthorized: this.retainGatewayAuthorization(input.authToken, descriptor, context, ownerApproved),
           context: {
             authToken: input.authToken,
@@ -1992,11 +2087,14 @@ export class DaemonControlPlaneHelper {
             // The project and conversation the calling program named (call-context.ts), for the handler to act in.
             ...(input.context?.call ? { call: input.context.call } : {}),
             ...(context?.explicitUserRequest === undefined && !decidedInRun && !decidedByCapabilityGate && !heldMethod && !VALUE_DECIDED_METHOD_IDS.has(descriptor.id)
-              && !SETTING_WRITE_METHOD_IDS.has(descriptor.id) && !CREDENTIAL_MINT_METHOD_IDS.has(descriptor.id)
+              && !SETTING_WRITE_METHOD_IDS.has(descriptor.id) && !CREDENTIAL_MINT_METHOD_IDS.has(descriptor.id) && !(runsCapability !== undefined && firstUse.covered)
               ? {}
               : { metadata: {
-                // Who makes a credential, recorded with it (pairing-token-store.ts `PairingMaker`): the owner himself, or
-                // the caller it was put to him for, on his yes. In process only; never from a body.
+                // The capability run's first use was decided together with it, just now: one act, one decision; the
+                // capability route does not decide it again (routes/capabilities.ts). In process only; never from a body.
+                ...(runsCapability !== undefined && firstUse.covered && !heldMethod ? { decidedWithFirstUse: true } : {}),
+                // Who makes a credential, recorded with it (pairing-token-store.ts `PairingMaker`): the owner in person, or
+                // the caller it was put to the owner for, on the owner's yes. In process only; never from a body.
                 ...(!heldMethod && CREDENTIAL_MINT_METHOD_IDS.has(descriptor.id) ? { credentialMaker: credentialMakerOf(authenticated, callerFacts, ownerApproved) } : {}),
                 ...(context?.explicitUserRequest === undefined ? {} : { explicitUserRequest: context.explicitUserRequest }),
                 ...(decidedInRun ? { decidedInRun: true } : {}),
@@ -2005,10 +2103,10 @@ export class DaemonControlPlaneHelper {
                 // Whether the one rule admits this caller at once (method-owner-decision.ts `callerAdmitted`).
                 ...(VALUE_DECIDED_METHOD_IDS.has(descriptor.id) ? { ownerAdmitted } : {}),
                 // A credential write keeps who made it and how it was decided (in process only; never from a body).
-                ...(!heldMethod && SETTING_WRITE_METHOD_IDS.has(descriptor.id) ? { settingAct: this.settingActOf(input.authToken, context, upstreamAct, ownerApproved, ownerHimself(callerFacts)) } : {}),
+                ...(!heldMethod && SETTING_WRITE_METHOD_IDS.has(descriptor.id) ? { settingAct: this.settingActOf(input.authToken, context, upstreamAct, ownerApproved, ownerHimself(callerFacts) || ownersCommandLine(callerFacts)) } : {}),
               } }),
           },
-        });
+        }));
         if (body instanceof Response) {
           if ((body.headers.get('content-type') ?? '').toLowerCase().includes('text/event-stream')) {
             await body.body?.cancel().catch(() => {});
@@ -2092,7 +2190,7 @@ export class DaemonControlPlaneHelper {
     const bodyFields = bodyless && input.body !== null && typeof input.body === 'object' && !Array.isArray(input.body)
       ? Object.fromEntries(Object.entries(input.body as Record<string, unknown>).filter(([, value]) => typeof value === 'string' || typeof value === 'number' || typeof value === 'boolean'))
       : {};
-    const served = await this.invokeWebSocketControlPlaneCall({
+    const served = await asCaller(() => this.invokeWebSocketControlPlaneCall({
       authToken: input.authToken,
       signal: input.signal,
       method: descriptor.http.method,
@@ -2122,10 +2220,10 @@ export class DaemonControlPlaneHelper {
       // A route whose class depends on its value is told whether the one rule admits this caller at once.
       ...(VALUE_DECIDED_METHOD_IDS.has(descriptor.id) && ownerAdmitted ? { ownerAdmitted: true as const } : {}),
       // A settings write keeps who made it and how it was decided (a machine group carries the record to every member).
-      ...(SETTING_WRITE_METHOD_IDS.has(descriptor.id) ? { settingAct: this.settingActOf(input.authToken, context, upstreamAct, ownerApproved, ownerHimself(callerFacts)) } : {}),
+      ...(SETTING_WRITE_METHOD_IDS.has(descriptor.id) ? { settingAct: this.settingActOf(input.authToken, context, upstreamAct, ownerApproved, ownerHimself(callerFacts) || ownersCommandLine(callerFacts)) } : {}),
       // Decided above (method-owner-decision.ts): the route serves it without deciding it again.
       decided: true,
-    });
+    }));
     // A list or a search the route answered: what the caller may reach of it (control-plane/caller-reach.ts).
     return served.ok ? { ...served, body: await reachable(served.body) } : served;
   }

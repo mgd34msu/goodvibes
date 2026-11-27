@@ -89,7 +89,7 @@ export function createVoiceProvisionGateway(deps: VoiceProvisionGatewayDeps): Vo
     available: true,
     gateway: {
       fetchStatus: async () => await platformClient.operator.invoke('voice.local.status', {}) as VoiceStatusRead,
-      // Only from the person's own yes on the wake-word setup line: his press.
+      // Only from the person's own yes on the wake-word setup line: their press.
       startInstall: async () => readInstallStart(await invokePressed(platformClient, 'voice.local.install', {})),
     },
   };

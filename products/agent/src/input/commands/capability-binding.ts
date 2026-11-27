@@ -22,7 +22,7 @@ export const capabilityBinding: DaemonCapabilityBinding<CommandContext> = {
 
 /**
  * The same, for a control a person pressed in one of the Agent's places (the place host's daemon capabilities and the
- * lists it reads as his request): with this machine's own daemon credential when the host is this machine, as the
+ * lists it reads as their request): with this machine's own daemon credential when the host is this machine, as the
  * terminal app's presses go, so the host keeps the person's claim (daemon-verbs.ts `ownerPress`). Only the place host
  * is given it; the Agent's model and its tools call with `capabilityBinding`.
  */

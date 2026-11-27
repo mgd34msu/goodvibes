@@ -21,7 +21,7 @@ export const builtinGatewayNativeWorkExecutionMethodDescriptors: readonly Gatewa
   methodDescriptor({
     id: 'workLedger.project', title: 'Read Native Work Project', category: 'work-ledger',
     description: 'Read only the selected host project identity. Does not confer execution eligibility or authority.',
-    effects: ['work-ledger.inspect'],
+    effects: ['work.read'],
     http: { method: 'GET', path: '/api/work-ledger/project' },
     inputSchema: json(strictObject({})), outputSchema: json(nativeWorkLedgerProjectSchema),
   }),
@@ -29,10 +29,11 @@ export const builtinGatewayNativeWorkExecutionMethodDescriptors: readonly Gatewa
     ([operation, title, description]) => methodDescriptor({
       id: `workLedger.execution.${operation}`,
       title, description, category: 'work-ledger',
-      // Starting or resuming an attempt runs metered model work.
+      // Starting or resuming an attempt runs metered model work. A project act: below an admin, in a project given to the
+      // caller, on work it caused (start, routes/native-work-execution.ts), and a run is bound to the credential that started it.
       effects: operation === 'start' || operation === 'resume'
-        ? ['work-ledger.inspect', 'fleet.administer', 'outward.send']
-        : ['work-ledger.inspect', 'fleet.administer'],
+        ? ['work.read', 'fleet.write', 'outward.send']
+        : ['work.read', 'fleet.write'],
       ...(operation === 'start' || operation === 'resume'
         ? { replay: { in: 'body' as const, name: 'attemptId', behavior: 'One attempt (workId, attemptId and expectedRevision) runs once: an exact repeat returns the same execution identity instead of starting a second run; launch-claimed effects are never replayed.' } }
         : { repeat: 'safe' as const }),

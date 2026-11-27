@@ -43,8 +43,8 @@ export type OccasionsAuthority = AuthoritySurface;
 
 /**
  * The surface name written into a line's provenance suffix. Distinct from the
- * authority: the authority says whether the fact came from HIM, this says which
- * of his surfaces recorded it. The daemon accepts tui, agent, webui, voice and
+ * authority: the authority says whether the fact came from THE OWNER, this says which
+ * of their surfaces recorded it. The daemon accepts tui, agent, webui, voice and
  * hand-edit; this build is the agent.
  */
 export const OCCASIONS_RECORDING_SURFACE = 'agent';
@@ -163,7 +163,7 @@ export function isOccasionsAnswerWord(value: unknown): value is OccasionsAnswerW
 }
 
 /**
- * The three kinds, chosen by him at capture time and NEVER inferred (§4.4).
+ * The three kinds, chosen by the owner at capture time and NEVER inferred (§4.4).
  *
  * The list is here so the tool can OFFER the three; it is not here so anything
  * can pick one. `occasions.confirm` refuses without a kind, and nothing in this

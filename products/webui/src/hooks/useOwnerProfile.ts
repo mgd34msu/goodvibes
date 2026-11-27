@@ -16,7 +16,7 @@
  *      unrecognised value, and it refuses rather than defaulting because §7 gives forget
  *      and undo an authority check and nothing else, so an unstated authority on a delete
  *      would be no gate at all. This surface can claim owner-direct truthfully because
- *      the only thing that reaches these calls is the owner typing into his own settings
+ *      the only thing that reaches these calls is the owner typing into their own settings
  *      page, no page content, no message body and no document composes them. The agent
  *      must NOT hardcode this; it can genuinely be handed a purported fact by an email or
  *      a web page, and has to state which so the platform can refuse.

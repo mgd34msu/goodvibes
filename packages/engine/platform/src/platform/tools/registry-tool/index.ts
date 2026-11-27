@@ -457,7 +457,7 @@ async function runDependencies(
 /** What a skill this turn may not use gives: its name, and that it awaits the owner (or is switched off), nothing more. */
 function withheldSkill(mode: string, skill: { readonly name: string; readonly origin: SkillOrigin }): Record<string, unknown> {
   return skill.origin === 'project-local'
-    ? { mode, name: skill.name, state: 'awaits acceptance', note: `${skill.name} is a skill this project's files bring that the owner has not accepted yet; nothing of it is given until he accepts it (Tools and extensions, Skills).` }
+    ? { mode, name: skill.name, state: 'awaits acceptance', note: `${skill.name} is a skill this project's files bring that the owner has not accepted yet; nothing of it is given until the owner accepts it (Tools and extensions, Skills).` }
     : { mode, name: skill.name, state: 'not on', note: `${skill.name} is switched off or not reviewed yet; nothing of it is given until the owner switches it on.` };
 }
 

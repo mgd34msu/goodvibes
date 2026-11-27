@@ -144,8 +144,8 @@ export function decidePurchase(input: DecisionInput): DecisionOutcome {
   // Wording only: an amount the formatter will not render (never expected from the pools) is shown as its integer.
   const money = (amount: MinorUnits): string => Number.isSafeInteger(amount) && amount >= 0 ? formatMinorUnits(amount, quoted.currency) : String(amount);
   // A daily item budget of 0 is the shipped default: nothing is spent without
-  // the owner, so every purchase goes to him for a yes (below, as over the
-  // daily item budget); the host offers him, once, to set the limit
+  // the owner, so every purchase goes to them for a yes (below, as over the
+  // daily item budget); the host offers them, once, to set the limit
   // (host/limit-offer.ts), and a refusal names the setting.
   const itemBudgetUnset = limits.dailyItemMinorUnits <= 0;
 

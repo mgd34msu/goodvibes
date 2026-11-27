@@ -98,7 +98,7 @@ function topicFields(controller: OnboardingWizardControllerLike, topic: Onboardi
       const surfaces = capabilityOn ? getSelectedExternalSurfaceSpecs(controller).flatMap((surface) => {
         const step = buildExternalSurfaceStep(controller, surface);
         // This form saves the app's own settings only; an app that is sent its messages needs the webhook listener,
-        // which the person turns on himself in the one place for it.
+        // which the person switches on by hand in the one place for it.
         const inbound = INBOUND_EXTERNAL_SURFACE_IDS.has(surface.id)
           ? ` ${step.title.replace(/ surface$/, '')} sends its messages to GoodVibes by webhook: turn the webhook listener on in Devices and network, Addresses and ports (this form does not).` : '';
         return [{ kind: 'status' as const, id: `${step.id}.heading`, label: step.title, hint: `${step.description}${inbound}`, defaultValue: '', spacerBeforeRows: 1 }, ...step.fields];

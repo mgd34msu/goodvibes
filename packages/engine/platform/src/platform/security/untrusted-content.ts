@@ -104,13 +104,13 @@ export type AuthoritySurface = 'owner-direct' | UntrustedSurface;
  * differently from content that arrived unbidden. It is appealing because it
  * targets real friction: the owner instructed the read, so the read feels
  * authorized, and the refusals that follow it feel like the guard second-
- * guessing him.
+ * guessing them.
  *
- * It was declined. His asking the agent to open his mailbox is authority over
+ * It was declined. The owner asking the agent to open their mailbox is authority over
  * the READ; it confers nothing on what is INSIDE. The messages there were still
  * written by strangers, and a stranger's instruction does not become the
  * owner's because the owner opened the envelope. Worse, the tier would be
- * widest exactly where the attack lands: mail he asked to be read is the
+ * widest exactly where the attack lands: mail the owner asked to be read is the
  * ordinary case, so almost every real injection would arrive pre-authorized.
  *
  * The friction it aimed at was real and was removed a different way, without a
@@ -499,7 +499,7 @@ export class UntrustedContentLedger {
   }
 
   /**
-   * A read showed the owner these private dates (an occasions list, his plans).
+   * A read showed the owner these private dates (an occasions list, their plans).
    * Until the turn ends, the outbound check holds any text that carries one.
    */
   recordDisclosedDates(dates: readonly DisclosedDate[], scope: string | undefined = currentUntrustedContentScope()): void {
@@ -867,7 +867,7 @@ export interface OutwardEffectDecision {
 }
 
 /**
- * What a surface tells the owner he can do about a refusal.
+ * What a surface tells the owner they can do about a refusal.
  *
  * Required rather than defaulted, and deliberately so. The refusal that started
  * this told the owner to reply "send it now"; nothing implemented that, so the
@@ -949,8 +949,8 @@ export async function evaluateOutwardEffect(input: {
    *
    * `owner-direct` means the human typed the instruction that led here. It
    * changes the WORDING and nothing else: a refusal must not tell the owner to
-   * "take it to the owner", which is what it said to him when he asked for the
-   * send himself. It deliberately does not change the DECISION, owner
+   * "take it to the owner", which is what it said to them when they asked for the
+   * send themselves. It deliberately does not change the DECISION, owner
    * authority does not make a body that repeats a just-read message safe to
    * send, and treating it as if it did would be weakening the boundary rather
    * than fixing its wiring.
@@ -971,7 +971,7 @@ export async function evaluateOutwardEffect(input: {
   const ownerAsked = input.requestedBy === 'owner-direct';
   const disclosed = input.ledger.disclosedDatesThisTurn();
   if (disclosed.length > 0) {
-    // Family dates and the owner's plans answer him; they never ride into outbound
+    // Family dates and the owner's plans answer the owner; they never ride into outbound
     // text. Code reads the fields; no model is asked.
     const carried = input.content === undefined ? null : findDisclosedDate(disclosed, input.content);
     if (carried || input.content === undefined) {
@@ -989,7 +989,7 @@ export async function evaluateOutwardEffect(input: {
           taint: [],
           reason: carried
             ? `Held: the ${carried.field} of ${input.request.description} carries ${carried.date.date} (${carried.date.label}), a private date shown to the owner this turn. `
-              + 'Rule: dates from the occasions list and the owner\'s plans answer him and are never put into outbound text.'
+              + 'Rule: dates from the occasions list and the owner\'s plans answer the owner and are never put into outbound text.'
             : `Held: this turn showed the owner private dates, and ${input.request.description} did not say which of its fields leave, so they cannot be checked for one. `
               + 'Rule: dates from the occasions list and the owner\'s plans are never put into outbound text.',
           fix: [
@@ -1062,10 +1062,10 @@ export async function evaluateOutwardEffect(input: {
       fix: [
         mismatch,
         ownerAsked
-          // He asked for this himself. Telling him to go ask the owner is
-          // telling him to obtain authority he already holds, from himself.
-          // What he does not yet have is a look at the specific overlap, which
-          // the reason above now gives him, and a way to say "yes, knowing
+          // The owner asked for this in person. Telling them to go ask the owner is
+          // telling them to obtain authority they already hold, from themselves.
+          // What they do not yet have is a look at the specific overlap, which
+          // the reason above now gives them, and a way to say "yes, knowing
           // that", which is the gesture, not a sentence in the chat.
           ? 'You asked for this directly, so the question is not whether you authorized it, it is that its wording repeats what was just read, which is what an injected instruction looks like from here. Rewrite the overlapping field in your own words and it goes without a prompt, or approve it as it stands: '
             + describeRemedy(input.ownerRemedy)

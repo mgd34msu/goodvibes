@@ -100,9 +100,9 @@ export async function openNativeIntake(
     const auth = await platformClient.operator.invoke("control.auth.current", {}, current);
     check();
     current.throwIfAborted();
-    // The daemon says whether this browser is the owner himself (his sign-in with his
+    // The daemon says whether this browser is the owner in person (their sign-in with their
     // name and password): its one test of who the owner is, never guessed here.
-    // A device he paired is not him, but does his native work (method-owner-decision.ts
+    // A device the owner paired is not the owner, but does the owner's native work (method-owner-decision.ts
     // `ownersDevice`), so a paired browser keeps the form.
     const owner =
       (auth as { readonly ownerHimself?: unknown }).ownerHimself === true ||
@@ -120,7 +120,7 @@ export async function openNativeIntake(
       ).every((scope) => auth.scopes.includes("*") || auth.scopes.includes(scope))
     ) {
       const feature =
-        // Said to a person: what he was doing, never the transport's name.
+        // Said to a person: what they were doing, never the transport's name.
         authority === "turn" ? "Sending a message to the daemon" : authority === "execution" ? "Running work on the daemon" : "Asking for work";
       throw Object.assign(
         new Error(

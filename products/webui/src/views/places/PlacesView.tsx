@@ -7,7 +7,7 @@
  * by the daemon for every place in one call, `places.counts`), under the
  * project chooser: every read and act bound to a project is for the project
  * chosen there (lib/place-project.ts). An action that runs only in a terminal
- * program is shown greyed with one line saying where it runs.
+ * program is not drawn here: the web draws no control that cannot be used in it.
  * A place shows its lists as tabs, each read by itself from the daemon and
  * kept current by the event stream (hooks/usePlaceLists); the selected item's
  * detail; and its actions as buttons, only those that apply to the item in its
@@ -37,9 +37,9 @@ import {
   asksFirst, capabilityButton, capabilityRiskSentences, capabilitySentence, displayValues, loadCapabilities, opensForm, outcomeLine, resolvePlaceCapability,
   runPlaceCapability, useCapabilityIndex, type CapabilityReveal, type PlaceCapability,
 } from '../../lib/place-capabilities';
-import { EVERY_PROJECT, projectName, usePlaceProjects, type PlaceProjects } from '../../lib/place-project';
+import { EVERY_PROJECT, projectChoiceLabel, usePlaceProjects, type PlaceProjects } from '../../lib/place-project';
 import {
-  PLACE_GROUPS, RICHER_VIEWS, actionOfferedFor, allActionsOf, answersItem, elsewhereOf, filledFrom, itemActions, paneOf, placeActions, placeById, plainText, startingValues, undoActionOf, webListsOf, wholeActions,
+  PLACE_GROUPS, RICHER_VIEWS, answersItem, filledFrom, itemActions, paneOf, placeActions, placeById, plainText, startingValues, undoActionOf, webListsOf, wholeActions,
   type AnyPlace, type PlaceAnswer, type PlaceCapabilityAction, type PlaceCount, type PlaceDetailLine, type PlaceItem, type PlaceList, type PlaceRow,
   type RicherView,
 } from '../../lib/places';
@@ -79,7 +79,7 @@ function ProjectChooser({ projects }: { readonly projects: PlaceProjects }) {
         aria-label="Project"
         value={projects.project ?? ''}
         onChange={projects.choose}
-        options={[...projects.projects.map((project) => ({ value: project, label: projectName(project) })), { value: EVERY_PROJECT, label: 'Every project' }]}
+        options={[...projects.projects.map((project) => ({ value: project, label: projectChoiceLabel(projects, project) })), { value: EVERY_PROJECT, label: 'Every project' }]}
       />
     </label>
   );
@@ -355,35 +355,6 @@ function PlaceScreen({ place, listParam, lists, projects, onOpenList, onBack, on
     }
   }, [confirm, labelOf, list?.id, lists, onOpenList, place, projects.project, resolve, shown, titleOf]);
 
-  /**
-   * The actions here that run only in a terminal program: shown greyed, never hidden, each group with the one line
-   * that says where it runs.
-   */
-  const greyed = (scope: 'place' | 'whole' | 'item', target?: PlaceItem): ReactNode => {
-    const actions = allActionsOf(place).filter((action) => (scope === 'place' ? action.list === undefined
-      : action.list === list?.id && (scope === 'whole'
-        ? action.kind !== 'program' && action.whole === true
-        : (action.kind === 'program' || action.whole !== true) && target !== undefined && actionOfferedFor(action, target))));
-    const byWhere = new Map<string, string[]>();
-    for (const action of actions) {
-      const capability = action.kind === 'program' ? undefined : resolvePlaceCapability(capabilities, action.capability);
-      if (action.kind !== 'program' && !capability) continue;
-      const where = elsewhereOf(action, capability?.runsIn, capability?.group);
-      if (!where) continue;
-      const label = upperFirst(action.label ?? capability?.action.label.toLowerCase() ?? '');
-      byWhere.set(where, [...(byWhere.get(where) ?? []), label]);
-    }
-    if (byWhere.size === 0) return null;
-    return [...byWhere.entries()].map(([where, labels]) => (
-      <div key={where} className="place-elsewhere-actions">
-        <div className="place-elsewhere-actions__buttons">
-          {labels.map((label) => <Button key={label} size="sm" variant="secondary" disabled title={where}>{label}</Button>)}
-        </div>
-        <p className="place-elsewhere-actions__where">{where}</p>
-      </div>
-    ));
-  };
-
   /** A pressed button: the item fills what it gives, a form asks for the rest, then it runs. */
   const press = useCallback((action: PlaceCapabilityAction<PlaceItem>, target: PlaceItem | undefined, answer?: PlaceAnswer) => {
     const capability = resolve(action);
@@ -438,7 +409,6 @@ function PlaceScreen({ place, listParam, lists, projects, onOpenList, onBack, on
   const placeWide = buttonsFor(placeActions(place), undefined);
   const whole = list ? buttonsFor(wholeActions(place, list.id), undefined) : [];
   const forItem = list && item ? buttonsFor(itemActions(place, list.id, item), item) : [];
-  const greyedItem = item ? greyed('item', item) : null;
   const pane = list ? paneOf(list) : undefined;
   const Twin = pane ? PLACE_PANES[pane] : undefined;
 
@@ -476,8 +446,6 @@ function PlaceScreen({ place, listParam, lists, projects, onOpenList, onBack, on
     <div ref={listRef} className="place-list" onKeyDown={onListKey}>
       {/* The place's own actions, then the ones on this tab's kind of thing: a row that wraps, never the page title's. */}
       {placeWide.length + whole.length > 0 ? <div className="place-toolbar" aria-label="Actions">{placeWide}{whole}</div> : null}
-      {greyed('place')}
-      {greyed('whole')}
       {state.status === 'failed' ? (
         <div className="dv-notice dv-notice--warn place-notice" role="alert">
           <TriangleAlert aria-hidden="true" />
@@ -521,12 +489,7 @@ function PlaceScreen({ place, listParam, lists, projects, onOpenList, onBack, on
       title={plainText(rowOf(list, item).title)}
       meta={rowOf(list, item).right ? plainText(rowOf(list, item).right ?? '') : undefined}
       onClose={() => { setSelected((now) => ({ ...now, [list.id]: undefined })); setDetailOpen(false); }}
-      footer={forItem.length > 0 || greyedItem ? (
-        <>
-          {forItem.length > 0 ? <div className="place-actions" aria-label="Actions">{forItem}</div> : null}
-          {greyedItem}
-        </>
-      ) : undefined}
+      footer={forItem.length > 0 ? <div className="place-actions" aria-label="Actions">{forItem}</div> : undefined}
     >
       {Twin ? <Twin item={item} /> : <DetailLines lines={detailOf(list, item)} />}
     </DetailPane>

@@ -693,16 +693,16 @@ export function createNativeWorkExecutionHost(deps: {
     });
     standingWrites.add(write); void write.finally(() => standingWrites.delete(write));
   }
-  /** Runs the owner stopped by his answer to a question ("stop", "cancel"), already written to the ledger as stopped. */
+  /** Runs the owner stopped by their answer to a question ("stop", "cancel"), already written to the ledger as stopped. */
   const answeredStops = new Set<string>();
   function sayStanding(contract: ContractView): void {
     const key = contract.durableAdmission?.key; if (!key) return;
-    // Stopped by the owner's answer (not through cancel here): the ledger says stopped too, as for his stop in Work.
+    // Stopped by the owner's answer (not through cancel here): the ledger says stopped too, as for their stop in Work.
     if (contract.status === 'cancelled' && contract.failureKind === 'owner-rejected' && deps.storage.reportStopped && !answeredStops.has(contract.id)) {
       answeredStops.add(contract.id);
       const write = deps.storage.reportStopped(key, contract.error ?? 'Stopped by you.', active.get(key.attemptId)?.record).catch((error: unknown) => {
         answeredStops.delete(contract.id);
-        logger.warn('A piece of work the owner stopped by his answer was not written to the ledger as stopped', { attemptId: key.attemptId, error: summarizeError(error) });
+        logger.warn('A piece of work the owner stopped by their answer was not written to the ledger as stopped', { attemptId: key.attemptId, error: summarizeError(error) });
       });
       standingWrites.add(write); void write.finally(() => standingWrites.delete(write));
       return;

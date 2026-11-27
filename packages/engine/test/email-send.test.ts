@@ -182,7 +182,8 @@ test('one clientSendId is one mail: a repeat answers the first send, a changed m
   const first = await send({ ...mail, clientSendId: 'dinner-0001' });
   const repeat = await send({ ...mail, clientSendId: 'dinner-0001' });
   const changed = await send({ ...mail, body: 'Saturday instead?', clientSendId: 'dinner-0001' });
-  expect(repeat).toEqual(first);
+  // The repeat is the first answer, marked as a repeat (email.send's descriptor: "returns the first answer, marked repeated: true").
+  expect(repeat).toEqual({ ...(first as Record<string, unknown>), repeated: true });
   expect(changed).toEqual({ refused: 'CLIENT_SEND_ID_REUSED', status: 409 });
   expect(smtp.commands('DATA')).toBe(1);
 

@@ -197,7 +197,7 @@ export const CONVERSATION_PLACE = definePlace<ControlItem>({
 /** The key context of the controls read in the composer (`place.conversation-composer.<control>` in keybindings.json). */
 export const CONVERSATION_COMPOSER_KEYS = 'place.conversation-composer';
 
-/** Every control as an entry of the composer's context, with no default key: a person binds the ones he wants. */
+/** Every control as an entry of the composer's context, with no default key: a person binds the ones they want. */
 export function conversationComposerKeyContext(): KeyContext {
   return {
     id: CONVERSATION_COMPOSER_KEYS,

@@ -198,7 +198,7 @@ export function lockedSettingRefusal(key: string | undefined): CapabilityRefusal
   let lock: ReturnType<typeof readManagedLock>;
   try { lock = readManagedLock(key, machineManagedLockFolders()); }
   catch (error) { return new CapabilityRefusal(`Nothing was changed: ${errorText(error)}`, undefined, 'CONFIG_MANAGED', 403); }
-  return lock ? new CapabilityRefusal(managedLockRefusalText(lock, isSecretConfigKey(key)), `Ask the owner: only he removes the lock ${lock.source} set`, 'CONFIG_MANAGED', 403) : undefined;
+  return lock ? new CapabilityRefusal(managedLockRefusalText(lock, isSecretConfigKey(key)), `Ask the owner: only the owner removes the lock ${lock.source} set`, 'CONFIG_MANAGED', 403) : undefined;
 }
 
 /**
@@ -286,7 +286,7 @@ export const SETTINGS_SET: Def = {
   // Asked first only when the new value moves the setting the way that loosens it (sandbox off, a listener opened).
   loosensIf: (values) => Boolean(values.key) && !isSecretConfigKey(values.key!) && settingChangeMayLoosen(values.key!, settingValueOf(values.value ?? '')),
   // A setting that holds a credential: its new value is a secret written to the secret store (the writes-a-secret
-  // class of the one owner decision), so anyone but the owner himself is put to him, once, before it runs.
+  // class of the one owner decision), so anyone but the owner in person is put to the owner, once, before it runs.
   secretWhen: { input: 'key', values: CONFIG_SCHEMA.filter((setting) => isSecretConfigKey(setting.key)).map((setting) => setting.key) },
   // A locked setting is refused before any question.
   check: (values) => lockedSettingRefusal(values.key),
@@ -355,7 +355,7 @@ export const SETTINGS_RESET: Def = {
     }
     if (isDaemonOwnedConfigKey(key)) {
       const answer = await method(caller, 'config.reset', { key });
-      if (answer.code === 'OWNER_APPROVAL_PENDING') return { text: `${key} loosens a protection: it is put to the owner, and put back once he approves it.`, data: { key, pending: true } };
+      if (answer.code === 'OWNER_APPROVAL_PENDING') return { text: `${key} loosens a protection: it is put to the owner, and put back once the owner approves it.`, data: { key, pending: true } };
       return { text: `${key} is back to its default on the daemon: ${JSON.stringify(answer.value)}.`, data: { key, value: answer.value } };
     }
     const program = programOf(values, caller);

@@ -252,7 +252,7 @@ export class CostAttributionService {
     const keyOf = DIMENSION_KEY[dimension];
     const groups = new Map<string, AccumulatorState>();
     const total = emptyAccumulator();
-    // A caller that is not the owner himself (daemon-api withRecordReach): only what was spent in a session or by an
+    // A caller that is not the owner in person (daemon-api withRecordReach): only what was spent in a session or by an
     // agent it may reach (control-plane/caller-reach.ts); spending that names neither is the owner's to see.
     const reach = currentRecordReach();
     const reachable = (rec: CostUsageRecord): boolean => !reach

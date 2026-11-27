@@ -1,6 +1,6 @@
 // Proves: A call the daemon decides for a project is decided under the daemon's own permission mode, so a project whose settings file asks to be asked runs its commands unasked from a web chat, a schedule or any other daemon turn there.
 // Red when: The permission reader (permissions/manager.ts createPermissionConfigReader) stops laying the project's own settings file over the daemon's for a decision made in that project, so beta's "Ask me" is not read and its command runs under the daemon's Just YOLO, or gamma's looser file is taken over the daemon's Ask me.
-// Proves: A project value admitted while it was no looser than the daemon's keeps deciding the project's daemon turns after the owner makes the daemon stricter, so a command he has since denied runs there.
+// Proves: A project value admitted while it was no looser than the daemon's keeps deciding the project's daemon turns after the owner makes the daemon stricter, so a command the owner has since denied runs there.
 // Red when: The project's settings view (config/project-view.ts projectConfigView) stops admitting the project's file again when the daemon's settings change, keeping the layer it admitted against the old value, so beta's "prompt" still asks and runs after the daemon denies exec.
 
 /**
@@ -45,7 +45,7 @@ test('a daemon call in a project is decided under the project\'s stricter settin
     const runs: string[] = [];
     for (const name of ['alpha', 'beta', 'gamma']) {
       const before = asked.length;
-      // The owner's own daemon turn (the daemon marks every run of his it starts; unmarked work is someone else's).
+      // The owner's own daemon turn (the daemon marks every run of the owner's it starts; unmarked work is someone else's).
       const decision = await withOwnerInput(() => decideInProject(project(name), () => gate.checkDetailed('exec', { commands: [{ cmd: 'pwd' }] })));
       runs.push(`${name} ${decision.approved ? 'runs' : 'refused'}${asked.length > before ? ' asked' : ''}`);
     }
@@ -70,7 +70,7 @@ test("a project value admitted against the daemon's old value stops counting onc
   const config = new ConfigManager({ surfaceRoot: 'daemon', workingDir: own, homeDir: home, configDir: join(home, '.goodvibes', 'daemon'), ownsDaemonTier: true });
   expect(config.setMany([{ key: 'permissions.mode' as ConfigKey, value: 'ask-me' }, { key: 'permissions.tools.exec' as ConfigKey, value: 'prompt' }], localOwnerActor()).ok).toBe(true);
   const gate = new PermissionManager(async () => ({ approved: true }), createPermissionConfigReader(config), new PolicyRuntimeState(), null, null, null, { workspaceTrust: null });
-  // The owner's own daemon turn in beta (the daemon marks every run of his it starts).
+  // The owner's own daemon turn in beta (the daemon marks every run of the owner's it starts).
   const inBeta = async (): Promise<string> => ((await withOwnerInput(() => decideInProject(beta, () => gate.checkDetailed('exec', { commands: [{ cmd: 'pwd' }] })))).approved ? 'runs' : 'refused');
   const before = await inBeta();
   // The owner denies exec on the daemon; beta's file is not touched.

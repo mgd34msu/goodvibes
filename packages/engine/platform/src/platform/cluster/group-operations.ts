@@ -508,11 +508,11 @@ export interface PendingRestartFields {
   readonly warning?: string;
 }
 
-/** The words a group action with sharing off answers when the caller did not bring the owner's yes. */
+/** The words a group action with sharing off answers when the caller did not ask to turn sharing on with it. */
 export const SHARING_OFF_FOR_JOIN = 'sharing inbound work with your other machines is switched off on this machine';
-export const SHARING_OFF_JOIN_FIX = 'join again and answer yes to turning sharing on (or pass --yes): the join is kept and finishes when the daemon restarts';
+export const SHARING_OFF_JOIN_FIX = 'join again turning sharing on with it (--yes at the command line): the join is kept and finishes when the daemon restarts';
 /** The same refusal for forget, rotate, rename, publish and accept. */
-export const SHARING_OFF_ACTION_FIX = 'run it again and answer yes to turning sharing on (or pass --yes): it is kept and finishes when the daemon restarts';
+export const SHARING_OFF_ACTION_FIX = 'run it again turning sharing on with it (--yes at the command line): it is kept and finishes when the daemon restarts';
 
 /**
  * Keep an action asked for while sharing is off: written and read back before

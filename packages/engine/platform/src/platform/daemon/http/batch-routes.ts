@@ -44,7 +44,7 @@ export async function dispatchBatchRoutes(
 
   if (pathname === '/api/batch/jobs' && req.method === 'GET') {
     const limit = readBoundedPositiveInteger(url.searchParams.get('limit'), 100, 1_000);
-    // A caller that is not the owner himself: only the jobs it queued, before the newest `limit` are cut (caller-reach.ts).
+    // A caller that is not the owner in person: only the jobs it queued, before the newest `limit` are cut (caller-reach.ts).
     const reach = currentRecordReach();
     if (!reach) return Response.json({ jobs: await context.batchManager.listJobs(limit) });
     const every = await context.batchManager.listJobs(Number.MAX_SAFE_INTEGER);

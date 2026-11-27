@@ -236,7 +236,7 @@ export function readCliProviderSignInFacts(
 /** The sign-in line of a status report. */
 export function describeCliSignIns(facts: CliProviderSignInFacts): string {
   if (facts.signIns.length > 0) return facts.signIns.join(', then ');
-  // A key stored with /secrets is in the secret store, which this report does
+  // A key stored on the Secrets tab of Permissions and safety is in the secret store, which this report does
   // not open; say so, and the one way to give a key that it does see.
   const variable = facts.apiKeyEnvVars?.[0];
   const provider = facts.providerId ?? 'the provider';

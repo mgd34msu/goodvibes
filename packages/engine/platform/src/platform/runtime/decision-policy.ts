@@ -160,7 +160,7 @@ export function installPlatformDecisionPolicyObserver(): void {
 }
 
 /** The decision model gave no usable answer (the judgment layer's one rule), or none is installed. */
-function takesDecisionFallback(error: unknown): boolean {
+export function takesDecisionFallback(error: unknown): boolean {
   return error instanceof JudgmentPortMissingError || isDecisionModelFailure(error);
 }
 installPlatformDecisionPolicyObserver();

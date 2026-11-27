@@ -133,13 +133,25 @@ const OPEN_FOLDER = constants.O_RDONLY | constants.O_DIRECTORY;
 /** The prefix of this call's own names beside a part's place in the project, while it is being put there. */
 const PENDING = '.goodvibes-held-';
 
-/** What a staging lifetime is: a folder older than this was left by a daemon that stopped mid-call, and is removed. */
-const STAGING_LIFETIME_MS = 24 * 60 * 60 * 1000;
+/**
+ * A staging folder's name starts with the id of the process that made it (`call-<pid>-`, `open-<pid>-`): a call removes
+ * its own when it ends, and one whose process has ended (it stopped mid-call) belongs to nothing and is removed the next
+ * time the base is used. Nothing is removed because time went by.
+ */
+const STAGED_BY = /^(?:call|open)-(\d+)-/;
+function stagedByEndedProcess(entry: string): boolean {
+  const pid = Number(STAGED_BY.exec(entry)?.[1] ?? '0');
+  // A folder named before this rule (no process id) was left by a process that has ended.
+  if (!pid) return true;
+  if (pid === process.pid) return false;
+  try { process.kill(pid, 0); return false; }
+  catch (error) { return errorCode(error) === 'ESRCH'; }
+}
 
 /**
  * The folder held calls stage in: `<daemon home>/held` given by the door (routes/capabilities.ts), else the program's own
- * `~/.goodvibes/held`. Made owner-only, refused unless it is a real folder of this account; folders older than their
- * lifetime are removed (a daemon stopped mid-call left them).
+ * `~/.goodvibes/held`. Made owner-only, refused unless it is a real folder of this account; the folders a process that
+ * has ended left there are removed (it stopped mid-call).
  */
 function stagingBaseOf(given: string | undefined): string {
   const base = given ?? join(homedir(), '.goodvibes', 'held');
@@ -150,9 +162,8 @@ function stagingBaseOf(given: string | undefined): string {
     throw new HeldPathRefusal('outside', `${base}, where a call keeps its own copies, is not this account's own folder (a link, or another account's)`);
   }
   if ((info.mode & 0o777) !== 0o700) chmodSync(base, 0o700);
-  const now = Date.now();
   for (const entry of readdirSync(base)) {
-    try { if (now - lstatSync(join(base, entry)).mtimeMs > STAGING_LIFETIME_MS) rmSync(join(base, entry), { recursive: true, force: true }); } catch { /* gone */ }
+    try { if (stagedByEndedProcess(entry)) rmSync(join(base, entry), { recursive: true, force: true }); } catch { /* gone */ }
   }
   return base;
 }
@@ -246,7 +257,7 @@ export function holdCallerPath(given: string, projectReal: string): string | und
     if (hold.budget.bytes > HELD_MAX_BYTES || hold.budget.files > HELD_MAX_FILES) {
       throw new HeldPathRefusal('too-big', `${given} is more than one call works on (${HELD_MAX_BYTES / (1024 * 1024)} MiB or ${HELD_MAX_FILES} files in all, a file counted by its length)`);
     }
-    const root = mkdtempSync(join(hold.base, 'call-'));
+    const root = mkdtempSync(join(hold.base, `call-${process.pid}-`));
     const copied = copyOpenedFile(fd, join(root, leaf), opened.mode);
     hold.files.push({ root, folderFd, folderReal: dirname(real), named: leaf, copied, original: identityOf(opened), lockKey: `${opened.dev}:${opened.ino}`, projectReal });
     return join(root, leaf);
@@ -275,7 +286,7 @@ export function holdCallerPath(given: string, projectReal: string): string | und
   hold.fds.push(folderFd);
   const folderReal = realOf(folderFd)!;
   lockFile(hold, join(folderReal, ...rest), given);
-  const root = mkdtempSync(join(hold.base, 'call-'));
+  const root = mkdtempSync(join(hold.base, `call-${process.pid}-`));
   hold.fresh.push({ root, folderFd, folderReal, named: rest.join(sep), projectReal });
   return join(root, ...rest);
 }
@@ -752,7 +763,7 @@ export function isHeldPath(path: string): boolean {
 export function copyForProgram(path: string): string {
   const hold = calls.getStore();
   if (hold === undefined || !isHeldPath(path)) return path;
-  const folder = mkdtempSync(join(hold.base, 'open-'));
+  const folder = mkdtempSync(join(hold.base, `open-${process.pid}-`));
   const copy = join(folder, basename(path));
   const fd = openSync(copy, constants.O_WRONLY | constants.O_CREAT | constants.O_EXCL, 0o600);
   try {

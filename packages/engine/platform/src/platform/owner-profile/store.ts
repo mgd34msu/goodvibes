@@ -773,7 +773,7 @@ export class OwnerProfileStore {
     let edit = operate(start);
     if (!edit.ok && replayable && !this.matchesLastSeen(statOf(this.filePath))) {
       // The refusal may rest on a projection that predates a hand edit not yet picked up by the
-      // watcher (a line he just added reads as missing); judge it against the file as it is now.
+      // watcher (a line the owner just added reads as missing); judge it against the file as it is now.
       options.lifetime?.assertCurrent();
       const reloaded = await this.load();
       options.lifetime?.assertCurrent();

@@ -85,6 +85,7 @@ import { isSurfaceFeatureGateEnabled } from '../runtime/feature-flags/index.js';
 import { buildDaemonRelayReachability, relayRequestFactsFrom } from '../relay/daemon-wiring.js';
 import { RelayCodeStore } from '../relay/relay-codes.js';
 import { join } from 'node:path';
+import { AsyncLocalStorage } from 'node:async_hooks';
 import type { RelayReachability } from '../relay/reachability.js';
 import {
   readAutomationReasoningEffort,
@@ -149,8 +150,6 @@ interface StartupDrain { readonly pending: Set<Promise<void>>; readonly failures
 const startupDrains = new WeakMap<object, StartupDrain>();
 /** The client address of a request this daemon makes to itself in process: its own machine. */
 const IN_PROCESS_CLIENT_ADDRESS = '127.0.0.1';
-/** How long a listener move waits for the answers in flight when it was caused (afterAnswers). */
-const ANSWERS_BEFORE_MOVE_MS = 10_000;
 function ownStartup(owner: object, label: StartupOwner, action: () => Promise<void>): Promise<void> {
   let drain = startupDrains.get(owner);
   if (!drain) { drain = { pending: new Set(), failures: new Map() }; startupDrains.set(owner, drain); }
@@ -314,28 +313,28 @@ export class DaemonServer {
     },
     onError: (err) => logger.error('DaemonServer: restart after config change failed', { error: summarizeError(err) }),
   });
-  /** The answers being made now, by either listener (HTTP requests and WebSocket messages): see afterAnswers. */
-  private readonly answering = new Set<Promise<unknown>>();
+  /** The answer being made in this async context (an HTTP request's or a WebSocket message's): see afterAnswers. */
+  private readonly answerInMaking = new AsyncLocalStorage<{ answer?: Promise<unknown> }>();
 
-  /** Track one answer while it is made. */
-  private trackAnswer<T>(answer: Promise<T>): Promise<T> {
-    this.answering.add(answer);
-    void answer.then(() => this.answering.delete(answer), () => this.answering.delete(answer));
+  /** Make one answer, known as the answer in making to whatever it causes (afterAnswers). */
+  private trackAnswer<T>(make: () => Promise<T> | T): Promise<T> {
+    const holder: { answer?: Promise<unknown> } = {};
+    const answer = this.answerInMaking.run(holder, () => Promise.resolve().then(make));
+    holder.answer = answer;
     return answer;
   }
 
   /**
-   * Run `then` once every answer being made now has been made and handed to its connection (a turn of the event loop
-   * after the last one settles): a setting write that moves or restarts a listener is answered on the connection it
-   * came on before the listener moves, whichever door it came through. An answer begun after this call is not waited for.
+   * Run `then` once the answer of the request (or WebSocket message) that caused it has been made and handed to its
+   * connection (a turn of the event loop after it settles): a setting write that moves or restarts a listener is
+   * answered on the connection it came on before the listener moves, whichever door it came through. Caused by no
+   * answer (a settings file edited by hand): at once. Other answers in flight are not waited for, and nothing waits on
+   * a clock: the move follows the event of the causing answer.
    */
   private afterAnswers(then: () => void): void {
-    const pending = [...this.answering];
-    // A request that waits on something else (a held turn's answer, a long read) does not hold the move for ever: the
-    // write's own answer is a settings write, made well inside this bound.
-    let bound: ReturnType<typeof setTimeout> | undefined;
-    const limit = new Promise<void>((resolve) => { bound = setTimeout(resolve, ANSWERS_BEFORE_MOVE_MS); });
-    void Promise.race([Promise.allSettled(pending), limit]).then(() => { clearTimeout(bound); setImmediate(then); });
+    const causing = this.answerInMaking.getStore()?.answer;
+    if (!causing) { setImmediate(then); return; }
+    void Promise.allSettled([causing]).then(() => { setImmediate(then); });
   }
 
   private stoppingRuntime: Promise<void> | null = null;
@@ -684,7 +683,7 @@ export class DaemonServer {
     readonly sessionId: string; readonly task: string; readonly workingDirectory?: string | undefined;
     /**
      * The party of the ACP connection (or other embedder) that started the session: the owner's own connection makes
-     * it his turn; anyone else's, or none named, is someone else's input, whose agent runs reads only
+     * it the owner's turn; anyone else's, or none named, is someone else's input, whose agent runs reads only
      * (security/turn-input-party.ts; the agent manager keeps the party it was spawned under).
      */
     readonly inputParty?: TurnInputParty | undefined;
@@ -848,8 +847,8 @@ export class DaemonServer {
     this.surfaceRegistry.attachRuntime(this.runtimeStore);
     // Surface switches and capability changes are published, so a client of surfaces.list stays current without polling.
     this.surfaceEventsDetach ??= this.surfaceRegistry.attachRuntimeBus(this.runtimeBus);
-    // "Treat my own messages here as me" (off by default): the owner's own message on such a channel, in a conversation
-    // proven his alone, is his own input (security/turn-input-party.ts, daemon/owner-channel-conversation.ts).
+    // As released: the owner's own message on a channel that proves its sender, in a conversation proven the owner's
+    // alone, is the owner's own input (security/turn-input-party.ts, daemon/owner-channel-conversation.ts).
     this.ownerChannelReaderDetach ??= setOwnerChannelConversationReader(createOwnerChannelConversationReader({
       sessions: this.sessionBroker, routeBindings: this.routeBindings, channelPolicy: this.channelPolicy,
     }));
@@ -1183,7 +1182,7 @@ export class DaemonServer {
           if (upgrade === 'upgraded') return;
           if (upgrade) return upgrade;
           // Tracked while it is made, so a listener move this request causes waits for its answer (afterAnswers).
-          return self.trackAnswer(Promise.resolve(runInJudgmentRuntime(self.judgmentRuntime, () => self.handleRequest(req))));
+          return self.trackAnswer(() => runInJudgmentRuntime(self.judgmentRuntime, () => self.handleRequest(req)));
         },
         websocket: {
           open(ws) {
@@ -1191,14 +1190,14 @@ export class DaemonServer {
           },
           message(ws, message) {
             // Tracked as an HTTP request is: a listener move this message causes waits for its answer (afterAnswers).
-            void self.trackAnswer(Promise.resolve(runInJudgmentRuntime(self.judgmentRuntime, () => self.handleControlPlaneWebSocketMessage(
+            void self.trackAnswer(() => runInJudgmentRuntime(self.judgmentRuntime, () => self.handleControlPlaneWebSocketMessage(
               ws as unknown as { data: ControlPlaneWebSocketData; send(message: string): void },
               message,
             ).catch((error: unknown) => {
               logger.warn('DaemonServer: control-plane websocket message failed', {
                 error: summarizeError(error),
               });
-            }))));
+            })));
           },
           close(ws) {
             self.handleControlPlaneWebSocketClose(ws as unknown as { data: ControlPlaneWebSocketData });
@@ -1885,11 +1884,15 @@ export class DaemonServer {
       // A channel's conversation works in the channel's project ("Project for this channel"); with none it stays in the
       // daemon's own folder, where a write or a command is refused naming that control (channels/channel-project.ts).
       const channelProject = triggerSurface ? this.channelPolicy.getPolicy(triggerSurface as ChannelSurface).project : undefined;
-      const spawnInput = channelProject && owned.workingDirectory === undefined ? { ...owned, workingDirectory: channelProject } : owned;
+      // Any other session that belongs to a project works there (a session a paired device or a member made in a project
+      // the owner gave it, checked when it was made), never in the daemon's own folder.
+      const sessionProject = !triggerSurface && session && session.project && session.project !== 'unknown' ? session.project : undefined;
+      const placedIn = channelProject ?? sessionProject;
+      const spawnInput = placedIn && owned.workingDirectory === undefined ? { ...owned, workingDirectory: placedIn } : owned;
       // A guest's turn in scope stays the guest's (its actor), so the agent never runs with the channel's own authority.
       const scope = channelTurnScope(triggerSurface);
-      // The spawn turn names its channel conversation, so whose input it is can be read from it ("Treat my own messages
-      // here as me": the owner's own conversation, his alone, is his; any other stays someone else's).
+      // The spawn turn names its channel conversation, so whose input it is can be read from it (the owner's own
+      // conversation, theirs alone, is theirs; any other stays someone else's).
       const record = withTurnSurfaceId(scope.surface, () => withChannelExecutionMode(this.sessionBroker, sessionId, () => this.agentManager.spawn(spawnInput)), scope.actor,
         triggerSurface !== undefined ? sessionId : undefined);
       this.syncSpawnedAgentTask(record, sessionId);

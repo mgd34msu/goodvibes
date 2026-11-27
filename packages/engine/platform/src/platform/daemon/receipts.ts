@@ -236,7 +236,7 @@ export class DaemonReceiptStore {
     // alert no channel took is kept here too: the same line still waiting for
     // the next surface is that receipt, not a second one. Once the line is an
     // owner alert, the waiting receipt is kept for the owner alone, so no other
-    // reader can take it before he sees it.
+    // reader can take it before the owner sees it.
     const waiting = this.receipts.find((kept) => kept.deliveredAt === undefined && kept.text === text);
     if (waiting) {
       if (!ownerOnly || waiting.audience === 'owner') return waiting;

@@ -16,8 +16,6 @@ import { dispatchNativeConversationTurn, describeFailedNativeDispatch } from './
 import { createOwnerTurnSender } from './shell/owner-turn-sender.ts';
 import { createNativeWorkLedgerView } from './runtime/native-work-ledger-host.ts';
 import { createAgentNativeHostSelection } from './runtime/agent-native-host-selection.ts';
-import { SetupPairingController } from './shell/setup-pairing-controller.ts';
-import { parseSlashCommand } from './input/slash-command-parser.ts';
 import { runExitSequence } from './shell/exit-sequence.ts';
 import { buildAgentHerdrSessionUpdate } from './shell/herdr-session.ts';
 import { installStartupThemeProbe } from './renderer/startup-theme-probe.ts';
@@ -245,7 +243,6 @@ async function main(prepared: PreparedShellCliRuntime) {
     };
   };
 
-  let setupPairing: SetupPairingController | null = null;
   let pendingPermission: PendingPermissionState | null = null;
   const approvalsBinding = bindApprovals({
     broker: approvalBroker,
@@ -257,7 +254,6 @@ async function main(prepared: PreparedShellCliRuntime) {
     },
     getPending: () => pendingPermission,
     setPending: (next) => {
-      if (next) setupPairing?.cancelForTakeover();
       pendingPermission = next;
     },
     onResolveFailed: (error) => systemMessageRouter.high(
@@ -456,7 +452,7 @@ async function main(prepared: PreparedShellCliRuntime) {
     thinkingClock.noteReconnect(event.attempt, event.maxAttempts);
     render();
   }));
-  // A provider problem the owner acts on (a model he uses stopped being free, a custom provider file that did not
+  // A provider problem the owner acts on (a model they use stopped being free, a custom provider file that did not
   // load): said in the conversation, as the terminal app says it.
   unsubs.push(uiServices.events.providers.on('PROVIDER_WARNING', (warning) => {
     systemMessageRouter.high(warning.message);
@@ -528,7 +524,6 @@ async function main(prepared: PreparedShellCliRuntime) {
     exiting = true;
     runExitSequence<SessionSnapshot>({
       closeHerdr,
-      disposePairing: () => setupPairing?.dispose(),
       closePaintWindow: () => paintWindow.close(),
       stopSpokenOutput: () => stopSpokenOutputForExit?.(),
       unsubs,
@@ -570,7 +565,7 @@ async function main(prepared: PreparedShellCliRuntime) {
       exit: exitApp,
       // The person is in the middle of something this shell can see.
       userIsMidGesture: () => input.prompt.length > 0 || input.surfaceModals.active || input.waitingForOwner
-        || shellCommandsRunning > 0 || setupPairing?.ownsInput === true || pendingPermission !== null,
+        || shellCommandsRunning > 0 || pendingPermission !== null,
       workRunningHere: () => mainTurnBusy() || uiServices.readModels.agents.getSnapshot().active.length > 0
         || processManager.list().some((entry) => !entry.done),
       sessionId: () => runtime.sessionId,
@@ -687,10 +682,9 @@ async function main(prepared: PreparedShellCliRuntime) {
   });
   unsubs.push(() => ownerTurns.dispose());
 
-  // Every submission starts here: a pending setup takeover is let go, the
-  // conversation is offered for rewinds again, and the view returns to the bottom.
+  // Every submission starts here: the conversation is offered for rewinds again,
+  // and the view returns to the bottom.
   const prepareSubmission = (): void => {
-    setupPairing?.cancelForTakeover();
     // Acting here after another surface took the session over is what moves the conversation back for rewinds.
     if (ctx.services.conversationRewindHost.resumeIfTakenOver()) {
       systemMessageRouter.high('[Rewind] Another surface had taken over this session; this one is offering its conversation for rewinds again.');
@@ -754,7 +748,7 @@ async function main(prepared: PreparedShellCliRuntime) {
       for (const part of content) {
         if (part.type !== 'image') continue;
         const label = `image ${attachments.length + 1}`;
-        // The person sent this message with its image just now (the image control's Send): his own act, said so. The store's
+        // The person sent this message with its image just now (the image control's Send): their own act, said so. The store's
         // kinds are file, image, audio, video, document, archive and data: an attachment the model reads as a picture is `image`.
         const made = await verbs.invoke<{ readonly artifact?: { readonly id?: string } }>('artifacts.create',
           { kind: 'image', mimeType: part.mediaType, filename: `${label.replace(' ', '-')}.${part.mediaType.split('/')[1] ?? 'png'}`, dataBase64: part.data },
@@ -830,7 +824,6 @@ async function main(prepared: PreparedShellCliRuntime) {
     render: () => render(),
     terminalWidth: () => getTerminalSize(stdout).width,
     setPendingPermission: (pending) => {
-      if (pending) setupPairing?.cancelForTakeover();
       pendingPermission = pending;
     },
   });
@@ -947,49 +940,6 @@ async function main(prepared: PreparedShellCliRuntime) {
       },
     },
   );
-  setupPairing = new SetupPairingController(
-    { configManager, homeDirectory },
-    {
-      print: (text) => {
-        transcript.toBottom();
-        conversation.logWrapped(text);
-        render();
-      },
-      scroll: (lines) => {
-        scroll(lines);
-        render();
-      },
-      readPrompt: () => input.prompt,
-      setPrompt: (text) => {
-        input.prompt = text;
-        input.cursorPos = text.length;
-        input.commandMode = false;
-        input.autocomplete?.reset();
-        render();
-      },
-      // No modal open but, at most, command mode: the command that started this is still in it.
-      canPresent: () => {
-        return !exiting &&
-          pendingPermission === null &&
-          recoveryPending === null &&
-          !input.concealedInput &&
-          !input.plainLineInput &&
-          input.surfaceModals.modals().every((modal) => modal === input.modals.command) &&
-          !input.searchManager.active &&
-          !input.historySearch.active &&
-          !sessionViews.active;
-      },
-      executeOwnerCommand: (line) => {
-        const parsed = parseSlashCommand(line);
-        void commandRegistry.executeFromOwner(parsed.name, [...parsed.args], commandContext).catch(() => {
-          systemMessageRouter.userAction('Pairing replacement command failed. Preview pairing again before taking further action.', 'error');
-          render();
-        });
-      },
-    },
-  );
-  input.setupPairing = setupPairing;
-  commandContext.beginSetupPairing = (request) => setupPairing!.start(request);
   // The block ends with the line that names its copy key, as bound.
   commandContext.printBlock = (text, copy) => {
     transcript.toBottom();
@@ -1033,7 +983,7 @@ async function main(prepared: PreparedShellCliRuntime) {
     executeFromOwner: (name, args, context) => commandRegistry.executeFromOwner(name, args, context as typeof commandContext),
     keys: ctx.services.keybindingsManager,
     invoke: (method, input) => automationHost.invoke(method as never, input as never),
-    // A daemon capability no slash command here carries runs as the owner's press, with the credential that keeps his
+    // A daemon capability no slash command here carries runs as the owner's press, with the credential that keeps their
     // claim when the host is this machine (capability-binding.ts `ownerPressBinding`), never one the model calls with.
     capabilityBinding: ownerPressBinding,
     // The System place's Setup list: this Agent's settings, skip file and "Who decides" record.
@@ -1171,10 +1121,8 @@ async function main(prepared: PreparedShellCliRuntime) {
         workingDir,
         input,
         pendingPermission,
-        setupPairing,
       }),
     );
-    setupPairing?.checkPresentation();
     const { width, height } = getTerminalSize(stdout);
 
     // Cache the current model for consistent values across the entire render frame
@@ -1483,13 +1431,6 @@ async function main(prepared: PreparedShellCliRuntime) {
   });
 
   const routeInput = (data: string): void => {
-    // The administrative gesture has one input owner throughout its I/O. A
-    // new blocking prompt cancels it before that prompt may consume any key.
-    if (setupPairing?.ownsInput) {
-      if (pendingPermission) setupPairing.cancelForTakeover();
-      input.feed(data);
-      return;
-    }
     const blocking = handleBlockingShellInput({
       data,
       pendingPermission,
@@ -1553,9 +1494,11 @@ async function main(prepared: PreparedShellCliRuntime) {
     });
   });
   // Settled as the Agent opens, by the terminal app's rule: a folder with no decision that brings no hooks or tool
-  // servers of its own is trusted without a question; one that brings them is asked with the card above.
+  // servers of its own is trusted without a question; one that brings them is asked with the card above, in every mode
+  // (as released).
   void settleFolderTrustOnOpen(commandContext.workspace?.workspaceTrustManager, ctx.services.requestTrustDecision,
-    () => readFolderTrustFacts(workingDir, homeDirectory, String(configManager.get('tools.hooksFile') ?? '')));
+    () => readFolderTrustFacts(workingDir, homeDirectory, String(configManager.get('tools.hooksFile') ?? '')),
+    (line) => commandContext.print(line));
   // The setup checklist's two host steps (what a model's setup reading says): one reading of the connected host at
   // start, after the first frame, and a new one each time the daemon connection comes back; nothing on a timer.
   void checkConnectedHostSetup(commandContext);

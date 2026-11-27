@@ -1,6 +1,6 @@
 /**
  * Waiting for you, Purchases: the purchases that wait on the owner, in one
- * list, and what he can do on each.
+ * list, and what the owner can do on each.
  *
  * Home `daemon`: the payment host is the daemon's (its purchase windows, the
  * checkouts it runs, the security codes it waits for), so every capability

@@ -19,6 +19,11 @@ import { executeToolCalls as executeOrchestratorToolCalls, toolBudgetFromConfig 
 import { maxParallelToolCalls } from '../core/tool-batch.js';
 import { decideInProject } from '../permissions/call-project.js';
 import { withFileWriter } from '../state/file-cache.js';
+
+/** Who a web chat's file writes are told as (file-cache.ts); let go with the chat (`forgetFileWriter`). */
+export function chatFileWriter(sessionId: string): string {
+  return `web chat ${sessionId}`;
+}
 import { chatToolCallSession, withChatToolCalls } from '../security/turn-session.js';
 import type { Actor } from '@goodvibes/engine/daemon-api/http-policy';
 
@@ -94,7 +99,7 @@ export async function executeCompanionToolCalls(
   const permissionManager = deps.permissionManager;
   try {
     // Files are read and written as this chat: another chat or run in the same project never vouches for its reads.
-    results = await withChatToolCalls(sessionId, turnId, () => withFileWriter(`web chat ${sessionId}`, () => decideInProject(deps.workingDirectory, () => executeOrchestratorToolCalls({
+    results = await withChatToolCalls(sessionId, turnId, () => withFileWriter(chatFileWriter(sessionId), () => decideInProject(deps.workingDirectory, () => executeOrchestratorToolCalls({
       toolRegistry,
       permissionManager,
       hookDispatcher: deps.hookDispatcher,

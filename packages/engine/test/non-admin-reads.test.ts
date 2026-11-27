@@ -14,7 +14,11 @@
  * contract runner. Calls are served in-process; no port is bound.
  */
 import { afterEach, beforeEach, expect, test } from 'bun:test';
-import { mkdtempSync, rmSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, rmSync } from 'node:fs';
+import { daemonCallerProjectCheck } from '../platform/src/platform/daemon/facade-composition.ts';
+import { CallerProjectsStore } from '../platform/src/platform/workspace/caller-projects-store.ts';
+import { resolveGoodVibesDaemonHome } from '../platform/src/platform/config/goodvibes-home.ts';
+import { WorkspaceRegistrationStore } from '../platform/src/platform/workspace/registration/store.ts';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { UserAuthManager } from '../platform/src/platform/security/user-auth.ts';
@@ -59,8 +63,10 @@ function daemon() {
     controlPlaneGateway: new ControlPlaneGateway({ runtimeBus: new RuntimeEventBus() }),
     authToken: () => 'fixture-operator-token', trustProxyEnabled: () => false, host: '127.0.0.1', port: 0,
     dispatchApiRoutes: taskRoutes,
+    // The daemon's one project check, over the projects the owner gave each caller (a store in this daemon home).
+    callerProject: daemonCallerProjectCheck(dir),
   } as unknown as DaemonControlPlaneContext);
-  // The owner himself: his signed-in session, the account made at first start (another admin is not the owner).
+  // The owner in person: their signed-in session, the account made at first start (another admin is not the owner).
   const ownerName = userAuth.ownerUsername();
   if (ownerName === null) throw new Error('the user store made no owner account at first start');
   const owner = userAuth.createSession(ownerName).token;
@@ -97,7 +103,7 @@ test('a non-admin user cannot read transcripts, paired devices or any owner-priv
  * that is not the owner's content (counts, states, names, configuration). The
  * owner's content (mail, profile, purchases, dates, memory, transcripts and the
  * session listings drawn from them, paired devices and peers, calendar,
- * approvals, named people, workspace file contents, and the records of his
+ * approvals, named people, workspace file contents, and the records of their
  * browser, knowledge, channels, automations, fleet and skills) is absent because
  * its scopes are outside that grant.
  */
@@ -233,6 +239,13 @@ const OPEN_TO_NON_ADMIN: ReadonlyMap<string, string> = new Map([
 
 test('a non-admin user reads task counts and states but not an agent task\'s prompt or error', async () => {
   const d = daemon();
+  // The task runs in a project the owner gave the viewer: the list is the viewer's to read, its prompt and error never.
+  const project = join(dir, 'project');
+  mkdirSync(project, { recursive: true });
+  await new WorkspaceRegistrationStore({ path: join(dir, '.goodvibes', 'shared', 'workspace-registrations.json'), homeDir: dir,
+    daemonStateDir: join(dir, '.goodvibes') }).add(project);
+  new CallerProjectsStore(resolveGoodVibesDaemonHome(dir)).set('viewer', [project]);
+  d.catalog.setRecordOwner('task', (id) => (id === 'task-1' ? { project } : undefined));
   const prompt = 'Draft the reply to my lawyer about the custody hearing';
   d.tasks.snapshot = {
     queued: 0, running: 1, blocked: 0, totals: { created: 1, completed: 0, failed: 0, cancelled: 0 },

@@ -8,7 +8,7 @@
  * passing divergence gate; once promoted, the same unchanged bundle is enforced
  * again at the next start (policy-activation.json records it, with the file it
  * was read from: a bundle promoted or rolled back to from another file than
- * policy.bundlePath, one loaded with /security load-policy, is the one read at start;
+ * policy.bundlePath, one loaded on the Policy tab of Permissions and safety, is the one read at start;
  * when that file cannot be loaded, policy.bundlePath is loaded as the candidate instead
  * and the reason names both).
  * A bundle loaded at start that is not restored as active says why. Never throws, a

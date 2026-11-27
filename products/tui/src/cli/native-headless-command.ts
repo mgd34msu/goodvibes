@@ -15,7 +15,7 @@ import { createDaemonVerbCaller } from '../runtime/client/operator-endpoint.ts';
 import { claimHeadlessSession, restoreHeadlessSession } from '@goodvibes/engine/terminal-shell/startup-lifecycle';
 import { closeSessionHere, createSessionSurface, projectRecordsFolder } from '@goodvibes/engine/platform/platform/runtime/operations';
 import { GOODVIBES_TUI_SURFACE_ROOT } from '../config/surface.ts';
-import { announceHeadlessRecovery, announceHeadlessSession, readFolderTrustFacts, refusedHeadlessRun, settleHeadlessFolderTrust } from '@goodvibes/engine/terminal-shell/headless-command';
+import { announceHeadlessRecovery, announceHeadlessSession, refusedHeadlessRun } from '@goodvibes/engine/terminal-shell/headless-command';
 import { keepHeadlessSessionRecoverable } from '@goodvibes/engine/terminal-shell/session-crash-recovery';
 import { setProgramCallContext } from '@goodvibes/engine/platform/platform/runtime/client';
 
@@ -88,10 +88,8 @@ export async function runNativeHeadlessCommand(runtime: HeadlessCommandRuntime, 
             if (refused) return refused;
             throw error;
           }
-          // A folder with no trust decision and nothing of its own to run is trusted as the interactive start does
-          // (recorded the same way); one that brings hooks or tool servers is not trusted in this run: what needs trust is refused at once.
-          await settleHeadlessFolderTrust(ctx.commandContext.workspace?.workspaceTrustManager,
-            () => readFolderTrustFacts(workingDirectory, homeDirectory, String(configManager.get('tools.hooksFile') ?? '')));
+          // As released, the folder's trust is not settled here: the first call that needs it asks the trust question
+          // through this run's prompt transport (answered with --answer-permissions, or not at all).
           announceHeadlessSession(ctx, workingDirectory, cli.flags.outputFormat, configManager);
           const recovery = recovered ? announceHeadlessRecovery(recovered, cli.flags.outputFormat) : undefined;
           // The local daemon is found, or started when it is installed and stopped, before the turn; nothing is asked.

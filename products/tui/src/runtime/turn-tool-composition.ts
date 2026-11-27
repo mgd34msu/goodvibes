@@ -152,7 +152,7 @@ function registerTerminalTurnTools(toolRegistry: ToolRegistry, services: Runtime
     // The secret store (goodvibes_context reads Cloudflare tokens there) and the gates are the project's, above.
     cloudflareAuthToken: () => readDaemonOperatorToken(services.shellPaths.homeDirectory), // and counts the daemon's own token as the Worker operator token, as the daemon's status route does
     ...(options.hookChangeGate ? { hookChangeGate: options.hookChangeGate } : {}),
-    // A delegation nothing the owner said settles, and the decision model could not read, is put to him in the ordinary approval prompt.
+    // A delegation nothing the owner said settles, and the decision model could not read, is put to the owner in the ordinary approval prompt.
     delegationAsk: async (question, { signal }) => {
       const manager = turnPermissionManagers.get(services);
       if (manager === undefined) return { approved: false, asked: false, reason: 'no approval prompt is available here to ask the owner' };

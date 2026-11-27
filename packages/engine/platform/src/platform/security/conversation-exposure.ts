@@ -22,7 +22,7 @@
  *
  * An exposed turn never gets the owner's administrative authority on its own calls (daemon/capability-wiring.ts), and
  * what it writes into what steers a model is written "by your model after reading text from outside" and waits for the
- * owner's acceptance (control-plane/routes/capabilities.ts `authorOfRun`). The owner sees it on the card he is asked
+ * owner's acceptance (control-plane/routes/capabilities.ts `authorOfRun`). The owner sees it on the card they are asked
  * with ("This conversation has read text from outside: <where>").
  *
  * Pure bookkeeping, no decision: the gate decides with it.
@@ -38,8 +38,15 @@ export interface ConversationExposure {
   readonly at: string;
 }
 
-/** Conversations whose exposure is kept; the oldest is forgotten first (a new conversation by then). */
-const MAX_CONVERSATIONS = 10_000;
+/**
+ * A conversation's exposure lives exactly as long as the record it belongs to (a web chat, a session, a schedule, a
+ * trigger, a piece of work, an agent's run, one call): it is forgotten when that record is deleted (`clearExposure`,
+ * where each is deleted), never because time went by or other conversations were made, so no caller's activity pushes
+ * another conversation's protection out. The keys whose record lives only in this process (an agent's run
+ * `agent:<id>`, cleared when the agent manager lets the record go; one call's key, cleared when the call ends) are not
+ * written to the file: their record ends with the process, and so do they.
+ */
+const PROCESS_ONLY_KEY = /^(?:agent:|conversation:call-)/;
 /** Distinct sources kept per conversation (the first ones read: enough to say where, and that it read any). */
 const MAX_SOURCES = 16;
 
@@ -62,7 +69,8 @@ class ExposureStore {
     try {
       const parsed = JSON.parse(readFileSync(file, 'utf-8')) as { readonly conversations?: Record<string, unknown> };
       for (const [key, list] of Object.entries(parsed.conversations ?? {})) {
-        if (!Array.isArray(list)) continue;
+        // An earlier run's agent or one-call key: its record ended with that process.
+        if (!Array.isArray(list) || PROCESS_ONLY_KEY.test(key)) continue;
         const kept = list.filter((entry): entry is ConversationExposure => entry !== null && typeof entry === 'object'
           && typeof (entry as ConversationExposure).surface === 'string' && typeof (entry as ConversationExposure).origin === 'string'
           && typeof (entry as ConversationExposure).at === 'string').slice(0, MAX_SOURCES);
@@ -89,7 +97,6 @@ class ExposureStore {
       this.#byKey.set(key, [...list, exposure]);
       changed = true;
     }
-    while (this.#byKey.size > MAX_CONVERSATIONS) this.#byKey.delete(this.#byKey.keys().next().value!);
     if (changed) this.#save();
     return changed;
   }
@@ -108,7 +115,8 @@ class ExposureStore {
   #save(): void {
     if (this.#file === undefined) return;
     try {
-      atomicWriteFileSync(this.#file, `${JSON.stringify({ version: 1, conversations: Object.fromEntries(this.#byKey) })}\n`, { mkdirp: true });
+      const kept = [...this.#byKey].filter(([key]) => !PROCESS_ONLY_KEY.test(key));
+      atomicWriteFileSync(this.#file, `${JSON.stringify({ version: 1, conversations: Object.fromEntries(kept) })}\n`, { mkdirp: true });
     } catch { /* kept in memory for this run; the next read of outside text writes it again */ }
   }
 }
@@ -224,7 +232,23 @@ export function withCarriedExposure<T>(key: string, read: readonly ConversationE
   return withConversation(key, fn);
 }
 
+/** Told every key cleared: each is cleared where its record is deleted, so a listener hears the record's end. */
+const clearedListeners = new Set<(key: string) => void>();
+
+/**
+ * Hears every conversation key cleared (`clearExposure`, called where a chat, a session, a schedule, a trigger or a
+ * piece of work is deleted): what else was kept for that record goes with it (the daemon's checkpoint binding of a
+ * session, daemon/workspace-checkpointing.ts). Returns the stop.
+ */
+export function onConversationCleared(listener: (key: string) => void): () => void {
+  clearedListeners.add(listener);
+  return () => { clearedListeners.delete(listener); };
+}
+
 /** A clear that removes what the conversation read: it is no longer exposed (a new start of the same conversation). */
 export function clearExposure(key: string): void {
   store.clear(key);
+  for (const listener of clearedListeners) {
+    try { listener(key); } catch { /* a listener's failure clears nothing else */ }
+  }
 }

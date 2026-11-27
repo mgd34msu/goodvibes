@@ -19,6 +19,7 @@ import { GatewayVerbError } from './gateway-verb-error.js';
 import { readInvocationParams, requireStringValue } from './invocation-params.js';
 import { attachHandler } from './attach-handler.js';
 import { currentRecordReach } from '@goodvibes/engine/daemon-api';
+import { folderReach } from '../../workspace/folder-reach.js';
 
 /** The subset of the store the verb handlers need. */
 export type WorkspacesGatewayService = Pick<
@@ -38,7 +39,7 @@ function rethrowAsVerbError(error: unknown): never {
 }
 
 /**
- * A caller that is not the owner himself (daemon-api `currentRecordReach`) is shown only the projects it may name (the
+ * A caller that is not the owner in person (daemon-api `currentRecordReach`) is shown only the projects it may name (the
  * ones the owner gave it, control-plane/caller-reach.ts); the owner, every one.
  */
 function reachableRoots<T extends { readonly root: string }>(workspaces: readonly T[]): readonly T[] {
@@ -46,11 +47,20 @@ function reachableRoots<T extends { readonly root: string }>(workspaces: readonl
   return reach ? workspaces.filter((workspace) => reach('project', workspace.root)) : workspaces;
 }
 
+/**
+ * A project whose folder cannot be reached now (the folder that held it is missing too: a disk not mounted, a parent
+ * folder renamed) is listed with `reachable: false`; nothing of it is let go, and it is the same project when its folder
+ * is back (workspace/folder-reach.ts). Absent means reachable.
+ */
+function withReach<T extends { readonly root: string }>(workspace: T): T & { readonly reachable?: false } {
+  return folderReach(workspace.root) === 'unreachable' ? { ...workspace, reachable: false as const } : workspace;
+}
+
 function createListHandler(service: WorkspacesGatewayService): GatewayMethodHandler {
   return async () => {
     const snapshot = await service.snapshot();
-    // The folders the owner declined to register are his own choices: not a caller's but his.
-    return { workspaces: reachableRoots(snapshot.workspaces), declines: currentRecordReach() ? [] : snapshot.declines };
+    // The folders the owner declined to register are the owner's own choices: not a caller's but the owner's.
+    return { workspaces: reachableRoots(snapshot.workspaces).map(withReach), declines: currentRecordReach() ? [] : snapshot.declines };
   };
 }
 
@@ -61,10 +71,10 @@ function createListHandler(service: WorkspacesGatewayService): GatewayMethodHand
 function createProjectsHandler(service: WorkspacesGatewayService, daemonFolder: string | undefined): GatewayMethodHandler {
   return async () => {
     const snapshot = await service.snapshot();
-    const projects: { root: string; label?: string; daemonFolder: boolean }[] = [];
+    const projects: { root: string; label?: string; daemonFolder: boolean; reachable?: false }[] = [];
     for (const workspace of reachableRoots(snapshot.workspaces)) {
       if (workspace.root === daemonFolder || projects.some((project) => project.root === workspace.root)) continue;
-      projects.push({ root: workspace.root, ...(workspace.label ? { label: workspace.label } : {}), daemonFolder: false });
+      projects.push(withReach({ root: workspace.root, ...(workspace.label ? { label: workspace.label } : {}), daemonFolder: false }));
     }
     return { projects };
   };

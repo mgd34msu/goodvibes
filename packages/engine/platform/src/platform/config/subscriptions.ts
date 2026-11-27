@@ -158,7 +158,7 @@ function grantOf(subscription: ProviderSubscription | SubscriptionGrant): Subscr
 /**
  * A sign-in in the at-rest form an export file holds, for `/provider
  * export`: the owner asked for a file that carries the tokens to another
- * machine, which is a store of his choosing, so the tokens are taken out for a
+ * machine, which is a store of the owner's choosing, so the tokens are taken out for a
  * store write. The one place a handed-out record becomes text again.
  */
 export function subscriptionExportForm(subscription: ProviderSubscription): SubscriptionGrant {

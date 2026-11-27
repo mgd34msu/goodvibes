@@ -395,6 +395,7 @@ export function createPlaceHost(options: PlaceHostOptions): PlaceHost {
       return result.kind === 'run' ? result.values : undefined;
     },
     async confirm(question) {
+      // A place's control is the released command's confirmation: asked in every mode, as the command asked.
       const ask = options.context.confirm;
       if (!ask) return false;
       return ask({ ...question, tone: 'danger' });

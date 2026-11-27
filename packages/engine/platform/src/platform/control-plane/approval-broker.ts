@@ -11,8 +11,6 @@ import { projectIdentity, type UserPermissionRuleStore } from '../permissions/us
 import type { ControlPlaneSurfaceMessage } from './types.js';
 import type { AskPresentation } from '../permissions/ask-presentation.js';
 import { toolAskWords } from '../permissions/tool-ask-words.js';
-import { OPEN_QUESTIONS_PER_CALLER, OWNER_QUESTIONS_FULL, ownerQuestionsFullWords } from './owner-question-bounds.js';
-import { GatewayVerbError } from './routes/gateway-verb-error.js';
 import { logger } from '../utils/logger.js';
 import { isRecord } from '../utils/record-coerce.js';
 import { contentDigest } from '../utils/target-ref.js';
@@ -203,8 +201,8 @@ type ApprovalPublisher = {
 };
 
 /**
- * Who asks a question, for the owner's list: the caller outside his own programs that a held call was put to him for
- * (`requestedBy`, the attribution's principal), or `own` (his programs, his models' turns, the daemon itself).
+ * Who asks a question, for the owner's list: the caller outside the owner's own programs whose call raised it (`requestedBy`,
+ * the attribution's principal), or `own` (the owner's programs, their models' turns, the daemon itself).
  */
 function askerOf(record: SharedApprovalRecord): string {
   return askerOfRequest(record.metadata, record.request.attribution);
@@ -218,7 +216,7 @@ function askerOfRequest(metadata: Readonly<Record<string, unknown>> | undefined,
 }
 
 /**
- * The owner's list: the questions still open first, grouped by who asks, his own programs' first (oldest first), then
+ * The owner's list: the questions still open first, grouped by who asks, the owner's own programs' first (oldest first), then
  * one of each other caller's in turn (each caller's oldest first), so a flood from one caller never buries another's
  * question; then every settled one, newest first.
  */
@@ -877,12 +875,9 @@ export class ApprovalBroker {
     }
     const input: RequestSharedApprovalInput = question && given.request.analysis.summary !== question
       ? { ...given, request: { ...given.request, analysis: { ...given.request.analysis, summary: question } } } : given;
-    // The ONE place every question for the owner is raised: each caller's are bounded here, whichever door raised it (a
-    // capability's gate, a method the dispatch put to him, the unverified program's folder, the outside agent's project,
-    // pairing, sharing, a program's wire raise). The same ask again joins the open one (`coalesceKey` below); a caller
-    // already at the bound is refused with words, never held; the list keeps one caller from burying another (sortApprovals).
+    // The ONE place every question for the owner is raised, whichever door raised it. The same ask again joins the open
+    // one (`coalesceKey` below); the list keeps one caller from burying another (sortApprovals).
     await this.start();
-    this.#refuseWhenCallerFull(input);
     return this.#ownerApprovals.raise(input, {
       start: () => this.start(),
       approvals: this.approvals,
@@ -907,24 +902,6 @@ export class ApprovalBroker {
       coalesceKey: approvalCoalesceKey,
       resolve: (id, decision, proof) => this.#resolveApproval(id, decision, proof),
     });
-  }
-
-  /**
-   * A new question from a caller that already has `OPEN_QUESTIONS_PER_CALLER` waiting is refused (429
-   * `OWNER_QUESTIONS_FULL`): the same ask as one still open is not a new question (it joins it). The owner's own
-   * programs' questions name no outside caller and are never bounded.
-   */
-  #refuseWhenCallerFull(input: RequestSharedApprovalInput): void {
-    const asker = askerOfRequest(input.metadata, input.request.attribution);
-    if (asker === 'own') return;
-    const key = approvalCoalesceKey(input.sessionId, input.request.tool, input.request.args, input.request.workingDirectory);
-    let open = 0;
-    for (const record of this.approvals.values()) {
-      if (!isOpenApprovalStatus(record.status) || askerOf(record) !== asker) continue;
-      if (approvalCoalesceKey(record.sessionId ?? undefined, record.request.tool, record.request.args, record.request.workingDirectory) === key) return;
-      open += 1;
-    }
-    if (open >= OPEN_QUESTIONS_PER_CALLER) throw new GatewayVerbError(ownerQuestionsFullWords(open), OWNER_QUESTIONS_FULL, 429);
   }
 
   /** The resolver is an in-process capability, never part of a stored approval. */

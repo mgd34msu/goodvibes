@@ -10,6 +10,7 @@ import {
 } from '../../runtime/execution-intents.js';
 import type { DaemonRuntimeRouteContext, DaemonRuntimeRouteHandlerMap } from './runtime-route-types.js';
 import { isRecord } from '../../utils/record-coerce.js';
+import { withInputParty } from '../../security/turn-input-party.js';
 import { isAbsolute, resolve } from 'node:path';
 import { REASONING_EFFORT_SEVERITY } from '../../providers/reasoning-effort.js';
 import { ROUTE_SURFACE_KINDS } from '../../../events/routes.js';
@@ -302,7 +303,7 @@ export function toAgentSpawnInput(input: RuntimeRouteSpawnAgentInput): PlatformS
 export function createDaemonRuntimeRouteHandlers(
   context: DaemonRuntimeRouteContext,
 ): DaemonRuntimeRouteHandlerMap {
-  return createDaemonApiRuntimeRouteHandlers({
+  const handlers = createDaemonApiRuntimeRouteHandlers({
     ...context,
     automationManager: {
       ...context.automationManager,
@@ -311,4 +312,9 @@ export function createDaemonRuntimeRouteHandlers(
     },
     trySpawnAgent: (input, logLabel, sessionId) => context.trySpawnAgent(toAgentSpawnInput(input), logLabel, sessionId),
   });
+  // `POST /task` starts an agent as its caller's work: the owner's own press is theirs, anyone else's is someone else's
+  // (the agent manager marks the agent with the party that started it), as `capabilities.run` carries its caller's.
+  const partyOf = context.requestParty;
+  if (!partyOf) return handlers;
+  return { ...handlers, postTask: (req: Request) => withInputParty(partyOf(req), () => handlers.postTask(req)) };
 }

@@ -119,8 +119,8 @@ export function daemonAutomaticProjects(services: { readonly shellPaths: ShellPa
 }
 
 /**
- * Where the work of a channel conversation runs when its channel has no project: the owner's own conversation (his
- * alone, "Treat my own messages here as me" on: security/turn-input-party.ts) gets its own automatic project, made on
+ * Where the work of a channel conversation runs when its channel has no project: the owner's own conversation (theirs
+ * alone, on a channel that proves its sender: security/turn-input-party.ts) gets its own automatic project, made on
  * this first need; any other conversation gets none (undefined: nothing it says changes anything).
  */
 export function channelWorkProject(

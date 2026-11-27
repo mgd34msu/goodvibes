@@ -11,7 +11,10 @@
  * is answered with a refusal that says so.
  *
  * `write:fleet` is not a read scope, so a relayed call needs the passkey step-up
- * like every other mutation; `access: 'admin'` keeps them owner-scoped.
+ * like every other mutation. They are project acts (effect-authority.ts `fleet.write`): a caller below an admin names a
+ * node by its id as an agent task (control-plane/record-addresses.ts), reached only in a project given to it and changed
+ * only when it is its own (control-plane/caller-reach.ts `OWN_RECORD_CHANGES`); any other node (a background process, a
+ * watcher, a contract) is the owner's.
  */
 import type { GatewayMethodCatalog } from '../method-catalog.js';
 import type { GatewayMethodDescriptor, GatewayMethodHandler } from '../method-catalog-shared.js';
@@ -40,7 +43,7 @@ export const builtinGatewayFleetControlMethodDescriptors: readonly GatewayMethod
     title: 'Stop a Fleet Node',
     description: 'Hard-stop one fleet node through its owning manager (agent cancel, background process stop, watcher stop, workflow cancel, trigger or schedule remove, contract cancel, hosted ACP agent stop). `cascade: true` stops its descendants first. Answers the node ids actually acted on. A node whose capabilities do not include killable is refused with FLEET_ACTION_UNAVAILABLE; an unknown id with FLEET_NODE_NOT_FOUND.',
     category: 'fleet',
-    effects: ['fleet.administer'],
+    effects: ['fleet.write'],
     transport: ['ws'],
     inputSchema: FLEET_CONTROL_INPUT_SCHEMA,
     outputSchema: FLEET_CONTROL_OUTPUT_SCHEMA,
@@ -51,7 +54,7 @@ export const builtinGatewayFleetControlMethodDescriptors: readonly GatewayMethod
     title: 'Interrupt a Fleet Node',
     description: 'Gracefully interrupt one fleet node: an agent ends its current turn, a trigger or schedule is paused. Answers the node ids acted on. A node whose capabilities do not include interruptible is refused with FLEET_ACTION_UNAVAILABLE; an unknown id with FLEET_NODE_NOT_FOUND.',
     category: 'fleet',
-    effects: ['fleet.administer'],
+    effects: ['fleet.write'],
     transport: ['ws'],
     inputSchema: FLEET_CONTROL_INPUT_SCHEMA,
     outputSchema: FLEET_CONTROL_OUTPUT_SCHEMA,
@@ -62,7 +65,7 @@ export const builtinGatewayFleetControlMethodDescriptors: readonly GatewayMethod
     title: 'Resume a Fleet Node',
     description: 'Re-arm one paused trigger or schedule (for a trigger with an open breaker, this is the reset the breaker waits for). Answers the node ids acted on. A node whose capabilities do not include resumable is refused with FLEET_ACTION_UNAVAILABLE; an unknown id with FLEET_NODE_NOT_FOUND.',
     category: 'fleet',
-    effects: ['fleet.administer'],
+    effects: ['fleet.write'],
     transport: ['ws'],
     inputSchema: FLEET_CONTROL_INPUT_SCHEMA,
     outputSchema: FLEET_CONTROL_OUTPUT_SCHEMA,

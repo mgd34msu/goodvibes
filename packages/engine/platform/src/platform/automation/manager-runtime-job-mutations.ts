@@ -1,6 +1,7 @@
 import { ensureAutomationCronPhase, ownerTimezone, withCronTimezone, type AutomationScheduleDefinition } from './schedules.js';
 import { createHash, randomUUID } from 'node:crypto';
 import { projectIdentityOf } from '../workspace/project-identity.js';
+import { recordedCauseInScope } from '../security/turn-input-party.js';
 import type { ConfigManager } from '../config/manager.js';
 import type { AutomationJob, ManagedAutomationJob } from './jobs.js';
 import type { AutomationJobMutationOptions } from './job-mutations.js';
@@ -59,7 +60,7 @@ function projectOf(folder: string | undefined): string {
 }
 
 /**
- * The id a schedule whose id a person chose is stored under: the name he chose and a part made from his project and
+ * The id a schedule whose id a person chose is stored under: the name they chose and a part made from their project and
  * that name alone (`<id>-<8 hex>`), the same for every create of it in that project and different in every other. It is
  * made the same way whatever any other project holds, so it never says whether another project has a schedule of that
  * name, and a create naming another project's schedule is never answered with that one.
@@ -85,7 +86,7 @@ export function sameProjectJobOfChosenId(jobs: ReadonlyMap<string, ManagedAutoma
   return undefined;
 }
 
-/** A schedule's id: the one made from the name a person chose and his project (`storedScheduleId`), or a new one. */
+/** A schedule's id: the one made from the name a person chose and their project (`storedScheduleId`), or a new one. */
 function scheduleIdInProject(context: AutomationJobMutationContext, input: CreateAutomationJobInput): string {
   const chosen = input.id?.trim();
   if (!chosen) return `auto-${randomUUID().slice(0, 8)}`;
@@ -101,6 +102,8 @@ export async function createAutomationJobRecord(
   options: AutomationJobMutationOptions = {},
 ): Promise<ManagedAutomationJob> {
   const now = Date.now();
+  // Who made it, when not the owner: every run of it is then that caller's turn (jobs.ts `cause`).
+  const cause = recordedCauseInScope();
   const jobId = scheduleIdInProject(context, input);
   const schedule = anchoredSchedule(ensureAutomationCronPhase(withCronTimezone(input.schedule, ownerTimezone(context.configManager))), now);
   const enablement = nextJobEnablement(undefined, input.enabled ?? true, schedule, now, 'created-disabled');
@@ -131,6 +134,7 @@ export async function createAutomationJobRecord(
     // The setting is a default for one-shot jobs only: a recurring job deleted after its first run would silently stop recurring.
     deleteAfterRun: input.deleteAfterRun ?? (schedule.kind === 'at' && Boolean(context.configManager.get('automation.deleteAfterRun'))),
     archivedAt: undefined,
+    ...(cause ? { cause } : {}),
   };
   const committed = await context.commitJob(undefined, job, options);
   context.scheduleJob(committed);
@@ -148,10 +152,13 @@ export async function toggleAutomationJobEnabled(
   const job = context.jobs.get(jobId);
   if (!job) return null;
   const now = Date.now();
+  // Turned back on by someone else: its runs are that caller's from now on (pausing changes nobody's).
+  const cause = enabled ? recordedCauseInScope() : undefined;
   const updated: AutomationJob = {
     ...job,
     ...nextJobEnablement(job, enabled, job.schedule, now),
     updatedAt: now,
+    ...(cause ? { cause } : {}),
   };
   const committed = await context.commitJob(job, updated, options);
   context.scheduleJob(committed);
@@ -243,8 +250,15 @@ export async function updateAutomationJobRecord(
     ...enablement,
     updatedAt,
   };
+  // Changed by someone else: its runs are that caller's from now on. The owner's own change keeps who made it, unless
+  // they gave it new words of their own (then what runs is theirs).
+  const changedBy = recordedCauseInScope();
+  const ownWords = !changedBy && (patch.prompt !== undefined || patch.description !== undefined || patch.template !== undefined);
+  const { cause: _kept, ...uncaused } = updated;
+  void _kept;
+  const caused: AutomationJob = changedBy ? { ...uncaused, cause: changedBy } : ownWords ? uncaused : updated;
 
-  const committed = await context.commitJob(job, updated, options);
+  const committed = await context.commitJob(job, caused, options);
   context.scheduleJob(committed);
   context.syncJobToRuntime(committed, 'automation.update');
   context.emitJobUpdated(committed, changedJobFields(job, committed));

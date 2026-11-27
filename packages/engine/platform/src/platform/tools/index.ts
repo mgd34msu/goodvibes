@@ -7,6 +7,7 @@ import type { Tool } from '../types/tools.js';
 import { FileStateCache } from '../state/file-cache.js';
 import { ProjectIndex } from '../state/project-index.js';
 import { toolCallTelemetryFor } from '../state/telemetry.js';
+import { projectIdentityOf } from '../workspace/project-identity.js';
 import type { RuntimeEventBus } from '../runtime/events/index.js';
 import { ModeManager } from '../state/mode-manager.js';
 import { FileUndoManager } from '../state/file-undo.js';
@@ -595,8 +596,8 @@ export function registerAllTools(
     );
   }
   const readConfigManager = deps.configManager;
-  // Reading outside the project (another project's files, the owner's home) is the owner's own turn's only, under his
-  // own settings (YOLO: his choice for his own turns). A turn on anyone else's input (a member's or a device's chat, a
+  // Reading outside the project (another project's files, the owner's home) is the owner's own turn's only, under their
+  // own settings (YOLO: their choice for their own turns). A turn on anyone else's input (a member's or a device's chat, a
   // channel message, an outside agent, a runner, work someone else caused) reads inside its project only, by real
   // path, whatever the mode. The product's own homes are never read from outside them (utils/path-safety.ts).
   const allowOutsideProject = () => turnInputParty().party === 'owner' && isEffectiveDangerMode(readConfigManager);
@@ -778,7 +779,8 @@ export function registerAllTools(
       daemonHomeDir: deps.configManager.getHomeDirectory() ?? undefined,
       modeManager,
       setPrintLevel: (level) => printLevelConfig.setDynamic('behavior.hitlMode', level),
-      ...(deps.runtimeBus ? { telemetryDB: toolCallTelemetryFor(deps.runtimeBus) } : {}),
+      // This registry's project's calls only; a program's registry (one conversation) also its calls that name none.
+      ...(deps.runtimeBus ? { telemetryDB: toolCallTelemetryFor(deps.runtimeBus).forProject(projectIdentityOf(workingDirectory), { unattributed: conversationOf === undefined }) } : {}),
       ...(stateMemory ? { memory: stateMemory } : {}),
       contextAccounting: contextAccountingHolder,
     }),
@@ -832,7 +834,8 @@ export function registerAllTools(
   if (deps.triggers) {
     // A trigger made from this registry's turns works in its folder.
     registerTool(createTriggerTool(deps.triggers, { ...(deps.resolveSessionId ? { resolveSessionId: deps.resolveSessionId } : {}), workingDirectory }));
-    if (deps.triggers instanceof TriggerManager) detachProbeTools = deps.triggers.attachProbeTools(registry, deps.resolveSessionId);
+    // A probe of a trigger made here runs on this registry: its session's, and its project's (probe-tools.ts).
+    if (deps.triggers instanceof TriggerManager) detachProbeTools = deps.triggers.attachProbeTools(registry, deps.resolveSessionId, workingDirectory);
   }
   if (mcpRegistry) {
     registerTool(createMcpTool(mcpRegistry, deps?.mcpConnect));

@@ -5,7 +5,7 @@ import {
   projectFeedContextStable,
   projectFeedContextClosures,
 } from '@goodvibes/engine/terminal-shell/input-feed-context';
-import { InputTokenizer, type InputToken } from '@goodvibes/engine/platform/platform/core';
+import { InputTokenizer } from '@goodvibes/engine/platform/platform/core';
 import { reportDroppedPaste } from '@goodvibes/engine/terminal-shell/input-content';
 import { resolveFooterTarget, type FooterTarget } from '../renderer/footer-targets.ts';
 import {
@@ -40,7 +40,7 @@ import { ProcessModal } from '../renderer/process-modal.ts';
 import { LiveTailModal } from '../renderer/live-tail-modal.ts';
 import { BlockActionsMenu } from '../renderer/block-actions.ts';
 import { ContextInspectorModal } from '../renderer/context-inspector.ts';
-import { SurfaceModalHost, isTrackedModal, type TrackedModal } from '@goodvibes/engine/terminal-shell/surface-modal-host';
+import { SurfaceModalHost, type TrackedModal } from '@goodvibes/engine/terminal-shell/surface-modal-host';
 import { BookmarkModal } from './bookmark-modal.ts';
 import { McpWorkspace } from './mcp-workspace.ts';
 import { SessionPickerModal } from './session-picker-modal.ts';
@@ -84,7 +84,6 @@ type SelectionModalCallback = (result: SelectionResult | null) => void;
  * Extracted from main.ts and StateManager.
  */
 export class InputHandler extends TerminalInputHandlerState {
-  public setupPairing: { handleToken(token: InputToken): boolean; cancelForTakeover(): boolean } | null = null;
   public prompt = '';
 
   /**
@@ -230,10 +229,8 @@ export class InputHandler extends TerminalInputHandlerState {
       modals.blockActions,
       modals.selection,
     );
-    this.surfaceModals.onOpen = (modal, fromEmpty) => {
+    this.surfaceModals.onOpen = (_modal, fromEmpty) => {
       if (fromEmpty) this.modalReturnFocus = this.indicatorFocused ? 'indicator' : 'prompt';
-      if (!isTrackedModal(modal)) return;
-      this.setupPairing?.cancelForTakeover();
     };
     this.initFeedContext();
   }
@@ -362,13 +359,11 @@ export class InputHandler extends TerminalInputHandlerState {
 
   /** Begin one line of masked composer entry. */
   public beginConcealedInput(request: ConcealedInputRequest): void {
-    this.setupPairing?.cancelForTakeover();
     beginConcealedInputForHandler(this, request);
   }
 
   /** Begin one line of ordinary, echoed composer entry. */
   public beginPlainInput(request: PlainLineInputRequest): void {
-    this.setupPairing?.cancelForTakeover();
     beginPlainInputForHandler(this, request);
   }
 
@@ -418,7 +413,6 @@ export class InputHandler extends TerminalInputHandlerState {
       syncFeedContextLiveReferences(this, context);
       // Swap requestRender to buffered version for this feed.
       context.requestRender = bufferedRequestRender;
-      context.handleSetupPairingToken = (token) => this.setupPairing?.handleToken(token) ?? false;
       const tokens = this.tokenizer.feed(data);
       // A mouse token goes through the pointer first: over a kit modal it is a click on what was painted there.
       const routed = tokens.some((token) => token.type === 'mouse') ? tokens.flatMap((token) => this.surfacePointer.route(token)) : tokens;

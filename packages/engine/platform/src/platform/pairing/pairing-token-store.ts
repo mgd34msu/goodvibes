@@ -41,13 +41,15 @@
  * A minted token is an offer until its first use: it is not listed as a
  * device and does not count toward `device.nodes.maxPaired`, and when nobody
  * uses it within {@link PAIRING_OFFER_LIFETIME_MS} it stops authenticating and
- * is dropped at the next write. A pairing screen that mints again replaces its
- * own earlier unused offer, and a client that repeats a pairing attempt whose
- * reply it lost gets that attempt's offer re-issued, so neither adds a second
- * live credential. The first authentication claims it (one write
+ * is dropped at the next write (the released offer's own lifetime). A pairing
+ * screen that mints again replaces its own earlier unused offer, a client that
+ * repeats a pairing attempt whose reply it lost gets that attempt's offer
+ * re-issued, a revoke removes it, and past {@link MAX_OPEN_OFFERS} unused
+ * offers the oldest goes at the next mint, so none adds a second live
+ * credential without bound. The first authentication claims it (one write
  * per device); that claim adds a device, so it is bounded by
  * `device.nodes.maxPaired` exactly as a mint is, and a refused claim leaves the
- * offer usable until it expires. After that, last-seen is stamped in memory and written with the
+ * offer usable. After that, last-seen is stamped in memory and written with the
  * next write or by a timer, never inside a request. With managed token rotation
  * on ({@link PairingTokenManager.setRotationLimit}), a device token older than
  * the limit is refused here, the owner of "may this token authenticate", and
@@ -105,6 +107,12 @@ export function isPairingTokenShape(token: string): boolean {
 const LAST_SEEN_FLUSH_INTERVAL_MS = 5 * 60_000;
 /** How long a minted token waits for its first use before it expires unused. */
 export const PAIRING_OFFER_LIFETIME_MS = 15 * 60_000;
+/**
+ * Unused offers kept at once: besides its lifetime, its first use claims an offer, the owner's next code on the same
+ * screen replaces it (`replacesOffer`), a repeat of the same pairing attempt re-issues it, a revoke removes it, and past
+ * this many the oldest unused one goes at the next mint.
+ */
+const MAX_OPEN_OFFERS = 16;
 const DAY_MS = 24 * 60 * 60_000;
 const OWNER_LOCK_NAMESPACE_VERSION = 'goodvibes-pairing-owner-lock-v2\n';
 
@@ -132,13 +140,13 @@ interface StoredPairingToken {
   /** `agent`: the GoodVibes Agent's credential for the calls it makes on the owner's behalf. */
   client?: 'agent' | undefined;
   /**
-   * `owner-pairing`: the owner paired this device himself, through his own
-   * pairing flow (started from his verified program or his signed-in session;
-   * the code his screen showed is what the device uses). Written when the token
+   * `owner-pairing`: the owner paired this device in person, through their own
+   * pairing flow (started from their verified program or their signed-in session;
+   * the code their screen showed is what the device uses). Written when the token
    * is minted and never changed afterwards; it counts only with `madeBy
    * {owner: true}` (`ownerDeviceOf`). Absent: automation. Even the owner's own
-   * device is never the owner himself: it answers questions other callers
-   * raised and does his native work, and its own risky acts are put to him.
+   * device is never the owner in person: it answers questions other callers
+   * raised and does the owner's native work, and its own risky acts are put to the owner.
    */
   readonly origin?: 'owner-pairing' | undefined;
   /** Who made it, recorded from this release on (absent: made before this was recorded). */
@@ -259,21 +267,23 @@ export interface PublicPairingToken {
   readonly scopes?: readonly string[] | undefined;
   /**
    * How the token came to exist: `owner-pairing`, a device the owner paired
-   * himself (it answers questions other callers raised; its own risky acts are
-   * put to him, as anyone's); `automation`, every other token (minted through
-   * the API, on his yes to someone else's request, with narrowed scopes or for
+   * in person (it answers questions other callers raised; its own risky acts are
+   * put to the owner, as anyone's); `automation`, every other token (minted through
+   * the API, on the owner's yes to someone else's request, with narrowed scopes or for
    * a named client), which answers nothing.
    */
   readonly origin: PairingTokenOrigin;
   /** Who made it (recorded from this release on); absent: made before this was recorded. */
   readonly madeBy?: PairingMaker | undefined;
+  /** Made and not used by any device yet (and not expired): listed so it can be seen and revoked before its first use. */
+  readonly waitingForFirstUse?: true | undefined;
 }
 
 /** How a pairing token came to exist; see {@link PublicPairingToken.origin}. */
 export type PairingTokenOrigin = 'owner-pairing' | 'automation';
 
 /**
- * Who made a credential: the owner himself, or a caller (its principal id) with the owner's yes. Recorded when it is
+ * Who made a credential: the owner in person, or a caller (its principal id) with the owner's yes. Recorded when it is
  * made; a credential made before this was recorded has none, and holds exactly what its kind and scopes give a caller
  * that is not the owner.
  */
@@ -325,7 +335,7 @@ export interface MintPairingInput {
    * narrowed scopes or a named client is automation whatever is asked.
    */
   readonly origin?: PairingTokenOrigin | undefined;
-  /** Who made it (the route that mints records it: the owner himself, or a caller with his yes). */
+  /** Who made it (the route that mints records it: the owner in person, or a caller with the owner's yes). */
   readonly madeBy?: PairingMaker | undefined;
 }
 
@@ -480,11 +490,11 @@ export interface AuthenticatedPairingToken {
   /** The scope list the pairing stores, when it was issued a narrower one than full operator authority. */
   readonly scopes?: readonly string[] | undefined;
   /**
-   * True for a device the owner paired himself (see {@link PublicPairingToken.origin}): recorded `owner-pairing` and
-   * made by the owner himself (`madeBy {owner: true}`), or, on this machine only, a device recorded `owner-pairing`
-   * before makers were recorded. Never one made on his yes to someone else's request, and never a mark taken from
-   * another machine's word alone (`ownerDeviceOf`). It is NOT the owner himself: it answers a question another caller
-   * raised and does his native work; its own risky acts are put to him (daemon/method-owner-decision.ts `ownersDevice`).
+   * True for a device the owner paired in person (see {@link PublicPairingToken.origin}): recorded `owner-pairing` and
+   * made by the owner in person (`madeBy {owner: true}`), or, on this machine only, a device recorded `owner-pairing`
+   * before makers were recorded. Never one made on the owner's yes to someone else's request, and never a mark taken from
+   * another machine's word alone (`ownerDeviceOf`). It is NOT the owner in person: it answers a question another caller
+   * raised and does the owner's native work; its own risky acts are put to the owner (daemon/method-owner-decision.ts `ownersDevice`).
    */
   readonly ownerDevice?: true | undefined;
   /**
@@ -496,10 +506,10 @@ export interface AuthenticatedPairingToken {
 
 /**
  * Whether a pairing record is the owner's own device. The origin mark alone is the writer's word: it counts only with
- * the maker the daemon recorded as the owner himself (`{owner: true}`, his verified program, his signed-in session or
+ * the maker the daemon recorded as the owner in person (`{owner: true}`, their verified program, their signed-in session or
  * the daemon's own act). A record kept on THIS machine from before makers were recorded (no `madeBy`) keeps its mark
  * once, as this machine's own fact; one that arrived from another machine of the group without the owner's recorded
- * act is not his device here, whatever its origin says (gate-review-6 G1, G2).
+ * act is not the owner's device here, whatever its origin says (gate-review-6 G1, G2).
  */
 export function ownerDeviceOf(origin: unknown, madeBy: unknown, local: boolean): boolean {
   if (origin !== 'owner-pairing') return false;
@@ -551,7 +561,7 @@ function authorityText(snapshot: PairingTokenSnapshot): string {
     || (key === 'continuations' && Array.isArray(value) && value.length === 0) ? undefined : value);
 }
 
-/** An offer nobody used in time: it never authenticates and goes at the next write. */
+/** An offer nobody used within {@link PAIRING_OFFER_LIFETIME_MS}: it never authenticates and goes at the next write. */
 function isExpiredOffer(record: StoredPairingToken, now: number): boolean {
   return record.offeredUntil !== undefined && record.offeredUntil <= now;
 }
@@ -561,6 +571,14 @@ function dropExpiredOffers(snapshot: PairingTokenSnapshot, now: number): void {
   if (snapshot.tokens.some(record => isExpiredOffer(record, now))) {
     snapshot.tokens = snapshot.tokens.filter(record => !isExpiredOffer(record, now));
   }
+}
+
+/** Room for one more offer: the oldest unused offers past MAX_OPEN_OFFERS go (a count bound beside the lifetime). */
+function makeRoomForOffer(snapshot: PairingTokenSnapshot): void {
+  const open = snapshot.tokens.filter(record => record.offeredUntil !== undefined).sort((a, b) => a.createdAt - b.createdAt);
+  if (open.length < MAX_OPEN_OFFERS) return;
+  const gone = new Set(open.slice(0, open.length - MAX_OPEN_OFFERS + 1).map(record => record.id));
+  snapshot.tokens = snapshot.tokens.filter(record => !gone.has(record.id));
 }
 
 /** The later of the written and the not yet written last-seen time, as an optional field. */
@@ -902,7 +920,7 @@ export class PairingTokenManager {
         state: `device.nodes.maxPaired is ${cap} and ${paired.length} ${paired.length === 1 ? 'device is' : 'devices are'} already paired, so this pairing code cannot add another`,
         reason: 'The paired-device limit is reached',
         next: [
-          "Unpair a device on the owner's machine, or raise device.nodes.maxPaired, then use this pairing code again before it expires",
+          "Unpair a device on the owner's machine, or raise device.nodes.maxPaired, then use this pairing code again",
         ],
       },
     };
@@ -1770,13 +1788,14 @@ export class PairingTokenManager {
         });
       }
       const token = generateTokenValue();
+      makeRoomForOffer(snapshot);
       const record: StoredPairingToken = {
         id: `pair-${randomUUID()}`, name: input.name.trim() || 'Unnamed device',
         tokenHash: hashToken(token), createdAt: now, offeredUntil: now + PAIRING_OFFER_LIFETIME_MS,
         ...(input.mintedBy !== undefined ? { mintedBy: input.mintedBy } : {}),
         ...(attemptId !== undefined ? { attemptId } : {}),
         ...(input.client === 'agent' ? { client: 'agent' as const } : {}),
-        // The owner's own device only through his pairing flow, made by him (`madeBy {owner: true}`), never with a
+        // The owner's own device only through their pairing flow, made by them (`madeBy {owner: true}`), never with a
         // narrowed list or a named client: a mint that states the origin without that maker is automation, so no new
         // record can pass for one kept from before makers were recorded (`ownerDeviceOf`).
         ...(input.origin === 'owner-pairing' && scopes === undefined && input.client === undefined
@@ -1803,9 +1822,9 @@ export class PairingTokenManager {
    * device pairing for the first time is still bounded.
    */
   mintForMigration(input: MintPairingInput): MintedPairingToken {
-    // `origin` is the caller's to state: pairing.tokens.migrate states owner-pairing only when the owner himself made
-    // it (his verified program or his signed-in session moving onto its own token, maker `{owner: true}`); a migration
-    // the owner said yes to for someone else is automation. The owner's pairing hand-off from his own program or
+    // `origin` is the caller's to state: pairing.tokens.migrate states owner-pairing only when the owner in person made
+    // it (their verified program or their signed-in session moving onto its own token, maker `{owner: true}`); a migration
+    // the owner said yes to for someone else is automation. The owner's pairing hand-off from their own program or
     // session states owner-pairing.
     return this.mintInternal(input, { enforceCap: false });
   }
@@ -1850,11 +1869,11 @@ export class PairingTokenManager {
         return null;
       }
       const extra = entry.public as Record<string, unknown>;
-      // Another machine's word alone never makes the owner's device here: only his own recorded act (G2).
+      // Another machine's word alone never makes the owner's device here: only the owner's own recorded act (G2).
       const remoteOwnerDevice = entry.public.client !== 'agent' && entry.public.scopes === null && ownerDeviceOf(extra['origin'], extra['madeBy'], false);
       if (extra['origin'] === 'owner-pairing' && !remoteOwnerDevice
         && noteRefusedFromGroup(`device-token:${entry.id}@${entry.rev}`, { what: `the paired device "${entry.public.name}" marked as your own device (it is an ordinary device here)`, origin: entry.origin, at: Date.now() })) {
-        logger.warn('A device paired on another machine of the group arrived marked as the owner\'s own device without his own act there; it is an ordinary device on this machine', { tokenId: entry.id, from: entry.origin });
+        logger.warn('A device paired on another machine of the group arrived marked as the owner\'s own device without the owner\'s own act there; it is an ordinary device on this machine', { tokenId: entry.id, from: entry.origin });
       }
       return { id: entry.id, name: entry.public.name, principalId: pairingPrincipalId(entry.id),
         ...(entry.public.client === 'agent' ? { client: 'agent' as const } : {}),
@@ -1939,6 +1958,29 @@ export class PairingTokenManager {
     return Object.freeze([...made].map((child) => pairingPrincipalId(child)));
   }
 
+  /**
+   * What the owner's Devices list shows: every paired token ({@link list}), and each credential made that nobody has
+   * used yet and that has not expired, marked `waitingForFirstUse`, so a credential the owner just made is on the list (and
+   * can be revoked before it is used) instead of missing from it until a device first signs in with it.
+   */
+  listWithOffers(): PublicPairingToken[] {
+    const paired = this.list();
+    const now = Date.now();
+    const shown = new Set(paired.map((token) => token.id));
+    const offers = this.snapshot.tokens
+      .filter((t) => t.offeredUntil !== undefined && t.offeredUntil > now && !shown.has(t.id))
+      .map((t) => ({
+        id: t.id, name: t.name, createdAt: t.createdAt,
+        ...(t.mintedBy !== undefined ? { mintedBy: t.mintedBy } : {}),
+        ...(t.client === 'agent' ? { client: 'agent' as const } : {}),
+        ...(t.scopes !== undefined ? { scopes: Object.freeze([...t.scopes]) } : {}),
+        origin: t.client === undefined && t.scopes === undefined && ownerDeviceOf(t.origin, t.madeBy, true) ? 'owner-pairing' as const : 'automation' as const,
+        ...(t.madeBy !== undefined ? { madeBy: t.madeBy } : {}),
+        waitingForFirstUse: true as const,
+      }));
+    return [...paired, ...offers];
+  }
+
   /** Every per-pairing token, redacted (name / created / last-seen), never the secret. */
   list(): PublicPairingToken[] {
     // Pick up a mint or revoke made by another process; an unreadable file keeps the last good view.
@@ -1969,7 +2011,7 @@ export class PairingTokenManager {
       ...(t.mintedBy !== undefined ? { mintedBy: t.mintedBy } : {}),
       ...(t.client === 'agent' ? { client: 'agent' as const } : {}),
       ...(t.scopes !== undefined ? { scopes: Object.freeze([...t.scopes]) } : {}),
-      // As it authenticates: a token marked owner-pairing that was made on his yes to someone else is not his device.
+      // As it authenticates: a token marked owner-pairing that was made on the owner's yes to someone else is not the owner's device.
       origin: t.client === undefined && t.scopes === undefined && ownerDeviceOf(t.origin, t.madeBy, true) ? 'owner-pairing' as const : 'automation' as const,
       ...(t.madeBy !== undefined ? { madeBy: t.madeBy } : {}),
     })), ...elsewhere];

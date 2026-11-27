@@ -2,7 +2,7 @@
  * outward-approvals.ts, the agent's answer to "what actually clears this?"
  *
  * The refusal the owner met named a remedy that did not exist: reply "send it
- * now". He replied. It refused again, in the same words. Nothing in the whole
+ * now". The owner replied. It refused again, in the same words. Nothing in the whole
  * product had ever minted an `OwnerApproval`, the factory had test callers
  * only, so the advice was fiction, and the retry could not have worked.
  *
@@ -15,7 +15,7 @@
  *
  * ── What clears it here ───────────────────────────────────────────────────
  *
- * The owner's own answer to the send in his inbox (Waiting for you, Sends:
+ * The owner's own answer to the send in their inbox (Waiting for you, Sends:
  * places/held-sends-inbox.ts posts each refusal there). Two properties make
  * that a gesture rather than text:
  *
@@ -107,8 +107,8 @@ function contentKey(content: PendingOutwardAction['content']): string {
 /**
  * Remember what was just refused.
  *
- * The owner approves an action he has been SHOWN, so the thing he approves has
- * to be recorded at the moment of refusal, otherwise his "approve" would
+ * The owner approves an action they have been SHOWN, so the thing they approve has
+ * to be recorded at the moment of refusal, otherwise their "approve" would
  * be approving whatever came next, which is a blank cheque. Several refusals
  * in one turn each stay approvable; a refusal of the same action with the same
  * content as one already waiting refreshes that entry (keeping its number)

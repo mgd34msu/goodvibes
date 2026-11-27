@@ -162,7 +162,7 @@ async function runOwnedGoogleSetupFlow(path: GoogleSetupPath, deps: GoogleSetupF
     deps.progress.stepFinished(spec, result);
 
     if (deps.signal?.aborted === true) {
-      // Stopped by the person: nothing is handed to him, and no later step starts.
+      // Stopped by the person: nothing is handed to them, and no later step starts.
       halted = true;
     } else if (result.outcome === 'needs-human') {
       waitingOn = spec.id;

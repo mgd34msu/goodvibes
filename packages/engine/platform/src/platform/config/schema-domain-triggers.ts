@@ -36,8 +36,6 @@ export interface TriggersConfig {
   observationRingSize: number;
   /** Run-history records retained per trigger. */
   runHistoryLimit: number;
-  /** Age ceiling (hours) on retained run history. */
-  runHistoryTtlHours: number;
   /** Entries retained in the shared cross-watcher correlation event log. */
   eventLogLimit: number;
   /** Age ceiling (hours) on the shared correlation event log. */
@@ -71,7 +69,6 @@ export const triggersConfigDefaults: { triggers: TriggersConfig } = {
     maxConcurrentChecks: 4,
     observationRingSize: 200,
     runHistoryLimit: 50,
-    runHistoryTtlHours: 168,
     eventLogLimit: 500,
     eventLogTtlHours: 24,
     sweepIntervalMs: 300_000,
@@ -157,14 +154,6 @@ export const triggersConfigSettings: ConfigSettingDefinition[] = [
     ...intRange(1, 5_000),
   },
   {
-    key: 'watchers.triggers.runHistoryTtlHours',
-    label: 'Keep trigger runs for (hours)',
-    type: 'number',
-    description:
-      'Age ceiling in hours on retained run history. Records older than this are reaped by the recovery sweep even when the count limit has not been reached, and the sweep reports how many it removed. Read once when the daemon starts; restart to apply a change.',
-    ...intRange(1, 24 * 365),
-  },
-  {
     key: 'watchers.triggers.eventLogLimit',
     label: 'Events kept for linking triggers',
     type: 'number',
@@ -185,7 +174,7 @@ export const triggersConfigSettings: ConfigSettingDefinition[] = [
     label: 'How often old trigger records are cleared (ms)',
     type: 'number',
     description:
-      'Cadence of the recurring housekeeping sweep: reap records whose owning process or session is gone, retire fired one-shot triggers, enforce the count and age bounds, and re-validate persisted state by content. A daemon that only sweeps at boot never sweeps. Read once when the daemon starts; restart to apply a change.',
+      'Cadence of the recurring housekeeping sweep: reap records whose owning process or session is gone, retire fired one-shot triggers, enforce the count bounds and the correlation log\'s window, and re-validate persisted state by content. A daemon that only sweeps at boot never sweeps. Read once when the daemon starts; restart to apply a change.',
     ...intRange(10_000, 24 * 60 * 60 * 1000),
   },
   {

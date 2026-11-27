@@ -1,4 +1,4 @@
-// Proves: A request the owner's ChatGPT subscription refused for a reason other than the model is sent again on his paid OpenAI API key, or later requests stay on the key.
+// Proves: A request the owner's ChatGPT subscription refused for a reason other than the model is sent again on the owner's paid OpenAI API key, or later requests stay on the key.
 // Red when: The subscription's 400 about a parameter is read as a refusal of the model (`refusedModel` matching loosely), so the same request, and any later one, reaches the API key's endpoint.
 /**
  * With both sign-ins set up, a request goes to the subscription and moves to

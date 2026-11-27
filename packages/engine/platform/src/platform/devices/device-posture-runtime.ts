@@ -151,8 +151,8 @@ export interface DevicePostureRuntimeOptions {
   readonly approvals: DeviceApprovalBridge;
   readonly config: DevicePostureConfigSource;
   /**
-   * Who answers a request no live grant covers, from `permissions.mode`:
-   * 'allow' under yolo, otherwise the owner is asked. Absent: the owner is asked.
+   * Who answers a request no live grant covers (device-capability-service.ts `DeviceNoGrantAuthority`): the daemon's
+   * 'allow', since the request was decided once before it got here. Absent: the owner is asked.
    */
   readonly noGrantAuthority?: (() => DeviceNoGrantAuthority) | undefined;
   /** The host's lifetime; aborting it withdraws requests no phone has picked up. */

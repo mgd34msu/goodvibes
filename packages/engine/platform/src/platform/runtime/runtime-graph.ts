@@ -11,6 +11,7 @@ import { dirname, join } from 'node:path';
 import { carrySubfolderRecords, projectRecordsFolder } from './project-folder-records.js';
 import { logger } from '../utils/logger.js';
 import { summarizeError } from '../utils/error-display.js';
+import { outsideEveryCall } from '../utils/outside-every-call.js';
 import { PRIVATE_DELIVERY_HOSTS_SETTING, parseApprovedHosts } from './network/destination.js';
 import { resolveSecretInput } from '../config/secret-refs.js';
 import { ServiceRegistry } from '../config/service-registry.js';
@@ -344,7 +345,7 @@ export function buildRuntimeGraph<X extends object>(product: ProductComposition<
   const profileManager = new ProfileManager(shellPaths.resolveUserPath(surfaceRoot, 'profiles'));
   const bookmarkManager = new BookmarkManager(shellPaths.resolveUserPath(surfaceRoot, 'bookmarks'));
   const hookActivityTracker = new HookActivityTracker();
-  // Hosts on the owner's own network that deliveries he configured may reach, read live on every delivery.
+  // Hosts on the owner's own network that deliveries they configured may reach, read live on every delivery.
   const privateDeliveryHosts = (): readonly string[] => parseApprovedHosts(configManager.get(PRIVATE_DELIVERY_HOSTS_SETTING));
   // featureFlags is required in practice: a registry without one treats
   // `watchers.enabled` as on, so turning the setting off would change nothing.
@@ -765,6 +766,9 @@ export function buildRuntimeGraph<X extends object>(product: ProductComposition<
       conversationTools: conversationToolNames,
       sessionIsLive: (sessionId: string) => sessionBroker.getSession(sessionId) !== null,
       workAdmitted,
+      // A trigger with no session opens its own project's tools for a check through the one turn environment builder,
+      // in the process's own context (no caller's), so it checks after a restart with nobody working there.
+      openProjectTools: (folder) => outsideEveryCall(() => agentOrchestrator.acquireTurnEnvironment(folder)),
     })
     : undefined;
   if (triggerManager) scope.ownUntilRegistered('trigger manager', async () => { triggerManager.shutdown(); await triggerManager.join(); });
@@ -831,8 +835,7 @@ export function buildRuntimeGraph<X extends object>(product: ProductComposition<
   const closeMcpConnections = (): Promise<void> => mcpClosing ??= projectToolServers.release();
   scope.registry.add('MCP connections', closeMcpConnections);
   const permissionManager = createBrokeredPermissionManager({
-    // A product with no workspace trust gate still honours a headless run's refusal (WorkspaceTrustManager.refuseForThisRun).
-    workspaceTrust: workspaceTrustManager ?? repositoryTrust.runRefusalConstraint(),
+    workspaceTrust: workspaceTrustManager ?? null,
     // A decision for a turn or call in another project reads that project's trust (permissions/call-project.ts).
     ...(workspaceTrustFor ? { workspaceTrustFor } : {}),
     requestApproval,

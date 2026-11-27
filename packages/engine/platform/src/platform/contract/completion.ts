@@ -53,7 +53,7 @@ import { contractSourceScope } from './work-receipts.js';
 import { ownerEvidenceForModel } from './owner-evidence.js';
 
 import { spawnSync } from 'node:child_process';
-import { existsSync } from 'node:fs';
+import { existsSync, rmSync } from 'node:fs';
 import { join } from 'node:path';
 import { isDeepStrictEqual } from 'node:util';
 import { captureOwnedJson } from '../gate/judgment-input.js';
@@ -228,11 +228,172 @@ export function settlePublishedBranch(root: string, branch: string, contractId: 
   const landed = published ? `it is in ${here}; ` : '';
   const tip = git(root, ['rev-parse', '--verify', '--quiet', `${branch}^{commit}`]);
   if (!tip.ok) return published ? `it is in ${here}` : 'it has no branch of its own left';
-  if (!git(root, ['merge-base', '--is-ancestor', tip.out, 'HEAD']).ok) return `its own branch ${branch} is kept, as its commits are not in ${here}`;
+  if (!git(root, ['merge-base', '--is-ancestor', tip.out, 'HEAD']).ok) return `its changes are kept on its own branch ${branch}, not in ${here}: in Work, History, merge it into ${here} or discard it`;
   const removed = git(root, ['branch', '-d', branch]);
   if (removed.ok) return `${landed}its own branch was removed`;
   logger.warn('contract runner: a published work\'s branch was not removed', { contractId, branch, error: removed.err });
   return `${landed}its own branch ${branch} could not be removed`;
+}
+
+/** A finished or stopped work's own branch whose commits are not in the project's branch: its name and that branch's. */
+export interface KeptBranch { readonly branch: string; readonly into: string }
+
+/** The project's current branch by name, or undefined when HEAD names none (detached). */
+function currentBranch(root: string): string | undefined {
+  const head = git(root, ['rev-parse', '--abbrev-ref', 'HEAD']);
+  return head.ok && head.out && head.out !== 'HEAD' ? head.out : undefined;
+}
+
+/** The worktree that has `branch` checked out, if any (a stopped work keeps its own tree). */
+function treeHolding(root: string, branch: string): string | undefined {
+  const listed = git(root, ['worktree', 'list', '--porcelain']);
+  if (!listed.ok) return undefined;
+  let path: string | undefined;
+  for (const line of listed.out.split('\n')) {
+    if (line.startsWith('worktree ')) path = line.slice('worktree '.length);
+    else if (line === `branch refs/heads/${branch}` && path !== undefined && path !== root) return path;
+  }
+  return undefined;
+}
+
+/**
+ * Whether an ended work's own branch is still there with commits the project's branch lacks: what Work offers to merge
+ * or discard. Null when the branch is gone or already in the project's branch, or HEAD names no branch.
+ */
+export function readKeptBranch(root: string, branch: string | undefined): KeptBranch | null {
+  if (!branch) return null;
+  const into = currentBranch(root);
+  const tip = git(root, ['rev-parse', '--verify', '--quiet', `${branch}^{commit}`]);
+  if (into === undefined || !tip.ok || git(root, ['merge-base', '--is-ancestor', tip.out, 'HEAD']).ok) return null;
+  return { branch, into };
+}
+
+/** Why a kept branch was left as it is, said to the person (the refusal's reason, then what to do). */
+export class KeptBranchRefusal extends Error {
+  constructor(message: string, readonly next: string) { super(message); this.name = 'KeptBranchRefusal'; }
+}
+
+/**
+ * Merges an ended work's kept branch into the project's current branch, then removes the branch and the work's own tree
+ * (its commits are in the project now). A merge that conflicts is undone and nothing changes. Returns what landed.
+ */
+/**
+ * Where the work's own commits start on its branch: the snapshot commit of the owner's uncommitted edits the work
+ * started from (`inputCommit`), when that is on the branch and not in the project's branch (those edits are the
+ * owner's, never the work's); else the point the branch left the project's branch.
+ */
+function workBase(root: string, branch: string, inputCommit: string | undefined): { readonly base: string; readonly snapshot: boolean } {
+  if (inputCommit && git(root, ['merge-base', '--is-ancestor', inputCommit, branch]).ok && !git(root, ['merge-base', '--is-ancestor', inputCommit, 'HEAD']).ok) {
+    return { base: inputCommit, snapshot: true };
+  }
+  return { base: git(root, ['merge-base', 'HEAD', branch]).out, snapshot: false };
+}
+
+/**
+ * The work's files in the project's working tree. A finished work applied as uncommitted changes left them exactly as
+ * its branch has them (`applied`); one whose content differs from the branch's was changed since, by the owner.
+ */
+function workFilesOnDisk(root: string, branch: string, base: string): { readonly applied: readonly string[]; readonly changedSince: readonly string[] } {
+  const touched = git(root, ['diff', '--name-only', base, branch]).out.split('\n').filter(Boolean);
+  if (touched.length === 0) return { applied: [], changedSince: [] };
+  const dirty = git(root, ['status', '--porcelain', '--untracked-files=all', '--', ...touched]).out.split('\n').filter(Boolean).map((line) => line.slice(3));
+  // Compared by blob: the file on disk against the branch's (a file the branch deleted must be gone on disk too).
+  const sameAsBranch = (path: string): boolean => {
+    const theirs = git(root, ['rev-parse', '--verify', '--quiet', `${branch}:${path}`]);
+    if (!existsSync(join(root, path))) return !theirs.ok;
+    const ours = git(root, ['hash-object', '--', path]);
+    return theirs.ok && ours.ok && ours.out === theirs.out;
+  };
+  return { applied: dirty.filter(sameAsBranch), changedSince: dirty.filter((path) => !sameAsBranch(path)) };
+}
+
+/** Sets the work's applied files back to the project's branch (a file the project's branch does not have is removed). */
+function unapply(root: string, paths: readonly string[]): void {
+  for (const path of paths) {
+    if (git(root, ['cat-file', '-e', `HEAD:${path}`]).ok) git(root, ['checkout', 'HEAD', '--', path]);
+    else { git(root, ['rm', '-q', '--cached', '--ignore-unmatch', '--', path]); rmSync(join(root, path), { force: true }); }
+  }
+}
+
+function removeBranchAndTree(root: string, branch: string, force: boolean): void {
+  const tree = treeHolding(root, branch);
+  if (tree !== undefined) {
+    const removed = git(root, ['worktree', 'remove', ...(force ? ['--force'] : []), tree]);
+    if (!removed.ok) throw new KeptBranchRefusal(`the work's own folder ${tree} could not be removed (${removed.err})`, 'Close what has that folder open, then try again.');
+  }
+  const deleted = git(root, ['branch', '-D', branch]);
+  if (!deleted.ok) throw new KeptBranchRefusal(`git could not remove its branch ${branch} (${deleted.err})`, 'Read Work again, then try again.');
+}
+
+/**
+ * Puts an ended work's kept changes into the project's current branch as one commit, then removes its branch and its
+ * own folder. Only the work's own commits come in (never the snapshot of the owner's edits it started from). Files it
+ * left applied as uncommitted changes, unchanged since, become that commit; a file changed since refuses it. A change
+ * that conflicts with the project's branch is undone and nothing changes. Returns what landed.
+ */
+export function mergeKeptBranch(root: string, branch: string, title: string, inputCommit?: string): { readonly into: string; readonly commit: string } {
+  const kept = readKeptBranch(root, branch);
+  if (kept === null) throw new KeptBranchRefusal(`its branch ${branch} is not there any more, or its changes are already in the project`, 'Read Work again.');
+  if (ownerMergeInProgress(root)) throw new KeptBranchRefusal(`the project is in the middle of a merge of your own`, 'Finish or abort that merge, then merge it again.');
+  const { base, snapshot } = workBase(root, branch, inputCommit);
+  const onDisk = workFilesOnDisk(root, branch, base);
+  if (onDisk.changedSince.length > 0) throw new KeptBranchRefusal(`${onDisk.changedSince.join(', ')} ${onDisk.changedSince.length === 1 ? 'was' : 'were'} changed in the project since the work ended`, 'Commit or undo those changes, then merge it again.');
+  unapply(root, onDisk.applied);
+  const message = `Put in the work "${title}"`;
+  // From a snapshot: the work's own change (snapshot to branch tip) is applied to the index, three-way, and committed.
+  const landed = snapshot
+    ? (() => {
+      const patch = spawnSync('git', ['-C', root, 'diff', '--binary', base, branch], { encoding: 'utf-8' });
+      const applied = spawnSync('git', ['-C', root, 'apply', '--index', '--3way'], { input: patch.stdout ?? '', encoding: 'utf-8' });
+      return { ok: patch.status === 0 && applied.status === 0, out: (applied.stdout ?? '').trim(), err: (applied.stderr ?? '').trim() };
+    })()
+    : git(root, ['merge', '--no-ff', '--no-edit', '-m', message, branch]);
+  if (!landed.ok) {
+    const conflicted = git(root, ['diff', '--name-only', '--diff-filter=U']).out.split('\n').filter(Boolean);
+    const undone = snapshot
+      ? (git(root, ['reset', '--merge']).ok ? 'nothing was changed' : 'the unfinished change could not be undone; inspect the project before trying again')
+      : abortFailedMerge(root, false);
+    throw new KeptBranchRefusal(conflicted.length > 0
+      ? `its changes to ${conflicted.join(', ')} conflict with ${kept.into}; ${undone}`
+      : `git could not bring it in (${landed.err || landed.out}); ${undone}`, `Change ${kept.into} so it no longer conflicts, or discard the work's branch.`);
+  }
+  if (snapshot) {
+    const committed = git(root, ['commit', '--no-verify', '-m', message]);
+    if (!committed.ok) { git(root, ['reset', '--merge']); throw new KeptBranchRefusal(`git could not commit it (${committed.err || committed.out}); nothing was changed`, 'Read Work again, then merge it again.'); }
+  }
+  const commit = git(root, ['rev-parse', '--short', 'HEAD']).out;
+  removeBranchAndTree(root, branch, false);
+  return { into: kept.into, commit };
+}
+
+/**
+ * Throws an ended work's kept changes away: its branch, its own folder, and the files it left applied as uncommitted
+ * changes in the project that are unchanged since (set back to the project's branch). A file changed since is the
+ * owner's and stays; it is named. Decided by the permission manager under the owner's mode: it cannot be undone.
+ */
+export function discardKeptBranch(root: string, branch: string, inputCommit?: string): { readonly left: readonly string[] } {
+  if (readKeptBranch(root, branch) === null) throw new KeptBranchRefusal(`its branch ${branch} is not there any more, or its changes are already in the project`, 'Read Work again.');
+  const { base } = workBase(root, branch, inputCommit);
+  const onDisk = workFilesOnDisk(root, branch, base);
+  unapply(root, onDisk.applied);
+  removeBranchAndTree(root, branch, true);
+  return { left: onDisk.changedSince };
+}
+
+/** Whether the project still has this branch. */
+export function branchPresent(root: string, branch: string): boolean {
+  return git(root, ['rev-parse', '--verify', '--quiet', `refs/heads/${branch}`]).ok;
+}
+
+/**
+ * Throws away the other side of a conflict a stopped or failed work kept on a branch of its own: its branch and the
+ * folder that holds it. Discarded with the work's own branch ("discard it"), so nothing of the work is left on disk.
+ * False when that branch is not there any more.
+ */
+export function discardConflictBranch(root: string, branch: string): boolean {
+  if (!branchPresent(root, branch)) return false;
+  removeBranchAndTree(root, branch, true);
+  return true;
 }
 
 /** The commit message: the goal, the criteria met, gates passed, the units, and what was excluded. */
@@ -264,9 +425,6 @@ class PublicationPending extends Error {
 
 /** A publication that waiting and retrying can never complete: the contract fails and says where the result is. */
 class PublicationImpossible extends Error {}
-
-/** Publication attempts with backoff before the owner is asked to clear the obstacle. */
-const PUBLICATION_RETRIES = 6;
 
 /** The decision target an acceptance record is saved under. */
 const acceptanceTarget = (contractId: string): string => `${contractId}.accepted`;
@@ -310,17 +468,6 @@ function readAcceptance(contract: Pick<Contract, 'id' | 'decisions'>): Acceptanc
     ? parsed as AcceptanceRecord : undefined;
 }
 
-function abortableDelay(run: ContractRun, ms: number): Promise<void> {
-  if (run.env.wait !== undefined) return run.env.wait(ms, run.abort.signal);
-  return new Promise<void>(resolve => {
-    const done = (): void => { clearTimeout(timer); run.abort.signal.removeEventListener('abort', done); resolve(); };
-    const timer = setTimeout(done, ms);
-    timer.unref?.();
-    run.abort.signal.addEventListener('abort', done, { once: true });
-    if (run.abort.signal.aborted) done();
-  });
-}
-
 export function createCompletion(context: StepContext, correction: Pick<Correction, 'groupFailed' | 'deliverableFailed' | 'publicationPaused' | 'ownerAcceptance'>): Completion {
   const config = () => readContractConfig(context.configManager);
   const pendingVerifications = new WeakMap<ContractRun, Map<string, Promise<void>>>();
@@ -331,7 +478,7 @@ export function createCompletion(context: StepContext, correction: Pick<Correcti
   const acceptedSources = new WeakMap<ContractRun, { checkId: string; tree: string; source: GateSourceInputIdentity; gates?: QualityGateResult[] }>();
 
   /** A verifier failure stops after the port's configured fallback chain.
-   * Only unpublished checked work retries; that wait remains owned and abortable. */
+   * Checked work that could not be published is put to the owner at once, never retried on a clock. */
   function verify(run: ContractRun, targetId: string, what: string, step: () => Promise<void>): Promise<void> {
     let pending = pendingVerifications.get(run);
     if (pending === undefined) { pending = new Map(); pendingVerifications.set(run, pending); }
@@ -358,12 +505,9 @@ export function createCompletion(context: StepContext, correction: Pick<Correcti
             run.decide('resumed', targetId, `publication pending: ${note}; checked work retained and revalidated before each retry; no answer delivered`);
           }
           logger.warn('contract publication pending; work retained', { contractId: run.id, targetId, attempt: failures, reason: note });
-          if (failures < PUBLICATION_RETRIES) {
-            await abortableDelay(run, Math.min(30_000, 1_000 * 2 ** (failures - 1)));
-            continue;
-          }
-          // Retrying an unchanged obstacle cannot succeed. The owner is asked through the escalation path
-          // (every surface that shows owner questions shows it); the reply "retry", or a resume, publishes again.
+          // Nothing in Work acts on a clock: retrying an unchanged obstacle after a wait cannot succeed, so the owner is
+          // asked at once through the escalation path (every surface that shows owner questions shows it); the reply
+          // "retry", or a resume, publishes again.
           if (run.contract.status === 'committing') run.moveContract('judging');
           correction.publicationPaused(run, { note, ...(run.contract.isolation === 'worktree' && run.contract.branch !== undefined ? { branch: run.contract.branch } : {}) });
           return;
@@ -429,7 +573,16 @@ export function createCompletion(context: StepContext, correction: Pick<Correcti
       ...(unverifiedGates(currentGates).length > 0 ? ['unshown' as const] : []),
       ...(failedGates(currentGates).length > 0 ? ['gate' as const] : []),
     ];
-    const awaitingOwner = source !== undefined && problems.length === 0 && !ownerAccepted(contract, source.source);
+    // A finished result no decision model checked waits for the owner to accept it, in every mode (as released).
+    const unaccepted = source !== undefined && problems.length === 0 && !ownerAccepted(contract, source.source);
+    const ownerAsked: boolean = true;
+    if (unaccepted && !ownerAsked && notJudged !== undefined) {
+      run.control.fail('judgment-unavailable', `its result could not be checked: the decision model failed (${notJudged})`);
+      return null;
+    }
+    const acceptedByRule = unaccepted && !ownerAsked;
+    const awaitingOwner = unaccepted && ownerAsked;
+    if (acceptedByRule) contract.statusLine = 'Done; no decision model checked its result, so it was accepted by the rule of your permission mode.';
     const passed = problems.length === 0 && !awaitingOwner;
     const checkId = `${input.targetId}.k${input.checks.length + 1}`;
     const now = run.env.now();
@@ -459,10 +612,10 @@ export function createCompletion(context: StepContext, correction: Pick<Correcti
       const treeId = source.source.startsWith('tree:') ? source.source.slice('tree:'.length) : workingTreeIdentity(tree);
       if (treeId !== null) {
         const record: AcceptanceRecord = { version: 1, checkId, tree: treeId, fixRounds: contract.fixRounds };
-        decideRecorded(run, 'checked', acceptanceTarget(contract.id), `accepted result recorded (check ${checkId}, tree ${treeId.slice(0, 12)}): accepted by the owner, not independently checked`, receiptRecord(record));
+        decideRecorded(run, 'checked', acceptanceTarget(contract.id), `accepted result recorded (check ${checkId}, tree ${treeId.slice(0, 12)}): ${acceptedByRule ? 'accepted by the rule of the owner\'s permission mode' : 'accepted by the owner'}, not independently checked`, receiptRecord(record));
       }
     }
-    const said = passed ? (source === undefined ? 'pass' : 'pass, accepted by the owner') : awaitingOwner ? 'the owner is asked to accept the result' : problems.join(', ');
+    const said = passed ? (source === undefined ? 'pass' : acceptedByRule ? 'pass, accepted by the rule of the owner\'s permission mode' : 'pass, accepted by the owner') : awaitingOwner ? 'the owner is asked to accept the result' : problems.join(', ');
     run.decide('checked', input.targetId, `check ${checkId} (${input.trigger}): ${said}; ${notJudged === undefined ? 'not independently checked: no decision model is in use' : `not judged: ${notJudged}`}`);
     run.emit({
       type: 'CONTRACT_CHECKED',
@@ -1413,7 +1566,7 @@ export function createCompletion(context: StepContext, correction: Pick<Correcti
         if (files === 0) return { status: 'skipped', note: publication
           ? 'commit skipped: the exact accepted file delta is already present; owner changes preserved'
           : 'commit skipped: the contract changed no files; owner changes preserved' };
-        return { status: 'applied', note: `applied ${files} file${files === 1 ? '' : 's'} as uncommitted changes; pre-existing owner edits and staging preserved${commitOn ? '; automatic commit deferred for the dirty input baseline' : ''}` };
+        return { status: 'applied', note: `its ${files} changed file${files === 1 ? ' is' : 's are'} in the project, not committed, beside your own uncommitted edits, which stay as they were` };
       } catch (error) {
         if (error instanceof PublicationPending) throw error;
         const assessment = publicationAssessments.get(run);

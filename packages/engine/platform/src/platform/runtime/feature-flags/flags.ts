@@ -124,7 +124,6 @@ export const FEATURE_FLAGS: FeatureFlag[] = [
       'watchers.triggers.maxConcurrentChecks',
       'watchers.triggers.observationRingSize',
       'watchers.triggers.runHistoryLimit',
-      'watchers.triggers.runHistoryTtlHours',
       'watchers.triggers.eventLogLimit',
       'watchers.triggers.eventLogTtlHours',
       'watchers.triggers.sweepIntervalMs',

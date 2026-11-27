@@ -1,3 +1,4 @@
+import { AsyncLocalStorage } from 'node:async_hooks';
 import type { DaemonControlRouteHandlers, GatewayRestVerbInvocation } from './context.js';
 import type { RuntimeEventDomain } from '@goodvibes/engine/contracts';
 import { EngineErrorCodes, isOperationKey, OPERATION_KEY_RULE } from '@goodvibes/engine/errors';
@@ -71,7 +72,7 @@ export interface ControlRouteContext {
   readonly extractAuthToken: (req: Request) => string;
   /** `expiresAt`: when a sign-in session ends unless it is used again (the daemon extends it on use). */
   readonly resolveAuthenticatedPrincipal: (req: Request) => RequestPrincipal | null;
-  /** Whether the request is the owner himself (the one definition: platform daemon/method-owner-decision.ts `ownerHimself`). */
+  /** Whether the request is the owner in person (the one definition: platform daemon/method-owner-decision.ts `ownerHimself`). */
   readonly ownerHimself?: ((req: Request) => boolean) | undefined;
   readonly gatewayMethods: GatewayMethodCatalogLike;
   readonly getOperatorContract: () => unknown;
@@ -342,7 +343,6 @@ export function bindOwnerAdmitted(req: Request): void {
 export function readOwnerAdmitted(req: Request): boolean {
   return ownerAdmittedRequests.has(req);
 }
-
 /** Who made a settings write and how it was decided, bound per request by the dispatch (setting-act.ts). */
 export { bindSettingAct, readSettingAct, type SettingAct } from './setting-act.js';
 
@@ -411,6 +411,49 @@ function withContractRetryKey(methodId: string, req: Request, body: unknown): un
   }
   const record = body && typeof body === 'object' && !Array.isArray(body) ? body as Record<string, unknown> : {};
   return { ...record, idempotencyKey: key };
+}
+
+/**
+ * The request header a caller sends to be told, in the same answer, when its call starts waiting on a card put to the
+ * owner (`goodvibes do`): the answer is then lines of JSON, `{"waiting":{question,where}}` once a card is raised for the
+ * call, and last `{"status":<the call's HTTP status>,"body":<its answer>}`. Without it the answer is the call's own.
+ */
+export const WAITING_LINES_HEADER = 'x-goodvibes-waiting-lines';
+
+/** A card raised for the call being answered: what it asks, and where the owner answers it. */
+export interface WaitingNotice {
+  readonly question: string;
+  readonly where: string;
+}
+
+const waitingListener = new AsyncLocalStorage<(notice: WaitingNotice) => void>();
+
+/**
+ * Says, to the caller whose request is being answered in this async scope, that a card was raised for its call and the
+ * call now waits on the owner's answer. Nothing when the caller did not ask to be told (no `WAITING_LINES_HEADER`).
+ */
+export function noticeWaiting(notice: WaitingNotice): void {
+  waitingListener.getStore()?.(notice);
+}
+
+/** The call's answer as lines: a waiting line for each card raised while it runs, then its status and body. */
+function waitingLinesResponse(invoke: () => Promise<Response>): Response {
+  const encoder = new TextEncoder();
+  const stream = new ReadableStream<Uint8Array>({
+    start(controller) {
+      let open = true;
+      const line = (value: unknown): void => { if (open) controller.enqueue(encoder.encode(`${JSON.stringify(value)}\n`)); };
+      void waitingListener.run((notice) => line({ waiting: notice }), invoke).then(async (response) => {
+        const text = await response.text();
+        let body: unknown = text;
+        try { body = JSON.parse(text) as unknown; } catch { /* the answer as sent */ }
+        line({ status: response.status, body });
+      }, (error: unknown) => {
+        line({ status: 500, body: { error: error instanceof Error ? error.message : String(error), code: EngineErrorCodes.INTERNAL_ERROR } });
+      }).finally(() => { open = false; controller.close(); });
+    },
+  });
+  return new Response(stream, { status: 200, headers: { 'content-type': 'application/x-ndjson', 'cache-control': 'no-store' } });
 }
 
 /** A gateway call's answer; a contracts.start that returned an earlier call's contract says so in a header. */
@@ -583,7 +626,7 @@ export function createDaemonControlRouteHandlers(
       // A method that takes the shared retry key reads it from the header, or beside `body` in the envelope.
       const envelopeKey = parsedBody && typeof parsedBody.idempotencyKey === 'string' ? parsedBody.idempotencyKey : undefined;
       const idempotencyKey = methodId === 'contracts.start' ? undefined : req.headers.get('idempotency-key') ?? envelopeKey;
-      const response = await context.invokeGatewayMethodCall({
+      const callIt = () => context.invokeGatewayMethodCall({
         authToken: context.extractAuthToken(req),
         signal: req.signal,
         methodId,
@@ -605,9 +648,13 @@ export function createDaemonControlRouteHandlers(
           ...(readCallContext(req) ? { call: readCallContext(req) } : {}),
         },
       });
-      return gatewayCallResponse(methodId, response);
+      // A caller that asked to be told when its call starts waiting on a card (`goodvibes do`) gets its answer as lines.
+      if (req.headers.get(WAITING_LINES_HEADER) === '1') {
+        return waitingLinesResponse(async () => gatewayCallResponse(methodId, await callIt()));
+      }
+      return gatewayCallResponse(methodId, await callIt());
     },
-    resolveGatewayRestVerb: (method, pathname) => {
+    resolveGatewayRestVerb:(method, pathname) => {
       // Only a verb with a handler is served here; any other falls through to the route modules.
       const descriptor = context.gatewayMethods.findByHttpBinding(method, pathname);
       if (!descriptor?.http || !context.gatewayMethods.hasHandler(descriptor.id)) return null;

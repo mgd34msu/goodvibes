@@ -635,7 +635,7 @@ export function renderCliStatus(options: CliStatusOptions): string {
     ] : []),
     '',
     'Decision model:',
-    `  if Jev can't answer: ${snapshot.decisionModel.policyLabel}`,
+    `  when the decision model is missing or fails: ${snapshot.decisionModel.policyLabel}`,
     `  ${snapshot.decisionModel.line}`,
     '',
     'Auth:',

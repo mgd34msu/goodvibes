@@ -30,7 +30,7 @@ export const builtinGatewayPermissionRuleMethodDescriptors: readonly GatewayMeth
     category: 'permissions',
     effects: ['approvals.read'],
     transport: ['ws'],
-    notWorkFolders: { project: 'the project a list of the owner\'s rules is filtered by (a read his approvals scope admits); nothing works in it' },
+    notWorkFolders: { project: 'the project a list of the owner\'s rules is filtered by (a read the caller\'s approvals scope admits); nothing works in it' },
     inputSchema: PERMISSION_RULES_LIST_INPUT_SCHEMA,
     outputSchema: PERMISSION_RULES_LIST_OUTPUT_SCHEMA,
   }),

@@ -102,13 +102,8 @@ async function callLocalAuth<T>(runtime: CliCommandRuntime, methodId: string, in
     ? ((url, init) => daemon.fetchImpl(url, { ...init, headers: { ...(init?.headers as Record<string, string> | undefined), 'x-goodvibes-explicit-user-request': 'true' } })) as typeof fetch
     : daemon.fetchImpl;
   const answer = await callDaemonMethod<T>(daemon.target, methodId, { input, ...(write ? {} : { readOnly: true }) }, fetchImpl);
-  // Who may sign in is the owner's own act, and a command line never makes it by itself: the daemon put it to him.
-  const held = answer.ok ? answer.data as unknown as { readonly code?: unknown; readonly approvalId?: unknown; readonly state?: unknown } : undefined;
-  if (held?.code === 'OWNER_APPROVAL_PENDING' && typeof held.approvalId === 'string') {
-    return { ok: false, code: 'refused', daemonCode: 'OWNER_APPROVAL_PENDING',
-      error: `${typeof held.state === 'string' ? held.state : `Waiting for the owner (${held.approvalId})`}. It was not run at once because who may sign in is an act only you make, and a command line never makes it by itself. Answer it in Waiting for you: in the terminal app or the Agent, the web UI, or a paired phone.`,
-      fix: `Read what came of it: goodvibes do ${held.approvalId}` };
-  }
+  // Who may sign in is the owner's own act, and a command line never makes it by itself: the daemon decided it under
+  // the owner's permission mode (under Ask me this call waited on their one answer).
   return answer.ok ? { ok: true, data: answer.data } : signInCallFailure(daemon.target, answer);
 }
 

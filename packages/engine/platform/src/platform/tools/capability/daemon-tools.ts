@@ -21,7 +21,7 @@ import type { GatewayMethodCatalog } from '../../control-plane/method-catalog.js
 import { CAPABILITY_RUN_METHOD_ID } from '../../control-plane/method-catalog-capabilities.js';
 import type { Actor } from '@goodvibes/engine/daemon-api/http-policy';
 import { turnInputParty } from '../../security/turn-input-party.js';
-import { turnModelActor, whoseTurn } from '../../security/turn-session.js';
+import { turnModelActor, turnRecordOf, whoseTurn } from '../../security/turn-session.js';
 import { isOwnerWorkMethod } from '../../control-plane/owner-work-method.js';
 import { RUNS_LATER_METHOD_IDS, riskOfDescriptor } from '../../control-plane/method-risk.js';
 import { methodAddressesOf, methodListsOf } from '../../control-plane/record-addresses.js';
@@ -70,7 +70,7 @@ function capabilityMethodRefusal(id: string): string {
 
 /**
  * Who a call of this turn acts as: the model, for whose turn it is (security/turn-session.ts `turnModelActor`): a
- * member's or a device's web chat is that caller's model's turn, whoever sent the message; the owner's is his.
+ * member's or a device's web chat is that caller's model's turn, whoever sent the message; the owner's is theirs.
  */
 function turnAgent(): Actor {
   return turnModelActor();
@@ -110,7 +110,7 @@ export function createDaemonCapabilityTools(host: DaemonCapabilityToolHost, fall
     ];
     // A method is decided by its risk class (control-plane/method-risk.ts), the ONE owner decision every door applies
     // (daemon/method-owner-decision.ts), never by the older descriptor flags alone: one a model never calls stays refused;
-    // the owner's own act is put to him in every mode, opening on No; a loosening or a secret write is his to decide
+    // the owner's own act is put to them in every mode, opening on No; a loosening or a secret write is theirs to decide
     // (`loosen-security`), one that cannot be undone `irreversible-operator`; money is decided under the mode in force
     // for the turn's project; what runs by itself later is never made unasked from what the turn read.
     const refused = (method: (typeof methods)[number]): boolean => method.modelRefused === true || method.ownerOnly === true || (method.effects ?? []).includes('model.refused');
@@ -129,7 +129,7 @@ export function createDaemonCapabilityTools(host: DaemonCapabilityToolHost, fall
       // that runs later), whose answer the one reach rule bounds (control-plane/record-addresses.ts: it lists records of
       // a declared kind, or names one by a declared input): a read to this gate, as a capability that only reads is. A
       // turn on someone else's input reads it within its reach (caller-reach.ts); a read the rule cannot bound (the
-      // owner's watchers, his status) stays "would change or start something" to such a turn.
+      // owner's watchers, their status) stays "would change or start something" to such a turn.
       reads: methods.filter((method) => !refused(method) && risk(method) === 'none' && method.effect === 'read' && !RUNS_LATER_METHOD_IDS.has(method.id)
         && method.irreversible !== true && method.changesContract !== true
         && (methodListsOf(method.id).length > 0 || Object.keys(methodAddressesOf(method.id)).length > 0)).map((method) => method.id),
@@ -148,15 +148,33 @@ export function createDaemonCapabilityTools(host: DaemonCapabilityToolHost, fall
     const others = party.party === 'other' ? { othersInput: true as const, ...(party.madeFor ? { othersInputFor: party.madeFor } : {}) } : {};
     return { project: host.workingDirectory(), ...(sessionId ? { sessionId } : {}), ...others };
   };
-  // The bodies an action's preview read before the gate, each taken once by its call's run (as the daemon's own route).
-  const previews = new Map<string, Record<string, unknown>>();
-  // Keyed by the turn too: one project's registry serves every daemon turn there, and one turn's preview is never another's
-  // body (two turns making the same call each run on the body their own gate was shown).
-  const previewKey = (id: string, values: Readonly<Record<string, string>>): string => `${whoseTurn().turnId ?? ''}\u0000${id}\u0000${JSON.stringify(Object.entries(values).sort(([a], [b]) => a.localeCompare(b)))}`;
+  // The bodies an action's preview read before the gate, each taken once by its call's run (as the daemon's own route):
+  // the run sends the body the decision judged, never one read again later. Kept on the turn the call belongs to
+  // (security/turn-session.ts `turnRecordOf`), one per preview read in the order read, with no count bound another
+  // turn's calls could push one out of: taken when its call runs, and gone with its turn when the turn ends (a call
+  // refused by the gate is never taken). One turn's preview is never another's body (two turns making the same call
+  // each run on the body their own gate was shown), and a call outside every turn keeps none.
+  const previews = new WeakMap<object, Map<string, Array<Record<string, unknown>>>>();
+  const keepPreview = (key: string, body: Record<string, unknown>): void => {
+    const turn = turnRecordOf();
+    if (!turn) return;
+    const kept = previews.get(turn) ?? new Map<string, Array<Record<string, unknown>>>();
+    previews.set(turn, kept);
+    kept.set(key, [...(kept.get(key) ?? []), body]);
+  };
+  const takePreview = (key: string): Record<string, unknown> | undefined => {
+    const turn = turnRecordOf();
+    const kept = turn ? previews.get(turn) : undefined;
+    const list = kept?.get(key);
+    const first = list?.shift();
+    if (list && list.length === 0) kept?.delete(key);
+    return first;
+  };
+  const previewKey = (id: string, values: Readonly<Record<string, string>>): string => `${id}\u0000${JSON.stringify(Object.entries(values).sort(([a], [b]) => a.localeCompare(b)))}`;
   /**
    * An action's preview (a read the daemon answers with the method's body), as this turn: through the daemon's one
    * dispatch when it is there, as the action's method itself goes (a trigger's preview needs the owner's administrative
-   * authority his own turn has), else the handler in process.
+   * authority the owner's own turn has), else the handler in process.
    */
   const previewAsTurn = (previewId: string, fields: Record<string, unknown>, signal: AbortSignal | undefined): Promise<unknown> => {
     const actor = turnAgent();
@@ -192,8 +210,7 @@ export function createDaemonCapabilityTools(host: DaemonCapabilityToolHost, fall
         const body = await methodBodyOf(method, checked.values, (previewId, fields) => previewAsTurn(previewId, fields, signal),
           // What it makes belongs to this turn's project.
           host.workingDirectory());
-        previews.set(previewKey(entry.id, checked.values), body);
-        while (previews.size > 16) previews.delete(previews.keys().next().value!);
+        keepPreview(previewKey(entry.id, checked.values), body);
       } catch (error) {
         return message(error);
       }
@@ -209,7 +226,7 @@ export function createDaemonCapabilityTools(host: DaemonCapabilityToolHost, fall
       // this turn's gate, in this daemon, was the decision (exactly one, at the daemon).
       // The mark is the one `capabilities.run` reads for a call a program's gate decided (routes/capabilities.ts
       // `decidedByProgramGate`); without it the daemon's capability gate asked the owner a second time about a call this
-      // turn's gate had already put to him and he had answered (his web chat's hand-over, asked twice).
+      // turn's gate had already put to the owner and they had answered (their web chat's hand-over, asked twice).
       // Every call names this turn's project and session, as a terminal program's calls do (its call context): a method
       // routed by project (Work) reaches this project's, a list filtered by project is this project's, and what a call
       // records (a memory, an approval) names the conversation it came from.
@@ -223,7 +240,7 @@ export function createDaemonCapabilityTools(host: DaemonCapabilityToolHost, fall
         const descriptor = host.methods.get(methodId);
         if (!descriptor) return { success: false, error: `No capability or daemon method named ${id}. capability_find says what each capability is called.` };
         // The daemon's one dispatch, as a capability's nested method goes (daemon/capability-wiring.ts): the owner's own
-        // turn acts with his authority there (a schedule, a trigger, a watcher, a task in its project), a method served
+        // turn acts with the owner's authority there (a schedule, a trigger, a watcher, a task in its project), a method served
         // only by its route is reached through it, and the folder and reach checks are the dispatch's. This turn's gate
         // was the one decision; the dispatch does not decide it again. Without it (a registry built outside a daemon), a
         // method's handler in process.
@@ -245,7 +262,7 @@ export function createDaemonCapabilityTools(host: DaemonCapabilityToolHost, fall
             }
             return { success: true, output: JSON.stringify(answer ?? null, null, 2) };
           }
-          // The owner's own turn uses his Work by a method's id as through a capability: with his local authority
+          // The owner's own turn uses their Work by a method's id as through a capability: with their local authority
           // (control-plane/owner-work-method.ts, as daemon/capability-wiring.ts sends a nested Work method).
           const ownersWork = isOwnerWorkMethod(methodId) && turnInputParty().party === 'owner';
           const answer = await host.methods.invoke(methodId, { body: sent, ...(options?.signal ? { signal: options.signal } : {}),
@@ -286,8 +303,13 @@ export function createDaemonCapabilityTools(host: DaemonCapabilityToolHost, fall
         const method = entry.method;
         // The preview (a read) first when the action has one: its answer is the method's body, as read before the gate.
         const key = previewKey(entry.id, checked.values);
-        const read = previews.get(key);
-        previews.delete(key);
+        const read = takePreview(key);
+        // An action whose preview was read before the gate runs only the body that preview read (what the decision was
+        // made on): a time "in ten minutes" read later is another body, so a missing one runs nothing.
+        const previewed = entry.home === 'daemon' && method.preview !== undefined && !entry.inputs.some((input) => input.kind === 'secret');
+        if (!read && previewed) {
+          return { success: false, error: `${entry.label} was not run: no body its preview read for exactly these inputs in this turn is here (the inputs changed after the decision, or the preview is gone), so nothing ran. Make the call again.` };
+        }
         return callMethod(method.id, read ? read : () => methodBodyOf(method, checked.values, (previewId, fields) =>
           previewAsTurn(previewId, fields, options?.signal), host.workingDirectory()));
       }

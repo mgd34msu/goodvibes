@@ -8,7 +8,7 @@
  * (`storage.automaticProjectsFolder`, default `~/goodvibes-projects`), registered in the shared register like any
  * other (so its rules, trust, memory, checkpoints, Work, schedules, triggers, hooks and records are keyed to it by the
  * one project identity, and it is listed with every other project), its trust "trusted, nothing of its own to run"
- * (it is empty: the daemon made it for the owner's own message; a file it later brings asks him as any project does).
+ * (it is empty: the daemon made it for the owner's own message; a file it later brings asks them as any project does).
  *
  * Its name is a short lower-case folder name, picked by the decision model from names made from the message's words
  * (`workspace.automatic-project-name`); with no decision model set (silently) or one that failed (said), the chat's
@@ -17,7 +17,7 @@
  * attached instead. Nothing here deletes anything: a chat deleted leaves its project, which is the owner's folder.
  *
  * Someone else's input never makes one (the hosts ask only for the owner's own turns). Making the folder is not put to
- * the owner: it is the direct effect of his own message; everything he does in it is decided under the settings in
+ * the owner: it is the direct effect of their own message; everything they do in it is decided under the settings in
  * force for it, as for any project.
  */
 import { existsSync, mkdirSync, readFileSync, readdirSync, realpathSync, statSync } from 'node:fs';

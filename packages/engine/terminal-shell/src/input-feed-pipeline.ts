@@ -82,7 +82,6 @@ function adopt<Key extends MutableKey>(
   return result.handled;
 }
 export interface FeedPipelinePorts<Context extends FeedPipelineContext> {
-  readonly pairing?: ((context: Context, token: InputToken) => boolean) | undefined;
   readonly surfaceModalTokens: 'all' | 'text-key';
   readonly modal: (context: Context, token: InputToken, env: FeedEnvironment) => ModalResult;
   readonly workTree: (context: Context, token: InputToken, env: FeedEnvironment) => boolean;
@@ -149,7 +148,6 @@ export function createFeedInputTokens<Context extends FeedPipelineContext>(ports
         if (read.kind === 'drop') return;
         if (read.kind === 'rewrite') token = read.token;
       }
-      if (ports.pairing?.(context, token)) return;
       // The leader: armed, the next key completes the sequence or cancels it;
       // not armed, the leader's own key arms it. A concealed value never sees it.
       const leader = ports.leader?.state(context);

@@ -12,6 +12,10 @@
  *   (RETIRED_SETTING_KEYS, read from the settings schema of every release):
  *   removed from the file.
  *
+ * A key 3.5.0 declared and this release does not (SETTINGS_KEPT_FOR_ROLLBACK)
+ * is neither: it stays in the file untouched and is read past in silence, so
+ * a rollback to 3.5.0 still reads it.
+ *
  * Any other key this build does not know was typed by someone (a misspelling,
  * a key from a newer version): it is left in the file and reported once
  * (manager-ingestion.ts), never rewritten here.
@@ -63,8 +67,6 @@ export const RETIRED_SETTING_KEYS: readonly string[] = [
   'notifications.burstCooldownMs',
   'notifications.burstWindowMs',
   'permissions.backgroundAgents',
-  // The adaptive planner's switch, which changed nothing: the planner is gone (a piece of work has its plan).
-  'planner.adaptive',
   'push.subscriptions.sweepIntervalMinutes',
   'release.channel',
   'sandbox.replIsolation',
@@ -76,6 +78,24 @@ export const RETIRED_SETTING_KEYS: readonly string[] = [
   'surfaces.email.imapUser',
   'surfaces.email.username',
   'tools.contractVerification',
+];
+
+/**
+ * Settings keys 3.5.0 declared that this release does not (read from the `key:` rows of 3.5.0's settings schema
+ * against this release's). A stored value is read past in silence, never reported as an unknown setting, and left in
+ * the file as it is, so a 3.5.0 program after a rollback still reads it. Nothing in this release reads them.
+ * - `contract.heartbeatTimeoutMs`: a step's silence limit; no step is stopped for being quiet now.
+ * - `contract.gateTimeoutMs`: the gate command limit; a gate command runs until it exits.
+ * - `contract.transportRetryDelayMs`: the wait before a failed step ran again; it runs again at once.
+ * - `planner.wallTimeoutMs`: the longest writing a plan could take; a plan is written until it is done or stopped.
+ * - `planner.adaptive`: the adaptive planner's switch, which changed nothing (a piece of work has its plan).
+ */
+export const SETTINGS_KEPT_FOR_ROLLBACK: readonly string[] = [
+  'contract.gateTimeoutMs',
+  'contract.heartbeatTimeoutMs',
+  'contract.transportRetryDelayMs',
+  'planner.adaptive',
+  'planner.wallTimeoutMs',
 ];
 
 /**

@@ -12,7 +12,7 @@
  * the one every conversation that has not chosen its own uses. Each saved
  * artifact is announced as LIST_CHANGED `artifacts`.
  *
- * The person who pressed a control reads the result in his own words
+ * The person who pressed a control reads the result in their own words
  * (model-compare-person.ts); a model or another agent reads the tool's text,
  * which names the ids and the next calls, and everyone gets what was saved as
  * data.
@@ -134,7 +134,7 @@ export function createModelComparisonRunner(deps: ModelComparisonRunnerDeps): Mo
     modelCatalog: deps.modelCatalog,
     providerRegistry: deps.providerRegistry,
     artifactStore: deps.artifactStore,
-    // The person asked for the comparison, so each candidate's call is his confirmed act too: admitted under the same gate
+    // The person asked for the comparison, so each candidate's call is their confirmed act too: admitted under the same gate
     // (a deny rule or plan mode still refuses), never asked again per model.
     dispatchCandidate: (name, args) => registry.executeOwnerConfirmed(`capability-${name}-${randomUUID()}`, name, { ...args }, {
       goal: 'The owner asked for this: compare models on one prompt.',

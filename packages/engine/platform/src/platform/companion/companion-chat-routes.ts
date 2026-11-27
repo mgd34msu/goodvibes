@@ -808,7 +808,7 @@ function respondWithManagerError(err: unknown): Response {
  * historical answer, because the router already validated the credential.
  */
 function isOwnerRequest(req: Request, context: CompanionChatRouteContext): boolean {
-  // The daemon's own authority, and the owner himself: an admin who is not the owner sends someone else's input
+  // The daemon's own authority, and the owner in person: an admin who is not the owner sends someone else's input
   // (security/turn-input-party.ts), which the chat's turn runs under (companion-chat-manager.ts launchTurn).
   return (context.requireAdmin ? context.requireAdmin(req) === null : true) && (context.isOwnerCaller?.(req) ?? true);
 }

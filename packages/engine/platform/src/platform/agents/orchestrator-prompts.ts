@@ -88,8 +88,8 @@ async function prepareDecisionOrchestratorPromptContext(record: AgentRecord, dep
   let packets = preparedPackets.get(deps.knowledgeService);
   if (!packets) { packets = new Map(); preparedPackets.set(deps.knowledgeService, packets); }
   // What the packet may hold: ALWAYS this run's own project and party (knowledge-reach.ts `knowledgeTurnReach`), whatever
-  // reach is or is not in scope here: its project's knowledge, and the owner's shared knowledge for his own run or a
-  // caller he gave it. A sub-agent reuses its parent's packet only for the same project and party.
+  // reach is or is not in scope here: its project's knowledge, and the owner's shared knowledge for their own run or a
+  // caller they gave it. A sub-agent reuses its parent's packet only for the same project and party.
   const project = record.workingDirectory ?? deps.workingDirectory;
   const party = turnInputParty();
   const reach = `${project}\u0000${party.party === 'owner' ? 'owner' : `other\u0000${party.madeFor ?? ''}`}`;

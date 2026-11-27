@@ -9,7 +9,7 @@
  * budgets) and nowhere else.
  *
  * First-party local reads are not privacy-screened: they are the owner's own
- * state read by his own session. Research content keeps its own screening
+ * state read by the owner's own session. Research content keeps its own screening
  * owner (protected-research-report.ts). What leaves for a model is still
  * checked once by `snapshotJudgmentEvidence` (card data, attached secrets,
  * malformed input).

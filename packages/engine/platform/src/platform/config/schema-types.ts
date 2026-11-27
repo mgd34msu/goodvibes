@@ -150,7 +150,6 @@ export interface GoodVibesConfig {
     decomposition: 'agent' | 'heuristic';  // default: 'agent'. 'heuristic' forces the old single-item path
     maxTurns: number;                       // default: 0 (unlimited). Optional planner turn ceiling
     tokenCeiling: number;                   // default: 0 (unlimited). Optional planner token budget
-    wallTimeoutMs: number;                  // default: 0 (unlimited). Optional planner wall-clock timeout
     showPlanFirst: boolean;                 // default: false. A piece of work's plan waits for the owner's approval before it runs
   };
   sandbox: {

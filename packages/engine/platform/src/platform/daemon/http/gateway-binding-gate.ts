@@ -6,6 +6,8 @@ import { actorHoldsScope, type Actor } from '../http-policy.js';
 import { EFFECTS, admitRules, declaredAccessRules, type EffectAdmission, type EffectRule } from '../../security/effect-authority.js';
 import { catalogPathname, declaredRouteDescriptor } from './route-manifest.js';
 import { pairingGrant } from '../../security/http-auth.js';
+import { OWN_SESSION_FOLLOW_SCOPES } from '../../control-plane/gateway-scope-enforcement.js';
+import { SHARED_KIND_NOT_GIVEN, sharedKindGiven, sharedKindOfMethod, sharedKindRefusalWords } from '../../control-plane/shared-kinds.js';
 
 type GatewayRefusal = { status: number; ok: false; body: Record<string, unknown> };
 
@@ -18,19 +20,46 @@ function heldScopes(actor: Actor): readonly string[] {
   return actor.scopes === 'all' ? ['*'] : [...actor.scopes];
 }
 
+/**
+ * Who a call is admitted as. A method of one of the owner's shared kinds (control-plane/shared-kinds.ts) is opened by the
+ * owner's gift of that kind, not by a class or a scope: a paired device, a member or an admin that is not the owner, given
+ * the kind, uses its reads and its acts as an admin does. Never the owner's own acts (a row only the owner causes stays
+ * refused), never a model acting for someone (its turn is held to the gift of whom it acts for, shared-kind-gifts.ts).
+ */
+function admittedAs(descriptorId: string, actor: Actor): Actor {
+  if (actor.agentFor !== undefined || (actor.class !== 'device' && actor.class !== 'member' && actor.class !== 'admin')) return actor;
+  if (!sharedKindGiven(descriptorId, actor.id)) return actor;
+  return { ...actor, class: 'admin', scopes: 'all', ownerDevice: undefined };
+}
+
+/**
+ * A call of a shared kind refused for its class or a scope, by a caller the owner did not give that kind: the refusal
+ * says what was not given and where the owner gives it (shared-kinds.ts `sharedKindRefusalWords`).
+ */
+function notGivenRefusal(descriptor: Pick<GatewayMethodDescriptor, 'id'>, admission: Exclude<EffectAdmission, { kind: 'allowed' }>, actor: Actor): GatewayRefusal | null {
+  if (admission.kind !== 'refused' || admission.code !== 'MISSING_RIGHT' || admission.missing === 'peer') return null;
+  if (actor.agentFor !== undefined || (actor.class !== 'device' && actor.class !== 'member' && actor.class !== 'admin')) return null;
+  const kind = sharedKindOfMethod(descriptor.id);
+  if (kind === undefined || sharedKindGiven(descriptor.id, actor.id)) return null;
+  return { status: 403, ok: false, body: {
+    error: `Not done: ${sharedKindRefusalWords(kind, false)}. Nothing was read or changed.`, code: SHARED_KIND_NOT_GIVEN, category: 'authorization', status: 403,
+    effect: admission.effect, kind, next: [`Ask the owner to give this caller their ${kind} in Devices and network, on its row.`],
+  } };
+}
+
 /** The wire body of an admission refusal: the codes clients branch on, with the effect and what is missing. */
 function refusalOf(descriptor: Pick<GatewayMethodDescriptor, 'id'>, admission: Exclude<EffectAdmission, { kind: 'allowed' }>, actor: Actor): GatewayRefusal {
   const named = { effect: admission.effect, ...(admission.kind === 'refused' ? { missing: admission.missing } : {}) };
   if (admission.kind === 'ask-owner') {
     return { status: 403, ok: false, body: {
       error: `${descriptor.id} is the owner's to decide (${admission.reason}).`, code: 'OWNER_ONLY', category: 'authorization', status: 403,
-      ...named, next: ['Ask the owner to make this call from his own credential.'],
+      ...named, next: ['Ask the owner to make this call from their own credential.'],
     } };
   }
   if (admission.code === 'OWNER_ONLY') {
     return { status: 403, ok: false, body: {
       error: actor.agentFor !== undefined
-        ? `${descriptor.id} is the owner's own act; a call the Agent makes for him is refused. The owner does it from his own app.`
+        ? `${descriptor.id} is the owner's own act; a call the Agent makes for the owner is refused. The owner does it from their own app.`
         : `${descriptor.id}: ${admission.reason}.`,
       code: 'OWNER_ONLY', category: 'authorization', status: 403, ...named, next: [admission.next],
     } };
@@ -76,8 +105,8 @@ export function refuseGatewayAccess(
     }
     return { status: 401, ok: false, body: { error: `${descriptor.id} needs an authenticated caller.`, code: 'AUTH_REQUIRED', category: 'authentication', status: 401 } };
   }
-  const admission = admitRules(actor, rules);
-  return admission.kind === 'allowed' ? null : refusalOf(descriptor, admission, actor);
+  const admission = admitRules(admittedAs(descriptor.id, actor), rules);
+  return admission.kind === 'allowed' ? null : notGivenRefusal(descriptor, admission, actor) ?? refusalOf(descriptor, admission, actor);
 }
 
 /**
@@ -109,9 +138,10 @@ export function refuseGatewayInvocation(
   }
   const denied = refuseGatewayAccess(descriptor, actor);
   if (denied || requiredScopes.length === 0 || actor === undefined || descriptor.access === 'public' || descriptor.access === 'remote-peer') return denied;
-  const missing = requiredScopes.filter((scope) => !actorHoldsScope(actor, scope));
+  const held = admittedAs(descriptor.id, actor);
+  const missing = requiredScopes.filter((scope) => !actorHoldsScope(held, scope));
   if (missing.length === 0) return null;
-  const body = missingScopeRefusal(descriptor.id, requiredScopes, heldScopes(actor));
+  const body = missingScopeRefusal(descriptor.id, requiredScopes, heldScopes(held));
   return body ? { status: 403, ok: false, body: { ...body } } : null;
 }
 
@@ -164,5 +194,16 @@ export function gateGatewayBinding(req: Request, deps: GatewayBindingGateDeps): 
   // The auth gate already accepted the credential; a kind this resolver cannot describe is left to the route's own check.
   if (!principal) return null;
   const denied = refuseGatewayAccess(descriptor, principal.actor);
+  // A person who chats (the sessions scopes) follows their own conversations live without `read:events`: the stream it
+  // opens delivers only the frames of sessions their principal owns (control-plane/gateway-scope-enforcement.ts
+  // `ownSessions`), nothing else of the event stream.
+  if (denied && descriptor.id === CONTROL_EVENTS_STREAM_ID && followsOwnSessions(principal.actor)) return null;
   return denied ? Response.json(denied.body, { status: denied.status }) : null;
+}
+
+const CONTROL_EVENTS_STREAM_ID = 'control.events.stream';
+/** Whether a caller holds a scope that lets it follow its own sessions (OWN_SESSION_FOLLOW_SCOPES). */
+function followsOwnSessions(actor: Actor): boolean {
+  const scopes = actor.scopes;
+  return scopes === 'all' || OWN_SESSION_FOLLOW_SCOPES.some((scope) => scopes.has(scope));
 }

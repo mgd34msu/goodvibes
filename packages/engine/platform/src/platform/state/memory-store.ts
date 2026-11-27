@@ -11,7 +11,7 @@
 import { captureMemoryOperation, assertMemoryOperationCurrent, awaitMemoryOperation, type MemoryOperationOptions } from './memory-operation.js';
 import { rankReviewQueue, rankSemanticSearch, rerankRetrieved } from './memory-search-ranking.js';
 import { MEMORY_ID_SHAPE, newMemoryId } from './memory-id.js';
-import { authorAfterChange, memoryAwaitsOwner, type MemoryAuthor } from './memory-author.js';
+import { authorAfterChange, type MemoryAuthor } from './memory-author.js';
 import { noteListChanged } from '../runtime/list-changes.js';
 import { SQLiteStore } from './sqlite-store.js';
 import {
@@ -132,15 +132,14 @@ export interface MemoryRecord {
   validUntil?: number | undefined;
   /**
    * Who wrote what the record says, from the credential the daemon authenticated (never a field a caller sends):
-   * the owner himself, his model in his own turn, or someone else. Absent: written before authors were kept (3.5.0,
-   * or earlier in this version), the owner's. A record someone else wrote is given to no turn until the owner accepts
-   * it (memory-recall-contract.ts).
+   * the owner in person, their model in their own turn, or someone else. Absent: written before authors were kept (3.5.0,
+   * or earlier in this version), the owner's. A record someone else wrote is given to turns as any record once its write
+   * was allowed; a conversation it enters counts as having read text from outside (memory-author.ts).
    */
   author?: MemoryAuthor | undefined;
 }
 
 export type { MemoryAuthor } from './memory-author.js';
-export { memoryAwaitsOwner } from './memory-author.js';
 export type { MemoryTemporalStatus } from './memory-temporal.js';
 export { memoryRecordTemporalStatus, isMemoryTemporallyActive } from './memory-temporal.js';
 
@@ -958,8 +957,8 @@ export class MemoryStore {
     resetReview?: true;
     /**
      * Who makes the change (as the daemon authenticated the caller): someone else's change makes the record someone
-     * else's words, waiting for the owner's review; the owner's own change of a record someone else wrote is his
-     * acceptance of it; his model's change leaves the author as it was. Absent: the author is left as it was.
+     * else's words; the owner's own change of a record someone else wrote makes it the owner's reviewed words; their
+     * model's change leaves the author as it was. Absent: the author is left as it was.
      */
     by?: MemoryAuthor;
   }, options?: MemoryOperationOptions): MemoryRecord | null {
@@ -1054,28 +1053,6 @@ export class MemoryStore {
     logger.info('MemoryStore: record reviewed', { id, reviewState, confidence });
     noteListChanged({ list: 'memory', change: 'changed', id, ...projectNamed(existing) });
     return reviewed;
-  }
-
-  /**
-   * The owner accepts a record someone else wrote (Memory and knowledge): from now on it is given to turns as any
-   * record, with its review state and confidence as they are (no special weight). A record that waits for nobody is
-   * returned as it is. Null when there is no such record.
-   */
-  accept(id: string, options?: MemoryOperationOptions): MemoryRecord | null {
-    const operation = this.captureOperation(options);
-    assertMemoryOperationCurrent(operation);
-    if (!this.ready) return null;
-    const existing = this.get(id);
-    if (!existing) return null;
-    if (!memoryAwaitsOwner(existing)) return existing;
-    const now = Date.now();
-    const author: MemoryAuthor = { ...existing.author!, acceptedAt: now };
-    this.runMutation('UPDATE memory_records SET author = ?, updated_at = ? WHERE id = ?', [authorColumn(author), now, id], operation);
-    const accepted: MemoryRecord = { ...existing, author, updatedAt: now };
-    this.persist();
-    logger.info('MemoryStore: record accepted by the owner', { id });
-    noteListChanged({ list: 'memory', change: 'changed', id, ...projectNamed(existing) });
-    return accepted;
   }
 
   /** Delete a record and all its links. */

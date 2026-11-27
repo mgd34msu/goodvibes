@@ -142,7 +142,7 @@ export function callWritesOwnWorkingState(own: ToolOwnWorkingState, args: Record
 }
 
 /**
- * The argument values that make a call an act only the owner performs himself
+ * The argument values that make a call an act only the owner performs in person
  * (gate/classify.ts `owner-act`): a model's call carrying one is refused in
  * every mode. `values` are read from the published declaration of what is
  * named (the operator catalog's `ownerOnly`), not written by hand.
@@ -154,14 +154,20 @@ export interface ToolOwnerActs {
   readonly words?: Readonly<Record<string, string>> | undefined;
   /**
    * The values among `values` that are put to the owner instead of refused (every capability: capability_run):
-   * asked in every mode, opening on No, run on his yes (gate/classify.ts). The others stay refused to a model.
+   * asked in every mode, opening on No, run on the owner's yes (gate/classify.ts). The others stay refused to a model.
    */
   readonly asked?: readonly string[] | undefined;
   /**
    * The values among `asked` whose answer is never remembered: each call is asked on its own (a card's detail typed
-   * by the owner, `card.enter`). No remembered yes stands in for him, and the ask offers none.
+   * by the owner, `card.enter`). No remembered yes stands in for the owner, and the ask offers none.
    */
   readonly once?: readonly string[] | undefined;
+  /**
+   * Values that are an act no model makes only with some arguments (a settings write naming the permission mode or a
+   * permission rule): the argument at `path` equal to one of `prefixes` or under one (`permissions`, `permissions.mode`).
+   * Such a call is an owner act refused to a model in every mode, never asked (gate/classify.ts `refusedByArguments`).
+   */
+  readonly refusedWhen?: Readonly<Record<string, { readonly path: ToolArgumentPath; readonly prefixes: readonly string[] }>> | undefined;
 }
 
 /**
@@ -202,7 +208,7 @@ export interface ToolOwnerDecisions {
    */
   readonly runsLater?: readonly string[] | undefined;
   /**
-   * Values of `field` that send something out as the owner or spend his money (a capability of risk `sends-out` or
+   * Values of `field` that send something out as the owner or spend their money (a capability of risk `sends-out` or
    * `spends-money`, a method of class `spends-money`): after the conversation read text anyone can write, asked in every
    * mode, each time (permissions/manager.ts `callFacts`, security/conversation-exposure.ts).
    */
@@ -277,7 +283,7 @@ export interface ToolDefinition {
   /**
    * The tool changes who can reach the agent or acts on an outside system. Its calls are the
    * owner's to decide (gate/classify.ts, `grant-access`): the owner is asked once, and the answer
-   * is remembered when he chooses; only yolo runs it unasked.
+   * is remembered when the owner chooses; only yolo runs it unasked.
    */
   dangerous?: boolean | undefined;
   /**
@@ -286,12 +292,12 @@ export interface ToolDefinition {
    * request. Never sent to the model.
    */
   nestedOnly?: boolean | undefined;
-  /** Calls of this tool that only the owner makes himself; see {@link ToolOwnerActs}. */
+  /** Calls of this tool that only the owner makes in person; see {@link ToolOwnerActs}. */
   ownerActs?: ToolOwnerActs | undefined;
   /**
    * Calls of this tool whose effect the host they are sent to decides itself, under the owner's mode, when the call
    * arrives (a daemon method it admits natively for the Agent's credential): this gate admits such a call without
-   * deciding it a second time. The owner's own acts, his never-run rules, deny and ask rules, plan mode and a
+   * deciding it a second time. The owner's own acts, their never-run rules, deny and ask rules, plan mode and a
    * surface without command authority still apply here first.
    */
   hostDecides?: ToolOwnerActs | undefined;

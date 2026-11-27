@@ -96,11 +96,11 @@ export interface HostedJoin {
   /** Whether this terminal is in a hosted session now: a control that acts on the joined one shows only then. */
   joined(): boolean;
   status(): Promise<string>;
-  /** Joins it; `opensScreen` only for the person's own press (a model's join opens no screen on his display). */
+  /** Joins it; `opensScreen` only for the person's own press (a model's join opens no screen on their display). */
   join(session: string, options?: { readonly opensScreen?: boolean | undefined }): Promise<string>;
   /**
-   * `personAsked`: the person typed it himself (his own press, never the model's call). Only then is it sent with a
-   * person's claim, which lets the daemon run it as his own turn in the session's project.
+   * `personAsked`: the person typed it themselves (their own press, never the model's call). Only then is it sent with a
+   * person's claim, which lets the daemon run it as their own turn in the session's project.
    */
   send(text: string, personAsked?: boolean): Promise<string>;
   leave(): Promise<string>;
@@ -552,7 +552,7 @@ export const HOSTED_ATTACH: CapabilityDefinition<SessionsCapabilityServices> = {
   actionId: 'join', label: 'Join a hosted session', word: 'attach', inputs: [HOSTED_SESSION],
   sentence: 'This terminal joins hosted session {session}, shows its conversation so far and follows it live.', done: '',
   touches: 'reads', lasts: 'not-a-change', risk: 'none', undoneBy: 'leave', example: { session: 'hs-1' }, available: joinsHosted,
-  // Only the person's own press opens Your agents on his screen; a model's join follows the session without it.
+  // Only the person's own press opens Your agents on their screen; a model's join follows the session without it.
   async run(values, services, caller) { return { text: await joining(services).join(values.session ?? '', { opensScreen: caller.personAsked === true }) }; },
 };
 
@@ -662,7 +662,7 @@ export const HOSTED_NEW: CapabilityDefinition<HostedCapabilityServices> = {
     const prompt = (values.prompt ?? '').trim();
     const detachPolicy = values.leave === 'keep' ? 'survive' : values.leave === 'stop' ? 'kill' : undefined;
     // The first message is the turn of whoever caused this call, as the daemon recorded it (routes/capabilities.ts
-    // `causeOfRun`): the owner's own (his verified program, his sign-in) is his turn; anyone else's stays someone
+    // `causeOfRun`): the owner's own (their verified program, their sign-in) is their turn; anyone else's stays someone
     // else's input (hosted-sessions/manager.ts reads the mark once, for that first message only).
     const answer = await withInputParty(caller.cause ?? UNRECORDED_WORK_CAUSE, () => hostedMethod(caller, 'sessions.hosted.create', {
       workspaceRoot: caller.workingDirectory,

@@ -2,7 +2,7 @@ import type { ToolDefinition } from '../../types/tools.js';
 
 export const QUERY_TOOL_SCHEMA: ToolDefinition = {
   name: 'query',
-  description: 'Leave the owner a question and carry on working. The question goes to the owner\'s inbox, which he reads and answers later from either terminal app, the web UI or a push notification on his phone when push is on. When he answers, the answer is put on your next model request while you are still running, or when your session is next opened; show (or list) reads it at any time. Nothing waits for it.',
+  description: 'Leave the owner a question and carry on working. The question goes to the owner\'s inbox, which they read and answer later from either terminal app, the web UI or a push notification on their phone when push is on. When they answer, the answer is put on your next model request while you are still running, or when your session is next opened; show (or list) reads it at any time. Nothing waits for it.',
   parameters: {
     type: 'object',
     properties: {
@@ -17,7 +17,7 @@ export const QUERY_TOOL_SCHEMA: ToolDefinition = {
         type: 'array',
         items: { type: 'string' },
         maxItems: 8,
-        description: '(ask) Short answers the owner can pick from; he can always answer in his own words instead.',
+        description: '(ask) Short answers the owner can pick from; they can always answer in their own words instead.',
       },
       key: { type: 'string', description: '(ask) Your own name for the question; asking again under the same key while it is open returns the first question instead of a second one.' },
       questionId: { type: 'string', description: '(show, withdraw) The id ask returned.' },

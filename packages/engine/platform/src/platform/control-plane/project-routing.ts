@@ -42,9 +42,14 @@ function isRecord(value: unknown): value is Record<string, unknown> {
 
 /**
  * A catalog that registers each handler to run in the project its request names. `ensure` makes that project's work
- * (once; later calls return at once) before the handler runs, so a host's members can be read synchronously inside it.
+ * (once; later calls return at once) before the handler runs, so a host's members can be read synchronously inside it;
+ * when it returns a release, the project's work is held for the handler and let go when the handler ends.
  */
-export function routeByProject(catalog: GatewayMethodCatalog, ensure: (folder: string) => Promise<void>): GatewayMethodCatalog {
+export function routeByProject(catalog: GatewayMethodCatalog, ensure: (folder: string) => Promise<void | (() => void)>): GatewayMethodCatalog {
+  const held = async (folder: string, run: () => unknown): Promise<unknown> => {
+    const release = await ensure(folder);
+    try { return await run(); } finally { if (typeof release === 'function') release(); }
+  };
   const route = (handler: GatewayMethodHandler): GatewayMethodHandler => async (invocation) => {
     const { body, query } = invocation;
     const inBody = isRecord(body) && body['workingDirectory'] !== undefined;
@@ -55,7 +60,8 @@ export function routeByProject(catalog: GatewayMethodCatalog, ensure: (folder: s
     if (!inBody && !inQuery && !fromContext) {
       // A call made inside a project already (a daemon turn's, a resumed record's: `inProject`) stays in it. Any other
       // call naming no project is refused: the daemon's own folder is never a project to serve it from.
-      if (requestProject() !== undefined) return handler(invocation);
+      const inside = requestProject();
+      if (inside !== undefined) return held(inside, () => handler(invocation));
       throw new GatewayVerbError('No project folder came with the request, so no project\'s work was read or changed. Send workingDirectory, the absolute path of the project folder (a program sends its own with every call; the web UI the project chosen). Nothing was done.',
         'NO_PROJECT', 422, 'workingDirectory');
     }
@@ -69,8 +75,7 @@ export function routeByProject(catalog: GatewayMethodCatalog, ensure: (folder: s
       return rest;
     };
     const folder = projectKey(given.trim());
-    await ensure(folder);
-    return current.run(folder, () => handler({ ...invocation, body: without(body), query: without(query) as typeof query }));
+    return held(folder, () => current.run(folder, () => handler({ ...invocation, body: without(body), query: without(query) as typeof query })));
   };
   return new Proxy(catalog, {
     get(target, key, receiver) {

@@ -1,6 +1,6 @@
 export * from './daemon-home.js';
 // Which project a folder belongs to: the one answer every per-project record is keyed by.
-export { projectIdentityOf, registeredWorkspaceRoots } from './project-identity.js';
+export { holdProjectIdentity, projectIdentityOf, projectsKeptInside, registeredWorkspaceRoots } from './project-identity.js';
 // The one check of a project a caller names (never the root, the home folder, or the GoodVibes or daemon home).
 export { checkCallerProject, type CallerProjectFacts, type CallerProjectVerdict, type ProjectNamer } from './caller-project.js';
 export { whyNeverAProject } from './caller-project.js';

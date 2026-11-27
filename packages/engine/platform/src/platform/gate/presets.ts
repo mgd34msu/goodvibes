@@ -144,7 +144,7 @@ export function decisionModelReady(settings: DecisionModelSettings, env: Readonl
 }
 
 /**
- * The mode in force. The old auto-approve switch is a saved alias for YOLO;
+ * The mode in force, as released. The old auto-approve switch is a saved alias for YOLO;
  * Jev cannot decide without a working decision model, so jev-decides asks the
  * owner instead (just-vibes keeps going and holds those items for the end).
  */

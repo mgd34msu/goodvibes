@@ -78,7 +78,7 @@ export const CONVERSATION_GATE_DEFAULT_SURFACES: readonly string[] = [
 
 export interface ConversationGateConfig {
   readonly mode: ConversationGateMode;
-  /** How long an unanswered proposal stays answerable. */
+  /** How long an unanswered proposal stays answerable (the released proposal's own lifetime). */
   readonly proposalTtlMs: number;
   /** Hard cap on simultaneously pending proposals across all surfaces. */
   readonly maxPendingProposals: number;

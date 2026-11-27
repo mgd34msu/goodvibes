@@ -269,7 +269,7 @@ export function buildCliDoctorFindings(options: CliStatusOptions): readonly CliD
             : 'Connected host is reachable, but at least one public Agent route is unavailable or incompatible.',
         impact: 'Agent-only routes, especially isolated Agent Knowledge, may be unavailable.',
         action: refused
-          ? 'The daemon refused this Agent\'s token. Pair again: goodvibes-agent setup pair --apply'
+          ? 'The daemon refused this Agent\'s token. Pair again: goodvibes-agent setup pair --with-code'
           : 'The daemon and the Agent are different releases. Install one release of both: curl -fsSL https://goodvibes.sh/install.sh | sh',
       });
     }
@@ -282,7 +282,7 @@ export function buildCliDoctorFindings(options: CliStatusOptions): readonly CliD
         summary: 'Connected-host operator token is missing.',
         cause: `No operator token was found at ${options.externalRuntime.operatorToken.path}.`,
         impact: 'Agent can inspect only unauthenticated routes and cannot use protected connected-host APIs.',
-        action: 'Pair this Agent with the daemon: goodvibes-agent setup pair --apply',
+        action: 'Pair this Agent with the daemon: goodvibes-agent setup pair --with-code',
       });
     }
 
@@ -448,7 +448,7 @@ export function renderCliStatus(options: CliStatusOptions, snapshot: CliStatusSn
     ] : []),
     '',
     'Decision model',
-    `  if Jev can't answer: ${snapshot.decisionModel.policyLabel}`,
+    `  when the decision model is missing or fails: ${snapshot.decisionModel.policyLabel}`,
     `  ${snapshot.decisionModel.line}`,
     '',
     'Auth',
@@ -463,7 +463,7 @@ export function renderCliStatus(options: CliStatusOptions, snapshot: CliStatusSn
     options.auth
       ? options.auth.operatorTokenPresent
         ? `  connected host token present (${options.auth.operatorTokenPath})`
-        : '  connected host token none: pair this Agent with the daemon: goodvibes-agent setup pair --apply'
+        : '  connected host token none: pair this Agent with the daemon: goodvibes-agent setup pair --with-code'
       : '  connected host token unknown',
     '',
     'Connected GoodVibes host:',
@@ -527,7 +527,7 @@ export function renderCliStatus(options: CliStatusOptions, snapshot: CliStatusSn
       `  isolated Agent Knowledge route: ${!externalRuntime ? 'not checked (no connected host)'
         : !externalRuntime.reachable ? 'not checked (the daemon is not reachable; see the warning below)'
         : externalRuntime.agentKnowledge.probed === false
-          ? externalRuntime.operatorToken.present ? 'not checked (the daemon refused this Agent\'s token; pair again: goodvibes-agent setup pair --apply)' : 'not checked (no connected host token; pair: goodvibes-agent setup pair --apply)'
+          ? externalRuntime.operatorToken.present ? 'not checked (the daemon refused this Agent\'s token; pair again: goodvibes-agent setup pair --with-code)' : 'not checked (no connected host token; pair: goodvibes-agent setup pair --with-code)'
           : externalRuntime.agentKnowledge.ready ? 'ready' : 'not ready (see the warning below)'}`,
     );
     const problems = findings.filter((finding) => finding.severity !== 'note');

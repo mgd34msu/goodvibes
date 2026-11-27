@@ -123,8 +123,8 @@ function hostSetupItems(input: AgentSetupChecklistInput, reading: ConnectedHostS
       auth: {
         status: 'blocked',
         detail: reading.credentialPresent
-          ? `${reading.detail} Run goodvibes-agent setup pair --apply to get a fresh credential.${at}`
-          : `${reading.detail} Run goodvibes-agent setup pair --apply to pair this Agent with the host (the credential goes to ${input.connectedHostTokenPath}).${at}`,
+          ? `${reading.detail} Run goodvibes-agent setup pair --with-code with a new sign-in code from your own screen to get a fresh credential.${at}`
+          : `${reading.detail} Run goodvibes-agent setup pair --with-code with the sign-in code your own screen shows to pair this Agent with the host (the credential goes to ${input.connectedHostTokenPath}).${at}`,
       },
       knowledge: { status: 'optional', detail: 'Agent Knowledge needs an accepted host credential.' },
     };

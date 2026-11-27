@@ -44,12 +44,13 @@ export type CarriedUpload = (bytes: Buffer, name: string) => Promise<string>;
 
 /**
  * The body of `artifacts.create` for one part of a carried file: stored as a file artifact marked for a carried call
- * (carried-files.ts `CARRIED_UPLOAD_PURPOSE`), kept a day at most, removed by the daemon once the call reads it.
+ * (carried-files.ts `CARRIED_UPLOAD_PURPOSE`), removed by the daemon once the call reads it (or, its call never coming,
+ * once more than `CARRIED_UPLOADS_KEPT` unread parts wait), never by age.
  */
 export async function carriedPartBody(bytes: Buffer, name: string): Promise<Record<string, unknown>> {
-  const { CARRIED_UPLOAD_PURPOSE, CARRIED_UPLOAD_RETENTION_MS } = await import('@goodvibes/engine/platform/platform/capabilities');
+  const { CARRIED_UPLOAD_PURPOSE } = await import('@goodvibes/engine/platform/platform/capabilities');
   return { kind: 'file', filename: name, mimeType: 'application/octet-stream', dataBase64: bytes.toString('base64'),
-    retentionMs: CARRIED_UPLOAD_RETENTION_MS, metadata: { purpose: CARRIED_UPLOAD_PURPOSE } };
+    metadata: { purpose: CARRIED_UPLOAD_PURPOSE } };
 }
 
 /** The id the daemon gave a stored part, or a refusal naming what it answered. */

@@ -391,6 +391,20 @@ export interface ContractUnit {
    */
   lastReport?: CompletionReport | undefined;
   failureReason?: string | undefined;
+  /** What kind of failure `failureReason` is: the work's own failure kind when it ends at this step. */
+  failureKind?: ContractFailureKind | undefined;
+  /**
+   * Set when this step's change to a file was dropped because the other side of a conflict there was kept (by the
+   * owner or the decision model): "dropped: the other change to <file> was kept". A step whose change was dropped
+   * ends on the check it passed before the conflict; it is not checked again or nudged for what was dropped.
+   */
+  dropped?: string | undefined;
+  /**
+   * When the step's agent was last heard from (started, a model reply streaming, a tool reporting progress), epoch
+   * ms. A step is never stopped for being quiet: it ends when its agent's turn ends, its process exits, its connection
+   * closes, the provider answers an error, or the owner or a decision stops it. Its row says since when it is quiet.
+   */
+  heardAt?: number | undefined;
   /**
    * Best-of-N (design 6.2), on a plan unit with `attempts > 1` in worktree
    * mode: one attempt unit per sibling, each run and checked on its own. The

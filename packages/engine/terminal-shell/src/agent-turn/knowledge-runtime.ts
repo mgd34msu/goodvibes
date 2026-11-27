@@ -416,7 +416,7 @@ export async function classifyKnowledgeError(error: unknown, connection: AgentKn
     const message = `${hostMessage(error)} (HTTP ${status})`;
     if (status === 401 || status === 403) {
       return { ok: false, kind: 'auth_required', ...base, status, error: message,
-        next: ['Pair this Agent with the host again (goodvibes-agent setup pair --apply), then retry.'] };
+        next: ['Pair this Agent with the host again (goodvibes-agent setup pair --with-code), then retry.'] };
     }
     if (status === 404) {
       // The host answers 404 `Unknown knowledge item|connector` for an id it does

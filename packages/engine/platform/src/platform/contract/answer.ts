@@ -144,5 +144,7 @@ export function describeContractOutcome(contract: Pick<Contract, 'id' | 'criteri
     ...(excluded > 0 ? [`${excluded} left out: they need a different way of running the steps`] : []),
   ];
   const commit = contract.commit === undefined ? '' : `; ${contract.commit.note}`;
-  return `The work is done (${parts.join(', ')})${commit}`;
+  // A step whose change to a conflicting file was dropped (the other side kept) is said, by its own words.
+  const dropped = contract.units.filter((unit) => unit.dropped !== undefined).map((unit) => `step "${unit.title || unit.id}" ${unit.dropped}`);
+  return `The work is done (${parts.join(', ')})${dropped.length > 0 ? `; ${dropped.join('; ')}` : ''}${commit}`;
 }

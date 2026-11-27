@@ -219,7 +219,7 @@ const ROUTE: UnitRoute = { model: 'provider-a:model-a', provider: 'provider-a', 
 /** The real settings manager over a scratch settings folder, with the contract settings written as an owner writes them. */
 function configManager(home: string, root: string, contract: Record<string, unknown>): ConfigManager {
   const config = new ConfigManager({ configDir: join(home, 'config'), workingDir: root, surfaceRoot: 'goodvibes' });
-  const values: Record<string, unknown> = { isolation: 'shared', gates: [], transportRetryDelayMs: 0, ...contract };
+  const values: Record<string, unknown> = { isolation: 'shared', gates: [], ...contract };
   for (const [key, value] of Object.entries(values)) config.setDynamic(`contract.${key}` as ConfigKey, value);
   return config;
 }

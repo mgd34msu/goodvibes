@@ -7,14 +7,14 @@
  *   `createdBy`), the same maker and project a file the daemon keeps records (artifacts/turn-maker.ts). Never from what
  *   a caller sends: those two keys of a body's metadata are dropped.
  * - The owner's own knowledge (added outside any project, and everything kept from before this record) belongs to no
- *   project: it is his shared thing, given per caller by kind (control-plane/shared-kinds.ts `knowledge`). Nothing
+ *   project: it is their shared thing, given per caller by kind (control-plane/shared-kinds.ts `knowledge`). Nothing
  *   else exists.
- * - A caller that is not the owner himself reads, lists, searches and is given (packets, answers) a project's
+ * - A caller that is not the owner in person reads, lists, searches and is given (packets, answers) a project's
  *   knowledge only when that project is one given to it (`reach('project', ...)`, the request's record reach,
- *   daemon-api `currentRecordReach`), and the owner's shared knowledge only with his gift (`reach('shared',
+ *   daemon-api `currentRecordReach`), and the owner's shared knowledge only with the owner's gift (`reach('shared',
  *   'knowledge')`); the gift's admission does not stop these reads before this filter runs (shared-kinds.ts
  *   `knowledgeCallOfProject`). An entry or an issue drawn from a source is that source's; one drawn from none is the
- *   owner's shared knowledge. An addition naming no project is the owner's shared knowledge: refused to a caller he did
+ *   owner's shared knowledge. An addition naming no project is the owner's shared knowledge: refused to a caller the owner did
  *   not give it.
  */
 import { realpathSync } from 'node:fs';
@@ -41,7 +41,7 @@ export function knowledgeMakerMetadata(metadata: Record<string, unknown> | undef
   const project = typeof stamped['project'] === 'string' && stamped['project'].trim() ? stamped['project'].trim() : undefined;
   const maker = typeof stamped['createdBy'] === 'string' && stamped['createdBy'].trim() ? stamped['createdBy'].trim() : undefined;
   // Naming no project adds to the owner's shared knowledge: a caller that is not the owner (a reach is in scope) only
-  // with his gift of it; otherwise refused before anything is fetched or written.
+  // with the owner's gift of it; otherwise refused before anything is fetched or written.
   const reach = currentRecordReach();
   if (!project && reach && !reach('shared', 'knowledge')) throw new KnowledgeSharedAdditionRefused();
   if (!project && !maker) return metadata === undefined ? undefined : given;
@@ -83,7 +83,7 @@ function sourcesOf(lookup: KnowledgeReachLookup, kind: 'node' | 'issue', record:
 export function knowledgeReachNow(lookup: KnowledgeReachLookup): ((kind: 'source' | 'node' | 'issue', record: KnowledgeSourceRecord | KnowledgeNodeRecord | KnowledgeIssueRecord) => boolean) | undefined {
   const reach = currentRecordReach();
   if (!reach) return undefined;
-  // The owner's shared knowledge: only by his gift (his own turn reaches it; control-plane/shared-kinds.ts), asked once.
+  // The owner's shared knowledge: only by the owner's gift (their own turn reaches it; control-plane/shared-kinds.ts), asked once.
   const sharedGiven = reach('shared', 'knowledge');
   const sourceReachable = (source: KnowledgeSourceRecord | null): boolean => {
     if (!source) return sharedGiven;
@@ -108,7 +108,7 @@ function projectOfFolder(folder: string): string {
 /**
  * The reach of a turn's own knowledge, for what is put in its prompt: ALWAYS by the turn's project and party, whether or
  * not a caller's reach is in scope where its prompt is assembled. A project's knowledge only of the turn's own project
- * (none: no project's); the owner's shared knowledge for his own turn, and for a turn on someone else's input only when
+ * (none: no project's); the owner's shared knowledge for their own turn, and for a turn on someone else's input only when
  * the owner gave it to the caller it runs for (`madeFor`: a member's web chat; none recorded, a guest: never).
  */
 export function knowledgeTurnReach(project: string | undefined, party: TurnInputParty): RecordReachFilter {
@@ -134,10 +134,10 @@ export function callReachesKnowledge(methodId: string): boolean {
   return methodId.startsWith('knowledge.') || methodId === 'multimodal.writeback' || methodId === 'multimodal.analyze';
 }
 
-/** The words of an addition to the owner's shared knowledge by a caller he did not give it. */
-export const KNOWLEDGE_SHARED_ADDITION_REFUSED = 'This adds to the owner\'s own knowledge library (it names no project), which this caller was not given; nothing was added. Send it with the project it belongs to (workingDirectory), or ask the owner to give this device or member his knowledge in Devices and network, on its row';
+/** The words of an addition to the owner's shared knowledge by a caller the owner did not give it. */
+export const KNOWLEDGE_SHARED_ADDITION_REFUSED = 'This adds to the owner\'s own knowledge library (it names no project), which this caller was not given; nothing was added. Send it with the project it belongs to (workingDirectory), or ask the owner to give this device or member their knowledge in Devices and network, on its row';
 
-/** The refusal of an addition to the owner's shared knowledge by a caller without his gift (status 403). */
+/** The refusal of an addition to the owner's shared knowledge by a caller without the owner's gift (status 403). */
 export class KnowledgeSharedAdditionRefused extends Error {
   override readonly name = 'KnowledgeSharedAdditionRefused';
   readonly status = 403;

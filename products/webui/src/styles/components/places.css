@@ -298,32 +298,6 @@
   line-height: var(--leading-meta);
 }
 
-/* Actions that run only in a terminal program: greyed, with the one line that says where. */
-.place-elsewhere-actions {
-  display: flex;
-  flex-direction: column;
-  gap: 4px;
-  min-width: 0;
-}
-
-.place-elsewhere-actions + .place-elsewhere-actions,
-.place-actions + .place-elsewhere-actions {
-  margin-top: 8px;
-}
-
-.place-elsewhere-actions__buttons {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 8px;
-}
-
-.place-elsewhere-actions__where {
-  margin: 0;
-  color: var(--text-3);
-  font-size: var(--text-meta);
-  line-height: var(--leading-meta);
-}
-
 .place-row__right {
   color: var(--text-2);
   font-size: var(--text-sm);

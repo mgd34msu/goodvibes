@@ -175,8 +175,8 @@ export const SECURITY_LOAD_POLICY: CapabilityDefinition<Daemon> = {
   inputs: [PATH('The policy bundle file')],
   sentence: 'The bundle in {path} becomes the candidate policy until you change it; nothing is enforced until you enforce it.', done: '',
   touches: 'this-machine', lasts: 'kept', risk: 'none', example: { path: 'policy-bundle.json' },
-  // The candidate is the owner's (one for the daemon, what "Enforce" puts in force): loading one is his own act, so a
-  // device's, a member's or a model's load is put to him and never replaces his candidate on its own.
+  // The candidate is the owner's (one for the daemon, what "Enforce" puts in force): loading one is the owner's own act, so a
+  // device's, a member's or a model's load is put to the owner and never replaces their candidate on its own.
   ownerOnly: { reason: 'the candidate is the one you review and enforce for every program on this machine', instead: 'Ask the owner to load it in Permissions and safety, Policy.' },
   ownersAct: true,
   async run(values, services, caller) {

@@ -121,7 +121,7 @@ export async function sayToHosted(
   seams: Pick<HostedCommandSeams, 'client' | 'origin'> | null = resolveSeams(context),
   /** The attachment the text was written for (a draft opened in the Agents view); default: the one attached now. */
   binding: SessionBinding | null = null,
-  /** The person typed it himself (never the model's call): sent with his claim, so it runs as his turn in the session's project. */
+  /** The person typed it (never the model's call): sent with their claim, so it runs as their turn in the session's project. */
   personAsked = false,
 ): Promise<{ readonly ok: true } | { readonly ok: false; readonly error: string }> {
   const feed = getSharedHostedSessionFeed();

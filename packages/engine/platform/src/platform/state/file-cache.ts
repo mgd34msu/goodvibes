@@ -42,6 +42,14 @@ export function currentFileWriter(): string {
  */
 const lastWrites = new Map<string, { readonly hash: string; readonly writer: string }>();
 
+/**
+ * The writer is gone (its conversation was deleted): the last writes it made are no longer told to anyone, so they are
+ * let go. Without this, every file a deleted chat wrote kept its entry for the life of the process.
+ */
+export function forgetFileWriter(writer: string): void {
+  for (const [path, last] of lastWrites) if (last.writer === writer) lastWrites.delete(path);
+}
+
 /** One file a tool wrote, and who wrote it, read from the host's scope at the write. */
 export interface FileWritten {
   readonly path: string;

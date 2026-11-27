@@ -57,8 +57,20 @@ export function whoseTurn(): WhoseTurn {
 }
 
 /**
+ * The record of the turn a call belongs to, as an object that lives exactly as long as that turn's scope (a web chat's
+ * batch of tool calls, else the turn record): what is kept for one turn (an action's preview) is kept on it and goes
+ * when the turn ends. Undefined outside every turn.
+ */
+export function turnRecordOf(): object | undefined {
+  const chat = chatToolCalls.getStore();
+  const turn = currentTurn();
+  if (chat && turn === chat.outer) return chat;
+  return turn;
+}
+
+/**
  * The actor a turn's model calls as: the model acting for whose turn it is (a member's or a device's chat: theirs; a
- * guest's turn: the guest's), the local owner when nothing names one (his own program's turn, a chat of his).
+ * guest's turn: the guest's), the local owner when nothing names one (their own program's turn, a chat of theirs).
  */
 export function turnModelActor(): Actor {
   return agentActor(whoseTurn().actor ?? localOwnerActor());

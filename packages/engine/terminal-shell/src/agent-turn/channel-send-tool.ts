@@ -107,8 +107,8 @@ export function createAgentChannelSendTool(
         additionalProperties: false,
       },
       sideEffects: ['network'],
-      // A channel or route goes to a destination the owner set up and a link to his own web surface;
-      // a webhook URL is chosen in the call, so one he has not configured or allowed is his to decide.
+      // A channel or route goes to a destination the owner set up and a link to their own web surface;
+      // a webhook URL is chosen in the call, so one they have not configured or allowed is theirs to decide.
       subjects: { recipients: ['webhook'] },
     },
     execute: async (rawArgs: Record<string, unknown>, executionOptions) => {

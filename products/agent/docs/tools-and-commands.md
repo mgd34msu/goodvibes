@@ -372,7 +372,7 @@ Routine promotion is an explicit scheduling route. Local routines stay local unt
 | Command | Purpose |
 | --- | --- |
 | Models and providers (the menu) | The daemon's models, providers and sign-ins for every program: Models (make one the default, pin, back up, send every request to it), Providers (sign in with a subscription and finish with the code, sign out, store a key, remove your own, each one's account and how to fix it), Routing, Services (see, test and check them, use one a project defines), Comparisons (blind model comparisons: compare models on a prompt, it spends money; benchmark the local models; judge; switch to the winner or record keeping the model; save a report, handoff or ZIP), Media and Move (sign-ins, a sign-in summary and the services list to and from a file); add a provider of your own, read the model lists again and find model servers on this computer from anywhere in it. |
-| `/agents open` | Your agents: what is waiting for you, running, scheduled and finished (also F2 and Ctrl+O). |
+| `/agents` | Your agents: what is waiting for you, running, scheduled and finished (also F2 and Ctrl+O). |
 | `/agents` | Your agents: open the live view, and hand build, fix or review work to the terminal app (`hand-off`, with reason, success criteria, workspace hint, priority and review intent) and follow it (`handed-off`); both are the Handed off tab of the Work place too. |
 | Waiting for you (the menu) | What each kind of approval asks about, and the approvals waiting on you; answer one with its keys there. |
 | System place, Health | What needs attention (with what fixes each), one area in detail, a problem described, the runtime store, and the connected host's compatibility (health has no slash command). |

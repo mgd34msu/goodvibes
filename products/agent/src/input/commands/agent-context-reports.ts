@@ -2,7 +2,7 @@
  * The Agent's own reports for facts that used to show only in its workspace:
  * the project instruction files read into each turn (`/context files`), what
  * the last turns were given (`/context given`), and the commands running in
- * the background (`/tasks processes`). Each reads this machine only.
+ * the background ("background commands", `P` on Work and agents, Tasks here). Each reads this machine only.
  */
 import { discoverProjectContextFiles } from '@goodvibes/engine/terminal-shell/agent-turn/project-context-files';
 import type { CommandContext } from '../command-registry.ts';

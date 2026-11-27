@@ -32,15 +32,15 @@ export type WorkLedgerHistoryPage = z.infer<typeof workLedgerHistoryPageSchema>;
 export const builtinGatewayWorkLedgerMethodDescriptors: readonly GatewayMethodDescriptor[] = [
   methodDescriptor({
     id: 'workLedger.snapshot', title: 'Read Native Work Ledger', category: 'work-ledger',
-    description: 'Read the selected host project ledger, without mutation authority or allowedActions. Requires an owner operator and the dedicated read scope.',
-    effects: ['work-ledger.inspect'],
+    description: 'Read the selected host project ledger, without mutation authority or allowedActions. Requires the dedicated read scope; a caller below an admin reads only a project given to it.',
+    effects: ['work.read'],
     http: { method: 'GET', path: '/api/work-ledger/snapshot' },
     inputSchema: json(strictObject({ projectId }), 'input'), outputSchema: json(workLedgerReadSnapshotSchema),
   }),
   methodDescriptor({
     id: 'work.list', title: 'List Your Work', category: 'work-ledger',
     description: 'Every piece of work of this daemon\'s project, read in one call: what it is, what done means, where it stands (not started, its plan waiting, starting, its start cut off, running, needs you, a step failed, done, failed, stopped), its plan as steps with their state, the questions it waits on, the step it stopped at when one failed (what failed, and whether the work can go on without it), its spending limit and its results; and each piece of work proposed with its plan (`proposed: true`, not yet asked for). What the Work place, the web Work view and an agent read. No mutation and no execution.',
-    effects: ['work-ledger.inspect'],
+    effects: ['work.read'],
     http: { method: 'GET', path: '/api/work' },
     inputSchema: { type: 'object', additionalProperties: false, properties: {} },
     outputSchema: { type: 'object', additionalProperties: false, required: ['projectId', 'works'], properties: {
@@ -53,11 +53,11 @@ export const builtinGatewayWorkLedgerMethodDescriptors: readonly GatewayMethodDe
   }),
   methodDescriptor({
     id: 'work.target', title: 'Name A Piece Of Work For An Act', category: 'work-ledger',
-    description: 'Read what an act on one piece of work sends, from the work alone: `operation` "execution" answers the identity start, status, stop and resume take (its current attempt and revisions); "contract" answers the run that answering, running a step again and the spending limit act on. Every other field is passed through. Answers { summary, input }; nothing is kept.',
-    effects: ['work-ledger.inspect'],
+    description: 'Read what an act on one piece of work sends, from the work alone: `operation` "execution" answers the identity start, status, stop and resume take (its current attempt and revisions); "contract" answers the run that answering, running a step again and the spending limit act on; "own" answers only whether this caller may act on the work at all (a paired device, the outside agent or a member acts only on work it asked for itself: WORK_NOT_YOURS otherwise). Every other field is passed through. Answers { summary, input }; nothing is kept.',
+    effects: ['work.read'],
     http: { method: 'POST', path: '/api/work/target' },
     inputSchema: { type: 'object', additionalProperties: true, required: ['work', 'operation'], properties: {
-      work: { type: 'string', minLength: 1, maxLength: 200 }, operation: { type: 'string', enum: ['execution', 'contract'] }, zone: { type: 'string' },
+      work: { type: 'string', minLength: 1, maxLength: 200 }, operation: { type: 'string', enum: ['execution', 'contract', 'own'] }, zone: { type: 'string' },
     } },
     outputSchema: { type: 'object', additionalProperties: false, required: ['summary', 'input'], properties: {
       summary: { type: 'string' }, title: { type: 'string' }, input: { type: 'object', additionalProperties: true },
@@ -72,16 +72,29 @@ export const builtinGatewayWorkLedgerMethodDescriptors: readonly GatewayMethodDe
     ['discard', 'Throw A Plan Away', 'Throw away the waiting plan of a piece of work; the work stays, not started, and its next start writes a new plan.', { }, ['work']],
   ] as const).map(([operation, title, description, properties, required]) => methodDescriptor({
     id: `work.plan.${operation}`, title, description, category: 'work-ledger',
-    effects: ['work-ledger.inspect', 'work-ledger.administer'],
+    // Approving a plan answers what was put to the owner (method-risk.ts `A`); every other plan act is a project act on work
+    // the caller caused (routes/work.ts `ownWork`).
+    effects: operation === 'approve' ? ['work-ledger.inspect', 'work-ledger.administer'] : ['work.read', 'work.write'],
     repeat: operation === 'redo' ? 'unsafe' : 'safe',
     http: { method: 'POST', path: `/api/work/plan/${operation.replace('.', '/')}` },
     inputSchema: { type: 'object', additionalProperties: false, required: [...required], properties: { work: { type: 'string', minLength: 1, maxLength: 200 }, ...properties } },
     outputSchema: { type: 'object', additionalProperties: true, properties: { title: { type: 'string' } } },
   })),
+  ...([
+    ['merge', 'Merge A Work\'s Kept Branch In', 'Merge the branch an ended piece of work kept (its commits are not in the project\'s branch) into the project\'s current branch, then remove that branch and the work\'s own folder. A merge that conflicts is undone and nothing changes.'],
+    ['discard', 'Discard A Work\'s Kept Branch', 'Throw away the branch an ended piece of work kept, with the work\'s own folder and whatever they hold. It cannot be undone.'],
+  ] as const).map(([operation, title, description]) => methodDescriptor({
+    id: `work.branch.${operation}`, title, description, category: 'work-ledger',
+    effects: ['work.read', 'work.write'],
+    repeat: 'safe',
+    http: { method: 'POST', path: `/api/work/branch/${operation}` },
+    inputSchema: { type: 'object', additionalProperties: false, required: ['work'], properties: { work: { type: 'string', minLength: 1, maxLength: 200 } } },
+    outputSchema: { type: 'object', additionalProperties: true, properties: { title: { type: 'string' }, branch: { type: 'string' } } },
+  })),
   methodDescriptor({
     id: 'workLedger.history', title: 'Read Native Work Ledger History', category: 'work-ledger',
     description: 'Read at most 100 events after an exclusive cursor, pinned to a history high-water mark. Advance with cursor while hasMore is true. No mutations or execution.',
-    effects: ['work-ledger.inspect'],
+    effects: ['work.read'],
     http: { method: 'GET', path: '/api/work-ledger/history' },
     inputSchema: json(strictObject({ projectId, afterSequence: sequence, throughSequence: sequence.optional() }), 'input'),
     outputSchema: json(workLedgerHistoryPageSchema),

@@ -265,14 +265,14 @@ export function createRemoteConversationRouter(
     const operator = createOperatorApiClient({ baseUrl: owner.connection.baseUrl, authToken: owner.connection.token, fetchImpl: options.fetchImpl ?? globalThis.fetch });
     let pendingApproval: string | undefined;
     try {
-      // Only from the person's own choice of mode: his request, with this program's call context and the registration
-      // the daemon issued it (a looser mode is the owner's own act, run at once only on his press in his own program).
+      // Only from the person's own choice of mode: their request, with this program's call context and the registration
+      // the daemon issued it (a looser mode is the owner's own act, run at once only on their press in their own program).
       const pressed = { ...(await programCallHeadersFor(owner.connection.baseUrl, owner.connection.token, options.fetchImpl ?? globalThis.fetch, 'agent')), 'x-goodvibes-explicit-user-request': 'true' };
       const reply = await operator.invoke('sessions.permissionMode.set', { sessionId: owner.id, mode }, { headers: pressed });
       // A looser mode asked with a token minted for automation is put to the owner, not applied.
       if ('code' in reply) {
         pendingApproval = reply.approvalId;
-        throw new HostedExecutionModeError(`The mode change is waiting for the owner's approval (approval ${reply.approvalId}); the session keeps its mode until he approves it.`);
+        throw new HostedExecutionModeError(`The mode change is waiting for the owner's approval (approval ${reply.approvalId}); the session keeps its mode until the owner approves it.`);
       }
       const current = currentModeOwner();
       if (revision !== modeRequest || current.id !== owner.id || !sameNativeRemoteConnection(current.connection, owner.connection)) throw new HostedExecutionModeError('The hosted execution owner changed during the mode update.');

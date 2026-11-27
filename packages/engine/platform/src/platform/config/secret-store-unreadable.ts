@@ -29,10 +29,14 @@ export function secretStoreUnreadableSentence(cause: string, what: string): stri
  * "no key" (a provider refusing a chat request it has no key for). Weakly held.
  */
 const processStores = new Set<WeakRef<StoredSecretReader>>();
+/** A store's entry goes when the store itself is gone (collected): the set never outgrows the stores that exist. */
+const forgetStore = new FinalizationRegistry<WeakRef<StoredSecretReader>>((ref) => { processStores.delete(ref); });
 
 /** Called by every SecretsManager this process makes. */
 export function noteProcessSecretStore(store: StoredSecretReader): void {
-  processStores.add(new WeakRef(store));
+  const ref = new WeakRef(store);
+  processStores.add(ref);
+  forgetStore.register(store, ref);
 }
 
 /**

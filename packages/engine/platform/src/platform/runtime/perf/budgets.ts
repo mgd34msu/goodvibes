@@ -95,7 +95,7 @@ export const DEFAULT_BUDGETS: PerfBudget[] = [
     description:
       'p95 duration from GATE_REQUESTED to DECISION_EMITTED must be under 2500ms. ' +
       'The span includes one Jev stakes reading for a side-effecting call (two requests in parallel); ' +
-      'calls put to the owner are not counted, since they wait on his answer. ' +
+      'calls put to the owner are not counted, since they wait on the owner\'s answer. ' +
       'sustained violations indicate gate or judgment-port latency regression.',
   },
   // ── Integration Delivery SLO ─────────────────────────────────────────────

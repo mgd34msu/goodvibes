@@ -104,7 +104,7 @@ test('no credential is refused before any route; a viewer is refused an admin me
   };
   const deputy = userAuth.createSession('deputy').token;
   expect(await answer(deputy)).toEqual({ rest: 'refused OWNER_ONLY', method: 'refused OWNER_ONLY', socket: 'refused OWNER_ONLY' });
-  // The control: the owner himself, his signed-in session (the account made at first start), is not refused the same act
+  // The control: the owner in person, their signed-in session (the account made at first start), is not refused the same act
   // on any route (the approvals beyond are not composed). The operator token alone is a script, never the owner.
   const ownerName = userAuth.ownerUsername();
   if (ownerName === null) throw new Error('the user store made no owner account at first start');

@@ -324,7 +324,6 @@ function validateChannelPolicyRecord(value: unknown): void {
   validateOptionalBoolean(value['allowGroupMessages']);
   validateOptionalBoolean(value['allowThreadMessages']);
   validateOptionalBoolean(value['allowTextCommandsWithoutMention']);
-  validateOptionalBoolean(value['ownMessagesAsOwner']);
   validateOptionalString(value['project']);
   const dmPolicy = value['dmPolicy'];
   if (dmPolicy !== undefined && (typeof dmPolicy !== 'string' || !CONVERSATION_POLICIES.has(dmPolicy))) {

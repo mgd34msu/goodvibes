@@ -37,7 +37,7 @@ export function formatDeviceLine(token: PublicPairingToken, now: number = Date.n
 
 /**
  * How a token came to exist, in words every surface shows beside it: the
- * owner's own device makes his own acts; an automation token does not.
+ * owner's own device makes the owner's own acts; an automation token does not.
  */
 export function deviceOriginLabel(token: Pick<PublicPairingToken, 'origin'>): string {
   return token.origin === 'owner-pairing' ? 'owner device' : 'automation token';

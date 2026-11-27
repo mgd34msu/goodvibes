@@ -79,7 +79,6 @@ const NOTICES: { readonly [T in NoticeEventType]: NoticeRow } = {
   CONTRACT_OWNER_REPLIED: null,
   CONTRACT_WAITING: warning('Workstream waiting'),
   CONTRACT_GATE_RESULT: { byVariant: GATE_NOTICES },
-  CONTRACT_UNIT_SILENT: null,
   CONTRACT_MERGE_CONFLICT: null,
   CONTRACT_ATTEMPTS_SELECTED: null,
   CONTRACT_COMMITTED: { byVariant: COMMIT_NOTICES },

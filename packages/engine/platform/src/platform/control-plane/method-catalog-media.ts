@@ -152,9 +152,11 @@ export const builtinGatewayMediaMethodDescriptors: readonly GatewayMethodDescrip
   methodDescriptor({
     id: 'artifacts.list',
     title: 'List Artifacts',
-    description: 'Return stored artifact metadata for files and attachments.',
+    description: 'Return stored artifact metadata for files and attachments. A caller below an admin is answered the files it stored itself.',
     category: 'artifacts',
-    effects: ['artifacts.inspect'],
+    // Project acts (effect-authority.ts `artifacts.read`, `artifacts.write`): below an admin, a file is reached only by
+    // the caller that stored it (control-plane/caller-reach.ts, `artifact`: its maker's).
+    effects: ['artifacts.read'],
     http: { method: 'GET', path: '/api/artifacts' },
     inputSchema: EMPTY_OBJECT_SCHEMA,
     outputSchema: ARTIFACT_LIST_OUTPUT_SCHEMA,
@@ -165,7 +167,7 @@ export const builtinGatewayMediaMethodDescriptors: readonly GatewayMethodDescrip
     title: 'Create Artifact',
     description: 'Store a file or attachment artifact for later delivery, analysis, or knowledge ingest. JSON supports small inline bodies and daemon-local path/URI references; HTTP callers can also send multipart/form-data or a raw binary body for large uploads.',
     category: 'artifacts',
-    effects: ['artifacts.administer'],
+    effects: ['artifacts.write'],
     http: { method: 'POST', path: '/api/artifacts' },
     // A daemon-local path or file: URI is read on the daemon's disk (control-plane/caller-paths.ts): from anyone but
     // the owner's own program only inside a project given to it; a caller's own file is uploaded as its content.
@@ -205,7 +207,7 @@ export const builtinGatewayMediaMethodDescriptors: readonly GatewayMethodDescrip
     title: 'Get Artifact',
     description: 'Return metadata for a stored artifact.',
     category: 'artifacts',
-    effects: ['artifacts.inspect'],
+    effects: ['artifacts.read'],
     http: { method: 'GET', path: '/api/artifacts/{artifactId}' },
     inputSchema: objectSchema({ artifactId: STRING_SCHEMA }, ['artifactId']),
     outputSchema: ARTIFACT_ENTITY_OUTPUT_SCHEMA,
@@ -215,7 +217,7 @@ export const builtinGatewayMediaMethodDescriptors: readonly GatewayMethodDescrip
     title: 'Get Artifact Content',
     description: 'Return the raw content bytes for a stored artifact.',
     category: 'artifacts',
-    effects: ['artifacts.inspect'],
+    effects: ['artifacts.read'],
     transport: ['http'],
     http: { method: 'GET', path: '/api/artifacts/{artifactId}/content' },
     inputSchema: objectSchema({

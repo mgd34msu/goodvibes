@@ -4,7 +4,7 @@
  * Two of the owner's command hooks on the same Pre:tool point, loaded from a
  * real hooks file into the real dispatcher, in front of the real permission
  * manager, tool registry and executor in ask-me mode. The tool only reads, so
- * the gate runs it unasked; the owner refuses whatever he is asked.
+ * the gate runs it unasked; the owner refuses whatever they are asked.
  */
 import { afterEach, beforeEach, expect, test } from 'bun:test';
 import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';

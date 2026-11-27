@@ -201,7 +201,7 @@ function decisionItems(output: unknown): readonly DecisionItem[] {
 /** The principals that are the owner's own credentials by their nature (daemon-api actor.ts: the operator token, the local one). */
 const OWNERS_OWN = new Set(['owner', 'shared-token', 'local', 'local-owner']);
 
-/** Who answered, as a person reads it: "you" only when the owner himself answered; anyone else by the name the daemon keeps. */
+/** Who answered, as a person reads it: "you" only when the owner in person answered; anyone else by the name the daemon keeps. */
 function answererWords(by: Readonly<Record<string, unknown>>): string {
   const actor = text(by.actor);
   if (by.owner === true || OWNERS_OWN.has(actor)) return 'you';

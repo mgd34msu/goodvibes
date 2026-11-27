@@ -127,7 +127,7 @@ export function resolveNativeHostCredential(options: NativeHostCredentialOptions
     // For a daemon on another machine, a pairing whose reply was lost is settled
     // by repeating it under its attempt id (the host answers with the credential
     // it made, never a second one), so nothing is swapped in under it meanwhile.
-    if (pairing?.status === 'unknown') return { available: false, identity, reason: 'The reply to this terminal\'s pairing request was lost. Repeat it with goodvibes host pair --bootstrap-shared --apply in a shell, or forget it (Devices and network, Paired tab, Forget its daemon pairing) and pair with the sign-in code your own screen shows (Pair something, This program with its daemon).' };
+    if (pairing?.status === 'unknown') return { available: false, identity, reason: 'The reply to this terminal\'s pairing request was lost. Forget it (goodvibes host unpair, or Devices and network, Paired tab, Forget its daemon pairing) and pair with the sign-in code your own screen shows (Pair something, This program with its daemon).' };
     if (pairing?.status === 'missing') {
       return { available: false, identity, reason: onThisMachine
         ? 'The daemon on this machine is selected, but its operator token could not be read (it must be your own private file). Start the daemon once, or pair this terminal in Devices and network (Pair something, This program with its daemon).'

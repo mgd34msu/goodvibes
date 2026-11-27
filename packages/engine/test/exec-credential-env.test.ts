@@ -20,6 +20,7 @@ import type { ConfigKey } from '../platform/src/platform/config/schema-types.ts'
 import { runContractGates } from '../platform/src/platform/contract/gates.ts';
 import { RuntimeEventBus } from '../platform/src/platform/runtime/events/index.ts';
 import { makeRepo } from './contract/runner-support.ts';
+import { withOwnerInput } from '../platform/src/platform/security/turn-input-party.ts';
 
 useToolReadings([], EXEC_GATE_TABLE);
 
@@ -40,7 +41,8 @@ test('a command the model runs sees no credential from the app environment; an o
   const root = mkdtempSync(join(tmpdir(), 'gv-exec-env-'));
   roots.push(root);
   const tool = createExecTool(new ProcessManager(), { overflowHandler: new OverflowHandler({ baseDir: root }), defaultWorkingDirectory: root });
-  const result = await tool.execute({ commands: [{ cmd: 'env' }] });
+  // The owner's own turn, as the product marks an owner's turn: a call outside any turn is someone else's and only reads.
+  const result = await withOwnerInput(() => tool.execute({ commands: [{ cmd: 'env' }] }));
   const output = JSON.stringify(result);
   expect(result.success).toBe(true);
   expect({

@@ -40,7 +40,7 @@ function firstSaved(data: Readonly<Record<string, unknown>> | undefined): string
 
 programSideOf('media.make', {
   async after(_values, ctx, answer) {
-    // Only the person's own press opens it: the model's call made a file for the conversation, not for his screen.
+    // Only the person's own press opens it: the model's call made a file for the conversation, not for their screen.
     if (ctx.invokedByModel === true) return;
     const path = firstSaved(answer.data);
     // Saved on the daemon's machine and not this one (a daemon elsewhere): there is nothing here to open.

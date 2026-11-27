@@ -20,6 +20,8 @@ import { projectIdentity, UserPermissionRuleStore } from '../platform/src/platfo
 import { GatewayMethodCatalog } from '../platform/src/platform/control-plane/method-catalog.ts';
 import { registerPermissionRulesGatewayMethods } from '../platform/src/platform/control-plane/routes/permission-rules.ts';
 import { PolicyRuntimeState } from '../platform/src/platform/runtime/permissions/policy-runtime.ts';
+import { withOwnerInput } from '../platform/src/platform/security/turn-input-party.ts';
+import { localOwnerActor } from '@goodvibes/engine/daemon-api/http-policy';
 
 useGateReadings([['git wipe-fixture', { catastrophic: true }], ['git push --force origin', { irreversible: true }]]);
 
@@ -36,14 +38,26 @@ const settings = createPermissionConfigReader(new ConfigManager({
   surfaceRoot: 'agent', workingDir: join(settingsDir, 'workspace'), homeDir: join(settingsDir, 'home'), configDir: join(settingsDir, 'config'),
 }));
 
+/**
+ * Every check is made in the owner's own turn, as the product marks an owner's turn: a call outside any turn is someone
+ * else's and only reads, refused before any remembered rule is read.
+ */
+function ownersTurn(permissions: PermissionManager): PermissionManager {
+  const check = permissions.checkDetailed.bind(permissions);
+  permissions.checkDetailed = ((...args: Parameters<PermissionManager['checkDetailed']>) => withOwnerInput(() => check(...args))) as PermissionManager['checkDetailed'];
+  return permissions;
+}
+
 function manager(handler: PermissionRequestHandler, store: UserPermissionRuleStore | null, surfaceId?: string): PermissionManager {
-  return new PermissionManager(handler, settings, new PolicyRuntimeState(), null, null, store, { surfaceOf: () => surfaceId });
+  return ownersTurn(new PermissionManager(handler, settings, new PolicyRuntimeState(), null, null, store, { surfaceOf: () => surfaceId }));
 }
 
 async function revoke(store: UserPermissionRuleStore): Promise<void> {
   const catalog = new GatewayMethodCatalog();
   registerPermissionRulesGatewayMethods(catalog, { userRuleStore: store });
-  const invocation = { context: { admin: true } } as const;
+  // The owner in person (their signed-in session): a caller with no actor is no one the daemon established and reaches
+  // no rule (control-plane/caller-reach.ts).
+  const invocation = { context: { admin: true, credentialKind: 'user-session', actor: localOwnerActor() } } as const;
   const listed = await catalog.invoke('permissions.rules.list', { ...invocation, body: {} }) as { rules: { id: string }[] };
   expect(listed.rules).toHaveLength(1);
   expect(await catalog.invoke('permissions.rules.delete', {
@@ -132,16 +146,16 @@ describe('remembered rules stay in their project', () => {
       // a project of its own (workspace/project-identity.ts).
       const [inSubfolder, nestedRepository] = [join(projectA, 'src', 'deep'), join(projectA, 'vendor', 'nested')];
       for (const folder of [join(projectA, '.git'), inSubfolder, join(nestedRepository, '.git'), projectB]) mkdirSync(folder, { recursive: true });
-      // The owner's remembered answer to a forced push, a deletion only he decides: the grant that must never leak to another project.
+      // The owner's remembered answer to a forced push, a deletion only the owner decides: the grant that must never leak to another project.
       const forcePush = execArgs('git push --force origin');
       const grant = buildDurableRuleForDecision({ toolName: 'exec', args: forcePush, tier: 'command-class', effect: 'allow', ownerOnly: 'unrecoverable-delete' })!;
       await store.remember({ rule: grant, tier: 'command-class', tool: 'exec', createdAt: 1, project: projectIdentity(projectA) });
       const everywhere = buildDurableRuleForDecision({ toolName: 'exec', args: execArgs('npm run build'), tier: 'command-class', effect: 'allow' })!;
       await store.add({ rule: everywhere, tier: 'command-class', tool: 'exec', createdAt: 2 });
       let asks = 0;
-      const managerIn = (project: string) => new PermissionManager(async () => { asks++; return { approved: false }; },
+      const managerIn = (project: string) => ownersTurn(new PermissionManager(async () => { asks++; return { approved: false }; },
         createPermissionConfigReader(new ConfigManager({ surfaceRoot: 'agent', workingDir: project, homeDir: join(dir, 'home'), configDir: join(dir, 'config') })),
-        new PolicyRuntimeState(), null, null, store);
+        new PolicyRuntimeState(), null, null, store));
       const [inA, inB] = [managerIn(projectA), managerIn(projectB)];
       expect(await inA.checkDetailed('exec', forcePush)).toMatchObject({ approved: true, sourceLayer: 'user_rule' });
       expect(asks).toBe(0);

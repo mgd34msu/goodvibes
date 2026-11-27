@@ -148,7 +148,7 @@ export interface PlaceCapabilityAction<Item extends PlaceItem> {
   readonly states?: readonly string[] | undefined;
   /**
    * Offered only on rows whose own data says so, beside `states`: the item's `field` (a string field of the item)
-   * is one of `isOneOf` ("Treat my own messages here as me" only on a channel whose kind proves its sender). Data,
+   * is one of `isOneOf` ("enter its keys" only on a channel whose keys are entered on its row). Data,
    * so the terminal programs and the web renderer read it alike (`actionOfferedFor`).
    */
   readonly offeredWhen?: PlaceOfferedWhen | undefined;

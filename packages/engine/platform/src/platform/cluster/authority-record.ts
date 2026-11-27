@@ -112,11 +112,20 @@ export interface AuthorityPrivateParts {
   'key-epoch': never;
   'device-token': never;
   /**
-   * `passwordByOwner`: this version's password was set by the owner himself, on the machine that wrote it (his signed-in
-   * session or his verified program there, or his yes there). Another machine takes a new password for its own owner
+   * `passwordByOwner`: this version's password was set by the owner in person, on the machine that wrote it (their signed-in
+   * session or their verified program there, or their yes there). Another machine takes a new password for its own owner
    * account from the record only with it (security/user-auth.ts `#overlay`, gate-review-6 G2).
    */
-  user: { readonly passwordHash: string; readonly passwordByOwner?: true };
+  user: {
+    readonly passwordHash: string; readonly passwordByOwner?: true;
+    /**
+     * The group the owner's act was made in (null: before this machine was in a group with others, or a version only
+     * recorded as it is). Only an act made in the group carries across it, so a join changes no machine's password.
+     */
+    readonly setInGroup?: string | null;
+    /** The versions (`<id>@<rev>`) of the owner's account found, with the password in hand, to hold the same password. */
+    readonly samePasswordAs?: readonly string[];
+  };
   'peer-token': never;
   'device-grant': never;
   'relay-route': never;

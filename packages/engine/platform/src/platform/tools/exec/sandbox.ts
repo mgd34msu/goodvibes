@@ -182,6 +182,11 @@ export interface BwrapArgvInput {
   readonly maskHomeDir?: string | undefined;
   /** Extra absolute paths bound read-only, after the home mask (a program installed under $HOME). */
   readonly readOnlyExtras?: readonly string[] | undefined;
+  /**
+   * The command writes nothing it can keep: the home's caches are shown read-only as well (with `readOnlyWorkspace` and
+   * no writable extras: a turn on someone else's input, tools/exec/containment.ts). Only /tmp is its scratch.
+   */
+  readonly writesNothing?: boolean | undefined;
   /** Resolved regular DNS configuration file when /etc/resolv.conf points into /run. */
   readonly resolverConfigPath?: string | undefined;
 }
@@ -216,7 +221,9 @@ export function buildBwrapArgv(input: BwrapArgvInput): string[] {
   const homeView = input.maskHomeDir ? sandboxHomeView(input.maskHomeDir) : undefined;
   if (input.maskHomeDir && homeView) {
     argv.push('--tmpfs', input.maskHomeDir);
-    argv.push(...sandboxHomeBindArgs(homeView));
+    argv.push(...(input.writesNothing === true
+      ? sandboxHomeBindArgs({ ...homeView, binds: homeView.binds.map((bind) => ({ ...bind, access: 'read' as const })) })
+      : sandboxHomeBindArgs(homeView)));
   }
   for (const extra of input.readOnlyExtras ?? []) {
     argv.push('--ro-bind-try', extra, extra);
@@ -304,6 +311,12 @@ export interface ResolveSandboxPlanInput {
   readonly homeDir?: string | undefined;
   /** What host access the command needs, read by Jev (readCommandNeeds). */
   readonly needs: CommandNeeds;
+  /**
+   * The command runs for a turn on someone else's input (security/turn-input-party.ts): the workspace is bound read-only,
+   * none of the owner's `sandbox.workspaceWritable` extras is bound, and the home's caches are read-only. Only /tmp (a
+   * private tmpfs) takes its writes, so it writes no file anyone keeps (tools/exec/containment.ts).
+   */
+  readonly readOnly?: boolean | undefined;
 }
 
 const NOT_SANDBOXED_ARGV: string[] = [];
@@ -348,7 +361,9 @@ export function resolveExecSandboxPlan(input: ResolveSandboxPlanInput): ExecSand
   if (networkEnabled) {
     escalationsGranted.push('network (command on egress allowlist)');
   }
-  for (const extra of input.config.workspaceWritable) {
+  // Someone else's turn is given none of the owner's writable extras (their own setting for their own builds).
+  const writableExtras = input.readOnly === true ? [] : input.config.workspaceWritable;
+  for (const extra of writableExtras) {
     escalationsGranted.push(`writable path outside workspace: ${extra}`);
   }
 
@@ -363,21 +378,23 @@ export function resolveExecSandboxPlan(input: ResolveSandboxPlanInput): ExecSand
     bwrapPath: input.availability.bwrapPath,
     workspaceDir: input.workspaceDir,
     cwd: input.cwd,
-    writableExtras: input.config.workspaceWritable,
+    writableExtras,
     networkEnabled,
     resolverConfigPath,
+    ...(input.readOnly === true ? { readOnlyWorkspace: true, writesNothing: true } : {}),
     ...(input.homeDir ? { maskHomeDir: input.homeDir } : {}),
   });
 
   const networkSummary =
     network === 'enabled' ? 'network allowed' : network === 'disabled' ? 'network disabled' : 'network isolation unconfirmed';
-  const boundary =
-    `bubblewrap: workspace ${input.workspaceDir} writable, system read-only, /tmp isolated, ${networkSummary}`;
+  const boundary = input.readOnly === true
+    ? `bubblewrap: workspace ${input.workspaceDir} read-only (this turn acts on someone else's input and writes no file; only /tmp, private to this command, takes writes), system read-only, ${networkSummary}`
+    : `bubblewrap: workspace ${input.workspaceDir} writable, system read-only, /tmp isolated, ${networkSummary}`;
 
   const ignoredSettings = input.config.ignoredEntries ?? [];
   return {
     sandboxed: true, argvPrefix, boundary, network, escalationsGranted, homeMasked: input.homeDir !== undefined,
-    ...(input.homeDir === undefined ? {} : { homeDir: input.homeDir, extraShown: input.config.workspaceWritable }),
+    ...(input.homeDir === undefined ? {} : { homeDir: input.homeDir, extraShown: writableExtras }),
     ...(input.config.daemonPort === undefined ? {} : { daemonPort: input.config.daemonPort }),
     ...(ignoredSettings.length > 0 ? { ignoredSettings } : {}),
   };
@@ -445,6 +462,8 @@ export async function resolveRuntimeSandboxPlan(
   workspaceDir: string,
   cwd: string,
   options: Pick<JudgmentReadingOptions, 'signal' | 'assertCurrent'> = {},
+  /** The command writes no file anyone keeps (a turn on someone else's input, {@link ResolveSandboxPlanInput.readOnly}). */
+  readOnly = false,
 ): Promise<ExecSandboxPlan | null> {
   if (!sandbox) return null;
   options.signal?.throwIfAborted(); options.assertCurrent?.();
@@ -456,6 +475,7 @@ export async function resolveRuntimeSandboxPlan(
   const needs = await readCommandNeeds(command, workspaceDir, options);
   return resolveExecSandboxPlan({
     needs,
+    ...(readOnly ? { readOnly: true } : {}),
     config: sandbox.config,
     availability: sandbox.availability,
     featureEnabled: sandbox.featureEnabled,

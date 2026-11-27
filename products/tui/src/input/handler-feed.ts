@@ -84,7 +84,6 @@ import { guardCommandPaste, type PasteBurstGuardState } from '@goodvibes/engine/
  * references are service handles whose identity never changes after construction.
  */
 export interface InputFeedContext {
-  handleHostPairingToken?: (token: InputToken) => boolean;
   prompt: string;
   cursorPos: number;
   inputScrollTop: number;
@@ -174,7 +173,6 @@ export interface InputFeedContext {
 
 export const feedInputTokens = createFeedInputTokens<InputFeedContext>({
   surfaceModalTokens: 'all',
-  pairing: (context, token) => context.handleHostPairingToken?.(token) ?? false,
   modal: (context, token, { history }) => handleModalTokenRoutes(
     {
       ...captureModalFeedState(context, token, history),

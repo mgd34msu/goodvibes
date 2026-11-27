@@ -99,7 +99,7 @@ export function approvalReplyCandidates(
       && (binding.channelId ?? binding.externalId) === input.channelId && binding.threadId === input.threadId;
     // An ask is shown only in a conversation proven to be the owner's alone
     // (surface-delivery.ts); one about any other conversation (a group, a
-    // shared channel) is shown in his own, and answered from there.
+    // shared channel) is shown in the owner's own, and answered from there.
     if (sameConversation) return isOwnerConversation(binding, decision.policy.ownerId);
     const ownersAlone = binding.surfaceKind === surface && isOwnerConversation(binding, decision.policy.ownerId);
     return !ownersAlone && isChannelSurfaceKind(binding.surfaceKind) && input.channelId !== undefined && repliedInOwnConversation();

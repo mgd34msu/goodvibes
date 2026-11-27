@@ -130,7 +130,7 @@ async function resolveModel(
       return current;
     }
     if (isUnscoped(scope)) {
-      // The image goes only where the owner pointed: the current model, or the fallback he set.
+      // The image goes only where the owner pointed: the current model, or the fallback they set.
       const fallback = scope.visionFallbackModel?.()?.trim();
       if (fallback) return named(fallback);
       const choices = models.filter((model) => model.selectable && model.capabilities.multimodal).map((model) => model.registryKey);

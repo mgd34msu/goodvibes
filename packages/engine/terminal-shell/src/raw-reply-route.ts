@@ -131,14 +131,14 @@ export function callDaemonRoute<T>(
 export function callDaemonMethod<T>(
   target: RemoteDaemonTarget,
   methodId: string,
-  options: { readonly input?: unknown; readonly readOnly?: boolean } = {},
+  options: { readonly input?: unknown; readonly readOnly?: boolean; readonly timeoutMs?: number } = {},
   fetchImpl: DaemonFetch = fetch,
 ): Promise<DaemonVerbOutcome<T>> {
   return callDaemonVerb<T>(
     target,
     `/api/control-plane/methods/${encodeURIComponent(methodId)}/invoke`,
     // The route requires the `body` envelope to be present even when empty.
-    { method: 'POST', body: { body: options.input ?? {} }, ...(options.readOnly ? { readOnly: true } : {}) },
+    { method: 'POST', body: { body: options.input ?? {} }, ...(options.readOnly ? { readOnly: true } : {}), ...(options.timeoutMs !== undefined ? { timeoutMs: options.timeoutMs } : {}) },
     rawReplyReader(target, fetchImpl),
   );
 }

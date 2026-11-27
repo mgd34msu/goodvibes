@@ -6,6 +6,7 @@ import { captureAutonomousSource, retainAutonomousSource } from '../permissions/
 import { admitExternalRequest, type ExternalOperationSource, type ExternalPermissionHost } from '../permissions/external-request.js';
 import { withExternalOperationSource } from '../permissions/external-operation-scope.js';
 import { hasActionsIdentity } from './report.js';
+import { withInputParty } from '../security/turn-input-party.js';
 import type { CiWatchSubscription, FixSessionBrief, FixSessionStartOutcome, FixSessionStarter } from './types.js';
 
 /** Capture while the triggering operation still owns its source, before any detached await. */
@@ -42,7 +43,14 @@ export interface CiRepairRequest {
  * admitted brief and named in the start notice, and refused only when nothing
  * else failed. A refusal here is `refused`: it would come again for the same failure.
  */
-export async function startAdmittedCiRepair(host: ExternalPermissionHost | undefined, input: CiRepairRequest, starter: FixSessionStarter): Promise<FixSessionStartOutcome> {
+export function startAdmittedCiRepair(host: ExternalPermissionHost | undefined, input: CiRepairRequest, starter: FixSessionStarter): Promise<FixSessionStartOutcome> {
+  // Decided, and started, as the party whose input made the watch (its pushing turn's: the owner's own chat is theirs),
+  // whoever checks it now; a watch with none recorded is someone else's, so its repair only reads and is refused.
+  const party = input.subscription.party ?? { party: 'other' as const, who: 'a CI watch with no record of whose push made it' };
+  return withInputParty(party, () => startAdmittedCiRepairAs(host, input, starter));
+}
+
+async function startAdmittedCiRepairAs(host: ExternalPermissionHost | undefined, input: CiRepairRequest, starter: FixSessionStarter): Promise<FixSessionStartOutcome> {
   if (!host || !input.operation) return { error: 'CI repair has no current original-source admission owner', refused: true };
   const operation = input.operation;
   const assertCurrent = () => { input.signal.throwIfAborted(); input.assertCurrent(); operation.assertCurrent(); };

@@ -43,7 +43,7 @@ const PROJECT_KINDS: ReadonlySet<string> = new Set(['project-mcp', 'project-good
 
 /**
  * The MCP config of a caller that named no project: only the files that are for all the person's projects (and the
- * other programs' files in his home). Every project-scope read or write is refused (NO_PROJECT); the daemon's folder is
+ * other programs' files in the owner's home). Every project-scope read or write is refused (NO_PROJECT); the daemon's folder is
  * never read in its place.
  */
 function userOnlyConfig(homeDirectory: string): McpProjectConfig {
@@ -107,7 +107,7 @@ export function createMcpCapabilityServices(sources: McpServiceSources): McpCapa
           heldForTrust: async () => own ? own.heldForWorkspaceTrust(roots) : [],
           async upsert(scope, server) {
             if (own) {
-              // The owner's request: a project file's entry he added starts without the folder's trust question.
+              // The owner's request: a project file's entry the owner added starts without the folder's trust question.
               const result = await own.upsertServerConfig(roots, scope, server, { byOwner: true });
               return { path: result.path, connected: own.listServerSecurity().find((entry) => entry.name === server.name)?.connected ?? false };
             }

@@ -183,7 +183,7 @@ export interface ApprovalViewer {
 /**
  * Who asked a question, as its record names the asker: the caller a held call was put to the owner for
  * (`requestedBy`), the principal that raised it over the wire (`raisedByPrincipal`), and the outside caller of its
- * attribution. Empty for a question the owner's own programs, his models' turns or the daemon raised.
+ * attribution. Empty for a question the owner's own programs, their models' turns or the daemon raised.
  */
 function askersOf(record: SharedApprovalRecord): readonly string[] {
   const askers: string[] = [];
@@ -202,7 +202,7 @@ export function deviceAnswerRefusal(record: SharedApprovalRecord, viewer: Pick<A
   if (only === undefined) return undefined;
   const own = new Set([only.self, ...only.madeFromIt]);
   if (!askersOf(record).some((asker) => own.has(asker))) return undefined;
-  return { code: 'OWNER_ONLY', reason: 'A device answers only a question another caller raised; this one was asked by this device or by a credential made from it, so the owner answers it himself (his signed-in session or his own program).' };
+  return { code: 'OWNER_ONLY', reason: 'A device answers only a question another caller raised; this one was asked by this device or by a credential made from it, so answer it yourself, in your signed-in session or your own program.' };
 }
 
 export type ApprovalAction = 'claim' | 'approve' | 'deny' | 'amend' | 'cancel';

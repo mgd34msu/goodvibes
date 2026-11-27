@@ -28,6 +28,8 @@ export interface TriggerActionExecutor {
     readonly deliverTo?: string | undefined;
     /** The project folder the turn works in: the one its trigger was made for. */
     readonly workingDirectory?: string | undefined;
+    /** Who made the trigger when it was not the owner (types.ts `TriggerDefinition.cause`): the turn is that caller's. */
+    readonly cause?: import('../security/turn-input-party.js').RecordedCause | undefined;
   }): Promise<string>;
   runGrant(input: {
     readonly triggerId: string;
@@ -60,7 +62,6 @@ export interface TriggerManagerConfig {
   readonly maxConcurrentChecks?: number | undefined;
   readonly observationRingSize?: number | undefined;
   readonly runHistoryLimit?: number | undefined;
-  readonly runHistoryTtlHours?: number | undefined;
   readonly eventLogLimit?: number | undefined;
   readonly eventLogTtlHours?: number | undefined;
   readonly sweepIntervalMs?: number | undefined;
@@ -149,7 +150,6 @@ export function retentionFrom(config: TriggerManagerConfig): TriggerRetentionPol
   return {
     observationRingSize: config.observationRingSize ?? DEFAULT_RETENTION.observationRingSize,
     runHistoryLimit: config.runHistoryLimit ?? DEFAULT_RETENTION.runHistoryLimit,
-    runHistoryTtlMs: (config.runHistoryTtlHours ?? 168) * 60 * 60 * 1000,
     eventLogLimit: config.eventLogLimit ?? DEFAULT_RETENTION.eventLogLimit,
     eventLogTtlMs: (config.eventLogTtlHours ?? 24) * 60 * 60 * 1000,
   };

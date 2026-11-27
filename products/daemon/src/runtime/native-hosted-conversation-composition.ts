@@ -12,5 +12,5 @@ export function installNativeHostedConversationProjects(catalog: GatewayMethodCa
   return () => { projectOwners.delete(catalog); };
 }
 export function nativeHostedConversationProjects(catalog: GatewayMethodCatalog): Projects | undefined { return projectOwners.get(catalog); }
-/** One project's native turn dependencies, as `Projects.forProject` gives them. */
-export type NativeHostedProjectOwner = Owner;
+/** One project's native turn dependencies, as `Projects.forProject` gives them (with the turn host's adoption). */
+export type NativeHostedProjectOwner = Owner & ReturnType<Projects['forProject']>;

@@ -18,7 +18,7 @@ describe('settings an earlier release left are carried forward', () => {
     mkdirSync(configDir, { recursive: true });
     mkdirSync(daemonDir, { recursive: true });
     const programFile = join(configDir, 'settings.json'), daemonFile = join(daemonDir, 'settings.json');
-    // As the owner's 3.4.2 terminal app file held them: daemon keys, a key this release no longer has, and his own settings.
+    // As the owner's 3.4.2 terminal app file held them: daemon keys, a key this release no longer has, and the owner's own settings.
     const original = `${JSON.stringify({
       provider: { model: 'openai:gpt-6.2-sol' },
       permissions: { mode: 'yolo' },
@@ -37,7 +37,7 @@ describe('settings an earlier release left are carried forward', () => {
     expect(daemon.service).toEqual({ restartOnFailure: true, autostart: true });
     const program = JSON.parse(readFileSync(programFile, 'utf-8')) as Record<string, unknown>;
     expect(program).toEqual({ provider: { model: 'openai:gpt-6.2-sol' }, permissions: { mode: 'yolo' } });
-    // In effect after the move: the owner's moved value, the daemon's own value, and his other settings.
+    // In effect after the move: the owner's moved value, the daemon's own value, and the owner's other settings.
     expect(config.get('service.autostart' as ConfigKey)).toBe(true);
     expect(config.get('service.restartOnFailure' as ConfigKey)).toBe(true);
     expect(config.get('provider.model' as ConfigKey)).toBe('openai:gpt-6.2-sol');

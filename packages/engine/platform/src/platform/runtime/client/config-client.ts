@@ -43,14 +43,14 @@ import {
 
 /**
  * A write the daemon put to the owner instead of applying (`202` `OWNER_APPROVAL_PENDING`: a value that loosens a
- * protection, sent with no press of his) is not written: said as that, so the caller restores the value it showed
+ * protection, sent with no press of the owner's) is not written: said as that, so the caller restores the value it showed
  * and never reports it saved. Shared with the credentials client.
  */
 export function throwIfPutToOwner(answer: unknown, what: string): void {
   if (answer === null || typeof answer !== 'object') return;
   const held = answer as { readonly code?: unknown; readonly approvalId?: unknown };
   if (held.code !== 'OWNER_APPROVAL_PENDING') return;
-  throw new Error(`${what} was not changed yet: it is waiting for the owner's answer in Waiting for you (approval ${String(held.approvalId ?? '')}); it applies when he approves it.`);
+  throw new Error(`${what} was not changed yet: it is waiting for the owner's answer in Waiting for you (approval ${String(held.approvalId ?? '')}); it applies when the owner approves it.`);
 }
 
 /** This is a deterministic owner capability, not an admission grant. */

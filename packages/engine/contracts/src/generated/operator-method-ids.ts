@@ -643,6 +643,8 @@ export const OPERATOR_METHOD_IDS = [
   "watchers.update",
   "web_search.providers.list",
   "web_search.query",
+  "work.branch.discard",
+  "work.branch.merge",
   "work.list",
   "work.plan.approve",
   "work.plan.discard",

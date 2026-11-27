@@ -623,11 +623,6 @@
       "types": "./platform/dist/platform/channels/channel-state.d.ts",
       "import": "./platform/dist/platform/channels/channel-state.js"
     },
-    "./platform/platform/channels/own-messages-proof": {
-      "bun": "./platform/src/platform/channels/own-messages-proof.ts",
-      "types": "./platform/dist/platform/channels/own-messages-proof.d.ts",
-      "import": "./platform/dist/platform/channels/own-messages-proof.js"
-    },
     "./platform/platform/channels/telegram-cursor": {
       "bun": "./platform/src/platform/channels/telegram/cursor-migration-data.ts",
       "types": "./platform/dist/platform/channels/telegram/cursor-migration-data.d.ts",
@@ -3197,11 +3192,6 @@
       "bun": "./terminal-shell/src/setup-review.ts",
       "types": "./terminal-shell/dist/setup-review.d.ts",
       "import": "./terminal-shell/dist/setup-review.js"
-    },
-    "./terminal-shell/host-pairing-controller": {
-      "bun": "./terminal-shell/src/host-pairing-controller.ts",
-      "types": "./terminal-shell/dist/host-pairing-controller.d.ts",
-      "import": "./terminal-shell/dist/host-pairing-controller.js"
     },
     "./terminal-shell/host-pairing-store": {
       "bun": "./terminal-shell/src/host-pairing-store.ts",

@@ -83,7 +83,7 @@ interface HomeAssistantRouteContext {
   readonly resolveDefaultProviderModel?: (() => { provider: string; model: string } | null) | undefined;
   /** Optional home-graph reader so a turn can ground itself in its pre-registered space. */
   readonly homeGraph?: HomeGraphGroundingReader | undefined;
-  /** The Home Assistant channel's policy, for "Treat my own messages here as me" (HomeAssistantChatRuntime.channelPolicy). */
+  /** The Home Assistant channel's policy, for whether a message is the owner's own (HomeAssistantChatRuntime.channelPolicy). */
   readonly channelPolicy?: HomeAssistantChatRuntime['channelPolicy'];
 }
 

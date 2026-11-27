@@ -76,6 +76,7 @@ export {
   type TurnContext,
 } from './turn-boundary.js';
 export { chatToolCallSession, turnModelActor, whoseTurn, withChatToolCalls, type WhoseTurn } from './turn-session.js';
+export { onConversationCleared } from './conversation-exposure.js';
 export { asCallOutsideTurn, declareUnmarkedWorkIsOwners, ownersChannelSession, turnInputParty, withInputParty, type TurnInputParty } from './turn-input-party.js';
 export {
   CONTENT_DERIVATION_SITE,

@@ -8,7 +8,7 @@
  * by a reader skimming imports.
  */
 
-/** Where a recorded line came from. `hand-edit` means the owner typed it himself. */
+/** Where a recorded line came from. `hand-edit` means the owner typed it by hand. */
 export type ProfileSurface = 'tui' | 'agent' | 'webui' | 'voice' | 'hand-edit';
 
 /** The surfaces recognised in a provenance suffix, in the order the grammar lists them. */

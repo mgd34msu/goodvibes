@@ -1,10 +1,10 @@
 /**
  * owner-added.ts, the MCP servers the owner put into a project's MCP file with
- * his own command or form (`/mcp add`, the MCP screen's add form, the web's).
+ * their own command or form (`/mcp add`, the MCP screen's add form, the web's).
  *
  * A project file waits on the owner's trust of the workspace because a cloned
  * repository, or anything else that writes there, can name a program to start.
- * A server the owner added himself is his request, not something the folder
+ * A server the owner added in person is their request, not something the folder
  * brought: it starts without the trust question. Each one is kept here, outside
  * the repository, by the file it was written to, its name and a digest of how
  * it starts (command, arguments, environment, address, headers). An entry that
@@ -52,7 +52,7 @@ function read(homeDirectory: string): OwnerAddedRecord {
   }) ?? { version: 1, servers: [] };
 }
 
-/** Record that the owner put `server` into the project MCP file at `file` himself (replacing an earlier record of its name there). */
+/** Record that the owner put `server` into the project MCP file at `file` in person (replacing an earlier record of its name there). */
 export function recordOwnerAddedServer(homeDirectory: string, file: string, server: McpServerConfig): void {
   const at = resolve(file);
   const others = read(homeDirectory).servers.filter((row) => !(row.file === at && row.name === server.name));

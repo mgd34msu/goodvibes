@@ -18,7 +18,7 @@ import type { EntryType } from '@goodvibes/judgment';
 import type { Occasion, OccasionSubject } from './types.js';
 
 /**
- * The words that mark a line as being about the owner himself.
+ * The words that mark a line as being about the owner themselves.
  *
  * Accepted both bare (`· mine ·`) and behind `for` (`· for me ·`), because both
  * are things a person writes and neither is ambiguous with a person's name.

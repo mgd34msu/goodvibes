@@ -3,6 +3,8 @@ import { FileStateCache, ProjectIndex } from '@goodvibes/engine/platform/platfor
 import { projectProxy, requestProject, routeByProject } from '@goodvibes/engine/platform/platform/control-plane';
 import { createProjectWorkSet } from './project-work-set.js';
 import { whoseTurn } from '@goodvibes/engine/platform/platform/security';
+import { ownerModeInForce } from '@goodvibes/engine/platform/platform/permissions';
+import { normalizePermissionMode } from '@goodvibes/engine/platform/platform/gate/presets';
 import { mergeKeepingGetters } from './merge-keeping-getters.js';
 import { composeRuntimeServices, createBrokeredPermissionManager, registerGateRuntimeEvents, type ComposedRuntimeServices } from '@goodvibes/engine/platform/platform/runtime/bootstrap';
 import { askingQuestions, callingAgentAsker, daemonAgentPresence, useOwnerAnswerReader } from '@goodvibes/engine/platform/platform/agents';
@@ -10,7 +12,7 @@ import { createDaemonWorkspaceTrustResolver } from './workspace-trust-compositio
 import { installNativeHostedConversationProjects, type NativeHostedProjectOwner } from './native-hosted-conversation-composition.js';
 import { createNativeWorkSubmissionHost } from '@goodvibes/engine/platform/platform/workflow/work-ledger/native-submission';
 import { createNativeConversationIntakeHost, createNativeRequirementProposer, type NativeConversationContinuationOwner } from '@goodvibes/engine/platform/platform/workflow/work-ledger/native-intake';
-import { carryOldWorkRecords, oldPlanningSourceIds, createLocalWorkLedgerReadBinding, createWorkPlans, askUnrecordedWorkCauses, carryProgramContracts } from '@goodvibes/engine/platform/platform/workflow/work-ledger';
+import { carryOldWorkRecords, oldPlanningSourceIds, createLocalWorkLedgerReadBinding, createWorkPlans, keepOldWorkAsOwners, carryProgramContracts } from '@goodvibes/engine/platform/platform/workflow/work-ledger';
 import { FeatureAnnouncementStore, featureAnnouncementsPath } from '@goodvibes/engine/platform/platform/runtime/feature-announcements';
 import { watchProgramSettingsFiles } from '@goodvibes/engine/platform/platform/runtime/program-settings-watch';
 import { createWorkstreamDraftService } from '@goodvibes/engine/platform/platform/orchestration';
@@ -85,6 +87,8 @@ interface ProjectWork {
   readonly activation: ReturnType<typeof createDaemonNativeWorkExecutionActivation>;
   readonly plans: ReturnType<typeof createWorkPlans>;
   readonly hosted: NativeHostedProjectOwner;
+  /** Whether something of it runs now (its fleet, a native turn of its hosted host): it is not let go meanwhile. */
+  busy(): boolean;
   close(): Promise<void>;
 }
 export async function createRuntimeBaseServices(options: RuntimeServicesOptions): Promise<{ services: Omit<RuntimeServices, 'daemonHandlers'>; handlerOptions: Omit<DaemonHandlerCompositionOptions, 'distributedRuntimeReady'>; closeWorkLedger: () => Promise<void>; closeBrowserJudgment: () => Promise<void>; closeAutonomousPermissions: () => void; retireContinuationScope: () => void }> {
@@ -417,7 +421,7 @@ export async function createRuntimeBaseServices(options: RuntimeServicesOptions)
       daemonReceipts: daemonReceiptStoreAt(daemonReceiptsPath(configManager)),
       relayAvailable: () => configManager.get('relay.enabled') === true,
       pairingWebOrigin: () => resolvePairingWebOrigin(configManager)?.origin,
-      // The owner said yes to serving the web UI to his network from a pairing surface: what
+      // The owner said yes to serving the web UI to their network from a pairing surface: what
       // `webui enable --lan` writes, then the daemon's own report that its listener is bound
       // again (TRANSPORT_CONNECTED, or TRANSPORT_TERMINAL_FAILURE when it could not bind).
       pairingServeToNetwork: () => serveDaemonToNetwork(configManager, options.runtimeBus),
@@ -608,7 +612,7 @@ export async function createRuntimeBaseServices(options: RuntimeServicesOptions)
     // Every project's native turns: over that project's own intake, each request in the project it names (the daemon's
     // own folder is no project and has none: a request naming no project is refused NO_PROJECT).
     const removeHostedProjects = installNativeHostedConversationProjects(gatewayMethods,
-      { route: (catalog) => routeByProject(catalog, (folder) => projectWork.ensure(folder)), forProject: (folder) => projectWork.get(folder).hosted });
+      { route: (catalog) => routeByProject(catalog, (folder) => projectWork.acquire(folder)), forProject: (folder) => projectWork.get(folder).hosted });
     disposalScope.registry.add('native hosted conversation binding', removeHostedProjects);
     // A CI watch made by a project's work: its native continuation is held by that project's records, so every read or
     // change of it goes to the project whose store holds it, among the projects made so far and every registered one.
@@ -662,7 +666,10 @@ export async function createRuntimeBaseServices(options: RuntimeServicesOptions)
         // terminal folder, where an earlier build kept it, that file left as it was).
         file: carriedRecordsFile(shellPaths.resolveProjectPath(GOODVIBES_DAEMON_SURFACE_ROOT, 'work-plans', `${projectId}.json`),
           shellPaths.resolveUserPath(GOODVIBES_DAEMON_SURFACE_ROOT, 'work-plans', `${projectId}.json`)),
-        showPlanFirst: () => configManager.get('planner.showPlanFirst') === true,
+        // "Show me the plan before it runs" is the owner's own "ask me" rule for a plan, so it is read as the released
+        // modes read such a rule: in every mode but YOLO (which reads no rule). The mode in force for THIS project.
+        showPlanFirst: () => configManager.get('planner.showPlanFirst') === true
+          && normalizePermissionMode(ownerModeInForce(root) ?? configManager.get('permissions.mode')) !== 'yolo',
         // Its `work` notices name this project (the one project identity), so only its screens read again.
         project: projectIdentityOf(root),
       });
@@ -677,8 +684,9 @@ export async function createRuntimeBaseServices(options: RuntimeServicesOptions)
         sourceIds: () => oldPlanningSourceIds(knowledgeStore, projectId),
         announcements,
       }).catch((error: unknown) => logger.warn('[Work] old planning records could not be carried into Work', { project: root, error: summarizeError(error) }));
-      // This project's live work with no recorded cause, put to the owner once (work-cause-question.ts).
-      const stopCauseQuestions = askUnrecordedWorkCauses({ projectId, service: ledger.service, authority: ledger.authority, plans, inbox: ownerInbox });
+      // This project's work made before causes were kept is the owner's, with nothing asked (old-work-cause.ts).
+      void keepOldWorkAsOwners({ projectId, service: ledger.service, authority: ledger.authority, plans, ready: () => knowledgeStore.init() })
+        .catch((error: unknown) => logger.warn('[Work] old work could not be recorded as the owner\'s', { project: root, error: summarizeError(error) }));
       // Contracts a terminal program was running itself in this project (3.5.0's own runner), carried once into its
       // Work as proposed work with their remaining steps; their files are only read (carry-program-contracts.ts).
       try {
@@ -699,7 +707,9 @@ export async function createRuntimeBaseServices(options: RuntimeServicesOptions)
           hostedOwner.assertCurrent(context, principalId, source);
         },
       };
-      const intake = createNativeConversationIntakeHost({ projectRoot: root, projectId, sessionId, storage: await knowledgeStore.openNativeConversationStorage(projectId),
+      // This Work's own conversation storage: closed with it (the knowledge store keeps an open one until it is closed).
+      const conversationStorage = await knowledgeStore.openNativeConversationStorage(projectId);
+      const intake = createNativeConversationIntakeHost({ projectRoot: root, projectId, sessionId, storage: conversationStorage,
         scopes: nativeScopes, port: judgment.port, decisionLog: judgment.decisionLog, proposer: createNativeRequirementProposer(providerRegistry), continuation,
         artifacts: graph.artifactStore });
       const activation = createDaemonNativeWorkExecutionActivation({
@@ -713,21 +723,33 @@ export async function createRuntimeBaseServices(options: RuntimeServicesOptions)
         notifyFleetSlotReleased: () => agentManager.notifyFleetSlotReleased(),
         onFleetSlotReleased: (listener) => agentManager.onFleetSlotReleased(listener),
       });
+      // The native turn host made over this Work's intake (hosted-sessions-composition.ts): asked whether a turn runs, and
+      // closed with this Work.
+      let turnHost: { busy(): boolean; close(): Promise<void> } | undefined;
       return {
         projectId, reader: readBinding.client, submission, intake, activation, plans,
         hosted: { projectId, projectRoot: root, intake, journalPath: shellPaths.resolveProjectPath(GOODVIBES_DAEMON_SURFACE_ROOT, 'native-hosted-turns', `${projectId}.json`),
           installContinuationOwner: (owner) => { hostedOwner = owner; },
-          principalCanAct: (principalId) => pairingTokens.nativePrincipalCurrent(principalId) },
+          principalCanAct: (principalId) => pairingTokens.nativePrincipalCurrent(principalId),
+          adopt: (host) => { turnHost = host; } },
+        busy: () => activation.fleetOwnership().length > 0 || turnHost?.busy() === true,
         async close() {
-          stopCauseQuestions();
           readBinding.client.dispose();
-          try { await Promise.all([submission.close(), intake.close(), activation.close()]); }
-          finally { await ledger.close(); await projectIndex.dispose(); }
+          try { await turnHost?.close(); } catch (error) { logger.warn('[Work] a project\'s native turn host was not closed cleanly', { project: root, error: summarizeError(error) }); }
+          hostedOwner = undefined;
+          try { await Promise.all([submission.close(), intake.close(), activation.close()]); await conversationStorage.close(); }
+          // The project's facilities this Work held go with it (released once nothing else holds them).
+          finally { await ledger.close(); await projectIndex.dispose(); projectTurns.unhold(root); }
         },
       };
     };
-    const projectWork = createProjectWorkSet<ProjectWork>({ build: buildProjectWork });
-    workPlansForProject = async (folder) => { await projectWork.ensure(folder); return projectWork.get(folder).plans; };
+    // At most a bound of projects' Work open; past it the least recently used that nothing holds is let go
+    // (project-work-set.ts), and made again by the next request naming the project.
+    const projectWork = createProjectWorkSet<ProjectWork>({ build: buildProjectWork, busy: (work) => work.busy() });
+    workPlansForProject = async (folder) => {
+      const release = await projectWork.acquire(folder);
+      try { return projectWork.get(folder).plans; } finally { release(); }
+    };
     disposalScope.registry.add('project work', () => projectWork.close());
     nativeFleetOwnership = () => projectWork.all().flatMap((work) => work.activation.fleetOwnership());
     fenceNativeWork = async () => { await projectWork.close(); };
@@ -743,12 +765,16 @@ export async function createRuntimeBaseServices(options: RuntimeServicesOptions)
     })();
     // Every Work and native method is served from the project its request names; a request naming none is refused
     // (NO_PROJECT): the daemon's own folder is no project.
-    const routedMethods = routeByProject(gatewayMethods, (folder) => projectWork.ensure(folder));
+    const routedMethods = routeByProject(gatewayMethods, (folder) => projectWork.acquire(folder));
     const current = (): ProjectWork => projectWork.get(requestProject());
     registerWorkLedgerGatewayMethods(routedMethods, projectProxy(() => current().reader));
-    registerNativeWorkSubmissionGatewayMethods(routedMethods, projectProxy(() => current().submission));
+    registerNativeWorkSubmissionGatewayMethods(routedMethods, projectProxy(() => current().submission),
+      // Work a caller that is not the owner submits is that caller's (it just made it): it starts it itself.
+      (workId, cause) => current().plans.noteCause(workId, cause, { made: true }));
     registerNativeConversationIntakeGatewayMethods(routedMethods, projectProxy(() => current().intake));
-    registerNativeWorkExecutionGatewayMethods(routedMethods, { get projectId() { return current().projectId; }, acquire: () => current().activation.acquire() });
+    registerNativeWorkExecutionGatewayMethods(routedMethods, { get projectId() { return current().projectId; }, acquire: () => current().activation.acquire(),
+      // Who caused each piece of work: a caller below an admin starts only its own (routes/native-work-execution.ts).
+      causeOf: (workId) => current().plans.causeOf(workId) });
     // Work as every surface reads it: each piece of work with where it stands and its plan, and what an act on one sends.
     registerWorkGatewayMethods(routedMethods, { get projectId() { return current().projectId; }, get reader() { return current().reader; },
       acquire: () => current().activation.acquire(), get plans() { return current().plans; } });
@@ -771,6 +797,8 @@ export async function createRuntimeBaseServices(options: RuntimeServicesOptions)
         graph.endLongWaits?.();
       },
       workspaceTrustManager,
+      // A webhook naming a project fires that project's own hooks (daemon/http-listener.ts).
+      projectHooks: (folder: string, event: Parameters<typeof hookDispatcher.fire>[0]) => projectTurns.fireHooks(folder, event),
       triggerManager,
       ownerInbox,
       mailboxReaders,

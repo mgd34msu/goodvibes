@@ -74,7 +74,7 @@ import { briefWithPreviousChecks, buildUnitBrief } from './brief.js';
 import { failureFromError, isAbortError, type ContractRun, type SpawnPurpose } from './run-context.js';
 import { IllegalContractTransitionError, isTerminalUnitStatus, type ContractFailureKind, type ContractGroup, type ContractRouteSelector, type ContractUnit } from './types.js';
 import { rollUpContractUsage, type UsagePricing } from './usage.js';
-import type { UnitWatchdog } from './watchdog.js';
+import type { UnitActivity } from './unit-activity.js';
 import { groupTakesSharedTree, groupWorkstreamInput, takeSharedTreeForGroup } from './workstreams.js';
 import { discardUnrecordedWorkstreamSnapshot } from '../orchestration/persistence.js';
 
@@ -113,7 +113,7 @@ export interface GroupRunnerDeps {
   readonly fleetCapacity: FleetCapacityFn;
   readonly routeSelector: ContractRouteSelector;
   readonly getStatus: (agentId: string) => AgentRecord | null;
-  readonly watchdog: UnitWatchdog;
+  readonly activity: UnitActivity;
   readonly settlement: ContractUnitSettlement;
   readonly steps: GroupSteps;
   readonly pricing: UsagePricing;
@@ -334,7 +334,7 @@ export function createGroupRunner(deps: GroupRunnerDeps): GroupRunner {
     }
     unit.activeAgentId = agentId;
     runtime.agentLost = false;
-    runtime.agentStartedAt = run.env.now();
+    unit.heardAt = run.env.now();
     const purpose = runtime.nextSpawnPurpose;
     runtime.nextSpawnPurpose = 'unit';
     run.moveUnit(unit, 'running');
@@ -347,7 +347,7 @@ export function createGroupRunner(deps: GroupRunnerDeps): GroupRunner {
       route: { model: route.model, provider: route.provider, ...(route.reasoningEffort === undefined ? {} : { reasoningEffort: route.reasoningEffort }), reason: route.reason },
       purpose,
     });
-    deps.watchdog.touch(agentId);
+    deps.activity.touch(agentId);
   }
 
   function markMerged(run: ContractRun, itemId: string): void {
@@ -520,7 +520,7 @@ export function createGroupRunner(deps: GroupRunnerDeps): GroupRunner {
     runtime.recheckPending = false;
     run.releaseHold(unit);
     runtime.nextSpawnPurpose = purpose;
-    if (agentId !== undefined) deps.watchdog.forget(agentId);
+    if (agentId !== undefined) deps.activity.forget(agentId);
     run.moveUnit(unit, 'pending');
     const task = [briefWithPreviousChecks(buildUnitBrief(run.contract, group, unit), unit), firstTurn].filter((part): part is string => part !== undefined && part.length > 0).join('\n\n');
     if (run.spawnWaits(unit)) {
@@ -569,7 +569,7 @@ export function createGroupRunner(deps: GroupRunnerDeps): GroupRunner {
     }
     for (const unit of run.allUnits()) {
       run.settle(unit, 'cancelled');
-      if (unit.activeAgentId !== undefined) deps.watchdog.forget(unit.activeAgentId);
+      if (unit.activeAgentId !== undefined) deps.activity.forget(unit.activeAgentId);
     }
     // Locks are released by the runner only after real executor, phase and
     // contract cleanup has joined. Terminal statuses are too early.

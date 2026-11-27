@@ -235,7 +235,7 @@ export function wireStreamEventMetrics(
         render();
       });
     }));
-    // A provider problem the owner acts on (a model he uses stopped being free, a custom provider file that did not load).
+    // A provider problem the owner acts on (a model they use stopped being free, a custom provider file that did not load).
     unsubs.push(events.providers.on('PROVIDER_WARNING', (warning) => {
       announce(warning.message);
       render();

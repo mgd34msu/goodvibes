@@ -10,8 +10,9 @@
  * - when the agent's turn ends, the host reads the tree: no marker left in a
  *   conflicting file, so the host concludes the merge with a commit and the
  *   step is checked; a marker left, so the conflict remains and the owner is
- *   asked once (keep the first change, keep the second, or stop);
- * - the owner's "keep the first" or "keep the second" is applied here, by the
+ *   asked once, in every mode, as every Work question is (keep the first
+ *   change, keep the second, or stop);
+ * - the chosen "keep the first" or "keep the second" is applied here, by the
  *   host, file by file, and the merge concluded.
  *
  * Nothing here waits on a clock: each step runs when the agent's turn ended or
@@ -58,10 +59,12 @@ async function mergeUnderWay(cwd: string): Promise<boolean> {
 }
 
 async function branchIsIn(cwd: string, branch: string): Promise<boolean> {
+  // Compared by commit, not by exit code: a git run that exits 1 with nothing on stderr does not reject here.
   const git = await gitIn(cwd);
   try {
-    await git.raw(['merge-base', '--is-ancestor', branch, 'HEAD']);
-    return true;
+    const tip = (await git.raw(['rev-parse', '--verify', `${branch}^{commit}`])).trim();
+    const base = (await git.raw(['merge-base', tip, 'HEAD'])).trim();
+    return tip.length > 0 && base === tip;
   } catch {
     return false;
   }
@@ -92,6 +95,10 @@ export async function startConflictMerge(cwd: string, repair: MergeConflictRepai
     if (await mergeUnderWay(cwd)) return;
     throw new Error(`the other change (branch ${repair.branch}) could not be brought into the repair step's tree: ${error instanceof Error ? error.message : String(error)}`);
   }
+  // git can end without an error and without merging (a refusal it prints to stdout): what is seen decides.
+  if (!(await mergeUnderWay(cwd)) && !(await branchIsIn(cwd, repair.branch))) {
+    throw new Error(`the other change (branch ${repair.branch}) could not be brought into the repair step's tree: git did not start the merge`);
+  }
 }
 
 /** Where the repair step's tree stands, read when its agent's turn ended. */
@@ -106,7 +113,8 @@ export async function finishConflictMerge(cwd: string, repair: MergeConflictRepa
   const git = await gitIn(cwd);
   const paths = await conflictedPaths(cwd, repair.files);
   if (paths.length > 0) await git.raw(['add', '--', ...paths]);
-  await git.raw(['commit', '--no-edit', '--no-verify']);
+  // Said as what happened, not as git's "Merge branch '<internal branch>' into <internal branch>".
+  await git.raw(['commit', '--no-verify', '-m', `Combine the two changes to ${repair.files.join(', ') || 'the same files'}`]);
 }
 
 /**
@@ -124,6 +132,29 @@ export async function keepOneSide(cwd: string, repair: MergeConflictRepair, keep
   // The agent's own edits of these files are set aside: the owner chose one side.
   if (paths.length > 0) await git.raw(['checkout', keep === 'first' ? '--ours' : '--theirs', '--', ...paths]);
   await finishConflictMerge(cwd, repair);
+}
+
+/**
+ * The work ended (stopped, or failed) with the repair's merge never finished: the merge is undone in the repair
+ * step's tree, and the tree and its branch go when they hold nothing the work's own branch lacks (the repair wrote
+ * nothing of its own that was committed). What stays is the work's own branch and the other change's branch
+ * (`repair.branch`), which the end line names. Never throws: a tree that stays is only disk use.
+ */
+export async function setRepairTreeAside(projectRoot: string, cwd: string, workBranch: string): Promise<void> {
+  try {
+    if (!existsSync(cwd)) return;
+    const tree = await gitIn(cwd);
+    if (await mergeUnderWay(cwd)) await tree.raw(['merge', '--abort']);
+    const own = (await tree.raw(['rev-parse', '--abbrev-ref', 'HEAD'])).trim();
+    if (!own || own === 'HEAD' || own === workBranch) return;
+    if ((await tree.raw(['status', '--porcelain', '--untracked-files=all'])).trim() !== '') return;
+    // Its last commit is in the work's own branch: the tree holds nothing of its own.
+    const head = (await tree.raw(['rev-parse', 'HEAD'])).trim();
+    if (!(await tree.raw(['branch', '--contains', head, '--format=%(refname:short)'])).split('\n').map((line) => line.trim()).includes(workBranch)) return;
+    const project = await gitIn(projectRoot);
+    await project.raw(['worktree', 'remove', '--force', cwd]);
+    await project.raw(['branch', '-D', own]);
+  } catch { /* left for the retention rules */ }
 }
 
 /** Whether the other branch is part of a tree's history (the work's own branch, after the repair merged into it). */

@@ -121,8 +121,8 @@ function privateContextBlockOf(nativeSource: ReturnType<typeof captureAutonomous
  * which call it is and for how long, and logs it after the first minute and
  * every five minutes after. Those notices write the record only. A call that
  * bounds itself (selfBoundedCallDeadline) also publishes agent progress each
- * minute until its own deadline passes, so the silence watchdog does not take
- * a long command for a hang; any other call is silence to the watchdog.
+ * minute until its own deadline passes, so a step's row reads a long command
+ * as at work, not as quiet. Nothing stops a quiet agent: the row only says so.
  */
 function surfaceLongToolCall(record: AgentRecord, turn: number, toolName: string, keepAliveUntil: number | undefined, keepAlive: () => void): () => void {
   const startedAt = Date.now();
@@ -236,8 +236,8 @@ async function executeToolCalls(
     session.appendMessage({ type: 'tool_started', turn, toolName: call.name, toolCallId: call.id,
       args: requestedArguments.slice(0, 500), timestamp: new Date().toISOString() });
     const publishLiveness = (): void => { context.emitAgentProgress(record.id, record.progress ?? '', 'operator'); };
-    // A tool that reports progress (output arrived, a step finished) is not silent: the silence watchdog
-    // counts each report as liveness. Reports can come per output chunk, so they are published at most once per interval.
+    // A tool that reports progress (output arrived, a step finished) is not quiet: a step's row in Work
+    // counts each report as its agent heard from. Reports can come per output chunk, so they are published at most once per interval.
     let lastLiveness = Date.now();
     const reportToolProgress = (): void => {
       const now = Date.now();
@@ -957,8 +957,8 @@ async function runAgentTaskWithPolicy(context: AgentOrchestratorRunContext, reco
     // Provider drafts and reasoning stay private: only reviewed prose and
     // terminal output become public text. While the model streams, the run
     // publishes a content-free liveness tick (its unchanged progress line)
-    // at most once per interval, so the fleet view and the silence
-    // watchdog see a responding model rather than a hung one.
+    // at most once per interval, so the fleet view and a step's row in
+    // Work see a responding model rather than a quiet one.
     let lastStreamTick = 0;
     const onDelta = (_delta: StreamDelta) => {
       const now = Date.now();

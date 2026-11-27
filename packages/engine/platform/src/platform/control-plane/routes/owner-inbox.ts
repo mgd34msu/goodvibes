@@ -60,7 +60,7 @@ function askerKeptFrom(invocation: GatewayMethodInvocation, metadata: Record<str
   const holdsNone = kind === 'agent' || kind === 'user-session';
   const registrant = typeof session === 'string' ? registrantOf?.(session) : undefined;
   // The registering program too: holders of one operator token are told apart by their registrations.
-  // An asker with no session: only from the owner's own program by who it is (his registered terminal program, a turn
+  // An asker with no session: only from the owner's own program by who it is (their registered terminal program, a turn
   // the daemon hosts; method-owner-decision.ts `ownersProgramCaller`), never from the operator token alone.
   const context = invocation.context;
   const mayAsk = !holdsNone && (typeof session === 'string'
@@ -90,7 +90,7 @@ function answerSource(invocation: GatewayMethodInvocation): OwnerAnswerSource {
     // A sign-in named like this machine's token is told apart by kind (`user:<name>`), never read as "you".
     actor: actor !== undefined && actor.class !== 'peer' && actor.class !== 'system' ? actor.id : invocation.context.principalId ?? 'operator',
     surface: invocation.context.clientKind ?? 'web',
-    // Whether the owner himself answered, from the actor the transport established (never a model acting for him).
+    // Whether the owner in person answered, from the actor the transport established (never a model acting for them).
     ...(actor?.class === 'owner' && actor.agentFor === undefined ? { owner: true as const } : {}),
   };
 }

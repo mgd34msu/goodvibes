@@ -237,8 +237,8 @@ export const SERVICES_TRUST: CapabilityDefinition<ServicesCapabilityServices> = 
   actionId: 'trust', label: 'Use a service this project defines', word: 'trust',
   inputs: [
     { id: 'service', label: 'Service', help: 'Services from this project\'s services file that wait for you', kind: 'choice', choices: { list: PENDING_SERVICES_LIST }, required: true, typed: { position: 1 } },
-    // The entry as the person was shown it (its digest in the services list), filled by the place from the row he
-    // pressed on, never asked: an entry the repository changed after he looked is not approved.
+    // The entry as the person was shown it (its digest in the services list), filled by the place from the row they
+    // pressed on, never asked: an entry the repository changed after they looked is not approved.
     {
       id: 'shown', label: 'As shown', help: 'The entry as it read when it was shown to you', kind: 'text', freeTextReason: 'filled from the row you pressed on',
       required: { default: '', defaultMeans: 'the entry as it reads when it runs' }, typed: { flag: '--shown' }, showWhen: { suppliedBy: 'the row you pressed on' },
@@ -261,7 +261,7 @@ export const SERVICES_TRUST: CapabilityDefinition<ServicesCapabilityServices> = 
     }
     let result;
     try {
-      // What the person was shown (the entry as the row he pressed on read, else as it reads now) is what is approved.
+      // What the person was shown (the entry as the row they pressed on read, else as it reads now) is what is approved.
       result = registry.confirmProjectService(name, shown || pending.digest);
     } catch (error) {
       throw new CapabilityRefusal(`Nothing was confirmed: the confirmation could not be saved (${summarizeError(error)}).`);

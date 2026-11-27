@@ -88,7 +88,7 @@ export interface ProfileProseLine {
    * and this is a stable react key and the document order, so it is kept, but it must
    * NEVER reach a verb. `profile.forget` refuses a `lineIndex` outright (400), because a
    * position taken from an earlier read may be a different line by the time the owner
-   * clicks: he edits this file himself, and a settings page left open is exactly where a
+   * clicks: they edit this file by hand, and a settings page left open is exactly where a
    * stale index happens.
    */
   readonly lineIndex: number;
@@ -98,7 +98,7 @@ export interface ProfileProseLine {
 }
 
 export interface ProfileSection {
-  /** The heading text as written, his renames are respected (§4.5). */
+  /** The heading text as written, the owner's renames are respected (§4.5). */
   readonly heading: string;
   readonly tier: ProfileTier;
   readonly fields: readonly ProfileField[];
@@ -147,7 +147,7 @@ export interface ProfileProvenanceAnswer {
   /** Whether the field is in the document at all. */
   readonly present: boolean;
   /**
-   * True when the field exists but carries no provenance suffix, he wrote or edited it
+   * True when the field exists but carries no provenance suffix, the owner wrote or edited it
    * by hand, and §4.2's honest answer is to say so rather than dress it up as a source.
    */
   readonly handEdited: boolean;
@@ -181,9 +181,9 @@ export interface ProfileWriteOutcome {
  *
  * A mechanical field is addressed by its `fieldId`. A prose line is addressed by its
  * CONTENT, the section it sits in plus its exact text, never by its position (§9.2).
- * The owner is a concurrent writer: he can edit the file in his editor while this page is
- * open, so an index captured at render time may name a different line by the time he
- * clicks. Content addressing degrades honestly instead, matching nothing and removing
+ * The owner is a concurrent writer: they can edit the file in their editor while this page is
+ * open, so an index captured at render time may name a different line by the time they
+ * click. Content addressing degrades honestly instead, matching nothing and removing
  * nothing when the document has moved on.
  *
  * `profile.provenance` and `profile.undo` take a fieldId only, which is why prose lines
@@ -478,7 +478,7 @@ export function profileTargetId(target: ProfileTarget): string {
  * daemon's own `canonicalProfileSection` applies, so this surface classifies a heading
  * exactly the way the store does. A heading the owner has renamed outside the canonical
  * set is recognised by neither, which is a property of the design rather than a gap here:
- * the store treats such a section as one of his own.
+ * the store treats such a section as one of the owner's own.
  */
 function normalizeHeading(heading: string): string {
   return heading.trim().toLowerCase().replace(/\s+/g, ' ');
@@ -535,7 +535,7 @@ export function profileDisabledLine(): string {
   return 'Your profile is turned off, so nothing is loaded. Turn on profile.enabled in Settings to use it.';
 }
 
-/** One line for a provenance record: which surface, when, and his words (§4.2). */
+/** One line for a provenance record: which surface, when, and the owner's words (§4.2). */
 export function provenanceSummary(provenance: ProfileProvenance): string {
   return `${provenance.surface}, ${provenance.date}: "${provenance.said}"`;
 }
@@ -572,7 +572,7 @@ export function deletedWhat(outcome: ProfileWriteOutcome, fallbackLabel: string)
  * Appended whenever a delete finds nothing to delete.
  *
  * A forget names a row this page rendered from an earlier read, so a failure usually means
- * the file has moved on since, he edited it himself, or another surface did. Saying only
+ * the file has moved on since, the owner edited it by hand, or another surface did. Saying only
  * "nothing was removed" would be true and useless; the useful part is that the page may no
  * longer match the file, and that it is being re-read.
  *
@@ -593,7 +593,7 @@ export const STALE_VIEW_NOTE =
  * Success names what actually went, from the daemon's own change list. Every failure,
  * an absent field, a note whose text is no longer there, a section renamed away, or two
  * identical notes the daemon will not guess between, relays the daemon's own sentence and
- * adds the staleness note, because in all of them the row he clicked no longer matches the
+ * adds the staleness note, because in all of them the row they clicked no longer matches the
  * document. A body that never said `ok` is reported as unsaid, never as a deletion.
  */
 export function forgetReportLine(
@@ -627,7 +627,7 @@ export const WEBUI_PROFILE_SURFACE = 'webui';
  * The authority every write from this surface claims (§7 layer 1).
  *
  * This is a CLAIM about where the fact came from, and this surface can make it honestly:
- * the only thing that reaches a profile write here is the owner typing into his own
+ * the only thing that reaches a profile write here is the owner typing into their own
  * settings page. No page content, no message body and no document composes these calls,
  * so `owner-direct` is the true answer rather than the convenient one.
  *

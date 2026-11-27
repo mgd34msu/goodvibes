@@ -169,10 +169,12 @@ export function describeTargetChanges(changes: readonly TargetChange[]): string 
 
 /**
  * The one confirmation rule for typed commands, applied by the command registry
- * at registration so no handler decides it: a line the command marks as
+ * at registration so no handler decides it. Outside Ask me (and plan) a line
+ * runs at once: the owner's typing is their act, and a model's line was decided by
+ * the permission manager under the mode. Under Ask me a line the command marks as
  * irreversible asks once inline; `--yes` typed by the owner is the answer given
  * in advance (for scripts and surfaces with no dialog); `--yes` from a model is
- * ignored, so a model-run line is always put to the owner.
+ * ignored, so under Ask me a model-run line is put to the owner.
  *
  * The handler receives the question's `reviewed` value, what was shown. When
  * it refuses with `TARGET_CHANGED` (the target moved between the question and

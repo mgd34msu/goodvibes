@@ -51,7 +51,9 @@ describe('the event stream grant is decided once, from the descriptors', () => {
       }, (event) => events.push(event));
       publishAdminOnly(gateway);
       gateway.publishEvent('remote-peer', { peer: 'p' });
-      expect(domains).toEqual(['automation']);
+      // `turn` and `tools` are opened to a person's sessions scope frame by frame, for the sessions that person's principal owns
+      // (gateway-scope-enforcement.ts OWN_SESSION_FOLLOW_SCOPES); `config` and `tasks` stay closed, whatever kind it names.
+      expect(domains).toEqual(['turn', 'tools', 'automation']);
       for (const event of ADMIN_ONLY_BROADCASTS) expect(events).not.toContain(event);
       expect(events).not.toContain('conversation.followup.companion');
       expect(events).toContain('remote-peer');

@@ -13,16 +13,16 @@
  * §4.3, a nudge never carries the date, in any form. So `pending` renders the
  * message the daemon composed and nothing else. There is no path in this file
  * from a date to a nudge, because the pending payload holds no date to find.
- * `list` DOES return dates, and that is not a contradiction: it is him asking his
+ * `list` DOES return dates, and that is not a contradiction: it is the owner asking their
  * own system over an authenticated verb, which is the explicit ask that unlocks a
  * closed-tier read. What must never happen is those dates riding into an
  * outbound message, so `list` (and `plans`) record the dates they show on the
  * turn's ledger and the outbound check holds any text that carries one, naming
  * the rule; the line the model reads says the same.
  *
- * §4.4, the kind is chosen by HIM at capture time and never inferred. This file
+ * §4.4, the kind is chosen by THE OWNER at capture time and never inferred. This file
  * supplies no default, and `confirm` refuses without one. The three kinds are
- * offered so he can pick; a parent's death anniversary answered with a cheerful
+ * offered so the owner can pick; a parent's death anniversary answered with a cheerful
  * "you'll probably want to sort something" would be genuinely bad, and there is
  * no heuristic that gets that right from a label.
  *
@@ -30,8 +30,8 @@
  * `propose` writes nothing and hands back the daemon's own one-line
  * confirmation, which already carries the kind question when the kind is missing.
  * That is one interaction, not two. It also hands back a proposal token for that
- * exact line; `confirm` takes the token plus the kind he chose and sends the
- * proposed values, so what is written is what he heard, not a retyped copy.
+ * exact line; `confirm` takes the token plus the kind the owner chose and sends the
+ * proposed values, so what is written is what they heard, not a retyped copy.
  *
  * §4.9, `later` is a distinct answer, not a decline. It is offered alongside yes
  * and no, and nothing here folds it into either.
@@ -39,8 +39,8 @@
  * §4.10, a yes opens a short interview, and the agent does NOT make the
  * recommendation. The questions come from the daemon (opened from what the
  * profile already knows) and are relayed verbatim; `interview_record` stores what
- * he landed on, in his words. A thread he goes quiet on is a dropped thread, not
- * a completion, so `interview` resumes at the question he did not answer.
+ * the owner landed on, in their words. A thread they go quiet on is a dropped thread, not
+ * a completion, so `interview` resumes at the question they did not answer.
  *
  * §4.11, removal takes one confirmation. Not unquestioned, and not an argument.
  *
@@ -139,7 +139,7 @@ function requireAuthority(value: unknown): { readonly authority: OccasionsAuthor
  * Absent is the ordinary case and is NOT an error: the daemon reads a bare
  * `MM-DD` as annual and a bare `YYYY-MM-DD` as a one-off, so the date's own shape
  * already answers. A value that is neither word is refused rather than dropped,
- * silently ignoring "monthly" would record an annual occasion he did not ask for.
+ * silently ignoring "monthly" would record an annual occasion the owner did not ask for.
  */
 function readRecurrence(
   value: unknown,
@@ -168,7 +168,7 @@ function proposalFieldValue(field: string, value: unknown): unknown {
 // ── Proposals ──────────────────────────────────────────────────────────────
 
 /**
- * A line put to him by `propose` or `plan_propose`, kept until he answers.
+ * A line put to the owner by `propose` or `plan_propose`, kept until they answer.
  * Process-wide so the token survives the tool being rebuilt; bounded, and gone
  * when the Agent restarts (the refusal then says to propose again).
  */
@@ -191,8 +191,8 @@ function rememberProposal(proposal: PendingProposal): string {
 
 /**
  * The proposal a confirm names, or the refusal. A value passed beside the token
- * that differs from the proposal is refused: what he agreed to is the line, and a
- * changed value needs a new line read to him.
+ * that differs from the proposal is refused: what the owner agreed to is the line, and a
+ * changed value needs a new line read to them.
  */
 function takeProposal(
   args: Record<string, unknown>,
@@ -203,15 +203,15 @@ function takeProposal(
   const token = readString(args.proposal);
   if (!token) {
     return fail([
-      `\`proposal\` is required: the token action:"${propose}" returned for the line he agreed to. Nothing was recorded.`,
-      `Call action:"${propose}" first and read him the line it returns.`,
+      `\`proposal\` is required: the token action:"${propose}" returned for the line the owner agreed to. Nothing was recorded.`,
+      `Call action:"${propose}" first and read the owner the line it returns.`,
     ]);
   }
   const proposal = PROPOSALS.get(token);
   if (!proposal || proposal.target !== target || proposal.expiresAt <= Date.now()) {
     return fail([
       `There is no open proposal ${token} here (a proposal lasts a day and does not survive an Agent restart). Nothing was recorded.`,
-      `Call action:"${propose}" again and read him the new line.`,
+      `Call action:"${propose}" again and read the owner the new line.`,
     ]);
   }
   const values = proposal.values as Record<string, unknown>;
@@ -220,7 +220,7 @@ function takeProposal(
   if (changed.length > 0) {
     return fail([
       `Proposal ${token} was for: ${proposal.line}. This call changes ${changed.join(', ')}, so nothing was recorded.`,
-      `To record a different value, call action:"${propose}" with it and read him the new line.`,
+      `To record a different value, call action:"${propose}" with it and read the owner the new line.`,
     ]);
   }
   return { token, proposal };
@@ -241,7 +241,7 @@ async function handleAnswer(
   answer: string,
   occurrence: string,
 ): Promise<ToolOutcome> {
-  if (!occasionId) return fail(['`occasionId` is required: which occasion he is answering.']);
+  if (!occasionId) return fail(['`occasionId` is required: which occasion the owner is answering.']);
   if (!isOccasionsAnswerWord(answer)) {
     return fail([
       `\`answer\` must be one of ${OCCASIONS_ANSWER_WORDS.join(', ')}. Got "${answer || '(nothing)'}".`,
@@ -266,7 +266,7 @@ async function handleAnswer(
     return ok(['Recorded as later, not a no. It comes back on its own, roughly halfway to the date.']);
   }
   if (answer === 'acknowledged') {
-    return ok(['Recorded: he has it in hand. Nothing is pushed at him about this occurrence again, and it stays on his dates.']);
+    return ok(['Recorded: the owner has it in hand. Nothing is pushed at them about this occurrence again, and it stays on their dates.']);
   }
   const interview = response.interview;
   if (interview === null) {
@@ -297,8 +297,8 @@ async function handleInterviewAnswer(
   text: string,
 ): Promise<ToolOutcome> {
   if (!interviewId) return fail(['`interviewId` is required.']);
-  if (!stepId) return fail(['`stepId` is required: which question he just answered.']);
-  if (!text) return fail(['`text` is required: his answer, in his words. Do not paraphrase it.']);
+  if (!stepId) return fail(['`stepId` is required: which question the owner just answered.']);
+  if (!text) return fail(['`text` is required: the owner\'s answer, in their words. Do not paraphrase it.']);
   const result = await deps.invoke(OCCASIONS_METHOD_IDS.interviewAnswer, { interviewId, stepId, text });
   if (!result.ok) return fail(['Could not record that answer.', `  ${result.error ?? 'no reason given'}`]);
   const response = narrowOccasionsInterview(result.data);
@@ -317,29 +317,29 @@ async function handleInterviewRecord(
   if (!interviewId) return fail(['`interviewId` is required.']);
   if (!landedOn) {
     return fail([
-      '`landedOn` is required: what he actually settled on, in his words.',
-      'Recording that he said yes is not the point, a history of questions cannot stop year three',
+      '`landedOn` is required: what the owner actually settled on, in their words.',
+      'Recording that they said yes is not the point, a history of questions cannot stop year three',
       'steering where year one did.',
     ]);
   }
   const result = await deps.invoke(OCCASIONS_METHOD_IDS.interviewRecord, { interviewId, landedOn });
-  if (!result.ok) return fail(['Could not record what he landed on.', `  ${result.error ?? 'no reason given'}`]);
+  if (!result.ok) return fail(['Could not record what the owner landed on.', `  ${result.error ?? 'no reason given'}`]);
   const response = narrowOccasionsInterview(result.data);
   if (!response) return fail([OCCASIONS_RESPONSE_UNREADABLE]);
   if (!response.present || response.interview === null) {
     return fail([`There is no interview ${interviewId}, nothing was recorded.`]);
   }
   return ok([
-    `Recorded: he landed on ${response.interview.landedOn ?? landedOn}.`,
-    'That is written to his gift history and this occasion is settled for this cycle.',
+    `Recorded: the owner landed on ${response.interview.landedOn ?? landedOn}.`,
+    'That is written to their gift history and this occasion is settled for this cycle.',
   ]);
 }
 
 /**
- * Applies his answer to "which date is right?". With `keep` the other lines for
- * that title are removed from his profile (a profile write, so it carries the
+ * Applies the owner's answer to "which date is right?". With `keep` the other lines for
+ * that title are removed from their profile (a profile write, so it carries the
  * authority); without it nothing changes and the recorded dates come back to
- * put to him.
+ * put to the owner.
  */
 async function handleResolveConflict(
   deps: AgentOccasionsToolDeps,
@@ -360,8 +360,8 @@ async function handleResolveConflict(
     if (removed.length > 0) lines.push(`  Already removed: the line${removed.length === 1 ? '' : 's'} dated ${removed.join(', ')}.`);
     if (!keep && dates.length > 1) {
       lines.push(
-        `  Ask him which date is right: ${dates.join(' or ')}. Then call action:"resolve_conflict" with keep set to the date he names.`,
-        '  Do not pick one for him.',
+        `  Ask the owner which date is right: ${dates.join(' or ')}. Then call action:"resolve_conflict" with keep set to the date they name.`,
+        '  Do not pick one for them.',
       );
     } else {
       lines.push('  Say that rather than reporting it fixed.');
@@ -371,12 +371,12 @@ async function handleResolveConflict(
   if (removed.length === 0) {
     return ok([
       `Settled: ${response.occasionId} now has one date recorded, so it stops being raised.`,
-      'Nothing was removed from his profile by this call.',
+      'Nothing was removed from the owner\'s profile by this call.',
     ]);
   }
   return ok([
     `Say this in your reply: ${response.disclosure || `Kept ${keep} for ${response.occasionId}.`}`,
-    `  Removed the line${removed.length === 1 ? '' : 's'} dated ${removed.join(', ')}; his answers and gift history stay, and the conflict is not raised again.`,
+    `  Removed the line${removed.length === 1 ? '' : 's'} dated ${removed.join(', ')}; the owner's answers and gift history stay, and the conflict is not raised again.`,
   ]);
 }
 
@@ -421,24 +421,24 @@ async function handlePropose(
   if (!response.ok) return fail([`Nothing was recorded for ${title}.`, `  ${response.reason ?? 'no reason given'}`]);
 
   const lines = [
-    // §4.5: one line, at the moment he can still catch a mishearing. The daemon
+    // §4.5: one line, at the moment the owner can still catch a mishearing. The daemon
     // composed it, and when the kind is missing that same line already asks for
     // it, so this is ONE interaction, not a confirmation followed by a
     // separate kind question.
-    `Ask him this, as written: ${response.confirmation}`,
+    `Ask the owner this, as written: ${response.confirmation}`,
     `  Nothing is written yet. This is what would be: ${response.line}`,
   ];
   if (response.needsKind) {
     lines.push(
-      `  He has to pick the kind himself, ${OCCASIONS_KIND_WORDS.join(', ')}, and it is never guessed.`,
+      `  The owner has to pick the kind themselves, ${OCCASIONS_KIND_WORDS.join(', ')}, and it is never guessed.`,
       '  A date worth remembering is not always one to buy something for.',
     );
   }
   for (const other of response.conflictsWith) {
-    lines.push(`  He has already recorded a different date for this: ${other}. Ask which is right.`);
+    lines.push(`  The owner has already recorded a different date for this: ${other}. Ask which is right.`);
   }
   const token = rememberProposal({ target: 'occasion', line: response.line, values, expiresAt: Date.now() + PROPOSAL_LIFETIME_MS });
-  lines.push(`  When he confirms, call action:"confirm" with proposal:"${token}"${response.needsKind ? ' and the kind he chose' : ''}.`
+  lines.push(`  When the owner confirms, call action:"confirm" with proposal:"${token}"${response.needsKind ? ' and the kind they chose' : ''}.`
     + ' A changed value needs a new proposal.');
   return ok(lines);
 }
@@ -455,27 +455,27 @@ async function handleConfirm(
   if (isOutcome(taken)) return taken;
   const { token, proposal } = taken;
   if (proposal.target !== 'occasion') return fail([OCCASIONS_RESPONSE_UNREADABLE]);
-  // A kind the proposal already carries was read to him in its line, so it is
+  // A kind the proposal already carries was read to the owner in its line, so it is
   // held like every other field; a call may supply one only when it had none.
   const proposedKind = readString(proposal.values.kind);
   const givenKind = readString(args.kind);
   if (proposedKind && givenKind && givenKind.toLowerCase() !== proposedKind.toLowerCase()) {
     return fail([
       `Proposal ${token} was for: ${proposal.line}. This call changes kind, so nothing was recorded.`,
-      'To record a different kind, call action:"propose" with it and read him the new line.',
+      'To record a different kind, call action:"propose" with it and read the owner the new line.',
     ]);
   }
   const kind = proposedKind || givenKind;
   if (!kind) {
     return fail([
       `\`kind\` is required: ${OCCASIONS_KIND_WORDS.join(', ')}.`,
-      'Ask him which. Nothing is recorded until he says, because that is not something to guess at.',
+      'Ask the owner which. Nothing is recorded until they say, because that is not something to guess at.',
     ]);
   }
   if (!isOccasionsKindWord(kind)) {
     return fail([`\`kind\` must be one of ${OCCASIONS_KIND_WORDS.join(', ')}. Got "${kind}".`]);
   }
-  if (authority !== 'autonomous' && !said) return fail(['`said` is required: his verbatim words for this date.']);
+  if (authority !== 'autonomous' && !said) return fail(['`said` is required: the owner\'s verbatim words for this date.']);
   const title = proposal.values.title;
 
   const result = await deps.invoke(OCCASIONS_METHOD_IDS.confirm, {
@@ -492,7 +492,7 @@ async function handleConfirm(
   PROPOSALS.delete(token);
   return ok([
     `Say this in your reply: ${response.disclosure || `Recorded ${title} in your profile.`}`,
-    'It is a line in his own file, which he can edit by hand. Do not confirm it again later.',
+    'It is a line in the owner\'s own file, which they can edit by hand. Do not confirm it again later.',
   ]);
 }
 
@@ -511,10 +511,10 @@ async function handleRemove(
     const occasion = listed.ok ? narrowOccasionsList(listed.data)?.occasions.find((view) => view.occasion.id === occasionId)?.occasion : undefined;
     if (listed.ok && occasion === undefined) return fail([`There is no occasion ${occasionId}, so there is nothing to remove.`]);
     return fail([
-      `Not removed: ${occasionId} and everything recorded against it (answers, gift history, calendar mirrors) cannot be restored, so he confirms once.`,
+      `Not removed: ${occasionId} and everything recorded against it (answers, gift history, calendar mirrors) cannot be restored, so the owner confirms once.`,
       occasion === undefined
-        ? `Ask him once to confirm removing ${occasionId}, then call this again with confirmed:true and line set to the occasion's line.`
-        : `Ask him once to confirm removing ${occasionId}, then call this again with confirmed:true and line:${JSON.stringify(occasion.text)}.`,
+        ? `Ask the owner once to confirm removing ${occasionId}, then call this again with confirmed:true and line set to the occasion's line.`
+        : `Ask the owner once to confirm removing ${occasionId}, then call this again with confirmed:true and line:${JSON.stringify(occasion.text)}.`,
       'One question, not a negotiation. Do not ask why, and do not ask twice.',
     ]);
   }
@@ -566,11 +566,11 @@ async function handlePlanPropose(
   if (!response) return fail([OCCASIONS_RESPONSE_UNREADABLE]);
   if (!response.ok) return fail([`Nothing was recorded for ${title}.`, `  ${response.reason ?? 'no reason given'}`]);
   return ok([
-    `Ask him this, as written: ${response.confirmation}`,
+    `Ask the owner this, as written: ${response.confirmation}`,
     `  Nothing is written yet. This is what would be: ${response.line}`,
-    '  A plan never prompts him about anything. It is here so nothing is suggested into that window,',
-    '  and so a reminder that would land while he is away moves earlier instead.',
-    `  When he confirms, call action:"plan_confirm" with proposal:"${rememberProposal({ target: 'plan', line: response.line, values, expiresAt: Date.now() + PROPOSAL_LIFETIME_MS })}".`
+    '  A plan never prompts the owner about anything. It is here so nothing is suggested into that window,',
+    '  and so a reminder that would land while they are away moves earlier instead.',
+    `  When the owner confirms, call action:"plan_confirm" with proposal:"${rememberProposal({ target: 'plan', line: response.line, values, expiresAt: Date.now() + PROPOSAL_LIFETIME_MS })}".`
     + ' A changed value needs a new proposal.',
   ]);
 }
@@ -587,7 +587,7 @@ async function handlePlanConfirm(
   if (isOutcome(taken)) return taken;
   const { token, proposal } = taken;
   if (proposal.target !== 'plan') return fail([OCCASIONS_RESPONSE_UNREADABLE]);
-  if (authority !== 'autonomous' && !said) return fail(['`said` is required: his verbatim words for this plan.']);
+  if (authority !== 'autonomous' && !said) return fail(['`said` is required: the owner\'s verbatim words for this plan.']);
   const title = proposal.values.title;
 
   const result = await deps.invoke(OCCASIONS_METHOD_IDS.plansConfirm, {
@@ -626,7 +626,7 @@ async function handleSweep(deps: AgentOccasionsToolDeps): Promise<ToolOutcome> {
   if (response.hold === 'disabled') {
     lines.push('  Occasions are turned off, so nothing was raised. Housekeeping still ran.');
   } else if (response.hold === 'quiet-hours') {
-    lines.push('  It is outside his active hours, so nothing was raised. Nothing was dropped, it waits.');
+    lines.push('  It is outside the owner\'s active hours, so nothing was raised. Nothing was dropped, it waits.');
   } else {
     lines.push(response.nudge === null
       ? '  Nothing is due.'
@@ -635,7 +635,7 @@ async function handleSweep(deps: AgentOccasionsToolDeps): Promise<ToolOutcome> {
     // Per destination, not just an aggregate. `occasions.nudgeChannel` is a list
     // and each destination is pushed independently, so "delivered: true" can be
     // true while Telegram was refused, reporting only the aggregate would hide
-    // exactly the failure he needs to hear about.
+    // exactly the failure the owner needs to hear about.
     for (const delivery of response.deliveries) {
       lines.push(delivery.delivered
         ? `  Delivered on ${delivery.channel}.`
@@ -684,20 +684,20 @@ export function createAgentOccasionsTool(deps: AgentOccasionsToolDeps): Tool {
           answer: {
             type: 'string',
             enum: [...OCCASIONS_ANSWER_WORDS],
-            description: 'His answer. "later" is its own answer, not a no, never send it as one.',
+            description: 'The owner\'s answer. "later" is its own answer, not a no, never send it as one.',
           },
           occurrence: { type: 'string', description: 'YYYY-MM-DD; only for an occurrence other than the next one.' },
           interviewId: { type: 'string', description: 'The interview in flight. action:"pending" lists them.' },
-          stepId: { type: 'string', description: 'Which question he just answered.' },
-          text: { type: 'string', description: 'His answer to one interview question, in his words.' },
-          landedOn: { type: 'string', description: 'What he actually settled on. Closes the interview.' },
-          proposal: { type: 'string', description: 'confirm/plan_confirm: the token propose/plan_propose returned for the line he agreed to. Exactly that line is written.' },
-          title: { type: 'string', description: 'propose/plan_propose: what the occasion or plan is called, in his words.' },
+          stepId: { type: 'string', description: 'Which question the owner just answered.' },
+          text: { type: 'string', description: 'The owner\'s answer to one interview question, in their words.' },
+          landedOn: { type: 'string', description: 'What the owner actually settled on. Closes the interview.' },
+          proposal: { type: 'string', description: 'confirm/plan_confirm: the token propose/plan_propose returned for the line the owner agreed to. Exactly that line is written.' },
+          title: { type: 'string', description: 'propose/plan_propose: what the occasion or plan is called, in the owner\'s words.' },
           date: { type: 'string', description: 'propose: MM-DD for something annual, YYYY-MM-DD for a one-off.' },
           kind: {
             type: 'string',
             enum: [...OCCASIONS_KIND_WORDS],
-            description: 'HE picks this: gift-giving offers a gift, remember-only does not. On confirm, the kind he chose.',
+            description: 'THE OWNER picks this: gift-giving offers a gift, remember-only does not. On confirm, the kind they chose.',
           },
           person: { type: 'string', description: 'Who it is about, as a plain label. Omit when the title already says.' },
           recurrence: {
@@ -706,25 +706,25 @@ export function createAgentOccasionsTool(deps: AgentOccasionsToolDeps): Tool {
             description: 'Omit to let the date decide: MM-DD is annual, YYYY-MM-DD is a one-off.',
           },
           leadDays: { type: 'number', description: 'Override the default runway for this one occasion only.' },
-          self: { type: 'boolean', description: 'propose: true when the date is his own (his birthday). Recorded as "for me"; a remember-only date of his own is never pushed at him.' },
+          self: { type: 'boolean', description: 'propose: true when the date is the owner\'s own (their birthday). Recorded as "for me"; a remember-only date of their own is never pushed at them.' },
           from: { type: 'string', description: 'A plan\'s first day, YYYY-MM-DD.' },
           to: { type: 'string', description: 'A plan\'s last day, YYYY-MM-DD.' },
-          away: { type: 'boolean', description: 'True when the plan takes him away from home. Feeds reminder timing.' },
-          destination: { type: 'string', description: 'Where, when he said. Omit when he did not.' },
+          away: { type: 'boolean', description: 'True when the plan takes the owner away from home. Feeds reminder timing.' },
+          destination: { type: 'string', description: 'Where, when the owner said. Omit when they did not.' },
           details: {
             type: 'array',
             items: { type: 'string' },
-            description: 'plan_propose: everything else he gave about the plan, one detail per entry (a confirmation number, a flight and its times, who is travelling), exactly as given.',
+            description: 'plan_propose: everything else the owner gave about the plan, one detail per entry (a confirmation number, a flight and its times, who is travelling), exactly as given.',
           },
-          keep: { type: 'string', description: 'resolve_conflict: the date he says is right, as recorded (MM-DD or YYYY-MM-DD). The other lines for that title are removed. Omit to get the recorded dates to ask him about.' },
-          confirmed: { type: 'boolean', description: 'action:"remove" only: true after you asked him once to confirm the removal. Never grants write authority.' },
+          keep: { type: 'string', description: 'resolve_conflict: the date the owner says is right, as recorded (MM-DD or YYYY-MM-DD). The other lines for that title are removed. Omit to get the recorded dates to ask them about.' },
+          confirmed: { type: 'boolean', description: 'action:"remove" only: true after you asked the owner once to confirm the removal. Never grants write authority.' },
           line: { type: 'string', description: 'action:"remove" with confirmed:true only: the exact line to remove, as the unconfirmed call named it. Only that line goes, so repeating the call removes nothing more.' },
           authority: {
             type: 'string',
             enum: [...PROFILE_AUTHORITIES],
             description: 'Optional source provenance; external-source labels further restrict profile writes.',
           },
-          said: { type: 'string', description: 'His verbatim words. Required for confirm and plan_confirm when `authority` is an external-source label; ignored otherwise. Never grants write authority.' },
+          said: { type: 'string', description: 'The owner\'s verbatim words. Required for confirm and plan_confirm when `authority` is an external-source label; ignored otherwise. Never grants write authority.' },
         },
         additionalProperties: false,
       },

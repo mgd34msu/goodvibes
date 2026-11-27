@@ -508,7 +508,7 @@ export interface FeedOccurrence {
 const FEED_TIMEOUT_MS = 30_000;
 const FEED_MAX_BYTES = 5 * 1024 * 1024;
 
-/** A feed is fetched as an outward request: https or webcal only, a public host unless the owner allowed his network, time and size bounded. */
+/** A feed is fetched as an outward request: https or webcal only, a public host unless the owner allowed their network, time and size bounded. */
 export function createFeedFetcher(options: { readonly allowPrivateHosts?: boolean; readonly send?: (url: string, init: RequestInit) => Promise<Response> } = {}): FeedFetcher {
   const send = options.send ?? (options.allowPrivateHosts ? (url: string, init: RequestInit) => fetch(url, init) : (url: string, init: RequestInit) => postToPublicWebhook(url, init));
   const target = (raw: string): { url: string } | { problem: string } => {

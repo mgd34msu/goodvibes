@@ -9,6 +9,7 @@ import type { AutomationExecutionPolicy } from './session-targets.js';
 import type { AutomationEntityBase, AutomationJobStatus } from './types.js';
 import type { AutomationSourceRecord } from './sources.js';
 import type { ScheduleRunOutcome } from '@goodvibes/engine/contracts';
+import type { RecordedCause } from '../security/turn-input-party.js';
 
 /**
  * The job type discriminator on the shared automation scheduler. `standard`
@@ -54,6 +55,13 @@ export interface AutomationJob extends AutomationEntityBase {
   readonly pausedReason?: string | undefined;
   readonly deleteAfterRun: boolean;
   readonly archivedAt?: number | undefined;
+  /**
+   * Who caused this schedule when it was not the owner (security/turn-input-party.ts `recordedCauseInScope`): made,
+   * given new words or resumed by a paired device, a member, the outside agent, a script, or a turn on someone else's
+   * input. Every run of it is then that caller's turn, never the owner's: reads only, no stored credential, no connected
+   * mail or calendar tools. Absent: the owner's own (and every schedule kept before makers were recorded).
+   */
+  readonly cause?: RecordedCause | undefined;
 }
 
 export interface ManagedAutomationJob extends AutomationJob {

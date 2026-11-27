@@ -531,7 +531,7 @@ function approvalLiveRecords(snapshot: UiControlPlaneSnapshot | null, ownPrincip
       const raisedHere = ownPrincipal !== undefined && approval.metadata['raisedByPrincipal'] === ownPrincipal;
       const cancellable = active && raisedHere;
       const label = `${approval.request.tool}: ${approval.request.analysis.summary}`;
-      // Answering an approval put to the owner is his own act: the model is shown where he answers it, never a route to answer it.
+      // Answering an approval put to the owner is the owner's own act: the model is shown where they answer it, never a route to answer it.
       const ownerAnswers = `only the owner answers approval ${approval.id}: the approval prompt, Waiting for you, or the web UI`;
       const cancelRoute = `agent_operator_action action:"approvals.cancel" approvalId:"${approval.id}"`;
       return {

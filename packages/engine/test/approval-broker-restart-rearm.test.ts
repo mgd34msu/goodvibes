@@ -28,7 +28,6 @@ import { join } from 'node:path';
 import { ApprovalBroker, type SharedApprovalRecord } from '../platform/src/platform/control-plane/approval-broker.ts';
 import type { PermissionPromptRequest } from '../platform/src/platform/permissions/prompt.ts';
 import { buildExecPromptAnswerHandler } from '../platform/src/platform/runtime/permissions/exec-prompt-wiring.ts';
-import { putToOwner } from '../platform/src/platform/control-plane/owner-act.ts';
 import { buildRaiseMetadata } from '../platform/src/platform/control-plane/routes/approvals-raise.ts';
 
 /** Far longer than the file may run, so no timer of the first broker fires during it. */
@@ -156,23 +155,21 @@ test('two approvers at once: one decision stands, the command gets only its type
   expect(broker.getApproval(raised.id)?.audit.filter((entry) => entry.action === 'approved').length).toBe(1);
 });
 
-test('a change put to the owner is in effect when his approve returns; one that cannot be applied leaves the ask waiting', async () => {
+test('a change put to the owner is in effect when the owner\'s approve returns; one that cannot be applied leaves the ask waiting', async () => {
   const broker = new ApprovalBroker({ storePath });
   await broker.start();
-  // An admin who is not the owner asked to switch the sandbox off: the change is put to the owner.
+  // Under Ask me a change was put to the owner: the change is registered on its approval (ApprovalBroker.onApproved, as
+  // approvals.raise registers one) and is put in effect inside the owner's answer.
   const settings = { 'sandbox.enabled': true };
   let diskFull = true;
-  const { approvalId } = await putToOwner(broker, {
-    summary: 'Switch the sandbox off', reasons: ['sandbox.enabled: true -> false'],
-    tool: 'config.set', args: { key: 'sandbox.enabled', value: false }, requestedBy: 'admin-2',
-    apply: () => {
-      if (diskFull) throw new Error('ENOSPC: no space left on device');
-      settings['sandbox.enabled'] = false;
-    },
+  const approvalId = (await raise(broker, 'switch-sandbox-off')).id;
+  broker.onApproved(approvalId, () => {
+    if (diskFull) throw new Error('ENOSPC: no space left on device');
+    settings['sandbox.enabled'] = false;
   });
   const approve = () => broker.resolveApproval(approvalId, { approved: true, actor: 'owner', actorSurface: 'tui', expectedRevision: broker.getApproval(approvalId)!.revision });
 
-  // The change fails: nothing was decided, and the ask still waits for him.
+  // The change fails: nothing was decided, and the ask still waits for the owner.
   const failed = await approve().then(() => 'recorded', (error: { code?: unknown }) => error.code);
   expect(failed).toBe('APPROVED_NOT_APPLIED');
   expect(broker.getApproval(approvalId)?.status).toBe('pending');

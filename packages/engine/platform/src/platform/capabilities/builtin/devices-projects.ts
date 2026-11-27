@@ -9,6 +9,7 @@
  */
 import { CapabilityRefusal, type CapabilityDefinition, type InputDescription } from '../types.js';
 import { currentRecordReach } from '@goodvibes/engine/daemon-api';
+import { CARRIED_FROM_350_WORDS } from '../../control-plane/shared-kinds.js';
 
 /** What these capabilities need: the daemon's one record of the projects each caller was given. */
 export interface CallerProjectsCapabilityServices {
@@ -19,6 +20,8 @@ export interface CallerProjectsCapabilityServices {
     give(principalId: string, folder: string): { readonly ok: true; readonly project: string; readonly projects: readonly string[] } | { readonly ok: false; readonly reason: string };
     /** Take the project `folder` names from `principalId`: the projects it keeps, or undefined when it had not that one. */
     take(principalId: string, folder: string): readonly string[] | undefined;
+    /** Of a caller's projects, those carried from 3.5.0 at the upgrade (caller-projects-store.ts `carryFrom350`), shown so. */
+    carriedOf?(principalId: string): readonly string[];
   } | undefined;
 }
 
@@ -54,17 +57,22 @@ export const DEVICES_PROJECTS: Definition = {
   sentence: 'Lists each paired device and member given projects of yours, with those projects; one not listed acts on shared things only.', done: '',
   touches: 'reads', lasts: 'not-a-change', risk: 'none', example: {},
   async run(_values, services) {
-    const callers = storeOf(services).list();
-    // A caller that is not the owner himself sees only the projects it may name itself (control-plane/caller-reach.ts):
+    const store = storeOf(services);
+    const callers = store.list();
+    // A caller that is not the owner in person sees only the projects it may name itself (control-plane/caller-reach.ts):
     // who else was given those, and nothing of another project.
     const reach = currentRecordReach();
+    // A project carried from 3.5.0 at the upgrade is said so; it is taken away like any other (devices.take-project).
     const rows = Object.entries(callers)
-      .map(([who, projects]) => ({ id: who, who, projects: reach ? projects.filter((project) => reach('project', project)) : [...projects] }))
+      .map(([who, projects]) => {
+        const shown = reach ? projects.filter((project) => reach('project', project)) : [...projects];
+        return { id: who, who, projects: shown, carried: (store.carriedOf?.(who) ?? []).filter((project) => shown.includes(project)) };
+      })
       .filter((row) => !reach || row.projects.length > 0);
     if (rows.length === 0) return { text: 'No device or member has been given a project: each acts on shared things only.', data: { callers: rows } };
     // The operator token of this computer (given folders where the daemon cannot verify its programs) by what it is.
     const named = (who: string): string => who === 'shared-token' ? 'GoodVibes on this computer (shared-token)' : who;
-    return { text: ['Projects each device or member may work in', ...rows.map((row) => `  ${named(row.who)}: ${row.projects.join(', ')}`)].join('\n'), data: { callers: rows } };
+    return { text: ['Projects each device or member may work in', ...rows.map((row) => `  ${named(row.who)}: ${row.projects.map((project) => row.carried.includes(project) ? `${project} (${CARRIED_FROM_350_WORDS})` : project).join(', ')}`)].join('\n'), data: { callers: rows } };
   },
 };
 

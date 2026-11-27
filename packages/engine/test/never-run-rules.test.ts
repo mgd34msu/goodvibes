@@ -19,6 +19,7 @@ import type { ConfigKey } from '../platform/src/platform/config/schema.ts';
 import { createPermissionConfigReader, PermissionManager } from '../platform/src/platform/permissions/manager.ts';
 import { ToolRegistry } from '../platform/src/platform/tools/registry.ts';
 import { executeToolCalls, type ToolExecutionDeps } from '../platform/src/platform/core/orchestrator-tool-runtime.ts';
+import { withOwnerInput } from '../platform/src/platform/security/turn-input-party.ts';
 import { HeldForOwnerLedger } from '../platform/src/platform/permissions/held-for-owner.ts';
 import { PolicyRuntimeState } from '../platform/src/platform/runtime/permissions/policy-runtime.ts';
 import { UserPermissionRuleStore } from '../platform/src/platform/permissions/user-rule-store.ts';
@@ -56,7 +57,8 @@ test('the owner\'s never-run rule refuses in yolo every call that carries the co
   /** Whether the call ran, and whether the owner's never-run rule is what refused it. */
   const outcome = async (args: Record<string, unknown>) => {
     const before = ran;
-    const [result] = await executeToolCalls(deps, `turn-${++calls}`, [{ id: `call-${calls}`, name: 'exec', arguments: args }]);
+    // The owner's own turn, marked as the product marks one (unmarked work is someone else's input).
+    const [result] = await withOwnerInput(() => executeToolCalls(deps, `turn-${++calls}`, [{ id: `call-${calls}`, name: 'exec', arguments: args }]));
     return { ran: ran > before, neverRun: (result?.error ?? '').includes('Your never-run rule "git push"') };
   };
   const one = (cmd: string) => ({ commands: [{ cmd }] });

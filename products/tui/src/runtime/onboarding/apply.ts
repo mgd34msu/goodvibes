@@ -39,7 +39,7 @@ const { applyConfigOperation, buildConfigRollbackAction, validateConfigOperation
   snapshotFileRollback,
   reload: (deps) => deps.config.load(),
   get: (deps, key) => deps.config.get(key as never),
-  // Applied from the wizard the person completed with his own press: it goes with every write.
+  // Applied from the wizard the person completed with their own press: it goes with every write.
   set: (deps, key, value) => deps.config.setDynamic(key as never, value, { press: { personAsked: true } }),
   isUnset: (deps, key) => deps.config.describeConfigKeySource(key as never).effectiveOrigin === 'default',
   unset: (deps, key) => deps.config.reset(key as never, { press: { personAsked: true } }),

@@ -25,6 +25,7 @@ import { createShellPathService } from '../platform/src/platform/runtime/shell-p
 import { trustGatedAsk, WorkspaceRestrictedError, WorkspaceTrustManager, type WorkspaceTrustLevel } from '../platform/src/platform/runtime/workspace-trust.ts';
 import { forgetGateReadings, gateReadingsPort } from './_helpers/gate-readings.ts';
 import { localOwnerActor } from '@goodvibes/engine/daemon-api/http-policy';
+import { withOwnerInput } from '../platform/src/platform/security/turn-input-party.ts';
 
 const root = realpathSync(mkdtempSync(join(tmpdir(), 'gv-workspace-trust-')));
 afterAll(() => { rmSync(root, { recursive: true, force: true }); });
@@ -66,8 +67,9 @@ test('a shipped trust.json is not honoured; answered restricted, writes and comm
       trustGatedAsk(trust, async () => { ownerPrompts++; return { approved: true }; }, answer),
       createPermissionConfigReader(config), new PolicyRuntimeState(), null, null, null, { workspaceTrust: trust });
 
-    // Refused is a decision that does not approve, or the constraint's refusal of a restricted workspace.
-    const runs = (tool: string, args: Record<string, unknown>) => manager.checkDetailed(tool, args).then((result) => result.approved,
+    // Refused is a decision that does not approve, or the constraint's refusal of a restricted workspace. Each call is the
+    // owner's own turn, as the product marks an owner's turn: a call outside any turn is someone else's and only reads.
+    const runs = (tool: string, args: Record<string, unknown>) => withOwnerInput(() => manager.checkDetailed(tool, args)).then((result) => result.approved,
       (error: unknown) => { if (error instanceof WorkspaceRestrictedError) return false; throw error; });
     const write = { files: [{ path: join(project, 'src.ts'), content: 'export {};\n' }] };
     const command = { commands: [{ cmd: 'npm install left-pad --save' }] };

@@ -78,7 +78,7 @@ export function installSmokePlan(
     successCriteria: [
       'The Agent binary starts and reports status without printing connected-host tokens.',
       'The connected GoodVibes host is reachable from Agent.',
-      'The connected host verifies this Agent\'s credential as the owner (on another machine, after the owner paired it: Devices and network, Pair something, or goodvibes-agent setup pair --apply).',
+      'The connected host verifies this Agent\'s credential as the owner (on another machine, after the owner paired it: Devices and network, Pair something, or goodvibes-agent setup pair --with-code).',
       'A provider/model route is selected for normal assistant turns.',
       'The first assistant turn responds in the main conversation.',
     ],

@@ -64,7 +64,7 @@ export interface ExternalOperationSource {
  */
 export async function admitExternalRequest(host: ExternalPermissionHost, transport: ExternalRequestScope,
   operation: ExternalOperationSource, input: { readonly tool: string; readonly args: Record<string, unknown>; readonly effect?: ToolExecutionEffect | undefined; readonly supportingDecisionIds?: readonly string[]; readonly serverPolicy?: Readonly<Record<string, unknown>>; readonly protocolSubject?: CapturedProtocolRequest;
-    /** The owner's own rule asks him about this request (an `ask-on-risk` MCP server called outside its scope): one sentence, shown to him. */
+    /** The owner's own rule asks them about this request (an `ask-on-risk` MCP server called outside its scope): one sentence, shown to them. */
     readonly ownerAsk?: string | undefined;
     /** The request's own sender put it to its answerer, who said yes: plan mode and deny rules still refuse it, nobody is asked. */
     readonly ownerConfirmed?: boolean | undefined },

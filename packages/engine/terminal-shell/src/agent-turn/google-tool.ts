@@ -35,8 +35,8 @@ import { readString } from './tool-args.js';
  *
  * ── What this tool got wrong, and what it cost ────────────────────────────
  *
- * The owner asked for one mail to his own address to prove the connection
- * worked. The agent listed his inbox first, the obvious way to demonstrate
+ * The owner asked for one mail to their own address to prove the connection
+ * worked. The agent listed their inbox first, the obvious way to demonstrate
  * that reading works, and what it does unprompted when asked to prove the
  * connection, and the send was refused because of the listing. Three faults
  * here compounded, and each is worth naming because each looks harmless alone:
@@ -284,8 +284,8 @@ export function createAgentGoogleTool(options: AgentGoogleToolOptions): Tool {
    * uses the mail tool at all, into "does THIS message repeat what was read",
    * which is answerable and almost always no. Without it the tool took the
    * coarse path and refused every send that followed any read, which is the
-   * defect the owner met: he listed his inbox to prove the connection worked,
-   * and the send he was proving it with was refused on the strength of the
+   * defect the owner met: they listed their inbox to prove the connection worked,
+   * and the send they were proving it with was refused on the strength of the
    * listing.
    */
   async function outwardAllowed(
@@ -316,7 +316,7 @@ export function createAgentGoogleTool(options: AgentGoogleToolOptions): Tool {
 
   /**
    * Perform an action the owner approved in Waiting for you (Sends). It runs from
-   * his keystrokes with the content he was shown, so it needs no admission of
+   * their keystrokes with the content they were shown, so it needs no admission of
    * a tool call and no re-issue by the model; card material is still screened.
    */
   /**
@@ -402,7 +402,7 @@ export function createAgentGoogleTool(options: AgentGoogleToolOptions): Tool {
   /**
    * The owner's own addresses, from configuration only.
    *
-   * Read per call because he can connect a mailbox mid-session. Never from a
+   * Read per call because the owner can connect a mailbox mid-session. Never from a
    * header, a sender, or anything else a message can influence, see the platform's
    * security/owner-identity.ts for what an attacker would have to control.
    */
@@ -442,7 +442,7 @@ export function createAgentGoogleTool(options: AgentGoogleToolOptions): Tool {
       },
       // Gmail and Calendar over the network; a sent mail or created event leaves its receipt.
       sideEffects: ['network', 'state'],
-      // Mail to an address that is not the owner's own and that he has not allowed is his to decide.
+      // Mail to an address that is not the owner's own and that they have not allowed is theirs to decide.
       ownerDecisions: { field: 'action', recipients: { 'mail.send': ['to'] } },
     },
     execute: async (rawArgs: Record<string, unknown>, executionOptions): Promise<ToolOutput> => {
@@ -731,14 +731,14 @@ export function createAgentGoogleTool(options: AgentGoogleToolOptions): Tool {
           if (refused !== null) return refused;
           if (!summary.canSendMail) return failure('Google approved the fresh consent, but the grant it returned still does not permit sending mail.');
         }
-        // The one exemption: a send whose EVERY recipient is the owner himself.
+        // The one exemption: a send whose EVERY recipient is the owner.
         //
-        // He is the trust root, not a third party, and telling him what arrived
-        // is the point of an assistant reading his mail, "what came in
+        // The owner is the trust root, not a third party, and telling them what arrived
+        // is the point of an assistant reading their mail, "what came in
         // overnight" is a summary that necessarily reuses the words of what came
         // in, so without this the feature is refused in its most ordinary use.
-        // Deliberately narrow: his configured addresses only, never a domain or
-        // a pattern, and a send to him AND anyone else is not exempt. Identity
+        // Deliberately narrow: the owner's configured addresses only, never a domain or
+        // a pattern, and a send to the owner AND anyone else is not exempt. Identity
         // comes from configuration and never from anything a message can
         // influence. This matches the daemon's email.send route, which had the
         // exemption while this path did not, the same defect class on two

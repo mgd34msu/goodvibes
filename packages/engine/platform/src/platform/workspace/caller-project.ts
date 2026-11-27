@@ -7,12 +7,14 @@
  * and the rules "in this project" are read for, so it is never taken as given:
  *
  * - it is resolved to its real path and then to its project (`projectIdentityOf`), and both must pass;
- * - it is never `/`, never the home folder itself, never the GoodVibes or daemon home, anything inside one or any folder
- *   above one;
+ * - it is never `/`, never the home folder itself or a folder above it, never a hidden folder right under the home
+ *   folder or anything in one (`~/.ssh`, `~/.gnupg`, `~/.config`), never a system folder (`/etc`, `/var`, `/usr`, `/root`
+ *   and the like, unless the home folder lives there), never the GoodVibes or daemon home, anything inside one or any
+ *   folder above one; registering a workspace is held to the same rule (registration/store.ts);
  * - it must be a registered workspace or inside one (the shared register is where the owner's trust decisions are kept
- *   too), unless the caller is the owner himself or his own program, by who it is (his sign-in, a device he paired, his
- *   registered terminal program, his Agent program, a turn the daemon hosts: `projectNamerOf`), whose every project is
- *   his; the operator token or the Agent's credential alone is a script. The folder the daemon was started in is no
+ *   too), unless the caller is the owner in person or their own program, by who it is (their sign-in, a device they paired, their
+ *   registered terminal program, their Agent program, a turn the daemon hosts: `projectNamerOf`), whose every project is
+ *   theirs; the operator token or the Agent's credential alone is a script. The folder the daemon was started in is no
  *   exception: the daemon's own working folder is in its home (`<daemon home>/own-folder`), which no project is, and the
  *   folder it was started from means nothing to it, so a device works there only once the owner registered it;
  * - any other caller (a paired device, a signed-in member) may name only a project the owner assigned to it
@@ -27,14 +29,17 @@ import type { CredentialKind } from '@goodvibes/engine/daemon-api/http-policy';
 import type { Actor } from '../daemon/http-policy.js';
 import { ownersProgramCaller } from '../daemon/method-owner-decision.js';
 
-/** The real path of `path`: of the file when it exists, else of its nearest existing folder with the rest after it. */
+/**
+ * The real path of `path`: of the file when it exists, else of its nearest existing folder with the rest after it; as
+ * the filesystem names it (`realpathSync.native`: a case-insensitive disk's own spelling, as project-identity.ts reads).
+ */
 export function realPathOf(path: string): string {
   const absolute = resolve(path);
   let existing = absolute;
   const rest: string[] = [];
   for (;;) {
     try {
-      return resolve(realpathSync(existing), ...[...rest].reverse());
+      return resolve(realpathSync.native(existing), ...[...rest].reverse());
     } catch {
       const parent = dirname(existing);
       if (parent === existing) return absolute;
@@ -105,10 +110,27 @@ export function noProjectFacts(homeDirectory: string, daemonHome: string): Pick<
   return { homeDirectory, goodVibesHome: join(homeDirectory, '.goodvibes'), daemonHome };
 }
 
+/** The system's own folders: never a project, nor anything inside one. */
+const SYSTEM_FOLDERS: readonly string[] = ['/etc', '/var', '/usr', '/root', '/bin', '/sbin', '/lib', '/lib32', '/lib64', '/boot', '/proc', '/sys', '/dev', '/run'];
+
 /** Why a real path may never be a project, or undefined. */
 function neverAProject(path: string, facts: Pick<CallerProjectFacts, 'homeDirectory' | 'goodVibesHome' | 'daemonHome'>): string | undefined {
   if (dirname(path) === path) return 'the root of the file system is no project';
-  if (path === realPathOf(facts.homeDirectory) || path === realPathOf(homedir())) return 'the home folder itself is no project';
+  for (const home of new Set([realPathOf(facts.homeDirectory), realPathOf(homedir())])) {
+    if (path === home) return 'the home folder itself is no project';
+    // A folder that holds the home folder (`/home`): everyone's files, never one project.
+    if (pathWithin(home, path)) return 'it holds the home folder, which is no project';
+    // A hidden folder right under the home folder (`~/.ssh`, `~/.gnupg`, `~/.config`, `~/.aws`, `~/.local`) and
+    // everything in it: where programs keep their own files and credentials, never a project.
+    const first = relative(home, path).split(/[\\/]/)[0] ?? '';
+    if (pathWithin(path, home) && first.startsWith('.')) return `it is in ${join(home, first)}, where programs keep their own files and credentials, which is no project`;
+  }
+  // The system's folders, unless the home folder itself lives in one (`/var/home/<user>` on some systems).
+  const inHome = [facts.homeDirectory, homedir()].some((home) => pathWithin(path, realPathOf(home)));
+  for (const system of inHome ? [] : SYSTEM_FOLDERS) {
+    const at = realPathOf(system);
+    if (pathWithin(path, at)) return `it is in ${system}, the system's own files, which is no project`;
+  }
   for (const [home, name] of [[facts.goodVibesHome, 'the GoodVibes home'], [facts.daemonHome, 'the daemon home']] as const) {
     const at = realPathOf(home);
     if (pathWithin(path, at) || pathWithin(at, path)) return `it holds or is inside ${name}, which is no project`;
@@ -147,9 +169,9 @@ export function checkCallerProject(raw: string, who: ProjectNamer, facts: Caller
 
 /**
  * Who names a project, for {@link checkCallerProject}: the owner's own program by WHO it is, never by the kind of
- * credential it holds (daemon/method-owner-decision.ts `ownersProgramCaller`: the owner himself, his sign-in, a device he
- * paired himself, his registered terminal program; his Agent program's model; a turn the daemon hosts), whose every
- * project is his without his giving it to himself. The operator token from a script or from another machine, and the
+ * credential it holds (daemon/method-owner-decision.ts `ownersProgramCaller`: the owner in person, their sign-in, a device they
+ * paired in person, their registered terminal program; their Agent program's model; a turn the daemon hosts), whose every
+ * project is theirs without their giving it to themselves. The operator token from a script or from another machine, and the
  * Agent's credential without its program, are scripts: like a member, an admin who is not the owner and every other
  * device, they name only the projects the owner gave them.
  */

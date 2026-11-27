@@ -5,8 +5,7 @@
  */
 import type { RuntimeServices } from '../runtime/services.js';
 import type { GatewayMethodInvocation } from '../control-plane/method-catalog-shared.js';
-import { HELD_CALL_CLIENT_KIND, registerCapabilityGatewayMethods } from '../control-plane/routes/capabilities.js';
-import type { RequestPrincipal } from './http-policy.js';
+import { registerCapabilityGatewayMethods } from '../control-plane/routes/capabilities.js';
 import type { DaemonControlPlaneHelper } from './control-plane.js';
 import { registerHookTraceGatewayMethods } from '../control-plane/routes/hook-trace.js';
 import { registerContextWindowLearnedGatewayMethods } from '../control-plane/routes/context-windows-learned.js';
@@ -21,10 +20,11 @@ import { nameCapabilityValuesWith, presentCapabilityRunAsks } from '../capabilit
 import { movedCapabilityEntries } from '../capabilities/builtin/index.js';
 import { createDaemonCapabilityServices } from '../capabilities/daemon-services.js';
 import { methodInputOf } from '../capabilities/operator-input.js';
-import { createCapabilityOwnerGate, type HeldCallUsers } from './capability-owner-gate.js';
+import { createCapabilityOwnerGate, type CallerUsers } from './capability-owner-gate.js';
 import { capabilityDecidedMark, runActOf, runCoversOf, takeOwnerApprovalGrant, type OwnerApprovedCallGrant } from '../control-plane/owner-approved-call.js';
 import { OWNER_DECIDED_EFFECTS } from '../capabilities/catalog.js';
-import { admitEffects, effectFacts } from '../security/effect-authority.js';
+import { admitEffects } from '../security/effect-authority.js';
+import { makesOwnerOnlyAct } from './method-owner-decision.js';
 import { turnInputParty } from '../security/turn-input-party.js';
 import { riskOfDescriptor } from '../control-plane/method-risk.js';
 import { conversationExposedNow } from '../security/conversation-exposure.js';
@@ -37,7 +37,7 @@ import { isTerminalProgramRegistration } from '../pairing/terminal-program-regis
 import { OUTSIDE_AGENT_ISSUE_METHOD_ID } from '../control-plane/method-catalog-programs.js';
 import { giveOutsideAgentProject, issueOutsideAgent, OUTSIDE_AGENT_NAME } from './outside-agent.js';
 import { credentialMakerOfInvocation } from '../control-plane/routes/pairing.js';
-import { CARRIED_UPLOAD_PURPOSE } from '../capabilities/carried-files.js';
+import { CARRIED_UPLOAD_PURPOSE, CARRIED_UPLOADS_KEPT } from '../capabilities/carried-files.js';
 import { resolveGoodVibesDaemonHome } from '../config/goodvibes-home.js';
 
 /** One call of another method through the daemon's own dispatch, as the caller of the outer call. */
@@ -77,12 +77,6 @@ export type DaemonMethodCall = (input: {
    * actor here (daemonTurnAdmission). That turn's gate was the one decision; nothing asks again.
    */
   readonly daemonTurn?: boolean | undefined;
-  /**
-   * The outer call is a held call run on the owner's yes after a restart (no credential was ever kept): the nested call
-   * is dispatched as this principal, the caller the call was held for, with that caller's scopes and actor, as the
-   * same call's nested method would be live. Never the daemon's own credential.
-   */
-  readonly asCaller?: RequestPrincipal | undefined;
   /** The owner approved the outer call: this nested call keeps the person's claim the credential cannot make, once. */
   readonly ownerApproved?: OwnerApprovedCallGrant | undefined;
   /**
@@ -90,7 +84,7 @@ export type DaemonMethodCall = (input: {
    * dispatch does not decide the method's risk class a second time (method-owner-decision.ts).
    */
   readonly decidedUpstream?: object | undefined;
-  /** The query a method call held for the owner carried (a route's path and query fields), sent again as it came. */
+  /** The query a method call handed to the gate carried (a route's path and query fields), sent again as it came. */
   readonly query?: Record<string, unknown> | undefined;
 }) => Promise<{ readonly status: number; readonly ok: boolean; readonly body: unknown }>;
 
@@ -98,7 +92,7 @@ export type DaemonMethodCall = (input: {
  * Whether a call came from one of the daemon's own turns (tools/capability/daemon-tools.ts): made in process, so it
  * carries the turn's actor and no credential.
  */
-/** The owner's Work methods: his work, its runs and its plans (control-plane/routes/work.ts, native-work-execution.ts). */
+/** The owner's Work methods: their work, its runs and its plans (control-plane/routes/work.ts, native-work-execution.ts). */
 import { OWNER_WORK_METHOD } from '../control-plane/owner-work-method.js';
 
 function fromDaemonTurn(invocation: GatewayMethodInvocation): boolean {
@@ -106,31 +100,17 @@ function fromDaemonTurn(invocation: GatewayMethodInvocation): boolean {
 }
 
 /**
- * The caller a held call run after a restart was kept as (control-plane/routes/capabilities.ts `approvedHeldInvocation`),
- * as the principal its nested methods are dispatched as; undefined for any other call. A held call whose kept caller
- * cannot be read fully is never given one: its nested methods are refused rather than sent with any other credential.
- */
-function heldCallerPrincipal(invocation: GatewayMethodInvocation): RequestPrincipal | null | undefined {
-  const context = invocation.context;
-  if (context.clientKind !== HELD_CALL_CLIENT_KIND || context.authToken) return undefined;
-  const actor = context.actor;
-  const kind = context.principalKind;
-  if (!context.principalId || !actor || !context.credentialKind || (kind !== 'user' && kind !== 'bot' && kind !== 'service' && kind !== 'token')) return null;
-  const scopes = [...(context.scopes ?? [])];
-  return { principalId: context.principalId, principalKind: kind, admin: context.admin === true, scopes, scopeSet: new Set(scopes),
-    credentialKind: context.credentialKind, roles: [], authRevision: 0, actor };
-}
-
-/**
  * A daemon turn's nested method call is admitted for that turn's actor (the owner's model) by what the method
  * declares, as a terminal program's turn is when its nested call arrives with the Agent's credential: a method a
- * model never causes is refused here too, and a credential write the owner decided for the capability is his.
+ * model never causes is refused here too, and a credential write the owner decided for the capability is the owner's.
  */
 function daemonTurnAdmission(runtime: Pick<RuntimeServices, 'gatewayMethods'>, methodId: string, invocation: GatewayMethodInvocation): GatewayVerbError | null {
   const actor = invocation.context.actor!;
   const declared = runtime.gatewayMethods.get(methodId)?.effects ?? [];
-  // An act that is the owner's own was put to him by that turn's gate (gate/classify.ts `ownerActs.asked`): his.
-  const hisOwn = (effect: (typeof declared)[number]): boolean => OWNER_DECIDED_EFFECTS.has(effect) || effectFacts([effect]).modelRefused;
+  // Of what the table refuses a model, the owner's own turn makes only what it makes under their mode (a credential they gave it,
+  // a purchase allowed within their limits: effect-authority.ts `MODEL_UNDER_MODE`); everything else no model makes
+  // (granting access, a sign-in, a credential, a pairing, the permission rules) stays refused here, in every mode.
+  const hisOwn = (effect: (typeof declared)[number]): boolean => OWNER_DECIDED_EFFECTS.has(effect);
   const asModel = declared.filter((effect) => !hisOwn(effect));
   const asOwner = declared.filter(hisOwn);
   const model = admitEffects(actor, asModel);
@@ -189,17 +169,17 @@ export function registerDaemonCapabilities(runtime: Pick<RuntimeServices, 'gatew
   | 'providerRegistry' | 'providerOptimizer' | 'favoritesStore' | 'benchmarkStore' | 'subscriptionManager' | 'serviceRegistry' | 'mediaProviders'
   // Models and providers (capabilities/builtin/compare.ts): blind model comparisons.
   | 'modelComparisons'
-  // An outside caller's call put to the owner (capability-owner-gate.ts): his approvals and the gate's own parts.
+  // An outside caller's call decided under the owner's mode (capability-owner-gate.ts): the owner's approvals and the gate's own parts.
   | 'approvalBroker' | 'policyRuntimeState' | 'featureFlags'
-  // Who asked for a held call, by name, and whether that caller is still allowed when the owner says yes.
+  // Who asks, by name, on the card and to Jev.
   | 'pairingTokens'>, call: DaemonMethodCall,
   // The daemon's machine-group verbs (capabilities/builtin/cluster.ts), composed by the host after the router.
   composed: {
     readonly clusterVerbs?: (() => import('./http/cluster-group-routes.js').ClusterGroupVerbs | null) | undefined;
     /** The places as declared (terminal-shell places/browser.ts, given by the host): `places.counts` counts each. */
     readonly places?: readonly CountedPlace[] | undefined;
-    /** The daemon's sign-in users (given by the host): a held call names its asker by user, and checks it is still there. */
-    readonly users?: HeldCallUsers | undefined;
+    /** The daemon's sign-in users (given by the host): a sign-in that asks is named by its user. */
+    readonly users?: CallerUsers | undefined;
   } = {}): void {
   // An ask for a capability_run call, here or raised by a program into this daemon's approvals, reads as the capability's own words.
   const moved = new Map(movedCapabilityEntries().map((entry) => [entry.id, entry] as const));
@@ -231,7 +211,7 @@ export function registerDaemonCapabilities(runtime: Pick<RuntimeServices, 'gatew
   registerContextWindowLearnedGatewayMethods(runtime.gatewayMethods, services);
   // Each terminal program posts the calls its gate decided to the daemon's permission audit, where a candidate policy is reviewed.
   registerPolicyAuditGatewayMethods(runtime.gatewayMethods, runtime.policyRuntimeState);
-  const { invokeMethod, invokeHeldMethod, sendNested } = daemonNestedMethods(runtime, call);
+  const { invokeMethod, invokeMethodCall, sendNested } = daemonNestedMethods(runtime, call);
   // A daemon turn's method by id (or an action with its own method) goes through this same dispatch as a capability's
   // nested method (tools/capability/daemon-tools.ts): one door, with what the dispatch gives and checks.
   runtime.gatewayMethods.setDaemonTurnMethodCall((methodId, body, invocation) => sendNested(methodId, body, undefined, invocation));
@@ -239,9 +219,9 @@ export function registerDaemonCapabilities(runtime: Pick<RuntimeServices, 'gatew
     catalog: daemonCapabilityCatalog,
     services,
     invokeMethod,
-    invokeHeldMethod,
-    // An outside caller's call is decided once, as its own question to the owner (no folder trust), and a call put to
-    // him is answered at once and run when he answers (capability-owner-gate.ts).
+    invokeMethodCall,
+    // An outside caller's call is decided once, under the owner's mode (no folder trust); under Ask me its request waits
+    // on the owner's one answer (capability-owner-gate.ts).
     ...createCapabilityOwnerGate(runtime, composed.users ? { users: composed.users } : {}),
     // Files sent with a call (capabilities/carried-files.ts): put in scratch folders in the daemon's own home, owner-only;
     // content larger than one method body arrives ahead as artifact uploads made for it, read once and removed.
@@ -257,6 +237,9 @@ export function registerDaemonCapabilities(runtime: Pick<RuntimeServices, 'gatew
         drop(id) {
           const purpose = (runtime.artifactStore.getRecord(id)?.metadata as Record<string, unknown> | undefined)?.['purpose'];
           if (purpose === CARRIED_UPLOAD_PURPOSE) runtime.artifactStore.delete(id);
+          // Parts whose call never came (its program ended between sending them and the call): past the bound, the oldest
+          // go, never by age; a call reading its parts now holds far fewer than the bound.
+          for (const stale of runtime.artifactStore.listByPurpose(CARRIED_UPLOAD_PURPOSE).slice(CARRIED_UPLOADS_KEPT)) runtime.artifactStore.delete(stale.id);
         },
       },
     },
@@ -265,11 +248,13 @@ export function registerDaemonCapabilities(runtime: Pick<RuntimeServices, 'gatew
     terminalProgram: (registration) => isTerminalProgramRegistration(runtime.shellPaths.homeDirectory, registration),
     sessionRegistrant: (sessionId) => held.sessionBroker?.registrantOf(sessionId),
   });
-  // The outside agent's one credential (daemon/outside-agent.ts): the owner's own credential asks, once per daemon.
+  // The outside agent's one credential (daemon/outside-agent.ts): asked for with the operator token on this machine (the
+  // `mcp serve` program, a script to this daemon), decided under the owner's mode, once per daemon. It holds no
+  // administrative scope and no project: it works only in a project the owner in person gives it.
   attachHandler(runtime.gatewayMethods, OUTSIDE_AGENT_ISSUE_METHOD_ID, async (invocation) => {
     const actor = invocation.context.actor;
-    if (actor?.class !== 'owner' || actor.agentFor !== undefined) {
-      throw new GatewayVerbError('Only the owner\'s own credential (the operator token) has the outside agent\'s credential issued.', 'OWNER_ONLY', 403);
+    if (invocation.context.credentialKind !== 'local' || (actor?.class !== 'owner' && actor?.class !== 'script') || actor.agentFor !== undefined) {
+      throw new GatewayVerbError('Only the operator token on this computer (goodvibes-daemon mcp serve) has the outside agent\'s credential issued.', 'OWNER_ONLY', 403);
     }
     const issued = issueOutsideAgent(resolveGoodVibesDaemonHome(runtime.shellPaths.homeDirectory), runtime.pairingTokens,
       credentialMakerOfInvocation(invocation).madeBy);
@@ -277,10 +262,12 @@ export function registerDaemonCapabilities(runtime: Pick<RuntimeServices, 'gatew
       throw new GatewayVerbError(`The outside agent already has its credential from this daemon (the paired device "${OUTSIDE_AGENT_NAME}", ${issued.issued}); it is not issued twice.`,
         'OUTSIDE_AGENT_ISSUED', 409, undefined, { next: ['Revoke it among the paired devices (Devices and network) to have a new one issued on the next start.'] });
     }
-    // The owner's one question named the project it was started in: his yes gives it that project too.
+    // The project it was started in is given only by the owner in person (who works where is the owner's own act); anyone else's
+    // issue gives none, and the agent works in a project once the owner gives it one in Devices and network.
     const project = readInvocationParams(invocation)['project'];
-    if (typeof project === 'string' && project.trim()) {
-      const given = await giveOutsideAgentProject({ homeDirectory: runtime.shellPaths.homeDirectory, gatewayMethods: runtime.gatewayMethods }, `pairing:${issued.id}`, project.trim());
+    // The owner in person or the owner's own command line (method-owner-decision.ts `makesOwnerOnlyAct`, the one test).
+    if (typeof project === 'string' && project.trim() && makesOwnerOnlyAct({ actor, credentialKind: invocation.context.credentialKind ?? undefined, registration: invocation.context.call?.registration })) {
+      const given = await giveOutsideAgentProject({ homeDirectory: runtime.shellPaths.homeDirectory }, `pairing:${issued.id}`, project.trim());
       if (!given.ok) return { id: issued.id, token: issued.token, name: issued.name, project: { given: false, reason: given.reason } };
     }
     return { id: issued.id, token: issued.token, name: issued.name };
@@ -300,46 +287,46 @@ export function registerDaemonCapabilities(runtime: Pick<RuntimeServices, 'gatew
 }
 
 /**
- * How a capability's nested method, and a method call held for the owner run on his yes, reach the daemon's one
- * dispatch (`call`: the facade's, daemonMethodCallOf): a capability's method (`invokeMethod`), a held method call as it
- * came (`invokeHeldMethod`), and a daemon turn's method by id (`sendNested`).
+ * How a capability's nested method, and a method call the gate allowed, reach the daemon's one dispatch (`call`: the
+ * facade's, daemonMethodCallOf): a capability's method (`invokeMethod`), a decided method call as it came
+ * (`invokeMethodCall`), and a daemon turn's method by id (`sendNested`).
  */
 export function daemonNestedMethods(runtime: Pick<RuntimeServices, 'gatewayMethods'>, call: DaemonMethodCall): {
   readonly invokeMethod: (methodId: string, body: Record<string, unknown>, invocation: GatewayMethodInvocation) => Promise<unknown>;
-  readonly invokeHeldMethod: (methodId: string, body: unknown, query: Record<string, unknown> | undefined, invocation: GatewayMethodInvocation) => Promise<unknown>;
+  readonly invokeMethodCall: (methodId: string, body: unknown, query: Record<string, unknown> | undefined, invocation: GatewayMethodInvocation) => Promise<unknown>;
   readonly sendNested: (methodId: string, input: unknown, query: Record<string, unknown> | undefined, invocation: GatewayMethodInvocation) => Promise<unknown>;
 } {
   const invokeMethod = (methodId: string, body: Record<string, unknown>, invocation: GatewayMethodInvocation): Promise<unknown> =>
     sendNested(methodId, methodInputOf(body, runtime.gatewayMethods.get(methodId)?.inputSchema), undefined, invocation);
-  // A method call the dispatch put to the owner (method-owner-decision.ts), run as it came once he said yes: its body
+  // A method call the dispatch handed to the gate (method-owner-decision.ts), run as it came once allowed: its body
   // and query as sent, never read again as a capability's fields.
-  const invokeHeldMethod = (methodId: string, body: unknown, query: Record<string, unknown> | undefined, invocation: GatewayMethodInvocation): Promise<unknown> =>
+  const invokeMethodCall = (methodId: string, body: unknown, query: Record<string, unknown> | undefined, invocation: GatewayMethodInvocation): Promise<unknown> =>
     sendNested(methodId, body, query, invocation);
   const sendNested = async (methodId: string, input: unknown, query: Record<string, unknown> | undefined, invocation: GatewayMethodInvocation): Promise<unknown> => {
       const descriptor = runtime.gatewayMethods.get(methodId);
-      // A call the owner approved in Waiting for you: his approval is the person's request for its own nested method
-      // that needs one, and when the caller is not the owner and the act was his, every nested method of that one call
-      // is made with his authority (control-plane/owner-approved-call.ts).
+      // A call the owner approved in Waiting for you: the owner's approval is the person's request for its own nested method
+      // that needs one, and when the caller is not the owner and the act was the owner's, every nested method of that one call
+      // is made with the owner's authority (control-plane/owner-approved-call.ts).
       const ownerApproved = takeOwnerApprovalGrant(invocation, descriptor);
-      // One of the daemon's own turns: admitted here for its actor (the owner's, when his approval carries his
+      // One of the daemon's own turns: admitted here for its actor (the owner's, when their approval carries their
       // authority), then sent with the daemon's own credential.
       const daemonTurn = fromDaemonTurn(invocation);
-      // The owner's own daemon turn (his web chat, his schedules: security/turn-input-party.ts) uses his Work as he does
-      // at his own machine: a Work method nested in it goes as his local credential, so his work is read, started and
-      // answered as his (its cause recorded as his by capabilities.run). Someone else's turn never gets this.
-      // And only his own model's: a member's or a device's chat is their model's turn, whoever sent the message there.
+      // The owner's own daemon turn (their web chat, their schedules: security/turn-input-party.ts) uses their Work as they do
+      // at their own machine: a Work method nested in it goes as their local credential, so their work is read, started and
+      // answered as theirs (its cause recorded as theirs by capabilities.run). Someone else's turn never gets this.
+      // And only the owner's own model's: a member's or a device's chat is their model's turn, whoever sent the message there.
       const actingFor = invocation.context.actor?.agentFor ?? invocation.context.actor;
       const ownersTurn = daemonTurn && turnInputParty().party === 'owner' && (actingFor === undefined || actingFor.class === 'owner' || actingFor.class === 'system');
       const ownersWork = ownersTurn && OWNER_WORK_METHOD.test(methodId);
       // A turn of a conversation that read text from outside (this turn or any earlier one: security/conversation-
-      // exposure.ts) never acts with his administrative authority on its own calls: what it asks for may be what it read.
-      // His yes to a call it asked carries his authority for that one call: in Waiting for you (`ownerApproved`), or at
-      // the turn's own gate (gate/admitted-decision.ts `ownersYesToThisCall`: the exact call his card showed, its
+      // exposure.ts) never acts with the owner's administrative authority on its own calls: what it asks for may be what it read.
+      // The owner's yes to a call it asked carries their authority for that one call: in Waiting for you (`ownerApproved`), or at
+      // the turn's own gate (gate/admitted-decision.ts `ownersYesToThisCall`: the exact call their card showed, its
       // arguments unchanged, for as long as it runs; every nested method of it, and nothing else of the turn).
-      // A read with no effect (its class `none`, its declared effect a read: his triggers listed, an action's preview read
-      // before his card is shown) is no act: his own turn reads with his authority after a read from outside too, or a
-      // trigger it asks for is refused at its preview before he is ever asked, and he could not see his own list. Each act
-      // is still his to decide at the turn's gate, by the same rule as a schedule after such a read.
+      // A read with no effect (its class `none`, its declared effect a read: the owner's triggers listed, an action's preview read
+      // before their card is shown) is no act: their own turn reads with their authority after a read from outside too, or a
+      // trigger it asks for is refused at its preview before the owner is ever asked, and the owner could not see their own list. Each act
+      // is still the owner's to decide at the turn's gate, by the same rule as a schedule after such a read.
       const ownersRead = descriptor !== undefined && descriptor.effect === 'read' && riskOfDescriptor(descriptor) === 'none';
       const ownersAdmin = ownersTurn && (ownersYesToThisCall() || ownersRead
         || (!conversationExposedNow() && !getProcessUntrustedContentLedger().hasIngestedThisTurn()));
@@ -348,20 +335,12 @@ export function daemonNestedMethods(runtime: Pick<RuntimeServices, 'gatewayMetho
         const refused = daemonTurnAdmission(runtime, methodId, as);
         if (refused) throw refused;
       }
-      // A held call run on the owner's yes after a restart: its nested method is dispatched as the caller it was held
-      // for (scopes, effects, kind as that caller's), with the owner's one-call grant when his yes carries it, exactly as
-      // the same call's nested method is live. Never with the daemon's own credential.
-      const asCaller = heldCallerPrincipal(invocation);
-      if (asCaller === null) {
-        throw new GatewayVerbError(`${methodId} was not run: who the held call runs as could not be read back, so its nested method is not sent as anyone.`, 'CAPABILITY_ASK_AGAIN', 409);
-      }
       // A field written `body.<name>` reaches the method's input at `<name>`, as the invoke endpoint reads a request
       // (capabilities/operator-input.ts methodInputOf): for an action's fields, its preview, and a handler's own call.
       const answer = await call({
         authToken: invocation.context.authToken ?? '', methodId, body: input, ...(query ? { query } : {}), ...(daemonTurn ? { daemonTurn: true } : {}),
-        ...(asCaller ? { asCaller } : {}),
         ...(ownerApproved ? { ownerApproved } : {}),
-        // The capability (or the method call held for the owner) was decided already: the method is not decided again.
+        // The capability (or the method call handed to the gate) was decided already: the method is not decided again.
         // It carries who made the capability's act and how it was decided (a settings write keeps that record).
         // And which classes its decision covered: a method of a stricter class it calls is decided at the dispatch.
         decidedUpstream: capabilityDecidedMark(runActOf(invocation), runCoversOf(invocation)),
@@ -372,8 +351,8 @@ export function daemonNestedMethods(runtime: Pick<RuntimeServices, 'gatewayMetho
           ...(invocation.context.clientKind ? { clientKind: invocation.context.clientKind } : {}),
           // The person's claim travels to the method only as the daemon kept it for this caller.
           ...(invocation.context.metadata?.['explicitUserRequest'] === true || ownerApproved?.personRequest === true ? { explicitUserRequest: true } : {}),
-          // The owner's own daemon turn (his web chat, his schedule's run, his Work step) acts with his administrative
-          // authority, as his own program does: a schedule, a trigger, a watcher, a task in its project. Its gate was the
+          // The owner's own daemon turn (their web chat, their schedule's run, their Work step) acts with their administrative
+          // authority, as their own program does: a schedule, a trigger, a watcher, a task in its project. Its gate was the
           // one decision (asked after the turn read text anyone can write, else under the project's settings). Someone
           // else's turn never gets it.
           ...(invocation.context.admin === true || ownersAdmin ? { admin: true } : {}),
@@ -387,7 +366,7 @@ export function daemonNestedMethods(runtime: Pick<RuntimeServices, 'gatewayMetho
       if (!answer.ok) throw refusalOf(methodId, answer.status, answer.body);
       return answer.body;
   };
-  return { invokeMethod, invokeHeldMethod, sendNested };
+  return { invokeMethod, invokeMethodCall, sendNested };
 }
 
 /**
@@ -396,10 +375,7 @@ export function daemonNestedMethods(runtime: Pick<RuntimeServices, 'gatewayMetho
  */
 export function daemonMethodCallOf(helper: () => Pick<DaemonControlPlaneHelper, 'invokeGatewayMethodCall' | 'describeRequestPrincipal'>,
   ownToken: () => string | null | undefined): DaemonMethodCall {
-  return ({ localOrigin, transport, daemonTurn, asCaller, ...given }) => {
-    // A held call run on the owner's yes after a restart: dispatched as the caller it was held for, never with any
-    // credential.
-    if (asCaller) return helper().invokeGatewayMethodCall({ ...given, authToken: '', principal: asCaller });
+  return ({ localOrigin, transport, daemonTurn, ...given }) => {
     // A call nested in one of the daemon's own turns carries no credential: it goes with the daemon's own, its
     // effects already admitted for that turn's actor (daemonNestedMethods).
     const input = daemonTurn === true ? { ...given, authToken: ownToken() ?? '' } : given;

@@ -57,7 +57,7 @@ const PLACE = 'the Google tab of Mail, calendar and channels';
 /** The control that connects, by its name on the tab (its key can be rebound, so it is not named). */
 const CONNECT_KEY = '"connect"';
 const READ = { done: '', touches: 'reads', lasts: 'not-a-change', risk: 'none' } as const;
-/** Storing, replacing or removing a Google credential is the owner's to decide for a model: put to him, opening on No. */
+/** Storing, replacing or removing a Google credential is the owner's to decide for a model: put to the owner, opening on No. */
 const CREDENTIAL_EFFECTS = ['control-plane.write', 'secret.write'] as const;
 /** What a consent link is, as the pane that shows it says it. */
 const CONSENT_REVEAL = {
@@ -70,7 +70,7 @@ function googleOf(services: GoogleCapabilityServices): NonNullable<GoogleCapabil
   return services.google;
 }
 
-/** Whether the person asked himself (a key, a form, a typed line), so a consent link may be handed back. */
+/** Whether the person asked themselves (a key, a form, a typed line), so a consent link may be handed back. */
 function person(caller: CapabilityCaller): boolean {
   return caller.personAsked === true;
 }
@@ -120,7 +120,7 @@ function startedResult(started: GoogleWorkStarted | GoogleWorkBusy, caller: Capa
       `${work.label}: ${steps.length > 0 ? `${steps.length} step${steps.length === 1 ? '' : 's'} done, ` : ''}one thing needs you, the consent link.`,
       person(caller)
         ? 'Open the consent link and approve it; the connection finishes by itself and its progress shows on the Google tab.'
-        : 'The consent link is waiting for the owner in Waiting for you; the connection finishes by itself once he approves it.',
+        : 'The consent link is waiting for the owner in Waiting for you; the connection finishes by itself once the owner approves it.',
     ];
     return { text: lines.join('\n'), data: { work: workData(work) }, ...(person(caller) ? { reveal: { value: started.consentUrl } } : {}) };
   }

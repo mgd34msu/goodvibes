@@ -221,7 +221,7 @@ function buildAgentHarnessTool(deps: AgentHarnessToolDeps): Tool {
       // Every mode but an effect only reads: the gate classes it as a read and it runs beside other reads.
       readModes: { field: 'mode', values: HARNESS_READ_MODES },
       // A draft names its recipient when it is saved; channel_draft_send delivers to that one. A webhook
-      // the owner has not configured or allowed is his to decide at the save, the only place a model sets it.
+      // the owner has not configured or allowed is the owner's to decide at the save, the only place a model sets it.
       ownerDecisions: { field: 'mode', recipients: { channel_draft_save: ['draftWebhook'] } },
       concurrency: 'serial',
     } satisfies Tool['definition']),

@@ -184,15 +184,13 @@ const COMMAND_HELP: Record<string, CommandHelp> = {
     usage: [
       'setup',
       'setup status',
-      'setup pair [--name <device-name>]',
-      'setup pair [--name <device-name>] --apply',
       'setup pair [--name <device-name>] --with-code   (your own device: type the sign-in code your signed-in web UI shows)',
       'setup unpair',
       'onboarding',
       'onboarding status',
     ],
     summary: 'Start the Agent on the Setup tab of System, or inspect whether setup has already been applied for this user.',
-    examples: ['setup', 'setup status', 'setup pair', 'setup pair --apply', 'onboarding status'],
+    examples: ['setup', 'setup status', 'setup pair --with-code', 'onboarding status'],
   },
   status: {
     usage: ['status', 'status --json', '--runtime-url http://127.0.0.1:3421 status'],

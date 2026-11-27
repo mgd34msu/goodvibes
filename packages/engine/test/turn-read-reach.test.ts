@@ -108,8 +108,8 @@ test("under Just YOLO someone else's turn reads only its project; the owner's re
   const owner = (call: ToolCall): Promise<string> => withOwnerInput(() => run(call));
   const shows = (text: string, words: string): string => (text.includes(words) ? 'reads' : 'refused');
 
-  // Rows: the member beside her project, by read and by find; the owner beside his; the owner in the product's home;
-  // the control, the member inside her project.
+  // Rows: the member beside the member's project, by read and by find; the owner beside the owner's; the owner in the
+  // product's home; the control, the member inside the member's project.
   expect([
     `member read beside: ${shows(await member(read(join(beside, 'secret.txt'))), 'BETA_SECRET')}`,
     `member find beside: ${shows(await member(find(beside)), 'secret.txt')}`,

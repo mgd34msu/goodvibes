@@ -30,7 +30,7 @@
  * and the frozen catastrophic block is untouched. It settles only an ask the gate
  * marked `containable` (asked only for where the call could reach); an ask the
  * gate routed to the owner (an owner-only item, an irreversible or
- * security-loosening call) always reaches him. An approval made here carries
+ * security-loosening call) always reaches them. An approval made here carries
  * `settledBy: 'sandbox'`, so it is recorded as this layer's, never as the owner's.
  */
 import { decideSandboxedExec, readCommandNeeds, type SandboxPolicyDecision } from '@goodvibes/engine/platform/platform/runtime/permissions/sandbox-policy';
@@ -187,7 +187,7 @@ export function createSandboxExecAsk(deps: SandboxExecAskDeps, ask: PermissionRe
     // The offer is for this layer only; the owner's prompt and the daemon never see it.
     const toOwner = withoutOffer(request);
     // Only an ask the gate offered as containable is this layer's to settle: one the gate routed
-    // to the owner (an owner-only item, an irreversible or security-loosening call) is his alone.
+    // to the owner (an owner-only item, an irreversible or security-loosening call) is theirs alone.
     if (request.containable !== true || request.ownerOnly !== undefined) return ask(toOwner, options);
     // Without a decision model, this keeps actual OS containment but asks the owner instead of semantically inferring host-access needs.
     if (decisionModelPolicyState().operation === 'no-decision-model') return ask(toOwner, options);

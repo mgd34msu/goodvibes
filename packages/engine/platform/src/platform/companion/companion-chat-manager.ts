@@ -16,9 +16,9 @@ import type { NativeDataWriteOwner } from '../runtime/native-reader-compatibilit
  * - Sessions survive daemon restart via CompanionChatPersistence: a summary
  *   document per chat and an append-only transcript, so a save is one small
  *   write whatever the chat's length.
- * - Inbound messages are rate-limited per session and per client via
- *   CompanionChatRateLimiter (token-bucket, 30 msgs/min per client,
- *   10 msgs/min per session by default, configurable).
+ * - Inbound messages are bounded by how many wait to be answered, per chat and
+ *   per client, via CompanionChatRateLimiter (no clock: 10 waiting per chat,
+ *   30 per client across chats by default, configurable).
  * - When a user message is posted, the manager appends it to the transcript
  *   and runs a turn through the one turn loop (core/turn-loop.ts). Each turn
  *   runs in its own untrusted-content scope, so what one chat reads and when
@@ -40,6 +40,7 @@ import { inChannelWithoutProject } from '../channels/channel-project.js';
 import { HOME_ASSISTANT_SURFACE } from '../channels/builtin/homeassistant.js';
 import { isHomeAssistantChatSession } from '../daemon/homeassistant-chat.js';
 import { withUntrustedContentScope } from '../security/untrusted-content.js';
+import { clearExposure } from '../security/conversation-exposure.js';
 import type { Actor } from '@goodvibes/engine/daemon-api/http-policy';
 import type { CompanionPostMessageOptions } from './companion-chat-turn-control.js';
 import type {
@@ -85,13 +86,16 @@ import {
   turnFailureNote,
 } from './companion-chat-history.js';
 import {
+  chatFileWriter,
   executeCompanionToolCalls,
 } from './companion-chat-turn-execution.js';
+import { forgetFileWriter } from '../state/file-cache.js';
+import { forgetAutonomousInvocationSession } from '../core/orchestrator-tool-runtime.js';
 import { planCompanionSweep } from './companion-chat-gc.js';
 import type { CompanionSessionBrokerBridge } from './companion-chat-broker-bridge.js';
 import { CompanionBrokerSync } from './companion-chat-broker-sync.js';
 import { CompanionChatRateLimiter } from './companion-chat-rate-limiter.js';
-import type { CompanionChatRateLimiterOptions } from './companion-chat-rate-limiter.js';
+import type { CompanionChatRateLimiterOptions, CompanionChatWaiting } from './companion-chat-rate-limiter.js';
 import type { ToolRegistry } from '../tools/registry.js';
 import type { ToolCall, ToolResult } from '../types/tools.js';
 import { toolCallActivity } from '@goodvibes/engine/contracts';
@@ -151,7 +155,7 @@ export interface CompanionTurnEnvironment {
   readonly toolCallHooks?: HookDispatcherLike | undefined;
   /** Resolves once the project's hooks are read and its checkpoint baseline is taken (awaited before the first tool call). */
   ready?(): Promise<void>;
-  /** The turn's knowledge (the owner's memory for this project and his own, the project's code context), as a terminal turn's. */
+  /** The turn's knowledge (the owner's memory for this project and their own, the project's code context), as a terminal turn's. */
   knowledge?(input: {
     readonly task: string;
     readonly conversationTail: ReturnType<ConversationManager['getMessagesForLLM']>;
@@ -258,6 +262,8 @@ interface InternalSession {
   abortController: AbortController;
   /** The in-flight turn, when one is running (see ActiveCompanionTurn). */
   activeTurn?: ActiveCompanionTurn | null;
+  /** The client whose message the running turn answers, when a client sent it (counted as waiting, waitingFor). */
+  activeTurnClient?: string | undefined;
   /** Memory records already given to this chat's turns (not given again), and how many turns asked (environment.knowledge). */
   knowledgeGiven?: string[];
   knowledgeTurns?: number;
@@ -356,7 +362,7 @@ export interface CompanionChatManagerConfig {
    * call is refused (nothing is ever done in the daemon's own folder).
    */
   readonly automaticProject?: ((ask: { readonly key: string; readonly kind: string; readonly message: string; readonly signal?: AbortSignal | undefined }) => Promise<{ readonly folder: string; readonly said: string }>) | undefined;
-  /** The sign-in user the user store records as the owner: an older chat he made (no maker kept) is his model's. */
+  /** The sign-in user the user store records as the owner: an older chat the owner made (no maker kept) is their model's. */
   readonly ownerUsername?: (() => string | null) | undefined;
   /**
    * Permission boundary used when executing model-originated tool calls.
@@ -395,7 +401,7 @@ export interface CompanionChatManagerConfig {
   readonly persist?: boolean | undefined;
   /** Actual installed writer declares retained session-effort semantics before publication. */
   readonly nativeDataWriter?: NativeDataWriteOwner | undefined;
-  /** Rate-limiting options. Defaults: 30 msgs/min per client, 10/min per session. */
+  /** Bounds on messages waiting to be answered. Defaults: 30 per client, 10 per chat. */
   readonly rateLimiter?: CompanionChatRateLimiterOptions | false | undefined;
   /** Override for tests */
   readonly idleActiveMs?: number | undefined;
@@ -425,6 +431,8 @@ export class CompanionChatManager {
   private readonly artifactStore: CompanionChatArtifactStore | null;
   private readonly persistence: CompanionChatPersistence | null;
   private readonly rateLimiter: CompanionChatRateLimiter | null;
+  /** Sends being prepared and saved, by client: counted as waiting until they join a chat's queue. */
+  private readonly preparingByClient = new Map<string, number>();
   private readonly idleActiveMs: number;
   private readonly idleEmptyMs: number;
   private readonly closedMemoryGraceMs: number;
@@ -475,7 +483,7 @@ export class CompanionChatManager {
       ? new CompanionChatPersistence(config.sessionsDir ?? defaultSessionsDir(config.homeDirectory))
       : null;
 
-    // Rate limiter
+    // How many messages may wait to be answered, per chat and per client (no clock: companion-chat-rate-limiter.ts).
     this.rateLimiter =
       config.rateLimiter === false
         ? null
@@ -484,7 +492,6 @@ export class CompanionChatManager {
     const gcIntervalMs = config.gcIntervalMs ?? GC_INTERVAL_MS;
     this.gcTimer = setInterval(() => {
       this._gcSweep();
-      this.rateLimiter?.cleanup();
     }, gcIntervalMs);
     // Don't block node process on this timer
     this.gcTimer.unref?.();
@@ -970,15 +977,15 @@ export class CompanionChatManager {
   /**
    * Post a user message and start an async LLM turn. Returns the messageId.
    *
-   * Rate-limited per session and per client (throws GoodVibesError{kind:'rate-limit'}
-   * if limits are exceeded).
+   * Refused (GoodVibesError, category 'rate_limit') when the chat or the client
+   * already has its bound of messages waiting to be answered; no clock.
    *
    * Throws if the session is closed or not found.
    *
    * @param sessionId - The session to post to.
    * @param content   - The message text.
-   * @param clientId  - The SSE/HTTP client identity for per-client rate limiting.
-   *                    Pass '' to skip client-level rate limiting.
+   * @param clientId  - The SSE/HTTP client identity, whose waiting messages are counted.
+   *                    Pass '' to skip the per-client bound.
    */
   async postMessage(
     sessionId: string,
@@ -1032,9 +1039,38 @@ export class CompanionChatManager {
     const alreadyAccepted = await this.replayOfClientMessage(session, options.clientMessageId, content);
     if (alreadyAccepted !== undefined) return alreadyAccepted;
 
-    // Rate-limit check (throws GoodVibesError on violation)
-    this.rateLimiter?.check(sessionId, clientId);
+    // How many of this chat's and this client's messages wait to be answered (throws GoodVibesError at the bound).
+    this.rateLimiter?.check(clientId, this.waitingFor(session, clientId));
+    // Counted as waiting from here: while it is prepared and saved, then by its queue entry or its running turn.
+    if (clientId) this.preparingByClient.set(clientId, (this.preparingByClient.get(clientId) ?? 0) + 1);
+    try {
+      return await this.acceptCountedMessage(session, sessionId, content, clientId, options);
+    } finally {
+      if (clientId) {
+        const left = (this.preparingByClient.get(clientId) ?? 1) - 1;
+        if (left > 0) this.preparingByClient.set(clientId, left); else this.preparingByClient.delete(clientId);
+      }
+    }
+  }
 
+  /**
+   * Messages waiting to be answered: in this chat (queued, running, being prepared), and from `clientId` across every
+   * chat (its queued entries, the turns of its messages running, its sends being prepared). The bound's whole input:
+   * no clock.
+   */
+  private waitingFor(session: InternalSession, clientId: string): CompanionChatWaiting {
+    const inSession = (session.pendingTurns?.length ?? 0) + (session.activeTurn ? 1 : 0) + (session.preparingTurns ?? 0);
+    if (!clientId) return { session: inSession, client: 0 };
+    let fromClient = this.preparingByClient.get(clientId) ?? 0;
+    for (const other of this.sessions.values()) {
+      for (const entry of other.pendingTurns ?? []) if (entry.clientId === clientId) fromClient++;
+      if (other.activeTurn && other.activeTurnClient === clientId) fromClient++;
+    }
+    return { session: inSession, client: fromClient };
+  }
+
+  /** The rest of {@link _postMessageInternal}, once the message is counted as waiting. */
+  private async acceptCountedMessage(session: InternalSession, sessionId: string, content: string, clientId: string, options: CompanionPostOptions): Promise<string> {
     this.assertEffortPublication(session.meta.reasoningEffort);
     const route = this.captureTurnRoute(session.meta);
     const attachments = resolveAttachments(options.attachments ?? [], this.artifactStore);
@@ -1056,7 +1092,7 @@ export class CompanionChatManager {
     let accepting = true;
     const doneAccepting = (): void => { if (accepting) { accepting = false; session.acceptingSends = (session.acceptingSends ?? 1) - 1; } };
     try {
-      return await this.acceptPreparedMessage(session, sessionId, content, options, attachments, route, messageId, stopsAtEntry, doneAccepting);
+      return await this.acceptPreparedMessage(session, sessionId, content, options, attachments, route, messageId, stopsAtEntry, doneAccepting, clientId);
     } finally {
       doneAccepting();
     }
@@ -1073,6 +1109,7 @@ export class CompanionChatManager {
     messageId: string,
     stopsAtEntry: number,
     doneAccepting: () => void,
+    clientId = '',
   ): Promise<string> {
     let providerContent: QueuedCompanionTurn['providerContent'];
     const preparation = buildProviderUserContent(content, attachments, this.artifactStore);
@@ -1180,6 +1217,7 @@ export class CompanionChatManager {
       ...(options.onTurnEvent ? { onTurnEvent: options.onTurnEvent } : {}),
       ...(options.ownerDirect === undefined ? {} : { ownerDirect: options.ownerDirect }),
       ...(options.ownerParty === true ? { ownerParty: true } : {}),
+      ...(clientId ? { clientId } : {}),
     };
     const queue = (session.pendingTurns ??= []);
     if (options.steer === true) queue.unshift(entry);
@@ -1449,6 +1487,8 @@ export class CompanionChatManager {
     if (this.disposed || session.activeTurn || session.meta.status === 'closed') return;
     const next = session.pendingTurns?.shift();
     if (!next) return;
+    // Its sender's message still waits to be answered while its turn runs (waitingFor).
+    session.activeTurnClient = next.clientId;
     const messages = this.transcript(session);
     const idx = messages.findIndex((m) => m.id === next.userMessageId);
     const queuedMsg = idx >= 0 ? messages[idx] : undefined;
@@ -1473,8 +1513,8 @@ export class CompanionChatManager {
    */
   /**
    * Whom the chat's model acts for: its maker, as kept when it was made (a member, a device, an admin who is not the
-   * owner), whoever sends a message there. Undefined for the owner's own chats (made with his credential or in process):
-   * his model, as before. An older chat kept no maker: made by the owner's sign-in or his machine's token it is his;
+   * owner), whoever sends a message there. Undefined for the owner's own chats (made with their credential or in process):
+   * their model, as before. An older chat kept no maker: made by the owner's sign-in or their machine's token it is theirs;
    * made by anyone else, it is that principal's as a member holding no scope, the least a credential is.
    */
   private makerActorOf(meta: CompanionChatSession): Actor | undefined {
@@ -1498,8 +1538,8 @@ export class CompanionChatManager {
       // A message the owner did not send (Home Assistant's room, a signed-in person or device that is not the owner)
       // drives a turn on someone else's input: no command outside a real sandbox, no file written
       // (security/turn-input-party.ts).
-      // His own message on a channel where he chose to be treated as himself, in a conversation proven his alone
-      // (`ownerParty`), is his input too, though it opens no new untrusted-content turn.
+      // The owner's own message on a channel where they chose to be treated as themselves, in a conversation proven theirs alone
+      // (`ownerParty`), is their input too, though it opens no new untrusted-content turn.
       // Someone else's turn here runs for whoever made this chat: it reaches that caller's chats and sessions, never the
       // owner's or another caller's in the same project (control-plane/caller-reach.ts).
       const party = (): Promise<void> => ownerDirect || ownerParty ? withOwnerInput(run)
@@ -1722,7 +1762,7 @@ export class CompanionChatManager {
       } else if (environment) {
         conversation.hostInstructions.set('environment', `${environmentBlock(await sessionEnvironment(conversation, environment.workingDirectory), new Date())}\n${SCREENLESS_TURN_LINE}`);
         // The turn's knowledge, as a terminal turn in the project is given it (agents/orchestrator.ts turnKnowledge):
-        // the owner's memory for this project and his own, the project's code context when it is on. A record given
+        // the owner's memory for this project and their own, the project's code context when it is on. A record given
         // on an earlier turn of this chat is not given again.
         const knowledge = await environment.knowledge?.({
           task: userMsg?.content ?? '', conversationTail: conversation.getMessagesForLLM(),
@@ -2025,7 +2065,7 @@ export class CompanionChatManager {
       // concurrent turn may have taken it), detach the session-abort chain,
       // and settle for any exit path that did not run finalizeCancelled
       // (resolve is idempotent, a second call is a no-op).
-      if (session.activeTurn === scope.activeTurn) session.activeTurn = null;
+      if (session.activeTurn === scope.activeTurn) { session.activeTurn = null; session.activeTurnClient = undefined; }
       // A reply whose save failed is in memory only: the turn stays marked as
       // started, so a daemon that stops before the next save of this chat
       // shows the question as cut off on reload instead of silently unanswered.
@@ -2137,7 +2177,7 @@ export class CompanionChatManager {
   ): RegenerateCompanionChatMessageOutput {
     const session = this._requireOpenSession(sessionId);
     this._assertNoTurnInFlight(session, 'regenerate a reply');
-    this.rateLimiter?.check(sessionId, options.clientId ?? '');
+    this.rateLimiter?.check(options.clientId ?? '', this.waitingFor(session, options.clientId ?? ''));
     const route = this.captureTurnRoute(session.meta);
     const now = Date.now();
     const branch = { messages: [...this.transcript(session)], lastActivityAt: session.lastActivityAt };
@@ -2165,7 +2205,7 @@ export class CompanionChatManager {
   ): EditCompanionChatMessageOutput {
     const session = this._requireOpenSession(sessionId);
     this._assertNoTurnInFlight(session, 'edit a message');
-    this.rateLimiter?.check(sessionId, options.clientId ?? '');
+    this.rateLimiter?.check(options.clientId ?? '', this.waitingFor(session, options.clientId ?? ''));
     const route = this.captureTurnRoute(session.meta);
     const now = Date.now();
     const branch = { messages: [...this.transcript(session)], lastActivityAt: session.lastActivityAt };
@@ -2356,6 +2396,12 @@ export class CompanionChatManager {
       if (session && !this.sessions.has(sessionId)) this.sessions.set(sessionId, session);
       throw error;
     }
+    // What the chat had read from outside goes with its record (security/conversation-exposure.ts), deleted or swept.
+    clearExposure(companionChatContentScope(sessionId));
+    // Who last wrote each file is told only of a writer that exists: the deleted chat's entries go with it.
+    forgetFileWriter(chatFileWriter(sessionId));
+    // And the identities of its tool calls (core/orchestrator-tool-runtime.ts): two Maps per chat otherwise kept for ever.
+    forgetAutonomousInvocationSession(sessionId);
   }
 
   /**

@@ -49,7 +49,7 @@ async function runStartupTool(args: readonly string[], ctx: CommandContext): Pro
     if (sub === 'review') {
       const snapshot = await getSnapshot();
       ctx.print([
-        // A person reads this: no session id (an id names nothing he knows; this is the program he is in).
+        // A person reads this: no session id (an id names nothing they know; this is the program they are in).
         'What this program started with:',
         `  providers/models: ${snapshot.providerCount}`,
         `  services configured: ${snapshot.serviceCount}`,

@@ -368,14 +368,6 @@ export interface ChannelPolicyRecord {
    */
   readonly open?: boolean | undefined;
   /**
-   * "Treat my own messages here as me" (off by default). A message on a channel is someone else's input, also when it
-   * comes from the owner's own verified account (security/turn-input-party.ts). With this on, a message from the
-   * channel's owner (`ownerId`, or for Home Assistant the conversation's own user) in a conversation proven to be his
-   * alone (a direct, one-to-one conversation; never a group, channel or thread) is the owner's own: it may change files
-   * and run commands under his mode. It loosens a protection: set only by the owner, asked, opening on No.
-   */
-  readonly ownMessagesAsOwner?: boolean | undefined;
-  /**
    * "Project for this channel": the registered project (its folder) a conversation on this channel works in: its
    * files, commands and tool servers are that project's. None by default: a turn there that would write a file or run a
    * command is refused, naming this control (channels/channel-project.ts); nothing is ever written in the daemon's own folder.

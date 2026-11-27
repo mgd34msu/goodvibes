@@ -11,7 +11,7 @@
  *    localhost loopback). Rather than a surface showing a dead button, the
  *    daemon labels each gated capability with WHY it is unavailable and the
  *    supported way to get it: a secure address (Settings, General, Secure
- *    address: Let's Encrypt for a domain the owner has, his own certificate,
+ *    address: Let's Encrypt for a domain the owner has, their own certificate,
  *    Tailscale, or the daemon's own local authority, daemon/lan-https).
  */
 import { isPrivateNetworkHost, isTailnetHost } from '@goodvibes/engine/transport-http/paths';
@@ -80,7 +80,7 @@ export const PAIRING_REACH_FIX = 'goodvibes-daemon webui enable --lan';
  * pairing code would carry), decided from the daemon's settings with no
  * request on the network: an address on this machine's loopback is not
  * reachable from anywhere else; an address the owner set (`web.publicBaseUrl`,
- * a proxy or tunnel he runs) is his statement that it is; otherwise the
+ * a proxy or tunnel they run) is their statement that it is; otherwise the
  * listener serves other machines only with `controlPlane.enabled`. A caller
  * reaching a daemon on another machine already proves that daemon serves other
  * machines, and says so with `servesOtherMachines`.

@@ -78,8 +78,6 @@ export interface CommandUiActions extends TerminalCommandUiActions<import('./mod
    * until the LLM sees it.
    */
   getPendingPastes?: () => ReadonlyMap<string, string>;
-  /** Reserved for direct owner-terminal dispatch; never a generic confirmation callback. */
-  beginHostPairing?: (request: { readonly apply: boolean; readonly bootstrapShared: boolean; readonly name: string }) => Promise<void>;
   readonly invokedByModel?: boolean;
 
   /** Arm the one-key jump to a spawned CI fix-session (the surface attaches on the jump key; the user never retypes an id). */

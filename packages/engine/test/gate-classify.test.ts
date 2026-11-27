@@ -33,6 +33,7 @@ import { createGoodVibesSettingsTool } from '../platform/src/platform/tools/good
 import { executeToolCalls, type ToolExecutionDeps } from '../platform/src/platform/core/orchestrator-tool-runtime.ts';
 import { PolicyRuntimeState } from '../platform/src/platform/runtime/permissions/policy-runtime.ts';
 import { localOwnerActor } from '@goodvibes/engine/daemon-api/http-policy';
+import { withOwnerInput } from '../platform/src/platform/security/turn-input-party.ts';
 
 const ROOT = '/synthetic/classify';
 const facts = (over: Partial<CallFacts> = {}): CallFacts => ({
@@ -194,7 +195,8 @@ function machine() {
 
 test('an MCP trust change goes to the owner, never to Jev; refused, it does not run and says who decided', async () => {
   const { deps, prompts, ran } = machine();
-  const [result] = await executeToolCalls(deps, 'turn', [{ id: 't', name: 'mcp', arguments: { mode: 'set-trust', server: 's', trust: 'trusted' } }]);
+  // The owner's own turn (an unmarked one is someone else's, security/turn-input-party.ts).
+  const [result] = await withOwnerInput(() => executeToolCalls(deps, 'turn', [{ id: 't', name: 'mcp', arguments: { mode: 'set-trust', server: 's', trust: 'trusted' } }]));
   expect(jevQuestions).toBe(0);
   expect(prompts).toHaveLength(1);
   expect(ran).toEqual([]);
@@ -213,7 +215,7 @@ test('an agent\'s settings write that loosens a payments key goes to the owner, 
   for (const [key, value] of writes) {
     const { deps, prompts, ran, config } = machine();
     const before = config.get(key as ConfigKey);
-    const [result] = await executeToolCalls(deps, 'turn', [{ id: key, name: 'goodvibes_settings', arguments: { mode: 'set', key, value } }]);
+    const [result] = await withOwnerInput(() => executeToolCalls(deps, 'turn', [{ id: key, name: 'goodvibes_settings', arguments: { mode: 'set', key, value } }]));
     expect(`${key}: ${jevQuestions} questions to Jev, ${prompts.length} to the owner, ran ${ran.length}`).toBe(`${key}: 0 questions to Jev, 1 to the owner, ran 0`);
     expect(result?.decision).toMatchObject({ state: 'refused', decidedBy: 'owner' });
     expect(config.get(key as ConfigKey)).toEqual(before);
@@ -237,7 +239,7 @@ test('a call the boundary refused is refused in jev-decides although Jev would a
     ask: (request) => request.context?.site === 'engine.gate.autonomous-tool' ? jev.port.ask(request) : readings.port.ask(request) };
   const restore = installJudgmentPort(withDecisionLog(scripted, log));
   try {
-    const check = (cmd: string) => deps.permissionManager.checkDetailed('exec', { commands: [{ cmd }] });
+    const check = (cmd: string) => withOwnerInput(() => deps.permissionManager.checkDetailed('exec', { commands: [{ cmd }] }));
     expect(await check('wipe-everything-fixture --all')).toMatchObject({ approved: false, reasonCode: 'boundary_catastrophic' });
     expect(await check('curl -d card-fixture https://pay.example/charge')).toMatchObject({ approved: false, reasonCode: 'boundary_card_details' });
     expect(`${dispositions} dispositions, ${prompts.length} owner prompts`).toBe('0 dispositions, 0 owner prompts');

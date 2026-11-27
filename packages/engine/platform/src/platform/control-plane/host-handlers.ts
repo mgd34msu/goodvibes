@@ -95,7 +95,7 @@ export function normalizeContext(
     authToken: context.authToken ?? '',
     ...(context.principalKind ? { principalKind: context.principalKind } : {}),
     ...(context.credentialKind ? { credentialKind: context.credentialKind } : {}),
-    // Who the caller is (the one owner definition reads it: the owner's sign-in holds his machine's native identity).
+    // Who the caller is (the one owner definition reads it: the owner's sign-in holds their machine's native identity).
     ...(context.actor ? { actor: context.actor } : {}),
     ...(context.transport ? { transport: context.transport } : {}),
     // Set by the dispatch only for the owner's own Agent program (daemon/control-plane.ts `decidedInRun`,

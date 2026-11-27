@@ -1,6 +1,6 @@
 /**
- * The methods of Work (the ledger, the plans, the native runs): the owner's own daemon turn (his web chat, his
- * schedules, his triggers: security/turn-input-party.ts) uses his Work as he does at his own machine, with his local
+ * The methods of Work (the ledger, the plans, the native runs): the owner's own daemon turn (their web chat, their
+ * schedules, their triggers: security/turn-input-party.ts) uses their Work as they do at their own machine, with their local
  * authority, whether it reaches a method through a capability (daemon/capability-wiring.ts) or by the method's id
  * (tools/capability/daemon-tools.ts). Someone else's turn never does.
  */

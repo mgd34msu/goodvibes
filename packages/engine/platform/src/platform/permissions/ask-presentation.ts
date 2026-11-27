@@ -31,7 +31,7 @@ import { PURCHASE_AMOUNT_METADATA, PURCHASE_DEADLINE_METADATA, PURCHASE_ITEM_MET
 import { formatMinorUnits } from '../payments/message.js';
 import { minorUnitExponent } from '../payments/money-parsing.js';
 import { toolAskWords } from './tool-ask-words.js';
-import { commandLineAskInPlanMode, isCommandLineAsk } from './command-line-ask.js';
+import { isCommandLineAsk } from './command-line-ask.js';
 
 export type AskKind =
   | 'run-command' | 'answer-command-prompt' | 'change-files' | 'fetch' | 'start-agent' | 'hand-off-work'
@@ -414,7 +414,7 @@ export const ONCE_LABEL = 'Yes, once';
 const OPENS_ON_NO: ReadonlySet<OwnerOnlyKind> = new Set<OwnerOnlyKind>([
   'unrecoverable-delete', 'irreversible-operator', 'spend-over-limit', 'payment-step', 'new-recipient', 'untrusted-derived-send',
   'loosen-security', 'grant-access',
-  // An act only the owner does (a capability put to him rather than refused): his yes is the act.
+  // An act only the owner does (a capability put to them rather than refused): their yes is the act.
   'owner-act',
 ]);
 
@@ -761,16 +761,15 @@ export function presentApprovalAsk(request: PermissionPromptRequest, facts: AskF
 
   // A price change is asked because the price moved, not because of the mode: that is its why.
   const priceWhy = kind === 'model-price' ? modelPriceWhy(request.args) : undefined;
-  // An act only the owner makes, asked by someone else (a paired device, a member): it is put to him in every mode,
-  // so the mode is not why it is asked; only that it is his.
-  const ownersAlone = request.ownerOnly === 'owner-act' && request.attribution?.kind === 'outside-caller';
-  const typedWhy = !typed ? undefined : commandLineAskInPlanMode(request) || facts.modeInForce.mode === 'plan'
-    ? 'Plan mode is on. This was not the model: it was typed as a command on this machine, and a command line never runs it by itself, so it runs only if you say yes.'
-    : 'It was typed as a command on this machine, and a command line never runs it by itself (anything that can drive a terminal could have typed it), so it runs only if you say yes.';
-  const why = priceWhy ?? typedWhy ?? (ownersAlone ?`${capitalize(by ?? 'someone other than you')} asked for it, and only you may do it, so it is put to you whatever the mode.` : undefined) ?? [
+  // An act only the owner makes, asked by someone else (a paired device, a member): it is put to them in every mode,
+  // so the mode is not why it is asked; only that it is theirs.
+  const ownersAlone = request.ownerOnly === 'owner-act' && request.attribution?.kind === 'outside-caller' && !typed;
+  // A command typed on this machine gets the card the same act from the owner's program gets under the mode in force,
+  // with that card's own reasons; only the question says it was typed.
+  const why = priceWhy ?? (ownersAlone ?`${capitalize(by ?? 'someone other than you')} asked for it, and only you may do it, so it is put to you whatever the mode.` : undefined) ?? [
     modeWhy(facts),
     // "This can't be undone." is said once, in the question: the reasons below do not say it again.
-    request.ownerOnly !== undefined ? `Only you decide this: ${cannotUndo && request.ownerOnly === 'irreversible-operator' ? 'it is an operator action' : ownerOnlyWords(request.ownerOnly, request.ownerOnlyBecause)}.` : undefined,
+    request.ownerOnly !== undefined && !(typed && request.ownerOnly === 'owner-act') ? `Only you decide this: ${cannotUndo && request.ownerOnly === 'irreversible-operator' ? 'it is an operator action' : ownerOnlyWords(request.ownerOnly, request.ownerOnlyBecause)}.` : undefined,
     cannotUndo ? 'So it asks every time; to let it run without asking, add a rule in Permissions and safety, Rules ("add a rule").' : undefined,
   ].filter((part): part is string => part !== undefined).join(' ');
 

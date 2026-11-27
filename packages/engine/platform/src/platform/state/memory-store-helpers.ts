@@ -161,7 +161,7 @@ export function rowToRecord(columns: string[], values: unknown[]): MemoryRecord 
 
 /**
  * A record's author from its column. NULL (or no column) is the owner's. A value that cannot be read is someone
- * else's, waiting for the owner: an unreadable author never makes a record his.
+ * else's, waiting for the owner: an unreadable author never makes a record the owner's.
  */
 function authorOfRow(raw: unknown): { author?: MemoryRecord['author'] } {
   if (raw === null || raw === undefined) return {};

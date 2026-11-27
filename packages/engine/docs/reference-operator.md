@@ -4,7 +4,7 @@ Generated from the synced GoodVibes operator contract artifact.
 
 ## Summary
 
-- Methods: `679`
+- Methods: `681`
 - Events: `37`
 - Auth modes: `shared-bearer`, `session-login`
 - HTTP status path: `/status`
@@ -12081,7 +12081,7 @@ Return the raw content bytes for a stored artifact.
 
 - Title: `Get Artifact Content`
 - Source: `builtin`
-- Access: `admin`
+- Access: `authenticated`
 - Transport: `http`
 - HTTP: `GET /api/artifacts/{artifactId}/content`
 - Scopes: `read:artifacts`
@@ -12136,7 +12136,7 @@ Store a file or attachment artifact for later delivery, analysis, or knowledge i
 
 - Title: `Create Artifact`
 - Source: `builtin`
-- Access: `admin`
+- Access: `authenticated`
 - Transport: `http`, `ws`
 - HTTP: `POST /api/artifacts`
 - Scopes: `write:artifacts`
@@ -12365,7 +12365,7 @@ Return metadata for a stored artifact.
 
 - Title: `Get Artifact`
 - Source: `builtin`
-- Access: `admin`
+- Access: `authenticated`
 - Transport: `http`, `ws`
 - HTTP: `GET /api/artifacts/{artifactId}`
 - Scopes: `read:artifacts`
@@ -12492,11 +12492,11 @@ Return metadata for a stored artifact.
 
 #### `artifacts.list`
 
-Return stored artifact metadata for files and attachments.
+Return stored artifact metadata for files and attachments. A caller below an admin is answered the files it stored itself.
 
 - Title: `List Artifacts`
 - Source: `builtin`
-- Access: `admin`
+- Access: `authenticated`
 - Transport: `http`, `ws`
 - HTTP: `GET /api/artifacts`
 - Scopes: `read:artifacts`
@@ -12820,7 +12820,7 @@ Return local auth posture, users, and sessions.
 
 #### `local_auth.users.create`
 
-Create a local auth user. roles: omitted creates an admin. scopes: the operator scopes the user holds (for example read:sessions and write:sessions for someone who only chats: she reads her own chats under them; read:transcripts adds anyone else's); omitted, the user holds its role's default set. A narrowed user is not an admin, whatever its roles.
+Create a local auth user. roles: omitted creates an admin. scopes: the operator scopes the user holds (for example read:sessions and write:sessions for someone who only chats: they read their own chats under them; read:transcripts adds anyone else's); omitted, the user holds its role's default set. A narrowed user is not an admin, whatever its roles.
 
 - Title: `Create Local Auth User`
 - Source: `builtin`
@@ -14599,7 +14599,7 @@ Create a durable automation job. An optional id makes the create repeatable in i
 
 - Title: `Create Automation Job`
 - Source: `builtin`
-- Access: `admin`
+- Access: `authenticated`
 - Transport: `http`, `ws`
 - HTTP: `POST /api/automation/jobs`
 - Scopes: `write:automation`
@@ -15941,7 +15941,7 @@ Delete a durable automation job.
 
 - Title: `Delete Automation Job`
 - Source: `builtin`
-- Access: `admin`
+- Access: `authenticated`
 - Transport: `http`, `ws`
 - HTTP: `DELETE /api/automation/jobs/{jobId}`
 - Scopes: `write:automation`
@@ -15995,7 +15995,7 @@ Disable a durable automation job.
 
 - Title: `Disable Automation Job`
 - Source: `builtin`
-- Access: `admin`
+- Access: `authenticated`
 - Transport: `http`, `ws`
 - HTTP: `POST /api/automation/jobs/{jobId}/disable`
 - Scopes: `write:automation`
@@ -16050,7 +16050,7 @@ Enable a durable automation job.
 
 - Title: `Enable Automation Job`
 - Source: `builtin`
-- Access: `admin`
+- Access: `authenticated`
 - Transport: `http`, `ws`
 - HTTP: `POST /api/automation/jobs/{jobId}/enable`
 - Scopes: `write:automation`
@@ -17768,7 +17768,7 @@ Trigger an automation job immediately.
 
 - Title: `Run Automation Job Now`
 - Source: `builtin`
-- Access: `admin`
+- Access: `authenticated`
 - Transport: `http`, `ws`
 - HTTP: `POST /api/automation/jobs/{jobId}/run`
 - Scopes: `write:automation`
@@ -17827,7 +17827,7 @@ Update a durable automation job. (Renamed from automation.jobs.patch in the 1.0.
 
 - Title: `Update Automation Job`
 - Source: `builtin`
-- Access: `admin`
+- Access: `authenticated`
 - Transport: `http`, `ws`
 - HTTP: `PATCH /api/automation/jobs/{jobId}`
 - Scopes: `write:automation`
@@ -19126,7 +19126,7 @@ Cancel an active automation run.
 
 - Title: `Cancel Automation Run`
 - Source: `builtin`
-- Access: `admin`
+- Access: `authenticated`
 - Transport: `http`, `ws`
 - HTTP: `POST /api/automation/runs/{runId}/cancel`
 - Scopes: `write:automation`
@@ -23161,7 +23161,7 @@ Retry a completed or failed automation run.
 
 - Title: `Retry Automation Run`
 - Source: `builtin`
-- Access: `admin`
+- Access: `authenticated`
 - Transport: `http`, `ws`
 - HTTP: `POST /api/automation/runs/{runId}/retry`
 - Scopes: `write:automation`
@@ -24152,7 +24152,7 @@ Create a schedule record.
 
 - Title: `Create Schedule`
 - Source: `builtin`
-- Access: `admin`
+- Access: `authenticated`
 - Transport: `http`, `ws`
 - HTTP: `POST /api/automation/schedules`
 - Scopes: `write:automation`
@@ -25426,7 +25426,7 @@ Delete a schedule record.
 
 - Title: `Delete Schedule`
 - Source: `builtin`
-- Access: `admin`
+- Access: `authenticated`
 - Transport: `http`, `ws`
 - HTTP: `DELETE /api/automation/schedules/{scheduleId}`
 - Scopes: `write:automation`
@@ -27269,7 +27269,7 @@ Stop a schedule from running until it is resumed; it is kept. The same as the sc
 
 - Title: `Pause a Schedule`
 - Source: `builtin`
-- Access: `admin`
+- Access: `authenticated`
 - Transport: `http`, `ws`
 - HTTP: `POST /api/automation/schedules/{scheduleId}/pause`
 - Scopes: `write:automation`
@@ -27479,7 +27479,7 @@ Let a paused schedule run again at its next time, until you change it. The same 
 
 - Title: `Resume a Schedule`
 - Source: `builtin`
-- Access: `admin`
+- Access: `authenticated`
 - Transport: `http`, `ws`
 - HTTP: `POST /api/automation/schedules/{scheduleId}/resume`
 - Scopes: `write:automation`
@@ -27534,7 +27534,7 @@ Trigger a schedule immediately.
 
 - Title: `Run Schedule Now`
 - Source: `builtin`
-- Access: `admin`
+- Access: `authenticated`
 - Transport: `http`, `ws`
 - HTTP: `POST /api/automation/schedules/{scheduleId}/run`
 - Scopes: `write:automation`
@@ -32164,7 +32164,7 @@ The capabilities this daemon knows, as a screen draws them: each one's id, group
 
 #### `capabilities.run`
 
-Runs one capability by id with its inputs (names and values as capabilities.find lists them), as the same act would run from any other source: the inputs are checked against its definition, its effects are admitted for the caller, and then a person's own request (a sign-in, a paired device or an app on this machine stating a person asked) runs at once, a call the Agent makes after its own capability gate judged it (the Agent's credential with that gate's mark) runs, and any other caller's call, the Agent's credential without the mark included, is decided under the owner's permission mode (an act that loosens a protection or cannot be undone is put to the owner and opens on No). A capability with its own method runs through that method. workingDirectory is the caller's project (a hooks file, a project secret store); program is the terminal program asking (tui or agent); model is the model that program's conversation uses (provider:model), which a capability on that conversation's model (its context window size) acts on unless its inputs name another. The answer is the text a person reads (detail: the capability's own words without its done line), the facts a script reads (never a secret value), the risk and what a repeat of this capability does; reveal is a value the person must see once (a new device's token, a join key), returned only to the person who asked. A call put to the owner is never held open: the answer is at once 202 with code OWNER_APPROVAL_PENDING, the approvalId of the question waiting for him in Waiting for you, state and next; send approvalId alone (no id), with the same credential, to read what came of it: 202 again while he has not answered, the run's answer once he approved it, or the refusal (403 CAPABILITY_NOT_APPROVED with his reason, or the capability's own refusal). A refusal is never a 500: it keeps the code of what refused it and the status that code stands for (404 NOT_FOUND for what is not held, 422 only for inputs that do not fit, 503 UNAVAILABLE for what this daemon was started without, 409 for any other refusal of the state found, with the capability's own code); a refusal from a method or an outside program the daemon ran for the capability keeps that method's status and code (424 CI_SOURCE_REFUSED for GitHub); 500 is the daemon's own fault. A capability that acts in a project folder is refused at once, 422 CAPABILITY_CALLER_CONTEXT_MISSING, when the call names no workingDirectory: the owner is never asked about a call that would then be refused. The owner's approval of a call put to him stands as the person's request for that call's own nested method that needs one (confirmation owner-request), for that one call only. A call put to him runs on his yes, after a daemon restart too, as the caller it was held for; whatever can refuse it without him (its inputs, its preview) is checked before he is asked. A capability that is the owner's own act is put to him, opening on No, never refused outright: asked for by a caller who is not the owner (an admin's sign-in, a paired device, a member), it is put to him the same way, the question naming who asks, and on his yes it runs with his authority for that one call and its nested methods. Before a held call runs on his yes, the caller it was held for must still be allowed: one whose operator token was replaced, whose device was unpaired, or whose sign-in user or sign-in is gone gets 403 CAPABILITY_CALLER_GONE naming it, and nothing runs; when that cannot be told (after a restart, a caller told only by a credential that is not kept) it is 409 CAPABILITY_ASK_AGAIN. His yes is judged again against the mode and the deny rules as they are when he answers: plan mode switched on, or a rule that now refuses it, refuses it with that reason. A remembered answer to an outside caller's call is kept for that caller only, and none is offered for an act of the owner's own asked by someone who is not the owner. Folder trust is not asked for a daemon capability: it acts on what the daemon keeps, not in a project folder.
+Runs one capability by id with its inputs (names and values as capabilities.find lists them), as the same act would run from any other source: the inputs are checked against its definition, its effects are admitted for the caller, and then a person's own request (a sign-in, a paired device or an app on this machine stating a person asked) runs at once, a call the Agent makes after its own capability gate judged it (the Agent's credential with that gate's mark) runs, and any other caller's call, the Agent's credential without the mark included, is decided under the owner's permission mode with who is asking as a fact: YOLO runs it when the caller's scopes and reach allow it, Jev decides gives it to Jev's permission decision, Ask me raises the one approval card and this call waits on the owner's answer (the caller closing its connection withdraws the question; nothing of it is kept). A capability with its own method runs through that method. workingDirectory is the caller's project (a hooks file, a project secret store); program is the terminal program asking (tui or agent); model is the model that program's conversation uses (provider:model), which a capability on that conversation's model (its context window size) acts on unless its inputs name another. The answer is the text a person reads (detail: the capability's own words without its done line), the facts a script reads (never a secret value), the risk and what a repeat of this capability does; reveal is a value the person must see once (a new device's token, a join key), returned only to the person who asked. A call not allowed is refused, 403 CAPABILITY_NOT_APPROVED with the reason. A refusal is never a 500: it keeps the code of what refused it and the status that code stands for (404 NOT_FOUND for what is not held, 422 only for inputs that do not fit, 503 UNAVAILABLE for what this daemon was started without, 409 for any other refusal of the state found, with the capability's own code); a refusal from a method or an outside program the daemon ran for the capability keeps that method's status and code (424 CI_SOURCE_REFUSED for GitHub); 500 is the daemon's own fault. A capability that acts in a project folder is refused at once, 422 CAPABILITY_CALLER_CONTEXT_MISSING, when the call names no workingDirectory: nothing is decided about a call that would then be refused. Under Ask me the owner's yes stands as the person's request for that call's own nested method that needs one (confirmation owner-request), for that one call only; whatever can refuse it without the owner (its inputs, its preview) is checked before the owner is asked. A capability that is the owner's own act, asked for by a caller who is not the owner (an admin's sign-in, a paired device, a member), is an item of the owner's list decided under the owner's mode with who asks as a fact, never refused outright; allowed, it runs with the owner's authority for that one call and its nested methods. A yes that waited is judged again against the mode and the deny rules as they are when the owner answers: plan mode switched on, or a rule that now refuses it, refuses it with that reason. A remembered answer to an outside caller's call is kept for that caller only, and none is offered for an act of the owner's own asked by someone who is not the owner. Folder trust is not asked for a daemon capability: it acts on what the daemon keeps, not in a project folder.
 
 - Title: `Run A Capability`
 - Source: `builtin`
@@ -32228,9 +32228,6 @@ Runs one capability by id with its inputs (names and values as capabilities.find
     "everyProject": {
       "type": "boolean"
     },
-    "approvalId": {
-      "type": "string"
-    },
     "delegatedFrom": {
       "type": "string",
       "enum": [
@@ -32241,6 +32238,9 @@ Runs one capability by id with its inputs (names and values as capabilities.find
       "type": "string"
     }
   },
+  "required": [
+    "id"
+  ],
   "additionalProperties": false
 }
 ```
@@ -32333,64 +32333,6 @@ Runs one capability by id with its inputs (names and values as capabilities.find
         "risk"
       ],
       "additionalProperties": false
-    },
-    {
-      "type": "object",
-      "properties": {
-        "success": {
-          "type": "boolean",
-          "const": false
-        },
-        "code": {
-          "type": "string",
-          "const": "OWNER_APPROVAL_PENDING"
-        },
-        "approvalId": {
-          "type": "string"
-        },
-        "followable": {
-          "type": "boolean"
-        },
-        "key": {
-          "type": "string"
-        },
-        "keys": {
-          "type": "array",
-          "items": {
-            "type": "string"
-          }
-        },
-        "reasons": {
-          "type": "array",
-          "items": {
-            "type": "string"
-          }
-        },
-        "sessionId": {
-          "type": "string"
-        },
-        "mode": {
-          "type": "string"
-        },
-        "requestedMode": {
-          "type": "string"
-        },
-        "state": {
-          "type": "string"
-        },
-        "next": {
-          "type": "array",
-          "items": {
-            "type": "string"
-          }
-        }
-      },
-      "required": [
-        "code",
-        "approvalId",
-        "state"
-      ],
-      "additionalProperties": true
     }
   ]
 }
@@ -34513,9 +34455,6 @@ Apply allowlist additions or removals for a channel surface.
           }
         },
         "open": {
-          "type": "boolean"
-        },
-        "ownMessagesAsOwner": {
           "type": "boolean"
         },
         "project": {
@@ -37136,9 +37075,6 @@ Return ingress policy configuration for channels.
           "open": {
             "type": "boolean"
           },
-          "ownMessagesAsOwner": {
-            "type": "boolean"
-          },
           "project": {
             "type": "string"
           },
@@ -37250,9 +37186,6 @@ Update ingress policy configuration for a channel surface. `open` makes it a sha
       "type": "string"
     },
     "allowTextCommandsWithoutMention": {
-      "type": "boolean"
-    },
-    "ownMessagesAsOwner": {
       "type": "boolean"
     },
     "project": {
@@ -37557,9 +37490,6 @@ Update ingress policy configuration for a channel surface. `open` makes it a sha
     "open": {
       "type": "boolean"
     },
-    "ownMessagesAsOwner": {
-      "type": "boolean"
-    },
     "project": {
       "type": "string"
     },
@@ -37618,7 +37548,7 @@ Update ingress policy configuration for a channel surface. `open` makes it a sha
 
 #### `channels.profiles.delete`
 
-Remove a channel profile binding. Returns { deleted: false } when no binding for that key existed, an honest boolean, never a phantom removal. Removing a binding whose permission mode is tighter than the one its channel's sessions would fall back to (the surface-wide binding's, else the host's) loosens it, which is the owner's own act: from a caller who is not the owner it answers 202 OWNER_APPROVAL_PENDING and is removed when he approves it; with no approval path it is 403 OWNER_ONLY.
+Remove a channel profile binding. Returns { deleted: false } when no binding for that key existed, an honest boolean, never a phantom removal. Removing a binding whose permission mode is tighter than the one its channel's sessions would fall back to (the surface-wide binding's, else the host's) loosens it, which is the owner's own act: from a caller who is not the owner it answers 202 OWNER_APPROVAL_PENDING and is removed when the owner approves it; with no approval path it is 403 OWNER_ONLY.
 
 - Title: `Unbind Channel Profile`
 - Source: `builtin`
@@ -38095,7 +38025,7 @@ Return every per-channel profile binding: the model, provider and permission-mod
 
 #### `channels.profiles.set`
 
-Bind (upsert) the model/provider and permission-mode defaults for a channel. Keyed on (surfaceKind, channelId?): field by field, a channelId-scoped binding wins over the surface-wide default; setting the same key again replaces it. A session the daemon originates from the channel uses these values whatever a channels.routing assignment names. A set that loosens the permission mode the channel's sessions run under (against the mode they get now, the host's when no binding sets one; leaving permissionMode out of a set removes the key's own mode) is the owner's own act, as sessions.permissionMode.set is: from a caller who is not the owner it is put to the owner and answers 202 OWNER_APPROVAL_PENDING with approvalId, followable, the current binding, mode, requestedMode, state and next, and applies when he approves it; with no approval path it is 403 OWNER_ONLY and nothing is changed.
+Bind (upsert) the model/provider and permission-mode defaults for a channel. Keyed on (surfaceKind, channelId?): field by field, a channelId-scoped binding wins over the surface-wide default; setting the same key again replaces it. A session the daemon originates from the channel uses these values whatever a channels.routing assignment names. A set that loosens the permission mode the channel's sessions run under (against the mode they get now, the host's when no binding sets one; leaving permissionMode out of a set removes the key's own mode) is the owner's own act, as sessions.permissionMode.set is: from a caller who is not the owner it is put to the owner and answers 202 OWNER_APPROVAL_PENDING with approvalId, followable, the current binding, mode, requestedMode, state and next, and applies when the owner approves it; with no approval path it is 403 OWNER_ONLY and nothing is changed.
 
 - Title: `Bind Channel Profile`
 - Source: `builtin`
@@ -46653,7 +46583,7 @@ Return the resolved GoodVibes config snapshot.
 
 #### `config.reset`
 
-Remove the explicit value of one config key through the daemon API so it reads as its default again, in every settings file that holds it. The response reports the value the host now holds and which file and tier it came from. Refuses a key that holds a credential (use credentials.delete), a key the host does not know, a key locked by managed policy, and runtime.workingDir (no caller moves the daemon). A change that loosens a security, permission, judgment or payment setting is the owner's own act: asked with a token minted for automation (one minted through the API by another token, such as pairing.tokens.create or pairing.tokens.migrate, or with narrowed scopes or for a named client; pairing.tokens.list shows it as origin automation) it is not made, but put to the owner as an approval only his own credential answers, and the answer is 202 with code OWNER_APPROVAL_PENDING and the `approvalId`; the change is applied when he approves it, and lapses after a day unanswered or if the daemon restarts first. The owner himself (his sign-in, his own terminal program with a verified registration) makes it at once; any paired device, his own included, is put to him.
+Remove the explicit value of one config key through the daemon API so it reads as its default again, in every settings file that holds it. The response reports the value the host now holds and which file and tier it came from. Refuses a key that holds a credential (use credentials.delete), a key the host does not know, a key locked by managed policy, and runtime.workingDir (no caller moves the daemon). A change that loosens a security, permission, judgment or payment setting is the owner's own act: asked with a token minted for automation (one minted through the API by another token, such as pairing.tokens.create or pairing.tokens.migrate, or with narrowed scopes or for a named client; pairing.tokens.list shows it as origin automation) it is not made, but put to the owner as an approval only the owner's own credential answers, and the answer is 202 with code OWNER_APPROVAL_PENDING and the `approvalId`; the change is applied when the owner approves it, and lapses after a day unanswered or if the daemon restarts first. The owner in person (their sign-in, their own terminal program with a verified registration) makes it at once; any paired device, the owner's own included, is put to the owner.
 
 - Title: `Reset Config Value`
 - Source: `builtin`
@@ -46800,7 +46730,7 @@ Remove the explicit value of one config key through the daemon API so it reads a
 
 #### `config.set`
 
-Write one config value on the daemon: `{ key, value }`, where value is any JSON the key accepts. The response reports the value the host now holds and which file and tier it is in; a value that did not take is refused with what the host holds instead. A key that holds a credential takes only a goodvibes://secrets/ reference (store the secret with credentials.set); runtime.workingDir is refused (409 WORKSPACE_CHANGE_UNAVAILABLE): the daemon serves every project at once and no caller moves it, so a call names its project itself. The same route also serves the settings clients' lane, which answers with its own object: `{ settingsPrecondition }` takes action `capture` (read the facts a change would act on) or `write` (make it, optionally only while `ifServing` and `ifIncarnation` still hold; a repeated `requestId` returns the first answer). A change that loosens a security, permission, judgment or payment setting is the owner's own act: asked with a token minted for automation (one minted through the API by another token, such as pairing.tokens.create or pairing.tokens.migrate, or with narrowed scopes or for a named client; pairing.tokens.list shows it as origin automation) it is not made, but put to the owner as an approval only his own credential answers, and the answer is 202 with code OWNER_APPROVAL_PENDING and the `approvalId`; the change is applied when he approves it, and lapses after a day unanswered or if the daemon restarts first. The owner himself (his sign-in, his own terminal program with a verified registration) makes it at once; any paired device, his own included, is put to him.
+Write one config value on the daemon: `{ key, value }`, where value is any JSON the key accepts. The response reports the value the host now holds and which file and tier it is in; a value that did not take is refused with what the host holds instead. A key that holds a credential takes only a goodvibes://secrets/ reference (store the secret with credentials.set); runtime.workingDir is refused (409 WORKSPACE_CHANGE_UNAVAILABLE): the daemon serves every project at once and no caller moves it, so a call names its project itself. The same route also serves the settings clients' lane, which answers with its own object: `{ settingsPrecondition }` takes action `capture` (read the facts a change would act on) or `write` (make it, optionally only while `ifServing` and `ifIncarnation` still hold; a repeated `requestId` returns the first answer). A change that loosens a security, permission, judgment or payment setting is the owner's own act: asked with a token minted for automation (one minted through the API by another token, such as pairing.tokens.create or pairing.tokens.migrate, or with narrowed scopes or for a named client; pairing.tokens.list shows it as origin automation) it is not made, but put to the owner as an approval only the owner's own credential answers, and the answer is 202 with code OWNER_APPROVAL_PENDING and the `approvalId`; the change is applied when the owner approves it, and lapses after a day unanswered or if the daemon restarts first. The owner in person (their sign-in, their own terminal program with a verified registration) makes it at once; any paired device, the owner's own included, is put to the owner.
 
 - Title: `Set Config Value`
 - Source: `builtin`
@@ -47076,7 +47006,7 @@ Write one config value on the daemon: `{ key, value }`, where value is any JSON 
 
 #### `config.setMany`
 
-Write several config values on the daemon as one update: `{ entries: [{ key, value }] }`. Every entry is admitted before anything is written, each settings file is written once and the configuration revision moves once, so a pair of settings that only make sense together never lands half-applied. A refusal names the setting, the reason and the next step, and says what was saved (nothing, unless a later settings file could not be written after an earlier one was). The answer lists, per key, the value the host now holds and which file and tier it is in; when a key does not hold the value asked for (a higher tier overrides it, or it was coerced), the answer is 409 CONFIG_SET_NOT_APPLIED naming those keys in `notApplied`, with the revision written and every entry's held value. A key that holds a credential takes only a goodvibes://secrets/ reference; runtime.workingDir is refused (409 WORKSPACE_CHANGE_UNAVAILABLE), as with config.set. A change that loosens a security, permission, judgment or payment setting is the owner's own act: asked with a token minted for automation (one minted through the API by another token, such as pairing.tokens.create or pairing.tokens.migrate, or with narrowed scopes or for a named client; pairing.tokens.list shows it as origin automation) it is not made, but put to the owner as an approval only his own credential answers, and the answer is 202 with code OWNER_APPROVAL_PENDING and the `approvalId`; the change is applied when he approves it, and lapses after a day unanswered or if the daemon restarts first. The owner himself (his sign-in, his own terminal program with a verified registration) makes it at once; any paired device, his own included, is put to him.
+Write several config values on the daemon as one update: `{ entries: [{ key, value }] }`. Every entry is admitted before anything is written, each settings file is written once and the configuration revision moves once, so a pair of settings that only make sense together never lands half-applied. A refusal names the setting, the reason and the next step, and says what was saved (nothing, unless a later settings file could not be written after an earlier one was). The answer lists, per key, the value the host now holds and which file and tier it is in; when a key does not hold the value asked for (a higher tier overrides it, or it was coerced), the answer is 409 CONFIG_SET_NOT_APPLIED naming those keys in `notApplied`, with the revision written and every entry's held value. A key that holds a credential takes only a goodvibes://secrets/ reference; runtime.workingDir is refused (409 WORKSPACE_CHANGE_UNAVAILABLE), as with config.set. A change that loosens a security, permission, judgment or payment setting is the owner's own act: asked with a token minted for automation (one minted through the API by another token, such as pairing.tokens.create or pairing.tokens.migrate, or with narrowed scopes or for a named client; pairing.tokens.list shows it as origin automation) it is not made, but put to the owner as an approval only the owner's own credential answers, and the answer is 202 with code OWNER_APPROVAL_PENDING and the `approvalId`; the change is applied when the owner approves it, and lapses after a day unanswered or if the daemon restarts first. The owner in person (their sign-in, their own terminal program with a verified registration) makes it at once; any paired device, the owner's own included, is put to the owner.
 
 - Title: `Set Several Config Values`
 - Source: `builtin`
@@ -51324,6 +51254,25 @@ Start a contract for `ask` (the person's words verbatim) in a hosted session cre
                     "items": {
                       "type": "string"
                     }
+                  },
+                  "conflict": {
+                    "type": "object",
+                    "properties": {
+                      "branch": {
+                        "type": "string"
+                      },
+                      "files": {
+                        "type": "array",
+                        "items": {
+                          "type": "string"
+                        }
+                      }
+                    },
+                    "required": [
+                      "branch",
+                      "files"
+                    ],
+                    "additionalProperties": false
                   }
                 },
                 "required": [
@@ -53393,6 +53342,25 @@ Start a contract for `ask` (the person's words verbatim) in a hosted session cre
               "failureReason": {
                 "type": "string"
               },
+              "failureKind": {
+                "type": "string",
+                "enum": [
+                  "transport",
+                  "max_turns",
+                  "planning",
+                  "budget",
+                  "owner-rejected",
+                  "judgment-unavailable",
+                  "zombie",
+                  "other"
+                ]
+              },
+              "dropped": {
+                "type": "string"
+              },
+              "heardAt": {
+                "type": "number"
+              },
               "attemptOf": {
                 "type": "string"
               },
@@ -54703,6 +54671,25 @@ Start a contract for `ask` (the person's words verbatim) in a hosted session cre
                     },
                     "failureReason": {
                       "type": "string"
+                    },
+                    "failureKind": {
+                      "type": "string",
+                      "enum": [
+                        "transport",
+                        "max_turns",
+                        "planning",
+                        "budget",
+                        "owner-rejected",
+                        "judgment-unavailable",
+                        "zombie",
+                        "other"
+                      ]
+                    },
+                    "dropped": {
+                      "type": "string"
+                    },
+                    "heardAt": {
+                      "type": "number"
                     },
                     "attemptOf": {
                       "type": "string"
@@ -59586,6 +59573,25 @@ One contract with its whole tree, running or ended. The captured input's per-fil
                 "items": {
                   "type": "string"
                 }
+              },
+              "conflict": {
+                "type": "object",
+                "properties": {
+                  "branch": {
+                    "type": "string"
+                  },
+                  "files": {
+                    "type": "array",
+                    "items": {
+                      "type": "string"
+                    }
+                  }
+                },
+                "required": [
+                  "branch",
+                  "files"
+                ],
+                "additionalProperties": false
               }
             },
             "required": [
@@ -61655,6 +61661,25 @@ One contract with its whole tree, running or ended. The captured input's per-fil
           "failureReason": {
             "type": "string"
           },
+          "failureKind": {
+            "type": "string",
+            "enum": [
+              "transport",
+              "max_turns",
+              "planning",
+              "budget",
+              "owner-rejected",
+              "judgment-unavailable",
+              "zombie",
+              "other"
+            ]
+          },
+          "dropped": {
+            "type": "string"
+          },
+          "heardAt": {
+            "type": "number"
+          },
           "attemptOf": {
             "type": "string"
           },
@@ -62965,6 +62990,25 @@ One contract with its whole tree, running or ended. The captured input's per-fil
                 },
                 "failureReason": {
                   "type": "string"
+                },
+                "failureKind": {
+                  "type": "string",
+                  "enum": [
+                    "transport",
+                    "max_turns",
+                    "planning",
+                    "budget",
+                    "owner-rejected",
+                    "judgment-unavailable",
+                    "zombie",
+                    "other"
+                  ]
+                },
+                "dropped": {
+                  "type": "string"
+                },
+                "heardAt": {
+                  "type": "number"
                 },
                 "attemptOf": {
                   "type": "string"
@@ -67837,6 +67881,25 @@ Every contract this daemon holds, newest first, each with its whole tree: the as
                       "items": {
                         "type": "string"
                       }
+                    },
+                    "conflict": {
+                      "type": "object",
+                      "properties": {
+                        "branch": {
+                          "type": "string"
+                        },
+                        "files": {
+                          "type": "array",
+                          "items": {
+                            "type": "string"
+                          }
+                        }
+                      },
+                      "required": [
+                        "branch",
+                        "files"
+                      ],
+                      "additionalProperties": false
                     }
                   },
                   "required": [
@@ -69906,6 +69969,25 @@ Every contract this daemon holds, newest first, each with its whole tree: the as
                 "failureReason": {
                   "type": "string"
                 },
+                "failureKind": {
+                  "type": "string",
+                  "enum": [
+                    "transport",
+                    "max_turns",
+                    "planning",
+                    "budget",
+                    "owner-rejected",
+                    "judgment-unavailable",
+                    "zombie",
+                    "other"
+                  ]
+                },
+                "dropped": {
+                  "type": "string"
+                },
+                "heardAt": {
+                  "type": "number"
+                },
                 "attemptOf": {
                   "type": "string"
                 },
@@ -71216,6 +71298,25 @@ Every contract this daemon holds, newest first, each with its whole tree: the as
                       },
                       "failureReason": {
                         "type": "string"
+                      },
+                      "failureKind": {
+                        "type": "string",
+                        "enum": [
+                          "transport",
+                          "max_turns",
+                          "planning",
+                          "budget",
+                          "owner-rejected",
+                          "judgment-unavailable",
+                          "zombie",
+                          "other"
+                        ]
+                      },
+                      "dropped": {
+                        "type": "string"
+                      },
+                      "heardAt": {
+                        "type": "number"
                       },
                       "attemptOf": {
                         "type": "string"
@@ -76311,6 +76412,25 @@ Start a contract for `ask`, the person's words verbatim, which every stated acce
                     "items": {
                       "type": "string"
                     }
+                  },
+                  "conflict": {
+                    "type": "object",
+                    "properties": {
+                      "branch": {
+                        "type": "string"
+                      },
+                      "files": {
+                        "type": "array",
+                        "items": {
+                          "type": "string"
+                        }
+                      }
+                    },
+                    "required": [
+                      "branch",
+                      "files"
+                    ],
+                    "additionalProperties": false
                   }
                 },
                 "required": [
@@ -78380,6 +78500,25 @@ Start a contract for `ask`, the person's words verbatim, which every stated acce
               "failureReason": {
                 "type": "string"
               },
+              "failureKind": {
+                "type": "string",
+                "enum": [
+                  "transport",
+                  "max_turns",
+                  "planning",
+                  "budget",
+                  "owner-rejected",
+                  "judgment-unavailable",
+                  "zombie",
+                  "other"
+                ]
+              },
+              "dropped": {
+                "type": "string"
+              },
+              "heardAt": {
+                "type": "number"
+              },
               "attemptOf": {
                 "type": "string"
               },
@@ -79690,6 +79829,25 @@ Start a contract for `ask`, the person's words verbatim, which every stated acce
                     },
                     "failureReason": {
                       "type": "string"
+                    },
+                    "failureKind": {
+                      "type": "string",
+                      "enum": [
+                        "transport",
+                        "max_turns",
+                        "planning",
+                        "budget",
+                        "owner-rejected",
+                        "judgment-unavailable",
+                        "zombie",
+                        "other"
+                      ]
+                    },
+                    "dropped": {
+                      "type": "string"
+                    },
+                    "heardAt": {
+                      "type": "number"
                     },
                     "attemptOf": {
                       "type": "string"
@@ -82608,6 +82766,7 @@ Return the operator-facing control-plane contract manifest, including auth, tran
                     "enum": [
                       "none",
                       "loosens-a-protection",
+                      "runs-later",
                       "steers-a-model",
                       "cannot-be-undone",
                       "spends-money",
@@ -83593,6 +83752,7 @@ Return a single gateway method descriptor.
           "enum": [
             "none",
             "loosens-a-protection",
+            "runs-later",
             "steers-a-model",
             "cannot-be-undone",
             "spends-money",
@@ -83953,6 +84113,7 @@ Return the gateway method catalog.
             "enum": [
               "none",
               "loosens-a-protection",
+              "runs-later",
               "steers-a-model",
               "cannot-be-undone",
               "spends-money",
@@ -90175,7 +90336,7 @@ Gracefully interrupt one fleet node: an agent ends its current turn, a trigger o
 
 - Title: `Interrupt a Fleet Node`
 - Source: `builtin`
-- Access: `admin`
+- Access: `authenticated`
 - Transport: `ws`
 - HTTP: none
 - Scopes: `write:fleet`
@@ -90903,7 +91064,7 @@ Re-arm one paused trigger or schedule (for a trigger with an open breaker, this 
 
 - Title: `Resume a Fleet Node`
 - Source: `builtin`
-- Access: `admin`
+- Access: `authenticated`
 - Transport: `ws`
 - HTTP: none
 - Scopes: `write:fleet`
@@ -91519,7 +91680,7 @@ Hard-stop one fleet node through its owning manager (agent cancel, background pr
 
 - Title: `Stop a Fleet Node`
 - Source: `builtin`
-- Access: `admin`
+- Access: `authenticated`
 - Transport: `ws`
 - HTTP: none
 - Scopes: `write:fleet`
@@ -118504,10 +118665,10 @@ Persist a meaningful project decision record for future TUI and agent context.
 
 - Title: `Record Project Decision`
 - Source: `builtin`
-- Access: `admin`
+- Access: `authenticated`
 - Transport: `http`, `ws`
 - HTTP: `POST /api/projects/planning/decisions`
-- Scopes: `write:knowledge`
+- Scopes: `write:work-ledger`
 - Emits events: none
 - Dangerous: `no`
 - Invokable: `yes`
@@ -119863,10 +120024,10 @@ Remove completed project work-plan tasks. Defaults to clearing status done only.
 
 - Title: `Clear Completed Project Work Plan Tasks`
 - Source: `builtin`
-- Access: `admin`
+- Access: `authenticated`
 - Transport: `http`, `ws`
 - HTTP: `POST /api/projects/planning/work-plan/clear-completed`
-- Scopes: `write:knowledge`
+- Scopes: `write:work-ledger`
 - Emits events: none
 - Dangerous: `no`
 - Invokable: `yes`
@@ -120814,10 +120975,10 @@ Create a durable project-scoped work-plan task for TUI, WebUI, APK, daemon plann
 
 - Title: `Create Project Work Plan Task`
 - Source: `builtin`
-- Access: `admin`
+- Access: `authenticated`
 - Transport: `http`, `ws`
 - HTTP: `POST /api/projects/planning/work-plan/tasks`
-- Scopes: `write:knowledge`
+- Scopes: `write:work-ledger`
 - Emits events: none
 - Dangerous: `no`
 - Invokable: `yes`
@@ -121582,10 +121743,10 @@ Delete a durable project-scoped work-plan task.
 
 - Title: `Delete Project Work Plan Task`
 - Source: `builtin`
-- Access: `admin`
+- Access: `authenticated`
 - Transport: `http`, `ws`
 - HTTP: `DELETE /api/projects/planning/work-plan/tasks/{taskId}`
-- Scopes: `write:knowledge`
+- Scopes: `write:work-ledger`
 - Emits events: none
 - Dangerous: `no`
 - Invokable: `yes`
@@ -122487,10 +122648,10 @@ Set a task's status and optional reason.
 
 - Title: `Set Project Work Plan Task Status`
 - Source: `builtin`
-- Access: `admin`
+- Access: `authenticated`
 - Transport: `http`, `ws`
 - HTTP: `POST /api/projects/planning/work-plan/tasks/{taskId}/status`
-- Scopes: `write:knowledge`
+- Scopes: `write:work-ledger`
 - Emits events: none
 - Dangerous: `no`
 - Invokable: `yes`
@@ -123181,10 +123342,10 @@ Patch a durable project-scoped work-plan task. Returns the task before and after
 
 - Title: `Update Project Work Plan Task`
 - Source: `builtin`
-- Access: `admin`
+- Access: `authenticated`
 - Transport: `http`, `ws`
 - HTTP: `PATCH /api/projects/planning/work-plan/tasks/{taskId}`
-- Scopes: `write:knowledge`
+- Scopes: `write:work-ledger`
 - Emits events: none
 - Dangerous: `no`
 - Invokable: `yes`
@@ -124160,10 +124321,10 @@ Replace task ordering for the current project work plan. Returns the tasks whose
 
 - Title: `Reorder Project Work Plan Tasks`
 - Source: `builtin`
-- Access: `admin`
+- Access: `authenticated`
 - Transport: `http`, `ws`
 - HTTP: `POST /api/projects/planning/work-plan/tasks/reorder`
-- Scopes: `write:knowledge`
+- Scopes: `write:work-ledger`
 - Emits events: none
 - Dangerous: `no`
 - Invokable: `yes`
@@ -132011,7 +132172,7 @@ Add a memory record to the daemon-owned canonical store. The daemon is the singl
 
 - Title: `Add Memory Record`
 - Source: `builtin`
-- Access: `admin`
+- Access: `authenticated`
 - Transport: `http`, `ws`
 - HTTP: `POST /api/memory/records`
 - Scopes: `write:memory`
@@ -132258,7 +132419,7 @@ Permanently delete a memory record and its links from the canonical store. Delet
 
 - Title: `Delete Memory Record`
 - Source: `builtin`
-- Access: `admin`
+- Access: `authenticated`
 - Transport: `http`, `ws`
 - HTTP: `DELETE /api/memory/records/{id}`
 - Scopes: `write:memory`
@@ -133010,7 +133171,7 @@ Create a directed relation (e.g. "supersedes", "caused") from the path record to
 
 - Title: `Link Memory Records`
 - Source: `builtin`
-- Access: `admin`
+- Access: `authenticated`
 - Transport: `http`, `ws`
 - HTTP: `POST /api/memory/records/{id}/links`
 - Scopes: `write:memory`
@@ -133155,7 +133316,7 @@ Return every link where the record is the source or the target. Returns 404 when
 
 #### `memory.records.list`
 
-Bulk read from the canonical store: a literal (non-semantic) search returning the matching records as a plain array. A call that names a project (its call context, or project in the filter) reads that project's records and the ones that belong to no project; a call naming none reads only the records that belong to no project; everyProject (the owner himself only, his place's "Every project") reads every record. This is the read a client surface uses instead of opening the store file for its browse/list and knowledge-injection paths.
+Bulk read from the canonical store: a literal (non-semantic) search returning the matching records as a plain array. A call that names a project (its call context, or project in the filter) reads that project's records and the ones that belong to no project; a call naming none reads only the records that belong to no project; everyProject (the owner in person only, their place's "Every project") reads every record. This is the read a client surface uses instead of opening the store file for its browse/list and knowledge-injection paths.
 
 - Title: `List Memory Records`
 - Source: `builtin`
@@ -133933,7 +134094,7 @@ Edit a record's content fields (class, scope, summary, detail, tags) and its tem
 
 - Title: `Update Memory Record`
 - Source: `builtin`
-- Access: `admin`
+- Access: `authenticated`
 - Transport: `http`, `ws`
 - HTTP: `POST /api/memory/records/{id}/update`
 - Scopes: `write:memory`
@@ -134146,7 +134307,7 @@ Update a record's review signal (reviewState, confidence, reviewer, staleReason)
 
 - Title: `Update Memory Record Review`
 - Source: `builtin`
-- Access: `admin`
+- Access: `authenticated`
 - Transport: `http`, `ws`
 - HTTP: `POST /api/memory/records/{id}/review`
 - Scopes: `write:memory`
@@ -137902,7 +138063,7 @@ Apply the surface's per-offer decisions in ONE pass: an accepted notifications o
 
 #### `pairing.handoff.create`
 
-The owner's pairing flow. Mint a per-device token AND assemble the set-up OFFER SET this daemon can satisfy (notifications, carrying the VAPID public key; relay; passkey step-up), so a freshly-paired surface can complete them in one pass. Returns the offer set, the `#pair=<token>` deep-link fragment (the exact URL-fragment shape the web app consumes, token in `pair=`, offers in `offers=`), a full deep link when a web origin is configured, and that origin's honest TLS/capability POSTURE: the one plain-http-on-LAN notice line (stated here, never a nag) plus per-capability availability labels so surfaces render "needs https: set up a secure address in Settings, General, Secure address (...)" instead of dead buttons. The token secret is returned exactly once. When a paired device asks, the new token records that device (mintedBy) and is revoked with it; a device whose own pairing is gone is refused with 403 PAIRING_TOKEN_NOT_FOUND. Each offer is independently declinable at completion. A pairing minted narrower than full authority cannot complete a hand-off (pairing.handoff.complete needs what stepup.credentials.register needs), so it is offered nothing to complete and gets its token alone. The device it pairs is recorded as the owner's own (origin owner-pairing, madeBy owner) only when the owner himself asks (his signed-in session, or his own terminal program with a verified registration) with full authority; from anyone else (an admin, a script, the operator token alone, any device, the Agent's credential, a narrowed caller, a call run on his yes to another's request) it is recorded as automation. `fromSharedToken: true` is how a client signed in with the shared operator token (the owner's own browser) moves onto its own token: it pairs itself here, exempt from device.nodes.maxPaired as pairing.tokens.migrate is, and the token it gets is an owner device; only a caller on the shared token may send it (400 INVALID_ARGUMENT otherwise). No code is made that a phone could not open: when the daemon's web address is reachable only from its own machine (a loopback address, or controlPlane.enabled off without web.publicBaseUrl naming it), the call is refused with 409 PAIRING_CODE_UNREACHABLE, saying why and the command to run in a terminal on the daemon's machine (goodvibes-daemon webui enable --lan); pairing.posture.get gives the same decision with numbered steps before anything is minted. `serveToNetwork: true` is the owner's yes to "Phones on your network cannot reach GoodVibes yet. Serve it to your network?", which a pairing surface asks in place of that refusal: the daemon writes what goodvibes-daemon webui enable --lan writes, waits for its own listener to report it is bound again (TRANSPORT_CONNECTED; no sleep, no poll), and then mints for the address phones can open, in the same call; refused 409 PAIRING_CODE_UNREACHABLE only when it still cannot be reached. `fromSharedToken: true`, and `forThisMachine: true` (a code for a browser on the daemon's own machine), are not refused for that.
+The owner's pairing flow. Mint a per-device token AND assemble the set-up OFFER SET this daemon can satisfy (notifications, carrying the VAPID public key; relay; passkey step-up), so a freshly-paired surface can complete them in one pass. Returns the offer set, the `#pair=<token>` deep-link fragment (the exact URL-fragment shape the web app consumes, token in `pair=`, offers in `offers=`), a full deep link when a web origin is configured, and that origin's honest TLS/capability POSTURE: the one plain-http-on-LAN notice line (stated here, never a nag) plus per-capability availability labels so surfaces render "needs https: set up a secure address in Settings, General, Secure address (...)" instead of dead buttons. The token secret is returned exactly once. When a paired device asks, the new token records that device (mintedBy) and is revoked with it; a device whose own pairing is gone is refused with 403 PAIRING_TOKEN_NOT_FOUND. Each offer is independently declinable at completion. A pairing minted narrower than full authority cannot complete a hand-off (pairing.handoff.complete needs what stepup.credentials.register needs), so it is offered nothing to complete and gets its token alone. The device it pairs is recorded as the owner's own (origin owner-pairing, madeBy owner) only when the owner in person asks (their signed-in session, or their own terminal program with a verified registration) with full authority; from anyone else (an admin, a script, the operator token alone, any device, the Agent's credential, a narrowed caller, a call run on the owner's yes to another's request) it is recorded as automation. `fromSharedToken: true` is how a client signed in with the shared operator token (the owner's own browser) moves onto its own token: it pairs itself here, exempt from device.nodes.maxPaired as pairing.tokens.migrate is, and the token it gets is an owner device; only a caller on the shared token may send it (400 INVALID_ARGUMENT otherwise). No code is made that a phone could not open: when the daemon's web address is reachable only from its own machine (a loopback address, or controlPlane.enabled off without web.publicBaseUrl naming it), the call is refused with 409 PAIRING_CODE_UNREACHABLE, saying why and the command to run in a terminal on the daemon's machine (goodvibes-daemon webui enable --lan); pairing.posture.get gives the same decision with numbered steps before anything is minted. `serveToNetwork: true` is the owner's yes to "Phones on your network cannot reach GoodVibes yet. Serve it to your network?", which a pairing surface asks in place of that refusal: the daemon writes what goodvibes-daemon webui enable --lan writes, waits for its own listener to report it is bound again (TRANSPORT_CONNECTED; no sleep, no poll), and then mints for the address phones can open, in the same call; refused 409 PAIRING_CODE_UNREACHABLE only when it still cannot be reached. `fromSharedToken: true`, and `forThisMachine: true` (a code for a browser on the daemon's own machine), are not refused for that.
 
 - Title: `Create Pairing Hand-off`
 - Source: `builtin`
@@ -138114,7 +138275,7 @@ The owner's pairing flow. Mint a per-device token AND assemble the set-up OFFER 
 
 #### `pairing.outsideAgent.issue`
 
-The one credential this daemon gives `goodvibes-daemon mcp serve`, asked for with the operator token: a paired-device token named "Outside agent (goodvibes-daemon mcp serve)" (origin automation), with no person's claim, answered once with `token` and `id`. Making it is the owner's own act: from anyone but him it is put to him as ONE question, "Let the outside agent "goodvibes-daemon mcp serve" work in <project>?" when the call names the folder it was started in (`project`), else its credential for shared things only; his yes issues it and gives it that project. A second ask while it is kept is refused 409 OUTSIDE_AGENT_ISSUED (revoke it among the paired devices to have a new one issued). Every act of it the owner decides is put to him, and the first time it names a project it was not given he is asked whether it may work there.
+The one credential this daemon gives `goodvibes-daemon mcp serve`, asked for with the operator token: a paired-device token named "Outside agent (goodvibes-daemon mcp serve)" (origin automation), with no person's claim, answered once with `token` and `id`. Making it is the owner's own act: from anyone but the owner it is put to the owner as ONE question, "Let the outside agent "goodvibes-daemon mcp serve" work in <project>?" when the call names the folder it was started in (`project`), else its credential for shared things only; the owner's yes issues it and gives it that project. A second ask while it is kept is refused 409 OUTSIDE_AGENT_ISSUED (revoke it among the paired devices to have a new one issued). Every act of it the owner decides is put to the owner, and the first time it names a project it was not given the owneris asked whether it may work there.
 
 - Title: `Issue the Outside Agent Credential`
 - Source: `builtin`
@@ -138446,7 +138607,7 @@ What goodvibes-daemon webui enable --lan does, from any surface, after the owner
 
 #### `pairing.tokens.create`
 
-Mint a new named per-device operator token and return its plaintext secret EXACTLY ONCE (for a QR / pairing hand-off). Only a hash is persisted; the secret is never listed or returned again. The name is user-visible and editable. When a paired device asks, the new token records that device (mintedBy) and is revoked with it; a device whose own pairing is gone is refused with 403 PAIRING_TOKEN_NOT_FOUND. client "agent" mints the GoodVibes Agent's credential for the calls it makes on the owner's behalf: the daemon reports it as credential "agent" and judges every call made with it; it is listed with client "agent" and does not count toward device.nodes.maxPaired. Send an attemptId and send the same one again when a reply is lost: while the token that attempt produced is unused, the repeat returns that token (same id) under a new secret. scopes limits the device to that list of operator scopes (for example read:sessions and write:sessions for a phone that only chats: it reads the chats it made under them); left out, the device holds full operator authority. A caller grants only scopes it holds: a narrowed caller's token inherits its list when scopes is left out, and naming a scope the caller does not hold is 403 MISSING_SCOPE. A token minted here is automation (origin automation): it does not make the owner's own acts, such as loosening a security, permission, judgment or payment setting. A device the owner pairs himself is paired with pairing.handoff.create.
+Mint a new named per-device operator token and return its plaintext secret EXACTLY ONCE (for a QR / pairing hand-off). Only a hash is persisted; the secret is never listed or returned again. The name is user-visible and editable. When a paired device asks, the new token records that device (mintedBy) and is revoked with it; a device whose own pairing is gone is refused with 403 PAIRING_TOKEN_NOT_FOUND. client "agent" mints the GoodVibes Agent's credential for the calls it makes on the owner's behalf: the daemon reports it as credential "agent" and judges every call made with it; it is listed with client "agent" and does not count toward device.nodes.maxPaired. Send an attemptId and send the same one again when a reply is lost: while the token that attempt produced is unused, the repeat returns that token (same id) under a new secret. scopes limits the device to that list of operator scopes (for example read:sessions and write:sessions for a phone that only chats: it reads the chats it made under them); left out, the device holds full operator authority. A caller grants only scopes it holds: a narrowed caller's token inherits its list when scopes is left out, and naming a scope the caller does not hold is 403 MISSING_SCOPE. A token minted here is automation (origin automation): it does not make the owner's own acts, such as loosening a security, permission, judgment or payment setting. A device the owner pairs in person is paired with pairing.handoff.create.
 
 - Title: `Mint Paired Device Token`
 - Source: `builtin`
@@ -138530,7 +138691,7 @@ Mint a new named per-device operator token and return its plaintext secret EXACT
 
 #### `pairing.tokens.delete`
 
-Revoke (permanently delete) one paired device token. Revocation is immediate: the token fails the very next request with a 401, and every token this device minted is revoked with it (listed in alsoRevoked); every other paired device keeps working. An unknown id is a 404 PAIRING_TOKEN_NOT_FOUND, never a 200-noop. A token the caller minted, or the caller's own token, is revoked at once; any other token (a device the owner paired, another principal's) is the owner's own act: from an admin who is not the owner it is put to the owner (202 OWNER_APPROVAL_PENDING) and revoked when he approves it, and any other credential is refused 403 OWNER_ONLY.
+Revoke (permanently delete) one paired device token. Revocation is immediate: the token fails the very next request with a 401, and every token this device minted is revoked with it (listed in alsoRevoked); every other paired device keeps working. An unknown id is a 404 PAIRING_TOKEN_NOT_FOUND, never a 200-noop. A token the caller minted, or the caller's own token, is revoked at once; any other token (a device the owner paired, another principal's) is the owner's own act: from an admin who is not the owner it is put to the owner (202 OWNER_APPROVAL_PENDING) and revoked when the owner approves it, and any other credential is refused 403 OWNER_ONLY.
 
 - Title: `Revoke Paired Device Token`
 - Source: `builtin`
@@ -138651,7 +138812,7 @@ Revoke (permanently delete) one paired device token. Revocation is immediate: th
 
 #### `pairing.tokens.list`
 
-List the per-pairing operator tokens (paired devices/browsers) as redacted views: id, user-visible name, created timestamp, last-seen timestamp, mintedBy (the paired device that minted it, when one did), scopes (the operator scopes it holds, when it was paired with a narrower list; absent means full operator authority) and origin: `owner-pairing` for a device the owner paired himself (pairing.handoff.create or the pairing screen asked by the owner himself, his sign-in or his verified program, with full authority, completed with the code his own screen showed; pairing.tokens.migrate by the owner himself), which answers an approval another caller raised and does his native work, and is never the owner himself (its own risky acts are put to him), or `automation` for every other token (pairing.tokens.create, a migration or mint made on his yes to someone else's request, a narrowed list, the Agent's credential, and every token minted before origin was recorded), which answers nothing. Origin is recorded at the mint and never changes; to make a device an owner device, pair it again from the pairing screen and revoke the old token. The token secret is never stored in listable form and is never returned.
+List the per-pairing operator tokens (paired devices/browsers, and each one made that no device has used yet and that has not expired, marked waitingForFirstUse so it can be revoked before its first use) as redacted views: id, user-visible name, created timestamp, last-seen timestamp, mintedBy (the paired device that minted it, when one did), scopes (the operator scopes it holds, when it was paired with a narrower list; absent means full operator authority) and origin: `owner-pairing` for a device the owner paired in person (pairing.handoff.create or the pairing screen asked by the owner in person, their sign-in or their verified program, with full authority, completed with the code their own screen showed; pairing.tokens.migrate by the owner in person), which answers an approval another caller raised and does the owner's native work, and is never the owner in person (its own risky acts are put to the owner), or `automation` for every other token (pairing.tokens.create, a migration or mint made on the owner's yes to someone else's request, a narrowed list, the Agent's credential, and every token minted before origin was recorded), which answers nothing. Origin is recorded at the mint and never changes; to make a device an owner device, pair it again from the pairing screen and revoke the old token. The token secret is never stored in listable form and is never returned.
 
 - Title: `List Paired Device Tokens`
 - Source: `builtin`
@@ -138711,6 +138872,9 @@ none
               "owner-pairing",
               "automation"
             ]
+          },
+          "waitingForFirstUse": {
+            "type": "boolean"
           }
         },
         "required": [
@@ -138864,7 +139028,7 @@ Change the user-visible name of a paired device token. An unknown id is a 404 PA
 
 #### `pairing.tokens.revokeShared`
 
-Revoke the shared operator token by replacing it: every copy handed to another device stops working immediately, and the daemon writes the new value to its operator-tokens.json, where the apps on its own machine read it, so they stay signed in. Other devices use per-device pairing tokens (or user sessions). The owner's own act (access.withdraw): any credential but the owner's own (the operator token, a device he paired himself, his sign-in) is refused 403 OWNER_ONLY, an admin's with the reason that it is the owner's to decide. Refused with SHARED_TOKEN_NOT_REPLACEABLE (409) when the daemon serves a token set by GOODVIBES_DAEMON_TOKEN. Not safe to repeat: each call replaces the shared token again.
+Revoke the shared operator token by replacing it: every copy handed to another device stops working immediately, and the daemon writes the new value to its operator-tokens.json, where the apps on its own machine read it, so they stay signed in. Other devices use per-device pairing tokens (or user sessions). The owner's own act (access.withdraw): any credential but the owner's own (the operator token, a device the owner paired in person, the owner's sign-in) is refused 403 OWNER_ONLY, an admin's with the reason that it is the owner's to decide. Refused with SHARED_TOKEN_NOT_REPLACEABLE (409) when the daemon serves a token set by GOODVIBES_DAEMON_TOKEN. Not safe to repeat: each call replaces the shared token again.
 
 - Title: `Revoke The Legacy Shared Token`
 - Source: `builtin`
@@ -141149,7 +141313,7 @@ The purchase audit ledger: what was bought, from which merchant registrable doma
 
 #### `payments.standing.create`
 
-The owner authorises, in advance, a purchase a schedule or trigger may start without asking him: the item in his words, the shops, the most one purchase may come to, the most all of them may come to every periodDays days, and an optional last day. Amounts are read in the budget currency. Every other limit still applies to each purchase: the budgets, the per-purchase ceiling and the veto or approval window. Its confirmation is owner-request: confirm: true from a credential that states a person asked, else CONFIRMATION_REQUIRED; the Money place (payments.repeat) sends both. The owner's own act: an agent cannot add one.
+The owner authorises, in advance, a purchase a schedule or trigger may start without asking them: the item in the owner's words, the shops, the most one purchase may come to, the most all of them may come to every periodDays days, and an optional last day. Amounts are read in the budget currency. Every other limit still applies to each purchase: the budgets, the per-purchase ceiling and the veto or approval window. Its confirmation is owner-request: confirm: true from a credential that states a person asked, else CONFIRMATION_REQUIRED; the Money place (payments.repeat) sends both. The owner's own act: an agent cannot add one.
 
 - Title: `Authorise a Purchase in Advance`
 - Source: `builtin`
@@ -141358,7 +141522,7 @@ Remove one standing purchase authorisation by its id. No new purchase can start 
 
 #### `payments.standing.list`
 
-The purchases the owner authorised in advance for runs nobody starts in the moment (a schedule or a trigger): for each, its id, the item in his words, the shops it may be bought from, the most one purchase may come to, the most all of them may come to over its period, what is spent or held in the current period and what is left, and when it expires. A scheduled purchase names one of these ids as standingId on payments.checkout.begin.
+The purchases the owner authorised in advance for runs nobody starts in the moment (a schedule or a trigger): for each, its id, the item in the owner's words, the shops it may be bought from, the most one purchase may come to, the most all of them may come to over its period, what is spent or held in the current period and what is left, and when it expires. A scheduled purchase names one of these ids as standingId on payments.checkout.begin.
 
 - Title: `Standing Purchase Authorisations`
 - Source: `builtin`
@@ -142656,7 +142820,7 @@ Add one prose bullet to a section, carrying its provenance suffix. Same three-la
 
 #### `profile.forget`
 
-Delete a mechanical field and every retained history comment for it, or one prose line addressed by its section plus its exact text. Never by line position: the owner edits this file himself, so an index taken from an earlier read may name a different line by the time the delete arrives. Text that no longer matches removes nothing and says so, rather than deleting the nearest thing. No tombstone, no deleted flag, no retention window, delete means delete. Forgetting something that was not there reports that honestly instead of returning success. Authority-gated exactly like a write: an injection that cannot add a fact must not be able to remove one.
+Delete a mechanical field and every retained history comment for it, or one prose line addressed by its section plus its exact text. Never by line position: the owner edits this file by hand, so an index taken from an earlier read may name a different line by the time the delete arrives. Text that no longer matches removes nothing and says so, rather than deleting the nearest thing. No tombstone, no deleted flag, no retention window, delete means delete. Forgetting something that was not there reports that honestly instead of returning success. Authority-gated exactly like a write: an injection that cannot add a fact must not be able to remove one.
 
 - Title: `Forget Profile Line`
 - Source: `builtin`
@@ -150623,14 +150787,14 @@ Return distributed node/device runtime state.
 
 #### `remote.work.cancel`
 
-Cancel a remote work item.
+Cancel a remote work item. A caller below an admin cancels only work queued for a session or schedule of its own.
 
 - Title: `Cancel Remote Work`
 - Source: `builtin`
-- Access: `admin`
+- Access: `authenticated`
 - Transport: `http`, `ws`
 - HTTP: `POST /api/remote/work/{workId}/cancel`
-- Scopes: `write:remote`
+- Scopes: `write:sessions`
 - Emits events: none
 - Dangerous: `no`
 - Invokable: `yes`
@@ -159551,7 +159715,7 @@ A terminal program that runs its own session (the terminal app, the Agent) tells
 
 - Title: `Announce a Session Checkpoint Change`
 - Source: `builtin`
-- Access: `admin`
+- Access: `authenticated`
 - Transport: `http`, `ws`
 - HTTP: none
 - Scopes: `write:sessions`
@@ -159611,7 +159775,7 @@ Mark a shared session as closed.
 
 - Title: `Close Shared Session`
 - Source: `builtin`
-- Access: `admin`
+- Access: `authenticated`
 - Transport: `http`, `ws`
 - HTTP: `POST /api/sessions/{sessionId}/close`
 - Scopes: `write:sessions`
@@ -159997,11 +160161,11 @@ Return the live context-window usage for a session: estimatedContextTokens (the 
 
 #### `sessions.create`
 
-Create a shared session for a surface, route, or web client.
+Create a shared session for a surface, route, or web client. `workingDirectory` names the project it belongs to (checked as every call's project is); the session is its caller's, kept as who made it. A caller below an admin makes one only in a project the owner gave it, or one of no project that only it and the owner reach.
 
 - Title: `Create Shared Session`
 - Source: `builtin`
-- Access: `admin`
+- Access: `authenticated`
 - Transport: `http`, `ws`
 - HTTP: `POST /api/sessions`
 - Scopes: `write:sessions`
@@ -160022,6 +160186,9 @@ Create a shared session for a surface, route, or web client.
       "type": "string"
     },
     "surfaceId": {
+      "type": "string"
+    },
+    "workingDirectory": {
       "type": "string"
     }
   },
@@ -160213,7 +160380,7 @@ Permanently remove a shared session record and its queued inputs/messages from t
 
 - Title: `Delete Shared Session`
 - Source: `builtin`
-- Access: `admin`
+- Access: `authenticated`
 - Transport: `http`, `ws`
 - HTTP: `DELETE /api/sessions/{sessionId}`
 - Scopes: `write:sessions`
@@ -160265,7 +160432,7 @@ Remove a surface's participant and its route binding from a session so that surf
 
 - Title: `Detach Shared Session Participant`
 - Source: `builtin`
-- Access: `admin`
+- Access: `authenticated`
 - Transport: `http`, `ws`
 - HTTP: `POST /api/sessions/{sessionId}/detach`
 - Scopes: `write:sessions`
@@ -160478,7 +160645,7 @@ Queue a deferred follow-up for a shared session so it runs after the current age
 
 - Title: `Queue Shared Session Follow-Up`
 - Source: `builtin`
-- Access: `admin`
+- Access: `authenticated`
 - Transport: `http`, `ws`
 - HTTP: `POST /api/sessions/{sessionId}/follow-up`
 - Scopes: `write:sessions`
@@ -162988,7 +163155,7 @@ Cancel a queued shared-session input before it is delivered or spawned. An input
 
 - Title: `Cancel Shared Session Input`
 - Source: `builtin`
-- Access: `admin`
+- Access: `authenticated`
 - Transport: `http`, `ws`
 - HTTP: `POST /api/sessions/{sessionId}/inputs/{inputId}/cancel`
 - Scopes: `write:sessions`
@@ -163252,7 +163419,7 @@ A live registered surface reports that it collected a queued input (moves it to 
 
 - Title: `Mark Shared Session Input Delivered`
 - Source: `builtin`
-- Access: `admin`
+- Access: `authenticated`
 - Transport: `http`, `ws`
 - HTTP: `POST /api/sessions/{sessionId}/inputs/{inputId}/deliver`
 - Scopes: `write:sessions`
@@ -164312,7 +164479,7 @@ Append a user message to a shared session. Omitted `kind` defaults to `message` 
 
 - Title: `Post Shared Session Message`
 - Source: `builtin`
-- Access: `admin`
+- Access: `authenticated`
 - Transport: `http`, `ws`
 - HTTP: `POST /api/sessions/{sessionId}/messages`
 - Scopes: `write:sessions`
@@ -165415,7 +165582,7 @@ Return the session execution mode in force (`mode`): ask-me, jev-decides, just-v
 
 #### `sessions.permissionMode.set`
 
-Set ask-me, jev-decides, just-vibes, or yolo execution, or enter the read-only plan posture. Admin only, because it can loosen security: yolo runs every action without safety denials, and for the local runtime session (no hosted or channel mode of its own) it rewrites the daemon-wide permissions.mode. A hosted session and a channel session with its own mode change only that session; a web chat (companion-chat) has no mode of its own, so setting it rewrites the daemon-wide permissions.mode. Emits runtime.gate (PRESET_CHANGED) so every surface stays in sync. Other session ids answer 404 SESSION_NOT_LOCAL. A looser mode asked with a token minted for automation is not set (a device the owner paired himself sets it at once): it is put to the owner as an approval only his own credential answers, the answer is 202 with code OWNER_APPROVAL_PENDING, the unchanged `mode` and the `approvalId`, and the mode changes when he approves it.
+Set ask-me, jev-decides, just-vibes, or yolo execution, or enter the read-only plan posture. Admin only, because it can loosen security: yolo runs every action without safety denials, and for the local runtime session (no hosted or channel mode of its own) it rewrites the daemon-wide permissions.mode. A hosted session and a channel session with its own mode change only that session; a web chat (companion-chat) has no mode of its own, so setting it rewrites the daemon-wide permissions.mode. Emits runtime.gate (PRESET_CHANGED) so every surface stays in sync. Other session ids answer 404 SESSION_NOT_LOCAL. A looser mode asked with a token minted for automation is not set (a device the owner paired in person sets it at once): it is put to the owner as an approval only the owner's own credential answers, the answer is 202 with code OWNER_APPROVAL_PENDING, the unchanged `mode` and the `approvalId`, and the mode changes when the owner approves it.
 
 - Title: `Set Session Permission Mode`
 - Source: `builtin`
@@ -165758,7 +165925,7 @@ Idempotently register (or heartbeat) a session keyed on a caller-supplied id, ca
 
 - Title: `Register Shared Session`
 - Source: `builtin`
-- Access: `admin`
+- Access: `authenticated`
 - Transport: `http`, `ws`
 - HTTP: `POST /api/sessions/register`
 - Scopes: `write:sessions`
@@ -166042,7 +166209,7 @@ Reopen a previously closed shared session.
 
 - Title: `Reopen Shared Session`
 - Source: `builtin`
-- Access: `admin`
+- Access: `authenticated`
 - Transport: `http`, `ws`
 - HTTP: `POST /api/sessions/{sessionId}/reopen`
 - Scopes: `write:sessions`
@@ -166492,7 +166659,7 @@ Deliver a live steering message to the active agent for a shared session, option
 
 - Title: `Steer Shared Session`
 - Source: `builtin`
-- Access: `admin`
+- Access: `authenticated`
 - Transport: `http`, `ws`
 - HTTP: `POST /api/sessions/{sessionId}/steer`
 - Scopes: `write:sessions`
@@ -168341,7 +168508,7 @@ Cancel an in-flight runtime task.
 
 - Title: `Cancel Runtime Task`
 - Source: `builtin`
-- Access: `admin`
+- Access: `authenticated`
 - Transport: `http`, `ws`
 - HTTP: `POST /api/tasks/{taskId}/cancel`
 - Scopes: `write:tasks`
@@ -168501,7 +168668,7 @@ Start an agent on `task`. Without `sessionId`, `routeId` or `surfaceKind` the ag
 
 - Title: `Create Task`
 - Source: `builtin`
-- Access: `admin`
+- Access: `authenticated`
 - Transport: `http`, `ws`
 - HTTP: `POST /task`
 - Scopes: `write:tasks`
@@ -169107,7 +169274,7 @@ Retry a failed or cancelled agent task: a new agent runs the same task on the mo
 
 - Title: `Retry Runtime Task`
 - Source: `builtin`
-- Access: `admin`
+- Access: `authenticated`
 - Transport: `http`, `ws`
 - HTTP: `POST /api/tasks/{taskId}/retry`
 - Scopes: `write:tasks`
@@ -174144,7 +174311,7 @@ Cancel a trigger; a command an on-exit trigger supervises is stopped.
 
 - Title: `Cancel a trigger`
 - Source: `builtin`
-- Access: `admin`
+- Access: `authenticated`
 - Transport: `ws`
 - HTTP: none
 - Scopes: `write:watchers`
@@ -174242,7 +174409,7 @@ Create a trigger from a definition { id, label, description?, spec, action?, own
 
 - Title: `Create a trigger`
 - Source: `builtin`
-- Access: `admin`
+- Access: `authenticated`
 - Transport: `ws`
 - HTTP: none
 - Scopes: `write:watchers`
@@ -174551,7 +174718,7 @@ The newest runs of one trigger (default 20, at most 200): when, outcome, detail 
 
 - Title: `Read a trigger's runs`
 - Source: `builtin`
-- Access: `admin`
+- Access: `authenticated`
 - Transport: `ws`
 - HTTP: none
 - Scopes: `read:watchers`
@@ -174676,11 +174843,11 @@ The newest runs of one trigger (default 20, at most 200): when, outcome, detail 
 
 #### `watchers.triggers.list`
 
-List the supervised triggers: id, label, kind, what each watches, state, how often it fired and its last error.
+List the supervised triggers: id, label, kind, what each watches, state, how often it fired and its last error. A caller below an admin is answered the triggers of the projects the owner gave it.
 
 - Title: `List triggers`
 - Source: `builtin`
-- Access: `admin`
+- Access: `authenticated`
 - Transport: `ws`
 - HTTP: none
 - Scopes: `read:watchers`
@@ -174783,7 +174950,7 @@ Read the blanks of "Watch for something" (the inputs of the triggers.watch capab
 
 - Title: `Preview a trigger`
 - Source: `builtin`
-- Access: `admin`
+- Access: `authenticated`
 - Transport: `ws`
 - HTTP: none
 - Scopes: `read:watchers`
@@ -174898,7 +175065,7 @@ Close the breaker of a trigger that stopped after repeated failures, once the ca
 
 - Title: `Reset a trigger's breaker`
 - Source: `builtin`
-- Access: `admin`
+- Access: `authenticated`
 - Transport: `ws`
 - HTTP: none
 - Scopes: `write:watchers`
@@ -175714,13 +175881,113 @@ Execute a provider-backed web search and return normalized ranked results.
 
 ### work-ledger
 
+#### `work.branch.discard`
+
+Throw away the branch an ended piece of work kept, with the work's own folder and whatever they hold. It cannot be undone.
+
+- Title: `Discard A Work's Kept Branch`
+- Source: `builtin`
+- Access: `authenticated`
+- Transport: `http`, `ws`
+- HTTP: `POST /api/work/branch/discard`
+- Scopes: `read:work-ledger`, `write:work-ledger`
+- Emits events: none
+- Dangerous: `no`
+- Invokable: `yes`
+
+##### Input schema
+
+```json
+{
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "work"
+  ],
+  "properties": {
+    "work": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 200
+    }
+  }
+}
+```
+
+##### Output schema
+
+```json
+{
+  "type": "object",
+  "additionalProperties": true,
+  "properties": {
+    "title": {
+      "type": "string"
+    },
+    "branch": {
+      "type": "string"
+    }
+  }
+}
+```
+
+#### `work.branch.merge`
+
+Merge the branch an ended piece of work kept (its commits are not in the project's branch) into the project's current branch, then remove that branch and the work's own folder. A merge that conflicts is undone and nothing changes.
+
+- Title: `Merge A Work's Kept Branch In`
+- Source: `builtin`
+- Access: `authenticated`
+- Transport: `http`, `ws`
+- HTTP: `POST /api/work/branch/merge`
+- Scopes: `read:work-ledger`, `write:work-ledger`
+- Emits events: none
+- Dangerous: `no`
+- Invokable: `yes`
+
+##### Input schema
+
+```json
+{
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "work"
+  ],
+  "properties": {
+    "work": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 200
+    }
+  }
+}
+```
+
+##### Output schema
+
+```json
+{
+  "type": "object",
+  "additionalProperties": true,
+  "properties": {
+    "title": {
+      "type": "string"
+    },
+    "branch": {
+      "type": "string"
+    }
+  }
+}
+```
+
 #### `work.list`
 
 Every piece of work of this daemon's project, read in one call: what it is, what done means, where it stands (not started, its plan waiting, starting, its start cut off, running, needs you, a step failed, done, failed, stopped), its plan as steps with their state, the questions it waits on, the step it stopped at when one failed (what failed, and whether the work can go on without it), its spending limit and its results; and each piece of work proposed with its plan (`proposed: true`, not yet asked for). What the Work place, the web Work view and an agent read. No mutation and no execution.
 
 - Title: `List Your Work`
 - Source: `builtin`
-- Access: `admin`
+- Access: `authenticated`
 - Transport: `http`, `ws`
 - HTTP: `GET /api/work`
 - Scopes: `read:work-ledger`
@@ -175846,7 +176113,7 @@ Throw away the waiting plan of a piece of work; the work stays, not started, and
 
 - Title: `Throw A Plan Away`
 - Source: `builtin`
-- Access: `admin`
+- Access: `authenticated`
 - Transport: `http`, `ws`
 - HTTP: `POST /api/work/plan/discard`
 - Scopes: `read:work-ledger`, `write:work-ledger`
@@ -175893,7 +176160,7 @@ Write the waiting plan of a piece of work again from its goal and what done mean
 
 - Title: `Write A Plan Again`
 - Source: `builtin`
-- Access: `admin`
+- Access: `authenticated`
 - Transport: `http`, `ws`
 - HTTP: `POST /api/work/plan/redo`
 - Scopes: `read:work-ledger`, `write:work-ledger`
@@ -175940,7 +176207,7 @@ Take one step out of a waiting plan (and out of what the other steps wait on); t
 
 - Title: `Take A Step Out Of A Plan`
 - Source: `builtin`
-- Access: `admin`
+- Access: `authenticated`
 - Transport: `http`, `ws`
 - HTTP: `POST /api/work/plan/step/drop`
 - Scopes: `read:work-ledger`, `write:work-ledger`
@@ -175992,7 +176259,7 @@ Change what one step of a waiting plan does. The plan waits for approval again.
 
 - Title: `Change A Step Of A Plan`
 - Source: `builtin`
-- Access: `admin`
+- Access: `authenticated`
 - Transport: `http`, `ws`
 - HTTP: `POST /api/work/plan/step/edit`
 - Scopes: `read:work-ledger`, `write:work-ledger`
@@ -176049,7 +176316,7 @@ Move one step of a waiting plan to another place, counting from 1. The plan wait
 
 - Title: `Move A Step Of A Plan`
 - Source: `builtin`
-- Access: `admin`
+- Access: `authenticated`
 - Transport: `http`, `ws`
 - HTTP: `POST /api/work/plan/step/move`
 - Scopes: `read:work-ledger`, `write:work-ledger`
@@ -176102,11 +176369,11 @@ Move one step of a waiting plan to another place, counting from 1. The plan wait
 
 #### `work.target`
 
-Read what an act on one piece of work sends, from the work alone: `operation` "execution" answers the identity start, status, stop and resume take (its current attempt and revisions); "contract" answers the run that answering, running a step again and the spending limit act on. Every other field is passed through. Answers { summary, input }; nothing is kept.
+Read what an act on one piece of work sends, from the work alone: `operation` "execution" answers the identity start, status, stop and resume take (its current attempt and revisions); "contract" answers the run that answering, running a step again and the spending limit act on; "own" answers only whether this caller may act on the work at all (a paired device, the outside agent or a member acts only on work it asked for itself: WORK_NOT_YOURS otherwise). Every other field is passed through. Answers { summary, input }; nothing is kept.
 
 - Title: `Name A Piece Of Work For An Act`
 - Source: `builtin`
-- Access: `admin`
+- Access: `authenticated`
 - Transport: `http`, `ws`
 - HTTP: `POST /api/work/target`
 - Scopes: `read:work-ledger`
@@ -176134,7 +176401,8 @@ Read what an act on one piece of work sends, from the work alone: `operation` "e
       "type": "string",
       "enum": [
         "execution",
-        "contract"
+        "contract",
+        "own"
       ]
     },
     "zone": {
@@ -176175,7 +176443,7 @@ Persist cancellation for the selected existing attempt, including a pending init
 
 - Title: `Cancel Native Work Execution`
 - Source: `builtin`
-- Access: `admin`
+- Access: `authenticated`
 - Transport: `http`, `ws`
 - HTTP: `POST /api/work-ledger/execution/cancel`
 - Scopes: `read:work-ledger`, `write:fleet`
@@ -177122,7 +177390,7 @@ Explicitly resume an interrupted/refused intent with a fresh evaluation or recov
 
 - Title: `Resume Native Work Execution`
 - Source: `builtin`
-- Access: `admin`
+- Access: `authenticated`
 - Transport: `http`, `ws`
 - HTTP: `POST /api/work-ledger/execution/resume`
 - Scopes: `read:work-ledger`, `write:fleet`
@@ -178069,7 +178337,7 @@ Start one existing complete native work attempt using host-owned source and pair
 
 - Title: `Start Native Work Execution`
 - Source: `builtin`
-- Access: `admin`
+- Access: `authenticated`
 - Transport: `http`, `ws`
 - HTTP: `POST /api/work-ledger/execution/start`
 - Scopes: `read:work-ledger`, `write:fleet`
@@ -179016,7 +179284,7 @@ Inspect a bounded execution or admission-intent projection for an existing nativ
 
 - Title: `Read Native Work Execution`
 - Source: `builtin`
-- Access: `admin`
+- Access: `authenticated`
 - Transport: `http`, `ws`
 - HTTP: `POST /api/work-ledger/execution/status`
 - Scopes: `read:work-ledger`, `write:fleet`
@@ -179963,7 +180231,7 @@ Read at most 100 events after an exclusive cursor, pinned to a history high-wate
 
 - Title: `Read Native Work Ledger History`
 - Source: `builtin`
-- Access: `admin`
+- Access: `authenticated`
 - Transport: `http`, `ws`
 - HTTP: `GET /api/work-ledger/history`
 - Scopes: `read:work-ledger`
@@ -181620,7 +181888,7 @@ Start the single initial semantic admission of captured conversation text. Repla
 
 - Title: `Admit Native Conversation Intake`
 - Source: `builtin`
-- Access: `admin`
+- Access: `authenticated`
 - Transport: `http`, `ws`
 - HTTP: `POST /api/work-ledger/intake/admit`
 - Scopes: `read:work-ledger`, `write:work-ledger`
@@ -182965,7 +183233,8 @@ Start the single initial semantic admission of captured conversation text. Repla
           "type": "string",
           "enum": [
             "semantic",
-            "exhausted"
+            "exhausted",
+            "decision-model"
           ]
         }
       },
@@ -183825,7 +184094,7 @@ Persist a terminal intake cancellation before work admission. If admission alrea
 
 - Title: `Cancel Native Conversation Intake`
 - Source: `builtin`
-- Access: `admin`
+- Access: `authenticated`
 - Transport: `http`, `ws`
 - HTTP: `POST /api/work-ledger/intake/cancel`
 - Scopes: `read:work-ledger`, `write:work-ledger`
@@ -185170,7 +185439,8 @@ Persist a terminal intake cancellation before work admission. If admission alrea
           "type": "string",
           "enum": [
             "semantic",
-            "exhausted"
+            "exhausted",
+            "decision-model"
           ]
         }
       },
@@ -186030,7 +186300,7 @@ Persist exact original conversation text and unsupported-source disclosures on t
 
 - Title: `Capture Native Conversation Intake`
 - Source: `builtin`
-- Access: `admin`
+- Access: `authenticated`
 - Transport: `http`, `ws`
 - HTTP: `POST /api/work-ledger/intake/capture`
 - Scopes: `read:work-ledger`, `write:work-ledger`
@@ -187523,7 +187793,8 @@ Persist exact original conversation text and unsupported-source disclosures on t
           "type": "string",
           "enum": [
             "semantic",
-            "exhausted"
+            "exhausted",
+            "decision-model"
           ]
         }
       },
@@ -188383,7 +188654,7 @@ Read the current conversation intake or immutable admitted-work receipt by origi
 
 - Title: `Get Native Conversation Intake`
 - Source: `builtin`
-- Access: `admin`
+- Access: `authenticated`
 - Transport: `http`, `ws`
 - HTTP: `POST /api/work-ledger/intake/get`
 - Scopes: `read:work-ledger`, `write:work-ledger`
@@ -189724,7 +189995,8 @@ Read the current conversation intake or immutable admitted-work receipt by origi
               "type": "string",
               "enum": [
                 "semantic",
-                "exhausted"
+                "exhausted",
+                "decision-model"
               ]
             }
           },
@@ -190601,7 +190873,7 @@ Explicitly recover captured conversation admission with a fresh semantic operati
 
 - Title: `Resume Native Conversation Intake`
 - Source: `builtin`
-- Access: `admin`
+- Access: `authenticated`
 - Transport: `http`, `ws`
 - HTTP: `POST /api/work-ledger/intake/resume`
 - Scopes: `read:work-ledger`, `write:work-ledger`
@@ -191946,7 +192218,8 @@ Explicitly recover captured conversation admission with a fresh semantic operati
           "type": "string",
           "enum": [
             "semantic",
-            "exhausted"
+            "exhausted",
+            "decision-model"
           ]
         }
       },
@@ -192806,7 +193079,7 @@ Read only the selected host project identity. Does not confer execution eligibil
 
 - Title: `Read Native Work Project`
 - Source: `builtin`
-- Access: `admin`
+- Access: `authenticated`
 - Transport: `http`, `ws`
 - HTTP: `GET /api/work-ledger/project`
 - Scopes: `read:work-ledger`
@@ -192847,11 +193120,11 @@ Read only the selected host project identity. Does not confer execution eligibil
 
 #### `workLedger.snapshot`
 
-Read the selected host project ledger, without mutation authority or allowedActions. Requires an owner operator and the dedicated read scope.
+Read the selected host project ledger, without mutation authority or allowedActions. Requires the dedicated read scope; a caller below an admin reads only a project given to it.
 
 - Title: `Read Native Work Ledger`
 - Source: `builtin`
-- Access: `admin`
+- Access: `authenticated`
 - Transport: `http`, `ws`
 - HTTP: `GET /api/work-ledger/snapshot`
 - Scopes: `read:work-ledger`
@@ -193827,7 +194100,7 @@ Look up an immutable native submission receipt by the original request ID on the
 
 - Title: `Read Native Work Submission`
 - Source: `builtin`
-- Access: `admin`
+- Access: `authenticated`
 - Transport: `http`, `ws`
 - HTTP: `POST /api/work-ledger/submissions/get`
 - Scopes: `read:work-ledger`, `write:work-ledger`
@@ -194092,7 +194365,7 @@ Persist one bounded explicit-source goal and ordered criteria on the selected au
 
 - Title: `Submit Native Work`
 - Source: `builtin`
-- Access: `admin`
+- Access: `authenticated`
 - Transport: `http`, `ws`
 - HTTP: `POST /api/work-ledger/submissions`
 - Scopes: `read:work-ledger`, `write:work-ledger`
@@ -194373,7 +194646,7 @@ Persist cancellation of the exact native hosted dispatch and drain its owned tur
 
 - Title: `Cancel Native Hosted Turn`
 - Source: `builtin`
-- Access: `admin`
+- Access: `authenticated`
 - Transport: `http`, `ws`
 - HTTP: `POST /api/work-ledger/turn/cancel`
 - Scopes: `read:work-ledger`, `write:work-ledger`, `write:sessions`
@@ -194546,7 +194819,7 @@ Read authoritative native session ownership. Only an explicit legacy result perm
 
 - Title: `Inspect Native Hosted Session`
 - Source: `builtin`
-- Access: `admin`
+- Access: `authenticated`
 - Transport: `http`, `ws`
 - HTTP: `POST /api/work-ledger/turn/session`
 - Scopes: `read:sessions`
@@ -194636,7 +194909,7 @@ Deliver an already admitted native conversation input at most once through a hos
 
 - Title: `Start Native Hosted Turn`
 - Source: `builtin`
-- Access: `admin`
+- Access: `authenticated`
 - Transport: `http`, `ws`
 - HTTP: `POST /api/work-ledger/turn/start`
 - Scopes: `read:work-ledger`, `write:work-ledger`, `write:sessions`
@@ -194819,7 +195092,7 @@ Deliver an already admitted native conversation input at most once through a hos
 
 - Title: `Start Agent Native Hosted Turn`
 - Source: `builtin`
-- Access: `admin`
+- Access: `authenticated`
 - Transport: `http`, `ws`
 - HTTP: `POST /api/work-ledger/turn/startAgent`
 - Scopes: `read:work-ledger`, `write:work-ledger`, `write:sessions`
@@ -195002,7 +195275,7 @@ Read native hosted dispatch status. Does not admit, claim, retry or execute.
 
 - Title: `Status Native Hosted Turn`
 - Source: `builtin`
-- Access: `admin`
+- Access: `authenticated`
 - Transport: `http`, `ws`
 - HTTP: `POST /api/work-ledger/turn/status`
 - Scopes: `read:work-ledger`, `write:work-ledger`, `write:sessions`
@@ -195214,6 +195487,9 @@ The projects a caller with no folder of its own (the web UI, a script) can choos
           },
           "daemonFolder": {
             "type": "boolean"
+          },
+          "reachable": {
+            "type": "boolean"
           }
         },
         "required": [
@@ -195314,6 +195590,9 @@ Register a workspace root so the whole subtree beneath it is covered. Refuses an
             "generation"
           ],
           "additionalProperties": false
+        },
+        "reachable": {
+          "type": "boolean"
         }
       },
       "required": [
@@ -195407,6 +195686,9 @@ Return every registered workspace root (coverage flows down each root's subtree)
               "generation"
             ],
             "additionalProperties": false
+          },
+          "reachable": {
+            "type": "boolean"
           }
         },
         "required": [

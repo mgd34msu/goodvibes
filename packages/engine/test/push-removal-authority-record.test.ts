@@ -40,7 +40,7 @@ test('a removed device and a de-admined user\'s devices stop being served here a
   // The control: the other reader knows both devices from the record alone.
   expect(await served(other)).toEqual([phone.id, alice.id].sort());
 
-  // The owner removes his phone while the record can be read but not written.
+  // The owner removes their phone while the record can be read but not written.
   chmodSync(recordDir, 0o500);
   let removed: boolean;
   try {

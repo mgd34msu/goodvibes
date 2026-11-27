@@ -11,7 +11,7 @@
  *     questions. Judgement stays with the owner, which is also why the outcome
  *     is recorded as what THEY landed on rather than what was suggested.
  *  2. **It opens from what the profile already knows.** People and Notes are
- *     prose preserved verbatim; if the owner has mentioned she is into
+ *     prose preserved verbatim; if the owner has mentioned the person is into
  *     something, the first question starts there. That is the difference
  *     between useful and generic, and it is why {@link openInterview} takes
  *     profile lines rather than a name.

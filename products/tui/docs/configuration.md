@@ -133,10 +133,12 @@ Older settings files keep working: `safe-owner`, `prompt`, `normal`,
 is not rewritten, and `prompt`, `normal`, `accept-edits` and `custom` print a
 one-line notice. How much each mode asks is in
 [decision models](../../../docs/decision-model-policy.md#how-much-you-are-asked).
-In `jev-decides` and `just-vibes`, "If Jev can't answer" (`judgment.policy`, in
-the decision model settings) says whether a call Jev would decide comes to you
-(Ask me, the default) or is refused (Refuse the action) while the decision model
-fails.
+"When the decision model is missing or fails" (`judgment.policy`, in the
+decision model settings) says what happens to a call the decision model would
+read or decide while a set model fails: `Hybrid` (the default) decides it as
+`ask-me` does (held to the end of the run in `just-vibes`); `Decision Model Only`
+refuses it with the reason. With no decision model set, `jev-decides` behaves as
+`ask-me` whatever this setting.
 `--just-vibes` and `--yolo` select those modes for one launch. `behavior.autoApprove` is a deprecated alias for `yolo`;
 selecting an execution mode clears it. Per-tool overrides are the separate
 `permissions.tools.<name>` keys, each `allow`, `prompt` or `deny`; an explicit

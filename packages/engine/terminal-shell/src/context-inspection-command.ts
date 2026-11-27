@@ -36,7 +36,7 @@ export function conversationContextOf<Context extends ContextInspectionContext>(
   const given = policy.lastTurns;
   return {
     async show(options) {
-      // Its own screen only for the person's press (a model's call opens nothing on his display).
+      // Its own screen only for the person's press (a model's call opens nothing on their display).
       if (options?.opensScreen !== false && context.openContextInspector) { context.openContextInspector(); return 'The context is shown on its own screen.'; }
       const messages = context.session.conversationManager.getMessagesForLLM();
       if (!messages.length) return 'The conversation has no messages yet.';

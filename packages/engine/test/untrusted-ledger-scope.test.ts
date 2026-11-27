@@ -1,6 +1,6 @@
 // Proves: Once a turn has read untrusted text, a send goes only with the owner's approval of that exact message, and another session's turn start does not erase what this session read.
 // Red when: One session's turn start clears another session's reads on the shared ledger, or a send after an untrusted read goes without the owner's approval of that exact message within its window.
-// Proves: Input from a channel, a schedule or an unknown source is taken as typed by the owner: it erases the record of what was read and acts with his authority.
+// Proves: Input from a channel, a schedule or an unknown source is taken as typed by the owner: it erases the record of what was read and acts with the owner's authority.
 // Red when: The owner-direct test accepts a source outside its list (or overrides an explicit ownerDirect false), so such input starts a turn that clears the ledger, or its tool calls skip the surface check.
 /**
  * Text from an untrusted source is never evidence for an approval: no surface
@@ -24,6 +24,7 @@ import type { TurnInputOrigin } from '../platform/src/events/turn.ts';
 import { evaluateOutwardEffect, UntrustedContentLedger, withUntrustedContentScope } from '../platform/src/platform/security/untrusted-content.ts';
 import { grantOwnerApproval } from '../platform/src/platform/security/owner-approval.ts';
 import { configureDecisionModelPolicy } from '../platform/src/platform/runtime/decision-policy.ts';
+import { withOwnerInput } from '../platform/src/platform/security/turn-input-party.ts';
 
 let retirePolicy: () => void;
 beforeEach(() => { retirePolicy = configureDecisionModelPolicy(() => 'Hybrid', () => false); });
@@ -88,8 +89,10 @@ test('only the owner\'s own input starts a turn; channel, schedule and unknown i
     const config = new ConfigManager({ configDir: join(dir, 'config'), workingDir: dir, surfaceRoot: 'goodvibes' });
     const manager = new PermissionManager(async () => ({ approved: true }), createPermissionConfigReader(config), new PolicyRuntimeState());
     const write = { path: join(dir, 'note.txt'), content: 'from the turn' };
-    expect(await withTurnSurfaceId(turnSurfaceOf({ source: 'email' }), () => manager.checkDetailed('write', write)))
+    // Both calls carry the owner's mark, as the product marks an owner's turn (a call outside any turn is someone else's
+    // and only reads): only the turn's surface tells them apart.
+    expect(await withOwnerInput(() => withTurnSurfaceId(turnSurfaceOf({ source: 'email' }), () => manager.checkDetailed('write', write))))
       .toMatchObject({ approved: false, reasonCode: 'boundary_surface_authority' });
-    expect((await withTurnSurfaceId(turnSurfaceOf({ source: 'operator' }), () => manager.checkDetailed('write', write))).reasonCode).not.toBe('boundary_surface_authority');
+    expect((await withOwnerInput(() => withTurnSurfaceId(turnSurfaceOf({ source: 'operator' }), () => manager.checkDetailed('write', write)))).reasonCode).not.toBe('boundary_surface_authority');
   } finally { rmSync(dir, { recursive: true, force: true }); }
 });

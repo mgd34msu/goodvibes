@@ -21,8 +21,8 @@
  *   (credential kind `local` from the host's own machine). In a turn the
  *   daemon hosts, the same precedence runs against the daemon itself
  *   (in-process-host.ts).
- * - A call the owner makes himself (his `profile` command) or a surface makes
- *   to show him something presents the ordinary credential, whatever the method.
+ * - A call the owner makes in person (their `profile` command) or a surface makes
+ *   to show them something presents the ordinary credential, whatever the method.
  *
  * Which credential, and so which credential kind, a call presents is decided
  * here and nowhere else.
@@ -32,14 +32,14 @@ import { delegatedOperatorConnection, type DelegatedOperatorConnection } from '.
 import { isOperatorAutomationTargetMethod } from './operator-automation-target.js';
 import type { CapturedOperatorConnection } from './operator-connection-owner.js';
 
-/** Who makes a call: the Agent (a tool its model called), or the owner (his own command, or a view shown to him). */
+/** Who makes a call: the Agent (a tool its model called), or the owner (their own command, or a view shown to them). */
 export type AgentCallActor = 'agent' | 'owner';
 
 /** The credential a call presents: the Agent's ordinary one for the host, or its delegated one. */
 export type AgentCallCredential = 'ordinary' | 'delegated';
 
 /**
- * The writes to the owner's own state the Agent makes on his behalf, besides
+ * The writes to the owner's own state the Agent makes on their behalf, besides
  * the automation jobs and schedules (operator-automation-target.ts). Profile
  * writes also state their provenance (`authority: "autonomous"`).
  */
@@ -82,8 +82,8 @@ export async function agentCallConnection(ordinary: CapturedOperatorConnection, 
   if (agentCallCredential(methodId, actor) === 'ordinary') return { connection: ordinary };
   // A program the host could not verify (no registration: another system than Linux, a host on another machine, a
   // daemon that refused it) is no program of the owner's to that host, and the host makes the Agent's credential for
-  // none: the call goes with the ordinary credential, and the host puts its acts that the owner decides to him (held
-  // for his answer in his signed-in session), never on this program's word. A turn the daemon hosts is the daemon's.
+  // none: the call goes with the ordinary credential, and the host puts its acts that the owner decides to the owner (held
+  // for their answer in their signed-in session), never on this program's word. A turn the daemon hosts is the daemon's.
   if (ordinary.fetch === undefined && !(await programRegistrationFor(ordinary.baseUrl, ordinary.token ?? undefined))) return { connection: ordinary };
   const delegated = await delegatedOperatorConnection(ordinary, homeDirectory, signal);
   return { connection: delegated, delegated };

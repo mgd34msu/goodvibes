@@ -71,8 +71,6 @@ function describeEvent(event: ContractEvent): string {
       return `waiting: ${oneLine(event.reason, 400)}`;
     case 'CONTRACT_GATE_RESULT':
       return `gate ${event.gate} on ${event.targetId}: ${event.outcome ?? (event.skipped ? 'unverified (skipped)' : event.passed ? 'passed' : 'failed')}${event.reason ? `: ${event.reason}` : ''} (${event.durationMs} ms)`;
-    case 'CONTRACT_UNIT_SILENT':
-      return `unit ${event.unitId} agent ${event.agentId} silent for ${Math.round(event.silentMs / 1000)} s: ${event.action}`;
     case 'CONTRACT_MERGE_CONFLICT':
       return `unit ${event.unitId} merge conflict on ${event.branch}: ${listOrNone(event.files)}`;
     case 'CONTRACT_ATTEMPTS_SELECTED':

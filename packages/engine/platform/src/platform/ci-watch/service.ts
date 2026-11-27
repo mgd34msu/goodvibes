@@ -38,6 +38,7 @@ import {
 import { logger } from '../utils/logger.js';
 import { summarizeError } from '../utils/error-display.js';
 import { StoreWriteQueue } from '../state/store-write-queue.js';
+import { markedInputParty } from '../security/turn-input-party.js';
 
 /** A watch with no terminal verdict ends this long after it was created or last seen pending. */
 export const CI_WATCH_IDLE_MS = 24 * 60 * 60_000;
@@ -79,6 +80,8 @@ export interface CreateCiWatchInput {
   readonly triggerFixSession?: boolean | undefined;
   /** The project folder the watch belongs to (CiWatchSubscription.project). */
   readonly project?: string | undefined;
+  /** Whose input made it (CiWatchSubscription.party). */
+  readonly party?: import('../security/turn-input-party.js').TurnInputParty | undefined;
 }
 
 export interface CiWatchCheckResult {
@@ -281,6 +284,8 @@ export class CiWatchService {
       ...(input.ref ? { ref: input.ref } : {}),
       ...(input.prNumber !== undefined ? { prNumber: input.prNumber } : {}),
       ...(input.project ? { project: input.project } : {}),
+      // Made by a caller's own request (ci.watches.create): the party its door marked it with, never a default.
+      ...((input.party ?? markedInputParty()) ? { party: input.party ?? markedInputParty() } : {}),
       deliveryChannel: channel,
       triggerFixSession: input.triggerFixSession === true,
       createdAt: now,

@@ -293,7 +293,7 @@ export class PlaceModal implements SurfaceModal {
   private capture: { readonly prompt: string; readonly resolve: (combo: KeyCombo | undefined) => void; leader: boolean } | undefined;
   /**
    * A value the person must see once (a capability that declares `reveals`): shown whole in its own pane, with the
-   * copy key, until he leaves it. Held only here; never in the outcome line, a log or the transcript.
+   * copy key, until the person leaves it. Held only here; never in the outcome line, a log or the transcript.
    */
   private revealed: { readonly shown: CapabilityRevealed; copied: string | undefined } | undefined;
   /** An item's answers listed by Enter: which one is selected. */

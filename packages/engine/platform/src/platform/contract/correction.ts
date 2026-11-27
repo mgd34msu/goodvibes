@@ -48,6 +48,7 @@ import { renderContractPlan, type ContractPlan, type PlanProblem } from './plan-
 import { prepareFixPlannerInput, type FixPlannerInput } from './fix-planner-input.js';
 import { readPlannerBounds } from './planner.js';
 import { describeStall, detectStall, standingOf, type StallReason } from './progress.js';
+import { conflictBranchIsIn } from './conflict-repair.js';
 import { failureFromError, isAbortError, type ContractRun } from './run-context.js';
 import { buildOwnerAcceptanceQuestion, buildPublicationPauseQuestion, isOwnerAcceptance, isPublicationPause, type Escalations, type OwnerAcceptanceInput, type PublicationPauseInput, type Rejudge } from './escalation.js';
 import type { StepContext } from './steps.js';
@@ -730,6 +731,26 @@ export function createCorrection(context: StepContext, escalations: Pick<Escalat
       if (unit === undefined || unit.status !== 'fixing') return;
       const fixed = run.contract.units.filter((candidate) => candidate.groupId === groupId);
       const runtime = run.runtime(unit);
+      if (repairs.conflict !== undefined && run.contract.worktreePath !== undefined) {
+        // The unit's own branch must now be in the work's branch: a repair that passed without it would lose that step's change.
+        if (!(await conflictBranchIsIn(run.contract.worktreePath, repairs.conflict))) {
+          run.control.fail('other', `the change of step "${unit.title || unit.id}" to ${repairs.conflict.files.join(', ')} did not reach the work after its conflict was repaired, so it is kept on its own branch ${repairs.conflict.branch}`);
+          return;
+        }
+        // Its branch is in: the step's held merge is settled and its kept tree removed.
+        await run.engine?.retryItemIntegration(unit.id);
+        // Its change to the conflicting files was dropped (the other side was kept): it ends on the check it passed
+        // before the conflict, said as dropped; it is not checked again or nudged for a change that is not there.
+        if (unit.dropped !== undefined) {
+          // A step being fixed reaches passed through checking; nothing is checked here.
+          if (!run.tryMoveUnit(unit, 'checking') || !run.tryMoveUnit(unit, 'passed')) return;
+          if (run.runtime(unit).hold !== null) run.releaseHold(unit);
+          else run.settle(unit, 'completed');
+          run.decide('checked', unit.id, unit.dropped);
+          context.groups().unitPassed(run, unit);
+          return;
+        }
+      }
       // The re-check reads the unit's own files and those its fixes changed, nothing a sibling did.
       runtime.evidencePaths = new Set([...unit.touchedPaths, ...fixed.flatMap((candidate) => candidate.touchedPaths)]);
       const record = unit.activeAgentId === undefined ? null : context.getStatus(unit.activeAgentId);
@@ -809,8 +830,9 @@ export function createCorrection(context: StepContext, escalations: Pick<Escalat
       question: buildOwnerAcceptanceQuestion(run.contract, input),
       retryOrCancel: true,
     });
-    // The caller saves the question's binding and writes the checkpoint once.
-    run.contract.statusLine = 'The work finished; no decision model is in use, so its result waits for you to accept it or stop the work.';
+    // The caller saves the question's binding and writes the checkpoint once. Accepted by the rule of the mode (outside
+    // Ask me), it waits for nobody, and its done line says so.
+    if (escalation.resolvedAt === undefined) run.contract.statusLine = 'The work finished; no decision model is in use, so its result waits for you to accept it or stop the work.';
     return escalation.id;
   }
 
@@ -825,7 +847,12 @@ export function createCorrection(context: StepContext, escalations: Pick<Escalat
       question: buildPublicationPauseQuestion(run.contract, input),
       retryOrCancel: true,
     });
-    run.contract.statusLine = `The work's result passed its checks but could not be put in the project (${input.note})${input.branch === undefined ? '' : `; it is kept on branch ${input.branch}`}. Clear what blocks it, then put it in again or stop the work.`;
+    // Not put in again (decided at once outside Ask me, a third time): the work ended failed, and its end line says
+    // what failed and what is kept where.
+    if (run.terminal) { context.checkpoint?.(run); return; }
+    const what = `The work's result passed its checks but could not be put in the project (${input.note})${input.branch === undefined ? '' : `; it is kept on branch ${input.branch}`}.`;
+    // Put to the owner in every mode (contract/escalation.ts `asksOwner`).
+    run.contract.statusLine = `${what} Clear what blocks it, then put it in again or stop the work.`;
     context.checkpoint?.(run);
   }
 }

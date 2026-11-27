@@ -226,20 +226,20 @@ export interface ConfigSetOptions {
   /**
    * Who decided this write, from the call site that handled it: the person's own press (a key, a typed line, a
    * submitted form), or the program's gate deciding a model's call. Sent with a daemon-owned write, so the daemon
-   * runs an act it decides for the owner at once on his press, and does not decide a call his program's gate decided
-   * again. Absent: neither, and such an act is put to him.
+   * runs an act it decides for the owner at once on their press, and does not decide a call their program's gate decided
+   * again. Absent: neither, and such an act is put to the owner.
    */
   press?: DaemonWritePress | undefined;
 }
 
 /** Who decided a write sent to the daemon (ConfigSetOptions `press`). */
 export interface DaemonWritePress {
-  /** The person asked for exactly this, now (his press in his own program). */
+  /** The person asked for exactly this, now (their press in their own program). */
   readonly personAsked?: boolean | undefined;
   /** The program's own gate decided the model's call that writes it. */
   readonly decidedByProgramGate?: boolean | undefined;
   /**
-   * In the daemon: who made this write and how it was decided (his press, his yes to a held call, or admitted under his
+   * In the daemon: who made this write and how it was decided (the owner's press, their yes to a held call, or admitted under their
    * rules for a named caller), as its dispatch bound it to the request. Held while the change notices go out
    * (`writeAct()`), so the machine group keeps it with the change and carries it to every member.
    */
@@ -622,7 +622,7 @@ export class ConfigManager {
     const lock = this.managedLockOf(key);
     if (lock) {
       throw new RefusalError(buildRefusal({ code: 'CONFIG_MANAGED', reason: managedLockRefusalText(lock, isSecretBearingConfigKey(key)),
-        next: [`Ask the owner: only he removes the lock ${lock.source} set.`], state: 'nothing was saved', status: 403 }), { category: 'config', source: 'config' });
+        next: [`Ask the owner: only the owner removes the lock ${lock.source} set.`], state: 'nothing was saved', status: 403 }), { category: 'config', source: 'config' });
     }
   }
 
@@ -1832,7 +1832,7 @@ export class ConfigManager {
    * security, permission, judgment or payment setting, or null when it does
    * not loosen one or the actor may (`settings.loosen`, the effect table). A
    * model acting for someone (`agentFor`) also needs the gate's decision on
-   * its call to be the owner's, his rule's or the mode's. The one check every
+   * its call to be the owner's, their rule's or the mode's. The one check every
    * settings write path asks, the routed write to the daemon included.
    */
   loosenRefusal(key: string, value: unknown, actor: Actor, decision?: ToolDecision | undefined):
@@ -1881,8 +1881,8 @@ export class ConfigManager {
    * payment setting is admitted for the actor making it (`settings.loosen` in
    * the effect table, security/effect-authority.ts): the owner and the program
    * make it, an admin's is the owner's to decide and is refused here (the
-   * daemon's routes put it to him first), anyone else is refused; a model
-   * (`agentActor`) makes it only when the owner, his standing rule or the mode
+   * daemon's routes put it to the owner first), anyone else is refused; a model
+   * (`agentActor`) makes it only when the owner, their standing rule or the mode
    * settled the call (`options.decision`, the gate's decision, read by
    * tools/goodvibes-runtime/config-routing.ts from gate/admitted-decision.ts).
    *
@@ -1943,7 +1943,7 @@ export class ConfigManager {
       if (!options.bypassManagedLock) {
         const lock = this.managedLockOf(key);
         if (lock) {
-          return refuse({ code: 'CONFIG_MANAGED', reason: managedLockRefusalText(lock, isSecretBearingConfigKey(key)), next: [`Ask the owner: only he removes the lock ${lock.source} set.`], status: 403 });
+          return refuse({ code: 'CONFIG_MANAGED', reason: managedLockRefusalText(lock, isSecretBearingConfigKey(key)), next: [`Ask the owner: only the owner removes the lock ${lock.source} set.`], status: 403 });
         }
       }
       try { this.#resolvePath(key); }
@@ -2125,7 +2125,7 @@ export class ConfigManager {
    */
   watchConfigFiles(options: { intervalMs?: number } = {}): () => void {
     this.stopWatchingConfigFiles();
-    const paths = [this.configPath, this.projectConfigPath, this.sharedTierPath, this.daemonTierPath].filter(
+    const paths = [this.configPath, this.projectConfigPath, this.sharedTierPath, this.daemonTierPath, this.#daemonHostSettingsPath()].filter(
       (p): p is string => typeof p === 'string' && p.length > 0,
     );
     this._fileWatch = watchConfigFiles(paths, () => this.reloadFromDiskAndNotify(), options.intervalMs, this.hostSettings.active);
@@ -2656,8 +2656,8 @@ export class ConfigManager {
    * (and leaves the decision-model settings out of what it reads, loadDaemonTier);
    * the daemon (the one manager that owns that file) also sets it in the terminal
    * app's and the Agent's settings files, moves the decision-model settings aside
-   * and removes the value (Ask me is then the "If Jev can't answer" answer, the
-   * default), so the order the programs start in does not matter. Every file
+   * and removes the value (Hybrid, the default, is then what "When the decision
+   * model is missing or fails" holds), so the order the programs start in does not matter. Every file
    * changed is kept beside itself as it was, and the owner is told once. A 3.5.0
    * program reading the files afterwards finds two values it knows, no decision
    * model, and `judgment.setAside` and `judgment.noDecisionModel`, keys it does
@@ -2887,6 +2887,7 @@ export class ConfigManager {
         parent[field] = structuredClone(value);
       });
       for (const key of applied) staged.sources.set(key, 'daemon');
+      this.#layDaemonToolPermissions(staged, remote);
       return;
     }
     try {
@@ -2907,7 +2908,49 @@ export class ConfigManager {
         parent[field] = value;
       });
       for (const key of applied) staged.sources.set(key, 'daemon');
+      this.#layDaemonToolPermissions(staged, stored);
     } catch (error) { throw this.loadFailure('Daemon', this.daemonTierPath, error); }
+    // The daemon keeps the owner's per-tool permissions in its own settings file (a key no tier routes to the daemon's):
+    // read here as the owner's shared default too. Unreadable or absent: nothing laid from it.
+    const hostFile = this.#daemonHostSettingsPath();
+    if (hostFile !== null && existsSync(hostFile)) {
+      try {
+        const parsed = JSON.parse(readFileSync(hostFile, 'utf-8')) as unknown;
+        if (parsed !== null && typeof parsed === 'object' && !Array.isArray(parsed)) this.#layDaemonToolPermissions(staged, parsed as Record<string, unknown>);
+      } catch (error) {
+        logger.warn('The daemon\'s own settings file could not be read for its per-tool permissions; none are laid from it', { file: hostFile, error: summarizeError(error) });
+      }
+    }
+  }
+
+  /** The daemon's own settings file, for a program beside the daemon (its per-tool permissions are read from it); else null. */
+  #daemonHostSettingsPath(): string | null {
+    if (this.daemonTierOwner || this.daemonTierPath === null || this.homeDirectory === null) return null;
+    const path = resolveSurfaceDirectory(this.homeDirectory, 'daemon-host', 'settings.json');
+    return path === this.configPath ? null : path;
+  }
+
+  /**
+   * The per-tool permissions the owner sets in the daemon (`permissions.tools.*`) are their one shared default, as their
+   * permission mode is: in a program beside the daemon, a tool the daemon holds stricter (deny, or ask where the program
+   * allows) is held so in the program's own turns too. The program's own stricter value stays (nothing loosens), and a
+   * project's stricter value is laid after this (#keepProjectStricter): the stricter of the three wins, read by every
+   * decision through the one reader (project-view.ts `projectSettingsInForce`). The daemon itself reads its own file.
+   */
+  #layDaemonToolPermissions(staged: ConfigRuntimeState, stored: Record<string, unknown>): void {
+    if (this.daemonTierOwner) return;
+    const leaves: Array<{ path: string; value: unknown }> = [];
+    collectLeaves(stored, '', leaves);
+    for (const leaf of leaves) {
+      const key = leaf.path;
+      if (!key.startsWith('permissions.tools.') || typeof leaf.value !== 'string') continue;
+      const own = readDotPath(staged.nonRuntime, key).value;
+      // Only where the program's own value is looser than the daemon's (TOOL_PERMISSION, config-key-facts.ts).
+      if (isDeepStrictEqual(own, leaf.value) || configKeyFacts(key).loosens?.(leaf.value, own) !== true) continue;
+      const { parent, field } = this.#resolvePath(key as DaemonOwnedConfigPath, staged.nonRuntime);
+      parent[field] = leaf.value;
+      staged.sources.set(key, 'daemon');
+    }
   }
 
   /** The daemon store path, or null when no daemon tier is configured. */

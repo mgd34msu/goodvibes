@@ -162,7 +162,7 @@ export function createDaemonSystemRouteHandlers(
     getRouteBindings: (req) => {
       const admin = context.requireAdmin(req);
       if (admin) return admin;
-      // A binding is of the session, schedule and run it names: a caller that is not the owner himself is listed only
+      // A binding is of the session, schedule and run it names: a caller that is not the owner in person is listed only
       // those it may reach every one of (pagination.ts keepReachableNaming, platform control-plane/caller-reach.ts).
       const field = (binding: unknown, key: string): string | undefined => {
         const value = binding !== null && typeof binding === 'object' ? (binding as Record<string, unknown>)[key] : undefined;
@@ -915,7 +915,7 @@ async function handleApprovalAction(
  * A settings write that loosens a security, permission, judgment or payment setting is decided by the one owner rule
  * (platform daemon/method-owner-decision.ts): the daemon's dispatch tells this route whether the caller is one the rule
  * admits at once (`settingsLoosenAdmission`). A caller it does not admit gets `OWNER_DECISION_NEEDED` here, nothing
- * changed, and the dispatch puts that same call to the owner's gate, as every other call of a class he decides; a
+ * changed, and the dispatch puts that same call to the owner's gate, as every other call of a class the owner decides; a
  * caller the effect table refuses outright is refused. Null: the write goes on (admitted, or it loosens nothing).
  */
 async function ownerActResponse(
@@ -929,7 +929,7 @@ async function ownerActResponse(
   if (locked.length > 0) {
     return context.recordApiResponse(req, path, jsonErrorResponse({
       error: locked.join(' '), code: 'CONFIG_MANAGED', state: 'nothing was saved',
-      next: ['Ask the owner: only he removes a managed lock (Tools and extensions, Managed settings, unlock).'],
+      next: ['Ask the owner: only the owner removes a managed lock (Tools and extensions, Managed settings, unlock).'],
     }, { status: 403 }));
   }
   const admission = context.settingsLoosenAdmission?.(req) ?? 'allowed';
@@ -948,7 +948,7 @@ async function ownerActResponse(
   return context.recordApiResponse(req, path, jsonErrorResponse({
     error: `${reasons.join(' ')} Only the owner makes that change. Nothing was changed.`,
     code: 'OWNER_ONLY', state: 'the settings are unchanged',
-    next: ['Make the change from the owner\'s own app (his sign-in, a device he paired, or the terminal app or the Agent on the daemon\'s machine).'],
+    next: ['Make the change from the owner\'s own app (their sign-in, a device they paired, or the terminal app or the Agent on the daemon\'s machine).'],
   }, { status: 403 }));
 }
 

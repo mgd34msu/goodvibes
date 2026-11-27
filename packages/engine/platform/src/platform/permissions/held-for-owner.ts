@@ -1,10 +1,10 @@
 /**
- * Calls permissions.mode just-vibes held for the owner instead of asking him
+ * Calls permissions.mode just-vibes held for the owner instead of asking them
  * in the middle of the work: not run, listed at the end of the run, and
- * approved or set aside by him afterwards (`/held` in both terminal apps).
+ * approved or set aside by the owner afterwards (`/held` in both terminal apps).
  *
- * An approval is his answer "allow for this session" for that exact call, as
- * if he had been asked when it was made: the gate that held it records it
+ * An approval is the owner's answer "allow for this session" for that exact call, as
+ * if they had been asked when it was made: the gate that held it records it
  * (PermissionManager), so the same call runs when it is made again.
  *
  * One ledger per process, like the process's permission gate. Bounded: the
@@ -141,7 +141,7 @@ const HELD_KEY_PREFIX = 'held:';
 /**
  * Post every call the gate holds to the owner inbox as a `queued-action` with
  * `approve` and `dismiss`, so the owner sees it in `/questions` and the web UI
- * and answers it from any surface; his answer approves or sets aside the held
+ * and answers it from any surface; their answer approves or sets aside the held
  * call, and an answer here or through `/held` closes the other. Held calls live
  * in this process, so items a previous process posted are withdrawn at start.
  *

@@ -606,9 +606,9 @@ export class ConversationManager {
   }
 
   /**
-   * What the person said in this conversation, oldest first, as text: his own
+   * What the person said in this conversation, oldest first, as text: their own
    * messages only. A host-made message in a user slot (runtime reference data,
-   * a tool's pictures) is not his and is left out.
+   * a tool's pictures) is not theirs and is left out.
    */
   public getOwnerMessages(): string[] {
     const owned: string[] = [];

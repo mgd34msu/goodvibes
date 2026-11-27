@@ -54,7 +54,6 @@ export type {
   StallRoute,
   TurnLimitSource,
   UnitRole,
-  UnitSilenceAction,
   UnitSpawnPurpose,
   YesNoVerdict,
 } from './contract.js';
@@ -88,7 +87,6 @@ export {
   STALL_ROUTES,
   TURN_LIMIT_SOURCES,
   UNIT_ROLES,
-  UNIT_SILENCE_ACTIONS,
   UNIT_SPAWN_PURPOSES,
   YES_NO_VERDICTS,
 } from './contract.js';

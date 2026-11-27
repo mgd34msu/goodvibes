@@ -1,7 +1,7 @@
-// Proves: The owner's approval about a stranger's message, or about a group chat, is sent to that chat, showing the people in it the owner's review and how he answered it.
+// Proves: The owner's approval about a stranger's message, or about a group chat, is sent to that chat, showing the people in it the owner's review and how they answered it.
 // Red when: The daemon delivers an approval about a message from someone who is not the channel's owner, or about a conversation not proven to be the owner's alone, to that conversation instead of only to the owner's own conversations.
-// Proves: The owner's work proposal from a group chat is posted to that group for the others in it to see, or is lost when none of his own conversations can take it.
-// Red when: The conversation gate posts the owner's own work proposal into the group he asked in, or drops it when his own conversations refuse it instead of putting it in Waiting for you, where accepting starts the work.
+// Proves: The owner's work proposal from a group chat is posted to that group for the others in it to see, or is lost when none of the owner's own conversations can take it.
+// Red when: The conversation gate posts the owner's own work proposal into the group they asked in, or drops it when their own conversations refuse it instead of putting it in Waiting for you, where accepting starts the work.
 
 import { afterEach, expect, test } from 'bun:test';
 import { rmSync } from 'node:fs';
@@ -32,7 +32,7 @@ function routeApprovals(daemon: SurfaceDaemon): { settle: () => Promise<void>; s
   };
 }
 
-test('a stranger\'s held message and a group only the owner wrote in put the owner\'s item in his own chat and send nothing to either chat, on raise, approve and refuse', async () => {
+test('a stranger\'s held message and a group only the owner wrote in put the owner\'s item in the owner\'s own chat and send nothing to either chat, on raise, approve and refuse', async () => {
   // Telegram at the wire: a loopback server recording each message a chat would receive.
   const received: { chat: string; approvalId: string; status: string }[] = [];
   const wire = Bun.serve({ hostname: '127.0.0.1', port: 0, async fetch(request) { received.push(await request.json() as typeof received[number]); return Response.json({ ok: true }); } });
@@ -54,7 +54,7 @@ test('a stranger\'s held message and a group only the owner wrote in put the own
     broker: daemon.sessionBroker, approvals: daemon.approvalBroker, routes: daemon.routeBindings, accounts: accounts.reader,
     workspaceRoot: daemon.root, selectionPath: join(daemon.root, 'telegram-delegated-selection.json'), receiptPath: join(daemon.root, 'telegram-delegated-review.json'),
   });
-  // The owner, as his pairing names him.
+  // The owner, as the owner's pairing names them.
   const ownerSnapshot: NativePairedSnapshot = { kind: 'local', tokenId: 'owner-token', principalId: 'owner', authorityId: 'owner', authorityRevision: 'owner-token', scopes: [] };
   const owner: NativeExecutionAuthority = { current: () => ownerSnapshot, withCurrent: async (_expected, operation) => await operation(() => ownerSnapshot) };
   try {
@@ -90,7 +90,7 @@ test('a stranger\'s held message and a group only the owner wrote in put the own
       await routing.settle();
       return id;
     };
-    // A group where only the owner has written so far: its approvals are his, and others in the group would see them.
+    // A group where only the owner has written so far: its approvals are the owner's, and others in the group would see them.
     const ownersGroup = await daemon.routeBindings.upsertBinding({ kind: 'channel', surfaceKind: 'telegram', surfaceId: 'telegram', externalId: OWNERS_GROUP, channelId: OWNERS_GROUP, metadata: { userId: OWNER, chatType: 'group' } });
     const groupTurn = await daemon.sessionBroker.submitMessage({ routeId: ownersGroup.id, surfaceKind: 'telegram', surfaceId: 'telegram', externalId: OWNERS_GROUP, userId: OWNER, body: 'List the garden folder.', providerMessageId: 'group-1' });
     const groupApproved = await askAndAnswer(groupTurn.session.id, 'call-group-yes', true);
@@ -114,7 +114,7 @@ test('a stranger\'s held message and a group only the owner wrote in put the own
   }
 });
 
-test('the owner\'s work request in a group posts nothing in the group: its proposal goes to his own chat, and when his chat refuses it, it waits in Waiting for you, where accepting starts the work', async () => {
+test('the owner\'s work request in a group posts nothing in the group: its proposal goes to the owner\'s own chat, and when that chat refuses it, it waits in Waiting for you, where accepting starts the work', async () => {
   // Telegram at the wire: a loopback server recording each message a chat would receive; the owner's chat refuses while `refusing`.
   const received: { chat: string; text: string }[] = [];
   let refusing = false;
@@ -123,7 +123,8 @@ test('the owner\'s work request in a group posts nothing in the group: its propo
     received.push(message);
     return refusing && message.chat === OWNER ? new Response('chat not found', { status: 400 }) : Response.json({ ok: true });
   } });
-  const daemon = await surfaceDaemon({ conversationGate: true, settings: { 'surfaces.telegram.enabled': true }, policies: { telegram: { allowlistUserIds: [OWNER], ownerId: OWNER, allowDirectMessages: true } } });
+  // As released, the owner's own work request on a channel is put to them as a proposal in every mode (S8); Ask me here.
+  const daemon = await surfaceDaemon({ conversationGate: true, settings: { 'surfaces.telegram.enabled': true, 'permissions.mode': 'ask-me' }, policies: { telegram: { allowlistUserIds: [OWNER], ownerId: OWNER, allowDirectMessages: true } } });
   roots.push(daemon.root);
   daemon.channelPlugins.register({
     id: 'telegram-wire', surface: 'telegram', displayName: 'Telegram', capabilities: [],

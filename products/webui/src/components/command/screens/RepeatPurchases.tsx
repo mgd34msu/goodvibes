@@ -4,7 +4,7 @@
  * the daemon's own words (its shop, item, limits, what is left and its last
  * day) with "Stop"; "Allow a repeat purchase…" opens the `/payments` sheet
  * with the same six blanks and the same sentence as the terminal. Both are
- * the owner's own acts, sent with his explicit request.
+ * the owner's own acts, sent with their explicit request.
  */
 import { asArray, asRecord } from '../../../lib/object';
 import { Row, RowList } from '../../ui/Row';

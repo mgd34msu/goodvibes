@@ -5,7 +5,7 @@
  * - turn_start_ms: TURN_SUBMITTED → first STREAM_DELTA
  * - cancel_ms: the cancel request → TURN_CANCEL (the event carries `requestedAt`)
  * - permission_decision_ms: GATE_REQUESTED → DECISION_EMITTED, for calls the gate decided
- *   itself (a call put to the owner waits on his answer and is not counted)
+ *   itself (a call put to the owner waits on their answer and is not counted)
  *
  * Maintains a capped rolling window of measurements per SLO and exposes
  * p95 values through `getMetrics()`. The doctor's check context builds one
@@ -142,7 +142,7 @@ export class SloCollector {
         const startAt = this._pendingPermission.get(event.callId);
         if (startAt === undefined) return;
         this._pendingPermission.delete(event.callId);
-        // The figure is the gate's own latency: a call put to the owner waited on his
+        // The figure is the gate's own latency: a call put to the owner waited on their
         // answer, and a call whose admission failed was never decided.
         const source = event.sourceLayer ?? event.source;
         if (source === 'user_prompt' || source === 'admission_failed') return;

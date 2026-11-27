@@ -79,8 +79,6 @@ export interface CommandUiActions extends TerminalCommandUiActions<import('./mod
    * flag on the concealed request; see input/plain-line-input.ts.
    */
   beginPlainInput?: (request: import('./plain-line-input.ts').PlainLineInputRequest) => void;
-  /** Live terminal-owned pairing operation; never authority on its own. */
-  beginSetupPairing?: (request: { readonly apply: boolean; readonly name: string }) => Promise<void>;
   /**
    * Print lines into the transcript as one block whose copy key copies `copy.text` instead of
    * the lines shown (a pairing block copies its real link, while its lines show it masked).

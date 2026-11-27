@@ -31,7 +31,7 @@ export interface ListedRecords {
   readonly idFields?: readonly string[] | undefined;
   /**
    * The list is a report of the daemon's own run over every project's records (it names records of many projects in
-   * one entry): the owner's alone; a caller that is not the owner himself is answered it empty.
+   * one entry): the owner's alone; a caller that is not the owner in person is answered it empty.
    */
   readonly ownerOnly?: true | undefined;
 }
@@ -109,7 +109,7 @@ const METHODS: Readonly<Record<string, { readonly inputs?: Readonly<Record<strin
   'watchers.triggers.history': { inputs: { id: 'trigger' } },
   'watchers.triggers.cancel': { inputs: { id: 'trigger' } },
   'watchers.triggers.reset': { inputs: { id: 'trigger' } },
-  'watchers.triggers.grant.register': { inputs: { id: not('the name of a command the owner lets triggers run (his one list of commands, no project\'s)') } },
+  'watchers.triggers.grant.register': { inputs: { id: not('the name of a command the owner lets triggers run (the owner\'s one list of commands, no project\'s)') } },
   'watchers.create': { inputs: { id: NEW_ID } },
   // Rules.
   'permissions.rules.list': { lists: [{ at: 'rules', kind: 'rule' }] },
@@ -149,8 +149,11 @@ const METHODS: Readonly<Record<string, { readonly inputs?: Readonly<Record<strin
   'media.collect': { inputs: { taskId: not('a provider\'s media generation job') } },
   // Files.
   'artifacts.list': { lists: [{ at: 'artifacts', kind: 'artifact' }] },
-  'devices.artifacts.read': { inputs: { artifactId: not('an artifact on a paired device node, read through that node\'s own grants') } },
-  'devices.artifacts.delete': { inputs: { artifactId: not('an artifact on a paired device node, read through that node\'s own grants') } },
+  // A capture of the owner's phone is the owner's alone (only the owner, or their own turn, asks for one: method-risk.ts `owner-act`): read
+  // and deleted only by the owner (refused flat for anyone else), and listed to no one else.
+  'devices.artifacts.list': { lists: [{ at: 'artifacts', kind: 'artifact', ownerOnly: true }] },
+  'devices.artifacts.read': { inputs: { artifactId: not('a capture of the owner\'s phone, the owner\'s alone: read only by the owner in person') } },
+  'devices.artifacts.delete': { inputs: { artifactId: not('a capture of the owner\'s phone, the owner\'s alone: deleted only by the owner in person') } },
   'media.analyze': { inputs: { 'artifact.id': 'artifact' } },
   'media.transform': { inputs: { 'artifact.id': 'artifact' } },
   'multimodal.packet': { inputs: { 'analysis.id': not('an analysis result passed back as data'), 'analysis.artifact.id': 'artifact' } },
@@ -253,9 +256,9 @@ const FAMILIES: readonly (readonly [string, string])[] = [
   ['hooks.', 'a hook of a program\'s'],
   ['permissions.audit.', 'a call a program\'s gate decided, posted as data'],
   ['panels.', 'a panel of a screen'],
-  // The inbox list keeps, for a caller that is not the owner himself, only questions of projects it may reach
-  // (owner-inbox.ts listPageNow); every other item is his own. Answering is his alone (OWNER_ANSWERS_ONLY).
-  ['inbox.', 'an item of the owner\'s inbox, waiting for him (a question of a project is read as that question)'],
+  // The inbox list keeps, for a caller that is not the owner in person, only questions of projects it may reach
+  // (owner-inbox.ts listPageNow); every other item is the owner's own. Answering is the owner's alone (OWNER_ANSWERS_ONLY).
+  ['inbox.', 'an item of the owner\'s inbox, waiting for the owner (a question of a project is read as that question)'],
   // Read in the store: a watcher (feed, file, webhook watch) keeps no project or session; triggers are `trigger`.
   ['watchers.', 'a watcher of the daemon\'s: none keeps a project, a session or a caller'],
   // A watch by id is `ci-watch` (METHODS), its project's.
@@ -404,7 +407,6 @@ const CAPABILITIES: Readonly<Record<string, Readonly<Record<string, Addressed>>>
   'memory.show': { record: 'memory-record' },
   'memory.edit': { record: 'memory-record' },
   'memory.review': { record: 'memory-record' },
-  'memory.accept': { record: 'memory-record' },
   'memory.promote': { record: 'memory-record' },
   'memory.remove': { record: 'memory-record' },
   'memory.link': { from: 'memory-record', to: 'memory-record' },
@@ -455,7 +457,8 @@ const CAPABILITIES: Readonly<Record<string, Readonly<Record<string, Addressed>>>
   // `work`: a piece of Work, routed to the project its call names (control-plane/project-routing.ts), which the
   // project check holds; it names nothing of another project's.
   ...Object.fromEntries(['work.start', 'work.status', 'work.cancel', 'work.resume', 'work.answer', 'work.retry', 'work.go-on-without',
-    'work.budget', 'work.plan-redo', 'work.step-edit', 'work.step-drop', 'work.step-move', 'work.approve', 'work.plan-discard']
+    'work.budget', 'work.plan-redo', 'work.step-edit', 'work.step-drop', 'work.step-move', 'work.approve', 'work.plan-discard',
+    'work.branch-merge', 'work.branch-discard']
     .map((id) => [id, { work: not('a piece of Work, routed to the project the call names (project-routing.ts), held by the project check') }])),
   // `worktree`: a worktree folder of the caller's project, handed to its method as `path`, a work folder the folder
   // check holds (caller-paths.ts).

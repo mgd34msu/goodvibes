@@ -100,10 +100,10 @@ export interface HomeAssistantChatRuntime {
   /** Optional home-graph reader used to ground a turn against its pre-registered space. */
   readonly homeGraph?: HomeGraphGroundingReader | undefined;
   /**
-   * The Home Assistant channel's policy ("Treat my own messages here as me", its owner): a message in a conversation
-   * proven the owner's alone (daemon/owner-channel-conversation.ts) is his own input when it is on. Absent: never.
+   * The Home Assistant channel's policy (its owner): a typed message in a conversation proven the owner's alone
+   * (daemon/owner-channel-conversation.ts) is the owner's own input. Absent: never.
    */
-  readonly channelPolicy?: (() => Pick<ChannelPolicyRecord, 'ownMessagesAsOwner' | 'ownerId' | 'project'>) | undefined;
+  readonly channelPolicy?: (() => Pick<ChannelPolicyRecord, 'ownerId' | 'project'>) | undefined;
 }
 
 export async function postHomeAssistantChatMessage(
@@ -148,12 +148,12 @@ export async function postHomeAssistantChatMessage(
   // The daemon genuinely cannot establish the owner here, so it does not claim
   // to, the window stays open and outward effects stay judged on derivation.
   // Wiring this honestly would need speaker identification, not a flag.
-  // Its turn is someone else's input, unless the owner chose "Treat my own messages here as me" for Home Assistant and
-  // this conversation is proven his alone (Home Assistant's user id of the channel's owner, one-to-one): then it is his.
+  // Its turn is someone else's input, unless this conversation is proven the owner's alone (Home Assistant's user id of
+  // the channel's owner, one-to-one): then it is the owner's, as the owner's own message on any channel that proves its sender.
   const policy = runtime.channelPolicy?.();
-  // A spoken message (a voice pipeline: it names the device that heard it, not who spoke) is never his; only a message
+  // A spoken message (a voice pipeline: it names the device that heard it, not who spoke) is never the owner's; only a message
   // known to be typed can be.
-  const ownerParty = policy?.ownMessagesAsOwner === true && input.inputKind === 'typed'
+  const ownerParty = policy !== undefined && input.inputKind === 'typed'
     && isOwnersAloneConversation(resolution.binding, policy.ownerId);
   if (options.wait === false) {
     const messageId = await runtime.chatManager.postMessage(resolution.session.id, message, clientId, {
@@ -259,7 +259,7 @@ async function resolveHomeAssistantChatSessionNow(
       // Who it is with and whether it is one-to-one: the owner's own conversations (owner-alert.ts isOwnerConversation).
       ...(input.userId ? { userId: input.userId } : {}),
       conversationKind: input.threadId ? 'thread' : input.conversationKind ?? 'direct',
-      // Typed or spoken, for this message (the owner rule reads it: a spoken message is never his).
+      // Typed or spoken, for this message (the owner rule reads it: a spoken message is never the owner's).
       inputKind: input.inputKind ?? 'spoken',
       messageId: input.messageId,
       conversationId: input.conversationId,

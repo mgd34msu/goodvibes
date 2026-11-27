@@ -254,6 +254,8 @@ export interface DaemonRuntimeRouteContext {
     createSession(input: {
       id?: string | undefined;
       title?: string | undefined;
+      /** The project folder the session belongs to (checked for the caller before the route runs). */
+      project?: string | undefined;
       metadata?: Record<string, unknown> | undefined;
       routeBinding?: RouteBindingRecordLike | undefined;
       participant?: SessionParticipantInput | undefined;
@@ -369,11 +371,17 @@ export interface DaemonRuntimeRouteContext {
   /** Open a shared-session SSE stream for turn and agent events. */
   readonly openSessionEventStream: (req: Request, sessionId: string) => Response;
   /**
-   * Whether the owner typed this message into his own program: the request was authenticated as the owner with a
-   * person's credential (this machine, his paired device or his login), names itself a terminal app or the Agent, and
+   * Whether the owner typed this message into their own program: the request was authenticated as the owner with a
+   * person's credential (this machine, their paired device or their login), names itself a terminal app or the Agent, and
    * claims a person asked for it. Stamped on the input (OWNER_TYPED_METADATA_KEY); absent means never.
    */
   readonly ownerTypedAtProgram?: ((req: Request) => boolean) | undefined;
+  /**
+   * Whether the request is the owner in person (platform daemon/method-owner-decision.ts `ownerHimself`: their signed-in
+   * session or their verified program). Stamped on the input (OWNER_HIMSELF_METADATA_KEY); a hosted session the owner
+   * made in person runs such a message as their own turn. Absent means never.
+   */
+  readonly ownerHimself?: ((req: Request) => boolean) | undefined;
 }
 
 export type DaemonRuntimeRouteHandlerMap = DaemonRuntimeRouteHandlers;

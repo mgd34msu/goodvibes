@@ -90,7 +90,10 @@ export interface ApprovalRaiseService {
  */
 export const APPROVAL_RAISE_MAX_WAIT_MS = 60_000;
 
-/** Longest expiry a raised ask may carry, in ms. Twelve hours. */
+/**
+ * Longest expiry a raised ask may carry, in ms. Twelve hours. The raiser's own stated wait (a protocol's lifetime: an
+ * out-of-process surface, Home Assistant's reply deadline); the daemon sets none for an ask it raises itself.
+ */
 export const APPROVAL_RAISE_MAX_TIMEOUT_MS = 12 * 60 * 60 * 1_000;
 
 function invalid(message: string, field: string): GatewayVerbError {
@@ -211,7 +214,7 @@ export function buildRaiseMetadata(
   // it is delivered, when it started, what came of it, its settled words) is dropped, whatever the caller sent.
   const base: Record<string, unknown> = {};
   // Display facts only, and only from the owner's own programs by who they are (method-owner-decision.ts
-  // `ownersProgramCaller`: his registered terminal program, his Agent program, a turn the daemon hosts; never the operator
+  // `ownersProgramCaller`: the owner's registered terminal program, their Agent program, a turn the daemon hosts; never the operator
   // token or the Agent's credential alone): its background agent's id (the fleet's "blocked on you") and the decision
   // model's verdict, each a short text.
   const context = invocation.context;

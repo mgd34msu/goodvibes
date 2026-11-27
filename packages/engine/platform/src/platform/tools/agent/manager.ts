@@ -3,6 +3,7 @@ import { classicAgentInput } from './classic-policy.js';
 import { decisionModelPolicyState } from '@goodvibes/engine/errors';
 import { currentTurn, withAgentTurn, type TurnContext } from '../../security/turn-boundary.js';
 import { turnInputParty, withInputParty, withOtherPartyInput, type TurnInputParty } from '../../security/turn-input-party.js';
+import { clearExposure } from '../../security/conversation-exposure.js';
 import type { Actor } from '@goodvibes/engine/daemon-api/http-policy';
 import { currentExecutionModeOwner, detachedFromInvocation, type ExecutionModeOwner } from '../../gate/execution-context.js';
 import { AgentCapacityError } from './capacity-error.js';
@@ -156,8 +157,10 @@ export class AgentManager {
   private readonly triggerSurfaces = new WeakMap<AgentRecord, { readonly surface: string; readonly actor?: Actor | undefined }>();
   /** Agents a turn acting on someone else's input started, with who that was (security/turn-input-party.ts). */
   private readonly otherPartySpawns = new WeakMap<AgentRecord, string>();
+  /** The caller each of those was started for, when the daemon recorded one (its `madeFor`): whose agent it is. */
+  private readonly otherPartyMakers = new WeakMap<AgentRecord, string>();
   /**
-   * Agents the owner's own turn (or a run marked as his) started: their runs are marked his. Neither here nor above:
+   * Agents the owner's own turn (or a run marked as theirs) started: their runs are marked the owner's. Neither here nor above:
    * started where nothing names whose it is, and its runs read as someone else's (unknown leans to someone else).
    */
   private readonly ownerPartySpawns = new WeakSet<AgentRecord>();
@@ -266,6 +269,8 @@ export class AgentManager {
       this.combinedCancellationSignals.delete(id);
       this.cancellationControllers.delete(id);
       this.frozenConversationSnapshots.delete(id);
+      // What the agent's run read goes with its record (security/conversation-exposure.ts).
+      clearExposure(`agent:${id}`);
     }
   }
 
@@ -702,8 +707,10 @@ export class AgentManager {
       if (triggerTurn) this.spawnTurns.set(record, triggerTurn);
       // An agent a turn on someone else's input started acts on that input too (security/turn-input-party.ts).
       const spawnParty = turnInputParty();
-      if (spawnParty.party === 'other') this.otherPartySpawns.set(record, spawnParty.who);
-      else this.ownerPartySpawns.add(record);
+      if (spawnParty.party === 'other') {
+        this.otherPartySpawns.set(record, spawnParty.who);
+        if (spawnParty.madeFor) this.otherPartyMakers.set(record, spawnParty.madeFor);
+      } else this.ownerPartySpawns.add(record);
       this.pruneTerminalRecords();
       this.agents.set(id, record);
       return this.reserveExecution(id);
@@ -973,7 +980,7 @@ export class AgentManager {
     if (workParty !== undefined) return withInputParty(workParty, turn);
     const otherParty = this.otherPartySpawns.get(record);
     if (otherParty !== undefined) return withOtherPartyInput(otherParty, turn);
-    // Started by the owner's own turn or a run marked his: his. Started where nothing named whose it is: read from its
+    // Started by the owner's own turn or a run marked the owner's: the owner's. Started where nothing named whose it is: read from its
     // own turn, which names no owner's input (security/turn-input-party.ts: someone else's).
     return this.ownerPartySpawns.has(record) ? withInputParty({ party: 'owner' }, turn) : turn();
   }
@@ -1029,6 +1036,16 @@ export class AgentManager {
 
   getStatus(id: string): AgentRecord | null {
     return this.agents.get(id) ?? null;
+  }
+
+  /**
+   * The caller an agent was started for when that was not the owner (its turn's `madeFor`, security/turn-input-party.ts):
+   * a paired device's, a member's or the outside agent's own task. Undefined for the owner's and for one nobody recorded.
+   * The one reach rule reads it (daemon/record-owners.ts): such a caller stops or retries only its own.
+   */
+  madeByOf(id: string): string | undefined {
+    const record = this.agents.get(id);
+    return record ? this.otherPartyMakers.get(record) : undefined;
   }
 
   cancel(id: string, kind: 'interrupt' | 'kill' = 'kill'): boolean {
@@ -1269,6 +1286,7 @@ export class AgentManager {
    * records (loading a saved session) refuses first while {@link listActive} is not empty.
    */
   clear(): void {
+    for (const id of this.agents.keys()) clearExposure(`agent:${id}`);
     this.agents.clear();
     this.executionBoundaries.clear();
     this.restoredContractUnits.clear();

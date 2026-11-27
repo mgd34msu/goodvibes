@@ -96,7 +96,7 @@ function PermissionModeFact({ sessionId, daemonWide = false }: { sessionId: stri
       setSheetOpen(false);
       await queryClient.invalidateQueries({ queryKey: queryKeys.sessionPermissionMode(sessionId) });
     },
-    // A looser mode put to the owner waits for his approval (OwnerApprovalNotices says so); the mode shown stays the one in force.
+    // A looser mode put to the owner waits for their approval (OwnerApprovalNotices says so); the mode shown stays the one in force.
     onError: (error: unknown) => {
       if (error instanceof OwnerApprovalPendingError) setSheetOpen(false);
     },

@@ -209,7 +209,7 @@ export interface AgentTurnEnvironment {
   readonly configManager?: ConfigManager | undefined;
   /**
    * The knowledge a turn there is given before its first request, as a terminal conversation's turn is given it: the
-   * owner's memory for this project and his own (never another project's), and the project's code context when the
+   * owner's memory for this project and their own (never another project's), and the project's code context when the
    * code index is on. Null when passive knowledge is off or nothing cleared the relevance floor.
    */
   knowledge(input: AgentTurnKnowledgeInput): Promise<AgentTurnKnowledge | null>;
@@ -781,7 +781,7 @@ export class AgentOrchestrator {
 
   /**
    * One turn's knowledge in `cwd`, the same selection a terminal conversation's turn makes (core/orchestrator-turn-loop.ts):
-   * the owner's memory for that project and his own, ranked against the turn's message and the conversation, within
+   * the owner's memory for that project and their own, ranked against the turn's message and the conversation, within
    * the passive-injection budget and relevance floor; the project's code context when the code index and its flag are
    * on. Null when passive knowledge is off, there is no memory, or nothing cleared the floor.
    */

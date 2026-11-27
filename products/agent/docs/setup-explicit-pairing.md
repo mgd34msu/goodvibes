@@ -13,104 +13,45 @@ for an Agent on another machine (attribution and revocation per device).
 
 The selected host is the daemon on this machine, or the origin stated in
 `daemon.connectedHost.url` (for one run, `--runtime-url`). A host on another
-machine must be stated with its scheme, `https://` or `http://`: when
-`controlPlane.host` names another machine and no origin is stated, preview
-refuses and sends nothing, because the migration request and the minted
-credential would otherwise cross the network unencrypted on a guess. This
-machine's daemon token is never sent to another machine, by preview, by
-`--apply` or by the repeat of an unresolved attempt, and that includes
+machine must be stated with its scheme, `https://` or `http://`. This machine's
+daemon token is never sent to another machine, and that includes
 `GOODVIBES_DAEMON_TOKEN`; the environment credential sent there is
 `GOODVIBES_CONNECTED_HOST_TOKEN`.
 
-`goodvibes-agent setup pair` previews migration of the selected host's existing
-legacy shared operator credential into a named per-device Agent credential.
-`--name <name>` selects the device label (default `GoodVibes Agent`). Preview is
-read-only. It displays the exact host, label, administrative scope and current
-environment-override posture.
+The owner pairs this Agent as their own device with a sign-in code they start
+in person, where they are signed in as themselves: in that daemon's web UI (or
+their terminal app on that machine), Devices and network, Pair something, "Show the
+sign-in code once". Then, in a terminal on this machine:
 
-`goodvibes-agent setup pair --apply` performs the same fresh preview, then asks
-for an exact one-time phrase on an interactive terminal. `--yes`, scripted stdin
-and JSON apply cannot bypass that prompt. The phrase is bound in memory to the
-host, effective source credential, Agent home, name and observed local pairing
-state. Before mutation, the source must still be verified by `auth.current` as
-an admin legacy shared-token principal with `write:control-plane` or `*`.
-Changed selection, credentials, local state, revocation or cancellation aborts
-before the migration request; when that happens after the attempt marker was
-written, the marker is released, so the next preview starts fresh and sends
-nothing on its own.
+```sh
+goodvibes-agent setup pair --with-code              # type or paste the code when asked
+goodvibes-agent setup pair --name laptop --with-code
+```
 
-Inside the interactive Agent, the owner presses Pair something, "This program
-with its daemon", in the Devices and network place (or "Pair with a host" on
-the Setup tab of System; both run `devices.pair`, and the name is a field of its
-form): it shows the selected host and what pairing allows, then asks for the displayed
-fresh exact phrase in the same step. Every message is in plain words (a "key"
-for the credential; no "principal", "migration" or "remint" on screen); the
-status ids in JSON output are unchanged. The phrase is kept rather than a `y`:
-input typed before the question appears is discarded either way, but a `y`
-pressed by habit once it is shown would answer a yes/no question, while the
-random phrase can only be typed after reading it, for access that lasts until
-it is revoked. Only the owner's own press in the Agent's terminal opens
-that operation; any other caller gets the read-only summary. Model/harness calls,
-including `confirm:true`, nested commands, `--yes` and inline phrases cannot
-create or replace a credential. No confirmation answer enters normal chat,
-input history or model submission. The disclosure and phrase remain in the
-display-only transcript; PageUp/PageDown and the mouse wheel can review them
-without giving up the operation.
+The code is read from the terminal, never from an argument (other processes can
+read those), and the host must confirm it as a device of the owner's; nothing else is
+asked. `--name <name>` is the device label (default `GoodVibes Agent`). Without
+`--with-code` the command prints its one usage line and exits `2`; without an
+interactive terminal it says the code is typed in a terminal and exits `2`;
+Enter alone cancels (`2`). It exits `0` when paired and `1` when the host did
+not take the code (already used, older than 15 minutes, or never one: make a
+new one) or could not be reached; every outcome is one sentence saying what to
+do. Inside the interactive Agent the same is Pair something, "This program with
+its daemon", in the Devices and network place (or "Pair with a host" on the
+Setup tab of System), with the code typed into its field.
 
-The interactive shell owns cancellation from the beginning of preview through
-verification. Escape, Ctrl-C and Ctrl-D cancel even after the answer is submitted;
-terminal EOF/close, SIGTERM and shell exit dispose the operation. A typed slash
-command replaces it and invalidates its old answer and callbacks. Starting a
-new line prompt or modal cancels it; a pending permission/recovery prompt cannot
-consume its confirmation. When another surface takes focus or replaces the
-visible draft, the abandoned pairing line is drained through Enter/Escape
-before that surface can accept an answer. Cancellation suppresses late preview and success
-messages. The durable pairing state remains authoritative: an unknown migration
-outcome remains unknown, and a stored credential survives interrupted verification.
-Press Pair something again, or run `goodvibes-agent setup status`, to settle or reverify it rather
-than starting a new pairing or revoking. Pairing success does not establish provider, workspace,
+When the host's answer to an earlier pairing was lost, the result says so
+(`unknown`): a key made for it was never received, cannot sign in and stops
+working within 15 minutes. `goodvibes-agent setup unpair` forgets that attempt;
+then pair with a new code. When the host no longer accepts the stored device
+credential (revoked there, or the daemon was reset), pairing again says
+`credential-rejected`. `goodvibes-agent setup unpair` (or "forget its daemon
+pairing", `U` on the Paired tab of Devices and network) forgets the stored
+credential for the selected host at any time; nothing is sent to the host, and
+the key stays valid there until it is revoked there. It exits 0 when something
+was forgotten and 1 otherwise. A pairing store that cannot be used names the
+cause, the path and the fix. Pairing does not establish provider, workspace,
 Jev or execution readiness.
-
-Two outcomes are the exception to "remains unknown". When the host answers the
-migration request with a definite refusal (a 4xx other than a timeout or a
-conflict) or is not listening at all, nothing was created: the attempt is
-cleared, the result says `rejected`, and the next preview pairs normally. The
-migration request carries the attempt's id, so an unknown outcome after a lost
-reply is settled by the next pairing (Pair something, or `goodvibes-agent setup pair`):
-it sends the same request again under the same id, and the host answers it with
-the credential that attempt produced (same token id, new secret) while nobody
-has used it, or mints the first one if the earlier request never arrived. The
-result is stored and verified as usual; a second credential is never created.
-If the repeat cannot be made (for a host on another machine with no
-environment token, the result says why), `--apply` offers a `CLEAR ...` phrase that
-forgets the local marker; a credential the host made for the attempt was never
-received, so it cannot sign in and lapses unused within 15 minutes.
-
-When the host no longer accepts the stored device credential (it was revoked
-there, or the daemon was reset), `setup pair` says `credential-rejected`, and
-`--apply` offers a `FORGET ...` phrase that removes the stored credential so
-this Agent can pair again. `goodvibes-agent setup unpair` (or "forget its daemon pairing", `U` on the
-Paired tab of Devices and network, pressed by the owner) forgets the stored credential for the selected host at any
-time; nothing is sent to the host, and the token stays valid there until you
-revoke it. It exits 0 when a credential was forgotten and 1 otherwise. A
-pairing store that cannot be used names the cause, the path and the fix.
-
-In the standalone command, Enter or an incorrect phrase cancels with exit code 2.
-From the confirmation
-prompt onward, Ctrl-C and terminal EOF (Ctrl-D) interrupt with exit code 130,
-including while awaiting a request or verification reply. Process SIGINT and
-SIGTERM also interrupt the earlier preview with exit code 130. Before the
-migration request there is no new credential. Once a request may have reached
-the daemon, interruption preserves the durable unknown-outcome marker; after
-the returned secret is stored, interruption preserves that secret for a fresh
-`setup status` check. Closing the command's own terminal reader after successful
-completion does not turn success into cancellation.
-
-The action creates persistent **administrative operator access**. It is not a
-restricted read-only or ledger-only token. The current daemon migration method
-uses its migration-specific mint path, does not revoke the shared token, and
-does not replace a same-name record at the ordinary new-device cap. Agent calls
-only `pairing.tokens.migrate`, never `create`, `delete` or `revokeShared`.
 
 ## Storage and uncertain outcomes
 
@@ -123,12 +64,10 @@ changed. Secret values and remote/parser errors are never returned by the
 pairing command or preview.
 
 A cross-process-locked, durable unknown-outcome marker is written before the
-single migration request. The request has no automatic retry and rejects
-redirects. A lost, rejected, malformed, overlarge or interrupted response leaves
-that marker in place, including after a process restart. It blocks automatic
-reminting. The host's token list may need operator review; the server does not
-provide idempotent recovery of the one-time secret. This increment deliberately
-provides no implicit reset/revoke/replace operation.
+single pairing request. The request has no automatic retry and rejects
+redirects. A lost, malformed, overlarge or interrupted response leaves that
+marker in place, including after a process restart, until `setup unpair`
+forgets it.
 
 A valid returned secret is durably saved before live verification. This avoids
 losing the only copy when verification is interrupted. The final check verifies

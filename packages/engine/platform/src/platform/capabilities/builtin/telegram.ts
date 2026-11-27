@@ -1,11 +1,11 @@
 /**
  * Delegated Telegram intake: a chat whose messages wait for the owner instead
- * of being answered, and the review queue of the messages he accepted. Kept by
+ * of being answered, and the review queue of the messages the owner accepted. Kept by
  * the daemon (the chat selection and the review records under its project
  * store; the originals in its memory until their deadline). Every capability
  * here is one `inbound.telegram.*` method, called as the same caller, so the
  * method's own paired-owner authority decides who may act; the capability
- * adds what a person gives in words: a message by the short id he was shown,
+ * adds what a person gives in words: a message by the short id they were shown,
  * a chat by its id, a time as 90s, 30m, 2h or 7d.
  */
 import { CapabilityRefusal, type CapabilityCaller, type CapabilityDefinition, type CapabilityResult, type InputDescription, type ListName } from '../types.js';

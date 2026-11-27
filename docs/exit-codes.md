@@ -10,7 +10,7 @@ and never branch on a code without knowing which program produced it.
 | `0` | Completed, or admitted work was recorded. | The contract passed, or the command did what it says. `reply` follows the contract it answered, so its code is the contract's; `reply --no-follow` exits `0` once the reply is read. | The command did what it says. | Installed, and the daemon and web UI run as asked (`Done.`). |
 | `1` | Failed: model or provider error, empty response, `--max-turns` reached, a turn refused before it started (a failed preflight check, or a conversation too large for the model's context window), or the host unavailable, blocked or refused the input. | Failed, was refused, or was cancelled. | It ran and failed; the reason is printed, or with `--json` one `{ok:false, code, error, fix}` document is printed on stdout. | Failed or refused with an `INSTALL_E<n>` code; the previous programs were put back when any had been replaced. |
 | `2` | Invalid input: bad usage, a missing prompt, or a prompt given with a recovery flag. Bad usage prints the error and the command's one usage line; with `--output json` or `stream-json`, the run's final frame (`stopReason` `invalid-input`) on stdout instead. | Waiting on the owner with no terminal to ask on: answer with `goodvibes-contract reply <id> "<text>"`. | The command line was wrong: unknown command or flag, a flag this command does not take, a missing value. It prints the error and the command's one usage line; with `--json`, a `{ok:false, code, error, fix}` document (`code` `PARSE_ERROR` or `COMMAND_REFUSED`) on stdout instead. | not used |
-| `3` | Outcome unknown (`turn-unsettled`): the turn ended without a final event. For admitted native input, the input may have taken effect: run `run --intake-status` before retrying. | not used | Service commands: installed but not running (`service-status`; `install-service`, `start-service` and `restart-service` when the service is not running afterwards). `do` and `pair`: waiting for the owner in Waiting for you (below). | Installed, but another copy earlier on `PATH` still answers a command name. |
+| `3` | Outcome unknown (`turn-unsettled`): the turn ended without a final event. For admitted native input, the input may have taken effect: run `run --intake-status` before retrying. | not used | Service commands: installed but not running (`service-status`; `install-service`, `start-service` and `restart-service` when the service is not running afterwards). | Installed, but another copy earlier on `PATH` still answers a command name. |
 | `4` | not used | not used | Service commands: not installed. | Installed, but the daemon or the web UI is not running as asked (a service not set up or not running, a failed restart, an unconfigured web UI, an unsaved `--no-service`); `Installed, with the problems above.` |
 | `5` | not used | not used | `install-service`, `refresh-service`, `uninstall-service`: the definition at the service's path was not written by GoodVibes; nothing was changed. | not used |
 | `64` | not used | Usage error. | not used | not used |
@@ -23,7 +23,7 @@ The same number, different meaning:
 
 - `2` is a usage error for `run` and the daemon, but "the owner has to answer"
   for `goodvibes-contract`, which reports usage as `64`.
-- `3` is "the outcome is unknown" for `run`, "waiting for the owner" for `do`, "not running" for
+- `3` is "the outcome is unknown" for `run`, "not running" for
   `goodvibes-daemon service-status`, `install-service`, `start-service` and `restart-service`, and "installed but shadowed on `PATH`" for `install.sh`.
 - `4` is "not installed" for `goodvibes-daemon service-status` and "installed,
   with problems" for `install.sh`.
@@ -32,31 +32,26 @@ The same number, different meaning:
 
 `do` and `find` (`goodvibes`, `goodvibes-agent`, `goodvibes-daemon`) run and find a GoodVibes capability through the
 daemon: `0` it was done (or found), `1` it was refused or failed (a capability that acts on a conversation is refused
-in one line, since it needs the terminal app or the Agent), `2` the command line was wrong, `3` it waits for the owner
-and nothing ran yet. A `do` waits for the owner in Waiting for you when it weakens a protection (installing something
-that runs by itself included, such as a file named by path that a program runs by itself later), cannot be undone,
-spends money, writes a secret or is the owner's own act, whoever typed it and wherever: a command line never carries a
-person's word, and nothing is asked at the terminal. It also waits when the owner's mode put any other change to him
-(a command line is never a person's press, whatever its terminal or environment). Only a read runs at once.
-The line says it is waiting, where to answer it (Waiting for you, in the terminal app or the Agent, the web UI, or a
-paired phone), the approval's id and how to read what came of it, `<program> do <approval id>`, which exits `3` again
-while he has not answered, `0` once it ran and `1` when he said no. With `--output json` (`--json` for the daemon) the
-answer, the waiting answer (`code` `OWNER_APPROVAL_PENDING`, `approvalId`, `answerIn`), or the `{ok:false, code, error, fix}`
-refusal, is one document on stdout; without it the waiting line (exit `3`) is printed on stdout and a refusal or failure
-(exit `1`) on stderr, the same in all three programs. A refusal's code is the capability's own (`NOT_FOUND`, `INVALID_ARGUMENT`,
-`UNAVAILABLE`, ...); the exit code is `1` for every refusal, whatever its HTTP status.
+in one line, since it needs the terminal app or the Agent), `2` the command line was wrong. A `do` that weakens a
+protection (installing something that runs by itself included, such as a file named by path that a program runs by
+itself later), cannot be undone, spends money, writes a secret or is the owner's own act is decided by the daemon under
+the owner's permission mode, whoever typed it and wherever: a command line never carries a person's word, and nothing
+is asked at the terminal. YOLO runs it, Just vibes holds it, and under Ask me and Jev decides the owner's one approval card asks it and
+the `do` waits on that answer (`0` once it ran, `1` on the owner's No). Only a read runs at once. With `--output json` (`--json`
+for the daemon) the answer or the `{ok:false, code, error, fix}` refusal is one document on stdout; without it a refusal
+or failure (exit `1`) is printed on stderr, the same in all three programs. A refusal's code is the capability's own
+(`NOT_FOUND`, `INVALID_ARGUMENT`, `UNAVAILABLE`, `CAPABILITY_NOT_APPROVED`, ...); the exit code is `1` for every
+refusal, whatever its HTTP status.
 
-`goodvibes-daemon pair` exits `3` the same way when the pairing code it asks for waits for the owner: making one gives a
-new device access, the owner's own act, and a command line never makes it by itself. It prints that it waits, why,
-where to answer it, the approval's id, and how to read the code once he has answered yes:
-`goodvibes-daemon do <approval id> --json` (its `fragment` and `deepLink`); with `--json`, one document
-(`code` `OWNER_APPROVAL_PENDING`, `approvalId`, `why`, `answerIn`, `fix`). A command line's call is always a script's to
-the daemon: its person's word counts only from the terminal app or the Agent, registered with the daemon.
+`goodvibes-daemon pair` (and `goodvibes pair`, `goodvibes-agent pair`), in a terminal, asks once when the daemon is
+reachable only from this computer: "Phones on your network cannot reach GoodVibes yet. Serve it to your network?
+[y/N]"; Enter or `n` changes nothing and exits `0` with the link for this computer. `goodvibes-daemon pair --lan` and a
+mint on another daemon (`--host`) print their plan and exit `0` without `-y`, changing nothing.
 
 Branching rules that hold for every program:
 
 - `0` means the requested effect happened. Anything else means it did not, or
-  (`run` exit `3`) that it is not known, or (`do` exit `3`) that it waits for the owner.
+  (`run` exit `3`) that it is not known.
 - Do not retry on `3` from `run`; inspect first.
 - Standard 128+signal codes are not used except `130`, and `129` and `143` from `install.sh`.
 - `goodvibes-agent doctor` exits `1` for a must-fix (`risk`) finding and `0` otherwise; `--strict` makes any finding exit `1`.
@@ -83,7 +78,7 @@ Branching rules that hold for every program:
 | `session-open-elsewhere` | `1` | `--resume`, `--continue` or `--session` named a session another running copy has open; nothing was sent. Close it there and run again, or run without the flag. `refusal` says which session. |
 | `session-not-found` | `1` | `--resume <id>` or `--session <id>` named a session that does not exist, or `--continue`/`--resume` found none to continue; nothing was sent and no input was recorded. `refusal` says which. |
 | `invalid-input` | `2` | Fix the command line. |
-| `native-blocked`, `native-refused` | `1` | The host recorded the input and blocked or refused it; it will not run. |
+| `native-blocked`, `native-refused` | `1` | The host recorded the input and blocked or refused it; it will not run. A refusal because the decision model could not answer while "When the decision model is missing or fails" (`judgment.policy`) is Decision Model Only says so in `response`, naming that setting; nothing ran. |
 | `native-cancelled` | `130` | The recorded input was cancelled. |
 | `native-work` | `0` when the work's execution is reported, otherwise `3` | The input became work on the host. Without an execution report its outcome is not known yet: run `run --intake-status`. |
 | `native-turn` | `3` | The input was recorded as a turn on the host, which this run does not follow to its end: run `run --intake-status` for the outcome. |

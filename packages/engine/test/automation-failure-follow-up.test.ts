@@ -1,4 +1,4 @@
-// Proves: A scheduled job the owner removed comes back, or one he disabled runs again, because the follow-up of a failed run writes the copy of the job it took before the owner's change.
+// Proves: A scheduled job the owner removed comes back, or one they disabled runs again, because the follow-up of a failed run writes the copy of the job it took before the owner's change.
 // Red when: The failure follow-up applies its cooldown to the job as the failed run saw it instead of the job as it stands, so the removed job is put back and the disabled one enabled.
 /**
  * A run that fails to start is followed up after its failure is read: the
@@ -63,7 +63,7 @@ test('a job removed or disabled while its failed run is being read stays removed
   const removed = await manager.createJob({ name: 'backup', prompt: 'Back up the photos.', schedule: hourly, enabled: true, failure: cooldown });
   const disabled = await manager.createJob({ name: 'digest', prompt: 'Send the news digest.', schedule: hourly, enabled: true, failure: cooldown });
 
-  /** Run the job; while its failure is being read, the owner makes his change; then the reading ends. */
+  /** Run the job; while its failure is being read, the owner makes their change; then the reading ends. */
   const failWhile = async (jobId: string, change: () => Promise<unknown>) => {
     const reading = new Promise<void>((resolve) => { reached = resolve; });
     const run = manager.runNow(jobId).then(() => 'started', () => 'failed');

@@ -8,14 +8,14 @@
  * | chat | companion chat manager | the chat's project | its `createdBy` |
  * | session | session broker (a web chat's session read as the chat) | the record's `project` (`unknown`: none) | who registered it |
  * | approval | approval broker | the question's `workingDirectory` | |
- * | schedule | automation manager | the job's `execution.workingDirectory` | |
- * | schedule-run | automation manager | its schedule's | |
- * | trigger | trigger manager | the definition's `workingDirectory` | |
+ * | schedule | automation manager | the job's `execution.workingDirectory` | its `cause.madeFor` (someone else's) |
+ * | schedule-run | automation manager | its schedule's | its schedule's |
+ * | trigger | trigger manager | the definition's `workingDirectory` | its `cause.madeFor` (someone else's) |
  * | rule | user rule store | the rule's `project` (none: applies everywhere) | |
  * | memory-record | memory registry | a "this project" record's `project` (any other: none) | |
  * | checkpoint | the checkpoint verbs' surface (registered by products/daemon service-graph.ts, where it is built) | the workspace of the store that holds it (the daemon's own: none) | |
  * | memory-proposal | memory registry's proposals | the one project its records are of (several: the owner's only) | |
- * | task | agent manager | the agent's `workingDirectory` (a runtime task row: its agent's) | |
+ * | task | agent manager | the agent's `workingDirectory` (a runtime task row: its agent's) | the caller it was started for (`madeByOf`) |
  * | batch-job | batch manager (facade-composition.ts) | none | its `createdBy` |
  * | route-binding, remote-work | route bindings, remote work (facade-composition.ts) | the first record they name | |
  * | artifact | artifact store | a daemon turn's file: its chat's (`metadata.project`); else none | its `metadata.createdBy` (a turn's file: the chat's maker) |
@@ -31,19 +31,19 @@ export interface RecordOwnerStores {
   readonly sessionSharedWith?: ((id: string) => readonly string[]) | undefined;
   readonly approvals?: { getApproval(id: string): { readonly request: { readonly workingDirectory?: string | undefined } } | null } | undefined;
   readonly schedules?: {
-    getJob(id: string): { readonly execution?: { readonly workingDirectory?: string | undefined } | undefined } | undefined;
+    getJob(id: string): { readonly execution?: { readonly workingDirectory?: string | undefined } | undefined; readonly cause?: { readonly madeFor?: string | undefined } | undefined } | undefined;
     getRun(id: string): { readonly jobId: string } | undefined;
   } | undefined;
   readonly triggers?: {
-    get(id: string): { readonly definition: { readonly workingDirectory?: string | undefined } } | null;
+    get(id: string): { readonly definition: { readonly workingDirectory?: string | undefined; readonly cause?: { readonly madeFor?: string | undefined } | undefined } } | null;
     resolveName?(name: string, project?: string | undefined): string;
   } | undefined;
   readonly rules?: { list(): readonly { readonly rule: { readonly id: string }; readonly project?: string | undefined }[] } | undefined;
   readonly memory?: {
-    get(id: string): { readonly scope: string; readonly project?: string | undefined } | null;
+    get(id: string): { readonly scope: string; readonly project?: string | undefined; readonly author?: { readonly kind: string; readonly madeBy?: string | undefined } | undefined } | null;
     listConsolidationProposals?(): readonly { readonly id?: string | undefined; readonly ids: readonly string[] }[];
   } | undefined;
-  readonly tasks?: { getStatus(id: string): { readonly workingDirectory?: string | undefined } | null } | undefined;
+  readonly tasks?: { getStatus(id: string): { readonly id?: string | undefined; readonly workingDirectory?: string | undefined } | null; madeByOf?(id: string): string | undefined } | undefined;
   /** A runtime task row's owner (the agent it tracks, runtime/tasks/adapters/agent-adapter.ts): a task listed by `tasks.list`. */
   readonly runtimeTaskOwner?: ((taskId: string) => string | undefined) | undefined;
   readonly artifacts?: { get(id: string): { readonly metadata?: Record<string, unknown> | undefined } | null } | undefined;
@@ -75,7 +75,8 @@ export function registerRecordOwners(catalog: Pick<GatewayMethodCatalog, 'setRec
   });
   const schedule = (id: string): RecordOwner | undefined => {
     const job = stores.schedules?.getJob(id);
-    return job ? { project: folder(job.execution?.workingDirectory) } : undefined;
+    // Whose it is when someone else caused it (automation/jobs.ts `cause.madeFor`); none kept is the owner's.
+    return job ? { project: folder(job.execution?.workingDirectory), ...(job.cause?.madeFor ? { madeBy: job.cause.madeFor } : {}) } : undefined;
   };
   catalog.setRecordOwner('schedule', schedule);
   catalog.setRecordOwner('schedule-run', (id) => {
@@ -85,7 +86,9 @@ export function registerRecordOwners(catalog: Pick<GatewayMethodCatalog, 'setRec
   catalog.setRecordOwner('trigger', (id, where) => {
     // A name typed in a project is that project's trigger of the name its people chose (TriggerManager resolveName).
     const trigger = stores.triggers?.get(stores.triggers.resolveName?.(id, where?.project) ?? id);
-    return trigger ? { project: folder(trigger.definition.workingDirectory) } : undefined;
+    // Whose it is when someone else made it (triggers/types.ts `cause.madeFor`); none kept is the owner's.
+    const madeBy = trigger?.definition.cause?.madeFor;
+    return trigger ? { project: folder(trigger.definition.workingDirectory), ...(madeBy ? { madeBy } : {}) } : undefined;
   });
   catalog.setRecordOwner('rule', (id) => {
     const rule = stores.rules?.list().find((entry) => entry.rule.id === id);
@@ -93,7 +96,9 @@ export function registerRecordOwners(catalog: Pick<GatewayMethodCatalog, 'setRec
   });
   catalog.setRecordOwner('memory-record', (id) => {
     const record = stores.memory?.get(id);
-    return record ? { project: record.scope === 'project' ? folder(record.project) : null } : undefined;
+    // Whose it is when someone else wrote it (state/memory-author.ts `madeBy`, the authenticated principal); none kept is the owner's.
+    const madeBy = record?.author?.kind === 'other' ? record.author.madeBy : undefined;
+    return record ? { project: record.scope === 'project' ? folder(record.project) : null, ...(madeBy ? { madeBy } : {}) } : undefined;
   });
   // A consolidation proposal is of the records it names: one project's (or shared, every one shared); records of two
   // projects make it the owner's alone.
@@ -114,7 +119,11 @@ export function registerRecordOwners(catalog: Pick<GatewayMethodCatalog, 'setRec
       const owner = stores.runtimeTaskOwner?.(id);
       return owner && owner !== id ? stores.tasks?.getStatus(owner) ?? null : null;
     })();
-    return agent ? { project: folder(agent.workingDirectory) } : undefined;
+    if (!agent) return undefined;
+    // Whose task it is when someone else's call started it (the agent manager's `madeByOf`).
+    const agentId = stores.tasks?.getStatus(id) ? id : stores.runtimeTaskOwner?.(id);
+    const madeBy = agentId ? stores.tasks?.madeByOf?.(agentId) : undefined;
+    return { project: folder(agent.workingDirectory), ...(madeBy ? { madeBy } : {}) };
   });
   catalog.setRecordOwner('artifact', (id) => {
     const artifact = stores.artifacts?.get(id);

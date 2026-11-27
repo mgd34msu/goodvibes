@@ -20,7 +20,6 @@ import { randomUUID } from 'node:crypto';
 import { existsSync } from 'node:fs';
 import { basename } from 'node:path';
 import { logger } from '../utils/logger.js';
-import { outsideEveryCall } from '../utils/outside-every-call.js';
 import { readDocument, writeDocument } from '../utils/atomic-json-store.js';
 import { defineLifecycle } from '../utils/lifecycle-machine.js';
 import { summarizeError } from '../utils/error-display.js';
@@ -108,7 +107,7 @@ export interface WorkProposalRecord {
    */
   readonly starting?: boolean | undefined;
   /**
-   * The direction the owner added to his "yes" (an accepted proposal only),
+   * The direction the owner added to their "yes" (an accepted proposal only),
    * saved with the answer so work started later (after a restart) still carries it.
    */
   readonly agreedNote?: string | undefined;
@@ -359,12 +358,11 @@ export class WorkProposalStore {
     if (!this.sweepEnabled || this.sweepTimer || this.proposals.size === 0) return;
     // Resolved records are retained until expiry too. Stopping when only
     // resolved records remain would leave them in an idle store indefinitely.
-    // Armed by the request that made the first proposal: in the process's own context (utils/outside-every-call.ts).
-    this.sweepTimer = outsideEveryCall(() => setInterval(() => {
+    this.sweepTimer = setInterval(() => {
       const summary = this.reap();
       if (summary.total > 0) void this.persist();
       if (this.proposals.size === 0) this.clearSweep();
-    }, this.sweepInterval));
+    }, this.sweepInterval);
     this.sweepTimer.unref?.();
   }
 
@@ -515,7 +513,7 @@ export class WorkProposalStore {
     this.reap();
     const record = this.proposals.get(id);
     if (!record || !record.delivered || !workProposalLifecycle.can(record.status, outcome)) return null;
-    // The owner's added direction is saved in the same write as his "yes".
+    // The owner's added direction is saved in the same write as their "yes".
     const resolved: WorkProposalRecord = { ...record, status: outcome, ...(outcome === 'accepted' && note?.trim() ? { agreedNote: note.trim() } : {}) };
     // Taken at once, so a racing second answer finds it answered; acted on only
     // once saved: an answer whose save failed is given back and throws, so the

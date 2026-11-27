@@ -42,7 +42,12 @@ export interface RegisteredWorkspaceFacts {
   readonly by: 'agent' | 'tui' | 'chat' | 'other';
   /** The Agent's automatic checkpoints are on there. */
   readonly checkpoints: boolean;
+  /** Its folder cannot be reached now (the folder that held it is missing too: a disk not mounted, a parent renamed); nothing of it is lost. */
+  readonly unreachable: boolean;
 }
+
+/** The words a list shows beside a project whose folder cannot be reached now. */
+export const NOT_REACHABLE_NOW = 'not reachable now';
 
 /** The register's rows, read defensively: the answer is data from another process. */
 export function registeredWorkspaces(answer: unknown): readonly RegisteredWorkspaceFacts[] {
@@ -56,6 +61,7 @@ export function registeredWorkspaces(answer: unknown): readonly RegisteredWorksp
       registeredAt: text(row.registeredAt),
       by: origin.startsWith('agent') ? 'agent' : origin === 'tui' ? 'tui' : origin === 'automatic-project' ? 'chat' : 'other',
       checkpoints: row.checkpointEligible === true,
+      unreachable: row.reachable === false,
     };
   });
 }
@@ -81,7 +87,7 @@ export const WORKSPACES_LIST: CapabilityDefinition<WorkspacesCapabilityServices>
     return {
       text: [
         `Registered workspaces (${workspaces.length})`,
-        ...workspaces.map((workspace) => `  ${workspace.root}${workspace.label ? ` (${workspace.label})` : ''}${workspace.checkpoints ? ', automatic checkpoints on' : ''}`),
+        ...workspaces.map((workspace) => `  ${workspace.root}${workspace.label ? ` (${workspace.label})` : ''}${workspace.checkpoints ? ', automatic checkpoints on' : ''}${workspace.unreachable ? `, ${NOT_REACHABLE_NOW}` : ''}`),
       ].join('\n'),
       data: { workspaces },
     };

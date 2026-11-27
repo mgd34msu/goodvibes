@@ -99,6 +99,10 @@ import { registerSecureAddressGatewayMethods } from '../../platform/src/platform
 import { registerVoiceSetupGatewayMethods } from '../../platform/src/platform/control-plane/routes/voice-setup.js';
 import { registerWorkspacesGatewayMethods } from '../../platform/src/platform/control-plane/routes/workspaces.js';
 import { registerWorktreeSetupGatewayMethods } from '../../platform/src/platform/control-plane/routes/worktree-setup.js';
+import { registerContextWindowLearnedGatewayMethods } from '../../platform/src/platform/control-plane/routes/context-windows-learned.js';
+import { registerHookTraceGatewayMethods } from '../../platform/src/platform/control-plane/routes/hook-trace.js';
+import { registerPolicyAuditGatewayMethods } from '../../platform/src/platform/control-plane/routes/policy-audit.js';
+import { registerWorkGatewayMethods } from '../../platform/src/platform/control-plane/routes/work.js';
 
 /**
  * A stand-in for whatever service/deps a route group is handed.
@@ -214,6 +218,10 @@ const ROUTE_REGISTRARS: ReadonlyArray<readonly [string, (catalog: GatewayMethodC
   ['work-ledger', (catalog) => registerWorkLedgerGatewayMethods(catalog, { projectId: 'probe', async readSnapshot() { return { projectId: 'probe', revision: 1, cursor: 1, works: [] }; }, async history() { return []; }, subscribe() { return () => {}; }, dispose() {} })],
   ['workspaces', (catalog) => registerWorkspacesGatewayMethods(catalog, stubDeps())],
   ['worktree-setup', (catalog) => registerWorktreeSetupGatewayMethods(catalog, stubDeps())],
+  ['context-windows-learned', (catalog) => registerContextWindowLearnedGatewayMethods(catalog, stubDeps())],
+  ['hook-trace', (catalog) => registerHookTraceGatewayMethods(catalog, stubDeps())],
+  ['policy-audit', (catalog) => registerPolicyAuditGatewayMethods(catalog, stubDeps())],
+  ['work', (catalog) => registerWorkGatewayMethods(catalog, stubDeps())],
 ];
 
 /**
@@ -223,11 +231,9 @@ const ROUTE_REGISTRARS: ReadonlyArray<readonly [string, (catalog: GatewayMethodC
  * others, and `registerFleetGatewayMethods` / `registerCheckpointGatewayMethods`
  * / `registerContractGatewayMethods` are reached through
  * `registerFleetCheckpointsSearchGatewayMethods`.
- * `registerWorkLedgerImportGatewayMethods` requires a trusted selected host,
- * opaque actor authority and a live authorization callback, and the four
- * native registrars require live paired-token authority, before any of them
- * inspects input: probed with generic stubs as a user principal they would
- * only exercise FORBIDDEN, so they are listed here and not probed.
+ * The four native registrars require live paired-token authority before any
+ * of them inspects input: probed with generic stubs as a user principal they
+ * would only exercise FORBIDDEN, so they are listed here and not probed.
  */
 export const EXPECTED_ROUTE_REGISTRARS: readonly string[] = [
   'registerAcpGatewayMethods',
@@ -289,9 +295,12 @@ export const EXPECTED_ROUTE_REGISTRARS: readonly string[] = [
   'registerUpdateGatewayMethods',
   'registerVoiceSetupGatewayMethods',
   'registerWorkLedgerGatewayMethods',
-  'registerWorkLedgerImportGatewayMethods',
   'registerWorkspacesGatewayMethods',
   'registerWorktreeSetupGatewayMethods',
+  'registerContextWindowLearnedGatewayMethods',
+  'registerHookTraceGatewayMethods',
+  'registerPolicyAuditGatewayMethods',
+  'registerWorkGatewayMethods',
 ];
 
 /**

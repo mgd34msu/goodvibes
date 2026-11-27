@@ -174,8 +174,8 @@ function flagOf(value: unknown): boolean | undefined {
   return word === 'true' ? true : word === 'false' ? false : undefined;
 }
 
-// Payments: spending beyond what the owner set is his decision alone, so any
-// change that lets more be bought without asking him counts as loosening.
+// Payments: spending beyond what the owner set is their decision alone, so any
+// change that lets more be bought without asking them counts as loosening.
 // An unknown previous money limit is read as the shipped 0, the strictest.
 /** A money limit: a higher amount lets more be bought without asking. */
 function raisesLimit(loosening: string): Loosening {
@@ -261,6 +261,22 @@ for (const key of ['judgment.endpoint', 'judgment.model', 'judgment.backend', 'j
 }
 // No decision model chosen, turned off: a decision model (set here or in the environment) decides again.
 declareLoosening('judgment.noDecisionModel', { loosening: 'let a decision model decide for you again', loosens: flagTurnsOff });
+// The project-settable keys (PROJECT_SETTABLE) whose value can take a protection or the owner's money and time from them:
+// each with the direction a repository's file may move it in (only stricter; a looser value there is refused). The rest
+// of `behavior.*` (compaction, warnings, history, guidance, return context, result reconciliation) changes how a session
+// in that project looks and reads, no protection, so it has none.
+declareLoosening('contract.autoCommit', { loosening: 'commit a contract\'s work without you', loosens: flagTurnsOn });
+declareLoosening('contract.commitScope', ranked('commit more of a contract\'s work without you', ['off', 'scoped', 'all']));
+declareLoosening('contract.acceptanceStakes', ranked('count a criterion as met on a weaker reading', ['critical', 'high']));
+declareLoosening('contract.midRunChecks', { loosening: 'stop checking a contract\'s work as it goes', loosens: flagTurnsOff });
+declareLoosening('contract.isolation', ranked('run contract work outside its own worktree', ['worktree', 'auto', 'shared']));
+for (const key of ['contract.maxNudgesPerUnit', 'contract.maxFixRounds', 'contract.planRepairLimit', 'contract.maxUnits', 'contract.judgmentCallBudget',
+  'contract.defaultAttempts', 'contract.maxActiveContracts', 'contract.maxParallelUnits', 'contract.transportRetryLimit',
+  'contract.nudgeTtlMs', 'contract.evidenceNudgeLimit', 'contract.stallLimit']) {
+  declareLoosening(key, raisesLimit('let contract work spend more of your models\' time and money'));
+}
+declareLoosening('behavior.budgetAlertUsd', { loosening: 'warn you later about what a conversation spends', loosens: raisesBudget });
+declareLoosening('behavior.hitlMode', ranked('tell you less', ['operator', 'balanced', 'quiet', 'off']));
 // Safety-gate and protection keys whose values say which way a change goes (each strict value is the closed posture
 // of settings-ingestion.ts `closedPostureOf`, or the schema row's own words): only a move away from the strict end
 // loosens, so a move toward it (secrets only in secure storage, MCP servers contained) is never held back or put to

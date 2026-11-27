@@ -217,7 +217,7 @@ async function handlePluginTrustCli(runtime: CliCommandRuntime, args: readonly s
     stateFilePath,
     trustFilePath: join(goodvibesHome, 'plugin-trust.json'),
   });
-  // The publisher keys saved with /plugin trust-key, read without loading (or rewriting) that app's state.
+  // The publisher keys saved as trusted publisher keys (Tools and extensions, Plugins), read without loading (or rewriting) that app's state.
   const savedKey = (name: string): string | undefined => {
     try {
       const keys = (JSON.parse(readFileSync(stateFilePath, 'utf-8')) as { publisherKeys?: Record<string, unknown> }).publisherKeys;

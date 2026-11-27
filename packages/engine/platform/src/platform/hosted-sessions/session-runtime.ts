@@ -226,11 +226,11 @@ export interface HostedSessionRuntime {
    * what starts a new untrusted-content turn for this session.
    * `answersContractQuestion` (an open escalation id of this session's
    * contracts) sends the message to that contract as the owner's answer.
-   * `ownerTyped`: the daemon established that the owner typed it into his own
+   * `ownerTyped`: the daemon established that the owner typed it into their own
    * program attached to this session (a person's credential, the program's
    * label and a person's claim, checked where the request entered; never the
-   * caller's word). His turn then edits and runs commands in this session's
-   * project under his mode, exactly as a conversation in a terminal there.
+   * caller's word). Their turn then edits and runs commands in this session's
+   * project under their mode, exactly as a conversation in a terminal there.
    */
   submit(text: string, correlationId?: string, options?: HostedSubmitOptions): Promise<void>;
   /**
@@ -392,7 +392,7 @@ export function createHostedSessionRuntime(options: HostedSessionRuntimeOptions)
     // A model changing a hook is always put to the owner, whatever the mode or earlier answers.
     hookDispatcher: services.hookDispatcher,
     hookChangeGate: (request, { signal }) => services.permissionManager.checkHookChange(request, { signal }),
-    // A delegation nothing the owner said settles, and the decision model could not read, is put to him in the ordinary approval prompt.
+    // A delegation nothing the owner said settles, and the decision model could not read, is put to the owner in the ordinary approval prompt.
     delegationAsk: (question, { signal }) => services.permissionManager.askDelegation(question, { signal }),
     contractRunner: options.floor.contractRunner,
     projectRoot: options.workspaceRoot,
@@ -497,7 +497,7 @@ export function createHostedSessionRuntime(options: HostedSessionRuntimeOptions)
     contractHooks: options.floor.contractRunner.hooks(),
     // Tasks another session handed to this one are said at the start of each turn until accepted.
     sessionOrchestration: services.sessionOrchestration,
-    // The owner's memory for this project and his own, and the project's code context while its index is kept, given
+    // The owner's memory for this project and their own, and the project's code context while its index is kept, given
     // to each turn as the host's other turns in the project are given them.
     ...(options.floor.hostTools?.memoryRegistry ? { memoryRegistry: options.floor.hostTools.memoryRegistry } : {}),
     ...(projectCode ? { codeIndex: projectCode.source, isCodeInjectionSettingEnabled: () => true } : {}),
@@ -606,9 +606,9 @@ export function createHostedSessionRuntime(options: HostedSessionRuntimeOptions)
     submit: async (text: string, correlationId?: string, submitOptions?: HostedSubmitOptions): Promise<void> => {
       if (disposed) throw new HostedSessionUnavailableError(sessionId, 'its loop was shut down before this message was delivered');
       // `ownerDirect` decides the gate's surface authority, so it is set only
-      // when the daemon established that the owner typed this into his own
+      // when the daemon established that the owner typed this into their own
       // program attached to the session (`ownerTyped`, operator input only):
-      // then the turn is his at work in this session's project, like his own
+      // then the turn is theirs at work in this session's project, like their own
       // terminal conversation there. Any other verb call carrying an operator
       // token stays a service-surface instruction. The window is this
       // session's own, and an operator's input starts its next turn here. Only

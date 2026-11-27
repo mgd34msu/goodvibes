@@ -3,14 +3,13 @@
  * with a call its gate wants the owner to decide.
  *
  * The run cannot have it answered (no person, no `--answer-permissions`
- * script), so the question is not the run's: it is the owner's, in his shared
+ * script), so the question is not the run's: it is the owner's, in their shared
  * list. A `capability_run` call of a capability the daemon runs is handed to
  * the daemon as the call it is (`capabilities.run`, with this program's own
  * credential and no claim that a person asked): the daemon's gate decides it
- * once under the owner's mode, puts it to him in Waiting for you worded as
- * the capability (its label, its sentence, each input on a labelled line, a
- * secret hidden), and runs it when he approves it. The run's frame says the
- * call is held for him and where. Nothing is raised a second time anywhere.
+ * once under the owner's mode (under Ask me it raises the one approval card,
+ * worded as the capability, and this call waits on their answer) and runs it
+ * there when allowed. Nothing is raised a second time anywhere.
  *
  * Any other call (a command, a file write, a capability of the conversation)
  * can only run inside this run, which ends without it: it is held for the
@@ -30,19 +29,11 @@ function record(value: unknown): Record<string, unknown> {
 
 const held = (reason: string): PermissionPromptDecision => ({ approved: false, remember: false, heldForOwner: true, reason });
 
-/** A call this run held for the owner through the daemon: the approval it waits as (`id`), the capability, its words. */
-export interface HeldThroughDaemon {
-  readonly id: string;
-  readonly tool: string;
-  readonly summary: string;
-  readonly reason: string;
-}
-
-/** The prompt of a headless run nobody answers: each ask is held for the owner (see the header). */
+/** The prompt of a headless run nobody answers: a daemon capability goes to the daemon's decision (see the header). */
 export function holdForOwnerInHeadlessRun(host: {
   readonly shellPaths: Pick<ShellPathService, 'homeDirectory' | 'workingDirectory'>;
   readonly configManager: ConnectedHostConfigReader;
-}, onHeld?: (call: HeldThroughDaemon) => void): (request: PermissionPromptRequest) => Promise<PermissionPromptDecision> {
+}): (request: PermissionPromptRequest) => Promise<PermissionPromptDecision> {
   return async (request) => {
     if (request.tool !== 'capability_run') return held(NOBODY);
     const id = typeof request.args['id'] === 'string' ? request.args['id'].trim() : '';
@@ -64,14 +55,8 @@ export function holdForOwnerInHeadlessRun(host: {
         body: JSON.stringify({ body: { id, inputs, workingDirectory: host.shellPaths.workingDirectory } }),
       });
       const body = record(await response.json().catch(() => null));
-      if (response.status === 202 && body['code'] === 'OWNER_APPROVAL_PENDING' && typeof body['approvalId'] === 'string') {
-        const reason = `held for you: ${typeof body['state'] === 'string' ? body['state'] : `it waits in Waiting for you as approval ${body['approvalId']}`}. This run goes on without it`;
-        // The run's result names it (heldForOwner), by the approval it waits as.
-        try { onHeld?.({ id: body['approvalId'], tool: id, summary: typeof body['label'] === 'string' ? body['label'] : id, reason }); } catch { /* the hold stands */ }
-        return held(reason);
-      }
       if (response.ok) {
-        // The daemon's gate decided it under the owner's mode without asking him, and ran it there.
+        // The daemon's gate decided it under the owner's mode, and ran it there.
         return held(`not run here: the daemon decided it under your mode and ran it. ${typeof body['text'] === 'string' ? body['text'] : ''}`.trim());
       }
       const said = typeof body['error'] === 'string' ? body['error'] : `the daemon answered ${response.status}`;

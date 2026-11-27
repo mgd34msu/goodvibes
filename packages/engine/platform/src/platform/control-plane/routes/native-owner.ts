@@ -23,14 +23,20 @@ function holds(scopes: readonly string[] | undefined, needed: readonly string[])
  * with `scopes` on the request, and the transport's authority must be the
  * same owner, still current, still holding `scopes`: a paired device, or an
  * app on the daemon's own machine presenting the operator token it already
- * holds (`local`), or the owner himself signed in (his sign-in holds his own
+ * holds (`local`), or the owner in person signed in (their sign-in holds their own
  * machine's authority). The operator token from another machine, a sign-in
  * that is not the owner's or a revoked device gets `PAIRED_OWNER_REQUIRED`
  * with the step that makes it eligible.
+ *
+ * `projectAct`: work in a project (a submission, a run started, read or stopped: effect-authority.ts `work.read`,
+ * `work.write`) is open below an admin too, to a paired device holding `scopes` (the outside agent among them): the
+ * dispatch's project check held the call to a project given to it, and its native identity is its own pairing, so a run
+ * it starts is bound to it and it reaches no other credential's run.
  */
-export function requireNativeOwner(invocation: GatewayMethodInvocation, scopes: readonly string[], feature: string): NativeExecutionAuthority {
+export function requireNativeOwner(invocation: GatewayMethodInvocation, scopes: readonly string[], feature: string,
+  options: { readonly projectAct?: boolean } = {}): NativeExecutionAuthority {
   const context = invocation.context;
-  if (!context.admin || !context.principalId || !holds(context.scopes, scopes) || invocation.isAuthorized?.(scopes) !== true) {
+  if ((!context.admin && options.projectAct !== true) || !context.principalId || !holds(context.scopes, scopes) || invocation.isAuthorized?.(scopes) !== true) {
     throw new GatewayVerbError(`${feature} needs owner access with ${scopes.join(', ')}; this caller does not hold it. Sign in as the owner or use a credential with those scopes.`, 'FORBIDDEN', 403);
   }
   const authority = invocation.nativeExecutionAuthority;
@@ -44,8 +50,8 @@ export function requireNativeOwner(invocation: GatewayMethodInvocation, scopes: 
 
 /**
  * Whether the native identity the transport built for a call (`current`, of a paired device or the owner's own machine)
- * is the caller's own: the same token principal, or the owner himself on his sign-in, who holds his own machine's
- * identity (daemon/control-plane.ts `createNativeExecutionAuthority`; its principal is the machine's, not his sign-in's
+ * is the caller's own: the same token principal, or the owner in person on their sign-in, who holds their own machine's
+ * identity (daemon/control-plane.ts `createNativeExecutionAuthority`; its principal is the machine's, not their sign-in's
  * name). The one test every owner-only native act reads (native work, purchase windows, checkout, reconciliation).
  * `anyPrincipalKind`: the caller's principal kind is not held to `token` (native work's own rule).
  */
@@ -59,7 +65,7 @@ export function nativeIdentityIsCaller(
   return (options.anyPrincipalKind === true || context.principalKind === 'token') && context.principalId === current.principalId;
 }
 
-/** True while the invocation's caller still passes `requireNativeOwner`. */
-export function isNativeOwner(invocation: GatewayMethodInvocation, scopes: readonly string[]): boolean {
-  try { requireNativeOwner(invocation, scopes, 'Native work'); return true; } catch { return false; }
+/** True while the invocation's caller still passes `requireNativeOwner` (with the same `projectAct`). */
+export function isNativeOwner(invocation: GatewayMethodInvocation, scopes: readonly string[], options: { readonly projectAct?: boolean } = {}): boolean {
+  try { requireNativeOwner(invocation, scopes, 'Native work', options); return true; } catch { return false; }
 }

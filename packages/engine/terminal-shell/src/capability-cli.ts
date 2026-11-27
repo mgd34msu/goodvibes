@@ -12,23 +12,19 @@
  * person's press, whatever its environment, its terminal or its marks say, so
  * `do` never carries the person's claim. It runs no-risk reads; an act that
  * weakens a protection (installing something that runs by itself included),
- * cannot be undone, spends money, writes a secret or is the owner's own is held
- * for the owner and answered in Waiting for you (a terminal program, the web
- * UI, a paired phone), opening on No (capability-cli-confirm.ts, platform
- * capabilities/command-line-hold.ts); it answers no question addressed to the
- * owner and approves nothing. Nothing is asked at the terminal: anything that
- * can drive a terminal (`tmux send-keys`, `ssh -tt localhost`, `script`) can
- * type there, and a command a model's command tool ran can clear any mark it
- * was given. A capability that acts on a conversation is refused in one line:
- * it needs a program holding a conversation.
- *
- * A call held for the owner (that one, or one from a credential that cannot
- * state a person asked) prints that it is waiting, where to answer it and its
- * approval's id, and exits 3; `<program> do <approval id>` reads what came of
- * it (3 again while he has not answered).
+ * cannot be undone, spends money, writes a secret or is the owner's own is
+ * decided by the daemon under the owner's permission mode (platform
+ * capabilities/command-line-hold.ts): YOLO runs it, Jev decides gives it to
+ * Jev, Ask me asks the owner on the approval card and this command waits on their one
+ * answer. It answers no question addressed to the owner and approves nothing.
+ * Nothing is asked at the terminal: anything that can drive a terminal
+ * (`tmux send-keys`, `ssh -tt localhost`, `script`) can type there, and a
+ * command a model's command tool ran can clear any mark it was given. A
+ * capability that acts on a conversation is refused in one line: it needs a
+ * program holding a conversation.
  *
  * Exit codes (docs/exit-codes.md): 0 done, 1 it ran and did not succeed (a
- * refusal included), 2 the command line was wrong, 3 waiting for the owner.
+ * refusal included), 2 the command line was wrong.
  */
 import { resolveGoodVibesDaemonHome } from '@goodvibes/engine/platform/platform/config/goodvibes-home';
 import { createNetworkFetch } from '@goodvibes/engine/platform/platform/runtime/network/outbound';
@@ -38,8 +34,8 @@ import { cliWithFileWorkHere } from './bundle-file-work.js';
 import { configuredDaemonIsThisMachine } from '@goodvibes/engine/platform/platform/runtime/client/daemon-target-resolver';
 import { resolveRemoteDaemonTarget, type DaemonFetch } from './cluster-remote-daemon-target.js';
 import { CAPABILITY_DO_USAGE, CAPABILITY_FIND_USAGE, type CapabilityCliVerb } from './capability-cli-help.js';
-import { heldForOwnerReason } from './capability-cli-confirm.js';
 import { CALL_PROGRAM_KEY_HEADER, COMMAND_LINE_CLIENT, markCommandLineCall, programRegistrationFor } from '@goodvibes/engine/platform/platform/runtime/client';
+import { WAITING_LINES_HEADER } from '@goodvibes/engine/daemon-api/control-routes';
 
 export { CAPABILITY_CLI_HELP, CAPABILITY_CLI_VERBS, CAPABILITY_DO_USAGE, CAPABILITY_FIND_USAGE, type CapabilityCliVerb } from './capability-cli-help.js';
 
@@ -146,30 +142,18 @@ export async function runCapabilityCli(input: CapabilityCliInput): Promise<numbe
   }
   const parsed = parseDoArgs(input.args);
   if ('problem' in parsed) return usage(input, parsed.problem);
-  // An approval's id in place of a capability's: what came of a call that waited for the owner.
-  const held = HELD_CALL_ID.test(parsed.id);
-  if (held && Object.keys(parsed.inputs).length > 0) return usage(input, `${parsed.id} is a call that waited for the owner: it takes no --input`);
   // A command line is never a person's press (the header above): the person's claim is never sent. An act that weakens
-  // a protection, cannot be undone, spends money, writes a secret or is the owner's own is held for the owner in Waiting
-  // for you, opening on No (capability-cli-confirm.ts, capabilities/command-line-hold.ts); the why is printed with it.
-  const heldForOwner = !held ? await heldForOwnerReason(parsed.id, parsed.inputs) : undefined;
-  const outcome = await input.invoke('capabilities.run', held ? { approvalId: parsed.id } : {
+  // a protection, cannot be undone, spends money, writes a secret or is the owner's own is decided by the daemon under
+  // the owner's permission mode (capabilities/command-line-hold.ts); under Ask me this call waits on their one answer.
+  const outcome = await input.invoke('capabilities.run', {
     id: parsed.id, inputs: parsed.inputs, workingDirectory: input.workingDirectory, ...(input.caller ? { program: input.caller } : {}),
   }, { explicitUserRequest: false });
   if (!outcome.ok) return failure(input, outcome);
-  const data = outcome.data as { readonly text?: string; readonly code?: string; readonly approvalId?: string; readonly state?: string };
-  // Put to the owner (a credential that cannot state a person asked): nothing ran yet, and the outcome is read by its id.
-  if (data.code === 'OWNER_APPROVAL_PENDING' && typeof data.approvalId === 'string') {
-    const read = `${input.program} do ${data.approvalId}`;
-    const where = 'Answer it in Waiting for you: in the terminal app or the Agent, the web UI, or a paired phone.';
-    if (input.json) input.stdout(JSON.stringify({ ok: false, ...(outcome.data as object), answerIn: where, fix: `Read what came of it: ${read}` }));
-    else input.stdout(`${data.state ?? `Waiting for the owner (${data.approvalId}).`}.\n  ${heldForOwner !== undefined ? `It was not run at once because ${heldForOwner}. ` : ''}${where}\n  Read what came of it: ${read}`);
-    return 3;
-  }
+  const data = outcome.data as { readonly text?: string };
   if (input.json) input.stdout(JSON.stringify({ ok: true, ...(outcome.data as object) }));
   else {
     // A value the person must see once (a capability's `reveals`) comes back only to the person who typed the line:
-    // it is printed for him on its own line, with what it is, after the capability's words.
+    // it is printed for them on its own line, with what it is, after the capability's words.
     const reveal = (outcome.data as { readonly reveal?: { readonly label?: unknown; readonly value?: unknown; readonly note?: unknown } }).reveal;
     const shown = reveal && typeof reveal.value === 'string'
       ? ['', `${typeof reveal.label === 'string' ? reveal.label : 'Shown once'}:`, reveal.value, ...(typeof reveal.note === 'string' ? [reveal.note] : [])]
@@ -179,8 +163,40 @@ export async function runCapabilityCli(input: CapabilityCliInput): Promise<numbe
   return 0;
 }
 
-/** The id of a question the daemon put to the owner (`approval-` and eight hex digits); a capability id has a dot. */
-const HELD_CALL_ID = /^approval-[0-9a-f]{8}$/;
+/**
+ * A `do`'s answer sent as lines (daemon-api control-routes.ts `WAITING_LINES_HEADER`): each card raised for the act is
+ * said at once, in one line on standard error (what is asked and where to answer it), while the `do` keeps waiting; the
+ * last line is the act's own answer, returned as the answer it would have been. Any other answer is returned as it came.
+ */
+export async function waitingLinesRead(response: Response): Promise<Response> {
+  if (!(response.headers.get('content-type') ?? '').startsWith('application/x-ndjson') || !response.body) return response;
+  const reader = response.body.getReader();
+  const decoder = new TextDecoder();
+  let pending = '';
+  let last: { readonly status: number; readonly body: unknown } | undefined;
+  const take = (text: string): void => {
+    if (!text.trim()) return;
+    let value: { readonly waiting?: { readonly question?: unknown; readonly where?: unknown }; readonly status?: unknown; readonly body?: unknown };
+    try { value = JSON.parse(text) as typeof value; } catch { return; }
+    if (value.waiting) {
+      const question = typeof value.waiting.question === 'string' ? value.waiting.question.replace(/\s+/g, ' ').trim() : 'this act';
+      const where = typeof value.waiting.where === 'string' ? value.waiting.where : 'answer it in GoodVibes';
+      process.stderr.write(`Waiting for your answer: ${question.replace(/[.?!]?$/, '.')} ${where.charAt(0).toUpperCase()}${where.slice(1).replace(/[.]?$/, '.')}\n`);
+    } else if (typeof value.status === 'number') {
+      last = { status: value.status, body: value.body };
+    }
+  };
+  for (;;) {
+    const { done, value } = await reader.read();
+    if (value) pending += decoder.decode(value, { stream: true });
+    let at = pending.indexOf('\n');
+    while (at >= 0) { take(pending.slice(0, at)); pending = pending.slice(at + 1); at = pending.indexOf('\n'); }
+    if (done) break;
+  }
+  take(pending);
+  if (!last) return new Response(JSON.stringify({ error: 'the daemon\'s answer ended before the act did', code: 'INTERNAL_ERROR' }), { status: 502, headers: { 'content-type': 'application/json' } });
+  return new Response(typeof last.body === 'string' ? last.body : JSON.stringify(last.body), { status: last.status, headers: { 'content-type': 'application/json' } });
+}
 
 /** The invoke of a program that reaches its daemon by address and operator token (the terminal app, the daemon's own command line). */
 export function daemonTargetInvoke(runtime: {
@@ -216,7 +232,9 @@ export function daemonTargetInvoke(runtime: {
     // Named as the command line it is (`x-goodvibes-client: cli`), with the person's claim only where `do` gives it.
     const claimed: DaemonFetch = (url, init) => base(url, { ...init, headers: { ...(init?.headers as Record<string, string> | undefined),
       'x-goodvibes-client': COMMAND_LINE_CLIENT, ...(registration ? { [CALL_PROGRAM_KEY_HEADER]: registration } : {}),
-      ...(options.explicitUserRequest ? { 'x-goodvibes-explicit-user-request': 'true' } : {}) } });
+      ...(options.explicitUserRequest ? { 'x-goodvibes-explicit-user-request': 'true' } : {}),
+      // A `do` is told, in the same answer, when its act starts waiting on a card (one line on standard error).
+      ...(methodId === 'capabilities.run' ? { [WAITING_LINES_HEADER]: '1' } : {}) } }).then(waitingLinesRead);
     // The daemon's own refusal, as it said it: the same words `do` prints in all three programs, never restated
     // ("the daemon on this machine refused the request: ...") or joined with its next step into one line.
     let refusal: { readonly error: string; readonly next?: string | undefined; readonly code?: string | undefined } | undefined;
@@ -231,8 +249,10 @@ export function daemonTargetInvoke(runtime: {
       }
       return response;
     };
-    // Only find only reads: a lost answer to it is safe to repeat; a `do` may have run, whoever asked.
-    const outcome = await callDaemonMethod<unknown>(resolved.target, methodId, { input, ...(methodId === 'capabilities.find' ? { readOnly: true } : {}) }, reading);
+    // Only find only reads: a lost answer to it is safe to repeat; a `do` may have run, whoever asked. A `do` has no time
+    // limit of its own: its act may wait on the owner's card, answered in a program or the web; Ctrl+C withdraws it.
+    const outcome = await callDaemonMethod<unknown>(resolved.target, methodId, { input, ...(methodId === 'capabilities.find' ? { readOnly: true } : {}),
+      ...(methodId === 'capabilities.run' ? { timeoutMs: 0 } : {}) }, reading);
     if (outcome.ok) return outcome;
     // A credential the daemon does not accept is not a refusal of the call: its own words (which credential) stay.
     if (refusal && refusal.code !== 'AUTH_REQUIRED') return { ok: false, code: refusal.code ?? outcome.daemonCode ?? outcome.code, error: refusal.error, fix: refusal.next ?? '' };

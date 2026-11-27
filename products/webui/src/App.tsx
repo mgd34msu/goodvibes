@@ -490,7 +490,7 @@ export default function App() {
     return firstString(record, ['username', 'name', 'principal']) || firstString(identity, ['name', 'subject']);
   }, [auth.data]);
   // The identity carries no person's name for a device token; an owner device is the
-  // owner's, so his name comes from his profile (one read per sign-in, kept).
+  // owner's, so their name comes from their profile (one read per sign-in, kept).
   const ownerDevice = asRecord(auth.data).admin === true;
   const ownerName = useQuery({
     queryKey: queryKeys.ownerProfileField('identity.name'),

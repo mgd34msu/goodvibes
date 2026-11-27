@@ -161,13 +161,13 @@ type SurfaceReplyRefusal =
   | 'no-deliverable-target';
 
 /**
- * How long a pending surface reply may wait for an agent this process cannot
- * see. A turn run by another process (a TUI that died before reporting back)
- * or a record the agent manager already evicted never becomes terminal here,
- * so without a bound its entry was polled every two seconds until the daemon
- * stopped. Agents this process can see keep their entry while they run.
+ * How many pending surface replies may wait at once for agents this process cannot see. A turn run by another process
+ * (a TUI that died before reporting back) or a record the agent manager already evicted never becomes terminal here,
+ * so without a bound its entry was polled every two seconds until the daemon stopped. Such an entry goes when its
+ * route or conversation is removed, or, past this count, the oldest first; never by its age. Agents this process can
+ * see keep their entry while they run.
  */
-export const ORPHANED_SURFACE_REPLY_MAX_AGE_MS = 6 * 60 * 60 * 1000;
+export const MAX_ORPHANED_SURFACE_REPLIES = 256;
 
 const UNDELIVERED_BODY_EXCERPT_CHARS = 2000;
 const MAX_RECOVERED_REPLIES = 1_000;
@@ -804,21 +804,30 @@ export class DaemonSurfaceDeliveryHelper {
   }
 
   /**
-   * Entries for agents this daemon does not know (run by another process that
-   * never reported back) are closed after a long wait, so the map cannot grow
-   * without end. Looked at when a reply is queued; costs one pass over the map.
+   * Entries for agents this daemon does not know (run by another process that has not reported back) are closed when
+   * the reply has nowhere left to go (its channel route or its conversation was removed), and, past
+   * MAX_ORPHANED_SURFACE_REPLIES of them, the oldest first, so the map cannot grow without end. No clock closes one:
+   * an agent that reports back late still has its reply delivered. Looked at when a reply is queued; one pass.
    */
   private dropOrphanedReplies(): void {
-    const now = this.now();
-    for (const pending of [...this.context.pendingSurfaceReplies.values()]) {
-      if (now - pending.createdAt <= ORPHANED_SURFACE_REPLY_MAX_AGE_MS || this.context.agentManager.getStatus(pending.agentId)) continue;
+    const orphans = [...this.context.pendingSurfaceReplies.values()].filter((pending) => !this.context.agentManager.getStatus(pending.agentId))
+      .sort((a, b) => a.createdAt - b.createdAt);
+    const overCount = Math.max(0, orphans.length - MAX_ORPHANED_SURFACE_REPLIES);
+    for (const [index, pending] of orphans.entries()) {
+      let routeGone = false;
+      let sessionGone = false;
+      try { routeGone = pending.routeId !== undefined && !this.context.routeBindings.getBinding(pending.routeId); } catch { routeGone = false; }
+      try { sessionGone = pending.sessionId !== undefined && !this.context.sessionBroker.getSession(pending.sessionId); } catch { sessionGone = false; }
+      if (!routeGone && !sessionGone && index >= overCount) continue;
       logger.warn('Surface reply abandoned: its agent is not known to this daemon and never reported back', {
         surface: pending.surfaceKind,
         agentId: pending.agentId,
         sessionId: pending.sessionId ?? null,
         bindingId: pending.routeId ?? null,
       });
-      this.recordReplyPhase(pending, 'failed', 'no answer arrived: the agent is not known to this daemon and never reported back');
+      this.recordReplyPhase(pending, 'failed', routeGone || sessionGone
+        ? `no answer can be delivered: its ${routeGone ? 'channel route' : 'conversation'} was removed while its agent, not known to this daemon, had not reported back`
+        : 'no answer arrived: the agent is not known to this daemon, and newer replies waiting on such agents took its place');
       try { this.context.channelReplyPipeline.untrack(pending.agentId); }
       catch (error) { logger.warn('Surface reply could not be untracked', { agentId: pending.agentId, error: summarizeError(error) }); }
       this.context.pendingSurfaceReplies.delete(pending.agentId);
@@ -919,8 +928,8 @@ export class DaemonSurfaceDeliveryHelper {
     await this.context.routeBindings.start();
     // An ask is shown on a channel only in a conversation proven to be the
     // owner's alone. One raised in a guest's turn, or about a conversation that
-    // is not proven his alone (a group, even one only he has written in, or one
-    // someone else wrote in), goes to his own conversations, never to that one.
+    // is not proven the owner's alone (a group, even one only the owner has written in, or one
+    // someone else wrote in), goes to the owner's own conversations, never to that one.
     const guestChannel = approvalGuestChannel(approval) ?? this.notOwnersAloneChannelOf(approval);
     const outcome = guestChannel === undefined
       ? await this.deliverApprovalToItsRoute(approval)

@@ -86,7 +86,7 @@ export function projectConfigView(base: ConfigManager, folder: string, options: 
     try {
       const carried = carryProjectSettingsOnce(folder);
       if (carried) logger.info('[settings] the programs\' project settings files were carried into the project\'s one file', { file: carried.file, from: carried.carriedFrom, differed: carried.differed.map((entry) => entry.key) });
-      // The owner is told once which keys the programs' files set differently, as a program's own carry tells him
+      // The owner is told once which keys the programs' files set differently, as a program's own carry tells them
       // (manager.ts migrationReceipt: the same announce-once store, delivered to the next surface that reads it).
       if (carried && carried.differed.length > 0) {
         new FeatureAnnouncementStore(featureAnnouncementsPath(base)).record(`carried-forward:project-settings:${carried.file}`, describeProjectSettingsCarry(carried));

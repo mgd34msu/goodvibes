@@ -2,7 +2,7 @@
  * `agent_knowledge_ingest`: one source added to the owner's knowledge, the daemon's one store. The arguments and any
  * workspace path are checked here; the ingest itself runs the daemon's `knowledge.*` capability as a nested
  * `capability_run` call, judged by that capability's own risk (fetching from the owner's network loosens a protection
- * and is the owner's to set; importing browser history is his own act), the one gate a model's daemon call goes
+ * and is the owner's to set; importing browser history is the owner's own act), the one gate a model's daemon call goes
  * through. This call only routes it and is classed a read. A workspace file the turn names is read by this program, on
  * its own machine, and its content is sent: the daemon may be on another machine.
  */
@@ -502,7 +502,7 @@ export function createAgentKnowledgeIngestTool(
       }
       const answer = await runCapability(call.id, inputs, options);
       if (!answer.ok) {
-        // The file went up only so the owner could be asked: on his No (or a refusal) it does not stay on the daemon.
+        // The file went up only so the owner could be asked: on their No (or a refusal) it does not stay on the daemon.
         if (!uploaded) return failure(answer.error);
         const notDiscarded = await discardAgentKnowledgeUpload(uploaded.connection, uploaded.id);
         return failure(notDiscarded === undefined

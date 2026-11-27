@@ -19,6 +19,7 @@ import type { ConfigKey } from '../platform/src/platform/config/schema.ts';
 import { createPermissionConfigReader, PermissionManager } from '../platform/src/platform/permissions/manager.ts';
 import { ToolRegistry } from '../platform/src/platform/tools/registry.ts';
 import { executeToolCalls, type ToolExecutionDeps } from '../platform/src/platform/core/orchestrator-tool-runtime.ts';
+import { withOwnerInput } from '../platform/src/platform/security/turn-input-party.ts';
 import { HeldForOwnerLedger } from '../platform/src/platform/permissions/held-for-owner.ts';
 import { createPolicyRuntimeState } from '../platform/src/platform/runtime/permissions/permission-composition.ts';
 import { createFeatureFlagManager } from '../platform/src/platform/runtime/feature-flags/manager.ts';
@@ -73,7 +74,8 @@ test('a promoted bundle\'s deny for ~/.ssh refuses a write there unasked; a writ
   let calls = 0;
   const write = async (path: string) => {
     const before = asked;
-    const [result] = await executeToolCalls(deps, `turn-${++calls}`, [{ id: `call-${calls}`, name: 'write', arguments: { path, content: 'x' } }]);
+    // The owner's own turn, marked as the product marks one (unmarked work is someone else's input).
+    const [result] = await withOwnerInput(() => executeToolCalls(deps, `turn-${++calls}`, [{ id: `call-${calls}`, name: 'write', arguments: { path, content: 'x' } }]));
     return { ran: result?.success === true, ownerAsked: asked > before };
   };
 

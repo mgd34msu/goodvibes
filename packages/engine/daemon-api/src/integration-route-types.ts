@@ -93,7 +93,7 @@ export interface MemoryRecordSearchFilterInput {
   /** The asking project (its resolved folder): only its records and the person's own. */
   readonly project?: string | undefined;
   /**
-   * Every project's records: the owner's explicit choice in his place's project chooser ("Every project"), refused from
+   * Every project's records: the owner's explicit choice in their place's project chooser ("Every project"), refused from
    * anyone else. Without it and without a project, only the records that belong to no project.
    */
   readonly everyProject?: boolean | undefined;
@@ -209,7 +209,8 @@ export interface UserAuthManagerLike {
   /** A narrower scope list for the user, or `null` for its role's default set. */
   setUserScopes(username: string, scopes: readonly string[] | null): unknown;
   deleteUser(username: string): boolean;
-  rotatePassword(username: string, password: string): void;
+  /** `by`: who asks; the owner's own account is refused unless it is the owner in person. */
+  rotatePassword(username: string, password: string, by?: { readonly ownerHimself: boolean }): void;
   revokeSession(sessionId: string): boolean;
   clearBootstrapCredentialFile(): boolean;
 }
@@ -244,10 +245,16 @@ export interface DaemonIntegrationRouteContext {
    */
   readonly callerProjectRefusal?: ((req: Request, folder: string) => string | undefined) | undefined;
   /**
-   * Whether the request is the owner himself (the one definition, method-owner-decision.ts `ownerHimself`): only he may
+   * Whether the request is the owner in person (the one definition, method-owner-decision.ts `ownerHimself`): only the owner may
    * read every project's memory at once (`everyProject`). Absent: nobody may.
    */
   readonly ownerHimself?: ((req: Request) => boolean) | undefined;
+  /**
+   * Whether the request makes an act only the owner makes (method-owner-decision.ts `makesOwnerOnlyAct`: the owner in
+   * person, or the owner's own verified command line, `do`): only such a request changes the owner's own password. Absent: read
+   * as `ownerHimself`.
+   */
+  readonly makesOwnerOnlyAct?: ((req: Request) => boolean) | undefined;
   /** Optional: absent on embedders without the consolidation scheduler, the receipts route answers 501 honestly. */
   readonly memoryConsolidation?: MemoryConsolidationSchedulerLike | null | undefined;
   readonly parseJsonBody: (req: Request) => Promise<JsonRecord | Response>;
@@ -265,7 +272,7 @@ export interface DaemonIntegrationRouteContext {
   readonly userAuth: UserAuthManagerLike;
   /**
    * Who writes a memory record over these routes, from the credential the daemon authenticated (never a body field):
-   * the owner himself (his own press from one of his terminal programs), his model (a terminal program's own call), or
+   * the owner in person (their own press from one of their terminal programs), their model (a terminal program's own call), or
    * someone else, named. Absent: every write is someone else's.
    */
   readonly memoryAuthorOf?: ((req: Request) => MemoryRecordAuthorLike) | undefined;
@@ -277,4 +284,6 @@ export interface DaemonIntegrationRouteContext {
 export interface MemoryRecordAuthorLike {
   readonly kind: 'owner' | 'owner-model' | 'other';
   readonly who?: string | undefined;
+  /** Someone else's record: the principal the daemon authenticated for it (never a body's); it changes its own records. */
+  readonly madeBy?: string | undefined;
 }

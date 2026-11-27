@@ -4,12 +4,12 @@
  * The ONE place this is decided, for every door a turn comes through. It decides how far a turn's commands and file
  * writes may reach (tools/exec/containment.ts `containmentForTurn`, `foreignInputWriteRefusal`):
  *
- *  - The OWNER's turn (his terminal conversation, his web chat, his schedule or trigger he set up, work he himself asked
- *    for or approved, a hosted session he typed into): commands run by the one rule every terminal conversation has, the shared sandbox
- *    setting and his mode; an ask nobody is present for waits for him in Waiting for you.
+ *  - The OWNER's turn (their terminal conversation, their web chat, a schedule or trigger they set up, work they asked
+ *    for or approved in person, a hosted session they typed into): commands run by the one rule every terminal conversation has, the shared sandbox
+ *    setting and their mode; an ask nobody is present for waits for them in Waiting for you.
  *  - A turn driven by SOMEONE ELSE's input (a message that arrived on a channel, a guest the channel admitted, a paired
  *    device or signed-in person who is not the owner, a webhook, input an outside caller put into a hosted session, work
- *    anyone but the owner caused and he has not approved): it runs reads only (every other tool call is refused at
+ *    anyone but the owner caused and the owner has not approved): it runs reads only (every other tool call is refused at
  *    admission, gate/classify.ts), no command outside a real sandbox and writes no file, whatever the mode
  *    (added after a daemon-hosted turn nobody watched reached the owner's tmux through an unsandboxed command).
  *
@@ -32,13 +32,13 @@ export type TurnInputParty =
   | { readonly party: 'owner' }
   /**
    * `madeFor`: the principal whose own conversation the turn runs in, when the daemon recorded one (a member's web chat:
-   * hers); what such a turn reaches of chats and sessions is what that principal made (control-plane/caller-reach.ts).
+   * that member's); what such a turn reaches of chats and sessions is what that principal made (control-plane/caller-reach.ts).
    */
   | {
     readonly party: 'other'; readonly who: string; readonly madeFor?: string | undefined;
     /**
      * Set only by {@link asCallOutsideTurn}: this is no turn but that caller's own request over the wire, already decided
-     * at its door by the one owner decision (put to the owner, run under his rules for that caller, or refused). The act
+     * at its door by the one owner decision (put to the owner, run under the owner's rules for that caller, or refused). The act
      * its door runs for it as decided (`ToolRegistry.executeOwnerConfirmed`) is not refused as a turn on someone else's
      * input (permissions/manager.ts `callFacts`); every turn started from it reads as someone else's, as before, and the
      * mark is dropped wherever a turn takes its party from it (withInputParty, withOtherPartyInput).
@@ -52,12 +52,12 @@ const OWNER: TurnInputParty = Object.freeze({ party: 'owner' });
  * Work that no turn and no mark names (a callback that lost its turn's scope, a queue drained by other code, a run no
  * host marked) is someone else's: unknown leans to someone else. A process whose unmarked work is the person at its own
  * keyboard (the terminal app, the Agent: `declareUnmarkedWorkIsOwners`) says so once at start; the daemon never does,
- * and marks every run of the owner's it starts (his schedules and triggers, his Work, his calls over the wire).
+ * and marks every run of the owner's it starts (their schedules and triggers, their Work, their calls over the wire).
  */
 const UNMARKED: TurnInputParty = Object.freeze({ party: 'other', who: 'work that no turn or mark names as the owner\'s' });
 let unmarkedIsOwners = false;
 
-/** The terminal programs: outside any turn, the work in this process is the owner's own at his keyboard. */
+/** The terminal programs: outside any turn, the work in this process is the owner's own at their keyboard. */
 export function declareUnmarkedWorkIsOwners(): void {
   unmarkedIsOwners = true;
 }
@@ -66,7 +66,7 @@ function unmarked(): TurnInputParty {
   return unmarkedIsOwners ? OWNER : UNMARKED;
 }
 
-/** The owner's own surfaces: his terminal programs, his web view, the daemon itself. (His schedules are marked as his.) */
+/** The owner's own surfaces: their terminal programs, their web view, the daemon itself. (Their schedules are marked as theirs.) */
 const OWNER_SURFACES: ReadonlySet<string> = new Set(['tui', 'cli', 'terminal', 'agent', 'web', 'webui', 'daemon']);
 
 /** People and programs whose turns are the owner's. */
@@ -75,10 +75,11 @@ const OWNER_ACTOR_CLASSES: ReadonlySet<ActorClass> = new Set(['owner', 'system']
 const marked = new AsyncLocalStorage<TurnInputParty>();
 
 /**
- * Whether a channel turn is the owner's own message in a conversation proven to be his alone, on a channel where he
- * chose "Treat my own messages here as me" (channels/types.ts `ownMessagesAsOwner`, off by default). The host that runs
- * channel turns sets it (the daemon: daemon/owner-channel-conversation.ts), from the turn's session and its channel's
- * route and policy, never from anything a message wrote. Absent, or answering false: a channel message is someone else's.
+ * Whether a channel turn is the owner's own message (a sender the channel authenticates as its owner) in a conversation
+ * proven to be theirs alone: the owner's turn, as released; a change it asks for is still put to the owner as a channel
+ * request (gate/classify.ts). The host that runs channel turns sets it (the daemon: daemon/owner-channel-conversation.ts),
+ * from the turn's session and its channel's route and policy, never from anything a message wrote. Absent, or answering
+ * false: a channel message is someone else's.
  */
 type OwnerChannelConversationReader = (turn: TurnContext) => boolean;
 let ownerChannelConversation: OwnerChannelConversationReader | undefined;
@@ -95,9 +96,8 @@ function ownersChannelTurn(turn: TurnContext): boolean {
 }
 
 /**
- * Whether a channel session is the owner's own conversation, his alone, on a channel where he chose "Treat my own
- * messages here as me": the same reader, asked for the session alone (its one channel read from its routes). A piece of
- * work such a conversation caused (his message there, agreed by him there) is his own (the daemon's Work runner asks).
+ * Whether a channel session is the owner's own conversation, theirs alone, on a channel that proves its sender: the same reader, asked for the session alone (its one channel read from its routes). A piece of
+ * work such a conversation caused (their message there, agreed by them there) is their own (the daemon's Work runner asks).
  */
 export function ownersChannelSession(sessionId: string | undefined): boolean {
   if (!sessionId) return false;
@@ -137,6 +137,34 @@ export function withInputParty<T>(party: TurnInputParty, fn: () => T): T {
  */
 export function markedInputParty(): TurnInputParty | undefined {
   return marked.getStore();
+}
+
+/**
+ * Who caused what a record made now will run later (a schedule, a trigger), as that record keeps it: someone else
+ * (`party: 'other'`), named as the mark or the turn in scope names them. Undefined for the owner's own (their signed-in
+ * session or verified program, marked at the daemon's dispatch; their own turn) and for work no caller and no turn names
+ * (the program's own: a check-in it sets up, the terminal program at their keyboard): such a record is theirs, as every
+ * record made before records kept a maker is. Read from the mark the dispatch set from the authenticated caller
+ * (daemon/control-plane.ts) or the turn's own party, never from anything a caller or a model wrote.
+ */
+export type RecordedCause = { readonly party: 'other'; readonly who: string; readonly madeFor?: string | undefined };
+
+export function recordedCauseInScope(): RecordedCause | undefined {
+  const mark = marked.getStore();
+  const party = mark ?? (currentTurn() !== undefined ? turnInputParty() : undefined);
+  if (party === undefined || party.party === 'owner') return undefined;
+  return Object.freeze({ party: 'other' as const, who: party.who, ...(party.madeFor ? { madeFor: party.madeFor } : {}) });
+}
+
+/**
+ * The party a record's runs act as: the cause it keeps, or the owner's when it keeps none. A kept value that is not a
+ * readable cause (a record written by hand, by an earlier build, or carried from elsewhere) is someone else's.
+ */
+export function partyOfRecordedCause(cause: RecordedCause | undefined): TurnInputParty {
+  if (cause === undefined) return OWNER;
+  const kept = cause !== null && typeof cause === 'object' ? cause as Partial<RecordedCause> : {};
+  const who = typeof kept.who === 'string' && kept.who.trim() ? kept.who : 'a maker that could not be read';
+  return Object.freeze({ party: 'other' as const, who, ...(typeof kept.madeFor === 'string' && kept.madeFor ? { madeFor: kept.madeFor } : {}) });
 }
 
 /** Runs `fn` with no party marked: a turn it starts is read from its own scope, never from the caller's mark. */
@@ -180,13 +208,13 @@ export function turnInputParty(turn: TurnContext | undefined = currentTurn()): T
   // `WorkCause`), and its runner marks the turn with that party (withOwnerInput / withOtherPartyInput).
   if (turn.origin && inputOriginIsOwnerDirect(turn.origin)) return OWNER;
   const surface = turn.surface;
-  // A turn with no surface is the owner's only when its host established that he gave its input (his keyboard); an
+  // A turn with no surface is the owner's only when its host established that the owner gave its input (their keyboard); an
   // agent's turn is marked by the party that started it (tools/agent/manager.ts); anything else is someone else's.
   if (surface === undefined) return turn.ownerInput === true ? OWNER : unmarked();
   const normalized = normalizeSurfaceId(surface);
   if (isGuestSurfaceId(normalized)) return { party: 'other', who: `a guest on ${normalized.slice('guest:'.length)}` };
   if (OWNER_SURFACES.has(normalized)) return OWNER;
-  // The owner's own message on a channel where he chose to be treated as himself, in a conversation proven his alone.
+  // The owner's own message on a channel that proves its sender, in a conversation proven theirs alone.
   if (ownersChannelTurn(turn)) return OWNER;
   return { party: 'other', who: normalized === 'service' ? 'input an outside caller sent' : `a message on ${normalized}` };
 }

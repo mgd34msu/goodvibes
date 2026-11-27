@@ -44,7 +44,7 @@ export type ProfileSectionName = (typeof PROFILE_SECTIONS)[number];
  * twenty birthdays. So each occasion is a prose line, preserved verbatim by
  * this parser exactly like any other bullet, and typed by a reader layered on
  * top of it (`platform/occasions/grammar.ts`). The profile's guarantee that a
- * validator never rewrites a line he wrote survives unchanged, and a date line
+ * validator never rewrites a line the owner wrote survives unchanged, and a date line
  * this parser cannot make sense of is reported with a reason rather than
  * corrected.
  */
@@ -67,7 +67,7 @@ const SECTION_BY_NORMALIZED = new Map<string, ProfileSectionName>(
   PROFILE_SECTIONS.map((name) => [normalizeProfileKey(name), name]),
 );
 
-/** The canonical section a heading names, or `null` when it is one of his own. */
+/** The canonical section a heading names, or `null` when it is one of the owner's own. */
 export function canonicalProfileSection(heading: string): ProfileSectionName | null {
   return SECTION_BY_NORMALIZED.get(normalizeProfileKey(heading)) ?? null;
 }
@@ -138,8 +138,8 @@ function loadTimeZones(): { readonly exact: Set<string>; readonly lower: Set<str
  * An IANA zone, checked against the runtime's own list.
  *
  * Case-insensitive as a second attempt: `america/detroit` is the owner typing
- * the right zone in the wrong case, and flagging it invalid would send him
- * looking for a mistake he did not make.
+ * the right zone in the wrong case, and flagging it invalid would send them
+ * looking for a mistake they did not make.
  */
 const ianaTimeZone: ProfileFieldValidator = (value) => {
   const zones = loadTimeZones();

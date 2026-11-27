@@ -11,9 +11,8 @@
  *
  * The minted token is an offer until the device uses it: showing a QR that is
  * never scanned adds no device, and an unused offer stops working after
- * PAIRING_OFFER_LIFETIME_MS (pairing-token-store.ts). A producer that shows a
- * new QR in place of its earlier one passes `replacesOffer`, so the earlier
- * offer is withdrawn unless a device already used it.
+ * PAIRING_OFFER_LIFETIME_MS (pairing-token-store.ts). A producer that shows a new QR in place of its earlier one passes
+ * `replacesOffer`, so the earlier offer is withdrawn unless a device already used it.
  *
  * The token rides in the URL fragment, never the query, so it is never sent to a
  * server (no access-log / Referer exposure). The offer set rides alongside so a
@@ -77,8 +76,8 @@ export function defaultPairingTokenName(now: Date = new Date()): string {
 }
 
 export function mintPairingHandoff(input: MintPairingHandoffInput): PairingHandoff {
-  // Minted in the owner's own process, from the pairing screen at his terminal, the code shown on his own screen: the
-  // owner's device, made by him (pairing-token-store.ts `ownerDeviceOf` counts the origin only with this maker).
+  // Minted in the owner's own process, from the pairing screen at their terminal, the code shown on their own screen: the
+  // owner's device, made by them (pairing-token-store.ts `ownerDeviceOf` counts the origin only with this maker).
   const token = input.pairingTokens.mint({ name: input.name, origin: 'owner-pairing', madeBy: { owner: true }, ...(input.replacesOffer !== undefined ? { replacesOffer: input.replacesOffer } : {}) });
   const fragment = buildPairingHandoffFragment({ token: token.token, offers: input.offers });
   const deepLink = input.webOrigin

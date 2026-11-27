@@ -277,7 +277,7 @@ export class AgentNoteRegistry {
     });
   }
 
-  /** `accept`: the owner himself reviewed it, which accepts a note someone else wrote (never a model's review). */
+  /** `accept`: the owner in person reviewed it, which accepts a note someone else wrote (never a model's review). */
   public markReviewed(idOrTitle: string, options: { readonly accept?: boolean } = {}): AgentNoteRecord {
     return this.locked(() => {
       const store = this.readStore();

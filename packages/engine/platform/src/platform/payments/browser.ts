@@ -52,7 +52,7 @@ export interface PurchaseModeChoice {
  * The two ways purchases can run, as every surface offers them where payments
  * are turned on. The words live here so the terminal programs and the web UI
  * say the same thing. The first is marked as the recommended, safer way. The second line states what happens when the stop notice
- * cannot reach the owner, his recorded decision (docs/payments.md, the ruling on
+ * cannot reach the owner, their recorded decision (docs/payments.md, the ruling on
  * undeliverable notices), so it is known at the moment it is chosen.
  */
 export function purchaseModeChoices(vetoMinutes: number): readonly PurchaseModeChoice[] {

@@ -78,8 +78,6 @@ export interface DecompositionBounds {
   maxTurns: number;
   /** Total token budget; exceeding it stops the run. */
   tokenCeiling: number;
-  /** Wall-clock timeout in ms; exceeding it cancels the run. */
-  wallTimeoutMs: number;
 }
 
 export interface DecompositionRunnerRequest {

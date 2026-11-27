@@ -226,7 +226,7 @@ export class FileUndoManager {
         }
       }
       // The entry is kept either way: a conflict until the owner puts the file back or
-      // drops it (discard), a write failure to retry. Nothing he could still undo is lost.
+      // drops it (discard), a write failure to retry. Nothing the person could still undo is lost.
       from.push(entry);
       throw err;
     }

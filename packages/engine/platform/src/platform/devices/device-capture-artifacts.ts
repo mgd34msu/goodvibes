@@ -23,6 +23,12 @@ export interface DeviceCaptureArtifact {
   readonly expiresAt: number;
   readonly workId?: string | undefined;
   readonly reason?: string | undefined;
+  /**
+   * Who made the capture and the project it was made for (artifacts/turn-maker.ts `withTurnMaker`: the turn's chat or
+   * session, or the caller of the call that asked). Absent on a capture kept from before this record: the owner's only.
+   */
+  readonly createdBy?: string | undefined;
+  readonly project?: string | undefined;
 }
 /** `deleted`: the owner asked for this capture to be removed before its retention window ended. */
 export type DeviceArtifactRemovalReason = 'expired' | 'file-missing' | 'content-mismatch' | 'orphan-file' | 'malformed' | 'count-cap' | 'deleted';
@@ -72,7 +78,8 @@ function validateArtifact(value: unknown): SavedArtifact | null {
     mediaType: typeof row.mediaType === 'string' && row.mediaType ? row.mediaType : 'application/octet-stream', fileName: row.fileName,
     byteLength: row.byteLength, capturedAt: row.capturedAt, expiresAt: row.expiresAt,
     sourceObservation: row.sourceObservation,
-    ...(typeof row.workId === 'string' && row.workId ? { workId: row.workId } : {}), ...(typeof row.reason === 'string' && row.reason ? { reason: row.reason } : {}) };
+    ...(typeof row.workId === 'string' && row.workId ? { workId: row.workId } : {}), ...(typeof row.reason === 'string' && row.reason ? { reason: row.reason } : {}),
+    ...(typeof row.createdBy === 'string' && row.createdBy ? { createdBy: row.createdBy } : {}), ...(typeof row.project === 'string' && row.project ? { project: row.project } : {}) };
 }
 const publicArtifact = (row: SavedArtifact): DeviceCaptureArtifact => { const { sourceObservation: _source, ...artifact } = row; return artifact; };
 export interface DeviceCaptureStoreOptions {
@@ -229,7 +236,8 @@ export class DeviceCaptureArtifactStore {
     return rows.filter(row => row.expiresAt > now && (!nodeId || row.nodeId === nodeId)).sort((a, b) => b.capturedAt - a.capturedAt).map(publicArtifact);
   }
   async retain(input: { readonly nodeId: string; readonly capabilityId: DeviceCapabilityId; readonly kind: DeviceArtifactKind; readonly mediaType: string;
-    readonly bytes: Uint8Array; readonly workId?: string | undefined; readonly reason?: string | undefined; readonly ttlMs?: number | undefined; readonly assertCurrent?: (() => void) | undefined }): Promise<DeviceCaptureArtifact> {
+    readonly bytes: Uint8Array; readonly workId?: string | undefined; readonly reason?: string | undefined; readonly ttlMs?: number | undefined; readonly assertCurrent?: (() => void) | undefined;
+    readonly createdBy?: string | undefined; readonly project?: string | undefined }): Promise<DeviceCaptureArtifact> {
     const assertion = input.assertCurrent;
     if (assertion !== undefined && typeof assertion !== 'function') throw new Error('Device capture owner is unavailable');
     const assertOriginal = assertion?.bind(input); assertOriginal?.();
@@ -252,7 +260,8 @@ export class DeviceCaptureArtifactStore {
       const ttl = input.ttlMs && input.ttlMs > 0 ? input.ttlMs : this.getPolicy().retentionMs;
       const row: SavedArtifact = { id, nodeId: input.nodeId, capabilityId: input.capabilityId, kind: input.kind, mediaType: input.mediaType, fileName,
         byteLength: bytes.byteLength, sourceObservation: mutation.owner.importedStamp(join(this.directory, fileName)), capturedAt: now, expiresAt: now + ttl,
-        ...(input.workId ? { workId: input.workId } : {}), ...(input.reason ? { reason: input.reason } : {}) };
+        ...(input.workId ? { workId: input.workId } : {}), ...(input.reason ? { reason: input.reason } : {}),
+        ...(input.createdBy ? { createdBy: input.createdBy } : {}), ...(input.project ? { project: input.project } : {}) };
       mutation.complete(id); return { next: [...rows, row], result: publicArtifact(row) };
     }, input.assertCurrent);
     // A capture kept: every view of the captures (the Devices place, the web UI) reads them again.

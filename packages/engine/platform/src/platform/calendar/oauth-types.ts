@@ -326,7 +326,7 @@ export interface MergedCalendarEvent extends CalendarEvent {
    * Absent means the provider said nothing, which is read as somebody else's.
    * This is what decides whether the event's text is recorded as untrusted
    * content when a turn reads it (see untrusted-events.ts): an event the owner
-   * created himself is not externally sourced; everything else is.
+   * created in person is not externally sourced; everything else is.
    */
   readonly organizerIsOwner?: boolean;
 }

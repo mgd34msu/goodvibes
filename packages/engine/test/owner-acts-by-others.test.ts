@@ -1,15 +1,16 @@
 // Proves: A caller who is not the owner withdraws access the owner granted: an admin revokes a device the owner paired, or replaces the shared operator token.
-// Red when: `pairing.tokens.delete` revokes a device the calling admin neither holds nor minted instead of putting it to the owner, or `pairing.tokens.revokeShared` runs for an admin who is not the owner.
+// Red when: `pairing.tokens.delete` revokes a device the calling admin neither holds nor minted, or puts it to the owner as a question, instead of refusing it, or `pairing.tokens.revokeShared` runs for an admin who is not the owner.
 // Proves: A caller who is not the owner loosens the permission mode the sessions from a channel run under, up to yolo.
-// Red when: `channels.profiles.set` or `channels.profiles.delete` applies a binding change that loosens a channel's mode for an admin who is not the owner instead of putting it to the owner.
+// Red when: `channels.profiles.set` or `channels.profiles.delete` applies a binding change that loosens a channel's mode for an admin who is not the owner, or puts it to the owner as a question, instead of refusing it.
 // Proves: The model the Agent runs claims an approval, or cancels one that another caller raised.
 // Red when: The approval actions port stops applying the reading's claim and cancel rule before it reaches the broker, so the Agent's credential claims an ask or cancels one it did not raise.
 /**
  * Real components only: the daemon's control-plane helper over a real user
  * store, method catalog with the pairing verbs registered, pairing token store
  * and approval broker, and `capabilities.run` with the owner gate as every
- * daemon registers them (a method the dispatch puts to the owner is held
- * there); the approval actions port over a real broker. The owner is his own
+ * daemon registers them (an owner's own act by anyone else is refused before the
+ * gate; a question raised anyway would be read and answered No here, and counted);
+ * the approval actions port over a real broker. The owner is their own
  * signed-in session (the account made at first start); the operator token
  * alone is a script.
  */
@@ -45,6 +46,8 @@ import { CallerSharedStore, type SharedKind } from '../platform/src/platform/con
 import { resolveGoodVibesDaemonHome } from '../platform/src/platform/config/goodvibes-home.ts';
 
 const OPERATOR_TOKEN = 'synthetic-operator-token';
+/** The refusals of an act only the owner makes: the effect table's (OWNER_ONLY) and the dispatch's (OWNER_ONLY_ACT). */
+const OWNERS_OWN_REFUSALS: ReadonlySet<string> = new Set(['OWNER_ONLY', 'OWNER_ONLY_ACT']);
 let dir: string;
 const cleanups: Array<() => void> = [];
 beforeEach(() => { dir = mkdtempSync(join(tmpdir(), 'gv-owner-acts-')); });
@@ -53,7 +56,7 @@ afterEach(() => { for (const cleanup of cleanups.splice(0).reverse()) cleanup();
 /**
  * The daemon's dispatch over `catalog` as a daemon composes it: its user store (the owner is the account made at first
  * start), its pairing records, its approvals, and `capabilities.run` with the owner gate, where a method call the
- * dispatch puts to the owner waits for him and is sent again as it came on his yes.
+ * dispatch puts to the owner waits for them and is sent again as it came on their yes.
  */
 async function daemonOver(catalog: GatewayMethodCatalog, broker: ApprovalBroker, pairing: PairingTokenManager) {
   const userAuth = new UserAuthManager({ bootstrapFilePath: join(dir, 'users.json'), bootstrapCredentialPath: join(dir, 'bootstrap.txt'), scryptParams: { N: 1024, r: 1, p: 1 } });
@@ -73,21 +76,42 @@ async function daemonOver(catalog: GatewayMethodCatalog, broker: ApprovalBroker,
     controlPlaneGateway: new ControlPlaneGateway({ runtimeBus: new RuntimeEventBus() }),
     distributedRuntime: new DistributedRuntimeManager(join(dir, 'remote', 'distributed-runtime.json')),
     allowedBrowserOrigins: () => [], authToken: () => OPERATOR_TOKEN, trustProxyEnabled: () => false, host: '127.0.0.1', port: 3421,
-    // Who reaches the owner's shared things (his channels among them), as the daemon composes it.
+    // Who reaches the owner's shared things (their channels among them), as the daemon composes it.
     sharedKind: createSharedKindGifts({ homeDirectory: home, broker }),
   } as unknown as DaemonControlPlaneContext);
   const nested = daemonNestedMethods({ gatewayMethods: catalog }, daemonMethodCallOf(() => helper, () => OPERATOR_TOKEN));
   registerCapabilityGatewayMethods(catalog, {
     catalog: async () => new CapabilityCatalog(movedCapabilityEntries()),
     services: createDaemonCapabilityServices({ configManager: config, hookDispatcher, secretsManager: secrets }),
-    invokeMethod: nested.invokeMethod, invokeHeldMethod: nested.invokeHeldMethod,
+    invokeMethod: nested.invokeMethod, invokeMethodCall: nested.invokeMethodCall,
     ...ownerGate,
   });
   const ownerName = userAuth.ownerUsername();
   if (ownerName === null) throw new Error('the user store made no owner account at first start');
-  // What the owner gives a caller of his shared things (Devices and network, devices.give-shared).
+  // What the owner gives a caller of their shared things (Devices and network, devices.give-shared).
   const giveShared = (principalId: string, kinds: readonly SharedKind[]) => new CallerSharedStore(resolveGoodVibesDaemonHome(home)).set(principalId, kinds);
   return { helper, userAuth, giveShared, owner: userAuth.createSession(ownerName).token };
+}
+
+/**
+ * Under Ask me a call the gate decides waits on the owner's one answer: the question it raises is read (which act it
+ * asks about) and answered No while the call waits, from the broker's own record of it.
+ */
+async function refusedWhileWaiting(broker: ApprovalBroker, send: () => Promise<{ readonly status: number; readonly body: unknown }>) {
+  const seen = new Set(broker.listApprovals(Number.MAX_SAFE_INTEGER).map((record) => record.id));
+  let asked: string | undefined;
+  const stop = broker.subscribe((record) => {
+    if (seen.has(record.id) || record.status !== 'pending') return;
+    seen.add(record.id);
+    asked = String(record.metadata['capabilityId']);
+    void broker.resolveApproval(record.id, { approved: false, actor: 'owner', expectedRevision: record.revision, reason: 'Not now.' }).catch(() => undefined);
+  });
+  try {
+    const result = await send();
+    return { status: result.status, code: (result.body as { code?: string }).code, asked };
+  } finally {
+    stop();
+  }
 }
 
 test('an admin who is not the owner revokes no device the owner paired and cannot replace the shared token; the owner can revoke', async () => {
@@ -100,28 +124,28 @@ test('an admin who is not the owner revokes no device the owner paired and canno
   // The owner is the first user; `deputy` is an admin who is not the owner.
   userAuth.addUser('deputy', 'deputy-password', ['admin']);
 
-  // The owner paired his phone from his own machine.
+  // The owner paired their phone from their own machine.
   const phone = pairing.mint({ name: 'owner phone', origin: 'owner-pairing', madeBy: { owner: true } });
   expect(pairing.authenticate(phone.token)?.id).toBe(phone.id);
   const deputy = userAuth.createSession('deputy').token;
 
-  const revoke = await helper.invokeGatewayMethodCall({ authToken: deputy, methodId: 'pairing.tokens.delete', body: { id: phone.id } });
-  expect({ status: revoke.status, code: (revoke.body as { code?: string }).code }).toEqual({ status: 202, code: 'OWNER_APPROVAL_PENDING' });
+  // Withdrawing access the deputy neither holds nor minted is the owner's own act: refused, never put to the owner (no question).
+  const revoke = await refusedWhileWaiting(broker, () => helper.invokeGatewayMethodCall({ authToken: deputy, methodId: 'pairing.tokens.delete', body: { id: phone.id } }));
+  expect({ ...revoke, code: OWNERS_OWN_REFUSALS.has(String(revoke.code)) ? 'refused as the owner\'s own act' : revoke.code })
+    .toEqual({ status: 403, code: 'refused as the owner\'s own act', asked: undefined });
   expect(pairing.authenticate(phone.token)?.id).toBe(phone.id);
-  // It waits for the owner as an ask only he answers.
-  expect(broker.listApprovals().map((entry) => entry.metadata['capabilityId'])).toEqual(['pairing.tokens.delete']);
 
   const replace = await helper.invokeGatewayMethodCall({ authToken: deputy, methodId: 'pairing.tokens.revokeShared', body: {} });
   expect({ status: replace.status, code: (replace.body as { code?: string }).code }).toEqual({ status: 403, code: 'OWNER_ONLY' });
   expect(pairing.isLegacyRevoked()).toBe(false);
 
-  // The control: the owner himself (his signed-in session) revokes it at once.
+  // The control: the owner in person (their signed-in session) revokes it at once.
   const own = await helper.invokeGatewayMethodCall({ authToken: owner, methodId: 'pairing.tokens.delete', body: { id: phone.id } });
   expect(own.status).toBe(200);
   expect(pairing.authenticate(phone.token)).toBeNull();
 });
 
-test('an admin who is not the owner cannot loosen the permission mode a channel\'s sessions run under; he can tighten it and the owner can loosen it', async () => {
+test('an admin who is not the owner cannot loosen the permission mode a channel\'s sessions run under; that admin can tighten it and the owner can loosen it', async () => {
   const broker = new ApprovalBroker({ storePath: join(dir, 'approvals.json') });
   await broker.start();
   const registry = new ChannelProfileRegistry(new ChannelProfileStore(join(dir, 'channel-profiles.json')));
@@ -130,7 +154,7 @@ test('an admin who is not the owner cannot loosen the permission mode a channel\
   registerChannelProfilesGatewayMethods(catalog, registry, { hostMode: () => 'just-vibes', ownerApprovals: broker });
   const { helper, userAuth, owner, giveShared } = await daemonOver(catalog, broker, new PairingTokenManager(join(dir, 'pairing-tokens.json')));
   userAuth.addUser('deputy', 'deputy-password', ['admin']);
-  // The owner let the deputy use his channels: what it does with them is still decided by what each act is.
+  // The owner let the deputy use their channels: what it does with them is still decided by what each act is.
   giveShared('deputy', ['channels']);
   const deputy = userAuth.createSession('deputy').token;
   const call = async (authToken: string, methodId: string, body: Record<string, unknown>) => {
@@ -143,17 +167,19 @@ test('an admin who is not the owner cannot loosen the permission mode a channel\
   // The owner holds the ops channel to ask-me.
   expect((await call(owner, 'channels.profiles.set', { ...ops, permissionMode: 'ask-me' })).status).toBe(200);
 
-  // Each of these loosens ask-me (to yolo, to the host's just-vibes): none is applied, each waits for the owner.
+  // Each of these loosens ask-me (to yolo, to the host's just-vibes): the owner's own act, each refused, never put to the
+  // owner (no question), and none applied.
   const loosenings: Array<[string, Record<string, unknown>]> = [
     ['channels.profiles.set', { ...ops, permissionMode: 'yolo' }],
     ['channels.profiles.set', { ...ops, model: 'some-model' }],
     ['channels.profiles.delete', ops],
   ];
   for (const [methodId, body] of loosenings) {
-    expect({ methodId, ...(await call(deputy, methodId, body)) }).toEqual({ methodId, status: 202, code: 'OWNER_APPROVAL_PENDING' });
+    const answered = await refusedWhileWaiting(broker, () => helper.invokeGatewayMethodCall({ authToken: deputy, methodId, body }));
+    expect({ methodId, ...answered, code: OWNERS_OWN_REFUSALS.has(String(answered.code)) ? 'refused as the owner\'s own act' : answered.code })
+      .toEqual({ methodId, status: 403, code: 'refused as the owner\'s own act', asked: undefined });
     expect({ methodId, mode: await modeOfOps() }).toEqual({ methodId, mode: 'ask-me' });
   }
-  expect(broker.listApprovals().map((entry) => entry.metadata['capabilityId']).sort()).toEqual(loosenings.map(([methodId]) => methodId).sort());
 
   // The controls: the admin's tightening applies at once, and so does the owner's loosening.
   expect((await call(deputy, 'channels.profiles.set', { ...ops, permissionMode: 'plan' })).status).toBe(200);

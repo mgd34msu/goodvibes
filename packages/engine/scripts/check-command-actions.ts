@@ -15,7 +15,7 @@
  *  6. an action marked risky is not put to the owner when a model runs its
  *     line (or asks its own question: `asksItself`), or one that loosens a
  *     protection can be run by a model (the owner's own complete line, or a
- *     form he submitted, is the request and asks nothing);
+ *     form they submitted, is the request and asks nothing);
  *  7. an action cannot be reached from the guided path (a blank's list depends
  *     on a blank that comes after it, or on none, or the action shows no form
  *     and has a blank that must be filled);
@@ -93,8 +93,8 @@ export function checkDescription(description: CommandDescription<never>, problem
     const example = { ...placeholders(action), ...action.example };
     const line = renderTypedLine(description, action.id, example);
     const args = [...tokenizeSlashCommand(line)].slice(1);
-    // The owner's own line of it runs at once (it is the request); a model's line of it is put to him first,
-    // or refused outright when it is his alone.
+    // The owner's own line of it runs at once (it is the request); a model's line of it is put to the owner first,
+    // or refused outright when it is the owner's alone.
     if (action.risk !== 'none' && !action.asksItself) {
       const putToOwner = (() => {
         try { return generatedConfirm(description)(args, { invokedByModel: true }) !== undefined; }

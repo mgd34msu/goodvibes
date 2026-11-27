@@ -11,8 +11,8 @@
 import { CapabilityRefusal, type CapabilityDefinition, type ListName } from '../types.js';
 
 /**
- * A request to pair this program with its daemon: the one way a device becomes the owner's own. He starts it himself
- * on a screen where he is signed in as himself (the web UI, or his own program on the daemon's machine: Devices and
+ * A request to pair this program with its daemon: the one way a device becomes the owner's own. The owner starts it in person
+ * on a screen where they are signed in as themselves (the web UI, or their own program on the daemon's machine: Devices and
  * network, Pair something, A phone or another device, "Show the sign-in code once"), and this program completes it
  * with that code. Nothing here asks the daemon to mint a key for whoever asks.
  */

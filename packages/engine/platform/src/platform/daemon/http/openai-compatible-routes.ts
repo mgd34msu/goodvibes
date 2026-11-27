@@ -653,7 +653,7 @@ async function handleQueuedCompletion(
   try { jobId = decodeURIComponent(rawId); }
   catch { return openAIError('Malformed completion id in path.', 400, 'invalid_request_error', 'invalid_id'); }
   const found = context.batch ? await context.batch.getJob(jobId) : null;
-  // A caller that is not the owner himself reads back only a completion it queued (control-plane/caller-reach.ts),
+  // A caller that is not the owner in person reads back only a completion it queued (control-plane/caller-reach.ts),
   // answered as for no completion: another caller's is never said to exist.
   const reach = currentRecordReach();
   const job = found && (!reach || reach('batch-job', found.id, { project: null, ...(found.createdBy ? { madeBy: found.createdBy } : {}) })) ? found : null;

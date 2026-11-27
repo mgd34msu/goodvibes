@@ -262,7 +262,7 @@ function settingModelRoute(setting: AgentConfigSetting): string {
  * it falls back to the agent's own resolution (the pre-routing behavior, kept
  * so every existing call site still works). When the daemon owns the key and
  * could not be reached, `unavailable` is true and there is deliberately NO
- * value, reporting a default here is what told the owner his bot username was
+ * value, reporting a default here is what told the owner their bot username was
  * not set when it was.
  */
 function resolveSettingValue(

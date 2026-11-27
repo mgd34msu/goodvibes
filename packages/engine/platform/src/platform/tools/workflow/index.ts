@@ -698,7 +698,7 @@ export function createWorkflowTool(services: WorkflowServices, contracts: Workfl
             assertCurrent();
             const request = source?.request.trim();
             const started = await runner.start({
-              // The work as the owner asked for it, then what this contract is to do: never his latest message on its own.
+              // The work as the owner asked for it, then what this contract is to do: never their latest message on its own.
               ask: request ? `${request}\n\nPlanned for the agents:\n- ${task}` : task,
               sessionId,
               origin: 'agent-tool',

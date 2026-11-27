@@ -434,7 +434,7 @@ export class ArtifactStore {
   list(limit = 100): ArtifactDescriptor[] {
     const now = Date.now();
     this.pruneExpired(now);
-    // Served for a caller that is not the owner himself (daemon-api withRecordReach): only the files it may reach, before
+    // Served for a caller that is not the owner in person (daemon-api withRecordReach): only the files it may reach, before
     // the newest `limit` are cut (control-plane/caller-reach.ts). Every reader of this list is filtered the same way:
     // the method, the Agent's artifacts capability and its tool.
     return keepReachable([...this.records.values()].filter((record) => !isExpired(record, now)), 'artifact', (record) => record.id)

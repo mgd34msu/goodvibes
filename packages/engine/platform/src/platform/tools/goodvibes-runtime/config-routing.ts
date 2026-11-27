@@ -318,7 +318,7 @@ export async function applyRoutedConfigWrite(
   // turn stays the guest's), with the gate's decision on its call. The settings
   // owner applies its own rule (`loosenRefusal`): a change that loosens
   // security stands only for an actor that may make it, and for a model only
-  // when the owner, his rule or the mode settled the call. The same check runs
+  // when the owner, their rule or the mode settled the call. The same check runs
   // before a write is sent to the daemon or to another surface's file, so
   // routing cannot skip it.
   const decision = currentAdmittedToolDecision();

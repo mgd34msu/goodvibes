@@ -87,9 +87,7 @@ export {
   getContractCommitScope,
   getContractDefaultAttempts,
   getContractEvidenceNudgeLimit,
-  getContractGateTimeoutMs,
   getContractGates,
-  getContractHeartbeatTimeoutMs,
   getContractIsolation,
   getContractMaxActiveContracts,
   getContractMaxFixRounds,
@@ -100,7 +98,6 @@ export {
   getContractNudgeTtlMs,
   getContractPlanRepairLimit,
   getContractStallLimit,
-  getContractTransportRetryDelayMs,
   getContractTransportRetryLimit,
   getEnabledContractGates,
   readContractConfig,
@@ -204,8 +201,8 @@ export { acquireSharedTree, groupWorkstreamInput, phaseCapacity, remainingBudget
 export { BRIEF_CHECKED_PARAGRAPH, briefWithPreviousChecks, buildUnitBrief } from './brief.js';
 export { addJudgmentUsage, agentsUsage, contractAgentIds, mergeAll, ownerRecordUsage, rollUpContractUsage } from './usage.js';
 export type { AgentLookup, PriceUsageFn, UsagePricing } from './usage.js';
-export { createUnitWatchdog, watchdogIntervalMs } from './watchdog.js';
-export type { UnitWatchdog, UnitWatchdogDeps, WatchedAgent } from './watchdog.js';
+export { createUnitActivity } from './unit-activity.js';
+export type { UnitActivity, UnitActivityDeps } from './unit-activity.js';
 export { TRANSPORT_RETRY_SITE, createUnitFailureHandling } from './unit-failures.js';
 export type { UnitFailureDeps, UnitFailureHandling } from './unit-failures.js';
 export { CONTRACT_EVENT_SOURCE, contractEmitterContext, contractTraceId, emitContractEvent } from './events.js';

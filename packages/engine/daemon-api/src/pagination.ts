@@ -15,7 +15,7 @@ import { AsyncLocalStorage } from 'node:async_hooks';
  * `schedule-run`, `approval`, `task`, `checkpoint`, `trigger`, `rule`, `memory-record`, `artifact`; `project` with a
  * project's folder for a row kept by the project it belongs to) and id: the one
  * check of what a caller may reach (platform control-plane/caller-reach.ts), set by the daemon around a call of a caller
- * that is not the owner himself. A paged list keeps only what this keeps BEFORE it cuts its page, so a page, its
+ * that is not the owner in person. A paged list keeps only what this keeps BEFORE it cuts its page, so a page, its
  * `hasMore`, its cursor and its totals are about what the caller can reach.
  *
  * @public

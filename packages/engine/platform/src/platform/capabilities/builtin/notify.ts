@@ -94,7 +94,7 @@ export const NOTIFY_ADD: CapabilityDefinition<NotifyCapabilityServices> = {
   inputs: [{ id: 'url', label: 'Address', help: 'A webhook address such as https://ntfy.sh/my-topic; it carries its key, so it is kept secret', kind: 'secret', required: true, typed: { position: 1 } }],
   sentence: 'Notifications and alerts also go to the webhook address you gave (an ntfy topic or the like), kept in the secret store, until you change it.', done: '',
   touches: 'credential', lasts: 'kept', risk: 'none', undoneBy: 'remove',
-  // The address carries posting rights: writing it is the owner's, and a model's call of it is put to him.
+  // The address carries posting rights: writing it is the owner's, and a model's call of it is put to the owner.
   effects: ['control-plane.write', 'secret.write'],
   example: {},
   async run(values, services) {

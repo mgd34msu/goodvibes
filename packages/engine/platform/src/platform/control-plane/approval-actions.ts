@@ -90,7 +90,7 @@ export function approvalViewerOfActor(actor: Actor | undefined, node: string): A
     : actor.class === 'peer' ? 'remote-node'
       : actor.class === 'owner' || actor.class === 'system' ? 'owner-route'
         : actor.class === 'admin' ? 'admin' : 'operator';
-  // The owner's own device (an admin that is never the owner himself) answers, but only a question another caller
+  // The owner's own device (an admin that is never the owner in person) answers, but only a question another caller
   // raised: never its own, nor one of a credential made from it (approval-lifecycle.ts `answersOthersOnly`).
   const device = actor.agentFor === undefined && actor.class === 'admin' ? actor.ownerDevice : undefined;
   return {
@@ -213,7 +213,7 @@ export function localApprovalActions(broker: ApprovalActionsBroker, now: () => n
       if (record && own) {
         return { applied: false, record, reading: readApproval(record, viewer, now()),
           refusal: refusal({ code: own.code, state: `${record.status} (revision ${record.revision})`, status: 403, reason: own.reason,
-            next: ['The owner answers it himself, in his signed-in session or his own program.'] }) };
+            next: ['Answer it yourself, in your signed-in session or your own program.'] }) };
       }
       if (id !== null) return withReading(await broker.resolveApproval(id, input), viewer);
       // Only hunk indexes travel; changed arguments are computed by the node that owns the ask.

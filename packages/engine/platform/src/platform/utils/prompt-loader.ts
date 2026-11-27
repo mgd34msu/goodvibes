@@ -48,7 +48,7 @@ export function readPromptFile(
 /** How one file of the chain is read: its text, or undefined when it is missing or cannot be read (each said in the log). */
 type PromptFileReader = (resolved: string) => string | undefined;
 
-/** A file the owner chose himself (his home's prompts, a path he set): read as it is. */
+/** A file the owner chose in person (their home's prompts, a path they set): read as it is. */
 function readOwnersFile(resolved: string): string | undefined {
   try {
     return readFileSync(resolved, 'utf-8');
@@ -224,7 +224,7 @@ export function findNearestAgentsFile(startDir: string, stopAt?: string): string
  * Why a folder's project files (its AGENTS.md, its .goodvibes/GOODVIBES.md) are not read into a prompt, or undefined
  * when they are: they are read only for a project the owner trusted (runtime/workspace-trust.ts, the project's own
  * decision; trust given for having had nothing of its own to run covers no file it has since). A folder that is the
- * owner's home holds no repository: its files are his own.
+ * owner's home holds no repository: its files are their own.
  */
 export function projectFilesHeld(projectRoot: string, homeDirectory: string): string | undefined {
   const real = (path: string): string => { try { return realpathSync(path); } catch { return resolve(path); } };

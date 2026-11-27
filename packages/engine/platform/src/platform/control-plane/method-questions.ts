@@ -13,6 +13,8 @@ export const METHOD_QUESTIONS: Readonly<Record<string, string>> = {
   'work.plan.step.move': 'Move a step of this piece of work\'s plan to another place?',
   'work.plan.approve': 'Approve this piece of work\'s plan, so its steps start running?',
   'work.plan.discard': 'Throw this piece of work\'s plan away?',
+  'work.branch.merge': 'Merge the branch this piece of work kept into the project\'s branch?',
+  'work.branch.discard': 'Throw away the branch this piece of work kept, with everything on it?',
   'workLedger.execution.start': 'Start running this piece of work on the daemon?',
   'workLedger.execution.status': 'Check where this piece of work stands?',
   'workLedger.execution.cancel': 'Stop this piece of work?',

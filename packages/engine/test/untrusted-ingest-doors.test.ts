@@ -33,6 +33,7 @@ import { createWebSearchTool } from '../platform/src/platform/tools/web-search/i
 import { WebSearchProviderRegistry } from '../platform/src/platform/web-search/provider-registry.ts';
 import { WebSearchService } from '../platform/src/platform/web-search/service.ts';
 import { localOwnerActor } from '@goodvibes/engine/daemon-api/http-policy';
+import { withOwnerInput } from '../platform/src/platform/security/turn-input-party.ts';
 
 /** A stdio MCP server with one tool, `lookup`, that returns a planted instruction. */
 const STAND_IN_SERVER = `
@@ -94,7 +95,8 @@ test('fetch, an MCP result and web search each record what they read, and a send
   const tools = new ToolRegistry(manager);
   const deps: ToolExecutionDeps = { permissionManager: manager, toolRegistry: tools, autonomousSource: () => ({ goal: 'Read for the owner', criteria: [] }),
     hookDispatcher: null, runtimeBus: null, sessionId: 'doors', emitterContext: () => ({ sessionId: 'doors', traceId: 'doors', source: 'orchestrator' }) };
-  const call = (id: string, name: string, args: Record<string, unknown>) => executeToolCalls(deps, `turn-${id}`, [{ id, name, arguments: args }]);
+  // The owner's own turn reads: work no turn names is someone else's and only reads (turn-input-party.ts), and an MCP call can change things.
+  const call = (id: string, name: string, args: Record<string, unknown>) => withOwnerInput(() => executeToolCalls(deps, `turn-${id}`, [{ id, name, arguments: args }]));
   tools.register(createFetchTool({ resolveHost: resolver }));
   // Sent in full, as after the model loaded its parameters: the call is not refused as listed in one line.
   const mcpTool = createMcpTool(mcp);

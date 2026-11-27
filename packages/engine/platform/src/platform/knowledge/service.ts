@@ -116,6 +116,7 @@ import {
 } from './shared.js';
 import { isGeneratedKnowledgeSource } from './generated-projections.js';
 import { knowledgeRecordReachable } from './knowledge-reach.js';
+import { currentRecordReach } from '@goodvibes/engine/daemon-api';
 import {
   prepareKnowledgeScopeSelection,
   KnowledgeScopeSelectionHeldError,
@@ -310,14 +311,18 @@ export class KnowledgeService {
     const nodeCount = queryKnowledgeNodes(selection, { limit: Number.MAX_SAFE_INTEGER }).total;
     selection.assertCurrent();
     assertEdges();
+    // A caller held to what it may reach (anyone but the owner at large) is shown its own counts only: never where the
+    // owner's library is kept, nor the library-wide counts of the owner's jobs, schedules, usage and reviews.
+    const held = currentRecordReach() !== undefined;
     return {
       ...allStatus,
+      ...(held ? { storagePath: '', jobRunCount: 0, usageCount: 0, candidateCount: 0, reportCount: 0, scheduleCount: 0 } : {}),
       sourceCount: selection.sources.length,
       nodeCount,
       edgeCount,
       issueCount: selection.issues.length,
       extractionCount,
-      refinementTaskCount,
+      refinementTaskCount: held && spaceId === null ? 0 : refinementTaskCount,
       note: 'Structured knowledge uses SQL-backed sources, nodes, edges, issues, extractions, and job runs. Markdown is an optional projection, not the source of truth.',
     };
   }

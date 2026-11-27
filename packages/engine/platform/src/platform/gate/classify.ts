@@ -7,8 +7,8 @@
  * standing rule that matched, where the instruction came from, whether the
  * turn read untrusted text) and this function applies one order:
  *
- *   0. an act only the owner performs himself (answering an approval put to
- *      him, granting access through an operator method) is refused to a
+ *   0. an act only the owner performs in person (answering an approval put to
+ *      them, granting access through an operator method) is refused to a
  *      model's call in every mode, yolo included: whoever approved the call,
  *      the daemon refuses it from a model; then, in a turn acting on someone
  *      else's input, every call that is not a read (unless its tool holds it
@@ -16,14 +16,18 @@
  *      conversation with no project changing something (refused whatever
  *      anyone would answer, so nothing below asks about it);
  *   1. surface authority (a change asked for on a channel the owner set up is
- *      his to approve; on a surface anyone can write to it is refused; a turn
- *      a channel's guest started runs only plain reads without him), then
- *      a call that only tightens a protection (allowed, in every mode and
- *      folder), then the plan posture;
+ *      the owner's to approve, in every mode but plan; on a surface anyone can write to
+ *      it is refused; a turn a channel's guest started runs only plain reads
+ *      without the owner), then a call that only tightens a
+ *      protection (allowed, in every mode and folder), then the plan posture;
  *   2. yolo runs everything that passed 1;
  *   3. a matching deny or ask rule;
  *   4. the owner-only list, recognised by code from the call and the facts
- *      the caller holds (recognizeOwnerOnly), never from a model;
+ *      the caller holds (recognizeOwnerOnly), never from a model: an act that
+ *      was the owner's own sent through a tool that puts it to the decision,
+ *      and the rest of the list; as released (permissions/manager.ts): asked
+ *      in Ask me and Jev decides, held to the end of the run in Just vibes,
+ *      never decided by Jev;
  *   5. a matching allow rule;
  *   6. the declared-effect defaults: a read inside the allowed directories,
  *      a read of the app's own state, a call its registration declared
@@ -70,8 +74,8 @@ export type OwnerOnlyKind =
    */
   | 'unrecoverable-delete'
   /**
-   * Sending as the owner to a recipient that is neither one of his configured
-   * destinations nor one he allowed: the tool declares where its recipients
+   * Sending as the owner to a recipient that is neither one of their configured
+   * destinations nor one they allowed: the tool declares where its recipients
    * sit (`subjects.recipients`, `ownerDecisions.recipients`), or code reads
    * them from a call no declaration covers (gate/send-recipients.ts: a shell
    * command that mails or posts to a messaging service, a `fetch` to one, an
@@ -97,8 +101,8 @@ export type OwnerOnlyKind =
   /** A change asked for on a channel the owner set up, where a message cannot direct one by itself. */
   | 'channel-request'
   /**
-   * An act the owner performs himself: answering an approval or a purchase window
-   * put to him, granting or withdrawing access through an operator method the
+   * An act the owner performs in person: answering an approval or a purchase window
+   * put to them, granting or withdrawing access through an operator method the
    * catalog declares `ownerOnly`. A model's call is refused, not asked about.
    */
   | 'owner-act';
@@ -116,7 +120,7 @@ const OWNER_ONLY_REASONS: Readonly<Record<OwnerOnlyKind, string>> = {
   'irreversible-operator': 'it is an operator action that cannot be undone',
   'standing-ask': 'your rule says to ask you about this',
   'channel-request': 'it was asked for in a channel conversation, where a message cannot direct a change by itself',
-  'owner-act': 'it is an act that is yours alone; it runs only on your yes',
+  'owner-act': 'it is an act of yours (granting, withdrawing or choosing for you), asked for by a caller that is not you',
 };
 
 export function ownerOnlyReason(kind: OwnerOnlyKind): string {
@@ -128,7 +132,7 @@ export function ownerOnlyWords(kind: OwnerOnlyKind, because: string | undefined)
   return because ?? OWNER_ONLY_REASONS[kind];
 }
 
-/** A standing "ask me" by what it is: the owner's kept rule by its description, or his answer earlier this session. */
+/** A standing "ask me" by what it is: the owner's kept rule by its description, or their answer earlier this session. */
 function standingAskBecause(rule: CallRuleFact): string {
   if (rule.source === 'session') return `you said earlier in this session to ask you about this (${rule.description})`;
   if (rule.source === 'user-rule') return `your rule "${rule.description}" says to ask you about this`;
@@ -137,7 +141,7 @@ function standingAskBecause(rule: CallRuleFact): string {
 }
 
 /**
- * Something outside the permission rules that asks the owner about a call (a tool server's trust level, his Pre:tool
+ * Something outside the permission rules that asks the owner about a call (a tool server's trust level, their Pre:tool
  * hook), as a clause for "Only you decide this: …": its own sentence, with no closing stop and a lower-case start.
  */
 export function outsideAskBecause(sentence: string): string {
@@ -186,11 +190,11 @@ export interface CallFacts {
   /** For an owner act, the act in its own words when the tool's declaration gives them (ownerActWordsOf). */
   readonly ownerActWords?: string | undefined;
   /**
-   * The owner act is one the tool puts to the owner rather than refusing (its `ownerActs.asked`: every capability
-   * through capability_run): asked in every mode, opening on No, never refused outright.
+   * The owner act is one the tool puts to the decision rather than refusing (its `ownerActs.asked`: every capability
+   * through capability_run): an item of the owner's list, decided under their mode, never refused outright.
    */
   readonly ownerActAsked?: boolean | undefined;
-  /** The owner act is answered each time (its `ownerActs.once`: a card's detail he types): no remembered yes covers it. */
+  /** The owner act is answered each time (its `ownerActs.once`: a card's detail the owner types): no remembered yes covers it. */
   readonly ownerActOnce?: boolean | undefined;
   /** The turn read text anyone can write (the untrusted-content ledger holds an entry for it). */
   readonly untrustedRead: boolean;
@@ -210,12 +214,12 @@ export interface CallFacts {
   readonly hostDecides?: boolean | undefined;
   /**
    * The call only tightens a protection (the tool's `tightens`, types/tools.ts): plan mode on, a folder restricted, a
-   * "never" rule added, a protection switched on. Allowed as a fact in every mode and folder: nothing is asked.
+   * "never" rule added, a protection switched on. Allowed as a fact in every mode but plan (refused there, as released) and every folder: nothing is asked.
    */
   readonly onlyTightens?: boolean | undefined;
   /**
    * The call writes only the model's own working state (its running checklist: the tool's `ownWorkingState`,
-   * types/tools.ts). Not an act on the person's things: allowed as a fact in every mode, never held or asked.
+   * types/tools.ts). Not an act on the person's things: allowed as a fact in every mode but plan (refused there, as released), never held or asked.
    */
   readonly ownWorkingState?: boolean | undefined;
   /**
@@ -302,8 +306,8 @@ export function classifyCall(mode: GatePresetName, facts: CallFacts): CallClass 
       state: 'refused', decidedBy: 'code',
       reason: facts.ownerActWords
         ? `${facts.ownerActWords} is something only the owner does from their own screen`
-        : `${facts.tool} would do something only the owner does himself (answer what was put to him, or grant or withdraw access)`,
-      next: ['do not call it again', 'tell the owner what is waiting; he answers it in his own app (the approval prompt, Waiting for you, the web UI)'],
+        : `${facts.tool} would do something only the owner does in person (answer what was put to them, or grant or withdraw access)`,
+      next: ['do not call it again', 'tell the owner what is waiting; they answer it in their own app (the approval prompt, Waiting for you, the web UI)'],
     } };
   }
   // A turn acting on someone else's input (a member's web chat, a channel message, a guest, input an outside caller put
@@ -315,11 +319,15 @@ export function classifyCall(mode: GatePresetName, facts: CallFacts): CallClass 
   // the party's (whose input it is), never the surface's words.
   const surfaceRefuses = facts.surface !== undefined && facts.category !== 'read' && !surfaceCarriesCommandAuthority(facts.surface)
     && !surfaceRequestsReachOwner(facts.surface);
-  if (facts.otherParty !== undefined && facts.category !== 'read' && (facts.heldToBoundary !== true || surfaceRefuses)) {
+  // As released (P4): a change asked by a sender the owner admitted on a channel the owner set up (a guest's turn, or a
+  // channel whose requests reach the owner) is put to the owner as a channel request below, not refused here.
+  const channelRequest = facts.surface !== undefined && facts.category !== 'read' && !surfaceCarriesCommandAuthority(facts.surface)
+    && surfaceRequestsReachOwner(facts.surface);
+  if (facts.otherParty !== undefined && facts.category !== 'read' && !channelRequest && (facts.heldToBoundary !== true || surfaceRefuses)) {
     return { kind: 'fact', allow: false, basis: 'surface', decision: {
       state: 'refused', decidedBy: 'code',
       reason: `this turn acts on someone else's input (${facts.otherParty}), and such a turn only reads outside a real sandbox, whatever the mode: ${facts.tool} would change or start something`,
-      next: ['carry on with reading and reporting', 'say what you would do; the owner can do it himself'],
+      next: ['carry on with reading and reporting', 'say what you would do; the owner can do it themselves'],
     } };
   }
   // A call that will be refused whatever anyone answers is refused here, before any question: the owner is never asked
@@ -330,15 +338,14 @@ export function classifyCall(mode: GatePresetName, facts: CallFacts): CallClass 
       next: ['say what you would change instead', 'the owner chooses a project for this channel'],
     } };
   }
-  // A guest's turn (someone a channel admits who is not its owner) may read and
-  // answer: a plain read (files inside the allowed directories, see plainRead)
-  // runs; every other call is the owner's to approve, in every mode and with or
-  // without a decision model, as a change asked for on a channel is.
+  // As released: a guest's turn (someone a channel admits who is not its owner) may read and answer: a plain read
+  // (files inside the allowed directories, see plainRead) runs; every other read is the owner's to approve, in every
+  // mode and with or without a decision model, as a change asked for on a channel is.
   if (isGuestSurfaceId(facts.surface) && facts.category === 'read' && !plainRead(facts)) {
     return { kind: 'owner-only', item: 'channel-request' };
   }
   if (facts.surface !== undefined && facts.category !== 'read' && !surfaceCarriesCommandAuthority(facts.surface)) {
-    // A channel the owner set up: the request becomes his approval, answered on a command surface.
+    // A channel the owner set up: the request becomes the owner's approval, answered on a command surface.
     // Plan mode still refuses below; yolo does not skip it (the surface, not the mode, lacks authority).
     if (mode !== 'plan' && surfaceRequestsReachOwner(facts.surface)) return { kind: 'owner-only', item: 'channel-request' };
     const verdict = effectPermittedForProvenance(facts.category === 'write' ? 'write' : 'exec', { surfaceId: facts.surface });
@@ -348,45 +355,32 @@ export function classifyCall(mode: GatePresetName, facts: CallFacts): CallClass 
       next: [verdict.allowed ? 'report what was asked and let the owner decide' : verdict.fix, 'carry on with reading and reporting'],
     } };
   }
-  // An act that only tightens a protection is never refused or asked about, in any mode or folder: it can only
-  // make what follows safer, and asking the owner about it would put a question in front of him that is not his.
-  if (facts.onlyTightens === true) {
-    return { kind: 'fact', allow: true, basis: 'declared-effect', decision: {
-      state: 'allowed', decidedBy: 'code', reason: 'it only tightens a protection',
-    } };
-  }
-  // The model's own checklist is its working state, not the person's things: written in every mode, plan mode and
-  // just-vibes with no decision model included, and never held or asked about.
-  if (facts.ownWorkingState === true) {
-    return { kind: 'fact', allow: true, basis: 'declared-effect', decision: {
-      state: 'allowed', decidedBy: 'code', reason: 'it writes only the model\'s own checklist',
-    } };
-  }
-  if (mode === 'plan' && facts.category !== 'read') {
+  // As released, plan mode refuses every change, one that only tightens a protection and the model's own checklist
+  // included: it is checked before those two facts.
+  if (mode === 'plan' && (facts.category !== 'read' || facts.onlyTightens === true || facts.ownWorkingState === true)) {
     return { kind: 'fact', allow: false, basis: 'plan', decision: {
       state: 'refused', decidedBy: 'mode',
       reason: `plan mode is on and ${facts.tool} would change something`,
       next: ['present the plan of changes and wait for the owner to approve it', 'the owner leaves plan mode to run it'],
     } };
   }
-  // An act only the owner does, of a tool that puts such acts to him (a capability: capability_run): asked in every
-  // mode, yolo included, opening on No; it runs on his yes (or on his own remembered answer to it).
-  if (facts.ownerOnly === 'owner-act') {
-    const owned = facts.rule;
-    if (owned?.effect === 'deny') return { kind: 'fact', allow: false, basis: 'rule', rule: owned, decision: ruleDecision(owned, false) };
-    if (owned?.effect === 'allow' && owned.ownerOnly === 'owner-act' && facts.ownerActOnce !== true) {
-      return { kind: 'fact', allow: true, basis: 'owner-rule', rule: owned, decision: {
-        state: 'allowed', decidedBy: 'rule', reason: `you allowed this before (${owned.description})`, limit: owned.description,
-      } };
-    }
-    return facts.ownerActOnce === true ? { kind: 'owner-only', item: 'owner-act', once: true } : { kind: 'owner-only', item: 'owner-act' };
+  // An act that only tightens a protection is never refused or asked about outside plan mode: it can only make what
+  // follows safer, and asking the owner about it would put a question in front of them that is not theirs.
+  if (facts.onlyTightens === true) {
+    return { kind: 'fact', allow: true, basis: 'declared-effect', decision: {
+      state: 'allowed', decidedBy: 'code', reason: 'it only tightens a protection',
+    } };
   }
-  // A command that starts or drives one of GoodVibes' own programs, or touches its home (reachesProductPastGate): the
-  // door to the owner's own acts, so asked in every mode, yolo included, each time, opening on No.
-  if (facts.ownerOnlyOnce === true && facts.ownerOnly !== undefined) {
-    if (facts.rule?.effect === 'deny') return { kind: 'fact', allow: false, basis: 'rule', rule: facts.rule, decision: ruleDecision(facts.rule, false) };
-    return { kind: 'owner-only', item: facts.ownerOnly, once: true, ...(facts.ownerOnlyBecause !== undefined ? { because: facts.ownerOnlyBecause } : {}) };
+  // The model's own checklist is its working state, not the person's things: written outside plan mode (just-vibes
+  // with no decision model included), and never held or asked about.
+  if (facts.ownWorkingState === true) {
+    return { kind: 'fact', allow: true, basis: 'declared-effect', decision: {
+      state: 'allowed', decidedBy: 'code', reason: 'it writes only the model\'s own checklist',
+    } };
   }
+  // YOLO runs every call that passed the steps above: an item of the owner's list (an act that was the owner's own, a command
+  // reaching the product past the gate, what runs later, sends or spends after outside text) included. Only the flat
+  // refusals above and the owner's never-run rules stop a call here.
   if (mode === 'yolo') {
     return { kind: 'fact', allow: true, basis: 'mode', decision: { state: 'allowed', decidedBy: 'mode', reason: 'yolo mode runs every call' } };
   }
@@ -394,6 +388,17 @@ export function classifyCall(mode: GatePresetName, facts: CallFacts): CallClass 
   if (rule?.effect === 'deny') return { kind: 'fact', allow: false, basis: 'rule', rule, decision: ruleDecision(rule, false) };
   // Named by the rule that asks, never as "a rule" when it is a session's answer or another cause.
   if (rule?.effect === 'ask') return { kind: 'owner-only', item: 'standing-ask', because: standingAskBecause(rule) };
+  // An act that was the owner's own, sent by a tool that puts such acts to the decision (a capability through
+  // capability_run, a caller who is not the owner's own program): an item of the owner's list, decided under their mode; their own
+  // remembered answer to it settles it.
+  if (facts.ownerOnly === 'owner-act') {
+    if (rule?.effect === 'allow' && rule.ownerOnly === 'owner-act' && facts.ownerActOnce !== true) {
+      return { kind: 'fact', allow: true, basis: 'owner-rule', rule, decision: {
+        state: 'allowed', decidedBy: 'rule', reason: `you allowed this before (${rule.description})`, limit: rule.description,
+      } };
+    }
+    return facts.ownerActOnce === true ? { kind: 'owner-only', item: 'owner-act', once: true } : { kind: 'owner-only', item: 'owner-act' };
+  }
   // One decision, at the host: it admits this call itself under the owner's mode when it arrives.
   if (facts.hostDecides === true) {
     return { kind: 'fact', allow: true, basis: 'host', decision: {
@@ -521,9 +526,9 @@ export interface OwnerOnlyCallFacts {
   /** The call writes a setting, and the key's declared loosening rule says this change loosens it (config-key-facts.ts). */
   readonly loosensSetting?: boolean | undefined;
   /**
-   * The call sends as the owner to a recipient that is not one of his own
-   * configured destinations and that he has not allowed (callRecipients, read
-   * against his settings and answers by the caller).
+   * The call sends as the owner to a recipient that is not one of their own
+   * configured destinations and that they have not allowed (callRecipients, read
+   * against their settings and answers by the caller).
    */
   readonly newRecipient?: boolean | undefined;
   /**
@@ -648,7 +653,7 @@ export function runsLaterCall(args: Record<string, unknown>, definition: Pick<To
 /** The words a call that runs by itself later, from a turn that read untrusted text, is put to the owner with. */
 export const RUNS_LATER_FROM_READ_BECAUSE = 'it makes something that runs by itself later, and this conversation read text anyone can write, which may be what asked for it';
 
-/** Whether a call sends something out as the owner or spends his money (its tool's `ownerDecisions.sendsOrSpends`). */
+/** Whether a call sends something out as the owner or spends their money (its tool's `ownerDecisions.sendsOrSpends`). */
 export function sendsOrSpendsCall(args: Record<string, unknown>, definition: Pick<ToolDefinition, 'ownerDecisions'> | undefined): boolean {
   const decisions = definition?.ownerDecisions;
   return decisions !== undefined && namesOneOf(args, decisions.field, decisions.sendsOrSpends);
@@ -722,8 +727,24 @@ function asAct(label: string): string {
 }
 
 /** Whether the owner act a call names is one its tool puts to the owner (`ownerActs.asked`) rather than refusing. */
+/**
+ * Whether a call names a value that no model makes with these arguments (`ownerActs.refusedWhen`: a settings write
+ * naming the permission mode or a permission rule): an owner act refused, never asked, in every mode.
+ */
+export function refusedByArguments(args: Record<string, unknown>, acts: NonNullable<OwnerOnlyDefinition['ownerActs']>): boolean {
+  if (!acts.refusedWhen) return false;
+  for (const value of argumentValues(args, acts.field) ?? []) {
+    const rule = Object.hasOwn(acts.refusedWhen, value.trim()) ? acts.refusedWhen[value.trim()] : undefined;
+    if (!rule) continue;
+    const named = argumentValues(args, rule.path) ?? [];
+    if (named.some((arg) => rule.prefixes.some((prefix) => arg.trim() === prefix || arg.trim().startsWith(`${prefix}.`)))) return true;
+  }
+  return false;
+}
+
 export function ownerActAsked(args: Record<string, unknown>, definition: OwnerOnlyDefinition | undefined): boolean {
   const acts = definition?.ownerActs;
+  if (acts !== undefined && refusedByArguments(args, acts)) return false;
   if (!acts?.asked || acts.asked.length === 0) return false;
   const named = argumentValues(args, acts.field);
   // Every value the call names must be an asked one; a value that cannot be read stays refused (fails closed).
@@ -771,7 +792,7 @@ export function ownerOnlyCause(toolName: string, args: Record<string, unknown>,
   definition: OwnerOnlyDefinition | undefined, facts: OwnerOnlyCallFacts, directory: string | undefined): { readonly kind: OwnerOnlyKind; readonly because?: string } | undefined {
   const acts = definition?.ownerActs;
   // A value that cannot be read is taken as an owner act: the declaration fails closed.
-  if (acts !== undefined && namesOneOf(args, acts.field, acts.values)) return { kind: 'owner-act' };
+  if (acts !== undefined && (namesOneOf(args, acts.field, acts.values) || refusedByArguments(args, acts))) return { kind: 'owner-act' };
   if (changesMcpTrust(toolName, args)) return { kind: 'grant-access', because: 'it changes how far a tool server is trusted' };
   if (definition?.dangerous === true) return { kind: 'grant-access', because: `${toolName} is declared dangerous, so each call of it is yours to decide` };
   if (facts.loosensSetting === true) return { kind: 'loosen-security' };

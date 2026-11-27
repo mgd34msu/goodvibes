@@ -55,7 +55,7 @@ import type { ConfigSetting } from './schema.js';
 import { listDaemonOwnedConfigPaths } from './config-ownership.js';
 import { deleteRawDotPath, writeRawDotPath } from './settings-io.js';
 import { readDotPath } from './shared-config-tier.js';
-import { RETIRED_NO_DECISION_MODEL_POLICIES } from './settings-carry-forward.js';
+import { RETIRED_NO_DECISION_MODEL_POLICIES, SETTINGS_KEPT_FOR_ROLLBACK } from './settings-carry-forward.js';
 import { isSecretBearingConfigKey, SECRET_BEARING_CONFIG_PATHS } from './secret-bearing-config-keys.js';
 import { isStructuredCredentialReferenceConfigKey } from './structured-credential-config.js';
 import { describeMalformedSecretRef, looksLikeSecretRef } from './secret-ref-refusal.js';
@@ -511,7 +511,9 @@ function screenSecretReferences(
  * The test here is exact: the path is neither a known setting nor a known
  * section, and its parent section is known. A host setting the reading
  * manager registered is a known setting, and the sections that hold it are
- * known sections, so a misspelt leaf beside it is still reported.
+ * known sections, so a misspelt leaf beside it is still reported. A key 3.5.0
+ * declared and this release removed (SETTINGS_KEPT_FOR_ROLLBACK) is not
+ * reported: it was written by 3.5.0, and is kept for a rollback to it.
  */
 function collectUnknownKeys(
   raw: Record<string, unknown>,
@@ -532,6 +534,8 @@ function collectUnknownKeys(
       // `clientSecretRef` growing into a `{ ref, … }` record under a newer
       // component. Checking the path BEFORE descending is what catches that;
       // descending first only ever finds the leaves inside it.
+      // A key 3.5.0 had and this release removed is read past in silence and left in the file for a rollback.
+      if (SETTINGS_KEPT_FOR_ROLLBACK.includes(path)) continue;
       if (!known.has(path) && !hostPaths.has(path) && !sections.has(path) && isKnownSection(prefix)) {
         found.push({ key: path, section: prefix, name });
         continue;

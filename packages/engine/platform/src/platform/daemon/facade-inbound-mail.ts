@@ -733,7 +733,7 @@ export function composeInboundMail(
     // routes are loaded first: otherwise that mail finds no route and is
     // recorded as never announced. Routes that cannot be read do not stop the
     // reader: the mail is still recorded, and the missing route is reported.
-    // The owners are read the same way: a route counts as the owner's only once his owner id is known.
+    // The owners are read the same way: a route counts as the owner's only once the owner's id is known.
     try { await Promise.all([options.routeBindings.start(), options.channelOwnersReady?.()]); }
     catch (error) {
       logger.warn('Inbound mail started without the owner\'s channel routes', { surface: 'email-inbound', detail: error instanceof Error ? error.message : String(error) });

@@ -778,7 +778,7 @@ export async function bootstrapRuntime(stdout: NodeJS.WriteStream, options: Boot
     fileCache,
     projectIndex,
     sessionId: userSessionId,
-    isResumed: false, // Sessions start fresh; use /session resume to load a previous one
+    isResumed: false, // Sessions start fresh; /resume (or Sessions, resume) loads a previous one
     runtime,
     orchestrator,
     compositor,

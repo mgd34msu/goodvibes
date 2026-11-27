@@ -13,7 +13,6 @@
  */
 // The words' own module (channel-words.ts re-exports it): the web UI draws this declaration too (places/browser.ts).
 import { CHANNEL_STATE_WORDS, channelReasonOf, channelStateOf, type ChannelState } from '@goodvibes/engine/platform/platform/channels/channel-state';
-import { OWN_MESSAGES_CHANNELS } from '@goodvibes/engine/platform/platform/channels/own-messages-proof';
 
 /** The channels whose own keys are entered on their row ("enter its keys": the daemon's channels.connect). */
 const KEYED_CHANNELS: readonly string[] = ['slack', 'discord', 'ntfy', 'webhook', 'homeassistant', 'telegram', 'google-chat', 'signal',
@@ -482,9 +481,6 @@ export const MESSAGES_PLACE = definePlace<Item>({
     { key: 'k', list: 'channels', states: TROUBLED, capability: 'channels.doctor', label: 'check it', fill: { channel: 'id' } },
     { key: 'w', list: 'channels', states: SET_UP, capability: 'channels.rules', label: 'who may write', fill: { channel: 'id' } },
     { key: 'e', list: 'channels', states: SET_UP, capability: 'channels.set-rules', label: 'change who may write', fill: { channel: 'id' } },
-    // Off by default: a message here is someone else's input, also from your own account (security/turn-input-party.ts).
-    // Offered only on a channel whose kind proves its sender and a one-to-one conversation (own-messages-proof.ts).
-    { key: 'm', list: 'channels', states: SET_UP, offeredWhen: { field: 'id', isOneOf: OWN_MESSAGES_CHANNELS }, capability: 'channels.own-messages', label: 'treat my own messages here as me', fill: { channel: 'id' } },
     // Where a conversation here may change things: a registered project, or none (then it writes no file and runs no
     // command; channels/channel-project.ts).
     // Always its form: choosing the project is the whole point (its default, none, would otherwise run at once).

@@ -76,7 +76,7 @@ export function wireViewOpeners(options: WireViewOpenersOptions): void {
       hosted: getSharedHostedSessionFeed(),
       // The outcome goes back to the modal so it never claims a send that did not happen.
       // The draft's own attachment travels with it: sent only to the session it was written for.
-      // The person typed it into the Agents view: his own words, sent with his claim.
+      // The person typed it into the Agents view: their own words, sent with their claim.
       steerHosted: (text, binding) => sayToHosted(commandContext, text, undefined, binding, true),
       confirm: (confirmOptions) => confirmThrough(host, confirmOptions),
       requestRender: render,

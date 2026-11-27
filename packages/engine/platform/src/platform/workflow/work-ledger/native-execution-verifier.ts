@@ -214,7 +214,7 @@ export async function verifyNativeWorkExecution(options: {
   assertDurableCheckpoint(contract, admission); assertNativeContractSource(contract);
   if (contract.status !== 'passed') throw new Error('Native verifier requires the bound passed contract');
   // Its result accepted by the owner with no decision model in use (the deliverable's check has no reading and asked
-  // him, contract/answer.ts `describeContractOutcome`): the work is done, and the ledger says so, with evidence that is
+  // the owner, contract/answer.ts `describeContractOutcome`): the work is done, and the ledger says so, with evidence that is
   // honest about it, "unavailable" (never "verified"): nothing checked its results. Without this the ledger said "in
   // progress" for ever for work that was done.
   const last = contract.checks.at(-1);
@@ -508,6 +508,6 @@ export async function verifyNativeWorkExecution(options: {
   const passed = result.check.result === 'pass' && criteriaResults.every(item => item.status === 'satisfied');
   result.recordAction(`native settlement ${admission.contractId}: ${passed ? 'verified' : 'failed'} against ${admission.payloadRevision}`);
   options.signal.throwIfAborted();
-  return { attestation: freeze({ outcome: passed ? 'verified' : 'failed', reason: passed ? 'Every original native criterion and quality check passed against host-collected evidence.' : 'Original native criteria or quality did not pass verification.', source: 'host_check', criteriaResults, references }),
+  return { attestation: freeze({ outcome: passed ? 'verified' : 'failed', reason: passed ? 'Every result you asked for and every quality check passed, read from what the work actually did.' : 'A result you asked for, or a quality check, did not pass.', source: 'host_check', criteriaResults, references }),
     report: (contract.answer?.trim() || 'Native execution finished; see revision-bound verification evidence.').slice(0, 20_000), assertCurrent };
 }

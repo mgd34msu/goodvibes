@@ -1,5 +1,5 @@
 // Proves: A machine that asked to pair gets a peer token before the owner approved it, with the wrong challenge, or keeps one after it was revoked.
-// Red when: Verifying a pair request issues a token while it waits for the owner, after he rejected it, after its token was used, or for the wrong challenge; a repeated verify leaves the token it replaced working; or a revoked peer token still authenticates.
+// Red when: Verifying a pair request issues a token while it waits for the owner, after the owner rejected it, after its token was used, or for the wrong challenge; a repeated verify leaves the token it replaced working; or a revoked peer token still authenticates.
 // Proves: A second machine that asked to pair under a paired peer's id takes that peer over, ending its token, without the owner confirming the replace.
 // Red when: Verifying an approved request whose requested id another machine verified first merges into that peer and issues a token instead of refusing with REMOTE_PAIR_REPLACES_PEER.
 /**

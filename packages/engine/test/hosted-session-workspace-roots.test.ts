@@ -4,7 +4,7 @@
  * A paired device with session write access can ask the daemon to start a
  * hosted session in any folder it names, and that session's agent gets file
  * tools rooted there. The real manager with the real allowed roots (the
- * daemon's own directory and the workspaces in a real register) and the real
+ * workspaces in a real register; the daemon's own folder is none) and the real
  * settings manager, read as the daemon reads it, over temp directories; the floor factory is a stand-in that only counts the floors it
  * was asked for, which is the point at which a session would get its tools.
  */
@@ -59,11 +59,13 @@ test('a hosted session starts only in the daemon\'s folder or a registered works
     daemonDir: await create(daemonDir),
   };
   await manager.dispose();
+  // The daemon's own folder is a folder of its own in its home, never a project (hosted-sessions/workspace-roots.ts):
+  // no session starts there either.
   expect({ results, asked }).toEqual({
     results: {
       unlisted: 'HostedSessionArgumentError', parentOfAllowed: 'HostedSessionArgumentError', linkOut: 'HostedSessionArgumentError',
-      registered: 'HostedSessionUnavailableError', subfolder: 'HostedSessionUnavailableError', daemonDir: 'HostedSessionUnavailableError',
+      registered: 'HostedSessionUnavailableError', subfolder: 'HostedSessionUnavailableError', daemonDir: 'HostedSessionArgumentError',
     },
-    asked: [registered, join(registered, 'src'), daemonDir],
+    asked: [registered, join(registered, 'src')],
   });
 });

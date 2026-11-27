@@ -10,7 +10,7 @@ export type NotificationLevel = 'critical' | 'warning' | 'info' | 'debug';
 /**
  * How loudly a routed notification is shown. Both are kept in the history.
  * - `toast`  , also shown on screen now
- * - `history`, kept in the history only (read later with /notifications)
+ * - `history`, kept in the history only (read later on the Notices tab of System, Ctrl+N)
  */
 export type NotificationPresence = 'toast' | 'history';
 

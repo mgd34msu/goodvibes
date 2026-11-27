@@ -1,12 +1,12 @@
 // Proves: A credential is stored as a literal in a settings file, card material reaches one, or a refusal echoes the value.
 // Red when: A credential literal or card material is accepted into a settings file, or the refusal echoes the value.
-// Proves: An agent loosens the sandbox, a payments limit or the permission mode through a settings write that neither the owner, his rule nor the mode settled.
+// Proves: An agent loosens the sandbox, a payments limit or the permission mode through a settings write that neither the owner, their rule nor the mode settled.
 // Red when: `ConfigManager.setMany` saves a loosening change from an agent with no decision or with only Jev's, saves part of a refused update, or a new key under a security prefix has neither a loosening rule nor a review.
 // Proves: A setting locked as managed in the daemon's folder or another program's is written through the daemon's settings.
 // Red when: The daemon's settings manager reads managed locks only from its own folder, so a lock kept beside the daemon's settings file, beside its own client settings or in the Agent's folder lets the write through.
 /**
  * An agent cannot loosen security through settings: a write that widens the
- * sandbox or loosens any payments key is refused unless the owner, his rule or
+ * sandbox or loosens any payments key is refused unless the owner, their rule or
  * the mode settled the call, and nothing is saved. Every key under the
  * security-bearing prefixes is classified, so a new key there is a decision
  * someone made, not a gap.

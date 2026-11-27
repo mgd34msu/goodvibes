@@ -45,7 +45,7 @@ import {
   terminalRequiredNote,
   type ExecInteractionRuntime,
 } from './interactive.js';
-import { containmentForTurn, type ExecContainmentRequirement } from './containment.js';
+import { containmentForTurn, turnWritesNoFile, type ExecContainmentRequirement } from './containment.js';
 import {
   backgroundContainmentRefusal,
   containmentRefusal,
@@ -358,7 +358,9 @@ async function runCommand(
   // The command and policy are this call's own values; the signal and the invocation check say whether it is still wanted.
   const assertCurrent = () => { signal?.throwIfAborted(); policy.assertCurrent?.(); };
   const cwd = resolveCwd(cmdInput.cwd, workingDirectory);
-  const resolved = await resolveRuntimeSandboxPlan(policy.sandbox, cmdStr, workingDirectory, cwd, { signal, assertCurrent });
+  // A turn on someone else's input: its project read-only, none of the owner's writable extras (containment.ts).
+  const resolved = await resolveRuntimeSandboxPlan(policy.sandbox, cmdStr, workingDirectory, cwd, { signal, assertCurrent },
+    !policy.capturedInput && turnWritesNoFile());
   const plan = resolved && !policy.capturedInput ? withSandboxRuntimes(resolved, workingDirectory) : resolved;
   assertCurrent();
   if (!policy.capturedInput) {

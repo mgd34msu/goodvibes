@@ -14,7 +14,7 @@
  * mechanical first pass: one effect per scope a method needs, `read`/`write`
  * for anyone holding the scope, `inspect`/`administer` where an admin is
  * needed. The named rows above them say more than a scope can (the owner
- * himself, a question to the owner instead of a refusal, a subject the actor
+ * in person, a question to the owner instead of a refusal, a subject the actor
  * must own); the flag rows mark what a method also does (cannot be undone,
  * sends outward, changes a contract, is never made by a model).
  *
@@ -48,7 +48,7 @@ interface EffectRow {
   readonly public?: true | undefined;
   /**
    * The owner's own device causes it too (daemon-api actor.ts `ownerDevice`), though it is an admin and never the
-   * owner himself: reading his questions and answering one some other caller raised (the approval viewer refuses a
+   * owner in person: reading the owner's questions and answering one some other caller raised (the approval viewer refuses a
    * question the device or a credential made from it raised, control-plane/approval-lifecycle.ts).
    */
   readonly ownerDevice?: true | undefined;
@@ -93,12 +93,17 @@ const ROWS = [
   /**
    * Withdrawing access the caller neither minted nor holds (a device the owner
    * paired, another principal's token, the shared operator token): the owner's
-   * own act; an admin's is put to the owner. A token the caller minted or holds
-   * is revoked under control-plane.write alone (routes/pairing.ts).
+   * own act, refused for anyone else (an admin who is not the owner, a device, a
+   * script), never put to the owner. A token the caller minted or holds is revoked
+   * under control-plane.write alone (routes/pairing.ts).
    */
-  { id: 'access.withdraw', least: 'owner', scope: 'write:control-plane', subject: 'any', ask: { kind: 'loosen-security', floor: 'admin' }, modelRefused: true },
-  /** A settings change that loosens a security, permission, judgment or payment setting: an admin's is put to the owner. */
-  { id: 'settings.loosen', least: 'owner', scope: 'write:config', subject: 'any', ask: { kind: 'loosen-security', floor: 'admin' } },
+  { id: 'access.withdraw', least: 'owner', scope: 'write:control-plane', subject: 'any', modelRefused: true },
+  /**
+   * A settings change that loosens a security, permission, judgment or payment setting: the owner's own act, refused
+   * for anyone else, never put to the owner (who of the owner's class is the owner in person: daemon/method-owner-decision.ts).
+   */
+  { id: 'settings.loosen', least: 'owner', scope: 'write:config', subject: 'any' },
+  /** Writing a credential: a model's call makes it only in the owner's own turn, under their mode (`MODEL_UNDER_MODE`). */
   { id: 'secret.write', least: 'admin', scope: 'write:config', subject: 'any', modelRefused: true },
   /** Entering a card or its security code. */
   { id: 'card.enter', least: 'owner', scope: 'write:payments', subject: 'any', modelRefused: true },
@@ -258,6 +263,30 @@ const ROWS = [
   { id: 'watchers.read', least: 'device', scope: 'read:watchers', subject: 'any' },
   { id: 'web-search.administer', least: 'admin', scope: 'write:web-search', subject: 'any' },
   { id: 'web-search.read', least: 'device', scope: 'read:web-search', subject: 'any' },
+  /**
+   * Work in a project (Work's list and plans, a piece of work asked for, its run started, read, stopped): a project act. Below
+   * an admin, the project check holds the caller to a project given to it (Work is served per project, a call naming none is
+   * refused: control-plane/project-routing.ts), and an act on a piece of work to work it caused itself (routes/work.ts
+   * `ownWork`, routes/native-work-execution.ts; a run is bound to the credential that started it).
+   */
+  { id: 'work.read', least: 'device', scope: 'read:work-ledger', subject: 'any' },
+  { id: 'work.write', least: 'device', scope: 'write:work-ledger', subject: 'any' },
+  /**
+   * The other project acts, opened by scope as Work is (each scope is in a new credential's default list,
+   * routes/pairing.ts `DEFAULT_PAIRED_SCOPES`): an agent task started, stopped or retried; a schedule made, changed, run or
+   * removed; a trigger made, cancelled or reset; a memory record of a project; a file saved in the daemon's store. Below an admin, the project check holds the call to a project given to
+   * the caller, the one reach rule holds what it names by id to that project, and a change of a record it names to a
+   * record the caller made itself (control-plane/caller-reach.ts `OWN_RECORD_CHANGES`). What such a caller starts runs as
+   * its own turn, never the owner's (security/turn-input-party.ts). Sessions use `sessions.write`, remote work queued
+   * for a session `sessions.write` too, and a project's plan `work.write`.
+   */
+  { id: 'tasks.write', least: 'device', scope: 'write:tasks', subject: 'any' },
+  { id: 'automation.write', least: 'device', scope: 'write:automation', subject: 'any' },
+  { id: 'triggers.read', least: 'device', scope: 'read:watchers', subject: 'any' },
+  { id: 'triggers.write', least: 'device', scope: 'write:watchers', subject: 'any' },
+  { id: 'memory.write', least: 'device', scope: 'write:memory', subject: 'any' },
+  { id: 'artifacts.read', least: 'device', scope: 'read:artifacts', subject: 'any' },
+  { id: 'artifacts.write', least: 'device', scope: 'write:artifacts', subject: 'any' },
   { id: 'work-ledger-import.administer', least: 'admin', scope: 'write:work-ledger-import', subject: 'any' },
   { id: 'work-ledger.administer', least: 'admin', scope: 'write:work-ledger', subject: 'any' },
   { id: 'work-ledger.inspect', least: 'admin', scope: 'read:work-ledger', subject: 'any' },
@@ -285,6 +314,22 @@ export function isEffectId(value: unknown): value is EffectId {
   return typeof value === 'string' && Object.hasOwn(EFFECTS, value);
 }
 
+/**
+ * The effects refused to a model (`modelRefused`) that the owner's own model makes in their own turn, decided under their
+ * mode at that turn's gate: writing a credential they gave it, and allowing a purchase within their limits. Every other
+ * `modelRefused` effect a model never makes, in any mode, the owner's own turn included ({@link modelNeverMakes}).
+ */
+export const MODEL_UNDER_MODE: ReadonlySet<EffectId> = new Set<EffectId>(['secret.write', 'purchase.approve']);
+
+/**
+ * Whether no model ever causes this effect, whoever it acts for and in every mode, YOLO and the owner's own turn
+ * included: granting or withdrawing access, a sign-in, a credential minted or carried out, a pairing, the permission
+ * rules, a card's details, an answer for the owner.
+ */
+export function modelNeverMakes(effect: EffectId): boolean {
+  return EFFECTS[effect].modelRefused === true && !MODEL_UNDER_MODE.has(effect);
+}
+
 export type EffectAdmission =
   | { readonly kind: 'allowed' }
   | { readonly kind: 'ask-owner'; readonly effect: EffectId; readonly ownerOnly: OwnerOnlyKind; readonly reason: string }
@@ -301,7 +346,7 @@ const ALLOWED: EffectAdmission = Object.freeze({ kind: 'allowed' });
 
 /** People, most authority first; a smaller rank holds more. */
 // A script holding the operator token (no registration of the owner's verified program) stands where an admin who is not
-// the owner stands: every scope, never the owner's own acts (refused, or put to him where the row asks).
+// the owner stands: every scope, never the owner's own acts (refused, or put to the owner where the row asks).
 const RANK: Readonly<Record<Exclude<EffectClass, 'peer'>, number>> = { owner: 0, admin: 1, script: 1, member: 2, device: 3, guest: 4 };
 
 const CLASS_WORDS: Readonly<Record<EffectClass, string>> = {
@@ -323,15 +368,15 @@ function admitOne(actor: Actor, rule: EffectRule, subject: { readonly owners: re
       : refused(rule, 'MISSING_RIGHT', 'peer', `${rule.id} is open only to a remote peer`, 'Call it from the peer node with its peer token.');
   }
   if (rule.modelRefused === true && actor.agentFor !== undefined) {
-    return refused(rule, 'OWNER_ONLY', 'owner', `${rule.id} is the owner's own act; a model acting for him never makes it`,
-      'Tell the owner what is waiting; he does it from his own app.');
+    return refused(rule, 'OWNER_ONLY', 'owner', `${rule.id} is the owner's own act; a model acting for the owner never makes it`,
+      'Tell the owner what is waiting; they do it from their own app.');
   }
-  // The owner's own device (an admin, never the owner himself) on the rows marked for it; nothing else of his.
+  // The owner's own device (an admin, never the owner in person) on the rows marked for it; nothing else of the owner's.
   if (rule.ownerDevice === true && actor.class === 'admin' && actor.agentFor === undefined && actor.ownerDevice !== undefined) return ALLOWED;
   const rank = RANK[actor.class];
   if (rank <= RANK[rule.least]) {
     if (rank >= RANK.member && rule.scope !== '' && !actorHoldsScope(actor, rule.scope)) {
-      // Its own subject under one of the row's own scopes (a member's own web chat under her sessions scopes).
+      // Its own subject under one of the row's own scopes (a member's own web chat under their sessions scopes).
       const ownSubject = subject === undefined || subject.owners.includes(actor.id);
       if (ownSubject && rule.ownScopes?.some((scope) => actorHoldsScope(actor, scope)) === true) return ALLOWED;
       return refused(rule, 'MISSING_RIGHT', rule.scope, `the credential does not hold ${rule.scope}`,
@@ -348,7 +393,7 @@ function admitOne(actor: Actor, rule: EffectRule, subject: { readonly owners: re
   }
   return rule.least === 'owner'
     ? refused(rule, 'OWNER_ONLY', 'owner', `${rule.id} is the owner's own act; ${CLASS_WORDS[actor.class]} cannot make it`,
-      'The owner does it himself: from the terminal app or the Agent, or his sign-in.')
+      'The owner does it in person: from the terminal app or the Agent, or their sign-in.')
     : refused(rule, 'MISSING_RIGHT', rule.least, `${rule.id} needs ${CLASS_WORDS[rule.least]}; this credential is ${CLASS_WORDS[actor.class]}`,
       rule.least === 'admin' ? 'Sign in with an admin account or use the operator token.' : `Use ${CLASS_WORDS[rule.least]}'s credential.`);
 }

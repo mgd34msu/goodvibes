@@ -38,6 +38,9 @@ const REGISTERED_WORKSPACE_SCHEMA = objectSchema(
       { id: STRING_SCHEMA, canonicalRoot: STRING_SCHEMA, generation: NUMBER_SCHEMA },
       ['id', 'canonicalRoot', 'generation'],
     ),
+    // false (in a list) when the folder cannot be reached now: the folder that held it is missing too (a disk not
+    // mounted, a parent renamed). Nothing of the project is let go. Absent means reachable.
+    reachable: BOOLEAN_SCHEMA,
   },
   ['root', 'registeredAt'],
 );
@@ -57,7 +60,7 @@ export const WORKSPACES_REGISTRATIONS_LIST_INPUT_SCHEMA = objectSchema({}, []);
 export const WORKSPACES_PROJECTS_LIST_INPUT_SCHEMA = objectSchema({}, []);
 export const WORKSPACES_PROJECTS_LIST_OUTPUT_SCHEMA = objectSchema(
   {
-    projects: arraySchema(objectSchema({ root: STRING_SCHEMA, label: STRING_SCHEMA, daemonFolder: BOOLEAN_SCHEMA }, ['root', 'daemonFolder'])),
+    projects: arraySchema(objectSchema({ root: STRING_SCHEMA, label: STRING_SCHEMA, daemonFolder: BOOLEAN_SCHEMA, reachable: BOOLEAN_SCHEMA }, ['root', 'daemonFolder'])),
   },
   ['projects'],
 );

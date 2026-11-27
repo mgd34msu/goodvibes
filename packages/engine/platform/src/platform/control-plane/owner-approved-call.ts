@@ -1,12 +1,12 @@
 /**
- * owner-approved-call.ts, the owner's approval of a call put to him standing
- * as his own act for that call's nested methods.
+ * owner-approved-call.ts, the owner's approval of a call put to them standing
+ * as their own act for that call's nested methods.
  *
  * An outside caller's call that `capabilities.run` put to the owner runs, once
- * he approves it, as the same caller (routes/capabilities.ts). That caller's
+ * the owner approves it, as the same caller (routes/capabilities.ts). That caller's
  * credential states no person, so a nested method that needs a person's
  * request (`confirmation: 'owner-request'`, control-plane/confirmation-gate.ts)
- * refused the call the owner had just approved. His approval is that request,
+ * refused the call the owner had just approved. The owner's approval is that request,
  * for that one call: the approved run is marked here, each nested method it
  * calls that needs it takes a one-use grant (capability-wiring.ts), and the
  * dispatch spends the grant on that one nested call (daemon/control-plane.ts),
@@ -15,12 +15,12 @@
  * can be named from outside the process: an invocation or a grant is an object
  * this module issued, never a value read from a request.
  *
- * The same grant carries the owner's approval of a model's call of an act that is his own (its program's gate put it
- * to him, gate/classify.ts): the nested method is admitted as the owner the model acts for, that one call.
+ * The same grant carries the owner's approval of a model's call of an act that is the owner's own (its program's gate put it
+ * to the owner, gate/classify.ts): the nested method is admitted as the owner the model acts for, that one call.
  *
- * And it carries his authority when the caller is not the owner (an admin's sign-in, a paired device, a member) and
- * the act was his own (an effect only the owner causes): the run is marked with the owner's actor, and every nested
- * method of that one call is admitted as him, never as the caller, whose credential cannot make it.
+ * And it carries the owner's authority when the caller is not the owner (an admin's sign-in, a paired device, a member) and
+ * the act was the owner's own (an effect only the owner causes): the run is marked with the owner's actor, and every nested
+ * method of that one call is admitted as the owner, never as the caller, whose credential cannot make it.
  */
 import type { Actor } from '@goodvibes/engine/daemon-api/http-policy';
 import type { SettingAct } from '@goodvibes/engine/daemon-api/control-routes';
@@ -31,7 +31,7 @@ type CoveredDescriptor = { readonly confirmation?: string | undefined; readonly 
 /**
  * Whether a nested method is one the owner's approval stands in for: it needs a person's request
  * (`confirmation: 'owner-request'`), or it causes an effect that is the owner's own act (a model never causes it, or
- * only the owner does), which his yes to the call made his.
+ * only the owner does), which the owner's yes to the call made theirs.
  */
 export function ownerApprovalCovers(descriptor: CoveredDescriptor): boolean {
   if (!descriptor) return false;
@@ -40,11 +40,11 @@ export function ownerApprovalCovers(descriptor: CoveredDescriptor): boolean {
   return effects.length > 0 && (effectFacts(effects).modelRefused || effectFacts(effects).ownerOnly);
 }
 
-/** A one-use grant: the nested call it is handed with is the owner's request, or made with his authority. */
+/** A one-use grant: the nested call it is handed with is the owner's request, or made with the owner's authority. */
 export interface OwnerApprovedCallGrant {
   /** The approval the owner answered, named in what the nested call is admitted as. */
   readonly approvalId: string;
-  /** The owner's actor, when the call's caller is not the owner and the act was his: the nested call is admitted as him. */
+  /** The owner's actor, when the call's caller is not the owner and the act was the owner's: the nested call is admitted as the owner. */
   readonly owner?: Actor | undefined;
   /** The nested method needs a person's request (or is the owner's own act): the claim is kept for it. */
   readonly personRequest: boolean;
@@ -53,6 +53,8 @@ export interface OwnerApprovedCallGrant {
 interface ApprovedRun {
   readonly approvalId: string;
   readonly owner?: Actor | undefined;
+  /** Set when the run ends: an invocation the run was carried to takes no grant after that. */
+  ended?: true;
 }
 
 /** Approved runs, by their invocation, until the run ends. */
@@ -62,15 +64,27 @@ const grants = new WeakSet<OwnerApprovedCallGrant>();
 
 /**
  * Mark the invocation an approved call runs under (approval `approvalId`). `owner`: the owner's actor, when the
- * caller is not the owner and the act was his own; every nested method of the run is then made with his authority.
+ * caller is not the owner and the act was the owner's own; every nested method of the run is then made with the owner's authority.
  */
 export function markOwnerApprovedRun(invocation: object, approvalId: string, owner?: Actor): void {
   approvedRuns.set(invocation, { approvalId, ...(owner ? { owner } : {}) });
 }
 
-/** The run is over: no nested call of it takes a grant after this. */
+/** The run is over: no nested call of it takes a grant after this (nor of an invocation it was carried to). */
 export function endOwnerApprovedRun(invocation: object): void {
+  const run = approvedRuns.get(invocation);
+  if (run) run.ended = true;
   approvedRuns.delete(invocation);
+}
+
+/**
+ * The same run, described again with its caller's project (routes/capabilities.ts `withCallOf`): its nested methods are
+ * still that run's, so they take its grant while it lasts. Without this a handler capability's own method call (a
+ * spend's `payments.standing.create`) lost the decision the run was made under.
+ */
+export function carryOwnerApprovedRun(from: object, to: object): void {
+  const run = approvedRuns.get(from);
+  if (run) approvedRuns.set(to, run);
 }
 
 /**
@@ -79,7 +93,7 @@ export function endOwnerApprovedRun(invocation: object): void {
  */
 export function takeOwnerApprovalGrant(invocation: object, descriptor: CoveredDescriptor): OwnerApprovedCallGrant | undefined {
   const run = approvedRuns.get(invocation);
-  if (run === undefined) return undefined;
+  if (run === undefined || run.ended === true) return undefined;
   const covers = ownerApprovalCovers(descriptor);
   if (run.owner === undefined && !covers) return undefined;
   const grant: OwnerApprovedCallGrant = Object.freeze({ approvalId: run.approvalId, personRequest: covers, ...(run.owner ? { owner: run.owner } : {}) });

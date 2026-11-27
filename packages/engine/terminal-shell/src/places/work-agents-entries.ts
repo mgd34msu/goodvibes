@@ -723,13 +723,14 @@ export const WORK_AGENT_ACTIONS: readonly PlaceAction<WorkAgentItem>[] = [
   // Coding agents the daemon hosts.
   { key: 'enter', id: 'host', list: 'coding-agents', capability: 'agents.host', label: 'host it', fill: { agent: 'id' } },
   { key: 'l', id: 'coding-agents', list: 'coding-agents', whole: true, capability: 'agents.hostable', label: 'list them' },
-  // A media job a provider was still making when its answer came back: collected by the daemon, from anywhere in the place.
-  { key: 'J', id: 'collect-media-job', capability: 'media.collect', label: 'collect a media job' },
-  // The Agent's briefing of its own state (the terminal app keeps none: the capability refuses there).
-  { key: 'O', id: 'briefing', capability: 'work.brief', label: 'your briefing', programs: ['agent'] },
+  // Each act sits on the list it belongs to, never above every list. A media job a provider was still making when its
+  // answer came back is a daemon job: collected from Daemon tasks.
+  { key: 'J', id: 'collect-media-job', list: 'daemon-tasks', whole: true, capability: 'media.collect', label: 'collect a media job' },
+  // The Agent's briefing of its own state, on Your agents (the terminal app keeps none: the capability refuses there).
+  { key: 'O', id: 'briefing', list: 'agents', whole: true, capability: 'work.brief', label: 'your briefing', programs: ['agent'] },
   // Web research: a question or a page goes to the Agent's conversation; runs, the queue and reports are the daemon's.
-  { key: 'Q', id: 'research-question', capability: 'research.ask', label: 'research a question', programs: ['agent'] },
-  { key: 'W', id: 'look-at-page', capability: 'research.inspect', label: 'look at a web page', programs: ['agent'] },
+  { key: 'Q', id: 'research-question', list: 'research', whole: true, capability: 'research.ask', label: 'research a question', programs: ['agent'] },
+  { key: 'W', id: 'look-at-page', list: 'research', whole: true, capability: 'research.inspect', label: 'look at a web page', programs: ['agent'] },
   { key: 's', id: 'start-research', list: 'research', whole: true, capability: 'research.start-run', label: 'start a research run' },
   { key: 'w', id: 'save-report', list: 'research', capability: 'research.save-report', label: 'save a sourced report', fill: { question: (item) => (item as ResearchRunItem).question, title: (item) => (item as ResearchRunItem).title } },
   { key: 'a', id: 'add-source', list: 'sources', whole: true, capability: 'research.add-source', label: 'add a source' },

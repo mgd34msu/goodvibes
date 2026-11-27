@@ -122,6 +122,20 @@ export function SessionRewind({ sessionId }: SessionRewindProps) {
     && receipt.files.safetyCheckpointId !== null && (receipt.files.restoredFileCount > 0 || receipt.files.removedFileCount > 0));
   const undoFailed = undoFiles.data?.result?.failedPaths ?? [];
 
+  // Each press opens its confirm dialog first, in every mode (as released).
+  function runApply(): void {
+    if (!planData || apply.isPending || applyRefused) return;
+    if (planData.token) apply.mutate(planData.token);
+  }
+  function runUndoFiles(): void {
+    const id = receipt?.undo.files?.restoreCheckpointId;
+    if (id) undoFiles.mutate(id);
+  }
+  function runUndoConversation(): void {
+    const id = receipt?.undo.conversation?.undoSnapshotId;
+    if (id) undoConversation.mutate(id);
+  }
+
   return (
     <section className="session-rewind">
       <p className="session-rewind__intro">
@@ -329,11 +343,7 @@ export function SessionRewind({ sessionId }: SessionRewindProps) {
           target={`Scope: ${scope}${anchorTurnId ? ` · turn ${anchorTurnId}` : ' · most recent checkpoint'}`}
           description="The chosen scope goes back to this point, and an undo point is kept so you can reverse it."
           confirmLabel="Rewind"
-          onConfirm={() => {
-            setConfirmApply(false);
-            if (apply.isPending || applyRefused) return;
-            if (planData.token) apply.mutate(planData.token);
-          }}
+          onConfirm={() => { setConfirmApply(false); runApply(); }}
           onCancel={() => setConfirmApply(false)}
         />
       )}
@@ -346,11 +356,7 @@ export function SessionRewind({ sessionId }: SessionRewindProps) {
           target={`Restore checkpoint ${receipt.undo.files.restoreCheckpointId}`}
           description="The files go back to how they were just before the rewind."
           confirmLabel="Undo"
-          onConfirm={() => {
-            const id = receipt.undo.files?.restoreCheckpointId;
-            setConfirmUndo(false);
-            if (id) undoFiles.mutate(id);
-          }}
+          onConfirm={() => { setConfirmUndo(false); runUndoFiles(); }}
           onCancel={() => setConfirmUndo(false)}
         />
       )}
@@ -363,11 +369,7 @@ export function SessionRewind({ sessionId }: SessionRewindProps) {
           target={`Snapshot ${receipt.undo.conversation.undoSnapshotId}`}
           description="The messages the rewind dropped come back. If anything was said since the rewind, nothing changes and you are told why."
           confirmLabel="Undo"
-          onConfirm={() => {
-            const id = receipt.undo.conversation?.undoSnapshotId;
-            setConfirmUndoConversation(false);
-            if (id) undoConversation.mutate(id);
-          }}
+          onConfirm={() => { setConfirmUndoConversation(false); runUndoConversation(); }}
           onCancel={() => setConfirmUndoConversation(false)}
         />
       )}

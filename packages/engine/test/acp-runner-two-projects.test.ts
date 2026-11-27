@@ -26,6 +26,7 @@ import { projectIdentity, UserPermissionRuleStore } from '../platform/src/platfo
 import { PolicyRuntimeState } from '../platform/src/platform/runtime/permissions/policy-runtime.ts';
 import { ApprovalBroker } from '../platform/src/platform/control-plane/approval-broker.ts';
 import { AcpConnection } from '../platform/src/platform/acp/connection.ts';
+import { withOwnerInput } from '../platform/src/platform/security/turn-input-party.ts';
 import { forgetGateReadings, gateReadingsPort } from './_helpers/gate-readings.ts';
 
 const STAND_IN_AGENT = join(import.meta.dir, 'fixtures', 'acp-stand-in-agent.ts');
@@ -85,7 +86,8 @@ test('two runners in two projects ask the same write: the deny kept for beta ref
     [process.execPath, STAND_IN_AGENT], { permissionHost: host, operation });
 
   try {
-    const [inAlpha, inBeta] = await Promise.all([runner('alpha', alpha).run(), runner('beta', beta).run()]);
+    // The owner's own work starts both runners: work no turn names is someone else's and only reads (turn-input-party.ts).
+    const [inAlpha, inBeta] = await withOwnerInput(() => Promise.all([runner('alpha', alpha).run(), runner('beta', beta).run()]));
     expect(`alpha ${inAlpha.output.split(' ')[0]}, written ${existsSync(join(alpha, 'probe.txt'))}; beta ${inBeta.output.split(' ')[0]}, written ${existsSync(join(beta, 'probe.txt'))}; asked ${asked.length}`)
       .toBe('alpha allowed, written true; beta refused, written false; asked 0');
   } finally {

@@ -674,7 +674,7 @@ export class ChannelProviderRuntimeManager {
         },
       });
       if (generated.length > 0) {
-        // The names are credentials and stay out of the log; the owner reads them where he asks to see them.
+        // The names are credentials and stay out of the log; the owner reads them where they ask to see them.
         logger.info('ntfy topics generated and kept in the secret store; subscribe to them on your phone', {
           settings: generated.map((entry) => entry.setting),
           next: 'goodvibes surfaces check ntfy shows the topic names to subscribe to',

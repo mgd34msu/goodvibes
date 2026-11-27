@@ -20,7 +20,6 @@ import { atomicWriteFileSync } from '../../config/atomic-write.js';
 import type { MemoryApi } from '../../knowledge/knowledge-api.js';
 import type { MemoryRegistry } from '../../state/memory-registry.js';
 import { memoryRecordTemporalStatus } from '../../state/memory-temporal.js';
-import { memoryAwaitsOwner } from '../../state/memory-author.js';
 import type {
   MemoryBundle, MemoryClass, MemoryRecord, MemoryReviewState, MemoryScope, MemorySearchFilter, ProvenanceLink,
 } from '../../state/memory-store.js';
@@ -96,15 +95,15 @@ function authorLine(record: MemoryRecord): string {
   const author = record.author;
   if (author === undefined || author.kind === 'owner') return 'you';
   if (author.kind === 'owner-model') return 'your model, in your own conversation';
-  return `someone else (${author.who ?? 'not named'}), ${memoryAwaitsOwner(record) ? 'waiting for you to accept it: no turn is given it until you do' : 'accepted by you'}`;
+  return `someone else (${author.who ?? 'not named'}); its write was decided under your permission mode, and a conversation it enters counts as having read text from outside`;
 }
 
 /** One record on one line: its id, where it applies (and for which project), its kind, its tags and its summary. */
 export function memoryRecordLine(record: MemoryRecord): string {
   const tags = record.tags.length ? ` [${record.tags.join(', ')}]` : '';
   const where = record.scope === 'project' ? (record.project ? ` (${basename(record.project)})` : ' (every project)') : '';
-  const waits = memoryAwaitsOwner(record) ? ' [written by someone else: waiting for you]' : '';
-  return `  ${record.id}  ${record.scope}/${record.cls}${where}${tags}  ${record.summary}${temporalLabel(record)}${waits}`;
+  const others = record.author?.kind === 'other' ? ' [written by someone else]' : '';
+  return `  ${record.id}  ${record.scope}/${record.cls}${where}${tags}  ${record.summary}${temporalLabel(record)}${others}`;
 }
 
 /** The asking project's identity: the folder the caller named. A caller with none reads only the records of no project. */
@@ -137,7 +136,7 @@ function refuseMoveOutOfProject(services: MemoryCapabilityServices, id: string, 
 /**
  * Whether one of these ids names one of the owner's shared records (a record of no project: one that applies everywhere,
  * as the reach rule reads it, control-plane/caller-reach.ts `memory-record`). Changing one (marking it, correcting it,
- * moving it, linking it, forgetting it) is the owner's own act: anyone but him and his own turns is put to him
+ * moving it, linking it, forgetting it) is the owner's own act: anyone but the owner and their own turns is put to them
  * (`ownersActWhen`, routes/capabilities.ts).
  */
 export function namesSharedMemoryRecord(services: MemoryCapabilityServices, ids: readonly (string | undefined)[]): boolean {
@@ -201,7 +200,7 @@ function formatVectorStats(stats: ReturnType<MemoryApi['vectorStats']>, title: s
 /**
  * The values' filter, for the caller's project when it named one: its records and the person's own, never another
  * project's. A caller naming no project reads only the records that belong to no project (the person's own); every
- * project's at once is the owner's choice in his place's project chooser, never a capability's.
+ * project's at once is the owner's choice in their place's project chooser, never a capability's.
  */
 function filterOf(values: Readonly<Record<string, string>>, caller?: CapabilityCaller): MemorySearchFilter {
   const project = caller ? callerProject(caller) : undefined;
@@ -271,15 +270,14 @@ export const MEMORY_ADD: MemoryDefinition = {
     const scope = (values.scope || 'project') as MemoryScope;
     // "This project" is the asking project's, and is given only to work there.
     const project = projectFor(scope, caller, 'Nothing was remembered');
-    // Who wrote it, as the daemon authenticated the caller: someone else's waits for the owner's review before any turn
-    // is given it.
+    // Who wrote it, as the daemon authenticated the caller: kept on the record, so a conversation given someone else's
+    // record counts as having read text from outside (state/memory-author.ts `noteOthersWritingRead`).
     const author = caller.author ?? UNNAMED_AUTHOR;
     const record = await services.memory.add({
       scope, ...(project !== undefined ? { project } : {}), cls: values.class as MemoryClass, summary,
       ...(values.detail ? { detail: values.detail } : {}), tags: splitTags(values.tags), provenance, author,
     });
-    const waits = author.kind === 'other' ? ' It was written by someone else, so no turn of yours is given it until you accept it in Memory and knowledge.' : '';
-    return { text: `Its id is ${record.id}.${waits}`, data: { record } };
+    return { text: `Its id is ${record.id}.`, data: { record } };
   },
 };
 
@@ -367,7 +365,7 @@ export const MEMORY_EDIT: MemoryDefinition = {
       ...(project !== undefined ? { project } : {}),
     };
     if (Object.keys(patch).length === 0) throw new CapabilityRefusal('Nothing was changed: give a new summary, detail, tags or where it applies.');
-    // Someone else's correction makes the record someone else's words, waiting for the owner; his own accepts it.
+    // Someone else's correction makes the record someone else's words (kept on the record).
     const record = services.memory.update(values.record!, { ...patch, by: caller.author ?? UNNAMED_AUTHOR });
     if (!record) throw missing(values.record!);
     return { text: `Changed: ${Object.keys(patch).join(', ')}.`, data: { record } };
@@ -390,10 +388,10 @@ export const MEMORY_REVIEW: MemoryDefinition = {
   example: { record: 'mem-1', state: 'stale' },
   async run(values, services, caller) {
     if (values.confidence && !/^(100|[1-9]?\d)$/.test(values.confidence)) throw new CapabilityRefusal(`Confidence takes a whole number from 0 to 100, not "${values.confidence}". Nothing was changed.`);
-    // "Reviewed" lets the record's text into later prompts as something the owner checked: only the owner himself counts
-    // (his own press or typed words, his yes in Waiting for you), never another credential's claim to be a person.
+    // "Reviewed" lets the record's text into later prompts as something the owner checked: only the owner in person counts
+    // (their own press or typed words, their yes in Waiting for you), never another credential's claim to be a person.
     if (values.state === 'reviewed' && caller.author?.kind !== 'owner') {
-      throw new CapabilityRefusal(`Memory record ${values.record} is unchanged: marking a record reviewed is the owner's decision that its text may reach the prompt, so it only counts when the owner asks for it himself.`, 'Ask the owner to mark it reviewed in the Memory place.');
+      throw new CapabilityRefusal(`Memory record ${values.record} is unchanged: marking a record reviewed is the owner's decision that its text may reach the prompt, so it only counts when the owner asks for it in person.`, 'Ask the owner to mark it reviewed in the Memory place.');
     }
     const record = services.memory.review(values.record!, {
       state: values.state as MemoryReviewState,
@@ -402,34 +400,7 @@ export const MEMORY_REVIEW: MemoryDefinition = {
       ...(values.reason ? { staleReason: values.reason } : {}),
     });
     if (!record) throw missing(values.record!);
-    // The owner's own "reviewed and right" of a record someone else wrote is his acceptance of it.
-    const accepted = values.state === 'reviewed' ? services.memory.accept(record.id) ?? record : record;
-    return { text: `Confidence ${accepted.confidence}%.`, data: { record: accepted } };
-  },
-};
-
-/**
- * The owner accepts a record someone else wrote (a device, a member, an outside agent, a script or command line with no
- * person, a turn on someone else's input): until he does, no turn of his is given it. Accepting gives it no special
- * weight (its review state and confidence stay); changing it himself (Correct a record) also accepts it, and forgetting
- * it discards it. Only the owner himself does it: anyone else's call, a model's included, is put to him, opening on No.
- */
-export const MEMORY_ACCEPT: MemoryDefinition = {
-  capability: daemon('memory.accept', 'safe'),
-  actionId: 'accept', label: 'Accept a record someone else wrote', word: 'accept', inputs: [RECORD],
-  sentence: '{record}, written by someone else, will be given to your turns like any record of yours, until you change it.',
-  done: 'Accepted {record}.',
-  touches: 'this-machine', lasts: 'kept', risk: 'none', steersModel: true, undoneBy: 'forget',
-  ownerOnly: { reason: 'accepting what someone else wrote lets it steer your turns', instead: 'Ask the owner to accept it in Memory and knowledge, on the record.' },
-  ownersAct: true,
-  example: { record: 'mem-1' },
-  async run(values, services, caller) {
-    if (caller.author?.kind !== 'owner') {
-      throw new CapabilityRefusal(`Memory record ${values.record} is unchanged: accepting what someone else wrote counts only when the owner does it himself.`, 'Ask the owner to accept it in Memory and knowledge.');
-    }
-    const record = services.memory.accept(values.record!);
-    if (!record) throw missing(values.record!);
-    return { text: record.author?.kind === 'other' ? 'From now on your turns are given it.' : 'It was not waiting for you: your turns are given it already.', data: { record } };
+    return { text: `Confidence ${record.confidence}%.`, data: { record } };
   },
 };
 
@@ -444,7 +415,7 @@ export const MEMORY_PROMOTE: MemoryDefinition = {
   async run(values, services, caller) {
     const project = projectFor(values.scope!, caller, `Memory record ${values.record} is unchanged`);
     refuseMoveOutOfProject(services, values.record!, values.scope!, project, caller);
-    // Where a record is given is part of what it steers: someone else's move makes it wait for the owner again.
+    // Where a record is given is part of what it steers: someone else's move makes it someone else's words again.
     const record = services.memory.update(values.record!, { scope: values.scope as MemoryScope, ...(project !== undefined ? { project } : {}), by: caller.author ?? UNNAMED_AUTHOR });
     if (!record) throw missing(values.record!);
     return { text: '', data: { record } };
@@ -657,7 +628,7 @@ export const MEMORY_DECIDE_PROPOSAL: MemoryDefinition = {
 
 /** Every memory capability that runs in the daemon, in the order a person meets them. */
 export const MEMORY_DAEMON_CAPABILITIES: readonly MemoryDefinition[] = [
-  MEMORY_LIST, MEMORY_ADD, MEMORY_SEARCH, MEMORY_SHOW, MEMORY_EDIT, MEMORY_REVIEW, MEMORY_ACCEPT, MEMORY_PROMOTE, MEMORY_LINK, MEMORY_REMOVE,
+  MEMORY_LIST, MEMORY_ADD, MEMORY_SEARCH, MEMORY_SHOW, MEMORY_EDIT, MEMORY_REVIEW, MEMORY_PROMOTE, MEMORY_LINK, MEMORY_REMOVE,
   MEMORY_QUEUE, MEMORY_EXPLAIN, MEMORY_EXPORT, MEMORY_INSPECT, MEMORY_IMPORT, MEMORY_SNAPSHOTS, MEMORY_RESTORE, MEMORY_INDEX, MEMORY_REBUILD_INDEX,
   MEMORY_DECIDE_PROPOSAL,
 ];

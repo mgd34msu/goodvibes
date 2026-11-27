@@ -1,5 +1,5 @@
 /**
- * limit-offer.ts, the owner's chance to set a spending limit he never set.
+ * limit-offer.ts, the owner's chance to set a spending limit they never set.
  *
  * The daily item budget and the per-purchase ceiling ship at 0, so every
  * purchase asks the owner first. The first time a purchase meets one of them

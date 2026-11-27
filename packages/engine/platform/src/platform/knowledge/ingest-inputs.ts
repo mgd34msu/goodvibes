@@ -80,7 +80,7 @@ export async function ingestKnowledgeUrl(
     assertOwned();
     // Whose it is: the project and maker of the call or turn adding it (knowledge-reach.ts); a scheduled refresh keeps
     // the source's own. Refused here, before anything is fetched, when it would add to the owner's shared knowledge for
-    // a caller he did not give it.
+    // a caller the owner did not give it.
     const ownMetadata = input.refresh === true ? input.metadata : knowledgeMakerMetadata(input.metadata);
     const uris = createKnowledgeIngestUriCanonicalizer(context, ownership, assertOwned, signal);
     const canonicalUri = await uris.canonicalize(input.url) ?? undefined;
@@ -213,7 +213,7 @@ export async function ingestKnowledgeArtifact(
     await context.store.init();
     assertOwned();
     // Whose it is (knowledge-reach.ts); refused before anything is fetched when it would add to the owner's shared
-    // knowledge for a caller he did not give it.
+    // knowledge for a caller the owner did not give it.
     const ownMetadata = knowledgeMakerMetadata(input.metadata);
     const uris = createKnowledgeIngestUriCanonicalizer(context, ownership, assertOwned, signal);
     // A URI role must settle before this route performs an external artifact fetch.

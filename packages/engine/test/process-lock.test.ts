@@ -38,7 +38,8 @@ async function holdInChild(dir: string, lockPath: string) {
     'setInterval(() => {}, 1 << 30);',
     '',
   ].join('\n'));
-  const child = Bun.spawn(['bun', script, lockPath], { stdin: 'ignore', stdout: 'pipe', stderr: 'inherit' });
+  // The runtime running this test, not whatever `bun` the PATH names (a version manager's shim may refuse to start).
+  const child = Bun.spawn([process.execPath, script, lockPath], { stdin: 'ignore', stdout: 'pipe', stderr: 'inherit' });
   const reader = child.stdout.getReader();
   const { value } = await reader.read();
   reader.releaseLock();

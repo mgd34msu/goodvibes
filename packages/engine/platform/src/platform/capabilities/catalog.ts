@@ -13,7 +13,8 @@
  *    its slash command's own code. The group engineers move each of these.
  */
 import { capabilityGroupOf, capabilityIdOf } from './command-groups.js';
-import { effectFacts, type EffectId } from '../security/effect-authority.js';
+import { MODEL_UNDER_MODE, modelNeverMakes, type EffectId } from '../security/effect-authority.js';
+import { MODEL_NEVER_CAPABILITY_IDS } from '../control-plane/method-risk.js';
 import type { CapabilityMethod } from './operator-input.js';
 import type { CapabilityGroupId } from './groups.js';
 import { effectiveRisk } from './risk.js';
@@ -183,10 +184,12 @@ export class CapabilityCatalog {
 /**
  * What a run of this capability with these values causes, as rows of the effect table: the definition's own
  * `effects` when it states them, else derived from its words (a read of the control plane or a write to it;
- * `cannot-be-undone` adds `record.destroy`, `sends-out` and `spends-money` add `outward.send`, `ownerOnly` adds
- * `model.refused`). A chosen value that raises the risk adds its row either way.
+ * `cannot-be-undone` adds `record.destroy`, `sends-out` and `spends-money` add `outward.send`; one a model never runs,
+ * control-plane/method-risk.ts `MODEL_NEVER_CAPABILITY_IDS`, adds `model.refused`). An owner-only capability is not by
+ * that alone one a model never runs: the owner's own model makes their acts under their mode, and anyone else is refused
+ * them by the one owner rule. A chosen value that raises the risk adds its row either way.
  */
-export function capabilityEffects(entry: Pick<CapabilityEntry, 'risk' | 'inputs' | 'touches' | 'ownerOnly' | 'effects'> & Partial<Pick<CapabilityEntry, 'secretWhen'>>, values: Readonly<Record<string, string>> = {}): readonly EffectId[] {
+export function capabilityEffects(entry: Pick<CapabilityEntry, 'risk' | 'inputs' | 'touches' | 'ownerOnly' | 'effects'> & Partial<Pick<CapabilityEntry, 'secretWhen' | 'id'>>, values: Readonly<Record<string, string>> = {}): readonly EffectId[] {
   const effects = new Set<EffectId>(entry.effects ?? [entry.touches === 'reads' ? 'control-plane.read' : 'control-plane.write']);
   // A run whose chosen value makes it write a secret (a setting that holds a credential): the secret write it is.
   const secret = entry.secretWhen;
@@ -194,20 +197,21 @@ export function capabilityEffects(entry: Pick<CapabilityEntry, 'risk' | 'inputs'
   const risk = effectiveRisk(entry, values);
   if (risk === 'cannot-be-undone') effects.add('record.destroy');
   if (risk === 'sends-out' || risk === 'spends-money') effects.add('outward.send');
-  if (entry.ownerOnly) effects.add('model.refused');
+  if (entry.id !== undefined && MODEL_NEVER_CAPABILITY_IDS.has(entry.id)) effects.add('model.refused');
   return [...effects];
 }
 
 /**
- * Effects the effect table refuses to a model (`modelRefused`) that a model's call through `capability_run` may
- * still cause once the owner decided that call himself, as he decides every call that weakens a protection: writing
- * a credential. Everywhere else (a daemon method called directly, another tool) the table's refusal stands.
+ * Effects the effect table refuses to a model (`modelRefused`) that the owner's own model's call through
+ * `capability_run` makes in their own turn, decided under their mode at that turn's gate: writing a credential they gave it,
+ * allowing a purchase within their limits (security/effect-authority.ts `MODEL_UNDER_MODE`). Every other one no model
+ * makes, in any mode.
  */
-export const OWNER_DECIDED_EFFECTS: ReadonlySet<EffectId> = new Set<EffectId>(['secret.write']);
+export const OWNER_DECIDED_EFFECTS: ReadonlySet<EffectId> = MODEL_UNDER_MODE;
 
-/** Whether a model never causes it, whoever it acts for: one of its effects says so, and the owner cannot decide it for him. */
-export function modelNeverRuns(entry: Pick<CapabilityEntry, 'risk' | 'inputs' | 'touches' | 'ownerOnly' | 'effects'>): boolean {
-  return capabilityEffects(entry).some((effect) => !OWNER_DECIDED_EFFECTS.has(effect) && effectFacts([effect]).modelRefused);
+/** Whether a model never causes it, whoever it acts for and in every mode: one of its effects says so. */
+export function modelNeverRuns(entry: Pick<CapabilityEntry, 'risk' | 'inputs' | 'touches' | 'ownerOnly' | 'effects'> & Partial<Pick<CapabilityEntry, 'id'>>): boolean {
+  return capabilityEffects(entry).some(modelNeverMakes);
 }
 
 /** Whether a model's call of it is the owner's to decide, as a call that weakens a protection is (it writes a credential). */

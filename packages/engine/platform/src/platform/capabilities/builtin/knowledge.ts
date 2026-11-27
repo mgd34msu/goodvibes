@@ -170,7 +170,8 @@ export const KNOWLEDGE_STATUS = read({
   async run(_values, services) {
     const status = await services.knowledge.status.get();
     return {
-      text: fold(['Your knowledge', `  ready: ${status.ready ? 'yes' : 'no'}`, `  kept at: ${status.storagePath}`, `  sources: ${status.sourceCount}`, `  entries: ${status.nodeCount}`, `  links: ${status.edgeCount}`, `  issues: ${status.issueCount}`]),
+      // Where it is kept is said to the owner only (a caller held to its projects is given no path: knowledge/service.ts).
+      text: fold(['Your knowledge', `  ready: ${status.ready ? 'yes' : 'no'}`, ...(status.storagePath ? [`  kept at: ${status.storagePath}`] : []), `  sources: ${status.sourceCount}`, `  entries: ${status.nodeCount}`, `  links: ${status.edgeCount}`, `  issues: ${status.issueCount}`]),
       data: { ...status },
     };
   },

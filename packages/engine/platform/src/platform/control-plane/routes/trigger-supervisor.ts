@@ -11,12 +11,40 @@ import type { GatewayMethodInvocation } from '../method-catalog-shared.js';
 import { GatewayVerbError } from './gateway-verb-error.js';
 import { readInvocationParams, requireString } from './invocation-params.js';
 import { missingScopes } from '@goodvibes/engine/daemon-api/route-helpers';
-function authenticate(invocation: GatewayMethodInvocation, scope: string): void {
-  if (!invocation.context.principalId || invocation.context.admin !== true || missingScopes(invocation.context.scopes, [scope]).length > 0
+import { sharedKindReached, sharedKindRefusalWords } from '../shared-kinds.js';
+/**
+ * `projectAct`: a trigger of a project (listed, read, previewed, made, cancelled, reset: effect-authority.ts
+ * `triggers.read`, `triggers.write`) is open below an admin holding the scope; the dispatch's project check and the one
+ * reach rule hold such a caller to the projects the owner gave it and to triggers it made. The supervisor's status (every
+ * project's triggers at once) and the owner's list of commands triggers may run stay an admin's.
+ */
+function authenticate(invocation: GatewayMethodInvocation, scope: string, projectAct = false): void {
+  if (!invocation.context.principalId || (invocation.context.admin !== true && !projectAct) || missingScopes(invocation.context.scopes, [scope]).length > 0
     || invocation.isAuthorized && !invocation.isAuthorized([scope])) {
-    throw new GatewayVerbError(`${scope === 'read:watchers' ? 'Reading' : 'Changing'} supervised triggers requires a current administrative operator with watcher access.`, 'TRIGGER_OPERATOR_REQUIRED', 403);
+    throw new GatewayVerbError(`${scope === 'read:watchers' ? 'Reading' : 'Changing'} ${projectAct ? 'a project\'s triggers requires watcher access' : 'supervised triggers requires a current administrative operator with watcher access'}.`, 'TRIGGER_OPERATOR_REQUIRED', 403);
   }
   invocation.signal?.throwIfAborted();
+}
+
+/** The trigger operations open below an admin (see `authenticate`). */
+const PROJECT_TRIGGER_OPERATIONS: ReadonlySet<string> = new Set([
+  'watchers.triggers.list', 'watchers.triggers.history', 'watchers.triggers.create', 'watchers.triggers.preview',
+  'watchers.triggers.cancel', 'watchers.triggers.reset',
+]);
+
+/**
+ * A trigger made below an admin whose turn's answer goes to a channel of the owner's (`action.deliverTo`: telegram,
+ * slack:C123) uses the owner's channels, a shared kind (control-plane/shared-kinds.ts): only with the owner's gift of
+ * channels. Refused otherwise, before anything is kept; an answer left in the owner's inbox needs none.
+ */
+function refuseChannelDelivery(invocation: GatewayMethodInvocation, definition: Record<string, unknown>): void {
+  if (invocation.context.admin === true) return;
+  const action = definition['action'];
+  const deliverTo = action !== null && typeof action === 'object' && !Array.isArray(action) ? (action as Record<string, unknown>)['deliverTo'] : undefined;
+  if (typeof deliverTo !== 'string' || !deliverTo.trim()) return;
+  if (invocation.context.principalId && sharedKindReached({ ownersOwn: false, daemonTurn: false, othersInput: false, principalId: invocation.context.principalId }, 'channels')) return;
+  throw new GatewayVerbError(`Not done: its answer would go to ${deliverTo}, and ${sharedKindRefusalWords('channels', false)}. Leave deliverTo out to have it in the owner's inbox. Nothing was set up.`,
+    'SHARED_KIND_NOT_GIVEN', 403, 'definition.action.deliverTo');
 }
 function translate(error: unknown): never {
   if (error instanceof TriggerOperatorError) throw new GatewayVerbError(error.message, `TRIGGER_${error.kind.toUpperCase().replaceAll('-', '_')}`, error.kind === 'unavailable' ? 503 : 409);
@@ -62,9 +90,10 @@ export function registerTriggerSupervisorGatewayMethods(
       if (limit !== undefined && (typeof limit !== 'number' || !Number.isInteger(limit) || limit < 1)) throw new GatewayVerbError('limit must be a positive whole number', 'INVALID_ARGUMENT', 400, 'limit');
       return operations.history(named(invocation, params), limit as number | undefined);
     },
-    'watchers.triggers.create': async (_invocation, params) => {
+    'watchers.triggers.create': async (invocation, params) => {
       const definition = params['definition'];
       if (!definition || typeof definition !== 'object' || Array.isArray(definition)) throw new GatewayVerbError('definition is required: { id, label, spec, action? }', 'INVALID_ARGUMENT', 400, 'definition');
+      refuseChannelDelivery(invocation, definition as Record<string, unknown>);
       // It works in a project: the folder of the program or caller that makes it (sent beside the definition or in it).
       const given = typeof params['workingDirectory'] === 'string' ? params['workingDirectory'].trim()
         : typeof (definition as Record<string, unknown>)['workingDirectory'] === 'string' ? String((definition as Record<string, unknown>)['workingDirectory']).trim() : '';
@@ -120,7 +149,7 @@ export function registerTriggerSupervisorGatewayMethods(
     if (!handler) continue;
     const scope = descriptor.scopes[0] ?? 'write:watchers';
     catalog.register(descriptor, async (invocation) => {
-      authenticate(invocation, scope);
+      authenticate(invocation, scope, PROJECT_TRIGGER_OPERATIONS.has(descriptor.id));
       try { return await handler(invocation, readInvocationParams(invocation)); } catch (error) { translateOperation(error); }
     }, { replace: true });
   }

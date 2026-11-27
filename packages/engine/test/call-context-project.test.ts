@@ -1,15 +1,15 @@
 // Proves: A daemon capability acts in another project than the one its call names, in the daemon's own folder when the call names none, or in a project its caller may not name, also through another input than its project that names a folder a process works in; or a refusing rule is escaped by naming another project.
 // Red when: The daemon stops reading a program's project header into the call's context, capabilities.run stops taking the project from that context or lets it outrank the body's folder, a per-project service takes the daemon's working folder in place of a missing project instead of refusing, the daemon's dispatch runs a paired device's call in the root, the home folder, the daemon home or a project the owner did not give it, or lets its outside coding agent's cwd name such a project, or a deny rule kept in one project stops applying when the call names another.
-// Proves: A member the owner removed keeps the projects he gave him, so a user made later with the same name may act in them.
-// Red when: Removing a member who has no sign-in open no longer tells the daemon, so the projects given to him stay kept under his name.
+// Proves: A member the owner removed keeps the projects the owner gave them, so a user made later with the same name may act in them.
+// Red when: Removing a member who has no sign-in open no longer tells the daemon, so the projects given to that member stay kept under their name.
 // Proves: A caller the owner gave some projects reaches by id another project's web chat, memory record, question waiting for the owner, checkpoint or saved artifact, or a refusal tells it that such a record exists.
 // Red when: The dispatch stops running its one check of what a caller may reach before a method's handler or route, a kind's owner lookup stops giving the record's project or maker, a capability input naming several records by id is not declared or not read one id at a time, or the refusal's words for another project's record differ from those for no record.
 // Proves: A device the owner gave one project, following the daemon's event stream, receives another project's events (its questions, its chats' turns) while the owner works there.
 // Red when: The gateway stops asking each stream's reach before it sends a frame, or an event's question or session no longer resolves to the project it belongs to, so the device given yellow is sent zinc's question or zinc's chat turn.
 // Proves: A route the daemon serves outside its method catalog, or a route reached by its path over the daemon's socket, runs for a caller without the checks of its project and of what it may reach.
 // Red when: The router stops reading an uncatalogued route's declaration in its folder and reach checks, or the socket's method-and-path call goes straight to its route, so the kiosk given yellow follows zinc's chat or starts a task in zinc.
-// Proves: The same call put to the owner from two projects is held as one question, so the call from the second project never runs on its own answer.
-// Red when: The held-call bound stops keying a call by the project and session it was made in, or capabilities.run stops passing the call's checked project and named session into that key, so the call from zinc is answered with yellow's question.
+// Proves: A paired device holding the default scopes is refused starting a session in a project the owner gave it, or starts one in a project the owner did not give it.
+// Red when: sessions.create is held at an admin again (its effect sessions.administer, or write:sessions dropped from the default list), so the default credential is refused in yellow, or the dispatch stops checking the project its body names both by its one project check and by its work-folder check, so it names zinc.
 /**
  * One daemon, its own working folder and two projects. The calls go through the
  * daemon's real pieces: the header reader of its HTTP routes (daemon-api
@@ -61,11 +61,11 @@ import { memoryProjectOf } from '../platform/src/platform/state/memory-project.t
 import { emitTurnSubmitted } from '../platform/src/platform/runtime/emitters/turn.ts';
 import { RUNTIME_EVENT_DOMAINS } from '../platform/src/platform/runtime/events/index.ts';
 import { DaemonHttpRouter } from '../platform/src/platform/daemon/http/router.ts';
-import { OwnerQuestionBounds } from '../platform/src/platform/control-plane/owner-question-bounds.ts';
 import { createCapabilityOwnerGate } from '../platform/src/platform/daemon/capability-owner-gate.ts';
 import { PolicyRuntimeState } from '../platform/src/platform/runtime/permissions/policy-runtime.ts';
 import type { ConfigKey } from '../platform/src/platform/config/schema.ts';
 import { localOwnerActor } from '@goodvibes/engine/daemon-api/http-policy';
+import { DEFAULT_PAIRED_SCOPES } from '../platform/src/platform/control-plane/routes/pairing.ts';
 
 const OPERATOR_TOKEN = 'fixture-operator-token';
 let dir: string;
@@ -92,8 +92,8 @@ test('a capability acts in the project its call names, from its subfolder too, b
   const catalog = new GatewayMethodCatalog();
   const memoryRegistry = new MemoryRegistry(memoryStore);
   const pairing = new PairingTokenManager(join(dir, 'pairing-tokens.json'));
-  // The owner's questions and his rules, and `capabilities.run` with his gate under ask-me, as the daemon composes them
-  // (capability-wiring.ts): a call another caller makes that changes something is put to him and waits.
+  // The owner's questions and rules, and `capabilities.run` with the owner's gate under ask-me, as the daemon composes them
+  // (capability-wiring.ts): a call another caller makes that changes something is put to the owner and waits.
   const approvals = new ApprovalBroker({ storePath: join(dir, 'approvals.json') });
   await approvals.start();
   const rules = new UserPermissionRuleStore(join(dir, 'permission-rules.json'));
@@ -126,8 +126,8 @@ test('a capability acts in the project its call names, from its subfolder too, b
   helper.watchRevocations();
   cleanups.push(() => helper.dispose());
 
-  // The owner himself, on his own signed-in session (the account made at first start): who names any project. The
-  // operator token alone is a script, and a paired device, his own included, is never the owner himself
+  // The owner in person, on their own signed-in session (the account made at first start): who names any project. The
+  // operator token alone is a script, and a paired device, the owner's own included, is never the owner in person
   // (daemon/method-owner-decision.ts `ownerHimself`): each names only what the owner gave it.
   const ownerName = userAuth.ownerUsername();
   if (ownerName === null) throw new Error('the user store made no owner account at first start');
@@ -159,7 +159,7 @@ test('a capability acts in the project its call names, from its subfolder too, b
   given.set(pairingPrincipalId(kiosk.id), [yellow]);
   given.set(pairingPrincipalId(everywhere.id), ['/']);
   const asDevice = (token: string, folder: string): Promise<string> => actedIn({}, { workingDirectory: folder }, 'mcp.files', token);
-  // A member the owner gave yellow, then removed while signed out: a user made later with his name gets nothing of his.
+  // A member the owner gave yellow, then removed while signed out: a user made later with that member's name gets nothing of theirs.
   userAuth.addUser('member1', ['correct', 'horse', 'battery', 'member'].join('-'), ['admin']);
   given.set('member1', [yellow]);
   const removedMember = (): string => {
@@ -275,26 +275,27 @@ test('a capability acts in the project its call names, from its subfolder too, b
       context: { principalKind: principal.principalKind, admin: principal.admin, scopes: principal.scopes, actor: principal.actor } });
     return routeAnswer(answer.status, answer.body);
   };
-  // One question per caller, project and session (owner-question-bounds.ts): the same call held from yellow and from
-  // zinc, by one caller, is two questions; again from yellow, yellow's again.
-  const bounds = new OwnerQuestionBounds();
-  const held = async (project: string, approvalId: string): Promise<string> => {
-    const admitted = await bounds.admit('local', { id: 'schedule.add', values: { prompt: 'run the tests', every: '1d' }, project, session: 'conversation-1' }, () => 0);
-    if (admitted.kind === 'new') { admitted.asked(approvalId); return `new ${approvalId}`; }
-    return admitted.kind === 'same' ? `same as ${admitted.approvalId}` : admitted.kind;
+  // A credential the owner made naming no scopes (the default list, routes/pairing.ts `DEFAULT_PAIRED_SCOPES`: a paired
+  // device below an admin) given yellow: starting a session is a project act it may make there (effect-authority.ts
+  // `sessions.write`), and never in a project it was not given (the method's `workingDirectory`, checked by the dispatch).
+  // Any refusal is shown by its code; past the checks the call reaches a route this proof serves none of.
+  const defaultDevice = pairing.mint({ name: 'default device', scopes: [...DEFAULT_PAIRED_SCOPES] });
+  given.set(pairingPrincipalId(defaultDevice.id), [yellow]);
+  const defaultSession = async (folder: string): Promise<string> => {
+    try {
+      const answer = await helper.invokeGatewayMethodCall({ authToken: defaultDevice.token, methodId: 'sessions.create', body: { title: 'from the default device', workingDirectory: folder }, context: { clientKind: 'tui', admin: false } });
+      const code = String((answer.body as { code?: unknown }).code);
+      return answer.status === 401 || answer.status === 403 ? `refused ${answer.status} ${code}` : 'past the check';
+    } catch { return 'past the check'; }
   };
-  // The same through `capabilities.run` itself, the route that keys the call with its checked project and the session it
-  // names: a device given yellow and zinc adds the same memory from each; the question it is put to the owner as.
-  const both = pairing.mint({ name: 'given yellow and zinc' });
-  given.set(pairingPrincipalId(both.id), [yellow, zinc]);
-  const heldRun = async (folder: string): Promise<string> => {
-    const answer = await helper.invokeGatewayMethodCall({ authToken: both.token, methodId: 'capabilities.run',
-      body: { id: 'memory.add', inputs: { class: 'fact', summary: 'Run the tests daily', scope: 'project' }, workingDirectory: folder },
-      context: { clientKind: 'tui', admin: true } });
-    const approvalId = (answer.body as { approvalId?: unknown } | null)?.approvalId;
-    return typeof approvalId === 'string' ? approvalId : `not held ${answer.status} ${String((answer.body as { code?: unknown } | null)?.code)}`;
-  };
-
+  // Under Ask me a call that got past these checks waits on the owner's one answer; the owner answers No to each question raised
+  // from here on, so a row reads only how far its call got (a refusal of the project or record, or past the check).
+  const known = new Set(approvals.listApprovals(Number.MAX_SAFE_INTEGER).map((record) => record.id));
+  const stopAnswering = approvals.subscribe((record) => {
+    if (known.has(record.id) || record.status !== 'pending') return;
+    known.add(record.id);
+    void approvals.resolveApproval(record.id, { approved: false, actor: 'owner', expectedRevision: record.revision, reason: 'Not now.' }).catch(() => undefined);
+  });
   const rows = [
     `header ${await actedIn(header, {})}`,
     `subfolder ${await actedIn({ [CALL_PROJECT_HEADER]: encodeURIComponent(join(yellow, 'sub')) }, {})}`,
@@ -328,15 +329,11 @@ test('a capability acts in the project its call names, from its subfolder too, b
     `route outside the catalog: the kiosk opens its own chat's event stream ${await streamOf(kiosk.token, kioskChat)}`,
     `socket path call: the kiosk starts a task in zinc ${await socketTask(kiosk.token, zinc)}`,
     `socket path call: the kiosk starts a task in yellow ${await socketTask(kiosk.token, yellow)}`,
-    `held from yellow: ${await held(yellow, 'approval-yellow')}`,
-    `held from zinc: ${await held(zinc, 'approval-zinc')}`,
-    `held from yellow again: ${await held(yellow, 'approval-other')}`,
-    await (async () => {
-      const [fromYellow, fromZinc, fromYellowAgain] = [await heldRun(yellow), await heldRun(zinc), await heldRun(yellow)];
-      return `held by capabilities.run: from yellow ${fromYellow.startsWith('not held') ? fromYellow : 'asked'}, from zinc ${fromZinc === fromYellow ? 'yellow\'s question' : 'a question of its own'}, from yellow again ${fromYellowAgain === fromYellow ? 'yellow\'s question' : 'another'}`;
-    })(),
+    `default credential starts a session in yellow ${await defaultSession(yellow)}`,
+    `default credential starts a session in zinc ${await defaultSession(zinc)}`,
     removedMember(),
   ];
+  stopAnswering();
   expect(rows).toEqual([
     `header ${join(yellow, '.goodvibes', 'mcp.json')}`,
     `subfolder ${join(yellow, '.goodvibes', 'mcp.json')}`,
@@ -368,10 +365,8 @@ test('a capability acts in the project its call names, from its subfolder too, b
     'route outside the catalog: the kiosk opens its own chat\'s event stream past the check',
     'socket path call: the kiosk starts a task in zinc refused 403 PROJECT_NOT_ALLOWED',
     'socket path call: the kiosk starts a task in yellow past the check',
-    'held from yellow: new approval-yellow',
-    'held from zinc: new approval-zinc',
-    'held from yellow again: same as approval-yellow',
-    'held by capabilities.run: from yellow asked, from zinc a question of its own, from yellow again yellow\'s question',
+    'default credential starts a session in yellow past the check',
+    'default credential starts a session in zinc refused 403 PROJECT_NOT_ALLOWED',
     'member given 1 project, removed while signed out, keeps 0',
   ]);
 });

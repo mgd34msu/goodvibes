@@ -99,7 +99,7 @@ export interface HostedWorkspaceFloor {
     readonly remoteRunnerRegistry?: import('../runtime/remote/index.js').RemoteRunnerRegistry | undefined;
     readonly personalCapture?: import('../personal-capture/index.js').PersonalCaptureHolder | undefined;
     readonly decorateRegistry?: ((registry: import('../tools/registry.js').ToolRegistry) => void) | undefined;
-    /** The owner's memory, given to each turn as the host's other turns are given it (this project's and his own). */
+    /** The owner's memory, given to each turn as the host's other turns are given it (this project's and their own). */
     readonly memoryRegistry?: import('../state/index.js').MemoryRegistry | undefined;
   } | undefined;
   /** Release everything this floor started. Called when its last session goes. */

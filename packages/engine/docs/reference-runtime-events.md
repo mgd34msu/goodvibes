@@ -3424,17 +3424,6 @@ The `contracts` domain carries one named event per step of a contract. Each fiel
 | `reason` | string | optional |
 | `occurrenceId` | string | optional |
 
-### `CONTRACT_UNIT_SILENT`
-
-| Field | Type | Required |
-|-------|------|----------|
-| `contractId` | string | yes |
-| `unitId` | string | yes |
-| `agentId` | string | yes |
-| `silentMs` | number | yes |
-| `action` | enum: `failed`, `retried` | yes |
-| `occurrenceId` | string | optional |
-
 ### `CONTRACT_MERGE_CONFLICT`
 
 | Field | Type | Required |

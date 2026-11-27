@@ -23,7 +23,7 @@
  */
 // The words from their own module (no handler reaches a Node module): the web UI draws this declaration too (places/browser.ts).
 import { daemonUpdateWords, keepAwakeWords, voiceRuntimeWords } from '@goodvibes/engine/platform/platform/capabilities/system';
-import { registeredWorkspaces, type RegisteredWorkspaceFacts } from '@goodvibes/engine/platform/platform/capabilities/workspaces';
+import { NOT_REACHABLE_NOW, registeredWorkspaces, type RegisteredWorkspaceFacts } from '@goodvibes/engine/platform/platform/capabilities/workspaces';
 import type { SystemSessionServices } from '@goodvibes/engine/platform/platform/capabilities';
 import type { SetupPlaceHooks, SetupPlaceItem } from '../setup-command.js';
 import type { PlacePrograms } from './place-host.js';
@@ -178,9 +178,12 @@ function workspaceItems(output: unknown): readonly StateItem[] {
   return registeredWorkspaces(output).map((workspace): StateItem => {
     const name = workspace.root.split('/').filter(Boolean).at(-1) ?? workspace.root;
     return {
-      kind: 'state', id: workspace.root, state: 'registered', title: workspace.label ?? name, mark: 'ok',
-      ...(workspace.by === 'chat' ? { right: 'made for a chat' } : workspace.checkpoints ? {} : { right: 'no checkpoints' }),
+      kind: 'state', id: workspace.root, state: 'registered', title: workspace.label ?? name, mark: workspace.unreachable ? 'paused' : 'ok',
+      ...(workspace.unreachable ? { right: NOT_REACHABLE_NOW } : workspace.by === 'chat' ? { right: 'made for a chat' } : workspace.checkpoints ? {} : { right: 'no checkpoints' }),
       lines: [
+        ...(workspace.unreachable
+          ? [`Its folder cannot be reached now: the folder that holds it is missing too (a disk that is not mounted, or a folder renamed). Nothing of the project is lost; when the folder is back it is the same project, with its earlier work.`]
+          : []),
         `The Agent works in ${workspace.root}${workspace.checkpoints ? ' and keeps automatic checkpoints there' : ''}.`,
         'Unregistering it stops that; starting the Agent there registers it again.',
       ],

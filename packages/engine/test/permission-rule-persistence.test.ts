@@ -21,6 +21,7 @@ import { createPermissionConfigReader, PermissionManager } from '../platform/src
 import type { PermissionRequestHandler } from '../platform/src/platform/permissions/prompt.ts';
 import { UserPermissionRuleStore, type StoredUserPermissionRule } from '../platform/src/platform/permissions/user-rule-store.ts';
 import { PolicyRuntimeState } from '../platform/src/platform/runtime/permissions/policy-runtime.ts';
+import { withOwnerInput } from '../platform/src/platform/security/turn-input-party.ts';
 
 useGateReadings();
 
@@ -47,7 +48,12 @@ afterEach(() => { rmSync(dir, { recursive: true, force: true }); });
 
 function manager(store: UserPermissionRuleStore, handler: PermissionRequestHandler): PermissionManager {
   const config = new ConfigManager({ surfaceRoot: 'agent', workingDir: join(dir, 'workspace'), homeDir: join(dir, 'home'), configDir: join(dir, 'config') });
-  return new PermissionManager(handler, createPermissionConfigReader(config), new PolicyRuntimeState(), null, null, store);
+  const permissions = new PermissionManager(handler, createPermissionConfigReader(config), new PolicyRuntimeState(), null, null, store);
+  // Every check is made in the owner's own turn, as the product marks an owner's turn: a call outside any turn is
+  // someone else's and only reads, refused before any remembered rule is read.
+  const check = permissions.checkDetailed.bind(permissions);
+  permissions.checkDetailed = ((...call: Parameters<PermissionManager['checkDetailed']>) => withOwnerInput(() => check(...call))) as PermissionManager['checkDetailed'];
+  return permissions;
 }
 
 /** The rule store over its file, with its writes passed through a store the test can hold or fail. */

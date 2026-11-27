@@ -334,7 +334,7 @@ function verifyToolExecution(args: Record<string, unknown>, options: ToolExecute
  */
 /**
  * Why a nested call was refused, in plain words: the owner's own rule by its description ("a rule of yours refuses it
- * (deny every call to Save an artifact in this project)"), his No, or the gate's own reason. Never a decision code.
+ * (deny every call to Save an artifact in this project)"), their No, or the gate's own reason. Never a decision code.
  */
 export function nestedRefusalWords(result: Pick<PermissionCheckResult, 'reasonCode' | 'userReason' | 'detail' | 'decision'>): string {
   const decision = result.decision;
@@ -370,7 +370,7 @@ export async function runRegisteredTool(callId: string, name: string, args: Reco
   }
   const admitted = toolDecisionOf({ reasonCode: verdict.reasonCode, sourceLayer: verdict.sourceLayer, userReason: verdict.userReason,
     detail: verdict.detail, decision: verdict.decision, approved: true }, name);
-  // The owner's own yes to exactly this call, as his card showed it: a one-call grant (gate/admitted-decision.ts).
+  // The owner's own yes to exactly this call, as their card showed it: a one-call grant (gate/admitted-decision.ts).
   const ownersYes = verdict.sourceLayer === 'user_prompt' && verdict.modifiedArgs === undefined;
   return withAdmittedToolDecision(admitted, () => registry.execute(callId, name, verdict.modifiedArgs ?? hooked.args, signal ? { signal } : undefined), ownersYes);
 }
@@ -1417,7 +1417,7 @@ export class ToolRegistry {
             const asked = toolAskWords(current.name, current.args)?.question.replace(/\?$/, '') ?? `${current.name} was not run`;
             return { callId, success: false, error: `Plan mode is on, so nothing was changed: ${asked}.` };
           }
-          // Any other refusal in plain words, naming what was asked and why: the owner's own rule by its description, his
+          // Any other refusal in plain words, naming what was asked and why: the owner's own rule by its description, their
           // No, the gate's own reason; never a decision code.
           const asked = toolAskWords(current.name, current.args)?.question.replace(/\?$/, '') ?? current.name;
           return { callId, success: false, error: `${asked} was not done: ${nestedRefusalWords(admission.result)}.` };
@@ -1456,10 +1456,10 @@ export class ToolRegistry {
   }
 
   /**
-   * One call the owner confirmed himself: a form he filled in and answered yes
+   * One call the owner confirmed in person: a form they filled in and answered yes
    * to. It is prepared, admitted and run on the same path as a nested call,
    * with no parent tool execution: the source is the owner's stated request,
-   * and the admission carries his confirmation, so a deny rule or plan mode
+   * and the admission carries their confirmation, so a deny rule or plan mode
    * still refuses but nobody is asked again. Only the owner's own input path
    * calls this; a model reaches tools through a turn or `executeNested`.
    */
@@ -1468,7 +1468,7 @@ export class ToolRegistry {
       readonly goal: string;
       readonly criteria: readonly string[];
       readonly signal?: AbortSignal | undefined;
-      /** The session the owner confirmed the call in; his remembered answers are read under it. */
+      /** The session the owner confirmed the call in; their remembered answers are read under it. */
       readonly sessionId?: string | undefined;
     }): Promise<ToolResult> {
     const manager = registryPermissionOwners.get(this);

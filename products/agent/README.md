@@ -147,16 +147,15 @@ to pair, the Agent is your own program there.
 
 Its form's Name field chooses the device name. Only you can pair: a model or
 another command cannot. From a shell, `goodvibes-agent setup pair --with-code`
-reads the code from the terminal. `goodvibes-agent setup pair --apply` asks
-that host for an administrator key from its shared operator token, put to you
-there; on your yes it is an ordinary key, never your device.
+reads the code from the terminal; nothing else is asked.
 
-If a `setup pair --apply` request is interrupted, run it again to see where it got to. When
-the host's answer was lost, the same request is repeated and the host answers it
-with the key it already made, never a second one. A key that was kept but not
-yet confirmed by the host is kept and checked with `goodvibes-agent setup status`. A key set in
-the environment is used before the saved one; the result says so
-(`paired-shadowed` in JSON) and leaves the environment as it is.
+When the host's answer to a pairing was lost, the result says so: a key made for
+it was never received and stops working within 15 minutes; `goodvibes-agent
+setup unpair` forgets that attempt, then pair again with a new code. A key that
+was kept but not yet confirmed by the host is kept and checked with
+`goodvibes-agent setup status`. A key set in the environment is used before the
+saved one; the result says so (`paired-shadowed` in JSON) and leaves the
+environment as it is.
 
 ### Asking for work and recovering a lost request
 

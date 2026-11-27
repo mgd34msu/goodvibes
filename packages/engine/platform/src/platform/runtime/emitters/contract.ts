@@ -102,10 +102,6 @@ export function emitContractGateResult(bus: RuntimeEventBus, ctx: EmitterContext
   emitContract(bus, ctx, 'CONTRACT_GATE_RESULT', data);
 }
 
-export function emitContractUnitSilent(bus: RuntimeEventBus, ctx: EmitterContext, data: ContractEventData<'CONTRACT_UNIT_SILENT'>): void {
-  emitContract(bus, ctx, 'CONTRACT_UNIT_SILENT', data);
-}
-
 export function emitContractMergeConflict(bus: RuntimeEventBus, ctx: EmitterContext, data: ContractEventData<'CONTRACT_MERGE_CONFLICT'>): void {
   emitContract(bus, ctx, 'CONTRACT_MERGE_CONFLICT', data);
 }

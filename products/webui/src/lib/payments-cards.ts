@@ -8,8 +8,8 @@
  * ── Why the webui may take a card at all ──────────────────────────────────
  *
  * The owner was asked directly whether the webui should accept raw card
- * details, with the exposure stated in front of him (a PAN on a browser page,
- * form autofill, password managers, browser history, XSS in our own UI). He
+ * details, with the exposure stated in front of them (a PAN on a browser page,
+ * form autofill, password managers, browser history, XSS in our own UI). They
  * chose the option labelled "Card entry in webui too", and then wrote:
  *
  *   "so is the webui getting card input? i said yes..."
@@ -23,7 +23,7 @@
  *
  * ── The six conditions came WITH the ruling ───────────────────────────────
  *
- * The option he selected carried them; they are part of what he chose, not
+ * The option the owner selected carried them; they are part of what the owner chose, not
  * advice added afterwards. The platform ships them as `WEBUI_CARD_ENTRY_CONDITIONS`
  * so no surface can implement a weaker version, but that export is not in the
  * platform version this app pins (see the note on CARD_ENTRY_CONDITIONS below), so

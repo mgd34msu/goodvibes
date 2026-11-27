@@ -161,7 +161,7 @@ function reasonExplanation(result: PermissionCheckResult, mode: string, autoAppr
     case 'boundary_surface_authority':
     case 'boundary_card_details':
     case 'boundary_outward_effect': return `The boundary refused this call (${result.boundary?.refusedBy ?? result.reasonCode}).`;
-    case 'owner_act': return 'Only the owner does this himself; a model\'s call of it is refused in every mode.';
+    case 'owner_act': return 'Only you do this, in person; a model\'s call of it is refused in every mode.';
     case 'user_approved':
     case 'user_denied': return 'This reaches a Human-in-the-Loop approval prompt; the outcome depends on your response at the prompt.';
     default: return 'Decided by the platform permission machinery.';
@@ -266,7 +266,7 @@ async function explain(options: DoctorSubcommandOptions): Promise<CliCommandOutp
     } catch (error) {
       // Under Decision Model Only a decision the model could not answer stops the call: say so instead of a stack.
       if (!(error instanceof JudgmentError)) throw error;
-      const stopped = `not consulted: ${error.message} "If Jev can't answer" is Refuse the action, so the call stops with this reason and nothing is asked.`;
+      const stopped = `not consulted: ${error.message} "When the decision model is missing or fails" is Decision Model Only, so the call stops with this reason and nothing is asked.`;
       if (json) {
         return { output: JSON.stringify({ subject: args.join(' '), tool: target.tool, category, args: target.args, mode: inForce.mode, savedMode,
           ...(inForce.reason !== undefined ? { modeReason: inForce.reason } : {}), decisionModel: stopped, decisionModelConsulted: false,

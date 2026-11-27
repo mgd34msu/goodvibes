@@ -174,7 +174,7 @@ export function createOwnerTurnSender(deps: OwnerTurnSenderDeps): OwnerTurnSende
       // Not sent again on its own, so its sender is told now rather than never.
       how.answered?.({ answer: 'This message may not have been taken: its intake did not confirm it. Send it again if no answer follows.', status: 'failed' });
       uncertain(text);
-      const line = 'Your message may have been sent: its intake did not confirm it. It is kept; check /work intake before sending it again.';
+      const line = 'Your message may have been sent: its intake did not confirm it. It is kept; check it in Work, under Unanswered, before sending it again.';
       if (how.quiet) messages.activity(line);
       else messages.aboutInput(line, 'warning');
       deps.render();

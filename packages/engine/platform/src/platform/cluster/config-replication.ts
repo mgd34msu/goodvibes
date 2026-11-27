@@ -75,6 +75,7 @@ import {
   readReplicaAct,
   withRecordedActsOnly,
   CARRIED_ACT,
+  OLDER_RUN_ACT,
   type ConfigReplicaDocument,
   type ConfigReplicaEntry,
   type ConfigReplicaTombstone,
@@ -250,12 +251,12 @@ export interface ConfigRecentChange {
   readonly act: ReplicaAct;
 }
 
-/** How a change was decided, in the owner's words: "his press", "his yes to <caller>", "<caller> under his rules". */
+/** How a change was decided, in words for the owner: "you, with your own press", "<caller>, and you said yes to it", "<caller>, allowed by your rules". */
 export function describeReplicaAct(act: ReplicaAct): string {
   const who = act.name ?? (act.owner ? 'you' : act.by);
   if (act.how === 'press') return act.owner ? 'you, with your own press' : `${who}, with a press`;
   if (act.how === 'yes') return `${who}, and you said yes to it`;
-  if (act.how === 'carried') return 'you (carried from before this record existed)';
+  if (act.how === 'carried') return `you (${act.name ?? 'carried from before this record existed'})`;
   return `${who}, allowed by your rules without asking`;
 }
 
@@ -561,7 +562,10 @@ export class ConfigReplicationService {
         this.localDifferences.delete(path);
         continue;
       }
-      if (entry && entry.origin !== this.host.nodeId) {
+      // A run of the older release since the upgrade (released 3.5.0 put back on this machine, the owner's own act on
+      // it): what changed here then is this machine's change made in that run, decided below.
+      const fromOlderRun = olderRun !== undefined;
+      if (entry && entry.origin !== this.host.nodeId && !fromOlderRun) {
         // Applied here and changed since: an edit made here that nothing announced.
         if (this.localDifferences.get(path)?.revision !== entry.revision) {
           this.localDifferences.set(path, { origin: entry.origin, revision: entry.revision });
@@ -574,13 +578,13 @@ export class ConfigReplicationService {
       // announced, recorded with no one who made it, which the other machines do not take.
       // A path the group holds a change for that was not taken here is not folded in: that would overwrite it.
       if (entry === null && this.refusedPaths.has(path)) continue;
-      // This machine's own change made while it ran 3.5.0 after the upgrade (it is in its settings, not in this
-      // record) records no one: the carry mark applies once, to what this machine held at its own upgrade, never to a
-      // change made after it (gate-review-6 G14). It stays here until the owner shares it ("share a setting").
-      const act = entry === null ? this.seedAct : undefined;
-      if (!act) this.host.logger.warn(olderRun !== undefined
-        ? 'cluster: a shared setting changed here while this machine ran an older release records no one who made it, so the other machines will not take it; in Devices and network, Machine group, "share a setting" sends it as your own'
-        : 'cluster: a shared setting changed here records no one who made it (it was not changed through the daemon\'s settings controls), so the other machines will not take it', { path });
+      // This machine's own change made while it ran 3.5.0 after the upgrade (it is in its settings, not in this record):
+      // it did not cross while 3.5.0 ran; now that this machine is upgraded again it crosses, recorded as the owner's act
+      // made on this machine (gate-review-6 G14, decided). The carry mark of the first upgrade is not applied again:
+      // only this run's changes, on this machine, at this upgrade.
+      const act = entry === null && this.seedAct ? this.seedAct : fromOlderRun ? OLDER_RUN_ACT : undefined;
+      if (act === OLDER_RUN_ACT) this.host.logger.info('cluster: a shared setting changed here while this machine ran an older release is sent to the group as your act made on this machine', { path });
+      if (!act) this.host.logger.warn('cluster: a shared setting changed here records no one who made it (it was not changed through the daemon\'s settings controls), so the other machines will not take it', { path });
       next = putReplicaEntry(next, { path, value, origin: this.host.nodeId, at: this.host.now(), ...(act ? { act } : {}) });
       changed.push(path);
       agreed[path] = next.revision;

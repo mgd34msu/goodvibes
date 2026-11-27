@@ -25,6 +25,7 @@ import { writeFileAtomic } from '../../utils/atomic-json-store.js';
 import { logger } from '../../utils/logger.js';
 import { summarizeError } from '../../utils/error-display.js';
 import { noteListChanged } from '../../runtime/list-changes.js';
+import { clearExposure } from '../../security/conversation-exposure.js';
 
 export type WorkPlanState = 'writing' | 'waiting' | 'approved' | 'failed';
 
@@ -42,13 +43,24 @@ export interface WorkPlanView {
 export type WorkPlanGate = { readonly kind: 'run'; readonly draftPlan?: DraftedPlan | undefined } | { readonly kind: 'waiting' };
 
 /**
- * Who caused a piece of work to run, kept on its record here. The owner's own (`owner`) only when the owner himself
- * submitted it or approved it: a person's press or typed line of his, or his answer in Waiting for you; anything else
+ * Who caused a piece of work to run, kept on its record here. The owner's own (`owner`) only when the owner in person
+ * submitted it or approved it: a person's press or typed line of theirs, or their answer in Waiting for you; anything else
  * (a model in a turn on someone else's input, a device, a member, a script, an outside agent) is someone else's
- * (`other`, `who` in words) until he approves it. A turn of that work runs as that party
+ * (`other`, `who` in words) until the owner approves it. A turn of that work runs as that party
  * (security/turn-input-party.ts): someone else's work runs reads only and no command outside a real sandbox.
  */
-export type WorkCause = { readonly party: 'owner' } | { readonly party: 'other'; readonly who: string };
+export type WorkCause = {
+  readonly party: 'owner';
+  /** A caller that is not the owner asked for it and the owner said yes: that caller (by its principal) acts on it afterwards. */
+  readonly madeFor?: string | undefined;
+} | {
+  readonly party: 'other'; readonly who: string;
+  /**
+   * The caller that caused it, by its principal (daemon/method-owner-decision.ts `partyOfCaller`): such a caller below an
+   * admin acts on this work afterwards, and on no one else's (routes/work.ts `ownWork`). Absent: nobody's in particular.
+   */
+  readonly madeFor?: string | undefined;
+};
 
 /** What a piece of work with no cause recorded is: nobody is recorded as its owner's own, so it is not. */
 export const UNRECORDED_WORK_CAUSE: WorkCause = Object.freeze({ party: 'other', who: 'work the owner is not recorded as having asked for or approved' });
@@ -82,10 +94,12 @@ export interface WorkPlans {
   adopt(proposalId: string, workId: string): void;
   /**
    * An act made `workId` run (it was handed over, started, approved, resumed, a step run again): who caused it. The
-   * owner's own act makes it his; someone else's is kept only where nothing is recorded yet, so it never takes the
-   * work away from him. See {@link WorkCause}.
+   * owner's own act makes it theirs; someone else's is kept only on work that caller just made (`made`: it handed the
+   * work over a moment before), so it never takes work away from anyone. Work with no cause recorded that it did not just
+   * make (work made before causes were kept) is the owner's: anyone else's start, resume or retry of it is refused, never
+   * claimed by whoever starts it. See {@link WorkCause}.
    */
-  noteCause(workId: string, cause: WorkCause): void;
+  noteCause(workId: string, cause: WorkCause, options?: { readonly made?: boolean | undefined }): void;
   /** Who caused `workId` to run: {@link UNRECORDED_WORK_CAUSE} when nothing is recorded. */
   causeOf(workId: string): WorkCause;
   /**
@@ -93,18 +107,16 @@ export interface WorkPlans {
    * recorded cause, else {@link UNRECORDED_WORK_CAUSE}.
    */
   causeOfSession(sessionId: string | undefined): WorkCause;
-  /** Whether who caused `workId` is recorded at all (work made before causes were kept has none). */
+  /** Whether who caused `workId` is recorded at all (work made before causes were kept has none until `ownOldWork`). */
   hasCause(workId: string): boolean;
-  /**
-   * Work with no recorded cause is put to the owner once, in Waiting for you (work-cause-question.ts): asked here, it
-   * runs nothing until he answers (`noteCause` refuses every act that would make it run).
-   */
-  askCause(workId: string): void;
-  causeAsked(workId: string): boolean;
   /** When this project's Work began keeping causes (its first start of this version): older work has none. */
   causesKeptSince(): number;
-  /** His answer: `keep` records it as his; `drop` leaves it unrecorded (the caller stops the work). Either way it is no longer asked. */
-  answerCause(workId: string, answer: 'keep' | 'drop'): void;
+  /**
+   * Work made before causes were kept (old-work-cause.ts) is the owner's, with nothing asked: recorded as theirs, so it
+   * reads and runs as their own; anyone else's start, resume or retry of it stays refused (`noteCause`). Returns how many
+   * were recorded now.
+   */
+  ownOldWork(workIds: readonly string[]): number;
 }
 
 export interface WorkPlanSubject { readonly id: string; readonly goal: string; readonly criteria: readonly string[] }
@@ -159,18 +171,19 @@ export function createWorkPlans(deps: {
   const held = new Map<string, Held>();
   // Who caused each piece of work to run (WorkCause), kept beside its plan and not dropped when the work starts.
   const causes = new Map<string, WorkCause>();
-  // Work with no recorded cause put to the owner and not answered yet: it runs nothing.
-  const asked = new Set<string>();
+  // Work made before causes were kept, recorded as the owner's (`ownOldWork`): no one else's act ever takes it.
+  const old = new Set<string>();
   // When this record began keeping causes: work made before it is the work no cause was ever kept for.
   let causesKeptSince: number | undefined;
   try {
-    const stored = JSON.parse(readFileSync(deps.file, 'utf8')) as { readonly plans?: Record<string, Held>; readonly causes?: Record<string, unknown>; readonly causeAsked?: unknown; readonly causesKeptSince?: unknown };
-    if (Array.isArray(stored.causeAsked)) for (const workId of stored.causeAsked) if (typeof workId === 'string') asked.add(workId);
+    const stored = JSON.parse(readFileSync(deps.file, 'utf8')) as { readonly plans?: Record<string, Held>; readonly causes?: Record<string, unknown>; readonly ownersOld?: unknown; readonly causesKeptSince?: unknown };
+    if (Array.isArray(stored.ownersOld)) for (const workId of stored.ownersOld) if (typeof workId === 'string') old.add(workId);
     if (typeof stored.causesKeptSince === 'number' && Number.isFinite(stored.causesKeptSince)) causesKeptSince = stored.causesKeptSince;
     for (const [workId, cause] of Object.entries(stored.causes ?? {})) {
-      const read = cause as { readonly party?: unknown; readonly who?: unknown } | null;
-      if (read?.party === 'owner') causes.set(workId, { party: 'owner' });
-      else if (read?.party === 'other') causes.set(workId, { party: 'other', who: typeof read.who === 'string' && read.who ? read.who : UNRECORDED_WORK_CAUSE.who });
+      const read = cause as { readonly party?: unknown; readonly who?: unknown; readonly madeFor?: unknown } | null;
+      const madeFor = typeof read?.madeFor === 'string' && read.madeFor ? { madeFor: read.madeFor } : {};
+      if (read?.party === 'owner') causes.set(workId, { party: 'owner', ...madeFor });
+      else if (read?.party === 'other') causes.set(workId, { party: 'other', who: typeof read.who === 'string' && read.who ? read.who : UNRECORDED_WORK_CAUSE.who, ...madeFor });
     }
     for (const [workId, entry] of Object.entries(stored.plans ?? {})) {
       // A plan being written when the daemon stopped was never finished: it is written again on the next Start.
@@ -188,7 +201,7 @@ export function createWorkPlans(deps: {
 
   function save(): void {
     try {
-      writeFileAtomic(deps.file, `${JSON.stringify({ version: 1, plans: Object.fromEntries(held), causes: Object.fromEntries(causes), causesKeptSince, ...(asked.size > 0 ? { causeAsked: [...asked] } : {}) }, null, 2)}\n`, { mkdirp: true, mode: 0o600 });
+      writeFileAtomic(deps.file, `${JSON.stringify({ version: 1, plans: Object.fromEntries(held), causes: Object.fromEntries(causes), causesKeptSince, ...(old.size > 0 ? { ownersOld: [...old] } : {}) }, null, 2)}\n`, { mkdirp: true, mode: 0o600 });
     } catch (error) {
       logger.warn('The work plans file could not be written; the plans are held until the daemon stops', { error: summarizeError(error) });
     }
@@ -199,7 +212,7 @@ export function createWorkPlans(deps: {
   // The mark is kept from the first start of this version on (nothing else in the file changes, nothing to announce).
   if (firstKept) {
     try {
-      writeFileAtomic(deps.file, `${JSON.stringify({ version: 1, plans: Object.fromEntries(held), causes: Object.fromEntries(causes), causesKeptSince, ...(asked.size > 0 ? { causeAsked: [...asked] } : {}) }, null, 2)}\n`, { mkdirp: true, mode: 0o600 });
+      writeFileAtomic(deps.file, `${JSON.stringify({ version: 1, plans: Object.fromEntries(held), causes: Object.fromEntries(causes), causesKeptSince, ...(old.size > 0 ? { ownersOld: [...old] } : {}) }, null, 2)}\n`, { mkdirp: true, mode: 0o600 });
     } catch (error) {
       logger.warn('The work plans file could not be written; when causes began to be kept is held until the daemon stops', { error: summarizeError(error) });
     }
@@ -283,6 +296,8 @@ export function createWorkPlans(deps: {
       if (entry.draftId) deps.drafts.removeDraft(entry.draftId);
       held.delete(workId);
       save();
+      // A discarded piece of work never runs: what it had read from outside goes with it (security/conversation-exposure.ts).
+      clearExposure(`work:${workId}`);
       return true;
     },
     started(workId) {
@@ -315,12 +330,16 @@ export function createWorkPlans(deps: {
       held.set(workId, { draftId: entry.draftId, state: entry.state });
       save();
     },
-    noteCause(workId, cause) {
-      // Made before causes were kept, and put to the owner: nothing makes it run until he answers.
-      if (asked.has(workId)) throw new WorkPlanRefusal('This work was asked for before GoodVibes kept who asked for each piece of work: answer "keep it as mine" or "drop it" in Waiting for you first. Nothing was run.');
+    noteCause(workId, cause, options) {
       const known = causes.get(workId);
+      // Work with no cause recorded that this caller did not just make, or made before causes were kept (`ownOldWork`), is
+      // the owner's: only the owner starts or resumes it; anyone else's act is refused and never makes it theirs.
+      if (cause.party === 'other' && ((known === undefined && options?.made !== true) || old.has(workId))) {
+        throw new WorkPlanRefusal('This work was asked for before GoodVibes kept who asked for each piece of work, so it is the owner\'s: only the owner starts, resumes or retries it. Nothing was run.');
+      }
       if (cause.party === 'other' ? known !== undefined : known?.party === 'owner') return;
-      causes.set(workId, cause.party === 'owner' ? { party: 'owner' } : { party: 'other', who: cause.who });
+      const madeFor = cause.madeFor ? { madeFor: cause.madeFor } : {};
+      causes.set(workId, cause.party === 'owner' ? { party: 'owner', ...madeFor } : { party: 'other', who: cause.who, ...madeFor });
       save();
     },
     causeOf(workId) {
@@ -332,17 +351,17 @@ export function createWorkPlans(deps: {
       return UNRECORDED_WORK_CAUSE;
     },
     hasCause: (workId) => causes.has(workId),
-    askCause(workId) {
-      if (causes.has(workId) || asked.has(workId)) return;
-      asked.add(workId);
-      save();
-    },
-    causeAsked: (workId) => asked.has(workId),
     causesKeptSince: () => causesKeptSince!,
-    answerCause(workId, answer) {
-      asked.delete(workId);
-      if (answer === 'keep') causes.set(workId, { party: 'owner' });
-      save();
+    ownOldWork(workIds) {
+      let recorded = 0;
+      for (const workId of workIds) {
+        if (causes.has(workId)) continue;
+        causes.set(workId, { party: 'owner' });
+        old.add(workId);
+        recorded += 1;
+      }
+      if (recorded > 0) save();
+      return recorded;
     },
   };
 }

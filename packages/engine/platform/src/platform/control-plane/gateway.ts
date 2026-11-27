@@ -409,7 +409,7 @@ export class ControlPlaneGateway {
 
   /**
    * The rules of the one check of what a caller may reach (the method catalog's `reachRules`), set once by the daemon:
-   * from then on every client that is not the owner himself receives only events about records it may reach
+   * from then on every client that is not the owner in person receives only events about records it may reach
    * (event-reach.ts), live and replayed. Unset (a program's own gateway, no daemon): every client as its grant says.
    */
   setEventReachRules(rules: () => EventReachRules | undefined): void {
@@ -418,7 +418,7 @@ export class ControlPlaneGateway {
 
   private eventReachRules: (() => EventReachRules | undefined) | null = null;
 
-  /** A new client's reach: null (everything) without rules or for the owner himself. */
+  /** A new client's reach: null (everything) without rules or for the owner in person. */
   private reachOfClient(context: EventReachContext | undefined): EventReach | null {
     return this.eventReachRules ? createEventReach(context, this.eventReachRules) : null;
   }

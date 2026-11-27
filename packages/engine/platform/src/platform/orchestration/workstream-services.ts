@@ -143,7 +143,6 @@ function readDecompositionConfig(configManager: Pick<ConfigManager, 'get'>): Dec
     bounds: {
       maxTurns: num(configManager.get('planner.maxTurns'), 0),
       tokenCeiling: num(configManager.get('planner.tokenCeiling'), 0),
-      wallTimeoutMs: num(configManager.get('planner.wallTimeoutMs'), 0),
     },
   };
 }

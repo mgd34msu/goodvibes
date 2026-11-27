@@ -126,7 +126,7 @@ export function purchaseWindowAnswerHandler(deps: PaymentWindowHandlerDeps, acti
 function pairedOwner(context: HandlerContextEnvelope) {
   const authority = context.nativeExecutionAuthority;
   const expected = (() => { try { return authority?.current(); } catch { throw forbidden(); } })();
-  // A paired device, an app on the owner's own machine ('local'), or the owner himself signed in (his machine's).
+  // A paired device, an app on the owner's own machine ('local'), or the owner in person signed in (their machine's).
   if (!expected || !authority || !context.admin || !nativeIdentityIsCaller(context, expected)
     || !scope(context.scopes, 'write:payments') || !scope(expected.scopes, 'write:payments')
     || !authorizedFor(context, 'write:payments')) throw forbidden();

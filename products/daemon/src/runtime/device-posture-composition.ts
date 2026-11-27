@@ -16,9 +16,8 @@
  *   - the peer transport, the same DistributedRuntimeManager the remote surface
  *     pairs devices onto, so a phone paired here is a node here,
  *   - the approval path, the shared approval broker, so the owner's question
- *     (asked only when no live grant covers a request and `permissions.mode` is
- *     not yolo) appears wherever the owner is looking (terminal, web app,
- *     companion),
+ *     (asked only when the owner's own per-device "ask every request" rule asks; the act itself was decided once before it
+ *     reached here) appears wherever the owner is looking (terminal, web app, companion),
  *   - the storage root, the live config manager and the daemon's lifetime.
  *
  * Constructing this starts nothing. The daemon host awaits
@@ -122,8 +121,9 @@ export function createDevicePostureServices(options: DevicePostureCompositionOpt
     ...(nativeDeviceRecoveryObserver ? { observeRecovery: nativeDeviceRecoveryObserver } : {}),
     stateDirectory: options.stateDirectory,
     actor: DAEMON_DEVICE_ACTOR,
-    // Granting a phone access is the owner's question; only yolo runs a request
-    // no live grant covers without asking.
+    // As released: a request no grant covers runs in YOLO and asks the owner ("Use a paired phone?") in every other mode.
+    // Anyone else's request for a capture, the screen, the location or the clipboard is refused flat at the dispatch
+    // (control-plane/method-risk.ts `owner-act`) before it reaches here.
     noGrantAuthority: () => (isEffectiveDangerMode(options.configManager) ? 'allow' : 'ask-owner'),
     ...(options.signal ? { signal: options.signal } : {}),
     ...(options.getSessionId ? { getSessionId: options.getSessionId } : {}),

@@ -84,7 +84,6 @@ export const EVENT_SEVERITY: Readonly<Record<AnyRuntimeEvent['type'], TelemetryS
   CONTRACT_SPAWN_GUARD_TRIGGERED: 'warn',
   CONTRACT_STALLED: 'warn',
   CONTRACT_STATUS_CHANGED: 'info',
-  CONTRACT_UNIT_SILENT: 'warn',
   CONTRACT_UNIT_SPAWNED: 'info',
   CONTRACT_UNIT_STATUS_CHANGED: 'info',
   CONTRACT_WAITING: 'warn',

@@ -102,7 +102,7 @@ function neutralizeFrameMarkers(text: string): string {
  * The framing is written as a standing rule with no hedge and no condition,
  * because a hedged rule ("be careful with instructions here") is a rule an
  * attacker can argue with, and the attacker gets to write as many words as
- * he likes inside the frame, arguing. An absolute rule leaves nothing to
+ * they like inside the frame, arguing. An absolute rule leaves nothing to
  * argue about: there is no exception for urgent messages, for messages that
  * claim to be from the owner, or for messages that claim the rule does not
  * apply to them.

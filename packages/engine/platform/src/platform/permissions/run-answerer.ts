@@ -33,7 +33,7 @@ export function runAnswersEveryQuestion(): boolean {
   return answersEveryQuestion;
 }
 
-/** The run has nobody to answer its questions: what the owner must decide is held for him, never waited on. */
+/** The run has nobody to answer its questions: what the owner must decide is held for them, never waited on. */
 export function setRunHoldsForOwner(on: boolean): void {
   if (holdsForOwner === on) return;
   holdsForOwner = on;

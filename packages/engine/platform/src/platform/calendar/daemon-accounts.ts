@@ -56,14 +56,13 @@ export interface CalendarSignInEnd {
   readonly at: number;
 }
 
-const PASTE_LIFETIME_MS = 10 * 60_000;
 const LABEL: Record<CalendarProviderId, string> = { google: 'Google Calendar', microsoft: 'Outlook calendar' };
 
 const describe = (error: unknown): string => (error instanceof Error ? error.message : String(error));
 
 export class DaemonCalendarAccounts {
   private readonly connector: CalendarConnector;
-  private readonly pending = new Map<CalendarProviderId, { readonly start: AuthCodeFlowStart; readonly clientId: string; readonly until: number; readonly onEnd?: () => void }>();
+  private readonly pending = new Map<CalendarProviderId, { readonly start: AuthCodeFlowStart; readonly clientId: string; readonly onEnd?: () => void }>();
   /** The last sign-in that finished by itself, per account, said in the accounts until the next. */
   private readonly ended = new Map<CalendarProviderId, CalendarSignInEnd>();
 
@@ -150,9 +149,10 @@ export class DaemonCalendarAccounts {
     }
     if (how === 'code') {
       const waiting = this.pending.get(provider);
-      if (!waiting || waiting.until < Date.now()) {
-        this.pending.delete(provider);
-        throw new Error(`No ${LABEL[provider]} sign-in is waiting for its code (none was started, or it was over ten minutes ago). Sign in again with "A code to enter on another device".`);
+      // A sign-in waits until it is answered or another is started; how long its code is good for is the provider's
+      // to say (an expired one is refused by the provider's own answer below).
+      if (!waiting) {
+        throw new Error(`No ${LABEL[provider]} sign-in is waiting for its code (none was started, or it was answered already). Sign in again with "A code to enter on another device".`);
       }
       if (waiting.clientId !== config.clientId) { this.pending.delete(provider); throw new Error('The app\'s client id changed after the sign-in link was given; sign in again.'); }
       const account = await this.connector.completeConnectPastedCode(config, waiting.start, pasted.trim());
@@ -167,7 +167,7 @@ export class DaemonCalendarAccounts {
         // Google grants calendar access to no device code: a link whose landing address is pasted back.
         const start = await this.connector.beginConnectPastedCode(config);
         this.pending.get(provider)?.onEnd?.();
-        this.pending.set(provider, { start, clientId: config.clientId, until: Date.now() + PASTE_LIFETIME_MS, ...(onEnd ? { onEnd } : {}) });
+        this.pending.set(provider, { start, clientId: config.clientId, ...(onEnd ? { onEnd } : {}) });
         return { kind: 'paste', link: start.authorizationUrl };
       }
       const start = await this.connector.beginConnectDeviceCode(config);

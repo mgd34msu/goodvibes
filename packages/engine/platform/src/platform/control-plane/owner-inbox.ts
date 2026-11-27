@@ -6,7 +6,7 @@
  * broker, which already keeps them, settles their waiters and fans them out;
  * the inbox reads them from it and answers them through it. Everything else a
  * subsystem or an agent needs from the owner (a question, a channel claim, a
- * purchase window, an action queued while he was away) is posted here and kept
+ * purchase window, an action queued while the owner was away) is posted here and kept
  * in the question store: one SQLite file in the owner's home that the daemon,
  * both terminal apps and their agents all open (question-store.ts).
  *
@@ -66,7 +66,7 @@ export { OWNER_ANSWER_AGENT_METADATA, OWNER_ANSWER_SESSION_METADATA, OWNER_ASKER
  * `decision` is a call Jev decided for the owner at the permission gate: it is
  * open while the owner can still act on it (undo, never, always, ask, keep),
  * and only a list that names the kind shows it, so it never reads as something
- * waiting on him.
+ * waiting on the owner.
  *
  * `report` is the answer of a run nobody was watching (a scheduled run or a
  * trigger's turn) that named no surface to deliver to, or whose delivery
@@ -92,7 +92,7 @@ export interface OwnerAnswerSource {
   readonly actor: string;
   readonly surface: string;
   /**
-   * The owner himself answered (his own credential, his sign-in or a device he paired, never a model acting for him):
+   * The owner in person answered (their own credential, their sign-in or a device they paired, never a model acting for them):
    * every surface says "you"; any other answerer is named. Absent on answers from before it was kept.
    */
   readonly owner?: true | undefined;
@@ -994,7 +994,7 @@ export class OwnerInbox implements RevisionSource, OwnerInboxPort, OwnerAnswerRe
     const items: OwnerItem[] = [];
     const afterCursor = (item: OwnerItem): boolean => !after || sortTime(item) < after.time || (sortTime(item) === after.time && item.id > after.id);
     const actions = this.#approvalActions;
-    // A caller that is not the owner himself (daemon-api withRecordReach): only the questions of projects it may reach,
+    // A caller that is not the owner in person (daemon-api withRecordReach): only the questions of projects it may reach,
     // before the page is cut (control-plane/caller-reach.ts); every other item is the owner's own and not listed.
     const reach = currentRecordReach();
     if (actions && (!kinds || kinds.has('approval'))) {

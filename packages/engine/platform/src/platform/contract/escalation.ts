@@ -57,7 +57,7 @@ import { addJudgmentUsage } from './usage.js';
 import { logger } from '../utils/logger.js';
 import { summarizeError } from '../utils/error-display.js';
 import { releaseSharedTreeForOwner, retakeSharedTreeAfterOwner } from './workstreams.js';
-import { keepOneSide } from './conflict-repair.js';
+import { keepOneSide, setRepairTreeAside, type MergeConflictRepair } from './conflict-repair.js';
 
 /** The decision site owner replies are logged under. */
 export const OWNER_REPLY_SITE = 'contract.owner-reply';
@@ -170,7 +170,7 @@ export function buildUnitFailureQuestion(contract: Contract, unit: Pick<Contract
   const goOn = canGoOnWithout(contract, unit.id) ? ', go on without it,' : '';
   return [
     `Step "${titleOf(unit.title)}" failed, so the work stopped at that step.`,
-    `What failed: ${titleOf(reason).slice(0, 400)}`,
+    `What failed: ${reason.replace(/\s+/g, ' ').trim().slice(0, 400)}`,
     'The steps that finished are kept, and the steps that wait on this one have not run. Nothing was approved and no result changed.',
     `Run the step again (the steps waiting on it then run as usual)${goOn} or stop the work.`,
   ].join('\n');
@@ -269,7 +269,8 @@ export interface PublicationPauseInput {
 /** The publication-pause question, built in code: the obstacle, where the result is, and the two answers. */
 export function buildPublicationPauseQuestion(contract: Contract, input: PublicationPauseInput): string {
   return [
-    `The work "${titleOf(contract.goal || contract.ask)}" passed its checks, but its result could not be put in the project: ${titleOf(input.note).slice(0, 400)}`,
+    // What failed, whole up to 400 characters (a 120-character title would cut git's own sentence in the middle).
+    `The work "${titleOf(contract.goal || contract.ask)}" passed its checks, but its result could not be put in the project: ${input.note.replace(/\s+/g, ' ').trim().slice(0, 400)}`,
     input.branch === undefined
       ? 'The checked changes are kept in the working tree.'
       : `The checked result is kept on a branch of its own, made for "${titleOf(contract.goal || contract.ask)}" (to apply it yourself: git merge ${input.branch}).`,
@@ -321,7 +322,7 @@ export function buildOwnerAcceptanceQuestion(contract: Contract, input: OwnerAcc
     ...(answer.length === 0 ? [] : [`Its answer begins: ${answer.length <= 400 ? answer : `${answer.slice(0, 397)}...`}`]),
     input.branch === undefined
       ? 'Its changes are in the working tree.'
-      // Named by the work it is for, never by its id: what a person can use when he answers.
+      // Named by the work it is for, never by its id: what a person can use when they answer.
       : `Its changes are kept on a branch of their own, made for "${titleOf(contract.goal || contract.ask)}"; none of them is in your files until you accept.`,
     'Accept it to put the result in the project, or cancel to stop the work. Nothing is put in until you accept.',
   ].join('\n');
@@ -362,12 +363,17 @@ export function conflictHeadline(files: readonly string[]): string {
   return `The two changes to ${files.length === 0 ? 'the same files' : files.join(', ')} could not be combined`;
 }
 
+/** The end line's words for the other side of a conflict the work did not take: where it is kept. */
+function otherChangeKept(conflict: MergeConflictRepair): string {
+  return `The other change to ${conflict.files.join(', ')}, which could not be combined with it, is kept on its own branch ${conflict.branch}.`;
+}
+
 /** The conflict question, built in code: which two changes, what each answer does. */
 export function buildConflictQuestion(contract: Contract, files: readonly string[], first: string, second: string): string {
   return [
     `${conflictHeadline(files)}.`,
     `In the work "${titleOf(contract.goal || contract.ask)}", the step "${titleOf(first)}" and the step "${titleOf(second)}" both changed ${files.length === 1 ? 'it' : 'them'}, and the step that was to combine them ended its turn with both versions still in place.`,
-    `Answer "first" to keep the change of "${titleOf(first)}" (already in the work), "second" to keep the change of "${titleOf(second)}", or "stop" to stop the work. The other changes of both steps are kept either way.`,
+    `Choose "first" to keep the change of "${titleOf(first)}" (already in the work), "second" to keep the change of "${titleOf(second)}", or "stop" to stop the work. The other changes of both steps are kept either way.`,
   ].join('\n');
 }
 
@@ -562,7 +568,15 @@ export function createEscalations(context: StepContext, rejudge: Rejudge): Escal
     return run.contract.escalations.filter((escalation) => escalation.resolvedAt === undefined);
   }
 
+  /**
+   * As released: a question of a piece of work (a repeated refused plan, a failed step, a result that could not be put
+   * in, a failed session turn, a result no decision model checked; and a conflict, the comparable new question) is put
+   * to the owner in every mode.
+   */
   function raise(run: ContractRun, input: EscalationInput): Escalation {
+    return raiseToOwner(run, input);
+  }
+  function raiseToOwner(run: ContractRun, input: EscalationInput): Escalation {
     const { contract } = run;
     // A session's own request is fixed and answered by native decisions, not owner approval. A contract started
     // by unattended work keeps its source as the fixed root and asks its owner like any other.
@@ -710,6 +724,7 @@ export function createEscalations(context: StepContext, rejudge: Rejudge): Escal
     const shared = new Set(conflict.files);
     const first = contract.units.find((candidate) => candidate.id !== target?.id && candidate.groupId !== group.id && candidate.status === 'passed'
       && candidate.touchedPaths.some((path) => shared.has(path)));
+    // Put to the owner in every mode, as every question of a piece of work was in the released modes (a Work question, S19).
     raise(run, {
       scope: 'group', targetId: group.id, reason: 'stalled', unmetCriterionIds: [], decisionIds: [], retryOrCancel: true,
       question: buildConflictQuestion(contract, files, first?.title || 'the work so far', target?.title || target?.id || 'the other step'),
@@ -720,7 +735,7 @@ export function createEscalations(context: StepContext, rejudge: Rejudge): Escal
 
   /**
    * The owner's answer to the conflict question: "first" or "second" keeps that change in the conflicting files (the
-   * host applies it in the repair step's tree and finishes the merge) and the repair step passes, as he decided it;
+   * host applies it in the repair step's tree and finishes the merge) and the repair step passes, as the owner decided it;
    * "stop" stops the work. Any other answer leaves the question open.
    */
   async function replyToConflict(run: ContractRun, escalation: Escalation, text: string): Promise<OwnerReplyOutcome> {
@@ -740,7 +755,10 @@ export function createEscalations(context: StepContext, rejudge: Rejudge): Escal
       run.decide('owner-replied', group.id, `${escalation.id}: stop, the work is stopped`);
       run.emit({ type: 'CONTRACT_OWNER_REPLIED', contractId: run.id, escalationId: escalation.id, reading, outcome: 'act', action });
       run.contract.failureKind = 'owner-rejected';
-      run.control.cancel(`stopped by you: ${conflictHeadline(conflict.files).toLowerCase().replace(/^the/, 'the')}`);
+      // Nothing of the repair is left but the two changes: the work's own branch, and the other change's branch.
+      if (run.contract.branch !== undefined) await setRepairTreeAside(run.contract.projectRoot, run.runtime(unit).cwd, run.contract.branch);
+      run.control.cancel(`stopped by you after ${conflictHeadline(conflict.files).replace(/^The/, 'the')}`);
+      if (run.contract.statusLine !== undefined) run.contract.statusLine = `${run.contract.statusLine} ${otherChangeKept(conflict)}`;
       return { escalationId: escalation.id, reading, outcome: 'act', action };
     }
     // Applied before the question closes: a failure leaves it open, said in words.
@@ -756,11 +774,35 @@ export function createEscalations(context: StepContext, rejudge: Rejudge): Escal
     leaveOwnerWait(run);
     run.decide('owner-replied', group.id, `${escalation.id}: ${answer}, the ${answer} change to ${conflict.files.join(', ')} is kept and the merge of ${conflict.branch} finished`);
     run.emit({ type: 'CONTRACT_OWNER_REPLIED', contractId: run.id, escalationId: escalation.id, reading, outcome: 'act', action });
-    // The owner settled what the step was to do: it passes as he decided, and its tree (with the finished merge) goes in.
-    context.checks().passUnit(run, unit, `The two changes to ${conflict.files.join(', ')} could not be combined; you chose to keep the ${answer} one.`, `the owner kept the ${answer} change`);
+    checkKeptSide(run, unit, conflict, answer, 'the owner chose');
     context.ownerProgress(run);
     try { context.checkpoint?.(run); } catch { /* the contract is held and its write is scheduled */ }
     return { escalationId: escalation.id, reading, outcome: 'act', action };
+  }
+
+  /**
+   * One side was kept by the owner and applied in the repair step's tree with the merge
+   * finished: the step's criteria say that choice, and the step (still held at its finished turn) is checked against
+   * them as any step is, so the work's result rests on a real check of every step.
+   */
+  function checkKeptSide(run: ContractRun, unit: ContractUnit, conflict: MergeConflictRepair, answer: 'first' | 'second', who: string): void {
+    const files = conflict.files.join(', ');
+    const kept = `${files} ${conflict.files.length === 1 ? 'holds' : 'hold'} only the ${answer} change, as ${who} when the two changes could not be combined`;
+    for (const criterion of unit.criteria) {
+      if (criterion.disposition !== 'judged') continue;
+      criterion.text = kept;
+      criterion.status = 'unread';
+    }
+    unit.brief = `${unit.brief}\n\nThe ${answer} change to ${files} is kept (${who}); the host applied it and finished the merge. Change nothing more in ${files}.`;
+    // The step whose change to those files was dropped says so, and is not checked or nudged again for it: "first"
+    // drops the conflicting step's change (the step this repair is for), "second" the change already in the work.
+    const target = run.unit(run.group(unit.groupId)?.repairs?.targetId ?? '');
+    const shared = new Set(conflict.files);
+    const dropped = answer === 'first' ? target
+      : run.contract.units.find((candidate) => candidate.id !== target?.id && candidate.groupId !== unit.groupId && candidate.status === 'passed'
+        && candidate.touchedPaths.some((path) => shared.has(path)));
+    if (dropped !== undefined) dropped.dropped = `dropped: the other change to ${files} was kept`;
+    void context.checks().runCheck(run, unit, 'completion', `The two changes to ${files} could not be combined; the ${answer} one is kept (${who}), and the host applied it and finished the merge.`);
   }
 
   /** Back to the status the contract left for the owner, once nothing else waits on them. */
@@ -1115,6 +1157,7 @@ export function createEscalations(context: StepContext, rejudge: Rejudge): Escal
       escalation.reply = { text, reading, outcome: 'act', decisionId: undefined };
       escalation.resolvedAt = run.env.now();
       unit.failureReason = undefined;
+      unit.failureKind = undefined;
       unit.transportRetries = 0;
       run.decide('owner-replied', unit.id, `${escalation.id}: retry, unit ${unit.id} runs again with a fresh agent`);
       run.emit({ type: 'CONTRACT_OWNER_REPLIED', contractId: run.id, escalationId: escalation.id, reading, outcome: 'act', action });

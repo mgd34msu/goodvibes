@@ -109,7 +109,7 @@ export class ConfirmDialog implements SurfaceModal, ConfirmView {
   }
 }
 
-/** Ask through a host; resolves true only when the confirming button was pressed. */
+/** Ask through a host; resolves true only when the confirming button was pressed. Shown in every mode, as released. */
 export function confirmThrough(host: SurfaceModalHost, options: ConfirmOptions): Promise<boolean> {
   return new Promise<boolean>((resolve) => host.push(new ConfirmDialog(options, resolve)));
 }

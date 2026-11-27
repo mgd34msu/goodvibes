@@ -54,8 +54,8 @@ export interface ProjectWorktreeSettingsSource {
   /** The daemon's own setting, for a key the project's layer does not hold. */
   readonly daemonSetting: (key: string) => unknown;
   /**
-   * The owner's trust decision for a folder: 'trusted' only when he trusted it (not for having nothing of its own),
-   * 'restricted' when he kept it restricted, 'undecided' otherwise.
+   * The owner's trust decision for a folder: 'trusted' only when they trusted it (not for having nothing of its own),
+   * 'restricted' when they kept it restricted, 'undecided' otherwise.
    */
   readonly folderTrust: (folder: string) => 'trusted' | 'restricted' | 'undecided';
 }

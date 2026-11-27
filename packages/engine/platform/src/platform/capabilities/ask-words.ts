@@ -30,6 +30,13 @@ const clip = (text: string, max: number): string => text.length <= max ? text : 
  */
 export const CARRIED_FROM_ARG = 'carriedFrom';
 export const RESULT_LEAVES_ARG = 'resultLeaves';
+/**
+ * A first use given to a caller (daemon/capability-owner-gate.ts `daemonGrant`: a project, one of the owner's shared
+ * things, typing into an observed agent) is no capability of the catalog: its card is worded by the act in the owner's
+ * words, carried on the call it decides (never matched on).
+ */
+export const GRANT_LABEL_ARG = 'grantLabel';
+export const GRANT_SENTENCE_ARG = 'grantSentence';
 
 /** A thing's title by the id an input carries, from the live list the input chooses from; undefined when not known. */
 export type CapabilityValueTitle = (list: string, value: string) => string | undefined;
@@ -64,6 +71,11 @@ export function capabilityAskWords(lookup: (id: string) => CapabilityEntry | und
   if (!id) return undefined;
   const entry = lookup(id);
   const raw = args['inputs'] && typeof args['inputs'] === 'object' && !Array.isArray(args['inputs']) ? args['inputs'] as Record<string, unknown> : {};
+  const grant = !entry && typeof args[GRANT_LABEL_ARG] === 'string' && args[GRANT_LABEL_ARG].trim() ? clip(args[GRANT_LABEL_ARG].trim().replace(/\s+/g, ' '), 200) : undefined;
+  if (grant !== undefined) {
+    const sentence = typeof args[GRANT_SENTENCE_ARG] === 'string' && args[GRANT_SENTENCE_ARG].trim() ? clip(args[GRANT_SENTENCE_ARG].trim().replace(/\s+/g, ' '), 400) : undefined;
+    return { question: `${grant}?`, lines: sentence ? [sentence] : [], subject: grant, doing: `"${grant}"` };
+  }
   if (!entry) return methodAskWords(id, raw, methodTitle, Intl.DateTimeFormat().resolvedOptions().timeZone || 'UTC');
   // A secret input whose `plainWhen` holds for what the call gives is no secret for it (a setting that holds no key):
   // its value is shown, as the call carried it in clear.
@@ -124,7 +136,7 @@ function actOf(label: string): string {
   const [first = '', ...rest] = label.trim().split(/\s+/);
   const gerund = GERUNDS[first.toLowerCase()];
   // A second act joined on ("Move a meeting or change an event", "Ask and hear the answer") would stay a bare verb
-  // after the -ing one, and a label in the person's own voice ("Ask me", "my phone") reads wrong said of him: quoted.
+  // after the -ing one, and a label in the person's own voice ("Ask me", "my phone") reads wrong said of them: quoted.
   const words = rest.map((word) => word.toLowerCase().replace(/[^a-z']/g, ''));
   const secondAct = words.some((word, at) => (word === 'and' || word === 'or') && GERUNDS[words[at + 1] ?? ''] !== undefined);
   const ownVoice = words.some((word) => word === 'me' || word === 'my');

@@ -63,7 +63,7 @@ export function boundCapabilityCatalog(): CapabilityCatalog {
 }
 
 /**
- * Ask the person for a value on the program's hidden line: the value typed, null when he went back (Esc), undefined
+ * Ask the person for a value on the program's hidden line: the value typed, null when they went back (Esc), undefined
  * when this program has no screen to ask on.
  */
 export function askBoundHiddenValue(label: string): Promise<string | null> | undefined {

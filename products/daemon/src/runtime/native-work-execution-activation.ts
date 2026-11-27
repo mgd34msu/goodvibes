@@ -89,11 +89,10 @@ export function createDaemonNativeWorkExecutionActivation(options: NativeWorkExe
       graph.agentOrchestrator.setDependencies(toolDependencies);
       const owner = native;
       // Who caused each piece of work, from its record: its session turns and its agents run as that party (the owner's
-      // own only when he himself asked for it or approved it; anyone else's runs reads only, no command outside a real
-      // sandbox). Read at every turn and wake, so his approval since the work started counts.
+      // own only when the owner in person asked for it or approved it; anyone else's runs reads only, no command outside a
+      // real sandbox). Read at every turn and wake, so the owner's approval since the work started counts.
       // Work a channel conversation caused, with no cause of its own on record, is the owner's own when that conversation
-      // is his alone on a channel where he chose "Treat my own messages here as me" (his message there, agreed by him
-      // there): the same rule his own channel turns follow (security/turn-input-party.ts). A guest's, a group's or any
+      // is theirs alone on a channel that proves its sender (their message there, agreed by them there): the same rule their own channel turns follow (security/turn-input-party.ts). A guest's, a group's or any
       // other conversation's stays someone else's.
       const workCauseOf = (sessionId: string | undefined): WorkCause => {
         const recorded = options.workPlans?.causeOfSession(sessionId) ?? UNRECORDED_WORK_CAUSE;

@@ -1,5 +1,5 @@
 import { randomUUID } from 'node:crypto';
-import { getContractGateTimeoutMs, projectTestCommandMissing, resolveProjectTestCommand } from '@goodvibes/engine/platform/platform/contract';
+import { projectTestCommandMissing, resolveProjectTestCommand } from '@goodvibes/engine/platform/platform/contract';
 import type { ToolCall } from '@goodvibes/engine/platform/platform/types';
 import type { CommandContext } from '../command-registry.ts';
 import { requireShellPaths } from '@goodvibes/engine/terminal-shell/command-service-access';
@@ -174,13 +174,12 @@ const KILLED_DRAIN_GRACE_MS = 250;
  * (capabilities/builtin/code.ts; Code and changes, t): the project's one test
  * command (contract/gates.ts `resolveProjectTestCommand`), its output streamed
  * into the conversation and its result kept there as a notice; the words of
- * that result are what it answers. The time limit is `contract.gateTimeoutMs`
- * unless overridden, 0 for none.
+ * that result are what it answers. It runs until the command exits or the owner
+ * stops it (Esc): no clock stops it.
  */
 export async function runTestCommand(
   args: string[],
   ctx: CommandContext,
-  timeoutMs?: number,
 ): Promise<string> {
   const cwd = requireShellPaths(ctx).workingDirectory;
   const configManager = ctx.platform.configManager;
@@ -192,12 +191,11 @@ export async function runTestCommand(
     // A first line a screen can show whole (the reason, under it, names the folder, a settings value and how to add one).
     return `Not run: this project has no test command.\n${reason}`;
   }
-  const limitMs = timeoutMs ?? getContractGateTimeoutMs(configManager);
   const runs = ctx.testRuns;
   const signal = runs ? runs.begin() : new AbortController().signal;
   if (!signal) return 'A test run is still going, or still finishing after a stop; Esc stops it, and the tests can be run again once it has ended.';
   try {
-    return await runResolvedTest(resolved.command, resolved.source, args, cwd, limitMs, signal, ctx);
+    return await runResolvedTest(resolved.command, resolved.source, args, cwd, signal, ctx);
   } finally {
     runs?.finish(signal);
   }
@@ -208,14 +206,13 @@ async function runResolvedTest(
   source: string,
   args: readonly string[],
   cwd: string,
-  timeoutMs: number,
   signal: AbortSignal,
   ctx: CommandContext,
 ): Promise<string> {
   const pattern = args.length > 0 ? args.join(' ') : undefined;
   const toolCall: ToolCall = { id: `test-run-${randomUUID()}`, name: 'test', arguments: pattern ? { pattern } : {} };
 
-  ctx.print(`Running: ${command} (${source}${timeoutMs > 0 ? `, limit ${Math.round(timeoutMs / 1000)}s` : ''}; Esc stops it)`);
+  ctx.print(`Running: ${command} (${source}; Esc stops it)`);
 
   const startedAt = Date.now();
   const proc = Bun.spawn(['/bin/sh', '-c', command], {
@@ -225,7 +222,6 @@ async function runResolvedTest(
     detached: process.platform !== 'win32',
   });
 
-  let timedOut = false;
   let stopped = false;
   const pumpAbort = new AbortController();
   let drainTimer: ReturnType<typeof setTimeout> | undefined;
@@ -234,11 +230,6 @@ async function runResolvedTest(
     drainTimer ??= setTimeout(() => pumpAbort.abort(), KILLED_DRAIN_GRACE_MS);
     drainTimer.unref?.();
   };
-  const timer = timeoutMs > 0 ? setTimeout(() => {
-    timedOut = true;
-    kill();
-  }, timeoutMs) : undefined;
-  timer?.unref?.();
   const stop = (): void => {
     stopped = true;
     kill();
@@ -280,7 +271,6 @@ async function runResolvedTest(
     pumpAbort.abort();
     throw error;
   } finally {
-    clearTimeout(timer);
     if (drainTimer) clearTimeout(drainTimer);
     clearInterval(flushTimer);
     signal.removeEventListener('abort', stop);
@@ -288,42 +278,15 @@ async function runResolvedTest(
 
   const durationMs = Date.now() - startedAt;
 
-  if (stopped && !timedOut) {
+  if (stopped) {
     flushDisplay(true);
     ctx.print('Test run stopped.');
     ctx.session.conversationManager.logToolResultBlock(toolCall, 'error', 'stopped', durationMs, 'stopped by the owner');
+    // Durable end state: logToolResultBlock renders only into the display buffer, which the next rebuild drops;
+    // the notice is a real message and stays.
     ctx.session.conversationManager.addNotice('[Test] Stopped before it finished; no result.', { level: 'info' });
     ctx.renderRequest();
     return 'Stopped before it finished; no result.';
-  }
-
-  if (timedOut) {
-    flushDisplay(true);
-    const timeoutSeconds = Math.round(timeoutMs / 1000);
-    ctx.print(`Test run timed out after ${timeoutSeconds}s and was killed. Raise contract.gateTimeoutMs (0 for no limit) or pass a pattern to run fewer tests.`);
-    ctx.session.conversationManager.logToolResultBlock(
-      toolCall,
-      'error',
-      'timed out',
-      durationMs,
-      `timed out after ${timeoutSeconds}s`,
-    );
-    // Durable end state: logToolResultBlock (above) renders straight into the
-    // display-only history buffer and never touches the real message list, so
-    // it does not survive the next full rebuildHistory() (which rebuilds
-    // strictly from conversationManager.getMessageSnapshot()), the very next
-    // dirty render silently wipes it back to how the transcript looked before
-    // /test ran. addNotice persists the same content as a real message
-    // (same durable pattern as /checkpoint rewind's confirm notice in
-    // checkpoint-runtime.ts) so the timeout outcome survives like any other
-    // command's output. The streamed output during the run is allowed to stay
-    // transient, only this final state needs to persist.
-    ctx.session.conversationManager.addNotice(
-      `[Test] Timed out after ${timeoutSeconds}s and was killed.`,
-      { level: 'error' }
-    );
-    ctx.renderRequest();
-    return `Timed out after ${timeoutSeconds}s and was killed; contract.gateTimeoutMs in Settings is the limit (0 for none).`;
   }
 
   flushDisplay(true);

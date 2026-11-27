@@ -98,7 +98,6 @@ export const coreConfigDefaults = {
     decomposition: 'agent',
     maxTurns: 0,
     tokenCeiling: 0,
-    wallTimeoutMs: 0,
     showPlanFirst: false,
   },
   sandbox: {
@@ -654,13 +653,6 @@ export const coreHeadConfigSettings: (ConfigSettingDefinition | ConfigSettingRow
     label: 'Most tokens writing a plan may use (0 for no limit)',
     type: 'number',
     description: 'The most tokens the planning agent may use to write the plan of a piece of work; 0 sets no limit.',
-    ...optionalWorkLimit(),
-  },
-  {
-    key: 'planner.wallTimeoutMs',
-    label: 'Longest writing a plan may take (ms, 0 for no limit)',
-    type: 'number',
-    description: 'The longest the planning agent may take to write the plan of a piece of work, in milliseconds; 0 lets it go on until the plan is written or you stop it.',
     ...optionalWorkLimit(),
   },
   {

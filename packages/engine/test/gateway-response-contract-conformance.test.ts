@@ -187,7 +187,7 @@ describe('profile.* responses conform to the published contract', () => {
     expect(answer.field?.value).toContain('401 Home St');
   });
 
-  test('profile.get: a field with no provenance suffix, and one he never recorded', async () => {
+  test('profile.get: a field with no provenance suffix, and one the owner never recorded', async () => {
     const { catalog } = await profileHarness();
     const handEdited = await invokeAndCheck(
       catalog,

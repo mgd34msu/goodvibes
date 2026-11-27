@@ -3,13 +3,13 @@
  * in its MCP files that the owner did not add), and the one rule both terminal
  * programs apply to a folder with no trust decision: a folder that brings
  * neither is trusted without a question, because trusting it lets nothing run
- * that the permission mode does not already govern. The interactive start
- * (the terminal app's tui-startup.ts) and `run` in both programs apply it the
- * same way and record it the same way, in the workspace trust file with the
+ * that the permission mode does not already govern. The interactive start in
+ * both programs applies it and records it in the workspace trust file with the
  * reason "nothing of its own to run". A folder that brings hooks or tool
- * servers is left undecided: the interactive start asks, and a headless run
- * does not trust it, refusing every call that needs trust at once with a
- * sentence naming the folder, what it brings and how to trust it.
+ * servers is left undecided and the interactive start asks. A headless run
+ * (`run`) settles nothing at its start: as released, the trust question is
+ * asked through its prompt transport at the first call that needs trust,
+ * answered with --answer-permissions or not at all.
  */
 import { existsSync, realpathSync } from 'node:fs';
 import { isAbsolute, join, relative, sep } from 'node:path';
@@ -59,46 +59,6 @@ export function readFolderTrustFacts(openedIn: string, homeDirectory: string, ho
   };
 }
 
-/** What a folder brings of its own, in words: "a hooks file (hooks.json) and tool servers (MCP) weather in .mcp.json". */
-function broughtWords(folder: FolderTrustFacts): string {
-  const parts = [
-    ...(folder.hooksFile !== null ? [`a hooks file (${folder.hooksFile})`] : []),
-    ...(folder.mcpFiles.length > 0
-      ? [`tool ${folder.mcpServers.length === 1 ? 'server' : 'servers'} (MCP) ${folder.mcpServers.length > 0 ? `${folder.mcpServers.join(', ')} ` : ''}in ${folder.mcpFiles.join(', ')}`]
-      : []),
-    ...(folder.setupCommandsFile !== null ? [`worktree setup commands (in ${folder.setupCommandsFile})`] : []),
-  ];
-  return parts.join(' and ');
-}
-
-/** The sentence a headless run refuses a call with in a folder that brings hooks or tool servers of its own. */
-export function headlessUntrustedFolderSentence(folder: FolderTrustFacts): string {
-  return `${folder.shownPath} brings ${broughtWords(folder)} of its own and has no trust decision, so this run does not trust it: `
-    + 'no file is changed and no command runs there; reads still work. To trust it, open it in goodvibes and choose '
-    + '"Trust this workspace", or "Trust this folder" in Permissions and safety, This folder, then run again.';
-}
-
-/**
- * Before a headless run's turn (`run` in both programs, nobody to ask): a
- * folder with no trust decision and nothing of its own is trusted as the
- * interactive start does (trustFolderWithNothingOfItsOwn); one that brings
- * hooks or tool servers of its own is not trusted for this run, and every call
- * that needs trust is refused at once with headlessUntrustedFolderSentence
- * (nothing saved: it stays undecided). Never throws.
- */
-export async function settleHeadlessFolderTrust(
-  manager: Pick<WorkspaceTrustManager, 'load' | 'isDecided' | 'setLevel' | 'refuseForThisRun'> | undefined,
-  folder: () => FolderTrustFacts,
-): Promise<void> {
-  if (!manager) return;
-  if (await trustFolderWithNothingOfItsOwn(manager, folder)) return;
-  try {
-    const facts = folder();
-    if (!manager.isDecided() && facts.hasItsOwn) manager.refuseForThisRun(headlessUntrustedFolderSentence(facts));
-  } catch (error) {
-    logger.info('The headless trust refusal for a folder with files of its own was not set', { error: summarizeError(error) });
-  }
-}
 
 /** A trust decision the card records. */
 export type FolderTrustChoice = 'trusted' | 'restricted';
@@ -167,14 +127,19 @@ export async function settleFolderTrustOnOpen(
   manager: Pick<WorkspaceTrustManager, 'load' | 'isDecided' | 'trustQuestion' | 'setLevel' | 'trustedForNothingToRun' | 'askWhenRepositoryFilesAppear'> | undefined,
   requestTrustDecision: (() => Promise<FolderTrustChoice>) | undefined,
   folder: () => FolderTrustFacts,
+  say?: (line: string) => void,
 ): Promise<void> {
   if (!manager || !requestTrustDecision) return;
   try {
     await manager.load();
+    // As released: the trust card is shown in every mode, on opening and when the folder gains files of its own.
+    void say;
     manager.askWhenRepositoryFilesAppear(requestTrustDecision);
     const facts = folder();
     if (await trustFolderWithNothingOfItsOwn(manager, () => facts)) return;
-    if (!manager.isDecided() || (manager.trustedForNothingToRun() && facts.hasItsOwn)) await manager.trustQuestion(requestTrustDecision).answer;
+    if (!manager.isDecided() || (manager.trustedForNothingToRun() && facts.hasItsOwn)) {
+      await manager.trustQuestion(requestTrustDecision).answer;
+    }
   } catch (error) {
     logger.info('The workspace trust question asked on opening was not answered', { error: summarizeError(error) });
   }

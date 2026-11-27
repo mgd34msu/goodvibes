@@ -25,8 +25,8 @@ import { createHash } from 'node:crypto';
 
 /**
  * Who made a replicated change on the machine it was made on, and how it was decided there (daemon-api setting-act.ts
- * `SettingAct`, the same shape): `press`, the owner's own press; `yes`, his yes to a call put to him (`by` is the caller
- * who asked); `rules`, admitted under his rules for the named caller. Recorded by the originating machine from its own
+ * `SettingAct`, the same shape): `press`, the owner's own press; `yes`, their yes to a call put to them (`by` is the caller
+ * who asked); `rules`, admitted under their rules for the named caller. Recorded by the originating machine from its own
  * dispatch, carried inside the group's authenticated messages, kept and shown by every member. A setting change from a
  * peer that records none is not taken.
  */
@@ -40,6 +40,13 @@ export interface ReplicaAct {
 
 /** The record a change made before acts were kept carries once its machine marks it the owner's at the upgrade. */
 export const CARRIED_ACT: ReplicaAct = Object.freeze({ by: 'owner', owner: true, how: 'carried', name: 'carried from before this record existed' });
+
+/**
+ * The record a change made on a machine while it ran the older release again (released 3.5.0 put back after the
+ * upgrade) carries once that machine is upgraded again: the owner's act made on that machine, sent then (gate-review-6
+ * G14, decided).
+ */
+export const OLDER_RUN_ACT: ReplicaAct = Object.freeze({ by: 'owner', owner: true, how: 'carried', name: 'made on this machine while it ran the older release' });
 
 /** One replicated setting. */
 export interface ConfigReplicaEntry {

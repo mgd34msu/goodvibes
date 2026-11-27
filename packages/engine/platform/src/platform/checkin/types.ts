@@ -36,7 +36,7 @@ export interface CheckinStateSnapshot {
   readonly needsAttention: readonly string[];
   /**
    * How many things wait for the owner (open approvals and questions, contracts
-   * waiting for his decision, failed runs), all of them: the lines above name only
+   * waiting for the owner's decision, failed runs), all of them: the lines above name only
    * the first few of each kind. Absent when the reader cannot see those sources.
    */
   readonly waitingForOwner?: number | undefined;

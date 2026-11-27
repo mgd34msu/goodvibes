@@ -185,6 +185,8 @@ export interface RuntimeServices {
   readonly sessionManager: SessionManager;
   readonly sessionOrchestration: CrossSessionTaskRegistry;
   readonly hookDispatcher: HookDispatcher;
+  /** Fires an event on one project's own hooks, holding its facilities for the firing (project-turn-facilities.ts). */
+  readonly projectHooks?: ((folder: string, event: Parameters<HookDispatcher['fire']>[0]) => ReturnType<HookDispatcher['fire']>) | undefined;
   readonly hookActivityTracker: HookActivityTracker;
   readonly hookWorkbench: HookWorkbench;
   readonly pluginManager: PluginManager;

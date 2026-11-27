@@ -145,7 +145,7 @@ function clearManagedSettingLockLocked(key: ConfigKey, configDir: string): boole
 
 /**
  * Removes the managed lock on `key` from every lock file on this machine that keeps it (readManagedLocks reads them
- * all, so a lock left in one would still hold). The owner's own act: its capability puts anyone else's call to him.
+ * all, so a lock left in one would still hold). The owner's own act: its capability puts anyone else's call to the owner.
  * Answers whether any lock was removed.
  */
 export function clearManagedSettingLockEverywhere(key: ConfigKey, folders: readonly string[]): boolean {

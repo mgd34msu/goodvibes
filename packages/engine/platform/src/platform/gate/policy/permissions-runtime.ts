@@ -75,7 +75,7 @@ export function showRememberedRules(ctx: PermissionsCommandContext): void {
   }
   const records = store.list();
   if (records.length === 0) {
-    ctx.print('No permission rules. Approving an ask with a remember tier stores one here; /permissions add writes one directly.');
+    ctx.print('No permission rules. Approving an ask with a remember tier stores one here; in Permissions and safety, Rules, "add a rule" writes one directly.');
     return;
   }
   if (ctx.openSelection) {
@@ -105,7 +105,7 @@ export function showRememberedRules(ctx: PermissionsCommandContext): void {
       return `  ${record.rule.id}  ${label}  (${detail})`;
     }),
     '',
-    'Revoke one with: /permissions revoke <rule-id>',
+    'To take one away: in Permissions and safety, Rules, choose it and "remove".',
   ].join('\n'));
 }
 
@@ -136,7 +136,7 @@ const ADD_USAGE = [
   '  /permissions add <allow|deny|ask> tool <tool>        every call of a tool, in this project',
 ].join('\n');
 
-/** A rule id for a rule the owner added himself, apart from remembered answers' `user-...` ids. */
+/** A rule id for a rule the owner added in person, apart from remembered answers' `user-...` ids. */
 function ownerRuleId(kind: string, tool: string, now: number): string {
   return `owner-${kind}-${tool.replace(/[^A-Za-z0-9_.-]/g, '')}-${now.toString(36)}-${Math.random().toString(36).slice(2, 8)}`;
 }
@@ -196,8 +196,8 @@ export async function addOwnerRule(ctx: PermissionsCommandContext, args: readonl
   try {
     await store.add(record);
     ctx.print(record.tier === 'never-run'
-      ? `Added rule ${record.rule.id}: ${record.rule.description}. Every tool that can reach a shell is refused a command that runs it, in every permission mode including yolo, in every project. Remove it with /permissions revoke ${record.rule.id}.`
-      : `Added rule ${record.rule.id}: ${record.rule.description} (in ${record.project}). Remove it with /permissions revoke ${record.rule.id}.`);
+      ? `Added rule ${record.rule.id}: ${record.rule.description}. Every tool that can reach a shell is refused a command that runs it, in every permission mode including yolo, in every project. To take it away: in Permissions and safety, Rules, choose it and "remove".`
+      : `Added rule ${record.rule.id}: ${record.rule.description} (in ${record.project}). To take it away: in Permissions and safety, Rules, choose it and "remove".`);
   } catch (error) {
     ctx.print(`Could not add the rule: ${summarizeError(error)}`);
   }
@@ -210,6 +210,6 @@ export function showPermissionSettings(ctx: PermissionsCommandContext): void {
   ctx.print(renderPermissionProvenance(provenance));
   const ruleCount = ctx.ruleStore?.list().length ?? 0;
   ctx.print(ruleCount > 0
-    ? `\n${ruleCount} permission rule${ruleCount === 1 ? '' : 's'} in effect. Use /permissions rules to review or revoke them, /permissions add to add one.`
-    : '\nNo permission rules. Use /permissions add to add one, or /permissions never to refuse a command everywhere (for example: /permissions never git push).');
+    ? `\n${ruleCount} permission rule${ruleCount === 1 ? '' : 's'} in effect: in Permissions and safety, Rules, look at them, "remove" one, or "add a rule".`
+    : '\nNo permission rules. In Permissions and safety, Rules: "add a rule", or "never run a command" to refuse a command everywhere.');
 }

@@ -59,7 +59,7 @@ export interface RequestPrincipal extends AuthenticatedPrincipal {
   /** When a login session ends by time. Absent for credentials without an expiry. */
   readonly expiresAt?: number;
   /**
-   * A device token the owner paired himself through his pairing flow (recorded
+   * A device token the owner paired in person through their pairing flow (recorded
    * on the token when it was minted). Only a `device-token` carries it.
    */
   readonly ownerDevice?: true;

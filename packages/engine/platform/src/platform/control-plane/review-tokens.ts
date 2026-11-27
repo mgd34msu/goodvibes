@@ -10,6 +10,9 @@
  * comes back with the change list, so the caller refuses with
  * `TARGET_CHANGED` naming what moved instead of a bare "token invalid".
  *
+ * The lifetime is the released confirm's own (v3.5.0): a preview shown and
+ * confirmed, not a clock added since.
+ *
  * Held only in the daemon process that will perform the apply: a preview seen
  * is acknowledged here, not in a durable two-phase protocol.
  */

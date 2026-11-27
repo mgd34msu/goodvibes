@@ -15,7 +15,7 @@ import { dispatchNativeConversationTurn } from './native-conversation-ingress.js
 import type { NativeConversationIntakeState } from './native-conversation-intake.js';
 import type { HeadlessSessionRecovery, NativeHeadlessTurnResult } from './native-headless.js';
 import { describeCrashRecovery, type CrashRecoveryReport } from '../session-crash-recovery.js';
-import { holdForOwnerInHeadlessRun, type HeldThroughDaemon } from './headless-held-calls.js';
+import { holdForOwnerInHeadlessRun } from './headless-held-calls.js';
 import { postHeadlessHookRunsToDaemon, type HookRunsSource } from '../places/hook-runs-poster.js';
 import { programNotices } from '../program-notices.js';
 import type { ShellPathService } from '@goodvibes/engine/platform/platform/runtime/shell';
@@ -119,19 +119,17 @@ export async function executeHeadlessTurn(
   const permissionAnswers = answerPermissions
     ? createHeadlessPermissionInput({ input: process.stdin, emit: observer.frame, signal })
     : undefined;
-  // One answerer per question: the script, or (nobody here) the owner in his own list, never both.
+  // One answerer per question: the script, or (nobody here) the owner in their own list, never both.
   ctx.permissionPromptRef.answersHere = true;
-  // The calls this run held for the owner through the daemon, each by the approval it waits as (the result's heldForOwner).
-  const heldThroughDaemon: HeldThroughDaemon[] = [];
   // The script is the run's one answerer for every question its calls raise, a method the daemon would otherwise
   // decide itself when it arrives included: this run's gate decides it, and it is sent saying so.
   if (permissionAnswers) {
     ctx.permissionPromptRef.requestPermission = permissionAnswers.prompt;
     setRunAnswersEveryQuestion(true);
   } else if (ctx.services) {
-    ctx.permissionPromptRef.requestPermission = holdForOwnerInHeadlessRun(ctx.services, (call) => { heldThroughDaemon.push(call); });
+    ctx.permissionPromptRef.requestPermission = holdForOwnerInHeadlessRun(ctx.services);
     // Nobody answers this run: a call the daemon would decide by asking the owner (a natively admitted method) is
-    // decided here and held for him through the daemon, never waited on (permissions/run-answerer.ts).
+    // decided here and held for them through the daemon, never waited on (permissions/run-answerer.ts).
     setRunHoldsForOwner(true);
   }
   signal.addEventListener('abort', abort, { once: true });
@@ -227,8 +225,6 @@ export async function executeHeadlessTurn(
     const held = [
       ...(ctx.permissions?.listHeldForOwner() ?? []).filter((call) => call.heldAt >= startedAt)
         .map((call) => ({ id: call.id, tool: call.toolName, summary: call.summary, reason: call.reason })),
-      // What waits in Waiting for you, named by its approval: the owner's answer there runs it.
-      ...heldThroughDaemon.map((call) => ({ id: call.id, tool: call.tool, summary: call.summary, reason: call.reason })),
     ];
     // Read while the run's composition still owns the policy: whether a decision model was in use, and its failure.
     const decisionModel = decisionModelUse();

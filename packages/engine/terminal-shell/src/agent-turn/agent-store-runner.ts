@@ -19,6 +19,7 @@ import type { ShellPathService } from '@goodvibes/engine/platform/platform/runti
 import type { MemoryAccess } from '@goodvibes/engine/platform/platform/runtime/memory-spine';
 import { noteListChanged, type ChangedList } from '@goodvibes/engine/platform/platform/runtime/emitters';
 import { ToolRegistry, createWebSearchTool } from '@goodvibes/engine/platform/platform/tools';
+import { ToolInputProjectionError } from '@goodvibes/engine/platform/platform/tools/input-projection';
 import type { Tool } from '@goodvibes/engine/platform/platform/types';
 import type { WebSearchService } from '@goodvibes/engine/platform/platform/web-search';
 import type { ProtectedSourceOwner } from '@goodvibes/engine/platform/platform/security';
@@ -123,6 +124,26 @@ function changedLists(id: string): readonly ChangedList[] {
   return lists;
 }
 
+/**
+ * A refusal raised while a call's input was prepared, for the person who asked: the refusing rule's own sentence when
+ * it has one (each names what to change), else what happened in plain words. Nothing ran in either case.
+ */
+function preparationRefusal(error: ToolInputProjectionError): CapabilityRefusal {
+  const code = error.problem === 'invalid' ? 'INVALID_ARGUMENT' : error.problem === 'capacity' || error.problem === 'unavailable' ? 'UNAVAILABLE' : undefined;
+  if (error.detail) return new CapabilityRefusal(`Not done. ${error.detail}`, undefined, code);
+  const words = ((): string => {
+    switch (error.problem) {
+      case 'invalid': return 'what was given could not be prepared for it';
+      case 'capacity': case 'unavailable': return 'the daemon could not prepare it right now';
+      case 'cancelled': return 'it was stopped before it ran';
+      case 'stale': case 'released': case 'binding-changed': return 'a setting or a file it depends on changed while it was prepared, so do it again';
+      case 'unconfigured': return 'it is not set up on this machine';
+      case 'held': return 'it was refused before anything took effect';
+    }
+  })();
+  return new CapabilityRefusal(`Not done: ${words}; nothing was changed.`, undefined, code);
+}
+
 /** The research screening owners, as an Agent turn the daemon hosts has them (hosted-turn.ts): made on first use. */
 function researchOwners(homeDirectory: string): () => { readonly report: ProtectedSourceOwner; readonly shared: ProtectedSourceOwner } {
   const lifetime = new AbortController();
@@ -204,10 +225,18 @@ export function createAgentStoreRunner(deps: AgentStoreRunnerDeps): AgentStoreRu
         ...(deps.ingestUrl ? { ingestUrl: deps.ingestUrl } : {}),
         ...(deps.config ? { scheduleHost: () => resolveAgentConnectedHostConnection(deps.config!, deps.homeDirectory) } : {}),
         async tool(name, args, what) {
-          const result = await toolsFor(shellPaths).executeOwnerConfirmed(`capability-${name}`, name, { ...args }, {
-            goal: `The owner asked for this: ${what}.`,
-            criteria: [`Run ${name} with exactly the values the owner gave.`],
-          });
+          let result: Awaited<ReturnType<ToolRegistry['executeOwnerConfirmed']>>;
+          try {
+            result = await toolsFor(shellPaths).executeOwnerConfirmed(`capability-${name}`, name, { ...args }, {
+              goal: `The owner asked for this: ${what}.`,
+              criteria: [`Run ${name} with exactly the values the owner gave.`],
+            });
+          } catch (error) {
+            // A refusal while the call's input was prepared (a sourced report's screening off, a setting changed under
+            // it) is the call's answer in words, never a fault of the daemon.
+            if (error instanceof ToolInputProjectionError) throw preparationRefusal(error);
+            throw error;
+          }
           if (!result.success) throw new CapabilityRefusal(`Not done: ${(result.error ?? `${name} did not succeed and gave no reason.`).replace(/^Not done:\s*/i, '')}`);
           return result.output?.trim() || `${what}: done.`;
         },

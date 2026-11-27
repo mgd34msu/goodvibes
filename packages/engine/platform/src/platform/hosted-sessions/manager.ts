@@ -618,6 +618,7 @@ export class HostedSessionManager {
         createdAt: at, updatedAt: at, turnCount: 0, messageCount: 0,
         restoredFromDisk: false,
         ...(input.originSurface ? { originSurface: input.originSurface } : {}),
+        ...(input.madeByOwner === true ? { madeByOwner: true as const } : {}),
         contractIds: [],
         permissionMode: runtime.liveTurnControls.getPermissionMode(),
       };
@@ -680,10 +681,12 @@ export class HostedSessionManager {
       // (the loop could not be composed, the engine was disposed) is logged and
       // published here, so the first prompt is never lost without a trace.
       // The create call itself was authenticated at the gateway: an operator's input. It is the owner's own turn only
-      // when the call that asked for it is marked as his (capabilities/builtin/sessions.ts `hosted.new`, from the cause
-      // the daemon recorded: his verified program or his sign-in), as a message he typed into his own attached program
+      // when the call that asked for it is marked as the owner's (capabilities/builtin/sessions.ts `hosted.new`, from the cause
+      // the daemon recorded: their verified program or their sign-in), as a message they typed into their own attached program
       // is; anyone else's stays someone else's input. The turn itself runs with no mark, so nothing after it inherits it.
-      const ownersOwn = markedInputParty()?.party === 'owner';
+      // A session the owner made in person (`madeByOwner`, their sign-in or their verified program at the create route) is
+      // theirs: its first prompt is their own turn, decided under their mode.
+      const ownersOwn = markedInputParty()?.party === 'owner' || live.record.madeByOwner === true;
       void withoutInputMark(() => this.deliver(sessionId, input.initialPrompt!, undefined, { operatorInput: true, ...(ownersOwn ? { ownerTyped: true } : {}) })).catch((error: unknown) => {
         const detail = `the first prompt was not delivered: ${summarizeError(error)}`;
         logger.warn('[hosted-sessions] the initial prompt of a new session was not delivered', { sessionId, error: summarizeError(error) });
@@ -871,7 +874,7 @@ export class HostedSessionManager {
    * `operatorInput` marks input an authenticated operator sent; it starts the
    * session's next untrusted-content turn (session-runtime.ts).
    * `answersContractQuestion` sends it as the answer to that open contract question.
-   * `ownerTyped`: the owner typed it into his own program attached here (session-runtime.ts).
+   * `ownerTyped`: the owner typed it into their own program attached here (session-runtime.ts).
    */
   async deliver(sessionId: string, text: string, correlationId?: string, delivery?: HostedSubmitOptions): Promise<void> {
     const live = this.requireLive(sessionId);

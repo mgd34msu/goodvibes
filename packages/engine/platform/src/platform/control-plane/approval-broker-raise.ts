@@ -139,7 +139,7 @@ function joinApproval(
   });
 }
 
-/** Metadata key naming the channel whose guest's turn raised an ask; the ask is the owner's and is delivered to him. */
+/** Metadata key naming the channel whose guest's turn raised an ask; the ask is the owner's and is delivered to the owner. */
 export const APPROVAL_GUEST_CHANNEL_METADATA = 'guestChannel';
 
 /** The channel whose guest's turn raised an ask, or undefined for any other ask. */

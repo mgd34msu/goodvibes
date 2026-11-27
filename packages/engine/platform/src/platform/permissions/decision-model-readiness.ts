@@ -31,7 +31,7 @@ export interface DecisionModelReadinessOptions {
   /**
    * The mode in force was chosen by the owner for this session (Shift+Tab, a
    * hosted session's mode, a channel profile) rather than read from settings.
-   * Such a choice counts as his, the same as one saved in settings.
+   * Such a choice counts as the owner's, the same as one saved in settings.
    */
   readonly chosen?: boolean | undefined;
   /** The environment requests read TYPESAFE_* from; the process environment when absent, as the gate's own readiness reads it. */

@@ -17,7 +17,7 @@ export { COMMAND_LINE_CLIENT_KIND, commandLineHoldReason } from './command-line-
 export { callerPathOf, fileWorkRefusal, pathInputsRefusal, readCallerJson, runHoldingPaths, unreadableFile, type CallerPathOptions } from './path-inputs.js';
 export { CHILD_HELD_FD, copyForProgram, heldForChild, heldPath, holdCallerPath, isHeldPath, readHeldFile, readProjectFile, shownPath, writeHeldFile, writeHeldFiles, type HeldWrite, type ProjectFileReading } from './held-paths.js';
 export { contentAt, MAX_CARRIED_BYTES, PLACE_PATH_CAPABILITIES, packFolder, placeContent, receiveCarried, sameContent, unpackFolder, type CarriedContent, type CarriedRun, type FolderArchive,
-  CARRIED_UPLOAD_PURPOSE, CARRIED_UPLOAD_RETENTION_MS, uploadCarriedParts, type CarriedParts } from './carried-files.js';
+  CARRIED_UPLOAD_PURPOSE, CARRIED_UPLOADS_KEPT, uploadCarriedParts, type CarriedParts } from './carried-files.js';
 export { capabilityOutcomeText, choiceLabelInSentence, fillSentence, fixedChoiceLabels, hiddenSecret, lastsWords, shownValues } from './outcome.js';
 export { methodBodyOf, operatorInputFromValues, type CapabilityMethod } from './operator-input.js';
 export {

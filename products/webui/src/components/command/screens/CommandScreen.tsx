@@ -1,8 +1,7 @@
 /**
  * The frame of a screen drawn from one slash command's description: its title
- * and summary, the main action, the rows the screen shows, and under them,
- * greyed, the command's actions only a terminal app can do, each with the
- * reason in a sentence. A screen reads its rows with `useCommandRead` and
+ * and summary, the main action, and the rows the screen shows. The command's
+ * actions only a terminal app can do are not shown here. A screen reads its rows with `useCommandRead` and
  * reads again after any of its sheets ran.
  */
 import { createContext, useContext, type ReactNode } from 'react';
@@ -11,7 +10,6 @@ import { COMMAND_ACTIONS } from '../../../lib/generated/command-actions';
 import { invokeMethod } from '../../../lib/goodvibes';
 import { formatError } from '../../../lib/errors';
 import { Button } from '../../ui/Button';
-import { terminalOnlyActions } from '../ActionSheet';
 
 /** False inside a panel whose own header already names the screen. */
 export const CommandScreenTitleShown = createContext(true);
@@ -48,7 +46,6 @@ export function CommandScreen({ command, title, summary, actions, testId, childr
   readonly children: ReactNode;
 }) {
   const described = COMMAND_ACTIONS.commands.find((entry) => entry.name === command);
-  const terminal = terminalOnlyActions(command);
   const titled = useContext(CommandScreenTitleShown);
   return (
     <section className="gv-command-screen" data-testid={testId} aria-label={title ?? described?.title ?? command}>
@@ -60,16 +57,6 @@ export function CommandScreen({ command, title, summary, actions, testId, childr
         {actions ? <div className="gv-command-screen__actions">{actions}</div> : null}
       </header>
       {children}
-      {terminal.length > 0 ? (
-        <details className="gv-command-screen__terminal">
-          <summary>Done from a terminal app ({terminal.length})</summary>
-          <ul>
-            {terminal.map((entry) => (
-              <li key={entry.label}><span className="gv-command-screen__terminal-label">{entry.label}</span> {entry.reason}</li>
-            ))}
-          </ul>
-        </details>
-      ) : null}
     </section>
   );
 }

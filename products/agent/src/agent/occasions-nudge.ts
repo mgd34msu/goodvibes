@@ -1,5 +1,5 @@
 /**
- * occasions-nudge.ts, which outstanding occasions have not yet been put to him
+ * occasions-nudge.ts, which outstanding occasions have not yet been put to the owner
  * in this session, and the exact words to say.
  *
  * Pure by construction: it is handed one `occasions.pending` answer and what has
@@ -27,8 +27,8 @@
  * "Do you want to sort something for it?" only for a batch containing a
  * gift-giving occasion (`composeNudge`'s `answerable`), and a remember-only batch
  * is a statement. Offering an answer to a statement invites an answer that means
- * nothing, and dropping the ask from a question leaves him a notification he
- * cannot act on. Neither happens if the message is not touched.
+ * nothing, and dropping the ask from a question leaves the owner a notification
+ * they cannot act on. Neither happens if the message is not touched.
  *
  * ## What "already raised" is, and what it is not
  *
@@ -66,14 +66,14 @@ export interface OccasionsRaise {
   readonly text: string;
   /** True when a yes/no/later answer is invited. From the daemon, never inferred. */
   readonly answerable: boolean;
-  /** The occasion this concerns, for the tool call his answer turns into. */
+  /** The occasion this concerns, for the tool call the owner's answer turns into. */
   readonly occasionId: string;
   /** Set for an interview raise, so the answer can be recorded against the step. */
   readonly interviewId?: string;
   readonly stepId?: string;
 }
 
-/** What has already been put to him, by stream. Bounded by the occasions declared. */
+/** What has already been put to the owner, by stream. Bounded by the occasions declared. */
 export type OccasionsRaiseLedger = ReadonlyMap<string, string>;
 
 export interface OccasionsRaiseDecision {
@@ -92,8 +92,8 @@ const EMPTY_DECISION: OccasionsRaiseDecision = { raises: [], ledger: new Map() }
  * Everything outstanding that has not already been said, in the order to say it.
  *
  * Order: the batched nudge first, then conflicts, then interviews. A conflict is
- * a fact about the record he can fix in one sentence, and an interview is a
- * thread he is already inside, putting the interview question before the nudge
+ * a fact about the record the owner can fix in one sentence, and an interview is a
+ * thread they are already inside, putting the interview question before the nudge
  * that opened it would read backwards.
  */
 export function decideOccasionsRaises(
@@ -115,7 +115,7 @@ export function decideOccasionsRaises(
       answerable: nudge.answerable,
       // A batch can name several occasions. The first subject is the one an
       // unqualified "yes" is about; the model has the whole batch in the message
-      // and asks him which when there is more than one.
+      // and asks the owner which when there is more than one.
       occasionId: nudge.subjects[0]?.occasionId ?? '',
     });
   }
@@ -130,7 +130,7 @@ export function decideOccasionsRaises(
       // and within one session saying it twice is repetition.
       token: conflict.occasionId,
       text: conflict.message,
-      // Two dates are not a yes/no question. He answers by saying which is right.
+      // Two dates are not a yes/no question. The owner answers by saying which is right.
       answerable: false,
       occasionId: conflict.occasionId,
     });
@@ -145,8 +145,8 @@ export function decideOccasionsRaises(
       stream: `interview:${interview.interviewId}`,
       // The STEP id, not the interview id: answering one question and being
       // handed the next has to read as progress, while the same unanswered
-      // question is the thread he already walked away from. That is what makes
-      // this resume at the question he did not answer rather than at the start.
+      // question is the thread the owner already walked away from. That is what makes
+      // this resume at the question they did not answer rather than at the start.
       token: step.id,
       text: step.prompt,
       answerable: false,
@@ -165,8 +165,8 @@ export function decideOccasionsRaises(
     if (ledger.get(candidate.stream) === candidate.token) continue;
     raises.push(candidate);
   }
-  // `next` holds only the streams this answer carried, so an occasion he has
-  // answered, or one he removed, leaves the ledger on the next read.
+  // `next` holds only the streams this answer carried, so an occasion the owner has
+  // answered, or one they removed, leaves the ledger on the next read.
   return { raises, ledger: next };
 }
 

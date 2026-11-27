@@ -170,14 +170,14 @@ export async function postToPublicWebhook(
   const hostname = new URL(validation.url).hostname;
   let addresses;
   try {
-    // An owner-configured target may reach the hosts he approved; an address an outside party supplied never does.
+    // An owner-configured target may reach the hosts the owner approved; an address an outside party supplied never does.
     ({ addresses } = await checkDestination(validation.url, 'owner-webhook', {
       approvedHosts: approved ?? [], resolver: options.resolveHost, ...(lifetime.signal ? { signal: lifetime.signal } : {}),
     }));
   } catch (error) {
     if (!(error instanceof DestinationRefusedError)) throw error;
     emitSsrfDeny('[redacted-host]', '[redacted-url]', 'Resolved address is not allowed');
-    // An owner-configured target on his own network gets the setting that would admit it;
+    // An owner-configured target on the owner's own network gets the setting that would admit it;
     // a range no approval admits (cloud metadata, reserved, multicast) is refused as it is.
     if (approved !== undefined && APPROVED_PRIVATE_RANGES.has(error.range as ResolvedAddressRange)) {
       throw new PrivateDeliveryHostRefusedError(`${error.message}. ${approvalHint(hostname)}`, { cause: error });

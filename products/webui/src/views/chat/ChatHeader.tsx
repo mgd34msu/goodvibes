@@ -11,7 +11,7 @@ import type { KeyboardEvent } from 'react';
 import { Button } from '../../components/ui/Button';
 import { IconButton } from '../../components/ui/IconButton';
 import { Select } from '../../components/ui/Select';
-import { NO_PROJECT, chooseNoProjectForNewChat, projectName, useNewChatHasNoProject, type PlaceProjects } from '../../lib/place-project';
+import { NO_PROJECT, chooseNoProjectForNewChat, projectChoiceLabel, projectName, useNewChatHasNoProject, type PlaceProjects } from '../../lib/place-project';
 
 export interface ChatTitleProps {
   activeSessionId: string;
@@ -103,7 +103,7 @@ export function ChatProjectLine({ chatProject, started, projects }: ChatProjectL
           aria-label={started ? 'Project for a new chat' : 'Project for this chat'}
           value={noneForNew ? NO_PROJECT : projects.project ?? NO_PROJECT}
           onChange={choose}
-          options={[...projects.projects.map((project) => ({ value: project, label: projectName(project) })), { value: NO_PROJECT, label: NO_PROJECT_LABEL }]}
+          options={[...projects.projects.map((project) => ({ value: project, label: projectChoiceLabel(projects, project) })), { value: NO_PROJECT, label: NO_PROJECT_LABEL }]}
         />
       </span>
     </span>

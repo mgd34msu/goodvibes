@@ -32,11 +32,12 @@ import { parseCompletionReport, type CompletionReport } from '../agents/completi
 import { verifyUnitClaims } from '../contract/claims.js';
 import { contractUnitSpawn } from './contract-binding.js';
 import { runContractGates } from '../contract/gates.js';
-import { getContractTransportRetryDelayMs, getContractTransportRetryLimit } from '../contract/config.js';
+import { getContractTransportRetryLimit } from '../contract/config.js';
 import { readFailure } from '@goodvibes/engine/errors';
 import { logger } from '../utils/logger.js';
 import { summarizeError } from '../utils/error-display.js';
 import { FenceError, FenceIssuer, type Fence } from '../utils/owner-fence.js';
+import { heldGitLock, waitForGitLock } from './git-lock-wait.js';
 import type { CancellationRegistry } from './cancellation.js';
 import { excludeUntouchedLaunchResidue, readDirtyTreePaths, type DirtyLaunchSnapshot } from './dirty-guard.js';
 import { mergeWorkItemUsage } from './types.js';
@@ -169,12 +170,6 @@ async function isTransportFailure(error: string): Promise<boolean> {
   return reading.transientNetwork || reading.beforeResponse;
 }
 
-function sleep(ms: number): Promise<void> {
-  return new Promise((resolve) => {
-    const timer = setTimeout(resolve, ms);
-    timer.unref?.();
-  });
-}
 
 type AgentOutcome = { status: 'completed' | 'failed' | 'cancelled'; record: AgentRecord | null };
 
@@ -343,33 +338,42 @@ interface CommitPhaseWorkResult {
   readonly commit: PhaseCommitOutcome;
 }
 
-/** Git's own words when another git process holds the index or a ref: `Unable to create '<path>.lock': File exists.` */
-const GIT_LOCK_HELD = /Unable to create '[^'\n]*\.lock': File exists/;
-/** Waits before each retry of a commit refused by a held git lock; a lock is held for the length of one git command. */
-const LOCK_RETRY_DELAYS_MS = [250, 1_000, 3_000] as const;
+/** A commit that met a stale git lock: the lock was removed (or could not be), said in words. */
+class StaleGitLockError extends Error {
+  constructor(said: string) { super(said); this.name = 'StaleGitLockError'; }
+}
 
 /**
- * Runs a commit, trying again a bounded number of times when git reports that
- * another process holds its lock (decided from git's message, no model). Any
- * other error, or the lock still held after the last wait, is thrown. The
- * phase fence is checked right before each attempt: a phase killed or
- * superseded meanwhile commits nothing (FenceError).
+ * Runs a commit; when git reports that another process holds its lock (decided from git's message, no model), waits
+ * for that lock by its events (git-lock-wait.ts: the lock file going away when its holder's command ends) and runs it
+ * again. A stale lock (its holder gone) is removed and said (`said`), and the commit runs again. It fails only when the
+ * commit itself fails, or a stale lock could not be removed or is stale again at once. The phase fence is checked right
+ * before each attempt: a phase killed or superseded meanwhile commits nothing (FenceError), and its stop ends a wait.
  */
-async function commitWithLockRetry<T>(fence: Fence, run: () => Promise<T>): Promise<T> {
-  const signal = fence.signal;
-  for (let attempt = 0; ; attempt++) {
+async function commitWithLockWait<T>(fence: Fence, run: () => Promise<T>, said: string[]): Promise<T> {
+  let stale = 0;
+  for (;;) {
     fence.check();
     try { return await run(); }
     catch (error) {
-      const delay = LOCK_RETRY_DELAYS_MS[attempt];
-      if (delay === undefined || signal.aborted || !GIT_LOCK_HELD.test(summarizeError(error))) throw error;
-      await new Promise<void>((resolve) => {
-        const timer = setTimeout(done, delay);
-        function done(): void { clearTimeout(timer); signal.removeEventListener('abort', done); resolve(); }
-        signal.addEventListener('abort', done, { once: true });
-      });
+      const lock = heldGitLock(summarizeError(error));
+      if (lock === undefined || fence.signal.aborted) throw error;
+      const waited = await waitForGitLock(lock, fence.signal);
+      if (waited.kind === 'stale') {
+        said.push(waited.said);
+        stale += 1;
+        // One made again as soon as it was removed is not left behind: something keeps making it; that is not waited on.
+        if (!waited.removed || stale > 1) throw new StaleGitLockError(waited.said);
+      }
+      if (waited.kind === 'stopped') fence.check();
     }
   }
+}
+
+/** A committed outcome's note: ignored paths skipped, and a stale lock met on the way. */
+function commitNote(ignoredNote: string | undefined, said: readonly string[]): string | undefined {
+  const parts = [...(ignoredNote ? [ignoredNote] : []), ...said];
+  return parts.length > 0 ? parts.join('; ') : undefined;
 }
 
 /** A commit the phase fence refused before git ran: nothing was committed. */
@@ -384,18 +388,14 @@ export function phaseFence(item: WorkItem, phase: Phase, signal: AbortSignal | u
 
 /** A commit that still failed: the item keeps its pass and carries this as a warning. */
 function failedCommit(error: unknown): PhaseCommitOutcome {
-  const message = summarizeError(error);
-  const lock = GIT_LOCK_HELD.test(message);
-  return { status: 'failed', reason: lock
-    ? `another git process held the repository lock through ${LOCK_RETRY_DELAYS_MS.length} retries (${message})`
-    : message };
+  return { status: 'failed', reason: error instanceof StaleGitLockError ? error.message : summarizeError(error) };
 }
 
 /**
  * Runs the POST-gate scoped commit for a passed phase and reports its
  * outcome HONESTLY rather than swallowing failures. The gate has already
  * decided the phase passed; this step only records the changes. A held git
- * lock is retried a bounded number of times; a commit that still fails leaves
+ * lock is waited for until it goes away (a stale one is removed and said); a commit that fails leaves
  * the item passed with a warning (the changes stay in the working tree, and
  * `retryItemCommit` runs the commit again). Never a silent no-op that lets the
  * fleet imply a commit happened when it did not.
@@ -424,14 +424,16 @@ export async function commitPhaseWork(
   if (deps.itemWorktree) {
     try {
       const itemWorktree = deps.itemWorktree;
-      const result = await commitWithLockRetry(fence, () => itemWorktree.commit(`orchestration: ${item.title}, ${phase.kind} phase`, paths));
+      const said: string[] = [];
+      const result = await commitWithLockWait(fence, () => itemWorktree.commit(`orchestration: ${item.title}, ${phase.kind} phase`, paths), said);
       const ignoredNote = result.skippedIgnored.length > 0
         ? `${result.skippedIgnored.length} ignored path${result.skippedIgnored.length === 1 ? '' : 's'} skipped`
         : undefined;
       if (result.hash === null) {
         return { commit: { status: 'skipped', reason: ignoredNote ? `nothing to stage (${ignoredNote})` : 'nothing to stage' } };
       }
-      return { commit: { status: 'committed', hash: result.hash, ...(ignoredNote ? { reason: ignoredNote } : {}) } };
+      const note = commitNote(ignoredNote, said);
+      return { commit: { status: 'committed', hash: result.hash, ...(note ? { reason: note } : {}) } };
     } catch (error) {
       return { commit: error instanceof FenceError ? fencedCommit(error) : failedCommit(error) };
     }
@@ -472,7 +474,8 @@ export async function commitPhaseWork(
   }
 
   try {
-    const result = await commitWithLockRetry(fence, () => worktree.commitWorkingTree(`orchestration: ${item.title}, ${phase.kind} phase`, paths));
+    const said: string[] = [];
+    const result = await commitWithLockWait(fence, () => worktree.commitWorkingTree(`orchestration: ${item.title}, ${phase.kind} phase`, paths), said);
     const ignoredNote = result.skippedIgnored.length > 0
       ? `${result.skippedIgnored.length} ignored path${result.skippedIgnored.length === 1 ? '' : 's'} skipped`
       : undefined;
@@ -480,9 +483,10 @@ export async function commitPhaseWork(
       // A null hash is "nothing was staged", an honest skip, not a landed commit.
       return { exclusion, commit: { status: 'skipped', reason: ignoredNote ? `nothing to stage (${ignoredNote})` : 'nothing to stage' } };
     }
+    const note = commitNote(ignoredNote, said);
     return {
       exclusion,
-      commit: { status: 'committed', hash: result.hash, ...(ignoredNote ? { reason: ignoredNote } : {}) },
+      commit: { status: 'committed', hash: result.hash, ...(note ? { reason: note } : {}) },
     };
   } catch (error) {
     return { exclusion, commit: error instanceof FenceError ? fencedCommit(error) : failedCommit(error) };
@@ -655,11 +659,11 @@ async function runPhaseWithSignal(
   }
 
   if (outcome.status === 'failed') {
-    // A contract unit's failures are the runner's to read and retry.
+    // A contract unit's failure is the contract runner's: the step fails, and what comes next is its question's.
     const retryLimit = unitSpawn ? 0 : getContractTransportRetryLimit(deps.configManager);
     if (item.transportRetryCount < retryLimit && await isTransportFailure(outcome.record?.error ?? '')) {
       item.transportRetryCount += 1;
-      await sleep(getContractTransportRetryDelayMs(deps.configManager));
+      // Run again at once, bounded by the retry limit: Work keeps no clock of its own.
       // The failed attempt spent tokens too; the caller folds only the returned usage into the item.
       const retried = await runPhase(workstream, item, phase, priorReports, deps);
       return { ...retried, result: { ...retried.result, usage: mergeUsage(usage, retried.result.usage) } };

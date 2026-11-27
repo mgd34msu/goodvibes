@@ -168,7 +168,7 @@ export class OwnerQuestionCard {
     try {
       open = this.#deps.inbox.listNow({ status: 'open', kinds: ['question'], sessionId });
     } catch {
-      return; // an unreadable store shows no card; /questions reports why
+      return; // an unreadable store shows no card; Waiting for you says why
     }
     const next = [...open].filter((item) => askedHere(item, sessionId) && !this.#later.has(item.id)).sort((a, b) => a.createdAt - b.createdAt)[0];
     if (next) this.#show(next);

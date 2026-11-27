@@ -310,30 +310,30 @@ root work, group agents into cohorts, send messages, wait for completion,
 inspect budgets and plans, and inspect contracts.
 
 - **Who may start agents.** What the owner said in the conversation decides,
-  not only his latest message: an instruction to use agents stands until a
+  not only their latest message: an instruction to use agents stands until a
   later message about agents changes it. Plain words are read without any
   model request: when the owner asked for agents (fan out, a set of agents,
   use or assign agents, delegate) and did not later forbid or limit them, the
-  agents start; when he forbade them in plain words (do not use agents, do it
-  yourself), the call is refused with his words quoted in full and what would
-  be accepted. Only when his words do not settle it (he said nothing about
-  agents, a message both asks and restricts, or the call starts more agents
-  than a number he named) is the decision model asked, once per state of the
+  agents start; when the owner forbade them in plain words (do not use agents,
+  do it yourself), the call is refused with the owner's words quoted in full
+  and what would be accepted. Only when the owner's words do not settle it
+  (they said nothing about agents, a message both asks and restricts, or the
+  call starts more agents than a number they named) is the decision model asked, once per state of the
   conversation; its answer is "go" or the one thing to change. When the
   decision model cannot answer, the permission mode decides: yolo and
   just-vibes start the agents; ask-me and jev-decides put the agents and their
-  tasks to the owner in the ordinary approval prompt, and his answer stands
+  tasks to the owner in the ordinary approval prompt, and their answer stands
   for the rest of the conversation. A call identical to one refused earlier in
   the same turn is not sent again: the model is given the refusal again in
   full and the owner sees one `[Blocked]` line.
 - **`spawn` and `batch-spawn`** start a contract through the contract runner
   unless `outsideContract` is set. The contract's ask is the work as the owner
-  asked for it (his latest message that asked for agents, else the first thing
-  he asked in the conversation), followed by the planned tasks; the spawned
+  asked for it (their latest message that asked for agents, else the first
+  thing they asked in the conversation), followed by the planned tasks; the spawned
   tasks become the contract's proposed units, which the planner weighs when it
   writes the plan. A plan the planner returns unchanged after it was sent back
   is not checked again, and when the decision model cannot check a plan the
-  plan goes ahead unchecked (unless "If Jev can't answer" is Refuse the action). The result
+  plan goes ahead unchecked (unless Decision Model Only is chosen). The result
   JSON carries `contractStarted: true`, the contract id and the owner agent id.
   A contract's planner chooses each unit's tools and write scope, so a call
   that sets `tools`, `restrictTools`, `writeScope` or `executionIntent`

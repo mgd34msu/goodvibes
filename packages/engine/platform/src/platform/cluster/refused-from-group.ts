@@ -1,7 +1,7 @@
 /**
  * refused-from-group.ts, what this machine refused from another machine of its group because it claimed the owner's
- * identity without his own recorded act (gate-review-6 G2): a new password for the owner's account, or a device marked
- * as his own device, written on another machine where he did not make it. Kept in memory for this run (the newest
+ * identity without the owner's own recorded act (gate-review-6 G2): a new password for the owner's account, or a device marked
+ * as the owner's own device, written on another machine where the owner did not make it. Kept in memory for this run (the newest
  * twenty, one line per refused version), logged as it happens, and shown by `cluster.status` and the Machine group tab.
  * Never a value, a hash or a token: what was refused, from which machine's record, and when.
  */

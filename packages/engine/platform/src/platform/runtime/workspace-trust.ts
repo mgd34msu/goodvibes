@@ -74,12 +74,13 @@ export interface TrustGateOptions {
  * - Undecided workspace: the first non-read request raises the workspace's one
  *   trust question (owned by the manager, so every gate over the same workspace
  *   shares it), and, if the answer is 'trusted', the ORIGINAL request is
- *   forwarded to `ask` so the very thing the user just approved happens.
+ *   forwarded to `ask` so the very thing the user just approved happens (as
+ *   released: the trust card approves no call; each call follows its mode).
  *   Requests that arrive while the question is open wait on the same question
  *   (bounded by `options.waitMs` when set) rather than opening a second one.
  */
 export function trustGatedAsk(
-  manager: Pick<WorkspaceTrustManager, 'isCategoryAllowed' | 'isDecided' | 'trustQuestion'> & Partial<Pick<WorkspaceTrustManager, 'refusalForThisRun'>> & { readonly workspaceRoot?: string },
+  manager: Pick<WorkspaceTrustManager, 'isCategoryAllowed' | 'isDecided' | 'trustQuestion'> & { readonly workspaceRoot?: string },
   ask: PermissionRequestHandler,
   requestTrustDecision: () => Promise<WorkspaceTrustLevel>,
   options: TrustGateOptions = {},
@@ -90,9 +91,6 @@ export function trustGatedAsk(
     // A call on what the daemon holds (a daemon capability) works in no project folder: the folder neither refuses nor asks.
     if (request.outsideFolder === true || manager.isCategoryAllowed(request.category)) return ask(request, execution);
     if (manager.isDecided()) return { approved: false };
-    // A headless run in a folder that brings hooks or tool servers of its own: refused at once, no question.
-    const refusal = manager.refusalForThisRun?.() ?? null;
-    if (refusal !== null) return { approved: false, reason: refusal };
     const question = manager.trustQuestion(requestTrustDecision);
     const where = manager.workspaceRoot ? ` for ${manager.workspaceRoot}` : '';
     const unanswered = {
@@ -166,7 +164,7 @@ const RESTRICTED_FOR_MODEL = 'This folder is restricted: no file can be changed 
 
 /**
  * What a repository brings with it (its hooks file, its MCP server files)
- * waits on the owner's trust of the workspace: until he trusts it, nothing in
+ * waits on the owner's trust of the workspace: until they trust it, nothing in
  * those files is loaded or started. An undecided workspace is not trusted.
  * Every product reads the same decision (the user's workspace register).
  */
@@ -306,7 +304,7 @@ export async function repositoryTrustNotice(input: {
 /**
  * True when `path` is a file the repository in `trust.workspaceRoot` could have
  * brought, so it waits on the owner's trust. A workspace that is the owner's
- * home directory holds no repository: files there are his own.
+ * home directory holds no repository: files there are their own.
  */
 export function heldForRepositoryTrust(trust: Pick<RepositoryTrust, 'workspaceRoot' | 'isTrusted' | 'coversRepositoryFiles'>, path: string, homeDirectory: string): boolean {
   if (coversRepositoryFiles(trust)) return false;
@@ -613,9 +611,6 @@ export class WorkspaceTrustManager {
       if (this.isDecided() && !this.isCategoryAllowed(category)) {
         throw new WorkspaceRestrictedError(RESTRICTED_FOR_MODEL, 'Not run: this folder is restricted ("Trust this folder" in Permissions and safety, This folder, trusts it).');
       }
-      // A headless run in an undecided folder that brings hooks or tool servers of its own: not trusted here.
-      const refusal = this.runRefusal;
-      if (refusal !== null && !this.isDecided() && !this.isCategoryAllowed(category)) throw new WorkspaceRestrictedError(refusal, `Not run: ${refusal}`);
     };
     assertCurrent();
     return assertCurrent;
@@ -623,47 +618,6 @@ export class WorkspaceTrustManager {
 
   isDecided(): boolean {
     return this.level !== null;
-  }
-
-  /** Set by refuseForThisRun: the sentence every call that needs trust is refused with at once, or null. */
-  private runRefusal: string | null = null;
-
-  /**
-   * A run with nobody to ask (`run`) in a folder with no trust decision that
-   * brings hooks or tool servers of its own: the folder is not trusted for this
-   * run, so every call that needs trust (a write, a command, delegation) is
-   * refused at once with `sentence`, whoever would have decided it, and no trust
-   * question is raised. Reads keep working. Nothing is saved: the folder stays
-   * undecided, and a decision made later (here or in another program) wins.
-   */
-  refuseForThisRun(sentence: string): void {
-    this.runRefusal = sentence;
-  }
-
-  /** The sentence a call that needs trust is refused with in this run, while the folder is undecided; null otherwise. */
-  refusalForThisRun(): string | null {
-    return this.runRefusal !== null && !this.isDecided() ? this.runRefusal : null;
-  }
-
-  /**
-   * The run refusal alone, as the permission gate's autonomous constraint, for
-   * a product whose own actions pass no workspace trust gate (the Agent): in a
-   * headless run in a folder that brings hooks or tool servers of its own, a
-   * call that needs trust is refused at once with refuseForThisRun's sentence;
-   * otherwise nothing changes for it.
-   */
-  runRefusalConstraint(): Pick<WorkspaceTrustManager, 'prepareAutonomousConstraint'> {
-    return {
-      prepareAutonomousConstraint: async (category: PermissionCategory, signal?: AbortSignal) => {
-        const check = (): void => {
-          assertPermissionActive(signal);
-          const refusal = this.refusalForThisRun();
-          if (refusal !== null && !this.isCategoryAllowed(category)) throw new WorkspaceRestrictedError(refusal, `Not run: ${refusal}`);
-        };
-        check();
-        return check;
-      },
-    };
   }
 
   /** Why the saved decision could not be read, or null when it was read or never existed. */

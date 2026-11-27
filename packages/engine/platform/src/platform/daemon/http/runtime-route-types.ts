@@ -45,6 +45,11 @@ export interface DaemonRuntimeRouteContext extends Omit<
   readonly parseOptionalJsonBody: (req: Request) => Promise<JsonBody | null | Response>;
   readonly recordApiResponse: (req: Request, path: string, response: Response) => Response;
   readonly requireAdmin: (req: Request) => Response | null;
+  /**
+   * Whose request this is, as the work it starts carries it (security/turn-input-party.ts): the owner's own press is theirs,
+   * any other caller's is someone else's, as `capabilities.run` marks what it runs. Absent: nothing is marked.
+   */
+  readonly requestParty?: ((req: Request) => import('../../security/turn-input-party.js').TurnInputParty) | undefined;
   readonly agentManager: {
     getStatus(agentId: string): AgentRecordLike | null;
     cancel(agentId: string): void;

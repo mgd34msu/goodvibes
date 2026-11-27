@@ -314,7 +314,7 @@ export async function dispatchMcpRoutes(req: Request, context: McpRouteContext):
     const scope = parseScope(body.scope);
     let result: Awaited<ReturnType<McpRouteContext['mcpRegistry']['upsertServerConfig']>>;
     try {
-      // A person's form (the method refuses a model's call): the server is his request, not something the folder brought.
+      // A person's form (the method refuses a model's call): the server is that person's request, not something the folder brought.
       result = await context.mcpRegistry.upsertServerConfig(context.roots, scope, server, { byOwner: true });
     } catch (error) {
       // A name the config refuses, exempt tools aimed at the project file, a file that cannot be written: nothing was written.

@@ -182,7 +182,7 @@ function briefAssignment(input: AgentInput) {
 
 /**
  * The ask of a contract this call starts: the work as the owner asked for it
- * (stamped by the host from his standing request, never only his latest
+ * (stamped by the host from the owner's standing request, never only their latest
  * message), then the units planned for it. Its first line names the contract.
  */
 function contractAsk(input: AgentInput, units: readonly ProposedUnit[]): string {
@@ -262,19 +262,6 @@ export interface AgentToolConfig {
    * here, and a delegation the gate admitted starts.
    */
   readonly delegationAsk?: DelegationOwnerAsk | undefined;
-}
-
-/** Longest one wait call blocks when no silence limit applies. */
-const MAX_WAIT_MS = 30 * 60_000;
-
-/**
- * The longest one wait may block: the silence after which a running unit agent
- * is restarted (`contract.heartbeatTimeoutMs`), so a waiting worker is never
- * taken for a hung one; 30 minutes when that limit is off.
- */
-function waitLimitMs(configManager: Pick<ConfigManager, 'get'>): number {
-  const heartbeat = configManager.get('contract.heartbeatTimeoutMs');
-  return typeof heartbeat === 'number' && Number.isFinite(heartbeat) && heartbeat > 0 ? Math.min(heartbeat, MAX_WAIT_MS) : MAX_WAIT_MS;
 }
 
 /** True when `work` settles within `ms`, false at the deadline; rejects with the abort reason when `signal` aborts. */
@@ -825,9 +812,10 @@ export function createAgentTool(config: AgentToolConfig): Tool {
           });
         }
 
+        // The wait the caller asked for, whole: no product cap shortens it (the agent's end, or the turn being stopped,
+        // ends it first).
         const requestedMs = typeof input.timeoutMs === 'number' && Number.isFinite(input.timeoutMs) ? Math.max(0, input.timeoutMs) : 0;
-        const limitMs = waitLimitMs(config.configManager);
-        const timeoutMs = Math.min(requestedMs, limitMs);
+        const timeoutMs = requestedMs;
         const startedAt = Date.now();
         const joined = timeoutMs > 0 ? await awaitWithin(manager.join(input.agentId), timeoutMs, signal) : false;
         const waitedMs = Date.now() - startedAt;
@@ -841,7 +829,6 @@ export function createAgentTool(config: AgentToolConfig): Tool {
         const ended = terminalStatuses.has(finalStatus);
         const finalFailure = await childFailureFor(manager, finalRecord, { signal, assertCurrent });
         assertCurrent();
-        const reduced = requestedMs > limitMs;
         return publish({
           success: true,
           output: JSON.stringify({
@@ -849,7 +836,6 @@ export function createAgentTool(config: AgentToolConfig): Tool {
             status: finalStatus,
             timedOut: !ended && !joined,
             waitedMs,
-            ...(reduced ? { requestedMs, limitMs, reason: `A wait is capped at ${limitMs} ms, the time a turn may stay silent (contract.heartbeatTimeoutMs); the agent may still be running.` } : {}),
             ...(ended ? {} : joined
               ? { hint: 'No run of this agent is executing in this process now; it will not end by itself. Use mode=message to wake it or mode=cancel to stop it.' }
               : { hint: 'Agent still running. Call mode=wait again with timeoutMs to keep waiting.' }),

@@ -201,10 +201,10 @@ const COMMAND_HELP: Record<string, CommandHelp> = {
     examples: ['auth', 'auth add-user admin --password-stdin', 'auth rotate-password admin --password-stdin', 'auth clear-bootstrap'],
   },
   host: {
-    usage: ['host pair [--url <exact-origin>] [--name <device-name>] [--bootstrap-shared] [--apply]', 'host unpair [--url <exact-origin>]'],
-    line: 'Review explicit TUI host pairing (--bootstrap-shared; --apply), or forget it',
-    summary: 'Review pairing of this TUI with its host. --apply creates the credential and needs fresh confirmation in an owner terminal; scripted approval (--yes) is not supported. When the host no longer accepts the stored credential, pair --apply offers to forget it. unpair forgets the stored credential (it stays valid on the host until revoked there).',
-    examples: ['host pair', 'host pair --bootstrap-shared', 'host pair --apply', 'host unpair'],
+    usage: ['host pair [--url <exact-origin>] [--name <device-name>]', 'host unpair [--url <exact-origin>]'],
+    line: 'Pair this terminal with a daemon on another machine by a sign-in code, or forget the pairing',
+    summary: 'pair reads, in a terminal, the sign-in code your own signed-in screen shows (Devices and network, Pair something, "Show the sign-in code once") and keeps it as this terminal\'s key for the host, once the host confirms it as a device. The daemon on this machine needs no pairing. unpair forgets the stored credential (it stays valid on the host until revoked there), or an earlier attempt whose reply was lost.',
+    examples: ['host pair', 'host pair --url https://studio.example:3421', 'host unpair'],
   },
   subscription: {
     usage: [

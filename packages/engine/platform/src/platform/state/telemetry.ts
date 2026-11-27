@@ -10,6 +10,8 @@
  * {@link TOOL_CALL_TELEMETRY_ROW_CAP} rows.
  */
 import type { RuntimeEventBus } from '../runtime/events/index.js';
+import { projectOfDecision } from '../permissions/call-project.js';
+import { projectIdentityOf } from '../workspace/project-identity.js';
 
 export interface ToolCallRecord {
   id: number;
@@ -20,6 +22,8 @@ export interface ToolCallRecord {
   tokens: number;
   result_bytes: number;
   timestamp: number;
+  /** The project the call ran in (the decision's project when the call was made), when one was named. */
+  project?: string | undefined;
 }
 
 export interface TelemetryFilter {
@@ -46,15 +50,49 @@ export const TOOL_CALL_TELEMETRY_ROW_CAP = 10_000;
 
 const BYTES_PER_TOKEN = 4;
 
+/**
+ * Which rows a view of the log shows: every row (the process's own log), or one project's (a tool registry of one
+ * project in a host that serves many: a turn reads only its own project's calls). `unattributed`: rows that name no
+ * project are shown too (a program's registry: every call of the process is its project's).
+ */
+interface TelemetryScope {
+  readonly log: TelemetryDB;
+  readonly project: string;
+  readonly unattributed: boolean;
+}
+
 export class TelemetryDB {
   private readonly rows: ToolCallRecord[] = [];
   private nextId = 1;
   private dropped = 0;
+  /** Rows dropped by the cap, per project they named ('' for none). */
+  private readonly droppedOf = new Map<string, number>();
 
-  constructor(private readonly rowCap = TOOL_CALL_TELEMETRY_ROW_CAP) {}
+  constructor(private readonly rowCap = TOOL_CALL_TELEMETRY_ROW_CAP, private readonly scope?: TelemetryScope) {}
 
-  /** One row per finished call: name, status, duration and sizes only. */
-  recordToolCall(call: { tool: string; status: ToolCallRecord['status']; durationMs: number; resultBytes?: number | undefined; timestamp?: number | undefined }): void {
+  /** This log as one project sees it (see {@link TelemetryScope}); recording through it records into this log. */
+  forProject(project: string, options: { readonly unattributed?: boolean } = {}): TelemetryDB {
+    return new TelemetryDB(this.rowCap, { log: this.scope?.log ?? this, project, unattributed: options.unattributed === true });
+  }
+
+  private shows(row: ToolCallRecord): boolean {
+    if (!this.scope) return true;
+    return row.project === undefined ? this.scope.unattributed : row.project === this.scope.project;
+  }
+
+  private visibleRows(): readonly ToolCallRecord[] {
+    if (!this.scope) return this.rows;
+    return this.scope.log.rows.filter((row) => this.shows(row));
+  }
+
+  private droppedCount(): number {
+    if (!this.scope) return this.dropped;
+    return (this.scope.log.droppedOf.get(this.scope.project) ?? 0) + (this.scope.unattributed ? this.scope.log.droppedOf.get('') ?? 0 : 0);
+  }
+
+  /** One row per finished call: name, status, duration and sizes only, and the project it ran in when one was named. */
+  recordToolCall(call: { tool: string; status: ToolCallRecord['status']; durationMs: number; resultBytes?: number | undefined; timestamp?: number | undefined; project?: string | undefined }): void {
+    if (this.scope) { this.scope.log.recordToolCall(call); return; }
     const resultBytes = Math.max(0, Math.round(call.resultBytes ?? 0));
     this.rows.push({
       id: this.nextId++,
@@ -64,10 +102,11 @@ export class TelemetryDB {
       tokens: Math.ceil(resultBytes / BYTES_PER_TOKEN),
       result_bytes: resultBytes,
       timestamp: call.timestamp ?? Date.now(),
+      ...(call.project !== undefined ? { project: call.project } : {}),
     });
     if (this.rows.length > this.rowCap) {
       const excess = this.rows.length - this.rowCap;
-      this.rows.splice(0, excess);
+      for (const gone of this.rows.splice(0, excess)) this.droppedOf.set(gone.project ?? '', (this.droppedOf.get(gone.project ?? '') ?? 0) + 1);
       this.dropped += excess;
     }
   }
@@ -76,8 +115,9 @@ export class TelemetryDB {
   query(filter: TelemetryFilter = {}): ToolCallRecord[] {
     const matched: ToolCallRecord[] = [];
     const limit = filter.limit !== undefined && Number.isFinite(filter.limit) ? Math.max(0, Math.floor(filter.limit)) : Number.POSITIVE_INFINITY;
-    for (let index = this.rows.length - 1; index >= 0 && matched.length < limit; index--) {
-      const row = this.rows[index]!;
+    const rows = this.visibleRows();
+    for (let index = rows.length - 1; index >= 0 && matched.length < limit; index--) {
+      const row = rows[index]!;
       if (filter.tool && row.tool !== filter.tool) continue;
       if (filter.status && row.status !== filter.status) continue;
       if (filter.since !== undefined && row.timestamp < filter.since) continue;
@@ -90,10 +130,10 @@ export class TelemetryDB {
   getSummary(): TelemetrySummary {
     const summary: TelemetrySummary = {
       total_calls: 0, total_tokens: 0, total_errors: 0, total_cancelled: 0, total_duration_ms: 0,
-      dropped_calls: this.dropped, by_tool: {},
+      dropped_calls: this.droppedCount(), by_tool: {},
     };
     const durations: Record<string, number> = {};
-    for (const row of this.rows) {
+    for (const row of this.visibleRows()) {
       summary.total_calls++;
       summary.total_tokens += row.tokens;
       summary.total_duration_ms += row.duration_ms;
@@ -138,6 +178,10 @@ export function toolCallTelemetryFor(bus: RuntimeEventBus): TelemetryDB {
   logsByBus.set(bus, log);
   bus.onDomain('tools', (envelope) => {
     const event = envelope.payload;
+    // The project the call was decided for (permissions/call-project.ts): the bus delivers in the emitting call's
+    // context, so a row names the project its call ran in, and a project's view of the log shows only its own.
+    const decided = projectOfDecision();
+    const project = decided !== undefined ? projectIdentityOf(decided) : undefined;
     if (event.type === 'TOOL_SUCCEEDED' || event.type === 'TOOL_FAILED') {
       log.recordToolCall({
         tool: event.tool,
@@ -145,9 +189,10 @@ export function toolCallTelemetryFor(bus: RuntimeEventBus): TelemetryDB {
         durationMs: event.durationMs,
         resultBytes: event.result?.byteSize,
         timestamp: envelope.ts,
+        project,
       });
     } else if (event.type === 'TOOL_CANCELLED') {
-      log.recordToolCall({ tool: event.tool, status: 'cancelled', durationMs: 0, timestamp: envelope.ts });
+      log.recordToolCall({ tool: event.tool, status: 'cancelled', durationMs: 0, timestamp: envelope.ts, project });
     }
   });
   return log;

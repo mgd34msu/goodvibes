@@ -36,6 +36,11 @@ export interface TriggerSupervisorDeps {
   readonly sessionIsLive?: ((sessionId: string) => boolean) | undefined;
   /** Whether new work is admitted (daemon/work-admission.ts); no action fires while it is not. */
   readonly workAdmitted?: (() => boolean) | undefined;
+  /**
+   * Opens a project's tools for a probe of a trigger with no session (the host's one turn environment builder, in the
+   * process's own context): such a trigger checks its project after a restart with nobody working there.
+   */
+  readonly openProjectTools?: import('./probe-tools.js').ProbeProjectToolOpener | undefined;
 }
 
 /** The live `watchers.triggers.*` settings. */
@@ -49,7 +54,6 @@ export function readTriggerConfig(configManager: Pick<ConfigManager, 'get'>): Tr
     maxConcurrentChecks: configManager.get('watchers.triggers.maxConcurrentChecks'),
     observationRingSize: configManager.get('watchers.triggers.observationRingSize'),
     runHistoryLimit: configManager.get('watchers.triggers.runHistoryLimit'),
-    runHistoryTtlHours: configManager.get('watchers.triggers.runHistoryTtlHours'),
     eventLogLimit: configManager.get('watchers.triggers.eventLogLimit'),
     eventLogTtlHours: configManager.get('watchers.triggers.eventLogTtlHours'),
     sweepIntervalMs: configManager.get('watchers.triggers.sweepIntervalMs'),
@@ -72,6 +76,7 @@ export function createTriggerSupervisor(deps: TriggerSupervisorDeps): TriggerMan
   const { configManager, processManager } = deps;
   // Platform-tool probes call the tools of the sessions whose registries attach here (attachProbeTools).
   const probeTools = new ProbeToolHost();
+  probeTools.setProjectOpener(deps.openProjectTools);
   // An http probe is held to the fetch tool's own host settings, read live.
   const fetchDeps = createConfiguredFetchDeps({ serviceRegistry: null, featureFlags: null, configManager });
   const hostList = (value: readonly string[] | (() => readonly string[] | undefined) | undefined): readonly string[] | undefined =>
@@ -92,7 +97,7 @@ export function createTriggerSupervisor(deps: TriggerSupervisorDeps): TriggerMan
     streamHost: createBunStreamHost(processManager),
     probeIo: createDefaultProbeIo({
       runCommand: createProcessManagerCommandRunner(processManager),
-      callTool: (tool, input, timeoutMs, ownerSessionId) => probeTools.call(tool, input, timeoutMs, ownerSessionId),
+      callTool: (tool, input, timeoutMs, ownerSessionId, project) => probeTools.call(tool, input, timeoutMs, ownerSessionId, project),
       hostPolicy,
     }),
     probeHostPolicy: hostPolicy,

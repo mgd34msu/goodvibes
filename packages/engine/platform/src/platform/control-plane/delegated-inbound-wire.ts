@@ -153,7 +153,7 @@ export const delegatedTelegramResultSchemas = {
   list: z.object({
     outcome: z.literal('listed'), records: z.array(delegatedReviewRecordSchema),
     pending: z.array(z.object({ ref: delegatedSourceRefSchema, approvalId: id, sourceExpiresAt: z.number(), outcome: z.union([pendingOutcome, z.literal('held')]) }).strict()),
-    // The owner's chats still held here, by configuration: `keepsNewMessages` false once he chose to keep no new ones
+    // The owner's chats still held here, by configuration: `keepsNewMessages` false once the owner chose to keep no new ones
     // (revoke); a chat handed back (release) is not listed. What a review row's chat allows is read from this.
     chats: z.array(z.object({ configurationId: id, keepsNewMessages: z.boolean() }).strict()).optional(),
   }).strict(),

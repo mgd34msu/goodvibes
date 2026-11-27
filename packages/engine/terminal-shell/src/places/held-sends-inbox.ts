@@ -99,7 +99,7 @@ export function bridgeHeldSendsToDaemonInbox(options: HeldSendsInboxOptions): ()
     try { await options.invoke('inbox.withdraw', { itemId, reason }); } catch { /* answered or gone already */ }
   };
 
-  /** The owner said send: the very send that was refused goes out, with the content he was shown. */
+  /** The owner said send: the very send that was refused goes out, with the content they were shown. */
   const send = async (entry: PendingOutwardAction): Promise<void> => {
     if (!entry.perform) {
       // No way to perform it from here: a one-use approval for the exact content, spent by the next identical call.

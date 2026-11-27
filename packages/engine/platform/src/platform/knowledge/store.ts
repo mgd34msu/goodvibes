@@ -416,40 +416,42 @@ export class KnowledgeStore {
     };
   }
 
+  /**
+   * A project's storage, kept for the next open until it is closed: a project's Work let go when idle closes its storages
+   * (the daemon's project-work-set.ts), and the Work made again for it opens fresh ones, never the closed ones.
+   */
+  private keptUntilClosed<T extends { close(): Promise<void> }>(cache: Map<string, T>, projectId: string, storage: T): T {
+    const close = storage.close.bind(storage);
+    storage.close = () => {
+      if (cache.get(projectId) === storage) cache.delete(projectId);
+      return close();
+    };
+    cache.set(projectId, storage);
+    return storage;
+  }
+
   /** Trusted native host only. The runtime must not expose this storage capability. */
   async openNativeWorkExecutionStorage(projectId: string): Promise<NativeWorkExecutionStorage> {
     await this.init();
     if (this.closed) throw new Error('KnowledgeStore is closed');
-    let storage = this.nativeExecutionStorage.get(projectId);
-    if (!storage) {
-      storage = createNativeWorkExecutionStorage(this.sqlite, projectId, this.nativeRequestChanged(projectId, 'execution'), this.declareNativeExecutionFormat, this.declareNativeCiFormat, this.declareNativeSettlementFormat);
-      this.nativeExecutionStorage.set(projectId, storage);
-    }
-    return storage;
+    return this.nativeExecutionStorage.get(projectId) ?? this.keptUntilClosed(this.nativeExecutionStorage, projectId,
+      createNativeWorkExecutionStorage(this.sqlite, projectId, this.nativeRequestChanged(projectId, 'execution'), this.declareNativeExecutionFormat, this.declareNativeCiFormat, this.declareNativeSettlementFormat));
   }
 
   /** Host-owned conversation capture shares the ledger's coordinated database. */
   async openNativeConversationStorage(projectId: string): Promise<NativeConversationStorage> {
     await this.init();
     if (this.closed) throw new Error('KnowledgeStore is closed');
-    let storage = this.nativeConversationStorage.get(projectId);
-    if (!storage) {
-      storage = createNativeConversationStorage(this.sqlite, projectId, this.nativeRequestChanged(projectId, 'intake'), this.declareNativeConversationFormat, this.declareNativeSettledFormat);
-      this.nativeConversationStorage.set(projectId, storage);
-    }
-    return storage;
+    return this.nativeConversationStorage.get(projectId) ?? this.keptUntilClosed(this.nativeConversationStorage, projectId,
+      createNativeConversationStorage(this.sqlite, projectId, this.nativeRequestChanged(projectId, 'intake'), this.declareNativeConversationFormat, this.declareNativeSettledFormat));
   }
 
   /** Trusted host seam: reuses this owner's coordinated database. */
   async openWorkLedgerStorage(projectId: string): Promise<KnowledgeWorkLedgerStorage> {
     await this.init();
     if (this.closed) throw new Error('KnowledgeStore is closed');
-    let storage = this.ledgerStorage.get(projectId);
-    if (!storage) {
-      storage = createKnowledgeWorkLedgerStorage(this.sqlite, projectId, this.nativeRequestChanged(projectId, 'work-ledger'), undefined, this.declareNativeExplicitSourceFormat, this.declareHistoricalImportFormat);
-      this.ledgerStorage.set(projectId, storage);
-    }
-    return storage;
+    return this.ledgerStorage.get(projectId) ?? this.keptUntilClosed(this.ledgerStorage, projectId,
+      createKnowledgeWorkLedgerStorage(this.sqlite, projectId, this.nativeRequestChanged(projectId, 'work-ledger'), undefined, this.declareNativeExplicitSourceFormat, this.declareHistoricalImportFormat));
   }
 
   close(): Promise<void> {

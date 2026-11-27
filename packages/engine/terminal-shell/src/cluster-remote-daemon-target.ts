@@ -410,8 +410,10 @@ export async function callDaemonVerb<T>(
     return { ok: false, code: 'invalid-host', error: error instanceof Error ? error.message : `the token is not for ${url}`, fix: 'name the daemon as scheme://host:port and pass --token for it' };
   }
   // A peer that accepts the connection and never answers must not hang the command; the race also covers a fetch that ignores its signal.
+  // `timeoutMs: 0`: no time limit of this call's own (a `do` whose act waits on the owner's answer; Ctrl+C withdraws it).
   const timeoutMs = init.timeoutMs ?? DAEMON_VERB_TIMEOUT_MS;
-  const signal = init.signal ? AbortSignal.any([init.signal, AbortSignal.timeout(timeoutMs)]) : AbortSignal.timeout(timeoutMs);
+  const limit = timeoutMs > 0 ? AbortSignal.timeout(timeoutMs) : undefined;
+  const signal = init.signal && limit ? AbortSignal.any([init.signal, limit]) : init.signal ?? limit ?? new AbortController().signal;
   // A send that fails part-way may still have been applied; only a read is safe to repeat blindly.
   const mayHaveApplied = init.method === 'POST' && init.readOnly !== true
     ? ' This change may or may not have been applied: run `cluster status` before repeating it.'

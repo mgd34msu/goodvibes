@@ -22,10 +22,13 @@ export function createDaemonRuntimeAutomationRouteHandlers(
     getAutomationRun: (runId) => handleGetAutomationRun(context, runId),
     getAutomationHeartbeat: () => Response.json({ pending: context.automationManager.listHeartbeatWakes?.() ?? [] }),
     postAutomationHeartbeat: async (request) => withAdmin(context, request, () => handlePostAutomationHeartbeat(context, request)),
-    automationRunAction: async (runId, action, request) => withAdmin(context, request, () => handleAutomationRunAction(context, runId, action, request)),
-    runAutomationJobNow: async (jobId, request) => withAdmin(context, request, () => handleRunScheduleNow(context, jobId)),
+    // Project acts (effect-authority.ts `automation.write`): admitted by their effects at the router's binding gate; the
+    // dispatch's project check and the one reach rule hold a caller below an admin to its own schedules and runs in the
+    // projects the owner gave it (control-plane/caller-reach.ts `OWN_RECORD_CHANGES`).
+    automationRunAction: async (runId, action, request) => handleAutomationRunAction(context, runId, action, request),
+    runAutomationJobNow: async (jobId) => handleRunScheduleNow(context, jobId),
     getSchedules: () => handleGetSchedules(context),
-    runScheduleNow: (scheduleId, request) => withAdmin(context, request, () => handleRunScheduleNow(context, scheduleId)),
+    runScheduleNow: (scheduleId) => handleRunScheduleNow(context, scheduleId),
     getSchedulerCapacity: (req) => withAdmin(context, req, () => Response.json(context.automationManager.getSchedulerCapacity())),
   };
 }

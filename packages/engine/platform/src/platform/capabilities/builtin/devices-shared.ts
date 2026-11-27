@@ -1,13 +1,13 @@
 /**
- * Devices and network: which of the owner's shared things (control-plane/shared-kinds.ts: his mail, calendar,
+ * Devices and network: which of the owner's shared things (control-plane/shared-kinds.ts: their mail, calendar,
  * channels, knowledge library, money, profile, dates, home, notifications) a paired device, a signed-in member, the
  * outside agent or the operator token may reach. Default none, whatever a credential's scopes say: only the owner
- * himself, his programs and his own turns reach them. Given and taken back on the caller's row as a project is
- * (capabilities/builtin/devices-projects.ts); a caller that tries a kind it was not given puts one question to him the
- * first time (daemon/shared-kind-gifts.ts), and his yes there is the same gift. Kept in `<daemon home>/caller-shared.json`.
+ * in person, their programs and their own turns reach them. Given and taken back on the caller's row as a project is
+ * (capabilities/builtin/devices-projects.ts); a caller that tries a kind it was not given puts one question to the owner the
+ * first time (daemon/shared-kind-gifts.ts), and the owner's yes there is the same gift. Kept in `<daemon home>/caller-shared.json`.
  */
 import { CapabilityRefusal, type CapabilityDefinition, type InputDescription } from '../types.js';
-import { SHARED_KINDS, SHARED_KIND_WORDS, isSharedKind, type SharedKind } from '../../control-plane/shared-kinds.js';
+import { CARRIED_FROM_350_WORDS, SHARED_KINDS, SHARED_KIND_WORDS, isSharedKind, type SharedKind } from '../../control-plane/shared-kinds.js';
 import { currentRecordReach } from '@goodvibes/engine/daemon-api';
 
 /** What these capabilities need: the daemon's one record of the shared kinds each caller was given. */
@@ -16,6 +16,8 @@ export interface CallerSharedCapabilityServices {
     list(): Readonly<Record<string, readonly SharedKind[]>>;
     kindsOf(principalId: string): readonly SharedKind[];
     set(principalId: string, kinds: readonly SharedKind[]): readonly SharedKind[];
+    /** Of a caller's kinds, those carried from 3.5.0 at the upgrade (shared-kinds.ts `carryFrom350`), shown so. */
+    carriedOf?(principalId: string): readonly SharedKind[];
   } | undefined;
 }
 
@@ -54,11 +56,13 @@ export const DEVICES_SHARED: Definition = {
   sentence: 'Lists each paired device and member given something of yours that belongs to no project (mail, calendar, money, ...); one not listed reaches none of it.', done: '',
   touches: 'reads', lasts: 'not-a-change', risk: 'none', example: {},
   async run(_values, services) {
-    // The owner's own record of who reaches his things: his alone to read (anyone else's call runs with a reach filter).
-    if (currentRecordReach()) throw new CapabilityRefusal('Only the owner sees who may reach his own things; nothing was read.', undefined, 'OWNER_ONLY');
-    const rows = Object.entries(storeOf(services).list()).map(([who, kinds]) => ({ id: who, who, kinds: [...kinds] }));
+    // The owner's own record of who reaches their things: theirs alone to read (anyone else's call runs with a reach filter).
+    if (currentRecordReach()) throw new CapabilityRefusal('Only the owner sees who may reach their own things; nothing was read.', undefined, 'OWNER_ONLY');
+    const store = storeOf(services);
+    // A kind carried from 3.5.0 at the upgrade is said so; it is taken back like any other (devices.take-shared).
+    const rows = Object.entries(store.list()).map(([who, kinds]) => ({ id: who, who, kinds: [...kinds], carried: [...(store.carriedOf?.(who) ?? [])] }));
     if (rows.length === 0) return { text: `No device or member has been given anything of yours: each reaches none of your ${SHARED_KINDS.join(', ')}.`, data: { callers: rows } };
-    return { text: ['What of yours each device or member may reach', ...rows.map((row) => `  ${row.who}: ${row.kinds.join(', ')}`)].join('\n'), data: { callers: rows } };
+    return { text: ['What of yours each device or member may reach', ...rows.map((row) => `  ${row.who}: ${row.kinds.map((kind) => row.carried.includes(kind) ? `${kind} (${CARRIED_FROM_350_WORDS})` : kind).join(', ')}`)].join('\n'), data: { callers: rows } };
   },
 };
 

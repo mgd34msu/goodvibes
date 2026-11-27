@@ -44,39 +44,30 @@ function sessionFileName(sessionId: string): string {
 
 /**
  * Count bound: at most this many session files survive a pass, newest-written
- * first. Bounds a burst of short-lived sessions that would otherwise outrun the
- * age bound entirely.
+ * first, of the per-process `session_<hex>` files (a conversation's own file
+ * goes only when its conversation does).
  */
 const SESSION_KEEP_COUNT = 50;
 
-/**
- * Age bound: a session file whose last write is older than this belongs to a
- * session nothing is going to resume. Fourteen days is deliberately generous,
- * the file is small, and the count bound is what actually holds the store flat
- * on an active machine.
- */
-const SESSION_MAX_AGE_MS = 14 * 24 * 60 * 60 * 1000;
-
-/** How often the housekeeping pass repeats while a surface stays up. */
+/** How often the housekeeping pass repeats while a surface stays up (it asks which conversations are gone; no age). */
 const SWEEP_INTERVAL_MS = 30 * 60 * 1000;
 
-/** The two bounds a single reap pass applies. */
+/** The bound a single reap pass applies. */
 interface ReapBounds {
   readonly keepCount: number;
-  readonly maxAgeMs: number;
 }
 
 /** What one reap pass actually reclaimed, the disclosure payload. */
 interface ReapOutcome {
   readonly filesRemoved: number;
   readonly bytesReclaimed: number;
-  /** Removed for being past {@link ReapBounds.maxAgeMs}. */
-  readonly agedOut: number;
+  /** Removed because their conversation is gone. */
+  readonly gone: number;
   /** Removed for falling outside {@link ReapBounds.keepCount}. */
   readonly overCap: number;
 }
 
-const NOTHING_REAPED: ReapOutcome = { filesRemoved: 0, bytesReclaimed: 0, agedOut: 0, overCap: 0 };
+const NOTHING_REAPED: ReapOutcome = { filesRemoved: 0, bytesReclaimed: 0, gone: 0, overCap: 0 };
 
 /** Read a Node errno `code` off an unknown thrown value without widening to `any`. */
 function errorCode(err: unknown): string | undefined {
@@ -115,15 +106,13 @@ function removeSessionFile(path: string, name: string): boolean {
  * every removal tolerates the file already being gone. A second pass over an
  * already-reaped directory finds no candidates and removes nothing.
  *
- * `protectedFileName` is never a candidate, the caller's own session file must
- * survive its own recovery even when it is months old (a long-dormant session
- * being resumed is the exact case the age bound would otherwise destroy).
+ * `protectedFileName` is never a candidate: the caller's own session file must
+ * survive its own recovery.
  */
 function reapSessionFiles(
   stateDir: string,
   protectedFileName: string,
   bounds: ReapBounds,
-  now: number,
   canReclaimKeyedState?: (sessionToken: string) => boolean,
 ): ReapOutcome {
   let names: string[];
@@ -161,22 +150,23 @@ function reapSessionFiles(
 
   let filesRemoved = 0;
   let bytesReclaimed = 0;
-  let agedOut = 0;
+  let gone = 0;
   let overCap = 0;
   let generatedSeen = 0;
   for (const candidate of candidates) {
-    const tooOld = now - candidate.mtimeMs > bounds.maxAgeMs;
+    // A conversation's own state goes when its conversation is gone (the owner of the conversations said so above),
+    // whatever its age; a process's own file only past the count bound. No age decides either.
     if (!candidate.keyed) generatedSeen += 1;
     const beyondCap = !candidate.keyed && generatedSeen > bounds.keepCount;
-    if (!tooOld && !beyondCap) continue;
+    if (!candidate.keyed && !beyondCap) continue;
     if (!removeSessionFile(candidate.path, candidate.name)) continue;
     filesRemoved += 1;
     bytesReclaimed += candidate.size;
-    if (tooOld) agedOut += 1;
+    if (candidate.keyed) gone += 1;
     else overCap += 1;
   }
 
-  return { filesRemoved, bytesReclaimed, agedOut, overCap };
+  return { filesRemoved, bytesReclaimed, gone, overCap };
 }
 
 /**
@@ -191,7 +181,7 @@ function discloseReap(stateDir: string, outcome: ReapOutcome): void {
   logger.info('KVState: reclaimed stale session state files', {
     stateDir,
     filesRemoved: outcome.filesRemoved,
-    agedOut: outcome.agedOut,
+    gone: outcome.gone,
     overCap: outcome.overCap,
     bytesReclaimed: outcome.bytesReclaimed,
   });
@@ -202,7 +192,7 @@ export interface KVStateOptions {
   readonly stateDir: string;
   /**
    * Whether the state file of a caller-supplied (`session-<id>`) session may be
-   * reclaimed once it is past the age bound. Receives the file's id part.
+   * reclaimed: its conversation is gone. Receives the file's id part.
    * Omitted, those files are never reclaimed: a resumed conversation must find
    * its state, and only the owner of the conversations knows which are gone.
    */
@@ -222,9 +212,10 @@ export interface KVStateOptions {
  * - Lazy load: defers disk read until first operation.
  * - Atomic persistence: write to temp file then rename.
  * - Write-through: set() and clear() write the (small) file before they resolve.
- * - Bounded store: every session file older than SESSION_MAX_AGE_MS, and every
- *   file past the SESSION_KEEP_COUNT most recent, is reclaimed at recovery and
- *   then on a SWEEP_INTERVAL_MS timer. The instance's own file is exempt.
+ * - Bounded store: a conversation's file whose conversation is gone, and every
+ *   process file past the SESSION_KEEP_COUNT most recent, is reclaimed at
+ *   recovery and then on a SWEEP_INTERVAL_MS pass. No age decides. The
+ *   instance's own file is exempt.
  */
 export class KVState {
   private sessionId: string;
@@ -390,8 +381,8 @@ export class KVState {
    * This is NOT what keeps the store bounded, for a long time nothing called
    * it, and every session file the platform had ever written accumulated forever.
    * The bounds are now enforced by each instance's own housekeeping (see
-   * {@link KVState.load}), which runs both this count bound and an age bound at
-   * recovery and then on a timer. This static form survives for callers that
+   * {@link KVState.load}), which runs this count bound and reclaims the files of
+   * conversations that are gone, at recovery and then on a pass. This static form survives for callers that
    * want an explicit count-only pass, and now shares the same idempotent,
    * concurrency-tolerant, disclosed implementation instead of its own
    * unguarded `unlinkSync`.
@@ -403,7 +394,7 @@ export class KVState {
     const stateDir = readKVStateDir(options);
     discloseReap(
       stateDir,
-      reapSessionFiles(stateDir, '', { keepCount, maxAgeMs: Number.POSITIVE_INFINITY }, Date.now()),
+      reapSessionFiles(stateDir, '', { keepCount }),
     );
   }
 
@@ -468,7 +459,7 @@ export class KVState {
     try {
       discloseReap(
         this.stateDir,
-        reapSessionFiles(this.stateDir, this.fileName, { keepCount: SESSION_KEEP_COUNT, maxAgeMs: SESSION_MAX_AGE_MS }, Date.now(), this.canReclaimKeyedState),
+        reapSessionFiles(this.stateDir, this.fileName, { keepCount: SESSION_KEEP_COUNT }, this.canReclaimKeyedState),
       );
     } catch (err) {
       logger.debug('KVState: session state housekeeping pass failed', { error: summarizeError(err) });

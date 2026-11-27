@@ -211,7 +211,7 @@ export class IntegrationHelperService {
   /** `limit` keeps the newest tasks only, so a long-lived daemon does not send its whole history; the totals stay whole. */
   getTaskSnapshot(limit?: number): Record<string, unknown> {
     const state = this.context.runtimeStore.getState();
-    // A caller that is not the owner himself is listed and counted only the tasks it may reach (control-plane/caller-reach.ts),
+    // A caller that is not the owner in person is listed and counted only the tasks it may reach (control-plane/caller-reach.ts),
     // before the newest `limit` are cut: the counts say no more than the list does.
     const reachable = currentRecordReach() !== undefined;
     const all = [...keepReachable([...state.tasks.tasks.values()], 'task', (task) => task.id)];
@@ -288,7 +288,7 @@ export class IntegrationHelperService {
 
   getRouteSnapshot(): Record<string, unknown> {
     const state = this.context.runtimeStore.getState();
-    // A binding is of the session, schedule and run it names: a caller that is not the owner himself is shown and
+    // A binding is of the session, schedule and run it names: a caller that is not the owner in person is shown and
     // counted only those it may reach every one of (control-plane/caller-reach.ts).
     const kept = keepReachableNaming([...state.routes.bindings.values()], BINDING_RECORDS);
     const counted = currentRecordReach() !== undefined;
@@ -338,7 +338,7 @@ export class IntegrationHelperService {
 
   /** The newest sessions; `readable` keeps only those the caller may read (a hosted one: its owners and admins). */
   getSessionBrokerSnapshot(readable?: (session: { readonly id: string; readonly kind: string }) => boolean): Record<string, unknown> {
-    // A caller that is not the owner himself: only the sessions it may reach and read, before the newest 50 are cut
+    // A caller that is not the owner in person: only the sessions it may reach and read, before the newest 50 are cut
     // (control-plane/caller-reach.ts); the entries this build could not read are the owner's to repair.
     const reachable = currentRecordReach() !== undefined;
     const listed = reachable || readable ? this.context.sessionBroker.listSessions(Number.MAX_SAFE_INTEGER) : this.context.sessionBroker.listSessions(50);
@@ -358,7 +358,7 @@ export class IntegrationHelperService {
 
   getDeliverySnapshot(): Record<string, unknown> {
     const state = this.context.runtimeStore.getState();
-    // A delivery is its schedule run's: a caller that is not the owner himself is listed and counted only the
+    // A delivery is its schedule run's: a caller that is not the owner in person is listed and counted only the
     // deliveries of runs it may reach (control-plane/caller-reach.ts), before the newest 100 are cut.
     const reachable = currentRecordReach() !== undefined;
     const kept = keepReachable([...state.deliveries.deliveryAttempts.values()], 'schedule-run', (attempt) => attempt.runId);

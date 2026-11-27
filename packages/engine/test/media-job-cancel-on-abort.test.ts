@@ -1,4 +1,4 @@
-// Proves: Stopping the collect of a paid media job cancels that job at the provider, so the owner pays for output he never receives.
+// Proves: Stopping the collect of a paid media job cancels that job at the provider, so the owner pays for output they never receive.
 // Red when: An aborted collect is handled like an aborted generate (`finish` given the remote cancel from `collect`), so a cancel request for the job reaches the provider.
 /**
  * A generation job is paid for once the provider accepts it. Aborting the

@@ -32,7 +32,7 @@ import { decisionOrClassic, isClassicOperation, withConfiguredDecisionModelPolic
  * consumed marks that did not land.
  */
 
-import { OWNER_TYPED_METADATA_KEY } from '@goodvibes/engine/daemon-api';
+import { OWNER_HIMSELF_METADATA_KEY, OWNER_TYPED_METADATA_KEY } from '@goodvibes/engine/daemon-api';
 import { hostedLifecycleCallbacks } from './lifecycle-callbacks.js';
 import { logger } from '../utils/logger.js';
 import { summarizeError } from '../utils/error-display.js';
@@ -196,7 +196,7 @@ interface PendingDelivery {
    */
   readonly answersContractQuestion?: string | undefined;
   /**
-   * The daemon stamped it as typed by the owner into his own program attached
+   * The daemon stamped it as typed by the owner into their own program attached
    * to the session (`OWNER_TYPED_METADATA_KEY`, set by the route where the
    * request entered, never kept from a caller). Operator input only.
    */
@@ -467,7 +467,10 @@ export class HostedSessionSpineIntake {
             correlationId: input.correlationId,
             ...(operatorInput ? { operatorInput: true } : {}),
             ...(operatorInput && typeof answers === 'string' && answers.trim() !== '' ? { answersContractQuestion: answers } : {}),
-            ...(operatorInput && input.metadata?.[OWNER_TYPED_METADATA_KEY] === true ? { ownerTyped: true } : {}),
+            // The owner's own typed line at their program; or, in a session the owner made in person (`madeByOwner`), a message they
+            // sent in person (OWNER_HIMSELF_METADATA_KEY, stamped by the route from their credential): their own turn.
+            ...(operatorInput && (input.metadata?.[OWNER_TYPED_METADATA_KEY] === true
+              || (record.madeByOwner === true && input.metadata?.[OWNER_HIMSELF_METADATA_KEY] === true)) ? { ownerTyped: true } : {}),
             attempts: 0,
           };
           // Without the collected mark the input is still queued on the spine, so

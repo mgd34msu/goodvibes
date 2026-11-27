@@ -380,7 +380,8 @@ export async function evaluateUnmarkedWorktree(input: {
     return { action: 'keep', reason: { why: 'running', detail: 'its contract, workstream or agent is still running' }, assessment: { kind: 'unreadable', reason: 'not read while running' }, sinceMs: now };
   }
   // Git lists a worktree from the moment its add begins, before the record is written; a lock or a young link keeps it.
-  const unsettled = unsettledWorktreeReason(path, now);
+  // An owner that has ended is done creating it: only a lock or a missing link says otherwise, never its young age.
+  const unsettled = unsettledWorktreeReason(path, now, owner.state === 'ended' ? 0 : undefined);
   if (unsettled) {
     return { action: 'keep', reason: { why: 'running', detail: `kept because ${unsettled}` }, assessment: { kind: 'unreadable', reason: 'not read while in creation' }, sinceMs: now };
   }

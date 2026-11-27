@@ -34,19 +34,16 @@ export interface GateInput {
   /** A shipping address is configured. */
   readonly hasShippingAddress: boolean;
   /**
-   * This request came from the owner speaking directly, in this turn.
-   *
-   * Not "a request arrived", a schedule, a trigger or a channel message is not
-   * an instruction to spend money. See security/untrusted-content.ts: those
-   * surfaces carry no command authority at all.
+   * This purchase names no standing authorisation: it is decided as a purchase asked for in the moment, by the owner's limits
+   * and the purchase window. The host sets it to `standingAuthorizationId === undefined` (host/checkout-handlers.ts), so a
+   * begin with no standing authorisation passes this gate whoever started it (the owner's own words, a schedule, a trigger,
+   * a channel message); what keeps spending in hand is everything after it, in every permission mode.
    */
   readonly isOwnerDirectRequest: boolean;
   /**
    * The owner's live standing authorisation this purchase was admitted under
-   * (payments/host/standing-store.ts), when nobody asked for it in the moment.
-   * Set only by the host after it matched the item, merchant and amount to the
-   * entry; it is what lets a scheduled or triggered purchase past the origin
-   * gate, and nothing else.
+   * (payments/host/standing-store.ts), when the begin names one. Set only by the host after it matched the item, merchant
+   * and amount to the entry; the purchase is then bound to what the entry says.
    */
   readonly standingAuthorizationId?: string | undefined;
   /**
@@ -100,9 +97,8 @@ export function checkPaymentGates(input: GateInput): GateRefusal | null {
     return {
       code: 'not-owner-request',
       reason:
-        'Refused: this purchase was not asked for by you directly and no live standing authorisation of '
-        + 'yours covers it. A schedule, a trigger, or a message from a channel cannot authorize spending '
-        + 'on its own; you can, in your own words, or in advance with "Allow a repeat purchase" in the Money place.',
+        'Refused: this purchase names no standing authorisation of yours and is not decided as one asked for in the moment. '
+        + '"Allow a repeat purchase" in the Money place says in advance what may be bought, within what amount.',
     };
   }
   if (!input.isPaymentsLeader) {

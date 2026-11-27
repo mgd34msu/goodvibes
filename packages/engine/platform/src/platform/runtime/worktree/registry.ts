@@ -755,6 +755,9 @@ export class WorktreeRegistry {
       }
       if (claimed) { keepReason(claimed); continue; }
       try {
+        // The product's own bookkeeping at the tree's root (a step's verification log) is untracked and is no one's work
+        // (the assessment above did not count it): taken out so git can remove the tree. Only untracked files of that folder.
+        await runGit(row.path, ['clean', '-fdq', '--', '.goodvibes']);
         // Never forced: git refuses a tree with modified or untracked files, whatever was read before.
         await this.git.worktreeRemove(row.path);
         const branch = evaluation.assessment.kind === 'nothing-unique' || evaluation.assessment.kind === 'unmerged' ? evaluation.assessment.branch : null;

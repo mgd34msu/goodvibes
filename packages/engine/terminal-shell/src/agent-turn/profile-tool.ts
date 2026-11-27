@@ -193,7 +193,7 @@ function renderField(field: ProfileFieldResponse): string {
 
 async function handleRead(deps: AgentProfileToolDeps): Promise<ToolOutcome> {
   const result = await deps.invoke(PROFILE_METHOD_IDS.read, {});
-  if (!result.ok) return fail(['Could not read your profile.', `  ${result.error ?? 'no reason given'}`]);
+  if (!result.ok) return fail(['Could not read the user\'s profile.', `  ${result.error ?? 'no reason given'}`]);
   const response = narrowProfileRead(result.data);
   if (!response) return fail([PROFILE_RESPONSE_UNREADABLE]);
   if (response.state.kind === 'unavailable') {
@@ -240,7 +240,7 @@ async function handleGet(deps: AgentProfileToolDeps, fieldId: string): Promise<T
   if (!result.ok) return fail([`Could not read ${fieldId}.`, `  ${result.error ?? 'no reason given'}`]);
   const response = narrowProfileGet(result.data);
   if (!response) return fail([PROFILE_RESPONSE_UNREADABLE]);
-  if (!response.present || !response.field) return ok([`${response.fieldId} is not set in your profile.`]);
+  if (!response.present || !response.field) return ok([`${response.fieldId} is not set in the user's profile.`]);
   const field = response.field;
   const lines = [`${field.fieldId}: ${field.value}`];
   if (!field.valid) {
@@ -286,7 +286,7 @@ async function handlePerson(
   if (!result.ok) return fail([`Could not look up ${name}.`, `  ${result.error ?? 'no reason given'}`]);
   const response = narrowProfilePerson(result.data);
   if (!response) return fail([PROFILE_RESPONSE_UNREADABLE]);
-  if (response.lines.length === 0) return ok([`No one called ${response.name} is recorded in your profile.`]);
+  if (response.lines.length === 0) return ok([`No one called ${response.name} is recorded in the user's profile.`]);
   return ok([
     `${response.name}:`,
     ...response.lines.map(renderProseLine),
@@ -301,7 +301,7 @@ async function handleProvenance(deps: AgentProfileToolDeps, fieldId: string): Pr
   if (!result.ok) return fail([`Could not read provenance for ${fieldId}.`, `  ${result.error ?? 'no reason given'}`]);
   const response = narrowProfileProvenance(result.data);
   if (!response) return fail([PROFILE_RESPONSE_UNREADABLE]);
-  if (!response.present) return ok([`${response.fieldId} is not in your profile, so there is nothing to trace.`]);
+  if (!response.present) return ok([`${response.fieldId} is not in the user's profile, so there is nothing to trace.`]);
   const lines = [`${response.fieldId}:`];
   // The same receipt a closed-tier `get` carries, relayed when the daemon gives one.
   const disclosure = (response as { readonly disclosure?: unknown }).disclosure;
@@ -416,7 +416,7 @@ async function handleSet(
   const response = narrowProfileWrite(result.data);
   if (!response) return fail([PROFILE_RESPONSE_UNREADABLE]);
   if (!response.ok) return notDoneOutcome(`${fieldId} was not recorded`, response.reason, authority);
-  return disclosureOutcome(response.disclosure, `Noted, saved ${fieldId} to your profile.`);
+  return disclosureOutcome(response.disclosure, `Noted, saved ${fieldId} to the user's profile.`);
 }
 
 async function handleAppend(
@@ -439,7 +439,7 @@ async function handleAppend(
   const response = narrowProfileWrite(result.data);
   if (!response) return fail([PROFILE_RESPONSE_UNREADABLE]);
   if (!response.ok) return notDoneOutcome(`the note under ${section} was not added`, response.reason, authority);
-  return disclosureOutcome(response.disclosure, `Noted, added a line to ${section} in your profile.`);
+  return disclosureOutcome(response.disclosure, `Noted, added a line to ${section} in the user's profile.`);
 }
 
 /**
@@ -493,7 +493,7 @@ async function handleForget(
   // exists to remove.
   if (!response.ok) return notDoneOutcome(`${target} was not deleted`, response.reason, authority);
   return ok([
-    `Say this in your reply: ${response.disclosure || `Forgotten: removed ${target} from your profile.`}`,
+    `Say this in your reply: ${response.disclosure || `Forgotten: removed ${target} from the user's profile.`}`,
     'The line and its kept history are gone from the file.',
   ]);
 }
@@ -509,7 +509,7 @@ async function handleUndo(
   const response = narrowProfileWrite(result.data);
   if (!response) return fail([PROFILE_RESPONSE_UNREADABLE]);
   if (!response.ok) return notDoneOutcome(`${fieldId} was not restored`, response.reason, authority);
-  return ok([`Say this in your reply: ${response.disclosure || `Put back the previous ${fieldId} in your profile.`}`]);
+  return ok([`Say this in your reply: ${response.disclosure || `Put back the previous ${fieldId} in the user's profile.`}`]);
 }
 
 // ── Tool ───────────────────────────────────────────────────────────────────

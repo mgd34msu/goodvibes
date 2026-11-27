@@ -554,8 +554,8 @@ export const PROVIDER_FINISH: MethodCapabilityDefinition = {
   ],
   sentence: 'The sign-in to {provider} is finished with the code you give and kept for every program until you change it (signing out ends it).', done: '',
   touches: 'credential', lasts: 'kept', risk: 'none', undoneBy: 'sign-out', example: { provider: 'openai' },
-  // It stores a sign-in every program then sends its requests with: whose account it is, only the owner says.
-  ownerOnly: { reason: 'it stores the sign-in every program sends its requests with', instead: 'Ask the owner to finish it in Models and providers.' },
+  // A model's `/provider finish` was a judgment at v3.5.0 (class none, not owner only), and so it is now: the code is the
+  // person's, typed on the hidden line, and the sign-in is theirs.
   method: { id: 'providers.subscription.signIn.finish', fields: { provider: 'provider', code: 'code' } },
   said: (answer, values) => {
     const expiresAt = typeof answer['expiresAt'] === 'number' ? answer['expiresAt'] : undefined;

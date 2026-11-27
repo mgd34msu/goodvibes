@@ -1,22 +1,12 @@
 // Proves: A capability that writes a credential runs when a model calls it through capability_run without the owner being asked, as an item of their list that Jev never decides, or the owner's own request for it is put to them.
 // Red when: capability_run's definition stops putting a capability that declares secret.write (secrets.set) among the calls that loosen a protection, so Jev settles the model's call instead of the owner's card, or the secret is stored after the owner said No, or capabilities.run stops running a person's own request at once.
-// Proves: An outside caller's capability call that the daemon put to the owner runs although they said No, or without waiting for their answer, or on their yes after plan mode was switched on; or an ask raised over the wire, answered yes and remember, saves a rule or approves another ask; or a model's capability call made inside another tool is not asked as the capability; or a command line's call that writes a secret runs at once on a person's claim instead of being decided at the gate.
-// Red when: capabilities.run stops refusing a call on the gate's No (the `decided.approved` refusal in routes/capabilities.ts), or counts an outside caller's call as decided elsewhere so it runs unasked; or approvals.raise keeps a caller's metadata keys the daemon reads; or the broker remembers or sweeps from a wire-raised record (its remember options and ownerOnly kept, and the wire check in rememberedRule and the sweep dropped); or the gate's yes after a check that failed is no longer judged again against plan mode; or daemonCapabilityRunner sends a wrapper tool's capability straight to the daemon instead of through capability_run; or capabilities.run stops sending a call from the command-line client kind to the gate whatever its claim (decidedFromCommandLine, commandLineHoldReason).
-// Proves: A turn on someone else's input runs a tool call that is not a read, or work that a caller other than the owner caused runs its turn as the owner's own (a command outside a real sandbox, a file written) before the owner approves it, or such a caller hands work over against the owner's No or approves a plan.
-// Red when: classifyCall stops refusing a call that is not a read when the turn's party is someone else's, or the permission manager's callFacts stops reading turnInputParty, or exec declares heldToBoundary with no sandbox; or causeOfRun counts a caller who is not the owner as the owner, or a Work act stops keeping who caused it before the work runs, or noteCause lets someone else's act take a work from the owner, or lets its start claim work with no cause recorded (the owner's); or capabilities.run runs work.delegate from such a caller without deciding it under the mode or after the owner's No, or stops refusing an answer (work.approve) from such a caller, so it reaches Work.
-// Proves: A capability whose result carries secrets runs, or is put to the owner, for a caller that is not the owner in person (a paired device, its person's press included), or its result is written where that caller reads it.
-// Red when: capabilities.run stops refusing a capability that declares resultSecret (provider.export) for a caller makesOwnerOnlyAct does not name, so the paired laptop's press is asked or runs and writes the file.
-// Proves: A daemon method that loosens a protection in the caller's own project, called directly by an admin credential that is not the owner, runs without being put to the owner or on the owner's No; or the same method for every project (a tool server of no project) is put to the owner instead of refused.
-// Red when: the dispatch stops deciding a method by its risk class (methodCallPutToOwner in daemon/method-owner-decision.ts, or the method call handed through capabilities.run), so the automation token's project tool server is written at once or on the owner's No; or mcp.servers.upsert of scope global stops being owner-act (method-risk.ts BY_CALL) or the dispatch stops refusing such a call before the gate (makesOwnerOnlyAct), so it is asked.
-// Proves: A caller that holds a credential of the owner's program's kind without being the owner's program (the Agent's credential with no registration of the Agent) has a secret result handed back or put to the owner, or an admin that is not the owner mints a credential or the Agent's credential, or has that put to the owner.
-// Red when: capabilities.run stops refusing a capability no model runs (MODEL_NEVER_CAPABILITY_IDS, provider.export) for a call made with an agent credential, so provider.export is asked or runs; or pairing.tokens.create stops being owner-act (method-risk.ts) or the dispatch stops refusing it for a caller makesOwnerOnlyAct does not name, so the automation token's mint is asked or made.
-// Proves: A caller that is not the owner in person has a credential migrated for it, or has that put to the owner, or the owner's own paired device answers a question it raised itself.
-// Red when: pairing.tokens.migrate stops being owner-act or the dispatch stops refusing it before the gate (makesOwnerOnlyAct), so the automation token's migration is asked or made; or a paired device is again the owner in person (ownerHimself, the device class in actor.ts); or the approval actions stop refusing an owner's device a question it or a credential made from it raised (deviceAnswerRefusal).
-// Proves: Under YOLO an admin credential that is not the owner in person changes the owner's password, mints a credential, gives itself a project or stops the daemon, or any of these is put to the owner; or the owner in person cannot make them at once.
-// Red when: local-auth.password or devices.give-project leave OWNER_ONLY_CAPABILITIES, or pairing.tokens.create or services.stop stop being owner-act (method-risk.ts), or capabilities.run or the dispatch stop refusing them before the gate for a caller makesOwnerOnlyAct does not name, so the automation token's press reaches the password method, mints, is given the second project or reaches the service stop under YOLO; or UserAuthManager.rotatePassword stops refusing the owner's account to a request that is not the owner's; or the owner's own session is refused one of them.
-// Proves: A registration presented on another connection, or after its process ended, proves nothing.
-// Red when: ProgramRegistrations.verify stops asking whether the process and the connection that proved a registration are still alive while the socket's step stops ending it when its process or its connection ends (each alone holds it), so a key outlives its program; or the program socket takes an answer to another connection's challenge.
-// Proves: A daemon method call from a caller that is not the owner, handed to the gate and allowed by the owner's mode, is handed to the gate again instead of run, so it never runs and is decided over and over (a decision model's call each time under Jev decides).
+// Proves: A model's capability call that the daemon put to the owner runs although they said No, or without waiting for their answer, or on their yes after plan mode was switched on; or an ask raised over the wire, answered yes and remember, saves a rule or approves another ask; or a model's capability call made inside another tool is not asked as the capability.
+// Red when: capabilities.run stops refusing a call on the gate's No (the `decided.approved` refusal in routes/capabilities.ts), or counts a model's call as decided elsewhere so it runs unasked; or approvals.raise keeps a caller's metadata keys the daemon reads; or the broker remembers or sweeps from a wire-raised record (its remember options and ownerOnly kept, and the wire check in rememberedRule and the sweep dropped); or the gate's yes after a check that failed is no longer judged again against plan mode; or daemonCapabilityRunner sends a wrapper tool's capability straight to the daemon instead of through capability_run.
+// Proves: A turn on a channel guest's or stranger's input runs a tool call that is not a read, or work that a channel guest caused runs its turn as the user's own (a command outside a real sandbox, a file written) before the user approves it.
+// Red when: classifyCall stops refusing a call that is not a read when the turn's party is someone else's, or the permission manager's callFacts stops reading turnInputParty, or exec declares heldToBoundary with no sandbox; or a Work act stops keeping a guest's cause before the work runs, or noteCause lets a guest's act take work the user's own start has taken.
+// Proves: A capability that no model makes (a result carrying secrets) runs, or is put to the owner, for a call made with the Agent's credential, or its result is written where that call reads it.
+// Red when: capabilities.run stops refusing a capability no model runs (MODEL_NEVER_CAPABILITY_IDS, provider.export) for a call made with an agent credential, so provider.export is asked or runs.
+// Proves: A daemon method call from a model, handed to the gate and allowed by the owner's mode, is handed to the gate again instead of run, so it never runs and is decided over and over (a decision model's call each time under Jev decides).
 // Red when: capabilities.run stops counting a handed method call's own risk class among the classes its decision covers, so the dispatch finds the sent memory.records.add undecided and hands it back until the caller's in-flight limit refuses it (503, the stand-in never reached).
 /**
  * `capability_run` is registered as a terminal program registers it, in a
@@ -629,68 +619,4 @@ test('an outside caller\'s call put to the owner waits for them, stores nothing 
   const settledByRule = await answeredWhileWaiting(() => methodPress(OPERATOR_TOKEN, 'project'), false);
   expect(`${settledByRule.status} ${codeOf(settledByRule)}; asked ${settledByRule.asked}; written ${serverWrites.length - writesBefore}`)
     .toBe('403 CAPABILITY_NOT_APPROVED; asked false; written 0');
-});
-
-test('a registration presented on another connection, or after its process ended, proves nothing', async () => {
-  // The daemon's program socket and its registrations, in this process, run as a daemon from source (the test is
-  // the daemon here); the real authentication of the operator token; the other end is a real process of this account
-  // (_helpers/program-socket-peer.ts), run by the same runtime, holding the terminal app's source entry open.
-  const repo = join(import.meta.dir, '..', '..', '..');
-  const daemonHome = join(dir, 'daemon-home');
-  mkdirSync(daemonHome, { recursive: true, mode: 0o700 });
-  const helper = new DaemonControlPlaneHelper({
-    gatewayMethods: new GatewayMethodCatalog(), pairingTokens: new PairingTokenManager(join(dir, 'pairing-tokens.json')),
-    userAuth: new UserAuthManager({ bootstrapFilePath: join(dir, 'users.json'), bootstrapCredentialPath: join(dir, 'bootstrap.txt'), scryptParams: { N: 1024, r: 1, p: 1 } }),
-    controlPlaneGateway: new ControlPlaneGateway({ runtimeBus: new RuntimeEventBus() }),
-    authToken: () => OPERATOR_TOKEN, trustProxyEnabled: () => false, host: '127.0.0.1', port: 0,
-  } as unknown as DaemonControlPlaneContext);
-  const entry = process.argv[1];
-  process.argv[1] = join(repo, 'products', 'daemon', 'src', 'cli', 'entrypoint.ts');
-  cleanups.push(() => { process.argv[1] = entry!; });
-  const registrations = new ProgramRegistrations();
-  let principalId = '';
-  // The daemon's loopback listener as far as a registering program meets it: the door it names its secret at before it
-  // connects, which the socket's proof is made from (program-socket.ts `expectProgramNonce`, the router's door).
-  const listener = Bun.serve({ hostname: '127.0.0.1', port: 0, fetch: async (request) =>
-    new Response(null, { status: expectProgramNonce(((await request.json()) as { nonce?: unknown }).nonce) ? 204 : 400 }) });
-  cleanups.push(() => { void listener.stop(true); });
-  const socket = startProgramSocket(daemonHome, registrations, {
-    authenticate: (token) => {
-      const request = new Request('http://127.0.0.1/api/control-plane/programs', { headers: { authorization: `Bearer ${token}` } });
-      bindLocalOrigin(request);
-      const principal = helper.authenticateRequest(request)?.principal;
-      if (principal) principalId = principal.principalId;
-      return principal ? { principalId: principal.principalId, credentialKind: principal.credentialKind } : undefined;
-    },
-    port: () => listener.port,
-  });
-  cleanups.push(() => socket?.stop());
-  const peer = (mode: string) => {
-    const child = spawn(process.execPath, ['--no-env-file', join(import.meta.dir, '_helpers', 'program-socket-peer.ts'), mode], {
-      env: { ...process.env, GOODVIBES_DAEMON_HOME: daemonHome, PEER_TOKEN: OPERATOR_TOKEN, PEER_PORT: String(listener.port), PEER_ENTRY: join(repo, 'products', 'tui', 'src', 'main.ts') },
-      stdio: ['pipe', 'pipe', 'inherit'],
-    });
-    let out = '';
-    // Its first line, or what it said when it ended without one (so a failing peer fails the case, never holds it).
-    let resolveLine: (line: string) => void = () => {};
-    const line = new Promise<string>((resolve) => { resolveLine = resolve; });
-    child.stdout.on('data', (chunk: Buffer) => { out += chunk.toString(); if (out.includes('\n')) resolveLine(out.trim()); });
-    const ended = new Promise<void>((resolve) => child.on('close', (code) => { resolveLine(`ended ${code}: ${out.trim()}`); resolve(); }));
-    return { child, line, ended };
-  };
-
-  // Its own live process: the registration names the terminal app (the control).
-  const live = peer('live');
-  const key = (await live.line).replace(/^KEY /, '');
-  const whileAlive = registrations.verify(key, principalId, 'local') ?? 'nothing';
-  // The same key once that process has ended.
-  live.child.stdin.end();
-  await live.ended;
-  const afterExit = registrations.verify(key, principalId, 'local') ?? 'nothing';
-  // A connection that answers another connection's challenge.
-  const cross = peer('cross');
-  const crossed = await cross.line;
-  await cross.ended;
-  expect(`while alive ${whileAlive}; after its process ended ${afterExit}; ${crossed}; live registrations ${registrations.count()}`)
-    .toBe('while alive tui; after its process ended nothing; cross refused; live registrations 0');
 });

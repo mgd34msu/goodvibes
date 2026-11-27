@@ -19,7 +19,7 @@ import { GatewayVerbError } from './gateway-verb-error.js';
 import { readInvocationParams, requireStringValue } from './invocation-params.js';
 import { attachHandler } from './attach-handler.js';
 import { currentRecordReach } from '@goodvibes/engine/daemon-api';
-import { folderReach } from '../../workspace/folder-reach.js';
+import { folderReach, forgetProjectMount } from '../../workspace/folder-reach.js';
 import { noteListChanged } from '../../runtime/list-changes.js';
 
 /** The subset of the store the verb handlers need. */
@@ -115,6 +115,8 @@ function createRemoveHandler(service: WorkspacesGatewayService): GatewayMethodHa
     const root = requireStringValue(params.root, 'root');
     try {
       const removed = await service.remove(root);
+      // What is kept of the project's mount (workspace/folder-reach.ts) goes with the project.
+      forgetProjectMount(root);
       noteListChanged({ list: 'workspaces', change: 'deleted' });
       return removed;
     } catch (error) {

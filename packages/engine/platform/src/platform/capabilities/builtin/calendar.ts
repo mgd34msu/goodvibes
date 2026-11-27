@@ -230,7 +230,8 @@ export const CALENDAR_CONNECT: Def = {
   ],
   sentence: 'The daemon signs in to {provider} and reads it beside the calendar on this computer, until you sign out; Google already connected on the Google tab is read with nothing more asked.', done: '',
   touches: 'credential', lasts: 'kept', risk: 'none', undoneBy: 'disconnect',
-  // Signing in keeps a sign-in token: a model's call is put to the owner, opening on No.
+  // Signing in keeps a sign-in token: the owner's alone, as `/calendar connect` was at v3.5.0; a model's call is put to the owner.
+  ownerOnly: { reason: 'signing a calendar account in grants access to it', instead: 'The Calendar accounts list shows what is signed in.' },
   effects: ['control-plane.write', 'secret.write'],
   reveals: SIGN_IN_REVEAL,
   example: { provider: 'google' },
@@ -270,6 +271,8 @@ export const CALENDAR_USE_APP: Def = {
   ],
   sentence: 'Signing in to {provider} uses your own app, client id {clientId}, until you change it.', done: '',
   touches: 'credential', lasts: 'kept', risk: 'none',
+  // The owner's alone, as `/calendar use-app` was at v3.5.0.
+  ownerOnly: { reason: 'it keeps an app credential that signing in to a calendar uses', instead: 'The Calendar accounts list shows what is signed in.' },
   effects: ['control-plane.write', 'secret.write'],
   example: { provider: 'google', clientId: '123-abc.apps.googleusercontent.com' },
   async run(values, services) {
@@ -290,6 +293,8 @@ export const CALENDAR_DISCONNECT: Def = {
   actionId: 'disconnect', word: 'disconnect', label: 'Sign out of a calendar account', inputs: [PROVIDER],
   sentence: 'The daemon signs out of {provider} and forgets its sign-in; its events are no longer read.', done: '',
   touches: 'credential', lasts: 'kept', risk: 'cannot-be-undone', example: { provider: 'google' },
+  // The owner's alone, as `/calendar disconnect` was at v3.5.0.
+  ownerOnly: { reason: 'signing a calendar account out removes its stored sign-in', instead: 'The Calendar accounts list shows what is signed in.' },
   async run(values, services) {
     const provider = providerOf(values.provider);
     const accounts = services.calendarHere.accounts();
@@ -360,6 +365,8 @@ export const CALENDAR_UNSUBSCRIBE: Def = {
   actionId: 'unsubscribe', word: 'unsubscribe', label: 'Stop subscribing to a feed', inputs: [FEED],
   sentence: '{name} is removed with its events and its stored address.', done: '',
   touches: 'this-machine', lasts: 'kept', risk: 'cannot-be-undone', example: { name: 'team' },
+  // The owner's alone, as `/calendar unsubscribe` was at v3.5.0.
+  ownerOnly: { reason: 'it deletes a stored feed address that cannot be recovered from here', instead: 'The Feeds list shows the feeds you subscribe to.' },
   async run(values, services) {
     const result = await services.calendarHere.local().feeds.unsubscribe(values.name ?? '');
     if (!result.removed) throw new CapabilityRefusal(`No feed is named ${values.name}; nothing was removed.`);

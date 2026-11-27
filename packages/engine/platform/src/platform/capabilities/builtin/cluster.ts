@@ -357,10 +357,10 @@ export const CLUSTER_FORGET: Definition = {
   capability: { id: 'cluster.forget', group: 'devices', home: 'daemon', repeat: 'safe' },
   actionId: 'forget', label: 'Remove a machine from the group', word: 'forget',
   inputs: [{ id: 'node', label: 'Machine', help: 'The machine\'s name or id, as the machines in the group show it', kind: 'text', freeTextReason: 'a machine of the group', required: true, typed: { position: 1 } }],
-  // Joining again with the group's new key puts the machine back, so it is not "cannot be undone"; the sentence says
-  // what changes at once (the same reasoning as leaving).
+  // Cannot be undone, as `/cluster forget` was at v3.5.0 (a model's call of it is put to the owner): the keys are replaced at
+  // once, and the machine takes part again only when it joins with the new one.
   sentence: '{node} is removed from the group: the group key and the join key are replaced at once, so it takes no part in the group until it joins again with the new key.', done: '',
-  touches: 'another-machine', lasts: 'kept', risk: 'none', example: { node: 'garage-pi' },
+  touches: 'another-machine', lasts: 'kept', risk: 'cannot-be-undone', example: { node: 'garage-pi' },
   async run(values, services) {
     const forgotten = settled(await verbsOf(services).forget(values.node!, sharingOf(values)));
     return {
@@ -373,9 +373,10 @@ export const CLUSTER_FORGET: Definition = {
 export const CLUSTER_LEAVE: Definition = {
   capability: { id: 'cluster.leave', group: 'devices', home: 'daemon', repeat: 'safe' },
   actionId: 'leave', label: 'Leave the group', word: 'leave', inputs: [],
-  // Joining again with the key undoes it, so it is not "cannot be undone": the sentence says what stops until then.
+  // Cannot be undone, as `/cluster leave` was at v3.5.0 (a model's call of it is put to the owner): the sentence says what stops
+  // until the machine joins again with the group's key.
   sentence: 'This machine leaves its group. Until it joins again with the group\'s key, it takes no part in the group\'s channel work, its settings are no longer kept in step with the group, and it serves its own secure address instead of the group\'s.', done: '',
-  touches: 'another-machine', lasts: 'kept', risk: 'none', example: {},
+  touches: 'another-machine', lasts: 'kept', risk: 'cannot-be-undone', example: {},
   async run(_values, services) {
     const left = settled(await verbsOf(services).leave());
     return { text: `Left "${plain(left.groupName)}". The other machines still list this one until one of them removes it.`, data: { groupId: left.groupId } };

@@ -499,9 +499,9 @@ async function runRemoteMint(input: RunPairCommandInput, target: RemoteDaemonTar
   );
   if (!outcome.ok) return failure(outcome.error, outcome.fix, flags.json, outcome.code);
 
-  // Making a pairing code mints a credential for someone: the owner's own act. A command line never makes it by itself
-  // (anything that can drive a terminal could have typed it): the daemon decided it under the owner's permission mode
-  // (under Ask me this call waited on the owner's one answer), and a refusal came back as one above.
+  // Making a pairing code mints a credential for the user's own device: the user's own act. This typed command carries the machine's
+  // token, which is the user, so the daemon runs it at once in every permission mode and asks nothing more; the only question
+  // is the one asked above on a terminal ("Serve it to your network? [y/N]"), and a refusal came back as one above.
   const data = outcome.data;
   const offerKinds = data.offers.map((offer) => offer.kind).filter(isPairingOfferKind);
   const mintedLine = `minted a new per-device pairing token ("${data.token.name}") on the daemon at ${target.baseUrl}.`;

@@ -400,8 +400,9 @@ export const MAIL_PASSWORD: CapabilityDefinition<MessagesCapabilityServices> = {
   inputs: [{ id: 'password', label: 'Password', help: 'The email account\'s password (an app password for Gmail); it goes to the secret store and is never shown', kind: 'secret', required: true, typed: { position: 1 } }],
   sentence: 'Your email mailbox password is kept in the secret store, until you change it; settings hold only a reference to it.', done: '',
   touches: 'credential', lasts: 'kept', risk: 'none',
-  // Writing a credential: a model's call is put to the owner, opening on No (never refused outright), and a password
-  // the model leaves out is typed by the person on the hidden line.
+  // Writing a credential: the owner's alone, as `/mail password` was at v3.5.0; a model's call is put to the owner, opening on No
+  // (never refused outright), and a password the model leaves out is typed by the person on the hidden line.
+  ownerOnly: { reason: 'it stores the password the mailbox is opened with', instead: 'Mail status says whether a password is stored.' },
   effects: ['control-plane.write', 'secret.write'],
   example: {},
   async run(values, services) {

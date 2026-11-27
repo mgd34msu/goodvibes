@@ -197,6 +197,8 @@ export interface InstallHooks {
   ready?: typeof ready;
   /** Stands in for `goodvibes-daemon refresh-service` (which needs the built daemon): the unit text it would write. */
   renderUnit?: (options: Options) => Promise<string>;
+  /** Stands in for the step that names the workspace to the running daemon and reads that it is ready (needs the built daemon). */
+  registerWorkspace?: Run;
 }
 /** Recovery for the install currently in flight; the failure path and the signal path both run exactly this. */
 let activeRecovery: (() => void) | undefined;
@@ -430,8 +432,13 @@ export async function install(options: Options, hooks: InstallHooks = {}): Promi
         execute('systemctl', ['--user', 'enable', serviceUnit(options)]);
         execute('systemctl', ['--user', 'restart', serviceUnit(options)]);
         await (hooks.ready ?? ready)(options, readFileSync(join(release, 'webui/index.html'), 'utf8'), execute);
-        // Nothing is paired: the terminal app and the Agent on this machine are the owner's own programs by their verified
-        // registration with this daemon (the program socket), so they need no key of their own.
+        // Nothing is paired: the terminal app and the Agent on this machine connect with the machine's own token (the daemon's
+        // operator token in the data folder), so they need no key of their own. What this step does is name the workspace to the
+        // daemon as a project and read that the daemon is ready for work; a failure here rolls the install back, as released.
+        if (hooks.registerWorkspace || !hooks.stage) {
+          const registerArguments = [join(ROOT, 'products/tui/scripts/register-installed-workspace.ts'), options.prefix, options.dataDir, String(options.port), options.workspace ?? ROOT, serviceUnit(options)];
+          (hooks.registerWorkspace ?? execute)(join(release, 'runtime/bun'), registerArguments, { cwd: options.dataDir });
+        }
       } else if (old?.service && present(unitPath(old))) {
         // Absent when the owner already removed it (goodvibes-daemon uninstall-service).
         execute('systemctl', ['--user', 'disable', serviceUnit(old)]);

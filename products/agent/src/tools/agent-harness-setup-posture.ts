@@ -9,7 +9,7 @@ import type { CommandContext } from '../input/command-registry.ts';
 import { requireShellPaths } from '../input/commands/runtime-services.ts';
 import { deriveStep1Capabilities, deriveStep1CapabilityFlags } from '../runtime/onboarding/index.ts';
 import { connectedHostOperatorTokenPath, readConnectedHostOperatorToken } from '@goodvibes/engine/terminal-shell/agent-turn/connected-host-auth';
-import { SETUP_TOPICS } from '@goodvibes/engine/terminal-shell/setup-command';
+import { SETUP_PLACE_TOPICS, SETUP_TOPICS } from '@goodvibes/engine/terminal-shell/setup-command';
 import { resolveGoodVibesDaemonHome } from '@goodvibes/engine/platform/platform/config/goodvibes-home';
 import type { SetupSmokeNativeEvidence } from './agent-setup-smoke-reference.ts';
 import { DEFAULT_AGENT_SETUP_WIZARD_REVIEW_ROUTE, DEFAULT_AGENT_SETUP_WIZARD_RERUN_SMOKE_ROUTE, DEFAULT_AGENT_SETUP_WIZARD_SAVE_SMOKE_ROUTE } from '../agent/setup-wizard.ts';
@@ -60,11 +60,13 @@ export async function setupPostureCatalogStatus(context: CommandContext, options
   const setupWizard = buildSetupWizard(plan, context, smoke);
   return caller.publish({
     modes: ['setup_posture', 'setup_item', 'setup_repair', 'provision_connected_host_token', 'run_setup_smoke'],
-    // What the person sets up, one topic at a time: each a row of System's Setup tab and the capability setup.<topic>
-    // (a provider of your own is Models and providers' provider.add).
+    // What the person sets up, one topic at a time: each a row of System's Setup tab and, but for the rows that only open
+    // a place, the capability setup.<topic> (a provider of your own is Models and providers' provider.add).
     setupTopics: Object.values(SETUP_TOPICS).map((topic) => (topic.word === 'add-provider'
       ? { label: topic.label, control: 'Models and providers, n', capability: 'provider.add' }
-      : { label: topic.label, control: 'System, Setup', capability: `setup.${topic.word}` })),
+      : topic.word in SETUP_PLACE_TOPICS
+        ? { label: topic.label, control: 'System, Setup' }
+        : { label: topic.label, control: 'System, Setup', capability: `setup.${topic.word}` })),
     capabilities: capabilities.length,
     planItems: plan.length,
     blockedPlanItems: plan.filter((item) => item.status === 'blocked').length,

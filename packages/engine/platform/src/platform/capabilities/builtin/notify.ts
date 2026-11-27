@@ -83,7 +83,7 @@ export const NOTIFY_LIST: CapabilityDefinition<NotifyCapabilityServices> = {
     return {
       text: [`Notifications go to ${entries.length} address${entries.length === 1 ? '' : 'es'}:`,
         ...addresses.map((entry) => `  ${entry.number}. ${entry.shown}${entry.readable ? '' : ' (its stored address could not be read; nothing is sent to it)'}`),
-        ...(complete.length > 0 ? ['The full addresses are shown once, in the pane.'] : [])].join('\n'),
+        ...(complete.length > 0 ? ['The full addresses are in the pane, not in these words.'] : [])].join('\n'),
       data: { addresses },
       ...(complete.length > 0 ? { reveal: { value: complete.join('\n') } } : {}),
     };

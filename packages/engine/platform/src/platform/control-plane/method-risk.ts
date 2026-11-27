@@ -165,8 +165,9 @@ const DECLARED: Readonly<Record<string, MethodRisk>> = {
   // Memory records steer the owner's turns (the capability layer's `steersModel`).
   'memory.vector.rebuild': N, 'memory.embeddings.default.set': N, 'memory.records.add': T, 'memory.records.update-review': T,
   'memory.records.delete': U, 'memory.records.import': T, 'memory.records.update': T, 'memory.records.links.add': T,
-  // Models and providers (provider.finish is the owner's own act; an API key is a secret).
-  'models.current.set': N, 'models.refresh': N, 'providers.subscription.signIn.begin': O, 'providers.subscription.signIn.finish': O,
+  // Models and providers (a subscription sign-in, begun or finished, was a judgment of a model's call at v3.5.0, class none; an API
+  // key is a secret).
+  'models.current.set': N, 'models.refresh': N, 'providers.subscription.signIn.begin': N, 'providers.subscription.signIn.finish': N,
   'providers.apiKey.set': S,
   // Batches spend provider money.
   'batch.jobs.create': M, 'batch.jobs.cancel': N, 'batch.providerBatches.cancel': N, 'batch.run': M,
@@ -342,7 +343,7 @@ export const OWNER_ONLY_CAPABILITIES: Readonly<Record<string, OwnerOnlyArea>> = 
   // Secrets: written, linked, trusted, removed or read out.
   'secrets.set': 'secrets', 'secrets.link': 'secrets', 'secrets.trust': 'secrets', 'secrets.delete': 'secrets',
   'provider.add': 'secrets', 'provider.remove': 'secrets', 'provider.import': 'secrets', 'provider.export': 'secrets',
-  'provider.sign-out': 'secrets', 'provider.sign-in': 'secrets', 'provider.finish': 'secrets',
+  'provider.sign-out': 'secrets',
   'services.trust': 'secrets', 'services.import': 'secrets',
   'mail.password': 'secrets', 'mail.setup': 'secrets', 'calendar.connect': 'secrets', 'calendar.use-app': 'secrets', 'calendar.disconnect': 'secrets',
   'channels.connect': 'secrets', 'notify.add': 'secrets', 'notify.remove': 'secrets', 'notify.clear': 'secrets',
@@ -355,7 +356,7 @@ export const OWNER_ONLY_CAPABILITIES: Readonly<Record<string, OwnerOnlyArea>> = 
   'payments.approve': 'money', 'payments.repeat': 'money', 'work.budget': 'money',
   // The permission mode and rules, and the protections every turn runs under.
   'permissions.place': 'permissions', 'permissions.revoke': 'permissions', 'security.trust-folder': 'permissions',
-  'security.load-policy': 'permissions', 'security.enforce-policy': 'permissions', 'security.restore-policy': 'permissions',
+  'security.enforce-policy': 'permissions', 'security.restore-policy': 'permissions',
   'security.host-mcp': 'permissions', 'security.host-commands': 'permissions', 'security.save-trust': 'permissions',
   // Managed locks.
   'managed.apply': 'settings', 'managed.apply-staged': 'settings', 'managed.unlock': 'settings', 'managed.lock': 'settings',
@@ -369,7 +370,7 @@ export const OWNER_ONLY_CAPABILITIES: Readonly<Record<string, OwnerOnlyArea>> = 
   'my-skills.delete': 'tools', 'my-skills.import-discovered': 'tools', 'my-skills.import-standard': 'tools',
   'my-skills.bundle-create': 'tools', 'my-skills.bundle-update': 'tools', 'my-skills.bundle-enable': 'tools',
   'my-skills.bundle-disable': 'tools', 'my-skills.bundle-delete': 'tools', 'skills.publish-local': 'tools', 'skills.unpublish': 'tools',
-  'plugin.enable': 'tools', 'plugin.disable': 'tools', 'plugin.trust': 'tools', 'plugin.trust-key': 'tools',
+  'plugin.disable': 'tools', 'plugin.trust': 'tools',
   'plugin.publish-local': 'tools', 'plugin.unpublish': 'tools', 'marketplace.install': 'tools', 'marketplace.update': 'tools',
   'marketplace.rollback': 'tools', 'marketplace.uninstall': 'tools', 'marketplace.bundle-import': 'tools',
   'mcp.exempt': 'tools', 'mcp.unexempt': 'tools', 'mcp.trust': 'tools', 'mcp.role': 'tools',
@@ -429,7 +430,7 @@ const SETTINGS_WRITE_CAPABILITY_IDS: ReadonlySet<string> = new Set([
 ]);
 /** The capabilities that write the hooks, tool servers or rules of the project the call names, or the daemon's own with none. */
 const PROJECT_OR_OWN_CAPABILITY_IDS: ReadonlySet<string> = new Set([
-  'hooks.enable', 'hooks.disable', 'hooks.scaffold', 'hooks.chain', 'hooks.remove', 'hooks.import', 'mcp.add', 'mcp.remove',
+  'hooks.enable', 'hooks.disable', 'hooks.scaffold', 'hooks.chain', 'hooks.remove', 'hooks.import', 'mcp.remove',
 ]);
 
 /**
@@ -449,7 +450,7 @@ export function ownerOnlyCapabilityCall(id: string, values: Readonly<Record<stri
   if (SETTINGS_WRITE_CAPABILITY_IDS.has(id) && facts.loosens) return 'settings';
   if (PROJECT_OR_OWN_CAPABILITY_IDS.has(id)) {
     if (!facts.workingDirectory) return 'tools';
-    if ((id === 'mcp.add' || id === 'mcp.remove') && (values['scope'] ?? 'project') !== 'project') return 'tools';
+    if (id === 'mcp.remove' && (values['scope'] ?? 'project') !== 'project') return 'tools';
     return undefined;
   }
   if (id === 'devices.take-project' || id === 'devices.take-shared') {
@@ -468,7 +469,7 @@ export function ownerOnlyCapabilityCall(id: string, values: Readonly<Record<stri
 export const MODEL_NEVER_CAPABILITY_IDS: ReadonlySet<string> = new Set([
   'devices.migrate-shared', 'devices.give-project', 'devices.give-shared', 'devices.revoke-shared', 'devices.approve', 'devices.reject',
   'provider.export', 'cluster.key', 'cluster.join', 'cluster.accept', 'secrets.trust', 'permissions.place', 'permissions.revoke',
-  'security.load-policy', 'security.enforce-policy', 'security.restore-policy', 'workspaces.register',
+  'security.enforce-policy', 'security.restore-policy', 'workspaces.register',
 ]);
 
 /** The class of one call of a method: by its body where the table says the body decides, else the descriptor's. */

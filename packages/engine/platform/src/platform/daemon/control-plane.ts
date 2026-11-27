@@ -1808,16 +1808,18 @@ export class DaemonControlPlaneHelper {
       && (credential !== 'user-session' && credential !== 'device-token' && credential !== 'local')) {
       context = { ...context, explicitUserRequest: undefined };
     }
-    // A model never makes what the effect table says no model causes (granting or withdrawing access, a sign-in, a
-    // credential, a pairing, the permission rules, a card): refused for any model in every mode, the owner's own turn
-    // included, whatever its call was decided as or carries (a grant from the owner's yes included). Answers keep their own rule.
+    // A model never makes what the effect table says no model causes (the acts v3.5.0 refused a model on this route:
+    // granting or withdrawing access, a sign-in, a credential, a pairing, the permission rules, a card): refused for any
+    // model in every mode, the user's own turn included, whatever its call was decided as or carries (a grant from the
+    // user's yes included). Answers keep their own rule. Every other act a model asks for is decided by the permission mode.
     // Before anything else is decided (a first use, a project, the gate), so it is never put to anyone.
     if (!ANSWER_METHOD_IDS.has(descriptor.id) && this.modelBehind(input, authenticated)
       && ((descriptor.effects ?? []).some(modelNeverMakes) || this.namesPermissionSettings(descriptor.id, input.body))) {
       return { status: 403, ok: false, body: refusalBody(modelNeverWords(`${descriptor.title} (${descriptor.id})`), MODEL_NEVER, 403) };
     }
-    // An act only the owner makes (method-risk.ts `owner-act`; a write of the permission mode or rules): refused for anyone
-    // but the owner in person and their own model's turn, in every mode, before anything is decided or put to anyone
+    // An act only the user makes (method-risk.ts `owner-act`; a write of the permission mode or rules): the user makes it from
+    // any credential and the user's own model in the user's own turn under the mode; a guest, a peer and a model on someone
+    // else's input are refused, in every mode, before anything is decided or put to anyone
     // (method-owner-decision.ts `makesOwnerOnlyAct`).
     if ((methodCallRisk(descriptor, input.body) === 'owner-act' || this.namesPermissionSettings(descriptor.id, input.body))
       && !makesOwnerOnlyAct({ actor: authenticated?.actor, credentialKind: credential ?? undefined,

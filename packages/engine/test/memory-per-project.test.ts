@@ -65,7 +65,7 @@ test('a project\'s memory is given to work in that project only, and none is kep
     // The daemon's one check of the project a caller names, as every daemon composes it (facade-composition.ts).
     callerProject: daemonCallerProjectCheck(home),
   } as unknown as DaemonControlPlaneContext);
-  // The owner in person: their signed-in session (the account made at first start). The operator token alone is a script.
+  // The user's own signed-in session (the account made at first start).
   const ownerName = userAuth.ownerUsername();
   if (ownerName === null) throw new Error('the user store made no owner account at first start');
   const owner = userAuth.createSession(ownerName).token;

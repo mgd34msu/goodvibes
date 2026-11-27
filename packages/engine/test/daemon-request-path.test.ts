@@ -1,5 +1,5 @@
 // Proves: A request with no credential reaches an API route, or a caller below the right class reaches a method by its REST address, its operator method or a socket call that names a method and path.
-// Red when: The daemon's request path stops authenticating before routing, or one of the three routes to a method stops asking the effect authority, so a viewer creates a user or an admin who is not the owner answers the owner's approval.
+// Red when: The daemon's request path stops authenticating before routing, or one of the three routes to a method stops asking the effect authority, so a viewer creates a user or answers an approval.
 // Proves: A page from another origin acts through the daemon riding a browser cookie: it changes something, reads the event stream or signs the owner out with the sign-in cookie, or acts as the paired device node with its cookie.
 // Red when: The request path stops refusing a write or a read authenticated by the sign-in cookie, the sign-out on that cookie, or a peer call on the device-node cookie, from a page whose origin is neither the daemon's own nor on the allowed list (or, for a change, from no origin).
 /**
@@ -36,8 +36,6 @@ afterEach(() => { rmSync(dir, { recursive: true, force: true }); });
 function daemon() {
   const userAuth = new UserAuthManager({ bootstrapFilePath: join(dir, 'users.json'), bootstrapCredentialPath: join(dir, 'bootstrap.txt'), scryptParams: { N: 1024, r: 1, p: 1 } });
   userAuth.addUser('viewer', 'viewer-password', ['viewer']);
-  // An admin who is not the owner (the owner is the first user, `admin`).
-  userAuth.addUser('deputy', 'deputy-password', ['admin']);
   const catalog = new GatewayMethodCatalog();
   const runtimeBus = new RuntimeEventBus();
   // The daemon's own settings manager: it owns the daemon's settings file.
@@ -74,7 +72,7 @@ function socketCall(helper: DaemonControlPlaneHelper, token: string, path: strin
 
 const codeOf = (body: unknown): string | undefined => (body as { code?: string } | null)?.code;
 
-test('no credential is refused before any route; a viewer is refused an admin method and an admin who is not the owner the owner\'s act, by REST, operator method and socket call', async () => {
+test('no credential is refused before any route; a viewer is refused an admin method and the answer to an approval, by REST, operator method and socket call', async () => {
   const { userAuth, helper, router } = daemon();
   const viewer = userAuth.createSession('viewer').token;
   const newUser = { username: 'mallory', password: 'mallory-password', roles: ['admin'] };
@@ -102,10 +100,9 @@ test('no credential is refused before any route; a viewer is refused an admin me
       socket: refused(viaSocket.status, codeOf(viaSocket.body)),
     };
   };
-  const deputy = userAuth.createSession('deputy').token;
-  expect(await answer(deputy)).toEqual({ rest: 'refused OWNER_ONLY', method: 'refused OWNER_ONLY', socket: 'refused OWNER_ONLY' });
-  // The control: the owner in person, their signed-in session (the account made at first start), is not refused the same act
-  // on any route (the approvals beyond are not composed). The operator token alone is a script, never the owner.
+  expect(await answer(viewer)).toEqual({ rest: 'refused OWNER_ONLY', method: 'refused OWNER_ONLY', socket: 'refused OWNER_ONLY' });
+  // The control: the user's own signed-in session (the account made at first start) is not refused the same act on any
+  // route (the approvals beyond are not composed).
   const ownerName = userAuth.ownerUsername();
   if (ownerName === null) throw new Error('the user store made no owner account at first start');
   expect(await answer(userAuth.createSession(ownerName).token)).toEqual({ rest: 'not refused', method: 'not refused', socket: 'not refused' });

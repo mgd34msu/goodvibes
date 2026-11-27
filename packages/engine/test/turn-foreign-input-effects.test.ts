@@ -1,12 +1,12 @@
-// Proves: Under Just YOLO a turn on someone else's input (a member's or a device's chat, a channel message, an outside agent) sends the owner's stored service credential with a fetch.
-// Red when: The fetch tool attaches a registered service's stored credential without asking whose turn it is (tools/fetch/runtime.ts prepareFetchRequest stops calling security/stored-credentials.ts storedCredentialRefusal), so the member's fetch reaches the loopback server with the owner's credential.
-// Proves: Under Just YOLO a turn on someone else's input changes files through a command: deletes its project's files or writes into the owner's writable extra folder.
-// Red when: The exec runtime builds that turn's sandbox plan writable again (tools/exec/runtime.ts stops passing turnWritesNoFile() to resolveRuntimeSandboxPlan, or sandbox.ts binds the workspace or the owner's sandbox.workspaceWritable extras writable for it), so the member's `rm` deletes the project's file or its `echo` lands in the extra folder.
+// Proves: Under Just YOLO a turn on a channel guest's or stranger's input (a channel message, a webhook) sends the user's stored service credential with a fetch.
+// Red when: The fetch tool attaches a registered service's stored credential without asking whose turn it is (tools/fetch/runtime.ts prepareFetchRequest stops calling security/stored-credentials.ts storedCredentialRefusal), so the guest's fetch reaches the loopback server with the user's credential.
+// Proves: Under Just YOLO a turn on a channel guest's or stranger's input changes files through a command: deletes its project's files or writes into the user's writable extra folder.
+// Red when: The exec runtime builds that turn's sandbox plan writable again (tools/exec/runtime.ts stops passing turnWritesNoFile() to resolveRuntimeSandboxPlan, or sandbox.ts binds the workspace or the user's sandbox.workspaceWritable extras writable for it), so the guest's `rm` deletes the project's file or its `echo` lands in the extra folder.
 /**
  * The registry every app composes (composeRuntimeServices, registerAllTools, the one turn loop and executor), under Just
- * YOLO. One turn is the owner's own (withOwnerInput), one someone else's (withOtherPartyInput, as the web chat marks a
- * member's message). Only the model's responses are scripted; the owner is a recorder that refuses; the service is a
- * loopback server that records the credential each request carried.
+ * YOLO. One turn is the user's own (withOwnerInput), one a channel guest's (withOtherPartyInput, as a channel message
+ * from a stranger is marked). Only the model's responses are scripted; the owner is a recorder that refuses; the service is
+ * a loopback server that records the credential each request carried.
  */
 import { afterEach, beforeEach, expect, test } from 'bun:test';
 import { existsSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
@@ -50,7 +50,7 @@ afterEach(async () => {
 });
 
 /** The registry under Just YOLO in `workingDir`, with `settings` for the owner, and one turn per call. */
-async function registry(settings: Record<string, unknown>, services?: Record<string, unknown>): Promise<{ readonly member: (call: ToolCall) => Promise<string>; readonly owner: (call: ToolCall) => Promise<string>; readonly workingDir: string }> {
+async function registry(settings: Record<string, unknown>, services?: Record<string, unknown>): Promise<{ readonly guest: (call: ToolCall) => Promise<string>; readonly owner: (call: ToolCall) => Promise<string>; readonly workingDir: string }> {
   const workingDir = join(root, 'alpha');
   const homeDirectory = join(root, 'home');
   for (const folder of [workingDir, homeDirectory]) mkdirSync(folder, { recursive: true });
@@ -101,42 +101,42 @@ async function registry(settings: Record<string, unknown>, services?: Record<str
     return results.map((result) => `${result.output ?? ''}${result.error ?? ''}`).join('');
   };
   return {
-    member: (call) => withOtherPartyInput('a member of this daemon', () => run(call)),
+    guest: (call) => withOtherPartyInput('a message on a channel', () => run(call)),
     owner: (call) => withOwnerInput(() => run(call)),
     workingDir,
   };
 }
 
-test("under Just YOLO someone else's turn sends no stored service credential; the owner's turn does", async () => {
+test("under Just YOLO a channel guest's turn sends no stored service credential; the user's turn does", async () => {
   const arrived: string[] = [];
   const server = Bun.serve({ hostname: '127.0.0.1', port: 0, fetch: (request) => { arrived.push(request.headers.get('authorization') ?? ''); return new Response('a private page\n'); } });
   disposables.defer(() => server.stop(true));
   const origin = `http://127.0.0.1:${server.port}`;
-  const { member, owner } = await registry({ fetch: { allowLocalhost: true } }, { vault: { name: 'vault', baseUrl: origin, authType: 'bearer', tokenKey: CREDENTIAL_ENV } });
+  const { guest, owner } = await registry({ fetch: { allowLocalhost: true } }, { vault: { name: 'vault', baseUrl: origin, authType: 'bearer', tokenKey: CREDENTIAL_ENV } });
   const fetchWithService = (): ToolCall => ({ id: 'fetch-1', name: 'fetch', arguments: { urls: [{ url: `${origin}/private`, service: 'vault' }] } });
   const sent = (headers: readonly string[]): string => (headers.some((header) => header.includes(CREDENTIAL)) ? 'credential sent' : 'no credential sent');
-  // Rows: the member's turn; the control, the owner's own turn with the same call.
-  await member(fetchWithService());
-  const byMember = arrived.splice(0);
+  // Rows: the guest's turn; the control, the user's own turn with the same call.
+  await guest(fetchWithService());
+  const byGuest = arrived.splice(0);
   await owner(fetchWithService());
   const byOwner = arrived.splice(0);
-  expect([`member: ${sent(byMember)}`, `owner: ${sent(byOwner)}`]).toEqual(['member: no credential sent', 'owner: credential sent']);
+  expect([`guest: ${sent(byGuest)}`, `owner: ${sent(byOwner)}`]).toEqual(['guest: no credential sent', 'owner: credential sent']);
 });
 
-test("under Just YOLO someone else's turn changes no file by a command; the owner's command writes", async () => {
+test("under Just YOLO a channel guest's turn changes no file by a command; the user's command writes", async () => {
   const extra = join(root, 'shared-lib');
   mkdirSync(extra, { recursive: true });
-  const { member, owner, workingDir } = await registry({ sandbox: { enabled: true, workspaceWritable: [extra] } });
+  const { guest, owner, workingDir } = await registry({ sandbox: { enabled: true, workspaceWritable: [extra] } });
   // On a host with no working boundary such a turn runs no command at all (the same rows hold).
   mkdirSync(join(workingDir, 'src'), { recursive: true });
   writeFileSync(join(workingDir, 'src', 'main.ts'), 'export {};\n');
   const exec = (cmd: string): ToolCall => ({ id: 'exec-1', name: 'exec', arguments: { commands: [{ cmd }] } });
-  await member(exec('rm -rf src'));
-  await member(exec(`echo member > ${join(extra, 'from-member.txt')}`));
+  await guest(exec('rm -rf src'));
+  await guest(exec(`echo guest > ${join(extra, 'from-guest.txt')}`));
   await owner(exec(`echo owner > ${join(extra, 'from-owner.txt')}`));
   expect([
-    `member rm: ${existsSync(join(workingDir, 'src', 'main.ts')) ? 'kept' : 'deleted'}`,
-    `member into the extra: ${existsSync(join(extra, 'from-member.txt')) ? 'written' : 'not written'}`,
+    `guest rm: ${existsSync(join(workingDir, 'src', 'main.ts')) ? 'kept' : 'deleted'}`,
+    `guest into the extra: ${existsSync(join(extra, 'from-guest.txt')) ? 'written' : 'not written'}`,
     `owner into the extra: ${existsSync(join(extra, 'from-owner.txt')) ? 'written' : 'not written'}`,
-  ]).toEqual(['member rm: kept', 'member into the extra: not written', 'owner into the extra: written']);
+  ]).toEqual(['guest rm: kept', 'guest into the extra: not written', 'owner into the extra: written']);
 });

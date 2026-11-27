@@ -331,8 +331,13 @@ export function classifyCall(mode: GatePresetName, facts: CallFacts): CallClass 
     } };
   }
   // A call that will be refused whatever anyone answers is refused here, before any question: the owner is never asked
-  // for nothing. A channel conversation with no project changes nothing (channels/channel-project.ts).
-  if (facts.channelWithoutProject !== undefined) {
+  // for nothing. A channel conversation with no project changes nothing (channels/channel-project.ts). The two rows the owner
+  // answers on a card as released (a guest's read that is not a plain read, row P3; a change asked on a channel the owner set
+  // up, row P4) are put to the owner first: v3.5.0 had no such refusal, and the card is the owner's to answer.
+  const guestReadCard = isGuestSurfaceId(facts.surface) && facts.category === 'read' && !plainRead(facts);
+  const channelChangeCard = mode !== 'plan' && facts.surface !== undefined && facts.category !== 'read'
+    && !surfaceCarriesCommandAuthority(facts.surface) && surfaceRequestsReachOwner(facts.surface);
+  if (facts.channelWithoutProject !== undefined && !guestReadCard && !channelChangeCard) {
     return { kind: 'fact', allow: false, basis: 'surface', decision: {
       state: 'refused', decidedBy: 'code', reason: facts.channelWithoutProject,
       next: ['say what you would change instead', 'the owner chooses a project for this channel'],

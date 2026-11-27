@@ -142,9 +142,8 @@ export function ownersProgramCaller(caller: Pick<CallerFacts, 'actor' | 'credent
 /**
  * The user's command line (`do`, `find` of the product's own binary, with the operator token of this machine, a program's
  * registration or none). It is the user: it names the folder it was typed in as the terminal app does, reaches what the user
- * reaches there, and makes the acts only the user makes ({@link makesOwnerOnlyAct}). Whether a risky capability it sends is
- * held for the owner's gate is the capability layer's own rule (capabilities/command-line-hold.ts, control-plane/routes/
- * capabilities.ts), not decided here.
+ * reaches there, and makes the acts only the user makes ({@link makesOwnerOnlyAct}). Nothing it sends is held for a question:
+ * a typed `do` runs at once in every permission mode, as the user's own typed command does.
  */
 export function ownersCommandLine(caller: Pick<CallerFacts, 'actor' | 'credentialKind' | 'registration'>): boolean {
   return caller.credentialKind === 'local' && isTheUser(caller.actor);
@@ -224,8 +223,8 @@ export function methodCallPutToOwner(facts: MethodCallFacts): Exclude<MethodRisk
   if (facts.ownerApproved || facts.decidedUpstream || facts.decidedInRun || facts.decidedByProgramGate) return undefined;
   // A natively admitted method is decided by its native admission, for the owner's own Agent program only.
   if (ownersAgentProgram(facts) && NATIVELY_ADMITTED_METHOD_IDS.has(facts.methodId)) return undefined;
-  // The owner's own Agent has its credential made (its own act, for its own program: the credential works as the owner's
-  // model only with that program's registration); anyone else asking for one is refused before this (dispatch).
+  // The user's own Agent has its credential made (its own act, for its own program; a program's registration decides
+  // nothing); a model asking for one is refused before this (dispatch).
   if (facts.agentCredentialMint === true && mintsAgentCredential(facts)) return undefined;
   return callerAdmitted(facts, risk) ? undefined : risk;
 }
@@ -234,8 +233,9 @@ export function methodCallPutToOwner(facts: MethodCallFacts): Exclude<MethodRisk
  * The methods and capabilities that answer a question addressed to the owner: an approval (approve, deny), an inbox
  * question, a contract's escalation, a piece of work's question or plan, a device or a machine waiting to pair, a held
  * channel message, a purchase window, a conversation rewind request, a tidying proposal. Answering is never itself a
- * question: the owner's own press in their own program, or their sign-in, answers at once; anyone else is refused
- * (`ownerAnswerRefusal`), never put to the owner, so no question waits on another one for ever.
+ * question: the user answers at once from any of their credentials (a sign-in, a device, the machine's token, a program of
+ * theirs); a model, a guest or a peer is refused (`ownerAnswerRefusal`), never put to the user, so no question waits on
+ * another one for ever.
  */
 export { ANSWER_METHOD_IDS };
 /**
@@ -299,7 +299,7 @@ export function makesOwnerOnlyAct(caller: Pick<CallerFacts, 'actor' | 'credentia
   return caller.ownersOwnTurn === true;
 }
 
-/** The code of an owner-only act refused for a caller that is not the owner in person. */
+/** The code of an owner-only act refused for a caller that is not the user: a guest, a peer, or a model that never makes it. */
 export const OWNER_ONLY_ACT = 'OWNER_ONLY_ACT';
 
 /** The one sentence of that refusal: what it was, that only the owner does it, and where the owner does it. */
@@ -307,7 +307,12 @@ export function ownerOnlyActWords(what: string, where: string): string {
   return `${what} is done only by the owner in person, in ${where}; this caller is not the owner. Nothing was done, and nothing was put to the owner.`;
 }
 
-/** The code of an act a model never makes (the effect table's `model.refused`), refused in every mode. */
+/**
+ * The code of an act a model never makes (the effect table's `model.refused`), refused in every mode: only the acts the
+ * released v3.5.0 refused a model on the route a model had (an operator method), such as granting or withdrawing access,
+ * a sign-in, a credential, a pairing and the permission rules. A model's call of anything else is decided by the five
+ * permission modes.
+ */
 export const MODEL_NEVER = 'MODEL_NEVER';
 /** Its one sentence. */
 export function modelNeverWords(what: string): string {

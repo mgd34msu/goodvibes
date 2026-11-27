@@ -16,8 +16,6 @@
 import { afterEach, beforeEach, expect, test } from 'bun:test';
 import { mkdirSync, mkdtempSync, rmSync } from 'node:fs';
 import { daemonCallerProjectCheck } from '../platform/src/platform/daemon/facade-composition.ts';
-import { CallerProjectsStore } from '../platform/src/platform/workspace/caller-projects-store.ts';
-import { resolveGoodVibesDaemonHome } from '../platform/src/platform/config/goodvibes-home.ts';
 import { WorkspaceRegistrationStore } from '../platform/src/platform/workspace/registration/store.ts';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -63,10 +61,10 @@ function daemon() {
     controlPlaneGateway: new ControlPlaneGateway({ runtimeBus: new RuntimeEventBus() }),
     authToken: () => 'fixture-operator-token', trustProxyEnabled: () => false, host: '127.0.0.1', port: 0,
     dispatchApiRoutes: taskRoutes,
-    // The daemon's one project check, over the projects the owner gave each caller (a store in this daemon home).
+    // The daemon's one project check, over the registered projects.
     callerProject: daemonCallerProjectCheck(dir),
   } as unknown as DaemonControlPlaneContext);
-  // The owner in person: their signed-in session, the account made at first start (another admin is not the owner).
+  // The user's own signed-in session, the account made at first start.
   const ownerName = userAuth.ownerUsername();
   if (ownerName === null) throw new Error('the user store made no owner account at first start');
   const owner = userAuth.createSession(ownerName).token;
@@ -137,8 +135,8 @@ const OPEN_TO_NON_ADMIN: ReadonlyMap<string, string> = new Map([
   ['checkin.config.get', 'check-in settings and whether the schedule is installed'],
   ['ci.status', 'job conclusions of a repository ref'],
   ['ci.watches.list', 'standing CI watches and their states'],
-  // A person's own web chat is one permission with making it: the record reach keeps a caller that is not the owner to
-  // the chats it made (caller-reach.ts `madeBy: 'required'`); anyone else's still needs read:transcripts.
+  // A person's own web chat is one permission with making it: a sign-in with the sessions scopes reads the chats it made
+  // (effect-authority.ts `chat.read`); anyone else's still needs read:transcripts.
   ['companion.chat.events.stream', 'only the caller\'s own web chat\'s live frames'],
   ['companion.chat.messages.list', 'only the caller\'s own web chat\'s messages'],
   ['companion.chat.messages.search', 'only the caller\'s own web chats are searched'],
@@ -239,12 +237,11 @@ const OPEN_TO_NON_ADMIN: ReadonlyMap<string, string> = new Map([
 
 test('a non-admin user reads task counts and states but not an agent task\'s prompt or error', async () => {
   const d = daemon();
-  // The task runs in a project the owner gave the viewer: the list is the viewer's to read, its prompt and error never.
+  // The task runs in a registered project: the list is the viewer's to read, its prompt and error never.
   const project = join(dir, 'project');
   mkdirSync(project, { recursive: true });
   await new WorkspaceRegistrationStore({ path: join(dir, '.goodvibes', 'shared', 'workspace-registrations.json'), homeDir: dir,
     daemonStateDir: join(dir, '.goodvibes') }).add(project);
-  new CallerProjectsStore(resolveGoodVibesDaemonHome(dir)).set('viewer', [project]);
   d.catalog.setRecordOwner('task', (id) => (id === 'task-1' ? { project } : undefined));
   const prompt = 'Draft the reply to my lawyer about the custody hearing';
   d.tasks.snapshot = {

@@ -462,13 +462,16 @@ export function ownerOnlyCapabilityCall(id: string, values: Readonly<Record<stri
 
 /**
  * The capabilities a model never runs, whoever's turn it is and in every mode (the effect table's `model.refused`,
- * added to their effects by capabilities/catalog.ts `capabilityEffects`): granting or withdrawing access, minting or
- * carrying out a credential, pairing a device, reading out a secret, the permission rules. A model's call of one is
- * refused at its turn's gate and at the daemon; nothing is asked.
+ * added to their effects by capabilities/catalog.ts `capabilityEffects`): the acts the released v3.5.0 refused a model
+ * on the route a model had (an operator method): granting or withdrawing access, carrying out a credential, pairing a
+ * device, reading out a secret, the permission rules. A model's call of one is refused at its turn's gate and at the
+ * daemon; nothing is asked. `cluster.key`, `cluster.join` and `cluster.accept` are not listed: v3.5.0 refused a model
+ * none of them, so a model's call of each is decided by the permission mode like any other call (the key and the
+ * accepting of a group's value are owner items, joining a group is a judgment).
  */
 export const MODEL_NEVER_CAPABILITY_IDS: ReadonlySet<string> = new Set([
   'devices.migrate-shared', 'devices.give-project', 'devices.give-shared', 'devices.revoke-shared', 'devices.approve', 'devices.reject',
-  'provider.export', 'cluster.key', 'cluster.join', 'cluster.accept', 'secrets.trust', 'permissions.place', 'permissions.revoke',
+  'provider.export', 'secrets.trust', 'permissions.place', 'permissions.revoke',
   'security.enforce-policy', 'security.restore-policy', 'workspaces.register',
 ]);
 

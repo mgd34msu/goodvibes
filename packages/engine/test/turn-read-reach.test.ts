@@ -1,9 +1,9 @@
-// Proves: Under Just YOLO a turn on someone else's input (a member's or a device's chat, a channel message, an outside agent) reads another project's files or GoodVibes' own home through the read and find tools.
-// Red when: The registry's outside-the-project switch (tools/index.ts allowOutsideProject) follows the mode alone again, or the path check (utils/path-safety.ts refuseProductHome) stops keeping the product's homes out of a widened read, so the member's turn reads the sibling folder's secret or the owner's turn reads a file in the GoodVibes home.
+// Proves: Under Just YOLO a turn on a channel guest's or stranger's input (a channel message, a webhook) reads another project's files or GoodVibes' own home through the read and find tools.
+// Red when: The registry's outside-the-project switch (tools/index.ts allowOutsideProject) follows the mode alone again, or the path check (utils/path-safety.ts refuseProductHome) stops keeping the product's homes out of a widened read, so the guest's turn reads the sibling folder's secret or the user's turn reads a file in the GoodVibes home.
 /**
  * The registry every app composes (composeRuntimeServices, registerAllTools, the one turn loop and executor), under Just
- * YOLO. One turn reads as the owner's own (withOwnerInput), one as someone else's (withOtherPartyInput, as the web chat
- * marks a member's message). Only the model's responses are scripted; the owner is a recorder that refuses.
+ * YOLO. One turn reads as the user's own (withOwnerInput), one as a channel guest's (withOtherPartyInput, as a channel
+ * message from a stranger is marked). Only the model's responses are scripted; the owner is a recorder that refuses.
  */
 import { afterEach, beforeEach, expect, test } from 'bun:test';
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
@@ -44,7 +44,7 @@ afterEach(async () => {
   rmSync(homeProbe, { force: true });
 });
 
-test("under Just YOLO someone else's turn reads only its project; the owner's reads beside it but never the product's home", async () => {
+test("under Just YOLO a channel guest's turn reads only its project; the user's reads beside it but never the product's home", async () => {
   const workingDir = join(root, 'alpha');
   const homeDirectory = join(root, 'home');
   const beside = join(root, 'beta');
@@ -104,23 +104,23 @@ test("under Just YOLO someone else's turn reads only its project; the owner's re
   };
   const read = (path: string): ToolCall => ({ id: 'read-1', name: 'read', arguments: { files: [{ path }] } });
   const find = (path: string): ToolCall => ({ id: 'find-1', name: 'find', arguments: { queries: [{ id: 'q1', mode: 'files', patterns: ['**/*'], path }] } });
-  const member = (call: ToolCall): Promise<string> => withOtherPartyInput('a member of this daemon', () => run(call));
+  const guest = (call: ToolCall): Promise<string> => withOtherPartyInput('a message on a channel', () => run(call));
   const owner = (call: ToolCall): Promise<string> => withOwnerInput(() => run(call));
   const shows = (text: string, words: string): string => (text.includes(words) ? 'reads' : 'refused');
 
-  // Rows: the member beside the member's project, by read and by find; the owner beside the owner's; the owner in the
-  // product's home; the control, the member inside the member's project.
+  // Rows: the guest beside the guest's project, by read and by find; the user beside the user's; the user in the
+  // product's home; the control, the guest inside the guest's project.
   expect([
-    `member read beside: ${shows(await member(read(join(beside, 'secret.txt'))), 'BETA_SECRET')}`,
-    `member find beside: ${shows(await member(find(beside)), 'secret.txt')}`,
+    `guest read beside: ${shows(await guest(read(join(beside, 'secret.txt'))), 'BETA_SECRET')}`,
+    `guest find beside: ${shows(await guest(find(beside)), 'secret.txt')}`,
     `owner read beside: ${shows(await owner(read(join(beside, 'secret.txt'))), 'BETA_SECRET')}`,
     `owner read the product's home: ${shows(await owner(read(homeProbe)), 'HOME_SECRET')}`,
-    `member read inside: ${shows(await member(read('note.txt')), 'ALPHA_NOTE')}`,
+    `guest read inside: ${shows(await guest(read('note.txt')), 'ALPHA_NOTE')}`,
   ]).toEqual([
-    'member read beside: refused',
-    'member find beside: refused',
+    'guest read beside: refused',
+    'guest find beside: refused',
     'owner read beside: reads',
     'owner read the product\'s home: refused',
-    'member read inside: reads',
+    'guest read inside: reads',
   ]);
 });

@@ -18,8 +18,7 @@ test('a device refused a knowledge write at its catalog path is refused it at th
   const readOnlyDevice = actorFromPrincipal({
     principalId: 'pairing:reader', principalKind: 'token', credentialKind: 'device-token', admin: false, scopes: ['read:knowledge', 'read:knowledge-content'],
   }, NO_OWNER_USER);
-  // The owner in person: their signed-in session, the account the user store records as the owner (the operator token alone
-  // is a script).
+  // The user's own signed-in session, the account the user store records as the owner.
   const owner = actorFromPrincipal({ principalId: 'admin', principalKind: 'user', credentialKind: 'user-session', admin: true, scopes: ['*'] }, { ownerUser: 'admin' });
   const status = (path: string, actor: Actor): number | 'let through' => {
     const refused = gateGatewayBinding(new Request(`http://127.0.0.1:3421${path}`, { method: 'POST' }), {

@@ -71,7 +71,7 @@ function daemon() {
   const give = (tokenId: string) => new CallerProjectsStore(resolveGoodVibesDaemonHome(home)).set(pairingPrincipalId(tokenId), [project]);
   const create = (token: string, body: Record<string, unknown>) =>
     helper.invokeGatewayMethodCall({ authToken: token, methodId: 'sessions.hosted.create', body: { workspaceRoot: project, ...body } });
-  // The owner in person: their signed-in session (the account made at first start). The operator token alone is a script.
+  // The user's own signed-in session (the account made at first start).
   const ownerName = userAuth.ownerUsername();
   if (ownerName === null) throw new Error('the user store made no owner account at first start');
   return { userAuth, pairing, created, create, give, owner: userAuth.createSession(ownerName).token };
@@ -92,7 +92,7 @@ test('a credential with ordinary write access cannot create an Agent session, an
   expect(d.created).toEqual([]);
   // A plain hosted session needs no operator authority and is created for the same writer.
   expect((await d.create(writer, {})).status).toBe(200);
-  // The owner in person may create an Agent session.
+  // The user's own sign-in may create an Agent session.
   expect((await d.create(d.owner, { originSurface: 'agent' })).status).toBe(200);
   expect(d.created.map((entry) => entry.originSurface)).toEqual([undefined, 'agent']);
 });

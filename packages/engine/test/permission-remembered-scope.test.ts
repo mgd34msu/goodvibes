@@ -55,7 +55,7 @@ function manager(handler: PermissionRequestHandler, store: UserPermissionRuleSto
 async function revoke(store: UserPermissionRuleStore): Promise<void> {
   const catalog = new GatewayMethodCatalog();
   registerPermissionRulesGatewayMethods(catalog, { userRuleStore: store });
-  // The owner in person (their signed-in session): a caller with no actor is no one the daemon established and reaches
+  // The user's own signed-in session: a caller with no actor is no one the daemon established and reaches
   // no rule (control-plane/caller-reach.ts).
   const invocation = { context: { admin: true, credentialKind: 'user-session', actor: localOwnerActor() } } as const;
   const listed = await catalog.invoke('permissions.rules.list', { ...invocation, body: {} }) as { rules: { id: string }[] };

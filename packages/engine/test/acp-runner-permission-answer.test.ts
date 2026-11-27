@@ -1,5 +1,5 @@
-// Proves: A remote runner's permission ask reaches the runner as it was answered: the owner's yes lets the runner act, their no, a withdrawn ask and a timed-out ask are told to it as exactly that, and a runner someone else started is refused without anyone being asked.
-// Red when: The runner's connection or its permission wire (acp/connection.ts, acp/permission-wire.ts) sends the runner something other than what was decided, so an approved ask reaches it as cancelled and it never acts, a withdrawn or timed-out ask reaches it as the owner's refusal, or someone else's runner is put to the owner.
+// Proves: A remote runner's permission ask reaches the runner as it was answered: the owner's yes lets the runner act, their no, a withdrawn ask and a timed-out ask are told to it as exactly that, and a runner a channel guest's turn started is refused without anyone being asked.
+// Red when: The runner's connection or its permission wire (acp/connection.ts, acp/permission-wire.ts) sends the runner something other than what was decided, so an approved ask reaches it as cancelled and it never acts, a withdrawn or timed-out ask reaches it as the owner's refusal, or a channel guest's runner is put to the owner.
 /**
  * Each row is one runner: a real ACP connection (acp/connection.ts) to a stand-in outside agent (a program outside the
  * product, spawned over stdio: test/fixtures/acp-stand-in-agent.ts) that asks to write one file in its folder and writes
@@ -91,14 +91,14 @@ test('a runner\'s permission ask reaches the runner as the owner answered it', a
       await row('no', 'no', owner),
       await row('withdrawn', 'withdraw', owner),
       await row('timed-out', 'time out', owner),
-      await row('device', 'yes', { party: 'other', who: 'the paired device "kiosk"' }),
+      await row('guest', 'yes', { party: 'other', who: 'a channel guest' }),
     ];
     expect(rows.join('\n')).toBe([
       'yes: allowed; written true; asked 1',
       'no: refused {"outcome":"selected","optionId":"reject"}; written false; asked 1',
       'withdrawn: refused {"outcome":"cancelled"}; written false; asked 1; why: nobody answered: the ask was withdrawn',
       'timed-out: refused {"outcome":"cancelled"}; written false; asked 1; why: nobody answered before the ask timed out',
-      'device: refused {"outcome":"selected","optionId":"reject"}; written false; asked 0; why: this turn acts on someone else\'s input (the paired device "kiosk"), and such a turn only reads outside a real sandbox, whatever the mode: write would change or start something',
+      'guest: refused {"outcome":"selected","optionId":"reject"}; written false; asked 0; why: this turn acts on someone else\'s input (a channel guest), and such a turn only reads outside a real sandbox, whatever the mode: write would change or start something',
     ].join('\n'));
   } finally {
     lifetime.abort();

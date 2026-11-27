@@ -175,7 +175,7 @@ test('a model\'s capability_run that stores a secret is put to the owner in Jev 
     .toBe('refused; Jev asked 0; asked loosen-security; stored false');
 
   // The owner's own screen: their signed-in session (the account made at first start) types the same line, and it runs
-  // at once. A paired device, the owner's own included, is never the owner in person (method-owner-decision.ts `ownerHimself`).
+  // at once (method-owner-decision.ts `ownerHimself`).
   const device = users.createSession(users.ownerUsername() ?? 'no owner account').token;
   const daemon: DaemonVerbCaller = {
     probe: () => ({ available: true }),
@@ -228,7 +228,7 @@ test('a model\'s call put to the owner waits for them and runs nothing on their 
   const reachedWork: string[] = [];
   registerCapabilityGatewayMethods(catalog, {
     catalog: async () => new CapabilityCatalog(movedCapabilityEntries()),
-    // The projects each caller was given are the daemon's own record in this scratch home (devices.give-project).
+    // The daemon's own home for this proof.
     services: createDaemonCapabilityServices({ configManager: config, hookDispatcher, workPlans: plans,
       secretsManager: secrets, memoryRegistry: new MemoryRegistry(memoryStore), homeDirectory: home }),
     invokeMethod: async (methodId, body) => {

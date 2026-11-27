@@ -36,18 +36,18 @@ function commandModelNotes(commandName: string): Omit<CommandExecutionPolicy, 'e
       boundary: '/work opens the Work place for the person. Every act on work (see it, start, check, stop, go on, answer it, run a failed step again, its spending limit, a plan before it runs, propose a piece of work with its plan) is a work.* capability: find it with capability_find and run it with capability_run. Host, principal, workspace and live capability checks remain mandatory.',
     };
   }
-  if (root === 'agent' || root === 'agent-workspace' || root === 'workspace') {
+  if (root === 'agent') {
     return {
       confirmation,
-      preferredModelTool: agentHarnessModes('workspace', 'workspace_categories', 'workspace_actions', 'workspace_action', 'run_workspace_action'),
-      boundary: 'Agent workspace navigation is visible shell routing. Use workspace action modes for concrete model-readable operation.',
+      preferredModelTool: 'capability_find and capability_run',
+      boundary: 'The person reaches every place from the menu (Ctrl+G then m). Use capability_find and capability_run for concrete model-readable operation.',
     };
   }
   if (root === 'setup' || root === 'welcome') {
     return {
       confirmation,
-      preferredModelTool: agentHarnessModes('workspace_actions', 'workspace_action', 'open_ui_surface'),
-      boundary: 'Setup opens the visible Agent workspace. Model-side changes should use settings or workspace actions.',
+      preferredModelTool: `capability_find and capability_run, or ${agentHarnessModes('open_ui_surface')}`,
+      boundary: 'Setup is the Setup tab of the System place for the person. Model-side changes should use settings or a setup.<topic> capability.',
     };
   }
   if (root === 'commands' || root === 'help' || root === 'shortcuts') {
@@ -60,8 +60,8 @@ function commandModelNotes(commandName: string): Omit<CommandExecutionPolicy, 'e
   if (root === 'keybindings') {
     return {
       confirmation,
-      preferredModelTool: agentHarnessModes('shortcuts', 'keybindings', 'keybinding', 'run_keybinding', 'set_keybinding', 'reset_keybinding'),
-      boundary: 'Keybinding inspection is read-only. Keybinding execution or edits require explicit confirmation through agent_harness keybinding modes.',
+      preferredModelTool: agentHarnessModes('shortcuts', 'keybindings', 'keybinding', 'run_keybinding'),
+      boundary: 'Keybinding inspection is read-only. Running a keybinding needs explicit confirmation through agent_harness run_keybinding; a binding is changed with capability_run id:"keys.bind" (keys.reset puts one back).',
     };
   }
   if (root === 'payments') {
@@ -131,7 +131,7 @@ function commandModelNotes(commandName: string): Omit<CommandExecutionPolicy, 'e
     return {
       confirmation,
       preferredModelTool: agentHarnessModes('open_ui_surface', 'run_command'),
-      boundary: '/context (the usage breakdown) and /context window (the current model\'s window) only read. /context window <size> writes a context window override for the current model and /context window clear removes it and any learned limit; both change the model registry\'s persisted override file in the local config directory and need explicit user intent.',
+      boundary: 'There is no /context command: the usage breakdown and the current model\'s window are reads (capability_find "context window"; a person has them in This conversation). Setting a window override for the current model, or clearing it and any learned limit, changes the model registry\'s persisted override file and needs explicit user intent.',
     };
   }
   if (root === 'health' || root === 'compat' || root === 'status' || root === 'accounts' || root === 'security') {
@@ -162,7 +162,7 @@ function commandModelNotes(commandName: string): Omit<CommandExecutionPolicy, 'e
       confirmation,
       preferredModelTool: root === 'secrets'
         ? settingsActions('list', 'get', 'set', 'reset')
-        : `${agentHarnessModes('workspace_actions', 'open_ui_surface')} or ${settingsActions('list', 'get', 'set')}`,
+        : `capability_find and capability_run, ${agentHarnessModes('open_ui_surface')}, or ${settingsActions('list', 'get', 'set')}`,
       boundary: 'Harness-owned configuration, secret, voice, subscription, and MCP commands can expose credentials or external account state. Mutations require explicit user intent and should prefer secret refs over raw values.',
     };
   }
@@ -198,8 +198,8 @@ function commandModelNotes(commandName: string): Omit<CommandExecutionPolicy, 'e
   if (root === 'notes') {
     return {
       confirmation,
-      preferredModelTool: `${agentHarnessModes('workspace_actions', 'workspace_action', 'run_workspace_action')} or agent_local_registry`,
-      boundary: 'Notes workspace routing is visible navigation; note record mutations should use Agent-local registry or workspace action modes.',
+      preferredModelTool: 'capability_find and capability_run, or agent_local_registry',
+      boundary: 'Opening Notes is visible navigation (Memory and knowledge, Notes); note record changes use the notes.* capabilities or the Agent-local registry.',
     };
   }
   if (root === 'knowledge') {
@@ -293,7 +293,7 @@ function commandModelNotes(commandName: string): Omit<CommandExecutionPolicy, 'e
   if (root === 'delegate') {
     return {
       confirmation,
-      preferredModelTool: agentHarnessModes('workspace_actions', 'workspace_action', 'run_workspace_action'),
+      preferredModelTool: 'capability_run id:"work.delegate"',
       boundary: 'Delegation is explicit user-directed work only; no hidden background review or separate Agent job should be created implicitly.',
     };
   }
@@ -349,7 +349,7 @@ function commandModelNotes(commandName: string): Omit<CommandExecutionPolicy, 'e
   if (root === 'profile' || root === 'agent-profile') {
     return {
       confirmation,
-      preferredModelTool: agentHarnessModes('workspace_actions', 'workspace_action', 'run_workspace_action'),
+      preferredModelTool: 'capability_find and capability_run',
       boundary: 'Agent profile commands manage isolated Agent runtime profiles and starter templates. Mutations require explicit confirmation.',
     };
   }
@@ -362,7 +362,7 @@ function commandModelNotes(commandName: string): Omit<CommandExecutionPolicy, 'e
   }
   return {
     confirmation,
-    boundary: 'Inspect the command description, usage, and workspace action metadata before invoking through run_command.',
+    boundary: 'Inspect the command description, usage, and action metadata before invoking through run_command.',
   };
 }
 
@@ -381,6 +381,6 @@ export function settingsPolicySummary(): Record<string, unknown> {
     discovery: 'Use settings action:"list" for the setting catalog and action:"get" with key, target, or query for one setting. Hidden/scriptable settings require includeHidden:true unless the exact key is supplied.',
     mutation: 'Use settings action:"set" or action:"reset" with key, target, or query; the complete resolved effect plan requires current recorded admission. Ambiguous lookups are refused.',
     secretHandling: 'Raw secret values require the secure provisioning path and are refused before judgment, including through aliases. Stored references are opaque; reset/clear captures exact scoped secret deletion.',
-    writablePolicy: 'Each setting descriptor includes writable and visibleInWorkspace. Managed or read-only owners refuse mutations. The current source, privacy floor and recorded permission decision govern every proposed effect.',
+    writablePolicy: 'Each setting descriptor includes writable and onSettingsScreen. Managed or read-only owners refuse mutations. The current source, privacy floor and recorded permission decision govern every proposed effect.',
   };
 }

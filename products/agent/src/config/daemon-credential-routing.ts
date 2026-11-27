@@ -45,7 +45,7 @@
  * daemon that was never there. A test that wants the routing installs its own
  * client and says so.
  */
-import { isDaemonOwnedConfigKey } from '@goodvibes/engine/platform/platform/config';
+import { isDaemonOwnedConfigKey, type DaemonWritePress } from '@goodvibes/engine/platform/platform/config';
 import type { DaemonCredentialsClient } from '@goodvibes/engine/platform/platform/runtime/client';
 
 let installed: DaemonCredentialsClient | null = null;
@@ -89,6 +89,8 @@ export interface CredentialRouteOutcome {
 export async function routeDaemonOwnedCredentialWrite(
   configKey: string,
   rawValue: string,
+  /** Who decided it (the person's press, the Agent's gate on the model's call), from the call site: sent with it. */
+  press?: DaemonWritePress,
 ): Promise<CredentialRouteOutcome | null> {
   if (!isDaemonOwnedConfigKey(configKey)) return null;
   const client = installed;
@@ -101,10 +103,10 @@ export async function routeDaemonOwnedCredentialWrite(
   // An empty value CLEARS: the same meaning the local path gives it, so the
   // two never disagree about what erasing a field does.
   if (rawValue.trim().length === 0) {
-    await client.clear(configKey);
+    await client.clear(configKey, press);
     return { appliedBy: 'daemon' };
   }
-  await client.set(configKey, rawValue);
+  await client.set(configKey, rawValue, press);
   return { appliedBy: 'daemon' };
 }
 

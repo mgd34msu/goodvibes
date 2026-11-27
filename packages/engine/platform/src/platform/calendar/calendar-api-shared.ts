@@ -68,7 +68,6 @@ const SCOPE_CODES = new Set([
 ]);
 
 const PROVIDER_LABEL: Readonly<Record<CalendarProviderId, string>> = { google: 'Google Calendar', microsoft: 'Microsoft Outlook' };
-const CONNECT_WORD: Readonly<Record<CalendarProviderId, string>> = { google: 'google', microsoft: 'outlook' };
 
 /** The scope an operation on a provider needs. */
 export function requiredCalendarScope(provider: CalendarProviderId, operation: CalendarOperation): string {
@@ -154,7 +153,8 @@ export async function errorFromResponse(
 ): Promise<CalendarApiError> {
   const bodyText = await res.text().catch(() => '');
   const label = PROVIDER_LABEL[provider];
-  const reconnect = `/calendar connect ${CONNECT_WORD[provider]}`;
+  // The control that signs it in again: its row on the Calendar accounts tab (never a line to type).
+  const reconnect = `"sign in" on its row of the Calendar accounts tab in Mail, calendar and channels`;
   if (res.status === 401) {
     return new CalendarApiError({
       kind: 'reconnect-needed',

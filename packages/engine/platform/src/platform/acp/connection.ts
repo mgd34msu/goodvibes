@@ -34,6 +34,8 @@ import { drainStderrTail } from '../utils/stderr-tail.js';
 import { OwnedScope, type CloseReport } from '../utils/owned-work.js';
 import { admitExternalRequest, type ExternalPermissionHost, type ExternalOperationSource } from '../permissions/external-request.js';
 import { AcpPermissionWire } from './permission-wire.js';
+import { turnInputParty, withInputParty } from '../security/turn-input-party.js';
+import { acpChildEnvironment } from './connection-party.js';
 import { runnerCeilingRefusal } from './runner-ceiling.js';
 import { logger } from '../utils/logger.js';
 import { AcpError } from '../types/errors.js';
@@ -185,9 +187,13 @@ export class AcpConnection {
       this.lifetime.signal.throwIfAborted();
 
       // 1. Spawn child process with piped stdio
+      // A runner started for someone else: the owner's own program (`goodvibes acp`) reads that from its environment,
+      // so its session's agent is that caller's input, never his turn (acp/connection-party.ts).
+      const childEnv = acpChildEnvironment(this.task.inputParty ?? turnInputParty());
       const spawned = Bun.spawn(this.spawnCmd, {
         // In the runner's project folder, never the folder the starting process runs in.
         ...(this.task.workingDirectory ? { cwd: this.task.workingDirectory } : {}),
+        ...(childEnv ? { env: childEnv } : {}),
         stdin: 'pipe',
         stdout: 'pipe',
         stderr: 'pipe',
@@ -488,13 +494,26 @@ export class AcpConnection {
           assertCurrent();
           // Capture the actual originating goal, never the child tool title or generated task prose.
           // Decided for the runner's own project and session: its folder's rules, trust and answers, no other's.
-          admission = await admitExternalRequest(host, { connectionId: this.id, destination: this.spawnCmd[0] ?? '', signal, assertCurrent, sessionId: this.task.sessionId, workingDirectory: this.task.workingDirectory },
+          // And as the turn of whoever started it, when that is recorded (a runner anyone but the owner started reads only).
+          const decide = () => admitExternalRequest(host, { connectionId: this.id, destination: this.spawnCmd[0] ?? '', signal, assertCurrent, sessionId: this.task.sessionId, workingDirectory: this.task.workingDirectory },
             { ...operation, assertCurrent: () => {} }, {
               tool: owned.toolCall.title ?? 'ACP action', protocolSubject,
               args: { ...(owned.toolCall.rawInput && typeof owned.toolCall.rawInput === 'object' && !Array.isArray(owned.toolCall.rawInput)
-                ? owned.toolCall.rawInput as Record<string, unknown> : {}), destination: { command: this.spawnCmd, cwd: this.task.workingDirectory } },
+                ? owned.toolCall.rawInput as Record<string, unknown> : {}),
+                // Set here, after the agent's own input, so its words cannot stand in for them: the ask names the runner
+                // by its task and says the folder it works in (permissions/ask-presentation.ts runnerAsk).
+                destination: { command: this.spawnCmd, cwd: this.task.workingDirectory, runnerTask: this.task.description } },
             });
-          const response = permissionOutcomeFor(owned.options, { approved: admission.result.approved, remember: false });
+          admission = await (this.task.inputParty ? withInputParty(this.task.inputParty, decide) : decide());
+          // An ask nobody answered (withdrawn, or left until its deadline) is told to the runner as exactly that: cancelled,
+          // never as the owner's refusal. A refusal the gate gave a reason for keeps its words on the run (who started it).
+          const unanswered = admission.result.unanswered;
+          if (!admission.result.approved && (unanswered !== undefined || admission.result.detail)) {
+            this.noteRefusal(unanswered === 'withdrawn' ? 'nobody answered: the ask was withdrawn'
+              : unanswered === 'timed-out' ? 'nobody answered before the ask timed out' : admission.result.detail!);
+          }
+          const response: RequestPermissionResponse = unanswered !== undefined && !admission.result.approved ? cancelled
+            : permissionOutcomeFor(owned.options, { approved: admission.result.approved, remember: false });
           // The wire checks once more, immediately before the response bytes are written.
           wire.defer(response, admission, admission.result.approved && response.outcome.outcome === 'selected', () => {});
           deferred = true;

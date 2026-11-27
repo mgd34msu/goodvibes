@@ -608,6 +608,24 @@ export function hostSandboxAvailability(): SandboxAvailability {
   return hostAvailability;
 }
 
+/** Why the sandbox cannot start here, in words, while it is switched on; undefined when it is off or working. */
+function sandboxNotWorkingWhy(sandboxSetting: unknown): string | undefined {
+  if (sandboxSetting !== true) return undefined;
+  const availability = hostSandboxAvailability();
+  if (availability.available) return undefined;
+  return (availability.reason ?? 'no boundary can be made here').replace(/^per-command exec sandbox unavailable:\s*/, '');
+}
+
+/**
+ * The sentence a question about a command carries while the sandbox is switched on (`sandbox.enabled`) but cannot
+ * start on this host: this command runs without it on a yes, and why it could not start. Undefined when the sandbox is
+ * off (the owner chose that) or working.
+ */
+export function sandboxNotWorkingSentence(sandboxSetting: unknown): string | undefined {
+  const why = sandboxNotWorkingWhy(sandboxSetting);
+  return why === undefined ? undefined : `The sandbox is switched on but could not start (${why}): if you say yes, this command runs on this computer without it.`;
+}
+
 /**
  * Probe the real host for bubblewrap availability. Impure (spawns `bwrap`
  * trivially, bounded to a short timeout); the pure {@link detectSandboxAvailability}

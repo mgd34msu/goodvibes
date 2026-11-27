@@ -67,6 +67,9 @@ export function finishedApprovalOutcome(
 
 /** Keep the exact legacy awaited shape: provenance is read from the record. */
 export function ordinaryApprovalDecision(record: SharedApprovalDecision): PermissionPromptDecision {
-  const { disposition: _disposition, ...decision } = record;
+  const { disposition, ...decision } = record;
+  // An ask nobody answered is said as such, never as the owner's refusal.
+  if (disposition === 'cancelled') return { ...decision, unanswered: 'withdrawn' };
+  if (disposition === 'expired') return { ...decision, unanswered: 'timed-out' };
   return decision;
 }

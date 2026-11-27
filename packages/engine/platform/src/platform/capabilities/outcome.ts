@@ -18,12 +18,14 @@ interface Worded {
 
 /** Fill `{input}` blanks and `{lasts}`; a blank with no value reads as its label in angle brackets. */
 export function fillSentence(template: string, values: ActionValues, lasts: string): string {
+  // The sentence's own spacing is tidied before the values go in, so a value is shown as given: a file named
+  // ".goodvibes/..." after "saved in" keeps its space ("in .goodvibes/..."), never "in.goodvibes/...".
   return template
     .replace(/\{lasts\}/g, lasts)
-    .replace(/\{([a-zA-Z0-9_-]+)\}/g, (_whole, id: string) => values[id] !== undefined && values[id] !== '' ? values[id]! : `<${id}>`)
     .replace(/\s+([.,;:])/g, '$1')
     .replace(/\s{2,}/g, ' ')
-    .trim();
+    .trim()
+    .replace(/\{([a-zA-Z0-9_-]+)\}/g, (_whole, id: string) => values[id] !== undefined && values[id] !== '' ? values[id]! : `<${id}>`);
 }
 
 /** How long the change lasts, in words: the action's own, or the chosen value's. */
@@ -48,6 +50,14 @@ export function shownValues(action: Pick<Worded, 'inputs'>, values: ActionValues
   return Object.fromEntries(Object.entries(values).map(([id, value]) => [id, secret.has(id) ? hiddenSecret(value) : value]));
 }
 
+/**
+ * A fixed choice's label as it reads inside a sentence: a label of plain words written as a control's caption ("An
+ * image", "Write over it") loses its capital; a name ("Google", "Google Calendar") keeps it.
+ */
+export function choiceLabelInSentence(label: string): string {
+  return /^[A-Z][a-z]+ [a-z]/.test(label) ? `${label.charAt(0).toLowerCase()}${label.slice(1)}` : label;
+}
+
 /** The values with each one picked from a fixed list shown by its label, as the sentence and the question show it. */
 export function fixedChoiceLabels(action: Pick<Worded, 'inputs'>, values: ActionValues): ActionValues {
   const shown: Record<string, string> = { ...values };
@@ -55,7 +65,7 @@ export function fixedChoiceLabels(action: Pick<Worded, 'inputs'>, values: Action
     const value = values[input.id];
     if (value === undefined || !Array.isArray(input.choices) || input.kind === 'secret') continue;
     const chosen = (input.choices as readonly FixedChoice[]).find((choice) => choice.value === value);
-    if (chosen) shown[input.id] = chosen.label;
+    if (chosen) shown[input.id] = choiceLabelInSentence(chosen.label);
   }
   return shown;
 }

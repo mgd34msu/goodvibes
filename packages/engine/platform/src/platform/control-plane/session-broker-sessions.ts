@@ -112,6 +112,24 @@ export function sessionRegistrant(session: SharedSessionRecord | null | undefine
   return typeof kept === 'string' && kept ? kept : local;
 }
 
+/** Between a registrant's caller key and the program of that caller that registered it (daemon-api `registrantKeyOf`). */
+export const REGISTRATION_MARK = '#';
+
+/**
+ * Whether a caller may name a session (as a question's asker, as the conversation an approval is raised in): it is the
+ * caller that registered it (`callerKey`), and, when the session was registered by one program of that caller (its
+ * registration key's fingerprint kept with it), that same program. Every holder of the operator token is one caller;
+ * the terminal app, the Agent, a command line and a script are told apart by their registrations. A session kept with
+ * no program (registered by a caller that sent none, or before registrations were kept) is that caller's, whichever
+ * of its programs asks.
+ */
+export function registrantMayName(registrant: string | undefined, caller: { readonly key: string; readonly registration?: string | undefined }): boolean {
+  if (registrant === undefined) return false;
+  const mark = registrant.indexOf(REGISTRATION_MARK);
+  if (mark < 0) return registrant === caller.key;
+  return registrant.slice(0, mark) === caller.key && registrant.slice(mark + 1) === caller.registration;
+}
+
 /**
  * True when a participant OTHER than `exclude` (the current input's own surface)
  * was seen within `freshnessMs`. Excluding the sender prevents a steer's own

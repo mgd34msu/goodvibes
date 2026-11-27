@@ -17,7 +17,7 @@ import { toolActivityFallback, toolCallActivity } from '@goodvibes/engine/contra
 import { toolActivityOf, toolDescriptionOf } from '../tools/registry.js';
 import { extractHostname } from '../tools/fetch/trust-tiers.js';
 import { extractPathArgs } from '../runtime/permissions/rules/path-scope.js';
-import { changesMcpTrust, ownerOnlyReason, type OwnerOnlyKind } from '../gate/classify.js';
+import { changesMcpTrust, ownerOnlyWords, type OwnerOnlyKind } from '../gate/classify.js';
 import { archetypeDisplayName } from '../agents/archetypes.js';
 import type { OwnerItem } from '../control-plane/owner-inbox.js';
 import type { PermissionPromptRequest } from './prompt.js';
@@ -31,6 +31,7 @@ import { PURCHASE_AMOUNT_METADATA, PURCHASE_DEADLINE_METADATA, PURCHASE_ITEM_MET
 import { formatMinorUnits } from '../payments/message.js';
 import { minorUnitExponent } from '../payments/money-parsing.js';
 import { toolAskWords } from './tool-ask-words.js';
+import { commandLineAskInPlanMode, isCommandLineAsk } from './command-line-ask.js';
 
 export type AskKind =
   | 'run-command' | 'answer-command-prompt' | 'change-files' | 'fetch' | 'start-agent' | 'hand-off-work'
@@ -219,6 +220,8 @@ function actionWord(args: Record<string, unknown>): string | undefined {
  */
 const TOOL_QUESTIONS: Readonly<Record<string, (args: Record<string, unknown>) => string>> = {
   workflow: () => 'Change an automation (a hook, schedule or trigger)?',
+  // The first project the outside agent's own credential names (daemon/outside-agent.ts): one question, by its folder.
+  'outside-agent.project': (args) => `Let the outside agent "goodvibes-daemon mcp serve" work in ${textArg(args, 'project') ?? 'a project'}?`,
   mcp: (args) => {
     switch (actionWord(args)) {
       case 'set-trust': return `Change how far ${textArg(args, 'serverName') ?? 'a tool server'} is trusted?`;
@@ -525,9 +528,31 @@ export function callActWords(call: AskedCall): string {
   return questionOf(kind, call, {}, permissionSubject(call.tool, call.args).values).title.replace(/\?$/, '');
 }
 
+/**
+ * A runner's own ask (acp/connection.ts sets `destination.runnerTask` and `destination.cwd` after the agent's input, so
+ * they are the daemon's words): which runner by its task, what it wants to do (its command, else its own name for the
+ * act) and the folder it works in. Undefined for any other call.
+ */
+function runnerAsk(tool: string, args: Readonly<Record<string, unknown>>): { readonly question: string; readonly lines: readonly string[] } | undefined {
+  const destination = args['destination'];
+  if (!destination || typeof destination !== 'object' || Array.isArray(destination)) return undefined;
+  const task = (destination as Record<string, unknown>)['runnerTask'];
+  const folder = (destination as Record<string, unknown>)['cwd'];
+  if (typeof task !== 'string' || task.trim() === '') return undefined;
+  const command = textArg(args as Record<string, unknown>, 'command');
+  const act = command !== undefined ? `run ${clipLine(command, 60)}` : `do "${clipLine(tool, 60)}"`;
+  const where = typeof folder === 'string' && folder !== '' ? folder : undefined;
+  return {
+    question: `Let the runner on "${clipLine(task, 60)}" ${act}${where ? ` in ${basename(where)}` : ''}?`,
+    lines: [`Runner: the one started on "${clipLine(task, 120)}"`, `It wants to: ${command !== undefined ? `run ${command}` : tool}`, ...(where ? [`In: ${where}`] : [])],
+  };
+}
+
 /** "Run this command?" and the rest of the 3.4 table for a permission request. */
 function questionOf(kind: AskKind, request: AskedCall, facts: Pick<AskFacts, 'workingDirectory' | 'settingLabel'>, subjectValues: readonly string[]): { question: string; title: string } {
   const args = request.args;
+  const runner = runnerAsk(request.tool, args);
+  if (runner) return { question: runner.question, title: runner.question };
   // A call its program words itself (a daemon method admitted natively, judged as a write: "Add a schedule ...?").
   if (kind === 'change-files' && extractPathArgs(args).length === 0) {
     const own = toolAskWords(request.tool, args);
@@ -637,6 +662,9 @@ function subjectOf(kind: AskKind, request: PermissionPromptRequest, values: read
       .map(([key, value]) => `${nameWords(key)}: ${typeof value === 'string' ? value : JSON.stringify(value)}`);
     return lines.length > 0 ? { kind: 'text', lines } : undefined;
   }
+  // A runner's ask: which runner, the act and its folder, each on its own line.
+  const runner = runnerAsk(request.tool, request.args);
+  if (runner) return { kind: 'text', lines: [...runner.lines] };
   // A call its program words itself: its sentence and each input on a labelled line, never the arguments as JSON.
   const own = toolAskWords(request.tool, request.args);
   if (own) return own.lines.length > 0 ? { kind: 'text', lines: [...own.lines] } : undefined;
@@ -675,9 +703,10 @@ export function approvalQuestion(request: PermissionPromptRequest, facts: Pick<A
   const subjectValues = permissionSubject(request.tool, request.args).values;
   const words = questionOf(kind, request, facts, subjectValues);
   const directory = askDirectory(request, facts);
-  if (!undoFactOf(request.tool, request.args, request.analysis.reading, request.ownerOnly, directory).cannotUndo) return words.question;
+  const typed = isCommandLineAsk(request) ? 'Typed as a command on this machine: ' : '';
+  if (!undoFactOf(request.tool, request.args, request.analysis.reading, request.ownerOnly, directory).cannotUndo) return `${typed}${words.question}`;
   const destroys = kind === 'run-command' && subjectValues.length === 1 ? commandEffect(subjectValues[0]!)?.undoQuestion : undefined;
-  return `${destroys ?? words.question} ${CANNOT_UNDO}`;
+  return `${typed}${destroys ?? words.question} ${CANNOT_UNDO}`;
 }
 
 /** Why a price change is asked: "<model> was free when you chose it and now costs about <price>." */
@@ -702,7 +731,10 @@ export function presentApprovalAsk(request: PermissionPromptRequest, facts: AskF
   const words = questionOf(kind, request, facts, subjectValues);
   const commands = kind === 'run-command' ? subjectValues : [];
   const destroys = commands.length === 1 ? commandEffect(commands[0]!)?.undoQuestion : undefined;
-  const question = cannotUndo ? `${destroys ?? words.question} ${CANNOT_UNDO}` : words.question;
+  // A command typed at a command line, held for the owner (command-line-ask.ts): said as what it is.
+  const typed = isCommandLineAsk(request);
+  const asked = cannotUndo ? `${destroys ?? words.question} ${CANNOT_UNDO}` : words.question;
+  const question = typed ? `Typed as a command on this machine: ${asked}` : asked;
   const hosts = kind === 'fetch'
     ? [...new Set(subjectValues.flatMap((url) => extractHostname(url) ?? []))].concat(request.attribution?.kind === 'fetch-localhost' ? [request.attribution.host] : [])
     : undefined;
@@ -732,11 +764,14 @@ export function presentApprovalAsk(request: PermissionPromptRequest, facts: AskF
   // An act only the owner makes, asked by someone else (a paired device, a member): it is put to him in every mode,
   // so the mode is not why it is asked; only that it is his.
   const ownersAlone = request.ownerOnly === 'owner-act' && request.attribution?.kind === 'outside-caller';
-  const why = priceWhy ?? (ownersAlone ? `${capitalize(by ?? 'someone other than you')} asked for it, and only you may do it, so it is put to you whatever the mode.` : undefined) ?? [
+  const typedWhy = !typed ? undefined : commandLineAskInPlanMode(request) || facts.modeInForce.mode === 'plan'
+    ? 'Plan mode is on. This was not the model: it was typed as a command on this machine, and a command line never runs it by itself, so it runs only if you say yes.'
+    : 'It was typed as a command on this machine, and a command line never runs it by itself (anything that can drive a terminal could have typed it), so it runs only if you say yes.';
+  const why = priceWhy ?? typedWhy ?? (ownersAlone ?`${capitalize(by ?? 'someone other than you')} asked for it, and only you may do it, so it is put to you whatever the mode.` : undefined) ?? [
     modeWhy(facts),
     // "This can't be undone." is said once, in the question: the reasons below do not say it again.
-    request.ownerOnly !== undefined ? `Only you decide this: ${cannotUndo && request.ownerOnly === 'irreversible-operator' ? 'it is an operator action' : ownerOnlyReason(request.ownerOnly)}.` : undefined,
-    cannotUndo ? 'So it asks every time; to let it run without asking, add a permission rule with /permissions.' : undefined,
+    request.ownerOnly !== undefined ? `Only you decide this: ${cannotUndo && request.ownerOnly === 'irreversible-operator' ? 'it is an operator action' : ownerOnlyWords(request.ownerOnly, request.ownerOnlyBecause)}.` : undefined,
+    cannotUndo ? 'So it asks every time; to let it run without asking, add a rule in Permissions and safety, Rules ("add a rule").' : undefined,
   ].filter((part): part is string => part !== undefined).join(' ');
 
   const brief = buildPermissionApprovalBrief(request);

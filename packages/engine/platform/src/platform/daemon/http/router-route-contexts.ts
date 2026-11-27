@@ -1,4 +1,5 @@
-import { putToOwner } from '../../control-plane/owner-act.js';
+import { readDaemonHosted, readOwnerAdmitted, readProgramRegistration, readRequestClaims } from '@goodvibes/engine/daemon-api/control-routes';
+import { ownersAgentProgram, ownersOwnPress, ownerHimself } from '../method-owner-decision.js';
 import { localApprovalActions } from '../../control-plane/approval-actions.js';
 import { admitEffects } from '../../security/effect-authority.js';
 import type { Actor } from '../http-policy.js';
@@ -22,6 +23,10 @@ import type { ApprovalBroker } from '../../control-plane/index.js';
 import type { PlatformServiceManager } from '../service-manager.js';
 import { toRecord } from '../../utils/record-coerce.js';
 import { unknownChannelAction } from '../../channels/action-outcome.js';
+import { ownMessagesRefusal } from '../../channels/own-messages-proof.js';
+import { channelProjectRefusal } from '../../channels/channel-project.js';
+import { managedLockRefusalText } from '../../runtime/settings/host-setting-policy-read.js';
+import { isSecretBearingConfigKey } from '../../config/secret-bearing-config-keys.js';
 import type { JsonRecord } from '../helpers.js';
 import type { WatcherRegistry } from '../../watchers/index.js';
 import type { DaemonChannelRouteContext, InboundMailHealthLike } from './channel-route-types.js';
@@ -170,13 +175,16 @@ export function buildChannelRouteContext(input: {
     parseOptionalJsonBody: input.parseOptionalJsonBody,
     requireAdmin: input.requireAdmin,
     surfaceRegistry: input.surfaceRegistry,
+    // "Treat my own messages here as me" exists only where the channel proves the sender and a one-to-one conversation.
+    ownMessagesRefusal,
+    // "Project for this channel": only a registered project's folder (channels/channel-project.ts).
+    channelProjectRefusal: (folder: string) => channelProjectRefusal(folder),
   };
 }
 
 
 export function buildSystemRouteContext(input: {
   readonly settingsPrecondition?: DaemonSystemRouteContext['settingsPrecondition'] | undefined;
-  readonly settingsImportPrecondition?: DaemonSystemRouteContext['settingsImportPrecondition'] | undefined;
   readonly approvalBroker: ApprovalBroker;
   readonly configManager: ConfigManager;
   readonly credentialStatus: DaemonSystemRouteContext['credentialStatus'];
@@ -213,13 +221,33 @@ export function buildSystemRouteContext(input: {
     approvalBroker: localApprovalActions(input.approvalBroker),
     configManager: input.configManager,
     configLoosening: (key, value, options) => input.configManager.describeLoosening(key, value, options),
-    putToOwner: (request) => putToOwner(input.approvalBroker, request),
+    // A managed lock, wherever it was recorded on this machine: refused before the owner is asked anything.
+    managedLockRefusal: (key) => {
+      let lock: ReturnType<ConfigManager['managedLockOf']>;
+      try { lock = input.configManager.managedLockOf(key); }
+      catch (error) { return `Nothing was changed: ${error instanceof Error ? error.message : String(error)}`; }
+      return lock ? managedLockRefusalText(lock, isSecretBearingConfigKey(key)) : null;
+    },
+    // The one owner rule, as the daemon's dispatch told this request (daemon/method-owner-decision.ts): admitted at
+    // once, refused by the effect table, or the owner's to decide (the dispatch then puts the same call to his gate).
     settingsLoosenAdmission: (request) => {
-      const actor = input.resolveAuthenticatedPrincipal(request)?.actor;
-      return actor === undefined ? 'refused' : admitEffects(actor, ['settings.loosen']).kind;
+      const principal = input.resolveAuthenticatedPrincipal(request);
+      const actor = principal?.actor;
+      if (actor === undefined) return 'refused';
+      if (readOwnerAdmitted(request)) return 'allowed';
+      // Served here without the dispatch (the precondition lane): the same rule, read from the request itself. The
+      // owner's own press (his session, or his verified program with his claim), or his program's gate's mark.
+      const claims = readRequestClaims(request);
+      const credentialKind = (principal as { readonly credentialKind?: string | null } | null)?.credentialKind ?? undefined;
+      const caller = { actor, credentialKind, registration: readProgramRegistration(request), personAsked: claims.personAsked,
+        daemonHosted: readDaemonHosted(request) };
+      if (ownersOwnPress(caller)) return 'allowed';
+      // The gate's mark counts only from the owner's own verified program (his registered terminal program, his Agent
+      // program, an Agent turn the daemon hosts); the Agent's credential alone is a script.
+      if (claims.decidedByProgramGate && (ownersAgentProgram(caller) || ownerHimself(caller))) return 'allowed';
+      return admitEffects(actor, ['settings.loosen']).kind === 'refused' ? 'refused' : 'ask-owner';
     },
     settingsPrecondition: input.settingsPrecondition,
-    settingsImportPrecondition: input.settingsImportPrecondition,
     credentialStatus: input.credentialStatus,
     integrationHelpers: input.integrationHelpers,
     inspectInboundTls: input.inspectInboundTls,

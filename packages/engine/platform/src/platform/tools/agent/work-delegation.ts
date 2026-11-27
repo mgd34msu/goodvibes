@@ -37,7 +37,15 @@ export interface AgentWorkDelegation {
    * Hand the record's task to the daemon as a piece of work, and follow it: `report` is told where it stands and how
    * it ended. Throws, with the daemon's words, when the daemon did not take it.
    */
-  delegate(record: AgentRecord, options: { readonly signal: AbortSignal; readonly report: (update: DelegatedWorkUpdate) => void }): Promise<DelegatedWork>;
+  delegate(record: AgentRecord, options: {
+    readonly signal: AbortSignal;
+    readonly report: (update: DelegatedWorkUpdate) => void;
+    /**
+     * Who the turn that asked acts for, when it is someone else's input (security/turn-input-party.ts): the work it hands
+     * over carries that party (the daemon keeps it on the work's record). Absent: the owner's own conversation.
+     */
+    readonly otherParty?: string | undefined;
+  }): Promise<DelegatedWork>;
   /** Stop following every work (the program is closing, or a headless run ends): each runs on; never stops a work. */
   close?(): void;
 }

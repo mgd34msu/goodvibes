@@ -77,6 +77,8 @@ export interface CreateCiWatchInput {
   readonly prNumber?: number | undefined;
   readonly deliveryChannel: string;
   readonly triggerFixSession?: boolean | undefined;
+  /** The project folder the watch belongs to (CiWatchSubscription.project). */
+  readonly project?: string | undefined;
 }
 
 export interface CiWatchCheckResult {
@@ -278,6 +280,7 @@ export class CiWatchService {
       repo,
       ...(input.ref ? { ref: input.ref } : {}),
       ...(input.prNumber !== undefined ? { prNumber: input.prNumber } : {}),
+      ...(input.project ? { project: input.project } : {}),
       deliveryChannel: channel,
       triggerFixSession: input.triggerFixSession === true,
       createdAt: now,
@@ -683,6 +686,7 @@ export class CiWatchService {
       failingJobs: Object.freeze(names),
       jobs,
       logs,
+      ...(subscription.project ? { project: subscription.project } : {}),
     };
   }
 }

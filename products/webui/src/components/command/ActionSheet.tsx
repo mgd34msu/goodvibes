@@ -200,9 +200,12 @@ export function Blank({ action, input, values, onChange, onLabel, current }: {
       );
     }
     const usual = input.required !== true && input.required.default === '' ? [{ value: '', label: input.required.defaultMeans }] : [];
+    // The chosen answer's sentence under the list, as each radio answer carries its own.
+    const chosenHelp = choices.find((choice) => choice.value === value)?.help;
     return (
       <Field label={input.label} help={help}>
         <Select aria-label={input.label} value={value} onChange={onChange} options={[...usual, ...choices.map((choice) => ({ value: choice.value, label: choice.label }))]} />
+        {chosenHelp ? <p className="gv-action-sheet__hint">{chosenHelp}</p> : null}
       </Field>
     );
   }
@@ -370,7 +373,8 @@ export function ActionSheet({ open, onClose, command, action: actionId, prefill 
     for (const input of found?.action.inputs ?? []) {
       if (!Array.isArray(input.choices) || input.id === lastsBy || sent[input.id] === undefined) continue;
       const choice = input.choices.find((entry) => entry.value === sent[input.id]);
-      if (choice) out[input.id] = choice.label;
+      // Inside the sentence a caption loses its capital ("An image" → "an image"), as the terminal programs say it.
+      if (choice) out[input.id] = /^[A-Z][a-z]+ [a-z]/.test(choice.label) ? `${choice.label.charAt(0).toLowerCase()}${choice.label.slice(1)}` : choice.label;
     }
     return out;
   }, [found, sent, labels]);

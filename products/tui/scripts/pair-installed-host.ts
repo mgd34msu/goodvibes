@@ -29,7 +29,7 @@ function defer(what: string): never {
     `  Nothing was reset, reminted or revoked. The daemon at ${host} is installed and running.`,
     '  An abandoned attempt may already have minted a device token named "GoodVibes installed TUI".',
     '  To clear it and pair later:',
-    '    1. In the terminal app run /devices, and revoke any "GoodVibes installed TUI" token: /devices revoke <id>',
+    '    1. In the terminal app open Devices and network (the menu, Ctrl+G then m), and revoke any "GoodVibes installed TUI" device on its Paired tab (x)',
     `    2. Remove the record for ${host} from ${store}`,
     '       (if that is the only host in the file, delete the file: rm ' + JSON.stringify(store) + ')',
     '    3. Run the pairing command printed by the installer, or simply re-run the installer.',

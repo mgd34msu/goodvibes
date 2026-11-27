@@ -2,7 +2,7 @@ import { mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { dirname } from 'node:path';
 import type { CommandContext } from '../command-registry.ts';
 import { defineList, type ListRow } from '@goodvibes/engine/terminal-shell/command-actions';
-import { CapabilityRefusal, type DeepLinkCapabilityServices, type ToolsExtrasSessionServices } from '@goodvibes/engine/platform/platform/capabilities';
+import { CapabilityRefusal, unreadableFile, type DeepLinkCapabilityServices, type ToolsExtrasSessionServices } from '@goodvibes/engine/platform/platform/capabilities';
 import { requireShellPaths } from './runtime-services.ts';
 import { DEEP_LINK_SURFACES, buildDeepLink, openDeepLink, parseDeepLink } from './deep-link.ts';
 
@@ -84,7 +84,8 @@ export function deepLinksOf(ctx: CommandContext): NonNullable<DeepLinkCapability
       try {
         return inspectDeepLinkBundle(JSON.parse(readFileSync(targetPath, 'utf-8')) as DeepLinkBundle);
       } catch (error) {
-        throw new CapabilityRefusal(`${targetPath} could not be read as a link file: ${error instanceof Error ? error.message : String(error)}`);
+        // Never the system's or the parser's words, which can quote the file (capabilities/path-inputs.ts).
+        throw unreadableFile(targetPath, 'a link file', undefined, error, 'Nothing was read from it.');
       }
     },
   };

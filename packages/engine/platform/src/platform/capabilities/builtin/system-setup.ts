@@ -14,6 +14,7 @@
 import { existsSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { atomicWriteFileSync } from '../../config/atomic-write.js';
+import { setAsideNewerVersionFile } from '../../config/read-versioned.js';
 import { resolveGoodVibesDaemonHome } from '../../config/goodvibes-home.js';
 import { CapabilityRefusal, type CapabilityCaller, type CapabilityDefinition, type FixedChoice } from '../types.js';
 import type { ProgramSettingsCapabilityServices } from './program-settings.js';
@@ -200,6 +201,44 @@ export const SETUP_WHO_DECIDES_ASKED: Def = {
   },
 };
 
+/**
+ * First run's record that setup is done, in a program's own folder (`~/.goodvibes/<program>/onboarding-complete.json`,
+ * with `onboarding-checked.json` beside it): the files the program's first run writes when you finish it
+ * (terminal-shell onboarding-markers.ts), in the same form, so the program opens the conversation at its next start.
+ */
+function markSetupDone(homeDirectory: string, program: Program, at: number): void {
+  const payload = `${JSON.stringify({ version: 1, checkedAt: at, updatedAt: at, source: 'capability', mode: 'new' }, null, 2)}\n`;
+  for (const file of ['onboarding-complete.json', 'onboarding-checked.json']) {
+    const path = setupStatePaths(homeDirectory).program(program, file);
+    // A file from a newer release is moved aside, not overwritten, so going back a release never loses its record.
+    setAsideNewerVersionFile(path, 1);
+    atomicWriteFileSync(path, payload, { mkdirp: true });
+  }
+}
+
+export const SETUP_MARK_DONE: Def = {
+  capability: { id: 'setup.mark-done', group: 'system', home: 'daemon', repeat: 'safe' },
+  actionId: 'mark-done', label: 'Mark first run as finished', word: 'mark-done',
+  inputs: [{
+    id: 'program', label: 'Program', help: 'Whose first run: the terminal app, the Agent, or both', kind: 'choice', typed: { position: 1 },
+    choices: [{ value: 'tui', label: 'The terminal app' }, { value: 'agent', label: 'The Agent' }, { value: 'both', label: 'Both programs' }],
+    required: { default: 'both', defaultMeans: 'both programs' },
+  }],
+  sentence: 'First run is recorded as finished, so the program named opens the conversation at its next start; System, Setup still holds every topic.', done: '',
+  touches: 'this-machine', lasts: 'kept', risk: 'none', example: { program: 'both' },
+  async run(values, services) {
+    const named = values.program || 'both';
+    if (named !== 'tui' && named !== 'agent' && named !== 'both') throw new CapabilityRefusal(`${named} is not a program: tui, agent or both; nothing was changed.`);
+    const programs: readonly Program[] = named === 'both' ? PROGRAMS : [named];
+    const home = homeOf(services);
+    const at = Date.now();
+    for (const program of programs) markSetupDone(home, program, at);
+    noteListChanged({ list: 'setup', change: 'changed' });
+    const words = programs.map((program) => (program === 'tui' ? 'the terminal app' : 'the Agent')).join(' and ');
+    return { text: `First run is recorded as finished for ${words}; it opens the conversation at the next start (System, Setup, "Run first-run again" opens it again).`, data: { programs } };
+  },
+};
+
 /** Every capability of this file, with the command it came from. */
 export const SYSTEM_SETUP_CAPABILITIES: readonly { readonly definition: Def; readonly command: { readonly name: string; readonly title: string } }[] =
-  [SETUP_CHECKLIST, SETUP_SKIP, SETUP_WHO_DECIDES_ASKED].map((definition) => ({ definition, command: { name: 'setup', title: 'Set up GoodVibes' } }));
+  [SETUP_CHECKLIST, SETUP_SKIP, SETUP_WHO_DECIDES_ASKED, SETUP_MARK_DONE].map((definition) => ({ definition, command: { name: 'setup', title: 'Set up GoodVibes' } }));

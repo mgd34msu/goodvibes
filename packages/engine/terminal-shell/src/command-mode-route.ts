@@ -167,7 +167,7 @@ export function createCommandModeTokenHandler<Context extends CommandRouteContex
                 state.conversationManager?.log(`The skill /${name} was found, but this surface cannot send it as a message.`, { fg: activeTokens().error });
                 state.requestRender();
               } else {
-                state.conversationManager?.log(`Unknown command: /${name}. Type /help for available commands.`, { fg: activeTokens().error });
+                state.conversationManager?.log(`Unknown command: /${name}. Type /help for the commands; everything else is in the menu (the leader key, Ctrl+G unless you changed it, then m).`, { fg: activeTokens().error });
                 state.requestRender();
               }
             }

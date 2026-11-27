@@ -90,7 +90,8 @@ export function SessionRewind({ sessionId }: SessionRewindProps) {
 
   const undoFiles = useMutation({
     mutationFn: (restoreCheckpointId: string) =>
-      platformClient.operator.checkpoints.restore({ id: restoreCheckpointId, safetyCheckpoint: true, confirm: true }),
+      // This session's own changes are not another's: the daemon refuses only when another session's would go back.
+      platformClient.operator.checkpoints.restore({ id: restoreCheckpointId, safetyCheckpoint: true, confirm: true, sessionId }),
     onSuccess: async () => {
       await queryClient.invalidateQueries({ queryKey: queryKeys.sessionChanges(sessionId) });
       await queryClient.invalidateQueries({ queryKey: queryKeys.checkpoints });

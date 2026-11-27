@@ -465,7 +465,7 @@ export async function collectHistoryDelta(
       status: null,
       problem:
         'The granted Google credential carries no Gmail read scope (readonly, modify, metadata, or full mail), so users.history.list cannot be called.',
-      fix: 'This mailbox is served over IMAP IDLE instead, which needs no Gmail OAuth scope. Connecting Google once more (/calendar connect google in the Agent, or the Google setup) asks for every Google scope GoodVibes uses, Gmail reading included.',
+      fix: 'This mailbox is served over IMAP IDLE instead, which needs no Gmail OAuth scope. Connecting Google once more ("ask for consent again" on the Google tab of Mail, calendar and channels) asks for every Google scope GoodVibes uses, Gmail reading included.',
     };
   }
 

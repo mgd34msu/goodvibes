@@ -26,6 +26,7 @@ import { UIFactory } from './renderer/ui-factory.ts';
 import { conversationMessagesAsSessionRecords } from './core/conversation-message-snapshot.ts';
 import { createTranscriptNavigators } from './shell/transcript-navigation.ts';
 import { InputHandler } from './input/handler.ts';
+import { checkConnectedHostSetup } from './input/connected-host-setup-status.ts';
 import { applyConfiguredHitlMode, createHerdrSessionReporter } from '@goodvibes/engine/terminal-shell';
 import type { ContentPart } from '@goodvibes/engine/platform/platform/providers';
 import { PermissionPromptUI } from './permissions/prompt.ts';
@@ -107,8 +108,7 @@ import { cancelConversationGeneration, installRemoteConversationRouting } from '
 import { applyAtModelSwitches } from './input/at-model-switch.ts';
 import { createCommandContextUi } from './shell/command-context-ui.ts';
 import { createTerminalPaintWindow } from './shell/terminal-paint-window.ts';
-import { createSessionContractViews, wireWorkTree } from './core/work-tree-wiring.ts';
-import { createContractQuestionComposer } from '@goodvibes/engine/terminal-shell/contract-question-composer';
+import { wireWorkTree } from './core/work-tree-wiring.ts';
 import { SessionViews } from './shell/session-views.ts';
 import { ownerPressBinding } from './input/commands/capability-binding.ts';
 import { setupPlace } from './input/commands/onboarding-runtime.ts';
@@ -306,18 +306,12 @@ async function main(prepared: PreparedShellCliRuntime) {
   // Live-microphone footer row (the wake detector); assigned once voice capture is wired below, null until then so pre-wiring frames size correctly.
   let voiceCaptureStatus: () => import('./core/voice-capture-status.ts').VoiceCaptureIndicatorState | null = () => null;
 
-  // One cached contract snapshot for the session (no manifest), rebuilt on a contract event: every per-frame lookup reads it.
-  const sessionContractViews = createSessionContractViews(ctx.services.contractRunner, () => runtime.sessionId,
-    (listener) => ctx.services.runtimeBus.onDomain('contracts', listener));
-  // A contract's open question: offered above the composer, answered by the next typed message unless dismissed (Alt+X).
-  const contractQuestions = createContractQuestionComposer(() => sessionContractViews.read());
-  // Agents and background processes opened full screen: Enter on a lane or ▶ bead, the Activity modal, the process monitor (shell/session-views.ts).
+  // Agents and background processes opened full screen: Enter on a lane or ▶ bead, the Activity modal, the process
+  // monitor (shell/session-views.ts). The Agent runs no contracts: its work runs on the daemon and is shown in Work.
   const sessionViews = new SessionViews({
     conversation,
     agentManager,
     processManager,
-    contractRunner: ctx.services.contractRunner,
-    contracts: sessionContractViews,
     fleetNodes: () => ctx.services.processRegistry.query().nodes,
     steer: (id, text) => ctx.services.processRegistry.steer(id, text),
     killAgent: (id) => ctx.services.processRegistry.kill(id, { cascade: true }),
@@ -444,7 +438,6 @@ async function main(prepared: PreparedShellCliRuntime) {
     conversation,
     events: uiServices.events,
     agentManager,
-    contracts: sessionContractViews,
     fleetNodes: () => ctx.services.processRegistry.query().nodes,
     pendingCallId: () => pendingPermission?.callId,
     turnActive: mainTurnBusy,
@@ -452,7 +445,7 @@ async function main(prepared: PreparedShellCliRuntime) {
     sessionId: () => runtime.sessionId,
     requestRender: () => render(),
   });
-  unsubs.push(...workTreeWiring.unsubs, () => sessionViews.dispose(), sessionContractViews.dispose);
+  unsubs.push(...workTreeWiring.unsubs, () => sessionViews.dispose());
   const throbberSource = createThrobberSource(
     uiServices.events.tools,
     () => ctx.services.contextAccountingHolder.getSource()?.getCompactionState().isCompacting === true,
@@ -742,7 +735,6 @@ async function main(prepared: PreparedShellCliRuntime) {
       notify: (message) => systemMessageRouter.high(message),
     }),
     refuseUnsendable,
-    answerOptions: () => contractQuestions.answerOptions(),
     sendTurn: (text, options, turnOptions, how) => ownerTurns.sendTurn(text, options, turnOptions, how),
     // The image control's message runs here with its image (the connected host and the native intake carry text only),
     // as the terminal app sends it; a turn that could not start says so in the conversation.
@@ -751,6 +743,27 @@ async function main(prepared: PreparedShellCliRuntime) {
         systemMessageRouter.high(`Your message and its image were not sent: ${summarizeError(error)}`, 'error');
       }).finally(() => render());
       render();
+    },
+    // A message with an image goes to the host that runs this conversation's turns with its image: uploaded to the host's
+    // artifact store first and sent as the message's attachments. Undefined (the turn runs here) while turns run here.
+    attachImages: async (content) => {
+      if (configManager.get('hostedSessions.routeConversationTurns') === false) return undefined;
+      const verbs = ctx.services.daemonVerbs;
+      if (!verbs.probe().available) return undefined;
+      const attachments: { artifactId: string; label: string }[] = [];
+      for (const part of content) {
+        if (part.type !== 'image') continue;
+        const label = `image ${attachments.length + 1}`;
+        // The person sent this message with its image just now (the image control's Send): his own act, said so. The store's
+        // kinds are file, image, audio, video, document, archive and data: an attachment the model reads as a picture is `image`.
+        const made = await verbs.invoke<{ readonly artifact?: { readonly id?: string } }>('artifacts.create',
+          { kind: 'image', mimeType: part.mediaType, filename: `${label.replace(' ', '-')}.${part.mediaType.split('/')[1] ?? 'png'}`, dataBase64: part.data },
+          { explicitUserRequest: true });
+        const artifactId = made.artifact?.id;
+        if (!artifactId) return undefined;
+        attachments.push({ artifactId, label });
+      }
+      return attachments.length > 0 ? attachments : undefined;
     },
     restoreDraft: (text) => restoreDraft(text),
     onShellCommandsRunning: (running) => { shellCommandsRunning = running; },
@@ -1050,14 +1063,13 @@ async function main(prepared: PreparedShellCliRuntime) {
     requestRender: () => render(),
   });
   unsubs.push(() => places.stop());
-  // /settings, the System place, the menu and the Agent's workspace open the one settings screen (terminal-shell settings-screen).
+  // /settings, the System place, the menu and the Setup topics open the one settings screen (terminal-shell settings-screen).
   commandContext.openSettingsModal = (target) => places.openSettings(target);
   commandContext.openPlaceMenu = places.openMenu;
   commandContext.openPlace = (id, start) => { places.openPlace(id, start); };
   // This conversation's controls a person bound to a key in the composer (Keys place, "This conversation, while writing a message").
   commandContext.runPlaceKey = (action) => { places.runKey(action); };
   // Key-table actions that act on a screen of this program (keybinding-catalog.ts).
-  commandContext.answerContractQuestionPlainly = () => { contractQuestions.sendNextAsOrdinary(); };
   commandContext.cycleModelPickerGroup = () => { if (input.modelPicker.active && input.modelPicker.mode === 'model') input.modelPicker.cycleGroupBy(); };
   input.setConversationManager(conversation);
   input.setContentWidth(getPromptContentWidth());
@@ -1074,7 +1086,6 @@ async function main(prepared: PreparedShellCliRuntime) {
     else if (target === 'model') commandContext.openModelPicker?.();
     else if (target === 'agents') commandContext.openAgents?.();
     else if (target === 'commands') commandContext.openCommandPalette?.();
-    else if (target === 'workspace') commandContext.openWorkspacePicker?.();
     else if (target === 'places') commandContext.openPlaceMenu?.();
     // The cost opens Money on Spending: this conversation's usage first.
     else if (target === 'usage') commandContext.openPlace?.('money', { list: 'spending' });
@@ -1161,7 +1172,6 @@ async function main(prepared: PreparedShellCliRuntime) {
         input,
         pendingPermission,
         setupPairing,
-        contracts: sessionContractViews.active(),
       }),
     );
     setupPairing?.checkPresentation();
@@ -1275,9 +1285,6 @@ async function main(prepared: PreparedShellCliRuntime) {
       composerFlags: composerState.flags,
       composerPendingRisk: composerState.pendingRisk,
       voiceCapture: voiceCaptureStatus(),
-      contractQuestionHint: contractQuestions.hint(ctx.services.keybindingsManager.getComboLabel('contract-question-ordinary')),
-      // Esc leads back only while what was typed is still in the composer (handler-interactions.ts).
-      workspaceReturnArea: input.prompt.length > 0 ? input.agentWorkspace.typedAwayFromArea : null,
       throbber,
       turnRunning: mainTurnBusy(),
       backToBottom,
@@ -1549,11 +1556,10 @@ async function main(prepared: PreparedShellCliRuntime) {
   // servers of its own is trusted without a question; one that brings them is asked with the card above.
   void settleFolderTrustOnOpen(commandContext.workspace?.workspaceTrustManager, ctx.services.requestTrustDecision,
     () => readFolderTrustFacts(workingDir, homeDirectory, String(configManager.get('tools.hooksFile') ?? '')));
-  // What is waiting (Home and Work & Approvals) is read in the background at every start, after the
-  // first frame, so the workspace opens with it already read; one read per report, nothing on a timer.
-  input.agentWorkspace.readAtStart(commandContext, () => render());
-  // When the connected daemon answers again, what failed because it did not is read again by itself.
-  unsubs.push(onDaemonAttached(() => { input.agentWorkspace.daemonAnswered(); render(); }));
+  // The setup checklist's two host steps (what a model's setup reading says): one reading of the connected host at
+  // start, after the first frame, and a new one each time the daemon connection comes back; nothing on a timer.
+  void checkConnectedHostSetup(commandContext);
+  unsubs.push(onDaemonAttached(() => { void checkConnectedHostSetup(commandContext, { force: true }); }));
   const followups = startFirstRenderFollowups({
     shellPaths: ctx.services.shellPaths,
     providerRegistry,

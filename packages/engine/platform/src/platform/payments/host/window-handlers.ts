@@ -2,6 +2,7 @@ import { isDeepStrictEqual } from 'node:util';
 import { PaymentReplyInboxClosedError, PaymentReplyWindowError } from '../reply-inbox.js';
 import type { HandlerContextEnvelope, TypedHandler } from '../../control-plane/host-handlers.js';
 import { GatewayVerbError } from '../../control-plane/routes/gateway-verb-error.js';
+import { nativeIdentityIsCaller } from '../../control-plane/routes/native-owner.js';
 import { describeCardTransportRefusal, mayCrossWithCardDetails } from '../entry-policy.js';
 import type { PaymentReplyInbox } from '../reply-inbox.js';
 import type { CheckoutOperations } from './checkout-operations.js';
@@ -125,9 +126,8 @@ export function purchaseWindowAnswerHandler(deps: PaymentWindowHandlerDeps, acti
 function pairedOwner(context: HandlerContextEnvelope) {
   const authority = context.nativeExecutionAuthority;
   const expected = (() => { try { return authority?.current(); } catch { throw forbidden(); } })();
-  // A paired device or an app on the owner's own machine ('local').
-  if (!expected || !authority || (expected.kind !== 'pairing-token' && expected.kind !== 'local') || !context.admin
-    || context.principalKind !== 'token' || context.principalId !== expected.principalId
+  // A paired device, an app on the owner's own machine ('local'), or the owner himself signed in (his machine's).
+  if (!expected || !authority || !context.admin || !nativeIdentityIsCaller(context, expected)
     || !scope(context.scopes, 'write:payments') || !scope(expected.scopes, 'write:payments')
     || !authorizedFor(context, 'write:payments')) throw forbidden();
   const signal = context.signal;

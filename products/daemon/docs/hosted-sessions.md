@@ -13,12 +13,13 @@ undecided workspace raises one trust question, which stays open until it is
 answered from an attached surface. Reads run meanwhile; a write, command or
 delegation waits for the answer at most ten minutes after the question was
 raised, and after that is refused at once, saying the question is still open.
-Hosted conversational commands require containment
-and cannot fall back to uncontained host execution or control the owner's
-terminal. Jev admission and current permission constraints still govern tool
-actions. An attachment or a `survive` policy grants no additional tool authority.
-See the [daemon composition](../src/runtime/hosted-session-composition.ts) and
-[execution posture](../../../packages/engine/platform/src/platform/hosted-sessions/exec-posture.ts).
+A command the owner's own message leads to runs as one in his terminal would:
+inside the sandbox when the sandbox setting is on, and as his mode allows. A
+message someone else put into the session runs no command outside a real
+sandbox and writes no file, whatever the mode. Jev admission and current
+permission constraints still govern tool actions. An attachment or a `survive`
+policy grants no additional tool authority. See the
+[daemon composition](../src/runtime/hosted-session-composition.ts).
 
 ## Inspect or end a session
 

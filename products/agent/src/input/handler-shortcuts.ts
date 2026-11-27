@@ -12,8 +12,6 @@ import { hasActiveExecutionMode, readExecutionMode, setExecutionMode } from '../
 export type { PromptEdit } from '@goodvibes/engine/terminal-shell/global-shortcuts';
 export type GlobalShortcutRouteState = GlobalShortcutState & {
   commandContext?: CommandContext;
-  cycleAgentWorkspaceCategory: (direction: 'next' | 'prev') => void;
-  dismissAgentWorkspace: () => boolean;
 };
 
 /** The failure row's key actions and what each asks of the row (turn-failure-actions.ts). */
@@ -47,33 +45,14 @@ const SHORTCUT_POLICY: GlobalShortcutPolicy<GlobalShortcutRouteState> = {
     },
     action(state, action) {
       switch (action) {
-        case 'workspace-close-all':
-        case 'workspace-close':
-          state.dismissAgentWorkspace();
-          state.requestRender();
-          return true;
-
         case 'command-palette':
           state.commandContext?.openCommandPalette?.();
-          state.requestRender();
-          return true;
-
-        case 'workspace-picker':
-          state.commandContext?.openWorkspacePicker?.();
           state.requestRender();
           return true;
 
         case 'open-agents':
           state.commandContext?.openAgents?.();
           state.requestRender();
-          return true;
-
-        case 'workspace-tab-next':
-          state.cycleAgentWorkspaceCategory('next');
-          return true;
-
-        case 'workspace-tab-prev':
-          state.cycleAgentWorkspaceCategory('prev');
           return true;
 
         case 'open-notifications':
@@ -94,12 +73,6 @@ const SHORTCUT_POLICY: GlobalShortcutPolicy<GlobalShortcutRouteState> = {
         case 'open-menu':
           // The menu of every place (terminal-shell/places).
           state.commandContext?.openPlaceMenu?.();
-          state.requestRender();
-          return true;
-
-        case 'contract-question-ordinary':
-          // A contract's open question: the next message is an ordinary one.
-          state.commandContext?.answerContractQuestionPlainly?.();
           state.requestRender();
           return true;
 
@@ -129,7 +102,7 @@ async function cycleMode(state: GlobalShortcutRouteState): Promise<void> {
     configManager,
     confirm: context.confirm,
     hosted: hasActiveExecutionMode(configManager)
-      ? { current: () => readExecutionMode(configManager), apply: (mode) => setExecutionMode(configManager, mode) }
+      ? { current: () => readExecutionMode(configManager), apply: (mode) => setExecutionMode(configManager, mode, { personAsked: true }) }
       : null,
     flash: getSharedModeFlash(),
     refused: (message) => {

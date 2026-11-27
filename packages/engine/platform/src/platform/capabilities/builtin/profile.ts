@@ -192,12 +192,12 @@ export const PROFILE_SET = change({
   sentence: 'Fact {field} is recorded as "{value}" in your own words, and GoodVibes knows it until you change it.', example: { field: 'commerce.shippingAddress', value: '1 Main St' },
   undoneBy: 'undo',
   async run(values, _services, caller) {
+    // The fact by its label, as the form and the question showed it (also in "where it came from").
+    const label = PROFILE_FIELDS.find((field) => field.id === values.field)?.label ?? values.field;
     // The person's own request, typed or submitted: his words are what he gave (the trust gate's verbatim quote).
     const answer = await call(caller, 'profile.set', {
-      fieldId: values.field!, value: values.value!, surface: surfaceOf(caller), said: `${values.field} is ${values.value}`, authority: 'owner-direct',
+      fieldId: values.field!, value: values.value!, surface: surfaceOf(caller), said: `${label} is ${values.value}`, authority: 'owner-direct',
     });
-    // The fact by its label, as the form and the question showed it.
-    const label = PROFILE_FIELDS.find((field) => field.id === values.field)?.label ?? values.field;
     return written(answer, `${label} was not recorded`, `Saved ${label} to your profile.`);
   },
 });

@@ -1,5 +1,6 @@
 import { ensureAutomationCronPhase, ownerTimezone, withCronTimezone, type AutomationScheduleDefinition } from './schedules.js';
-import { randomUUID } from 'node:crypto';
+import { createHash, randomUUID } from 'node:crypto';
+import { projectIdentityOf } from '../workspace/project-identity.js';
 import type { ConfigManager } from '../config/manager.js';
 import type { AutomationJob, ManagedAutomationJob } from './jobs.js';
 import type { AutomationJobMutationOptions } from './job-mutations.js';
@@ -52,13 +53,55 @@ function changedJobFields(previous: AutomationJob, next: AutomationJob): string[
   return UPDATE_FIELDS.filter(field => JSON.stringify(previous[field]) !== JSON.stringify(next[field]));
 }
 
+/** The project a job or a create works in, as one identity (the same folder however it is named), '' for none. */
+function projectOf(folder: string | undefined): string {
+  return folder && folder.trim() ? projectIdentityOf(folder.trim()) : '';
+}
+
+/**
+ * The id a schedule whose id a person chose is stored under: the name he chose and a part made from his project and
+ * that name alone (`<id>-<8 hex>`), the same for every create of it in that project and different in every other. It is
+ * made the same way whatever any other project holds, so it never says whether another project has a schedule of that
+ * name, and a create naming another project's schedule is never answered with that one.
+ */
+export function storedScheduleId(chosen: string, workingDirectory: string | undefined): string {
+  const part = createHash('sha256').update(`${projectOf(workingDirectory)}\u0000${chosen}`).digest('hex').slice(0, 8);
+  return `${chosen}-${part}`;
+}
+
+/**
+ * This project's schedule of the id a create chose (a repeat after a lost reply), or undefined: the one stored under the
+ * id made for it here, or one kept under the chosen id itself (made before ids were made this way) in this project.
+ * Another project's schedule is never this one.
+ */
+export function sameProjectJobOfChosenId(jobs: ReadonlyMap<string, ManagedAutomationJob>, input: Pick<CreateAutomationJobInput, 'id' | 'workingDirectory'>): ManagedAutomationJob | undefined {
+  const chosen = input.id?.trim();
+  if (!chosen) return undefined;
+  const here = projectOf(input.workingDirectory);
+  for (const id of [storedScheduleId(chosen, input.workingDirectory), chosen]) {
+    const job = jobs.get(id);
+    if (job && projectOf(job.execution.workingDirectory) === here) return job;
+  }
+  return undefined;
+}
+
+/** A schedule's id: the one made from the name a person chose and his project (`storedScheduleId`), or a new one. */
+function scheduleIdInProject(context: AutomationJobMutationContext, input: CreateAutomationJobInput): string {
+  const chosen = input.id?.trim();
+  if (!chosen) return `auto-${randomUUID().slice(0, 8)}`;
+  const id = storedScheduleId(chosen, input.workingDirectory);
+  // Held already (a schedule of another project whose made part is the same: never seen in practice): a new id, the
+  // same shape, so nothing is said about the other.
+  return context.jobs.has(id) ? `${chosen}-${randomUUID().replace(/-/g, '').slice(0, 8)}` : id;
+}
+
 export async function createAutomationJobRecord(
   context: AutomationJobMutationContext,
   input: CreateAutomationJobInput,
   options: AutomationJobMutationOptions = {},
 ): Promise<ManagedAutomationJob> {
   const now = Date.now();
-  const jobId = input.id?.trim() || `auto-${randomUUID().slice(0, 8)}`;
+  const jobId = scheduleIdInProject(context, input);
   const schedule = anchoredSchedule(ensureAutomationCronPhase(withCronTimezone(input.schedule, ownerTimezone(context.configManager))), now);
   const enablement = nextJobEnablement(undefined, input.enabled ?? true, schedule, now, 'created-disabled');
   const job: AutomationJob = {

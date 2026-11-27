@@ -79,6 +79,7 @@ import { contractIdempotencyLockPath, deserializeContract, deserializeOwnedContr
 import { acquireProcessLock, ProcessLockBusyError, type HeldProcessLock } from '../utils/process-lock.js';
 import { retainOriginalReviewDescriptors } from './review-file-observations.js';
 import { captureTreeBaseline, retainOriginalTreeBaselines } from './tree-baseline.js';
+import { conflictResolvedBy, startConflictMerge } from './conflict-repair.js';
 import {
   CURRENT_CONTRACT_SCHEMA_VERSION,
   isOpaqueContractId,
@@ -471,7 +472,8 @@ export function failureStatusLine(contract: Pick<Contract, 'id' | 'units' | 'gro
   const retry = contract.failureKind === 'judgment-unavailable' || contract.failureKind === 'transport'
     ? 'ask for the work again once the model is reachable' : 'ask for the work again, changed to address the reason above';
   const next = count > 0 && onBranch ? `to keep what it did, merge it with git merge ${contract.branch}; or ${retry}` : retry;
-  return `The work failed: ${reason}${unmetPart}. Kept: ${kept}. Next: ${next}.`;
+  // A reason that ends its own sentence is not given a second full stop.
+  return `The work failed: ${reason.trim().replace(/[.]+$/u, '')}${unmetPart}. Kept: ${kept}. Next: ${next}.`;
 }
 
 export function createContractRunner(deps: ContractRunnerDeps): ContractRunner & Required<Pick<ContractRunner, 'inspectIntegration' | 'remove'>> {
@@ -656,7 +658,7 @@ export function createContractRunner(deps: ContractRunnerDeps): ContractRunner &
   let hostClosing = false;
 
   function emit(contract: Contract, event: ContractEvent): void {
-    const occurrence = emitContractEvent(deps.runtimeBus, contract.sessionId, event);
+    const occurrence = emitContractEvent(deps.runtimeBus, contract.sessionId, event, contract.projectRoot);
     for (const listener of listeners) {
       try {
         listener(occurrence);
@@ -747,6 +749,10 @@ export function createContractRunner(deps: ContractRunnerDeps): ContractRunner &
       const run = item.contractId === undefined ? undefined : runs.get(item.contractId);
       const unit = item.contractUnitId === undefined ? undefined : run?.unit(item.contractUnitId);
       if (run !== undefined && unit !== undefined && unit.baseline === undefined && !run.terminal) {
+        // A step that repairs a conflicting merge starts with the other branch brought into its own tree (its agent
+        // cannot run git there): the conflicting files hold both sides between markers for it to edit.
+        const conflict = item.worktreePath === undefined ? undefined : conflictResolvedBy(run.group(unit.groupId), unit.id);
+        if (conflict !== undefined) await startConflictMerge(item.worktreePath!, conflict);
         unit.baseline = await captureTreeBaseline(item.worktreePath ?? run.contract.worktreePath ?? run.contract.projectRoot);
       }
       return decision;
@@ -1779,8 +1785,12 @@ export function createContractRunner(deps: ContractRunnerDeps): ContractRunner &
     run.abort.abort();
     groups.stopRun(run);
     const count = filesModified(contract);
-    const where = contract.isolation === 'worktree' && contract.branch !== undefined ? `on branch ${contract.branch}` : 'on disk';
-    contract.statusLine = `The work was stopped; ${count} file${count === 1 ? '' : 's'} already changed ${where}`;
+    const files = `${count === 1 ? 'the 1 file' : `the ${count} files`} it changed`;
+    // Said to a person: what became of the files, never an id; the branch only as the command that applies it.
+    contract.statusLine = count === 0 ? 'The work was stopped before it changed any file.'
+      : contract.isolation === 'worktree' && contract.branch !== undefined
+        ? `The work was stopped; ${files} ${count === 1 ? 'is kept on a branch of its own' : 'are kept on a branch of their own'} (to apply ${count === 1 ? 'it' : 'them'} yourself: git merge ${contract.branch}).`
+        : `The work was stopped; ${files} stay as they are in the project.`;
     run.decide('cancelled', contract.id, reason);
     run.emit({ type: 'CONTRACT_CANCELLED', contractId: contract.id, reason, filesModified: count });
     settleEnded(run);

@@ -8,7 +8,8 @@
  * when they change. The daemon's own settings are a different file and are not
  * touched; a daemon-owned setting is written to the daemon's own file as always.
  */
-import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, writeFileSync } from 'node:fs';
+import { readCallerJson } from '../path-inputs.js';
 import { dirname } from 'node:path';
 import type { ConfigManager } from '../../config/manager.js';
 import type { ConfigKey } from '../../config/schema.js';
@@ -18,13 +19,15 @@ import type { ProfileData, ProfileManager } from '../../profiles/manager.js';
 import { PROFILE_SETTING_KEYS, profileDataToConfigSnapshot } from '../../profiles/shape.js';
 import type { ManagedSettingsBundle, ProfileBundleEntry, ProfileSyncBundle } from '../../runtime/sandbox/types.js';
 import {
-  applyStagedManagedBundle, clearManagedSettingLock, formatStagedManagedBundleReview, getSettingsControlPlaneSnapshot,
-  inspectManagedSettingsBundle, recordSettingsSyncEvent, recordSettingsSyncFailure, rollbackManagedApply, setManagedSettingLock,
-  stageManagedSettingsBundle,
+  applyStagedManagedBundle, clearManagedSettingLockEverywhere, formatStagedManagedBundleReview, getSettingsControlPlaneSnapshot,
+  inspectManagedSettingsBundle, managedRollbackValues, mirrorManagedLocksForRelease, recordSettingsSyncEvent, recordSettingsSyncFailure, rollbackManagedApply, setManagedSettingLock,
+  stageManagedSettingsBundle, type ManagedBundleChange,
 } from '../../runtime/settings/control-plane.js';
 import { CapabilityRefusal, REPLACED_DONE, type ActionValues, type CapabilityCaller, type CapabilityDefinition, type CapabilityResult, type InputDescription, type ListName } from '../types.js';
 import { fixedInput, pickedInput, wordsInput } from './agent-stores.js';
 import { noteListChanged } from '../../runtime/list-changes.js';
+import { splitIncomingSettings } from '../../support/setup-transfer.js';
+import { bringsSecurity, heldBackLines, incomingSecurityInput } from './incoming-settings.js';
 
 /** What these capabilities need: the asking program's own settings and presets, read fresh for each call. */
 export interface ProgramSettingsCapabilityServices {
@@ -43,10 +46,9 @@ export const PRESETS_LIST = 'managed.profiles' as ListName;
 
 const errorText = (error: unknown): string => (error instanceof Error ? error.message : String(error)).replace(/\.$/, '');
 
-function readJsonFile(path: string, what: string): unknown {
-  let text: string;
-  try { text = readFileSync(path, 'utf-8'); } catch (error) { throw new CapabilityRefusal(`${path} could not be read (${errorText(error)}); nothing was changed.`); }
-  try { return JSON.parse(text); } catch { throw new CapabilityRefusal(`${path} is not valid JSON, so it is not ${what}; nothing was changed.`); }
+/** A JSON file named by path; never the system's or the parser's words (capabilities/path-inputs.ts). */
+function readJsonFile(path: string, what: string, caller: CapabilityCaller): unknown {
+  return readCallerJson(path, what, caller);
 }
 
 function keysOf(text: string | undefined): ConfigKey[] {
@@ -97,6 +99,8 @@ function change(fields: Fields): Def {
     example: fields.example,
     async run(values, services, caller) {
       const result = await guarded(() => fields.run(values, services.programSettings, caller));
+      // A lock added or removed here is kept in step in the lock file a released 3.5.0 reads, so a rollback weakens nothing.
+      if (fields.id.startsWith('managed.')) mirrorManagedLocksForRelease(services.programSettings.config(caller));
       // Every screen showing the presets and managed settings reads them again (LIST_CHANGED `tools`).
       noteListChanged({ list: 'tools', change: 'changed' });
       return result;
@@ -158,12 +162,12 @@ export const MANAGED_INSPECT = read({
   sentence: 'Shows what {path} would change here and how risky it is; nothing is changed.', example: { path: 'managed/team.json' },
   run: async (values, services, caller) => {
     const path = services.resolvePath(caller, values.path!);
-    return { text: await inspectManagedSettingsBundle(services.config(caller), readJsonFile(path, 'a managed settings bundle') as ManagedSettingsBundle, path) };
+    return { text: await inspectManagedSettingsBundle(services.config(caller), readJsonFile(path, 'a managed settings bundle', caller) as ManagedSettingsBundle, path) };
   },
 });
 export const MANAGED_EXPORT = change({
   id: 'managed.export', actionId: 'export', label: 'Save a preset as a managed bundle', word: 'export', lasts: 'not-a-change',
-  inputs: [pickedInput({ id: 'profile', label: 'Preset', help: 'Your saved presets', list: PRESETS_LIST, other: 'a preset name' }), { ...BUNDLE_FILE, help: 'Where to write the bundle', typed: { position: 2 } }],
+  inputs: [pickedInput({ id: 'profile', label: 'Preset', help: 'Your saved presets', list: PRESETS_LIST, other: 'a preset name' }), { ...BUNDLE_FILE, file: 'written', help: 'Where to write the bundle', typed: { position: 2 } }],
   sentence: 'The settings of preset {profile} are written to {path} as a managed bundle.', example: { profile: 'team', path: 'managed/team.json' },
   run: (values, services, caller) => {
     const loaded = services.presets(caller).load(values.profile!);
@@ -183,7 +187,7 @@ export const MANAGED_STAGE = change({
     const config = services.config(caller);
     const path = services.resolvePath(caller, values.path!);
     try {
-      const stage = await stageManagedSettingsBundle(config, readJsonFile(path, 'a managed settings bundle') as ManagedSettingsBundle, path);
+      const stage = await stageManagedSettingsBundle(config, readJsonFile(path, 'a managed settings bundle', caller) as ManagedSettingsBundle, path);
       return {
         text: [`Staged the managed bundle from ${path}: ${stage.changeCount} change(s), risk ${stage.risk}.`, ...(stage.ignoredKeys && stage.ignoredKeys.length > 0 ? [`Not staged, not settings this version manages: ${stage.ignoredKeys.join(', ')}.`] : [])].join('\n'),
         data: { stage: stage.id, changes: stage.changeCount, risk: stage.risk },
@@ -195,33 +199,47 @@ export const MANAGED_STAGE = change({
   },
 });
 
-/** What applying a managed bundle did to security: true whether it loosened, tightened or left it alone. */
-const MANAGED_APPLIED = 'Any setting it changed that touches security is named above; it can loosen or tighten a protection, and none named means it changed none.';
 const APPLY_OWNER_ONLY = { reason: 'a managed bundle can change security settings on this machine', instead: 'Ask the owner to apply it in Tools and extensions, Managed settings.' };
 
+/**
+ * The keys of a staged bundle an apply takes, by the one rule every import of settings follows (incoming-settings.ts):
+ * the changed ones asked for (every changed one when none is named), less those that loosen a protection unless the run
+ * chose to bring them in too. Those stay staged, shown with their present and incoming value.
+ */
+function managedApplyKeys(changes: readonly ManagedBundleChange[], requested: readonly ConfigKey[], bringSecurity: boolean) {
+  const changed = changes.filter((entry) => entry.changed && (requested.length === 0 || requested.includes(entry.key)));
+  const split = splitIncomingSettings((key: ConfigKey) => changed.find((entry) => entry.key === key)?.previousValue,
+    changed.map((entry) => ({ key: entry.key, value: entry.nextValue })), bringSecurity);
+  const taken = new Set(split.apply.map((entry) => entry.key));
+  return { keys: [...taken], applied: changed.filter((entry) => taken.has(entry.key)), heldBack: split.heldBack };
+}
+
+/** Apply the keys of one stage this run takes; nothing is applied (the stage stays) when every one is held back. */
+async function applyManagedStage(config: ConfigManager, stage: { readonly id: string; readonly changes: readonly ManagedBundleChange[] }, values: ActionValues, intro: string, extra: readonly string[]): Promise<CapabilityResult> {
+  const taken = managedApplyKeys(stage.changes, keysOf(values.keys), bringsSecurity(values));
+  const held = heldBackLines(taken.heldBack, 'apply again choosing to bring them in too; they stay staged');
+  if (taken.keys.length === 0) {
+    return { text: [`${intro}: nothing applied${taken.heldBack.length > 0 ? '' : ' (no setting in it differs)'}.`, ...held, ...extra].join('\n'), data: { applied: 0, heldBack: taken.heldBack.map((entry) => entry.key) } };
+  }
+  const result = await applyStagedManagedBundle(config, taken.keys, stage.id);
+  return {
+    text: [`${intro}: ${result.appliedCount} change(s)${result.remainingCount > 0 ? `, ${result.remainingCount} still staged` : ''}.`, ...securityLines(taken.applied), ...held, ...extra].join('\n'),
+    data: { rollback: result.rollbackToken, applied: result.appliedCount, remaining: result.remainingCount, heldBack: taken.heldBack.map((entry) => entry.key) },
+  };
+}
+
 export const MANAGED_APPLY = change({
-  id: 'managed.apply', actionId: 'apply', label: 'Apply a managed bundle', word: 'apply', inputs: [BUNDLE_FILE, ONLY_KEYS], risk: 'loosens-a-protection', undoneBy: 'rollback', ownerOnly: APPLY_OWNER_ONLY,
-  sentence: 'The settings in {path} are applied and locked as managed until you change it; rolling the apply back puts the earlier values back.', example: { path: 'managed/team.json' },
-  // A bundle may tighten as well as loosen: what it did to security is the list above, not the risk's words.
-  riskDone: MANAGED_APPLIED,
+  id: 'managed.apply', actionId: 'apply', label: 'Apply a managed bundle', word: 'apply', inputs: [BUNDLE_FILE, ONLY_KEYS, incomingSecurityInput('Apply them too')], undoneBy: 'rollback', ownerOnly: APPLY_OWNER_ONLY,
+  sentence: 'The settings in {path} are applied and locked as managed until you change it, one that loosens a protection only if you choose to apply those too; rolling the apply back puts the earlier values back.', example: { path: 'managed/team.json' },
   run: async (values, services, caller) => {
-    const requested = keysOf(values.keys);
     const config = services.config(caller);
     const path = services.resolvePath(caller, values.path!);
-    const bundle = readJsonFile(path, 'a managed settings bundle') as ManagedSettingsBundle;
+    const bundle = readJsonFile(path, 'a managed settings bundle', caller) as ManagedSettingsBundle;
     try {
       // One read: what is staged is what is applied, and only the stage this call made.
       const stage = await stageManagedSettingsBundle(config, bundle, path);
-      const result = await applyStagedManagedBundle(config, requested, stage.id);
-      const changed = stage.changes.filter((entry) => entry.changed && (requested.length === 0 || requested.includes(entry.key as ConfigKey)));
-      return {
-        text: [
-          `Applied the managed bundle from ${path}: ${result.appliedCount} change(s), risk ${stage.risk}${result.remainingCount > 0 ? `, ${result.remainingCount} still staged` : ''}.`,
-          ...securityLines(changed),
-          ...(stage.ignoredKeys && stage.ignoredKeys.length > 0 ? [`Not applied, not settings this version manages: ${stage.ignoredKeys.join(', ')}.`] : []),
-        ].join('\n'),
-        data: { rollback: result.rollbackToken, applied: result.appliedCount, remaining: result.remainingCount },
-      };
+      return await applyManagedStage(config, stage, values, `Applied the managed bundle from ${path} (risk ${stage.risk})`,
+        stage.ignoredKeys && stage.ignoredKeys.length > 0 ? [`Not applied, not settings this version manages: ${stage.ignoredKeys.join(', ')}.`] : []);
     } catch (error) {
       recordSettingsSyncFailure('managed', errorText(error), config.getControlPlaneConfigDir());
       throw new CapabilityRefusal(`Not applied: ${errorText(error)}.`);
@@ -229,22 +247,15 @@ export const MANAGED_APPLY = change({
   },
 });
 export const MANAGED_APPLY_STAGED = change({
-  id: 'managed.apply-staged', actionId: 'apply-staged', label: 'Apply the staged bundle', word: 'apply-staged', inputs: [ONLY_KEYS], risk: 'loosens-a-protection', undoneBy: 'rollback', ownerOnly: APPLY_OWNER_ONLY,
-  sentence: 'The staged settings are applied and locked as managed until you change it; rolling the apply back puts the earlier values back.', example: {},
-  riskDone: MANAGED_APPLIED,
+  id: 'managed.apply-staged', actionId: 'apply-staged', label: 'Apply the staged bundle', word: 'apply-staged', inputs: [ONLY_KEYS, incomingSecurityInput('Apply them too')], undoneBy: 'rollback', ownerOnly: APPLY_OWNER_ONLY,
+  sentence: 'The staged settings are applied and locked as managed until you change it, one that loosens a protection only if you choose to apply those too; rolling the apply back puts the earlier values back.', example: {},
   run: async (values, services, caller) => {
-    const requested = keysOf(values.keys);
     const config = services.config(caller);
     const staged = getSettingsControlPlaneSnapshot(config).stagedManagedBundle;
     if (!staged) throw new CapabilityRefusal('Nothing is staged; nothing was applied.', 'Stage a bundle first.');
     try {
       // The stage shown is the one applied: another stage put there since is refused.
-      const result = await applyStagedManagedBundle(config, requested, staged.id);
-      const changed = staged.changes.filter((entry) => entry.changed && (requested.length === 0 || requested.includes(entry.key as ConfigKey)));
-      return {
-        text: [`Applied the staged settings: ${result.appliedCount} change(s)${result.remainingCount > 0 ? `, ${result.remainingCount} still staged` : ''}.`, ...securityLines(changed)].join('\n'),
-        data: { rollback: result.rollbackToken, applied: result.appliedCount, remaining: result.remainingCount },
-      };
+      return await applyManagedStage(config, staged, values, 'Applied the staged settings', []);
     } catch (error) {
       recordSettingsSyncFailure('managed', errorText(error), config.getControlPlaneConfigDir());
       throw new CapabilityRefusal(`Not applied: ${errorText(error)}.`);
@@ -252,11 +263,26 @@ export const MANAGED_APPLY_STAGED = change({
   },
 });
 export const MANAGED_ROLLBACK = change({
-  id: 'managed.rollback', actionId: 'rollback', label: 'Undo a managed apply: put back the values from before it', word: 'rollback',
-  inputs: [pickedInput({ id: 'token', label: 'Apply', help: 'Past managed applies', list: MANAGED_ROLLBACKS_LIST, other: 'an apply\'s token' })],
-  sentence: 'The settings apply {token} changed get their earlier values back, until you change it.', example: { token: 'rb-3f1c' },
+  // A rollback releases the locks its apply set: a loosening, put to the owner for anyone else.
+  id: 'managed.rollback', actionId: 'rollback', label: 'Undo a managed apply: put back the values from before it', word: 'rollback', risk: 'loosens-a-protection',
+  inputs: [pickedInput({ id: 'token', label: 'Apply', help: 'Past managed applies', list: MANAGED_ROLLBACKS_LIST, other: 'an apply\'s token' }), incomingSecurityInput('Put them back too')],
+  sentence: 'The settings apply {token} changed get their earlier values back, until you change it; if one of them would loosen a protection (an organisation\'s tightening undone), nothing is rolled back unless you choose to put those back too.', example: { token: 'rb-3f1c' },
   run: (values, services, caller) => {
     const config = services.config(caller);
+    // Undoing a managed apply re-applies old settings: held back by the one rule every import of settings follows
+    // (incoming-settings.ts). A rollback is one record (its values and its locks together), so with a setting that
+    // would loosen a protection held back, none of it runs; choosing to put those back too is a loosening act of its own.
+    const restoring = managedRollbackValues(config, values.token!);
+    if (restoring !== undefined) {
+      const split = splitIncomingSettings((key: ConfigKey) => config.get(key), restoring, bringsSecurity(values));
+      if (split.heldBack.length > 0) {
+        return {
+          text: [`Not rolled back: apply ${values.token} would put back ${split.heldBack.length} setting(s) that loosen a protection.`,
+            ...heldBackLines(split.heldBack, 'roll back again choosing to put those back too; nothing was changed')].join('\n'),
+          data: { restored: 0, heldBack: split.heldBack.map((entry) => entry.key) },
+        };
+      }
+    }
     try {
       const restored = rollbackManagedApply(config, values.token!);
       return { text: `Put back ${restored} setting(s) to their values from before that apply.`, data: { restored } };
@@ -282,7 +308,8 @@ export const MANAGED_UNLOCK = change({
   sentence: 'The managed lock on {key} is cleared, so it can be changed here again, until you change it.', example: { key: 'permissions.mode' },
   run: (values, services, caller) => {
     if (!CONFIG_KEYS.has(values.key!)) throw new CapabilityRefusal(`No setting is called ${values.key}.`);
-    if (!clearManagedSettingLock(values.key as ConfigKey, services.config(caller).getControlPlaneConfigDir())) throw new CapabilityRefusal(`${values.key} has no managed lock; nothing was changed.`, undefined, 'NOT_FOUND');
+    // Every lock file that keeps it: a lock holds wherever it was recorded (readManagedLocks), so it is removed from all.
+    if (!clearManagedSettingLockEverywhere(values.key as ConfigKey, services.config(caller).managedLockFolders())) throw new CapabilityRefusal(`${values.key} has no managed lock; nothing was changed.`, undefined, 'NOT_FOUND');
     return { text: `Unlocked ${values.key}.`, data: { key: values.key } };
   },
 });
@@ -315,32 +342,36 @@ const SECTION_KEYS = (section: 'display' | 'behavior'): readonly ConfigKey[] => 
 const PROVIDER_FIELDS = new Set(PROFILE_SETTING_KEYS.filter((key) => key.startsWith('provider.')).map((key) => key.slice('provider.'.length)));
 
 export const PRESETS_LOAD = change({
-  id: 'presets.load', actionId: 'load', label: 'Load a preset', word: 'load', inputs: [PRESET],
-  sentence: 'The display, model and behaviour settings saved in {preset} become yours, until you change them.', example: { preset: 'focus' },
+  id: 'presets.load', actionId: 'load', label: 'Load a preset', word: 'load', inputs: [PRESET, incomingSecurityInput('Load them too')],
+  sentence: 'The display, model and behaviour settings saved in {preset} become yours, until you change them; one that loosens a protection only if you choose to load those too.', example: { preset: 'focus' },
   run: (values, services, caller) => {
     const config = services.config(caller);
     const { data } = services.presets(caller).load(values.preset!);
     const applied: string[] = []; const failed: string[] = []; const skipped: string[] = [];
-    const set = (key: ConfigKey, value: unknown): void => {
-      try { config.setDynamic(key, value); applied.push(key); } catch { failed.push(key); }
-    };
+    const incoming: { key: ConfigKey; value: unknown }[] = [];
     for (const section of ['display', 'behavior'] as const) {
       const part = data[section] as Record<string, unknown> | undefined;
       if (!part) continue;
       const keys = SECTION_KEYS(section);
       const known = new Set(keys.map((key) => key.split('.')[1]));
       for (const field of Object.keys(part)) if (!known.has(field)) skipped.push(`${section}.${field}`);
-      for (const key of keys) { const field = key.split('.')[1]!; if (Object.hasOwn(part, field)) set(key, part[field]); }
+      for (const key of keys) { const field = key.split('.')[1]!; if (Object.hasOwn(part, field)) incoming.push({ key, value: part[field] }); }
     }
     if (data.provider) {
       for (const field of Object.keys(data.provider)) if (!PROVIDER_FIELDS.has(field)) skipped.push(`provider.${field}`);
-      if (data.provider.model !== undefined) set('provider.model' as ConfigKey, data.provider.model);
-      if (data.provider.reasoningEffort !== undefined) set('provider.reasoningEffort' as ConfigKey, data.provider.reasoningEffort);
+      if (data.provider.model !== undefined) incoming.push({ key: 'provider.model' as ConfigKey, value: data.provider.model });
+      if (data.provider.reasoningEffort !== undefined) incoming.push({ key: 'provider.reasoningEffort' as ConfigKey, value: data.provider.reasoningEffort });
+    }
+    // One rule for every import of settings: what loosens a protection is held back unless chosen (incoming-settings.ts).
+    const split = splitIncomingSettings((key: ConfigKey) => config.get(key), incoming, bringsSecurity(values));
+    for (const change of split.apply) {
+      try { config.setDynamic(change.key, change.next); applied.push(change.key); } catch { failed.push(change.key); }
     }
     if (applied.length === 0 && failed.length > 0) throw new CapabilityRefusal(`Preset ${values.preset} was not loaded: these settings were refused: ${failed.join(', ')}.`);
     return {
-      text: [`Loaded preset ${values.preset}: ${applied.length} setting(s).`, ...(failed.length > 0 ? [`Not taken: ${failed.join(', ')}.`] : []), ...(skipped.length > 0 ? [`Not taken from a preset by this version: ${skipped.join(', ')}.`] : [])].join('\n'),
-      data: { preset: values.preset, applied, failed, skipped },
+      text: [`Loaded preset ${values.preset}: ${applied.length} setting(s).`, ...(failed.length > 0 ? [`Not taken: ${failed.join(', ')}.`] : []), ...(skipped.length > 0 ? [`Not taken from a preset by this version: ${skipped.join(', ')}.`] : []),
+        ...heldBackLines(split.heldBack, 'load the preset again choosing to load them too')].join('\n'),
+      data: { preset: values.preset, applied, failed, skipped, heldBack: split.heldBack.map((change) => change.key) },
     };
   },
 });
@@ -371,7 +402,7 @@ export const PRESETS_DELETE = change({
 });
 export const PRESETS_EXPORT = change({
   id: 'presets.export', actionId: 'export', label: 'Save your presets to a file', word: 'export', lasts: 'not-a-change',
-  inputs: [PRESETS_FILE, fixedInput({ id: 'overwrite', label: 'If the file exists', help: 'Keep it, or write over it', choices: [{ value: 'no', label: 'Keep it and stop' }, { value: 'yes', label: 'Write over it', risk: 'cannot-be-undone', riskDone: REPLACED_DONE }], typed: { flag: '--overwrite', switchOn: 'yes' }, optional: { default: 'no', means: 'keep it and stop' } })],
+  inputs: [{ ...PRESETS_FILE, file: 'written' }, fixedInput({ id: 'overwrite', label: 'If the file exists', help: 'Keep it, or write over it', choices: [{ value: 'no', label: 'Keep it and stop' }, { value: 'yes', label: 'Write over it', risk: 'cannot-be-undone', riskDone: REPLACED_DONE }], typed: { flag: '--overwrite', switchOn: 'yes' }, optional: { default: 'no', means: 'keep it and stop' } })],
   sentence: 'Every preset is written to {path}, to bring to another machine.', example: { path: 'presets.json' },
   run: (values, services, caller) => {
     const target = services.resolvePath(caller, values.path!);
@@ -390,7 +421,7 @@ export const PRESETS_INSPECT = read({
   sentence: 'Shows what the presets file {path} holds, without adding anything.', example: { path: 'presets.json' },
   run: (values, services, caller) => {
     const path = services.resolvePath(caller, values.path!);
-    const bundle = readJsonFile(path, 'a presets file') as Partial<ProfileSyncBundle>;
+    const bundle = readJsonFile(path, 'a presets file', caller) as Partial<ProfileSyncBundle>;
     const profiles = Array.isArray(bundle.profiles) ? bundle.profiles : [];
     return {
       text: ['Presets file', `  saved: ${typeof bundle.exportedAt === 'number' ? new Date(bundle.exportedAt).toISOString() : 'not said'}`, `  presets: ${profiles.length}`, `  in use when saved: ${bundle.activeProfile ?? 'none'}`].join('\n'),
@@ -412,7 +443,7 @@ export const PRESETS_IMPORT = change({
     const target = services.resolvePath(caller, values.path!);
     const overwrite = values.overwrite === 'yes';
     const prefix = values.prefix?.trim() ?? '';
-    const bundle = readJsonFile(target, 'a presets file') as Partial<ProfileSyncBundle>;
+    const bundle = readJsonFile(target, 'a presets file', caller) as Partial<ProfileSyncBundle>;
     if (!Array.isArray(bundle.profiles)) throw new CapabilityRefusal(`${target} is not a presets file (no "profiles" list); nothing was changed.`);
     const invalid = bundle.profiles.findIndex((entry) => {
       const item = entry as { name?: unknown; data?: unknown } | null;

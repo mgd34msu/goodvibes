@@ -155,6 +155,9 @@ export class AutocompleteEngine<Command extends AutocompleteCommand = Autocomple
     // highlighted over it, unless a command or alias has that very name.
     const exact = this.state.results.some(({ command }) => command.name === query || command.aliases?.includes(query) === true);
     if (isAcceptedCommandWord(query) && !exact) this.state.selectedIndex = -1;
+    // An unlisted command typed in full (`/memory`) is never offered, and nothing offered is highlighted over it:
+    // Enter runs the line as typed.
+    if (!exact && query !== '' && this.registry.get?.(query) !== undefined) this.state.selectedIndex = -1;
   }
 
   /** Move selection down one item (wraps around). */

@@ -54,7 +54,12 @@ export function buildSharedOrchestratorCoreServices(input: {
   const { services, configManager, providerRegistry } = input;
   return {
     ...projectOrchestratorCoreServices({ configManager, providerRegistry, services }),
-    memoryRegistry: { getAll: () => services.memorySpine.recallSnapshot().records },
+    // Retrieval as every other door's turn has it: the memory store's semantic index (the daemon's, over the wire while
+    // one is adopted), the recall snapshot only for the word-match fallback.
+    memoryRegistry: {
+      getAll: () => services.memorySpine.recallSnapshot().records,
+      semanticCandidates: (filter) => services.memorySpine.searchSemantic(filter),
+    },
     // The process's one helper route: compaction summaries, titles and resume summaries share its spend.
     helperModel: services.helperModel,
     // Main-session code auto-injection + tool-site reindex. Injection is

@@ -2,6 +2,7 @@ import { existsSync, statSync } from 'node:fs';
 import { readFile } from 'node:fs/promises';
 import type { ContentPart, ProviderApi } from '@goodvibes/engine/platform/platform/providers';
 import { resolveAndValidatePath, summarizeError } from '@goodvibes/engine/platform/platform/utils';
+import { isHeldPath } from '@goodvibes/engine/platform/platform/capabilities';
 import type { TerminalConversationManager } from './terminal-conversation.js';
 import { MAX_IMAGE_ATTACH_BYTES } from './modal-input-routes.js';
 import { commandRefusal } from './command-confirmation.js';
@@ -87,7 +88,9 @@ export function createLocalCommandActions<Context extends LocalCommandContext>(
     if (!projectRoot) throw commandRefusal(policy.error('working directory is unavailable.'));
     let resolvedPath: string;
     try {
-      resolvedPath = resolveAndValidatePath(rawPath, projectRoot);
+      // A file the conversation's control already placed and holds for this call (capabilities/held-paths.ts) is read
+      // as held: placing it again would read the project's path a second time.
+      resolvedPath = isHeldPath(rawPath) ? rawPath : resolveAndValidatePath(rawPath, projectRoot);
     } catch (err) {
       throw commandRefusal(policy.error(summarizeError(err)));
     }

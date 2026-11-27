@@ -37,7 +37,6 @@ interface SupportBundleRoute {
   readonly inspectCommand: string;
   readonly exportCommand: string;
   readonly importCommand?: string;
-  readonly workspaceActionIds: readonly string[];
 }
 
 type SecurityFindingResolution =
@@ -56,37 +55,27 @@ const SUPPORT_BUNDLE_ROUTES: readonly SupportBundleRoute[] = [
     // The support bundle is the daemon's: run by capability_run (System, Support and transfer, for a person).
     inspectCommand: 'capability_run id:"bundle.inspect" inputs:{"path"}',
     exportCommand: 'capability_run id:"bundle.export" inputs:{"path"}',
-    importCommand: 'capability_run id:"bundle.import" inputs:{"path"} (loading security settings too is put to the owner)',
-    workspaceActionIds: ['support-bundle-export', 'support-bundle-inspect', 'support-bundle-import'],
-  },
+    importCommand: 'capability_run id:"bundle.import" inputs:{"path"} (loading security settings too is put to the owner)',  },
   {
     bundleType: 'auth',
     defaultPath: 'auth-review-bundle.json',
     inspectCommand: 'capability_run id:"auth.inspect" inputs:{"path"}',
-    exportCommand: 'capability_run id:"auth.export" inputs:{"path"}',
-    workspaceActionIds: ['auth-bundle-export', 'auth-bundle-inspect'],
-  },
+    exportCommand: 'capability_run id:"auth.export" inputs:{"path"}',  },
   {
     bundleType: 'trust',
     defaultPath: 'trust-review-bundle.json',
     inspectCommand: 'capability_run security.read-trust with inputs.path',
-    exportCommand: 'capability_run security.save-trust with inputs.path',
-    workspaceActionIds: ['trust-bundle-export', 'trust-bundle-inspect'],
-  },
+    exportCommand: 'capability_run security.save-trust with inputs.path',  },
   {
     bundleType: 'subscription',
     defaultPath: 'subscription-bundle.json',
     inspectCommand: 'capability_run id:"provider.inspect" inputs:{"path"}',
-    exportCommand: 'capability_run id:"provider.export" inputs:{"path"} (the owner\'s own act)',
-    workspaceActionIds: ['subscription-bundle-export', 'subscription-bundle-inspect'],
-  },
+    exportCommand: 'capability_run id:"provider.export" inputs:{"path"} (the owner\'s own act)',  },
   {
     bundleType: 'voice',
     defaultPath: 'voice-bundle.json',
     inspectCommand: 'capability_run id:"voice.inspect" inputs:{"path"}',
-    exportCommand: 'capability_run id:"voice.export" inputs:{"path"}',
-    workspaceActionIds: ['voice-bundle-export', 'voice-bundle-inspect'],
-  },
+    exportCommand: 'capability_run id:"voice.export" inputs:{"path"}',  },
 ];
 
 function readLimit(value: unknown, fallback: number): number {
@@ -158,11 +147,11 @@ function severityRank(severity: SecurityFindingSeverity): number {
 
 
 function securityFindingModelRoute(): string {
-  return 'security action:"finding" or workspace action:"run_command"';
+  return 'security action:"finding" or screens_keys_commands action:"run_command"';
 }
 
 function supportBundleModelRoute(): string {
-  return 'support action:"bundle" or workspace action:"run"';
+  return 'support action:"bundle" or capability_find need:"support bundle"';
 }
 
 function describeFinding(finding: SecurityFinding, includeParameters: boolean, lookup?: Record<string, unknown>): Record<string, unknown> {
@@ -616,10 +605,9 @@ export async function supportBundleSummary(args: AgentHarnessSecurityArgs, optio
       ...(args.includeParameters === true ? {
         exportCommand: route.exportCommand,
         ...(route.importCommand ? { importCommand: route.importCommand } : {}),
-        workspaceActionIds: route.workspaceActionIds,
         parameters: {
           bundlePath: 'Path inside the workspace for support_bundle inspection; paths outside it are refused.',
-          confirm: 'Required for export/import routes through run_workspace_action or run_command.',
+          confirm: 'Export and import are the capabilities bundle.export and bundle.import (capability_run), asked under the person\'s mode.',
         },
       } : {
         summary: previewHarnessText(`${route.bundleType} bundle inspection route`),
@@ -629,7 +617,7 @@ export async function supportBundleSummary(args: AgentHarnessSecurityArgs, optio
     bundles: routes,
     returned: routes.length,
     total: SUPPORT_BUNDLE_ROUTES.length,
-    policy: 'Bundle catalog is read-only. Existing bundle inspection returns counts and redaction metadata only; bundle export/import stays confirmation-gated through workspace actions or slash-command mirrors.',
+    policy: 'Bundle catalog is read-only. Existing bundle inspection returns counts and redaction metadata only; bundle export/import stays confirmation-gated through capabilities or slash-command mirrors.',
   };
 }
 
@@ -700,7 +688,7 @@ function summarizeSupportBundle(path: string, bundle: Record<string, unknown>): 
     policy: {
       effect: 'read-only',
       values: 'Bundle inspection returns structure, counts, timestamps, and redaction metadata only. Raw config values, token values, and secret payloads are not returned.',
-      mutation: 'Bundle export/import remains confirmation-gated through run_workspace_action or run_command.',
+      mutation: 'Bundle export/import is capability_run id:"bundle.export" or id:"bundle.import", asked under the person\'s mode.',
     },
   };
 }

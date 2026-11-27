@@ -150,6 +150,12 @@ export interface TurnContext {
    */
   readonly actor?: Actor | undefined;
   readonly origin: TurnInputOrigin | undefined;
+  /**
+   * The host established that the owner himself gave this turn's input (his keyboard, an operator input marked owner-
+   * direct): the one positive fact a turn with no surface is the owner's by (security/turn-input-party.ts). Absent: no
+   * host said so, and such a turn is someone else's.
+   */
+  readonly ownerInput?: true | undefined;
   /** The message this turn answers. */
   readonly requestText: string | null;
   /** The same text when an authenticated operator sent it, else null. */
@@ -209,12 +215,14 @@ export function currentTurn(): TurnContext | undefined {
  * surface-authority check instead of being taken for the local owner's. It is
  * a turn of its own: it carries the surface and whose turn started it (a
  * guest stays a guest), and nothing else of that turn (not its request text,
- * not its owner's authority).
+ * not its owner's authority). `sessionId`: the channel conversation it was
+ * started for, so "Treat my own messages here as me" can read whose it is
+ * (security/turn-input-party.ts); never a grant by itself.
  */
-export function withTurnSurfaceId<T>(surface: string | undefined, fn: () => T, actor?: Actor | undefined): T {
+export function withTurnSurfaceId<T>(surface: string | undefined, fn: () => T, actor?: Actor | undefined, sessionId?: string | undefined): T {
   return turnScope.run(Object.freeze({
     turnId: freshTurnId(),
-    sessionId: null,
+    sessionId: sessionId ?? null,
     surface,
     ...(actor !== undefined ? { actor } : {}),
     origin: undefined,

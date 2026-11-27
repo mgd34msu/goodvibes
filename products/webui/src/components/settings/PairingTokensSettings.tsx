@@ -12,10 +12,13 @@
  * Two extra affordances, each with a plain-language description of what it
  * actually does:
  *
- *   - Migrate this browser, mints a fresh, named token for THIS session and
- *     immediately swaps this browser's sign-in to it (setExplicitAuthToken), so
- *     a browser still relying on the legacy shared token gets its own without
- *     ever being signed out mid-flow.
+ *   - This browser: whether it acts as you. Signed in with your password, or
+ *     holding a device you paired yourself, there is nothing to migrate and it
+ *     says so. Otherwise (the shared token, an automation token) it becomes
+ *     yours the one way any device does: you start it on your own screen
+ *     (signed in as you: Pair a new device, "Show the sign-in code once") and
+ *     type that code here. Nothing here mints a key: a key minted for whoever
+ *     asks is never your device.
  *   - Revoke the shared token, gated by a danger confirm naming the exact
  *     consequence: the daemon replaces it, so every device still on the old
  *     value is signed out at once (this browser too if it has not migrated
@@ -43,6 +46,14 @@ import { SettingsBlock } from './dialog/parts';
 import { PairNewDevice } from '../pairing/PairNewDevice';
 import { whenLabel } from '../../lib/when-label';
 import { getActiveRoute, unpairRelay } from '../../lib/relay-connection';
+
+/** Who made a credential, in words (the daemon records it from this release on). */
+function madeByWords(madeBy: unknown): string {
+  const maker = madeBy !== null && typeof madeBy === 'object' ? madeBy as { owner?: unknown; caller?: unknown } : {};
+  if (maker.owner === true) return 'made by you';
+  if (typeof maker.caller === 'string' && maker.caller) return `made by ${maker.caller}, with your yes`;
+  return 'made before this was recorded';
+}
 import { describeRelayPairingForConfirmation, getStoredRelayPairing } from '../../lib/relay-pairing';
 import '../../styles/components/pairing-tokens.css';
 
@@ -95,34 +106,26 @@ export function PairingTokensSettings() {
     onError: (error: unknown) => toast({ title: 'Revoke failed', description: formatError(error), tone: 'danger' }),
   });
 
-  const migrate = useMutation({
-    // Through the owner's pairing flow, so this browser becomes an owner device, not an automation token.
-    mutationFn: (name: string) => platformClient.operator.pairing.handoff.selfFromSharedToken(name),
-    onSuccess: async (result) => {
-      // Swap THIS browser over to its own new token immediately, the daemon just
-      // minted it for the same principal, so the swap never signs this tab out.
-      try {
-        await setExplicitAuthToken(result.token.token);
-      } catch (error: unknown) {
-        // The secret was served once and is gone now, so the minted device
-        // stays in the list with nothing able to use it. Say which one.
-        await invalidateTokens();
-        toast({
-          title: 'Migrate failed after the token was created',
-          description: `The daemon created "${result.token.name}" but this browser could not switch to it (${formatError(error)}). That device is unusable: revoke it in the list, then try again.`,
-          tone: 'danger',
-        });
-        return;
-      }
+  // This browser becomes yours the one way a device does: with the sign-in code your own screen showed (a device you
+  // paired yourself, signed in as you). The code is this browser's key; nothing is minted here.
+  const [code, setCode] = useState('');
+  const makeYours = useMutation({
+    mutationFn: async (raw: string) => {
+      await setExplicitAuthToken(raw);
+      const now = await getCurrentAuth() as { principalId?: unknown };
+      const listed = await platformClient.operator.pairing.tokens.list();
+      const device = listed.tokens.find((token) => `pairing:${token.id}` === now.principalId);
+      return { device };
+    },
+    onSuccess: async ({ device }) => {
+      setCode('');
       await invalidateTokens();
       await queryClient.invalidateQueries({ queryKey: queryKeys.auth });
-      toast({
-        title: 'This browser now has its own token',
-        description: `Named "${result.token.name}": it no longer relies on the shared token, and it is an owner device, so it makes your own changes.`,
-        tone: 'success',
-      });
+      toast(device?.origin === 'owner-pairing'
+        ? { title: 'This browser is your own device', description: `Signed in as "${device.name}", the device you paired on your own screen: it makes your own changes and answers questions other callers raised.`, tone: 'success' }
+        : { title: 'Signed in, but not as your device', description: 'That code was not made on your own screen (signed in as you), so this browser is an ordinary device. Make the code where you are signed in as yourself: Pair a new device, "Show the sign-in code once".', tone: 'warning' });
     },
-    onError: (error: unknown) => toast({ title: 'Migrate failed', description: formatError(error), tone: 'danger' }),
+    onError: (error: unknown) => toast({ title: 'That code did not sign this browser in', description: `${formatError(error)} Each code works once and for 15 minutes: make a new one on your own screen.`, tone: 'danger' }),
   });
 
   const revokeShared = useMutation({
@@ -146,16 +149,6 @@ export function PairingTokensSettings() {
     });
     if (!ok) return;
     revoke.mutate(token.id);
-  }
-
-  async function handleMigrate(): Promise<void> {
-    const ok = await confirm.ask({
-      title: 'Give this browser its own pairing token?',
-      description: 'This browser switches to a new token of its own and stays signed in.',
-      confirmLabel: 'Migrate this browser',
-    });
-    if (!ok) return;
-    migrate.mutate('This browser');
   }
 
   async function handleRevokeShared(): Promise<void> {
@@ -310,6 +303,11 @@ export function PairingTokensSettings() {
 
   const rows = tokens.data?.tokens ?? [];
   const legacySharedRevoked = tokens.data?.legacySharedRevoked ?? false;
+  // Whether this browser already acts as you: signed in as you (the daemon's own test, never inferred here), or holding
+  // a device you paired yourself.
+  const signedInAsYou = typeof auth.data === 'object' && auth.data !== null && (auth.data as { ownerHimself?: unknown }).ownerHimself === true;
+  const thisBrowsersDevice = rows.find((token) => `pairing:${token.id}` === currentPrincipal);
+  const yourDevice = thisBrowsersDevice?.origin === 'owner-pairing';
 
   return (
     <>
@@ -422,6 +420,8 @@ export function PairingTokensSettings() {
                 meta={[
                   // How it came to exist: a device the owner paired himself makes his own acts; an automation token does not.
                   token.origin === 'owner-pairing' ? 'owner device' : 'automation token',
+                  // Who made it (recorded from this release on).
+                  madeByWords((token as { madeBy?: unknown }).madeBy),
                   whenLabel(token.createdAt) && `Created ${whenLabel(token.createdAt)}`,
                   whenLabel(token.lastSeenAt) ? `last seen ${whenLabel(token.lastSeenAt)}` : 'never seen',
                   // What the device may do: its own scope list, or everything.
@@ -456,13 +456,46 @@ export function PairingTokensSettings() {
         {tokens.isSuccess && rows.some((token) => `pairing:${token.id}` === currentPrincipal && token.origin !== 'owner-pairing') && (
           <p className="pairing-token-row__note" role="note">
             This browser is signed in with an automation token, so it cannot make your own changes (loosening a security,
-            permission, judgment or payment setting, or answering a change put to you). To make it an owner device in one step,
-            open the pairing link from your own app here: run <code>goodvibes pair</code> in your terminal (or <code>/pair</code>),
-            or open Settings, Paired devices on a device signed in as you and pair a new device, then open that link in this browser.
-            It signs in as an owner device; revoke this automation token afterwards.
+            permission, judgment or payment setting, or answering a change put to you). To make it your own device, use
+            "This browser" below with the sign-in code your own screen shows; revoke this automation token afterwards.
           </p>
         )}
       </SettingsBlock>
+
+      {auth.isSuccess && (
+        <SettingsBlock
+          testId="this-browser"
+          title="This browser"
+          description={signedInAsYou
+            ? 'This browser is signed in as you, with your password: it already acts as you. There is nothing to migrate.'
+            : yourDevice
+              ? `This browser is your own device ("${thisBrowsersDevice?.name ?? ''}"), paired on your own screen. There is nothing to migrate.`
+              : 'This browser does not act as you (it holds the shared token or a key someone else asked for). It becomes your own device the one way any device does: on a screen where you are signed in as yourself, press Pair a new device, then "Show the sign-in code once", and type that code here. Or sign in here with your password.'}
+        >
+          {!signedInAsYou && !yourDevice && (
+            <form
+              className="pairing-token-row__rename-form"
+              onSubmit={(event) => {
+                event.preventDefault();
+                if (code.trim()) makeYours.mutate(code.trim());
+              }}
+            >
+              <Input
+                id="this-browser-code"
+                type="password"
+                autoComplete="off"
+                aria-label="Sign-in code from your own screen"
+                placeholder="Sign-in code from your own screen"
+                value={code}
+                onChange={(event) => setCode(event.target.value)}
+              />
+              <Button type="submit" variant="primary" size="sm" disabled={makeYours.isPending || !code.trim()}>
+                {makeYours.isPending ? 'Signing in…' : 'Make this browser yours'}
+              </Button>
+            </form>
+          )}
+        </SettingsBlock>
+      )}
 
       <SettingsBlock
         title="Shared token"
@@ -484,9 +517,6 @@ export function PairingTokensSettings() {
         )}
         {!legacySharedRevoked && (
           <div className="pairing-tokens-legacy__actions">
-            <Button disabled={migrate.isPending} onClick={() => void handleMigrate()}>
-              {migrate.isPending ? 'Migrating…' : 'Give this browser its own token'}
-            </Button>
             <Button
               variant="danger"
               className="pairing-tokens-legacy__revoke"

@@ -13,7 +13,7 @@
  */
 import type { DevicesClient } from '@goodvibes/engine/platform/platform/runtime/client';
 import { formatDeviceLine, type PublicPairingToken } from '@goodvibes/engine/platform/platform/pairing';
-import type { DevicesSessionServices } from '@goodvibes/engine/platform/platform/capabilities';
+import type { DevicesSessionServices, PairHostRequest } from '@goodvibes/engine/platform/platform/capabilities';
 import { commandRefusal } from './command-confirmation.js';
 import { defineList, type ListRow } from './command-actions/lists.js';
 import { runDaemonCapability, type DaemonCapabilityBinding } from './command-actions/capability-actions.js';
@@ -158,7 +158,7 @@ defineList<unknown>({
 /** How one app pairs on its own screen and keeps its own credential for its daemon (each piece it has). */
 export interface DevicesPairingHost<Ctx> {
   readonly pairDevice: (ctx: Ctx, name: string) => Promise<string | void>;
-  readonly pairHost?: ((ctx: Ctx, request: { readonly name: string; readonly bootstrapShared: boolean; readonly apply: boolean }) => Promise<string | void>) | undefined;
+  readonly pairHost?: ((ctx: Ctx, request: PairHostRequest) => Promise<string | void>) | undefined;
   readonly pairRelay?: ((ctx: Ctx, name: string) => Promise<string>) | undefined;
   readonly pairChannel?: ((ctx: Ctx, channel: string) => Promise<string | void>) | undefined;
   readonly hostStatus?: ((ctx: Ctx) => Promise<string>) | undefined;
@@ -170,7 +170,7 @@ export function pairingServices<Ctx>(pairing: DevicesPairingHost<Ctx>, ctx: Ctx)
   const { pairHost, pairRelay, pairChannel, hostStatus, unpairHost } = pairing;
   return {
     pairDevice: (name) => pairing.pairDevice(ctx, name),
-    ...(pairHost ? { pairHost: (request: { readonly name: string; readonly bootstrapShared: boolean; readonly apply: boolean }) => pairHost(ctx, request) } : {}),
+    ...(pairHost ? { pairHost: (request: PairHostRequest) => pairHost(ctx, request) } : {}),
     ...(pairRelay ? { pairRelay: (name: string) => pairRelay(ctx, name) } : {}),
     ...(pairChannel ? { pairChannel: (channel: string) => pairChannel(ctx, channel) } : {}),
     ...(hostStatus ? { hostStatus: () => hostStatus(ctx) } : {}),

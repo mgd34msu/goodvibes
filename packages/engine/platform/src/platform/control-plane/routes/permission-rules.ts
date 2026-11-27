@@ -22,7 +22,8 @@ export interface PermissionRulesGatewayDeps {
 export function createPermissionRulesListHandler(store: PermissionRulesGatewayDeps['userRuleStore']): GatewayMethodHandler {
   return async (invocation) => {
     const params = readInvocationParams(invocation);
-    const named = params['project'];
+    // A turn the daemon runs in a project lists that project's (its call names it); any other caller names one or reads all.
+    const named = params['project'] ?? (invocation.context?.clientKind === 'daemon-turn' ? invocation.context.call?.project : undefined);
     const folder = typeof named === 'string' && named.trim().length > 0 ? named.trim() : undefined;
     // A project's own list: its rules and the ones of every project, never another project's.
     const project = folder === undefined ? undefined : projectIdentity(projectRootOfDirectory(folder));

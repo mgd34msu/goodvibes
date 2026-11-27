@@ -6,8 +6,10 @@
  * the daemon, for the caller's project; what is installed is loaded by each
  * program that runs turns, as before.
  */
-import { mkdirSync, readFileSync, writeFileSync } from 'node:fs';
-import { dirname, isAbsolute, resolve } from 'node:path';
+import { mkdirSync, writeFileSync } from 'node:fs';
+import { dirname, resolve } from 'node:path';
+import { projectIdentityOf } from '../../workspace/project-identity.js';
+import { callerPathOf, readCallerJson } from '../path-inputs.js';
 import {
   describeUncheckedCatalogEntries, exportEcosystemCatalogBundle, importEcosystemCatalogBundle, inspectEcosystemCatalogBundle,
   inspectInstalledEcosystemEntry, installEcosystemCatalogEntry, listEcosystemInstallBackups, listInstalledEcosystemEntries, loadEcosystemCatalog,
@@ -63,15 +65,20 @@ function entryOf(catalog: EcosystemCatalogPathOptions, values: ActionValues): Ec
 function notDone(error: string): never {
   throw new CapabilityRefusal(error, undefined, 'NOT_DONE');
 }
-const fileIn = (cwd: string, path: string): string => isAbsolute(path) ? path : resolve(cwd, path);
-const changed = (): void => noteListChanged({ list: 'tools', change: 'changed' });
+/** The file a path input names, placed by capabilities/path-inputs.ts `callerPathOf` (inside the caller's checked project). */
+const fileIn = (_cwd: string, path: string, caller: CapabilityCaller): string => callerPathOf(caller, path);
+/**
+ * What is installed changed: an install for this project names it (only its screens read again); one for all the
+ * user's projects is a shared thing (every screen reads again).
+ */
+const changed = (values: ActionValues, caller: CapabilityCaller): void => noteListChanged({
+  list: 'tools', change: 'changed',
+  ...(values.scope !== 'user' && caller.workingDirectory ? { project: projectIdentityOf(resolve(caller.workingDirectory)) } : {}),
+});
 
-function readBundle(path: string, mode: 'inspect' | 'import'): EcosystemCatalogBundle {
-  try {
-    return JSON.parse(readFileSync(path, 'utf-8')) as EcosystemCatalogBundle;
-  } catch (error) {
-    throw new CapabilityRefusal(`Marketplace bundle ${mode} failed: could not read ${path} as JSON (${error instanceof Error ? error.message : String(error)}). Nothing was changed.`, undefined, 'BUNDLE_UNREADABLE');
-  }
+/** A marketplace bundle; never the system's or the parser's words (capabilities/path-inputs.ts). */
+function readBundle(path: string, caller: CapabilityCaller): EcosystemCatalogBundle {
+  return readCallerJson(path, 'a marketplace bundle', caller) as EcosystemCatalogBundle;
 }
 
 function read(fields: Pick<CapabilityDefinition<MarketplaceCapabilityServices>, 'actionId' | 'label' | 'word' | 'sentence' | 'run'> & { readonly inputs?: readonly InputDescription[]; readonly example?: ActionValues }): CapabilityDefinition<MarketplaceCapabilityServices> {
@@ -209,7 +216,7 @@ export const MARKETPLACE_BUNDLE_INSPECT = read({
   actionId: 'bundle-inspect', label: 'Look inside a marketplace bundle', word: 'bundle-inspect', inputs: [BUNDLE_FILE],
   sentence: 'Shows what {path} holds; nothing is installed.', example: { path: 'marketplace.json' },
   async run(values, services, caller) {
-    const summary = inspectEcosystemCatalogBundle(readBundle(fileIn(project(services, caller).cwd, values.path!), 'inspect'));
+    const summary = inspectEcosystemCatalogBundle(readBundle(fileIn(project(services, caller).cwd, values.path!, caller), caller));
     // Date rejects values outside +-8.64e15 ms, so a bundle's number can pass isFinite and still not be a date.
     const exportedDate = typeof summary.exportedAt === 'number' ? new Date(summary.exportedAt) : undefined;
     const exportedAt = exportedDate !== undefined && !Number.isNaN(exportedDate.getTime()) ? exportedDate.toISOString() : 'unknown';
@@ -235,7 +242,7 @@ export const MARKETPLACE_INSTALL = change({
   async run(values, services, caller) {
     const result = installEcosystemCatalogEntry(values.kind as EcosystemEntryKind, values.entry!, scoped(project(services, caller).catalog, values));
     if (!result.ok) notDone(result.error);
-    changed();
+    changed(values, caller);
     return { text: `Installed curated ${values.kind} ${values.entry} into ${result.receipt.targetPath}`, data: { kind: values.kind, id: values.entry, path: result.receipt.targetPath } };
   },
 });
@@ -247,7 +254,7 @@ export const MARKETPLACE_UPDATE = change({
   async run(values, services, caller) {
     const result = updateInstalledEcosystemEntry(values.kind as EcosystemEntryKind, values.entry!, scoped(project(services, caller).catalog, values));
     if (!result.ok) notDone(result.error);
-    changed();
+    changed(values, caller);
     return { text: `Updated curated ${values.kind} ${values.entry} in ${result.receipt.targetPath}`, data: { kind: values.kind, id: values.entry, path: result.receipt.targetPath } };
   },
 });
@@ -262,7 +269,7 @@ export const MARKETPLACE_ROLLBACK = change({
   async run(values, services, caller) {
     const result = rollbackInstalledEcosystemEntry(values.kind as EcosystemEntryKind, values.entry!, { ...scoped(project(services, caller).catalog, values), ...(values.backup ? { backupId: values.backup } : {}) });
     if (!result.ok) notDone(result.error);
-    changed();
+    changed(values, caller);
     return { text: `Rolled back curated ${values.kind} ${values.entry} in ${result.receipt.targetPath} using backup ${result.restoredFrom.id}`, data: { kind: values.kind, id: values.entry, backup: result.restoredFrom.id } };
   },
 });
@@ -273,7 +280,7 @@ export const MARKETPLACE_UNINSTALL = change({
   async run(values, services, caller) {
     const result = uninstallEcosystemCatalogEntry(values.kind as EcosystemEntryKind, values.entry!, scoped(project(services, caller).catalog, values));
     if (!result.ok) notDone(result.error);
-    changed();
+    changed(values, caller);
     return { text: `Uninstalled curated ${values.kind} ${values.entry} from ${result.removedPath}`, data: { kind: values.kind, id: values.entry, path: result.removedPath } };
   },
 });
@@ -281,13 +288,13 @@ export const MARKETPLACE_UNINSTALL = change({
 export const MARKETPLACE_BUNDLE_EXPORT: CapabilityDefinition<MarketplaceCapabilityServices> = {
   capability: { id: 'marketplace.bundle-export', group: 'tools', home: 'daemon', repeat: 'safe' },
   // The bundle is the local curated catalog (its entries), not the installs: the words say so.
-  actionId: 'bundle-export', label: 'Save the catalog to a bundle', word: 'bundle-export', inputs: [{ ...BUNDLE_FILE, help: 'Where to write the bundle' }, { ...INSTALL_SCOPE, label: 'Catalog of', help: 'This project\'s catalog, or the one for all your projects' }],
+  actionId: 'bundle-export', label: 'Save the catalog to a bundle', word: 'bundle-export', inputs: [{ ...BUNDLE_FILE, file: 'written', help: 'Where to write the bundle' }, { ...INSTALL_SCOPE, label: 'Catalog of', help: 'This project\'s catalog, or the one for all your projects' }],
   sentence: 'The local curated catalog (this project\'s, or the one for all your projects, as "Catalog of" says) is written to {path} as a bundle another machine can bring in; nothing installed is in it.', done: '',
   touches: 'this-machine', lasts: 'not-a-change', risk: 'none', example: { path: 'marketplace.json' },
   async run(values, services, caller) {
     const { catalog, cwd } = project(services, caller);
     const bundle = exportEcosystemCatalogBundle(values.scope === 'user' ? 'user' : 'project', catalog);
-    const target = fileIn(cwd, values.path!);
+    const target = fileIn(cwd, values.path!, caller);
     mkdirSync(dirname(target), { recursive: true });
     writeFileSync(target, `${JSON.stringify(bundle, null, 2)}\n`, 'utf-8');
     const entries = bundle.entries.length;
@@ -302,10 +309,10 @@ export const MARKETPLACE_BUNDLE_IMPORT: CapabilityDefinition<MarketplaceCapabili
   touches: 'this-machine', lasts: 'kept', risk: 'none', example: { path: 'marketplace.json' },
   async run(values, services, caller) {
     const { catalog, cwd } = project(services, caller);
-    const source = fileIn(cwd, values.path!);
-    const result = importEcosystemCatalogBundle(readBundle(source, 'import'), { ...catalog, scope: values.scope === 'user' ? 'user' : 'project' });
+    const source = fileIn(cwd, values.path!, caller);
+    const result = importEcosystemCatalogBundle(readBundle(source, caller), { ...catalog, scope: values.scope === 'user' ? 'user' : 'project' });
     if (result.error) throw new CapabilityRefusal(`Marketplace bundle import failed: ${result.error}`, undefined, 'BUNDLE_IMPORT_FAILED');
-    changed();
+    changed(values, caller);
     return {
       text: [`Brought ${result.imported} curated entr${result.imported === 1 ? 'y' : 'ies'} in from ${source}, merged into the catalog by kind and id${result.rejected.length > 0 ? `; ${result.rejected.length} refused` : ''}.`,
         ...Object.entries(result.pathByKind).map(([kind, path]) => `The ${KIND_LABEL.get(kind as EcosystemEntryKind) ?? kind}s went into ${path}.`), ...result.rejected.map((entry) => `Refused ${entry.id}: ${entry.reason}`)].join('\n'),

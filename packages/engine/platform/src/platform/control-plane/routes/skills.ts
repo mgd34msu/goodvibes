@@ -14,7 +14,9 @@
  * cataloged-but-unhandled 501.
  */
 import type { GatewayMethodCatalog } from '../method-catalog.js';
-import type { GatewayMethodHandler } from '../method-catalog-shared.js';
+import type { GatewayMethodHandler, GatewayMethodInvocation } from '../method-catalog-shared.js';
+import { ownerHimself, ownersAgentProgram, ownersOwnPress } from '../../daemon/method-owner-decision.js';
+import { authorAfterChange, newRecordAuthor, readRecordAuthor, type MemoryAuthor } from '../../state/memory-author.js';
 import { GatewayVerbError } from './gateway-verb-error.js';
 import { readInvocationParams, requireString } from './invocation-params.js';
 import { attachHandler } from './attach-handler.js';
@@ -73,6 +75,58 @@ function createSkillsGetHandler(service: SkillsGatewayService): GatewayMethodHan
   };
 }
 
+/** The frontmatter keys that say who wrote a skill (skills/library.ts): kept by the daemon, never taken from a body. */
+const AUTHOR_KEYS = ['author', 'author-who', 'author-accepted-at'] as const;
+/** The marks only the owner's own review sets: reviewed, when, and switched on. */
+const REVIEW_KEYS = ['review', 'reviewed-at', 'enabled'] as const;
+
+/**
+ * Who writes through this call (state/memory-author.ts), from the credential the daemon checked: the owner's own press
+ * (method-owner-decision.ts `ownersOwnPress`), his model (the Agent's credential for him), or anyone else, named.
+ */
+function writerOf(invocation: GatewayMethodInvocation): MemoryAuthor {
+  const actor = invocation.context.actor;
+  // His signed-in session is his press on every request; elsewhere, a person's claim in his own program.
+  const press = ownersOwnPress({
+    actor, credentialKind: invocation.context.credentialKind ?? undefined, registration: invocation.context.call?.registration,
+    personAsked: invocation.context.metadata?.['explicitUserRequest'] === true,
+  });
+  if (press) return { kind: 'owner' };
+  // His model, by who calls (method-owner-decision.ts): his Agent program (its credential with its registration, or a
+  // turn the daemon hosts), or his registered terminal program with no person's press. The Agent's credential alone is
+  // a script, named below.
+  const caller = { actor, credentialKind: invocation.context.credentialKind ?? undefined, registration: invocation.context.call?.registration,
+    daemonHosted: invocation.context.call?.daemonHosted === true };
+  if (ownersAgentProgram(caller) || (caller.registration !== undefined && ownerHimself(caller))) return { kind: 'owner-model' };
+  return { kind: 'other', who: `a caller that is not the owner himself (${actor ? `${actor.class} ${actor.id}` : 'not named'})` };
+}
+
+/**
+ * The frontmatter a skills.* write keeps: the caller's own keys, never an author it claims, and the review marks only
+ * when the owner himself writes; the author is who writes it (a change by someone else makes it his words, waiting).
+ */
+function keptMetadata(
+  given: Readonly<Record<string, SkillFrontmatterValue>> | undefined,
+  existing: Readonly<Record<string, SkillFrontmatterValue>> | undefined,
+  by: MemoryAuthor,
+): Record<string, SkillFrontmatterValue> {
+  const out: Record<string, SkillFrontmatterValue> = { ...(given ?? existing ?? {}) };
+  for (const key of AUTHOR_KEYS) delete out[key];
+  if (by.kind !== 'owner') for (const key of REVIEW_KEYS) if (given !== undefined) delete out[key];
+  const scalar = (value: SkillFrontmatterValue | undefined): string => typeof value === 'string' ? value.trim() : '';
+  const before = existing === undefined || existing['author'] === undefined ? undefined : readRecordAuthor({
+    kind: scalar(existing['author']), ...(scalar(existing['author-who']) ? { who: scalar(existing['author-who']) } : {}),
+    ...(scalar(existing['author-accepted-at']) ? { acceptedAt: Number(scalar(existing['author-accepted-at'])) } : {}),
+  });
+  const author = existing === undefined ? newRecordAuthor(by) : authorAfterChange(before, by, Date.now());
+  if (author !== undefined) {
+    out['author'] = author.kind;
+    if (author.who) out['author-who'] = author.who.replace(/\s+/g, ' ').trim();
+    if (author.acceptedAt !== undefined) out['author-accepted-at'] = String(author.acceptedAt);
+  }
+  return out;
+}
+
 function createSkillsCreateHandler(service: SkillsGatewayService): GatewayMethodHandler {
   return async (invocation) => {
     const params = readInvocationParams(invocation);
@@ -81,7 +135,7 @@ function createSkillsCreateHandler(service: SkillsGatewayService): GatewayMethod
         name: requireString(params, 'name'),
         description: requireString(params, 'description'),
         body: typeof params.body === 'string' ? params.body : '',
-        metadata: readMetadata(params.metadata),
+        metadata: keptMetadata(readMetadata(params.metadata), undefined, writerOf(invocation)),
       });
       return { skill };
     } catch (error) {
@@ -95,10 +149,11 @@ function createSkillsUpdateHandler(service: SkillsGatewayService): GatewayMethod
     const params = readInvocationParams(invocation);
     const name = requireString(params, 'name');
     try {
+      const existing = await service.get(name);
       const skill = await service.update(name, {
         description: typeof params.description === 'string' ? params.description : undefined,
         body: typeof params.body === 'string' ? params.body : undefined,
-        metadata: readMetadata(params.metadata),
+        metadata: keptMetadata(readMetadata(params.metadata), existing.metadata, writerOf(invocation)),
       });
       return { skill };
     } catch (error) {

@@ -45,14 +45,14 @@ export const ownerProfileConfigSettings: ConfigSettingDefinition[] = [
       'Keeps a profile about you: what you have told GoodVibes about yourself, in one file you can read and edit. On by default because the owner asked for it built, and a feature that ships off ships dark. Turning it off means the file is never opened and every profile verb answers "your profile is turned off", a stated state, not an empty profile that would read as "I know nothing about you". Applies when the daemon starts.',
   },
   {
-    key: 'profile.autonomousWrites',
+    key: 'profile.autonomousWrites', valueKind: 'opening-switch',
     label: 'Save what you tell GoodVibes about yourself without asking',
     type: 'boolean',
     description:
       'Lets GoodVibes save facts it learns from what you tell it about yourself, without asking each time. On by default because that was the owner\'s explicit choice over propose-first. Off leaves reads and your own hand edits working exactly as before, the honest "I will curate this myself" mode, not a disabled feature. Untrusted sources are barred either way.',
   },
   {
-    key: 'profile.discloseWrites',
+    key: 'profile.discloseWrites', valueKind: 'protection-switch',
     label: 'Say what was saved to your profile',
     type: 'boolean',
     description:
@@ -66,7 +66,7 @@ export const ownerProfileConfigSettings: ConfigSettingDefinition[] = [
       'Tells the model, each turn, what about you is not private: how you like to be addressed, your pronouns, city and timezone, your units and date format, and your style notes. On by default because otherwise the agent still guesses a metro area for a weather answer, which is the failure that started this. Closed-tier content (addresses, contact details, people, notes) is never bulk-injected regardless of this setting.',
   },
   {
-    key: 'profile.discloseClosedTierReads',
+    key: 'profile.discloseClosedTierReads', valueKind: 'protection-switch',
     label: 'Say when private profile details are used',
     type: 'boolean',
     description:
@@ -88,7 +88,7 @@ export const ownerProfileConfigSettings: ConfigSettingDefinition[] = [
     ...intRange(50, 3_600_000),
   },
   {
-    key: 'profile.path',
+    key: 'profile.path', valueKind: 'path',
     label: 'Profile file',
     type: 'string',
     description:
@@ -102,7 +102,7 @@ export const ownerProfileConfigSettings: ConfigSettingDefinition[] = [
       'Let a conversation record what you say about yourself as you say it, a trip and its itinerary, a birthday, a preference, a person. On by default because the alternative is what shipped before it: you paste a flight itinerary, get a warm reply, and nothing is stored. Off leaves conversations working and every profile read unchanged; it only stops the writing, and a turn that would have recorded something says so instead of staying quiet.',
   },
   {
-    key: 'profile.ownerChannels',
+    key: 'profile.ownerChannels', valueKind: 'trusted-list',
     label: 'Chat accounts that are you',
     type: 'string',
     description:

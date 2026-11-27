@@ -7,9 +7,9 @@ import {
   type MemoryUsageSummary,
 } from '@goodvibes/engine/platform/platform/state';
 import type { CommandContext } from '../input/command-registry.ts';
-import { buildAgentWorkspaceMemorySnapshot, type buildAgentWorkspaceRuntimeSnapshot } from '../input/agent-workspace-snapshot.ts';
-import { buildAgentWorkspaceSessionMemoryCount } from '../input/agent-workspace-snapshot-builders.ts';
-import { readConfigString } from '../input/agent-workspace-snapshot-config.ts';
+import { buildAgentMemorySnapshot, type buildAgentRuntimeSnapshot } from '../input/runtime-snapshot.ts';
+import { buildAgentSessionMemoryCount } from '../input/runtime-snapshot-builders.ts';
+import { readConfigString } from '../input/runtime-snapshot-config.ts';
 import { previewHarnessText } from '@goodvibes/engine/terminal-shell/agent-turn/preview-text';
 import { rankHarnessCatalog, type CatalogRankingOptions } from '@goodvibes/engine/terminal-shell/agent-turn/catalog-ranking';
 import { modelReadingServicePath } from './agent-harness-model-reading-source.ts';
@@ -36,13 +36,13 @@ function readLimit(value: unknown, fallback: number): number {
   return clampReadLimit(value, fallback, 200);
 }
 
-type MemoryPostureSnapshot = Pick<ReturnType<typeof buildAgentWorkspaceRuntimeSnapshot>, 'localMemoryCount' | 'localMemoryReviewQueueCount'
+type MemoryPostureSnapshot = Pick<ReturnType<typeof buildAgentRuntimeSnapshot>, 'localMemoryCount' | 'localMemoryReviewQueueCount'
   | 'localMemoryPromptActiveCount' | 'localMemoryTemporallyPendingCount' | 'localMemoryTemporallyExpiredCount' | 'sessionMemoryCount' | 'embeddingProvider'>;
 function memoryPostureSnapshot(context: CommandContext): MemoryPostureSnapshot {
-  const memory = buildAgentWorkspaceMemorySnapshot(context);
+  const memory = buildAgentMemorySnapshot(context);
   return { localMemoryCount: memory.count, localMemoryReviewQueueCount: memory.reviewQueueCount, localMemoryPromptActiveCount: memory.promptActiveCount,
     localMemoryTemporallyPendingCount: memory.temporallyPendingCount, localMemoryTemporallyExpiredCount: memory.temporallyExpiredCount,
-    sessionMemoryCount: buildAgentWorkspaceSessionMemoryCount(context), embeddingProvider: readConfigString(context, 'provider.embeddingProvider', '(provider default)') };
+    sessionMemoryCount: buildAgentSessionMemoryCount(context), embeddingProvider: readConfigString(context, 'provider.embeddingProvider', '(provider default)') };
 }
 
 function memoryApi(context: CommandContext): {
@@ -360,9 +360,9 @@ function compactVector(vector: MemoryVectorStats | null): Record<string, unknown
     embeddingProviderId: vector.embeddingProviderId,
     embeddingProviderLabel: vector.embeddingProviderLabel,
     ...(vector.error ? { error: previewHarnessText(vector.error, 160) } : {}),
-    modelRoute: 'agent_harness mode:"workspace_action" actionId:"memory-vector-status"',
-    doctorRoute: 'agent_harness mode:"workspace_action" actionId:"memory-vector-doctor"',
-    rebuildRoute: 'agent_harness mode:"run_workspace_action" actionId:"memory-vector-rebuild" explicitUserRequest:"<the user request, in their own words>"',
+    modelRoute: 'capability_run id:"memory.index"',
+    doctorRoute: 'capability_run id:"memory.index"',
+    rebuildRoute: 'capability_run id:"memory.rebuild-index"',
   };
 }
 

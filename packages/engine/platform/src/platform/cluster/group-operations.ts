@@ -23,6 +23,7 @@ import {
 } from './group-crypto.js';
 import type { ClusterGroupRuntime, DiscoveredGroup, SurfaceHolding } from './group-runtime.js';
 import { ConfigLocalDifferenceError, type ConfigReplicationStatus } from './config-replication.js';
+import { readReplicaAct, type ReplicaAct } from './config-replica.js';
 import type { ClusterElectionTiming } from './types.js';
 import {
   DEFAULT_GROUP_DISPLAY_NAME,
@@ -103,7 +104,7 @@ async function membershipOperation<T>(context: GroupOperationsContext, work: (ow
   catch (error) {
     if (!(error instanceof ClusterMembershipOperationError)) throw error;
     return failed(error.message, error.kind === 'persistence-unknown'
-      ? 'do not blindly retry: inspect cluster status and the membership store, then restart to reconcile the saved result'
+      ? 'do not blindly retry: look at Devices and network, Machine group and the membership store, then restart to reconcile the saved result'
       : 'wait for the current group operation to finish, or restart the runtime before trying again', { failure: error.kind });
   }
 }
@@ -243,13 +244,13 @@ export function groupStatus(context: GroupOperationsContext): GroupOperationResu
   const secret = context.electionSecret?.() ?? 'none';
   const electionAuthentication = membership === 'member' ? 'group-key' : secret === 'set' ? 'secret' : secret;
   const advice = !context.settings.enabled
-    ? 'sharing inbound work with your other machines is switched off here, turn it on with `config set cluster.enabled true`'
+    ? 'sharing inbound work with your other machines is switched off here, turn it on in Devices and network, Nearby groups, turn sharing on'
     : membership === 'no-group' && removedFrom
-      ? `this machine was removed from the group${removedFrom.groupName ? ` "${removedFrom.groupName}"` : ''} [${removedFrom.groupId}] by another member; to put it back, run \`cluster key\` on a machine in that group, then \`cluster join --group ${removedFrom.groupId}\` here and give it that key`
+      ? `this machine was removed from the group${removedFrom.groupName ? ` "${removedFrom.groupName}"` : ''} [${removedFrom.groupId}] by another member; to put it back, read the join key on a machine in that group (Devices and network, Machine group, join key), then join it here from Nearby groups with that key`
     : membership === 'no-group'
-      ? 'this machine is not in a group yet, run `cluster create` here, or `cluster join` to join one that already exists'
+      ? 'this machine is not in a group yet: start one in Devices and network, Machine group, or join one from Nearby groups'
       : membership === 'unreadable-key-material'
-        ? 'group membership storage could not be confirmed; it is read again every 30 seconds, so check the secrets store and keyfile; a restart reads it at once. Inspect `cluster status` before joining again'
+        ? 'group membership storage could not be confirmed; it is read again every 30 seconds, so check the secrets store and keyfile; a restart reads it at once. Look at Devices and network, Machine group before joining again'
         : null;
   return {
     ok: true,
@@ -368,7 +369,7 @@ async function createGroupOwned(
   if (context.runtime.membership === 'member') {
     return failed(
       'this machine is already in a group',
-      'leave it first with `cluster leave`, or use `cluster key` to add another machine to the group it is in',
+      'leave it first (Devices and network, Machines, leave the group on this machine\'s row), or show its join key (Machine group, join key) to add another machine to the group it is in',
     );
   }
   const passphrase = input.passphrase?.trim();
@@ -435,6 +436,8 @@ export interface JoinGroupInput {
    * is set on, and the join finishes at the daemon's next start.
    */
   readonly turnOnSharing?: boolean | undefined;
+  /** The owner's act that asked for the join (kept with a join that finishes at the next start). */
+  readonly act?: ReplicaAct | undefined;
 }
 
 export interface JoinGroupResult extends PendingRestartFields {
@@ -455,7 +458,8 @@ export const PENDING_GROUP_ACTION_SECRET_KEY = daemonSecretKeyFor('cluster.pendi
 
 /** A group action stored to finish at the next start. */
 export type PendingGroupAction =
-  | { readonly kind: 'join'; readonly groupId: string; readonly joinKey: string; readonly at: number }
+  /** `act`: the owner's act that asked for the join, kept so the join that finishes at the next start seeds under it. */
+  | { readonly kind: 'join'; readonly groupId: string; readonly joinKey: string; readonly at: number; readonly act?: ReplicaAct }
   | { readonly kind: 'forget'; readonly nodeId: string; readonly at: number }
   | { readonly kind: 'rotate'; readonly immediate: boolean; readonly at: number }
   | { readonly kind: 'rename'; readonly name: string; readonly at: number }
@@ -477,8 +481,8 @@ export async function readPendingGroupAction(secrets: ClusterSecretStore): Promi
   const text = (key: string): string | null => (typeof parsed[key] === 'string' ? parsed[key] as string : null);
   switch (parsed['kind']) {
     case 'join': {
-      const groupId = text('groupId'), joinKey = text('joinKey');
-      return groupId !== null && joinKey !== null ? { kind: 'join', groupId, joinKey, at } : null;
+      const groupId = text('groupId'), joinKey = text('joinKey'), act = readReplicaAct(parsed['act']);
+      return groupId !== null && joinKey !== null ? { kind: 'join', groupId, joinKey, at, ...(act ? { act } : {}) } : null;
     }
     case 'forget': { const nodeId = text('nodeId'); return nodeId !== null ? { kind: 'forget', nodeId, at } : null; }
     case 'rotate': return { kind: 'rotate', immediate: parsed['immediate'] === true, at };
@@ -561,8 +565,8 @@ async function joinGroupOwned(
     const groupId = input.groupId.trim();
     const joinKey = normalizeJoinKey(input.joinKey ?? '');
     if (input.turnOnSharing !== true || !context.enableSharing) return failed(SHARING_OFF_FOR_JOIN, SHARING_OFF_JOIN_FIX, { failure: 'sharing-off' });
-    if (groupId.length === 0 || joinKey.length === 0) return failed('a group id and a join key are both required', 'run `cluster join` again and give both');
-    const kept = await keepForRestart(context, { kind: 'join', groupId, joinKey, at: Math.trunc(context.now()) });
+    if (groupId.length === 0 || joinKey.length === 0) return failed('a group id and a join key are both required', 'join again from Devices and network, Nearby groups, and give the join key');
+    const kept = await keepForRestart(context, { kind: 'join', groupId, joinKey, at: Math.trunc(context.now()), ...(input.act ? { act: input.act } : {}) });
     if (!kept.ok) return kept;
     return { ok: true, data: { groupId, groupName: '', memberCount: 0, pending: true } };
   }
@@ -574,18 +578,18 @@ async function joinGroupOwned(
   if (heldGroup !== null && heldGroup !== input.groupId.trim()) {
     return failed(
       'this machine is already in a group',
-      'run `cluster leave` first if you mean to move it to a different one',
+      'leave it first (Devices and network, Machines, leave the group on this machine\'s row) if you mean to move it to a different one',
     );
   }
   const joinKey = normalizeJoinKey(input.joinKey ?? '');
   if (joinKey.length === 0) {
-    return failed('no join key was given', 'run `cluster key` on a machine already in the group to see it');
+    return failed('no join key was given', 'a machine already in the group shows it in Devices and network, Machine group, join key');
   }
   const groupId = input.groupId.trim();
   if (groupId.length === 0) {
     return failed(
       'no group was named',
-      'run `cluster join` with no arguments to pick from the groups on this network, or pass --group',
+      'pick the group from the groups on this network in Devices and network, Nearby groups, and join it there',
     );
   }
   const outcome = await context.runtime.requestJoin({
@@ -605,7 +609,7 @@ async function joinGroupOwned(
       timedOut
         ? 'no machine in that group accepted the join key, either the join key is wrong, or no machine in that group is reachable on this network'
         : outcome.reason,
-      'check the join key with `cluster key` on a machine already in the group, and that both machines are on the same network',
+      'check the join key on a machine already in the group (Devices and network, Machine group, join key), and that both machines are on the same network',
       { failure: outcome.failure },
     );
   }
@@ -682,7 +686,7 @@ export function joinKeyForGroup(context: GroupOperationsContext): GroupOperation
   if (!material || !state) {
     return failed(
       'this machine is not in a group, so it has no join key to show',
-      'create a group with `cluster create`, or join one with `cluster join`',
+      'start a group in Devices and network, Machine group, or join one from Nearby groups',
     );
   }
   return {
@@ -705,7 +709,7 @@ export function groupNodes(context: GroupOperationsContext): GroupOperationResul
   if (!state || !material) {
     return failed(
       'this machine is not in a group, so there is no member list',
-      'create a group with `cluster create`, or join one with `cluster join`',
+      'start a group in Devices and network, Machine group, or join one from Nearby groups',
     );
   }
   return {
@@ -798,7 +802,7 @@ async function forgetNodeOwned(
   if (!state || !context.runtime.keyMaterial) {
     return failed(
       'this machine is not in a group',
-      'create a group with `cluster create`, or join one with `cluster join`',
+      'start a group in Devices and network, Machine group, or join one from Nearby groups',
     );
   }
   // The operator names a machine by its full id, its display name, or an id
@@ -811,20 +815,20 @@ async function forgetNodeOwned(
   if (candidates.length > 1) {
     return failed(
       `'${nodeId}' matches ${candidates.length} machines in this group: ${candidates.map((entry) => `${entry.nodeId} (${entry.displayName})`).join(', ')}`,
-      'run `cluster forget` again with the full node id; `cluster nodes` lists them',
+      'remove it from its own row in Devices and network, Machines (remove from the group), which names each machine',
     );
   }
   const member = candidates[0];
   if (!member) {
     return failed(
       `no machine called '${nodeId}' is in this group`,
-      'run `cluster nodes` to see the member list',
+      'Devices and network, Machines lists the machines in the group',
     );
   }
   if (member.nodeId === context.nodeId) {
     return failed(
       'a machine cannot remove itself from the group',
-      'run `cluster leave` on this machine instead, or `cluster forget` from another machine in the group',
+      'leave the group on this machine\'s row instead (Devices and network, Machines, leave the group), or remove it from another machine in the group',
     );
   }
   // The replacement join key is minted before the removal is recorded, so
@@ -836,7 +840,7 @@ async function forgetNodeOwned(
   if (!current || !isCurrentMember(current, member.nodeId)) {
     return failed(
       `'${member.displayName}' is no longer on this machine's roster`,
-      'run `cluster nodes` to see the member list',
+      'Devices and network, Machines lists the machines in the group',
     );
   }
   // The removal and the generation that shuts the machine out are one record
@@ -849,8 +853,8 @@ async function forgetNodeOwned(
     return failed(
       `'${member.displayName}' was not removed: the group key could not be replaced (${summarizeError(error)})`,
       kind === 'persistence-unknown'
-        ? 'do not blindly retry: inspect cluster status and the membership store, then restart to reconcile the saved result'
-        : 'run `cluster forget` again',
+        ? 'do not blindly retry: look at Devices and network, Machine group and the membership store, then restart to reconcile the saved result'
+        : 'remove it again from its row in Devices and network, Machines',
       kind ? { failure: kind } : {},
     );
   }
@@ -909,7 +913,7 @@ async function rotateGroupKeyOwned(
   if (!material) {
     return failed(
       'this machine is not in a group, so there is no group key to replace',
-      'create a group with `cluster create`, or join one with `cluster join`',
+      'start a group in Devices and network, Machine group, or join one from Nearby groups',
     );
   }
   if (!context.settings.enabled) {
@@ -929,7 +933,7 @@ async function rotateGroupKeyOwned(
     if (error instanceof ClusterMembershipOperationError) throw error;
     return failed(
       `the group key could not be replaced: ${summarizeError(error)}`,
-      'inspect cluster status, then try again',
+      'look at Devices and network, Machine group, then try again',
     );
   }
   return {
@@ -999,7 +1003,7 @@ export function renameGroupTo(
     const state = context.runtime.groupState;
     const material = context.runtime.keyMaterial;
     if (!state || !material) {
-      return failed('this machine is not in a group', 'create a group with `cluster create` first');
+      return failed('this machine is not in a group', 'start a group first in Devices and network, Machine group');
     }
     if (!context.settings.enabled) {
       // A new name must reach the group: it is kept, sharing is turned on, and it is given once the group is up.
@@ -1030,10 +1034,11 @@ export async function decideLocalSetting(
   context: GroupOperationsContext,
   path: string,
   decision: 'publish' | 'accept',
-  options: { readonly turnOnSharing?: boolean | undefined } = {},
+  /** `act`: who pressed it and how it was decided; a published value carries it to every member. */
+  options: { readonly turnOnSharing?: boolean | undefined; readonly act?: ReplicaAct | undefined } = {},
 ): Promise<GroupOperationResult<SettingDecisionResult>> {
   if (!context.runtime.groupState || !context.runtime.keyMaterial) {
-    return failed('this machine is not in a group', 'there is no group setting to send to or take from; `cluster create` or `cluster join` first');
+    return failed('this machine is not in a group', 'there is no group setting to send to or take from; start a group in Devices and network, Machine group, or join one from Nearby groups, first');
   }
   if (!context.settings.enabled) {
     // Nothing reaches or comes from the group while sharing is off: the decision is kept and made once the group is up.
@@ -1053,13 +1058,13 @@ export async function decideLocalSetting(
       await context.runtime.acceptGroupConfigValue(path);
       return { ok: true, data: { path, decision: 'accepted' } };
     }
-    return { ok: true, data: { path, decision: await context.runtime.publishConfigValue(path) } };
+    return { ok: true, data: { path, decision: await context.runtime.publishConfigValue(path, options.act) } };
   } catch (error) {
     if (error instanceof UserAccountDecisionError) {
-      return failed(error.message, 'run `cluster status` to see which usernames are held by separate accounts');
+      return failed(error.message, 'Devices and network, Machine group, settings that differ, lists the usernames held by separate accounts');
     }
     if (error instanceof ConfigLocalDifferenceError) {
-      return failed(error.message, 'run `cluster status` to see which shared settings differ on this machine');
+      return failed(error.message, 'Devices and network, Machine group, settings that differ, lists the shared settings that differ on this machine');
     }
     if (error instanceof ClusterMembershipOperationError) {
       return failed(error.message, 'wait for the current group operation to finish, then try again', { failure: error.kind });
@@ -1117,7 +1122,7 @@ export function rejoinGroup(context: GroupOperationsContext, atLeast = 0): Promi
 async function rejoinGroupOwned(context: GroupOperationsContext, owner: ClusterMembershipOperation, atLeast: number): Promise<GroupOperationResult<JoinGroupResult>> {
   const material = context.runtime.keyMaterial;
   if (!material) {
-    return failed('this machine is not in a group', 'join one with `cluster join`');
+    return failed('this machine is not in a group', 'join one from Devices and network, Nearby groups');
   }
   const outcome = await context.runtime.requestRejoin(ADMISSION_TIMEOUT_MS, atLeast);
   if (!outcome.ok && outcome.failure === 'removed') {
@@ -1131,7 +1136,7 @@ async function rejoinGroupOwned(context: GroupOperationsContext, owner: ClusterM
     context.runtime.noteRemovedFromGroup({ groupId: material.groupId, groupName, at: context.now(), reason: outcome.reason });
     return failed(
       `this machine was removed from the group${groupName ? ` "${groupName}"` : ''} by another member, so it no longer holds the group's keys`,
-      `to put it back, run \`cluster key\` on a machine in the group, then \`cluster join --group ${material.groupId}\` here and give it that key`,
+      `to put it back, read the join key on a machine in the group (Devices and network, Machine group, join key), then join group ${material.groupId} here from Nearby groups with that key`,
       { terminal: true, failure: 'removed' },
     );
   }
@@ -1142,14 +1147,14 @@ async function rejoinGroupOwned(context: GroupOperationsContext, owner: ClusterM
     // it was removed from its own group.
     return failed(
       outcome.reason,
-      'if this machine was removed from the group, join it again with `cluster join` and the current join key',
+      'if this machine was removed from the group, join it again from Devices and network, Nearby groups, with the current join key',
       { terminal: outcome.failure === 'refused', failure: outcome.failure },
     );
   }
   context.runtime.assertMembershipOperation(owner);
   const current = context.runtime.keyMaterial;
   if (!current || current.groupId !== material.groupId || context.runtime.keyring().currentGeneration > grantGeneration(outcome.grant)) {
-    return failed('the group membership changed while this machine was asking to return', 'inspect cluster status, then ask to rejoin again', { failure: 'not-sent' });
+    return failed('the group membership changed while this machine was asking to return', 'look at Devices and network, Machine group, then ask to rejoin again', { failure: 'not-sent' });
   }
   const now = context.now();
   // The answer's entries are merged into this machine's record, never laid
@@ -1202,8 +1207,9 @@ export function stillOnRoster(state: GroupStateDocument | null, nodeId: string):
 /** The verb surface the daemon serves on `/api/cluster/*`. One line per operation. */
 export interface ClusterGroupVerbSurface {
   status(): GroupOperationResult<GroupStatusReport>;
-  create(input: { name?: string; passphrase?: string }): Promise<GroupOperationResult<CreateGroupResult>>;
-  join(input: { groupId: string; joinKey: string }): Promise<GroupOperationResult<JoinGroupResult>>;
+  /** `act`: the owner's act that starts or joins the group here; the settings in force here that the group lacks become its under it. */
+  create(input: { name?: string; passphrase?: string; act?: ReplicaAct }): Promise<GroupOperationResult<CreateGroupResult>>;
+  join(input: { groupId: string; joinKey: string; act?: ReplicaAct }): Promise<GroupOperationResult<JoinGroupResult>>;
   key(): GroupOperationResult<JoinKeyResult>;
   nodes(): GroupOperationResult<NodesResult>;
   groups(): GroupOperationResult<readonly DiscoveredGroup[]>;
@@ -1213,7 +1219,7 @@ export interface ClusterGroupVerbSurface {
   leave(): Promise<GroupOperationResult<LeaveGroupResult>>;
   rename(name: string, options?: { turnOnSharing?: boolean }): Promise<GroupOperationResult<RenameGroupResult>>;
   /** Send this machine's value of a shared setting to the group. */
-  publish(path: string, options?: { turnOnSharing?: boolean }): Promise<GroupOperationResult<SettingDecisionResult>>;
+  publish(path: string, options?: { turnOnSharing?: boolean; act?: ReplicaAct }): Promise<GroupOperationResult<SettingDecisionResult>>;
   /** Take the group's value of a shared setting here. */
   accept(path: string, options?: { turnOnSharing?: boolean }): Promise<GroupOperationResult<SettingDecisionResult>>;
   /** Turn sharing with your other machines on; in force from the daemon's next start. */
@@ -1234,11 +1240,20 @@ export interface ClusterGroupVerbSurface {
 export function createClusterGroupVerbs(context: GroupOperationsContext): ClusterGroupVerbSurface {
   return {
     status: () => groupStatus(context),
-    create: (input) => createGroup(context, {
-      ...(input.name !== undefined ? { displayName: input.name } : {}),
-      ...(input.passphrase !== undefined ? { passphrase: input.passphrase } : {}),
-    }),
-    join: (input) => joinGroup(context, input),
+    // Starting or joining the group is the owner's act that makes this machine's settings the group's where it has none.
+    create: async (input) => {
+      const created = await createGroup(context, {
+        ...(input.name !== undefined ? { displayName: input.name } : {}),
+        ...(input.passphrase !== undefined ? { passphrase: input.passphrase } : {}),
+      });
+      if (created.ok) context.runtime.noteSeedAct(input.act);
+      return created;
+    },
+    join: async (input) => {
+      const joined = await joinGroup(context, input);
+      if (joined.ok && joined.data.pending !== true) context.runtime.noteSeedAct(input.act);
+      return joined;
+    },
     key: () => joinKeyForGroup(context),
     nodes: () => groupNodes(context),
     groups: () => groupsOnTheNetwork(context),

@@ -9,6 +9,7 @@
  */
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { dirname } from 'node:path';
+import { unreadableFile } from '../path-inputs.js';
 import type { DaemonLocalCalendar } from '../../calendar/local-calendar.js';
 import type { DaemonCalendarAccounts } from '../../calendar/daemon-accounts.js';
 import type { CalendarProviderId } from '../../calendar/oauth-types.js';
@@ -125,8 +126,14 @@ export const CALENDAR_IMPORT: Def = {
     // The file on the asking program's machine: its text was sent; the daemon reads no path.
     const sent = values.filesAt === 'program';
     const path = sent ? '' : services.calendarHere.resolvePath(caller, values.path ?? '');
-    if (!sent && !existsSync(path)) throw new CapabilityRefusal(`There is no file ${values.path}; nothing was imported.`);
-    const result = services.calendarHere.local().events.importIcs(sent ? values.content ?? '' : readFileSync(path, 'utf8'));
+    let text: string;
+    try { text = sent ? values.content ?? '' : readFileSync(path, 'utf8'); } catch (error) {
+      // Never the system's words (capabilities/path-inputs.ts).
+      throw unreadableFile(values.path ?? '', 'an .ics file', caller, error, 'Nothing was imported.');
+    }
+    const result = services.calendarHere.local().events.importIcs(text);
+    // An entry that could not be read is quoted only to the person or the program that sent the text: it is the file's own.
+    const quoteEntry = sent || caller.personAsked === true;
     if (result.imported.length > 0) services.calendarHere.changed();
     return {
       text: [
@@ -134,7 +141,7 @@ export const CALENDAR_IMPORT: Def = {
         ...(result.duplicates > 0 ? [`${result.duplicates} already in the calendar from an earlier import ${result.duplicates === 1 ? 'was' : 'were'} skipped.`] : []),
         ...(result.secretSkipped > 0 ? [`${result.secretSkipped} with a secret-looking field ${result.secretSkipped === 1 ? 'was' : 'were'} not imported.`] : []),
         ...(result.untitled > 0 ? [`${result.untitled} had no title and ${result.untitled === 1 ? 'was' : 'were'} imported as "Untitled event".`] : []),
-        ...(result.notParsed.length > 0 ? [`${result.notParsed.length} entr${result.notParsed.length === 1 ? 'y' : 'ies'} could not be read: ${result.notParsed[0] ?? ''}`] : []),
+        ...(result.notParsed.length > 0 ? [`${result.notParsed.length} entr${result.notParsed.length === 1 ? 'y' : 'ies'} could not be read${quoteEntry ? `: ${result.notParsed[0] ?? ''}` : '.'}`] : []),
         ...(result.unexpandedSeries.length > 0 ? [`${result.unexpandedSeries.length} repeating event${result.unexpandedSeries.length === 1 ? '' : 's'} show on the first date only.`] : []),
       ].join(' '),
       data: { imported: result.imported.length, duplicates: result.duplicates },
@@ -145,7 +152,7 @@ export const CALENDAR_IMPORT: Def = {
 export const CALENDAR_EXPORT: Def = {
   capability: { id: 'calendar.export', group: 'messages', home: 'daemon', repeat: 'safe' },
   actionId: 'export', word: 'export', label: 'Export events to a file',
-  inputs: [{ id: 'dest', label: 'File', help: 'A new .ics file; an existing file is never replaced', kind: 'path', freeTextReason: 'a file path', required: { default: '', defaultMeans: 'shown here instead' }, typed: { position: 1 } }, FILES_AT],
+  inputs: [{ id: 'dest', label: 'File', help: 'A new .ics file; an existing file is never replaced', kind: 'path', file: 'written', freeTextReason: 'a file path', required: { default: '', defaultMeans: 'shown here instead' }, typed: { position: 1 } }, FILES_AT],
   sentence: 'Every event kept on this computer is written as iCalendar to the file you name, or shown here.', done: '',
   touches: 'this-machine', lasts: 'kept', risk: 'none', example: { dest: 'calendar.ics' },
   async run(values, services, caller) {

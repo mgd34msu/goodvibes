@@ -1,13 +1,15 @@
 /** Lazy daemon-owned native graph; ordinary conversations keep their own runner. */
 import { createAgentExecutionGraph } from '@goodvibes/engine/platform/platform/runtime/operations';
-import { WORKSTREAM_CONTAINMENT } from '@goodvibes/engine/platform/platform/hosted-sessions';
-import { ProcessManager, cancelAllAgentRuns, type AgentFleetOwnership } from '@goodvibes/engine/platform/platform/tools';
+import { ProcessManager, TURN_EXEC_CONTAINMENT, cancelAllAgentRuns, type AgentFleetOwnership } from '@goodvibes/engine/platform/platform/tools';
 import type { AgentOrchestrator } from '@goodvibes/engine/platform/platform/agents';
 import type { PermissionManager } from '@goodvibes/engine/platform/platform/permissions';
 import { NativeWorkExecutionError, type NativeWorkExecutionHost } from '@goodvibes/engine/platform/platform/workflow/work-ledger/native-execution';
 import { createDaemonNativeWorkExecutionServices } from './native-work-execution-composition.js';
 import type { ContractOperatorService } from '@goodvibes/engine/platform/platform/contract';
 import { createNativeWorkSessionDriver, type NativeSessionDriverOptions } from './native-work-session-driver.js';
+import { UNRECORDED_WORK_CAUSE, type WorkCause } from '@goodvibes/engine/platform/platform/workflow/work-ledger';
+import { logger, outsideEveryCall } from '@goodvibes/engine/platform/platform/utils';
+import { ownersChannelSession } from '@goodvibes/engine/platform/platform/security';
 
 type NativeOptions = Parameters<typeof createDaemonNativeWorkExecutionServices>[0];
 export type NativeWorkExecutionActivationOptions = Omit<NativeOptions, 'agentManager' | 'agentMessageBus' | 'readAccessFilter' | 'cancelForeground' | 'releaseForeground'> & {
@@ -34,6 +36,13 @@ export interface NativeWorkExecutionActivation {
 }
 
 export function createDaemonNativeWorkExecutionActivation(options: NativeWorkExecutionActivationOptions): NativeWorkExecutionActivation {
+  /** One part of the close, traced in the ordinary log at debug level: a stop that hangs names the part it waits on. */
+  const closeStep = <T>(part: string, pending: Promise<T>): Promise<T> => {
+    const from = Date.now();
+    logger.debug(`Work of ${options.projectRoot}: closing, waiting on ${part}`);
+    void pending.then(() => { logger.debug(`Work of ${options.projectRoot}: ${part} closed`, { ms: Date.now() - from }); }, () => {});
+    return pending;
+  };
   let closed = false;
   let opening: Promise<Awaited<ReturnType<typeof build>>> | undefined;
   let closing: Promise<void> | undefined;
@@ -74,12 +83,27 @@ export function createDaemonNativeWorkExecutionActivation(options: NativeWorkExe
       const toolDependencies = { ...options.toolDependencies, ...graph, processManager,
         // The ordinary remote runner registry owns the ordinary manager.
         remoteRunnerRegistry: undefined,
-        // A composed workstream the owner authorized: the boundary where available, the host where not.
-        execContainment: WORKSTREAM_CONTAINMENT,
+        // The one rule every turn's commands follow; someone else's work is held to the boundary at the command.
+        execContainment: TURN_EXEC_CONTAINMENT,
         contractRunner: native.runner, contractHooks: native.runner.hooks(), permissionManager: options.permissionManager };
       graph.agentOrchestrator.setDependencies(toolDependencies);
       const owner = native;
-      const driver = createNativeWorkSessionDriver({ ...options, runner: owner.runner, toolDependencies, onSlotReleased: releaseSlot,
+      // Who caused each piece of work, from its record: its session turns and its agents run as that party (the owner's
+      // own only when he himself asked for it or approved it; anyone else's runs reads only, no command outside a real
+      // sandbox). Read at every turn and wake, so his approval since the work started counts.
+      // Work a channel conversation caused, with no cause of its own on record, is the owner's own when that conversation
+      // is his alone on a channel where he chose "Treat my own messages here as me" (his message there, agreed by him
+      // there): the same rule his own channel turns follow (security/turn-input-party.ts). A guest's, a group's or any
+      // other conversation's stays someone else's.
+      const workCauseOf = (sessionId: string | undefined): WorkCause => {
+        const recorded = options.workPlans?.causeOfSession(sessionId) ?? UNRECORDED_WORK_CAUSE;
+        return recorded === UNRECORDED_WORK_CAUSE && ownersChannelSession(sessionId) ? { party: 'owner' } : recorded;
+      };
+      graph.agentManager.setWorkParty((record) => {
+        if (!record.contractId) return undefined;
+        return workCauseOf(owner.runner.get(record.contractId)?.sessionId);
+      });
+      const driver = createNativeWorkSessionDriver({ ...options, runner: owner.runner, toolDependencies, onSlotReleased: releaseSlot, workCauseOf,
         // A unit's turn is assembled the one way (its project's environment from this graph's orchestrator).
         turnEnvironment: (folder) => graph.agentOrchestrator.acquireTurnEnvironment(folder),
         assertCurrent: contract => { owner.execution.nativeOwner.decisions.authorityOf(contract); } });
@@ -133,13 +157,16 @@ export function createDaemonNativeWorkExecutionActivation(options: NativeWorkExe
         // before waiting on any one of their drains. The runner is told first that the daemon is closing: the agents
         // cancelled here end with it, which neither stops nor fails the work (it stands interrupted at the next start).
         owner.runner.prepareToClose?.();
-        const execution = owner.execution.close();
-        const sessions = driver.close();
+        // Told so, the runner no longer ends a run when its owner record is cancelled: each run ends here, its restart
+        // checkpoint kept, before anything below waits on it (the owner record's join waits for its run).
+        owner.endRuns();
+        const execution = closeStep('execution', owner.execution.close());
+        const sessions = closeStep('session turns', driver.close());
         cancelAllAgentRuns(graph.agentManager);
-        const agents = Promise.allSettled(graph.agentManager.list().map(record => graph.agentManager.join(record.id)));
-        const processes = processManager.close();
+        const agents = closeStep('agents', Promise.allSettled(graph.agentManager.list().map(record => graph.agentManager.join(record.id))));
+        const processes = closeStep('processes', processManager.close());
         drain = Promise.allSettled([execution, sessions, agents, processes]).then(async results => {
-          try { await owner.close(); } finally { graph.agentOrchestrator.dispose(); localFleetOwnership = () => []; }
+          try { await closeStep('runner', owner.close()); } finally { graph.agentOrchestrator.dispose(); localFleetOwnership = () => []; }
           const errors = results.filter((result): result is PromiseRejectedResult => result.status === 'rejected').map(result => result.reason);
           if (errors.length) throw new AggregateError(errors, 'Native execution cleanup failed');
         });
@@ -158,7 +185,8 @@ export function createDaemonNativeWorkExecutionActivation(options: NativeWorkExe
     async acquire() {
       if (closed) throw new NativeWorkExecutionError('closed');
       if (!opening) {
-        const pending = build(); opening = pending;
+        // Opened by whichever request first needs it: its runner, driver and workers are no caller's (outsideEveryCall).
+        const pending = outsideEveryCall(() => build()); opening = pending;
         void pending.catch(() => { if (opening === pending && !closed) opening = undefined; });
       }
       const owner = await opening;

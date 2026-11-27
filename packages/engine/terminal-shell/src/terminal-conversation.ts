@@ -306,6 +306,14 @@ export class TerminalConversationManager extends PlatformConversationManager {
         this.markDirty();
         this.publishSystemNotice(nextIndex, false);
     }
+    /** Another session took back this one's change: drawn in the transcript and published as a notice. */
+    public override addWorkspaceNotice(content: string): void {
+        const nextIndex = this.getMessageCount();
+        this.messageKindRegistry.delete(nextIndex);
+        super.addWorkspaceNotice(content);
+        this.markDirty();
+        this.publishSystemNotice(nextIndex, false);
+    }
     /** A `!` command's output is drawn in the transcript only; it is not a notification. */
     public override addShellOutput(content: string, failed: boolean): void {
         this.messageKindRegistry.delete(this.getMessageCount());

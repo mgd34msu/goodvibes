@@ -8,8 +8,9 @@
  * leaves: a setting that holds one stays behind, a file entry that holds one is
  * masked, and a secret-store reference travels as it is.
  */
-import { existsSync, mkdirSync, readFileSync, readdirSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, readFileSync, readdirSync } from 'node:fs';
 import { dirname, join } from 'node:path';
+import { readHeldFile, writeHeldFile, writeHeldFiles, type HeldWrite } from '../capabilities/held-paths.js';
 import type { ConfigManager } from '../config/manager.js';
 import type { ConfigKey } from '../config/schema-types.js';
 import { CONFIG_KEYS, CONFIG_SCHEMA } from '../config/schema.js';
@@ -195,7 +196,7 @@ export function buildSetupTransferBundle(config: Pick<ConfigManager, 'get'>, fil
 
 export function writeSetupTransferBundle(targetPath: string, bundle: SetupTransferBundle): void {
   mkdirSync(dirname(targetPath), { recursive: true });
-  writeFileSync(targetPath, JSON.stringify(bundle, null, 2) + '\n', 'utf-8');
+  writeHeldFile(targetPath, JSON.stringify(bundle, null, 2) + '\n');
 }
 
 export interface SetupTransferChange {
@@ -246,8 +247,7 @@ export function planSetupTransferImport(config: Pick<ConfigManager, 'get' | 'val
       if (bundle.ecosystem[part] !== undefined && !isPlainObject(bundle.ecosystem[part])) return { ok: false, reason: `"ecosystem.${part}" must be an object.` };
     }
   }
-  const changes: SetupTransferChange[] = [];
-  const heldBack: SetupTransferChange[] = [];
+  const incoming: { readonly key: ConfigKey; readonly value: unknown }[] = [];
   const ignoredKeys: string[] = [];
   const invalid: string[] = [];
   for (const [rawKey, next] of Object.entries(bundle.config)) {
@@ -259,11 +259,12 @@ export function planSetupTransferImport(config: Pick<ConfigManager, 'get' | 'val
       invalid.push(`${key} (${error instanceof Error ? error.message : String(error)})`);
       continue;
     }
-    const previous = config.get(key);
-    if (JSON.stringify(previous) === JSON.stringify(next)) continue;
-    const change = { key, previous: structuredClone(previous), next: structuredClone(next) };
-    (securityRelevantSetting(key, previous, next) && !includeSecurity ? heldBack : changes).push(change);
+    incoming.push({ key, value: structuredClone(next) });
   }
+  // The one rule every import of settings follows (splitIncomingSettings).
+  const split = splitIncomingSettings((key: ConfigKey) => structuredClone(config.get(key)), incoming, includeSecurity);
+  const changes: SetupTransferChange[] = [...split.apply];
+  const heldBack: SetupTransferChange[] = [...split.heldBack];
   if (invalid.length > 0) return { ok: false, reason: `these settings are invalid, so nothing was imported: ${invalid.join('; ')}` };
   const typed = bundle as unknown as SetupTransferBundle;
   const skippedParts: string[] = [];
@@ -280,6 +281,36 @@ export function planSetupTransferImport(config: Pick<ConfigManager, 'get' | 'val
     ecosystem: { plugins: kept['ecosystem.plugins'] as Record<string, unknown> | undefined, skills: kept['ecosystem.skills'] as Record<string, unknown> | undefined },
   };
   return { ok: true, bundle: importable, changes, heldBack, ignoredKeys, skippedParts };
+}
+
+/** One setting that would come in from a file or another machine: its value here now and the incoming one. */
+export interface IncomingSettingChange<K extends string = string> {
+  readonly key: K;
+  readonly previous: unknown;
+  readonly next: unknown;
+}
+
+/**
+ * The one rule for every capability that applies settings from a file or another machine (the setup transfer, a support
+ * bundle, a preset, a voice settings file, a sync bundle and its settled values): each incoming value that differs from
+ * the one here is either applied or, when it loosens a protection by the key's own facts or moves where data and
+ * secrets are kept (support-bundle.ts `securityRelevantSetting`), held back unless the caller chose to bring those in
+ * too (a choice that is itself a loosening act, asked of the person and the model, opening on No). Values equal to the
+ * present one are left out of both.
+ */
+export function splitIncomingSettings<K extends string>(present: (key: K) => unknown, incoming: readonly { readonly key: K; readonly value: unknown }[], bringSecurity: boolean): {
+  readonly apply: readonly IncomingSettingChange<K>[];
+  readonly heldBack: readonly IncomingSettingChange<K>[];
+} {
+  const apply: IncomingSettingChange<K>[] = [];
+  const heldBack: IncomingSettingChange<K>[] = [];
+  for (const { key, value } of incoming) {
+    let previous: unknown;
+    try { previous = present(key); } catch { previous = undefined; }
+    if (JSON.stringify(previous) === JSON.stringify(value)) continue;
+    (securityRelevantSetting(key, previous, value) && !bringSecurity ? heldBack : apply).push({ key, previous, next: value });
+  }
+  return { apply, heldBack };
 }
 
 /** The security settings a transfer holds back, each with its present and incoming value; a credential is never printed. */
@@ -353,19 +384,25 @@ export const SUPPORT_FOLDER_MARK = 'startup-review.json';
  * the shared redaction rule), and the remote runners' summary. Returns how many
  * values were masked.
  */
-export function writeSupportFolder(targetDir: string, parts: SupportFolderParts): { readonly masked: number } {
+export function writeSupportFolder(targetDir: string, parts: SupportFolderParts, place: (path: string, use: 'read' | 'write') => string = (path) => path): { readonly masked: number } {
   mkdirSync(targetDir, { recursive: true });
   const masked: string[] = [];
-  writeFileSync(join(targetDir, SUPPORT_FOLDER_MARK), JSON.stringify(maskLiteralSecrets(parts.review, masked), null, 2) + '\n', 'utf-8');
-  writeFileSync(join(targetDir, 'platform-review.json'), JSON.stringify(maskLiteralSecrets(parts.platformReview, masked, 'platform-review.json'), null, 2) + '\n', 'utf-8');
+  // Each file it writes is placed by `place` (a folder a caller named is resolved through its held handle, so a link
+  // planted there is refused: capabilities/held-paths.ts `heldPath`) and written the one way (`writeHeldFiles`: by a
+  // pending name and rename inside the opened folder, so a link swapped in at a file's name is never written through).
+  const writes: HeldWrite[] = [
+    { path: place(join(targetDir, SUPPORT_FOLDER_MARK), 'write'), data: JSON.stringify(maskLiteralSecrets(parts.review, masked), null, 2) + '\n' },
+    { path: place(join(targetDir, 'platform-review.json'), 'write'), data: JSON.stringify(maskLiteralSecrets(parts.platformReview, masked, 'platform-review.json'), null, 2) + '\n' },
+  ];
   for (const [source, name] of parts.copies) {
     if (!existsSync(source)) continue;
     const text = readFileSync(source, 'utf-8');
     let parsed: unknown;
     try { parsed = JSON.parse(text); } catch { parsed = { unreadable: `${name} is not valid JSON; its text is not included.` }; }
-    writeFileSync(join(targetDir, name), JSON.stringify(maskLiteralSecrets(parsed, masked, name), null, 2) + '\n', 'utf-8');
+    writes.push({ path: place(join(targetDir, name), 'write'), data: JSON.stringify(maskLiteralSecrets(parsed, masked, name), null, 2) + '\n' });
   }
-  writeFileSync(join(targetDir, 'remote-summary.json'), JSON.stringify(maskLiteralSecrets(parts.remoteSummary, masked, 'remote-summary.json'), null, 2) + '\n', 'utf-8');
+  writes.push({ path: place(join(targetDir, 'remote-summary.json'), 'write'), data: JSON.stringify(maskLiteralSecrets(parts.remoteSummary, masked, 'remote-summary.json'), null, 2) + '\n' });
+  writeHeldFiles(writes);
   return { masked: masked.length };
 }
 
@@ -377,10 +414,11 @@ const asRecord = (value: unknown): Record<string, unknown> => (value && typeof v
  * the install, secure-storage, integration-helper, sandbox and link facts (key
  * names only, as written). Throws when the folder holds no platform review.
  */
-export function inspectSupportFolder(targetDir: string): string {
-  const reviewPath = join(targetDir, 'platform-review.json');
+export function inspectSupportFolder(targetDir: string, place: (path: string, use: 'read' | 'write') => string = (path) => path): string {
+  // Placed by `place`, as writeSupportFolder's files are: a link planted in a folder a caller named is refused.
+  const reviewPath = place(join(targetDir, 'platform-review.json'), 'read');
   if (!existsSync(reviewPath)) throw new Error(`${targetDir} holds no support bundle (no platform-review.json)`);
-  const review = asRecord(JSON.parse(readFileSync(reviewPath, 'utf-8')) as unknown);
+  const review = asRecord(JSON.parse(readHeldFile(reviewPath, 'utf-8')) as unknown);
   const install = asRecord(review['install']);
   const storage = asRecord(review['storage']);
   const helpers = review['integrationHelpers'];

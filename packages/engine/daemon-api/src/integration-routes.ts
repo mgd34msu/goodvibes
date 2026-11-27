@@ -1,8 +1,12 @@
 import { MEMORY_RECORD_NOT_FOUND_CODE } from '@goodvibes/engine/errors';
 import type { DaemonIntegrationRouteHandlers } from './context.js';
 import { jsonErrorResponse, readServiceErrorResponse } from './error-response.js';
-import type { DaemonIntegrationRouteContext, IntegrationHelperServiceLike, MemoryRecordReviewInput, SessionReadPolicy } from './integration-route-types.js';
+import type {
+  DaemonIntegrationRouteContext, IntegrationHelperServiceLike, MemoryProvenanceLinkInput, MemoryRecordAuthorLike, MemoryRecordReviewInput, MemoryRecordSearchFilterInput, SessionReadPolicy,
+} from './integration-route-types.js';
 import { principalHasScope } from './http-policy.js';
+import { readCallContext } from './control-routes.js';
+import { currentRecordReach } from './pagination.js';
 import {
   createRouteBodySchema,
   createRouteBodySchemaRegistry,
@@ -133,6 +137,20 @@ function withAuthenticatedReviewer(
   return principal ? { ...rest, reviewedBy: principal.principalId } : rest;
 }
 
+/** Who writes a memory record over these routes (the context's reading of the credential); with none, someone else. */
+function memoryAuthorOfRequest(context: DaemonIntegrationRouteContext, req: Request): MemoryRecordAuthorLike {
+  return context.memoryAuthorOf?.(req) ?? { kind: 'other', who: 'a caller the daemon did not name' };
+}
+
+/** A record's provenance with only the sessions this caller registered: a session it merely names is dropped. */
+function withOwnSessionsOnly<T extends { readonly provenance?: readonly MemoryProvenanceLinkInput[] | undefined }>(
+  context: DaemonIntegrationRouteContext, req: Request, input: T,
+): T {
+  if (!input.provenance) return input;
+  const kept = input.provenance.filter((link) => link.kind !== 'session' || context.mayNameSession?.(req, link.ref) === true);
+  return { ...input, provenance: kept };
+}
+
 /** What a task row needs to hide when the caller may not read conversation text. */
 const TASK_TEXT_WITHHELD = 'Task titles, prompts and errors need read:transcripts; the counts and states are whole.';
 
@@ -191,6 +209,33 @@ function withServingListener(snapshot: unknown, servingListener: DaemonIntegrati
 export function createDaemonIntegrationRouteHandlers(
   context: DaemonIntegrationRouteContext,
 ): DaemonIntegrationRouteHandlers {
+  // A memory read whose call names a project (a place open in a project, the web UI's chosen project) is that project's
+  // and the person's own records only: another project's "this project" record is never listed there. A filter that
+  // names its project itself keeps it. A call naming none reads only the records that belong to no project (the
+  // person's own, given everywhere); every project's at once is the owner's explicit choice (`everyProject`, his
+  // place's project chooser), refused from anyone else.
+  // A project the caller may not name (a device or a member the owner gave none of it) is refused, nothing read.
+  const refusedRead = (reason: string): Response => Response.json({ error: `Not done: ${reason}. Nothing was read.`, code: 'PROJECT_NOT_ALLOWED', category: 'authorization', status: 403 }, { status: 403 });
+  const inCallersProject = <Filter extends MemoryRecordSearchFilterInput>(req: Request, filter: Filter): Filter | Response => {
+    const named = readCallContext(req)?.project;
+    for (const folder of [named, filter.project]) {
+      const refusal = folder ? context.callerProjectRefusal?.(req, folder) : undefined;
+      if (refusal) return refusedRead(refusal);
+    }
+    // `projectless` is the daemon's own narrowing, never taken from a body; `everyProject` is decided here.
+    const everyProject = filter.everyProject;
+    const rest = { ...filter };
+    delete (rest as { everyProject?: boolean }).everyProject;
+    delete (rest as { projectless?: boolean }).projectless;
+    if (rest.project !== undefined) return rest as Filter;
+    const project = named ? context.memoryProjectOf?.(named) : undefined;
+    if (project !== undefined) return { ...rest, project } as Filter;
+    if (everyProject === true) {
+      return context.ownerHimself?.(req) === true ? rest as Filter
+        : refusedRead('every project\'s memory at once is the owner\'s own choice, in his place\'s project chooser; name a project, or none for the records that belong to no project');
+    }
+    return { ...rest, projectless: true } as Filter;
+  };
   return {
     getReview: () => withHelpers(context.integrationHelpers, (helpers) => Response.json(helpers.buildReview())),
     getIntegrationSession: () => withHelpers(context.integrationHelpers, (helpers) => Response.json(helpers.getSessionSnapshot())),
@@ -200,7 +245,11 @@ export function createDaemonIntegrationRouteHandlers(
     getDeliveries: () => withHelpers(context.integrationHelpers, (helpers) => Response.json(helpers.getDeliverySnapshot())),
     getDelivery: (deliveryId) => {
       const runtimeStore = context.integrationHelpers?.getRuntimeStore() ?? null;
-      const delivery = runtimeStore?.getState().deliveries.deliveryAttempts.get(deliveryId);
+      const found = runtimeStore?.getState().deliveries.deliveryAttempts.get(deliveryId);
+      // A delivery is its schedule run's: a caller that is not the owner himself reads one only of a run it may reach,
+      // answered as for no delivery (pagination.ts currentRecordReach, platform control-plane/caller-reach.ts).
+      const reach = currentRecordReach();
+      const delivery = found && (!reach || reach('schedule-run', found.runId)) ? found : undefined;
       if (!delivery) {
         return jsonErrorResponse({ error: 'Unknown delivery' }, { status: 404 });
       }
@@ -309,7 +358,10 @@ export function createDaemonIntegrationRouteHandlers(
       if (body instanceof Response) return body;
       const parsed = parseMemoryRecordAddBody(body);
       if (parsed instanceof Response) return parsed;
-      const input = parsed.review ? { ...parsed, review: withAuthenticatedReviewer(context, req, parsed.review) } : parsed;
+      const reviewed = parsed.review ? { ...parsed, review: withAuthenticatedReviewer(context, req, parsed.review) } : parsed;
+      // Who wrote it is the authenticated caller's (never the body's), and a session it names is kept as where the
+      // record came from only when this caller registered it.
+      const input = { ...withOwnSessionsOnly(context, req, reviewed), author: memoryAuthorOfRequest(context, req) };
       try {
         const record = await context.memoryRegistry.add(input);
         return Response.json({ record }, { status: 201 });
@@ -322,7 +374,9 @@ export function createDaemonIntegrationRouteHandlers(
       if (body instanceof Response) return body;
       const parsed = parseMemoryRecordSearchBody(body);
       if (parsed instanceof Response) return parsed;
-      return Response.json(await context.memoryRegistry.honestSearch(parsed.filter, { recall: parsed.recall }));
+      const scoped = inCallersProject(req, parsed.filter);
+      if (scoped instanceof Response) return scoped;
+      return Response.json(await context.memoryRegistry.honestSearch(scoped, { recall: parsed.recall }));
     },
     getMemoryRecord: (id) => {
       const record = context.memoryRegistry.get(id);
@@ -367,14 +421,18 @@ export function createDaemonIntegrationRouteHandlers(
       if (body instanceof Response) return body;
       const filter = parseMemoryRecordFilterBody(body);
       if (filter instanceof Response) return filter;
-      return Response.json({ records: await context.memoryRegistry.search(filter) });
+      const scoped = inCallersProject(req, filter);
+      if (scoped instanceof Response) return scoped;
+      return Response.json({ records: await context.memoryRegistry.search(scoped) });
     },
     postMemoryRecordSearchSemantic: async (req) => {
       const body = await context.parseJsonBody(req);
       if (body instanceof Response) return body;
       const filter = parseMemoryRecordFilterBody(body);
       if (filter instanceof Response) return filter;
-      return Response.json({ results: await context.memoryRegistry.searchSemantic(filter) });
+      const scoped = inCallersProject(req, filter);
+      if (scoped instanceof Response) return scoped;
+      return Response.json({ results: await context.memoryRegistry.searchSemantic(scoped) });
     },
     postMemoryRecordUpdate: async (id, req) => {
       const admin = context.requireAdmin(req);
@@ -384,7 +442,8 @@ export function createDaemonIntegrationRouteHandlers(
       const patch = parseMemoryRecordUpdateBody(body);
       if (patch instanceof Response) return patch;
       try {
-        const record = context.memoryRegistry.update(id, patch);
+        // Someone else's change makes the record someone else's words, waiting for the owner again.
+        const record = context.memoryRegistry.update(id, { ...patch, by: memoryAuthorOfRequest(context, req) });
         if (record) await context.memoryRegistry.saved();
         return record
           ? Response.json({ record })
@@ -422,7 +481,9 @@ export function createDaemonIntegrationRouteHandlers(
       if (body instanceof Response) return body;
       const filter = parseMemoryRecordFilterBody(body);
       if (filter instanceof Response) return filter;
-      return Response.json({ bundle: context.memoryRegistry.exportBundle(filter) });
+      const scoped = inCallersProject(req, filter);
+      if (scoped instanceof Response) return scoped;
+      return Response.json({ bundle: context.memoryRegistry.exportBundle(scoped) });
     },
     postMemoryRecordImport: async (req) => {
       const admin = context.requireAdmin(req);
@@ -432,7 +493,8 @@ export function createDaemonIntegrationRouteHandlers(
       const input = parseMemoryBundleImportBody(body);
       if (input instanceof Response) return input;
       try {
-        return Response.json({ result: await context.memoryRegistry.importBundle(input.bundle) });
+        // Who wrote each imported record is who loaded it, never the author the file claims.
+        return Response.json({ result: await context.memoryRegistry.importBundle(input.bundle, undefined, undefined, memoryAuthorOfRequest(context, req)) });
       } catch (error) {
         return readServiceErrorResponse(error);
       }

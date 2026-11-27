@@ -50,21 +50,31 @@ export function followDaemonContextWindows(options: ContextWindowsFollowOptions)
     }, () => { /* No daemon yet: opened when this program's daemon connection is back. */ });
   };
   open();
-  // The daemon back (started again, or reached for the first time): what changed meanwhile is read, and the stream opened again.
+  // What this program's turn learned goes to the daemon, which keeps it in the one file and announces it. A report
+  // that does not arrive (no daemon yet, a daemon restarting) is kept and sent again when the daemon is back, so a
+  // limit learned while the daemon could not be reached still reaches it; the log says each time one did not arrive.
+  const report = options.report;
+  const unsent = new Map<string, LearnedContextWindow>();
+  const send = (learned: LearnedContextWindow): void => {
+    if (!report || stopped) return;
+    const key = `${learned.registryKey}\u0000${learned.kind}`;
+    unsent.set(key, learned);
+    void report(learned).then(() => {
+      if (unsent.get(key) === learned) unsent.delete(key);
+    }, (error: unknown) => {
+      logger.info('A context window limit this program learned did not reach the daemon; it is sent again when the daemon is back', { model: learned.registryKey, error: summarizeError(error) });
+    });
+  };
+  // The daemon back (started again, or reached for the first time): what changed meanwhile is read, the stream opened
+  // again, and what did not arrive is sent again.
   const stopBack = options.onDaemonBack(() => {
     if (stopped) return;
     options.registry.contextWindowsChanged();
     open();
+    for (const learned of [...unsent.values()]) send(learned);
   });
-  // What this program's turn learned goes to the daemon, which keeps it in the one file and announces it.
-  const report = options.report;
   const stopLearned = report && options.registry.onContextWindowLearned
-    ? options.registry.onContextWindowLearned((learned) => {
-      // Not kept by the daemon: it stays in this program's memory, and the log says why it did not arrive.
-      void report(learned).catch((error: unknown) => {
-        logger.info('A context window limit this program learned did not reach the daemon; it is kept in this program only', { model: learned.registryKey, error: summarizeError(error) });
-      });
-    })
+    ? options.registry.onContextWindowLearned((learned) => { send(learned); })
     : () => {};
   return () => {
     stopped = true;

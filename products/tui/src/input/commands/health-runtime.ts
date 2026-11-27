@@ -73,15 +73,15 @@ async function healthReport(ctx: CommandContext): Promise<CommandReport> {
   const accounts = await requireOperatorClient(ctx).providers.accountSnapshot();
   const settings = readModels.settings.getSnapshot();
   const items: { sentence: string; fix?: { label: string; line: string } }[] = [];
-  const fixFor: Readonly<Record<string, { label: string; line: string }>> = {
-    providers: { label: 'Sign in to a provider', line: '/setup sign-in' },
-    services: { label: 'In System, Health, check one area: Services', line: '/setup' },
-    mcp: { label: 'See which servers need attention', line: '/mcp review' },
+  // What fixes each is a control in a place, not a line to type.
+  const placeFor: Readonly<Record<string, string>> = {
+    plugins: ' The Plugins tab of Tools and extensions shows each one and why.',
+    providers: ' Sign in on the Providers tab of Models and providers (s on the provider).',
+    services: ' The Services tab of Models and providers checks each one; in System, Health, "check one area" reads Services again.',
+    mcp: ' The Servers tab of Tools and extensions shows which servers need attention and how to fix each.',
   };
-  // The held-back plugins are the Plugins tab of Tools and extensions: a control, not a line to type.
-  const placeFor: Readonly<Record<string, string>> = { plugins: ' The Plugins tab of Tools and extensions shows each one and why.' };
   for (const check of snapshot.checks.filter(isSetupIssue)) {
-    items.push({ sentence: `${check.area}: ${check.message}.${placeFor[check.area] ?? ''}`, ...(fixFor[check.area] ? { fix: fixFor[check.area] } : {}) });
+    items.push({ sentence: `${check.area}: ${check.message}.${placeFor[check.area] ?? ''}` });
   }
   for (const provider of accounts.providers) {
     // What fixes it is a control on the provider in Models and providers ("how to fix it"), not a line to type.

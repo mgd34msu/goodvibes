@@ -1,8 +1,8 @@
 /**
  * The review packet of your drafts, computed from the stores themselves (the project's document drafts and the
  * saved artifacts): its timeline, its defaults, its steps and what still stands in the way of review. The daemon
- * reports it (capabilities/builtin/documents.ts: documents.readiness, packet-steps, timeline); the Agent workspace
- * shows the same packet from the same functions.
+ * reports it (capabilities/builtin/documents.ts: documents.readiness, packet-steps, timeline); the Agent's model tools
+ * read the same packet from the same functions.
  */
 import type { ArtifactDescriptor } from '@goodvibes/engine/platform/platform/artifacts';
 import type { AgentDocumentRecord } from './document-registry-types.js';
@@ -12,19 +12,19 @@ import {
   isModelCompareJudgmentArtifact, isModelCompareRouteDecisionArtifact, isoToEpoch, isReviewerHandoffArchiveArtifact, isReviewerHandoffArtifact,
   isReviewPacketPresetArtifact, readArtifactMetadataNumber, readArtifactMetadataString, readArtifactMetadataStringList, reviewPacketPresetFreshness,
   uniqueStrings,
-  type AgentWorkspaceReviewPacketDefaults, type AgentWorkspaceReviewPacketTimeline, type AgentWorkspaceReviewPacketTimelineEvent,
-  type AgentWorkspaceReviewPacketWizard, type AgentWorkspaceReviewPacketWizardStep, type AgentWorkspaceReviewPacketWizardStepStatus,
+  type AgentReviewPacketDefaults, type AgentReviewPacketTimeline, type AgentReviewPacketTimelineEvent,
+  type AgentReviewPacketWizard, type AgentReviewPacketWizardStep, type AgentReviewPacketWizardStepStatus,
 } from './review-packet-utils.js';
 
 /** What the artifact list could not show: a truncated window, and a way to look single ids up outside it. */
 export interface ReviewPacketArtifactListInfo {
   readonly truncated?: boolean | undefined;
   readonly resolveArtifact?: ((artifactId: string) => ArtifactDescriptor | null) | undefined;
-  /** How the screen showing the drafts is named in a step's route ("Documents & Files" in the Agent workspace). */
+  /** How the screen showing the drafts is named in a step's route (Memory and knowledge, Drafts). */
   readonly documentsPage?: string | undefined;
 }
 
-const DOCUMENTS_PAGE = 'Documents & Files';
+const DOCUMENTS_PAGE = 'Memory and knowledge, Drafts';
 const TRUNCATED_NOTE = 'Unverified: the artifact list shows only the newest artifacts, so older reviewer evidence was not checked.';
 
 export function buildReviewPacketTimeline(
@@ -32,8 +32,8 @@ export function buildReviewPacketTimeline(
   artifacts: readonly ArtifactDescriptor[],
   artifactListAvailable: boolean,
   listInfo: ReviewPacketArtifactListInfo = {},
-): AgentWorkspaceReviewPacketTimeline {
-  const events: AgentWorkspaceReviewPacketTimelineEvent[] = [];
+): AgentReviewPacketTimeline {
+  const events: AgentReviewPacketTimelineEvent[] = [];
   for (const document of documents) {
     const openComments = document.comments.filter((comment) => comment.status === 'open').length;
     const proposedSuggestions = document.suggestions.filter((suggestion) => suggestion.status === 'proposed').length;
@@ -275,7 +275,7 @@ function packetDocument(documents: readonly AgentDocumentRecord[], preset: Artif
 export function buildReviewPacketDefaults(
   documents: readonly AgentDocumentRecord[],
   artifacts: readonly ArtifactDescriptor[],
-): AgentWorkspaceReviewPacketDefaults {
+): AgentReviewPacketDefaults {
   const latestPresetArtifact = artifacts.filter(isReviewPacketPresetArtifact).sort((left, right) => right.createdAt - left.createdAt)[0] ?? null;
   const latestDocument = packetDocument(documents, latestPresetArtifact);
   // The packet's export and comparison are the ones recorded against its
@@ -381,7 +381,7 @@ export function buildReviewPacketDefaults(
   };
 }
 
-function packetStepStatus(done: boolean, priorDone: boolean): AgentWorkspaceReviewPacketWizardStepStatus {
+function packetStepStatus(done: boolean, priorDone: boolean): AgentReviewPacketWizardStepStatus {
   if (done) return 'done';
   return priorDone ? 'current' : 'blocked';
 }
@@ -389,14 +389,14 @@ function packetStepStatus(done: boolean, priorDone: boolean): AgentWorkspaceRevi
 function buildReviewPacketWizardStep(input: {
   readonly id: string;
   readonly label: string;
-  readonly status: AgentWorkspaceReviewPacketWizardStepStatus;
+  readonly status: AgentReviewPacketWizardStepStatus;
   readonly detail: string;
   readonly userRoute: string;
   readonly modelRoute: string;
-  readonly actionId: string | null;
+  readonly control: string | null;
   readonly backtrackRoute?: string | null | undefined;
   readonly ownerLine: string;
-}): AgentWorkspaceReviewPacketWizardStep {
+}): AgentReviewPacketWizardStep {
   return {
     id: input.id,
     label: input.label,
@@ -404,7 +404,7 @@ function buildReviewPacketWizardStep(input: {
     detail: input.detail,
     userRoute: input.userRoute,
     modelRoute: input.modelRoute,
-    actionId: input.actionId,
+    control: input.control,
     backtrackRoute: input.backtrackRoute ?? (input.status === 'done' ? input.modelRoute : null),
     ownerLine: input.ownerLine,
   };
@@ -413,9 +413,9 @@ function buildReviewPacketWizardStep(input: {
 export function buildReviewPacketWizard(
   documents: readonly AgentDocumentRecord[],
   artifactListAvailable: boolean,
-  defaults: AgentWorkspaceReviewPacketDefaults,
+  defaults: AgentReviewPacketDefaults,
   listInfo: ReviewPacketArtifactListInfo = {},
-): AgentWorkspaceReviewPacketWizard {
+): AgentReviewPacketWizard {
   const page = listInfo.documentsPage ?? DOCUMENTS_PAGE;
   // The wizard works on the packet's document (the one the defaults chose), so
   // its steps describe one document and the artifacts recorded against it.
@@ -440,7 +440,7 @@ export function buildReviewPacketWizard(
         : presetLineage
           ? `Preset lineage: ${presetLineage.summary}.`
           : 'No saved packet preset lineage is attached.',
-      `Use ${page} -> Share review packet only after the user confirms the delivery target.`,
+      'Use Memory and knowledge, Artifacts, d (send as a review packet) only after the user confirms the delivery target.',
     ].join(' ')
     : 'Final evidence review stays pending until a reviewer handoff ZIP archive exists.';
   const documentRoute = latestDocument
@@ -449,7 +449,7 @@ export function buildReviewPacketWizard(
   const firstOpenComment = latestDocument?.comments.find((comment) => comment.status === 'open');
   const firstProposedSuggestion = latestDocument?.suggestions.find((suggestion) => suggestion.status === 'proposed');
   const judgmentForDecision = defaults.revealedJudgmentArtifactId ?? defaults.judgmentArtifactId;
-  const steps: AgentWorkspaceReviewPacketWizardStep[] = [];
+  const steps: AgentReviewPacketWizardStep[] = [];
   steps.push(buildReviewPacketWizardStep({
     id: 'draft-review',
     label: 'Draft review',
@@ -461,11 +461,11 @@ export function buildReviewPacketWizard(
           ? `${latestDocument.title} has ${openComments} open comment(s) and ${proposedSuggestions} proposed suggestion(s) to resolve before export.`
           : `${latestDocument.title} is not marked reviewed at its current revision; mark it reviewed before export.`
       : 'Create or select a document draft before building a reviewer packet.',
-    userRoute: latestDocument ? `${page} -> Show document draft` : `${page} -> Create document draft`,
+    userRoute: latestDocument ? `${page}, s (read in full)` : `${page}, w (new draft)`,
     modelRoute: latestDocument
       ? documentRoute
-      : 'agent_harness mode:"workspace_action" actionId:"document-create-draft"',
-    actionId: latestDocument ? 'document-show-draft' : 'document-create-draft',
+      : 'capability_run id:"documents.create"',
+    control: latestDocument ? `${page}, s (read in full)` : `${page}, w (new draft)`,
     ownerLine: !latestDocument
       ? 'write a new draft (Memory and knowledge, Drafts)'
       : firstOpenComment
@@ -483,11 +483,11 @@ export function buildReviewPacketWizard(
       : documentReviewed
         ? 'Export the reviewed draft as a saved artifact for comparison and handoff evidence.'
         : 'Resolve draft review items before exporting reviewer evidence.',
-    userRoute: `${page} -> Export document artifact`,
+    userRoute: `${page}, e (save as an artifact)`,
     modelRoute: latestDocument
       ? `agent_documents export documentId:"${latestDocument.id}" confirm:true`
-      : 'agent_harness mode:"workspace_action" actionId:"document-export-draft"',
-    actionId: 'document-export-draft',
+      : 'capability_run id:"documents.export"',
+    control: `${page}, e (save as an artifact)`,
     ownerLine: latestDocument ? `save draft ${latestDocument.id} as an artifact (Memory and knowledge, Drafts)` : 'save a draft as an artifact (Memory and knowledge, Drafts)',
     backtrackRoute: defaults.documentExportArtifactId
       ? `agent_artifacts mode:"show" artifactId:"${defaults.documentExportArtifactId}"`
@@ -506,7 +506,7 @@ export function buildReviewPacketWizard(
           : documentExported
             ? 'Run a blind comparison from the exported document evidence, then save a revealed judgment.'
             : 'Export document evidence before comparing models.',
-    userRoute: 'Models and providers -> Comparisons',
+    userRoute: 'Models and providers, Comparisons',
     modelRoute: defaults.revealedJudgmentArtifactId
       ? `agent_model_compare review artifactId:"${defaults.revealedJudgmentArtifactId}" reveal:true`
       : defaults.judgmentArtifactId
@@ -514,8 +514,8 @@ export function buildReviewPacketWizard(
         : defaults.comparisonArtifactId
           ? `agent_model_compare review artifactId:"${defaults.comparisonArtifactId}"`
           : 'capability_run compare.run',
-    // The comparison steps' controls are in Models and providers, Comparisons (no workspace row runs them).
-    actionId: null,
+    // The comparison steps' controls are in Models and providers, Comparisons.
+    control: 'Models and providers, Comparisons',
     ownerLine: defaults.comparisonArtifactId
       ? `judge comparison ${defaults.comparisonArtifactId}, with the model names shown (Models and providers, Comparisons)`
       : `compare models on a prompt${defaults.documentExportArtifactId ? `, source artifact ${defaults.documentExportArtifactId}` : ''}${latestDocument ? `, for draft ${latestDocument.id}` : ''} (Models and providers, Comparisons)`,
@@ -529,11 +529,11 @@ export function buildReviewPacketWizard(
       : judgmentReady
         ? 'Create a reviewer handoff from the revealed judgment and related document/export evidence.'
         : 'Save a revealed comparison judgment before creating reviewer handoff evidence.',
-    userRoute: 'Models and providers -> Comparisons',
+    userRoute: 'Models and providers, Comparisons',
     modelRoute: defaults.revealedJudgmentArtifactId
       ? `agent_model_compare handoff artifactId:"${defaults.revealedJudgmentArtifactId}" relatedArtifactIds:${JSON.stringify(defaults.relatedArtifactIds)} confirm:true`
       : 'capability_run compare.export',
-    actionId: null,
+    control: 'Models and providers, Comparisons',
     ownerLine: `save a reviewer handoff from ${defaults.revealedJudgmentArtifactId ? `judgment ${defaults.revealedJudgmentArtifactId}` : 'the judgment'}${defaults.relatedArtifactIds.length > 0 ? ` with ${defaults.relatedArtifactIds.join(', ')}` : ''} (Models and providers, Comparisons)`,
     backtrackRoute: defaults.handoffArtifactId
       ? `agent_artifacts mode:"show" artifactId:"${defaults.handoffArtifactId}"`
@@ -552,11 +552,11 @@ export function buildReviewPacketWizard(
         : judgmentReady
           ? 'Create reviewer handoff evidence before applying or leaving the revealed winning route.'
           : 'A revealed judgment is required before deciding whether to update the selected model route.',
-    userRoute: 'Models and providers -> Comparisons',
+    userRoute: 'Models and providers, Comparisons',
     modelRoute: defaults.revealedJudgmentArtifactId
       ? `agent_model_compare apply artifactId:"${defaults.revealedJudgmentArtifactId}" confirm:true or agent_model_compare routeDecision artifactId:"${defaults.revealedJudgmentArtifactId}" decision:"left-unchanged" confirm:true`
       : 'capability_run compare.apply or compare.record-decision',
-    actionId: null,
+    control: 'Models and providers, Comparisons',
     ownerLine: `switch to the winner of ${judgmentForDecision ? `judgment ${judgmentForDecision}` : 'the judgment'}, or keep the model and record why (Models and providers, Comparisons)`,
     backtrackRoute: defaults.routeDecisionArtifactId
       ? `agent_artifacts mode:"show" artifactId:"${defaults.routeDecisionArtifactId}"`
@@ -571,11 +571,11 @@ export function buildReviewPacketWizard(
       : handoffReady
         ? 'Archive the reviewer handoff as one ZIP artifact after route-decision review.'
         : 'Create a reviewer handoff with related evidence before archiving the packet.',
-    userRoute: 'Models and providers -> Comparisons',
+    userRoute: 'Models and providers, Comparisons',
     modelRoute: defaults.handoffArtifactId
       ? `agent_model_compare handoffArchive artifactId:"${defaults.handoffArtifactId}" confirm:true`
       : 'capability_run compare.export',
-    actionId: null,
+    control: archiveReady ? 'Memory and knowledge, Artifacts, d (send as a review packet)' : 'Models and providers, Comparisons',
     ownerLine: archiveReady
       ? `send artifact ${defaults.handoffArchiveArtifactId} as a review packet (Memory and knowledge, Artifacts)`
       : `save a ZIP of ${defaults.handoffArtifactId ? `handoff ${defaults.handoffArtifactId}` : 'the handoff'} (Models and providers, Comparisons)`,
@@ -824,7 +824,7 @@ export function buildReviewerReadinessChecklist(
         ? 'Document, artifact, and blind comparison routes are available.'
         : 'Document, artifact, and blind comparison routes must be available before a reviewer-ready export can be trusted.',
       inspectRoute: 'agent_harness mode:"document_ops"',
-      repairRoute: 'agent_harness mode:"workspace_actions" categoryId:"documents"',
+      repairRoute: 'capability_run id:"documents.list"',
     },
     {
       id: 'document-review-state',
@@ -972,8 +972,8 @@ export function buildReviewerReadinessChecklist(
 /** The whole packet of a project, from its drafts and the saved artifacts, each read once. */
 export function reviewPacketOf(sources: DocumentOpsSources, listInfo: ReviewPacketArtifactListInfo = {}): {
   readonly readiness: ReviewerReadinessChecklist;
-  readonly wizard: AgentWorkspaceReviewPacketWizard;
-  readonly timeline: AgentWorkspaceReviewPacketTimeline;
+  readonly wizard: AgentReviewPacketWizard;
+  readonly timeline: AgentReviewPacketTimeline;
 } {
   const documents = sources.documents.items;
   const artifacts = sources.artifacts.items;
@@ -1019,7 +1019,7 @@ export function formatReviewReadiness(readiness: ReviewerReadinessChecklist | un
   return lines.join('\n');
 }
 
-function stepLine(step: AgentWorkspaceReviewPacketWizardStep, index: number, current: string | null): string[] {
+function stepLine(step: AgentReviewPacketWizardStep, index: number, current: string | null): string[] {
   const head = `  ${index + 1}. ${step.label}`;
   if (step.status === 'done') return [`${head}: done. ${step.detail}`];
   if (step.status === 'blocked') return [`${head}: waits for the step before it.`];
@@ -1028,7 +1028,7 @@ function stepLine(step: AgentWorkspaceReviewPacketWizardStep, index: number, cur
 }
 
 /** The packet's steps in order, which are done, and the line for the next one. */
-export function formatReviewPacketSteps(wizard: AgentWorkspaceReviewPacketWizard | undefined): string {
+export function formatReviewPacketSteps(wizard: AgentReviewPacketWizard | undefined): string {
   if (!wizard) return 'The review packet steps could not be read.';
   const lines = [wizard.status === 'complete'
     ? `Review packet: all ${wizard.totalSteps} steps done.`
@@ -1048,7 +1048,7 @@ function when(at: number): string {
 }
 
 /** What happened to the packet, oldest first and dated. */
-export function formatReviewPacketTimeline(timeline: AgentWorkspaceReviewPacketTimeline | undefined): string {
+export function formatReviewPacketTimeline(timeline: AgentReviewPacketTimeline | undefined): string {
   if (!timeline) return 'The review packet timeline could not be read.';
   if (!timeline.available && timeline.items.length === 0) return `No timeline: your saved artifacts could not be read. ${timeline.next}`;
   if (timeline.items.length === 0) return 'Nothing has happened to a review packet yet: no draft, comment, export, comparison or handoff.';

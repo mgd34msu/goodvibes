@@ -139,7 +139,7 @@ const NEEDS_HTTPS_REASON = 'needs https: set up a secure address in Settings, Ge
  * only once it trusts that certificate.
  */
 export const LAN_HTTPS_NOTICE =
-  'This https address uses the certificate GoodVibes made on your computer: on each phone, install it once from the page /lan-https on the computer\'s plain address before opening this one.';
+  'This https address uses the certificate GoodVibes made on your computer: on each phone, install it once from the link for phones (the page /lan-https on this https address, which offers the certificate only when it matches the fingerprint in the link) before using this address.';
 
 export { isLoopbackHost };
 

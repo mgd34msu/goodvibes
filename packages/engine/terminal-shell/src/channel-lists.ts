@@ -6,7 +6,7 @@
  * `channels.profiles`. Each terminal program gives the binding it reaches the
  * daemon with; the web UI reads the same rows from the methods named below.
  */
-import { CHANNEL_PROFILES_LIST, CHANNELS_LIST_NAME } from '@goodvibes/engine/platform/platform/capabilities';
+import { CHANNEL_PROFILES_LIST, CHANNEL_PROJECTS_LIST, CHANNELS_LIST_NAME } from '@goodvibes/engine/platform/platform/capabilities';
 import { CHANNEL_STATE_WORDS, channelStateOf } from './channel-words.js';
 import { runDaemonCapability, type DaemonCapabilityBinding } from './command-actions/capability-actions.js';
 import { defineList, type ListRow } from './command-actions/lists.js';
@@ -51,6 +51,23 @@ export const CHANNEL_PROFILES = defineList<CommandActionContext>({
     });
   },
   operator: { method: 'channels.profiles.list', input: {}, rows: { from: 'bindings', value: 'surfaceKind', label: 'surfaceKind', detail: 'model' } },
+});
+
+/** The registered projects, the list "Project for this channel" chooses from. */
+export const CHANNEL_PROJECTS = defineList<CommandActionContext>({
+  name: CHANNEL_PROJECTS_LIST,
+  async read(ctx) {
+    if (!bindingOf) return [];
+    const answer = await runDaemonCapability('workspaces.list', {}, ctx, bindingOf);
+    return [
+      ...records(answer.data, 'workspaces').filter((workspace) => text(workspace['root'])).map((workspace): ListRow => ({
+        value: text(workspace['root']), label: text(workspace['label']) || text(workspace['root']).split('/').pop() || text(workspace['root']), detail: text(workspace['root']),
+      })),
+      // No project: conversations on the channel write no file and run no command.
+      { value: 'none', label: 'None', detail: 'conversations here write no file and run no command' },
+    ];
+  },
+  operator: { method: 'workspaces.registrations.list', input: {}, rows: { from: 'workspaces', value: 'root', label: 'root' } },
 });
 
 /** Give the lists the binding this program reaches the daemon with. */

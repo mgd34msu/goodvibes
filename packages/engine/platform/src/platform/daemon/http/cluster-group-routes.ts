@@ -32,9 +32,9 @@ import type { DiscoveredGroup } from '../../cluster/group-runtime.js';
 /** What the daemon facade supplies. One method per verb, no more. */
 export interface ClusterGroupVerbs {
   status(): Promise<GroupOperationResult<GroupStatusReport>> | GroupOperationResult<GroupStatusReport>;
-  create(input: { name?: string; passphrase?: string }): Promise<GroupOperationResult<CreateGroupResult>>;
+  create(input: { name?: string; passphrase?: string; act?: import('../../cluster/index.js').ReplicaAct }): Promise<GroupOperationResult<CreateGroupResult>>;
   /** `turnOnSharing`: the owner's yes to turning sharing on when it is off; the join then finishes after a restart. */
-  join(input: { groupId: string; joinKey: string; turnOnSharing?: boolean }): Promise<GroupOperationResult<JoinGroupResult>>;
+  join(input: { groupId: string; joinKey: string; turnOnSharing?: boolean; act?: import('../../cluster/index.js').ReplicaAct }): Promise<GroupOperationResult<JoinGroupResult>>;
   key(): Promise<GroupOperationResult<JoinKeyResult>> | GroupOperationResult<JoinKeyResult>;
   nodes(): Promise<GroupOperationResult<NodesResult>> | GroupOperationResult<NodesResult>;
   groups(): Promise<GroupOperationResult<readonly DiscoveredGroup[]>> | GroupOperationResult<readonly DiscoveredGroup[]>;
@@ -44,7 +44,7 @@ export interface ClusterGroupVerbs {
   leave(): Promise<GroupOperationResult<{ groupId: string; groupName: string }>>;
   rename(name: string, options?: { turnOnSharing?: boolean }): Promise<GroupOperationResult<RenameGroupResult>>;
   /** Send this machine's value of a shared setting that differs from the group's (`cluster status` lists them). */
-  publish(path: string, options?: { turnOnSharing?: boolean }): Promise<GroupOperationResult<SettingDecisionResult>>;
+  publish(path: string, options?: { turnOnSharing?: boolean; act?: import('../../cluster/index.js').ReplicaAct }): Promise<GroupOperationResult<SettingDecisionResult>>;
   /** Take the group's value of such a setting here. */
   accept(path: string, options?: { turnOnSharing?: boolean }): Promise<GroupOperationResult<SettingDecisionResult>>;
   /** Turn sharing with your other machines on (the daemon restarts to bring the group layer up). */

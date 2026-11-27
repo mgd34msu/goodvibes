@@ -63,7 +63,7 @@ export interface HarnessSettingCandidate {
   readonly category: string;
   readonly type: ConfigSetting['type'];
   readonly writable: boolean;
-  readonly visibleInWorkspace: boolean;
+  readonly onSettingsScreen: boolean;
   readonly modelRoute: string;
   readonly description: string;
 }
@@ -89,7 +89,7 @@ export interface HarnessSettingDescriptor {
   readonly default: unknown;
   readonly configured: boolean;
   readonly writable: boolean;
-  readonly visibleInWorkspace: boolean;
+  readonly onSettingsScreen: boolean;
   readonly modelRoute: string;
   readonly description: string;
   readonly enumValues?: readonly string[];
@@ -118,7 +118,7 @@ export interface HarnessSettingSummary {
   readonly value: unknown;
   readonly configured: boolean;
   readonly writable: boolean;
-  readonly visibleInWorkspace: boolean;
+  readonly onSettingsScreen: boolean;
   readonly modelRoute: string;
   readonly summary: string;
   readonly enumValues?: readonly string[];
@@ -222,7 +222,7 @@ function settingCandidate(setting: AgentConfigSetting): HarnessSettingCandidate 
     // recorded admission for its exact effect, and a routed write reports the
     // store it landed in.
     writable: true,
-    visibleInWorkspace: true,
+    onSettingsScreen: true,
     modelRoute: settingModelRoute(setting),
     description: setting.description,
   };
@@ -305,7 +305,7 @@ export function describeHarnessSetting(
     default: redactHarnessSettingValue(setting.key, setting.default),
     configured: !resolved.unavailable && !valuesEqual(resolved.value, setting.default),
     writable: resolved.writable ?? true,
-    visibleInWorkspace: true,
+    onSettingsScreen: true,
     modelRoute: settingModelRoute(setting),
     description: setting.description,
     scope: configKeyScope(setting.key),
@@ -331,7 +331,7 @@ export function describeHarnessSettingSummary(
     value: redactHarnessSettingValue(setting.key, resolved.value),
     configured: !resolved.unavailable && !valuesEqual(resolved.value, setting.default),
     writable: resolved.writable ?? true,
-    visibleInWorkspace: true,
+    onSettingsScreen: true,
     modelRoute: settingModelRoute(setting),
     summary: previewText(setting.description),
     scope: configKeyScope(setting.key),
@@ -711,7 +711,7 @@ export async function setHarnessSetting(
   if (setting.key === 'permissions.mode') {
     const previous = readExecutionMode(configManager);
     const mode = coerceHarnessSettingValue(setting, value);
-    await setExecutionMode(configManager, mode);
+    await setExecutionMode(configManager, mode, routing.press);
     return { key: setting.key, action: 'set', previous, current: readExecutionMode(configManager), ...executionModeDestination(configManager) };
   }
   const previous = configManager.get(setting.key);
@@ -728,11 +728,13 @@ export async function setHarnessSetting(
     // daemon executes with unattended. Pinning them to 'user' put the value
     // where the daemon cannot read it while the reference went to the daemon's
     // own settings file, so the setting reported success and changed nothing.
+    // Who decided it (routing.press, from the call site) goes with what reaches the daemon.
     const current = await persistSecretBackedConfigValue(
       configManager,
       secretsManager,
       setting.key,
       secretValue,
+      routing.press ? { press: routing.press } : {},
     );
     return {
       key: setting.key,
@@ -787,7 +789,7 @@ export async function resetHarnessSetting(
   if (!setting) throw new Error(`Unknown setting ${key || '<missing>'}.`);
   if (setting.key === 'permissions.mode') {
     const previous = readExecutionMode(configManager);
-    await setExecutionMode(configManager, setting.default);
+    await setExecutionMode(configManager, setting.default, routing.press);
     return { key: setting.key, action: 'reset', previous, current: readExecutionMode(configManager), ...executionModeDestination(configManager) };
   }
   if (setting.kind === 'host') {
@@ -826,7 +828,7 @@ export async function resetHarnessSetting(
       persistedTo: outcome.persistedTo,
     };
   } else {
-    configManager.reset(setting.key);
+    configManager.reset(setting.key, routing.press ? { press: routing.press } : {});
     result = {
       key: setting.key,
       action: 'reset',
@@ -896,7 +898,7 @@ export function formatHarnessSettingList(
       : `Settings (${settings.length} of ${shortOf}, this page is short; re-run with --limit ${shortOf} or narrow it with --category/--prefix)`,
     ...settings.map((setting) => {
       const status = setting.writable ? 'writable' : 'read-only';
-      const visible = setting.visibleInWorkspace ? 'workspace' : 'scriptable';
+      const visible = setting.onSettingsScreen ? 'settings screen' : 'scriptable';
       return `  ${setting.key}  ${setting.type}  ${status}/${visible}  current=${String(setting.value)}${setting.metadataUnavailable ? '  metadata unavailable; editing disabled' : ''}`;
     }),
   ].join('\n');
@@ -919,7 +921,7 @@ export function formatHarnessSetting(setting: HarnessSettingDescriptor | null): 
     ...(setting.valueStore ? [`  store ${setting.valueStore}`] : []),
     `  writable ${setting.writable ? 'yes' : 'no'}`,
     ...(setting.metadataUnavailable ? [`  metadata unavailable: ${setting.metadataUnavailable}`] : []),
-    `  workspace visible ${setting.visibleInWorkspace ? 'yes' : 'no'}`,
+    `  on the settings screen ${setting.onSettingsScreen ? 'yes' : 'no'}`,
     ...(setting.enumValues ? [`  values ${setting.enumValues.join(', ')}`] : []),
     `  ${setting.description}`,
   ].join('\n');

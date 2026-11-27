@@ -107,7 +107,6 @@ const daemon = Bun.spawn([BINARY, '--port', String(DAEMON_PORT), '--hostname', '
     ...process.env,
     GOODVIBES_HOME: home,
     GOODVIBES_DAEMON_HOME: join(home, '.goodvibes', 'daemon'),
-    GOODVIBES_WORKING_DIR: workspace,
     GOODVIBES_DAEMON_TOKEN: TOKEN,
   },
   cwd: workspace,

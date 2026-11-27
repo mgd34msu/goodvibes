@@ -3,6 +3,8 @@
  * Mirrors the pattern from src/lib/ui-preferences.ts:
  * read/write via localStorage, dispatch custom event for cross-tab sync.
  */
+import { accountKey } from './account-storage';
+import { subscribeClientLifetime } from './client-lifetime';
 
 /**
  * Stored webui theme. 'dark' and 'light' are the slate themes, 'auto' follows the
@@ -42,8 +44,18 @@ export interface ThemePreferences {
   density: Density;
 }
 
-export const THEME_PREFERENCES_KEY = 'goodvibes.webui.theme';
+/** Kept for the person signed in (account-storage.ts); another person's theme is never read. */
+export const THEME_PREFERENCES_KEY = 'goodvibes.webui.theme' as const;
 export const THEME_PREFERENCES_EVENT = 'goodvibes:webui-theme';
+
+// Another person signed in (or nobody is): their own theme, read and applied again.
+if (typeof window !== 'undefined') {
+  subscribeClientLifetime(() => {
+    unpersisted = null;
+    const next = readThemePreferences();
+    window.dispatchEvent(new CustomEvent(THEME_PREFERENCES_EVENT, { detail: next }));
+  });
+}
 
 export const DEFAULT_THEME_PREFERENCES: ThemePreferences = {
   theme: 'dark',
@@ -61,7 +73,7 @@ function storageAvailable(): boolean {
 export function resolveInitialTheme(): Theme {
   if (storageAvailable()) {
     try {
-      const stored = window.localStorage.getItem(THEME_PREFERENCES_KEY);
+      const stored = window.localStorage.getItem(accountKey(THEME_PREFERENCES_KEY));
       if (stored) {
         const parsed = JSON.parse(stored) as Partial<ThemePreferences>;
         if (isTheme(parsed.theme)) {
@@ -91,7 +103,7 @@ export function readThemePreferences(): ThemePreferences {
   if (unpersisted !== null) return unpersisted;
   if (!storageAvailable()) return DEFAULT_THEME_PREFERENCES;
   try {
-    const stored = window.localStorage.getItem(THEME_PREFERENCES_KEY);
+    const stored = window.localStorage.getItem(accountKey(THEME_PREFERENCES_KEY));
     if (!stored) return DEFAULT_THEME_PREFERENCES;
     const parsed = JSON.parse(stored) as Partial<ThemePreferences>;
     return {
@@ -106,7 +118,7 @@ export function readThemePreferences(): ThemePreferences {
 export function writeThemePreferences(next: ThemePreferences): ThemePreferences {
   if (storageAvailable()) {
     try {
-      window.localStorage.setItem(THEME_PREFERENCES_KEY, JSON.stringify(next));
+      window.localStorage.setItem(accountKey(THEME_PREFERENCES_KEY), JSON.stringify(next));
       unpersisted = null;
     } catch {
       // The choice still applies for this session, it just is not remembered.

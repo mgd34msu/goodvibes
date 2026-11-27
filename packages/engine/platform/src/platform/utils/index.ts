@@ -14,6 +14,7 @@ export * from './markdown-disclosure.js';
 export * from './notebook.js';
 export * from './notify.js';
 export * from './open-external.js';
+export * from './outside-every-call.js';
 export * from './owner-fence.js';
 export * from './path-safety.js';
 export * from './process-lock.js';

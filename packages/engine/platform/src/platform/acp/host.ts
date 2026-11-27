@@ -37,6 +37,8 @@ import type { Agent, Client, NewSessionResponse, PromptResponse, RequestPermissi
 import { drainStderrTail } from '../utils/stderr-tail.js';
 import { ACP_HANDSHAKE_TIMEOUT_MS, messageChunkText, permissionOutcomeFor, readNdJsonMessages, stopAcpChild, wellFormedPermissionOptions, withTimeout } from './protocol.js';
 import { admitExternalRequest, type ExternalPermissionHost } from '../permissions/external-request.js';
+import { withInputParty, type TurnInputParty } from '../security/turn-input-party.js';
+import { acpChildEnvironment } from './connection-party.js';
 import { captureAutonomousSource, type AutonomousToolSource } from '../permissions/autonomous.js';
 import { logger } from '../utils/logger.js';
 import { summarizeError } from '../utils/error-display.js';
@@ -192,6 +194,12 @@ interface HostedRecord {
   permissionWire?: AcpPermissionWire | undefined;
   /** The workspace trust revision captured at spawn: integer compares, no path resolution. */
   assertWorkspaceCurrent?: (() => void) | undefined;
+  /**
+   * Whose input the outside agent acts on, recorded when it was started (from the caller the transport established,
+   * routes/acp.ts): the owner's, or someone else's. Every ask of its own is decided as that party's turn
+   * (security/turn-input-party.ts), so an agent anyone but the owner started runs reads only.
+   */
+  readonly inputParty: TurnInputParty;
   teardownPromise?: Promise<void> | undefined;
   teardownState?: 'pending' | 'done' | 'failed' | undefined;
 }
@@ -210,7 +218,7 @@ export interface AcpHostServiceDeps {
   /** Maps the hosted agent onto a daemon shared session (kind 'acp'). Optional, narrower embeds skip it. */
   readonly registerSession?: AcpSessionRegistrar | undefined;
   /** Injectable spawn seam for tests. Defaults to Bun.spawn. */
-  readonly spawn?: ((cmd: string[], opts: { cwd: string }) => ReturnType<typeof Bun.spawn>) | undefined;
+  readonly spawn?: ((cmd: string[], opts: { cwd: string; env?: Record<string, string | undefined> | undefined }) => ReturnType<typeof Bun.spawn>) | undefined;
   /** Handshake bound (spawn→initialize→session). Default 15s, a bad binary becomes a structured failure, never a hung row. */
   readonly handshakeTimeoutMs?: number | undefined;
   /**
@@ -281,6 +289,8 @@ export class AcpHostService {
     readonly cwd: string;
     readonly title?: string | undefined;
     readonly prompt?: string | undefined;
+    /** Whose input it acts on (see HostedRecord.inputParty). Absent: someone else's, never the owner's by default. */
+    readonly inputParty?: TurnInputParty | undefined;
   }): Promise<HostedAcpAgent> {
     input = structuredClone(input);
     const host = this.deps.permissionHost;
@@ -313,10 +323,12 @@ export class AcpHostService {
       lifetime: new AbortController(),
       permissionRequests: new Map(),
       assertWorkspaceCurrent,
+      inputParty: input.inputParty ?? { party: 'other', who: 'an outside coding agent no owner started' },
     };
     this.records.set(id, record);
     const timeoutMs = this.deps.handshakeTimeoutMs ?? ACP_HANDSHAKE_TIMEOUT_MS;
-    const spawn = this.deps.spawn ?? ((cmd: string[], opts: { cwd: string }) => Bun.spawn(cmd, { ...opts, stdin: 'pipe', stdout: 'pipe', stderr: 'pipe' }));
+    const spawn = this.deps.spawn ?? ((cmd: string[], opts: { cwd: string; env?: Record<string, string | undefined> | undefined }) =>
+      Bun.spawn(cmd, { cwd: opts.cwd, ...(opts.env ? { env: opts.env } : {}), stdin: 'pipe', stdout: 'pipe', stderr: 'pipe' }));
 
     let stage: AcpHostError['stage'] = 'spawn';
     try {
@@ -326,7 +338,10 @@ export class AcpHostService {
       const { ClientSideConnection } = await loadAcpLibrary();
       record.lifetime.signal.throwIfAborted();
       assertSpawnCurrent();
-      record.child = spawn([input.agent.binaryPath, ...input.agent.args], { cwd: input.cwd });
+      // Started for someone else: the owner's own program (`goodvibes acp`) hosted here reads that from its environment,
+      // so its session's agent is that caller's input, never his turn (acp/connection-party.ts).
+      const env = acpChildEnvironment(record.inputParty);
+      record.child = spawn([input.agent.binaryPath, ...input.agent.args], { cwd: input.cwd, ...(env ? { env } : {}) });
       const ownedChild = record.child;
       // An unread stderr pipe fills and blocks a chatty child; keep its tail for the exit message.
       const stderr = drainStderrTail(ownedChild.stderr);
@@ -578,14 +593,15 @@ export class AcpHostService {
         };
         try {
           assertCurrent();
-          // Decided for the hosted agent's own folder: that project's rules, trust and answers, no other's.
-          admission = await admitExternalRequest(host, { connectionId: record.info.id, destination: record.info.binaryPath, signal, assertCurrent, sessionId: record.info.sessionId, workingDirectory: record.info.cwd },
+          // Decided for the hosted agent's own folder: that project's rules, trust and answers, no other's; and as the
+          // turn of whoever started it (an agent anyone but the owner started runs reads only).
+          admission = await withInputParty(record.inputParty, () => admitExternalRequest(host, { connectionId: record.info.id, destination: record.info.binaryPath, signal, assertCurrent, sessionId: record.info.sessionId, workingDirectory: record.info.cwd },
             { sourceOf: () => operation.source, assertCurrent: () => {} }, {
               tool: owned.toolCall.title ?? 'ACP action', protocolSubject: wire.protocolSubject!,
               args: { ...(owned.toolCall.rawInput && typeof owned.toolCall.rawInput === 'object' && !Array.isArray(owned.toolCall.rawInput)
                 ? owned.toolCall.rawInput as Record<string, unknown> : {}),
                 destination: { binaryPath: record.info.binaryPath, cwd: record.info.cwd } },
-            });
+            }));
           const response = permissionOutcomeFor(owned.options, { approved: admission.result.approved, remember: false });
           // The wire checks once more, immediately before the response bytes are written.
           wire.defer(response, admission, admission.result.approved && response.outcome.outcome === 'selected', cleanup);

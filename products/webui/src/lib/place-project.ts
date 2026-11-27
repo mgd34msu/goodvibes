@@ -16,19 +16,68 @@
 import { useQuery } from '@tanstack/react-query';
 import { useCallback, useEffect, useSyncExternalStore } from 'react';
 import { useEventStreamState } from './event-stream';
-import { invokeThroughMethod, setCallProject } from './goodvibes';
+import { chatCallProject, invokeThroughMethod, setCallProject } from './goodvibes';
+import { accountKey } from './account-storage';
+import { subscribeClientLifetime } from './client-lifetime';
 
-const STORAGE_KEY = 'goodvibes.places.project';
+const STORAGE_KEY = 'goodvibes.places.project' as const;
+
+/**
+ * The chooser's "Every project": the owner's own choice to read every project's per-project things (memory) at once.
+ * No project is named then; the call says `everyProject`, which the daemon takes only from the owner himself (from
+ * anyone else it reads only what belongs to no project). A list bound to one project asks for a project instead.
+ */
+export const EVERY_PROJECT = '*every-project*';
 export const PLACE_PROJECTS_KEY = ['places', 'projects'] as const;
 
+/**
+ * The new chat's "No project (one is made for this chat)": a chat started naming no project. It reads and answers only
+ * until the owner's own message there first needs somewhere to work; the daemon then makes the chat its own project
+ * (an automatic project, under "Folder for automatic projects") and its first answer says where its files are. It is a
+ * choice for a new chat only, kept for this visit, and leaves the places' project as it is.
+ */
+export const NO_PROJECT = '*no-project*';
+let newChatWithoutProject = false;
+const newChatListeners = new Set<() => void>();
+
+/** Whether the next new chat is started with no project (the chat line's "No project" choice). */
+export function newChatHasNoProject(): boolean {
+  return newChatWithoutProject;
+}
+
+/** Choose whether the next new chat is started with no project; choosing a project for it clears this. */
+export function chooseNoProjectForNewChat(none: boolean): void {
+  if (newChatWithoutProject === none) return;
+  newChatWithoutProject = none;
+  for (const listener of [...newChatListeners]) listener();
+}
+
+export function useNewChatHasNoProject(): boolean {
+  return useSyncExternalStore((listener) => { newChatListeners.add(listener); return () => { newChatListeners.delete(listener); }; },
+    () => newChatWithoutProject, () => newChatWithoutProject);
+}
+
+/** The choice kept for the person signed in now (account-storage.ts): never another person's. */
 function stored(): string | undefined {
-  try { return window.localStorage.getItem(STORAGE_KEY) ?? undefined; } catch { return undefined; }
+  try { return window.localStorage.getItem(accountKey(STORAGE_KEY)) ?? undefined; } catch { return undefined; }
 }
 
 let chosen: string | undefined = typeof window === 'undefined' ? undefined : stored();
 // Every call names the project last chosen in this browser from the first one (goodvibes.ts `setCallProject`).
 setCallProject(chosen);
 const listeners = new Set<() => void>();
+
+// Another person signed in (or nobody is): the project in use and a new chat's "No project" are read again for them,
+// so no call of theirs names the previous person's project.
+if (typeof window !== 'undefined') {
+  subscribeClientLifetime(() => {
+    chosen = stored();
+    setCallProject(chosen);
+    newChatWithoutProject = false;
+    for (const listener of [...listeners]) listener();
+    for (const listener of [...newChatListeners]) listener();
+  });
+}
 
 function subscribe(listener: () => void): () => void {
   listeners.add(listener);
@@ -39,7 +88,7 @@ function subscribe(listener: () => void): () => void {
 export function chooseProject(project: string): void {
   chosen = project;
   setCallProject(project);
-  try { window.localStorage.setItem(STORAGE_KEY, project); } catch { /* this browser keeps nothing: the choice lasts this visit */ }
+  try { window.localStorage.setItem(accountKey(STORAGE_KEY), project); } catch { /* this browser keeps nothing: the choice lasts this visit */ }
   for (const listener of [...listeners]) listener();
 }
 
@@ -69,7 +118,7 @@ export function usePlaceProjects(): PlaceProjects {
   useEffect(() => { if (stream.status === 'live' && isError) void refetch(); }, [stream.status, isError, refetch]);
   const current = useSyncExternalStore(subscribe, () => chosen, () => chosen);
   const projects = read.data ?? [];
-  const project = current && projects.includes(current) ? current : projects[0];
+  const project = current && (projects.includes(current) || current === EVERY_PROJECT) ? current : projects[0];
   // The project in use is the one every call names, also when it is the first the daemon offers (none chosen yet).
   useEffect(() => { setCallProject(project); }, [project]);
   const choose = useCallback((next: string) => chooseProject(next), []);
@@ -80,9 +129,14 @@ export function usePlaceProjects(): PlaceProjects {
   };
 }
 
-/** The project as last chosen in this browser (for a call made outside the places: the palette's runner). */
+/**
+ * The project a call made outside the places is for (the palette's runner, an action sheet): the open chat's while a
+ * chat is open (goodvibes.ts `setChatCallProject`), else the one last chosen in this browser ("Every project" names none).
+ */
 export function lastChosenProject(): string | undefined {
-  return chosen;
+  const chat = chatCallProject();
+  if (chat) return chat;
+  return chosen && chosen.startsWith('/') ? chosen : undefined;
 }
 
 /** A project's short name: its last folder. */

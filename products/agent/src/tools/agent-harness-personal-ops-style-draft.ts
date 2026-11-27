@@ -14,7 +14,7 @@ export function personalOpsStyleDraftRecord(): PersonalOpsLiveRecord {
     summary: isClassicOperation()
       ? 'Return a protected draft using the default template and supplied key points. Writing style and personal salutation are not inferred without a decision model.'
       : 'Read an explicitly supplied sent-message corpus and inbound message under protected semantic readings, then return a draft for review.',
-    userRoute: 'Agent Workspace -> Inbox & calendar -> Inbox -> Draft reply in my writing style',
+    userRoute: 'Mail, calendar and channels, Inbox (ask in the conversation for a reply in your writing style)',
     modelRoute: `personal_ops action:"read" laneId:"inbox" recordId:"${STYLE_DRAFT_RECORD_ID}"`,
     effect: 'read-only', capability: 'inbox-style-reply-draft', confirmationRequired: false,
     requiredFields: ['inbound', 'sentMessages'], optionalFields: ['context'],

@@ -3,7 +3,7 @@ import { confirmParameter, requestParameter } from '@goodvibes/engine/terminal-s
 export const AGENT_HARNESS_MODES = [
   'summary', 'modes', 'mode', 'route_decision', 'cli_commands', 'cli_command',
   'ui_surfaces', 'ui_surface', 'open_ui_surface',
-  'shortcuts', 'keybindings', 'keybinding', 'run_keybinding', 'set_keybinding', 'reset_keybinding',
+  'shortcuts', 'keybindings', 'keybinding', 'run_keybinding',
   'commands', 'command', 'run_command', 'channels', 'channel', 'channel_setup_guide', 'channel_triage', 'channel_deliveries', 'notifications', 'notification_target',
   'provider_accounts', 'provider_account', 'mcp_servers', 'mcp_server',
   'setup_posture', 'setup_item', 'setup_repair', 'provision_connected_host_token', 'run_setup_smoke',
@@ -27,8 +27,7 @@ export const AGENT_HARNESS_MODES = [
   'media_posture', 'media_provider',
   'sessions', 'session',
   'settings', 'get_setting', 'set_setting',
-  'reset_setting', 'workspace', 'workspace_categories', 'workspace_actions',
-  'workspace_action', 'run_workspace_action', 'tools', 'tool', 'release_evidence', 'release_evidence_artifact',
+  'reset_setting', 'tools', 'tool', 'release_evidence', 'release_evidence_artifact',
   'release_readiness', 'release_readiness_item',
   'operator_methods', 'operator_method',
   'service_posture', 'service_endpoint',
@@ -48,18 +47,6 @@ const BACKGROUND_PROCESS_ACTION_VALUES = [
   'start', 'spawn', 'run', 'stop', 'kill', 'cancel', 'wait', 'list',
   'status', 'poll', 'log', 'output', 'write', 'capabilities', 'doctor', 'parity',
 ] as const;
-
-const KEY_COMBO_PARAMETER_SCHEMA = {
-  type: 'object',
-  properties: {
-    key: { type: 'string', description: 'The key, such as g, enter, tab or up.' },
-    ctrl: { type: 'boolean', description: 'Ctrl is held.' },
-    shift: { type: 'boolean', description: 'Shift is held.' },
-    alt: { type: 'boolean', description: 'Alt is held.' },
-  },
-  required: ['key'],
-  additionalProperties: false,
-} as const;
 
 export const AGENT_HARNESS_PARAMETER_PROPERTIES = {
   // The full mode catalog is intentionally NOT inlined as an enum:
@@ -150,8 +137,8 @@ export const AGENT_HARNESS_PARAMETER_PROPERTIES = {
   },
   action: {
     type: 'string',
-    enum: [...BACKGROUND_PROCESS_ACTION_VALUES, 'preview', 'import', 'apply'],
-    description: 'Process-style action alias, or preview/import/apply for settings-import workspace actions.',
+    enum: [...BACKGROUND_PROCESS_ACTION_VALUES],
+    description: 'Process-style action alias.',
   },
   cwd: {
     type: 'string',
@@ -225,7 +212,7 @@ export const AGENT_HARNESS_PARAMETER_PROPERTIES = {
   },
   categoryId: {
     type: 'string',
-    description: 'Workspace category id. For open_ui_surface with surfaceId "agent-workspace", the workspace tab to open.',
+    description: 'For open_ui_surface with surfaceId "places", the place to open (its id, as target does).',
   },
   surfaceId: {
     type: 'string',
@@ -233,21 +220,12 @@ export const AGENT_HARNESS_PARAMETER_PROPERTIES = {
   },
   actionId: {
     type: 'string',
-    description: 'Workspace action id or keybinding action id.',
+    description: 'Keybinding action id.',
   },
   fields: {
     type: 'object',
     additionalProperties: { type: 'string' },
-    description: 'Values for a workspace action\'s blanks (by input id) for run_workspace_action, or combo fields (key, ctrl, shift, alt) for set_keybinding. For run_setup_smoke only agentBinaryOutput, statusJson, connectedHostStatusOutput, setupPostureOutput, firstAssistantTurn and notes are saved (8000 characters each, longer values are cut with a marker); other keys are listed as ignoredFields.',
-  },
-  combo: {
-    ...KEY_COMBO_PARAMETER_SCHEMA,
-    description: 'Single key combo for set_keybinding.',
-  },
-  combos: {
-    type: 'array',
-    items: KEY_COMBO_PARAMETER_SCHEMA,
-    description: 'Multiple key combos for set_keybinding.',
+    description: 'For run_setup_smoke only agentBinaryOutput, statusJson, connectedHostStatusOutput, setupPostureOutput, firstAssistantTurn and notes are saved (8000 characters each, longer values are cut with a marker); other keys are listed as ignoredFields.',
   },
   recordId: {
     type: 'string',
@@ -277,7 +255,7 @@ export const AGENT_HARNESS_PARAMETER_PROPERTIES = {
   },
   key: {
     type: 'string',
-    description: 'Agent setting key, or a key-combo lookup such as "Ctrl+G" for keybinding, run_keybinding, set_keybinding and reset_keybinding.',
+    description: 'Agent setting key, or a key-combo lookup such as "Ctrl+G" for keybinding and run_keybinding.',
   },
   value: {
     anyOf: [
@@ -285,7 +263,7 @@ export const AGENT_HARNESS_PARAMETER_PROPERTIES = {
       { type: 'number' },
       { type: 'boolean' },
     ],
-    description: 'Setting value, a combo label such as "Ctrl+G" for set_keybinding, or visible search text for shortcut routes.',
+    description: 'Setting value, or visible search text for shortcut routes and run_keybinding.',
   },
   target: {
     type: 'string',
@@ -353,11 +331,11 @@ export const AGENT_HARNESS_PARAMETER_PROPERTIES = {
   },
   limit: {
     type: 'number',
-    description: 'Maximum catalog entries to return. settings, workspace_actions and operator_methods page 50 rows by default, at most 100. inbox_triage: messages to label, at most 100.',
+    description: 'Maximum catalog entries to return. settings and operator_methods page 50 rows by default, at most 100. inbox_triage: messages to label, at most 100.',
   },
   offset: {
     type: 'number',
-    description: 'Row to start a settings, workspace_actions or operator_methods page at; a short page names the next offset.',
+    description: 'Row to start a settings or operator_methods page at; a short page names the next offset.',
   },
   confirm: confirmParameter('Without admission the call is refused and names the missing approval.'),
   explicitUserRequest: requestParameter(),

@@ -8,6 +8,82 @@
  * @public
  */
 
+import { AsyncLocalStorage } from 'node:async_hooks';
+
+/**
+ * Whether the caller of the request being served may reach one record, by kind (`chat`, `session`, `schedule`,
+ * `schedule-run`, `approval`, `task`, `checkpoint`, `trigger`, `rule`, `memory-record`, `artifact`; `project` with a
+ * project's folder for a row kept by the project it belongs to) and id: the one
+ * check of what a caller may reach (platform control-plane/caller-reach.ts), set by the daemon around a call of a caller
+ * that is not the owner himself. A paged list keeps only what this keeps BEFORE it cuts its page, so a page, its
+ * `hasMore`, its cursor and its totals are about what the caller can reach.
+ *
+ * @public
+ */
+export type RecordReachFilter = (kind: string, id: string, owner?: RecordReachOwner) => boolean;
+
+/**
+ * A record's owner as the list holding it already knows it (its project, who made it), so the filter does not look
+ * it up again: the same facts the kind's own lookup would give.
+ *
+ * @public
+ */
+export interface RecordReachOwner {
+  readonly project: string | null;
+  readonly madeBy?: string | undefined;
+}
+
+const recordReachScope = new AsyncLocalStorage<RecordReachFilter>();
+
+/**
+ * Serve `serve` with `filter` as the reach of the request's caller (absent: the owner, who reaches everything).
+ *
+ * @public
+ */
+export function withRecordReach<T>(filter: RecordReachFilter | null | undefined, serve: () => T): T {
+  return filter ? recordReachScope.run(filter, serve) : serve();
+}
+
+/**
+ * The request's caller's reach (see {@link RecordReachFilter}), for a store that pages inside itself and takes a
+ * filter; undefined for the owner, or when no rule was set.
+ *
+ * @public
+ */
+export function currentRecordReach(): RecordReachFilter | undefined {
+  return recordReachScope.getStore();
+}
+
+/**
+ * The items the request's caller may reach, before a list is paged or counted (the same array when the caller is the
+ * owner, or no rule was set).
+ *
+ * @public
+ */
+export function keepReachable<T>(items: readonly T[], kind: string, idOf: (item: T) => string | undefined): readonly T[] {
+  const filter = recordReachScope.getStore();
+  if (!filter) return items;
+  return items.filter((item) => {
+    const id = idOf(item);
+    return typeof id === 'string' && filter(kind, id);
+  });
+}
+
+/**
+ * The items the request's caller may reach, for a list whose items name several records (a route binding: its
+ * session, schedule and run): an item is kept when it names at least one and the caller may reach every one it names.
+ *
+ * @public
+ */
+export function keepReachableNaming<T>(items: readonly T[], named: readonly (readonly [kind: string, idOf: (item: T) => string | undefined])[]): readonly T[] {
+  const filter = recordReachScope.getStore();
+  if (!filter) return items;
+  return items.filter((item) => {
+    const ids = named.map(([kind, idOf]) => [kind, idOf(item)] as const).filter((entry): entry is readonly [string, string] => typeof entry[1] === 'string' && entry[1] !== '');
+    return ids.length > 0 && ids.every(([kind, id]) => filter(kind, id));
+  });
+}
+
 /**
  * Paginated response envelope. Returned by list endpoints that support
  * cursor-based pagination.

@@ -59,37 +59,8 @@ export interface StoreCapabilityFields {
   readonly effects?: readonly EffectId[] | undefined;
   /** Its preview check (CapabilityDefinition `check`): a refusal its values and caller show, before anything is asked. */
   readonly check?: CapabilityDefinition<AgentStoresCapabilityServices>['check'];
-}
-
-/**
- * The preview check of a capability that writes or reads a file a person names (`input`): a caller who is not the
- * person (a model, a script, another agent) names one in the project, never outside it, so such a call is refused
- * before the owner is asked anything about it. A relative path is read against the caller's project; with none, the
- * handler says so. The handler checks again where the file really is.
- */
-export function fileInProjectCheck(input: string, purpose: 'read' | 'write'): NonNullable<StoreCapabilityFields['check']> {
-  return (values, caller) => {
-    const raw = (values[input] ?? '').trim();
-    const project = caller.workingDirectory;
-    if (caller.personAsked === true || raw === '' || !project) return undefined;
-    const home = typeof process === 'undefined' ? '' : (process.env.HOME ?? '');
-    const resolved = normalizePath(raw.startsWith('~/') && home ? `${home}/${raw.slice(2)}` : raw.startsWith('/') ? raw : `${project.replace(/\/+$/, '')}/${raw}`);
-    const root = normalizePath(project);
-    if (resolved === root || resolved.startsWith(`${root}/`)) return undefined;
-    return new CapabilityRefusal(`Not done: ${raw} is outside the project (${project}); only you can ${purpose} a file there yourself.`,
-      'Name a file inside the project, or ask the person to do it from its place');
-  };
-}
-
-/** A slash path with `.` and `..` taken out ("/a/b/../c" is "/a/c"). */
-function normalizePath(path: string): string {
-  const parts: string[] = [];
-  for (const part of path.split('/')) {
-    if (part === '' || part === '.') continue;
-    if (part === '..') parts.pop();
-    else parts.push(part);
-  }
-  return `/${parts.join('/')}`;
+  /** It writes what steers a model in the owner's turns (CapabilityDefinition `steersModel`). */
+  readonly steersModel?: true | undefined;
 }
 
 /** A capability over one of the Agent's stores, run by the daemon's runner. */
@@ -110,6 +81,7 @@ export function storeCapability(fields: StoreCapabilityFields): CapabilityDefini
     ...(fields.undoneBy ? { undoneBy: fields.undoneBy } : {}),
     ...(fields.effects ? { effects: fields.effects } : {}),
     ...(fields.check ? { check: fields.check } : {}),
+    ...(fields.steersModel ? { steersModel: true as const } : {}),
     example: fields.example,
     async run(values, services, caller) {
       if (!services.agentStores) {

@@ -1,7 +1,10 @@
 import { assertCapturedInputPathContext } from '../contract/input-authority.js';
 import { existsSync, lstatSync, readlinkSync, realpathSync } from 'node:fs';
-import { dirname, isAbsolute, resolve, relative, sep } from 'node:path';
+import { homedir } from 'node:os';
+import { dirname, isAbsolute, join, resolve, relative, sep } from 'node:path';
 import { GoodVibesError } from '@goodvibes/engine/errors';
+import { projectWriteRootOf } from '../workspace/project-identity.js';
+import { resolveGoodVibesDaemonHome, resolveGoodVibesHome } from '../config/goodvibes-home.js';
 
 function pathOutsideRootError(inputPath: string): GoodVibesError {
   return new GoodVibesError(`Path '${inputPath}' is outside the project root`, {
@@ -59,31 +62,62 @@ export function landingPath(path: string, hops = 0): string {
 }
 
 /**
- * Resolves an input path against the provided project root and validates it is
- * contained within the project root. Throws if the resolved path escapes the
- * root unless the owner has enabled access outside it.
+ * Resolves an input path against the provided folder (the program's working
+ * folder) and validates it is contained within that folder's project
+ * (`projectWriteRootOf`: a program opened in a subfolder of a project works
+ * anywhere in the project; a product worktree is bounded by itself). Throws if
+ * the resolved path escapes the project unless the owner has enabled access
+ * outside it.
  */
 export function resolveAndValidatePath(inputPath: string, projectRoot: string, allowOutsideProject = false): string {
-  const root = realpathSync(resolve(projectRoot), 'utf8');
-  const resolved = resolve(root, inputPath);
+  const base = realpathSync(resolve(projectRoot), 'utf8');
+  const root = projectWriteRootOf(base);
+  const resolved = resolve(base, inputPath);
   assertCapturedInputPathContext(resolved);
   const rel = relative(root, resolved);
   if (!allowOutsideProject && escapesRoot(rel)) {
     throw pathOutsideRootError(inputPath);
   }
+  refuseProductHome(inputPath, root, resolved);
   const realExistingPath = landingPath(resolved);
   assertCapturedInputPathContext(realExistingPath);
   if (!allowOutsideProject && !isInsideRoot(root, realExistingPath)) {
     throw pathOutsideRootError(inputPath);
   }
+  refuseProductHome(inputPath, root, realExistingPath);
   if (existsSync(resolved)) {
     const realTargetPath = realpathSync(resolved, 'utf8');
     assertCapturedInputPathContext(realTargetPath);
     if (!allowOutsideProject && !isInsideRoot(root, realTargetPath)) {
       throw pathOutsideRootError(inputPath);
     }
+    refuseProductHome(inputPath, root, realTargetPath);
   }
   return resolved;
+}
+
+/**
+ * The product's own homes (the GoodVibes home of this process's tree and of the login home, the daemon home), real
+ * paths. They hold its credentials, records and every project's settings: no model's tool opens a path in them from
+ * outside them, the owner's own turn under YOLO included; what is in them is reached through the capabilities made for
+ * it.
+ */
+function productHomes(): readonly string[] {
+  const tree = resolveGoodVibesHome();
+  return [...new Set([join(tree, '.goodvibes'), resolveGoodVibesDaemonHome(tree), join(homedir(), '.goodvibes')])]
+    .map((home) => { try { return realpathSync(home, 'utf8'); } catch { return resolve(home); } });
+}
+
+/** Refuses `path` (absolute; a real path where it exists) outside `root` that lies in one of the product's homes. */
+function refuseProductHome(inputPath: string, root: string, path: string): void {
+  if (isInsideRoot(root, path)) return;
+  if (!productHomes().some((home) => isInsideRoot(home, path))) return;
+  throw new GoodVibesError(`Path '${inputPath}' is in GoodVibes' own home (its settings, records and credentials), which no tool reads or changes; nothing was opened. What is kept there is reached through the product's own places and capabilities.`, {
+    category: 'contract',
+    source: 'runtime',
+    recoverable: false,
+    operation: 'resolveAndValidatePath',
+  });
 }
 
 /**
@@ -95,8 +129,10 @@ export function resolveAndValidatePath(inputPath: string, projectRoot: string, a
  */
 export function resolveWritablePath(inputPath: string, projectRoot: string): string {
   const resolved = resolveAndValidatePath(inputPath, projectRoot);
-  const journals = resolve(realpathSync(resolve(projectRoot), 'utf8'), '.goodvibes', 'verification');
-  for (const candidate of [resolved, landingPath(resolved)]) {
+  const base = realpathSync(resolve(projectRoot), 'utf8');
+  // The journals of the working folder and of its project (a program opened in a subfolder writes anywhere in it).
+  const journalDirs = [...new Set([base, projectWriteRootOf(base)])].map((folder) => resolve(folder, '.goodvibes', 'verification'));
+  for (const candidate of [resolved, landingPath(resolved)]) for (const journals of journalDirs) {
     const insideJournals = !escapesRoot(relative(journals, candidate));
     // The landing path of a path that does not exist is its nearest existing
     // parent, which would wrongly "contain" the journals: only the path itself

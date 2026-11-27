@@ -57,7 +57,7 @@ import {
   type PairingReach,
 } from '@goodvibes/engine/platform/platform/pairing';
 import { renderPairingBanner } from '../core/pairing-banner.js';
-import { LAN_HTTPS_PAGE_PATH, httpsCertificateSource } from '@goodvibes/engine/platform/platform/daemon/lan-https/page';
+import { httpsCertificateSource, lanHttpsInstallLink } from '@goodvibes/engine/platform/platform/daemon/lan-https/page';
 import {
   callDaemonMethod,
   callDaemonRoute,
@@ -358,7 +358,7 @@ async function runLocalReprint(input: RunPairCommandInput, named?: RemoteDaemonT
     exitCode: 0,
     lines: [
       'Pair a phone',
-      ...pairingReadySteps(origin.origin, offers, lanCertificatePage(input.configManager, origin.origin)),
+      ...pairingReadySteps(origin.origin, offers, await lanCertificatePage(input, token, named, origin.origin)),
       '',
       ...banner.lines,
       ...(fromFiles.length > 0 ? ['', ...fromFiles] : []),
@@ -398,17 +398,27 @@ export function thisMachineSignIn(
 }
 
 /**
- * With the LAN https listener on, the page on the plain address where a phone
- * installs the GoodVibes certificate before it opens the https `origin`.
+ * With the LAN https listener on, the link a phone opens to install the GoodVibes certificate before it opens the https
+ * `origin`: the page on the https address with the certificate's fingerprint in it (lan-https/page.ts
+ * `lanHttpsInstallLink`), read from this machine's daemon (secureAddress.get). Never the plain address: the certificate
+ * and its fingerprint are never given over plain http. When the daemon cannot say it, the step says where the owner
+ * finds the link on this computer.
  */
-function lanCertificatePage(config: Pick<ConfigManager, 'get'>, origin: string): string | undefined {
+async function lanCertificatePage(input: RunPairCommandInput, token: string, named: RemoteDaemonTarget | undefined, origin: string): Promise<string | undefined> {
+  const config = input.configManager;
   // Only GoodVibes' own certificate is installed on the phone; Let's Encrypt and a certificate you made are trusted as they are.
   if (lanHttpsPort(config) === undefined || httpsCertificateSource(config) !== 'local-authority') return undefined;
   let url: URL;
   try { url = new URL(origin); } catch { return undefined; }
   if (url.protocol !== 'https:') return undefined;
-  const plainPort = resolveRuntimeEndpointBinding(config, 'controlPlane').port;
-  return `http://${url.hostname}:${plainPort}${LAN_HTTPS_PAGE_PATH}`;
+  const resolved = named !== undefined ? { ok: true as const, target: { baseUrl: named.baseUrl, token, isLocal: true } }
+    : resolveLocalDaemonTarget({ token, ...(input.flags.port === undefined ? {} : { port: input.flags.port }), configManager: config, daemonHomeDir: input.daemonHomeDir, readToken: input.readToken });
+  const status = resolved.ok
+    ? await callDaemonMethod<{ readonly localAuthority?: { readonly fingerprint?: string } }>(resolved.target, 'secureAddress.get', { input: {} }, input.fetchImpl).catch(() => undefined)
+    : undefined;
+  const fingerprint = status?.ok ? status.data.localAuthority?.fingerprint : undefined;
+  return fingerprint ? lanHttpsInstallLink(url.origin, fingerprint)
+    : 'the link for phones in System, Secure address in the web UI on this computer (it carries the certificate\'s fingerprint)';
 }
 
 /** Ask it (opening on No: it opens this machine to the network); false with no one to ask. */
@@ -488,6 +498,20 @@ async function runRemoteMint(input: RunPairCommandInput, target: RemoteDaemonTar
     target, 'pairing.handoff.create', { input: { name: defaultPairingTokenName(), ...(forThisMachine !== undefined ? { forThisMachine: true } : {}), ...(serveToNetwork ? { serveToNetwork: true } : {}) } }, input.fetchImpl,
   );
   if (!outcome.ok) return failure(outcome.error, outcome.fix, flags.json, outcome.code);
+
+  // Making a pairing code mints a credential for someone: the owner's own act. A command line never runs it by itself
+  // (anything that can drive a terminal could have typed it), so the daemon put it to the owner: say why it waits,
+  // where he answers it and its approval id, and end with 3, as `do` does (docs/exit-codes.md).
+  const held = outcome.data as unknown as { readonly code?: unknown; readonly approvalId?: unknown; readonly state?: unknown };
+  if (held.code === 'OWNER_APPROVAL_PENDING' && typeof held.approvalId === 'string') {
+    const where = 'Answer it in Waiting for you: in the terminal app or the Agent, the web UI, or a paired phone.';
+    const why = 'It was not run at once because making a pairing code gives a new device access, which is an act only you make, and a command line never makes it by itself.';
+    const again = `Once you have answered yes, read the code it made: goodvibes-daemon do ${held.approvalId} --json${local ? '' : ` --host ${target.baseUrl}`} (its fragment and deepLink).`;
+    if (flags.json) {
+      return { exitCode: 3, lines: [JSON.stringify({ ok: false, code: 'OWNER_APPROVAL_PENDING', approvalId: held.approvalId, state: held.state, why, answerIn: where, fix: again }, null, 2)] };
+    }
+    return { exitCode: 3, lines: [`${typeof held.state === 'string' ? held.state : `Waiting for the owner (${held.approvalId})`}.`, `  ${why} ${where}`, `  Approval: ${held.approvalId}. ${again}`] };
+  }
 
   const data = outcome.data;
   const offerKinds = data.offers.map((offer) => offer.kind).filter(isPairingOfferKind);

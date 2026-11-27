@@ -21,16 +21,26 @@ const AGENT_READ_MODES: Readonly<Record<string, ToolReadModes>> = Object.freeze(
   mcp: { field: 'mode', values: ['servers', 'tools', 'schema', 'resources', 'security', 'auth'] },
   control: { field: 'mode', values: ['commands', 'panels', 'subscriptions'] },
   task: { field: 'mode', values: ['list', 'show', 'handoffs'] },
+  // Saved artifacts: listing and showing one only read (a caller reaches only its own, control-plane/caller-reach.ts);
+  // export, package and archive write files.
+  agent_artifacts: { field: 'mode', values: ['list', 'show'] },
   // query is not listed: every mode (ask, show, list, withdraw) acts only on the owner's own inbox, so it keeps the
   // read category it has everywhere (types/tools.ts); a guest's turn is still asked by the gate (gate/classify.ts).
   // The facades over agent_harness: the actions that forward to a read mode of
   // the harness mode catalog (agent_harness declares its own from the catalog).
   models: { field: 'action', values: ['status', 'route', 'local', 'providers', 'provider'] },
-  memory: { field: 'action', values: ['status', 'provider', 'refinement', 'curator', 'candidate', 'list', 'search', 'get', 'stale'] },
-  settings: { field: 'action', values: ['list', 'get', 'preview_import'] },
-  workspace: { field: 'action', values: ['status', 'actions', 'action', 'surfaces', 'surface', 'shortcuts', 'keybindings', 'keybinding', 'commands', 'command', 'cli_commands', 'cli_command'] },
-  setup: { field: 'action', values: ['status', 'item', 'repair', 'checkpoint'] },
-  personal_ops: { field: 'action', values: ['briefing', 'status', 'queue', 'intake', 'lane'] },
+  // A record action (create, update, review, stale, delete) only routes to agent_local_registry, which decides it as
+  // itself: one act, one question.
+  memory: { field: 'action', values: ['status', 'provider', 'refinement', 'curator', 'candidate', 'list', 'search', 'get', 'create', 'update', 'review', 'stale', 'delete'] },
+  // import only routes to the capability settings.copy-from-terminal-app (a nested capability_run): its question is the one asked.
+  settings: { field: 'action', values: ['list', 'get', 'import'] },
+  screens_keys_commands: { field: 'action', values: ['surfaces', 'surface', 'shortcuts', 'keybindings', 'keybinding', 'commands', 'command', 'cli_commands', 'cli_command'] },
+  // finish and import_settings (or import) only route to a capability (setup.mark-done, settings.copy-from-terminal-app)
+  // as a nested capability_run: the capability's own question is the one asked.
+  setup: { field: 'action', values: ['status', 'item', 'repair', 'checkpoint', 'finish', 'import_settings', 'import'] },
+  // read only routes to the account's own mail or calendar tool (a nested mcp call decided as itself): one question,
+  // in that tool's words, never "your inbox & calendar" for either.
+  personal_ops: { field: 'action', values: ['briefing', 'status', 'queue', 'intake', 'lane', 'read'] },
   research: { field: 'action', values: ['briefing', 'status', 'plan', 'runs', 'run', 'sources', 'source', 'reports', 'report_artifact'] },
   computer: { field: 'action', values: ['status', 'plan', 'control', 'browser', 'setup', 'mcp'] },
   device: { field: 'action', values: ['status', 'capability', 'browser', 'control', 'voice', 'provider'] },

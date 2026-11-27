@@ -3,7 +3,8 @@ import { createRetryCommand, createUndoCommands } from '@goodvibes/engine/termin
 import type { CommandContext, CommandRegistry } from '../command-registry.ts';
 import { requireShellPaths } from './runtime-services.ts';
 import { summarizeError } from '@goodvibes/engine/platform/platform/utils/native-error-summary';
-import { sessionCapabilityServices } from './session-capabilities.ts';
+// Through its slot: session-capabilities.ts imports session.ts, which imports this file (session-capability-slots.ts).
+import { sessionServicesOf as sessionCapabilityServices } from './session-capability-slots.ts';
 
 export function registerSessionContentCommands(registry: CommandRegistry): void {
   registry.register(undoCommands.undo);

@@ -11,6 +11,10 @@ export type { PostalKind, PostalParts, PostalReadOptions, PreparedPostalAddress 
 
 export { ConfigManager, captureConfigSelectedScalars } from './manager.js';
 export type { ConfigScalarSelection, ConfigSelectedScalarGuard } from './manager.js';
+// A project's turn reads the host's settings with the project as its folder (the daemon's turns in a project).
+export { projectConfigView, projectFeatureFlags, projectSettingsInForce } from './project-view.js';
+// The ONE settings file a project keeps for every program and the daemon.
+export { projectSettingsFileOf } from './project-settings-file.js';
 export { captureJudgmentFallbackSettings, validJudgmentFallbackSettings } from './judgment-fallback-settings.js';
 export type { JudgmentFallbackSettings } from './schema-types-judgment.js';
 export type { PreparedConfigMutation, PreparedConfigMutationTransition, PreparedConfigMutationRequest,
@@ -18,7 +22,7 @@ export type { PreparedConfigMutation, PreparedConfigMutationTransition, Prepared
   PreparedConfigMutationReceipt } from './prepared-mutation.js';
 export type { HostBooleanSetting, HostBooleanSettingHandle, HostBooleanSettingResolved, HostManagedSettingLocks, HostNumberSetting, HostSetting, HostSettingValue, HostStringSetting } from './host-settings.js';
 export type { DeepReadonly, ConfigKeyTier, ConfigKeySource, DaemonConfigPatch } from './manager.js';
-export type { ConfigChange, ConfigSetOptions, DaemonWritePending, DaemonWriteRefusal, DaemonWriteRoute, SetResult } from './manager.js';
+export type { ConfigChange, ConfigSetOptions, DaemonWritePending, DaemonWritePress, DaemonWriteRefusal, DaemonWriteRoute, SetResult } from './manager.js';
 // Who a settings write is from (ConfigManager.setMany): the owner at his own surface, the program, or a model acting for someone.
 export { agentActor, localOwnerActor, systemActor } from '@goodvibes/engine/daemon-api/http-policy';
 export type { Actor } from '@goodvibes/engine/daemon-api/http-policy';
@@ -204,17 +208,14 @@ export interface DaemonEnabledReader {
 }
 
 /**
- * Resolve whether the local session daemon should run.
- *
- * `daemon.enabled` governs (default `true`, daemon on by default,
- * loopback-bound).
- *
- * This lives in the shared platform config module (not TUI-local) so the standalone
- * daemon CLI and the TUI's adopt-or-start path resolve the flag identically.
+ * Whether the local session daemon is used: always. Every program uses the daemon and starts it when it is not running
+ * (runtime/client/daemon-autostart.ts); `daemon.enabled` ("Use the background daemon") is retired, kept in a file only
+ * for a 3.5.0 program after a rollback, and a person's "off" was carried once to "Start the daemon at login"
+ * (settings-carry-forward.ts carryDaemonOffToLoginStart). Kept as the one reader every caller asks, so none reads the
+ * old key itself.
  */
-export function resolveDaemonEnabled(config: DaemonEnabledReader): boolean {
-  const enabled = config.get('daemon.enabled');
-  return typeof enabled === 'boolean' ? enabled : true;
+export function resolveDaemonEnabled(_config: DaemonEnabledReader): boolean {
+  return true;
 }
 
 /**
@@ -357,10 +358,6 @@ export {
 } from './secrets.js';
 export type {
   ConfirmedProjectSecret,
-  PreparedSecretImport,
-  PreparedSecretImportTransition,
-  PreparedSecretImportFacts,
-  SecretImportEntry,
   PreparedScopedSecretDeletion,
   PreparedScopedSecretDeletionFacts,
   SecretDeleteOptions,
@@ -387,10 +384,6 @@ export { ServiceRegistry, SERVICE_SECRET_KEY_FIELDS, SERVICE_SECRET_REFERENCE_FI
 export type * from './service-registry.js';
 export { SubscriptionManager, SubscriptionSessionEndedError, captureSubscriptionReadSource, sharedSubscriptionsPath, subscriptionExportForm, subscriptionState, subscriptionAuthFreshness, SUBSCRIPTION_EXPIRING_SOON_MS } from './subscriptions.js';
 export type {
-  PreparedSubscriptionImport,
-  PreparedSubscriptionImportTransition,
-  PreparedSubscriptionImportFacts,
-  SubscriptionImportEntry,
   OAuthProviderConfig,
   PendingSubscriptionLogin,
   ProviderSubscription,
@@ -399,7 +392,7 @@ export type {
   SubscriptionState,
 } from './subscriptions.js';
 export { observeImportFile, assertImportFileCurrent } from './prepared-import.js';
-export type { ImportFileObservation, PreparedImportTransitionFacts } from './prepared-import.js';
+export type { ImportFileObservation } from './prepared-import.js';
 export * from './subscription-auth.js';
 export * from './subscription-providers.js';
 export * from './subscription-sign-in.js';
@@ -449,10 +442,6 @@ export { captureRemoteSettingsPrecondition, inspectRemoteSettingsPrecondition, a
   applyRemoteSettingsPrecondition, resolvePreparedConfigWriteRoute, assertPreparedConfigWriteRoute } from './settings-precondition-client.js';
 export type { RemoteSettingsPrecondition, RemoteSettingsPreconditionFacts, RemoteSettingsReceipt, SettingsPreconditionRequest, SettingsPreconditionReceipt } from './settings-precondition-client.js';
 export { describeSettingsReceiptFailure } from './settings-owner-wire.js';
-export { captureRemoteSettingsImportPrecondition, inspectRemoteSettingsImportPrecondition, assertRemoteSettingsImportPrecondition,
-  applyRemoteSettingsImportPrecondition, assertCompletedRemoteSettingsImportPrecondition } from './settings-import-precondition-client.js';
-export type { RemoteSettingsImportPrecondition, RemoteSettingsImportPreconditionFacts, RemoteSettingsImportRestriction,
-  SettingsImportPreconditionRequest, SettingsImportPreconditionReceipt } from './settings-import-precondition-client.js';
 
 export { DEFAULT_DECISION_ROUTER_SETTINGS, captureDecisionRouterSettings } from './decision-router-settings.js';
 export type { DecisionRouterSettings, DecisionRouterTarget, DecisionRouterCategory } from './decision-router-settings.js';

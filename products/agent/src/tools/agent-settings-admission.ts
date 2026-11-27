@@ -1,4 +1,5 @@
 import { readString } from '@goodvibes/engine/terminal-shell/agent-turn/tool-args';
+import { programCallHeadersFor } from '@goodvibes/engine/platform/platform/runtime/client';
 import { agentResearchSourceOwner } from '@goodvibes/engine/terminal-shell/agent-turn/protected-research-report';
 import { withModelReadingSource, captureModelReadingInput, assertModelReadingInputCurrent } from './agent-harness-model-reading-source.ts';
 /** Preferred settings and compatibility harness share one exact effect-owner plan. */
@@ -22,7 +23,6 @@ import { coerceHarnessSettingValue, resolveHarnessSettingAsync, type HarnessSett
 import { getAgentSettingsSchema } from '../config/settings-catalog.ts';
 import { agentDaemonConfigClient, agentDaemonConfigClientRevision, buildAgentConfigRouting, configKeyScope } from '../config/daemon-config-routing.ts';
 import { buildGoodVibesSecretKey, defaultSecretBackedScope, isSecretConfigKey, isSecretReferenceValue } from '../config/secret-config.ts';
-import { createAgentSettingsImportProjector, isAgentSettingsImportMutation } from './agent-settings-import-admission.ts';
 import { readSettingsAction } from './agent-settings-action.ts';
 
 export function preferredSettingsMutation(name: string, args: Record<string, unknown>): 'set' | 'reset' | undefined {
@@ -59,12 +59,7 @@ function assertCapture(capture: Capture): void {
 export function createPreferredSettingsProjector(platform: Pick<CommandContext['platform'], 'configManager' | 'secretsManager'>,
   fallback?: ToolInputProjector, readingContext?: { readonly registry: ToolRegistry; readonly context: CommandContext }): ToolInputProjector {
   const config = platform.configManager; const secrets = platform.secretsManager;
-  const imports = readingContext ? createAgentSettingsImportProjector(readingContext.context, undefined, readingContext.registry) : undefined;
   return { async project(request) {
-    if (isAgentSettingsImportMutation(request.name, request.args)) {
-      if (!imports) throw new ToolInputProjectionError('unconfigured');
-      return imports.project(request);
-    }
     const operation = preferredSettingsMutation(request.name, request.args);
     if (!operation) {
       const result = fallback ? await fallback.project(request) : { status: 'projected' as const, args: request.args };
@@ -151,7 +146,9 @@ export function createPreferredSettingsProjector(platform: Pick<CommandContext['
       if (!client.ownsKey(key) || !capability) {
         throw new ToolInputProjectionError('unconfigured', `The setting ${key} belongs to the daemon, and this session's daemon connection cannot write daemon settings. Change it on the daemon (its settings or the web UI).`);
       }
-      remote = await capability.capture(remoteRequest);
+      // The model's call: applied only after the Agent's own gate decided it, so it goes with that gate's mark and
+      // the daemon does not decide it a second time.
+      remote = await capability.capture(remoteRequest, { decidedByProgramGate: true });
       remoteAssert = () => { if (client.preparedSettings !== capability) throw new ToolInputProjectionError('stale'); capability.assertCurrent(remote!); };
       const facts = capability.inspect(remote);
       applyRemote = () => capability.apply(remote!);
@@ -162,7 +159,9 @@ export function createPreferredSettingsProjector(platform: Pick<CommandContext['
       const routing = buildAgentConfigRouting({ homeDir: config.getHomeDirectory() ?? undefined });
       route = await resolvePreparedConfigWriteRoute(key, routing, assertRoutingOwner);
       if (route.mode === 'daemon') {
-        remote = await captureRemoteSettingsPrecondition(route.endpoint, remoteRequest);
+        // With the Agent's call context and registration, and its gate's mark (the write runs only after that gate).
+        const headers = await programCallHeadersFor(route.endpoint.baseUrl, route.endpoint.token, fetch, 'agent');
+        remote = await captureRemoteSettingsPrecondition({ ...route.endpoint, headers }, remoteRequest, { press: { decidedByProgramGate: true } });
         remoteAssert = () => assertRemoteSettingsPrecondition(remote!);
         const facts = inspectRemoteSettingsPrecondition(remote);
         applyRemote = () => applyRemoteSettingsPrecondition(remote!);

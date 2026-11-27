@@ -12,12 +12,12 @@ const browserControlPlan: TaskRouteEntry = {
   build: (request, slots) => ({
     id: 'browser-control-workflow-plan',
     label: 'Browser, screenshot, or desktop-control workflow plan',
-    userSurface: 'Work & Approvals workspace',
+    userSurface: 'Work and agents',
     userOutcome: 'Choose the safest browser, screenshot, or desktop-control workflow before any live UI action.',
     why: 'The request asks for screenshot, browser navigation/control, screen observation, or desktop control.',
     modelRoute: `computer action:"plan" query:${quote(request)} includeParameters:true`,
     inspectRoute: 'computer action:"control" includeParameters:true',
-    userRoute: 'Agent Workspace -> Work & Approvals',
+    userRoute: 'Work and agents (the menu, Ctrl+G then m)',
     requiresConfirmation: slots.starts || slots.changes || slots.opensUi,
     missingFields: ['target page/app/screen when applicable', 'exact live action to perform', 'confirmation for any live-control effect'],
     supportingRoutes: [
@@ -36,12 +36,12 @@ const mediaGeneration: TaskRouteEntry = {
   build: (request) => ({
     id: 'media-generation-artifact',
     label: 'Confirmed media artifact generation',
-    userSurface: 'Voice & Media workspace',
+    userSurface: 'System, Voice',
     userOutcome: 'Generate image or video only as a confirmed saved artifact with provider readiness visible first.',
     why: 'The request asks to generate, create, render, or draw image/video/media output.',
     modelRoute: 'device action:"provider" target:"media" includeParameters:true',
     inspectRoute: 'agent_harness mode:"media_posture" includeParameters:true',
-    userRoute: 'Agent Workspace -> Voice & Media',
+    userRoute: 'System, Voice (the menu, Ctrl+G then m)',
     requiresConfirmation: true,
     missingFields: ['media prompt', 'provider/model if the default is not acceptable', 'confirmation'],
     supportingRoutes: [
@@ -61,12 +61,12 @@ const voiceWorkflow: TaskRouteEntry = {
     return {
       id: 'voice-workflow-posture',
       label: 'Voice interaction workflow posture',
-      userSurface: 'Voice & Media workspace',
+      userSurface: 'System, Voice',
       userOutcome: 'Inspect push-to-talk, transcription, spoken-response, and wake-word posture before any voice capture or playback effect.',
       why: 'The request mentions voice workflows, voice memo transcription, push-to-talk, spoken responses, or wake-word capture.',
       modelRoute: `device action:"voice" query:${quote(request)} includeParameters:true`,
       inspectRoute: 'device action:"voice" includeParameters:true',
-      userRoute: 'Agent Workspace -> Voice & Media -> Voice readiness',
+      userRoute: 'System, Voice (the menu, Ctrl+G then m)',
       requiresConfirmation: voiceEffect,
       missingFields: voiceEffect
         ? ['voice workflow id or audio source', 'selected provider when needed', 'confirmation before capture, transcription, playback, or visible picker handoff']
@@ -90,12 +90,12 @@ const ttsProvider: TaskRouteEntry = {
     return {
       id: 'tts-provider-posture',
       label: 'TTS provider and voice setup posture',
-      userSurface: 'Voice & Media workspace',
+      userSurface: 'System, Voice',
       userOutcome: 'Inspect TTS provider and voice readiness before opening a picker or changing spoken-response settings.',
       why: 'The request mentions TTS, text-to-speech, speech synthesis, voice provider, or TTS voice selection.',
       modelRoute: 'device action:"provider" target:"tts" includeParameters:true',
       inspectRoute: 'device action:"voice" includeParameters:true',
-      userRoute: 'Agent Workspace -> Voice & Media -> TTS provider',
+      userRoute: 'Settings, TTS provider (/settings)',
       requiresConfirmation: openPicker,
       missingFields: openPicker ? ['provider or voice target when known', 'confirmation before visible picker handoff or setting change'] : undefined,
       supportingRoutes: [
@@ -118,16 +118,16 @@ const browserCockpit: TaskRouteEntry = {
     userOutcome: 'Inspect the configured browser/PWA cockpit and setup routes before opening an external browser.',
     why: 'The request mentions the browser cockpit, PWA, web dashboard, or browser dashboard.',
     modelRoute: 'computer action:"browser" includeParameters:true',
-    inspectRoute: 'workspace action:"surface" surfaceId:"connected-browser-cockpit" includeParameters:true',
+    inspectRoute: 'screens_keys_commands action:"surface" surfaceId:"connected-browser-cockpit" includeParameters:true',
     userRoute: 'Connected Browser Cockpit (opened through confirmed computer action:"open_browser")',
     requiresConfirmation: slots.opensUi,
     missingFields: slots.opensUi ? ['confirmation before opening the external browser/PWA handoff'] : undefined,
     supportingRoutes: [
       'computer action:"open_browser" confirm:true explicitUserRequest:"..."',
-      'workspace action:"open" surfaceId:"connected-browser-cockpit" confirm:true explicitUserRequest:"..."',
+      'screens_keys_commands action:"open" surfaceId:"connected-browser-cockpit" confirm:true explicitUserRequest:"..."',
       'host action:"services" query:"web" includeParameters:true',
     ],
-    policy: 'Browser/PWA readiness is read-only. Opening the connected browser cockpit is a visible confirmed handoff; browser-native Agent workspace routes count as ready only from certified platform/daemon browser/PWA route and first-run receipt read models.',
+    policy: 'Browser/PWA readiness is read-only. Opening the connected browser cockpit is a visible confirmed handoff; browser-native Agent routes count as ready only from certified platform/daemon browser/PWA route and first-run receipt read models.',
   }),
 };
 
@@ -164,12 +164,12 @@ const capabilityMap: TaskRouteEntry = {
     return {
       id: device ? 'device-voice-capability' : 'browser-computer-capability',
       label: device ? 'Device and voice capability map' : 'Browser/PWA or computer-use route',
-      userSurface: device ? 'Voice & Media workspace' : 'Connected browser cockpit',
+      userSurface: device ? 'System, Voice' : 'Connected browser cockpit',
       userOutcome: 'Use device, browser, and desktop capabilities only through visible permission-aware routes.',
       why: 'The request mentions browser/PWA, desktop/computer use, mobile, camera, screen, or voice/TTS.',
       modelRoute: device ? 'device action:"status" includeParameters:true' : 'computer action:"status" includeParameters:true',
       inspectRoute: device ? 'device action:"capability" target:"..." includeParameters:true' : 'computer action:"browser" includeParameters:true',
-      userRoute: device ? 'Agent Workspace -> Voice & Media' : 'Connected browser cockpit',
+      userRoute: device ? 'System, Voice (the menu, Ctrl+G then m)' : 'Connected browser cockpit',
       requiresConfirmation: slots.starts || slots.changes || slots.opensUi,
       supportingRoutes: [
         'computer action:"open_browser" confirm:true explicitUserRequest:"..."',
@@ -234,12 +234,12 @@ const channels: TaskRouteEntry = {
     return {
       id: variant.id,
       label: variant.label,
-      userSurface: 'Channels workspace',
+      userSurface: 'Mail, calendar and channels, Channels',
       userOutcome: variant.userOutcome,
       why: 'The request mentions external channels, notifications, target setup, or delivery receipts.',
       modelRoute,
       inspectRoute: inspectsStatus ? 'channels action:"status" includeParameters:true' : 'channels action:"triage" includeParameters:true',
-      userRoute: 'Agent Workspace -> Messaging',
+      userRoute: 'Mail, calendar and channels, Channels (the menu, Ctrl+G then m)',
       requiresConfirmation: task === 'setup' || task === 'send',
       missingFields: task === 'send'
         ? ['configured target', 'message text', 'confirmation']
@@ -264,12 +264,12 @@ const documentsArtifacts: TaskRouteEntry = {
   build: (_request, slots) => ({
     id: 'documents-artifacts-compare',
     label: 'Documents, artifacts, and model comparison',
-    userSurface: 'Documents & Files workspace',
+    userSurface: 'Memory and knowledge, Drafts',
     userOutcome: 'Keep drafts, uploads, artifacts, reviewer packets, and model choices in one reviewable workflow.',
     why: 'The request is about documents, artifacts, exports, reviewer packets, or blind model comparison.',
-    modelRoute: 'workspace action:"actions" categoryId:"documents" query:"documents compare artifacts"',
+    modelRoute: 'capability_find need:"drafts, artifacts or comparing models"',
     inspectRoute: 'agent_harness mode:"document_ops" includeParameters:true',
-    userRoute: 'Agent Workspace -> Documents & Files',
+    userRoute: 'Memory and knowledge, Drafts and Artifacts (the menu, Ctrl+G then m)',
     requiresConfirmation: slots.changes || slots.starts,
     supportingRoutes: [
       'agent_documents action:"browse"',
@@ -287,12 +287,12 @@ const agentKnowledge: TaskRouteEntry = {
   build: (_request, slots) => ({
     id: 'agent-knowledge',
     label: 'Isolated Agent Knowledge',
-    userSurface: 'Knowledge workspace',
+    userSurface: 'Memory and knowledge',
     userOutcome: 'Ask, search, inspect, or deliberately ingest reviewed sources into Agent-owned knowledge only.',
     why: 'The request mentions Agent Knowledge, Knowledge search, source-backed answers, or ingest.',
     modelRoute: 'agent_knowledge action:"ask" query:"..."',
     inspectRoute: 'agent_knowledge action:"status"',
-    userRoute: 'Agent Workspace -> Knowledge',
+    userRoute: 'Memory and knowledge (the menu, Ctrl+G then m)',
     requiresConfirmation: slots.changes,
     supportingRoutes: [
       'agent_knowledge action:"search" query:"..."',
@@ -316,7 +316,7 @@ const securityStatus: TaskRouteEntry = {
     userRoute: 'Permissions and safety (Ctrl+G m)',
     requiresConfirmation: false,
     supportingRoutes: [
-      'workspace action:"actions" categoryId:"tools-permissions"',
+      'capability_find need:"see the permission rules"',
       'settings action:"list" query:"permissions approval policy" includeParameters:true',
       'security action:"finding" findingId:"..." includeParameters:true',
     ],
@@ -380,21 +380,21 @@ const supportBundle: TaskRouteEntry = {
   build: (request, slots) => ({
     id: 'support-bundle-route',
     label: 'Support bundle and diagnostics packet route',
-    userSurface: 'Connected Host workspace',
+    userSurface: 'System, Support and transfer',
     userOutcome: 'Inspect available redacted support, diagnostic, trust, auth, or forensic bundles before exporting or importing anything.',
     why: 'The request mentions support bundles, diagnostic bundles, forensic bundles, or support packets.',
     modelRoute: `support action:"status" query:${quote(request)} includeParameters:true`,
     inspectRoute: 'support action:"status" includeParameters:true',
-    userRoute: 'Agent Workspace -> Connected Host -> Export support bundle',
+    userRoute: 'System, Support and transfer (the menu, Ctrl+G then m)',
     requiresConfirmation: slots.changes,
     missingFields: slots.changes ? ['bundle type or path', 'export/import/share destination when applicable', 'confirmation before bundle export, import, or external sharing'] : undefined,
     supportingRoutes: [
       'support action:"bundle" bundlePath:"..." includeParameters:true',
       'agent_harness mode:"support_bundles" includeParameters:true',
-      'workspace action:"actions" query:"support bundle" includeParameters:true',
-      'agent_harness mode:"run_workspace_action" actionId:"..." confirm:true explicitUserRequest:"..."',
+      'capability_run id:"bundle.preview"',
+      'capability_run id:"bundle.export" or id:"bundle.import"',
     ],
-    policy: 'Bundle catalog and bundle inspection are read-only and redacted. Bundle export, import, file writes, and sharing remain confirmation-gated workspace or slash-command flows.',
+    policy: 'Bundle catalog and bundle inspection are read-only and redacted. Bundle export, import, file writes, and sharing remain confirmation-gated capability or slash-command flows.',
   }),
 };
 
@@ -406,22 +406,22 @@ const savedSessions: TaskRouteEntry = {
     return {
       id: 'saved-session-route',
       label: 'Saved sessions, bookmarks, and transcript continuity',
-      userSurface: 'Conversation workspace',
-      userOutcome: 'Find, inspect, resume, export, or manage saved Agent sessions and bookmarks from the conversation workspace.',
+      userSurface: 'Sessions',
+      userOutcome: 'Find, inspect, resume, export, or manage saved Agent sessions and bookmarks from Sessions.',
       why: 'The request mentions saved sessions, session search, transcript export, bookmarks, restore, or conversation continuity.',
       modelRoute: `sessions action:"list" query:${quote(request)} includeParameters:true`,
       inspectRoute: 'sessions action:"list" includeParameters:true',
-      userRoute: 'Agent Workspace -> Conversation -> Search saved sessions',
+      userRoute: 'Sessions, s (search saved sessions)',
       requiresConfirmation: mutation,
       missingFields: mutation ? ['session id, title, or search target', 'exact lifecycle action', 'confirmation before save/load/resume/rename/fork/export/delete/bookmark changes'] : undefined,
       supportingRoutes: [
         'sessions action:"list" query:"..." includeParameters:true',
         'sessions action:"get" sessionId:"..." includeParameters:true',
         'agent_harness mode:"sessions" includeParameters:true',
-        'workspace action:"actions" categoryId:"conversation" query:"session" includeParameters:true',
-        'agent_harness mode:"run_workspace_action" actionId:"session-save|session-load|session-export-saved|session-delete" confirm:true explicitUserRequest:"..."',
+        'capability_run id:"session.list"',
+        'capability_run id:"session.save|session.resume|session.save-saved|session.delete"',
       ],
-      policy: 'Session and bookmark inspection is read-only. Save, load, resume, rename, fork, export, delete, and bookmark writes stay visible and confirmed through workspace or slash-command routes.',
+      policy: 'Session and bookmark inspection is read-only. Save, load, resume, rename, fork, export, delete, and bookmark writes stay visible and confirmed through capability or slash-command routes.',
     };
   },
 };
@@ -473,7 +473,7 @@ const connectedHostContract: TaskRouteEntry = {
     why: 'The request asks about daemon/operator/API route capability or service posture.',
     modelRoute: 'host action:"capabilities" includeParameters:true',
     inspectRoute: 'host action:"methods" includeParameters:true',
-    userRoute: 'Agent Workspace -> Start',
+    userRoute: 'System, Setup (the menu, Ctrl+G then m)',
     requiresConfirmation: false,
     supportingRoutes: [
       'host action:"method" methodId:"..."',

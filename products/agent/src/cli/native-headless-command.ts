@@ -13,11 +13,12 @@ import { createAgentNativeHostSelection } from '../runtime/agent-native-host-sel
 import { type SessionSnapshot } from '@/runtime/index.ts';
 import { conversationMessagesAsSessionRecords } from '../core/conversation-message-snapshot.ts';
 import { claimHeadlessSession, restoreHeadlessSession } from '@goodvibes/engine/terminal-shell/startup-lifecycle';
-import { closeSessionHere, createSessionSurface } from '@goodvibes/engine/platform/platform/runtime/operations';
+import { closeSessionHere, createSessionSurface, projectRecordsFolder } from '@goodvibes/engine/platform/platform/runtime/operations';
 import { GOODVIBES_AGENT_SURFACE_ROOT } from '../config/surface.ts';
 import { announceHeadlessRecovery, announceHeadlessSession, readFolderTrustFacts, refusedHeadlessRun, settleHeadlessFolderTrust } from '@goodvibes/engine/terminal-shell/headless-command';
 import { keepHeadlessSessionRecoverable } from '@goodvibes/engine/terminal-shell/session-crash-recovery';
-import { createConnectedHost } from '@goodvibes/engine/terminal-shell/agent-turn/connected-host-client';
+import { createConnectedHost, resolveConnectedHost } from '@goodvibes/engine/terminal-shell/agent-turn/connected-host-client';
+import { agentVerificationRefusal, setProgramCallContext } from '@goodvibes/engine/platform/platform/runtime/client';
 
 /**
  * A run that could not start (for example `--resume` named a session that is not
@@ -50,12 +51,16 @@ export async function runNativeHeadlessCommand(runtime: HeadlessCommandRuntime, 
     const host = nativeHost.resolve();
     return 'reason' in host ? host : { ...host, workspace: workingDirectory, journalPath };
   };
+  // Native intake runs before the runtime starts: this program says what it is now, so its first native call carries
+  // the registration the daemon issues it (call-context.ts); the runtime's start sets the same context with its session.
+  setProgramCallContext({ program: 'agent', project: () => workingDirectory, sessionId: () => undefined });
   return runHeadlessCommand(runtime, mode, {
     write: writeNativeHeadlessResult,
     run: (prompt, mode, outer) => runWithHeadlessTimeout(outer, limits.timeoutMs, async (signal) => {
       // The session to resume is taken, or refused, before the prompt goes to native intake: a refused run
       // leaves no input record on the host.
-      const surface = createSessionSurface({ surfaceRoot: GOODVIBES_AGENT_SURFACE_ROOT, workingDirectory, homeDirectory });
+      // A program opened in a subfolder keeps its sessions with its project's (as the runtime graph does).
+      const surface = createSessionSurface({ surfaceRoot: GOODVIBES_AGENT_SURFACE_ROOT, workingDirectory: projectRecordsFolder(workingDirectory), homeDirectory });
       let claimed: string | undefined;
       try {
         claimed = await claimHeadlessSession(cli.flags, surface);
@@ -151,6 +156,14 @@ export async function runNativeHeadlessCommand(runtime: HeadlessCommandRuntime, 
             });
           },
         });
+        // Refused before any turn on a computer that cannot prove this program to the daemon (and holds no key of its own
+        // from pairing): said in plain words, why and the way through, in place of the native host's generic refusal.
+        const unproven = result.stopReason === 'native-unavailable' && resolveConnectedHost({ configManager, homeDirectory }).source !== 'pairing'
+          ? agentVerificationRefusal() : undefined;
+        if (unproven) {
+          return { ...result, response: unproven, ...(result.error !== undefined ? { error: unproven } : {}),
+            ...(result.native ? { native: { ...result.native, message: unproven } } : {}) };
+        }
         return result;
       } finally {
         // Already released when the run moved into the session and ended; otherwise (it never got that far) here.

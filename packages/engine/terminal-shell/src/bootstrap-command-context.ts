@@ -371,7 +371,8 @@ export function projectAgentToolDependencies<
   },
 >(input: Input) {
   return {
-    contractRunner: input.services.contractRunner,
+    // None in a terminal program (its work runs on the daemon).
+    contractRunner: input.services.contractRunner ?? undefined,
     permissionManager: input.services.permissionManager,
     sandboxEscalationHandler: input.services.sandboxEscalationHandler,
     onSandboxedRun: input.services.onSandboxedRun,

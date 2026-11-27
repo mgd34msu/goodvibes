@@ -7,7 +7,7 @@
  * identical unit.
  */
 import { existsSync, lstatSync, readFileSync, readdirSync } from 'node:fs';
-import { basename, dirname, isAbsolute, join } from 'node:path';
+import { basename, dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { ConfigManager } from '../config/manager.js';
 import { resolveDaemonServiceDefault } from './daemon-service-default.js';
@@ -36,12 +36,6 @@ export const MANAGED_SERVICE_DESCRIPTION = PLATFORM_SERVICE_DESCRIPTION;
  * written through), or `unreadable`.
  */
 export type ManagedDefinitionOwner = 'absent' | 'product' | 'other' | 'unreadable';
-
-const XML_ENTITIES: Readonly<Record<string, string>> = { amp: '&', lt: '<', gt: '>', quot: '"', apos: "'" };
-
-function xmlUnescape(value: string): string {
-  return value.replace(/&(amp|lt|gt|quot|apos);/g, (_, name: string) => XML_ENTITIES[name] ?? '');
-}
 
 type DefinitionFile = { readonly contents: string } | { readonly state: Exclude<ManagedDefinitionOwner, 'product'> };
 
@@ -82,20 +76,6 @@ export function listProductServiceNames(platform: string, unitHomeDir: string): 
     .filter((entry) => readManagedDefinitionOwner(join(location.dir, entry)) === 'product')
     .map((entry) => entry.slice(0, -location.suffix.length))
     .sort();
-}
-
-/**
- * The absolute working directory an existing unit or plist names, or undefined
- * when it names none or one this reader cannot take literally (a `-`/`~` prefixed systemd value).
- */
-export function readDefinitionWorkingDirectory(path: string): string | undefined {
-  const file = readDefinitionFile(path);
-  if ('state' in file) return undefined;
-  const { contents } = file;
-  const systemd = /^WorkingDirectory=(.*)$/m.exec(contents)?.[1]?.replaceAll('%%', '%');
-  const launchd = /<key>WorkingDirectory<\/key>\s*<string>([^<]*)<\/string>/.exec(contents)?.[1];
-  const value = systemd ?? (launchd === undefined ? undefined : xmlUnescape(launchd));
-  return value !== undefined && isAbsolute(value) ? value : undefined;
 }
 
 export interface BuildManagedDaemonServiceManagerParams {

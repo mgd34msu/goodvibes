@@ -115,7 +115,7 @@ export function decodeRelayPairingString(text: string): RelayPairingPayload {
   ) {
     throw new GoodVibesError('Relay pairing string is missing required fields.', {
       category: 'bad_request', source: 'transport', recoverable: false,
-      next: ['Pair again from /relay pair (or goodvibes-agent relay pair): every pairing now carries its own relay code.'],
+      next: ['Pair again from "Pair something" in Devices and network (or goodvibes-agent relay pair): every pairing now carries its own relay code.'],
     });
   }
   const w = wire as WirePairing;
@@ -145,7 +145,7 @@ function assertPairingUsable(pairing: RelayPairingPayload): RelayPairingPayload 
   if (typeof pairing.code !== 'string' || pairing.code.length === 0) {
     throw new GoodVibesError('This relay pairing carries no relay code.', {
       category: 'bad_request', source: 'transport', recoverable: false, state: 'not connected',
-      next: ['Pair again from /relay pair (or goodvibes-agent relay pair): every pairing now carries its own relay code.'],
+      next: ['Pair again from "Pair something" in Devices and network (or goodvibes-agent relay pair): every pairing now carries its own relay code.'],
     });
   }
   return pairing;
@@ -159,6 +159,6 @@ function assertPairingProtocol(protocol: number): void {
     source: 'transport',
     recoverable: false,
     state: 'not connected',
-    next: ['Pair again from /relay pair on a daemon of the same release line, or update this program.'],
+    next: ['Pair again from "Pair something" in Devices and network on a daemon of the same release line, or update this program.'],
   });
 }

@@ -1,7 +1,7 @@
 /**
  * local-library-items.ts, the one summary of an Agent-local record (memory, a
  * note, a persona, a skill, a skill bundle, a routine) that the Agent's
- * workspace lists and the learning curator reads, wherever the turn runs.
+ * model tools list and the learning curator reads, wherever the turn runs.
  */
 import { memoryRecordTemporalStatus, type MemoryRecord } from '@goodvibes/engine/platform/platform/state';
 import type { AgentNoteRecord } from './note-registry.js';
@@ -10,7 +10,7 @@ import { formatAgentRecordOrigin } from './record-labels.js';
 import { evaluateAgentRoutineReadiness, type AgentRoutineRecord } from './routine-registry.js';
 import { evaluateAgentSkillBundleReadiness, evaluateAgentSkillReadiness, formatAgentSkillRequirement, type AgentSkillBundleRecord, type AgentSkillRecord } from './skill-registry.js';
 
-export interface AgentWorkspaceLocalLibraryItem {
+export interface AgentLocalLibraryItem {
   readonly id: string;
   readonly name: string;
   readonly description: string;
@@ -34,7 +34,7 @@ export interface AgentWorkspaceLocalLibraryItem {
   readonly temporalStatus?: 'active' | 'pending' | 'expired' | undefined; // memoryRecordTemporalStatus; pending/expired stay stored, just not prompt-injected
 }
 
-export function summarizePersonaItem(persona: AgentPersonaRecord, activePersonaId: string | null): AgentWorkspaceLocalLibraryItem {
+export function summarizePersonaItem(persona: AgentPersonaRecord, activePersonaId: string | null): AgentLocalLibraryItem {
   return {
     id: persona.id,
     name: persona.name,
@@ -47,7 +47,7 @@ export function summarizePersonaItem(persona: AgentPersonaRecord, activePersonaI
   };
 }
 
-export function summarizeSkillItem(skill: AgentSkillRecord): AgentWorkspaceLocalLibraryItem {
+export function summarizeSkillItem(skill: AgentSkillRecord): AgentLocalLibraryItem {
   const readiness = evaluateAgentSkillReadiness(skill);
   return {
     id: skill.id,
@@ -64,7 +64,7 @@ export function summarizeSkillItem(skill: AgentSkillRecord): AgentWorkspaceLocal
   };
 }
 
-export function summarizeSkillBundleItem(bundle: AgentSkillBundleRecord, skills: readonly AgentSkillRecord[]): AgentWorkspaceLocalLibraryItem {
+export function summarizeSkillBundleItem(bundle: AgentSkillBundleRecord, skills: readonly AgentSkillRecord[]): AgentLocalLibraryItem {
   const readiness = evaluateAgentSkillBundleReadiness(bundle, skills);
   const missing = [
     ...readiness.missingRequirements.map(formatAgentSkillRequirement),
@@ -85,7 +85,7 @@ export function summarizeSkillBundleItem(bundle: AgentSkillBundleRecord, skills:
   };
 }
 
-export function summarizeRoutineItem(routine: AgentRoutineRecord): AgentWorkspaceLocalLibraryItem {
+export function summarizeRoutineItem(routine: AgentRoutineRecord): AgentLocalLibraryItem {
   const readiness = evaluateAgentRoutineReadiness(routine);
   return {
     id: routine.id,
@@ -103,7 +103,7 @@ export function summarizeRoutineItem(routine: AgentRoutineRecord): AgentWorkspac
   };
 }
 
-export function summarizeMemoryItem(record: MemoryRecord): AgentWorkspaceLocalLibraryItem {
+export function summarizeMemoryItem(record: MemoryRecord): AgentLocalLibraryItem {
   const detail = record.detail?.trim();
   return {
     id: record.id,
@@ -123,7 +123,7 @@ export function summarizeMemoryItem(record: MemoryRecord): AgentWorkspaceLocalLi
   };
 }
 
-export function summarizeNoteItem(note: AgentNoteRecord): AgentWorkspaceLocalLibraryItem {
+export function summarizeNoteItem(note: AgentNoteRecord): AgentLocalLibraryItem {
   const preview = note.body.replace(/\s+/g, ' ').trim();
   const description = note.sourceUrl
     ? `${preview.slice(0, 160)}${preview.length > 160 ? '...' : ''} Origin URL ${note.sourceUrl}`

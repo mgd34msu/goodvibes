@@ -48,7 +48,6 @@ import { MediaProviderRegistry } from '@goodvibes/engine/platform/platform/media
 import { MultimodalService } from '@goodvibes/engine/platform/platform/multimodal';
 import { AgentManager } from '@goodvibes/engine/platform/platform/tools';
 import { AgentMessageBus } from '@goodvibes/engine/platform/platform/agents';
-import { createContractIntake, type ContractIntake } from '@goodvibes/engine/platform/platform/contract';
 import { type ApprovalDerivedHandlers } from '@goodvibes/engine/platform/platform/runtime/bootstrap';
 import { AgentOrchestrator } from '@goodvibes/engine/platform/platform/agents';
 import { ArchetypeLoader } from '@goodvibes/engine/platform/platform/agents';
@@ -56,7 +55,7 @@ import type { MemoryConsolidationRunReceipt } from '@goodvibes/engine/platform/p
 import { wireRuntimePower } from '@goodvibes/engine/platform/platform/power';
 import { gateConsolidationToLocalWriter } from './memory-consolidation-gate.ts';
 import { AgentDaemonReceiptFeed, createDaemonReceiptConsumption } from './daemon-receipts.ts';
-import { WorkspaceCheckpointManager, checkpointEligibilityRefusal, type CheckpointSessionResolver } from '@goodvibes/engine/platform/platform/workspace';
+import { WorkspaceCheckpointManager, checkpointEligibilityRefusal, projectIdentityOf, type CheckpointSessionResolver } from '@goodvibes/engine/platform/platform/workspace';
 import { ProcessManager } from '@goodvibes/engine/platform/platform/tools';
 import { ModeManager } from '@goodvibes/engine/platform/platform/state';
 import { FileUndoManager } from '@goodvibes/engine/platform/platform/state';
@@ -605,7 +604,6 @@ export interface RuntimeServices extends Omit<PlatformRuntimeServices,
   readonly agentManager: AgentManager;
   readonly agentMessageBus: AgentMessageBus;
   readonly agentOrchestrator: AgentOrchestrator;
-  readonly contractIntake: ContractIntake;
   readonly execPromptAnswerHandler: ApprovalDerivedHandlers['execPromptAnswerHandler'];
   readonly sandboxEscalationHandler: ApprovalDerivedHandlers['sandboxEscalationHandler'];
   readonly processManager: ProcessManager;
@@ -711,17 +709,19 @@ export function createRuntimeServices(options: RuntimeServicesOptions): RuntimeS
   // answer, and the folder stays undecided rather than recording a choice nobody made.
   const trustPromptRef: { requestTrustDecision: () => Promise<WorkspaceTrustLevel>; awaitingOwner?: boolean } = {
     requestTrustDecision: async () => {
+      // Trust is the project's: from a subfolder the question names the project it trusts.
+      const workspace = projectIdentityOf(workingDirectory);
       const decision = await permissionPromptRef.requestPermission({
         callId: `workspace-trust-${randomUUID().slice(0, 8)}`,
         tool: 'workspace-trust',
-        args: { workspace: workingDirectory },
+        args: { workspace },
         category: 'read',
         analysis: {
           classification: 'workspace-trust',
           riskLevel: 'high',
-          summary: `Trust the workspace ${workingDirectory}? Approving lets writes, commands and delegation run here and is remembered for this workspace.`,
-          reasons: [`${workingDirectory} has no trust decision recorded.`, 'Refusing leaves it undecided: reads keep working, and this request is refused.'],
-          target: workingDirectory,
+          summary: `Trust the workspace ${workspace}? Approving lets writes, commands and delegation run here and is remembered for this workspace.`,
+          reasons: [`${workspace} has no trust decision recorded.`, 'Refusing leaves it undecided: reads keep working, and this request is refused.'],
+          target: workspace,
           targetKind: 'path',
           blastRadius: 'local',
         },
@@ -851,7 +851,9 @@ export function createRuntimeServices(options: RuntimeServicesOptions): RuntimeS
       triggers: 'host',
       // Inbound continuations arrive over the wire dispatch below, not the register.
       continuationRunner: 'product',
-      // Work has one runner, the daemon's: the Agent resumes no contract of its own (its delegations are work there).
+      // Work has one runner, the daemon's: the Agent builds no contract runner and resumes no contract (its delegations
+      // are work there).
+      contracts: 'none',
       contractRecovery: 'product',
       taskGraphReaping: 'never',
       // The Agent's own profile tool reaches the daemon's owner-profile store.
@@ -910,13 +912,11 @@ export function createRuntimeServices(options: RuntimeServicesOptions): RuntimeS
         // The grants ledger and capture store are the daemon's; the phone tool reaches them over its verbs.
         const devicesClient: DevicesClient = createDevicesClient(daemonVerbs);
         // Work has one runner, the daemon's: a delegation that would have been a contract here is handed to it as a piece
-        // of work for this project (daemon-work-delegation.ts), and the Agent starts no contract of its own. Closed
-        // first, so the Agent's own shutdown never stops a work it was following.
-        base.agentManager.setContractRunner(null);
+        // of work for this project (daemon-work-delegation.ts). Closed first, so the Agent's own shutdown never stops a
+        // work it was following.
         const workDelegation = createDaemonWorkDelegation({ shellPaths, configManager, program: 'agent' });
         base.agentManager.setWorkDelegation(workDelegation);
         scope.registry.add('work delegation', () => workDelegation.close());
-        const contractIntake = createContractIntake({ runner: base.contractRunner, projectRoot: workingDirectory });
         // The approvals list: the daemon's record over `approvals.list`, unioned with
         // the asks this broker still holds, and the reason when the daemon cannot be
         // read. Push replaces the wait between re-reads, not the re-read.
@@ -1022,7 +1022,8 @@ export function createRuntimeServices(options: RuntimeServicesOptions): RuntimeS
         });
         scope.registry.add('fleet union poller', () => fleetUnion.stop());
         // MCP servers start when a tool needs one, never at boot (runtime/mcp-lazy-start.ts).
-        const lazyMcp = createLazyMcpRegistry(base.mcpRegistry, shellPaths);
+        // Their files are the project's (its root's `.goodvibes/mcp.json`), wherever in it the Agent was started.
+        const lazyMcp = createLazyMcpRegistry(base.mcpRegistry, { workingDirectory: projectIdentityOf(shellPaths.workingDirectory), homeDirectory: shellPaths.homeDirectory });
 
         // Explicit checkpoint creation through the gateway catalog composed over
         // this graph is gated the same way as automatic snapshots: an unregistered
@@ -1115,7 +1116,6 @@ export function createRuntimeServices(options: RuntimeServicesOptions): RuntimeS
           localReadSourceOwner,
           // OS-level terminal focus, fed from 'focus' tokens and read by the approval alerts.
           focusTracker: new FocusTracker(),
-          contractIntake,
           executionLedger: new AgentExecutionLedger(runtimeBus, undefined, { describeTool: (name) => describeTool(name) }),
           bindToolDefinitions: (describe: (name: string) => ToolDefinition | undefined): void => { describeTool = describe; },
           mcpRegistry: lazyMcp.registry,

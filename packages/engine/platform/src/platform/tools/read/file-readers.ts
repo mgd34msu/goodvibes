@@ -440,6 +440,8 @@ async function readNotebookFile(target: ReadTarget, context: ReadExecutionContex
     return createReadErrorResult(target, `Cannot read notebook: ${message}`);
   }
 
+  // What this reader has seen: a later edit or write of the notebook compares against it.
+  context.fileCache.update(target.resolvedPath, nbRaw, { tool: 'read' });
   const formatted = formatNotebook(nbRaw);
   const tokenEst = Math.ceil(nbByteSize / 4);
   indexReadFile(context, target.resolvedPath, tokenEst);

@@ -26,6 +26,15 @@ import { coreConfigDefaults } from './schema-domain-core.js';
 import { GATE_PRESETS, parsePermissionMode } from '../gate/presets.js';
 
 /**
+ * A managed lock as a carry reads it (ConfigManager `#lockedValue`): undefined when `key` is not locked; `{ value }`
+ * when it is and the value it holds is known (the locking program's own value, or the managed bundle's); null when it
+ * is locked and that value is not known. A carry never writes a locked key with anything but the value its lock holds:
+ * with that value known it writes that value, with it unknown it leaves the key as it is.
+ */
+export type LockedValue = (key: string) => { readonly value: unknown } | null | undefined;
+const NOT_LOCKED: LockedValue = () => undefined;
+
+/**
  * Settings keys a release from 3.0.0 to 3.4.2 declared that this release does
  * not, so a file can only hold them because an earlier release wrote them or
  * its owner set them then. Read from the `key:` rows of every release's
@@ -110,7 +119,7 @@ export const PROGRAM_SETTINGS_ROOTS: readonly string[] = ['tui', 'agent'];
  * default until 3.5.0, one default in the daemon's file from this release (a conversation still chooses its own).
  */
 export const DAEMON_KEYS_KEPT_FOR_ROLLBACK: readonly string[] = [
-  'behavior.budgetAlertUsd', 'sandbox.mcpIsolation', 'sandbox.enabled',
+  'behavior.budgetAlertUsd', 'sandbox.mcpIsolation', 'sandbox.enabled', 'storage.codeIndexEnabled',
   'provider.model', 'provider.reasoningEffort', 'provider.fallbackModels', 'provider.optimizerMode', 'provider.optimizerPinnedModel', 'permissions.mode',
 ];
 
@@ -134,7 +143,7 @@ export interface SettingsCarryForward {
  * file. Throws when the daemon's file cannot be read or written, before
  * `document` is changed.
  */
-export function carrySettingsForward(document: Record<string, unknown>, daemonTierPath: string | null): SettingsCarryForward {
+export function carrySettingsForward(document: Record<string, unknown>, daemonTierPath: string | null, locked: LockedValue = NOT_LOCKED): SettingsCarryForward {
   const merged = daemonTierPath === null ? [] : [...carryMergedLists(document, daemonTierPath), ...carryMergedRecords(document, daemonTierPath)];
   const daemonEntries = daemonTierPath === null ? [] : collectDaemonOwnedEntries(document)
     .filter(({ key }) => !MERGED_DAEMON_LISTS.includes(key) && !MERGED_DAEMON_RECORDS.includes(key));
@@ -146,6 +155,13 @@ export function carrySettingsForward(document: Record<string, unknown>, daemonTi
   if (daemonTierPath !== null && daemonEntries.length > 0) {
     const tier = readDaemonTierFile(daemonTierPath);
     for (const { key, value } of daemonEntries) {
+      // A key a program's folder locked: the value its lock holds is the one carried (and kept, if the daemon holds another).
+      const lock = locked(key);
+      if (lock) {
+        const now = readDotPath(tier, key);
+        if (!now.present || JSON.stringify(now.value) !== JSON.stringify(lock.value)) { persistDaemonKey(daemonTierPath, key, lock.value); (kept.has(key) ? copied : moved).push(key); }
+        continue;
+      }
       // A key kept for a rollback is copied once and then left alone: the daemon's value is the one in force.
       if (readDotPath(tier, key).present) { if (!kept.has(key)) superseded.push(key); }
       else { persistDaemonKey(daemonTierPath, key, value); (kept.has(key) ? copied : moved).push(key); }
@@ -249,13 +265,21 @@ function carryMergedRecords(document: Record<string, unknown>, daemonTierPath: s
  * upgrade: each kept key a program's file (`programFile`) holds and the daemon's file does not is copied into the
  * daemon's file, the program's file untouched. Returns the keys copied. Throws when a file cannot be read or written.
  */
-export function copyKeptProgramKeys(programFile: string, daemonTierPath: string): readonly string[] {
+export function copyKeptProgramKeys(programFile: string, daemonTierPath: string, locked: LockedValue = NOT_LOCKED): readonly string[] {
   if (!existsSync(programFile)) return [];
   const program = JSON.parse(readFileSync(programFile, 'utf-8')) as Record<string, unknown>;
   const tier = readDaemonTierFile(daemonTierPath);
   // The lists each program kept (MERGED_DAEMON_LISTS) are merged member by member, as a program's own start does.
   const copied: string[] = [...carryMergedLists(program, daemonTierPath), ...carryMergedRecords(program, daemonTierPath)];
   for (const key of DAEMON_KEYS_KEPT_FOR_ROLLBACK) {
+    // A key either program's folder locked: the value its lock holds is the one carried, whichever program is read first.
+    const lock = locked(key);
+    if (lock === null) continue;
+    if (lock) {
+      const now = readDotPath(readDaemonTierFile(daemonTierPath), key);
+      if (!now.present || JSON.stringify(now.value) !== JSON.stringify(lock.value)) { persistDaemonKey(daemonTierPath, key, lock.value); copied.push(key); }
+      continue;
+    }
     const held = readDotPath(program, key);
     if (!held.present || readDotPath(tier, key).present) continue;
     persistDaemonKey(daemonTierPath, key, held.value);
@@ -294,7 +318,7 @@ export interface StricterCarry {
  * was kept, so the owner is told once. Programs' files are never changed (a 3.5.0 binary after a rollback reads its
  * own). Throws when a file cannot be read or written.
  */
-export function carryStricterKeptValues(programFiles: Readonly<Record<string, string>>, daemonTierPath: string): readonly StricterCarry[] {
+export function carryStricterKeptValues(programFiles: Readonly<Record<string, string>>, daemonTierPath: string, locked: LockedValue = NOT_LOCKED): readonly StricterCarry[] {
   const markerPath = carriedListsPath(daemonTierPath);
   let carried: Record<string, unknown> = {};
   try { carried = JSON.parse(readFileSync(markerPath, 'utf8')) as Record<string, unknown>; } catch { carried = {}; }
@@ -314,11 +338,15 @@ export function carryStricterKeptValues(programFiles: Readonly<Record<string, st
     }
     const values = Object.values(held);
     if (!anySet) continue;
-    const strictest = values.reduce((best, value) => (strictness(value) > strictness(best) ? value : best));
+    // A locked key: the value its lock holds, or (that value not known) left as it is, carried once the lock is gone.
+    const lock = locked(key);
+    if (lock === null) continue;
+    const strictest = lock ? lock.value : values.reduce((best, value) => (strictness(value) > strictness(best) ? value : best));
     const tier = readDaemonTierFile(daemonTierPath);
     const current = readDotPath(tier, key);
     const fromAProgram = !current.present || values.some((value) => JSON.stringify(value) === JSON.stringify(current.value));
-    if (fromAProgram && (!current.present || strictness(strictest) > strictness(current.value))) persistDaemonKey(daemonTierPath, key, strictest);
+    if (lock && JSON.stringify(current.value) !== JSON.stringify(strictest)) persistDaemonKey(daemonTierPath, key, strictest);
+    else if (!lock && fromAProgram && (!current.present || strictness(strictest) > strictness(current.value))) persistDaemonKey(daemonTierPath, key, strictest);
     const differ = new Set(values.map((value) => JSON.stringify(value))).size > 1;
     if (differ && fromAProgram) told.push({ key, kept: strictest, held });
     finished.push(key);
@@ -328,6 +356,57 @@ export function carryStricterKeptValues(programFiles: Readonly<Record<string, st
     writeFileSync(markerPath, `${JSON.stringify({ ...carried, stricter: [...done, ...finished] }, null, 2)}\n`, { mode: 0o600 });
   }
   return told;
+}
+
+/** What carrying "Use the background daemon" (`daemon.enabled`) off forward did. */
+export interface DaemonOffCarry {
+  /** The programs (and `daemon`, the daemon's own file) whose file had it off. */
+  readonly offIn: readonly string[];
+  /** "Start the daemon at login" was turned off by the carry (false: it was set already and kept). */
+  readonly loginStartTurnedOff: boolean;
+}
+
+/**
+ * `daemon.enabled` ("Use the background daemon") was two things until 3.5.0: a program ran without the daemon, and the
+ * daemon did not start by itself. The first is gone (every program uses the daemon and starts it when it is not
+ * running); what stays true of a person's "off" is the second, which "Start the daemon at login" (`service.autostart`)
+ * says. So, once on this machine (recorded in `carried-lists.json` as `daemonOff`): when any program's file or the
+ * daemon's own has it off, "Start the daemon at login" is turned off in the daemon's file unless the person set it there
+ * already. The old key is left where it was, so a 3.5.0 program after a rollback reads it as before. Undefined when
+ * nothing was carried (nobody had it off, or it was carried before). Throws when a file cannot be read or written.
+ */
+export function carryDaemonOffToLoginStart(programFiles: Readonly<Record<string, string>>, daemonTierPath: string, locked: LockedValue = NOT_LOCKED): DaemonOffCarry | undefined {
+  const markerPath = carriedListsPath(daemonTierPath);
+  let carried: Record<string, unknown> = {};
+  try { carried = JSON.parse(readFileSync(markerPath, 'utf8')) as Record<string, unknown>; } catch { carried = {}; }
+  if (carried['daemonOff'] === true) return undefined;
+  const offIn: string[] = [];
+  for (const [program, file] of Object.entries(programFiles)) {
+    if (!existsSync(file)) continue;
+    if (readDotPath(JSON.parse(readFileSync(file, 'utf-8')) as Record<string, unknown>, 'daemon.enabled').value === false) offIn.push(program);
+  }
+  const tier = readDaemonTierFile(daemonTierPath);
+  if (readDotPath(tier, 'daemon.enabled').value === false) offIn.push('daemon');
+  let loginStartTurnedOff = false;
+  // A managed lock on "Start the daemon at login" keeps it as it is.
+  if (offIn.length > 0 && !readDotPath(tier, 'service.autostart').present && locked('service.autostart') === undefined) {
+    persistDaemonKey(daemonTierPath, 'service.autostart', false);
+    loginStartTurnedOff = true;
+  }
+  mkdirSync(dirname(markerPath), { recursive: true });
+  writeFileSync(markerPath, `${JSON.stringify({ ...carried, daemonOff: true }, null, 2)}\n`, { mode: 0o600 });
+  return offIn.length > 0 ? { offIn, loginStartTurnedOff } : undefined;
+}
+
+/** The one line the owner is told when "Use the background daemon" was off. */
+export function describeDaemonOffCarry(carry: DaemonOffCarry): string {
+  const where = (program: string): string => (program === 'tui' ? 'the terminal app' : program === 'agent' ? 'the Agent' : 'the daemon\'s settings');
+  const places = carry.offIn.map(where).join(' and ');
+  return `"Use the background daemon" was off in ${places}. Every program now uses the daemon and starts it when it is not running, so that setting is gone. `
+    + (carry.loginStartTurnedOff
+      ? '"Start the daemon at login" is off instead, so the daemon does not start by itself when you sign in; System, Settings changes it. '
+      : '"Start the daemon at login" keeps the value you gave it. ')
+    + 'A 3.5.0 program, after going back to it, still reads its old setting.';
 }
 
 /** The one line the owner is told when the programs held different values of a protection. */
@@ -392,7 +471,7 @@ function modeLooseness(value: unknown): number {
  * reads its own). Returns what each program held and what was kept when the programs held different values, so the
  * owner is told once; undefined otherwise. Throws when a file cannot be read or written.
  */
-export function carrySharedDefaults(programFiles: Readonly<Record<string, string>>, daemonTierPath: string): SharedDefaultsCarry | undefined {
+export function carrySharedDefaults(programFiles: Readonly<Record<string, string>>, daemonTierPath: string, locked: LockedValue = NOT_LOCKED): SharedDefaultsCarry | undefined {
   const markerPath = carriedListsPath(daemonTierPath);
   let carried: Record<string, unknown> = {};
   try { carried = JSON.parse(readFileSync(markerPath, 'utf8')) as Record<string, unknown>; } catch { carried = {}; }
@@ -426,7 +505,11 @@ export function carrySharedDefaults(programFiles: Readonly<Record<string, string
   const tier = readDaemonTierFile(daemonTierPath);
   for (const key of SHARED_DEFAULT_KEYS) {
     const current = readDotPath(tier, key);
-    const fromAProgram = !current.present || programs.some((program) => JSON.stringify(held[program]![key]) === JSON.stringify(current.value));
+    // A locked key: the value its lock holds, or (that value not known) left as it is.
+    const lock = locked(key);
+    if (lock === null) continue;
+    if (lock) kept[key] = lock.value;
+    const fromAProgram = lock !== undefined || !current.present || programs.some((program) => JSON.stringify(held[program]![key]) === JSON.stringify(current.value));
     if (!fromAProgram) continue;
     const wanted = kept[key];
     if (current.present && JSON.stringify(current.value) === JSON.stringify(wanted)) continue;

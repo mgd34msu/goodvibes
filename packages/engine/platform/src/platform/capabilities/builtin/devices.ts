@@ -150,6 +150,8 @@ export const DEVICES_MIGRATE_SHARED: CapabilityDefinition<unknown> = {
   touches: 'credential', lasts: 'kept', risk: 'none', undoneBy: 'revoke',
   ownerOnly: { reason: 'it makes a token that gives a device access', instead: 'The Devices and network place lists what is paired.' },
   reveals: { label: 'One-time token', note: 'Sign the device in with it now: it is shown this once and cannot be read again. Then retire the old shared token on the Paired tab.' },
+  // The token it reveals signs a device in.
+  resultSecret: 'a new device token that signs a device in to this daemon',
   example: { name: 'Old tablet' },
   async run(values, _services, caller) {
     if (!caller.method) throw new CapabilityRefusal('A token is made by the daemon\'s own method, which this run cannot reach.', 'Run it from the Devices and network place or goodvibes do.');

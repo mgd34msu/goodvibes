@@ -51,7 +51,8 @@ import type { GatewayMethodCatalog } from '../method-catalog.js';
 import type { GatewayMethodHandler, GatewayMethodInvocation } from '../method-catalog-shared.js';
 import type { PermissionAttribution, PermissionPromptRequest } from '../../permissions/prompt.js';
 import { approvalQuestion } from '../../permissions/ask-presentation.js';
-import { LOCAL_OWNER_PRINCIPAL, pairingTokenIdOfPrincipal } from '../../pairing/principal-ids.js';
+import { callerKey, isLocalOwnerCaller, pairingTokenIdOfCaller } from '../../pairing/principal-ids.js';
+import { registrantMayName } from '../session-broker-sessions.js';
 import type { RequestSharedApprovalInput, SharedApprovalRecord } from '../approval-broker.js';
 import type { RaisedApproval } from '../approval-broker-raise.js';
 import { GatewayVerbError } from './gateway-verb-error.js';
@@ -61,6 +62,7 @@ import { readApproval } from '../approval-lifecycle.js';
 import { approvalViewerOfActor } from '../approval-actions.js';
 import { systemActor } from '@goodvibes/engine/daemon-api/http-policy';
 import { admitEffects } from '../../security/effect-authority.js';
+import { ownersAgentProgram, ownersProgramCaller } from '../../daemon/method-owner-decision.js';
 import {
   PERMISSION_CATEGORIES,
   PERMISSION_RISK_LEVELS,
@@ -177,13 +179,16 @@ export function wireAskerWords(context: GatewayMethodInvocation['context'], devi
   if (!principalId) return 'a caller the daemon could not name';
   // Told apart by the kind of credential first, never by the name alone: a sign-in user's name is its principal id.
   if (context.principalKind === 'user' || context.credentialKind === 'user-session') return `${principalId}, signed in`;
-  if (context.credentialKind === 'agent') return 'the Agent on this machine';
-  const pairingId = pairingTokenIdOfPrincipal(principalId);
+  if (context.credentialKind === 'agent') {
+    return ownersAgentProgram({ actor: context.actor, credentialKind: 'agent', registration: context.call?.registration, daemonHosted: context.call?.daemonHosted === true })
+      ? 'the Agent on this machine' : 'a program holding the Agent\'s credential that is not the Agent itself';
+  }
+  const pairingId = pairingTokenIdOfCaller(context);
   if (pairingId !== undefined) {
     const name = deviceName?.(pairingId);
     return name ? `the paired device "${name}"` : `a paired device (${pairingId})`;
   }
-  if (principalId === LOCAL_OWNER_PRINCIPAL) return context.credentialKind === 'local' ? 'a program on this machine using your operator token' : 'a program using your operator token';
+  if (isLocalOwnerCaller(context)) return context.credentialKind === 'local' ? 'a program on this machine using your operator token' : 'a program using your operator token';
   return principalId;
 }
 
@@ -205,7 +210,18 @@ export function buildRaiseMetadata(
   // daemon itself reads on an approval (who raised it, which capability call it holds and who that call runs as, where
   // it is delivered, when it started, what came of it, its settled words) is dropped, whatever the caller sent.
   const base: Record<string, unknown> = {};
-  if (isRecord(supplied)) for (const key of RAISE_DISPLAY_METADATA_KEYS) if (Object.hasOwn(supplied, key)) base[key] = supplied[key];
+  // Display facts only, and only from the owner's own programs by who they are (method-owner-decision.ts
+  // `ownersProgramCaller`: his registered terminal program, his Agent program, a turn the daemon hosts; never the operator
+  // token or the Agent's credential alone): its background agent's id (the fleet's "blocked on you") and the decision
+  // model's verdict, each a short text.
+  const context = invocation.context;
+  if (isRecord(supplied) && ownersProgramCaller({ actor: context.actor, credentialKind: context.credentialKind ?? undefined,
+    registration: context.call?.registration, daemonHosted: context.call?.daemonHosted === true })) {
+    for (const [key, valid] of Object.entries(RAISE_DISPLAY_METADATA_KEYS)) {
+      const value = supplied[key];
+      if (Object.hasOwn(supplied, key) && valid(value)) base[key] = value;
+    }
+  }
   return {
     ...base,
     raisedVia: 'approvals.raise',
@@ -216,12 +232,18 @@ export function buildRaiseMetadata(
 }
 
 /**
- * The metadata a raiser may put on its ask: none. Every key a caller could send is read somewhere as wording or
- * identity (`judgmentVerdict` is drawn as Jev's verdict on the web card; `agentId`/`agentTemplate` list the ask under
- * a background agent in the fleet view, which marks that agent blocked on the owner), or is read by the daemon itself
- * (see buildRaiseMetadata), so a wire ask carries only what the daemon records about its raiser.
+ * The metadata a raiser may put on its ask, and only the owner's own programs (credential kind `local`, the terminal
+ * app's operator token from loopback, or `agent`, the Agent's own credential): the keys a surface shows for it, never read by the daemon as authority, wording or identity. `agentId` and
+ * `agentTemplate` list the ask under that program's background agent in the fleet view ("blocked on you");
+ * `judgmentVerdict` is drawn as the decision model's verdict on the web card. Each must be a short text (the verdict
+ * one of its three words). Any other key, or any key from another caller, is dropped (buildRaiseMetadata).
  */
-const RAISE_DISPLAY_METADATA_KEYS: readonly string[] = [];
+const SHORT_TEXT = (value: unknown): boolean => typeof value === 'string' && value.length > 0 && value.length <= 200 && !/[\r\n]/.test(value);
+const RAISE_DISPLAY_METADATA_KEYS: Readonly<Record<string, (value: unknown) => boolean>> = {
+  agentId: SHORT_TEXT,
+  agentTemplate: SHORT_TEXT,
+  judgmentVerdict: (value) => value === 'looks-safe' || value === 'flags-risk' || value === 'uncertain',
+};
 
 /** Wait for a decision for at most `waitMs`; resolves false when it runs out. */
 async function awaitDecision(raised: RaisedApproval, waitMs: number, signal?: AbortSignal): Promise<boolean> {
@@ -256,11 +278,6 @@ export interface ApprovalRaiseNames {
   readonly sessionRegistrant?: ((sessionId: string) => string | undefined) | undefined;
 }
 
-/** A principal as a session's registrant record names it: this machine's own credential is the operator token's. */
-function registrantKey(principal: string | undefined): string {
-  return principal === undefined || principal === 'local' ? LOCAL_OWNER_PRINCIPAL : principal;
-}
-
 export function createApprovalRaiseHandler(broker: ApprovalRaiseService, names: ApprovalRaiseNames = {}): GatewayMethodHandler {
   return async (invocation) => {
     const params = readInvocationParams(invocation);
@@ -278,11 +295,18 @@ export function createApprovalRaiseHandler(broker: ApprovalRaiseService, names: 
     const named = optionalString(params['sessionId'], 'sessionId');
     optionalString(params['routeId'], 'routeId');
     const registrant = named !== undefined ? names.sessionRegistrant?.(named) : undefined;
-    const sessionId = named !== undefined && registrant !== undefined && registrantKey(registrant) === registrantKey(invocation.context.principalId)
+    // Compared as kept caller keys (pairing/principal-ids.ts `callerKey`): by kind first, so a sign-in user named
+    // `shared-token` never matches a session this machine's programs registered.
+    // The registering program too (its registration): holders of one operator token are told apart by it.
+    const sessionId = named !== undefined && registrantMayName(registrant, { key: callerKey(invocation.context), registration: invocation.context.call?.registration })
       && invocation.context.credentialKind !== 'user-session' ? named : undefined;
 
+    // A registered program's question is held by its process (bound by the daemon with the registration, never sent):
+    // when that process is no longer running its hold is given up, so a program that died leaves no question open.
+    const holdProcess = invocation.context.call?.registration !== undefined ? invocation.context.call.process : undefined;
     const raised = await broker.raiseApproval({
       request,
+      ...(holdProcess === undefined ? {} : { holdProcess }),
       ...(sessionId === undefined ? {} : { sessionId }),
       ...(timeoutMs === undefined || timeoutMs === 0 ? {} : { timeoutMs }),
       metadata: buildRaiseMetadata(invocation, params['metadata']),

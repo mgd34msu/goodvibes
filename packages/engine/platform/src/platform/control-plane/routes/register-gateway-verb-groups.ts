@@ -334,7 +334,8 @@ export interface GatewayVerbGroupDeps extends FleetCheckpointsSearchGatewayDeps,
   readonly ciAutonomousHost?: (() => import('../../permissions/external-request.js').ExternalPermissionHost | undefined) | undefined;
   /** The host a natively admitted daemon method (the owner profile, occasions) is decided by: no folder trust (runtime-graph.ts). */
   readonly nativeMutationHost?: (() => import('../../permissions/external-request.js').ExternalPermissionHost | undefined) | undefined;
-  readonly onCiAutoWatch?: ((observer: (toolName: string, args: Record<string, unknown>, success: boolean) => void) => void) | undefined;
+  /** The tap a CI watch is made from: each tool a turn ran, with that turn's project (none for the host's own folder). */
+  readonly onCiAutoWatch?: ((observer: (toolName: string, args: Record<string, unknown>, success: boolean, turn: { readonly project?: string | undefined }) => void) => void) | undefined;
   /**
    * Optional: a daemon-side conversation store port for the conversation half of
    * the unified rewind (rewind.plan/apply with scope 'conversation' or 'both'),

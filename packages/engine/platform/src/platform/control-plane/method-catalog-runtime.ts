@@ -122,6 +122,8 @@ const MEMORY_SEARCH_FILTER_FIELDS = {
   provenanceKinds: arraySchema(MEMORY_PROVENANCE_KIND_SCHEMA),
   staleOnly: BOOLEAN_SCHEMA,
   limit: NUMBER_SCHEMA,
+  // Every project's records at once: the owner's own choice (his place's "Every project"), refused from anyone else.
+  everyProject: BOOLEAN_SCHEMA,
 } as const;
 
 export const builtinGatewayRuntimeMethodDescriptors: readonly GatewayMethodDescriptor[] = [
@@ -178,6 +180,8 @@ export const builtinGatewayRuntimeMethodDescriptors: readonly GatewayMethodDescr
     category: 'mcp',
     http: { method: 'POST', path: '/api/mcp/config/servers' },
     events: [runtimeEventId('mcp')],
+    // The folders the tool server's process may work in: each a project the caller may name (control-plane dispatch).
+    workFolders: ['server.allowedPaths'],
     inputSchema: bodyEnvelopeSchema({
       scope: MCP_SCOPE_SCHEMA,
       server: MCP_SERVER_CONFIG_SCHEMA,
@@ -327,6 +331,8 @@ export const builtinGatewayRuntimeMethodDescriptors: readonly GatewayMethodDescr
     description: 'Register or replace an execution backend under peerId so remote.peers.invoke runs commands on it. Credentials are goodvibes://secrets/ references only; an azure cloud-terminal credential is a JSON object {"clientId", "tenantId", "certificate"} (service principal application id, tenant id, and a PEM holding its certificate and private key), and a stored one of another shape is refused. A value docker or a cloud CLI would read as an option (starting with "-") and an id a paired peer holds are refused.',
     category: 'remote',
     http: { method: 'POST', path: '/api/remote/backends' },
+    // A local-process runner runs its commands in this folder: a project the caller may name (control-plane dispatch).
+    workFolders: ['backendConfig.cwd'],
     inputSchema: REMOTE_BACKEND_REGISTER_INPUT_SCHEMA,
     outputSchema: REMOTE_BACKEND_OUTPUT_SCHEMA,
     errorCodes: [REMOTE_BACKEND_ID_TAKEN],
@@ -460,6 +466,8 @@ export const builtinGatewayRuntimeMethodDescriptors: readonly GatewayMethodDescr
     category: 'worktrees',
     effects: ['worktrees.read'],
     http: { method: 'GET', path: '/api/worktrees' },
+    // The project whose worktrees are read: one the caller may name (control-plane dispatch, body or query).
+    workFolders: ['project'],
     inputSchema: objectSchema({ project: STRING_SCHEMA }, []),
     outputSchema: WORKTREE_SNAPSHOT_SCHEMA,
   }),
@@ -476,6 +484,8 @@ export const builtinGatewayRuntimeMethodDescriptors: readonly GatewayMethodDescr
     category: 'worktrees',
     effects: ['worktrees.write'],
     transport: ['ws'],
+    // Setup commands run in this worktree of this project: each a folder the caller may name.
+    workFolders: ['project', 'path'],
     inputSchema: WORKTREE_SETUP_RUN_INPUT_SCHEMA,
     outputSchema: WORKTREE_SETUP_RUN_OUTPUT_SCHEMA,
   }),
@@ -491,6 +501,8 @@ export const builtinGatewayRuntimeMethodDescriptors: readonly GatewayMethodDescr
     effects: ['worktrees.write'],
     dangerous: true,
     transport: ['ws'],
+    // This worktree of this project is committed and removed: each a folder the caller may name.
+    workFolders: ['project', 'path'],
     inputSchema: WORKTREE_DISCARD_INPUT_SCHEMA,
     outputSchema: WORKTREE_DISCARD_OUTPUT_SCHEMA,
   }),
@@ -643,6 +655,7 @@ export const builtinGatewayRuntimeMethodDescriptors: readonly GatewayMethodDescr
       staleOnly: BOOLEAN_SCHEMA,
       limit: NUMBER_SCHEMA,
       recall: BOOLEAN_SCHEMA,
+      everyProject: BOOLEAN_SCHEMA,
     }),
     outputSchema: MEMORY_RECORD_SEARCH_OUTPUT_SCHEMA,
   }),
@@ -687,7 +700,7 @@ export const builtinGatewayRuntimeMethodDescriptors: readonly GatewayMethodDescr
   methodDescriptor({
     id: 'memory.records.list',
     title: 'List Memory Records',
-    description: 'Bulk read from the canonical store: a literal (non-semantic) search returning the matching records as a plain array. An empty filter returns every record (getAll). This is the read a client surface uses instead of opening the store file for its browse/list and knowledge-injection paths.',
+    description: 'Bulk read from the canonical store: a literal (non-semantic) search returning the matching records as a plain array. A call that names a project (its call context, or project in the filter) reads that project\'s records and the ones that belong to no project; a call naming none reads only the records that belong to no project; everyProject (the owner himself only, his place\'s "Every project") reads every record. This is the read a client surface uses instead of opening the store file for its browse/list and knowledge-injection paths.',
     category: 'memory',
     effects: ['memory.read'],
     http: { method: 'POST', path: '/api/memory/records/list' },
@@ -742,6 +755,7 @@ export const builtinGatewayRuntimeMethodDescriptors: readonly GatewayMethodDescr
     category: 'memory',
     effects: ['memory.administer'],
     http: { method: 'POST', path: '/api/memory/records/import' },
+    notWorkFolders: { 'bundle.records[].project': 'a field of each record imported (the project it was about); nothing works in it' },
     inputSchema: bodyEnvelopeSchema({ bundle: MEMORY_BUNDLE_SCHEMA }, ['bundle']),
     outputSchema: entityOutputSchema('result', MEMORY_IMPORT_RESULT_SCHEMA),
   }),

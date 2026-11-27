@@ -216,6 +216,25 @@ export function branchAlreadyPublished(root: string, branch: string, inputCommit
   return git(root, ['merge-base', '--is-ancestor', tip.out, 'HEAD']).ok;
 }
 
+/**
+ * After a finished work was published: where it landed, as the end of its done line. A branch whose commits are all in
+ * the project's own branch (its tip an ancestor of HEAD) has nothing left of its own and is removed (its worktree is
+ * gone by now); a branch whose commits are not there (the work was applied as uncommitted changes) is kept and named.
+ */
+export function settlePublishedBranch(root: string, branch: string, contractId: string, published = true): string {
+  const head = git(root, ['rev-parse', '--abbrev-ref', 'HEAD']);
+  const here = head.ok && head.out && head.out !== 'HEAD' ? head.out : 'the project\'s current branch';
+  // Where it landed is said only when something was published now; a work that changed nothing landed nowhere.
+  const landed = published ? `it is in ${here}; ` : '';
+  const tip = git(root, ['rev-parse', '--verify', '--quiet', `${branch}^{commit}`]);
+  if (!tip.ok) return published ? `it is in ${here}` : 'it has no branch of its own left';
+  if (!git(root, ['merge-base', '--is-ancestor', tip.out, 'HEAD']).ok) return `its own branch ${branch} is kept, as its commits are not in ${here}`;
+  const removed = git(root, ['branch', '-d', branch]);
+  if (removed.ok) return `${landed}its own branch was removed`;
+  logger.warn('contract runner: a published work\'s branch was not removed', { contractId, branch, error: removed.err });
+  return `${landed}its own branch ${branch} could not be removed`;
+}
+
 /** The commit message: the goal, the criteria met, gates passed, the units, and what was excluded. */
 export function buildContractCommitMessage(contract: Contract): string {
   const firstLine = contract.goal.replace(/\s+/g, ' ').trim();
@@ -393,7 +412,7 @@ export function createCompletion(context: StepContext, correction: Pick<Correcti
     const scope = gateScope(contract);
     const source = input.scope === 'deliverable' ? captureGateInput(tree, undefined, scope) : undefined;
     if (input.scope === 'deliverable') acceptedSources.delete(run);
-    const gates = await runContractGates({ configManager: context.configManager, cwd: tree, runtimeBus: context.runtimeBus, sessionId: contract.sessionId, contractId: contract.id, targetId: input.targetId, scope,
+    const gates = await runContractGates({ configManager: context.configManager, cwd: tree, runtimeBus: context.runtimeBus, sessionId: contract.sessionId, contractId: contract.id, targetId: input.targetId, scope, project: contract.projectRoot,
       changedPaths: touchedPathsOf(contract, input.scope === 'group' ? input.unitIds : undefined), signal: run.abort.signal });
     for (const unit of contract.units.filter(unit => input.unitIds.has(unit.id))) {
       const preservation = verifyPrivateReceiptPreservation(contract, unit, tree);
@@ -500,7 +519,7 @@ export function createCompletion(context: StepContext, correction: Pick<Correcti
     preserveDeclaredReadReceipts(contract, context.readOwnerEvidence?.(contract, ''));
     const paths = new Set(contract.units.filter((unit) => input.unitIds.has(unit.id)).flatMap((unit) => unit.touchedPaths));
     const changes = (await collectChanges({ baseline: input.baseline }, { cwd: tree, writtenPaths: writtenPathsOf(run, input.unitIds) })).filter((change) => paths.has(change.path));
-    const gates = await runContractGates({ configManager: context.configManager, cwd: tree, runtimeBus: context.runtimeBus, sessionId: contract.sessionId, contractId: contract.id, targetId: input.targetId, scope,
+    const gates = await runContractGates({ configManager: context.configManager, cwd: tree, runtimeBus: context.runtimeBus, sessionId: contract.sessionId, contractId: contract.id, targetId: input.targetId, scope, project: contract.projectRoot,
       changedPaths: touchedPathsOf(contract, input.scope === 'group' ? input.unitIds : undefined), signal: run.abort.signal });
     for (const unit of contract.units.filter(unit => input.unitIds.has(unit.id))) {
       const preservation = verifyPrivateReceiptPreservation(contract, unit, tree);
@@ -1230,7 +1249,7 @@ export function createCompletion(context: StepContext, correction: Pick<Correcti
       if (workingTreeIdentity(tree) !== record.tree) return false;
       const scope = gateScope(contract);
       const source = captureGateInput(tree, undefined, scope);
-      const gates = await runContractGates({ configManager: context.configManager, cwd: tree, runtimeBus: context.runtimeBus, sessionId: contract.sessionId, contractId: contract.id, targetId: contract.id, scope,
+      const gates = await runContractGates({ configManager: context.configManager, cwd: tree, runtimeBus: context.runtimeBus, sessionId: contract.sessionId, contractId: contract.id, targetId: contract.id, scope, project: contract.projectRoot,
         changedPaths: touchedPathsOf(contract), signal: run.abort.signal });
       if (run.terminal) return true;
       if (failedGates(gates).length > 0 || unverifiedGates(gates).length > 0) return false;
@@ -1465,13 +1484,15 @@ export function createCompletion(context: StepContext, correction: Pick<Correcti
       if (contract.isolation === 'worktree' && contract.branch !== undefined && contract.worktreePath !== undefined) {
         const outcome = await commitWorktree(run, commitOn);
         if (outcome.status === 'committed' || outcome.status === 'applied' || outcome.status === 'skipped') {
-          // The branch's work reached the project's tree: the contract worktree goes; the branch stays as the record of the work.
+          // The branch's work reached the project's tree: the contract worktree goes.
           await new IsolatedWorktree(contract.projectRoot, contract.worktreePath, contract.branch, contract.baseBranch ?? 'main').evict()
             .then(({ keptIgnoredDir, droppedIgnored }) => {
               if (keptIgnoredDir) logger.info('contract runner: ignored files in the contract worktree were kept outside the repository history', { contractId: contract.id, keptIn: keptIgnoredDir });
               if (droppedIgnored.length > 0) logger.warn('contract runner: ignored files in the contract worktree were too large to keep and were removed with it', { contractId: contract.id, dropped: droppedIgnored });
             })
             .catch((error: unknown) => logger.warn('contract runner: the contract worktree was not removed', { contractId: contract.id, error: summarizeError(error) }));
+          // Its branch goes once its commits are in the project's own branch; otherwise it is kept, and the line says which.
+          return { ...outcome, note: `${outcome.note}; ${settlePublishedBranch(contract.projectRoot, contract.branch, contract.id, outcome.status !== 'skipped')}` };
         }
         return outcome;
       }

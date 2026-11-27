@@ -67,7 +67,7 @@ try {
     '--ro-bind', '/usr', '/usr', '--ro-bind', '/lib', '/lib', ...(process.arch === 'arm64' ? [] : ['--ro-bind', '/lib64', '/lib64']),
     '--proc', '/proc', '--dev', '/dev', '--bind', root, root, '--chdir', work, '--'];
   const env = { PATH: '/usr/bin:/bin', HOME: home, TMPDIR: join(root, 'tmp'), XDG_CONFIG_HOME: join(root, 'xdg'),
-    GOODVIBES_HOME: tree, GOODVIBES_DAEMON_HOME: daemon, GOODVIBES_WORKING_DIR: work, NO_COLOR: '1', GOODVIBES_SKIP_WAKE_MODEL_DOWNLOAD: '1' };
+    GOODVIBES_HOME: tree, GOODVIBES_DAEMON_HOME: daemon, NO_COLOR: '1', GOODVIBES_SKIP_WAKE_MODEL_DOWNLOAD: '1' };
   const probe = spawnSync('bwrap', [...boundary, '/usr/bin/test', '!', '-e', product], { env, encoding: 'utf8', timeout: 10_000 });
   assert.ifError(probe.error); assert.equal(probe.status, 0, `Filesystem containment unavailable: ${probe.stderr}`);
   const baselineProbe = spawnSync('bwrap', [...boundary, '/usr/bin/test', '!', '-e', baselineRoot], { env, encoding: 'utf8', timeout: 10_000 });
@@ -211,7 +211,7 @@ try {
   // exercising the daemon's shutdown handler.
   const host = spawn('bwrap', [...boundary.slice(0, -1), '--as-pid-1', '--json-status-fd', '3', '--', binary, 'serve', '--hostname', '127.0.0.1', '--port', String(servePort)], {
     env: { ...env, ...smokeJudgmentEnv, HOME: serveHome, GOODVIBES_HOME: serveTree, GOODVIBES_DAEMON_HOME: serveDaemon,
-      GOODVIBES_WORKING_DIR: serveWork, GOODVIBES_DAEMON_TOKEN: 'synthetic-native-inbox-token' },
+      GOODVIBES_DAEMON_TOKEN: 'synthetic-native-inbox-token' },
     stdio: ['ignore', 'pipe', 'pipe', 'pipe'],
   });
   let childPid; let statusBuffer = '';

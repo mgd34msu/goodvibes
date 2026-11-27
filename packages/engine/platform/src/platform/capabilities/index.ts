@@ -13,8 +13,12 @@ export {
   type CapabilityEntry, type CapabilityEntryHome, type CatalogActionSource, type CatalogCommandSource,
 } from './catalog.js';
 export { checkCapabilityInputs, type CapabilityInputCheck } from './validate.js';
-export { pathInputsRefusal } from './path-inputs.js';
-export { capabilityOutcomeText, fillSentence, hiddenSecret, lastsWords, shownValues } from './outcome.js';
+export { COMMAND_LINE_CLIENT_KIND, commandLineHoldReason } from './command-line-hold.js';
+export { callerPathOf, fileWorkRefusal, pathInputsRefusal, readCallerJson, runHoldingPaths, unreadableFile, type CallerPathOptions } from './path-inputs.js';
+export { CHILD_HELD_FD, copyForProgram, heldForChild, heldPath, holdCallerPath, isHeldPath, readHeldFile, readProjectFile, shownPath, writeHeldFile, writeHeldFiles, type HeldWrite, type ProjectFileReading } from './held-paths.js';
+export { contentAt, MAX_CARRIED_BYTES, PLACE_PATH_CAPABILITIES, packFolder, placeContent, receiveCarried, sameContent, unpackFolder, type CarriedContent, type CarriedRun, type FolderArchive,
+  CARRIED_UPLOAD_PURPOSE, CARRIED_UPLOAD_RETENTION_MS, uploadCarriedParts, type CarriedParts } from './carried-files.js';
+export { capabilityOutcomeText, choiceLabelInSentence, fillSentence, fixedChoiceLabels, hiddenSecret, lastsWords, shownValues } from './outcome.js';
 export { methodBodyOf, operatorInputFromValues, type CapabilityMethod } from './operator-input.js';
 export {
   capabilityGroupSelection, findCapabilities, foundCapability, readCapabilityGroup,

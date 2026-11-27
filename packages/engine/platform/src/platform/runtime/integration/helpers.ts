@@ -32,6 +32,14 @@ import { getSecuritySettingsReport, type SecuritySettingReport } from '../securi
 import { readIntelligenceSnapshot } from '../ui-read-models-observability-system.js';
 import { effectivePermissionMode } from '../../gate/presets.js';
 import { describePermissionModeInForce } from '../../permissions/decision-model-readiness.js';
+import { currentRecordReach, keepReachable, keepReachableNaming } from '@goodvibes/engine/daemon-api';
+
+/** The records a route binding names, by kind (its session, its schedule, its run). */
+const BINDING_RECORDS: readonly (readonly [string, (binding: { readonly sessionId?: string | undefined; readonly jobId?: string | undefined; readonly runId?: string | undefined }) => string | undefined])[] = [
+  ['session', (binding) => binding.sessionId],
+  ['schedule', (binding) => binding.jobId],
+  ['schedule-run', (binding) => binding.runId],
+];
 
 /**
  * The HTTP routes the daemon serves, read from the method catalog that serves
@@ -203,12 +211,21 @@ export class IntegrationHelperService {
   /** `limit` keeps the newest tasks only, so a long-lived daemon does not send its whole history; the totals stay whole. */
   getTaskSnapshot(limit?: number): Record<string, unknown> {
     const state = this.context.runtimeStore.getState();
-    const all = [...state.tasks.tasks.values()];
+    // A caller that is not the owner himself is listed and counted only the tasks it may reach (control-plane/caller-reach.ts),
+    // before the newest `limit` are cut: the counts say no more than the list does.
+    const reachable = currentRecordReach() !== undefined;
+    const all = [...keepReachable([...state.tasks.tasks.values()], 'task', (task) => task.id)];
+    const counted = (status: string): number => all.filter((task) => task.status === status).length;
     return {
-      queued: state.tasks.queuedIds.length,
-      running: state.tasks.runningIds.length,
-      blocked: state.tasks.blockedIds.length,
-      totals: {
+      queued: reachable ? counted('queued') : state.tasks.queuedIds.length,
+      running: reachable ? counted('running') : state.tasks.runningIds.length,
+      blocked: reachable ? counted('blocked') : state.tasks.blockedIds.length,
+      totals: reachable ? {
+        created: all.length,
+        completed: counted('completed'),
+        failed: counted('failed'),
+        cancelled: counted('cancelled'),
+      } : {
         created: state.tasks.totalCreated,
         completed: state.tasks.totalCompleted,
         failed: state.tasks.totalFailed,
@@ -271,11 +288,16 @@ export class IntegrationHelperService {
 
   getRouteSnapshot(): Record<string, unknown> {
     const state = this.context.runtimeStore.getState();
+    // A binding is of the session, schedule and run it names: a caller that is not the owner himself is shown and
+    // counted only those it may reach every one of (control-plane/caller-reach.ts).
+    const kept = keepReachableNaming([...state.routes.bindings.values()], BINDING_RECORDS);
+    const counted = currentRecordReach() !== undefined;
+    const keptIds = new Set(kept.map((binding) => binding.id));
     return {
-      totalBindings: state.routes.bindingIds.length,
-      activeBindings: state.routes.activeBindingIds.length,
-      recentBindings: state.routes.recentBindingIds.length,
-      bindings: [...state.routes.bindings.values()].map((binding) => ({
+      totalBindings: counted ? kept.length : state.routes.bindingIds.length,
+      activeBindings: counted ? state.routes.activeBindingIds.filter((id) => keptIds.has(id)).length : state.routes.activeBindingIds.length,
+      recentBindings: counted ? state.routes.recentBindingIds.filter((id) => keptIds.has(id)).length : state.routes.recentBindingIds.length,
+      bindings: kept.map((binding) => ({
         id: binding.id,
         kind: binding.kind,
         surfaceKind: binding.surfaceKind,
@@ -301,7 +323,8 @@ export class IntegrationHelperService {
     return {
       // The gate reports a request only after its decision, so the store flag
       // never reads true while a prompt is open; the broker holds it until decided.
-      awaitingDecision: countUndecidedApprovals(this.context.approvalBroker.listApprovals(Number.MAX_SAFE_INTEGER)) > 0,
+      // Of the questions the caller may reach (control-plane/caller-reach.ts): another project's waiting ask is not said.
+      awaitingDecision: countUndecidedApprovals([...keepReachable(this.context.approvalBroker.listApprovals(Number.MAX_SAFE_INTEGER), 'approval', (record) => record.id)]) > 0,
       // The mode in force, read the way the gate reads it (jev-decides is ask-me while no decision model works).
       mode: this.context.configManager ? describePermissionModeInForce(this.context.configManager).mode : effectivePermissionMode(undefined),
       lastDecision: state.permissions.lastDecision,
@@ -315,9 +338,12 @@ export class IntegrationHelperService {
 
   /** The newest sessions; `readable` keeps only those the caller may read (a hosted one: its owners and admins). */
   getSessionBrokerSnapshot(readable?: (session: { readonly id: string; readonly kind: string }) => boolean): Record<string, unknown> {
-    const listed = this.context.sessionBroker.listSessions(50);
-    const sessions = readable ? listed.filter((session) => readable(session)) : listed;
-    const unreadable = this.context.sessionBroker.unreadableEntries();
+    // A caller that is not the owner himself: only the sessions it may reach and read, before the newest 50 are cut
+    // (control-plane/caller-reach.ts); the entries this build could not read are the owner's to repair.
+    const reachable = currentRecordReach() !== undefined;
+    const listed = reachable || readable ? this.context.sessionBroker.listSessions(Number.MAX_SAFE_INTEGER) : this.context.sessionBroker.listSessions(50);
+    const sessions = keepReachable(readable ? listed.filter((session) => readable(session)) : listed, 'session', (session) => session.id).slice(0, 50);
+    const unreadable = reachable ? [] : this.context.sessionBroker.unreadableEntries();
     return {
       totals: {
         sessions: sessions.length,
@@ -332,9 +358,21 @@ export class IntegrationHelperService {
 
   getDeliverySnapshot(): Record<string, unknown> {
     const state = this.context.runtimeStore.getState();
-    const attempts = [...state.deliveries.deliveryAttempts.values()]
+    // A delivery is its schedule run's: a caller that is not the owner himself is listed and counted only the
+    // deliveries of runs it may reach (control-plane/caller-reach.ts), before the newest 100 are cut.
+    const reachable = currentRecordReach() !== undefined;
+    const kept = keepReachable([...state.deliveries.deliveryAttempts.values()], 'schedule-run', (attempt) => attempt.runId);
+    const attempts = [...kept]
       .sort((a, b) => (b.startedAt ?? b.endedAt ?? 0) - (a.startedAt ?? a.endedAt ?? 0))
       .slice(0, 100);
+    if (reachable) {
+      const status = (value: string): number => kept.filter((attempt) => attempt.status === value).length;
+      return {
+        totals: { queued: kept.length, started: kept.filter((attempt) => attempt.startedAt !== undefined).length,
+          succeeded: status('sent'), failed: status('failed'), deadLettered: status('dead_lettered') },
+        attempts,
+      };
+    }
     return {
       totals: {
         queued: state.deliveries.totalQueued,

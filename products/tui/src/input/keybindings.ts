@@ -54,7 +54,6 @@ export type KeyAction =
   | 'previous-session'
   | 'scroll-page-up'
   | 'scroll-page-down'
-  | 'contract-question-ordinary'
   | 'model-picker-group';
 
 export const ACTION_DESCRIPTIONS: Record<KeyAction, string> = { ...COMMON_ACTION_DESCRIPTIONS,
@@ -98,7 +97,7 @@ export const DEFAULT_KEYBINDINGS: Record<KeyAction, KeyCombo[]> = createKeybindi
   'focus-work-tree', 'cycle-permission-mode', 'open-notifications', 'failure-other-model',
   'failure-details', 'failure-sign-in', 'failure-retry', 'open-fix-session',
   'next-session', 'previous-session', 'scroll-page-up', 'scroll-page-down',
-  'contract-question-ordinary', 'model-picker-group',
+  'model-picker-group',
 ], {
 // Ctrl+P opens the command palette, the one entry point for every command,
   // view and setting; Ctrl+K (the other common palette chord) opens it too. The

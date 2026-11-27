@@ -42,6 +42,8 @@ export type AuthenticatedOperatorRequest =
       readonly scopes?: readonly string[] | undefined;
       /** A device the owner paired himself through his pairing flow, recorded when it was minted. */
       readonly ownerDevice?: true | undefined;
+      /** For an owner's device: the principal ids of the credentials made from it (pairing-token-store `madeFromIt`). */
+      readonly madeFromIt?: readonly string[] | undefined;
     }
   | {
       readonly kind: 'session';
@@ -114,7 +116,7 @@ export interface PairingTokenAuthenticator {
   ensureLocalNativeOwner?(): AuthenticatedNativePairingToken | null;
   withNativeAuthority?<T>(credential: NativeCredential, expected: AuthenticatedNativePairingToken,
     operation: (assertCurrent: () => AuthenticatedNativePairingToken) => T | Promise<T>): Promise<T>;
-  authenticate(token: string): { readonly id: string; readonly name: string; readonly client?: 'agent' | undefined; readonly scopes?: readonly string[] | undefined; readonly ownerDevice?: true | undefined } | null;
+  authenticate(token: string): { readonly id: string; readonly name: string; readonly client?: 'agent' | undefined; readonly scopes?: readonly string[] | undefined; readonly ownerDevice?: true | undefined; readonly madeFromIt?: readonly string[] | undefined } | null;
   /** Whether the shared operator token has been revoked (and, in the serving daemon, replaced). */
   isLegacyRevoked(): boolean;
   /**
@@ -227,7 +229,7 @@ export function authenticateOperatorToken(
     return { kind: 'pairing-token', token: normalized, tokenId: pairing.id, name: pairing.name,
       ...(pairing.client === 'agent' ? { client: 'agent' as const } : {}),
       ...(pairing.scopes !== undefined ? { scopes: pairing.scopes } : {}),
-      ...(pairing.ownerDevice === true ? { ownerDevice: true as const } : {}) };
+      ...(pairing.ownerDevice === true ? { ownerDevice: true as const, madeFromIt: pairing.madeFromIt ?? [] } : {}) };
   }
 
   // Then the shared token, unless this value was revoked. The revocation is
@@ -294,8 +296,13 @@ export interface OperatorPrincipalGrant {
   readonly principalKind: 'token' | 'user';
   readonly admin: boolean;
   readonly scopes: readonly string[];
-  /** A device the owner paired himself (no client named): it acts as the owner. */
+  /**
+   * A device the owner paired himself (no client named). It is never the owner himself: it answers a question another
+   * caller raised (never its own, nor one of a credential made from it) and does his native work.
+   */
   readonly ownerDevice?: true | undefined;
+  /** For an owner's device: the principal ids of the credentials made from it. */
+  readonly madeFromIt?: readonly string[] | undefined;
 }
 
 /**
@@ -318,7 +325,8 @@ export function operatorPrincipalGrant(
   const stored = authenticated.scopes;
   if (authenticated.kind === 'pairing-token') {
     const ownerDevice = authenticated.ownerDevice === true && authenticated.client === undefined;
-    return { principalId: pairingPrincipalId(authenticated.tokenId), ...pairingGrant(grantedScopes(true), stored), ...(ownerDevice ? { ownerDevice: true as const } : {}) };
+    return { principalId: pairingPrincipalId(authenticated.tokenId), ...pairingGrant(grantedScopes(true), stored),
+      ...(ownerDevice ? { ownerDevice: true as const, madeFromIt: authenticated.madeFromIt ?? [] } : {}) };
   }
   const adminRole = authenticated.roles.includes('admin');
   return {
@@ -348,6 +356,7 @@ export function operatorRequestActor(
     ...grant,
     credentialKind: credentialKindOf(authenticated, loopback),
     ownerDevice: grant.ownerDevice === true,
+    ...(grant.madeFromIt !== undefined ? { madeFromIt: grant.madeFromIt } : {}),
   }, owner);
 }
 

@@ -263,14 +263,20 @@ export const CODE_PLACE = definePlace<Item>({
     { key: 'b', id: 'bring-back', list: 'worktrees', states: [...LIVE_WORKTREE, 'gone'], capability: 'worktree.recover', label: 'how to bring them back', fill: { kind: tiedKind, id: tiedId } },
     { key: 'x', id: 'remove', list: 'worktrees', states: LIVE_WORKTREE, capability: 'worktree.discard', label: 'remove', fill: { worktree: 'id' } },
     { key: 'u', id: 'stop-tracking', list: 'worktrees', states: ['gone'], capability: 'worktree.cleanup', label: 'stop tracking', fill: { worktree: 'id' }, programs: REGISTER_WRITERS },
+    // The whole record of one worktree: state, owner, session, task, setup, next step (commands-final: no control before).
+    { key: 'v', id: 'worktree-details', list: 'worktrees', states: [...LIVE_WORKTREE, 'gone'], capability: 'worktree.inspect', label: 'its details', fill: { worktree: 'id' } },
     // The code index.
     { key: 'b', id: 'build-index', list: 'index', states: ['empty', 'built'], capability: 'codebase.build', label: 'build it' },
+    // The one setting, the daemon's, for every project and every door's turns.
+    { key: 'k', id: 'keep-index-current', list: 'index', capability: 'codebase.keep-current', label: 'keep it up to date in every project' },
     // Code intelligence: on the readiness row the form asks for the file; on a file with problems it is that file, at its first problem.
     { key: 'y', id: 'symbols', list: 'intelligence', states: LOOKUP_STATES, capability: 'intelligence.symbols', label: 'symbols', fill: { file: fromProblem('file') } },
     { key: 'o', id: 'outline', list: 'intelligence', states: LOOKUP_STATES, capability: 'intelligence.outline', label: 'outline', fill: { file: fromProblem('file') } },
     { key: 'g', id: 'definition', list: 'intelligence', states: LOOKUP_STATES, capability: 'intelligence.definition', label: 'where it is defined', fill: { file: fromProblem('file'), line: fromProblem('line'), column: fromProblem('column') } },
     { key: 'u', id: 'uses', list: 'intelligence', states: LOOKUP_STATES, capability: 'intelligence.references', label: 'its uses', fill: { file: fromProblem('file'), line: fromProblem('line'), column: fromProblem('column') } },
     { key: 'h', id: 'about', list: 'intelligence', states: LOOKUP_STATES, capability: 'intelligence.hover', label: 'what it is', fill: { file: fromProblem('file'), line: fromProblem('line'), column: fromProblem('column') } },
+    // Every problem the language servers report for the selected row's file (commands-final: no control before).
+    { key: 'p', id: 'file-problems', list: 'intelligence', states: LOOKUP_STATES, capability: 'intelligence.diagnostics', label: 'problems in the file', fill: { file: fromProblem('file') } },
     { key: 'i', id: 'install-server', list: 'intelligence', states: ['ready', 'not-ready', 'not-kept'], capability: 'intelligence.install', label: 'install a language server' },
   ],
   count: (lists) => {

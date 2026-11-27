@@ -249,8 +249,9 @@ export interface DaemonRepairDiagnosisOptions {
  * when the flag is already off, so a healthy machine pays one setting read.
  */
 export function diagnoseDaemonRepair(options: DaemonRepairDiagnosisOptions): DaemonRepairOffer | null {
-  // `resolveDaemonEnabled` is the reader discovery uses, so this cannot
-  // disagree with the thing it is diagnosing.
+  // `resolveDaemonEnabled` is the reader discovery uses, so this cannot disagree with the thing it is diagnosing. It
+  // answers yes always now ("Use the background daemon" is retired): discovery always looks, and the boot-time start
+  // (runtime/client/daemon-autostart.ts) brings the daemon up, so there is no wedged state left to repair here.
   if (resolveDaemonEnabled(options.config)) return null;
   const host = options.host ?? defaultDaemonHost(options.config);
   if (!host) return null;
@@ -310,23 +311,13 @@ export async function runDaemonRepair(options: DaemonRepairRunOptions): Promise<
     return { repaired, steps, summary };
   };
 
-  // The setting first and on its own: it is the half that silenced discovery,
-  // and it survives a failed service step, so the next launch's ordinary
-  // autostart can finish the job without asking anything.
-  try {
-    config.set(DAEMON_ENABLED_KEY, true);
-    steps.push(`set ${DAEMON_ENABLED_KEY} to true (it was false, which stopped this Agent from looking for a daemon at all)`);
-  } catch (error) {
-    const reason = summarizeError(error);
-    steps.push(`could not set ${DAEMON_ENABLED_KEY} to true: ${reason}`);
-    return finish(false, `[Daemon] Not reconnected to the daemon on this computer: the setting "Use the background daemon" could not be turned back on (${reason}). Turn it on in Settings, then start the daemon with: ${offer.serviceInstalled ? DAEMON_START_COMMAND : DAEMON_INSTALL_COMMAND}`);
-  }
-
+  // Only the daemon is started: no setting a person chose is changed ("Use the background daemon" is retired, and
+  // "Start the daemon at login" is his).
   if (!offer.serviceInstalled) {
     const installed = await installDaemonService(options.runDaemonCli ?? createDaemonCliRunner());
     if (!installed.ok) {
       steps.push(`could not install the daemon service: ${installed.detail}`);
-      return finish(false, `[Daemon] Not reconnected: "Use the background daemon" is back on, but the daemon service could not be installed (${installed.detail}). Install it with: ${DAEMON_INSTALL_COMMAND}`);
+      return finish(false, `[Daemon] Not reconnected: the daemon service could not be installed (${installed.detail}). Install it with: ${DAEMON_INSTALL_COMMAND}`);
     }
     steps.push(`installed the daemon service through goodvibes-daemon (${installed.detail})`);
   }
@@ -334,7 +325,7 @@ export async function runDaemonRepair(options: DaemonRepairRunOptions): Promise<
   const host = options.host ?? defaultDaemonHost(config);
   if (!host) {
     steps.push('could not reach the service manager from this process');
-    return finish(false, `[Daemon] Not reconnected: "Use the background daemon" is back on, but the service manager could not be reached from the Agent. Start the daemon with: ${DAEMON_START_COMMAND}`);
+    return finish(false, `[Daemon] Not reconnected: the service manager could not be reached from the Agent. Start the daemon with: ${DAEMON_START_COMMAND}`);
   }
   let brought: DaemonBringUpResult;
   try {
@@ -345,8 +336,8 @@ export async function runDaemonRepair(options: DaemonRepairRunOptions): Promise<
   steps.push(brought.detail);
   const did = offer.serviceInstalled ? 'started the daemon service' : 'installed and started the daemon service';
   return brought.answered
-    ? finish(true, `[Daemon] Reconnected to the daemon on this computer: turned "Use the background daemon" back on and ${did}${offer.serviceName ? ` "${offer.serviceName}"` : ''}; it answers.`)
-    : finish(false, `[Daemon] Not reconnected: "Use the background daemon" is back on, but the daemon is not answering: ${brought.detail}. The Agent tries again at the next launch.`);
+    ? finish(true, `[Daemon] Reconnected to the daemon on this computer: ${did}${offer.serviceName ? ` "${offer.serviceName}"` : ''}; it answers.`)
+    : finish(false, `[Daemon] Not reconnected: the daemon is not answering: ${brought.detail}. The Agent tries again at the next launch.`);
 }
 
 /**
@@ -358,6 +349,6 @@ export function describeDaemonRepairForHeadless(offer: DaemonRepairOffer): reado
   const serviceStep = offer.serviceInstalled ? DAEMON_START_COMMAND : DAEMON_INSTALL_COMMAND;
   return [
     `[Daemon] ${offer.diagnosis}`,
-    `[Daemon] To repair: run \`${serviceStep}\`, then set ${DAEMON_ENABLED_KEY} to true in the Agent's settings (or pass \`-c ${DAEMON_ENABLED_KEY}=true\` for one run).`,
+    `[Daemon] To repair: run \`${serviceStep}\`.`,
   ];
 }

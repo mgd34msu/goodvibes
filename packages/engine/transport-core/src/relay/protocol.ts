@@ -337,19 +337,19 @@ export interface RelayErrorAdvice {
 export const RELAY_ERROR_ADVICE: Readonly<Record<RelayErrorCode, RelayErrorAdvice>> = Object.freeze({
   'daemon-offline': {
     state: 'no daemon is registered on the relay for this pairing',
-    next: ['Start the daemon, and check its remote access with /relay status on that machine', 'If the daemon was re-paired, scan its new code from /relay pair'],
+    next: ['Start the daemon, and check its remote access on that machine: "is the relay reachable" on the Relay tab of Devices and network', 'If the daemon was re-paired, scan its new code from "Pair something" in Devices and network'],
     retryable: true,
   },
   'rid-taken': {
     state: 'another connection holds this daemon\'s relay id',
-    next: ['Update the relay and the daemon to the same release so the daemon can prove the id is its own', 'Check remote access with /relay status'],
+    next: ['Update the relay and the daemon to the same release so the daemon can prove the id is its own', 'Check remote access: "is the relay reachable" on the Relay tab of Devices and network'],
     retryable: true,
   },
   replaced: {
     state: 'another daemon registered on the relay with this daemon\'s relay identity, so the relay closed this registration',
     next: [
       'Stop the other daemon that uses this relay identity (a second daemon on the same home, or a copied or restored daemon home)',
-      'Or give this daemon its own relay identity, then start remote access again with /relay status',
+      'Or give this daemon its own relay identity, then check remote access again: "is the relay reachable" on the Relay tab of Devices and network',
     ],
     retryable: false,
   },
@@ -375,7 +375,7 @@ export const RELAY_ERROR_ADVICE: Readonly<Record<RelayErrorCode, RelayErrorAdvic
   },
   unauthorized: {
     state: 'the relay did not accept this daemon\'s proof of its relay id',
-    next: ['Check remote access with /relay status; the relay id must be the one derived from the daemon\'s identity key'],
+    next: ['Check remote access ("is the relay reachable" on the Relay tab of Devices and network); the relay id must be the one derived from the daemon\'s identity key'],
     retryable: false,
   },
   internal: {

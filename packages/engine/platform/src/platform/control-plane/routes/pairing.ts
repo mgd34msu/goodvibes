@@ -14,7 +14,7 @@
  */
 import type { GatewayMethodCatalog } from '../method-catalog.js';
 import type { GatewayMethodHandler, GatewayMethodInvocation } from '../method-catalog-shared.js';
-import type { PairingTokenManager } from '../../pairing/pairing-token-store.js';
+import type { PairingMaker, PairingTokenManager } from '../../pairing/pairing-token-store.js';
 import { PairingLimitReachedError, PairingMinterRevokedError, SharedTokenNotReplaceableError, isPairingAttemptId } from '../../pairing/pairing-token-store.js';
 import { pairingTokenIdOfCaller } from '../../pairing/principal-ids.js';
 import { GatewayVerbError } from './gateway-verb-error.js';
@@ -22,7 +22,7 @@ import { readInvocationParams, requireStringValue } from './invocation-params.js
 import { systemActor } from '@goodvibes/engine/daemon-api/http-policy';
 import { admitEffects } from '../../security/effect-authority.js';
 import type { ApprovalBroker } from '../approval-broker.js';
-import { putToOwner } from '../owner-act.js';
+import { AGENT_CREDENTIAL_OWNER_ONLY_WORDS, mintsAgentCredential, ownerHimself } from '../../daemon/method-owner-decision.js';
 
 /** The narrow slice of PairingTokenManager these verbs need. */
 export type PairingGatewayService = Pick<
@@ -34,6 +34,12 @@ function requirePrincipal(invocation: GatewayMethodInvocation): void {
   if (!invocation.context.principalId) {
     throw new GatewayVerbError('Sign in first: pairing needs a signed-in user or a paired device', 'UNAUTHENTICATED', 401);
   }
+}
+
+/** Who makes the credential, as the dispatch recorded it for this call (in process only), for the store to keep. */
+export function credentialMakerOfInvocation(invocation: GatewayMethodInvocation): { readonly madeBy?: PairingMaker } {
+  const maker = invocation.context.metadata?.['credentialMaker'] as PairingMaker | undefined;
+  return maker !== undefined ? { madeBy: maker } : {};
 }
 
 function createListHandler(service: PairingGatewayService): GatewayMethodHandler {
@@ -102,9 +108,17 @@ function createMintHandler(service: PairingGatewayService): GatewayMethodHandler
     if (params.client !== undefined && params.client !== 'agent') {
       throw new GatewayVerbError('client is "agent" or absent', 'INVALID_ARGUMENT', 400, 'client');
     }
+    // The Agent's credential is the owner's model: made only for the owner himself or an Agent turn the daemon hosts
+    // (daemon/method-owner-decision.ts `mintsAgentCredential`; the dispatch refuses anyone else before this, and so does
+    // this handler for a call that reaches it another way).
+    const context = invocation.context;
+    if (params.client === 'agent' && !mintsAgentCredential({ actor: context.actor, credentialKind: context.credentialKind ?? undefined,
+      registration: context.call?.registration, daemonHosted: context.call?.daemonHosted === true })) {
+      throw new GatewayVerbError(AGENT_CREDENTIAL_OWNER_ONLY_WORDS, 'OWNER_ONLY', 403, 'client');
+    }
     const scopes = mintedPairingScopes(invocation.context, params.scopes);
     try {
-      return { token: service.mint({ name, mintedBy: pairingTokenIdOfCaller(invocation.context),
+      return { token: service.mint({ name, mintedBy: pairingTokenIdOfCaller(invocation.context), ...credentialMakerOfInvocation(invocation),
         ...(attemptId !== undefined ? { attemptId } : {}), ...(params.client === 'agent' ? { client: 'agent' as const } : {}),
         ...(scopes !== undefined ? { scopes } : {}) }) };
     } catch (error) {
@@ -126,11 +140,22 @@ function createMigrateHandler(service: PairingGatewayService): GatewayMethodHand
       // migration mint is exempt from the cap. A repeated attempt id (the client
       // lost the reply) re-issues the offer that attempt made instead of adding one.
       const scopes = mintedPairingScopes(invocation.context, undefined);
+      const maker = credentialMakerOfInvocation(invocation);
+      // The owner himself moving his own program or session onto its own token (maker `{owner: true}`: his verified
+      // program or his signed-in session, method-owner-decision.ts `ownerHimself`) pairs his own device, with full
+      // authority only. A migration he said yes to for someone else (maker `{caller, ownersYes}`) gives that caller
+      // exactly what the card said, its own administrator key, and never his device: a yes to another's request never
+      // raises what a credential is (gate-review-6 G1).
+      const context = invocation.context;
+      const ownersPairing = scopes === undefined && maker.madeBy !== undefined && 'owner' in maker.madeBy
+        && ownerHimself({ actor: context.actor, credentialKind: context.credentialKind ?? undefined, registration: context.call?.registration });
       return { token: service.mintForMigration({
         name,
         mintedBy: pairingTokenIdOfCaller(invocation.context),
+        ...maker,
         ...(attemptId !== undefined ? { attemptId } : {}),
         ...(scopes !== undefined ? { scopes } : {}),
+        ...(ownersPairing ? { origin: 'owner-pairing' as const } : {}),
       }) };
     } catch (error) {
       rethrowAsVerbError(error);
@@ -183,29 +208,16 @@ function createRevokeHandler(service: PairingGatewayService, onRevoked?: Pairing
     // Told by the kind of credential: a sign-in user named like a device's principal is never that device.
     const callerTokenId = pairingTokenIdOfCaller(invocation.context);
     if (callerTokenId !== undefined && (token.id === callerTokenId || token.mintedBy === callerTokenId)) return revoke();
-    // Any other token is access the owner granted: withdrawing it is his own act.
-    const admission = admitEffects(invocation.context.actor ?? systemActor('in-process'), ['access.withdraw']);
-    if (admission.kind === 'allowed') return revoke();
-    if (admission.kind === 'refused' || !ownerApprovals) {
+    // Any other token is access the owner granted: withdrawing it is decided by the one owner rule
+    // (daemon/method-owner-decision.ts). The dispatch tells this handler whether it admits the caller at once; one it
+    // does not (a script with the operator token, an admin who is not the owner) is answered OWNER_DECISION_NEEDED,
+    // nothing revoked, and the dispatch puts the same call to the owner's gate. One the effect table refuses is refused.
+    void ownerApprovals;
+    if (invocation.context.metadata?.['ownerAdmitted'] === true) return revoke();
+    if (admitEffects(invocation.context.actor ?? systemActor('in-process'), ['access.withdraw']).kind === 'refused') {
       throw new GatewayVerbError(`Revoking ${token.name} (${id}) withdraws access only the owner withdraws; this credential neither holds nor minted it. Nothing was revoked.`, 'OWNER_ONLY', 403, 'id');
     }
-    const requestedBy = invocation.context.principalId ?? 'a caller who is not the owner';
-    const { approvalId } = await putToOwner(ownerApprovals, {
-      summary: `${requestedBy} asks to revoke the paired device ${token.name}`,
-      reasons: [`Revoking ${token.name} (${id}) ends that device's access, and the access of every device it paired.`],
-      tool: 'pairing.tokens.delete',
-      args: { id },
-      requestedBy,
-      apply: revoke,
-    });
-    return Response.json({
-      id,
-      code: 'OWNER_APPROVAL_PENDING',
-      approvalId,
-      followable: admitEffects(invocation.context.actor ?? systemActor('in-process'), ['approvals.read']).kind === 'allowed',
-      state: `nothing was revoked yet; revoking ${token.name} withdraws access only the owner withdraws, so it was put to the owner and is done when the owner approves it`,
-      next: [`Watch approval ${approvalId} (approvals.list with approvalId, or the approval-update event).`],
-    }, { status: 202 });
+    throw new GatewayVerbError(`Revoking ${token.name} (${id}) ends that device's access, and the access of every device it paired: the owner decides it.`, 'OWNER_DECISION_NEEDED', 409, 'id');
   };
 }
 

@@ -102,8 +102,8 @@ export interface TaskRouteEntry {
 /**
  * Injected product catalogs return typed rankings, or already-resolved records.
  * Judgment-backed callers must supply rankings to preserve uncertainty/provenance.
- * The agent passes its workspace action and harness mode catalogs; a host
- * without them gets empty match lists.
+ * The agent passes its harness mode catalog; a host without it gets an
+ * empty match list.
  */
 export interface TaskRouteCatalogRanking {
   /** Records are keyed separately so unresolved readings are never actionable matches. */
@@ -115,7 +115,6 @@ export interface TaskRouteJudgment {
   readonly selection: Omit<Selection, 'recordAction'>;
   readonly slots: { readonly readings: Readonly<Record<string, Reading>>; readonly decisionId: string | undefined };
   readonly named: Readonly<Record<string, Omit<Selection, 'recordAction'>>>;
-  readonly workspace: readonly Ranked[];
   readonly harness: readonly Ranked[];
 }
 export interface TaskRouteDeps {
@@ -127,7 +126,6 @@ export interface TaskRouteDeps {
    * listing gets no reading and its generic route string.
    */
   namedIds?: NamedIdSources | undefined;
-  workspaceMatches?(request: string, limit: number, options?: JudgmentReadingOptions): TaskRouteCatalogResult | Promise<TaskRouteCatalogResult>;
   modeMatches?(request: string, limit: number, options?: JudgmentReadingOptions): TaskRouteCatalogResult | Promise<TaskRouteCatalogResult>;
 }
 
@@ -147,7 +145,6 @@ export interface ReadyPlan {
   readonly routesConsidered: number;
   readonly note?: string;
   readonly nextAction: string;
-  readonly workspaceMatches: readonly Record<string, unknown>[];
   readonly harnessModeMatches: readonly Record<string, unknown>[];
   readonly policy: string;
 }

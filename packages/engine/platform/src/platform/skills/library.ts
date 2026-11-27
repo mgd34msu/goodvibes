@@ -18,11 +18,15 @@
  * home carries every skill and bundle in it here, once, nothing dropped; the
  * old file is left as it was, so a 3.5.0 Agent started again reads it as before.
  */
+import { createHash } from 'node:crypto';
 import { accessSync, constants, cpSync, existsSync, readdirSync, readFileSync, rmSync, statSync } from 'node:fs';
 import { delimiter, dirname, join, resolve } from 'node:path';
 import { atomicWriteFileSync, type AtomicWriteOptions } from '../config/atomic-write.js';
+import { writeHeldFile } from '../capabilities/held-paths.js';
 import { withProcessLockSync } from '../utils/process-lock.js';
 import { containsIssuerCredential } from '../utils/redaction.js';
+import { projectFilesHeld } from '../utils/prompt-loader.js';
+import { acceptedAuthor, authorAfterChange, memoryAwaitsOwner, newRecordAuthor, readRecordAuthor, type MemoryAuthor } from '../state/memory-author.js';
 import { frontmatterRewriteProblem, parseSkill, serializeSkill, skillContentProblem, type SkillFrontmatterValue } from './model.js';
 import { compareSkillsByOrigin, resolveSkillRoots, type SkillOrigin, type SkillRoot } from './roots.js';
 import type {
@@ -40,7 +44,7 @@ const SKILL_FILE_SUFFIX = '.md';
 const FOLDER_DOCUMENT = 'SKILL.md';
 
 /** The frontmatter keys GoodVibes writes; every other key in a file is the author's and is kept as written. */
-const MARK_KEYS = ['title', 'enabled', 'review', 'triggers', 'tags', 'requires-env', 'requires-commands', 'source', 'provenance', 'stale-reason', 'reviewed-at', 'created-at', 'updated-at'] as const;
+const MARK_KEYS = ['title', 'enabled', 'review', 'triggers', 'tags', 'requires-env', 'requires-commands', 'source', 'provenance', 'stale-reason', 'reviewed-at', 'created-at', 'updated-at', 'author', 'author-who', 'author-accepted-at'] as const;
 const MARK_KEY_SET = new Set<string>(MARK_KEYS);
 
 /** Writes made on behalf of a tool call carry its checks (the projection is current; this effect is its own). */
@@ -219,7 +223,27 @@ function recordOf(name: string, description: string, body: string, metadata: Rea
     path: located.path,
     origin: located.origin,
     marked,
+    ...skillAuthorField(skillAuthorOf(metadata)),
   };
+}
+
+/**
+ * The author kept in a skill file's frontmatter. No `author` key: none (the owner's; a file he dropped in or one from
+ * before authors were kept). An `author` that is not one of the three reads as someone else's, waiting.
+ */
+function skillAuthorOf(metadata: Readonly<Record<string, SkillFrontmatterValue>>): MemoryAuthor | undefined {
+  if (metadata['author'] === undefined) return undefined;
+  const acceptedAt = Number(scalar(metadata['author-accepted-at']).trim());
+  const who = scalar(metadata['author-who']).trim();
+  return readRecordAuthor({
+    kind: scalar(metadata['author']).trim(),
+    ...(who ? { who } : {}),
+    ...(scalar(metadata['author-accepted-at']).trim() && Number.isFinite(acceptedAt) ? { acceptedAt } : {}),
+  });
+}
+
+function skillAuthorField(author: MemoryAuthor | undefined): { author?: MemoryAuthor } {
+  return author === undefined ? {} : { author };
 }
 
 function normalizeRequirementsLenient(values: readonly AgentSkillRequirement[]): AgentSkillRequirement[] {
@@ -244,6 +268,11 @@ function marksOf(record: AgentSkillRecord): Record<string, SkillFrontmatterValue
   if (record.reviewedAt) marks['reviewed-at'] = record.reviewedAt;
   marks['created-at'] = record.createdAt;
   marks['updated-at'] = record.updatedAt;
+  if (record.author) {
+    marks['author'] = record.author.kind;
+    if (record.author.who && oneLine(record.author.who)) marks['author-who'] = oneLine(record.author.who);
+    if (record.author.acceptedAt !== undefined) marks['author-accepted-at'] = String(record.author.acceptedAt);
+  }
   return marks;
 }
 
@@ -320,6 +349,7 @@ function parseBundle(value: unknown): AgentSkillBundleRecord | null {
     createdAt: readString(value.createdAt, nowIso()),
     updatedAt: readString(value.updatedAt, nowIso()),
     ...(reviewedAt ? { reviewedAt } : {}),
+    ...skillAuthorField(readRecordAuthor(value.author)),
   };
 }
 
@@ -346,6 +376,99 @@ function readLibraryFile(path: string): LibraryFile {
     if (bundle) bundles.push(bundle); else keptAsFound.push(value);
   }
   return { exists: true, bundles, keptAsFound, fields };
+}
+
+// ---------------------------------------------------------------------------
+// A skill that comes from a project's files is the project's
+// ---------------------------------------------------------------------------
+
+/**
+ * What the owner accepted of a skill that comes from a project's files (`project-local`), kept in this library file
+ * by the file's path, never in the file: the file's own `enabled`, `review`, `reviewed-at`, `author` and `source` are a
+ * repository's words and are ignored. Valid only while the file's content is the one he accepted (its hash): a changed
+ * file is the project's again, switched off and waiting.
+ */
+interface ProjectSkillAcceptance {
+  readonly hash: string;
+  readonly enabled: boolean;
+  readonly reviewState: AgentSkillReviewState;
+  readonly reviewedAt?: string | undefined;
+  readonly staleReason?: string | undefined;
+  readonly author?: MemoryAuthor | undefined;
+}
+
+const PROJECT_ACCEPTED_FIELD = 'projectAccepted';
+
+function contentHash(text: string): string {
+  return createHash('sha256').update(text).digest('hex');
+}
+
+function projectAcceptances(fields: Readonly<Record<string, unknown>>): Record<string, ProjectSkillAcceptance> {
+  const kept = fields[PROJECT_ACCEPTED_FIELD];
+  if (!isRecord(kept)) return {};
+  const out: Record<string, ProjectSkillAcceptance> = {};
+  for (const [path, value] of Object.entries(kept)) {
+    if (!isRecord(value) || typeof value.hash !== 'string') continue;
+    const reviewedAt = readString(value.reviewedAt).trim();
+    const staleReason = readString(value.staleReason).trim();
+    out[path] = {
+      hash: value.hash, enabled: value.enabled === true, reviewState: parseReviewState(value.reviewState),
+      ...(reviewedAt ? { reviewedAt } : {}), ...(staleReason ? { staleReason } : {}),
+      ...skillAuthorField(value.author === undefined ? undefined : readRecordAuthor(value.author)),
+    };
+  }
+  return out;
+}
+
+/** The project a skill file of a project's skill folder belongs to, named for the owner (`<project>/.goodvibes/skills/x.md`). */
+function projectOfSkillFile(path: string): string {
+  const marker = '/.goodvibes/';
+  const at = path.indexOf(marker);
+  return at > 0 ? path.slice(0, at) : dirname(path);
+}
+
+/**
+ * A skill read from a project's files, as the store keeps it: the project's (author: someone else, the project), shown
+ * as from the project, switched off and waiting for review unless the owner accepted this very content
+ * (`projectAccepted`), whatever its frontmatter claims.
+ */
+function asProjectSkill(entry: Located, accepted: Readonly<Record<string, ProjectSkillAcceptance>>, homeDirectory: string): Located {
+  const project = projectOfSkillFile(entry.path);
+  const projectAuthor: MemoryAuthor = { kind: 'other', who: `the project ${project}` };
+  const acceptance = accepted[entry.path];
+  // Used only as the project's trust allows: a project the owner has not trusted (or keeps restricted) gives none.
+  const trusted = projectFilesHeld(project, homeDirectory) === undefined;
+  const current = trusted && acceptance !== undefined && acceptance.hash === contentHash(entry.text) ? acceptance : undefined;
+  const { staleReason: _stale, reviewedAt: _reviewed, author: _author, ...rest } = entry.record;
+  const record: AgentSkillRecord = {
+    ...rest,
+    source: 'imported',
+    provenance: `From the project's files (${entry.path})${current ? '' : ', not accepted by you yet'}`,
+    enabled: current?.enabled ?? false,
+    reviewState: current?.reviewState ?? 'fresh',
+    ...(current?.reviewedAt ? { reviewedAt: current.reviewedAt } : {}),
+    ...(current?.staleReason ? { staleReason: current.staleReason } : {}),
+    author: current?.author ?? projectAuthor,
+  };
+  return { ...entry, record };
+}
+
+/**
+ * Whether a turn's skill reader (the model's registry tool, a typed trigger) may load a skill found on disk: one from a
+ * project's files only when the owner accepted this very content, switched it on and reviewed it (the library's
+ * `projectAccepted`, never the file's own frontmatter); any other as `skillMayLoad` says. `homeDirectory` is the home
+ * whose `.goodvibes` holds the library.
+ */
+export function locatedSkillMayLoad(skill: { readonly origin: SkillOrigin; readonly path: string; readonly metadata: Readonly<Record<string, SkillFrontmatterValue>> }, homeDirectory: string | undefined): boolean {
+  if (skill.origin !== 'project-local') return skillMayLoad(skill.metadata);
+  if (!homeDirectory || projectFilesHeld(projectOfSkillFile(skill.path), homeDirectory) !== undefined) return false;
+  try {
+    const acceptance = projectAcceptances(readLibraryFile(skillLibraryPath(join(homeDirectory, '.goodvibes'))).fields)[skill.path];
+    if (!acceptance || acceptance.hash !== contentHash(readFileSync(skill.path, 'utf-8'))) return false;
+    return acceptance.enabled && acceptance.reviewState === 'reviewed' && acceptance.author !== undefined && !memoryAwaitsOwner({ author: acceptance.author });
+  } catch {
+    return false;
+  }
 }
 
 function writeLibraryFile(path: string, read: LibraryFile, bundles: readonly AgentSkillBundleRecord[], fields: Record<string, unknown>, effects?: SkillLibraryWriteEffects): void {
@@ -472,10 +595,13 @@ export class SkillLibrary {
     const bundles = state.library.bundles;
     const enabledSkills = skills.filter((skill) => skill.enabled);
     const enabledBundles = bundles.filter((bundle) => bundle.enabled);
+    // Reviewed, and not someone else's words the owner has not accepted (state/memory-author.ts, the one rule).
+    const given = (record: { readonly reviewState: AgentSkillReviewState; readonly author?: MemoryAuthor | undefined }): boolean =>
+      record.reviewState === 'reviewed' && !memoryAwaitsOwner(record);
     const activeBundles = enabledBundles.filter((bundle) => {
-      if (bundle.reviewState !== 'reviewed') return false;
+      if (!given(bundle)) return false;
       const readiness = evaluateAgentSkillBundleReadiness(bundle, skills);
-      return readiness.ready && readiness.includedSkills.every((skill) => skill.reviewState === 'reviewed');
+      return readiness.ready && readiness.includedSkills.every(given);
     });
     const applied = new Set<string>([...enabledSkills.map((skill) => skill.id), ...activeBundles.flatMap((bundle) => bundle.skillIds)]);
     return {
@@ -485,7 +611,7 @@ export class SkillLibrary {
       bundles: [...bundles],
       enabledBundles,
       activeBundles,
-      activeSkills: skills.filter((skill) => applied.has(skill.id) && skill.reviewState === 'reviewed' && evaluateAgentSkillReadiness(skill).ready),
+      activeSkills: skills.filter((skill) => applied.has(skill.id) && given(skill) && evaluateAgentSkillReadiness(skill).ready),
     };
   }
 
@@ -543,6 +669,7 @@ export class SkillLibrary {
         provenance: input.provenance?.trim() || input.source || 'user',
         ...(options.reviewed ? reviewedReviewPatch() : { reviewState: 'fresh' as const }),
         createdAt: timestamp, updatedAt: timestamp,
+        ...skillAuthorField(newRecordAuthor(input.author)),
       };
       const path = join(this.createIn, `${id}${SKILL_FILE_SUFFIX}`);
       this.writeSkillFile(path, documentOf(record, {}));
@@ -568,6 +695,7 @@ export class SkillLibrary {
         source: input.source ?? 'user',
         provenance: input.provenance?.trim() || input.source || 'user',
         reviewState: 'fresh', createdAt: timestamp, updatedAt: timestamp,
+        ...skillAuthorField(newRecordAuthor(input.author)),
       };
       this.touchLibrary(state, [...state.library.bundles, bundle]);
       return bundle;
@@ -594,6 +722,7 @@ export class SkillLibrary {
         provenance: input.provenance === undefined ? existing.provenance : input.provenance.trim() || existing.provenance,
         ...freshReviewPatch(),
         updatedAt: nowIso(),
+        ...skillAuthorField(authorAfterChange(existing.author, input.by, Date.now())),
       };
     });
   }
@@ -613,28 +742,36 @@ export class SkillLibrary {
         provenance: input.provenance === undefined ? existing.provenance : input.provenance.trim() || existing.provenance,
         ...freshReviewPatch(),
         updatedAt: nowIso(),
+        ...skillAuthorField(authorAfterChange(existing.author, input.by, Date.now())),
       };
     });
   }
 
   public setEnabled(idOrName: string, enabled: boolean): AgentSkillRecord {
-    return this.changeSkill(idOrName, (existing) => ({ ...existing, enabled, updatedAt: nowIso() }));
+    return this.changeSkill(idOrName, (existing) => ({ ...existing, enabled, updatedAt: nowIso() }), true);
   }
 
   public setBundleEnabled(idOrName: string, enabled: boolean): AgentSkillBundleRecord {
     return this.changeBundle(idOrName, (existing) => ({ ...existing, enabled, updatedAt: nowIso() }));
   }
 
-  public markReviewed(idOrName: string): AgentSkillRecord {
-    return this.changeSkill(idOrName, (existing) => ({ ...existing, ...reviewedReviewPatch(), updatedAt: nowIso() }));
+  /** `accept`: the owner himself reviewed it, which accepts a skill someone else wrote (never a model's review). */
+  public markReviewed(idOrName: string, options: { readonly accept?: boolean } = {}): AgentSkillRecord {
+    return this.changeSkill(idOrName, (existing) => ({
+      ...existing, ...reviewedReviewPatch(), updatedAt: nowIso(),
+      ...skillAuthorField(options.accept === true ? acceptedAuthor(existing.author, Date.now()) : existing.author),
+    }), true);
   }
 
-  public markBundleReviewed(idOrName: string): AgentSkillBundleRecord {
-    return this.changeBundle(idOrName, (existing) => ({ ...existing, ...reviewedReviewPatch(), updatedAt: nowIso() }));
+  public markBundleReviewed(idOrName: string, options: { readonly accept?: boolean } = {}): AgentSkillBundleRecord {
+    return this.changeBundle(idOrName, (existing) => ({
+      ...existing, ...reviewedReviewPatch(), updatedAt: nowIso(),
+      ...skillAuthorField(options.accept === true ? acceptedAuthor(existing.author, Date.now()) : existing.author),
+    }));
   }
 
   public markStale(idOrName: string, reason: string): AgentSkillRecord {
-    return this.changeSkill(idOrName, (existing) => ({ ...existing, ...staleReviewPatch(reason), updatedAt: nowIso() }));
+    return this.changeSkill(idOrName, (existing) => ({ ...existing, ...staleReviewPatch(reason), updatedAt: nowIso() }), true);
   }
 
   public markBundleStale(idOrName: string, reason: string): AgentSkillBundleRecord {
@@ -685,10 +822,10 @@ export class SkillLibrary {
    * Import a skill from the open skill standard format (SKILL.md), switched off and
    * waiting for review. Throws if the content is invalid or holds secret-looking text.
    */
-  public importFromStandard(content: string): AgentSkillRecord {
+  public importFromStandard(content: string, author?: MemoryAuthor): AgentSkillRecord {
     const parsed = parseSkillStandardMarkdown(content);
     if ('error' in parsed) throw new Error(parsed.error);
-    return this.create({ name: parsed.name, description: parsed.description, procedure: parsed.body, enabled: false, source: 'imported', provenance: 'skill-standard-import' });
+    return this.create({ name: parsed.name, description: parsed.description, procedure: parsed.body, enabled: false, source: 'imported', provenance: 'skill-standard-import', author });
   }
 
   /**
@@ -697,13 +834,14 @@ export class SkillLibrary {
    * is copied whole (its scripts and files beside SKILL.md). The copy waits for review; `enabled` switches it on.
    * Its provenance names the original (`copiedFromProvenance`), so the original is no longer offered as found.
    */
-  public copyIn(idOrName: string, input: { readonly enabled: boolean; readonly source: AgentSkillSource }): { readonly skill: AgentSkillRecord; readonly original: string } {
+  public copyIn(idOrName: string, input: { readonly enabled: boolean; readonly source: AgentSkillSource; readonly author?: MemoryAuthor | undefined }): { readonly skill: AgentSkillRecord; readonly original: string } {
     return this.locked((state) => {
       const found = this.find(state, idOrName);
       if (!found) throw new Error(`Unknown skill ${idOrName}`);
       const problem = frontmatterRewriteProblem(found.text);
       if (problem) throw new Error(`The frontmatter of ${found.path} cannot be copied without loss (${problem}); copy that file into ${this.createIn} by hand.`);
-      const { staleReason: _staleReason, reviewedAt: _reviewedAt, path: _path, origin: _origin, marked: _marked, ...original } = found.record;
+      // Who copies it in is its author (the file on disk names nobody the daemon checked).
+      const { staleReason: _staleReason, reviewedAt: _reviewedAt, path: _path, origin: _origin, marked: _marked, author: _author, ...original } = found.record;
       const id = this.nextName(slugify(original.id), state);
       const timestamp = nowIso();
       const record: AgentSkillRecord = {
@@ -711,6 +849,7 @@ export class SkillLibrary {
         enabled: input.enabled, source: input.source, provenance: copiedFromProvenance(found.path),
         reviewState: 'fresh',
         createdAt: timestamp, updatedAt: timestamp,
+        ...skillAuthorField(newRecordAuthor(input.author)),
       };
       const path = found.format === 'folder' ? join(this.createIn, id, FOLDER_DOCUMENT) : join(this.createIn, `${id}${SKILL_FILE_SUFFIX}`);
       const document = documentOf(record, found.authorMetadata);
@@ -730,6 +869,20 @@ export class SkillLibrary {
     const filePath = skillStandardFilePath(skill.name, destDir);
     if (!overwrite && existsSync(filePath)) throw new Error(`Skill file already exists at ${filePath}.`);
     atomicWriteFileSync(filePath, renderSkillStandardMarkdown(skill), { mkdirp: true, mode: 0o644 });
+    return filePath;
+  }
+
+  /**
+   * The skill written as a SKILL.md at exactly `filePath` (a capability resolving a folder the caller named through its
+   * held handle, capabilities/held-paths.ts, which made its folder; or a folder still to be made); the path written.
+   */
+  public exportToStandardFile(idOrName: string, filePath: string, overwrite = false): string {
+    const skill = this.get(idOrName);
+    if (!skill) throw new Error(`Unknown skill ${idOrName}`);
+    if (!overwrite && existsSync(filePath)) throw new Error(`Skill file already exists at ${filePath}.`);
+    // The one way a capability writes a file (capabilities/held-paths.ts `writeHeldFiles`): beneath a folder a caller
+    // named, by a pending name and rename inside the opened folder, so a link swapped in at SKILL.md is never followed.
+    writeHeldFile(filePath, renderSkillStandardMarkdown(skill), 0o644);
     return filePath;
   }
 
@@ -788,18 +941,40 @@ export class SkillLibrary {
     return ids;
   }
 
-  private changeSkill(idOrName: string, change: (existing: AgentSkillRecord, state: State) => AgentSkillRecord): AgentSkillRecord {
+  private changeSkill(idOrName: string, change: (existing: AgentSkillRecord, state: State) => AgentSkillRecord, marksOnly = false): AgentSkillRecord {
     return this.locked((state) => {
       const found = this.find(state, idOrName);
       if (!found) throw new Error(`Unknown skill ${idOrName}`);
       const updated = change(found.record, state);
+      if (found.origin === 'project-local' && marksOnly) {
+        // The owner's switch, review or acceptance of a project's skill is kept here, for this content; the project's
+        // file is never written with it (a mark there would be the repository's word again).
+        this.keepProjectAcceptance(state, found.path, found.text, updated);
+        this.touchLibrary(state, state.library.bundles);
+        return { ...updated, marked: true };
+      }
       // A frontmatter written by hand in fuller YAML than one key: value per line would lose what its author wrote.
       const problem = frontmatterRewriteProblem(found.text);
       if (problem) throw new Error(`The frontmatter of ${found.path} cannot be rewritten without loss (${problem}); change that file by hand.`);
-      this.writeSkillFile(found.path, documentOf(updated, found.authorMetadata));
+      const document = documentOf(updated, found.authorMetadata);
+      this.writeSkillFile(found.path, document);
+      // A project's skill changed here: what was accepted is for the content as written now, by whom it says.
+      if (found.origin === 'project-local') this.keepProjectAcceptance(state, found.path, document, updated);
       this.touchLibrary(state, state.library.bundles);
       return { ...updated, marked: true };
     });
+  }
+
+  /** Keep (in this library file) the owner's marks of a project's skill for exactly `text`, the file's content. */
+  private keepProjectAcceptance(state: State, path: string, text: string, record: AgentSkillRecord): void {
+    const fields = state.library.fields;
+    const kept = isRecord(fields[PROJECT_ACCEPTED_FIELD]) ? { ...(fields[PROJECT_ACCEPTED_FIELD] as Record<string, unknown>) } : {};
+    kept[path] = {
+      hash: contentHash(text), enabled: record.enabled, reviewState: record.reviewState,
+      ...(record.reviewedAt ? { reviewedAt: record.reviewedAt } : {}), ...(record.staleReason ? { staleReason: record.staleReason } : {}),
+      ...(record.author ? { author: record.author } : {}),
+    };
+    fields[PROJECT_ACCEPTED_FIELD] = kept;
   }
 
   private changeBundle(idOrName: string, change: (existing: AgentSkillBundleRecord, state: State) => AgentSkillBundleRecord): AgentSkillBundleRecord {
@@ -822,7 +997,12 @@ export class SkillLibrary {
   }
 
   private readState(): State {
-    return { skills: scanRoots(this.roots), library: readLibraryFile(this.libraryPath) };
+    const library = readLibraryFile(this.libraryPath);
+    // A skill from a project's files is the project's: what its frontmatter claims of an author, a review or a switch
+    // is ignored; only the owner's acceptance kept here, for this very content, counts (asProjectSkill).
+    const accepted = projectAcceptances(library.fields);
+    const home = dirname(this.goodvibesRoot);
+    return { skills: scanRoots(this.roots).map((entry) => entry.origin === 'project-local' ? asProjectSkill(entry, accepted, home) : entry), library };
   }
 
   /** A read: the files as they are now (the Agent's 3.5.0 store carried in first, once). */

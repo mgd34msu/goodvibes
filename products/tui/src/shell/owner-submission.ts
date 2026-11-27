@@ -30,8 +30,6 @@ export interface OwnerSubmissionPorts {
   readonly begin: () => void;
   /** `@model:<id> prompt`: switch, then hand the rest back to `submitCaptured`, or hold it when the switch did not land. */
   readonly switchModels: (models: readonly string[], rest: string, content: ContentPart[] | undefined, options: ProductInputContext) => void;
-  /** The contract question a typed message answers, unless it was dismissed. */
-  readonly answerOptions: () => { readonly answersContractQuestion?: string };
   /** Starts the turn. */
   readonly sendTurn: (text: string, content: ContentPart[] | undefined, inputOptions: OrchestratorUserInputOptions | undefined) => void;
   readonly notify: (message: string, level?: NoticeLevel) => void;
@@ -91,8 +89,7 @@ export function createOwnerSubmission(ports: OwnerSubmissionPorts): OwnerSubmiss
       notify: (message) => ports.notify(message),
     });
     if (shouldSendAfterCapture(capture, Boolean(content))) {
-      const answer: { readonly answersContractQuestion?: string } = options.spokenOutput ? {} : ports.answerOptions();
-      const inputOptions = options.spokenOutput ? createSpokenTurnInputOptions() : answer.answersContractQuestion ? answer : undefined;
+      const inputOptions = options.spokenOutput ? createSpokenTurnInputOptions() : undefined;
       // The output of `!` commands run since the last message goes with this one.
       shellCommands.afterShellCommands(() => ports.sendTurn(ports.shellPassthrough.consumeContext(capture.text), content, inputOptions));
     } else {

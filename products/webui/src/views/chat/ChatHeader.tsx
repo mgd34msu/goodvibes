@@ -11,7 +11,7 @@ import type { KeyboardEvent } from 'react';
 import { Button } from '../../components/ui/Button';
 import { IconButton } from '../../components/ui/IconButton';
 import { Select } from '../../components/ui/Select';
-import { projectName, type PlaceProjects } from '../../lib/place-project';
+import { NO_PROJECT, chooseNoProjectForNewChat, projectName, useNewChatHasNoProject, type PlaceProjects } from '../../lib/place-project';
 
 export interface ChatTitleProps {
   activeSessionId: string;
@@ -65,37 +65,47 @@ export function ChatTitle({
 }
 
 export interface ChatProjectLineProps {
-  /** The chat's own project (its session record), or undefined for a chat not started yet. */
+  /** The chat's own project (its session record), or undefined for a chat not started yet or started with none. */
   chatProject: string | undefined;
+  /** The chat has begun (it has a session record). */
+  started: boolean;
   /** The projects the daemon knows and the one chosen in this browser (lib/place-project.ts). */
   projects: PlaceProjects;
 }
 
+const NO_PROJECT_LABEL = 'No project (one is made for this chat)';
+
 /**
  * The project the chat works in, muted beside the title ("In alpha"), with the chooser beside it. A new chat is made
- * in the chosen project (every call names it); a chat keeps the project it started in, so once it has begun the
- * chooser only says so.
+ * in the chosen project (every call names it), or with "No project (one is made for this chat)": it then reads and
+ * answers only until the owner's first message that needs somewhere to work, when the daemon makes it its own project
+ * and its answer says where its files are. A chat keeps the project it started in (or the one made for it), so once
+ * it has begun the chooser only says what a new chat gets.
  */
-export function ChatProjectLine({ chatProject, projects }: ChatProjectLineProps) {
-  const shown = chatProject ?? projects.project;
-  if (projects.status === 'failed' && !shown) {
+export function ChatProjectLine({ chatProject, started, projects }: ChatProjectLineProps) {
+  const noneForNew = useNewChatHasNoProject();
+  const shown = started ? chatProject : noneForNew ? undefined : projects.project;
+  if (projects.status === 'failed' && !shown && !started && !noneForNew) {
     return <span className="chat-project chat-project__note" role="status">{`Could not read the projects the daemon knows: ${projects.reason ?? 'no reason was given'}.`}</span>;
   }
-  if (!shown && projects.projects.length === 0) return null;
-  const started = chatProject !== undefined;
+  const choose = (value: string): void => {
+    if (value === NO_PROJECT) { chooseNoProjectForNewChat(true); return; }
+    chooseNoProjectForNewChat(false);
+    projects.choose(value);
+  };
   return (
     <span className="chat-project">
-      {shown && <span className="chat-project__in" title={shown}>{`In ${projectName(shown)}`}</span>}
-      {projects.projects.length > 0 && (
-        <span className="chat-project__chooser" title={started ? 'A chat keeps the project it started in. A new chat is made in the project chosen here.' : 'The project this chat will work in'}>
-          <Select
-            aria-label={started ? 'Project for a new chat' : 'Project for this chat'}
-            value={projects.project ?? ''}
-            onChange={projects.choose}
-            options={projects.projects.map((project) => ({ value: project, label: projectName(project) }))}
-          />
-        </span>
-      )}
+      {shown
+        ? <span className="chat-project__in" title={shown}>{`In ${projectName(shown)}`}</span>
+        : <span className="chat-project__in" title={started ? 'This chat has no project yet: its own is made the first time your message here needs somewhere to work.' : 'A new chat started with no project gets its own project when your first message needs one.'}>{started ? 'No project yet' : 'No project'}</span>}
+      <span className="chat-project__chooser" title={started ? 'A chat keeps the project it started in. A new chat is made in the project chosen here.' : 'The project this chat will work in'}>
+        <Select
+          aria-label={started ? 'Project for a new chat' : 'Project for this chat'}
+          value={noneForNew ? NO_PROJECT : projects.project ?? NO_PROJECT}
+          onChange={choose}
+          options={[...projects.projects.map((project) => ({ value: project, label: projectName(project) })), { value: NO_PROJECT, label: NO_PROJECT_LABEL }]}
+        />
+      </span>
     </span>
   );
 }

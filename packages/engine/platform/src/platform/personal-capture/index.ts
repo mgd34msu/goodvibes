@@ -27,6 +27,8 @@ export type {
   ConversationalTurnInputLike,
 } from './spawn-contract.js';
 export { PersonalCaptureHolder } from './port.js';
+export { daemonPersonalCapturePort } from './daemon-port.js';
+export type { DaemonCaptureInvoke } from './daemon-port.js';
 export type {
   CaptureOccasionsAccess,
   CaptureProfileAccess,

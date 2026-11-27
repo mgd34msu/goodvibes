@@ -1,6 +1,14 @@
-import { readFileSync, readdirSync, statSync } from 'node:fs';
+import { readFileSync, readdirSync, realpathSync, statSync } from 'node:fs';
+import { homedir } from 'node:os';
 import { join, resolve } from 'node:path';
 import { logger } from '../utils/logger.js';
+import { readProjectFile } from '../capabilities/held-paths.js';
+import { projectFilesHeld } from '../utils/prompt-loader.js';
+import { projectIdentityOf } from '../workspace/project-identity.js';
+
+function realOrResolved(path: string): string {
+  try { return realpathSync(path); } catch { return resolve(path); }
+}
 import { summarizeError } from '../utils/error-display.js';
 import {
   collectMarkdownReferences,
@@ -254,16 +262,33 @@ export class ArchetypeLoader {
     }
 
     const declaredBy = new Map<string, string>();
+    // A project's own agent files (its .goodvibes/agents) are the project's: used only for a project the owner trusted,
+    // each opened as a held path (a link out of the project gives nothing), under a size limit (utils/prompt-loader.ts,
+    // the same rule as its AGENTS.md). Files under the owner's own home are his.
+    const projectRoot = projectIdentityOf(this.dir);
+    const homeDirectory = homedir();
+    const ownersOwn = realOrResolved(projectRoot) === realOrResolved(homeDirectory) || !realOrResolved(this.dir).startsWith(`${realOrResolved(projectRoot)}/`);
+    const held = ownersOwn ? undefined : projectFilesHeld(projectRoot, homeDirectory);
     for (const file of files) {
       const filePath = join(this.dir, file);
       signature.set(filePath, statSignature(filePath));
       const fallbackName = file.replace(/\.md$/, '');
       let content: string;
-      try {
-        content = readFileSync(filePath, 'utf-8');
-      } catch (err) {
-        this.addUnusable(fallbackName, filePath, [`could not be read: ${summarizeError(err)}`], declaredBy);
-        continue;
+      if (!ownersOwn) {
+        if (held !== undefined) { this.addUnusable(fallbackName, filePath, [`a file of this project, not used because ${held}`], declaredBy); continue; }
+        const reading = readProjectFile(filePath, projectRoot, { maxBytes: 1_048_576, maxChars: Number.MAX_SAFE_INTEGER });
+        if (reading.kind !== 'read') {
+          this.addUnusable(fallbackName, filePath, [reading.kind === 'refused' ? `not read: ${reading.reason}` : 'could not be read'], declaredBy);
+          continue;
+        }
+        content = reading.text;
+      } else {
+        try {
+          content = readFileSync(filePath, 'utf-8');
+        } catch (err) {
+          this.addUnusable(fallbackName, filePath, [`could not be read: ${summarizeError(err)}`], declaredBy);
+          continue;
+        }
       }
       const parsed = extractFrontmatter(content);
       if (!parsed) {

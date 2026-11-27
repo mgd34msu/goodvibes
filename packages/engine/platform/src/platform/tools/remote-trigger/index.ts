@@ -3,7 +3,9 @@ import { isDeepStrictEqual } from 'node:util';
 import { isAbsolute, relative, resolve, sep } from 'node:path';
 import type { Tool } from '../../types/tools.js';
 import { summarizeError } from '../../utils/error-display.js';
+import { resolveAndValidatePath } from '../../utils/path-safety.js';
 import { RemoteRunnerRegistry } from '../../runtime/remote/runner-registry.js';
+import { projectIdentityOf } from '../../workspace/project-identity.js';
 import { REMOTE_TRIGGER_TOOL_SCHEMA, type RemoteTriggerToolInput } from './schema.js';
 
 function summarizePool(pool: ReturnType<RemoteRunnerRegistry['listPools']>[number]) {
@@ -45,6 +47,18 @@ function summarizeArtifact(artifact: ReturnType<RemoteRunnerRegistry['listArtifa
 export interface RemoteToolOptions {
   /** When set, `import-artifact` reads only files inside this directory (the host's project). */
   readonly importRoot?: string | undefined;
+  /**
+   * The project this registry's turns work in: the tool lists, reviews and assigns only the runners and results of
+   * work made in it (a contract's `workspaceRoot`), as a turn is held to its own project (control-plane/caller-reach.ts
+   * `remote-runner`, `remote-artifact`). Absent: every one (a host that works in no folder).
+   */
+  readonly onlyProject?: string | undefined;
+}
+
+/** Whether a contract's folder is of the project `project` names (undefined: every project). */
+function ofProject(project: string | undefined, root: string | undefined): boolean {
+  if (project === undefined) return true;
+  return typeof root === 'string' && root.trim() !== '' && projectIdentityOf(root.trim()) === project;
 }
 
 /** The runner contract an artifact file (an absolute path) carries, or undefined when the file does not hold one. */
@@ -59,6 +73,12 @@ async function contractInFile(path: string): Promise<{ runnerId: string } & Reco
 }
 
 export function createRemoteTool(registry: RemoteRunnerRegistry, options: RemoteToolOptions = {}): Tool {
+  // The project this registry's turns are held to, read once: its runners and results only.
+  const project = options.onlyProject !== undefined && options.onlyProject.trim() !== '' ? projectIdentityOf(options.onlyProject.trim()) : undefined;
+  const contractsHere = () => registry.listContracts().filter((contract) => ofProject(project, contract.workspaceRoot));
+  const artifactsHere = () => registry.listArtifacts().filter((artifact) => ofProject(project, artifact.runnerContract.workspaceRoot));
+  const runnerHere = (runnerId: string): boolean => contractsHere().some((contract) => contract.runnerId === runnerId);
+  const poolHere = <T extends { readonly runnerIds: readonly string[] }>(pool: T): T => project === undefined ? pool : { ...pool, runnerIds: pool.runnerIds.filter(runnerHere) };
   return {
     definition: {
       name: 'remote',
@@ -86,7 +106,7 @@ export function createRemoteTool(registry: RemoteRunnerRegistry, options: Remote
       }
 
       if (input.mode === 'pools') {
-        const pools = registry.listPools();
+        const pools = registry.listPools().map(poolHere);
         return {
           success: true,
           output: JSON.stringify({
@@ -104,7 +124,7 @@ export function createRemoteTool(registry: RemoteRunnerRegistry, options: Remote
           const known = registry.listPools().map((entry) => entry.id);
           return { success: false, error: `Unknown pool: ${input.poolId}. Nothing was assigned. Create it with create-pool first${known.length ? `, or use one of: ${known.join(', ')}` : ''}.` };
         }
-        if (!registry.listContracts().some((contract) => contract.runnerId === input.runnerId)) {
+        if (!runnerHere(input.runnerId)) {
           return { success: false, error: `Unknown runner: ${input.runnerId}. Nothing was assigned. Use mode=contracts to see the runners that can be assigned.` };
         }
         const previousPoolId = registry.getContract(input.runnerId)?.poolId;
@@ -117,13 +137,14 @@ export function createRemoteTool(registry: RemoteRunnerRegistry, options: Remote
 
       if (input.mode === 'unassign') {
         if (!input.poolId || !input.runnerId) return { success: false, error: 'unassign requires poolId and runnerId.' };
+        if (!runnerHere(input.runnerId)) return { success: false, error: `Unknown runner: ${input.runnerId}. Nothing was changed. Use mode=contracts to see the runners of this project.` };
         const pool = registry.removeRunnerFromPool(input.poolId, input.runnerId);
         if (!pool) return { success: false, error: `Unknown pool: ${input.poolId}` };
         return { success: true, output: JSON.stringify(pool) };
       }
 
       if (input.mode === 'contracts') {
-        const contracts = registry.listContracts();
+        const contracts = contractsHere();
         return {
           success: true,
           output: JSON.stringify({
@@ -135,7 +156,7 @@ export function createRemoteTool(registry: RemoteRunnerRegistry, options: Remote
       }
 
       if (input.mode === 'artifacts') {
-        const artifacts = registry.listArtifacts();
+        const artifacts = artifactsHere();
         return {
           success: true,
           output: JSON.stringify({
@@ -148,7 +169,8 @@ export function createRemoteTool(registry: RemoteRunnerRegistry, options: Remote
 
       if (input.mode === 'review') {
         if (!input.artifactId) return { success: false, error: 'review requires artifactId.' };
-        const summary = registry.buildReviewSummary(input.artifactId);
+        // Another project's result is answered as no result (the words never say it exists elsewhere).
+        const summary = artifactsHere().some((artifact) => artifact.id === input.artifactId) ? registry.buildReviewSummary(input.artifactId) : null;
         if (!summary) return { success: false, error: `Unknown artifact: ${input.artifactId}` };
         return { success: true, output: summary };
       }
@@ -159,7 +181,10 @@ export function createRemoteTool(registry: RemoteRunnerRegistry, options: Remote
         const artifactPath = options.importRoot !== undefined ? resolve(options.importRoot, input.path) : resolve(input.path);
         if (options.importRoot !== undefined) {
           const rel = relative(resolve(options.importRoot), artifactPath);
-          if (isAbsolute(rel) || rel === '..' || rel.startsWith(`..${sep}`)) {
+          // By real path too: a link inside the project that points out of it is outside.
+          let inside = !(isAbsolute(rel) || rel === '..' || rel.startsWith(`..${sep}`));
+          if (inside) { try { resolveAndValidatePath(input.path, options.importRoot); } catch { inside = false; } }
+          if (!inside) {
             return { success: false, error: `import-artifact reads only files inside the project (${resolve(options.importRoot)}); ${artifactPath} is outside it. Nothing was imported.` };
           }
         }

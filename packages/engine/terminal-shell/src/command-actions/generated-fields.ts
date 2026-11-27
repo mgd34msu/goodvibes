@@ -30,6 +30,8 @@ export function generatedUsage(description: CommandDescription<never>): string {
 export function generatedArgsHint(description: CommandDescription<never>): string {
   const single = singleAction(description);
   if (single) return linePattern(single);
+  // A command kept only to open its place (`/memory`) takes nothing after its name.
+  if (description.actions.length === 0) return '';
   return `[${description.actions.map((action) => action.word).join('|')}]`;
 }
 

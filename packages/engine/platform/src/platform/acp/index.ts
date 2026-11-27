@@ -16,6 +16,7 @@ export { AcpManager, getDefaultAcpAgentCommand, parseAcpAgentCommandEnv, registe
   type AcpStdio,
   type EmbeddedSessionFactory,
 } from './agent.js';
+export { ACP_STARTED_FOR_ENV, acpChildEnvironment, acpConnectionParty } from './connection-party.js';
 export {
   AcpHostService,
   discoverAcpAgents,

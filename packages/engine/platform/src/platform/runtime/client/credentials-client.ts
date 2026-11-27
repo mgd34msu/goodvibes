@@ -49,7 +49,9 @@
  * the refusal. Writing it locally instead produces the split pair this module
  * exists to prevent.
  */
-import type { DaemonVerbCaller } from './daemon-verbs.js';
+import { pressInvokeOptions, type DaemonVerbCaller } from './daemon-verbs.js';
+import { throwIfPutToOwner } from './config-client.js';
+import type { DaemonWritePress } from '../../config/manager.js';
 
 /** What the daemon reports back about a credential write. Never the value. */
 export interface CredentialWriteReceipt {
@@ -64,9 +66,9 @@ export interface DaemonCredentialsClient {
    * Store a credential for a daemon-owned config key. The daemon writes the
    * secret, verifies it reads back, and only then points the config key at it.
    */
-  set(configKey: string, value: string): Promise<CredentialWriteReceipt>;
-  /** Clear a credential and the config reference that pointed at it. */
-  clear(configKey: string): Promise<void>;
+  set(configKey: string, value: string, press?: DaemonWritePress): Promise<CredentialWriteReceipt>;
+  /** Clear a credential and the config reference that pointed at it. `press`: who decided it, sent with it. */
+  clear(configKey: string, press?: DaemonWritePress): Promise<void>;
 }
 
 export function createDaemonCredentialsClient(verbs: DaemonVerbCaller): DaemonCredentialsClient {
@@ -78,13 +80,15 @@ export function createDaemonCredentialsClient(verbs: DaemonVerbCaller): DaemonCr
   };
 
   return {
-    set: async (configKey, value) => {
+    set: async (configKey, value, press) => {
       requireDaemon(configKey);
-      return await verbs.invoke<CredentialWriteReceipt>('credentials.set', { key: configKey, value });
+      const receipt = await verbs.invoke<CredentialWriteReceipt>('credentials.set', { key: configKey, value }, pressInvokeOptions(press));
+      throwIfPutToOwner(receipt, configKey);
+      return receipt;
     },
-    clear: async (configKey) => {
+    clear: async (configKey, press) => {
       requireDaemon(configKey);
-      await verbs.invoke('credentials.delete', { key: configKey });
+      throwIfPutToOwner(await verbs.invoke('credentials.delete', { key: configKey }, pressInvokeOptions(press)), configKey);
     },
   };
 }

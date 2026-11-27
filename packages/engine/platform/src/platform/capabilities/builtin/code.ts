@@ -922,6 +922,35 @@ export const WORKTREE_DISCARD: CapabilityDefinition<object> = {
   },
 };
 
+/** The one setting (the daemon's, config-ownership.ts) every program and the daemon's own turns follow. */
+const CODE_INDEX_KEPT_KEY = 'storage.codeIndexEnabled';
+
+/** Whether a project's code index is kept current, one choice for the machine, written in the daemon's settings. */
+export const CODEBASE_KEEP_CURRENT: CapabilityDefinition<object> = {
+  capability: { id: 'codebase.keep-current', group: 'code', home: 'daemon', repeat: 'safe' },
+  actionId: 'keep-index-current', label: 'Keep the code index up to date', word: 'keep-current',
+  inputs: [{
+    id: 'kept', label: 'Keep it up to date', help: 'On for every project on this machine, or off', kind: 'choice',
+    choices: [
+      { value: 'on', label: 'Kept up to date', help: 'A project\'s index is built the first time a turn there asks for code, and kept current after edits.' },
+      { value: 'off', label: 'Not built by itself', help: 'No index is built by itself; "build it" builds one on demand.' },
+    ],
+    required: true, typed: { position: 1 },
+  }],
+  sentence: 'The code index of every project on this machine: {kept} (one setting, kept by the daemon), until you change it.',
+  done: '', touches: 'this-machine', lasts: 'kept', risk: 'none', example: { kept: 'on' },
+  async run(values, _services, caller) {
+    const on = values.kept === 'on';
+    await methodOf(caller)('config.set', { key: CODE_INDEX_KEPT_KEY, value: on });
+    return {
+      text: on
+        ? 'The code index is kept up to date for every project: a project\'s index is built the first time a turn there asks for code.'
+        : 'The code index is no longer built by itself in any project; "build it" builds one on demand.',
+      data: { kept: on },
+    };
+  },
+};
+
 /** Every code capability that runs in the program holding the conversation. */
 export const CODE_SESSION_CAPABILITIES: readonly CodeDefinition[] = [
   GIT_STATUS, GIT_LOG, GIT_DIFF, GIT_INIT, GIT_COMMIT,
@@ -941,5 +970,5 @@ export function codeCommandOf(id: string): { readonly name: string; readonly tit
   return { name: 'test', title: 'Run the tests' };
 }
 
-/** The two the daemon runs, each through its own worktree method, in the caller's project. */
-export const CODE_DAEMON_CAPABILITIES: readonly CapabilityDefinition<object>[] = [WORKTREE_SETUP, WORKTREE_DISCARD];
+/** The ones the daemon runs: each worktree one through its own method in the caller's project, and the index setting. */
+export const CODE_DAEMON_CAPABILITIES: readonly CapabilityDefinition<object>[] = [WORKTREE_SETUP, WORKTREE_DISCARD, CODEBASE_KEEP_CURRENT];

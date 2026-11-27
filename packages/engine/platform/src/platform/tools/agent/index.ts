@@ -246,9 +246,12 @@ export interface AgentToolConfig {
   readonly configManager: Pick<ConfigManager, 'get'>;
   readonly archetypeLoader?: Pick<ArchetypeLoader, 'loadArchetype'> | undefined;
   /** Starts the contract spawn and batch-spawn hand work to, and answers the contracts and contract-history modes. */
-  readonly contractRunner: Pick<ContractRunner, 'start' | 'list' | 'get'> & Partial<Pick<ContractRunner, 'cancel' | 'join'>>;
+  /** Absent in a program that runs no contracts (its delegation goes to the daemon as work: AgentManager.delegatesToDaemon). */
+  readonly contractRunner?: (Pick<ContractRunner, 'start' | 'list' | 'get'> & Partial<Pick<ContractRunner, 'cancel' | 'join'>>) | undefined;
   /** The project a contract started here works in. */
   readonly projectRoot: string;
+  /** Where the agents run here keep their journals, when not in `projectRoot` (the daemon's records of the project). */
+  readonly journalRoot?: string | undefined;
   readonly surfaceRoot?: string | undefined;
   readonly readAccessFilter?: import('../shared/read-access.js').ReadAccessFilter | undefined;
   /** The conversation session a contract started here belongs to, read on each call. */
@@ -349,10 +352,11 @@ export function createAgentTool(config: AgentToolConfig): Tool {
     };
     const startOwnedContract = async (input: AgentInput, ask: string, units: readonly ProposedUnit[]): Promise<StartedContract> => {
       assertCurrent();
-      if (options === undefined) {
-        return startContract(input, ask, units, assertCurrent, (contractInput) => config.contractRunner.start(contractInput));
-      }
       const runner = config.contractRunner;
+      if (!runner) throw new Error('This program runs no contracts: a task is handed to the daemon as a piece of work in Work.');
+      if (options === undefined) {
+        return startContract(input, ask, units, assertCurrent, (contractInput) => runner.start(contractInput));
+      }
       const start = runner.start, cancel = runner.cancel, join = runner.join;
       if ((signal !== undefined || options?.assertCurrent !== undefined)
         && (typeof cancel !== 'function' || typeof join !== 'function')) {
@@ -401,7 +405,10 @@ export function createAgentTool(config: AgentToolConfig): Tool {
     const session = config.resolveSessionId();
     // The parent is the agent this call runs inside, as the host recorded it on the turn; none for the conversation's own turn.
     const callerAgentId = currentTurn()?.callerAgentId ?? undefined;
+    // An agent started here works in the project of the turn that started it (a daemon-run turn in a project: that
+    // project, never the daemon's own folder), as a contract started here does.
     const input = classicAgentInput({ ...modelAgentInput(args as unknown as AgentInput), sessionId: session,
+      ...(config.projectRoot ? { workingDirectory: config.projectRoot } : {}),
       ...(callerAgentId ? { parentAgentId: callerAgentId } : {}) });
     if (isNativeConversationTurn() && decisionModelPolicyState().operation !== 'no-decision-model' && (input.mode === 'spawn' || input.mode === 'batch-spawn')) {
       // A task handed to the daemon as a piece of work is new work on the daemon's one runner, as the daemon's intake
@@ -430,7 +437,7 @@ export function createAgentTool(config: AgentToolConfig): Tool {
     const notLive = (agentId: string, answered: boolean): { success: boolean; output?: string; error?: string } => {
       let fact = `Agent '${agentId}' is not running in this process, and no contract of this session names it. Agents do not survive a restart of the app.`;
       try {
-        for (const contract of config.contractRunner.list({ sessionId: session, includeTerminal: true, includeInputSnapshot: false })) {
+        for (const contract of config.contractRunner?.list({ sessionId: session, includeTerminal: true, includeInputSnapshot: false }) ?? []) {
           const unit = contract.units.find((candidate) => candidate.agentIds.includes(agentId));
           const role = contract.ownerAgentId === agentId ? 'the owner record'
             : contract.plannerAgentIds.includes(agentId) ? 'a planner'
@@ -463,7 +470,8 @@ export function createAgentTool(config: AgentToolConfig): Tool {
       const ownerMessages = input.parentAgentId === undefined && source !== undefined ? source.ownerMessages
         : input.authoritativeTask?.trim() ? [input.authoritativeTask] : [];
       try {
-        const verdict = await decideDelegation(config.contractRunner, { sessionId: session, ownerMessages, tasks },
+        // The conversation's earlier answers are kept per owner object: the runner's, or the manager's where none runs.
+        const verdict = await decideDelegation(config.contractRunner ?? config.manager, { sessionId: session, ownerMessages, tasks },
           { ask: config.delegationAsk, signal, assertCurrent });
         assertCurrent();
         return verdict.start ? null : publish(delegationRefusalResult(verdict.refusal));
@@ -643,7 +651,7 @@ export function createAgentTool(config: AgentToolConfig): Tool {
         const record = manager.getStatus(input.agentId);
         if (!record) {
           let unreadable: string | undefined;
-          const history = await readAgentSessionHistory({ projectRoot: config.projectRoot, surfaceRoot: config.surfaceRoot,
+          const history = await readAgentSessionHistory({ projectRoot: config.journalRoot ?? config.projectRoot, surfaceRoot: config.surfaceRoot,
             agentId: input.agentId, readAccessFilter: config.readAccessFilter, signal, assertCurrent,
             onUnreadable: (reason) => { unreadable = reason; } });
           assertCurrent();
@@ -671,7 +679,7 @@ export function createAgentTool(config: AgentToolConfig): Tool {
 
         let historyUnreadable: string | undefined;
         const history = !record.fullOutput && !['pending', 'running'].includes(record.status)
-          && (detail === 'full' || detail === 'messages') ? await readAgentSessionHistory({ projectRoot: config.projectRoot,
+          && (detail === 'full' || detail === 'messages') ? await readAgentSessionHistory({ projectRoot: config.journalRoot ?? config.projectRoot,
             surfaceRoot: config.surfaceRoot, agentId: input.agentId, readAccessFilter: config.readAccessFilter, signal, assertCurrent,
             onUnreadable: (reason) => { historyUnreadable = reason; } }) : undefined;
         assertCurrent();
@@ -871,7 +879,7 @@ export function createAgentTool(config: AgentToolConfig): Tool {
         // message queued for it. The instruction goes to the agents working
         // the contract's units now, and the result says which received it.
         if (record.contractRole === 'owner' && record.contractId) {
-          const contract = config.contractRunner.get(record.contractId);
+          const contract = config.contractRunner?.get(record.contractId);
           if (!contract) {
             return { success: false, error: `Agent '${record.id}' is the owner of contract ${record.contractId}, which is no longer loaded here. No message was queued. Use mode=contract-history to read its result.` };
           }
@@ -1113,11 +1121,11 @@ export function createAgentTool(config: AgentToolConfig): Tool {
         try {
           const detail = input.detail ?? 'summary';
           // The summary reads no captured repository manifest, so it is built only for the full view.
-          const contracts = config.contractRunner.list({
+          const contracts = config.contractRunner?.list({
             sessionId: session,
             includeTerminal: input.includeTerminal ?? true,
             includeInputSnapshot: detail === 'full',
-          });
+          }) ?? [];
           return {
             success: true,
             output: JSON.stringify({
@@ -1137,7 +1145,7 @@ export function createAgentTool(config: AgentToolConfig): Tool {
         // session's contracts (also those from before a restart) and every agent they or this session started,
         // with what each read, changed and reported from its saved journal.
         try {
-          const contracts = config.contractRunner.list({ sessionId: session, includeTerminal: true, includeInputSnapshot: false });
+          const contracts = config.contractRunner?.list({ sessionId: session, includeTerminal: true, includeInputSnapshot: false }) ?? [];
           const roles = new Map<string, string>();
           for (const contract of contracts) {
             for (const planner of contract.plannerAgentIds) roles.set(planner, `planner of contract ${contract.id}`);
@@ -1149,7 +1157,7 @@ export function createAgentTool(config: AgentToolConfig): Tool {
           for (const agentId of ids) {
             const record = manager.getStatus(agentId);
             let unreadable: string | undefined;
-            const journal = await readAgentJournalActivity({ projectRoot: config.projectRoot, surfaceRoot: config.surfaceRoot, agentId,
+            const journal = await readAgentJournalActivity({ projectRoot: config.journalRoot ?? config.projectRoot, surfaceRoot: config.surfaceRoot, agentId,
               readAccessFilter: config.readAccessFilter, signal, assertCurrent, onUnreadable: (reason) => { unreadable = reason; } });
             assertCurrent();
             const state = record ? record.status
@@ -1190,7 +1198,7 @@ export function createAgentTool(config: AgentToolConfig): Tool {
           return { success: false, error: 'contract-history requires contractId' };
         }
         try {
-          const contract = config.contractRunner.get(input.contractId);
+          const contract = config.contractRunner?.get(input.contractId);
           if (!contract || contract.sessionId !== session) {
             return { success: false, error: `Unknown contract: '${input.contractId}'` };
           }

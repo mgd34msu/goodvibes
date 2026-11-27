@@ -68,6 +68,7 @@ import type { ObservedAgentSource } from './observed/source.js';
 import type { AcpHostService } from '../../acp/host.js';
 import { DEFAULT_STALL_TELL_MS, HeadlineTable, deriveStallTell } from './headlines.js';
 import { logger } from '../../utils/logger.js';
+import { outsideEveryCall } from '../../utils/outside-every-call.js';
 import { summarizeError } from '../../utils/error-display.js';
 
 /** Default stalled threshold: running agent with no bus activity for this long → 'stalled'. */
@@ -134,7 +135,8 @@ export interface ProcessRegistryDeps {
    * contract-unit nodes, and a contract kill cancels through it.
    */
   /** `fleetControls` is read for merge conflicts; a runner without it shows none. */
-  readonly contractRunner: Pick<ContractRunner, 'list' | 'cancel'> & { readonly fleetControls?: ContractRunner['fleetControls'] | undefined };
+  /** Absent in a graph that runs no contracts (a terminal program): the fleet then lists none. */
+  readonly contractRunner?: (Pick<ContractRunner, 'list' | 'cancel'> & { readonly fleetControls?: ContractRunner['fleetControls'] | undefined }) | undefined;
   readonly processManager: Pick<ProcessManager, 'list' | 'stop' | 'getStatus'>;
   /** `awaitingOwner` names the platform watchers this process only restored from the store; a registry without it lists every record. */
   readonly watcherRegistry: Pick<WatcherRegistry, 'list' | 'stopWatcher'> & Partial<Pick<WatcherRegistry, 'awaitingOwner'>>;
@@ -473,7 +475,7 @@ export function createProcessRegistry(deps: ProcessRegistryDeps): ProcessRegistr
   function assemble(): { capturedAt: number; nodes: ProcessNode[] } {
     const capturedAt = now();
     const agents: AgentRecord[] = deps.agentManager.list();
-    const contracts: readonly ContractView[] = deps.contractRunner.list({ includeTerminal: true, includeInputSnapshot: false });
+    const contracts: readonly ContractView[] = deps.contractRunner?.list({ includeTerminal: true, includeInputSnapshot: false }) ?? [];
     const agentCtx = agentContext(capturedAt, agents, contracts, true);
     const agentIds = agentCtx.agentIds;
 
@@ -491,7 +493,7 @@ export function createProcessRegistry(deps: ProcessRegistryDeps): ProcessRegistr
     const agentNodesOf = (agentIds: readonly string[]): ProcessNode[] => [...new Set(agentIds)]
       .map((agentId) => agentNodeById.get(agentId))
       .filter((node): node is ProcessNode => node !== undefined);
-    const mergeConflicts = conflictedUnitDetails(deps.contractRunner.fleetControls?.());
+    const mergeConflicts = conflictedUnitDetails(deps.contractRunner?.fleetControls?.());
     for (const contract of contracts) {
       const units = allContractUnits(contract);
       // Members exclude the owner: it runs no model, and its usage is filled
@@ -604,7 +606,7 @@ export function createProcessRegistry(deps: ProcessRegistryDeps): ProcessRegistr
     const agents: AgentRecord[] = deps.agentManager.list();
     let contractsRead: readonly ContractView[] | undefined;
     const contracts = (): readonly ContractView[] =>
-      (contractsRead ??= deps.contractRunner.list({ includeTerminal: true, includeInputSnapshot: false }));
+      (contractsRead ??= deps.contractRunner?.list({ includeTerminal: true, includeInputSnapshot: false }) ?? []);
     let ctxRead: AgentAdapterContext | undefined;
     const ctx = (): AgentAdapterContext => (ctxRead ??= agentContext(capturedAt, agents, contracts(), forRead));
     const agentNode = (agentId: string | undefined): ProcessNode | undefined => {
@@ -638,7 +640,7 @@ export function createProcessRegistry(deps: ProcessRegistryDeps): ProcessRegistr
           activeAgent: agentNode(unit.activeAgentId),
           memberNodes: agentNodesOf(unit.agentIds),
           messageBusPresent: deps.messageBus !== undefined,
-          mergeConflict: conflictedUnitDetails(deps.contractRunner.fleetControls?.()).get(qualifyId(contract.id, unit.id)),
+          mergeConflict: conflictedUnitDetails(deps.contractRunner?.fleetControls?.()).get(qualifyId(contract.id, unit.id)),
           now: capturedAt,
         }));
       }
@@ -725,7 +727,8 @@ export function createProcessRegistry(deps: ProcessRegistryDeps): ProcessRegistr
     if (tickHandle !== null) timers.clearInterval(tickHandle);
     tickPeriod = period;
     quietTicks = 0;
-    tickHandle = timers.setInterval(tick, period);
+    // Re-armed by whichever subscriber or announced change asked (a request, a turn): in the process's own context.
+    tickHandle = outsideEveryCall(() => timers.setInterval(tick, period));
     // Never pin the event loop: an idle runtime must be able to exit even if
     // a consumer forgot to dispose (mirrors ScheduleManager.destroy hygiene).
     unrefHandle(tickHandle);
@@ -821,7 +824,7 @@ export function createProcessRegistry(deps: ProcessRegistryDeps): ProcessRegistr
       }
       case 'contract': {
         const contract = node.raw as ContractView;
-        return deps.contractRunner.cancel(contract.id, 'stopped by the operator') ? [node.id] : [];
+        return deps.contractRunner?.cancel(contract.id, 'stopped by the operator') ? [node.id] : [];
       }
       case 'contract-group': {
         // The group's working unit agents. The runner reads an operator

@@ -90,6 +90,12 @@ export interface SubagentTask {
   writeScope?: string[] | undefined;
   /** App-owned working directory for the spawned ACP session. */
   workingDirectory: string;
+  /**
+   * Whose input the subagent acts on, recorded from who started it (a runner the daemon starts: the cause of the
+   * capability call that started it). Every ask of its own is decided as that party's turn (security/turn-input-party.ts):
+   * started by anyone but the owner, it runs reads only. Absent: the starter's own turn decides it, as before.
+   */
+  inputParty?: { readonly party: 'owner' } | { readonly party: 'other'; readonly who: string } | undefined;
   /** Optional model override (e.g. "claude-sonnet-4-5"). */
   model?: string | undefined;
   /** Optional provider override (e.g. "anthropic"). */

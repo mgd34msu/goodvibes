@@ -30,9 +30,12 @@ import {
   type SetupTransferFiles,
 } from '../../support/setup-transfer.js';
 import { CapabilityRefusal, REPLACED_DONE, type ActionValues, type CapabilityCaller, type CapabilityDefinition, type InputDescription } from '../types.js';
+import { fileWorkRefusal, readCallerJson, unreadableFile } from '../path-inputs.js';
+import { heldPath } from '../held-paths.js';
 import type { ProgramSettingsCapabilityServices } from './program-settings.js';
 import { REMOTE_LIST, type RemoteCapabilityServices } from './remote.js';
-import { PROGRAM_INPUT } from './system-settings.js';
+import { PROGRAM_INPUT, lockedFileSettingsRefusal } from './system-settings.js';
+import { incomingSecurityInput } from './incoming-settings.js';
 
 /** The file that marks a support folder: a program doing the file work on its own disk checks for it (terminal-shell bundle-file-work.ts). */
 export { SUPPORT_FOLDER_MARK };
@@ -55,8 +58,8 @@ export interface SystemBundleCapabilityServices extends ProgramSettingsCapabilit
     home(): string;
     /** The caller's project folder, else the daemon's. */
     project(caller: CapabilityCaller): string;
-    /** The hooks file the program's turns in that project read. */
-    hooksFile(caller: CapabilityCaller, config: ConfigManager): string;
+    /** The hooks file the program's turns in the caller's project read; null when the caller named no project. */
+    hooksFile(caller: CapabilityCaller, config: ConfigManager): string | null;
   };
 }
 
@@ -79,12 +82,12 @@ const errorText = (error: unknown): string => (error instanceof Error ? error.me
 // nothing. Both inputs are filled by the program asking and never asked of a person.
 // ---------------------------------------------------------------------------
 
-const FILES_AT: InputDescription = {
+export const FILES_AT: InputDescription = {
   id: 'filesAt', label: 'Where the file is', help: 'On the daemon\'s machine, or on the machine of the program asking (which sends and writes the file itself)',
   kind: 'choice', choices: [{ value: 'daemon', label: 'On the daemon\'s machine' }, { value: 'program', label: 'On the machine of the program asking' }],
   required: { default: 'daemon', defaultMeans: 'on the daemon\'s machine' }, typed: { flag: '--files-at' }, showWhen: { suppliedBy: 'the program asking' },
 };
-const CONTENT_INPUT: InputDescription = {
+export const CONTENT_INPUT: InputDescription = {
   id: 'content', label: 'What the file holds', help: 'The file\'s text (a folder\'s: its files as JSON, name to text), sent by the program asking when the file is on its machine',
   kind: 'long-text', freeTextReason: 'filled by the program asking', required: { default: '', defaultMeans: 'read from the path' },
   typed: { flag: '--content' }, showWhen: { suppliedBy: 'the program asking' },
@@ -242,7 +245,7 @@ export const BUNDLE_SAVE: Def = {
   capability: { id: 'bundle.export', group: 'system', home: 'daemon', repeat: 'unsafe' },
   actionId: 'save', label: 'Save a support bundle', word: 'export',
   inputs: [
-    { ...BUNDLE_FILE, help: 'Where to write it, in this project folder unless it is a full path', required: { default: '', defaultMeans: 'goodvibes-bundle.json (the Agent\'s: goodvibes-agent-bundle.json) in this folder' } },
+    { ...BUNDLE_FILE, file: 'written', help: 'Where to write it, in this project folder unless it is a full path', required: { default: '', defaultMeans: 'goodvibes-bundle.json (the Agent\'s: goodvibes-agent-bundle.json) in this folder' } },
     { id: 'existing', label: 'If the file exists', help: 'Stop, or write over what it holds', kind: 'choice', choices: [
       { value: 'stop', label: 'Stop and say so' },
       { value: 'replace', label: 'Replace it', help: 'What it holds now cannot be recovered.', risk: 'cannot-be-undone', riskDone: REPLACED_DONE },
@@ -298,7 +301,8 @@ export const BUNDLE_CHECK: Def = {
 async function checkBundle(values: ActionValues, services: SystemBundleCapabilityServices, caller: CapabilityCaller, path: string, shown: string = path): Promise<{ text: string; data: Record<string, unknown> }> {
   const run = bundleFor(values, services, caller);
   const read = run.builder.inspectFile(path);
-  if (!read.ok) throw new CapabilityRefusal(read.problem.split(path).join(shown));
+  // The reader's words can quote the file (a parser's message): only the person, or the program that sent it, reads them.
+  if (!read.ok) throw caller.personAsked === true || filesAtProgram(values) ? new CapabilityRefusal(read.problem.split(path).join(shown)) : unreadableFile(shown, 'a support bundle', caller, undefined, 'Nothing was read from it.');
   const plan = planLines(run, path, false);
   return {
     text: [`${shown} holds ${read.summary.configKeys} setting(s); loading it would change ${plan.changes} of ${PROGRAM_WORDS[run.program]}'s. Nothing was changed.`, '',
@@ -312,10 +316,7 @@ export const BUNDLE_LOAD: Def = {
   actionId: 'load', label: 'Load settings from a support bundle', word: 'import',
   inputs: [
     BUNDLE_FILE,
-    { id: 'security', label: 'Security settings', help: 'Settings that decide what runs unasked, what this computer exposes and where data is kept', kind: 'choice', choices: [
-      { value: 'no', label: 'Leave them as they are' },
-      { value: 'yes', label: 'Load them too', risk: 'loosens-a-protection' },
-    ], required: { default: 'no', defaultMeans: 'leave them as they are' }, typed: { flag: '--include-security', switchOn: 'yes' } },
+    incomingSecurityInput('Load them too'),
     PROGRAM_INPUT,
     FILES_AT,
     CONTENT_INPUT,
@@ -332,7 +333,11 @@ async function loadBundle(values: ActionValues, services: SystemBundleCapability
   const run = bundleFor(values, services, caller);
   const includeSecurity = values.security === 'yes';
   const loaded = await run.builder.load(run.runtime, path, includeSecurity);
-  if (!loaded.ok) throw new CapabilityRefusal([loaded.problem, ...(loaded.lines ?? [])].join('\n').split(path).join(shown));
+  if (!loaded.ok) {
+    // The reader's words can quote the file (a parser's message): only the person, or the program that sent it, reads them.
+    throw caller.personAsked === true || filesAtProgram(values) ? new CapabilityRefusal([loaded.problem, ...(loaded.lines ?? [])].join('\n').split(path).join(shown))
+      : unreadableFile(shown, 'a support bundle', caller, undefined, 'Nothing was loaded.');
+  }
   const words = run.builder.describe(loaded.plan);
   const applied = loaded.applied.length;
   return {
@@ -432,7 +437,7 @@ function helpersOf(value: string | undefined): Record<string, unknown> | string 
 export const STARTUP_SUPPORT_BUNDLE: Def = {
   capability: { id: 'startup.support-bundle', group: 'system', home: 'daemon', repeat: 'unsafe' },
   actionId: 'support-bundle', label: 'Save a support folder about this setup', word: 'support-bundle',
-  inputs: [PLACE_INPUT('dir', 'Folder', 'The folder the support files are written to'), OVERWRITE, PROGRAM_INPUT, HELPERS_INPUT, LINKS_INPUT, FILES_AT],
+  inputs: [{ ...PLACE_INPUT('dir', 'Folder', 'The folder the support files are written to'), file: 'written', workFolder: false }, OVERWRITE, PROGRAM_INPUT, HELPERS_INPUT, LINKS_INPUT, FILES_AT],
   sentence: 'The setup review, the platform facts, the services and hooks files and the remote runners are written to the folder {dir} for a support thread; credentials in them are masked.', done: '',
   touches: 'this-machine', lasts: 'not-a-change', risk: 'none', example: { dir: 'support' },
   async run(values, services, caller) {
@@ -451,7 +456,7 @@ async function writeSupportFolderFor(values: ActionValues, services: SystemBundl
   {
     const program = programOf(values, caller);
     const config = services.programSettings.config({ ...caller, program });
-    if (shown === targetDir && existsSync(join(targetDir, SUPPORT_FOLDER_MARK)) && values.overwrite !== 'replace') {
+    if (shown === targetDir && existsSync(heldPath(join(targetDir, SUPPORT_FOLDER_MARK))) && values.overwrite !== 'replace') {
       throw new CapabilityRefusal(`${targetDir} already holds a support folder; nothing was written.`, 'Choose another folder, or choose to replace it.');
     }
     const { review, remote } = await reviewOf(services, caller, program, config);
@@ -468,10 +473,12 @@ async function writeSupportFolderFor(values: ActionValues, services: SystemBundl
       deepLinks: values.links ? values.links.split('\n').map((link) => link.trim()).filter(Boolean) : 'none named: the program asking named no views with links (the Agent has none)',
     };
     const paths = createShellPathService({ workingDirectory: services.supportBundles.project(caller), homeDirectory: services.supportBundles.home() });
+    const hooksFile = services.supportBundles.hooksFile(caller, config);
     const { masked } = writeSupportFolder(targetDir, {
       review, platformReview, remoteSummary: remote,
-      copies: [[paths.resolveUserPath(program, 'services.json'), 'services.json'], [services.supportBundles.hooksFile(caller, config), 'hooks.json']],
-    });
+      copies: [[paths.resolveUserPath(program, 'services.json'), 'services.json'], ...(hooksFile !== null ? [[hooksFile, 'hooks.json'] as [string, string]] : [])],
+    // Each file beneath a folder the caller named, through its held handle (capabilities/held-paths.ts).
+    }, heldPath);
     return {
       text: `Support folder for ${PROGRAM_WORDS[program]} written to ${shown}${masked > 0 ? ` (${masked} credential value(s) masked)` : ''}.`,
       data: { program, dir: shown, masked, issues: review.issues.length },
@@ -482,7 +489,7 @@ async function writeSupportFolderFor(values: ActionValues, services: SystemBundl
 export const STARTUP_SUPPORT_BUNDLE_INSPECT: Def = {
   capability: { id: 'startup.support-bundle-inspect', group: 'system', home: 'daemon', repeat: 'safe' },
   actionId: 'support-bundle-inspect', label: 'Read a support folder', word: 'support-bundle-inspect',
-  inputs: [PLACE_INPUT('dir', 'Folder', 'The folder that holds the support files'), FILES_AT, CONTENT_INPUT],
+  inputs: [{ ...PLACE_INPUT('dir', 'Folder', 'The folder that holds the support files'), workFolder: false }, FILES_AT, CONTENT_INPUT],
   sentence: 'Shows what the support folder {dir} says about its setup.', done: '',
   touches: 'reads', lasts: 'not-a-change', risk: 'none', example: { dir: 'support' },
   async run(values, services, caller) {
@@ -498,9 +505,10 @@ export const STARTUP_SUPPORT_BUNDLE_INSPECT: Def = {
     }
     const targetDir = services.programSettings.resolvePath(caller, values.dir!);
     try {
-      return { text: `The support folder ${targetDir} was read; nothing was changed.\n\n${inspectSupportFolder(targetDir)}`, data: { dir: targetDir } };
+      return { text: `The support folder ${targetDir} was read; nothing was changed.\n\n${inspectSupportFolder(targetDir, heldPath)}`, data: { dir: targetDir } };
     } catch (error) {
-      throw new CapabilityRefusal(`Could not read the support folder in ${targetDir}: ${errorText(error)}.`, 'Save one first: "Save a support folder about this setup".');
+      // Never the system's or the parser's words to anyone but the person (path-inputs.ts).
+      throw fileWorkRefusal(targetDir, 'a support folder', caller, error, 'Nothing was read from it.');
     }
   },
 };
@@ -508,7 +516,7 @@ export const STARTUP_SUPPORT_BUNDLE_INSPECT: Def = {
 export const STARTUP_TRANSFER_EXPORT: Def = {
   capability: { id: 'startup.transfer-export', group: 'system', home: 'daemon', repeat: 'unsafe' },
   actionId: 'transfer-export', label: 'Save this setup to move it to another computer', word: 'transfer-export',
-  inputs: [PLACE_INPUT('path', 'File', 'The file the setup is written to'), OVERWRITE, PROGRAM_INPUT, FILES_AT],
+  inputs: [{ ...PLACE_INPUT('path', 'File', 'The file the setup is written to'), file: 'written' }, OVERWRITE, PROGRAM_INPUT, FILES_AT],
   sentence: 'Settings, services, plugins and skills are written to {path} for another computer; literal credentials are left out.', done: '',
   touches: 'this-machine', lasts: 'not-a-change', risk: 'none', example: { path: 'setup-transfer.json' },
   async run(values, services, caller) {
@@ -536,16 +544,12 @@ export const STARTUP_TRANSFER_EXPORT: Def = {
   },
 };
 
-function readTransfer(path: string): unknown {
-  if (!existsSync(path)) throw new CapabilityRefusal(`File not found: ${path}; nothing was read.`);
-  try { return JSON.parse(readFileSync(path, 'utf-8')); } catch (error) { throw new CapabilityRefusal(`${path} is not a setup file: ${errorText(error)}.`); }
-}
-
 /** The setup file a call names: read here, or (the program asking holds it) the content it sent. */
 function transferOf(values: ActionValues, services: SystemBundleCapabilityServices, caller: CapabilityCaller): { readonly path: string; readonly parsed: unknown } {
   if (!filesAtProgram(values)) {
     const path = services.programSettings.resolvePath(caller, values.path!);
-    return { path, parsed: readTransfer(path) };
+    // Never the system's or the parser's words (capabilities/path-inputs.ts).
+    return { path, parsed: readCallerJson(path, 'a setup file', caller, 'Nothing was read.') };
   }
   const path = values.path!;
   try { return { path, parsed: JSON.parse(values.content ?? '') }; } catch (error) { throw new CapabilityRefusal(`${path} is not a setup file: ${errorText(error)}.`); }
@@ -585,10 +589,7 @@ export const STARTUP_TRANSFER_IMPORT: Def = {
   actionId: 'transfer-import', label: 'Bring in a setup moved from another computer', word: 'transfer-import',
   inputs: [
     PLACE_INPUT('path', 'File', 'The setup file to bring in'),
-    { id: 'security', label: 'Security settings', help: 'Settings that decide what runs unasked, what this computer exposes and where data is kept', kind: 'choice', choices: [
-      { value: 'no', label: 'Leave them as they are' },
-      { value: 'yes', label: 'Bring them in too', help: 'A setting that loosens a protection is then changed too.', risk: 'loosens-a-protection' },
-    ], required: { default: 'no', defaultMeans: 'leave them as they are' }, typed: { flag: '--include-security', switchOn: 'yes' } },
+    incomingSecurityInput(),
     PROGRAM_INPUT,
     FILES_AT,
     CONTENT_INPUT,
@@ -596,6 +597,13 @@ export const STARTUP_TRANSFER_IMPORT: Def = {
   sentence: 'The settings and files in {path} replace the ones here, security settings only if you choose to bring them in too; the files they replace are not kept. Reading the file first shows what changes.', done: '',
   touches: 'this-machine', lasts: 'kept', risk: 'cannot-be-undone', riskDone: 'The files it replaced are not kept.', example: { path: 'setup-transfer.json' },
   question: 'Bring in the setup in {path}?',
+  // Read once before anything is asked: a setting in it locked as managed refuses it now, and what runs is the content read.
+  readsFileBefore(values, services, caller) {
+    const { path, parsed } = transferOf(values, services, caller);
+    const config = parsed !== null && typeof parsed === 'object' && !Array.isArray(parsed) ? (parsed as { config?: unknown }).config : undefined;
+    const entries = config !== null && typeof config === 'object' && !Array.isArray(config) ? Object.entries(config).map(([key, value]) => ({ key, value })) : [];
+    return lockedFileSettingsRefusal(path, entries) ?? (filesAtProgram(values) ? undefined : { ...values, filesAt: 'program', path, content: JSON.stringify(parsed) });
+  },
   async run(values, services, caller) {
     const program = programOf(values, caller);
     const config = services.programSettings.config({ ...caller, program });

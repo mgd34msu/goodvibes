@@ -5,6 +5,7 @@
  * they run there; the terminal app supplies the views.
  */
 import { CapabilityRefusal, type CapabilityDefinition, type ListName } from '../types.js';
+import { callerPathOf } from '../path-inputs.js';
 
 export interface DeepLinkCapabilityServices {
   readonly deepLinks?: {
@@ -43,7 +44,8 @@ export const DEEPLINK_INSPECT: CapabilityDefinition<DeepLinkCapabilityServices> 
   inputs: [{ id: 'path', label: 'File', help: 'A file of links saved earlier', kind: 'path', freeTextReason: 'a file path', required: true, typed: { position: 1 } }],
   sentence: 'Shows when {path} was saved and how many links it holds.', done: '',
   touches: 'reads', lasts: 'not-a-change', risk: 'none', example: { path: 'links.json' },
-  async run(values, services) {
-    return { text: linksOf(services).inspect(values.path!) };
+  async run(values, services, caller) {
+    // Placed by the one rule for every capability's path (capabilities/path-inputs.ts).
+    return { text: linksOf(services).inspect(callerPathOf(caller, values.path!, { personPathAsTyped: true })) };
   },
 };

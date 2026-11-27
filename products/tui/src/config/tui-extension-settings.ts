@@ -3,9 +3,9 @@
  *
  * `update.autoUpdateAtLaunch`, `update.launchCheckTimeoutMs`,
  * `update.applyTimeoutMs` and `checkpoints.*` are platform schema settings
- * (the Agent reads the same ones). `statusline.*`, `session.autoTitle`, the
- * notification and alert settings under `behavior.*` and
- * `storage.codeIndexEnabled` are the TUI's own settings, declared once in the
+ * (the Agent reads the same ones), and `storage.codeIndexEnabled` is the
+ * daemon's one setting. `statusline.*`, `session.autoTitle` and the
+ * notification and alert settings under `behavior.*` are the TUI's own settings, declared once in the
  * platform (runtime/program-host-settings.ts) so the daemon and the Agent's
  * settings screen know them too, and registered on this app's config manager
  * (config/host-settings.ts). Either way the loader knows the key, a value of
@@ -21,7 +21,6 @@ import {
 } from '@goodvibes/engine/platform/platform/runtime/program-host-settings';
 
 export {
-  CODE_INDEX_ENABLED_SETTING,
   NOTIFY_AFTER_SECONDS_SETTING,
   NOTIFY_ON_AGENT_FAILURE_SETTING,
   NOTIFY_ON_APPROVAL_PENDING_SETTING,

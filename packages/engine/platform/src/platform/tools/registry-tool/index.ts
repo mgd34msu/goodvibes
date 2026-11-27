@@ -21,9 +21,11 @@ import {
   createLiveRegistrySource, liveRegistryScope, registryAgentDirectories, registryMarkdown, registrySkillRoots,
   materializeRegistryMarkdown, type RegistryToolSource,
 } from './source.js';
-import { findSkill, listSkillIndex, listSkills } from '../../skills/discovery.js';
-import { skillMayLoad } from '../../skills/library.js';
+import { findSkill, listSkillIndex, listSkills, type LocatedSkillIndex } from '../../skills/discovery.js';
+import { locatedSkillMayLoad } from '../../skills/library.js';
 import type { SkillFrontmatterValue } from '../../skills/model.js';
+import type { SkillOrigin } from '../../skills/roots.js';
+import { closeSync, constants, existsSync, fstatSync, lstatSync, openSync, readFileSync } from 'node:fs';
 import { capturedRegistryAdmission, type CapturedRegistryContext } from './captured-source.js';
 import { decisionOrClassic, isClassicOperation, withConfiguredDecisionModelPolicy } from '../../runtime/decision-policy.js';
 import { rankClassicCatalog, type ClassicCatalogMatch } from '../../runtime/classic-catalog.js';
@@ -69,7 +71,8 @@ function frontmatterList(value: SkillFrontmatterValue | undefined): string[] {
  */
 async function listRegistrySkills(roots: RegistryToolRoots, source: RegistryToolSource): Promise<RegistryMatch[]> {
   // A skill switched off, or not reviewed yet, in the skill store is not offered (skills/library.ts).
-  return (await listSkills(registrySkillRoots(roots), source)).filter((skill) => skillMayLoad(skill.metadata)).map((skill): RegistryMatch => ({
+  // One from a project's files only once the owner accepted that very content.
+  return (await listSkills(registrySkillRoots(roots), source)).filter((skill) => locatedSkillMayLoad(skill, roots.homeDirectory)).map((skill): RegistryMatch => ({
     name: skill.name,
     type: 'skill',
     description: skill.description,
@@ -435,6 +438,9 @@ async function runDependencies(
     };
   }
 
+  // A skill this turn may not use (a project's not accepted by the owner, one switched off or not reviewed): its name
+  // and why, nothing of its file.
+  if (!locatedSkillMayLoad(found, roots.homeDirectory)) return { success: true, output: JSON.stringify(withheldSkill('dependencies', found)) };
   const disclosure = await registryMarkdown(source, found.path);
   return {
     success: true,
@@ -448,6 +454,132 @@ async function runDependencies(
   };
 }
 
+/** What a skill this turn may not use gives: its name, and that it awaits the owner (or is switched off), nothing more. */
+function withheldSkill(mode: string, skill: { readonly name: string; readonly origin: SkillOrigin }): Record<string, unknown> {
+  return skill.origin === 'project-local'
+    ? { mode, name: skill.name, state: 'awaits acceptance', note: `${skill.name} is a skill this project's files bring that the owner has not accepted yet; nothing of it is given until he accepts it (Tools and extensions, Skills).` }
+    : { mode, name: skill.name, state: 'not on', note: `${skill.name} is switched off or not reviewed yet; nothing of it is given until the owner switches it on.` };
+}
+
+/**
+ * Which skill a registry path is a file of: the skill whose own folder holds it (`<folder>/SKILL.md` and the files
+ * beside it), or the skill file itself (a flat `<name>.md`). Undefined when the path is no skill's file. A path in an
+ * agents folder is not a skill's (agents are read as before).
+ */
+async function skillOfPath(path: string, roots: RegistryToolRoots, source: RegistryToolSource): Promise<{ readonly skill: LocatedSkillIndex; readonly folder: string | undefined } | 'agent' | undefined> {
+  const inAgents = registryAgentDirectories(roots).some((dir) => { const rel = relative(dir, path); return rel !== '' && !isAbsolute(rel) && !rel.startsWith('..'); });
+  if (inAgents) return 'agent';
+  let best: { readonly skill: LocatedSkillIndex; readonly folder: string | undefined } | undefined;
+  for (const skill of await listSkillIndex(registrySkillRoots(roots), source)) {
+    const file = resolve(skill.path);
+    if (basename(file) !== 'SKILL.md') { if (file === path) return { skill, folder: undefined }; continue; }
+    const folder = dirname(file);
+    const rel = relative(folder, path);
+    if (rel === '' || isAbsolute(rel) || rel.startsWith('..')) continue;
+    if (best === undefined || (best.folder !== undefined && folder.length > best.folder.length)) best = { skill, folder };
+  }
+  return best;
+}
+
+const NO_FOLLOW_READ = constants.O_RDONLY | constants.O_NOFOLLOW | constants.O_NONBLOCK | constants.O_NOCTTY;
+/** The most a registry read of one skill file takes in. */
+const SKILL_FILE_MAX_BYTES = 4 * 1024 * 1024;
+
+/**
+ * One file of a skill's own folder (or the skill file itself), read by its path inside that folder without following
+ * a link anywhere below the folder: each folder on the way opened `O_NOFOLLOW` through the one opened before it
+ * (`/proc/self/fd`), the file opened `O_NOFOLLOW`, a plain file only. A link, or a path that leaves the folder, reads
+ * as refused.
+ */
+function readSkillFileNoFollow(folder: string | undefined, path: string): string {
+  const readOpened = (fd: number): string => {
+    const info = fstatSync(fd);
+    if (!info.isFile()) throw new Error(`${path} is not a plain file`);
+    if (info.size > SKILL_FILE_MAX_BYTES) throw new Error(`${path} is larger than a skill file is read (${SKILL_FILE_MAX_BYTES} bytes)`);
+    return readFileSync(fd, 'utf8');
+  };
+  const openFile = (at: string): number => {
+    try { return openSync(at, NO_FOLLOW_READ); } catch (error) {
+      if ((error as NodeJS.ErrnoException).code === 'ELOOP') throw new Error(`${path} is a link; a skill's files are read only as they are in its own folder`);
+      throw error;
+    }
+  };
+  if (folder === undefined) {
+    const fd = openFile(path);
+    try { return readOpened(fd); } finally { closeSync(fd); }
+  }
+  const rel = relative(folder, path);
+  if (rel === '' || isAbsolute(rel) || rel.startsWith('..')) throw new Error(`${path} is not a file of the skill's own folder`);
+  const parts = rel.split(sep).filter((part) => part !== '' && part !== '.');
+  if (process.platform !== 'linux' || !existsSync('/proc/self/fd')) {
+    // No handles to walk by: each part checked not to be a link, the file opened without following one.
+    let at = folder;
+    for (const part of parts.slice(0, -1)) {
+      at = join(at, part);
+      if (lstatSync(at).isSymbolicLink()) throw new Error(`${path} is reached through a link; a skill's files are read only as they are in its own folder`);
+    }
+    const fd = openFile(path);
+    try { return readOpened(fd); } finally { closeSync(fd); }
+  }
+  let dirFd = openSync(folder, constants.O_RDONLY | constants.O_DIRECTORY);
+  try {
+    for (const part of parts.slice(0, -1)) {
+      let next: number;
+      try { next = openSync(`/proc/self/fd/${dirFd}/${part}`, constants.O_RDONLY | constants.O_DIRECTORY | constants.O_NOFOLLOW); } catch (error) {
+        if ((error as NodeJS.ErrnoException).code === 'ELOOP' || (error as NodeJS.ErrnoException).code === 'ENOTDIR') throw new Error(`${path} is reached through a link; a skill's files are read only as they are in its own folder`);
+        throw error;
+      }
+      closeSync(dirFd);
+      dirFd = next;
+    }
+    const fd = openFile(`/proc/self/fd/${dirFd}/${parts[parts.length - 1]!}`);
+    try { return readOpened(fd); } finally { closeSync(fd); }
+  } finally {
+    closeSync(dirFd);
+  }
+}
+
+/**
+ * A live source that reads only the files of one skill's own folder, without following a link (an include that leaves
+ * the folder, or is a link, reads as absent); a captured source is as it was captured.
+ */
+function skillFolderSource(source: RegistryToolSource, folder: string | undefined, file: string): RegistryToolSource {
+  if (!source.live) return source;
+  const inside = (path: string): boolean => {
+    const at = resolve(path);
+    if (folder === undefined) return at === file;
+    const rel = relative(folder, at);
+    return rel !== '' && !isAbsolute(rel) && !rel.startsWith('..');
+  };
+  return {
+    ...source,
+    exists: async (path) => inside(path) && existsSync(path),
+    includeExists: async (path) => {
+      if (!inside(path)) return false;
+      try { return lstatSync(path).isFile(); } catch { return false; }
+    },
+    read: async (path) => {
+      if (!inside(path)) throw new Error(`${resolve(path)} is not a file of the skill's own folder`);
+      return readSkillFileNoFollow(folder, resolve(path));
+    },
+  };
+}
+
+/**
+ * The source preview and content read a registry path through, or what they answer instead: a file of a skill this turn
+ * may use, read inside that skill's own folder without following a link; a skill it may not use gives its name and why
+ * only; a path in a skill folder that is no skill's file gives nothing.
+ */
+async function skillFileSource(mode: string, path: string, roots: RegistryToolRoots, source: RegistryToolSource): Promise<
+  | { readonly source: RegistryToolSource }
+  | { readonly answer: { success: boolean; output?: string; error?: string } }> {
+  const owner = await skillOfPath(path, roots, source);
+  if (owner === 'agent') return { source };
+  if (owner === undefined) return { answer: { success: false, error: `${path} is not a file of any skill. Use mode=search type=skills to list the skills and their files.` } };
+  if (!locatedSkillMayLoad(owner.skill, roots.homeDirectory)) return { answer: { success: true, output: JSON.stringify(withheldSkill(mode, owner.skill)) } };
+  return { source: skillFolderSource(source, owner.folder, path) };
+}
+
 async function runPreview(
   input: RegistryInput,
   roots: RegistryToolRoots,
@@ -455,6 +587,9 @@ async function runPreview(
 ): Promise<{ success: boolean; output?: string; error?: string }> {
   const resolvedPath = await resolveRegistryPath(input.path, roots, source);
   if (!resolvedPath.ok) return Promise.resolve({ success: false, error: resolvedPath.error });
+  const reading = await skillFileSource('preview', resolvedPath.path, roots, source);
+  if ('answer' in reading) return reading.answer;
+  source = reading.source;
 
   try {
     const disclosure = await registryMarkdown(source, resolvedPath.path);
@@ -485,6 +620,9 @@ async function runContent(
 ): Promise<{ success: boolean; output?: string; error?: string }> {
   const resolvedPath = await resolveRegistryPath(input.path, roots, source);
   if (!resolvedPath.ok) return Promise.resolve({ success: false, error: resolvedPath.error });
+  const reading = await skillFileSource('content', resolvedPath.path, roots, source);
+  if ('answer' in reading) return reading.answer;
+  source = reading.source;
 
   try {
     const disclosure = await registryMarkdown(source, resolvedPath.path);

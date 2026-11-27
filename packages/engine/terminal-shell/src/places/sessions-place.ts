@@ -88,7 +88,16 @@ interface JoinedItem extends PlaceItem {
   readonly runningTool?: string | undefined;
 }
 
-type Item = SessionItem | BranchItem | RecordItem | TaskItem | HostedItem | JoinedItem;
+/** One of the daemon's chats (a web chat, Home Assistant's, a channel conversation) and the project it works in. */
+interface ChatItem extends PlaceItem {
+  /** `own-project` when its project was made for it, `in-project` when it works in another, `no-project` before either. */
+  readonly state: 'own-project' | 'in-project' | 'no-project';
+  readonly title: string;
+  readonly kind: string;
+  readonly project: string;
+}
+
+type Item = SessionItem | BranchItem | RecordItem | TaskItem | HostedItem | JoinedItem | ChatItem;
 
 const text = (value: unknown): string => typeof value === 'string' ? value : '';
 const count = (value: unknown): number => typeof value === 'number' && Number.isFinite(value) ? value : 0;
@@ -239,6 +248,19 @@ function joinedOf(raw: unknown): readonly JoinedItem[] {
   return [{ id, state: runningTool ? 'running-tool' : 'joined', title: plain(text(joined.title)) || id, lines, ...(runningTool ? { runningTool } : {}) }];
 }
 
+/** `chats.list`'s answer (capabilities/builtin/chats.ts): each chat with its project. */
+function chatsOf(output: unknown): readonly ChatItem[] {
+  const rows = record(record(output).data).chats;
+  if (!Array.isArray(rows)) return [];
+  return rows.map(record).filter((row) => text(row.id)).map((row): ChatItem => {
+    const project = text(row.project);
+    return { id: text(row.id), state: !project ? 'no-project' : row.made === true ? 'own-project' : 'in-project',
+      title: plain(text(row.title)) || text(row.id), kind: plain(text(row.kind)), project };
+  });
+}
+
+const folderName = (folder: string): string => folder.split('/').filter(Boolean).at(-1) ?? folder;
+
 /** The model as a person reads it: once, with its provider when the model's own name does not already carry it. */
 function modelWords(session: SessionItem): string {
   if (!session.provider || session.model.startsWith(`${session.provider}:`)) return session.model;
@@ -379,6 +401,30 @@ export const SESSIONS_PLACE = definePlace<Item>({
       },
     },
     {
+      id: 'chats',
+      label: 'Chats',
+      noun: 'the daemon\'s chats and their projects',
+      source: { kind: 'daemon', method: 'capabilities.run', input: { id: 'chats.list' }, items: chatsOf },
+      follows: { domains: ['session'], events: ['session-update'], lists: ['workspaces'] },
+      empty: 'No chat yet.',
+      row: (item) => {
+        const chat = item as ChatItem;
+        return { title: chat.title, right: chat.project ? `in ${folderName(chat.project)}` : 'no project yet', mark: chat.project ? 'ok' : 'paused' };
+      },
+      detail: (item) => {
+        const chat = item as ChatItem;
+        return [
+          { text: chat.state === 'own-project'
+            ? `This chat works in its own project, ${folderName(chat.project)}, made for it: its files are in ${chat.project}.`
+            : chat.state === 'in-project'
+              ? `This chat works in ${folderName(chat.project)}: its files are in ${chat.project}.`
+              : 'This chat has no project yet: your own message there that needs somewhere to work (a file, a command, Work, a schedule) gets it its own.' },
+          { label: 'Kind', text: chat.kind, tone: 'muted' as const },
+          { label: 'Id', text: chat.id, tone: 'muted' as const },
+        ];
+      },
+    },
+    {
       id: 'joined',
       label: 'Joined here',
       noun: 'the hosted session this terminal joined',
@@ -396,6 +442,10 @@ export const SESSIONS_PLACE = definePlace<Item>({
     { key: 'f', list: 'sessions', states: ['current'], capability: 'session.fork', label: 'continue in a copy' },
     { key: 'u', list: 'sessions', states: ['current'], capability: 'session.upload', label: 'upload for a link' },
     { key: 'x', list: 'sessions', states: ['saved'], capability: 'session.delete', label: 'delete', fill: { session: 'id' } },
+    // Reads that had no control (commands-final): a saved session's details, and searching every saved session. The
+    // open conversation's row is not saved yet: its details are its own pane, and Record's `i` (session.current).
+    { key: 'v', id: 'session-details', list: 'sessions', states: ['saved'], capability: 'session.info', label: 'its details', fill: { session: 'id' } },
+    { key: 's', id: 'search-saved', list: 'sessions', whole: true, capability: 'session.search', label: 'search saved sessions' },
     { key: 'enter', list: 'branches', states: ['other'], capability: 'session.switch-branch', label: 'switch to it', fill: { branch: 'id' } },
     { key: 'm', list: 'branches', states: ['other'], capability: 'session.merge-branch', label: 'bring its messages in', fill: { branch: 'id' } },
     { key: 'enter', list: 'record', states: ['events'], capability: 'session.events', label: 'open it' },
@@ -403,12 +453,18 @@ export const SESSIONS_PLACE = definePlace<Item>({
     { key: 'enter', list: 'record', states: ['hotspots'], capability: 'session.hotspots', label: 'open it' },
     { key: 'enter', list: 'record', states: ['restored'], capability: 'session.restored', label: 'open it' },
     { key: 'enter', list: 'record', states: ['bookmark'], capability: 'session.bookmarks', label: 'go to it', fill: { block: 'id' } },
+    // Reads of this conversation that had no control (commands-final): the session itself, what the message box waits
+    // on, and finding words in it (blank: the search in place, as Ctrl+F).
+    { key: 'i', id: 'this-session', list: 'record', whole: true, capability: 'session.current', label: 'this session' },
+    { key: 'p', id: 'message-box', list: 'record', whole: true, capability: 'session.composer', label: 'what the message box waits on' },
+    { key: 'c', id: 'find-here', list: 'record', whole: true, capability: 'session.find', label: 'find words in it', form: true },
     { key: 'g', id: 'see-graph', list: 'handoffs', whole: true, capability: 'session.graph', label: 'see the whole graph' },
     { key: 'n', id: 'add-task', list: 'handoffs', whole: true, capability: 'session.link-task', label: 'add a task' },
     { key: 'o', id: 'hand-off', list: 'handoffs', states: OPEN_TASK, capability: 'session.hand-off', label: 'hand it to another session', fill: { task: 'task', from: 'session' } },
     { key: 'a', id: 'accept', list: 'handoffs', states: ['handed-off', 'handed-to-here'], capability: 'session.accept', label: 'accept it', fill: { handoff: (item) => (item as TaskItem).handoff?.id ?? '' } },
     { key: 'w', id: 'take-back', list: 'handoffs', states: ['handed-off', 'handed-from-here'], capability: 'session.withdraw', label: 'take it back', fill: { handoff: (item) => (item as TaskItem).handoff?.id ?? '' } },
     { key: 'x', id: 'cancel-task', list: 'handoffs', states: [...OPEN_TASK, 'handed-off', 'handed-from-here'], capability: 'session.cancel', label: 'cancel it', fill: { task: 'task', from: 'session' } },
+    { key: 'p', id: 'chat-project', list: 'chats', capability: 'chats.project', label: 'work in another project', fill: { chat: 'id' }, form: true },
     { key: 'enter', list: 'hosted', capability: 'hosted.attach', label: 'join', fill: { session: 'id' } },
     { key: 'x', list: 'hosted', capability: 'hosted.end', label: 'end', fill: { session: 'id' } },
     { key: 't', list: 'joined', capability: 'hosted.send', label: 'send a message now' },

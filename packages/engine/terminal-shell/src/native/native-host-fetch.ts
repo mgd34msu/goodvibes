@@ -1,4 +1,5 @@
 import type { OperatorApiClientOptions } from '@goodvibes/engine/operator-client';
+import { programCallHeadersFor } from '@goodvibes/engine/platform/platform/runtime/client';
 
 type NativeHostFetch = NonNullable<OperatorApiClientOptions['fetchImpl']>;
 
@@ -17,7 +18,19 @@ export class NativeHostSelectionChangedError extends Error {
 export function createNativeHostFetch(options: { readonly current: () => boolean; readonly fetchImpl?: NativeHostFetch }): NativeHostFetch {
   return async (input, init) => {
     if (!options.current()) throw new NativeHostSelectionChangedError();
-    const response = await (options.fetchImpl ?? fetch)(input, { ...init, redirect: 'error' });
+    // This program's call context and the registration the daemon issued it for this credential (call-context.ts): the
+    // daemon gives native authority to the operator token only from the owner's own verified program, never to the
+    // token alone (platform daemon/method-owner-decision.ts `ownersProgramCaller`).
+    const headers = new Headers(init?.headers ?? (input instanceof Request ? input.headers : undefined));
+    const bearer = headers.get('authorization')?.replace(/^Bearer\s+/i, '').trim();
+    const target = input instanceof Request ? input.url : String(input);
+    if (bearer) {
+      for (const [name, value] of Object.entries(await programCallHeadersFor(target, bearer, options.fetchImpl ?? fetch))) {
+        if (!headers.has(name)) headers.set(name, value);
+      }
+    }
+    if (!options.current()) throw new NativeHostSelectionChangedError();
+    const response = await (options.fetchImpl ?? fetch)(input, { ...init, headers, redirect: 'error' });
     if (!options.current()) {
       // A borrowed transport may ignore AbortSignal and return a streaming
       // response after retirement. Release its body before the request drains.

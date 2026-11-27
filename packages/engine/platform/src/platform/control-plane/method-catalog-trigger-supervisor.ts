@@ -9,6 +9,9 @@ const STATUS = objectSchema({
 const TRIGGER = objectSchema({
   id: STRING_SCHEMA, label: STRING_SCHEMA, kind: STRING_SCHEMA, watching: STRING_SCHEMA, state: STRING_SCHEMA, firedCount: NUMBER_SCHEMA,
   lastFiredAt: STRING_SCHEMA, nextCheckAt: STRING_SCHEMA, lastError: STRING_SCHEMA, droppedLines: NUMBER_SCHEMA, owedBatches: NUMBER_SCHEMA, next: STRING_SCHEMA,
+  // `id` is the name its project's people chose and type; `storedId`, only when it differs (another project held the
+  // name first), is how it is kept, which addresses it from anywhere.
+  storedId: STRING_SCHEMA,
 }, ['id', 'label', 'kind', 'watching', 'state', 'firedCount']);
 const ONE_TRIGGER = objectSchema({ trigger: TRIGGER }, ['trigger']);
 const BY_ID = objectSchema({ id: STRING_SCHEMA }, ['id']);
@@ -46,11 +49,16 @@ export const builtinTriggerOperationMethodDescriptors = [
     repeat: 'safe',
     description: 'Create a trigger from a definition { id, label, description?, spec, action?, ownerSessionId? }. spec.kind is on-exit, stream or condition; commands are argv, never a shell line. The action defaults to an agent turn, whose answer goes to the channel its deliverTo names (telegram, slack:C123) or else to the owner inbox; an action-grant action names a grant the owner registered. Needs watchers.triggers.enabled.',
     category: 'watchers', transport: ['ws'], effects: ['watchers.administer'],
-    // workingDirectory: the project folder its turns and commands work in (or definition.workingDirectory).
+    // workingDirectory: the project folder its turns and commands work in (or definition.workingDirectory): each a
+    // project the caller may name (control-plane dispatch).
+    workFolders: ['workingDirectory', 'definition.workingDirectory'],
+    // The file a file-watching trigger observes on the daemon's disk (triggers/watch-definition.ts).
+    daemonFiles: ['definition.spec.probe.path'],
     inputSchema: objectSchema({ definition: JSON_OBJECT_SCHEMA, workingDirectory: STRING_SCHEMA }, ['definition']), outputSchema: ONE_TRIGGER, errorCodes: TRIGGER_ERRORS }),
   methodDescriptor({ id: 'watchers.triggers.preview', title: 'Preview a trigger',
     description: 'Read the blanks of "Watch for something" (the inputs of the triggers.watch capability by name: name, kind finishes|prints|page|file|written, command one word per line, match, url, path, every, then ask|run, say, deliver, grant, definition) into what would be kept: summary is what it watches and does in one sentence, and input is the body of watchers.triggers.create ({ definition }). Nothing is made. A grant is looked up among the commands the owner let triggers run.',
     category: 'watchers', transport: ['ws'], effects: ['watchers.inspect'],
+    notDaemonFiles: { path: 'only written into the definition shown; nothing is read, and watchers.triggers.create checks the file it would watch' },
     inputSchema: objectSchema(Object.fromEntries(['name', 'kind', 'command', 'match', 'url', 'path', 'every', 'then', 'say', 'deliver', 'grant', 'definition'].map((key) => [key, STRING_SCHEMA])), ['name']),
     outputSchema: objectSchema({ summary: STRING_SCHEMA, input: objectSchema({ definition: JSON_OBJECT_SCHEMA }, ['definition']) }, ['summary', 'input']), errorCodes: TRIGGER_ERRORS }),
   methodDescriptor({ id: 'watchers.triggers.cancel', title: 'Cancel a trigger',
@@ -69,6 +77,8 @@ export const builtinTriggerOperationMethodDescriptors = [
     repeat: 'safe', confirmation: 'not-declined',
     description: 'The owner approves one command (argv, optional working directory) that a trigger may run when it fires. Only the owner registers a grant; a caller that declares it is not a user request is refused. Re-registering the same command keeps its digest.',
     category: 'watchers', transport: ['ws'], effects: ['watchers.administer', 'model.refused'], dangerous: true,
+    // The granted command runs in this folder when a trigger fires: a project the caller may name (control-plane dispatch).
+    workFolders: ['cwd'],
     inputSchema: objectSchema({ id: STRING_SCHEMA, description: STRING_SCHEMA, command: STRING_SCHEMA, args: arraySchema(STRING_SCHEMA), cwd: STRING_SCHEMA }, ['id', 'description', 'command']),
     outputSchema: objectSchema({ grant: GRANT }, ['grant']), errorCodes: TRIGGER_ERRORS }),
 ] as const;

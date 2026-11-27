@@ -22,6 +22,7 @@ import {
 } from '../../export/gist-uploader.ts';
 import { copyToClipboard } from '../../utils/clipboard.ts';
 import { openBrowser } from '../../utils/browser.ts';
+import { copyForProgram, shownPath } from '@goodvibes/engine/platform/platform/capabilities';
 
 export interface ShareInput {
   readonly format: 'html' | 'json' | 'md';
@@ -207,7 +208,7 @@ export async function shareConversation(ctx: CommandContext, input: ShareInput):
             const receiptPath = `${outputPath}.gist-${randomUUID()}.json`;
             try {
               writeJsonFileAtomic(receiptPath, {
-                version: 1, sessionId: metadata.sessionId, exportedPath: outputPath,
+                version: 1, sessionId: metadata.sessionId, exportedPath: shownPath(outputPath),
                 recordedAt: new Date().toISOString(),
                 ...(result.ok ? { status: 'accepted', url: result.url } : { status: 'unconfirmed' }),
               }, { durable: true, mode: 0o600, cleanupStaleTemps: false });
@@ -237,12 +238,14 @@ export async function shareConversation(ctx: CommandContext, input: ShareInput):
       }
 
       // Copy export path to clipboard if requested.
-      const copied = doCopy ? copyToClipboard(outputPath) : 'failed';
+      // A file held for the call that named it (capabilities/held-paths.ts) is copied as the project's path, and the
+      // browser is started on its own copy of what was written, never on a path read again later.
+      const copied = doCopy ? copyToClipboard(shownPath(outputPath)) : 'failed';
 
       // Open the exported HTML in the default browser if requested.
       let openResult = '';
       if (doOpen && format === 'html') {
-        openResult = openBrowser(pathToFileURL(outputPath).href, { allowFile: true });
+        openResult = openBrowser(pathToFileURL(copyForProgram(outputPath)).href, { allowFile: true });
       }
 
       // Emit the summary line, with all post-export hints inline.

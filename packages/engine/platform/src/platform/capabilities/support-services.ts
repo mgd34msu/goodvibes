@@ -30,7 +30,9 @@ export function createSupportCapabilityServices(sources: DaemonCapabilityService
   const goodvibesRoot = (): string => sources.shellPaths?.resolveUserPath() ?? resolveGoodVibesTreeDirectory();
   const home = (): string => sources.homeDirectory ?? config.getHomeDirectory?.() ?? dirname(goodvibesRoot());
   const project = (caller: CapabilityCaller): string => (caller.workingDirectory ? resolve(caller.workingDirectory) : config.getWorkingDirectory() ?? home());
-  const hooksFile = (caller: CapabilityCaller, programConfig: ConfigManager): string => resolve(project(caller), String(programConfig.get('tools.hooksFile')));
+  // A project's hooks file; a caller naming no project has none (the daemon's own folder holds no hooks file).
+  const hooksFile = (caller: CapabilityCaller, programConfig: ConfigManager): string | null =>
+    (caller.workingDirectory ? resolve(resolve(caller.workingDirectory), String(programConfig.get('tools.hooksFile'))) : null);
   const plugins = createPluginCapabilityServices(sources as PluginServiceSources).plugins;
   return {
     supportBundles: {
@@ -84,6 +86,7 @@ export function createSupportCapabilityServices(sources: DaemonCapabilityService
         const elevatedMcpCount = mcpServers.filter((server) => server.trustMode === 'allow-all').length;
         const hooks = (() => {
           const path = hooksFile(caller, programConfig);
+          if (path === null) return { path: 'no project named', exists: false, hookCount: 0, chainCount: 0, problem: null };
           try { return new HookWorkbench(DESCRIBE_ONLY as never, () => path).describeHooksFile(); }
           catch (error) { return { path, exists: true, hookCount: 0, chainCount: 0, problem: errorText(error) }; }
         })();

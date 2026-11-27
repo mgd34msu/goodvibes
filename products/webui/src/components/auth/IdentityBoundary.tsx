@@ -1,7 +1,7 @@
 import { useLayoutEffect, useMemo, useSyncExternalStore, type ReactNode } from 'react';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { getClientLifetime, subscribeClientLifetime } from '../../lib/client-lifetime';
-import { writeStoredActiveCompanionSessionId, writeStoredCompanionSessions } from '../../lib/companion-chat';
+import { setChatCallProject } from '../../lib/goodvibes';
 
 /** Each credential generation (token or relay pairing) owns its cache and mounted application; a route flip is not one. */
 export function IdentityBoundary({ children }: { children: ReactNode }) {
@@ -21,8 +21,9 @@ export function IdentityBoundary({ children }: { children: ReactNode }) {
       // Cancel before any late anonymous or previous-owner response is adopted.
       void client.cancelQueries();
       client.clear();
-      writeStoredCompanionSessions([]);
-      writeStoredActiveCompanionSessionId('');
+      // The chats this browser keeps are the signed-in person's own (account-storage.ts); the open chat's project is
+      // forgotten, so no call of the next person names it (the chat view sets it again for a chat it opens).
+      setChatCallProject(undefined);
     });
     return () => { unsubscribe(); void client.cancelQueries(); client.clear(); };
   }, [client]);

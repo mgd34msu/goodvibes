@@ -100,6 +100,8 @@ export async function deliverOwnerAlert(
   delivery: OwnerAlertDelivery,
   preferred: ChannelSurface | null,
   text: string,
+  /** What the alert stands for in Waiting for you (`approval:<id>`): a kept line is retired once that is answered. */
+  about?: string,
 ): Promise<AutomationRouteBinding | null> {
   let candidates: AutomationRouteBinding[];
   try {
@@ -120,7 +122,7 @@ export async function deliverOwnerAlert(
       preferred,
       error: error instanceof Error ? error.message : String(error),
     });
-    keepAsReceipt(delivery, text);
+    keepAsReceipt(delivery, text, about);
     return null;
   }
   const refusals: string[] = [];
@@ -141,13 +143,13 @@ export async function deliverOwnerAlert(
     triedRoutes: candidates.length,
     refusals,
   });
-  keepAsReceipt(delivery, text);
+  keepAsReceipt(delivery, text, about);
   return null;
 }
 
-function keepAsReceipt(delivery: OwnerAlertDelivery, text: string): void {
+function keepAsReceipt(delivery: OwnerAlertDelivery, text: string, about?: string): void {
   try {
-    delivery.recordOwnerReceipt(text);
+    delivery.recordOwnerReceipt(text, about);
   } catch (error) {
     logger.error('An alert for the owner could not be kept for the next surface', {
       error: error instanceof Error ? error.message : String(error),

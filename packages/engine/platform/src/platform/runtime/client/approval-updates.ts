@@ -42,6 +42,7 @@
 import { RefusalError } from '@goodvibes/engine/errors';
 import { openRawServerSentEventStream } from '../transports/sse-stream.js';
 import { buildUrl } from '../transports/transport-paths.js';
+import { programFetch } from './program-fetch.js';
 import { logger } from '../../utils/logger.js';
 import { summarizeError } from '../../utils/error-display.js';
 
@@ -160,7 +161,8 @@ export async function watchApprovalUpdates(
       options.onTerminate?.(error);
     };
     const close = await openRawServerSentEventStream(
-      fetchImpl,
+      // With this program's registration: the operator token alone is a script and hears none of the owner's questions.
+      programFetch(fetchImpl),
       approvalUpdateStreamUrl(options.baseUrl),
       {
         onEvent: ({ name: eventName, payload }) => {

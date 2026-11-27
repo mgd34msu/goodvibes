@@ -38,8 +38,7 @@ import {
   settledAskDecision,
 } from './permissions/broker-approval-card.ts';
 
-import { createSessionContractViews, wireWorkTree } from './core/work-tree-wiring.ts';
-import { createContractQuestionComposer } from '@goodvibes/engine/terminal-shell/contract-question-composer';
+import { wireWorkTree } from './core/work-tree-wiring.ts';
 import { describeContextWindowSource } from '@goodvibes/engine/platform/platform/providers';
 
 import { createShellLayout } from './renderer/layout-engine.ts';
@@ -91,7 +90,7 @@ import { allowTerminalWrite, installFullScreenTerminalOutputGuard } from '@goodv
 import { installProcessLifecycle } from './runtime/process-lifecycle.ts';
 import { createRenderScheduler, installTerminalExitGuards } from '@goodvibes/engine/terminal-shell';
 import { buildCommandArgsHint } from './input/command-args-hint.ts';
-import { contractIsWorking, summarizeRunningAgents } from './renderer/process-summary.ts';
+import { summarizeRunningAgents } from './renderer/process-summary.ts';
 import { footerFleetCost } from './views/fleet-read-model.ts';
 import { footerTargetRows } from './renderer/footer-targets.ts';
 import { wireStreamEventMetrics, type WireStreamEventMetricsResult } from './core/stream-event-wiring.ts';
@@ -405,16 +404,12 @@ async function main(prepared: PreparedShellCliRuntime) {
     }),
   );
   const fleetNodes = (): FleetNodes => currentFleet;
-  const sessionContractViews = createSessionContractViews(ctx.services.contractRunner, () => runtime.sessionId);
-  unsubs.push(sessionContractViews.dispose);
-  // A contract's open question: offered above the composer, answered by the next typed message unless dismissed (Alt+X).
-  const contractQuestions = createContractQuestionComposer(() => sessionContractViews.read());
-  // The work tree's live facts: call/turn timings, agent lanes, the call a permission prompt holds, fold persistence (work-tree-wiring.ts).
+  // The work tree's live facts: call/turn timings, agent lanes, the call a permission prompt holds, fold persistence
+  // (work-tree-wiring.ts). This program runs no contracts: its work runs on the daemon and is shown in Work.
   const workTreeWiring = wireWorkTree({
     conversation,
     events: uiServices.events,
     agentManager,
-    contracts: sessionContractViews,
     fleetNodes,
     pendingCallId: () => pendingPermission?.callId,
     turnActive: () => orchestrator.isThinking,
@@ -613,7 +608,6 @@ async function main(prepared: PreparedShellCliRuntime) {
     sessionMemoryStore: ctx.services.sessionMemoryStore,
     begin: beginSubmission,
     switchModels: (models, rest, content, options) => { void switchThenSubmit(models, rest, content, options); },
-    answerOptions: () => contractQuestions.answerOptions(),
     sendTurn: (text, content, inputOptions) => sendOwnerTurn(text, content, inputOptions),
     notify: (message, level) => systemMessageRouter.high(message, level),
     showShellOutput: (result) => conversation.addShellOutput(result.display, result.failed),
@@ -850,8 +844,6 @@ async function main(prepared: PreparedShellCliRuntime) {
   orchestratorRefs.getViewportHeight = getViewportHeight;
   orchestratorRefs.scrollToEnd = scrollToEnd;
   const views = new SessionViews({
-    contractRunner: ctx.services.contractRunner,
-    contracts: sessionContractViews,
     conversation,
     agentManager,
     processManager,
@@ -1006,14 +998,12 @@ async function main(prepared: PreparedShellCliRuntime) {
         : null;
     const managerAgents = agentManager.list().filter((a) => a.status === 'running' || a.status === 'pending');
     const runtimeAgents = agentSnapshot.active;
-    const sessionContracts = sessionContractViews.read();
     void herdrSession.update({
       sessionId: runtime.sessionId,
       sessionPath: join(ctx.services.surface.sessionsDir, `${sanitizeSessionName(runtime.sessionId)}.jsonl`),
       busy:
         orchestrator.isBusy ||
         hookDispatcher.activeInvocationCount > 0 ||
-        sessionContracts.some((contract) => contractIsWorking(contract.status)) ||
         currentFleet.some(
           (node) =>
             node.kind === 'agent' &&
@@ -1026,16 +1016,11 @@ async function main(prepared: PreparedShellCliRuntime) {
         hostPairing?.waitingForOwner === true ||
         currentFleet.some(
           (node) => node.kind === 'agent' && node.sessionRef?.sessionId === runtime.sessionId && node.state === 'awaiting-approval',
-        ) ||
-        sessionContracts.some(
-          (contract) =>
-            contract.status === 'awaiting-owner' ||
-            contract.groups.some((group) => group.status === 'awaiting-owner') ||
-            contract.units.some((unit) => unit.status === 'awaiting-owner'),
         ),
       resumeArgv: ['goodvibes', '--working-dir', workingDir, '--resume', runtime.sessionId],
     });
-    const runningAgentSummary = summarizeRunningAgents(managerAgents, runtimeAgents, sessionContracts);
+    // This program runs no contracts: its running agents are its own (work runs on the daemon).
+    const runningAgentSummary = summarizeRunningAgents(managerAgents, runtimeAgents, []);
     const runningAgentCount = runningAgentSummary.count;
     const { runningProcessCount, cw, promptInfo, commandArgsHint } = readShellFrameFacts(
       processManager,
@@ -1070,7 +1055,6 @@ async function main(prepared: PreparedShellCliRuntime) {
       modelActive: streamMetrics.modelActive,
       completionActivity: orchestrator.completionActivity,
       runningAgentCount,
-      contracts: sessionContracts,
       compacting,
       compactingSinceMs,
       pendingApproval: mainApproval ? { name: mainApproval.tool, args: mainApproval.args } : null,
@@ -1150,7 +1134,6 @@ async function main(prepared: PreparedShellCliRuntime) {
       contextStatusHint,
       submissionStatus,
       retryHint: actionHint(actionOffers),
-      contractQuestionHint: contractQuestions.hint(ctx.services.keybindingsManager.getComboLabel('contract-question-ordinary')),
       scriptableStatusLine: scriptableStatusline.current(),
       // behavior.autoCompactThreshold is stored as a percent integer (e.g. 80);
       // the bar expects a fraction [0..1]. Clamp to [0,1] to guard nonsense values.
@@ -1469,7 +1452,6 @@ async function main(prepared: PreparedShellCliRuntime) {
   // This conversation's controls a person bound to a key in the composer (Keys place, "This conversation, while writing a message").
   commandContext.runPlaceKey = (action) => { places.runKey(action); };
   // Key-table actions that act on a screen of this program (keybinding-catalog.ts).
-  commandContext.answerContractQuestionPlainly = () => { contractQuestions.sendNextAsOrdinary(); };
   commandContext.cycleModelPickerGroup = () => { if (input.modelPicker.active && input.modelPicker.mode === 'model') input.modelPicker.cycleGroupBy(); };
 
   // One owner of the user turn and its failover retries, read by the turn-end

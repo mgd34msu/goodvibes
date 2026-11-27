@@ -430,6 +430,8 @@ export interface ContractGroup {
     readonly scope: 'unit' | 'group' | 'deliverable';
     readonly targetId: string;
     readonly criterionIds: readonly string[];
+    /** Set when the repair resolves a step's conflicting merge: the step's branch and the files both sides changed. */
+    readonly conflict?: { readonly branch: string; readonly files: readonly string[] } | undefined;
   } | undefined;
   readonly dependsOn: readonly string[];
   criteria: Criterion[];

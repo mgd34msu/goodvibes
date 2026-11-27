@@ -216,6 +216,33 @@
   margin-left: -8px;
 }
 
+/* "In <project>" beside the chat's title, muted, with the project chooser after it. */
+.chat-project {
+  display: inline-flex;
+  flex: none;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+  margin-left: 8px;
+  color: var(--text-3);
+  font-size: var(--text-meta);
+  white-space: nowrap;
+}
+
+.chat-project__in {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  max-width: 24ch;
+}
+
+.chat-project__note {
+  white-space: normal;
+}
+
+.shell-header--phone .chat-project__chooser {
+  display: none;
+}
+
 .chat-title-button {
   display: inline-flex;
   align-items: center;

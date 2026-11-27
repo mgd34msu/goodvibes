@@ -2,12 +2,10 @@
 import { types as nodeTypes } from 'node:util';
 import type { ToolExecuteOptions } from '../types/tools.js';
 import { captureOwnedJson } from '../gate/judgment-input.js';
-import type { SecretsManager, PreparedScopedSecretDeletion, PreparedSecretImport } from '../config/secrets.js';
-import type { SubscriptionManager, PreparedSubscriptionImport } from '../config/subscriptions.js';
+import type { SecretsManager, PreparedScopedSecretDeletion } from '../config/secrets.js';
 import type { ConfigManager, PreparedConfigMutation } from '../config/manager.js';
 import type { ConfigWriteRoute } from '../config/daemon-config-route.js';
 import { assertPreparedConfigWriteRoute } from '../config/settings-precondition-client.js';
-import { assertRemoteSettingsImportPrecondition, type RemoteSettingsImportPrecondition } from '../config/settings-import-precondition-client.js';
 import { assertSynchronousJudgmentGuard } from '@goodvibes/judgment/decisions';
 
 export type ToolInputProjectionProblem = 'held' | 'capacity' | 'unconfigured' | 'invalid' | 'unavailable' | 'stale' | 'cancelled' | 'released' | 'binding-changed';
@@ -112,19 +110,11 @@ export type ToolOwnedAdmissionEvidence = ToolAdmissionEvidence | AgentSettingsAd
 interface PreparedSettingsBindings {
   readonly owner: ConfigManager;
   readonly secretDeletion?: Readonly<{ owner: SecretsManager; mutation: PreparedScopedSecretDeletion }> | undefined;
-  readonly secretImport?: Readonly<{ owner: SecretsManager; mutation: PreparedSecretImport }> | undefined;
-  readonly subscriptionImport?: Readonly<{ owner: SubscriptionManager; mutation: PreparedSubscriptionImport }> | undefined;
-  readonly remoteImport?: RemoteSettingsImportPrecondition | undefined;
   /** Restriction only: the registration retains its private source through each publication. */
   readonly assertSourceCurrent?: (() => void) | undefined;
   readonly route?: ConfigWriteRoute | undefined;
 }
-export type ToolPreparedSettingsMutation = PreparedSettingsBindings & (
-  | { readonly mutation: PreparedConfigMutation }
-  | { readonly mutation?: never; readonly secretImport: NonNullable<PreparedSettingsBindings['secretImport']> }
-  | { readonly mutation?: never; readonly subscriptionImport: NonNullable<PreparedSettingsBindings['subscriptionImport']> }
-  | { readonly mutation?: never; readonly remoteImport: RemoteSettingsImportPrecondition }
-);
+export type ToolPreparedSettingsMutation = PreparedSettingsBindings & { readonly mutation: PreparedConfigMutation };
 
 export type ToolInputProjectionResult = {
   readonly status: 'held';
@@ -216,12 +206,10 @@ export function captureSettingsMutation(value: unknown): ToolPreparedSettingsMut
   const owner = projectionProperty(value, 'owner') as ConfigManager | undefined;
   const mutation = projectionProperty(value, 'mutation') as PreparedConfigMutation | undefined;
   const route = projectionProperty(value, 'route') as ConfigWriteRoute | undefined;
-  const remoteImport = projectionProperty(value, 'remoteImport') as RemoteSettingsImportPrecondition | undefined;
   if (!owner) throw new ToolInputProjectionError('invalid');
   owner.assertSettingsWritable();
   if (mutation) { owner.assertPreparedMutation(mutation); owner.protectPreparedMutationTargets(mutation); }
   if (route) assertPreparedConfigWriteRoute(route);
-  if (remoteImport !== undefined) assertRemoteSettingsImportPrecondition(remoteImport);
   const secret = projectionProperty(value, 'secretDeletion');
   let secretDeletion: ToolPreparedSettingsMutation['secretDeletion'];
   if (secret !== undefined) {
@@ -232,33 +220,10 @@ export function captureSettingsMutation(value: unknown): ToolPreparedSettingsMut
     secretOwner.assertPreparedScopedDeletion(deletion);
     secretDeletion = Object.freeze({ owner: secretOwner, mutation: deletion });
   }
-  const importedSecret = projectionProperty(value, 'secretImport');
-  let secretImport: ToolPreparedSettingsMutation['secretImport'];
-  if (importedSecret !== undefined) {
-    if (!importedSecret || typeof importedSecret !== 'object' || nodeTypes.isProxy(importedSecret)) throw new ToolInputProjectionError('invalid');
-    const secretOwner = projectionProperty(importedSecret, 'owner') as SecretsManager;
-    const imported = projectionProperty(importedSecret, 'mutation') as PreparedSecretImport;
-    if (!secretOwner || !imported || secretDeletion) throw new ToolInputProjectionError('invalid');
-    secretOwner.assertPreparedImport(imported); secretImport = Object.freeze({ owner: secretOwner, mutation: imported });
-  }
-  const importedSubscription = projectionProperty(value, 'subscriptionImport');
-  let subscriptionImport: ToolPreparedSettingsMutation['subscriptionImport'];
-  if (importedSubscription !== undefined) {
-    if (!importedSubscription || typeof importedSubscription !== 'object' || nodeTypes.isProxy(importedSubscription)) throw new ToolInputProjectionError('invalid');
-    const subscriptionOwner = projectionProperty(importedSubscription, 'owner') as SubscriptionManager;
-    const imported = projectionProperty(importedSubscription, 'mutation') as PreparedSubscriptionImport;
-    if (!subscriptionOwner || !imported) throw new ToolInputProjectionError('invalid');
-    subscriptionOwner.assertPreparedImport(imported); subscriptionImport = Object.freeze({ owner: subscriptionOwner, mutation: imported });
-  }
   const assertSourceCurrent = projectionFunction<() => void>(projectionProperty(value, 'assertSourceCurrent'));
   const bindings = { owner, ...(route ? { route } : {}), ...(assertSourceCurrent ? { assertSourceCurrent } : {}),
-    ...(remoteImport ? { remoteImport } : {}),
-    ...(secretDeletion ? { secretDeletion } : {}), ...(secretImport ? { secretImport } : {}), ...(subscriptionImport ? { subscriptionImport } : {}) };
+    ...(secretDeletion ? { secretDeletion } : {}) };
   if (mutation) return Object.freeze({ ...bindings, mutation });
-  if (route || secretDeletion) throw new ToolInputProjectionError('invalid');
-  if (secretImport) return Object.freeze({ ...bindings, secretImport });
-  if (subscriptionImport) return Object.freeze({ ...bindings, subscriptionImport });
-  if (remoteImport) return Object.freeze({ ...bindings, remoteImport });
   throw new ToolInputProjectionError('invalid');
 }
 

@@ -74,7 +74,7 @@ export const clusterConfigDefaults: { cluster: ClusterConfig } = {
 
 const clusterSettingRows: ConfigSettingDefinition[] = [
   {
-    key: 'cluster.enabled',
+    key: 'cluster.enabled', valueKind: 'opening-switch',
     label: 'Share chat-app work with your other machines',
     type: 'boolean',
     description:

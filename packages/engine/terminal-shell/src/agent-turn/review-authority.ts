@@ -7,7 +7,7 @@ import { RefusalError, refusal } from '@goodvibes/engine/errors';
  * it is the owner's decision: a model may propose (create, edit, disable, mark
  * stale) but marking reviewed, and enabling a record nobody reviewed, count
  * only from the owner's own keystrokes. Every route that reaches these registry
- * methods (slash commands, the registry tool, the workspace actions, the
+ * methods (slash commands, the registry tool, the places' capabilities, the
  * VIBE.md import) calls the same two checks with the actor it is acting for, so
  * the answer does not depend on the route.
  */

@@ -114,6 +114,8 @@ export function composeUnattendedRunTools(input: UnattendedRunToolsInput): {
 
   return {
     decorateRegistry: (registry) => {
+      // A registry that has its own (a session the daemon hosts for the Agent brings the Agent's) keeps it.
+      if (registry.has(MAIL_AND_CALENDAR_TOOL)) return;
       wireAgentGoogleTool(registry, {
         configManager,
         secretsManager,

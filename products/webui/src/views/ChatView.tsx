@@ -3,7 +3,7 @@ import { createPortal } from 'react-dom';
 import { BookOpen, CalendarDays, Files, LayoutGrid, Mail } from 'lucide-react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { getClientLifetime, isClientLifetimeCurrent } from '../lib/client-lifetime';
-import { client as platformClient, invokeOwnerMethod } from '../lib/goodvibes';
+import { client as platformClient, invokeOwnerMethod, setChatCallProject } from '../lib/goodvibes';
 import { copyOutcomeMessage, copyText } from '../lib/copy-text';
 import { REASONING_EFFORT_SEVERITY } from '@goodvibes/engine/platform/browser/reasoning-effort';
 import { asRecord, bestId, bestTitle, firstString } from '../lib/object';
@@ -21,7 +21,8 @@ import {
   mergeCompanionMessages,
   LocalCompanionMessage,
 } from '../lib/companion-chat';
-import { ChatFindButton, ChatTitle, ChatTurnNotice } from './chat/ChatHeader';
+import { ChatFindButton, ChatProjectLine, ChatTitle, ChatTurnNotice } from './chat/ChatHeader';
+import { usePlaceProjects, useNewChatHasNoProject } from '../lib/place-project';
 import { availableSuggestions, greeting, greetingName, type SuggestionIcon } from './chat/new-chat';
 import { Spark } from '../components/shell/Spark';
 import { Button } from '../components/ui/Button';
@@ -224,6 +225,19 @@ export function ChatView({
   const chatSessionIds = useMemo(() => new Set(sessionItems.map((session) => bestId(session)).filter(Boolean)), [sessionItems]);
   const sessionProvider = activeSessionId ? firstString(activeSession, ['provider']) : '';
   const sessionModel = activeSessionId ? firstString(activeSession, ['model']) : '';
+  // The project the chat works in (its record), and the projects to choose a new chat's from.
+  const chatProject = activeSessionId ? firstString(activeSession, ['project']) || undefined : undefined;
+  // While a chat is open, every call made from here (a palette run, an action sheet, a read) names the chat's project,
+  // not the one the places have chosen (goodvibes.ts `setChatCallProject`); cleared when the chat closes.
+  // A chat with no project yet (or a new one started with "No project") names none: the daemon makes its own project
+  // when the owner's first message there needs one, never the places' choice.
+  const noProjectForNewChat = useNewChatHasNoProject();
+  const withoutProject = activeSessionId ? Boolean(activeSession) && chatProject === undefined : noProjectForNewChat;
+  useEffect(() => {
+    setChatCallProject(chatProject, withoutProject);
+    return () => { setChatCallProject(undefined); };
+  }, [chatProject, withoutProject]);
+  const placeProjects = usePlaceProjects();
   const currentModelRecord = asRecord(asRecord(currentModel.data).model);
   const currentModelData = Object.keys(currentModelRecord).length ? currentModelRecord : asRecord(currentModel.data);
   const defaultRegistryKey = firstString(currentModelData, ['registryKey'])
@@ -1063,16 +1077,19 @@ export function ChatView({
     <section className="chat-main" data-state={isNewChat ? 'new' : 'conversation'}>
       {removeFileConfirm.element}
       {headerSlots?.titleSlot && createPortal(
-        <ChatTitle
-          activeSessionId={activeSessionId}
-          title={activeSessionTitle}
-          isRenaming={isRenamingTitle}
-          draft={sessionTitleDraft}
-          onStartRename={() => setIsRenamingTitle(true)}
-          onDraftChange={setSessionTitleDraft}
-          onFinishRename={finishRenamingTitle}
-          onKeyDown={handleTitleKeyDown}
-        />,
+        <>
+          <ChatTitle
+            activeSessionId={activeSessionId}
+            title={activeSessionTitle}
+            isRenaming={isRenamingTitle}
+            draft={sessionTitleDraft}
+            onStartRename={() => setIsRenamingTitle(true)}
+            onDraftChange={setSessionTitleDraft}
+            onFinishRename={finishRenamingTitle}
+            onKeyDown={handleTitleKeyDown}
+          />
+          <ChatProjectLine chatProject={chatProject} started={Boolean(activeSessionId)} projects={placeProjects} />
+        </>,
         headerSlots.titleSlot,
       )}
       {headerSlots?.actionsSlot && createPortal(

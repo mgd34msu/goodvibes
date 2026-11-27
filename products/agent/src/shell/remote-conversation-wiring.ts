@@ -93,9 +93,9 @@ export interface NativeRemoteConversationWiring extends RemoteConversationWiring
 }
 
 /** Why a mode change is refused while a native input's hosted owner is still unconfirmed. */
-const UNCONFIRMED_NATIVE_OWNER_MODE_REASON = 'The native input sent from this surface is not yet confirmed by its host, so its '
-  + 'execution mode has no confirmed owner. Nothing was changed here or on the host. Inspect it with /work intake; '
-  + 'once the host reports it settled, or after /work intake-cancel, change the mode again.';
+const UNCONFIRMED_NATIVE_OWNER_MODE_REASON = 'The daemon has not yet confirmed the message you sent from here, so the permission '
+  + 'mode was not changed, here or on the daemon. Check the message in Work, under Unanswered; once it is answered, or '
+  + 'dropped there, change the mode again.';
 
 /** The host could not take this message and nothing was sent: run it here, and say why in one line. */
 export interface NativeLocalFallback {
@@ -382,8 +382,18 @@ export function installRemoteConversationRouting(
         // Source is the complete text the user sent (pastes spliced in, model
         // directives removed); anything it cannot carry was refused in the
         // composer. The host alone captures a continuation's actual history.
-        const state = await intake.submit(source, { delivery: 'hosted' });
+        // The conversation goes on in the hosted session it is in (a Stop, a failed turn or a daemon restart does not end
+        // it); only a cleared or replaced conversation (`reset`) starts a new one.
+        const continuing = router.hostedSessionId();
+        let state = await intake.submit(source, { delivery: 'hosted', ...(continuing ? { continuationSessionId: continuing } : {}) });
         if (disposed || sequence !== routeSequence) return detachedHandle();
+        // The daemon refused to go on in that session before recording anything (it was ended there): the message opens
+        // a new one instead of every later message being refused the same way.
+        if (continuing && state?.status === 'unavailable' && state.request && !state.notSent && !state.result) {
+          router.reset();
+          state = await intake.submit(source, { delivery: 'hosted' });
+          if (disposed || sequence !== routeSequence) return detachedHandle();
+        }
         if (nativeIntakeUnreachable(state)) {
           settleOwnerLatch(state);
           activity.end();
@@ -405,7 +415,7 @@ export function installRemoteConversationRouting(
         return detachedHandle();
       } catch {
         if (!disposed && sequence === routeSequence) {
-          activity.end(); options.notify('Native delivery is unconfirmed. Inspect /work intake. No legacy turn was started.'); options.render();
+          activity.end(); options.notify('Whether the daemon took your message is not known; nothing was run here. Check it in Work, under Unanswered.'); options.render();
         }
         // Handed to the host and not answered: it may have been recorded.
         onUncertain?.();
@@ -438,7 +448,7 @@ export function installRemoteConversationRouting(
           if (disposed || sequence !== routeSequence) return;
           if (!state && stoppedBeforeSave) {
             activity.end();
-            options.notify('[Stop] Admission of this input was stopped and no turn was started for it. /work intake shows whether it was saved.');
+            options.notify('[Stop] Sending this message was stopped, and nothing answers it. Work, under Unanswered, shows whether it was kept.');
             options.render();
             return;
           }
@@ -446,7 +456,7 @@ export function installRemoteConversationRouting(
           if (disposed || sequence !== routeSequence) return;
           if (state?.hostedTurn) await observeNative(state, intake);
           else activity.end();
-        }, () => { if (!disposed) { activity.end(); options.notify('Native cancellation is unconfirmed. Inspect /work intake.'); options.render(); } });
+        }, () => { if (!disposed) { activity.end(); options.notify('Whether the daemon stopped answering your message is not known. Check it in Work, under Unanswered.'); options.render(); } });
         return true;
       }
       if (router.cancelTurn()) return true;

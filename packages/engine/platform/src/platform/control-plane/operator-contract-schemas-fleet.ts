@@ -319,11 +319,20 @@ export const CHECKPOINT_RESTORE_RESULT_SCHEMA = objectSchema({
  * acknowledgment paths so a caller can act without guessing, this is an
  * honest "here is how to proceed", not a failure.
  */
+/** Another session's changes a restore takes back: that session, its agents that made some of them, the files. */
+export const CHECKPOINT_OTHER_SESSION_CHANGES_SCHEMA = objectSchema({
+  sessionId: STRING_SCHEMA,
+  agentIds: STRING_LIST_SCHEMA,
+  files: STRING_LIST_SCHEMA,
+}, ['sessionId', 'agentIds', 'files']);
+
 export const CHECKPOINT_RESTORE_REFUSAL_SCHEMA = objectSchema({
   reason: STRING_SCHEMA,
   confirmField: STRING_SCHEMA,
   previewMethod: STRING_SCHEMA,
   options: STRING_LIST_SCHEMA,
+  /** confirm:true without naming them: the other sessions whose changes it would take back. */
+  otherSessions: arraySchema(CHECKPOINT_OTHER_SESSION_CHANGES_SCHEMA),
 }, ['reason', 'confirmField', 'previewMethod', 'options']);
 
 export const CHECKPOINTS_RESTORE_INPUT_SCHEMA = objectSchema({
@@ -332,6 +341,10 @@ export const CHECKPOINTS_RESTORE_INPUT_SCHEMA = objectSchema({
   safetyCheckpoint: BOOLEAN_SCHEMA,
   confirm: BOOLEAN_SCHEMA,
   confirmToken: STRING_SCHEMA,
+  /** With confirm:true: the other sessions whose changes the caller takes back, as checkpoints.restorePreview listed them. */
+  takeBack: STRING_LIST_SCHEMA,
+  /** The caller's own session (its changes are not another's), when its call does not carry it. */
+  sessionId: STRING_SCHEMA,
 }, ['id']);
 
 export const CHECKPOINTS_RESTORE_OUTPUT_SCHEMA = objectSchema({
@@ -347,14 +360,20 @@ export const CHECKPOINT_RESTORE_PREVIEW_SCHEMA = objectSchema({
   affectedPathCount: NUMBER_SCHEMA,
   affectedPathSample: STRING_LIST_SCHEMA,
   stat: STRING_SCHEMA,
-}, ['checkpointId', 'label', 'affectedPathCount', 'affectedPathSample', 'stat']);
+  /** The other sessions whose changes this restore takes back (empty: none); the token confirms exactly these. */
+  otherSessions: arraySchema(CHECKPOINT_OTHER_SESSION_CHANGES_SCHEMA),
+  /** The same, as one sentence a person reads; absent when it takes back no other session's change. */
+  takesBack: STRING_SCHEMA,
+}, ['checkpointId', 'label', 'affectedPathCount', 'affectedPathSample', 'stat', 'otherSessions']);
 
 // No `paths`: the preview always describes the whole-tree restore, and its token
-// is bound to the checkpoint id alone, so a scoped preview would describe an
-// action the token does not confirm. A scoped restore is requested on
-// checkpoints.restore itself.
+// is bound to the checkpoint id (and the other sessions' changes it takes back), so
+// a scoped preview would describe an action the token does not confirm. A scoped
+// restore is requested on checkpoints.restore itself.
 export const CHECKPOINTS_RESTORE_PREVIEW_INPUT_SCHEMA = objectSchema({
   id: STRING_SCHEMA,
+  /** The caller's own session (its changes are not another's), when its call does not carry it. */
+  sessionId: STRING_SCHEMA,
 }, ['id']);
 
 export const CHECKPOINTS_RESTORE_PREVIEW_OUTPUT_SCHEMA = objectSchema({

@@ -6,27 +6,30 @@
  *   <program> find "<words>" [--output json]
  *
  * Both are the daemon's methods (`capabilities.run`, `capabilities.find`),
- * called with this program's daemon credential. A command a person typed at
- * a terminal is the request, so `do` runs at once, carrying the person's
- * claim, which the daemon keeps only from a person's credential; an act that
- * weakens a protection, cannot be undone, spends money, writes a secret or is
- * the owner's own is first asked once at the terminal device, opening on No
- * (capability-cli-confirm.ts; no flag skips it); a process
- * with no controlling terminal (cron, a service) or a command a model's command
- * tool ran carries no claim, and its call is decided by the daemon under the
- * owner's mode (`personAtTerminal`). A
- * capability that acts on a conversation is refused in one line: it needs a
- * program holding a conversation.
+ * called with this program's daemon credential, the command-line client kind
+ * (`x-goodvibes-client: cli`) and a registration of the command-line kind
+ * (`cli`, platform daemon/program-registrations.ts): a command line is never a
+ * person's press, whatever its environment, its terminal or its marks say, so
+ * `do` never carries the person's claim. It runs no-risk reads; an act that
+ * weakens a protection (installing something that runs by itself included),
+ * cannot be undone, spends money, writes a secret or is the owner's own is held
+ * for the owner and answered in Waiting for you (a terminal program, the web
+ * UI, a paired phone), opening on No (capability-cli-confirm.ts, platform
+ * capabilities/command-line-hold.ts); it answers no question addressed to the
+ * owner and approves nothing. Nothing is asked at the terminal: anything that
+ * can drive a terminal (`tmux send-keys`, `ssh -tt localhost`, `script`) can
+ * type there, and a command a model's command tool ran can clear any mark it
+ * was given. A capability that acts on a conversation is refused in one line:
+ * it needs a program holding a conversation.
  *
- * A credential that cannot state a person asked (a token minted for
- * automation) has its call put to the owner: `do` says so with the
- * approval's id and exits 3, and `<program> do <approval id>` reads what
- * came of it (3 again while he has not answered).
+ * A call held for the owner (that one, or one from a credential that cannot
+ * state a person asked) prints that it is waiting, where to answer it and its
+ * approval's id, and exits 3; `<program> do <approval id>` reads what came of
+ * it (3 again while he has not answered).
  *
  * Exit codes (docs/exit-codes.md): 0 done, 1 it ran and did not succeed (a
  * refusal included), 2 the command line was wrong, 3 waiting for the owner.
  */
-import { closeSync, openSync } from 'node:fs';
 import { resolveGoodVibesDaemonHome } from '@goodvibes/engine/platform/platform/config/goodvibes-home';
 import { createNetworkFetch } from '@goodvibes/engine/platform/platform/runtime/network/outbound';
 import type { ConfigManager } from '@goodvibes/engine/platform/platform/config';
@@ -35,13 +38,8 @@ import { cliWithFileWorkHere } from './bundle-file-work.js';
 import { configuredDaemonIsThisMachine } from '@goodvibes/engine/platform/platform/runtime/client/daemon-target-resolver';
 import { resolveRemoteDaemonTarget, type DaemonFetch } from './cluster-remote-daemon-target.js';
 import { CAPABILITY_DO_USAGE, CAPABILITY_FIND_USAGE, type CapabilityCliVerb } from './capability-cli-help.js';
-import { askAtTerminal, doQuestion } from './capability-cli-confirm.js';
-
-/**
- * The mark a model's command tool puts on every command it runs (platform tools/exec/model-command-mark.ts, the same
- * name; written here so `do` does not load the tool modules to read one name).
- */
-const MODEL_COMMAND_MARK = 'GOODVIBES_COMMAND_FROM_MODEL';
+import { heldForOwnerReason } from './capability-cli-confirm.js';
+import { CALL_PROGRAM_KEY_HEADER, COMMAND_LINE_CLIENT, markCommandLineCall, programRegistrationFor } from '@goodvibes/engine/platform/platform/runtime/client';
 
 export { CAPABILITY_CLI_HELP, CAPABILITY_CLI_VERBS, CAPABILITY_DO_USAGE, CAPABILITY_FIND_USAGE, type CapabilityCliVerb } from './capability-cli-help.js';
 
@@ -63,36 +61,6 @@ export interface CapabilityCliInput {
   readonly said?: string | undefined;
   readonly stdout: (text: string) => void;
   readonly stderr: (text: string) => void;
-  /** Whether a person is at a terminal typing this: read from the process when not given (personAtTerminal). */
-  readonly personAtTerminal?: boolean | undefined;
-}
-
-/**
- * Whether the process has a controlling terminal: it can open the terminal device (`/dev/tty` opens only for a
- * process with one, whatever its standard input is). A cron job, a service, a process started without a terminal has
- * none. Windows has no such device: there the console streams say it.
- */
-function hasControllingTerminal(): boolean {
-  if (process.platform === 'win32') return process.stdin.isTTY === true || process.stdout.isTTY === true;
-  try {
-    closeSync(openSync('/dev/tty', 'r'));
-    return true;
-  } catch {
-    return false;
-  }
-}
-
-/**
- * Whether `do` may say a person asked: when the process has a controlling terminal (a person at a terminal, whether or
- * not its standard input is a pipe: `echo x | goodvibes do ...` typed by a person is still the person) and carries no
- * mark of a model's command tool (which marks every command it runs, MODEL_COMMAND_MARK, also one it gives a
- * pseudo-terminal of its own). Without a terminal (cron, a service, a model's command) the call is an outside caller's,
- * decided by the daemon under the owner's mode.
- */
-function personAtTerminal(input: Pick<CapabilityCliInput, 'personAtTerminal'>): boolean {
-  if (input.personAtTerminal !== undefined) return input.personAtTerminal;
-  const marked = process.env[MODEL_COMMAND_MARK];
-  return (marked === undefined || marked === '') && hasControllingTerminal();
 }
 
 interface FoundRow {
@@ -154,6 +122,11 @@ function inputLine(entry: FoundRow['inputs'][number]): string {
 }
 
 export async function runCapabilityCli(input: CapabilityCliInput): Promise<number> {
+  // Every call this process makes names the command-line client kind, and carries the registration of the program whose
+  // command line it is (the terminal app's, the Agent's, or the daemon's own: the product's programs, verified by the
+  // daemon's program socket). The daemon still holds a command line's risky call for the owner whatever it claims
+  // (capabilities/command-line-hold.ts).
+  markCommandLineCall(input.caller ?? 'daemon');
   if (input.verb === 'find') {
     if (input.args.some((word) => word.startsWith('--'))) return usage(input, 'find takes only the words of what you need (and --output json)');
     const need = input.args.join(' ').trim();
@@ -176,30 +149,21 @@ export async function runCapabilityCli(input: CapabilityCliInput): Promise<numbe
   // An approval's id in place of a capability's: what came of a call that waited for the owner.
   const held = HELD_CALL_ID.test(parsed.id);
   if (held && Object.keys(parsed.inputs).length > 0) return usage(input, `${parsed.id} is a call that waited for the owner: it takes no --input`);
-  // A command a person typed at a terminal is the request, a pipe into it included. Anything else (no controlling
-  // terminal, or a command a model's command tool ran) is an outside caller's call, decided by the daemon under the
-  // owner's mode (personAtTerminal).
-  const person = personAtTerminal(input);
-  // At a terminal, an act that weakens a protection, cannot be undone, spends money, writes a secret or is the owner's
-  // own is asked once, as a place asks it, at the terminal device itself, opening on No (capability-cli-confirm.ts):
-  // a script someone else left for the person's shell cannot do it unseen. No flag skips it.
-  if (person && !held && input.personAtTerminal === undefined) {
-    const question = await doQuestion(parsed.id, parsed.inputs);
-    if (question !== undefined && !askAtTerminal(question)) {
-      return failure(input, { code: 'NOT_CONFIRMED', error: `${parsed.id} was not run: it was not answered yes at the terminal. Nothing ran.`,
-        fix: 'Run it again and type y at the question, or do it from its place in the program.' });
-    }
-  }
+  // A command line is never a person's press (the header above): the person's claim is never sent. An act that weakens
+  // a protection, cannot be undone, spends money, writes a secret or is the owner's own is held for the owner in Waiting
+  // for you, opening on No (capability-cli-confirm.ts, capabilities/command-line-hold.ts); the why is printed with it.
+  const heldForOwner = !held ? await heldForOwnerReason(parsed.id, parsed.inputs) : undefined;
   const outcome = await input.invoke('capabilities.run', held ? { approvalId: parsed.id } : {
     id: parsed.id, inputs: parsed.inputs, workingDirectory: input.workingDirectory, ...(input.caller ? { program: input.caller } : {}),
-  }, { explicitUserRequest: person });
+  }, { explicitUserRequest: false });
   if (!outcome.ok) return failure(input, outcome);
   const data = outcome.data as { readonly text?: string; readonly code?: string; readonly approvalId?: string; readonly state?: string };
   // Put to the owner (a credential that cannot state a person asked): nothing ran yet, and the outcome is read by its id.
   if (data.code === 'OWNER_APPROVAL_PENDING' && typeof data.approvalId === 'string') {
     const read = `${input.program} do ${data.approvalId}`;
-    if (input.json) input.stdout(JSON.stringify({ ok: false, ...(outcome.data as object), fix: `Read what came of it: ${read}` }));
-    else input.stdout(`${data.state ?? `Waiting for the owner (${data.approvalId}).`}.\n  Read what came of it: ${read}`);
+    const where = 'Answer it in Waiting for you: in the terminal app or the Agent, the web UI, or a paired phone.';
+    if (input.json) input.stdout(JSON.stringify({ ok: false, ...(outcome.data as object), answerIn: where, fix: `Read what came of it: ${read}` }));
+    else input.stdout(`${data.state ?? `Waiting for the owner (${data.approvalId}).`}.\n  ${heldForOwner !== undefined ? `It was not run at once because ${heldForOwner}. ` : ''}${where}\n  Read what came of it: ${read}`);
     return 3;
   }
   if (input.json) input.stdout(JSON.stringify({ ok: true, ...(outcome.data as object) }));
@@ -247,9 +211,12 @@ export function daemonTargetInvoke(runtime: {
     });
     if (!resolved.ok) return resolved;
     const base = fetchImpl ?? createNetworkFetch(globalThis.fetch, runtime.configManager);
-    const claimed: DaemonFetch = options.explicitUserRequest
-      ? (url, init) => base(url, { ...init, headers: { ...(init?.headers as Record<string, string> | undefined), 'x-goodvibes-explicit-user-request': 'true' } })
-      : base;
+    // This program's registration with the daemon of this machine (none for another machine's, or one that issues none).
+    const registration = await programRegistrationFor(resolved.target.baseUrl, resolved.target.token);
+    // Named as the command line it is (`x-goodvibes-client: cli`), with the person's claim only where `do` gives it.
+    const claimed: DaemonFetch = (url, init) => base(url, { ...init, headers: { ...(init?.headers as Record<string, string> | undefined),
+      'x-goodvibes-client': COMMAND_LINE_CLIENT, ...(registration ? { [CALL_PROGRAM_KEY_HEADER]: registration } : {}),
+      ...(options.explicitUserRequest ? { 'x-goodvibes-explicit-user-request': 'true' } : {}) } });
     // The daemon's own refusal, as it said it: the same words `do` prints in all three programs, never restated
     // ("the daemon on this machine refused the request: ...") or joined with its next step into one line.
     let refusal: { readonly error: string; readonly next?: string | undefined; readonly code?: string | undefined } | undefined;

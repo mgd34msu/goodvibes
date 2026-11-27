@@ -434,7 +434,7 @@ export function describeItem(
           inspectSetup: DEFAULT_AGENT_SETUP_WIZARD_REVIEW_ROUTE,
           inspectSetupItem: 'setup action:"item"',
           openOnboarding: 'agent_harness mode:"open_ui_surface" surfaceId:"onboarding" explicitUserRequest:"..."',
-          setupWorkspace: 'agent_harness mode:"workspace_action" target:"setup"',
+          setupChecklist: 'capability_run id:"setup.checklist"',
           settings: 'settings action:"list|get|set|reset"; compatibility detail remains in agent_harness settings modes',
           providerRouting: 'models action:"status"',
           providerAccounts: 'models action:"providers"',

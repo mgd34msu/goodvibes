@@ -66,6 +66,12 @@ export interface WorktreeIsolationManagerDeps {
   /** Shared with the engine so nested eviction and resumed integration are owned. */
   readonly ownedWork?: OwnedScope | undefined;
   readonly projectRoot: string;
+  /**
+   * Where item worktrees are placed (`<root>/.goodvibes/.worktrees/...`); defaults to `projectRoot`. A contract's
+   * engine branches from the contract's worktree (`projectRoot`) but places its items under the project itself, so
+   * no item tree sits inside the contract's tree (git cannot remove a worktree that holds another).
+   */
+  readonly worktreeRoot?: string | undefined;
   /** Construction-owned engine identity; isolates repository-wide Git refs across contracts. */
   readonly stateNamespace?: string | undefined;
   readonly emit: (event: OrchestrationEvent) => void;
@@ -146,6 +152,7 @@ export function createWorktreeIsolationManager(deps: WorktreeIsolationManagerDep
   const now = deps.now ?? ((): number => Date.now());
   const ownedWork = deps.ownedWork ?? new OwnedScope('worktree isolation');
   const keptCap = deps.keptWorktreeCap ?? 20;
+  const locationRoot = deps.worktreeRoot ?? deps.projectRoot;
   const reportedUnknownResources = new Set<string>();
   const rootGit = new GitService(deps.projectRoot);
   // Entity identity includes its real workstream; equal caller item IDs in
@@ -283,7 +290,7 @@ export function createWorktreeIsolationManager(deps: WorktreeIsolationManagerDep
         // Created but never recorded (a stop between git worktree add and the record): no agent ran there.
         // Only the tree at the path this reservation creates is that one; a tree on the branch anywhere else
         // was made by hand, may hold work, and is reported and kept.
-        const reservedPath = itemWorktreeDir(deps.projectRoot, branchForReservation);
+        const reservedPath = itemWorktreeDir(locationRoot, branchForReservation);
         if (physicalPath(existing[0].path) !== physicalPath(reservedPath)) {
           throw refused(`branch ${branchForReservation}, reserved for item ${item.id}, is checked out at ${existing[0].path}, not at ${reservedPath} where this work creates it, so it was not made by this work and was kept`,
             `If nothing you need is in it, remove it with git worktree remove ${existing[0].path}, then run the item again.`);
@@ -305,7 +312,7 @@ export function createWorktreeIsolationManager(deps: WorktreeIsolationManagerDep
     }
     const branch = item.worktreeBranch ?? row?.branch;
     if (!branch) throw refused(`item ${item.id} has no worktree branch recorded`);
-    const path = item.worktreePath ?? itemWorktreeDir(deps.projectRoot, branch);
+    const path = item.worktreePath ?? itemWorktreeDir(locationRoot, branch);
     const instance = getOrCreateInstance(workstream, item, path, branch);
     resourceGuards.get(instance)?.();
     if (!item.worktreePath) {
@@ -625,7 +632,7 @@ export function createWorktreeIsolationManager(deps: WorktreeIsolationManagerDep
     try { registry = identityRegistrySync(); rows = registry.forWorkstream(deps.stateNamespace ?? null, workstream.id); }
     catch (error) { logger.warn('worktree-isolation: private identity store unavailable; resources preserved', { error: summarizeError(error) }); return; }
     const recordedBranchFromPath = (path: string): string | undefined =>
-      productWorktreeSegments(deps.projectRoot, path)?.join('/');
+      productWorktreeSegments(locationRoot, path)?.join('/');
     for (const { path, branch } of resources) {
       const recorded = workstream.items.filter(item =>
         (item.worktreePath === path && (item.worktreeBranch === branch || item.worktreeBranch === undefined && recordedBranchFromPath(path) === branch))

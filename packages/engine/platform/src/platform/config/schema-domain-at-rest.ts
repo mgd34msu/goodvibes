@@ -22,7 +22,7 @@ export const atRestConfigDefaults: { atRest: AtRestConfig } = {
 
 export const atRestConfigSettings: ConfigSettingRow[] = [
   {
-    key: 'atRest.redactionEnabled',
+    key: 'atRest.redactionEnabled', valueKind: 'protection-switch',
     label: 'Hide keys and tokens in saved transcripts',
     type: 'boolean',
     description:

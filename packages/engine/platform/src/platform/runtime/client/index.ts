@@ -23,9 +23,13 @@
  */
 
 export type { DaemonReachability, DaemonVerbCaller, DaemonVerbInvokeOptions } from './daemon-verbs.js';
+export { PROGRAM_GATE_DECIDED_HEADER, pressInvokeOptions } from './daemon-verbs.js';
 // The one call context a program carries on every call to the daemon: its program, project and session.
 export { CALL_PROGRAM_HEADER, CALL_PROJECT_HEADER, CALL_SESSION_HEADER, programCallContextNow, programCallHeaders, setProgramCallContext } from './call-context.js';
+export { onProgramRegistrationRefused } from './call-context.js';
+export { agentVerificationRefusal, bindDelegatedCredential, CALL_PROGRAM_KEY_HEADER, COMMAND_LINE_CLIENT, programVerificationNotice, isCommandLineCall, markCommandLineCall, programCallHeadersFor, programRegistrationFor } from './call-context.js';
 export type { ProgramCallContext } from './call-context.js';
+export { programFetch } from './program-fetch.js';
 export { OwnedSelectionObservation } from './selection-observation.js';
 
 export { createClientApprovalRaiser } from './approval-raiser.js';
@@ -121,6 +125,7 @@ export {
   DAEMON_PROGRAM_MISSING_NOTICE,
   DAEMON_PROGRAM_STARTED_LINE,
   GOODVIBES_INSTALLER_COMMAND,
+  daemonAddressAnswers,
   daemonNotInstalledNotice,
   daemonProgramInstalled,
   daemonProgramStartFailedLine,

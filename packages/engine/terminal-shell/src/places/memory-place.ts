@@ -35,7 +35,8 @@ const plural = (count: number, one: string): string => `${count} ${one}${count =
 
 interface RecordItem extends PlaceItem {
   readonly kind: 'record';
-  readonly state: 'fresh' | 'reviewed' | 'stale' | 'contradicted';
+  /** Its review state; `from-someone-else`: written by someone else and given to no turn until the owner accepts it. */
+  readonly state: 'fresh' | 'reviewed' | 'stale' | 'contradicted' | 'from-someone-else';
   readonly summary: string;
   readonly cls: string;
   readonly scope: string;
@@ -45,6 +46,8 @@ interface RecordItem extends PlaceItem {
   readonly origin: readonly string[];
   readonly createdAt?: number | undefined;
   readonly staleReason: string;
+  /** Who wrote it, in words (the daemon's record of its author): you, your model, or someone else, named. */
+  readonly author: string;
 }
 interface CopyItem extends PlaceItem {
   readonly kind: 'copy';
@@ -140,12 +143,29 @@ const CLASS_WORDS: Readonly<Record<string, string>> = {
 const SCOPE_WORDS: Readonly<Record<string, string>> = { session: 'this session', project: 'this project', team: 'the team' };
 const REVIEW_WORDS: Readonly<Record<RecordItem['state'], string>> = {
   fresh: 'not reviewed yet', reviewed: 'reviewed and right', stale: 'out of date', contradicted: 'contradicted by something newer',
+  'from-someone-else': 'written by someone else: no turn is given it until you accept it',
 };
 const REVIEW_STATES = new Set<RecordItem['state']>(['fresh', 'reviewed', 'stale', 'contradicted']);
 
+/** Someone else wrote it and the owner has not accepted it (the platform's state/memory-author.ts `memoryAwaitsOwner`). */
+function awaitsOwner(entry: Readonly<Record<string, unknown>>): boolean {
+  const author = record(entry.author);
+  return author.kind === 'other' && typeof author.acceptedAt !== 'number';
+}
+
+/** Who wrote a record, in words; a record with no author was written before authors were kept: yours. */
+function authorWordsOf(entry: Readonly<Record<string, unknown>>): string {
+  const author = record(entry.author);
+  if (author.kind === 'owner-model') return 'your model, in your own conversation';
+  if (author.kind !== 'other') return 'you';
+  const who = plain(author.who) || 'not named';
+  return typeof author.acceptedAt === 'number' ? `someone else (${who}), accepted by you` : `someone else (${who}): waiting for you to accept, correct or forget it`;
+}
+
 function records(output: unknown): readonly RecordItem[] {
   return rows(record(output).records).filter((entry) => plain(entry.id)).map((entry): RecordItem => {
-    const state = REVIEW_STATES.has(entry.reviewState as RecordItem['state']) ? entry.reviewState as RecordItem['state'] : 'fresh';
+    const reviewed = REVIEW_STATES.has(entry.reviewState as RecordItem['state']) ? entry.reviewState as RecordItem['state'] : 'fresh';
+    const state = awaitsOwner(entry) ? 'from-someone-else' : reviewed;
     return {
       kind: 'record', id: plain(entry.id), state, summary: plain(entry.summary) || plain(entry.id), cls: plain(entry.cls), scope: plain(entry.scope),
       confidence: typeof entry.confidence === 'number' ? entry.confidence : 0,
@@ -154,6 +174,7 @@ function records(output: unknown): readonly RecordItem[] {
       origin: rows(entry.provenance).map((link) => `${plain(link.kind)} ${plain(link.ref)}${plain(link.label) ? ` (${plain(link.label)})` : ''}`),
       createdAt: typeof entry.createdAt === 'number' ? entry.createdAt : undefined,
       staleReason: plain(entry.staleReason),
+      author: authorWordsOf(entry),
     };
   }).sort((a, b) => (b.createdAt ?? 0) - (a.createdAt ?? 0));
 }
@@ -270,7 +291,9 @@ export const MEMORY_PLACE = definePlace<Item>({
         const entry = item as RecordItem;
         return {
           title: entry.summary,
-          ...(entry.state === 'stale' || entry.state === 'contradicted' ? { right: REVIEW_WORDS[entry.state] } : entry.state === 'fresh' ? { right: 'not reviewed' } : {}),
+          ...(entry.state === 'stale' || entry.state === 'contradicted' ? { right: REVIEW_WORDS[entry.state] }
+            : entry.state === 'from-someone-else' ? { right: 'someone else wrote it: accept?' }
+              : entry.state === 'fresh' ? { right: 'not reviewed' } : {}),
           mark: entry.state === 'reviewed' ? 'ok' : entry.state === 'fresh' ? 'waiting' : 'attention',
         };
       },
@@ -283,6 +306,7 @@ export const MEMORY_PLACE = definePlace<Item>({
           ...(entry.staleReason ? [{ label: 'Why', text: entry.staleReason, tone: 'muted' as const }] : []),
           ...(entry.tags.length > 0 ? [{ label: 'Tags', text: entry.tags.join(', ') }] : []),
           { label: 'Remembered', text: time(entry.createdAt) },
+          { label: 'Written by', text: entry.author, ...(entry.state === 'from-someone-else' ? { tone: 'warning' as const } : {}) },
           ...(entry.origin.length > 0 ? [{ label: 'Came from', text: entry.origin.join('; ') }] : []),
           { label: 'Id', text: entry.id, tone: 'muted' as const },
           ...(entry.detail ? [{ text: '' }, { text: entry.detail }] : []),
@@ -508,6 +532,8 @@ export const MEMORY_PLACE = definePlace<Item>({
     { key: 'enter', list: 'memory', capability: 'memory.show', label: 'see it all', fill: { record: 'id' } },
     { key: 'e', id: 'correct-record', list: 'memory', capability: 'memory.edit', label: 'correct', fill: { record: 'id' } },
     { key: 'v', list: 'memory', capability: 'memory.review', label: 'still right?', fill: { record: 'id' } },
+    // Someone else wrote it: no turn is given it until the owner accepts it (or corrects it, or forgets it).
+    { key: 'y', id: 'accept-record', list: 'memory', states: ['from-someone-else'], capability: 'memory.accept', label: 'accept', fill: { record: 'id' } },
     { key: 'p', list: 'memory', capability: 'memory.promote', label: 'where it applies', fill: { record: 'id' } },
     { key: 'l', list: 'memory', capability: 'memory.link', label: 'link', fill: { from: 'id' } },
     { key: 'x', id: 'forget-record', list: 'memory', capability: 'memory.remove', label: 'forget', fill: { record: 'id' } },
@@ -580,7 +606,9 @@ export const MEMORY_PLACE = definePlace<Item>({
   ],
   count: (lists) => {
     const waiting = (lists.memory ?? []).filter((item) => item.state === 'stale' || item.state === 'contradicted').length;
-    const issuesOpen = (lists.issues ?? []).filter((item) => item.state === 'open').length;
+    // Records someone else wrote wait for the owner's review as an open issue does.
+    const issuesOpen = (lists.issues ?? []).filter((item) => item.state === 'open').length
+      + (lists.memory ?? []).filter((item) => item.state === 'from-someone-else').length;
     const unreadable = (lists['about-you'] ?? []).some((item) => item.state === 'unreadable');
     if (unreadable) return { count: 1, words: 'profile could not be read', tone: 'wrong' };
     if (waiting + issuesOpen === 0) return undefined;

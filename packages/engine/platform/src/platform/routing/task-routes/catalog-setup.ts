@@ -14,12 +14,12 @@ const setupAndHostReadiness: TaskRouteEntry = {
   build: () => ({
     id: 'setup-and-host-readiness',
     label: 'Guided setup or connected-host repair',
-    userSurface: 'Start workspace',
+    userSurface: 'System, Setup',
     userOutcome: 'Get the assistant reachable and working before asking the user to diagnose topology.',
     why: 'The request is about install, first-run setup, host availability, auth, token, or setup smoke evidence.',
     modelRoute: 'setup action:"status" includeParameters:true',
     inspectRoute: 'host action:"status" includeParameters:true',
-    userRoute: 'Agent Workspace -> Start',
+    userRoute: 'System, Setup (the menu, Ctrl+G then m)',
     requiresConfirmation: false,
     supportingRoutes: [
       'setup action:"item" setupItemId:"connected-host-service"',
@@ -37,12 +37,12 @@ const hostRuntimeDiagnostics: TaskRouteEntry = {
   build: () => ({
     id: 'host-runtime-diagnostics',
     label: 'Connected host diagnostics',
-    userSurface: 'Start workspace diagnostics',
+    userSurface: 'System, Setup',
     userOutcome: 'Inspect daemon, host, service, and compatibility health through read-only connected-host diagnostics.',
     why: 'The request asks for daemon, host, service, health, doctor, readiness, or compatibility diagnostics.',
     modelRoute: 'host action:"status" includeParameters:true',
     inspectRoute: 'host action:"capabilities" includeParameters:true',
-    userRoute: 'Agent Workspace -> Start',
+    userRoute: 'System, Setup (the menu, Ctrl+G then m)',
     requiresConfirmation: false,
     supportingRoutes: [
       'host action:"services" includeParameters:true',
@@ -56,22 +56,21 @@ const hostRuntimeDiagnostics: TaskRouteEntry = {
 
 const goodvibesSettingsImport: TaskRouteEntry = {
   id: 'goodvibes-settings-import',
-  description: 'Previewing or importing settings from an existing GoodVibes install (the TUI or shared GoodVibes settings) into the agent.',
+  description: 'Importing the settings of an existing GoodVibes install (the terminal app, the TUI) into the agent.',
   build: () => ({
     id: 'goodvibes-settings-import',
-    label: 'Preview or import GoodVibes settings',
-    userSurface: 'Start workspace settings import',
-    userOutcome: 'Import compatible shared GoodVibes settings and subscription state into Agent-owned settings while capability implementations remain in their owning packages.',
-    why: 'The request asks to import or inspect existing GoodVibes settings.',
-    modelRoute: 'settings action:"import"',
-    inspectRoute: 'import_goodvibes_settings action:"preview"',
-    userRoute: 'Agent Workspace -> Start -> Import GoodVibes settings',
+    label: 'Give the Agent the terminal app\'s settings',
+    userSurface: 'System, Setup, Import settings',
+    userOutcome: 'Each setting the terminal app has set that the Agent holds differently is set the same in the Agent; sign-ins are already shared by both programs.',
+    why: 'The request asks to import existing GoodVibes settings.',
+    modelRoute: 'capability_run id:"settings.copy-from-terminal-app"',
+    inspectRoute: 'capability_find need:"give the Agent the settings I set in the terminal app"',
+    userRoute: 'System, Setup, Import settings (the menu, Ctrl+G then m)',
     requiresConfirmation: true,
     supportingRoutes: [
-      'settings action:"import" confirm:true explicitUserRequest:"..."',
-      'workspace action:"run" actionId:"import-goodvibes-tui-settings" confirm:true explicitUserRequest:"..."',
+      'settings action:"import"',
     ],
-    policy: 'Import previews are read-only; apply imports only Agent-owned settings and subscription state after confirmation without mutating source package stores.',
+    policy: 'One capability, settings.copy-from-terminal-app: a setting that loosens a protection is copied only when chosen (security:"yes"); the terminal app\'s settings are not changed.',
   }),
 };
 
@@ -81,12 +80,12 @@ const agentSettingsConfiguration: TaskRouteEntry = {
   build: (request, slots) => ({
     id: 'agent-settings-configuration',
     label: 'Agent settings inspection or change',
-    userSurface: 'Settings workspace',
+    userSurface: 'The settings screen',
     userOutcome: 'Find the right Agent-owned setting and keep every setting mutation explicit and confirmed.',
     why: 'The request mentions settings, configuration, or preferences without asking for GoodVibes TUI import.',
     modelRoute: `settings action:"list" query:${quote(request)} includeParameters:true`,
     inspectRoute: 'settings action:"list" includeParameters:true',
-    userRoute: 'Settings workspace (/settings)',
+    userRoute: 'The settings screen (/settings, or S in System)',
     requiresConfirmation: slots.changes,
     missingFields: slots.changes ? ['setting key', 'new value or reset target', 'confirmation'] : undefined,
     supportingRoutes: [
@@ -104,12 +103,12 @@ const localModelSmokeCheck: TaskRouteEntry = {
   build: (request) => ({
     id: 'local-model-smoke-check',
     label: 'Local model server smoke check',
-    userSurface: 'Models workspace',
+    userSurface: 'Models and providers',
     userOutcome: 'Check local model endpoints only through the confirmed smoke route with clear success criteria.',
     why: 'The request asks to check, smoke, or verify local model server health.',
     modelRoute: `models action:"smoke" query:${quote(request)} includeParameters:true`,
     inspectRoute: 'models action:"local" query:"local server health" includeParameters:true',
-    userRoute: 'Agent Workspace -> Models',
+    userRoute: 'Models and providers (the menu, Ctrl+G then m)',
     requiresConfirmation: true,
     missingFields: ['local endpoint or route id when multiple candidates exist', 'timeout when not default', 'confirmation before probing local servers'],
     supportingRoutes: [
@@ -129,12 +128,12 @@ const localModelCookbook: TaskRouteEntry = {
     return {
       id: 'local-model-cookbook-route',
       label: 'Local model cookbook and endpoint readiness',
-      userSurface: 'Models workspace',
+      userSurface: 'Models and providers',
       userOutcome: 'Recommend local model recipes and inspect endpoint readiness before setup or smoke effects.',
       why: 'The request mentions local models, Ollama, llama.cpp, vLLM, LM Studio, cookbook recipes, or hardware fit.',
       modelRoute: `models action:"local" query:${quote(request)} includeParameters:true`,
       inspectRoute: 'models action:"status" query:"local" includeParameters:true',
-      userRoute: 'Agent Workspace -> Models',
+      userRoute: 'Models and providers (the menu, Ctrl+G then m)',
       requiresConfirmation: localEffect,
       missingFields: localEffect ? ['selected recipe or endpoint', 'install/start/smoke intent', 'confirmation before local setup or server probing'] : undefined,
       supportingRoutes: [
@@ -155,7 +154,7 @@ const modelProviderAccount: TaskRouteEntry = {
     return {
       id: 'model-provider-account-posture',
       label: 'Model provider account and subscription posture',
-      userSurface: 'Models workspace',
+      userSurface: 'Models and providers',
       userOutcome: 'Inspect provider account, subscription, and auth readiness before changing credentials or model routes.',
       why: 'The request mentions model providers, subscriptions, provider auth, or API keys.',
       modelRoute: providerId
@@ -181,12 +180,12 @@ const modelRouteReadiness: TaskRouteEntry = {
   build: (request, slots) => ({
     id: 'model-route-readiness',
     label: 'Model route fit and readiness',
-    userSurface: 'Models workspace',
+    userSurface: 'Models and providers',
     userOutcome: 'Inspect the best model route for context, tools, vision, cost, latency, and privacy before changing defaults.',
     why: 'The request asks to choose, compare, or inspect model route fit.',
     modelRoute: `models action:"route" query:${quote(request)} includeParameters:true`,
     inspectRoute: 'models action:"status" includeParameters:true',
-    userRoute: 'Agent Workspace -> Models',
+    userRoute: 'Models and providers (the menu, Ctrl+G then m)',
     requiresConfirmation: slots.changes,
     missingFields: slots.changes ? ['selected model route id', 'confirmation before route change'] : undefined,
     supportingRoutes: [
@@ -204,12 +203,12 @@ const modelProviderRouting: TaskRouteEntry = {
   build: () => ({
     id: 'model-provider-routing',
     label: 'Model/provider route readiness',
-    userSurface: 'Models workspace',
+    userSurface: 'Models and providers',
     userOutcome: 'Choose or diagnose model access without asking the user to know provider internals.',
     why: 'The request is about model choice, provider accounts, subscriptions, local models, or context-window fit.',
     modelRoute: 'models action:"status" includeParameters:true',
     inspectRoute: 'models action:"route" target:"..." includeParameters:true',
-    userRoute: 'Agent Workspace -> Models',
+    userRoute: 'Models and providers (the menu, Ctrl+G then m)',
     requiresConfirmation: false,
     supportingRoutes: [
       'models action:"local"',
@@ -228,12 +227,12 @@ const personalityAndContext: TaskRouteEntry = {
     return {
       id: 'personality-and-context',
       label: 'Personality and project context',
-      userSurface: 'Local Context and Personas workspace',
+      userSurface: 'Memory and knowledge',
       userOutcome: 'Inspect or update how the assistant should behave without hidden prompt surprises.',
       why: 'The request mentions VIBE.md, personality, personas, tone, or project instruction files.',
       modelRoute: contextRoute,
       inspectRoute: contextRoute,
-      userRoute: 'Agent Workspace -> Local Context',
+      userRoute: 'Memory and knowledge, and This conversation (the menu, Ctrl+G then m)',
       requiresConfirmation: slots.changes,
       supportingRoutes: [
         'vibe action:"show"',
@@ -254,7 +253,7 @@ const externalMemoryProvider: TaskRouteEntry = {
     return {
       id: 'external-memory-provider-posture',
       label: 'External memory provider setup posture',
-      userSurface: 'Local Context workspace',
+      userSurface: 'Memory and knowledge',
       userOutcome: 'Inspect provider readiness and required daemon/platform contracts before promising external cross-session memory.',
       why: 'The request mentions an external memory provider, backend, sync, import/export, or a named provider such as Honcho, Mem0, or Supermemory.',
       modelRoute: providerId
@@ -263,7 +262,7 @@ const externalMemoryProvider: TaskRouteEntry = {
       inspectRoute: providerId
         ? `host action:"capability" query:"${providerId} memory provider"`
         : 'memory action:"status" query:"external memory provider" includeParameters:true',
-      userRoute: 'Agent Workspace -> Local Context',
+      userRoute: 'Memory and knowledge, and This conversation (the menu, Ctrl+G then m)',
       requiresConfirmation: slots.changes,
       missingFields: [
         ...(providerId ? [] : ['provider id or backend name']),
@@ -288,12 +287,12 @@ const memoryLearning: TaskRouteEntry = {
   build: (_request, slots) => ({
     id: 'memory-learning',
     label: 'Memory, routines, skills, and learning review',
-    userSurface: 'Local Context workspace',
+    userSurface: 'Memory and knowledge',
     userOutcome: 'Make durable learning reviewable, sourced, and reversible.',
     why: 'The request is about memory, recall, skills, routines, or external memory providers.',
     modelRoute: 'memory action:"status" includeParameters:true',
     inspectRoute: 'memory action:"curator" includeParameters:true',
-    userRoute: 'Agent Workspace -> Local Context',
+    userRoute: 'Memory and knowledge, and This conversation (the menu, Ctrl+G then m)',
     requiresConfirmation: slots.changes,
     supportingRoutes: [
       'memory action:"list"',
@@ -322,12 +321,12 @@ const personalOpsConnectorSetup: TaskRouteEntry = {
     return {
       id: 'personal-ops-connector-setup',
       label: 'Personal Ops connector setup posture',
-      userSurface: 'Personal Ops workspace',
+      userSurface: 'Mail, calendar and channels',
       userOutcome: 'Inspect the inbox or calendar connector lane before promising fresh provider data.',
       why: 'The request mentions Gmail, IMAP/SMTP, CalDAV, or an email/calendar connector setup task.',
       modelRoute: laneRoute,
       inspectRoute: 'personal_ops action:"status" includeParameters:true',
-      userRoute: 'Agent Workspace -> Personal Ops -> Readiness map',
+      userRoute: 'Mail, calendar and channels (the menu, Ctrl+G then m)',
       requiresConfirmation: slots.changes,
       missingFields: slots.changes ? ['connector/provider choice', 'credential or MCP setup route', 'confirmation before any account or secret mutation'] : undefined,
       supportingRoutes: [
@@ -346,12 +345,12 @@ const personalOpsDailyBriefing: TaskRouteEntry = {
   build: (request) => ({
     id: 'personal-ops-daily-briefing',
     label: 'Personal Ops daily briefing',
-    userSurface: 'Personal Ops workspace',
+    userSurface: 'Mail, calendar and channels',
     userOutcome: 'Start with one read-only daily plan across agenda, inbox, tasks, reminders, routines, delivery, and autonomy.',
     why: 'The request asks for a brief, briefing, agenda summary, or today view.',
     modelRoute: `personal_ops action:"briefing" query:${quote(request)} includeParameters:true`,
     inspectRoute: 'personal_ops action:"status" includeParameters:true',
-    userRoute: 'Agent Workspace -> Personal Ops -> Daily briefing plan',
+    userRoute: 'Work and agents, O (your briefing)',
     requiresConfirmation: false,
     supportingRoutes: [
       'personal_ops action:"queue" includeParameters:true',
@@ -371,12 +370,12 @@ const personalOpsReviewQueue: TaskRouteEntry = {
     return {
       id: 'personal-ops-review-queue',
       label: 'Personal Ops saved review queue',
-      userSurface: 'Personal Ops workspace',
+      userSurface: 'Mail, calendar and channels',
       userOutcome: 'Review saved inbox threads and calendar events before doing fresh reads or provider effects.',
       why: 'The request asks for saved Personal Ops review queues or previously captured inbox/calendar cards.',
       modelRoute: `personal_ops action:"queue"${laneQueueQuery} includeParameters:true`,
       inspectRoute: laneRoute,
-      userRoute: 'Agent Workspace -> Personal Ops -> Review queue',
+      userRoute: 'Mail, calendar and channels, Inbox and Calendar',
       requiresConfirmation: false,
       supportingRoutes: [
         intakeRoute,
@@ -396,12 +395,12 @@ const personalOpsFreshRead: TaskRouteEntry = {
     return {
       id: 'personal-ops-fresh-read-plan',
       label: 'Personal Ops fresh provider read plan',
-      userSurface: 'Personal Ops workspace',
+      userSurface: 'Mail, calendar and channels',
       userOutcome: 'Select the safest read-only connector operation before fetching fresh inbox or calendar data.',
       why: 'The request asks to refresh, sync, fetch, or inspect unread/upcoming personal provider data.',
       modelRoute: intakeRoute,
       inspectRoute: laneRoute,
-      userRoute: 'Agent Workspace -> Personal Ops -> Request planner',
+      userRoute: 'the conversation: say what you want done',
       requiresConfirmation: true,
       missingFields: ['lane id', 'read-only connector operation record id', 'bounded input fields', 'confirmation before reading live personal provider data'],
       supportingRoutes: [
@@ -422,12 +421,12 @@ const personalOpsIntake: TaskRouteEntry = {
     return {
       id: 'personal-ops-intake-route',
       label: 'Personal Ops request intake',
-      userSurface: 'Personal Ops workspace',
+      userSurface: 'Mail, calendar and channels',
       userOutcome: 'Triage personal data through reviewed lanes, redacted cards, and confirmed external effects.',
       why: 'The request involves inbox, email, calendar, notes, tasks, reminders, or reply drafting.',
       modelRoute: intakeRoute,
       inspectRoute: laneRoute,
-      userRoute: 'Agent Workspace -> Personal Ops',
+      userRoute: 'Mail, calendar and channels (the menu, Ctrl+G then m)',
       requiresConfirmation: slots.freshRead || slots.changes,
       missingFields: slots.changes ? ['connector lane and record id', 'exact provider effect', 'confirmation'] : undefined,
       supportingRoutes: [

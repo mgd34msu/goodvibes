@@ -11,6 +11,7 @@
 import { captureMemoryOperation, assertMemoryOperationCurrent, awaitMemoryOperation, type MemoryOperationOptions } from './memory-operation.js';
 import { rankReviewQueue, rankSemanticSearch, rerankRetrieved } from './memory-search-ranking.js';
 import { MEMORY_ID_SHAPE, newMemoryId } from './memory-id.js';
+import { authorAfterChange, memoryAwaitsOwner, type MemoryAuthor } from './memory-author.js';
 import { noteListChanged } from '../runtime/list-changes.js';
 import { SQLiteStore } from './sqlite-store.js';
 import {
@@ -48,6 +49,11 @@ import {
 
 /** Native score for a fresh record, independent of any model judgment. */
 const FRESH_MEMORY_CONFIDENCE = 60;
+/** A record's project for its change notice (runtime/list-changes.ts): that project's change, or everyone's when it has none. */
+function projectNamed(record: { readonly project?: string | undefined }): { readonly project?: string } {
+  return record.project !== undefined ? { project: record.project } : {};
+}
+
 /** The memory_meta key that records the one-time attribution of 3.5.0 "this project" records to their project. */
 const PROJECT_ATTRIBUTION_META = 'project-attribution-v1';
 
@@ -124,8 +130,17 @@ export interface MemoryRecord {
    * Undefined means no expiry.
    */
   validUntil?: number | undefined;
+  /**
+   * Who wrote what the record says, from the credential the daemon authenticated (never a field a caller sends):
+   * the owner himself, his model in his own turn, or someone else. Absent: written before authors were kept (3.5.0,
+   * or earlier in this version), the owner's. A record someone else wrote is given to no turn until the owner accepts
+   * it (memory-recall-contract.ts).
+   */
+  author?: MemoryAuthor | undefined;
 }
 
+export type { MemoryAuthor } from './memory-author.js';
+export { memoryAwaitsOwner } from './memory-author.js';
 export type { MemoryTemporalStatus } from './memory-temporal.js';
 export { memoryRecordTemporalStatus, isMemoryTemporallyActive } from './memory-temporal.js';
 
@@ -147,6 +162,12 @@ export interface MemorySearchFilter {
    * record (the owner's view of all memory).
    */
   project?: string | undefined;
+  /**
+   * With no `project`: only the records that belong to no project (the person's own, given everywhere). What every door
+   * a caller reads memory through sets when the caller names no project (the daemon's memory routes and capabilities);
+   * the owner's own "Every project" choice leaves it off.
+   */
+  projectless?: boolean | undefined;
   cls?: MemoryClass | undefined;
   tags?: string[] | undefined;
   /** Full-text substring match on summary and detail; the matches are ordered by the memory-search rerank. */
@@ -186,6 +207,8 @@ export interface MemoryAddOptions {
   validFrom?: number | undefined;
   /** Temporal validity window end (epoch ms). Undefined = no expiry. */
   validUntil?: number | undefined;
+  /** Who wrote it (MemoryRecord.author), as the daemon authenticated the caller; absent, the owner's. */
+  author?: MemoryAuthor | undefined;
   review?: {
     state?: MemoryReviewState | undefined;
     confidence?: number | undefined;
@@ -210,7 +233,13 @@ export interface MemoryAddInsert {
 }
 
 const ADD_RECORD_COLUMNS = ['id', 'scope', 'cls', 'summary', 'detail', 'tags', 'provenance', 'review_state', 'confidence',
-  'reviewed_at', 'reviewed_by', 'stale_reason', 'created_at', 'updated_at', 'valid_from', 'valid_until', 'project'];
+  'reviewed_at', 'reviewed_by', 'stale_reason', 'created_at', 'updated_at', 'valid_from', 'valid_until', 'project', 'author'];
+
+/** A record's author as its column keeps it (JSON; NULL for the owner's records written before authors were kept). */
+function authorColumn(author: MemoryAuthor | undefined): string | null {
+  return author === undefined ? null : JSON.stringify(author);
+}
+
 
 /** Whether a stored row is what an add of `opts` would have stored: a resend of the same add. */
 function isSameAdd(stored: MemoryRecord, opts: MemoryAddOptions): boolean {
@@ -225,7 +254,7 @@ function addRecordParameters(record: MemoryRecord): Array<string | number | null
   return [record.id, record.scope, record.cls, record.summary, record.detail ?? null,
     JSON.stringify(record.tags), JSON.stringify(record.provenance), record.reviewState, record.confidence,
     record.reviewedAt ?? null, record.reviewedBy ?? null, record.staleReason ?? null,
-    record.createdAt, record.updatedAt, record.validFrom ?? null, record.validUntil ?? null, record.project ?? null];
+    record.createdAt, record.updatedAt, record.validFrom ?? null, record.validUntil ?? null, record.project ?? null, authorColumn(record.author)];
 }
 
 function authoredRecord(opts: MemoryAddOptions, id: string, at: number): MemoryRecord {
@@ -247,6 +276,7 @@ function authoredRecord(opts: MemoryAddOptions, id: string, at: number): MemoryR
     updatedAt: at,
     validFrom: opts.validFrom,
     validUntil: opts.validUntil,
+    ...(opts.author !== undefined ? { author: opts.author } : {}),
   };
 }
 
@@ -427,8 +457,8 @@ export class MemoryStore {
     try {
       this.runMutation(
         `INSERT INTO memory_records
-           (id, scope, cls, summary, detail, tags, provenance, review_state, confidence, reviewed_at, reviewed_by, stale_reason, created_at, updated_at, valid_from, valid_until, project)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+           (id, scope, cls, summary, detail, tags, provenance, review_state, confidence, reviewed_at, reviewed_by, stale_reason, created_at, updated_at, valid_from, valid_until, project, author)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
         parameters,
         operation,
         () => { inserted = true; insert.onInserted?.(stored); },
@@ -464,7 +494,7 @@ export class MemoryStore {
     if (!this.ready) return null;
 
     const rows = this.sqlite.exec(
-      `SELECT id, scope, cls, summary, detail, tags, provenance, review_state, confidence, reviewed_at, reviewed_by, stale_reason, created_at, updated_at, valid_from, valid_until, project
+      `SELECT id, scope, cls, summary, detail, tags, provenance, review_state, confidence, reviewed_at, reviewed_by, stale_reason, created_at, updated_at, valid_from, valid_until, project, author
          FROM memory_records WHERE id = ? LIMIT 1`,
       [id],
     );
@@ -518,6 +548,9 @@ export class MemoryStore {
     if (filter.project !== undefined) {
       conditions.push('(project IS NULL OR project = ?)');
       params.push(filter.project);
+    } else if (filter.projectless === true) {
+      // A caller naming no project: only the records that belong to none (the person's own, given everywhere).
+      conditions.push('project IS NULL');
     }
 
     if (filter.since) {
@@ -552,7 +585,7 @@ export class MemoryStore {
 
     const where = conditions.length ? `WHERE ${conditions.join(' AND ')}` : '';
     const rows = this.sqlite.exec(
-      `SELECT id, scope, cls, summary, detail, tags, provenance, review_state, confidence, reviewed_at, reviewed_by, stale_reason, created_at, updated_at, valid_from, valid_until, project
+      `SELECT id, scope, cls, summary, detail, tags, provenance, review_state, confidence, reviewed_at, reviewed_by, stale_reason, created_at, updated_at, valid_from, valid_until, project, author
          FROM memory_records ${where}
          ORDER BY updated_at DESC, created_at DESC`,
       params,
@@ -669,9 +702,11 @@ export class MemoryStore {
    * `stale` and `contradicted` flags are kept, they only make a record less
    * trusted.
    */
-  async importBundle(bundle: MemoryBundle, options?: MemoryOperationOptions, intoProject?: string): Promise<MemoryImportResult> {
+  async importBundle(bundle: MemoryBundle, options?: MemoryOperationOptions, intoProject?: string, importedBy?: MemoryAuthor): Promise<MemoryImportResult> {
     // A file's project names a folder on the machine it was saved on: an imported "this project" record is for the
     // project that loads it (`intoProject`), and with none it is the person's own.
+    // Who wrote an imported record is who loaded it (`importedBy`, as the daemon authenticated the caller), never
+    // the author the file claims: a file cannot make its records the owner's.
     const operation = this.captureOperation(options);
     assertMemoryOperationCurrent(operation);
     if (!this.ready) throw new Error('MemoryStore: not initialized');
@@ -693,8 +728,8 @@ export class MemoryStore {
         const flagged = state === 'stale' || state === 'contradicted';
         this.runMutation(
           `INSERT INTO memory_records
-             (id, scope, cls, summary, detail, tags, provenance, review_state, confidence, reviewed_at, reviewed_by, stale_reason, created_at, updated_at, valid_from, valid_until, project)
-           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+             (id, scope, cls, summary, detail, tags, provenance, review_state, confidence, reviewed_at, reviewed_by, stale_reason, created_at, updated_at, valid_from, valid_until, project, author)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
           [
             record.id,
             normalizeScope(record.scope),
@@ -713,6 +748,7 @@ export class MemoryStore {
             record.validFrom ?? null,
             record.validUntil ?? null,
             normalizeScope(record.scope) === 'project' ? intoProject ?? null : null,
+            authorColumn(importedBy === undefined ? undefined : { kind: importedBy.kind, ...(importedBy.who !== undefined ? { who: importedBy.who } : {}) }),
           ],
           operation,
         );
@@ -870,7 +906,9 @@ export class MemoryStore {
     }
 
     await this.persistNow();
-    noteListChanged({ list: 'memory', change: 'changed', id: fromId });
+    // A link between two records of one project is that project's change; any other is everyone's.
+    const linked = from.project !== undefined && from.project === to.project ? { project: from.project } : {};
+    noteListChanged({ list: 'memory', change: 'changed', id: fromId, ...linked });
     return { fromId, toId, relation, createdAt: now };
   }
 
@@ -918,6 +956,12 @@ export class MemoryStore {
     project?: string | undefined;
     /** Replacing unverified source content must not inherit the old review. */
     resetReview?: true;
+    /**
+     * Who makes the change (as the daemon authenticated the caller): someone else's change makes the record someone
+     * else's words, waiting for the owner's review; the owner's own change of a record someone else wrote is his
+     * acceptance of it; his model's change leaves the author as it was. Absent: the author is left as it was.
+     */
+    by?: MemoryAuthor;
   }, options?: MemoryOperationOptions): MemoryRecord | null {
     const operation = this.captureOperation(options);
     assertMemoryOperationCurrent(operation);
@@ -942,18 +986,20 @@ export class MemoryStore {
     // Only a "this project" record is for a project.
     const newProject = newScope === 'project' ? patch.project ?? existing.project : undefined;
     const projectChanged = newProject !== existing.project;
+    const newAuthor = authorAfterChange(existing.author, patch.by, now);
 
     this.runMutation(
       `UPDATE memory_records
-         SET cls = ?, scope = ?, summary = ?, detail = ?, tags = ?, valid_from = ?, valid_until = ?, updated_at = ?, project = ?
+         SET cls = ?, scope = ?, summary = ?, detail = ?, tags = ?, valid_from = ?, valid_until = ?, updated_at = ?, project = ?, author = ?
          ${projectChanged ? ', gv_revision = lower(hex(randomblob(16)))' : ''}
          ${resetReview ? ", review_state = 'fresh', confidence = " + FRESH_MEMORY_CONFIDENCE + ', reviewed_at = NULL, reviewed_by = NULL, stale_reason = NULL' : ''}
          WHERE id = ?`,
-      [newClass, newScope, newSummary, newDetail ?? null, JSON.stringify(newTags), newValidFrom ?? null, newValidUntil ?? null, now, newProject ?? null, id],
+      [newClass, newScope, newSummary, newDetail ?? null, JSON.stringify(newTags), newValidFrom ?? null, newValidUntil ?? null, now, newProject ?? null, authorColumn(newAuthor), id],
       operation,
     );
 
     const updated: MemoryRecord = { ...existing, cls: newClass, scope: newScope, project: newProject, summary: newSummary, detail: newDetail, tags: newTags, validFrom: newValidFrom, validUntil: newValidUntil, updatedAt: now,
+      author: newAuthor,
       ...(resetReview ? { reviewState: 'fresh', confidence: FRESH_MEMORY_CONFIDENCE, reviewedAt: undefined, reviewedBy: undefined, staleReason: undefined } : {}) };
     this.indexRow(updated);
     this.persist();
@@ -1006,8 +1052,30 @@ export class MemoryStore {
     this.indexRow(reviewed);
     this.persist();
     logger.info('MemoryStore: record reviewed', { id, reviewState, confidence });
-    noteListChanged({ list: 'memory', change: 'changed', id });
+    noteListChanged({ list: 'memory', change: 'changed', id, ...projectNamed(existing) });
     return reviewed;
+  }
+
+  /**
+   * The owner accepts a record someone else wrote (Memory and knowledge): from now on it is given to turns as any
+   * record, with its review state and confidence as they are (no special weight). A record that waits for nobody is
+   * returned as it is. Null when there is no such record.
+   */
+  accept(id: string, options?: MemoryOperationOptions): MemoryRecord | null {
+    const operation = this.captureOperation(options);
+    assertMemoryOperationCurrent(operation);
+    if (!this.ready) return null;
+    const existing = this.get(id);
+    if (!existing) return null;
+    if (!memoryAwaitsOwner(existing)) return existing;
+    const now = Date.now();
+    const author: MemoryAuthor = { ...existing.author!, acceptedAt: now };
+    this.runMutation('UPDATE memory_records SET author = ?, updated_at = ? WHERE id = ?', [authorColumn(author), now, id], operation);
+    const accepted: MemoryRecord = { ...existing, author, updatedAt: now };
+    this.persist();
+    logger.info('MemoryStore: record accepted by the owner', { id });
+    noteListChanged({ list: 'memory', change: 'changed', id, ...projectNamed(existing) });
+    return accepted;
   }
 
   /** Delete a record and all its links. */
@@ -1026,7 +1094,7 @@ export class MemoryStore {
     this.indexCommitted(() => this.vectorIndex?.delete(id));
     this.persist();
     logger.info('MemoryStore: record deleted', { id });
-    noteListChanged({ list: 'memory', change: 'deleted', id });
+    noteListChanged({ list: 'memory', change: 'deleted', id, ...projectNamed(existing) });
     return true;
   }
 
@@ -1098,7 +1166,7 @@ export class MemoryStore {
   attributeOldProjectRecords(attribute: (record: MemoryRecord) => string | undefined): { readonly attributed: ReadonlyMap<string, number>; readonly keptOwn: number } | null {
     if (!this.ready || this.readMeta(PROJECT_ATTRIBUTION_META) !== null) return null;
     const rows = this.sqlite.exec(
-      `SELECT id, scope, cls, summary, detail, tags, provenance, review_state, confidence, reviewed_at, reviewed_by, stale_reason, created_at, updated_at, valid_from, valid_until, project
+      `SELECT id, scope, cls, summary, detail, tags, provenance, review_state, confidence, reviewed_at, reviewed_by, stale_reason, created_at, updated_at, valid_from, valid_until, project, author
          FROM memory_records WHERE scope = 'project' AND project IS NULL`,
     )[0];
     const attributed = new Map<string, number>();
@@ -1213,7 +1281,7 @@ export class MemoryStore {
   /** Every row with the revision its trigger stamped, in one query. */
   private vectorEntries(): MemoryVectorEntry[] {
     const result = this.sqlite.exec(
-      `SELECT id, scope, cls, summary, detail, tags, provenance, review_state, confidence, reviewed_at, reviewed_by, stale_reason, created_at, updated_at, valid_from, valid_until, project, gv_revision
+      `SELECT id, scope, cls, summary, detail, tags, provenance, review_state, confidence, reviewed_at, reviewed_by, stale_reason, created_at, updated_at, valid_from, valid_until, project, author, gv_revision
          FROM memory_records
          ORDER BY updated_at DESC, created_at DESC`,
     )[0];

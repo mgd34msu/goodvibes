@@ -17,6 +17,10 @@ export interface AsyncDisposalScope {
 }
 
 interface Failure { readonly label: string; readonly error: unknown; }
+
+function traceDebug(message: string, data?: Record<string, unknown>): void {
+  try { logger.debug(message, data); } catch { /* A trace line never interrupts cleanup. */ }
+}
 interface Entry { readonly label: string; readonly dispose: () => void | Promise<void>; }
 
 export class AsyncDisposalError extends Error {
@@ -64,7 +68,15 @@ export function createAsyncDisposalScope(scopeName: string): AsyncDisposalScope 
     try {
       const result = entry.dispose();
       if (result === closing && result !== undefined) throw new Error('A cleanup callback cannot await its own scope close.');
-      if (result && typeof result.then === 'function') return Promise.resolve(result).then(() => {}, (error: unknown) => failed(entry, error));
+      if (result && typeof result.then === 'function') {
+        // What a stop waits on, step by step, in the ordinary log at debug level: a close that hangs names its step.
+        const from = Date.now();
+        traceDebug(`${scopeName}: waiting on ${entry.label}`);
+        return Promise.resolve(result).then(
+          () => { traceDebug(`${scopeName}: ${entry.label} closed`, { ms: Date.now() - from }); },
+          (error: unknown) => failed(entry, error),
+        );
+      }
     } catch (error) { failed(entry, error); }
     return undefined;
   }

@@ -7,7 +7,7 @@ import { availablePairingOffers, mintPairingHandoff, defaultPairingTokenName, PA
 import { probePairingTailscale, runPairingTailscaleServe, stopPairingTailscaleServe } from '../core/pairing-tailscale-gateway.ts';
 import { createKeybindingsModalSurface } from './modals/keybindings-modal.ts';
 import { createPairingModalSurface, type PairingConnectionRequest, type PairingModalConnectionInfo, type PairingModalUnreachable } from './modals/pairing-modal.ts';
-import { describeOperatorRpcError, resolveOperatorRpc } from '../runtime/client/operator-endpoint.ts';
+import { describeOperatorRpcError, invokePressed, resolveOperatorRpc } from '../runtime/client/operator-endpoint.ts';
 
 /**
  * Register the config-modal surfaces and the old names that open them. Called
@@ -159,11 +159,12 @@ async function servePairingToNetwork(deps: ResolvedBuiltinViewDeps, name?: strin
   if (!rpc.available) throw new Error(rpc.reason);
   let answer: PairingHandoffAnswer;
   try {
-    answer = await rpc.platformClient.operator.invoke('pairing.handoff.create', {
+    // The owner's own yes in the modal: his press.
+    answer = await invokePressed<PairingHandoffAnswer>(rpc.platformClient, 'pairing.handoff.create', {
       name: name ?? defaultPairingTokenName(),
       offers: [...PAIRING_HANDOFF_OFFER_KINDS],
       serveToNetwork: true,
-    }) as PairingHandoffAnswer;
+    });
   } catch (error) { throw new Error(describeOperatorRpcError(error)); }
   const deepLink = answer.deepLink ?? answer.fragment;
   return {

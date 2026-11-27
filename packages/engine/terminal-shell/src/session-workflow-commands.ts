@@ -21,6 +21,27 @@ export interface SessionWorkflowContext extends TranscriptCommandContext<Termina
   print(message: string): void;
   renderRequest(): void;
 }
+/**
+ * One way both programs show a session's details: this session (`current`) and a saved one (`info`, Sessions `v`),
+ * the same fields in the same order with the same labels, aligned.
+ */
+const SESSION_FIELD_LABELS: Readonly<Record<'current' | 'info', Readonly<Record<string, string>>>> = {
+  current: { id: '  ID:       ', name: '  Name:     ', started: '  Started:  ', messages: '  Messages: ', model: '  Model:    ' },
+  info: {
+    heading: 'Session: ',
+    title: '  Title:    ',
+    model: '  Model:    ',
+    provider: '  Provider: ',
+    date: '  Date:     ',
+    messages: '  Messages: ',
+    file: '  File:     ',
+  },
+};
+
+function sessionField(view: 'current' | 'info', key: string, value: string): string {
+  return (SESSION_FIELD_LABELS[view][key] ?? '') + value;
+}
+
 export function createSessionWorkflowCommands<Context extends SessionWorkflowContext>(
   requireSessionManager: (context: Context) => SessionManager,
   policy: {
@@ -29,7 +50,6 @@ export function createSessionWorkflowCommands<Context extends SessionWorkflowCon
     readonly postureSeparator: string;
     readonly reviewSeparator: string;
     readonly reviewDetailSeparator: string;
-    readonly field: (view: 'current' | 'info', key: string, value: string) => string;
     readonly deleted: (name: string, title: string) => string;
     readonly failed: (action: 'rename' | 'delete' | 'fork' | 'save', error: unknown) => string;
     readonly captureSession: (context: Context) => {
@@ -122,11 +142,11 @@ export function createSessionWorkflowCommands<Context extends SessionWorkflowCon
       ctx.print(
         [
           'Current session',
-          policy.field('current', 'id', id),
-          policy.field('current', 'name', title),
-          policy.field('current', 'started', started),
-          policy.field('current', 'messages', String(msgCount)),
-          policy.field('current', 'model', `${ctx.session.runtime.model} (${ctx.session.runtime.provider})`),
+          sessionField('current', 'id', id),
+          sessionField('current', 'name', title),
+          sessionField('current', 'started', started),
+          sessionField('current', 'messages', String(msgCount)),
+          sessionField('current', 'model', `${ctx.session.runtime.model} (${ctx.session.runtime.provider})`),
         ].join('\n'),
       );
     }
@@ -253,13 +273,13 @@ export function createSessionWorkflowCommands<Context extends SessionWorkflowCon
       const date = new Date(found.timestamp).toLocaleString();
       ctx.print(
         [
-          policy.field('info', 'heading', found.name),
-          policy.field('info', 'title', String(found.title || '(untitled)')),
-          policy.field('info', 'model', String(found.model || '(unknown)')),
-          policy.field('info', 'provider', String(found.provider || '(unknown)')),
-          policy.field('info', 'date', String(date)),
-          policy.field('info', 'messages', String(found.messageCount)),
-          policy.field('info', 'file', String(found.filePath)),
+          sessionField('info', 'heading', found.name),
+          sessionField('info', 'title', String(found.title || '(untitled)')),
+          sessionField('info', 'model', String(found.model || '(unknown)')),
+          sessionField('info', 'provider', String(found.provider || '(unknown)')),
+          sessionField('info', 'date', String(date)),
+          sessionField('info', 'messages', String(found.messageCount)),
+          sessionField('info', 'file', String(found.filePath)),
           ...(found.returnContext ? formatReturnContextForDisplay(found.returnContext).map((line) => `  ${line}`) : []),
         ].join('\n'),
       );

@@ -170,8 +170,11 @@ export interface RuntimePollerOwners {
    * here, which is the whole reason this list is all-required.
    */
   readonly homeGraphService: { dispose(): void | Promise<void> };
-  /** The composed contract runner: disposing it stops the runner (each contract's engine with it) and releases its store's writer and sweep. */
-  readonly contractRunner: { dispose(): void; prepareToClose?(): void; flushWorkPlan?(): Promise<void>; closed?(): Promise<import('../utils/owned-work.js').CloseReport> };
+  /**
+   * The composed contract runner: disposing it stops the runner (each contract's engine with it) and releases its
+   * store's writer and sweep. Absent in a graph that runs no contracts (a terminal program).
+   */
+  readonly contractRunner?: { dispose(): void; prepareToClose?(): void; flushWorkPlan?(): Promise<void>; closed?(): Promise<import('../utils/owned-work.js').CloseReport> } | undefined;
   readonly processRegistry: { dispose(): void };
   readonly memoryGovernor: { stop(): void };
   /**
@@ -212,10 +215,11 @@ export function registerRuntimePollers(registry: AsyncDisposalRegistry, owners: 
   registry.add('home graph service', () => owners.homeGraphService.dispose());
   // Work-plan writes the runner queued are written before the graph closes (bounded, at once when none are queued),
   // for every product: a product that drains its contract recovery first does so in a scope that unwinds before this.
-  registry.add('contract runner', async () => {
-    owners.contractRunner.dispose();
+  const contracts = owners.contractRunner;
+  if (contracts) registry.add('contract runner', async () => {
+    contracts.dispose();
     // Each run's claim is released once its work drained, or once the bounded wait names it still running.
-    const [, report] = await Promise.all([owners.contractRunner.flushWorkPlan?.(), owners.contractRunner.closed?.()]);
+    const [, report] = await Promise.all([contracts.flushWorkPlan?.(), contracts.closed?.()]);
     if (report !== undefined && report.stillRunning.length > 0) {
       logger.warn('Runtime disposal: contracts still running when the contract runner closed', { stillRunning: report.stillRunning.map((entry) => entry.label) });
     }
@@ -234,7 +238,7 @@ export function registerRuntimePollers(registry: AsyncDisposalRegistry, owners: 
   // down subsystems.
   registry.add('hosted agent runs', () => {
     // Told first: the agents cancelled here end with the host, which neither stops nor fails the work they run.
-    owners.contractRunner.prepareToClose?.();
+    owners.contractRunner?.prepareToClose?.();
     const cancelled = owners.cancelHostedAgentRuns();
     if (cancelled > 0) logger.info('Runtime disposal cancelled in-flight agent runs', { cancelled });
   });

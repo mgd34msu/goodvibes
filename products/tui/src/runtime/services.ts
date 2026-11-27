@@ -1,4 +1,5 @@
 import { readTuiNotificationsMetadataOnly } from '../config/host-settings.ts';
+import { projectIdentityOf } from '@goodvibes/engine/platform/platform/workspace';
 /**
  * services.ts, the terminal app's composition root, as a CLIENT.
  *
@@ -26,11 +27,10 @@ import { buildContinuationSpawnInput, composeRuntimeServices } from '@goodvibes/
 import { forwardGatewayMethodsToDaemon } from './gateway-daemon-forward.ts';
 import { gateConsolidationToLocalWriter } from './memory-consolidation-gate.ts';
 import { createNotificationDispatcher, wireRuntimeNotificationBridge, wireMemoryPressureNotice } from './notification-dispatch.ts';
-import { resolveDaemonEnabled } from '@goodvibes/engine/platform/platform/config';
+import { resolveDaemonEnabled, type DaemonWritePress } from '@goodvibes/engine/platform/platform/config';
 import { createWorkspaceCheckpointing } from './workspace-checkpointing.ts';
 import { createShellPathService } from '@goodvibes/engine/platform/platform/runtime/shell-paths';
 import { createViewPanelAdapter } from '../views/view-panel-adapter.ts';
-import { createContractIntake } from '@goodvibes/engine/platform/platform/contract';
 import { KeybindingsManager } from '../input/keybindings.ts';
 import { startReplayRecording } from '@goodvibes/engine/platform/platform/core';
 import { WorkspaceTrustDecisionUnsettledError, type WorkspaceTrustLevel } from '@goodvibes/engine/platform/platform/runtime/operations';
@@ -96,7 +96,8 @@ export function createRuntimeServices(options: RuntimeServicesOptions): RuntimeS
   // nobody made.
   const trustPromptRef: { requestTrustDecision: () => Promise<WorkspaceTrustLevel>; awaitingOwner?: boolean } = {
     requestTrustDecision: async () => {
-      const workspace = workingDirectory;
+      // Trust is the project's: from a subfolder the question names the project it trusts.
+      const workspace = projectIdentityOf(workingDirectory);
       const decision = await localPromptRef.requestPermission({
         callId: `workspace-trust-${randomUUID().slice(0, 8)}`,
         tool: 'workspace-trust',
@@ -223,9 +224,9 @@ export function createRuntimeServices(options: RuntimeServicesOptions): RuntimeS
     triggers: 'host',
     // This surface runs follow-ups for the sessions it hosts behind its build guard (below).
     continuationRunner: 'product',
-    // Contracts left on disk are taken up by the long-lived hosts that follow them
-    // (bootstrap.ts, for the interactive TUI and headless runs), never by a
-    // one-shot command's graph that closes a moment later.
+    // Work has one runner, the daemon's: this program builds no contract runner (a delegation is handed to the daemon
+    // as a piece of work, below), so nothing of a contract is resumed or run here.
+    contracts: 'none',
     contractRecovery: 'product',
     taskGraphReaping: 'never',
     profileCapture: false,
@@ -233,20 +234,18 @@ export function createRuntimeServices(options: RuntimeServicesOptions): RuntimeS
       const requestApproval = clientRaiserRef.current;
       const workspaceTrustManager = base.workspaceTrustManager;
       if (!requestApproval || !workspaceTrustManager) throw new Error('The terminal graph was composed without its approval raiser or trust owner');
-      const { agentManager, configManager: config, providerRegistry, sessionBroker, contractRunner, processRegistry, surface } = base;
+      const { agentManager, configManager: config, providerRegistry, sessionBroker, processRegistry, surface } = base;
       // This product serves no verbs itself: each built-in verb on this catalog is
       // answered by the daemon. Plugins, mail, calendar and review surfaces call it.
       forwardGatewayMethodsToDaemon(base.gatewayMethods, verbs);
       // Every artifact this program's turns save goes through the daemon's `artifacts.save` (the daemon announces it).
       routeArtifactSavesThroughDaemon(base.artifactStore, shellPaths, configManager, 'tui');
       // Work has one runner, the daemon's: a delegation that would have been a contract here is handed to it as a piece
-      // of work for this project (daemon-work-delegation.ts), and this program starts no contract of its own. Closed
-      // first, so the program's own shutdown never stops a work it was following.
-      agentManager.setContractRunner(null);
+      // of work for this project (daemon-work-delegation.ts). Closed first, so the program's own shutdown never stops a
+      // work it was following.
       const workDelegation = createDaemonWorkDelegation({ shellPaths, configManager, program: 'tui' });
       agentManager.setWorkDelegation(workDelegation);
       scope.registry.add('work delegation', () => workDelegation.close());
-      const contractIntake = createContractIntake({ runner: contractRunner, projectRoot: workingDirectory });
       // Work that arrives for a session THIS surface hosts reaches the loop through
       // the same runner whether it came from the local broker or from the daemon's
       // queue. The wire half is inert until bootstrap.ts adopts a daemon.
@@ -334,9 +333,10 @@ export function createRuntimeServices(options: RuntimeServicesOptions): RuntimeS
         thisMachine: () => daemonConfig.thisMachine(),
         describe: () => `the daemon at ${resolveControlPlaneBaseUrl(configManager) ?? 'the connected address'}`,
         snapshot: () => daemonConfig.snapshot(),
-        write: (key, value) => daemonConfig.set(key, value),
-        writeMany: (changes) => daemonConfig.setMany(changes),
-        ...(daemonConfig.reset ? { reset: (key: string) => daemonConfig.reset!(key) } : {}),
+        // Who decided each write (the person's press, the gate's decision) goes with it, from the call site.
+        write: (key, value, press) => daemonConfig.set(key, value, press),
+        writeMany: (changes, press) => daemonConfig.setMany(changes, press),
+        ...(daemonConfig.reset ? { reset: (key: string, press?: DaemonWritePress) => daemonConfig.reset!(key, press) } : {}),
         refused: (key, error) => logger.warn('The daemon refused a setting written from the terminal; the previous value is back', { key, error: summarizeError(error) }),
       }));
       // The scheduler's first copy is an hour after start, so it runs until the
@@ -379,7 +379,6 @@ export function createRuntimeServices(options: RuntimeServicesOptions): RuntimeS
         notificationDispatcher,
         focusTracker,
         fleetReadModel,
-        contractIntake,
         close,
         dispose: (): void => { void close().catch(() => {}); },
       };

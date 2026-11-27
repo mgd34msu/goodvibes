@@ -1,6 +1,7 @@
 import { assertAgentLocalRegistryWrite, assertAgentLocalRegistryEffectCurrent, createAgentLocalRegistryWriteLifecycle, createAgentLocalRegistryInputProjector } from './local-registry-admission.js';
 import type { Tool, ToolExecuteOptions } from '@goodvibes/engine/platform/platform/types';
 import { assertCurrentToolExecution, type ToolRegistry } from '@goodvibes/engine/platform/platform/tools';
+import { presentToolAskWith, type ToolAskWords } from '@goodvibes/engine/platform/platform/permissions';
 import type { ShellPathService } from '@goodvibes/engine/platform/platform/runtime/shell';
 import { MemoryRegistry } from '@goodvibes/engine/platform/platform/state';
 import type { MemoryAccess } from '@goodvibes/engine/platform/platform/runtime/memory-spine';
@@ -447,11 +448,11 @@ export function createAgentLocalRegistryTool(shellPaths: ShellPathService, memor
     definition: {
       name: 'agent_local_registry',
       activity: {
-        doing: 'Checking', did: 'checked', object: 'notes & routines',
+        doing: 'Checking', did: 'checked', object: 'Agent records',
         byAction: {
-          change: { doing: 'Updating', did: 'updated', object: 'notes & routines' },
-          run: { doing: 'Using', did: 'used', object: 'notes & routines' },
-          delete: { doing: 'Deleting from', did: 'deleted from', object: 'notes & routines' },
+          change: { doing: 'Updating', did: 'updated', object: 'Agent records' },
+          run: { doing: 'Using', did: 'used', object: 'Agent records' },
+          delete: { doing: 'Deleting from', did: 'deleted from', object: 'Agent records' },
         },
       },
       description: 'Inspect or update Agent-local records by domain. Actions per domain: memory, note: list, search, get, create, update, review, stale, delete. persona adds use and clear_active. skill and skill_bundle add enable and disable. routine adds enable, disable and start. Create needs: memory summary; note title and body; persona name, description and body; skill name, description and procedure; skill_bundle name, description and skillIds; routine name, description and steps. Writes need current recorded admission. Marking a memory record, note, persona, skill, skill bundle or routine reviewed, and enabling one nobody reviewed, are the owner\'s: refused here with the command the owner types.',
@@ -538,7 +539,60 @@ export function createAgentLocalRegistryTool(shellPaths: ShellPathService, memor
   };
 }
 
+/** What one record of each domain is called, as a person says it. */
+const DOMAIN_NOUNS: Readonly<Record<AgentLocalRegistryDomain, { readonly one: string; readonly many: string }>> = {
+  memory: { one: 'a memory', many: 'your memories' },
+  note: { one: 'a note', many: 'your notes' },
+  persona: { one: 'a persona', many: 'your personas' },
+  skill: { one: 'a skill', many: 'your skills' },
+  skill_bundle: { one: 'a skill bundle', many: 'your skill bundles' },
+  routine: { one: 'a routine', many: 'your routines' },
+};
+
+/** A record's own title as the call names it, for the question's subject. */
+function namedRecord(args: Readonly<Record<string, unknown>>): string | undefined {
+  for (const field of ['summary', 'title', 'name', 'id']) {
+    const value = args[field];
+    if (typeof value === 'string' && value.trim()) return value.trim().length > 60 ? `${value.trim().slice(0, 59)}…` : value.trim();
+  }
+  return undefined;
+}
+
+/**
+ * The question for one call, in the words of the act on its own domain ("Remember this: …?", "Delete a note?"),
+ * never one sentence for every kind of record. A routed domain's write is asked by its capability (capability_run);
+ * these words are what that call says where it is named (a held or refused call, a remembered answer).
+ */
+export function agentLocalRegistryAskWords(args: Readonly<Record<string, unknown>>): ToolAskWords | undefined {
+  const domain = args.domain, action = args.action;
+  if (!isDomain(domain) || !isAction(action)) return undefined;
+  const { one, many } = DOMAIN_NOUNS[domain];
+  const named = namedRecord(args);
+  const it = named ? `${one.replace(/^an? /, '')} "${named}"` : one;
+  const words: Record<AgentLocalRegistryAction, readonly [question: string, doing: string]> = {
+    list: [`Look through ${many}?`, `Looking through ${many}`],
+    search: [`Search ${many}?`, `Searching ${many}`],
+    get: [`Read ${it}?`, `Reading ${it}`],
+    create: domain === 'memory'
+      ? [named ? `Remember this: "${named}"?` : 'Remember something?', 'Remembering it']
+      : [`Add ${it}?`, `Adding ${it}`],
+    update: [`Change ${it}?`, `Changing ${it}`],
+    enable: [`Turn on ${it}?`, `Turning on ${it}`],
+    disable: [`Turn off ${it}?`, `Turning off ${it}`],
+    review: [`Mark ${it} reviewed?`, `Marking ${it} reviewed`],
+    stale: [`Mark ${it} out of date?`, `Marking ${it} out of date`],
+    use: [`Use ${it} from now on?`, `Using ${it}`],
+    clear_active: ['Stop using the active persona?', 'Stopping the active persona'],
+    start: [`Start ${it}?`, `Starting ${it}`],
+    delete: domain === 'memory' ? [`Forget ${it}?`, `Forgetting ${it}`] : [`Delete ${it}?`, `Deleting ${it}`],
+  };
+  const [question, doing] = words[action];
+  return { question, lines: [], subject: question.replace(/\?$/, ''), doing };
+}
+
 export function registerAgentLocalRegistryTool(registry: ToolRegistry, shellPaths: ShellPathService, memoryRegistry: MemoryRegistry, memorySpine: MemoryAccess, runCapability: AgentLocalRegistryCapabilityRun): void {
+  // Each call is asked in the words of its own act on its own kind of record (the last registration is used).
+  presentToolAskWith('agent_local_registry', agentLocalRegistryAskWords);
   registry.register(createAgentLocalRegistryTool(shellPaths, memoryRegistry, memorySpine, runCapability),
     { inputProjection: createAgentLocalRegistryInputProjector(shellPaths, memoryRegistry, memorySpine) });
 }

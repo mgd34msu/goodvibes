@@ -23,9 +23,9 @@ function captureCandidate(): LearningCandidateDraft {
     status: isClassicOperation() ? 'unassessed' : 'ready',
     reason: isClassicOperation() ? 'No mechanical review flags were found; semantic curation remains unassessed.' : 'No urgent local-learning review candidates are present.',
     next: 'After a repeated workflow, useful preference, or durable lesson appears, capture it as a local memory, skill, routine, or persona for review.',
-    inspectRoute: 'agent_harness mode:"workspace_action" actionId:"learned-behavior"',
-    modelRoute: 'agent_harness mode:"workspace_actions" query:"learned behavior"',
-    createRoute: 'agent_harness mode:"run_workspace_action" actionId:"learned-behavior"',
+    inspectRoute: 'capability_find need:"remember a lesson, a workflow or a way of working"',
+    modelRoute: 'capability_find need:"remember a lesson, a workflow or a way of working"',
+    createRoute: 'capability_run id:"memory.add"',
   };
 }
 
@@ -133,16 +133,17 @@ function noteBehaviorProposalCandidate(record: LearningRecord, proposal: StoredL
   const { item } = record;
   const target = proposal?.target;
   if (!target || !isReviewed(item)) return null;
-  const actionId = target === 'memory'
-    ? 'notes-to-memory'
+  // The capability that makes it from the note (capability_run).
+  const capabilityId = target === 'memory'
+    ? 'notes.to-memory'
     : target === 'skill'
-    ? 'notes-to-skill'
+    ? 'notes.to-skill'
     : target === 'routine'
-      ? 'notes-to-routine'
-      : 'notes-to-persona';
+      ? 'notes.to-routine'
+      : 'notes.to-persona';
   const note = record.record as AgentNoteRecord;
   if (typeof note.title !== 'string' || typeof note.body !== 'string' || !Array.isArray(note.tags)) return null;
-  // The note records what was made from it, by this pass or the workspace promotion action.
+  // The note records what was made from it, by this pass or a notes.to-* capability.
   if (note.promoted?.some(entry => entry.domain === target)) return null;
   const proposalFields: NonNullable<LearningCandidateDraft['proposalFields']> = target === 'memory' ? {
     cls: proposal?.cls ?? 'fact',
@@ -164,8 +165,8 @@ function noteBehaviorProposalCandidate(record: LearningRecord, proposal: StoredL
     proposalTarget: target,
     proposalFields,
     inspectRoute: localRegistryRoute('note', 'get', item.id),
-    modelRoute: `agent_harness mode:"workspace_action" actionId:"${actionId}"`,
-    createRoute: `agent_harness mode:"run_workspace_action" actionId:"${actionId}" recordId:"${item.id}"`,
+    modelRoute: `capability_find need:"make a ${target} from a note"`,
+    createRoute: `capability_run id:"${capabilityId}" inputs:{note:"${item.id}"}`,
   };
 }
 
@@ -219,8 +220,8 @@ function workPlanCompletionCandidate(item: WorkPlanItem, proposal: StoredLearnin
     inspectRoute: `agent_work_plan action:"get" id:"${item.id}"`,
     modelRoute: 'agent_work_plan action:"get"',
     createRoute: target === 'memory'
-      ? 'agent_harness mode:"run_workspace_action" actionId:"memory-create"'
-      : 'agent_harness mode:"run_workspace_action" actionId:"learned-behavior"',
+      ? 'capability_run id:"memory.add"'
+      : `capability_find need:"make a ${target} from what was learned"`,
   };
 }
 
@@ -277,8 +278,8 @@ function researchRunCompletionCandidate(run: AgentResearchRunRecord, proposal: S
     inspectRoute: `agent_harness mode:"research_run" runId:"${run.id}"`,
     modelRoute: 'agent_harness mode:"research_run"',
     createRoute: target === 'memory'
-      ? 'agent_harness mode:"run_workspace_action" actionId:"memory-create"'
-      : 'agent_harness mode:"run_workspace_action" actionId:"learned-behavior"',
+      ? 'capability_run id:"memory.add"'
+      : `capability_find need:"make a ${target} from what was learned"`,
   };
 }
 
@@ -354,8 +355,8 @@ function sessionCompletionCandidate(record: LearningSessionRecord, proposal: Sto
     inspectRoute: `sessions action:"get" sessionId:"${session.name}"`,
     modelRoute: 'sessions action:"get"',
     createRoute: target === 'memory'
-      ? 'agent_harness mode:"run_workspace_action" actionId:"memory-create"'
-      : 'agent_harness mode:"run_workspace_action" actionId:"learned-behavior"',
+      ? 'capability_run id:"memory.add"'
+      : `capability_find need:"make a ${target} from what was learned"`,
   };
 }
 
@@ -374,7 +375,7 @@ function notePromotionCandidate(record: LearningRecord): LearningCandidateDraft 
     reviewState: item.reviewState,
     inspectRoute: localRegistryRoute('note', 'get', item.id),
     modelRoute: localRegistryModelRoute('note'),
-    createRoute: 'agent_harness mode:"workspace_action" actionId:"notes-to-knowledge"',
+    createRoute: `capability_run id:"notes.to-knowledge" inputs:{note:"${item.id}"}`,
   };
 }
 
@@ -564,7 +565,7 @@ function assembleLearningCandidates(source: LearningCuratorSource): AssembledCan
   const promotedReferences = new Set(Object.values(source.libraries).flatMap(records => records.flatMap(record => recordedPromotionReferences(record.record))));
   const proposed = new Set(drafts.flatMap(({ candidate }) => candidate.proposalTarget ? [learningPromotionReference(candidate.id)] : []));
   // A promotion whose record this process's libraries do not show (a memory made on an adopted daemon) is in the curation store.
-  // Notes promoted before the note kept its own record carry the workspace action's marker on the made record.
+  // Notes promoted before the note kept its own record carry the promotion's marker on the made record (older versions wrote it).
   const kept = drafts.filter(({ candidate }) => !candidate.proposalTarget || (!promotedReferences.has(learningPromotionReference(candidate.id))
     && !source.curation.promoted(learningPromotionReference(candidate.id))
     && !(candidate.domain === 'note' && candidate.recordId && promotedReferences.has(`agent-harness-note-promotion:${candidate.recordId}`))));

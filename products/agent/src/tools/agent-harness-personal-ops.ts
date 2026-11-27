@@ -1,7 +1,7 @@
 import { withConfiguredDecisionModelPolicy } from '@goodvibes/engine/platform/platform/runtime';
 import { runPersonalOpsStyleDraft, STYLE_DRAFT_RECORD_ID } from './agent-harness-personal-ops-style-draft.ts';
-import { buildAgentWorkspaceRoutineCounters } from '../input/agent-workspace-snapshot.ts';
-import { buildAgentWorkspaceChannels } from '../input/agent-workspace-channels.ts';
+import { buildAgentRoutineCounters } from '../input/runtime-snapshot.ts';
+import { buildAgentChannels } from '../input/channel-readiness.ts';
 import { snapshotJudgmentInput } from '@goodvibes/engine/platform/platform/gate';
 import { captureCatalogData } from '@goodvibes/engine/terminal-shell/agent-turn/catalog-data';
 import { rankHarnessCatalog, type CatalogRankingOptions } from '@goodvibes/engine/terminal-shell/agent-turn/catalog-ranking';
@@ -25,8 +25,8 @@ import { UNTRUSTED_CONTENT_RULE } from '../trust/untrusted-content.ts';
 export function personalOpsCatalogStatus(context: CommandContext): Record<string, unknown> {
   // Only what this summary counts: channels and routines. Lane status needs the
   // contract, the connectors and the Google connection, which personal_ops reads.
-  const channels = buildAgentWorkspaceChannels(context);
-  const localRoutines = buildAgentWorkspaceRoutineCounters(context).items;
+  const channels = buildAgentChannels(context);
+  const localRoutines = buildAgentRoutineCounters(context).items;
   return {
     modes: ['personal_ops_briefing', 'personal_ops', 'personal_ops_queue', 'personal_ops_lane', 'personal_ops_intake', 'run_personal_ops_read'],
     laneIds: LANE_IDS,
@@ -245,7 +245,7 @@ async function ownedPersonalOpsBriefingSummary(context: CommandContext, args: Ag
       laneTemplate: 'personal_ops action:"lane" laneId:"inbox|calendar|notes|tasks|reminders|routines|delivery"',
       liveReadTemplate: PERSONAL_OPS_LIVE_READ_TEMPLATE,
       autonomyQueue: 'autonomy action:"queue"',
-      workspace: 'workspace action:"actions" categoryId:"personal-ops"',
+      capabilities: 'capability_find need:"<what to do with mail, calendar, notes, tasks or reminders>"',
     },
     nextActions: [
       'Start with ready steps, then resolve attention or setup steps before promising live provider state.',

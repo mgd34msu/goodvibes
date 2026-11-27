@@ -169,7 +169,8 @@ function signInItems(output: unknown): readonly StateItem[] {
 }
 
 const REGISTERED_BY: Readonly<Record<RegisteredWorkspaceFacts['by'], string>> = {
-  agent: 'the Agent, started in it', tui: 'the terminal app, trusted there', other: 'another program or a script',
+  agent: 'the Agent, started in it', tui: 'the terminal app, trusted there', chat: 'the daemon, for a chat that had no project',
+  other: 'another program or a script',
 };
 
 /** Workspaces: the folders in the one shared register (`workspaces.registrations.list`), each a folder the Agent works in. */
@@ -178,7 +179,7 @@ function workspaceItems(output: unknown): readonly StateItem[] {
     const name = workspace.root.split('/').filter(Boolean).at(-1) ?? workspace.root;
     return {
       kind: 'state', id: workspace.root, state: 'registered', title: workspace.label ?? name, mark: 'ok',
-      ...(workspace.checkpoints ? {} : { right: 'no checkpoints' }),
+      ...(workspace.by === 'chat' ? { right: 'made for a chat' } : workspace.checkpoints ? {} : { right: 'no checkpoints' }),
       lines: [
         `The Agent works in ${workspace.root}${workspace.checkpoints ? ' and keeps automatic checkpoints there' : ''}.`,
         'Unregistering it stops that; starting the Agent there registers it again.',
@@ -271,8 +272,8 @@ export function systemSessionSource(read: SystemSessionReader): { read(): unknow
       }
       if (system.help) {
         items.push({
-          kind: 'state', id: 'help', state: 'help', title: 'Every command and every key', mark: 'ok',
-          lines: ['One searchable list of every command and every key of this program.', 'Every key can be changed on the Keys tab.'],
+          kind: 'state', id: 'help', state: 'help', title: 'The commands and every key', mark: 'ok',
+          lines: ['One searchable list of the few commands that remain and every key of this program; everything else is in the menu, as here.', 'Every key can be changed on the Keys tab.'],
         });
       }
       // Closing the program is a row the person selects and presses Enter on, never a letter of the place.
@@ -534,6 +535,8 @@ export const SYSTEM_PLACE = definePlace<Item>({
     // Workspaces (capabilities/builtin/workspaces.ts): the Agent registers the folder it starts in; here one is undone.
     { key: 'x', id: 'unregister-workspace', list: 'workspaces', states: ['registered'], capability: 'workspaces.unregister', label: 'unregister', fill: { root: 'id' } },
     { key: 'a', id: 'register-workspace', list: 'workspaces', whole: true, capability: 'workspaces.register', label: 'register a folder' },
+    // Where a chat that has no project is given its own (capabilities/builtin/chats.ts, `storage.automaticProjectsFolder`).
+    { key: 'f', id: 'automatic-folder', list: 'workspaces', whole: true, capability: 'chats.automatic-folder', label: 'folder for automatic projects', form: true },
     { key: 'x', id: 'remove-file', list: 'sign-in', states: ['present'], capability: 'local-auth.remove-first-run-file', label: 'remove it' },
     // This session: links to this program's views, and its help (capabilities/builtin/system-program.ts).
     // Links: open a view, a link for one item, a link someone gave you, a file of links saved earlier.

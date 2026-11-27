@@ -325,7 +325,7 @@ export function SecureAddressSettings() {
             <SettingsBlock title={words('local-authority')!.title} testId="secure-address-local-authority">
               <ChoiceWordsList words={words('local-authority')!} />
               {data.localAuthority.page && (
-                <p className="settings-empty">On each phone, once: open <code>{data.localAuthority.page}</code>{data.localAuthority.fingerprint ? <> (the certificate's fingerprint is <code>{data.localAuthority.fingerprint}</code>)</> : null}.</p>
+                <p className="settings-empty secure-address__phone-link">On each phone, once: open <code>{data.localAuthority.page}</code>{data.localAuthority.fingerprint ? <> (the certificate's fingerprint is <code>{data.localAuthority.fingerprint}</code>)</> : null}.</p>
               )}
               <div className="settings-rows">
                 <Button variant="primary" disabled={busy} onClick={() => change.mutate({ certificate: 'local-authority' })}>Use GoodVibes' own certificate</Button>

@@ -149,6 +149,8 @@ export interface TrySpawnAgentInput extends AgentSpawnSettingsLike {
   readonly tools?: string[] | readonly string[] | undefined;
   /** With `tools`: the agent gets exactly that list, not the template's defaults added to it. */
   readonly restrictTools?: boolean | undefined;
+  /** The project the agent works in (its folder's full path), as its caller named it and the daemon checked it. */
+  readonly workingDirectory?: string | undefined;
 }
 type AutomationJobLike = { readonly id: string };
 type AutomationRunLike = {
@@ -194,8 +196,9 @@ export interface DaemonRuntimeRouteContext {
   /** Whether the caller may read a session (a hosted one: its owners and admins). Absent: every session the route admits. */
   readonly mayReadSession?: SessionReadPolicy | undefined;
   /**
-   * The principal the request was authenticated as (its id), set by the listener. A session is kept as registered by
-   * the principal whose `sessions.register` made it; only that principal may name it as a question's asker.
+   * The principal the request was authenticated as, keyed with its kind by the listener (pairing/principal-ids.ts
+   * `callerKey`: a sign-in is `user:<name>`, never taken for a credential whose id is that name). A session is kept as
+   * registered by the principal whose `sessions.register` made it; only that principal may name it as a question's asker.
    */
   readonly requestPrincipalId?: ((req: Request) => string | undefined) | undefined;
   readonly sessionBroker: {

@@ -10,6 +10,9 @@
  */
 import type { TranscriptEventKind } from '../../core/transcript-events/types.js';
 import { CapabilityRefusal, type CapabilityCaller, type CapabilityDefinition, type FixedChoice, type InputDescription, type ListName } from '../types.js';
+import { callerPathOf } from '../path-inputs.js';
+import { withInputParty } from '../../security/turn-input-party.js';
+import { UNRECORDED_WORK_CAUSE } from '../../workflow/work-ledger/work-plans.js';
 
 /** The program's own session routines, each answering in the words it would print. */
 export interface LiveSessions {
@@ -250,13 +253,15 @@ export const SESSION_SAVE_SAVED: CapabilityDefinition<SessionsCapabilityServices
     { ...SAVED, help: 'Your saved sessions; . is this one' },
     { id: 'format', label: 'As', help: 'The kind of text', kind: 'choice', choices: [{ value: 'markdown', label: 'Markdown' }, { value: 'text', label: 'Plain text' }], required: { default: 'markdown', defaultMeans: 'Markdown' }, typed: { position: 2 } },
     { id: 'where', label: 'Where', help: 'A file, or this screen', kind: 'choice', choices: [{ value: 'file', label: 'Write it to a file' }, { value: 'here', label: 'Print it here', help: 'Shown only, never part of this conversation' }], required: { default: 'file', defaultMeans: 'a file' }, typed: { flag: '--print', switchOn: 'here' } },
-    { id: 'path', label: 'File', help: 'Where to write it', kind: 'path', freeTextReason: 'a file path', required: { default: '', defaultMeans: 'a new file in ~/goodvibes-exports' }, typed: { flag: '--out' }, showWhen: { input: 'where', is: 'file' } },
+    { id: 'path', label: 'File', help: 'Where to write it', kind: 'path', file: 'written', freeTextReason: 'a file path', required: { default: '', defaultMeans: 'a new file in ~/goodvibes-exports' }, typed: { flag: '--out' }, showWhen: { input: 'where', is: 'file' } },
   ],
   sentence: 'The redacted transcript of {session}, a saved conversation, will be written out as text ({format}); an existing file is never replaced.', done: '',
   touches: 'this-machine', lasts: 'not-a-change', risk: 'none', example: { session: 'my-notes', format: 'text' },
-  async run(values, services) {
+  async run(values, services, caller) {
     const print = values.where === 'here';
-    return { text: await live(services).exportSaved({ target: values.session ?? '', format: values.format === 'text' ? 'text' : 'markdown', path: print ? '' : values.path ?? '', print }) };
+    // Placed by the one rule for every capability's path (capabilities/path-inputs.ts).
+    const path = print || !values.path ? '' : callerPathOf(caller, values.path, { personPathAsTyped: true });
+    return { text: await live(services).exportSaved({ target: values.session ?? '', format: values.format === 'text' ? 'text' : 'markdown', path, print }) };
   },
 };
 
@@ -656,7 +661,10 @@ export const HOSTED_NEW: CapabilityDefinition<HostedCapabilityServices> = {
     if (!caller.workingDirectory) throw new CapabilityRefusal('No project folder came with the request, so no hosted session was started.', 'Ask from the project\'s folder, or send workingDirectory with the request.');
     const prompt = (values.prompt ?? '').trim();
     const detachPolicy = values.leave === 'keep' ? 'survive' : values.leave === 'stop' ? 'kill' : undefined;
-    const answer = await hostedMethod(caller, 'sessions.hosted.create', {
+    // The first message is the turn of whoever caused this call, as the daemon recorded it (routes/capabilities.ts
+    // `causeOfRun`): the owner's own (his verified program, his sign-in) is his turn; anyone else's stays someone
+    // else's input (hosted-sessions/manager.ts reads the mark once, for that first message only).
+    const answer = await withInputParty(caller.cause ?? UNRECORDED_WORK_CAUSE, () => hostedMethod(caller, 'sessions.hosted.create', {
       workspaceRoot: caller.workingDirectory,
       // The asking program's own kind of session: from the Agent one that answers as the Agent. The daemon starts an
       // Agent session only for a creator holding full operator authority (routes/hosted-sessions.ts): the Agent's own
@@ -664,7 +672,7 @@ export const HOSTED_NEW: CapabilityDefinition<HostedCapabilityServices> = {
       ...(caller.program === 'tui' || caller.program === 'agent' ? { originSurface: caller.program } : {}),
       ...(prompt ? { initialPrompt: prompt } : {}),
       ...(detachPolicy ? { detachPolicy } : {}),
-    });
+    }));
     const session = hostedRecord(answer.session);
     return { text: startedWords(session), data: { session } };
   },

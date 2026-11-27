@@ -2,7 +2,7 @@ import { bindContractInputAuthority } from '../../contract/input-authority.js';
 import { classicAgentInput } from './classic-policy.js';
 import { decisionModelPolicyState } from '@goodvibes/engine/errors';
 import { currentTurn, withAgentTurn, type TurnContext } from '../../security/turn-boundary.js';
-import { turnInputParty, withOtherPartyInput } from '../../security/turn-input-party.js';
+import { turnInputParty, withInputParty, withOtherPartyInput, type TurnInputParty } from '../../security/turn-input-party.js';
 import type { Actor } from '@goodvibes/engine/daemon-api/http-policy';
 import { currentExecutionModeOwner, detachedFromInvocation, type ExecutionModeOwner } from '../../gate/execution-context.js';
 import { AgentCapacityError } from './capacity-error.js';
@@ -156,6 +156,11 @@ export class AgentManager {
   private readonly triggerSurfaces = new WeakMap<AgentRecord, { readonly surface: string; readonly actor?: Actor | undefined }>();
   /** Agents a turn acting on someone else's input started, with who that was (security/turn-input-party.ts). */
   private readonly otherPartySpawns = new WeakMap<AgentRecord, string>();
+  /**
+   * Agents the owner's own turn (or a run marked as his) started: their runs are marked his. Neither here nor above:
+   * started where nothing names whose it is, and its runs read as someone else's (unknown leans to someone else).
+   */
+  private readonly ownerPartySpawns = new WeakSet<AgentRecord>();
   /** The turn whose tool call started each agent: its request, and the id work it leaves is recovered against. */
   private readonly spawnTurns = new WeakMap<AgentRecord, TurnContext>();
   private readonly restoredContractUnits = new Set<string>();
@@ -170,6 +175,11 @@ export class AgentManager {
   private contractRunner: AgentContractRunner | null;
   /** A terminal program's way to the daemon's runner, in place of a contract runner (setWorkDelegation). */
   private workDelegation: AgentWorkDelegation | null = null;
+  /**
+   * Whose input an agent of a piece of work acts on, from the work's record (setWorkParty): undefined for an agent no
+   * piece of work owns, which keeps the party of the turn that started it.
+   */
+  private workParty: ((record: AgentRecord) => TurnInputParty | undefined) | null = null;
   private executor: AgentExecutor | null;
   private readonly configManager: Pick<ConfigManager, 'get'> | null;
   private readonly additionalFleetOwnership: (() => readonly AgentFleetOwnership[]) | undefined;
@@ -693,6 +703,7 @@ export class AgentManager {
       // An agent a turn on someone else's input started acts on that input too (security/turn-input-party.ts).
       const spawnParty = turnInputParty();
       if (spawnParty.party === 'other') this.otherPartySpawns.set(record, spawnParty.who);
+      else this.ownerPartySpawns.add(record);
       this.pruneTerminalRecords();
       this.agents.set(id, record);
       return this.reserveExecution(id);
@@ -956,8 +967,15 @@ export class AgentManager {
       sessionId: record.sessionId ?? spawnTurn?.ownerSessionId ?? null,
       requestText: spawnTurn?.requestText ?? null,
     }, run);
+    // An agent of a piece of work acts as whoever caused that work, read from its record now (the owner's approval since
+    // it started counts), never as whatever scope started or woke it.
+    const workParty = this.workParty?.(record);
+    if (workParty !== undefined) return withInputParty(workParty, turn);
     const otherParty = this.otherPartySpawns.get(record);
-    return otherParty === undefined ? turn() : withOtherPartyInput(otherParty, turn);
+    if (otherParty !== undefined) return withOtherPartyInput(otherParty, turn);
+    // Started by the owner's own turn or a run marked his: his. Started where nothing named whose it is: read from its
+    // own turn, which names no owner's input (security/turn-input-party.ts: someone else's).
+    return this.ownerPartySpawns.has(record) ? withInputParty({ party: 'owner' }, turn) : turn();
   }
 
   /** The id of the turn whose call started an agent; undefined for an agent no turn started (a schedule, a channel spawn outside one). */
@@ -1297,6 +1315,14 @@ export class AgentManager {
     this.workDelegation = delegation;
   }
 
+  /**
+   * The daemon's runner of a project's work: whose input each agent of a piece of work acts on, read from that work's
+   * record at every run and wake (work-plans.ts `WorkCause`); undefined for an agent no piece of work owns.
+   */
+  setWorkParty(resolver: ((record: AgentRecord) => TurnInputParty | undefined) | null): void {
+    this.workParty = resolver;
+  }
+
   /** True when spawns that are not outside every contract are handed to the daemon as work (a terminal program). */
   delegatesToDaemon(): boolean {
     return this.workDelegation !== null && this.contractRunner === null;
@@ -1353,7 +1379,9 @@ export class AgentManager {
         if (this.runtimeBus) emitAgentCancelled(this.runtimeBus, ctx, { agentId: record.id, reason: update.reason });
       }
     };
-    return delegation.delegate(record, { signal, report }).then((work) => {
+    // The work carries the party of the turn that asked for it (security/turn-input-party.ts).
+    const otherParty = this.otherPartySpawns.get(record);
+    return delegation.delegate(record, { signal, report, ...(otherParty !== undefined ? { otherParty } : {}) }).then((work) => {
       record.delegatedWorkId = work.workId;
       return { settled: work.settled, cancel: (reason: string) => work.cancel(reason) };
     });

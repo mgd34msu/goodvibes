@@ -264,7 +264,7 @@ async function followDaemonInstall(verbs: DaemonUpdateVerbs, from: string | null
 export async function describeDaemonUpdates(verbs: DaemonUpdateVerbs, check: boolean, follow?: DaemonUpdateFollow): Promise<string> {
   const reachable = verbs.probe();
   if (!reachable.available) {
-    return ['Daemon updates', `  unavailable: ${reachable.reason}`, '  next: connect this app to a daemon, then run /update daemon again'].join('\n');
+    return ['Daemon updates', `  unavailable: ${reachable.reason}`, '  next: connect this app to a daemon, then check again on the Updates tab of System'].join('\n');
   }
   const method = check ? 'update.check' : 'update.status';
   try {

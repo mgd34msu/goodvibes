@@ -36,13 +36,18 @@ export function workPlanFrameRevision(payload: unknown, projectId: string | unde
   return typeof inner.revision === 'number' ? inner.revision : null;
 }
 
-export function useWorkPlan(lifetime: ClientLifetime, enabled: boolean) {
+/**
+ * The plan of `project` (the folder chosen in the places' project chooser): a work plan is one project's, and every
+ * planning call names its project (the daemon refuses one that names none, `NO_PROJECT`). No project chosen ("Every
+ * project"): nothing is read.
+ */
+export function useWorkPlan(lifetime: ClientLifetime, enabled: boolean, project: string | undefined) {
   const queryClient = useQueryClient();
   const scope = lifetime.revision;
   const query = useQuery({
-    queryKey: queryKeys.workPlanSnapshot(scope),
-    queryFn: ({ signal }) => readInContractScope(lifetime, signal, () => platformClient.workPlan.snapshot()),
-    enabled: enabled && hasSignInSync() && isClientLifetimeCurrent(lifetime),
+    queryKey: queryKeys.workPlanSnapshot(scope, project),
+    queryFn: ({ signal }) => readInContractScope(lifetime, signal, () => platformClient.workPlan.snapshot({ workingDirectory: project! })),
+    enabled: enabled && project !== undefined && hasSignInSync() && isClientLifetimeCurrent(lifetime),
     retry: false,
   });
 
@@ -53,8 +58,8 @@ export function useWorkPlan(lifetime: ClientLifetime, enabled: boolean) {
     : null;
 
   const reread = useCallback(() => {
-    void queryClient.invalidateQueries({ queryKey: queryKeys.workPlanSnapshot(scope) });
-  }, [queryClient, scope]);
+    void queryClient.invalidateQueries({ queryKey: queryKeys.workPlanSnapshot(scope, project) });
+  }, [queryClient, scope, project]);
 
   useEffect(() => {
     if (!enabled) return undefined;

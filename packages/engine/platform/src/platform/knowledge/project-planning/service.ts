@@ -16,6 +16,7 @@ import type { KnowledgeStore } from '../store.js';
 import type { StoredWorkPlanTask, WorkPlanTaskView, WorkPlanTaskWrite } from '../store-work-plan-tasks.js';
 import { defineLifecycle } from '../../utils/lifecycle-machine.js';
 import type { RuntimeEventBus } from '../../runtime/events/index.js';
+import type { EventAbout } from '../../../events/about.js';
 import {
   emitWorkPlanSnapshotInvalidated,
   emitWorkPlanTaskCreated,
@@ -95,6 +96,17 @@ export interface ProjectPlanningServiceOptions {
    * knowledge store (in memory for an in-memory store).
    */
   readonly workPlanRowsPath?: string | undefined;
+  /**
+   * The project folder whose plan `defaultProjectId` is: each event of that plan says it is about this project
+   * (events/about.ts), so the daemon's stream filter gives it to the callers of the project. A plan of another id says
+   * no project (the owner's alone).
+   */
+  readonly projectRoot?: string | undefined;
+  /**
+   * The folder of another project's plan this service keeps (a daemon's one service holds every project's plans): an
+   * event of that plan says it is about that project. Undefined for a plan of no project known here (the owner's alone).
+   */
+  readonly projectRootOf?: ((projectId: string) => string | undefined) | undefined;
 }
 
 /**
@@ -118,6 +130,10 @@ export const projectWorkPlanTaskLifecycle = defineLifecycle<ProjectWorkPlanTaskS
 
 export class ProjectPlanningService {
   private readonly defaultProjectId: string;
+  /** The folder of the default project's plan (ProjectPlanningServiceOptions.projectRoot). */
+  private readonly projectRoot: string | undefined;
+  /** The folder of another project's plan (ProjectPlanningServiceOptions.projectRootOf; set later by `declareProjectRoots`). */
+  private projectRootOf: ((projectId: string) => string | undefined) | undefined;
   private readonly waitForStartup: (() => Promise<void>) | undefined;
   private runtimeBus: RuntimeEventBus | null;
   private runtimeBusEpoch = 0;
@@ -152,6 +168,7 @@ export class ProjectPlanningService {
       waitForStartup: options.waitForStartup,
       runtimeBus: options.runtimeBus,
       workPlanRowsPath: workPlanRowsPath(configManager.getHomeDirectory(), workspace.configDirectory),
+      projectRoot: workingDirectory,
     });
     return { projectId, service };
   }
@@ -161,6 +178,8 @@ export class ProjectPlanningService {
     options: ProjectPlanningServiceOptions = {},
   ) {
     this.defaultProjectId = normalizeProjectId(options.defaultProjectId ?? 'default');
+    this.projectRoot = options.projectRoot;
+    this.projectRootOf = options.projectRootOf;
     this.runtimeBus = options.runtimeBus ?? null;
     this.waitForStartup = options.waitForStartup;
     const storePath = store.storagePath;
@@ -826,20 +845,54 @@ export class ProjectPlanningService {
     };
   }
 
+  /**
+   * What an event of this plan is about (events/about.ts): the default project's plan is this service's folder's; a plan
+   * of another project id is that project's folder where this service knows it (`projectRootOf`), else none, so it goes
+   * to the owner alone.
+   */
+  private aboutOf(event: WorkPlanEvent, kind: 'work-plan' | 'work-plan-task', id: string): { readonly about: EventAbout } {
+    const project = this.projectRoot !== undefined && event.projectId === this.defaultProjectId ? this.projectRoot
+      : this.notedRoots.get(normalizeProjectId(event.projectId)) ?? this.projectRootOf?.(event.projectId) ?? null;
+    return { about: { project, kind, id } };
+  }
+
+  /** Project folders a call named for a plan (the planning routes: every call names its project), by plan id. */
+  private readonly notedRoots = new Map<string, string>();
+
+  /**
+   * The folder of a plan's project, as a call that named it was checked for (daemon/http/project-planning-routes.ts):
+   * the events of that plan say they are about that project, whether or not a daemon turn worked there yet. Bounded.
+   */
+  noteProjectRoot(projectId: string, folder: string): void {
+    const key = normalizeProjectId(projectId);
+    this.notedRoots.delete(key);
+    this.notedRoots.set(key, folder);
+    if (this.notedRoots.size > 4_096) this.notedRoots.delete(this.notedRoots.keys().next().value!);
+  }
+
+  /**
+   * Where the plans of other projects this service keeps belong (a daemon's one service: the folders of the projects
+   * its turns work in), so their events say which project they are about.
+   */
+  declareProjectRoots(projectRootOf: (projectId: string) => string | undefined): void {
+    this.projectRootOf = projectRootOf;
+  }
+
   private emitWorkPlanTaskCreated(event: WorkPlanEvent, task: ProjectWorkPlanTask): void {
     if (!this.runtimeBus) return;
-    emitWorkPlanTaskCreated(this.runtimeBus, workPlanEmitterContext(event), { ...event, task });
+    emitWorkPlanTaskCreated(this.runtimeBus, workPlanEmitterContext(event), { ...event, task, ...this.aboutOf(event, 'work-plan-task', task.taskId) });
   }
 
   private emitWorkPlanTaskUpdated(event: WorkPlanEvent, task: ProjectWorkPlanTask, previousTask: ProjectWorkPlanTask): void {
     if (!this.runtimeBus) return;
-    emitWorkPlanTaskUpdated(this.runtimeBus, workPlanEmitterContext(event), { ...event, task, previousTask });
+    emitWorkPlanTaskUpdated(this.runtimeBus, workPlanEmitterContext(event), { ...event, task, previousTask, ...this.aboutOf(event, 'work-plan-task', task.taskId) });
   }
 
   private emitWorkPlanTaskStatusChanged(event: WorkPlanEvent, task: ProjectWorkPlanTask, previousTask: ProjectWorkPlanTask): void {
     if (!this.runtimeBus) return;
     emitWorkPlanTaskStatusChanged(this.runtimeBus, workPlanEmitterContext(event), {
       ...event,
+      ...this.aboutOf(event, 'work-plan-task', task.taskId),
       taskId: task.taskId,
       status: task.status,
       previousStatus: previousTask.status,
@@ -849,13 +902,13 @@ export class ProjectPlanningService {
 
   private emitWorkPlanTaskDeleted(event: WorkPlanEvent, task: ProjectWorkPlanTask): void {
     if (!this.runtimeBus) return;
-    emitWorkPlanTaskDeleted(this.runtimeBus, workPlanEmitterContext(event), { ...event, taskId: task.taskId, task });
+    emitWorkPlanTaskDeleted(this.runtimeBus, workPlanEmitterContext(event), { ...event, taskId: task.taskId, task, ...this.aboutOf(event, 'work-plan-task', task.taskId) });
   }
 
   /** One per committed edit: a snapshot read at an older revision is stale. Carries no tasks. */
   private emitWorkPlanSnapshotInvalidated(event: WorkPlanEvent, reason: string, updatedAt: number): void {
     if (!this.runtimeBus) return;
-    emitWorkPlanSnapshotInvalidated(this.runtimeBus, workPlanEmitterContext(event), { ...event, reason, updatedAt });
+    emitWorkPlanSnapshotInvalidated(this.runtimeBus, workPlanEmitterContext(event), { ...event, reason, updatedAt, ...this.aboutOf(event, 'work-plan', event.workPlanId) });
   }
 }
 

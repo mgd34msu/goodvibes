@@ -1,8 +1,8 @@
 # Project planning
 
 Project Planning holds the project's **work plan**: the durable task checklist
-that agent tools, the web SDK, the session briefing and `/workstream` read and
-write. The work plan is the one plan.
+that agent tools, the web SDK, the session briefing and the Work place's Checklist
+tab read and write. The work plan is the one plan.
 
 The same space also keeps the **planning state** and **project language**
 records written by the retired planning interview. They are read-only history:
@@ -321,9 +321,8 @@ decision records, and the work-plan methods manage the live task checklist.
 ## Terminal integration
 
 The terminal apps show saved planning state records as read-only history
-(`/work history` and the planning modal) and drive real work through
-the work plan and `/workstream`; nothing answers or approves a saved
-planning record.
+(the History tab of the Work place) and drive real work through the work
+plan and the Work place; nothing answers or approves a saved planning record.
 
 ## Next reads
 

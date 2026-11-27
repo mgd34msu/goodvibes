@@ -5,13 +5,15 @@ import { readFailureTransience } from '@goodvibes/engine/errors';
 import type { AgentOrchestrator, AgentTurnEnvironment } from '@goodvibes/engine/platform/platform/agents';
 import { ToolRegistry } from '@goodvibes/engine/platform/platform/tools';
 import { resolveHostedModelDefinition, withHostedSessionModel } from '@goodvibes/engine/platform/platform/hosted-sessions';
-import type { PermissionManager } from '@goodvibes/engine/platform/platform/permissions';
+import { decideInProject, type PermissionManager } from '@goodvibes/engine/platform/platform/permissions';
 import type { ConfigManager } from '@goodvibes/engine/platform/platform/config';
 import type { ProviderRegistry } from '@goodvibes/engine/platform/platform/providers';
 import type { RuntimeEventBus } from '@goodvibes/engine/platform/platform/runtime/state';
 import type { FeatureFlagManager } from '@goodvibes/engine/platform/platform/runtime/state';
 import type { HookDispatcher } from '@goodvibes/engine/platform/platform/hooks';
 import { logger } from '@goodvibes/engine/platform/platform/utils';
+import { withInputParty } from '@goodvibes/engine/platform/platform/security';
+import type { WorkCause } from '@goodvibes/engine/platform/platform/workflow/work-ledger';
 
 type ToolDependencies = Parameters<AgentOrchestrator['setDependencies']>[0];
 export interface NativeSessionDriverOptions {
@@ -33,6 +35,11 @@ export interface NativeSessionDriverOptions {
   readonly turnEnvironment: (folder: string) => AgentTurnEnvironment;
   /** The nonserialized native owner rechecks paired authority and workspace scope. */
   readonly assertCurrent: (contract: ContractView) => void;
+  /**
+   * Who caused the piece of work a run's session belongs to, from the work's record (work-plans.ts `WorkCause`): its
+   * turns run as that party. The owner's own only when he himself asked for it or approved it.
+   */
+  readonly workCauseOf: (sessionId: string | undefined) => WorkCause;
   /** Told when a turn's work ends and its owner stops holding a fleet slot. */
   readonly onSlotReleased?: (() => void) | undefined;
   /** A failed turn is retried with doubling backoff; the seams exist so tests never wait on a real timer. */
@@ -139,8 +146,12 @@ export function createNativeWorkSessionDriver(options: NativeSessionDriverOption
       if (stopped.has(contract.id) || !current || isTerminalContractStatus(current.status)) throw new Error('Native session is no longer active');
       options.assertCurrent(current);
     };
-    turn.setCoreServices({ configManager: options.configManager, providerRegistry,
-      codeIndexReindexScheduler: options.toolDependencies.toolExecutionObserver ? { onToolExecuted: options.toolDependencies.toolExecutionObserver } : undefined,
+    // The settings as a turn in this project reads them: its folder line, its memory and its records are the project's.
+    turn.setCoreServices({ configManager: environment.configManager ?? options.configManager, providerRegistry,
+      // Its tools ran in this project's turn: a CI watch its push makes is this project's.
+      codeIndexReindexScheduler: options.toolDependencies.toolExecutionObserver
+        ? { onToolExecuted: (tool: string, args: Record<string, unknown>, success: boolean) => options.toolDependencies.toolExecutionObserver?.(tool, args, success, { project: options.projectRoot }) }
+        : undefined,
       contractHooks: {
       ...hooks,
       sessionTurn(sessionId, turnId) {
@@ -258,7 +269,15 @@ export function createNativeWorkSessionDriver(options: NativeSessionDriverOption
         if (stopReason === 'provider_error' || stopReason === 'unexpected_error') reported = { error: new Error(error), provider: stopReason === 'provider_error' };
       });
       // The project's hooks are read and its checkpoint baseline taken before the unit's first call changes anything.
-      try { await session.ready(); await turn.handleUserInput(textFor(), undefined, { origin: { source: 'native-work', surface: 'service' } }); }
+      // Its turn runs as whoever caused the work, read from the work's record at each attempt (security/turn-input-party.ts):
+      // work the owner himself asked for or approved is his turn, changing files and running commands under his mode as
+      // his conversation in the project would; anyone else's runs reads only and no command outside a real sandbox,
+      // whatever the mode, until he approves it. Every decision on its calls is made for its project.
+      const party = options.workCauseOf(contract.sessionId);
+      const origin = party.party === 'owner'
+        ? { source: 'native-work', surface: 'service', ownerDirect: true }
+        : { source: 'native-work', surface: 'service' };
+      try { await session.ready(); await withInputParty(party, () => decideInProject(options.projectRoot, () => turn.handleUserInput(textFor(), undefined, { origin }))); }
       catch (error) { if (session.selectionChanged) return undefined; session.failed = true; return { error, provider: false }; }
       finally { off(); }
       if (reported) session.failed = true;

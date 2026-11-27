@@ -18,6 +18,7 @@ import {
 import { GatewayVerbError } from './gateway-verb-error.js';
 import { readInvocationParams, requireStringValue } from './invocation-params.js';
 import { attachHandler } from './attach-handler.js';
+import { currentRecordReach } from '@goodvibes/engine/daemon-api';
 
 /** The subset of the store the verb handlers need. */
 export type WorkspacesGatewayService = Pick<
@@ -36,10 +37,20 @@ function rethrowAsVerbError(error: unknown): never {
   throw error;
 }
 
+/**
+ * A caller that is not the owner himself (daemon-api `currentRecordReach`) is shown only the projects it may name (the
+ * ones the owner gave it, control-plane/caller-reach.ts); the owner, every one.
+ */
+function reachableRoots<T extends { readonly root: string }>(workspaces: readonly T[]): readonly T[] {
+  const reach = currentRecordReach();
+  return reach ? workspaces.filter((workspace) => reach('project', workspace.root)) : workspaces;
+}
+
 function createListHandler(service: WorkspacesGatewayService): GatewayMethodHandler {
   return async () => {
     const snapshot = await service.snapshot();
-    return { workspaces: snapshot.workspaces, declines: snapshot.declines };
+    // The folders the owner declined to register are his own choices: not a caller's but his.
+    return { workspaces: reachableRoots(snapshot.workspaces), declines: currentRecordReach() ? [] : snapshot.declines };
   };
 }
 
@@ -51,7 +62,7 @@ function createProjectsHandler(service: WorkspacesGatewayService, daemonFolder: 
   return async () => {
     const snapshot = await service.snapshot();
     const projects: { root: string; label?: string; daemonFolder: boolean }[] = [];
-    for (const workspace of snapshot.workspaces) {
+    for (const workspace of reachableRoots(snapshot.workspaces)) {
       if (workspace.root === daemonFolder || projects.some((project) => project.root === workspace.root)) continue;
       projects.push({ root: workspace.root, ...(workspace.label ? { label: workspace.label } : {}), daemonFolder: false });
     }

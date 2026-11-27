@@ -304,3 +304,7 @@ export { composeOccasions } from './routes/occasions-composition.js';
 export type { OccasionsComposition, OccasionsCompositionDeps } from './routes/occasions-composition.js';
 
 export { registerTriggerSupervisorGatewayMethods } from './routes/trigger-supervisor.js';
+
+// The risk class of every daemon method (method-risk.ts): what calling it does that the owner decides.
+export { declaredMethodRisk, methodCallRisk, METHOD_RISKS, RUNS_LATER_CAPABILITY_IDS, RUNS_LATER_METHOD_IDS, VALUE_DECIDED_METHOD_IDS } from './method-risk.js';
+export type { MethodRisk } from './method-risk.js';

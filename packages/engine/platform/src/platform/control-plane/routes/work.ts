@@ -22,6 +22,7 @@ import type { GatewayMethodInvocation } from '../method-catalog-shared.js';
 import type { WorkLedgerReadClient } from '../../workflow/work-ledger/index.js';
 import type { NativeWorkExecutionHost, NativeWorkExecutionObservation } from '../../workflow/work-ledger/native-execution.js';
 import { WorkPlanRefusal, type WorkPlans, type WorkPlanView } from '../../workflow/work-ledger/work-plans.js';
+import { nativeBoundRevisions } from '../../workflow/work-ledger/service.js';
 import { isTerminalContractStatus, type ContractView } from '../../contract/types.js';
 import { canGoOnWithout } from '../../contract/escalation.js';
 import { WORK_LEDGER_READ_SCOPE } from '../method-catalog-work-ledger.js';
@@ -82,7 +83,7 @@ export interface WorkItemView {
   readonly updatedAt: number;
 }
 
-type WorkExecution = Pick<NativeWorkExecutionHost, 'statusByAttempt'>;
+type WorkExecution = Pick<NativeWorkExecutionHost, 'statusByAttempt'> & Partial<Pick<NativeWorkExecutionHost, 'planDropped'>>;
 
 export interface WorkRouteHost {
   readonly projectId: string;
@@ -108,7 +109,9 @@ function runOf(contract: ContractView): WorkRunView {
     ...(contract.status === 'passed' && contract.answer ? { answer: contract.answer } : {}),
     steps: contract.units.map((unit) => ({ id: unit.id, title: unit.title || unit.brief || unit.id, status: unit.status, role: unit.role, dependsOn: [...unit.dependsOn] })),
     results: contract.criteria.map((criterion) => ({ text: criterion.text, status: String((criterion as { status?: unknown }).status ?? 'unshown') })),
-    questions: contract.escalations.filter((entry) => entry.resolvedAt === undefined && !isStepFailure(entry)).map((entry) => ({ id: entry.id, question: entry.question })),
+    // Only live work waits on a question: one left open when the run ended (stopped while it asked) is history, and
+    // the work is not said to ask anything.
+    questions: isTerminalContractStatus(contract.status) ? [] : contract.escalations.filter((entry) => entry.resolvedAt === undefined && !isStepFailure(entry)).map((entry) => ({ id: entry.id, question: entry.question })),
     // Only live work stops at a failed step: once the run ended, its step's pause is history.
     failedSteps: isTerminalContractStatus(contract.status) ? [] : contract.escalations.filter((entry) => entry.resolvedAt === undefined && isStepFailure(entry)).map((entry) => {
       const unit = contract.units.find((candidate) => candidate.id === entry.targetId);
@@ -123,11 +126,15 @@ function isStepFailure(entry: ContractView['escalations'][number]): boolean {
   return entry.failurePause === true && entry.scope === 'unit';
 }
 
-function stateOf(reported: string, attemptState: string | undefined, observed: NativeWorkExecutionObservation | null, plan: WorkPlanView | null): WorkState {
+function stateOf(reported: string, attemptState: string | undefined, observed: NativeWorkExecutionObservation | null, plan: WorkPlanView | null, blocker: string | null = null): WorkState {
   if (reported === 'complete') return 'done';
   if (reported === 'cancelled') return 'stopped';
-  // Its run ended failed, and the ledger says so with the reason (the attempt's blocker).
-  if (reported === 'blocked') return 'failed';
+  // "Blocked" in the ledger is either a run that ended failed (the blocker says "The work failed: ...") or a live run
+  // waiting for the owner (a question, a failed step, cut off by a stop): the run says which; unread, the words do.
+  if (reported === 'blocked' && (observed === null || (observed.kind === 'execution' && observed.contract === null))) {
+    if (blocker?.startsWith('Its plan waits')) return plan && plan.state !== 'approved' ? 'plan-waiting' : 'not-started';
+    return blocker !== null && !blocker.startsWith('The work failed') ? (blocker.startsWith('Cut off') ? 'interrupted' : blocker.startsWith('Stopped at the failed step') ? 'step-failed' : 'needs-you') : 'failed';
+  }
   // A start cut off (by a restart of the daemon) waits to be gone on with; one still under way is starting.
   if (observed?.kind === 'intent') return observed.intent.state === 'cancelled' ? 'stopped' : observed.recovery === 'required' ? 'interrupted' : 'starting';
   if (observed?.kind === 'execution') {
@@ -175,7 +182,7 @@ async function works(host: WorkRouteHost, invocation: GatewayMethodInvocation): 
     const plan = host.plans?.get(work.id) ?? null;
     items.push({
       id: work.id, title: work.title, goal: work.goal, criteria: [...work.criteria],
-      state: stateOf(work.reportedState, view.attempt?.state, observed, plan),
+      state: stateOf(work.reportedState, view.attempt?.state, observed, plan, view.attempt?.blocker ?? null),
       imported: work.source === null,
       reported: work.reportedState,
       verification: { state: view.verification.state, reason: view.verification.reason },
@@ -238,10 +245,13 @@ export function registerWorkGatewayMethods(catalog: GatewayMethodCatalog, host: 
     const attempt = view.attempt;
     if (operation === 'execution') {
       if (!work.currentAttemptId || !attempt) throw new GatewayVerbError(`"${work.title}" has ended: it was finished or stopped, so there is nothing to start or stop.`, 'WORK_NO_ATTEMPT', 409, 'work');
+      // The revisions its run is bound to: the host's own reports of where the run stands ("waits for you", "goes on")
+      // are not changes a caller must catch up with (work-ledger/service.ts `nativeBoundRevisions`).
+      const bound = nativeBoundRevisions(await host.reader.history(0), work, attempt);
       return {
         summary: `"${work.title}"`, title: work.title,
         input: { projectId: host.projectId, workId: work.id, attemptId: attempt.id,
-          expectedRevision: { work: work.revision, criteria: work.criteriaRevision, attempt: attempt.revision } },
+          expectedRevision: { work: bound.workRevision, criteria: work.criteriaRevision, attempt: bound.attemptRevision } },
       };
     }
     if (operation === 'contract') {
@@ -296,7 +306,13 @@ export function registerWorkGatewayMethods(catalog: GatewayMethodCatalog, host: 
     return { title: work.title, plan: await planAct(() => plansOf(host).approve(work.id)) };
   });
   attach('work.plan.discard', async (invocation) => {
-    const { work } = await subject(invocation);
-    return { title: work.title, discarded: await planAct(() => plansOf(host).discard(work.id)) };
+    const { work, proposed } = await subject(invocation);
+    const discarded = await planAct(() => plansOf(host).discard(work.id));
+    // Back to not started: the ledger says so too (it read "its plan waits" while the plan waited).
+    if (!proposed) {
+      const view = await workNamed(host, work.id);
+      if (view.attempt) await (await host.acquire()).planDropped?.(work.id, view.attempt.id);
+    }
+    return { title: work.title, discarded };
   });
 }

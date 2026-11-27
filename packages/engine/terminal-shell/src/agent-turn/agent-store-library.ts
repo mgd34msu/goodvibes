@@ -12,7 +12,7 @@ import { buildAgentSkillRequirements, formatAgentSkillRequirement } from './skil
 import { formatAgentRecordOrigin, formatAgentRecordReviewState } from './record-labels.js';
 import { discoverVibeFiles, formatVibeStatus, initVibeFile, loadVibeImportSource } from './vibe-file.js';
 import { discoverPersonas, discoverRoutines, type DiscoveredPersonaRecord, type DiscoveredRoutineRecord } from './record-discovery.js';
-import { recordLookupValues, splitWords, storeStep, type StoreAct, type StoreActContext } from './agent-store-common.js';
+import { ownersOwnReview, provenanceBy, recordLookupValues, splitWords, storeStep, writtenBy, type StoreAct, type StoreActContext } from './agent-store-common.js';
 
 const personasOf = (context: StoreActContext): AgentPersonaRegistry => AgentPersonaRegistry.fromShellPaths(context.shellPaths);
 const routinesOf = (context: StoreActContext): AgentRoutineRegistry => AgentRoutineRegistry.fromShellPaths(context.shellPaths);
@@ -111,7 +111,7 @@ export const PERSONA_ACTS: Readonly<Record<string, StoreAct>> = {
   async 'personas.create'(values, context) {
     const store = personasOf(context);
     const persona = storeStep(() => store.create({
-      name: values.name!, description: values.description!, body: values.body!, tags: splitWords(values.tags), triggers: splitWords(values.triggers), source: 'user', provenance: 'Command',
+      name: values.name!, description: values.description!, body: values.body!, tags: splitWords(values.tags), triggers: splitWords(values.triggers), source: 'user', provenance: provenanceBy(context, 'Command'), author: writtenBy(context),
     }));
     return personaChange('Made persona', persona, store);
   },
@@ -119,13 +119,13 @@ export const PERSONA_ACTS: Readonly<Record<string, StoreAct>> = {
     const store = personasOf(context);
     const persona = storeStep(() => store.update(values.persona!, {
       name: values.name || undefined, description: values.description || undefined, body: values.body || undefined,
-      tags: values.tags ? splitWords(values.tags) : undefined, triggers: values.triggers ? splitWords(values.triggers) : undefined, provenance: 'Command',
+      tags: values.tags ? splitWords(values.tags) : undefined, triggers: values.triggers ? splitWords(values.triggers) : undefined, provenance: provenanceBy(context, 'Command'), by: writtenBy(context),
     }));
     return personaChange('Changed persona', persona, store);
   },
   async 'personas.use'(values, context) { const store = personasOf(context); return personaChange('Using persona', storeStep(() => store.setActive(values.persona!)), store); },
   async 'personas.stop-using'(_values, context) { storeStep(() => personasOf(context).clearActive()); return { text: 'No persona is in use now.', data: { active: null } }; },
-  async 'personas.review'(values, context) { const store = personasOf(context); return personaChange('Reviewed persona', storeStep(() => store.markReviewed(values.persona!)), store); },
+  async 'personas.review'(values, context) { ownersOwnReview(context, 'Marking a persona reviewed'); const store = personasOf(context); return personaChange('Reviewed persona', storeStep(() => store.markReviewed(values.persona!, { accept: true })), store); },
   async 'personas.stale'(values, context) { const store = personasOf(context); return personaChange('Marked out of date', storeStep(() => store.markStale(values.persona!, values.reason!)), store); },
   async 'personas.delete'(values, context) { const store = personasOf(context); return personaChange('Deleted persona', storeStep(() => store.deletePersona(values.persona!)), store); },
   async 'personas.discover'(_values, context) {
@@ -139,7 +139,7 @@ export const PERSONA_ACTS: Readonly<Record<string, StoreAct>> = {
     const persona = storeStep(() => store.create({
       name: discovered.name, description: discovered.description || `Imported persona from ${discovered.origin} markdown file.`, body: discovered.body,
       tags: frontmatterList(discovered.frontmatter, ['tags']), triggers: frontmatterList(discovered.frontmatter, ['triggers']),
-      source: 'imported', provenance: `Imported file (${discovered.origin}): ${discovered.path}`,
+      source: 'imported', provenance: provenanceBy(context, `Imported file (${discovered.origin}): ${discovered.path}`), author: writtenBy(context),
     }));
     if (values.use === 'yes') storeStep(() => store.setActive(persona.id));
     return personaChange('Imported persona', persona, store, values.use === 'yes' ? '' : '; not in use yet');
@@ -162,13 +162,14 @@ export const PERSONA_ACTS: Readonly<Record<string, StoreAct>> = {
     return { text: `Wrote a starter VIBE.md at ${result.path}; fill it in, then use it as a persona.`, data: { path: result.path, scope } };
   },
   async 'personas.vibe-import'(values, context) {
+    if (values.review === 'yes') ownersOwnReview(context, 'Marking a persona reviewed');
     const source = storeStep(() => loadVibeImportSource(context.shellPaths, values.where || 'project'));
     const store = personasOf(context);
     const persona = storeStep(() => store.create({
       name: values.name || source.name, description: values.description || source.description, body: source.body,
-      tags: ['vibe', source.scope], triggers: ['vibe'], source: 'imported', provenance: `Imported VIBE.md (${source.scope}): ${source.path}`,
+      tags: ['vibe', source.scope], triggers: ['vibe'], source: 'imported', provenance: provenanceBy(context, `Imported VIBE.md (${source.scope}): ${source.path}`), author: writtenBy(context),
     }));
-    if (values.review === 'yes') storeStep(() => store.markReviewed(persona.id));
+    if (values.review === 'yes') storeStep(() => store.markReviewed(persona.id, { accept: true }));
     if (values.use === 'yes') storeStep(() => store.setActive(persona.id));
     return {
       text: [`Made persona ${persona.id} (${persona.name}) from ${source.path}`, `  reviewed ${values.review === 'yes' ? 'yes' : 'no'}`, `  in use ${values.use === 'yes' ? 'yes' : 'no'}`].join('\n'),
@@ -255,7 +256,7 @@ export const ROUTINE_ACTS: Readonly<Record<string, StoreAct>> = {
     const routine = storeStep(() => routinesOf(context).create({
       name: values.name!, description: values.description!, steps: values.steps!, triggers: splitWords(values.triggers), tags: splitWords(values.tags),
       requirements: buildAgentSkillRequirements({ env: splitWords(values.env), commands: splitWords(values.commands) }),
-      enabled: values.enabled === 'yes', source: 'user', provenance: 'Command',
+      enabled: values.enabled === 'yes', source: 'user', provenance: provenanceBy(context, 'Command'), author: writtenBy(context),
     }));
     return routineChange('Made routine', routine);
   },
@@ -270,11 +271,11 @@ export const ROUTINE_ACTS: Readonly<Record<string, StoreAct>> = {
       requirements: values.env || values.commands
         ? buildAgentSkillRequirements({ env: values.env ? splitWords(values.env) : kept('env'), commands: values.commands ? splitWords(values.commands) : kept('command') })
         : undefined,
-      provenance: 'Command',
+      provenance: provenanceBy(context, 'Command'), by: writtenBy(context),
     }));
     return routineChange('Changed routine', routine);
   },
-  async 'routines.review'(values, context) { return routineChange('Reviewed routine', storeStep(() => routinesOf(context).markReviewed(values.routine!))); },
+  async 'routines.review'(values, context) { ownersOwnReview(context, 'Marking a routine reviewed'); return routineChange('Reviewed routine', storeStep(() => routinesOf(context).markReviewed(values.routine!, { accept: true }))); },
   async 'routines.stale'(values, context) { return routineChange('Marked out of date', storeStep(() => routinesOf(context).markStale(values.routine!, values.reason!))); },
   async 'routines.delete'(values, context) { return routineChange('Deleted routine', storeStep(() => routinesOf(context).deleteRoutine(values.routine!))); },
   async 'routines.discover'(_values, context) {
@@ -291,7 +292,7 @@ export const ROUTINE_ACTS: Readonly<Record<string, StoreAct>> = {
         env: frontmatterList(discovered.frontmatter, ['requiresEnv', 'requires-env', 'requires_env']),
         commands: frontmatterList(discovered.frontmatter, ['requiresCommands', 'requires-commands', 'requires_commands', 'commands']),
       }),
-      enabled: values.enabled === 'yes', source: 'imported', provenance: `discovered:${discovered.origin}:${discovered.path}`,
+      enabled: values.enabled === 'yes', source: 'imported', provenance: provenanceBy(context, `discovered:${discovered.origin}:${discovered.path}`), author: writtenBy(context),
     }));
     return routineChange('Imported routine', routine);
   },

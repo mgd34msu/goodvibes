@@ -16,6 +16,7 @@ import type {
   McpToolPermission,
 } from './types.js';
 import { logger } from '../../utils/logger.js';
+import { mcpAskWhy } from '../../mcp/trust-words.js';
 import { summarizeError } from '../../utils/error-display.js';
 import { hostOutsideScope, pathOutsideScope, readScopedValues, type ScopedValue } from './scope.js';
 
@@ -379,7 +380,7 @@ export class McpPermissionManager {
     return {
       allowed, verdict: allowed ? 'allow' : asks ? 'ask' : 'deny', profileMode: profile.mode, causes,
       // Shown to the owner: the level and the limit in words (mcp/trust-words.ts), the value as the call gave it.
-      ...(asks ? { askOwner: `The tool server ${serverName} asks you about calls outside its limits, and this call to ${toolName} is outside them: ${[
+      ...(asks ? { askOwner: `${mcpAskWhy(serverName)}, and this call to ${toolName} is outside them: ${[
         ...(outsidePath ? [`${outsidePath.value}${outsidePath.resolved !== undefined && outsidePath.resolved !== outsidePath.value ? ` (${outsidePath.resolved})` : ''} is not in a folder it may use (${profile.allowedPaths.join(', ')})`] : []),
         ...(outsideHost ? [`${outsideHost.value} is not a site it may reach (${profile.allowedHosts.join(', ')})`] : []),
       ].join('; ')}.` } : {}),

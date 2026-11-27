@@ -13,6 +13,7 @@
  */
 import { openRawServerSentEventStream } from '../transports/sse-stream.js';
 import { buildUrl } from '../transports/transport-paths.js';
+import { programFetch } from './program-fetch.js';
 import { logger } from '../../utils/logger.js';
 import { summarizeError } from '../../utils/error-display.js';
 import type { SessionInputChangeHandlers } from './session-dispatch.js';
@@ -66,7 +67,8 @@ export function createSessionInputChangeSubscriber(
         const url = new URL(buildUrl(baseUrl, '/api/control-plane/events'));
         url.searchParams.set('domains', SESSION_UPDATE_DOMAIN);
         const opened = await openRawServerSentEventStream(
-          fetchImpl,
+          // With this program's registration: the operator token alone is a script and hears none of the owner's sessions.
+          programFetch(fetchImpl),
           url.toString(),
           {
             onEvent: ({ name: eventName, payload }) => {

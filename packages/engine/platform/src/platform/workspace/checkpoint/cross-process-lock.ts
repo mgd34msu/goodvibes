@@ -206,17 +206,19 @@ export async function acquireCrossProcessLock(lockPath: string, options: CrossPr
 }
 
 /**
- * Run a synchronous `write` while holding the lock at `lockPath`. Never waits:
- * a lock held elsewhere, including by other work in this process, throws
- * {@link CrossProcessLockBusyError} at once.
+ * Run a synchronous `write` while holding the lock at `lockPath`. Never waits
+ * unless `waitMs` says how long another process may keep it (the thread is
+ * blocked meanwhile): a lock held elsewhere throws
+ * {@link CrossProcessLockBusyError}; one held by other work in this process
+ * always at once.
  */
-export function withCrossProcessLockSync<T>(lockPath: string, write: () => T): T {
+export function withCrossProcessLockSync<T>(lockPath: string, write: () => T, options: { readonly waitMs?: number | undefined } = {}): T {
   mkdirSync(dirname(lockPath), { recursive: true, mode: 0o700 });
   try {
     return withProcessLockSync(kernelLockPath(lockPath), () => {
       const written = publishHolder(lockPath, randomBytes(8).toString('hex'));
       try { return write(); } finally { removeHolder(lockPath, written); }
-    }, { waitMs: 0 });
+    }, { waitMs: options.waitMs ?? 0 });
   } catch (error) {
     throw asBusy(lockPath, error);
   }

@@ -245,8 +245,8 @@ async function describeProcessEntry(
       log: routeFor(entry.id, 'run_background_process', 'log'),
       wait: routeFor(entry.id, 'run_background_process', 'wait'),
       stop: routeFor(entry.id, 'run_background_process', 'stop'),
-      visibleMonitor: 'workspace action:"open" surfaceId:"process-monitor"',
-      liveTail: `workspace action:"open" surfaceId:"live-tail" target:"${entry.id}"`,
+      visibleMonitor: 'screens_keys_commands action:"open" surfaceId:"process-monitor"',
+      liveTail: `screens_keys_commands action:"open" surfaceId:"live-tail" target:"${entry.id}"`,
     },
     ...(includeOutput ? {
       output: {
@@ -529,8 +529,8 @@ export async function backgroundProcessSummary(context: CommandContext, args: Ag
       tracked: all.length,
       running: all.filter((entry) => !entry.done).length,
       completed: all.filter((entry) => entry.done).length,
-      visibleMonitor: 'workspace action:"open" surfaceId:"process-monitor"',
-      liveTail: 'workspace action:"open" surfaceId:"live-tail"',
+      visibleMonitor: 'screens_keys_commands action:"open" surfaceId:"process-monitor"',
+      liveTail: 'screens_keys_commands action:"open" surfaceId:"live-tail"',
     },
     processes,
     ...(detached.length > 0 ? { detachedFromEarlierSessions: detached.map(record => describeDetachedRecord(record, args.includeParameters === true)) } : {}),
@@ -760,8 +760,8 @@ export async function runBackgroundProcessAction(context: CommandContext, args: 
           log: result.process_id ? routeFor(result.process_id, 'run_background_process', 'log') : null,
           wait: result.process_id ? routeFor(result.process_id, 'run_background_process', 'wait') : null,
           stop: result.process_id ? routeFor(result.process_id, 'run_background_process', 'stop') : null,
-          visibleMonitor: 'workspace action:"open" surfaceId:"process-monitor"',
-          liveTail: result.process_id ? `workspace action:"open" surfaceId:"live-tail" target:"${result.process_id}"` : null,
+          visibleMonitor: 'screens_keys_commands action:"open" surfaceId:"process-monitor"',
+          liveTail: result.process_id ? `screens_keys_commands action:"open" surfaceId:"live-tail" target:"${result.process_id}"` : null,
         },
         policy: 'Started as a tracked local background process with visible monitor/live-tail routes.',
       };

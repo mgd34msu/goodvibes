@@ -12,6 +12,7 @@ import type { GatewayMethodHandler } from '../method-catalog-shared.js';
 import { GatewayVerbError } from './gateway-verb-error.js';
 import { readInvocationParams, requireString } from './invocation-params.js';
 import { attachHandler } from './attach-handler.js';
+import { currentRecordReach } from '@goodvibes/engine/daemon-api';
 import { CiWatchError, type CiWatchService } from '../../ci-watch/index.js';
 import { CiSourceError, CiTargetGoneError } from '../../ci-watch/types.js';
 
@@ -95,7 +96,12 @@ function createStatusHandler(service: CiWatchGatewayService): GatewayMethodHandl
 }
 
 function createListHandler(service: CiWatchGatewayService): GatewayMethodHandler {
-  return async () => ({ watches: await service.listWatches() });
+  return async () => {
+    const watches = await service.listWatches();
+    // A caller that is not the owner himself: only the watches of projects it may reach (control-plane/caller-reach.ts).
+    const reach = currentRecordReach();
+    return { watches: reach ? watches.filter((watch) => reach('ci-watch', watch.id, { project: typeof watch.project === 'string' && watch.project.trim() ? watch.project : null })) : watches };
+  };
 }
 
 function createCreateHandler(service: CiWatchGatewayService): GatewayMethodHandler {
@@ -151,6 +157,12 @@ function createRunHandler(service: CiWatchGatewayService): GatewayMethodHandler 
 
 export function registerCiGatewayMethods(catalog: GatewayMethodCatalog, service: CiWatchGatewayService): void {
   const attach = (id: string, handler: GatewayMethodHandler): void => { attachHandler(catalog, id, handler); };
+  // A CI watch is its project's (CiWatchSubscription.project), for the one check of what a caller may reach
+  // (control-plane/caller-reach.ts): one with no project is the owner's.
+  catalog.setRecordOwner?.('ci-watch', async (id) => {
+    const watch = (await service.listWatches().catch(() => [])).find((entry) => entry.id === id);
+    return watch ? { project: typeof watch.project === 'string' && watch.project.trim() ? watch.project : null } : undefined;
+  });
   attach('ci.status', createStatusHandler(service));
   attach('ci.watches.list', createListHandler(service));
   attach('ci.watches.create', createCreateHandler(service));

@@ -53,7 +53,7 @@ interface GeneratedFields {
 const generatedFor = new WeakMap<CommandDescription<never>, GeneratedFields>();
 const describedByName = new Map<string, CommandDescription<never>>();
 
-/** The description a command was built from, by command name (the Agent workspace's rows open its actions). */
+/** The description a command was built from, by command name. */
 export function describedCommandByName(name: string): CommandDescription<never> | undefined {
   return describedByName.get(name);
 }
@@ -128,6 +128,10 @@ export function defineCommand<Ctx extends CommandActionContext>(description: Com
         if (dialog && opens) { await runComplete(description, opens, defaultsOf(opens as ActionDescription<never>), ctx); return; }
         if (dialog) { await runGuided(unknown, {}, ctx); return; }
         const report = description.actions.find((action) => action.id === description.report);
+        // A command kept only to open its place (`/memory`) has nothing to run where no screen can be shown.
+        if (!report && description.actions.length === 0) {
+          throw commandRefusal(`/${description.name} only opens ${description.title}, a screen of the terminal program; nothing was run.`, 'Find what it holds by saying what you need (capability_find, or goodvibes find).', 'USAGE');
+        }
         if (!report) throw commandRefusal(`/${description.name} needs an action. The actions are: ${names}.`, `/help ${description.name} shows each one with its line.`, 'USAGE');
         await runComplete(description, report, defaultsOf(report as ActionDescription<never>), ctx);
         return;

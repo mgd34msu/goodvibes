@@ -23,6 +23,8 @@ export interface PolicyImpactCall {
   readonly after: 'allow' | 'deny';
   /** The candidate rule that decided it, when one did. */
   readonly rule?: string | undefined;
+  /** The project the call was decided for (none: the owner's alone). */
+  readonly project?: string | undefined;
 }
 
 export interface PolicyImpact {
@@ -69,19 +71,35 @@ function decidingRule(decision: ReturnType<LayeredPolicyEvaluator['evaluate']>):
 export function policyImpact(input: {
   readonly currentRules: readonly PolicyRule[];
   readonly candidateRules: readonly PolicyRule[];
+  /** The project a call that names none is decided against (the asking caller's). */
   readonly projectRoot: string;
   readonly calls: readonly PermissionAuditEntry[];
+  /**
+   * The calls the asker may see, by the project each was decided for (control-plane/caller-reach.ts); absent: every one
+   * (the owner). A call it may not see is not decided again, nor counted.
+   */
+  readonly reaches?: ((project: string | undefined) => boolean) | undefined;
 }): PolicyImpact {
-  const config = (rules: readonly PolicyRule[]) => ({ mode: 'default' as const, projectRoot: input.projectRoot, rules: [...rules], defaultEffect: 'allow' as const });
-  const current = new LayeredPolicyEvaluator(config(input.currentRules));
-  const candidate = new LayeredPolicyEvaluator(config(input.candidateRules));
+  const config = (rules: readonly PolicyRule[], projectRoot: string) => ({ mode: 'default' as const, projectRoot, rules: [...rules], defaultEffect: 'allow' as const });
+  // Each call is decided against its OWN project (a path rule of one project's calls is never judged by another's root).
+  const evaluators = new Map<string, { readonly current: LayeredPolicyEvaluator; readonly candidate: LayeredPolicyEvaluator }>();
+  const evaluatorsFor = (projectRoot: string) => {
+    let pair = evaluators.get(projectRoot);
+    if (!pair) {
+      pair = { current: new LayeredPolicyEvaluator(config(input.currentRules, projectRoot)), candidate: new LayeredPolicyEvaluator(config(input.candidateRules, projectRoot)) };
+      evaluators.set(projectRoot, pair);
+    }
+    return pair;
+  };
   const changed: PolicyImpactCall[] = [];
   let checked = 0, skipped = 0;
   for (const entry of input.calls) {
+    if (input.reaches && !input.reaches(entry.project)) continue;
     const call = rebuildCall(entry);
     if (!call) { skipped++; continue; }
     checked++;
     const classification = classificationOf(entry);
+    const { current, candidate } = evaluatorsFor(entry.project ?? input.projectRoot);
     const before = current.evaluate(entry.tool, call.args, classification, call.subjects);
     const after = candidate.evaluate(entry.tool, call.args, classification, call.subjects);
     if (before.allowed === after.allowed) continue;
@@ -90,6 +108,7 @@ export function policyImpact(input: {
       callId: entry.callId, tool: entry.tool, target: entry.target!.trim(),
       before: before.allowed ? 'allow' : 'deny', after: after.allowed ? 'allow' : 'deny',
       ...(rule ? { rule } : {}),
+      ...(entry.project ? { project: entry.project } : {}),
     });
   }
   return { checkedCalls: checked, skippedCalls: skipped, changed };

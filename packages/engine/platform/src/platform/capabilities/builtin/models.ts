@@ -8,8 +8,9 @@
  * looks like. Each program's turns read the same files and settings; a
  * conversation's own model and effort stay with the program holding it.
  */
-import { closeSync, fsyncSync, mkdirSync, openSync, readFileSync, rmSync, writeSync, existsSync, chmodSync, writeFileSync } from 'node:fs';
-import { dirname, isAbsolute, resolve } from 'node:path';
+import { closeSync, fsyncSync, mkdirSync, openSync, rmSync, writeSync, existsSync, chmodSync, writeFileSync } from 'node:fs';
+import { dirname } from 'node:path';
+import { callerPathOf, readCallerJson } from '../path-inputs.js';
 import type { ConfigManager } from '../../config/manager.js';
 import type { SecretsManager } from '../../config/secrets.js';
 import type { ServiceRegistry } from '../../config/service-registry.js';
@@ -102,14 +103,12 @@ function iso(ms: number | undefined): string {
 }
 
 /**
- * A file path the person gave: a full path as given, a relative one in the caller's project. A relative path from a
- * caller that named no project is refused: the daemon's own folder is never taken in its place (caller-project.ts).
+ * A file path the caller gave, placed by capabilities/path-inputs.ts `callerPathOf`: inside its checked project for
+ * anyone but the person; a relative path from a caller that named no project is refused, the daemon's own folder never
+ * taken in its place.
  */
 function filePath(_models: Models, caller: CapabilityCaller, path: string): string {
-  if (isAbsolute(path)) return resolve(path);
-  if (caller.workingDirectory) return resolve(caller.workingDirectory, path);
-  throw new CapabilityRefusal(`${path} is a relative path and no project folder came with the request, so it was not read or written. Nothing was changed.`,
-    'Give the full path of the file, or send workingDirectory, the project folder, with the request.', 'NO_PROJECT', 422);
+  return callerPathOf(caller, path);
 }
 
 function stringList(value: unknown): string[] {
@@ -661,18 +660,14 @@ function readFileSubscription(entry: unknown): SubscriptionGrant | null {
   };
 }
 
-function readSubscriptionFile(path: string): SubscriptionFile {
-  let value: unknown;
-  try {
-    value = JSON.parse(readFileSync(path, 'utf-8')) as unknown;
-  } catch (error) {
-    throw new CapabilityRefusal(`${path} could not be read: ${summarizeError(error)}. Nothing was changed.`, undefined, 'BUNDLE_UNREADABLE');
-  }
+function readSubscriptionFile(path: string, caller: CapabilityCaller): SubscriptionFile {
+  // Never the system's or the parser's words (capabilities/path-inputs.ts).
+  const value = readCallerJson(path, 'a sign-ins file', caller);
   const candidate = value && typeof value === 'object' ? value as Partial<Record<keyof SubscriptionFile, unknown>> : {};
   const list = candidate.subscriptions;
   const subscriptions = Array.isArray(list) ? list.map(readFileSubscription) : [];
   if (candidate.version !== 1 || typeof candidate.exportedAt !== 'number' || !Number.isFinite(candidate.exportedAt) || !Array.isArray(list) || subscriptions.some((entry) => entry === null)) {
-    throw new CapabilityRefusal(`${path} is not a sign-ins file (version 1, with exportedAt and a list of complete sign-ins). Nothing was changed.`, undefined, 'BUNDLE_UNREADABLE');
+    throw new CapabilityRefusal(`${path} is not a sign-ins file (version 1, with exportedAt and a list of complete sign-ins). Nothing was changed.`, undefined, 'BUNDLE_UNREADABLE', 422);
   }
   return { version: 1, exportedAt: candidate.exportedAt, subscriptions: subscriptions as SubscriptionGrant[] };
 }
@@ -718,10 +713,12 @@ function writeOwnerOnlyFile(target: string, text: string, replace: boolean, show
 export const PROVIDER_EXPORT: CapabilityDefinition<ModelsCapabilityServices> = {
   capability: { id: 'provider.export', group: 'models', home: 'daemon', repeat: 'unsafe' },
   actionId: 'save-sign-ins', label: 'Save your sign-ins to a file', word: 'export',
-  inputs: [pathInput('Where to write them, such as sign-ins.json'), REPLACE_INPUT],
+  inputs: [{ ...pathInput('Where to write them, such as sign-ins.json'), file: 'written' }, REPLACE_INPUT],
   sentence: 'Your subscription sign-ins (logins), with their tokens, are written to {path} to copy to another machine or laptop, and stay there until you change it: anyone who reads the file can use them, so delete it once it has been used.', done: '',
   touches: 'this-machine', lasts: 'kept', risk: 'loosens-a-protection',
   ownerOnly: { reason: 'it writes your sign-in tokens out of the secret store into a plain file', instead: `Ask the owner to save them from ${PLACE}.` },
+  // The file it writes holds working sign-in tokens.
+  resultSecret: 'your sign-in tokens',
   example: { path: 'sign-ins.json' },
   async run(values, services, caller) {
     const models = services.models;
@@ -741,7 +738,7 @@ export const PROVIDER_INSPECT: CapabilityDefinition<ModelsCapabilityServices> = 
   async run(values, services, caller) {
     const models = services.models;
     const target = filePath(models, caller, values.path!);
-    const file = readSubscriptionFile(target);
+    const file = readSubscriptionFile(target, caller);
     return {
       text: [`${target}: ${file.subscriptions.length} sign-in${file.subscriptions.length === 1 ? '' : 's'}, written ${iso(file.exportedAt)}.`, 'Loading it would:', ...describeLoad(models.subscriptionManager, file)].join('\n'),
       data: { path: target, providers: file.subscriptions.map((entry) => entry.provider) },
@@ -761,7 +758,7 @@ export const PROVIDER_IMPORT: CapabilityDefinition<ModelsCapabilityServices> = {
   async run(values, services, caller) {
     const models = services.models;
     const target = filePath(models, caller, values.path!);
-    const file = readSubscriptionFile(target);
+    const file = readSubscriptionFile(target, caller);
     if (file.subscriptions.length === 0) throw new CapabilityRefusal(`${target} holds no sign-ins; nothing was changed.`, undefined, 'BUNDLE_EMPTY');
     const lines = describeLoad(models.subscriptionManager, file);
     for (const subscription of file.subscriptions) await models.subscriptionManager.saveSubscription(subscription);
@@ -1004,7 +1001,7 @@ export const AUTH_REPAIR: CapabilityDefinition<ModelsCapabilityServices> = {
 export const AUTH_EXPORT: CapabilityDefinition<ModelsCapabilityServices> = {
   capability: { id: 'auth.export', group: 'models', home: 'daemon', repeat: 'safe' },
   actionId: 'save-summary', label: 'Save a sign-in summary to a file', word: 'export',
-  inputs: [pathInput('A path in this project, or an absolute path'), REPLACE_INPUT],
+  inputs: [{ ...pathInput('A path in this project, or an absolute path'), file: 'written' }, REPLACE_INPUT],
   sentence: 'A summary of your sign-ins (names of stored secrets and providers, no secret or token) will be written to {path}, readable by you only, until you change it.',
   done: 'Saved the sign-in summary to {path}.',
   touches: 'this-machine', lasts: 'kept', risk: 'none', example: { path: 'auth-summary.json' },
@@ -1034,12 +1031,8 @@ export const AUTH_INSPECT: CapabilityDefinition<ModelsCapabilityServices> = {
   touches: 'reads', lasts: 'not-a-change', risk: 'none', example: { path: 'auth-summary.json' },
   async run(values, services, caller) {
     const target = filePath(services.models, caller, values.path!);
-    let value: unknown;
-    try {
-      value = JSON.parse(readFileSync(target, 'utf-8'));
-    } catch (error) {
-      throw new CapabilityRefusal(`Could not read ${target}: ${summarizeError(error)}`);
-    }
+    // Never the system's or the parser's words (capabilities/path-inputs.ts).
+    const value = readCallerJson(target, 'a sign-in summary', caller, 'Nothing was read from it.');
     const record = value && typeof value === 'object' ? value as Record<string, unknown> : {};
     if (record['version'] !== 1) throw new CapabilityRefusal(`${target} is not a sign-in summary (version 1).`);
     const names = (key: string) => stringList(record[key]);

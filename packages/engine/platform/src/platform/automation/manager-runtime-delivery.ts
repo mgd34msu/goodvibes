@@ -1,4 +1,5 @@
 import { logger } from '../utils/logger.js';
+import { outsideEveryCall } from '../utils/outside-every-call.js';
 import type { AutomationDeliveryManager } from './delivery-manager.js';
 import type { AutomationDeliveryAttempt, AutomationDeliveryTarget } from './delivery.js';
 import { calculateRetryDelay } from './failures.js';
@@ -165,7 +166,7 @@ export function scheduleAutomationFailureFollowUp(
     const release = reserved ?? context.tryReserveRun();
     if (!release) {
       // Every run slot is in use: the retry waits for one, and the manager starts it when a run ends.
-      context.capacityWaits.set(waitKey, { kind: 'retry', jobId: latestJob.id, since: waiting?.since ?? Date.now(), retryKey, resume: startRetry });
+      context.capacityWaits.set(waitKey, { kind: 'retry', jobId: latestJob.id, since: waiting?.since ?? Date.now(), retryKey, resume: (slot) => outsideEveryCall(() => startRetry(slot)) });
       return;
     }
     void context.executeJob(latestJob, 'scheduled', false, run.attempt + 1, release).catch((error) => {
@@ -177,7 +178,8 @@ export function scheduleAutomationFailureFollowUp(
       });
     });
   };
-  const timer = setTimeout(() => startRetry(), Math.max(1_000, calculateRetryDelay(retryPolicy.delayMs, run.attempt, retryPolicy.strategy, retryPolicy.maxDelayMs, retryPolicy.jitterMs)));
+  // A retry of a run a request started (run now) is armed in the process's own context too (utils/outside-every-call.ts).
+  const timer = outsideEveryCall(() => setTimeout(() => startRetry(), Math.max(1_000, calculateRetryDelay(retryPolicy.delayMs, run.attempt, retryPolicy.strategy, retryPolicy.maxDelayMs, retryPolicy.jitterMs))));
   timer.unref?.();
   context.retryTimers.set(retryKey, timer);
 }

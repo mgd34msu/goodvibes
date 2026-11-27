@@ -125,7 +125,7 @@ Models with different naming across providers (for example `GPT-4o` vs `gpt 4o`)
 
 ### Transparent failover rules
 
-Within a single synthetic model, backends are tried in order (best context window first, then best max output tokens as a tiebreaker), skipping any backend whose provider is not configured (a key in the environment or stored with `/secrets` both count). Each backend gets one attempt; this layer does the retrying. A failed backend is marked on a cooldown and the next backend in the list is tried immediately, in the same call, with no wait:
+Within a single synthetic model, backends are tried in order (best context window first, then best max output tokens as a tiebreaker), skipping any backend whose provider is not configured (a key in the environment or stored in the secret store, "store its key" on the Providers tab of Models and providers, both count). Each backend gets one attempt; this layer does the retrying. A failed backend is marked on a cooldown and the next backend in the list is tried immediately, in the same call, with no wait:
 
 - **Rate limit (429) or an out-of-credit/billing error.** The failed backend is put on cooldown (the provider's own retry-after when it sends one, otherwise 60 seconds by default) and the next backend is tried right away.
 - **Other 4xx errors from the provider (401, 403, 404, and similar).** Treated as provider-specific rather than the caller's fault: the backend gets a 60-second cooldown and the next backend is tried.

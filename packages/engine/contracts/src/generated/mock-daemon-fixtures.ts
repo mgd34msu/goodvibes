@@ -218,7 +218,8 @@ export const MOCK_DAEMON_FIXTURES: MockDaemonFixtureMap = {
           "holds": [
             {
               "id": "sample",
-              "releasedAt": 0
+              "releasedAt": 0,
+              "process": "sample"
             }
           ]
         },
@@ -409,7 +410,8 @@ export const MOCK_DAEMON_FIXTURES: MockDaemonFixtureMap = {
           "holds": [
             {
               "id": "sample",
-              "releasedAt": 0
+              "releasedAt": 0,
+              "process": "sample"
             }
           ]
         },
@@ -600,7 +602,8 @@ export const MOCK_DAEMON_FIXTURES: MockDaemonFixtureMap = {
           "holds": [
             {
               "id": "sample",
-              "releasedAt": 0
+              "releasedAt": 0,
+              "process": "sample"
             }
           ]
         },
@@ -791,7 +794,8 @@ export const MOCK_DAEMON_FIXTURES: MockDaemonFixtureMap = {
           "holds": [
             {
               "id": "sample",
-              "releasedAt": 0
+              "releasedAt": 0,
+              "process": "sample"
             }
           ]
         },
@@ -1002,7 +1006,8 @@ export const MOCK_DAEMON_FIXTURES: MockDaemonFixtureMap = {
             "holds": [
               {
                 "id": "sample",
-                "releasedAt": 0
+                "releasedAt": 0,
+                "process": "sample"
               }
             ]
           },
@@ -1235,7 +1240,8 @@ export const MOCK_DAEMON_FIXTURES: MockDaemonFixtureMap = {
           "holds": [
             {
               "id": "sample",
-              "releasedAt": 0
+              "releasedAt": 0,
+              "process": "sample"
             }
           ]
         },
@@ -2523,7 +2529,8 @@ export const MOCK_DAEMON_FIXTURES: MockDaemonFixtureMap = {
             ],
             "allowUnsafeExternalContent": false,
             "externalContentSource": "gmail",
-            "lightContext": false
+            "lightContext": false,
+            "workingDirectory": "sample"
           },
           "scheduleKind": "at",
           "queuedAt": 0,
@@ -2736,7 +2743,8 @@ export const MOCK_DAEMON_FIXTURES: MockDaemonFixtureMap = {
         ],
         "allowUnsafeExternalContent": false,
         "externalContentSource": "gmail",
-        "lightContext": false
+        "lightContext": false,
+        "workingDirectory": "sample"
       },
       "delivery": {
         "mode": "none",
@@ -2905,7 +2913,8 @@ export const MOCK_DAEMON_FIXTURES: MockDaemonFixtureMap = {
             ],
             "allowUnsafeExternalContent": false,
             "externalContentSource": "gmail",
-            "lightContext": false
+            "lightContext": false,
+            "workingDirectory": "sample"
           },
           "delivery": {
             "mode": "none",
@@ -3032,7 +3041,8 @@ export const MOCK_DAEMON_FIXTURES: MockDaemonFixtureMap = {
             ],
             "allowUnsafeExternalContent": false,
             "externalContentSource": "gmail",
-            "lightContext": false
+            "lightContext": false,
+            "workingDirectory": "sample"
           },
           "delivery": {
             "mode": "none",
@@ -3183,7 +3193,8 @@ export const MOCK_DAEMON_FIXTURES: MockDaemonFixtureMap = {
         ],
         "allowUnsafeExternalContent": false,
         "externalContentSource": "gmail",
-        "lightContext": false
+        "lightContext": false,
+        "workingDirectory": "sample"
       },
       "delivery": {
         "mode": "none",
@@ -3332,7 +3343,8 @@ export const MOCK_DAEMON_FIXTURES: MockDaemonFixtureMap = {
           ],
           "allowUnsafeExternalContent": false,
           "externalContentSource": "gmail",
-          "lightContext": false
+          "lightContext": false,
+          "workingDirectory": "sample"
         },
         "scheduleKind": "at",
         "queuedAt": 0,
@@ -3499,7 +3511,8 @@ export const MOCK_DAEMON_FIXTURES: MockDaemonFixtureMap = {
           ],
           "allowUnsafeExternalContent": false,
           "externalContentSource": "gmail",
-          "lightContext": false
+          "lightContext": false,
+          "workingDirectory": "sample"
         },
         "scheduleKind": "at",
         "queuedAt": 0,
@@ -3686,7 +3699,8 @@ export const MOCK_DAEMON_FIXTURES: MockDaemonFixtureMap = {
             ],
             "allowUnsafeExternalContent": false,
             "externalContentSource": "gmail",
-            "lightContext": false
+            "lightContext": false,
+            "workingDirectory": "sample"
           },
           "scheduleKind": "at",
           "queuedAt": 0,
@@ -3847,7 +3861,8 @@ export const MOCK_DAEMON_FIXTURES: MockDaemonFixtureMap = {
             ],
             "allowUnsafeExternalContent": false,
             "externalContentSource": "gmail",
-            "lightContext": false
+            "lightContext": false,
+            "workingDirectory": "sample"
           },
           "scheduleKind": "at",
           "queuedAt": 0,
@@ -4015,7 +4030,8 @@ export const MOCK_DAEMON_FIXTURES: MockDaemonFixtureMap = {
           ],
           "allowUnsafeExternalContent": false,
           "externalContentSource": "gmail",
-          "lightContext": false
+          "lightContext": false,
+          "workingDirectory": "sample"
         },
         "scheduleKind": "at",
         "queuedAt": 0,
@@ -4164,7 +4180,8 @@ export const MOCK_DAEMON_FIXTURES: MockDaemonFixtureMap = {
         ],
         "allowUnsafeExternalContent": false,
         "externalContentSource": "gmail",
-        "lightContext": false
+        "lightContext": false,
+        "workingDirectory": "sample"
       },
       "delivery": {
         "mode": "none",
@@ -4309,7 +4326,8 @@ export const MOCK_DAEMON_FIXTURES: MockDaemonFixtureMap = {
             ],
             "allowUnsafeExternalContent": false,
             "externalContentSource": "gmail",
-            "lightContext": false
+            "lightContext": false,
+            "workingDirectory": "sample"
           },
           "delivery": {
             "mode": "none",
@@ -4451,7 +4469,8 @@ export const MOCK_DAEMON_FIXTURES: MockDaemonFixtureMap = {
             ],
             "allowUnsafeExternalContent": false,
             "externalContentSource": "gmail",
-            "lightContext": false
+            "lightContext": false,
+            "workingDirectory": "sample"
           },
           "scheduleKind": "at",
           "queuedAt": 0,
@@ -5967,6 +5986,8 @@ export const MOCK_DAEMON_FIXTURES: MockDaemonFixtureMap = {
           }
         ],
         "open": false,
+        "ownMessagesAsOwner": false,
+        "project": "sample",
         "updatedAt": 0,
         "metadata": {}
       },
@@ -6520,6 +6541,8 @@ export const MOCK_DAEMON_FIXTURES: MockDaemonFixtureMap = {
             }
           ],
           "open": false,
+          "ownMessagesAsOwner": false,
+          "project": "sample",
           "updatedAt": 0,
           "metadata": {}
         }
@@ -6582,6 +6605,8 @@ export const MOCK_DAEMON_FIXTURES: MockDaemonFixtureMap = {
         }
       ],
       "open": false,
+      "ownMessagesAsOwner": false,
+      "project": "sample",
       "updatedAt": 0,
       "metadata": {}
     }
@@ -7200,6 +7225,17 @@ export const MOCK_DAEMON_FIXTURES: MockDaemonFixtureMap = {
         "previewMethod": "sample",
         "options": [
           "sample"
+        ],
+        "otherSessions": [
+          {
+            "sessionId": "sample",
+            "agentIds": [
+              "sample"
+            ],
+            "files": [
+              "sample"
+            ]
+          }
         ]
       }
     }
@@ -7218,7 +7254,19 @@ export const MOCK_DAEMON_FIXTURES: MockDaemonFixtureMap = {
         "affectedPathSample": [
           "sample"
         ],
-        "stat": "sample"
+        "stat": "sample",
+        "otherSessions": [
+          {
+            "sessionId": "sample",
+            "agentIds": [
+              "sample"
+            ],
+            "files": [
+              "sample"
+            ]
+          }
+        ],
+        "takesBack": "sample"
       }
     }
   },
@@ -7975,6 +8023,7 @@ export const MOCK_DAEMON_FIXTURES: MockDaemonFixtureMap = {
         "provider": "sample",
         "systemPrompt": "sample",
         "project": "sample",
+        "createdBy": "sample",
         "status": "active",
         "createdAt": 0,
         "updatedAt": 0,
@@ -8012,6 +8061,7 @@ export const MOCK_DAEMON_FIXTURES: MockDaemonFixtureMap = {
         "provider": "sample",
         "systemPrompt": "sample",
         "project": "sample",
+        "createdBy": "sample",
         "status": "active",
         "createdAt": 0,
         "updatedAt": 0,
@@ -8117,6 +8167,7 @@ export const MOCK_DAEMON_FIXTURES: MockDaemonFixtureMap = {
           "provider": "sample",
           "systemPrompt": "sample",
           "project": "sample",
+          "createdBy": "sample",
           "status": "active",
           "createdAt": 0,
           "updatedAt": 0,
@@ -8163,6 +8214,7 @@ export const MOCK_DAEMON_FIXTURES: MockDaemonFixtureMap = {
         "provider": "sample",
         "systemPrompt": "sample",
         "project": "sample",
+        "createdBy": "sample",
         "status": "active",
         "createdAt": 0,
         "updatedAt": 0,
@@ -13538,7 +13590,8 @@ export const MOCK_DAEMON_FIXTURES: MockDaemonFixtureMap = {
       "roles": [
         "sample"
       ],
-      "expiresAt": 0
+      "expiresAt": 0,
+      "ownerHimself": false
     }
   },
   "control.auth.login": {
@@ -13610,7 +13663,8 @@ export const MOCK_DAEMON_FIXTURES: MockDaemonFixtureMap = {
             "path": "sample",
             "requestSchema": {
               "username": "sample",
-              "password": "sample"
+              "password": "sample",
+              "newPassword": "sample"
             },
             "responseSchema": {
               "authenticated": false,
@@ -13641,7 +13695,8 @@ export const MOCK_DAEMON_FIXTURES: MockDaemonFixtureMap = {
               "roles": [
                 "sample"
               ],
-              "expiresAt": 0
+              "expiresAt": 0,
+              "ownerHimself": false
             }
           },
           "sessionCookie": {
@@ -13728,6 +13783,15 @@ export const MOCK_DAEMON_FIXTURES: MockDaemonFixtureMap = {
                 "sample"
               ],
               "invokable": false,
+              "workFolders": [
+                "sample"
+              ],
+              "notWorkFolders": {},
+              "daemonFiles": [
+                "sample"
+              ],
+              "notDaemonFiles": {},
+              "risk": "none",
               "replay": {
                 "in": "sample",
                 "name": "sample",
@@ -13930,6 +13994,15 @@ export const MOCK_DAEMON_FIXTURES: MockDaemonFixtureMap = {
           "sample"
         ],
         "invokable": false,
+        "workFolders": [
+          "sample"
+        ],
+        "notWorkFolders": {},
+        "daemonFiles": [
+          "sample"
+        ],
+        "notDaemonFiles": {},
+        "risk": "none",
         "replay": {
           "in": "sample",
           "name": "sample",
@@ -13993,6 +14066,15 @@ export const MOCK_DAEMON_FIXTURES: MockDaemonFixtureMap = {
             "sample"
           ],
           "invokable": false,
+          "workFolders": [
+            "sample"
+          ],
+          "notWorkFolders": {},
+          "daemonFiles": [
+            "sample"
+          ],
+          "notDaemonFiles": {},
+          "risk": "none",
           "replay": {
             "in": "sample",
             "name": "sample",
@@ -23978,6 +24060,16 @@ export const MOCK_DAEMON_FIXTURES: MockDaemonFixtureMap = {
       }
     }
   },
+  "pairing.outsideAgent.issue": {
+    "methodId": "pairing.outsideAgent.issue",
+    "http": null,
+    "status": 200,
+    "body": {
+      "id": "sample",
+      "token": "sample",
+      "name": "sample"
+    }
+  },
   "pairing.posture.get": {
     "methodId": "pairing.posture.get",
     "http": null,
@@ -31151,7 +31243,8 @@ export const MOCK_DAEMON_FIXTURES: MockDaemonFixtureMap = {
         "lastError": "sample",
         "droppedLines": 0,
         "owedBatches": 0,
-        "next": "sample"
+        "next": "sample",
+        "storedId": "sample"
       }
     }
   },
@@ -31172,7 +31265,8 @@ export const MOCK_DAEMON_FIXTURES: MockDaemonFixtureMap = {
         "lastError": "sample",
         "droppedLines": 0,
         "owedBatches": 0,
-        "next": "sample"
+        "next": "sample",
+        "storedId": "sample"
       }
     }
   },
@@ -31233,7 +31327,8 @@ export const MOCK_DAEMON_FIXTURES: MockDaemonFixtureMap = {
         "lastError": "sample",
         "droppedLines": 0,
         "owedBatches": 0,
-        "next": "sample"
+        "next": "sample",
+        "storedId": "sample"
       },
       "runs": [
         {}
@@ -31259,7 +31354,8 @@ export const MOCK_DAEMON_FIXTURES: MockDaemonFixtureMap = {
           "lastError": "sample",
           "droppedLines": 0,
           "owedBatches": 0,
-          "next": "sample"
+          "next": "sample",
+          "storedId": "sample"
         }
       ]
     }
@@ -31292,7 +31388,8 @@ export const MOCK_DAEMON_FIXTURES: MockDaemonFixtureMap = {
         "lastError": "sample",
         "droppedLines": 0,
         "owedBatches": 0,
-        "next": "sample"
+        "next": "sample",
+        "storedId": "sample"
       }
     }
   },

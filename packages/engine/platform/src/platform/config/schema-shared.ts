@@ -53,6 +53,8 @@ export interface ConfigSettingFields {
    * with the host it pairs with. Set by `port()` and `remotePort()`.
    */
   role?: 'listen-port' | 'remote-port' | undefined;
+  /** What the value IS where that makes a change loosen a protection (schema-types.ts `ConfigSetting.valueKind`). */
+  valueKind?: import('./schema-types.js').ConfigValueKind | undefined;
 }
 
 /**

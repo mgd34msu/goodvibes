@@ -4,7 +4,7 @@ import { DurablePolicyEpochOwner } from './durable-policy-epoch.js';
 import { PreparedSettingsTarget, settingsFileIdentity } from './prepared-target.js';
 import { createHash } from 'node:crypto';
 import { readFileSync, existsSync, copyFileSync, constants as fsConstants } from 'fs';
-import { join } from 'path';
+import { dirname, join } from 'path';
 import { isDeepStrictEqual } from 'node:util';
 import { VERSION } from '../version.js';
 import { JudgmentAuthorityRetiredError, RefusalError } from '@goodvibes/engine/errors';
@@ -19,8 +19,8 @@ import { logger } from '../utils/logger.js';
 import type { HookDispatcher } from '../hooks/index.js';
 import type { HookEvent } from '../hooks/types.js';
 import { attachOwnedConfigHook } from './hook-attachment.js';
-import { getManagedSettingLock } from '../runtime/settings/control-plane.js';
-import { readHostManagedSettingLock, readHostManagedSettingLocks, readStrictManagedSettingLock } from '../runtime/settings/host-setting-policy-read.js';
+import { managedLockFolders, managedLockRefusalText, readManagedLock, readManagedLocks, type ManagedLockHeld } from '../runtime/settings/host-setting-policy-read.js';
+import { isSecretBearingConfigKey } from './secret-bearing-config-keys.js';
 import { requireSurfaceRoot, resolveSharedDirectory, resolveSurfaceDirectory, resolveSurfaceSharedFile } from '../runtime/surface-root.js';
 import { summarizeError } from '../utils/error-display.js';
 import { FeatureAnnouncementStore, featureAnnouncementsPath } from '../runtime/feature-announcements.js';
@@ -38,7 +38,7 @@ import {
 } from './settings-io.js';
 import { watchConfigFiles, reloadAndNotifyChanges, type ConfigFileWatchHandle } from './config-file-watcher.js';
 import { isDaemonOwnedConfigKey, listDaemonOwnedConfigPaths, type DaemonOwnedConfigPath } from './config-ownership.js';
-import { DECISION_MODEL_NONE_KEY, DECISION_MODEL_SETTINGS_SET_ASIDE, DECISION_MODEL_SET_ASIDE_KEY, PROGRAM_SETTINGS_ROOTS, RETIRED_NO_DECISION_MODEL_POLICIES, RETIRED_SETTING_KEYS, carriedAnything, carrySettingsForward, carrySharedDefaults, carryStricterKeptValues, copyKeptProgramKeys, describeSettingsCarryForward, describeSharedDefaultsCarry, describeStricterCarry, type SettingsCarryForward } from './settings-carry-forward.js';
+import { DECISION_MODEL_NONE_KEY, DECISION_MODEL_SETTINGS_SET_ASIDE, DECISION_MODEL_SET_ASIDE_KEY, PROGRAM_SETTINGS_ROOTS, RETIRED_NO_DECISION_MODEL_POLICIES, RETIRED_SETTING_KEYS, carriedAnything, carryDaemonOffToLoginStart, carrySettingsForward, carrySharedDefaults, carryStricterKeptValues, copyKeptProgramKeys, describeDaemonOffCarry, describeSettingsCarryForward, describeSharedDefaultsCarry, describeStricterCarry, type LockedValue, type SettingsCarryForward } from './settings-carry-forward.js';
 import { resolveOrCreateDaemonPath } from './daemon-tier-paths.js';
 import { collectDaemonOwnedEntries, daemonConfigPathForHome, overlayDaemonTierFrom, persistDaemonKey, readDaemonTierFile, removeDaemonKey } from './daemon-config-tier.js';
 import { resolveGoodVibesDaemonHome } from './goodvibes-home.js';
@@ -51,13 +51,15 @@ import { configKeyFacts } from './config-key-facts.js';
 import { refusal as buildRefusal, type Refusal } from '@goodvibes/engine/errors';
 import type { ToolDecision } from '../types/tools.js';
 import { localOwnerActor, type Actor } from '@goodvibes/engine/daemon-api/http-policy';
+import type { SettingAct } from '@goodvibes/engine/daemon-api/control-routes';
 import { admitEffects } from '../security/effect-authority.js';
 import { HostSettings, type HostBooleanSettingHandle, type HostManagedSettingLocks, type HostSetting, type HostSettingValue, type HostSettingValues } from './host-settings.js';
 import { HostSettingsReadError, hostSettingsFileExists, readHostSettingValues, readHostSettingsFile, recoverHostSettingsWriteFailure } from './manager-host-settings.js';
 import { ConfigRuntimeState, captureRuntimeValue } from './manager-runtime-state.js';
 import { announceIngestionNotice, describeIngestionNotice } from './settings-ingestion.js';
 import { SETTINGS_FLOOR_MARKER_KEY } from './settings-reader-floor.js';
-import { isProjectRestrictedKey, restrictProjectLayer } from './project-layer-restrictions.js';
+import { collectLeaves, isProjectRestrictedKey, restrictProjectLayer } from './project-layer-restrictions.js';
+import { carryProjectSettingsOnce, describeProjectSettingsCarry, projectSettingsFileOf } from './project-settings-file.js';
 import { admitSettingValue, credentialValueRefusal, stricterProjectValueRefusal, type SettingAdmissionContext } from './write-admission.js';
 import { revisionSource, type RevisionSource } from '../utils/revision.js';
 import { freezePreparedData, normalizePreparedValue, preparedMutationLifecycle, preparedSchemaSignature, PreparedMutationRefusal, type PreparedMutationRecord,
@@ -221,6 +223,27 @@ export interface ConfigSetOptions {
    * settings screens' offline branch) states this.
    */
   daemonNotRunning?: boolean | undefined;
+  /**
+   * Who decided this write, from the call site that handled it: the person's own press (a key, a typed line, a
+   * submitted form), or the program's gate deciding a model's call. Sent with a daemon-owned write, so the daemon
+   * runs an act it decides for the owner at once on his press, and does not decide a call his program's gate decided
+   * again. Absent: neither, and such an act is put to him.
+   */
+  press?: DaemonWritePress | undefined;
+}
+
+/** Who decided a write sent to the daemon (ConfigSetOptions `press`). */
+export interface DaemonWritePress {
+  /** The person asked for exactly this, now (his press in his own program). */
+  readonly personAsked?: boolean | undefined;
+  /** The program's own gate decided the model's call that writes it. */
+  readonly decidedByProgramGate?: boolean | undefined;
+  /**
+   * In the daemon: who made this write and how it was decided (his press, his yes to a held call, or admitted under his
+   * rules for a named caller), as its dispatch bound it to the request. Held while the change notices go out
+   * (`writeAct()`), so the machine group keeps it with the change and carries it to every member.
+   */
+  readonly act?: SettingAct | undefined;
 }
 
 /**
@@ -242,14 +265,14 @@ export interface DaemonWriteRoute {
   describe?(): string;
   /** The daemon's resolved settings (`config.get`), or null when it could not answer. */
   snapshot?(): Promise<Record<string, unknown> | null>;
-  write(key: string, value: unknown): Promise<void>;
+  write(key: string, value: unknown, press?: DaemonWritePress): Promise<void>;
   /**
    * Several keys as one request the daemon admits whole (`config.setMany`):
    * every key is written or none is. Without it, the keys of one update go
    * one request each.
    */
-  writeMany?(changes: readonly { readonly key: string; readonly value: unknown }[]): Promise<void>;
-  reset?(key: string): Promise<void>;
+  writeMany?(changes: readonly { readonly key: string; readonly value: unknown }[], press?: DaemonWritePress): Promise<void>;
+  reset?(key: string, press?: DaemonWritePress): Promise<void>;
   /** The daemon refused a forwarded write; this process's view of the key was put back. */
   refused?(key: string, error: unknown): void;
 }
@@ -444,6 +467,8 @@ export class ConfigManager {
   private readonly daemonTierPath: string | null;
   /** True only in the daemon composition, the runtime allowed to REWRITE that store. */
   private readonly daemonTierOwner: boolean;
+  /** Every folder whose lock file holds managed locks on this machine, as {@link readManagedLocks} reads them. */
+  readonly #lockFolders: readonly string[];
   /** Attached by a client's composition: while the daemon is reachable, its settings are written only through it. */
   #daemonRoute: DaemonWriteRoute | null = null;
   /** Shared keys whose value the last load actually sourced from the shared tier file. */
@@ -516,8 +541,12 @@ export class ConfigManager {
       : join(base, 'settings.json');
     this.workingDirectory = workingDirectory;
     this.homeDirectory = homeDirectory;
+    // The project's ONE settings file for every program and the daemon (project-settings-file.ts). A program started in
+    // the home directory has no project: its project file is its own global file, as before.
     this.projectConfigPath = this.workingDirectory
-      ? resolveSurfaceDirectory(this.workingDirectory, settingsSurfaceRoot!, 'settings.json')
+      ? (homeDirectory !== null && this.workingDirectory === homeDirectory
+        ? resolveSurfaceDirectory(this.workingDirectory, settingsSurfaceRoot!, 'settings.json')
+        : projectSettingsFileOf(this.workingDirectory))
       : null;
     this.#workspaceOwner = Object.freeze({ workingDirectory, configDir: base,
       projectConfigPath: this.projectConfigPath, homeDirectory });
@@ -553,6 +582,10 @@ export class ConfigManager {
     );
     // Set BEFORE load(): that load is where the daemon-tier migration asks.
     this.daemonTierOwner = !this.readOnly && overrides.ownsDaemonTier === true;
+    // A managed lock holds wherever it was recorded (host-setting-policy-read.ts readManagedLocks): this manager's own
+    // folder first, then the daemon's own folder (beside its settings file), its client-scoped folder and every program's.
+    this.#lockFolders = managedLockFolders({ ownFolder: base, homeDirectory: this.homeDirectory,
+      daemonHomeDirectory: this.daemonTierPath ? dirname(this.daemonTierPath) : null });
 
     this.durablePolicy = new DurablePolicyEpochOwner([this.configPath, this.projectConfigPath, this.sharedTierPath, this.daemonTierPath, join(this.configDir, 'settings-sync.json')]
       .filter((path): path is string => path !== null), !this.readOnly);
@@ -572,6 +605,25 @@ export class ConfigManager {
 
   getControlPlaneConfigDir(): string {
     return this.configDir;
+  }
+
+  /** Every folder whose lock file this manager's writes honour: its own first, then the daemon's and each program's. */
+  managedLockFolders(): readonly string[] {
+    return this.#lockFolders;
+  }
+
+  /** The managed lock on `key` wherever it was recorded on this machine, or null (the one reader, readManagedLocks). */
+  managedLockOf(key: string): ManagedLockHeld | null {
+    return readManagedLock(key, this.#lockFolders);
+  }
+
+  /** Throws the one refusal sentence when `key` is locked as managed anywhere on this machine. */
+  #refuseManaged(key: string): void {
+    const lock = this.managedLockOf(key);
+    if (lock) {
+      throw new RefusalError(buildRefusal({ code: 'CONFIG_MANAGED', reason: managedLockRefusalText(lock, isSecretBearingConfigKey(key)),
+        next: [`Ask the owner: only he removes the lock ${lock.source} set.`], state: 'nothing was saved', status: 403 }), { category: 'config', source: 'config' });
+    }
   }
 
   /** The folder the custom provider files are read from. */
@@ -759,7 +811,7 @@ export class ConfigManager {
       getResolved: (locks) => {
         const value = this.get(registeredKey) as boolean;
         return Object.freeze({ key, value, defaultValue: definition.default, source: value === definition.default ? 'default' : 'local',
-          managedLock: locks ? locks.get(key) ?? null : readHostManagedSettingLock(key, this.configDir) });
+          managedLock: locks ? locks.get(key) ?? null : this.readHostManagedSettingLocks().get(key) ?? null });
       },
       set: (value, options) => this.setDynamic(registeredKey, value, options),
       setProjectValue: (value, options) => this.setProjectValue(registeredKey, value as never, options),
@@ -775,7 +827,8 @@ export class ConfigManager {
    * Unreadable policy throws, as `getResolved` does.
    */
   readHostManagedSettingLocks(): HostManagedSettingLocks {
-    return readHostManagedSettingLocks(this.configDir);
+    try { return readManagedLocks(this.#lockFolders); }
+    catch { throw new ConfigError('Host setting metadata unavailable because managed policy could not be read.'); }
   }
 
   /** Opaque pre-mutation lifetime signal, including category changes and reloads.
@@ -1274,7 +1327,7 @@ export class ConfigManager {
     if (JSON.stringify(this.preparedDestinations(operation, key)) !== JSON.stringify(record.facts.destinations)) {
       throw new PreparedMutationRefusal('stale', 'Prepared setting destination changed.');
     }
-    if (readHostManagedSettingLock(key, this.configDir)) throw new PreparedMutationRefusal('managed', 'Prepared setting is managed and cannot be changed.');
+    if (this.readHostManagedSettingLocks().get(key)) throw new PreparedMutationRefusal('managed', 'Prepared setting is managed and cannot be changed.');
     if (this.#permissionIncarnation !== incarnation) throw new PreparedMutationRefusal('stale', 'Prepared setting owner changed.');
   }
 
@@ -1309,9 +1362,8 @@ export class ConfigManager {
   private setRuntimeInput(key: ConfigKey, value: unknown, isDefault: boolean): void {
     this.invalidateLifetimes();
     const owned = captureRuntimeValue(key, value);
-    if (readStrictManagedSettingLock(key, this.configDir)) {
-      throw new ConfigError(`Setting ${key} is managed and cannot be changed.`);
-    }
+    // A program's own default sits below every stored value and changes nothing a lock holds; an override is refused.
+    if (!isDefault) this.#refuseManaged(key);
     if (!isDefault && key === 'permissions.mode' && this.get('behavior.autoApprove')) {
       this.setRuntimeInput('behavior.autoApprove', false, false);
     }
@@ -1552,7 +1604,7 @@ export class ConfigManager {
    * route can; a refusal puts each refused key back if it still holds the
    * value sent. Settles to the refusals.
    */
-  #forwardDaemonWrites(route: DaemonWriteRoute, changes: readonly { readonly key: ConfigKey; readonly value: unknown }[], reset: boolean): Promise<readonly DaemonWriteRefusal[]> {
+  #forwardDaemonWrites(route: DaemonWriteRoute, changes: readonly { readonly key: ConfigKey; readonly value: unknown }[], reset: boolean, press?: DaemonWritePress): Promise<readonly DaemonWriteRefusal[]> {
     const previous = changes.map(change => readDotPath(this.#config, change.key).value);
     const previousTiers = changes.map(change => this.runtimeState.sources.get(change.key));
     for (const change of changes) this.#noteDaemonWrite(change.key);
@@ -1588,8 +1640,8 @@ export class ConfigManager {
       }
     };
     const settled: Promise<readonly (DaemonWriteRefusal | null)[]> = changes.length > 1 && !reset && route.writeMany
-      ? route.writeMany(changes).then(() => { changes.forEach(accepted); return []; }, (error: unknown) => changes.map((_, index) => settle(index, error)))
-      : Promise.all(changes.map((change, index) => (reset && route.reset ? route.reset(change.key) : route.write(change.key, change.value))
+      ? route.writeMany(changes, press).then(() => { changes.forEach(accepted); return []; }, (error: unknown) => changes.map((_, index) => settle(index, error)))
+      : Promise.all(changes.map((change, index) => (reset && route.reset ? route.reset(change.key, press) : route.write(change.key, change.value, press))
         .then(() => { accepted(change); return null; }, (error: unknown) => settle(index, error))));
     const outcome: Promise<readonly DaemonWriteRefusal[]> = settled
       .then(results => results.filter((result): result is DaemonWriteRefusal => result !== null));
@@ -1637,7 +1689,7 @@ export class ConfigManager {
 
   validateDynamic(key: ConfigKey, value: unknown, options: ConfigSetOptions = {}): void {
     this.requireWritable();
-    this.validateSetValue(key, value, options, true);
+    this.validateSetValue(key, value, options);
   }
 
   /**
@@ -1647,7 +1699,7 @@ export class ConfigManager {
    * so a write cannot be reported as saved and then skipped at the next start.
    * The refusal never echoes the value.
    */
-  private validateSetValue(key: ConfigKey, value: unknown, options: ConfigSetOptions, purePolicyRead: boolean): unknown {
+  private validateSetValue(key: ConfigKey, value: unknown, options: ConfigSetOptions): unknown {
     const schema = this.hostSettings.schema(key) ?? SCHEMA_BY_KEY.get(key);
     const admission = admitSettingValue(key, schema, value, { config: this.#config });
     if (!admission.ok) {
@@ -1655,12 +1707,7 @@ export class ConfigManager {
     }
     const hostRefusal = this.hostWriteRefusal(key, admission.value);
     if (hostRefusal) throw new ConfigError(`${key} was not changed: ${hostRefusal.reason} ${hostRefusal.next.join(' ')}`);
-    if (!options.bypassManagedLock) {
-      const lock = purePolicyRead ? readStrictManagedSettingLock(key, this.configDir) : getManagedSettingLock(key, this.configDir);
-      if (lock) {
-        throw new ConfigError(`Setting ${key} is locked by ${lock.source}: ${lock.reason}`);
-      }
-    }
+    if (!options.bypassManagedLock) this.#refuseManaged(key);
     this.#resolvePath(key);
     return admission.value;
   }
@@ -1745,10 +1792,10 @@ export class ConfigManager {
       (this.setProjectValue as (k: ConfigKey, v: unknown, o: ConfigSetOptions) => void)(key, value, options);
       return;
     }
-    value = this.validateSetValue(key, value, options, false) as ConfigValue<K>;
+    value = this.validateSetValue(key, value, options) as ConfigValue<K>;
     const route = this.#routedDaemonWrite(key, options);
     if (route) {
-      void this.#forwardDaemonWrites(route, [{ key, value }], false);
+      void this.#forwardDaemonWrites(route, [{ key, value }], false, options.press);
       return;
     }
     this.#refuseDaemonFileWrite(key, options);
@@ -1844,7 +1891,11 @@ export class ConfigManager {
    * written, what reached disk is published and named in `saved`.
    */
   setMany(changes: readonly ConfigChange[], by: Actor, options: ConfigSetOptions = {}): SetResult {
-    const refuse = (init: { code: string; reason: string; next: readonly string[]; retryable?: boolean; status?: number },
+    return this.#withWriteAct(options.press?.act, () => this.#setMany(changes, by, options));
+  }
+
+  #setMany(changes: readonly ConfigChange[], by: Actor, options: ConfigSetOptions): SetResult {
+    const refuse =(init: { code: string; reason: string; next: readonly string[]; retryable?: boolean; status?: number },
       saved: readonly ConfigKey[] = []): SetResult => ({
       ok: false, saved,
       refusal: buildRefusal({ ...init, state: saved.length > 0 ? `saved ${saved.join(', ')}; the rest was not saved` : 'nothing was saved' }),
@@ -1890,9 +1941,9 @@ export class ConfigManager {
       const hostRefusal = this.hostWriteRefusal(key, value);
       if (hostRefusal) return refuse({ code: 'CONFIG_HOST_REFUSED', reason: `${key} was not changed: ${hostRefusal.reason}`, next: hostRefusal.next, status: 409 });
       if (!options.bypassManagedLock) {
-        const lock = getManagedSettingLock(key, this.configDir);
+        const lock = this.managedLockOf(key);
         if (lock) {
-          return refuse({ code: 'CONFIG_MANAGED', reason: `${key} is managed by ${lock.source} and cannot be changed: ${lock.reason}`, next: [`Change it where ${lock.source} sets it.`], status: 403 });
+          return refuse({ code: 'CONFIG_MANAGED', reason: managedLockRefusalText(lock, isSecretBearingConfigKey(key)), next: [`Ask the owner: only he removes the lock ${lock.source} set.`], status: 403 });
         }
       }
       try { this.#resolvePath(key); }
@@ -1946,7 +1997,7 @@ export class ConfigManager {
       // One request for every daemon key of this update, admitted whole by the daemon.
       const daemonChanges = admitted.filter(entry => entry.tier === 'daemon').map(({ key, value }) => ({ key, value }));
       forwarded.push(...daemonChanges.map(change => change.key));
-      const answer = this.#forwardDaemonWrites(route, daemonChanges, false);
+      const answer = this.#forwardDaemonWrites(route, daemonChanges, false, options.press);
       pending = { keys: [...forwarded], settle: async () => this.#markReported(await answer) };
       admitted.splice(0, admitted.length, ...admitted.filter(entry => entry.tier !== 'daemon'));
     }
@@ -2020,7 +2071,7 @@ export class ConfigManager {
       (this.set as (k: ConfigKey, v: unknown, o: ConfigSetOptions) => void)(key, value, options);
       return;
     }
-    value = this.validateSetValue(key, value, options, false) as ConfigValue<K>;
+    value = this.validateSetValue(key, value, options) as ConfigValue<K>;
     // One admission for write and reload: a value the project layer would skip when the file
     // is read again is refused here, before anything is written.
     if (this.projectConfigPath !== this.configPath) {
@@ -2154,7 +2205,25 @@ export class ConfigManager {
    * iterating schema entries). Runtime validation still applies via set().
    */
   setDynamic(key: ConfigKey, value: unknown, options: ConfigSetOptions = {}): void {
-    this.set(key, value as never, options);
+    this.#withWriteAct(options.press?.act, () => this.set(key, value as never, options));
+  }
+
+  /** Who made the write whose change notices are being delivered now (ConfigSetOptions `press.act`). */
+  #writeAct: SettingAct | undefined;
+
+  #withWriteAct<T>(act: SettingAct | undefined, write: () => T): T {
+    const outer = this.#writeAct;
+    this.#writeAct = act ?? outer;
+    try { return write(); } finally { this.#writeAct = outer; }
+  }
+
+  /**
+   * Who made the write a change notice is being delivered for, and how it was decided, or undefined when the write
+   * stated none. Read by a listener while it is called (notices are delivered synchronously, inside the write): the
+   * machine group keeps it with a shared setting's change and carries it to every member.
+   */
+  writeAct(): SettingAct | undefined {
+    return this.#writeAct;
   }
 
   /** Return a deep-readonly snapshot of the full config. Nested objects are immutable. */
@@ -2398,7 +2467,8 @@ export class ConfigManager {
     // Beside a daemon's file, a daemon key in this app's or project's file is not in effect: left out, with a notice.
     const besideDaemon = this.daemonTierPath !== null && !this.daemonTierOwner && file !== this.daemonTierPath
       && (file === this.configPath || file === this.projectConfigPath);
-    const ingested = ingestManagerSettings(parsed, file, this.ingestionSink(), new Set(this.hostSettings.keys()), besideDaemon ? isDaemonOwnedConfigKey : undefined);
+    const ingested = ingestManagerSettings(parsed, file, this.ingestionSink(), new Set(this.hostSettings.keys()), besideDaemon ? isDaemonOwnedConfigKey : undefined,
+      file === this.projectConfigPath && file !== this.configPath);
     if (nextHost) {
       this.hostLoadValues = nextHost;
       if (hostSource) this.hostLoadSources?.set(file, hostSource);
@@ -2428,9 +2498,12 @@ export class ConfigManager {
     staged.globalLayer = {};
     this.hostLoadValues = this.hostSettings.active ? this.hostSettings.defaults() : null;
     this.hostLoadSources = this.hostSettings.active ? new Map() : null;
+    // The project file's admitted layer, kept to be laid again over the shared and daemon values where it is stricter.
+    let projectLayer: Record<string, unknown> | undefined;
     try {
       this.ingestionNotices = [];
       this.#carryDecisionModelsOffForward();
+      this.#carryProjectSettings();
       this.#fileBaselines.delete(this.configPath);
       if (this.projectConfigPath) this.#fileBaselines.delete(this.projectConfigPath);
       if (this.hostSettings.active ? hostSettingsFileExists(this.configPath) : existsSync(this.configPath)) {
@@ -2454,11 +2527,15 @@ export class ConfigManager {
           const ingested = this.ingest(document, this.projectConfigPath);
           const restricted = restrictProjectLayer(ingested, staged.nonRuntime, this.projectConfigPath, this.hostSettings);
           for (const notice of restricted.notices) {
+            // The project's own worktree setup commands are said where they concern: the worktree setup's answer and
+            // the trust card name them (project-setup-settings.ts, folder-trust.ts), never also as a load notice or banner.
+            if (notice.key === 'worktree.setup.commands') continue;
             announceIngestionNotice(notice);
             this.recordIngestionNotice(notice);
             this.migrationReceipt(`project-restriction:${notice.file}:${notice.key}:${notice.reason}`, describeIngestionNotice(notice));
           }
           const migrated = restricted.layer;
+          projectLayer = migrated;
           staged.nonRuntime = sanitizeConfigShape(deepMerge(staged.nonRuntime, migrated) as GoodVibesConfig);
           staged.recordLayer(migrated, 'project');
         } catch (error) { throw this.loadFailure('Project', this.projectConfigPath, error); }
@@ -2466,6 +2543,7 @@ export class ConfigManager {
       this.loadSharedTier(staged);
       this.#carryDaemonTierForward();
       this.loadDaemonTier(staged);
+      if (projectLayer) this.#keepProjectStricter(staged, projectLayer);
       if (this.hostLoadValues) this.hostSettings.apply(staged.nonRuntime, this.hostLoadValues);
       const hostDefaultOrigins = this.hostLoadSources ? this.updateHostSources(staged, this.hostLoadSources) : new Set<string>();
       const effective = staged.compose();
@@ -2491,10 +2569,15 @@ export class ConfigManager {
    * dials, a fact the terminal owns, which in the daemon's file aims every
    * flag-less daemon command at that other daemon. The daemon (the one manager
    * that owns its files) removes them from its own settings file at load, once,
-   * and the owner is told once. A new install's copy never has them.
+   * and the owner is told once. A new install's copy never has them. A
+   * program's own settings file, read by the daemon for that program, keeps them.
    */
   #dropCopiedConnectedHost(document: Record<string, unknown>): void {
     if (this.readOnly || !this.daemonTierOwner) return;
+    // The daemon reading a program's own settings (Settings for that program, capabilities/daemon-services.ts) is not
+    // its own file: there the setting is the program's own, which daemon it dials, and stays.
+    const home = this.homeDirectory;
+    if (home !== null && PROGRAM_SETTINGS_ROOTS.some((root) => resolveSurfaceDirectory(home, root, 'settings.json') === this.configPath)) return;
     const daemon = document['daemon'];
     const nested = daemon !== null && typeof daemon === 'object' && !Array.isArray(daemon)
       && Object.hasOwn(daemon as Record<string, unknown>, 'connectedHost');
@@ -2545,7 +2628,7 @@ export class ConfigManager {
     let result: SettingsCarryForward;
     let keptAs: string;
     try {
-      result = carrySettingsForward(remaining, daemonFile);
+      result = carrySettingsForward(remaining, daemonFile, this.#lockedValueFor(this.#programSettingsFiles()));
       if (!carriedAnything(result)) return;
       // The file as the earlier version left it is kept beside it (same permissions), so a value
       // taken out (a retired key, a copy the daemon's file overrides) is never lost.
@@ -2603,8 +2686,11 @@ export class ConfigManager {
     const changed: string[] = [];
     const kept: string[] = [];
     let setAside: readonly string[] = [];
+    // A managed lock on the mode keeps it as it is (an unreadable lock file counts as one); the rest is carried.
+    let modeLocked: boolean;
+    try { modeLocked = this.managedLockOf('permissions.mode') !== null; } catch { modeLocked = true; }
     try {
-      for (const file of files) {
+      for (const file of modeLocked ? [] : files) {
         const exists = existsSync(file);
         // A program that never saved a setting has no file of its own to change; this manager's own file is made.
         if (!exists && file !== this.configPath) continue;
@@ -2640,7 +2726,9 @@ export class ConfigManager {
     }
     logger.info('Decision models switched off in an earlier version were carried to the mode Ask me', { changed, keptAs: kept, setAside });
     this.migrationReceipt(`carried-forward:decision-models-off:${tierPath}`,
-      'An earlier version had decision models switched off (No Decision Model). GoodVibes now uses the mode Ask me with No decision model chosen in Settings: nothing is sent to a decision model, even with a decision model key or server address in this computer\'s environment. '
+      (modeLocked
+        ? 'An earlier version had decision models switched off (No Decision Model). GoodVibes now has No decision model chosen in Settings: nothing is sent to a decision model, even with a decision model key or server address in this computer\'s environment. The permission mode is locked as managed, so it stays as it is. '
+        : 'An earlier version had decision models switched off (No Decision Model). GoodVibes now uses the mode Ask me with No decision model chosen in Settings: nothing is sent to a decision model, even with a decision model key or server address in this computer\'s environment. ')
       + (setAside.length > 0 || modelHeld.length > 0
         ? 'The decision model you had set up is kept, set aside; choosing a decision model in Settings offers it back. '
         : '')
@@ -2693,20 +2781,45 @@ export class ConfigManager {
    * when they differed, the owner is told once which was kept. Run by whichever manager loads first on this machine
    * (a program's or the daemon's); the programs' files are left as they were for a rollback.
    */
+  /**
+   * The programs' own project files (`.goodvibes/tui|agent|daemon-host/settings.json`) carried into the project's one
+   * file once, before it is first read (project-settings-file.ts); the owner told once which keys they set differently.
+   */
+  #carryProjectSettings(): void {
+    const file = this.projectConfigPath;
+    if (this.readOnly || file === null || file === this.configPath || this.workingDirectory === null) return;
+    try {
+      const carried = carryProjectSettingsOnce(this.workingDirectory);
+      if (!carried) return;
+      logger.info('[settings] the programs\' project settings files were carried into the project\'s one file', { file: carried.file, from: carried.carriedFrom, keys: carried.keys.length });
+      if (carried.differed.length > 0) this.migrationReceipt(`carried-forward:project-settings:${carried.file}`, describeProjectSettingsCarry(carried));
+    } catch (error) {
+      logger.warn('The programs\' own project settings files could not be carried into the project\'s one file; it is read as it is', { file, error: summarizeError(error) });
+    }
+  }
+
   #carryStricterKeptValues(): void {
     const tier = this.daemonTierPath;
     if (tier === null || this.readOnly || this.homeDirectory === null || tier === this.configPath || this.#daemonIsRemote()) return;
     const files: Record<string, string> = {};
     for (const root of PROGRAM_SETTINGS_ROOTS) files[root] = resolveSurfaceDirectory(this.homeDirectory, root, 'settings.json');
+    const locked = this.#lockedValueFor(files);
     try {
-      for (const carry of carryStricterKeptValues(files, tier)) this.migrationReceipt(`carried-forward:stricter:${carry.key}`, describeStricterCarry(carry));
+      for (const carry of carryStricterKeptValues(files, tier, locked)) this.migrationReceipt(`carried-forward:stricter:${carry.key}`, describeStricterCarry(carry));
     } catch (error) {
       logger.warn('A protection the programs kept could not be carried into the daemon\'s settings as the stricter of the two; the daemon keeps what it holds', { file: tier, error: summarizeError(error) });
+    }
+    // "Use the background daemon" off, carried once to "Start the daemon at login" off (settings-carry-forward.ts).
+    try {
+      const off = carryDaemonOffToLoginStart(files, tier, locked);
+      if (off !== undefined) this.migrationReceipt('carried-forward:daemon-off', describeDaemonOffCarry(off));
+    } catch (error) {
+      logger.warn('"Use the background daemon" being off could not be carried to "Start the daemon at login"; the daemon keeps what it holds', { file: tier, error: summarizeError(error) });
     }
     // The one shared default (model, effort, permission mode): the stricter mode, the terminal app's model and
     // effort, whichever program starts first; one notice naming both programs' values and what was kept.
     try {
-      const shared = carrySharedDefaults(files, tier);
+      const shared = carrySharedDefaults(files, tier, locked);
       if (shared !== undefined) this.migrationReceipt('carried-forward:shared-defaults', describeSharedDefaultsCarry(shared));
     } catch (error) {
       logger.warn('The programs\' own default model, effort and permission mode could not be carried into the daemon\'s one default; the daemon keeps what it holds', { file: tier, error: summarizeError(error) });
@@ -2718,13 +2831,40 @@ export class ConfigManager {
    * (settings-carry-forward.ts DAEMON_KEYS_KEPT_FOR_ROLLBACK: the terminal app's spending alert) into its file once,
    * so they are in force whichever program starts first; the program's file is left as it was for a rollback.
    */
+  /**
+   * What a start-up carry reads of a managed lock (settings-carry-forward.ts LockedValue): undefined when the key is not
+   * locked; the value the lock holds when it is known (the managed bundle's, or the locking program's own value in its
+   * settings file, `programFiles`); null when the key is locked (or the locks cannot be read) and that value is not known.
+   */
+  /** Each program's own settings file under this manager's home, by its folder name (`tui`, `agent`). */
+  #programSettingsFiles(): Readonly<Record<string, string>> {
+    const files: Record<string, string> = {};
+    if (this.homeDirectory !== null) for (const root of PROGRAM_SETTINGS_ROOTS) files[root] = resolveSurfaceDirectory(this.homeDirectory, root, 'settings.json');
+    return files;
+  }
+
+  #lockedValueFor(programFiles: Readonly<Record<string, string>>): LockedValue {
+    return (key) => {
+      let lock: ManagedLockHeld | null;
+      try { lock = this.managedLockOf(key); } catch { return null; }
+      if (!lock) return undefined;
+      if ('value' in lock) return { value: structuredClone(lock.value) };
+      const program = Object.entries(programFiles).find(([, file]) => join(dirname(file), 'settings-sync.json') === lock.file);
+      if (!program || !existsSync(program[1])) return null;
+      try {
+        const found = readDotPath(readRawSettingsFile(program[1]), key);
+        return found.present ? { value: structuredClone(found.value) } : null;
+      } catch { return null; }
+    };
+  }
+
   #copyKeptProgramKeys(): void {
     const tier = this.daemonTierPath;
     if (tier === null || this.readOnly || !this.daemonTierOwner || this.homeDirectory === null) return;
     for (const root of PROGRAM_SETTINGS_ROOTS) {
       const file = resolveSurfaceDirectory(this.homeDirectory, root, 'settings.json');
       try {
-        const copied = copyKeptProgramKeys(file, tier);
+        const copied = copyKeptProgramKeys(file, tier, this.#lockedValueFor(this.#programSettingsFiles()));
         if (copied.length > 0) this.migrationReceipt(`carried-forward:kept:${file}`, describeSettingsCarryForward(file, tier, { moved: [], copied, superseded: [], removed: [] }));
       } catch (error) {
         logger.warn('A setting a program kept could not be copied into the daemon\'s settings; it stays in the program\'s file', { file, error: summarizeError(error) });
@@ -2792,6 +2932,31 @@ export class ConfigManager {
       const { parent, field } = this.#resolvePath(key, staged.nonRuntime);
       parent[field] = found.value;
       staged.sources.set(key, 'shared');
+    }
+  }
+
+  /**
+   * A project's settings file may make a protection stricter (Ask me where the daemon's default is YOLO). The shared
+   * and daemon values are laid over the program's own files afterwards (a daemon-owned key such as `permissions.mode`
+   * is read from the daemon's settings), which wiped the project's stricter value in every program working there: a
+   * key the project file set, whose value has a loosening direction and is not looser than the value laid over it, is
+   * the project's again. A looser one was never admitted (restrictProjectLayer) and stays as laid.
+   */
+  #keepProjectStricter(staged: ConfigRuntimeState, layer: Record<string, unknown>): void {
+    const leaves: Array<{ path: string; value: unknown }> = [];
+    collectLeaves(layer, '', leaves);
+    for (const leaf of leaves) {
+      const key = leaf.path;
+      const source = staged.sources.get(key);
+      if (!key || (source !== 'daemon' && source !== 'shared')) continue;
+      const loosens = configKeyFacts(key).loosens;
+      if (!loosens) continue;
+      const laid = readDotPath(staged.nonRuntime, key).value;
+      if (isDeepStrictEqual(laid, leaf.value) || loosens(laid, leaf.value)) continue;
+      // A key the shared or daemon tier laid is a known setting path (the tiers write only those).
+      const { parent, field } = this.#resolvePath(key as DaemonOwnedConfigPath, staged.nonRuntime);
+      parent[field] = structuredClone(leaf.value);
+      staged.sources.set(key, 'project');
     }
   }
 
@@ -2923,8 +3088,7 @@ export class ConfigManager {
 
   private resetHostSetting(key: ConfigKey, value: HostSettingValue): void {
     if (this.hostSettingHasProjectValue(key)) this.setProjectValue(key, value as never);
-    const lock = getManagedSettingLock(key, this.configDir);
-    if (lock) throw new ConfigError(`Setting ${key} is locked by ${lock.source}: ${lock.reason}`);
+    this.#refuseManaged(key);
     const previous = this.hostSettings.snapshot(this.#config);
     // Reset must revoke the global copy too even when ordinary host set() edits
     // an existing higher-priority project leaf. This is the same owned scalar
@@ -2976,8 +3140,7 @@ export class ConfigManager {
         const admission = admitSettingValue(path, schema, value, { config: projected });
         if (!admission.ok) throw new ConfigError(`Invalid value for ${path} (${admission.reason})`);
       }
-      const lock = getManagedSettingLock(path as ConfigKey, this.configDir);
-      if (lock) throw new ConfigError(`Setting ${path} is locked by ${lock.source}: ${lock.reason}`);
+      this.#refuseManaged(path);
       previous.set(path, readDotPath(this.#config, path).value);
     }
     const staged = this.runtimeState.fork();
@@ -3008,8 +3171,7 @@ export class ConfigManager {
     const staged = this.runtimeState.fork();
     const current = staged.nonRuntime[category] as Record<string, unknown>;
     if (!(key in current) && ![...staged.overrides.keys()].some(entry => entry === hostKey || entry.startsWith(`${hostKey}.`))) return;
-    const lock = getManagedSettingLock(hostKey as ConfigKey, this.configDir);
-    if (lock) throw new ConfigError(`Setting ${hostKey} is locked by ${lock.source}: ${lock.reason}`);
+    this.#refuseManaged(hostKey);
     this.#refuseDaemonFileWrite(hostKey, {});
     const previousValue = readDotPath(this.#config, hostKey).value;
     delete current[key];
@@ -3039,22 +3201,30 @@ export class ConfigManager {
 
   /** Remove explicit preferences; full reset retains this frontend's defaults. Cross-tier disk writes are not transactional. */
   reset(key?: ConfigKey, options: ConfigSetOptions = {}): void {
+    this.#withWriteAct(options.press?.act, () => this.#reset(key, options));
+  }
+
+  #reset(key: ConfigKey | undefined, options: ConfigSetOptions): void {
     this.requireWritable();
     // Resetting a destination moves it to the default destination: the same change as setting it there.
     if (key !== undefined) this.#refuseUnboundDestination([{ key, value: readDotPath(DEFAULT_CONFIG_SNAPSHOT, key).value }]);
     const route = key !== undefined ? this.#routedDaemonWrite(key, options) : null;
     if (key !== undefined && route) {
-      const lock = getManagedSettingLock(key, this.configDir);
-      if (lock) throw new ConfigError(`Setting ${key} is locked by ${lock.source}: ${lock.reason}`);
+      this.#refuseManaged(key);
       this.invalidateLifetimes();
-      void this.#forwardDaemonWrites(route, [{ key, value: structuredClone(readDotPath(DEFAULT_CONFIG_SNAPSHOT, key).value) }], true);
+      void this.#forwardDaemonWrites(route, [{ key, value: structuredClone(readDotPath(DEFAULT_CONFIG_SNAPSHOT, key).value) }], true, options.press);
       return;
     }
     // A managed-policy lock refuses a reset the same way it refuses a write.
     if (key !== undefined) {
-      const lock = getManagedSettingLock(key, this.configDir);
-      if (lock) throw new ConfigError(`Setting ${key} is locked by ${lock.source}: ${lock.reason}`);
+      this.#refuseManaged(key);
       this.#refuseDaemonFileWrite(key, options);
+    } else {
+      // A full reset would put every locked setting back to its default: refused while any setting is locked.
+      const locks = [...readManagedLocks(this.#lockFolders).values()];
+      if (locks.length > 0) {
+        throw new ConfigError(`Settings were not reset: ${locks.map(lock => managedLockRefusalText(lock, isSecretBearingConfigKey(lock.key))).join(' ')}`);
+      }
     }
     // A per-tool permission has no schema row (tools register at runtime) but is still written by set() and can be
     // held by the project file, whose refusal tells the user to reset it.

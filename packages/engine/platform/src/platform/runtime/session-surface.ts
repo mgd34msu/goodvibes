@@ -49,7 +49,7 @@ export interface SessionSurface {
   readonly recoveryDir: string;
   /** `<workingDirectory>/.goodvibes/<surfaceRoot>/state` */
   readonly stateDir: string;
-  /** `<workingDirectory>/.goodvibes/<surfaceRoot>/checkpoints` */
+  /** `<workingDirectory>/.goodvibes/shared/checkpoints`: the project's one store, every program's (projectCheckpointsDir). */
   readonly checkpointsDir: string;
   /** Current saved path; safe IDs retain their filename. Opaque suggestions
    * before first publication are local to this owner; the writer coordinates
@@ -92,7 +92,33 @@ export function createSessionSurface(identity: SurfaceIdentity): SessionSurface 
     lastSessionPointer: join(sessionsDir, 'last-session.json'),
     recoveryDir,
     stateDir: resolveSurfaceDirectory(workingDirectory, surfaceRoot, 'state'),
-    checkpointsDir: resolveSurfaceDirectory(workingDirectory, surfaceRoot, 'checkpoints'),
+    checkpointsDir: projectCheckpointsDir(workingDirectory),
     recoveryFile,
   };
+}
+
+/**
+ * The ONE checkpoint store of a project, shared by the terminal app, the Agent and the daemon: one history a person
+ * sees and restores from in any of them (`<project>/.goodvibes/shared/checkpoints`).
+ */
+export function projectCheckpointsDir(projectFolder: string): string {
+  return join(projectFolder, '.goodvibes', 'shared', 'checkpoints');
+}
+
+/**
+ * The cross-process lock of a project's one checkpoint store (checkpoint/manager.ts takes it for every change to the
+ * store). Moving the file-writes record aside and carrying a subfolder's earlier records take it too, so each runs
+ * alone among every program and the daemon working in the project.
+ */
+export function projectStoreLockPath(projectFolder: string): string {
+  return join(projectCheckpointsDir(projectFolder), 'git', '.gv-lock');
+}
+
+/**
+ * The stores each program kept of its own before the one store (the terminal app's, which the daemon used too, the
+ * Agent's, and the unscoped one of the earliest releases), under `folder`: merged into the one store once, in time
+ * order, and left exactly as they were for a rollback.
+ */
+export function formerCheckpointsDirs(folder: string): readonly string[] {
+  return [...['tui', 'agent'].map((surface) => resolveSurfaceDirectory(folder, surface, 'checkpoints')), join(folder, '.goodvibes', 'checkpoints')];
 }

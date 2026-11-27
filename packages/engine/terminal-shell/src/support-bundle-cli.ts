@@ -16,7 +16,7 @@
 import { existsSync } from 'node:fs';
 import { resolve } from 'node:path';
 import {
-  autostartInstalledDaemon, createDaemonServiceControl, DAEMON_PROGRAM_STARTED_LINE, daemonProgramStartFailedLine, GOODVIBES_INSTALLER_COMMAND,
+  autostartInstalledDaemon, createDaemonServiceControl, daemonAddressAnswers, DAEMON_PROGRAM_STARTED_LINE, daemonProgramStartFailedLine, GOODVIBES_INSTALLER_COMMAND,
   type DaemonProgram,
 } from '@goodvibes/engine/platform/platform/runtime/client';
 import { configuredDaemonIsThisMachine } from '@goodvibes/engine/platform/platform/runtime/client/daemon-target-resolver';
@@ -59,7 +59,8 @@ export function daemonStartingInvoke(
   const say = options.say ?? ((line: string) => { process.stderr.write(`${line}\n`); });
   return async (methodId, input, callOptions) => {
     const answer = await invoke(methodId, input, callOptions);
-    if (answer.ok || answer.code !== 'unreachable' || !configuredDaemonIsThisMachine(runtime.configManager)) return answer;
+    // No answer, or no operator token yet (the daemon on this machine never ran, so it never wrote one): started either way.
+    if (answer.ok || (answer.code !== 'unreachable' && answer.code !== 'token-missing') || !configuredDaemonIsThisMachine(runtime.configManager)) return answer;
     // The program is not here: every call says that, never "could not reach".
     if (missing) return { ok: false, code: 'unreachable', error: missing, fix: '' };
     if (started) return answer;
@@ -68,6 +69,8 @@ export function daemonStartingInvoke(
       daemonMode: 'unavailable',
       control: createDaemonServiceControl({ configManager: runtime.configManager, workingDirectory: runtime.workingDirectory }),
       isReachable: async () => (await invoke('control.status', {}, { explicitUserRequest: false })).ok,
+      // A daemon program started now may be the first ever: heard at its address before its credential is read.
+      programAnswers: () => daemonAddressAnswers(runtime.configManager),
       ...(options.daemonProgram ? { program: options.daemonProgram } : {}),
     });
     if (outcome.action === 'not-installed' && outcome.program === false) {
@@ -76,9 +79,22 @@ export function daemonStartingInvoke(
     }
     if (outcome.action === 'program-start-failed') return { ok: false, code: 'unreachable', error: `${daemonProgramStartFailedLine(outcome.reason)} Nothing was sent.`, fix: '' };
     if (outcome.action === 'program-started') say(DAEMON_PROGRAM_STARTED_LINE);
-    else if (outcome.action !== 'started' && outcome.action !== 'came-online') return answer;
+    else if (outcome.action === 'starting') {
+      // The service runs and its daemon is still opening its stores: this call waits for it to answer (a minute at most).
+      if (!await answersWithin(() => daemonAddressAnswers(runtime.configManager), 60_000)) return answer;
+    } else if (outcome.action !== 'started' && outcome.action !== 'came-online') return answer;
     return invoke(methodId, input, callOptions);
   };
+}
+
+/** Whether `answers` says yes before `withinMs` ends, asked every 400 ms (the wait holds the process open). */
+async function answersWithin(answers: () => Promise<boolean>, withinMs: number): Promise<boolean> {
+  const until = Date.now() + withinMs;
+  for (;;) {
+    if (await answers()) return true;
+    if (Date.now() >= until) return false;
+    await new Promise<void>((resolve) => { setTimeout(resolve, 400); });
+  }
 }
 
 export async function runSupportBundleCli(input: SupportBundleCliInput): Promise<number> {

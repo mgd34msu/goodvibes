@@ -10,7 +10,11 @@
  *   0. an act only the owner performs himself (answering an approval put to
  *      him, granting access through an operator method) is refused to a
  *      model's call in every mode, yolo included: whoever approved the call,
- *      the daemon refuses it from a model;
+ *      the daemon refuses it from a model; then, in a turn acting on someone
+ *      else's input, every call that is not a read (unless its tool holds it
+ *      to the real sandbox boundary itself), in every mode; then a channel
+ *      conversation with no project changing something (refused whatever
+ *      anyone would answer, so nothing below asks about it);
  *   1. surface authority (a change asked for on a channel the owner set up is
  *      his to approve; on a surface anyone can write to it is refused; a turn
  *      a channel's guest started runs only plain reads without him), then
@@ -119,6 +123,28 @@ export function ownerOnlyReason(kind: OwnerOnlyKind): string {
   return OWNER_ONLY_REASONS[kind];
 }
 
+/** Why a call is the owner's, in words: what really caused it when known, else the kind's plain words. */
+export function ownerOnlyWords(kind: OwnerOnlyKind, because: string | undefined): string {
+  return because ?? OWNER_ONLY_REASONS[kind];
+}
+
+/** A standing "ask me" by what it is: the owner's kept rule by its description, or his answer earlier this session. */
+function standingAskBecause(rule: CallRuleFact): string {
+  if (rule.source === 'session') return `you said earlier in this session to ask you about this (${rule.description})`;
+  if (rule.source === 'user-rule') return `your rule "${rule.description}" says to ask you about this`;
+  if (rule.source === 'managed-policy') return 'your organization\'s managed permission policy says to ask you about this';
+  return `${rule.description} says to ask you about this`;
+}
+
+/**
+ * Something outside the permission rules that asks the owner about a call (a tool server's trust level, his Pre:tool
+ * hook), as a clause for "Only you decide this: …": its own sentence, with no closing stop and a lower-case start.
+ */
+export function outsideAskBecause(sentence: string): string {
+  const trimmed = sentence.trim().replace(/\.+$/, '');
+  return trimmed.charAt(0).toLowerCase() + trimmed.slice(1);
+}
+
 /** Every owner-only kind, for validating one that arrives over the wire. */
 export const OWNER_ONLY_KINDS = Object.freeze(Object.keys(OWNER_ONLY_REASONS)) as readonly OwnerOnlyKind[];
 
@@ -197,6 +223,26 @@ export interface CallFacts {
    * GoodVibes home, reachesProductPastGate): no remembered yes settles it and the ask offers none.
    */
   readonly ownerOnlyOnce?: boolean | undefined;
+  /**
+   * What made this call the owner's, in words naming the real cause (`ownerOnlyCause`): a file that runs by itself, a
+   * tool declared dangerous, the product's own program. The kind's plain words (`ownerOnlyReason`) when absent.
+   */
+  readonly ownerOnlyBecause?: string | undefined;
+  /**
+   * The turn acts on someone else's input (security/turn-input-party.ts, the one place that is decided): who, in words
+   * for the refusal. Absent: the owner's own turn.
+   */
+  readonly otherParty?: string | undefined;
+  /**
+   * The tool itself holds such a turn's every call to the real sandbox boundary (types/tools.ts `heldToBoundary`:
+   * `exec`, through tools/exec/containment.ts `containmentForTurn`), so admission does not refuse it here.
+   */
+  readonly heldToBoundary?: boolean | undefined;
+  /**
+   * The turn belongs to a channel conversation with no project and this tool's call is one the hold refuses there
+   * (channels/channel-project.ts `channelWithoutProjectRefusalFor`): the refusal, in its words. Refused before any question.
+   */
+  readonly channelWithoutProject?: string | undefined;
 }
 
 /** What settled a fact, for the caller's own records. */
@@ -204,8 +250,12 @@ export type FactBasis = 'surface' | 'plan' | 'mode' | 'rule' | 'owner-rule' | 'd
 
 export type CallClass =
   | { readonly kind: 'fact'; readonly allow: boolean; readonly basis: FactBasis; readonly decision: ToolDecision; readonly rule?: CallRuleFact | undefined }
-  /** `once`: an owner act answered each time (ownerActs.once): the ask offers nothing to remember. */
-  | { readonly kind: 'owner-only'; readonly item: OwnerOnlyKind; readonly once?: true | undefined }
+  /**
+   * `once`: an owner act answered each time (ownerActs.once): the ask offers nothing to remember. `because`: what really
+   * caused it, in words (a rule by its description, a tool server's trust level, a file that runs by itself); the
+   * kind's plain words (`ownerOnlyReason`) when absent.
+   */
+  | { readonly kind: 'owner-only'; readonly item: OwnerOnlyKind; readonly once?: true | undefined; readonly because?: string | undefined }
   | { readonly kind: 'judgment' };
 
 const LOCAL_EFFECTS: ReadonlySet<ToolSideEffect> = new Set(['read_fs', 'write_fs']);
@@ -254,6 +304,30 @@ export function classifyCall(mode: GatePresetName, facts: CallFacts): CallClass 
         ? `${facts.ownerActWords} is something only the owner does from their own screen`
         : `${facts.tool} would do something only the owner does himself (answer what was put to him, or grant or withdraw access)`,
       next: ['do not call it again', 'tell the owner what is waiting; he answers it in his own app (the approval prompt, Waiting for you, the web UI)'],
+    } };
+  }
+  // A turn acting on someone else's input (a member's web chat, a channel message, a guest, input an outside caller put
+  // into a hosted session, work nobody but the owner approved) runs reads only, in every mode, yolo included: a call
+  // that is not a read is refused here, at admission, for every tool, unless the tool itself holds that turn's call to
+  // the real sandbox boundary (exec). A tool states whether a call is a read (its category, narrowed by its read modes);
+  // one that states nothing is not a read.
+  // A tool held to the boundary is refused here too when its turn's surface could not direct it anyway: the reason is
+  // the party's (whose input it is), never the surface's words.
+  const surfaceRefuses = facts.surface !== undefined && facts.category !== 'read' && !surfaceCarriesCommandAuthority(facts.surface)
+    && !surfaceRequestsReachOwner(facts.surface);
+  if (facts.otherParty !== undefined && facts.category !== 'read' && (facts.heldToBoundary !== true || surfaceRefuses)) {
+    return { kind: 'fact', allow: false, basis: 'surface', decision: {
+      state: 'refused', decidedBy: 'code',
+      reason: `this turn acts on someone else's input (${facts.otherParty}), and such a turn only reads outside a real sandbox, whatever the mode: ${facts.tool} would change or start something`,
+      next: ['carry on with reading and reporting', 'say what you would do; the owner can do it himself'],
+    } };
+  }
+  // A call that will be refused whatever anyone answers is refused here, before any question: the owner is never asked
+  // for nothing. A channel conversation with no project changes nothing (channels/channel-project.ts).
+  if (facts.channelWithoutProject !== undefined) {
+    return { kind: 'fact', allow: false, basis: 'surface', decision: {
+      state: 'refused', decidedBy: 'code', reason: facts.channelWithoutProject,
+      next: ['say what you would change instead', 'the owner chooses a project for this channel'],
     } };
   }
   // A guest's turn (someone a channel admits who is not its owner) may read and
@@ -307,12 +381,19 @@ export function classifyCall(mode: GatePresetName, facts: CallFacts): CallClass 
     }
     return facts.ownerActOnce === true ? { kind: 'owner-only', item: 'owner-act', once: true } : { kind: 'owner-only', item: 'owner-act' };
   }
+  // A command that starts or drives one of GoodVibes' own programs, or touches its home (reachesProductPastGate): the
+  // door to the owner's own acts, so asked in every mode, yolo included, each time, opening on No.
+  if (facts.ownerOnlyOnce === true && facts.ownerOnly !== undefined) {
+    if (facts.rule?.effect === 'deny') return { kind: 'fact', allow: false, basis: 'rule', rule: facts.rule, decision: ruleDecision(facts.rule, false) };
+    return { kind: 'owner-only', item: facts.ownerOnly, once: true, ...(facts.ownerOnlyBecause !== undefined ? { because: facts.ownerOnlyBecause } : {}) };
+  }
   if (mode === 'yolo') {
     return { kind: 'fact', allow: true, basis: 'mode', decision: { state: 'allowed', decidedBy: 'mode', reason: 'yolo mode runs every call' } };
   }
   const rule = facts.rule;
   if (rule?.effect === 'deny') return { kind: 'fact', allow: false, basis: 'rule', rule, decision: ruleDecision(rule, false) };
-  if (rule?.effect === 'ask') return { kind: 'owner-only', item: 'standing-ask' };
+  // Named by the rule that asks, never as "a rule" when it is a session's answer or another cause.
+  if (rule?.effect === 'ask') return { kind: 'owner-only', item: 'standing-ask', because: standingAskBecause(rule) };
   // One decision, at the host: it admits this call itself under the owner's mode when it arrives.
   if (facts.hostDecides === true) {
     return { kind: 'fact', allow: true, basis: 'host', decision: {
@@ -322,13 +403,14 @@ export function classifyCall(mode: GatePresetName, facts: CallFacts): CallClass 
   if (facts.ownerOnly !== undefined) {
     // One answered each time (a command reaching past the gate through the product itself) is never settled by a
     // remembered yes, and its ask offers none.
-    if (facts.ownerOnlyOnce === true) return { kind: 'owner-only', item: facts.ownerOnly, once: true };
+    const because = facts.ownerOnlyBecause !== undefined ? { because: facts.ownerOnlyBecause } : {};
+    if (facts.ownerOnlyOnce === true) return { kind: 'owner-only', item: facts.ownerOnly, once: true, ...because };
     if (rule?.effect === 'allow' && rule.ownerOnly === facts.ownerOnly) {
       return { kind: 'fact', allow: true, basis: 'owner-rule', rule, decision: {
         state: 'allowed', decidedBy: 'rule', reason: `you allowed this before (${rule.description})`, limit: rule.description,
       } };
     }
-    return { kind: 'owner-only', item: facts.ownerOnly };
+    return { kind: 'owner-only', item: facts.ownerOnly, ...because };
   }
   if (rule?.effect === 'allow' && !(facts.untrustedRead && mayReachOutside(facts))) {
     return { kind: 'fact', allow: true, basis: 'rule', rule, decision: ruleDecision(rule, true) };
@@ -466,7 +548,29 @@ export interface OwnerOnlyCallFacts {
 export function reachesProductPastGate(toolName: string, args: Record<string, unknown>,
   definition: Pick<ToolDefinition, 'subjects' | 'sideEffects'> | undefined, directory: string | undefined, homes: readonly string[] | undefined,
   probe?: ProductReachProbe): boolean {
-  return reachesPastTheGate(callCommands(toolName, args, definition), directory, homes ?? [], probe ?? {});
+  if (reachesPastTheGate(callCommands(toolName, args, definition), directory, homes ?? [], probe ?? {})) return true;
+  return writesUnderProductHome(toolName, args, definition, directory, homes ?? [], probe ?? {});
+}
+
+/**
+ * Whether a file-writing tool (`write`, `edit`, or one declaring `write_fs`) names a path under a GoodVibes home or one
+ * of the installed product's own files (its programs, the hashes the installer recorded for them): as the path is
+ * given and where it really is (links followed through the probe). The same reach a command has, for the tool that
+ * writes without a command.
+ */
+function writesUnderProductHome(toolName: string, args: Record<string, unknown>, definition: Pick<ToolDefinition, 'sideEffects'> | undefined,
+  directory: string | undefined, homes: readonly string[], probe: ProductReachProbe): boolean {
+  const writes = toolName === 'write' || toolName === 'edit' || definition?.sideEffects?.includes('write_fs') === true;
+  if (!writes || homes.length === 0) return false;
+  const within = (path: string, home: string): boolean => {
+    const rel = relative(home, path);
+    return rel === '' || (!rel.startsWith(`..${sep}`) && rel !== '..' && !isAbsolute(rel));
+  };
+  return extractPathArgs(args).some((raw) => {
+    const given = raw.startsWith('~/') && probe.home ? resolve(probe.home, raw.slice(2)) : resolve(directory ?? '/', raw);
+    const real = probe.realPath ? probe.realPath(given) : given;
+    return homes.some((home) => within(given, resolve(home)) || within(real, resolve(home)));
+  });
 }
 
 /**
@@ -475,14 +579,29 @@ export function reachesProductPastGate(toolName: string, args: Record<string, un
  * runs without this gate seeing what it runs then (product-commands.ts `writesRunByItself`).
  */
 export function installsRunByItself(toolName: string, args: Record<string, unknown>,
-  definition: Pick<ToolDefinition, 'sideEffects'> | undefined, directory: string | undefined, searchPath: readonly string[] = []): boolean {
+  definition: Pick<ToolDefinition, 'sideEffects' | 'writesFiles'> | undefined, directory: string | undefined, searchPath: readonly string[] = []): boolean {
   const writes = toolName === 'write' || toolName === 'edit' || definition?.sideEffects?.includes('write_fs') === true;
-  if (!writes) return false;
-  return writesRunByItself(extractPathArgs(args), directory, searchPath);
+  const declared = declaredWrittenFiles(args, definition);
+  if (!writes && declared.length === 0) return false;
+  return writesRunByItself([...(writes ? extractPathArgs(args) : []), ...declared], directory, searchPath);
+}
+
+/**
+ * The files a call writes as its definition declares them (`writesFiles`: a capability's path input that it writes),
+ * read at the declared paths for the value the call names; none when it declares none for that value.
+ */
+function declaredWrittenFiles(args: Record<string, unknown>, definition: Pick<ToolDefinition, 'writesFiles'> | undefined): string[] {
+  const declared = definition?.writesFiles;
+  if (!declared) return [];
+  const named = argumentValues(args, declared.field);
+  if (named === undefined || named.length !== 1) return [];
+  const paths = declared.paths[named[0]!] ?? [];
+  // An input may name several files, one per line or separated by commas (capabilities/path-inputs.ts reads it so).
+  return paths.flatMap((path) => argumentValues(args, path) ?? []).flatMap((value) => value.split(/[\n,]/)).map((value) => value.trim()).filter(Boolean);
 }
 
 /** The definition fields the owner-only list is recognised from. */
-export type OwnerOnlyDefinition = Pick<ToolDefinition, 'dangerous' | 'ownerActs' | 'ownerDecisions' | 'subjects' | 'sideEffects'>;
+export type OwnerOnlyDefinition = Pick<ToolDefinition, 'dangerous' | 'ownerActs' | 'ownerDecisions' | 'subjects' | 'sideEffects' | 'writesFiles'>;
 
 /**
  * Whether the host this call is sent to decides it itself (`hostDecides`): only when the call names exactly one value
@@ -515,6 +634,36 @@ export function outsideFolderCall(args: Record<string, unknown>, definition: Pic
     return given !== undefined && given.length === 1 && condition.values.includes(given[0]!.trim());
   });
 }
+
+/**
+ * Whether a call makes something that runs by itself later (its tool's `ownerDecisions.runsLater`: a schedule, a trigger, a
+ * watcher, a task, a piece of work). Such a call from a turn that read text anyone can write is the owner's, asked in every
+ * mode, each time (permissions/manager.ts `callFacts`). A value that cannot be read counts as one (fails closed).
+ */
+export function runsLaterCall(args: Record<string, unknown>, definition: Pick<ToolDefinition, 'ownerDecisions'> | undefined): boolean {
+  const decisions = definition?.ownerDecisions;
+  return decisions !== undefined && namesOneOf(args, decisions.field, decisions.runsLater);
+}
+
+/** The words a call that runs by itself later, from a turn that read untrusted text, is put to the owner with. */
+export const RUNS_LATER_FROM_READ_BECAUSE = 'it makes something that runs by itself later, and this conversation read text anyone can write, which may be what asked for it';
+
+/** Whether a call sends something out as the owner or spends his money (its tool's `ownerDecisions.sendsOrSpends`). */
+export function sendsOrSpendsCall(args: Record<string, unknown>, definition: Pick<ToolDefinition, 'ownerDecisions'> | undefined): boolean {
+  const decisions = definition?.ownerDecisions;
+  return decisions !== undefined && namesOneOf(args, decisions.field, decisions.sendsOrSpends);
+}
+
+/** The words a send, a spend or a loosening, after the conversation read untrusted text, is put to the owner with. */
+export const SENDS_FROM_READ_BECAUSE = 'it sends, spends or loosens something for you, and this conversation read text anyone can write, which may be what asked for it';
+
+/**
+ * The owner-only kinds a call is asked about each time, in every mode, once its conversation read text anyone can write
+ * (permissions/manager.ts `callFacts`): sending, spending, loosening and granting access.
+ */
+export const EXPOSED_ASKED_KINDS: ReadonlySet<OwnerOnlyKind> = new Set<OwnerOnlyKind>([
+  'new-recipient', 'untrusted-derived-send', 'loosen-security', 'grant-access', 'spend-over-limit', 'change-contract',
+]);
 
 /** Whether the value the call gives `field` is one of `values`; a value that cannot be read counts as one (fails closed). */
 function namesOneOf(args: Record<string, unknown>, field: string, values: readonly string[] | undefined): boolean {
@@ -610,22 +759,39 @@ export function ownerActWordsOf(args: Record<string, unknown>, definition: Owner
  */
 export function recognizeOwnerOnly(toolName: string, args: Record<string, unknown>,
   definition: OwnerOnlyDefinition | undefined, facts: OwnerOnlyCallFacts, directory: string | undefined): OwnerOnlyKind | undefined {
+  return ownerOnlyCause(toolName, args, definition, facts, directory)?.kind;
+}
+
+/**
+ * The owner-only kind a call is (`recognizeOwnerOnly`) and, where the kind's plain words would name another cause, the
+ * cause in words: one kind covers several causes (a file that runs by itself and a setting that loosens are both
+ * `loosen-security`), and the card says the one that applies.
+ */
+export function ownerOnlyCause(toolName: string, args: Record<string, unknown>,
+  definition: OwnerOnlyDefinition | undefined, facts: OwnerOnlyCallFacts, directory: string | undefined): { readonly kind: OwnerOnlyKind; readonly because?: string } | undefined {
   const acts = definition?.ownerActs;
   // A value that cannot be read is taken as an owner act: the declaration fails closed.
-  if (acts !== undefined && namesOneOf(args, acts.field, acts.values)) return 'owner-act';
-  if (definition?.dangerous === true || changesMcpTrust(toolName, args)) return 'grant-access';
-  if (facts.loosensSetting === true) return 'loosen-security';
+  if (acts !== undefined && namesOneOf(args, acts.field, acts.values)) return { kind: 'owner-act' };
+  if (changesMcpTrust(toolName, args)) return { kind: 'grant-access', because: 'it changes how far a tool server is trusted' };
+  if (definition?.dangerous === true) return { kind: 'grant-access', because: `${toolName} is declared dangerous, so each call of it is yours to decide` };
+  if (facts.loosensSetting === true) return { kind: 'loosen-security' };
   // A command that runs one of the product's own programs to change something, or reads or writes the GoodVibes
   // home's files (its credential, settings and rules): it can loosen a protection past this gate (product-commands.ts).
-  if (reachesProductPastGate(toolName, args, definition, directory, facts.productHomes, facts.productProbe)) return 'loosen-security';
+  if (reachesProductPastGate(toolName, args, definition, directory, facts.productHomes, facts.productProbe)) {
+    return { kind: 'loosen-security', because: 'it runs one of GoodVibes\' own programs or touches GoodVibes\' own files, which can change your protections where this check cannot see' };
+  }
   // A file written that runs by itself later (a git hook, `.envrc`, a package script, a shell start-up file, ...).
-  if (installsRunByItself(toolName, args, definition, directory, facts.searchPath)) return 'loosen-security';
+  if (installsRunByItself(toolName, args, definition, directory, facts.searchPath)) {
+    return { kind: 'loosen-security', because: 'it writes a file whose commands run by themselves later, outside this check' };
+  }
   const decisions = definition?.ownerDecisions;
-  if (decisions !== undefined && (namesOneOf(args, decisions.field, decisions.loosens) || loosensByArguments(args, decisions))) return 'loosen-security';
-  if (decisions !== undefined && namesOneOf(args, decisions.field, decisions.contractChanges)) return 'change-contract';
-  if (decisions !== undefined && (namesOneOf(args, decisions.field, decisions.irreversible) || byArguments(args, decisions.field, decisions.irreversibleWhen))) return 'irreversible-operator';
-  if (unrecoverableDeletion(toolName, args, definition, directory) !== undefined) return 'unrecoverable-delete';
-  if (facts.newRecipient === true) return 'new-recipient';
+  if (decisions !== undefined && (namesOneOf(args, decisions.field, decisions.loosens) || loosensByArguments(args, decisions))) {
+    return { kind: 'loosen-security', because: 'it loosens one of your protections' };
+  }
+  if (decisions !== undefined && namesOneOf(args, decisions.field, decisions.contractChanges)) return { kind: 'change-contract' };
+  if (decisions !== undefined && (namesOneOf(args, decisions.field, decisions.irreversible) || byArguments(args, decisions.field, decisions.irreversibleWhen))) return { kind: 'irreversible-operator' };
+  if (unrecoverableDeletion(toolName, args, definition, directory) !== undefined) return { kind: 'unrecoverable-delete' };
+  if (facts.newRecipient === true) return { kind: 'new-recipient' };
   return undefined;
 }
 

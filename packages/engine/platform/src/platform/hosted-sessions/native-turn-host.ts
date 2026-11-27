@@ -502,6 +502,10 @@ export function createNativeHostedTurnHost(deps: NativeHostedTurnDependencies & 
       void owned.done.catch(() => {});
       return project({ identity, ...dispatch });
     } catch (error) {
+      // A fault while preparing (the session could not be made, say) is not a cancel: nobody stopped the message. It is
+      // recorded failed with what failed, so the person is told why it was not answered instead of it vanishing.
+      const fault = !owned.cancelled && !(error instanceof NativeHostedTurnError);
+      if (fault) logger.warn('[hosted-sessions] a native hosted turn could not be prepared', { inputId: identity.inputId, error: redactDiagnosticText(summarizeError(error)) });
       // No native runtime was dispatched on this preparation failure. Release
       // the empty session so a cancelled/revoked preparation cannot exhaust capacity.
       let reservationSettled = owned.brokerInputId === null;
@@ -526,8 +530,12 @@ export function createNativeHostedTurnHost(deps: NativeHostedTurnDependencies & 
           await parkUndispatched(identity).catch(() => {});
           outcome = new NativeHostedTurnError(error.code, 'Preparation did not finish and the input was not cancelled; read its status, and cancel it to release the session.');
         } else {
-          await retireUndispatched(identity).catch(() => {});
+          await retireUndispatched(identity, fault ? { summary: redactDiagnosticText(summarizeError(error)).slice(0, 1000), retryable: false } : undefined).catch(() => {});
           const record = await journal.read(identity).catch(() => null);
+          if (record?.state === 'failed') {
+            claimedHere.delete(key);
+            await settleIntake(identity, authority, options);
+          }
           if (record?.state === 'cancelled') {
             claimedHere.delete(key);
             await settleIntake(identity, authority, options);
@@ -547,11 +555,15 @@ export function createNativeHostedTurnHost(deps: NativeHostedTurnDependencies & 
     try { await journal.transition(identity, record.state, { state: 'recovery-required', sessionId: record.sessionId, brokerInputId: record.brokerInputId, correlationId: record.correlationId }); }
     catch (error) { if (!(error instanceof NativeHostedTurnJournalError) || error.code !== 'conflict') throw error; }
   }
-  /** A claim whose preparation failed before dispatch becomes cancelled; a concurrent move wins. */
-  async function retireUndispatched(identity: NativeHostedTurnIdentity): Promise<void> {
+  /**
+   * A claim whose preparation failed before dispatch becomes cancelled, or failed with `failure` when a fault (not a
+   * cancel) stopped it; a concurrent move wins.
+   */
+  async function retireUndispatched(identity: NativeHostedTurnIdentity, failure?: NativeHostedTurnFailure): Promise<void> {
     const record = await journal.read(identity);
     if (!record || !['preparing', 'queued', 'dispatching'].includes(record.state)) return;
-    try { await journal.transition(identity, record.state, { state: 'cancelled', sessionId: record.sessionId, brokerInputId: record.brokerInputId, correlationId: record.correlationId }); }
+    const bound = { sessionId: record.sessionId, brokerInputId: record.brokerInputId, correlationId: record.correlationId };
+    try { await (failure ? journal.transition(identity, record.state, { state: 'failed', ...bound }, failure) : journal.transition(identity, record.state, { state: 'cancelled', ...bound })); }
     catch (error) { if (!(error instanceof NativeHostedTurnJournalError) || error.code !== 'conflict') throw error; }
   }
   /**

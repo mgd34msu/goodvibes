@@ -3,7 +3,9 @@ import type { ContractErrorCode, ContractReplayKey } from '../types/foundation-c
 import type { NativeExecutionAuthority } from '../security/http-auth.js';
 import type { Actor, CredentialKind, PrincipalKind } from '../daemon/http-policy.js';
 import { effectFacts, type EffectId } from '../security/effect-authority.js';
+import { declaredMethodRisk, METHOD_RISKS, type MethodRisk } from './method-risk.js';
 export type { NativeExecutionAuthority, NativePairedSnapshot } from '../security/http-auth.js';
+export type { MethodRisk } from './method-risk.js';
 
 export type GatewayMethodTransport = 'http' | 'ws' | 'internal';
 export type GatewayMethodSource = 'builtin' | 'plugin';
@@ -28,6 +30,12 @@ export interface GatewayHttpBinding {
    * answers a success with it and the generated specs list it. Absent: 200.
    */
   readonly successStatus?: 201 | 202 | undefined;
+  /**
+   * Other verbs at the same path that are this same method (`PATCH /api/channels/policies/{surface}` beside its
+   * `POST`): a request with one of them is found as this method (method-catalog.ts `findByHttpBinding`), so it is
+   * decided where the method is (daemon/method-owner-decision.ts) and served by the method's own route.
+   */
+  readonly alsoAt?: readonly ('GET' | 'POST' | 'PATCH' | 'DELETE')[] | undefined;
 }
 
 export interface GatewayMethodDescriptor {
@@ -128,7 +136,128 @@ export interface GatewayMethodDescriptor {
    * `method-catalog.ts`'s `invoke()`.
    */
   readonly invokable?: boolean | undefined;
+  /**
+   * The inputs that name a folder a turn or a process will work in (an outside coding agent's `cwd`, a trigger's or a
+   * schedule's `workingDirectory`, a hosted session's `workspaceRoot`, a runner's `backendConfig.cwd`), as paths into
+   * the body: `a.b` for a nested field, `a[]` for each entry of a list. The daemon's dispatch runs the one check of a
+   * caller's project (workspace/caller-project.ts `checkCallerProject`) on each before the handler runs, for the
+   * credential that made the call. See `FOLDER_INPUT_NAMES`: an input so named and declared nowhere stops the catalog.
+   */
+  readonly workFolders?: readonly string[] | undefined;
+  /**
+   * The inputs named like a folder that no turn or process works in, each with why (a project a list is filtered by, a
+   * record's field, the owner's own registration of a workspace): declared so the catalog knows they were looked at.
+   */
+  readonly notWorkFolders?: Readonly<Record<string, string>> | undefined;
+  /**
+   * The inputs that name a file or folder on the daemon's disk the method reads or writes (an artifact made from a file
+   * by path, a knowledge source read from a file, a screenshot saved): for anyone but the owner's own program each must
+   * be inside a project given to that caller (control-plane/caller-paths.ts). See `FILE_INPUT_NAMES`.
+   */
+  readonly daemonFiles?: readonly string[] | undefined;
+  /** The inputs named like a file that name none on this disk, each with why (a path in a URL, a label, a file in a checkpoint). */
+  readonly notDaemonFiles?: Readonly<Record<string, string>> | undefined;
+  /**
+   * What calling it does that the owner decides (control-plane/method-risk.ts): `loosens-a-protection`,
+   * `cannot-be-undone`, `spends-money`, `writes-a-secret`, `owner-act`, `answers-the-owner`, or `none`. Every builtin method has one
+   * (`methodDescriptor` stamps it from the table, or stops the catalog); the daemon's dispatch decides a call of any
+   * class but `none` as the capability that does the same act would be (daemon/method-owner-decision.ts).
+   */
+  readonly risk?: MethodRisk | undefined;
   readonly metadata?: Record<string, unknown> | undefined;
+}
+
+/**
+ * The input names that name a file: every one in a builtin method's input schema, at any depth, is declared in
+ * `daemonFiles` or `notDaemonFiles` (or as a work folder), or the catalog does not load.
+ */
+export const FILE_INPUT_NAMES: ReadonlySet<string> = new Set(['path', 'paths', 'filePath', 'file', 'files', 'folderPath', 'dest', 'out', 'outputPath']);
+
+/**
+ * The input names that name a folder: every one in a builtin method's input schema, at any depth, is declared in
+ * `workFolders` or `notWorkFolders`, or the catalog does not load (as a write that does not say what a repeat does).
+ */
+export const FOLDER_INPUT_NAMES: ReadonlySet<string> = new Set([
+  'cwd', 'workingDirectory', 'workingDir', 'workdir', 'workspaceRoot', 'projectRoot', 'projectDir', 'worktreePath',
+  'directory', 'allowedPaths', 'root', 'project', 'mainWorktreeRoot', 'repoPath',
+]);
+
+/** Every path (as `workFolders` writes them) of an input named in `names`, in an input schema. */
+function folderInputPaths(schema: unknown, names: ReadonlySet<string> = FOLDER_INPUT_NAMES): string[] {
+  const found = new Set<string>();
+  const walk = (node: unknown, at: string, seen: ReadonlySet<unknown>): void => {
+    if (node === null || typeof node !== 'object' || seen.has(node)) return;
+    const next = new Set(seen).add(node);
+    const shape = node as Record<string, unknown>;
+    const properties = shape['properties'];
+    if (properties !== null && typeof properties === 'object') {
+      for (const [name, child] of Object.entries(properties as Record<string, unknown>)) {
+        const path = at ? `${at}.${name}` : name;
+        if (names.has(name)) found.add(path);
+        walk(child, path, next);
+      }
+    }
+    if (shape['items'] !== null && typeof shape['items'] === 'object') walk(shape['items'], `${at}[]`, next);
+    for (const key of ['anyOf', 'oneOf', 'allOf'] as const) {
+      const alternatives = shape[key];
+      if (Array.isArray(alternatives)) for (const alternative of alternatives) walk(alternative, at, next);
+    }
+  };
+  walk(schema, '', new Set());
+  return [...found];
+}
+
+/**
+ * A builtin method's folder inputs, checked when its descriptor is made: each input named like a folder is declared
+ * once, as a folder worked in or as one that is not (with why), and nothing is declared that is neither.
+ */
+function checkFolderInputs(id: string, schema: unknown, works: readonly string[] | undefined, not: Readonly<Record<string, string>> | undefined,
+  files?: readonly string[] | undefined, notFiles?: Readonly<Record<string, string>> | undefined): void {
+  const declared = new Set([...(works ?? []), ...Object.keys(not ?? {})]);
+  const undeclared = folderInputPaths(schema).filter((path) => !declared.has(path));
+  if (undeclared.length > 0) {
+    throw new Error(`Gateway method ${id} takes ${undeclared.join(', ')}, named like a folder, and does not declare whether a turn or process works in it (workFolders, or notWorkFolders with why).`);
+  }
+  for (const [path, why] of Object.entries(not ?? {})) {
+    if (!why.trim()) throw new Error(`Gateway method ${id} declares ${path} as no folder worked in without saying why.`);
+    if (works?.includes(path)) throw new Error(`Gateway method ${id} declares ${path} both as a folder worked in and as not one.`);
+  }
+  // Every input named like a file: a file on the daemon's disk, or said why not (a folder declared above counts).
+  const fileDeclared = new Set([...declared, ...(files ?? []), ...Object.keys(notFiles ?? {})]);
+  const undeclaredFiles = folderInputPaths(schema, FILE_INPUT_NAMES).filter((path) => !fileDeclared.has(path));
+  if (undeclaredFiles.length > 0) {
+    throw new Error(`Gateway method ${id} takes ${undeclaredFiles.join(', ')}, named like a file, and does not declare whether it names a file on this daemon's disk (daemonFiles, or notDaemonFiles with why).`);
+  }
+  for (const [path, why] of Object.entries(notFiles ?? {})) {
+    if (!why.trim()) throw new Error(`Gateway method ${id} declares ${path} as no file on this disk without saying why.`);
+    if (files?.includes(path)) throw new Error(`Gateway method ${id} declares ${path} both as a file on this disk and as not one.`);
+  }
+}
+
+/**
+ * The values at each of a method's declared work folders in a call's body, with the path each was read at: a string
+ * at a plain path, each string of a list at `a[]`. A value that is not text is left to the method's own validation.
+ */
+export function workFolderValues(body: unknown, paths: readonly string[]): { readonly path: string; readonly value: string }[] {
+  const out: { path: string; value: string }[] = [];
+  const read = (node: unknown, parts: readonly string[], at: string): void => {
+    if (parts.length === 0) {
+      if (typeof node === 'string' && node.trim()) out.push({ path: at, value: node });
+      // A list of folders (a tool server's allowed paths): each one.
+      if (Array.isArray(node)) node.forEach((entry, index) => { if (typeof entry === 'string' && entry.trim()) out.push({ path: `${at}[${index}]`, value: entry }); });
+      return;
+    }
+    if (node === null || typeof node !== 'object') return;
+    const [head, ...rest] = parts as [string, ...string[]];
+    const list = head.endsWith('[]');
+    const name = list ? head.slice(0, -2) : head;
+    const child = Array.isArray(node) ? undefined : (node as Record<string, unknown>)[name];
+    const here = at ? `${at}.${name}` : name;
+    if (!list) { read(child, rest, here); return; }
+    if (Array.isArray(child)) child.forEach((entry, index) => read(entry, rest, `${here}[${index}]`));
+  };
+  for (const path of paths) read(body, path.split('.'), '');
+  return out;
 }
 
 export interface GatewayEventDescriptor {
@@ -157,6 +286,35 @@ export interface CallContext {
   readonly project?: string | undefined;
   /** The conversation the call came from. */
   readonly sessionId?: string | undefined;
+  /**
+   * Which program of the principal asks: the fingerprint of its registration key (daemon-api control-routes.ts
+   * `readProgramRegistration`). Tells holders of one credential apart; grants nothing.
+   */
+  readonly registration?: string | undefined;
+  /** The registered program's process on this machine (`<pid>:<start>`), bound by the daemon with the registration. */
+  readonly process?: string | undefined;
+  /** The daemon served the request to itself, in process (a turn it hosts): bound by its router, never from a header. */
+  readonly daemonHosted?: true | undefined;
+  /**
+   * A daemon-run turn acting on someone else's input (security/turn-input-party.ts: a member's web chat, a guest, a
+   * channel message, work nobody but the owner approved): set in process only, by the daemon's own turn
+   * (tools/capability/daemon-tools.ts). Such a turn reaches only the chats and sessions its own caller made
+   * (control-plane/caller-reach.ts `reaches`); it only ever narrows what a call reaches.
+   */
+  readonly othersInput?: true | undefined;
+  /** With `othersInput`: the principal whose own conversation the turn runs in (a member's web chat: hers), when known. */
+  readonly othersInputFor?: string | undefined;
+  /**
+   * A call nested in one of the daemon's own turns, sent with the daemon's credential (set by the dispatch only for its
+   * in-process `daemonTurn` input, removed from any other): it names its turn's `project` only.
+   */
+  readonly daemonTurn?: true | undefined;
+  /**
+   * What the calling program's own conversation read from outside, as it says (daemon-api control-routes.ts
+   * `CALL_READ_OUTSIDE_HEADER`; security/conversation-exposure.ts `decodeCarriedExposure`). It only tightens: the
+   * dispatch runs the call inside that conversation, marked exposed (`withCarriedExposure`).
+   */
+  readonly readOutside?: string | undefined;
 }
 
 export interface GatewayMethodInvocationContext {
@@ -288,6 +446,11 @@ export const METHOD_DESCRIPTOR_SCHEMA = objectSchema({
   changesContract: BOOLEAN_SCHEMA,
   recipients: arraySchema(STRING_SCHEMA),
   invokable: BOOLEAN_SCHEMA,
+  workFolders: arraySchema(STRING_SCHEMA),
+  notWorkFolders: JSON_OBJECT_SCHEMA,
+  daemonFiles: arraySchema(STRING_SCHEMA),
+  notDaemonFiles: JSON_OBJECT_SCHEMA,
+  risk: stringEnumSchema(METHOD_RISKS),
   replay: objectSchema({ in: STRING_SCHEMA, name: STRING_SCHEMA, behavior: STRING_SCHEMA }, ['in', 'name', 'behavior']),
   repeat: stringEnumSchema(['safe', 'keyed', 'unsafe']),
   errorCodes: arraySchema(objectSchema({ code: STRING_SCHEMA, status: NUMBER_SCHEMA, meaning: STRING_SCHEMA }, ['code', 'status', 'meaning'])),
@@ -476,7 +639,10 @@ function defaultMethodEffect(scopes: readonly string[]): GatewayMethodEffect {
  *   listings (`sessions.list`, `sessions.search`, `sessions.hosted.list`,
  *   `sessions.integration.snapshot`, `companion.chat.sessions.list`), whose
  *   titles come from what was said and whose participants name the people in
- *   each conversation.
+ *   each conversation. A person's own web chat is not someone else's
+ *   transcript: its maker reads it (the companion chat reads, effect
+ *   `chat.read`) under the sessions scope she made it with, `read:sessions`
+ *   or `write:sessions`; every other chat stays behind `read:transcripts`.
  * - `read:pairing`, `read:remote`: paired devices, device nodes and their
  *   grants, remote peers, their pair requests and the work sent to them.
  * - `read:checkpoints`: workspace file contents (checkpoint diffs and
@@ -529,6 +695,12 @@ export function methodDescriptor(input: BuiltinMethodInput): GatewayMethodDescri
   const effect: GatewayMethodEffect = facts.outward ? 'outward' : defaultMethodEffect(facts.scopes);
   const repeat = methodRepeat(input.id, effect, input.repeat, input.replay);
   const inputSchema = withConfirmField(input.id, input.confirmation, input.inputSchema);
+  checkFolderInputs(input.id, inputSchema, input.workFolders, input.notWorkFolders, input.daemonFiles, input.notDaemonFiles);
+  // What it does that the owner decides (method-risk.ts): stated, or the catalog does not load.
+  const risk = input.risk ?? declaredMethodRisk(input.id, effect);
+  if (risk === undefined) {
+    throw new Error(`Gateway method ${input.id} changes something but declares no risk class (control-plane/method-risk.ts: loosens-a-protection, steers-a-model, cannot-be-undone, spends-money, writes-a-secret, owner-act, answers-the-owner or none).`);
+  }
   return {
     source: input.source ?? 'builtin',
     transport: input.transport ?? ['http', 'ws'],
@@ -544,6 +716,7 @@ export function methodDescriptor(input: BuiltinMethodInput): GatewayMethodDescri
     ...(facts.changesContract ? { changesContract: true } : {}),
     effect,
     repeat,
+    risk,
   };
 }
 

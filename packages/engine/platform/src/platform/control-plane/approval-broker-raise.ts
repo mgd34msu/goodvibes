@@ -47,7 +47,7 @@ import type {
   SharedApprovalAuditRecord,
   SharedApprovalRecord,
 } from './approval-broker.js';
-import { isOpenApprovalStatus, type ApprovalRequester } from './approval-lifecycle.js';
+import { isOpenApprovalStatus, type ApprovalHold, type ApprovalRequester } from './approval-lifecycle.js';
 import { ordinaryApprovalDecision } from './approval-disposition.js';
 import { logger } from '../utils/logger.js';
 import { assertPermissionActive } from '../permissions/cancellation.js';
@@ -78,7 +78,7 @@ export interface RaiseApprovalDeps {
   /** Write a new record, then put it in the map. Rejects with nothing visible when the write fails. */
   create(record: SharedApprovalRecord): Promise<void>;
   /** Record another wire raiser's hold on an open ask; null when the ask is no longer open. */
-  addHold(approvalId: string, holdId: string): Promise<SharedApprovalRecord | null>;
+  addHold(approvalId: string, hold: ApprovalHold): Promise<SharedApprovalRecord | null>;
   /** Fan the record out: SSE `approval-update`, surface message, listeners. */
   publish(approval: SharedApprovalRecord): void;
   /** Expire an ask whose deadline passed. */
@@ -176,7 +176,9 @@ export function approvalRaiser(metadata: Readonly<Record<string, unknown>> | und
     return typeof caller === 'string' && caller.length > 0 ? `in-process:capability-caller:${caller}` : 'in-process';
   }
   const principal = metadata['raisedByPrincipal'];
-  return typeof principal === 'string' && principal.length > 0 ? `principal:${principal}` : 'wire:unidentified';
+  // By kind first: a sign-in user named `shared-token` is never the operator token's raiser (pairing/principal-ids.ts).
+  const user = metadata['raisedByPrincipalKind'] === 'user' ? 'user:' : '';
+  return typeof principal === 'string' && principal.length > 0 ? `principal:${user}${principal}` : 'wire:unidentified';
 }
 
 /** The coalescing key of a raise: its raiser, then the broker's (session, tool, args) key. */
@@ -236,7 +238,7 @@ export async function raiseSharedApproval(
     const holdId = wire ? randomUUID() : undefined;
     if (holdId !== undefined) {
       // A wire raiser's hold is part of the record, so a restart keeps it and its receipt can be read.
-      const held = await deps.addHold(approval.id, holdId);
+      const held = await deps.addHold(approval.id, { id: holdId, ...(input.holdProcess === undefined ? {} : { process: input.holdProcess }) });
       if (held) approval = held;
       else {
         // The ask settled while the hold waited for the write queue: hand back its decision, with no hold to release.
@@ -260,7 +262,8 @@ export async function raiseSharedApproval(
 
   const now = Date.now();
   const creatorHoldId = wire ? randomUUID() : undefined;
-  const requester: ApprovalRequester = creatorHoldId !== undefined ? { kind: 'wire', holds: [{ id: creatorHoldId }] }
+  const requester: ApprovalRequester = creatorHoldId !== undefined
+    ? { kind: 'wire', holds: [{ id: creatorHoldId, ...(input.holdProcess === undefined ? {} : { process: input.holdProcess }) }] }
     : input.readsRecord === true ? { kind: 'record-reader' } : { kind: 'in-process' };
   const approval: SharedApprovalRecord = {
     id: `approval-${randomUUID().slice(0, 8)}`,

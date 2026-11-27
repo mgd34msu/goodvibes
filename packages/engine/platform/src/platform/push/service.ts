@@ -26,6 +26,7 @@ import type { DeliveryLifetime } from '../utils/delivery-lifetime.js';
 import { PushSubscriptionStore, toPublicSubscription, type PushSubscriptionStatus } from './subscription-store.js';
 import { VapidManager } from './vapid.js';
 import type {
+  StoredPushSubscription,
   PublicPushSubscription,
   PushDeliveryReceipt,
   PushMessage,
@@ -224,6 +225,28 @@ export interface PushServiceDeps {
   readonly users?: { onAdminWithdrawn(listener: (username: string) => void): () => void } | undefined;
 }
 
+/**
+ * What a push is about, as the stream frame about the same thing carries it (control-plane/event-reach.ts reads the
+ * event's name and payload): a question's id, a session's id. A push that names nothing it can tell apart goes to the
+ * owner himself only.
+ */
+export interface PushAbout {
+  readonly event: string;
+  readonly payload: Record<string, unknown>;
+}
+
+/**
+ * Who may be told what: for the principal that registered a device, null when it may be told everything (the owner
+ * himself), else whether a push about `(event, payload)` may reach it, by the rule every stream frame is sent by. Set
+ * once by the daemon where it is composed (it knows its users, devices and the reach rules); unset, no device is told
+ * anything (never "no rule, no check").
+ */
+export type PushAudience = (principalId: string) => ((event: string, payload: unknown) => boolean) | null;
+let daemonPushAudience: PushAudience | undefined;
+export function setPushAudience(audience: PushAudience | undefined): void {
+  daemonPushAudience = audience;
+}
+
 export interface SubscribeInput {
   readonly principalId: string;
   /** Stable device identity; when present the record reconciles on it, not the endpoint. */
@@ -337,9 +360,10 @@ export class PushService {
     );
   }
 
-  /** Fan a message out to every stored subscription. */
+  /** Fan a message about nothing named out: to the owner's own devices only (who may be told what, `PushAudience`). */
   deliver(message: PushMessage, lifetime: DeliveryLifetime = {}): Promise<PushDeliveryReceipt[]> {
-    return deliverToAll(message, this.deliveryDeps(), lifetime);
+    const audience = daemonPushAudience;
+    return deliverToAll(message, { ...this.deliveryDeps(), recipients: (subscription) => audience?.(subscription.principalId) === null }, lifetime);
   }
 
   /**
@@ -370,11 +394,24 @@ export class PushService {
    * a daemon receipt the first time the daemon itself is the cause. A fan-out
    * with no registered device is not a failure (push was never turned on).
    */
-  private announce(event: string, context: Record<string, string>, message: PushMessage): void {
+  private announce(event: string, context: Record<string, string>, message: PushMessage, about: PushAbout): void {
     // The daemon's own reason this fan-out could not send, held by this fan-out
     // alone so a concurrent one can neither take nor clear it.
     let notSent: string | null = null;
-    void deliverToAll(message, this.deliveryDeps((reason) => { notSent = reason; }), {}).then(
+    // Only the devices of people who may see what it is about (the rule every stream frame is sent by): decided once per
+    // registering principal for this fan-out.
+    const audience = daemonPushAudience;
+    const decided = new Map<string, boolean>();
+    const recipients = (subscription: StoredPushSubscription): boolean => {
+      let may = decided.get(subscription.principalId);
+      if (may === undefined) {
+        const reach = audience?.(subscription.principalId);
+        may = audience !== undefined && (reach === null || reach?.(about.event, about.payload) === true);
+        decided.set(subscription.principalId, may);
+      }
+      return may;
+    };
+    void deliverToAll(message, { ...this.deliveryDeps((reason) => { notSent = reason; }), recipients }, {}).then(
       (receipts) => this.reportReach(event, context, receipts, notSent),
       (error) => {
         logger.warn(`PushService: ${event} fan-out failed`, {
@@ -435,7 +472,7 @@ export class PushService {
         body: `${tool}: ${summary}`,
         data: { kind: 'approval', approvalId: approval.id },
         urgency: 'high',
-      });
+      }, { event: 'approval-update', payload: { approvalId: approval.id } });
     });
   }
 
@@ -455,7 +492,8 @@ export class PushService {
         body: item.title,
         data: { kind: 'needs-input', ...(item.sessionId ? { sessionId: item.sessionId } : {}) },
         urgency: 'normal',
-      });
+        // A question left for the owner is his alone, as his inbox's frames are.
+      }, { event: 'owner-inbox-update', payload: { id: item.id } });
     });
   }
 
@@ -589,7 +627,8 @@ export class PushService {
         ...(escalated ? { escalated: true } : {}),
       },
       urgency: 'high',
-    });
+      // About its session (a node of no session is the owner's alone).
+    }, { event: 'fleet', payload: notice.sessionId ? { sessionId: notice.sessionId } : {} });
   }
 
   /**
@@ -628,7 +667,7 @@ export class PushService {
           nodeId: notice.nodeId,
         },
         urgency: 'normal',
-      });
+      }, { event: 'fleet', payload: notice.sessionId ? { sessionId: notice.sessionId } : {} });
     });
   }
 }

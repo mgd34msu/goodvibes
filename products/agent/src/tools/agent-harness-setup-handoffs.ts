@@ -1,17 +1,14 @@
 import { quoteRouteValue, provisionConnectedHostTokenRoute } from './agent-harness-setup-posture-utils.ts';
 import type { SetupHandoffCard, SetupPlanItem, SetupRepairCard } from './agent-harness-setup-posture-types.ts';
-import { connectedHostAuthState, OWNER_PAIRING_COMMAND } from './agent-harness-setup-connected-host.ts';
+import { connectedHostAuthState, OWNER_PAIRING_CONTROL } from './agent-harness-setup-connected-host.ts';
 
 export function setupHandoff(options: SetupHandoffCard): SetupHandoffCard {
   return options;
 }
 
-export function confirmedWorkspaceActionRoute(actionId: string, explicitUserRequest: string): string {
-  return `agent_harness mode:"run_workspace_action" actionId:"${quoteRouteValue(actionId)}" explicitUserRequest:"${quoteRouteValue(explicitUserRequest)}"`;
-}
-
-export function inspectWorkspaceActionRoute(actionId: string): string {
-  return `agent_harness mode:"workspace_action" actionId:"${quoteRouteValue(actionId)}" includeParameters:true`;
+/** A capability the model runs (capability_run), by id; its inputs come from capability_find's answer. */
+function capabilityRoute(id: string): string {
+  return `capability_run id:"${quoteRouteValue(id)}"`;
 }
 
 export function openSurfaceRoute(surfaceId: string, explicitUserRequest: string): string {
@@ -90,7 +87,7 @@ export function setupHandoffsForItem(item: SetupPlanItem): readonly SetupHandoff
       const state = authPosture ? connectedHostAuthState(authPosture) : 'needs-token';
       if (state === 'review-pairing-store') return [setupHandoff({
         id: 'inspect-agent-pairing', label: 'Inspect Agent pairing', kind: 'diagnostic', effect: 'read-only',
-        userRoute: '/setup pair', modelRoute: 'agent_harness mode:"run_command" command:"/setup pair"',
+        userRoute: OWNER_PAIRING_CONTROL, modelRoute: 'capability_run id:"devices.pair"',
         nextStep: 'Review the prior host-bound attempt or unsafe store before any credential action.',
         safety: 'Preview only; never remints, revokes or rewrites shared-token storage.',
       })];
@@ -101,9 +98,9 @@ export function setupHandoffsForItem(item: SetupPlanItem): readonly SetupHandoff
             label: 'Owner pairs this Agent',
             kind: 'user-command',
             effect: 'user-run',
-            userRoute: OWNER_PAIRING_COMMAND,
-            modelRoute: 'agent_harness mode:"run_command" command:"/setup pair"',
-            nextStep: `Ask the owner to type ${OWNER_PAIRING_COMMAND} in the live Agent terminal and confirm the exact phrase it shows; /setup pair previews it. Then rerun setup status.`,
+            userRoute: OWNER_PAIRING_CONTROL,
+            modelRoute: 'capability_run id:"devices.pair"',
+            nextStep: `Ask the owner to press ${OWNER_PAIRING_CONTROL} in the live Agent terminal and confirm the exact phrase it shows; capability_run id:"devices.pair" previews it. Then rerun setup status.`,
             safety: 'Granting persistent administrative access is the owner\'s act; the model can preview it but cannot apply it.',
           })
           : state === 'needs-token'
@@ -143,24 +140,14 @@ export function setupHandoffsForItem(item: SetupPlanItem): readonly SetupHandoff
     case 'goodvibes-settings-import':
       return [
         setupHandoff({
-          id: 'preview-goodvibes-settings-import',
-          label: 'Preview GoodVibes import',
-          kind: 'workspace-action',
-          effect: 'read-only',
-          userRoute: item.userRoute,
-          modelRoute: 'import_goodvibes_settings action:"preview"',
-          nextStep: 'Show importable setting and subscription counts before any import.',
-          safety: 'Read-only preview; raw provider secrets are not returned.',
-        }),
-        setupHandoff({
-          id: 'apply-goodvibes-settings-import',
-          label: 'Apply GoodVibes import',
-          kind: 'workspace-action',
+          id: 'copy-from-terminal-app',
+          label: 'Give the Agent the terminal app\'s settings',
+          kind: 'capability',
           effect: 'confirmed-effect',
           userRoute: item.userRoute,
-          modelRoute: 'setup action:"import_settings" confirm:true explicitUserRequest:"Import reviewed shared GoodVibes settings into Agent-owned state."',
-          nextStep: 'Apply only after the user has reviewed the preview and wants Agent to import the values.',
-          safety: 'Confirmed Agent-owned settings import; does not mutate source GoodVibes platform stores.',
+          modelRoute: capabilityRoute('settings.copy-from-terminal-app'),
+          nextStep: 'Run it when the user wants the Agent to have the settings the terminal app has; the answer names every setting it copied and any it held back.',
+          safety: 'A setting that loosens a protection is copied only when the user chose to copy those too (security:"yes"); the terminal app\'s own settings are not changed.',
           requiresConfirmation: true,
         }),
       ];
@@ -182,7 +169,7 @@ export function setupHandoffsForItem(item: SetupPlanItem): readonly SetupHandoff
           label: 'Inspect model routing',
           kind: 'diagnostic',
           effect: 'read-only',
-          userRoute: 'Agent Workspace -> Models',
+          userRoute: 'Models and providers (the menu, Ctrl+G then m)',
           modelRoute: 'models action:"status" includeParameters:true',
           nextStep: 'Inspect current route, provider readiness, local recipes, and route quality before choosing.',
           safety: 'Read-only model routing posture.',
@@ -241,7 +228,7 @@ export function setupHandoffsForItem(item: SetupPlanItem): readonly SetupHandoff
           label: 'Open model picker',
           kind: 'ui-surface',
           effect: 'visible-navigation',
-          userRoute: 'Agent Workspace -> Models',
+          userRoute: 'Models and providers (the menu, Ctrl+G then m)',
           modelRoute: openSurfaceRoute('model-picker', 'Review or choose the main local model route.'),
           nextStep: 'Use the visible picker only after local readiness and benchmark evidence are reviewed.',
           safety: 'Visible UI navigation; route change stays explicit.',
@@ -282,15 +269,15 @@ export function setupHandoffsForItem(item: SetupPlanItem): readonly SetupHandoff
           userRoute: item.userRoute,
           modelRoute: 'memory action:"curator" includeParameters:true',
           nextStep: 'Review memory, notes, personas, skills, routines, and suggested local behavior updates.',
-          safety: 'Read-only curator posture; creates and imports stay confirmed workspace actions.',
+          safety: 'Read-only curator posture; creates and imports stay confirmed capabilities.',
         }),
         setupHandoff({
           id: 'capture-learned-behavior',
           label: 'Capture learned behavior',
-          kind: 'workspace-action',
+          kind: 'capability',
           effect: 'confirmed-effect',
-          userRoute: 'Agent Workspace -> Local Context',
-          modelRoute: confirmedWorkspaceActionRoute('learned-behavior', 'Save a reviewed lesson, workflow, or operating style as Agent-local behavior.'),
+          userRoute: 'Memory and knowledge, and This conversation (the menu, Ctrl+G then m)',
+          modelRoute: capabilityRoute('memory.add'),
           nextStep: 'Create a persona, skill, or routine only from a reviewed user-visible lesson.',
           safety: 'Confirmed Agent-local behavior write; no default knowledge write.',
           requiresConfirmation: true,
@@ -354,12 +341,12 @@ export function setupHandoffsForItem(item: SetupPlanItem): readonly SetupHandoff
           safety: 'Read-only channel posture; no external message is sent.',
         }),
         setupHandoff({
-          id: 'open-channels-workspace',
-          label: 'Open Channels workspace',
+          id: 'open-channels-place',
+          label: 'Open Mail, calendar and channels',
           kind: 'ui-surface',
           effect: 'visible-navigation',
           userRoute: item.userRoute,
-          modelRoute: 'agent_harness mode:"open_ui_surface" surfaceId:"agent-workspace" target:"channels" explicitUserRequest:"Open the Channels workspace for communication setup."',
+          modelRoute: 'agent_harness mode:"open_ui_surface" surfaceId:"places" target:"messages" explicitUserRequest:"Open Mail, calendar and channels for communication setup."',
           nextStep: 'Use visible channel setup only for surfaces where the assistant should be reachable.',
           safety: 'Visible UI navigation; channel pairing and delivery remain explicit.',
           requiresConfirmation: true,
@@ -382,7 +369,7 @@ export function setupHandoffsForItem(item: SetupPlanItem): readonly SetupHandoff
           label: 'Inspect process parity',
           kind: 'diagnostic',
           effect: 'read-only',
-          userRoute: 'Agent Workspace -> Work & Approvals -> Process capabilities',
+          userRoute: 'Your agents (Ctrl+O)',
           modelRoute: 'process action:"capabilities"',
           nextStep: 'Check process list, poll, wait, log, kill, write, PTY, and sudo parity before choosing a process route.',
           safety: 'Read-only parity report; does not start, stop, write to, or escalate a process.',
@@ -392,7 +379,7 @@ export function setupHandoffsForItem(item: SetupPlanItem): readonly SetupHandoff
           label: 'Inspect foreground shell route',
           kind: 'diagnostic',
           effect: 'read-only',
-          userRoute: 'Agent Workspace -> Work & Approvals',
+          userRoute: 'Work and agents (the menu, Ctrl+G then m)',
           modelRoute: 'execution action:"route" id:"local-shell-command"',
           nextStep: 'Use only visible foreground shell execution for explicit user-requested sudo until safe credential mediation exists.',
           safety: 'Read-only route inspection; actual shell execution remains governed by the foreground exec policy.',
@@ -421,12 +408,12 @@ export function setupHandoffsForItem(item: SetupPlanItem): readonly SetupHandoff
           safety: 'Read-only autonomy queue posture.',
         }),
         setupHandoff({
-          id: 'open-automation-workspace',
-          label: 'Open Schedules in the workspace',
+          id: 'open-automation-place',
+          label: 'Open Automation',
           kind: 'ui-surface',
           effect: 'visible-navigation',
-          userRoute: 'Agent Workspace -> Schedules',
-          modelRoute: 'agent_harness mode:"open_ui_surface" surfaceId:"agent-workspace" target:"automation" explicitUserRequest:"Open Schedules in the workspace for schedule and background work setup."',
+          userRoute: 'Automation, in the menu (Ctrl+G then m)',
+          modelRoute: 'agent_harness mode:"open_ui_surface" surfaceId:"places" target:"automation" explicitUserRequest:"Open Automation for schedule and background work setup."',
           nextStep: 'Create reminders or promote routines only through confirmed visible forms.',
           safety: 'Visible UI navigation; schedule and run mutations remain confirmed.',
           requiresConfirmation: true,
@@ -445,12 +432,12 @@ export function setupHandoffsForItem(item: SetupPlanItem): readonly SetupHandoff
           safety: 'Read-only tool posture; no browser or desktop action is executed.',
         }),
         setupHandoff({
-          id: 'open-tools-mcp-workspace',
-          label: 'Open Tools & MCP workspace',
+          id: 'open-tools-place',
+          label: 'Open Tools and extensions',
           kind: 'ui-surface',
           effect: 'visible-navigation',
           userRoute: item.userRoute,
-          modelRoute: 'agent_harness mode:"open_ui_surface" surfaceId:"agent-workspace" target:"tools" explicitUserRequest:"Open Tools and MCP setup for browser or desktop control."',
+          modelRoute: 'agent_harness mode:"open_ui_surface" surfaceId:"places" target:"tools" explicitUserRequest:"Open Tools and extensions for browser or desktop control."',
           nextStep: 'Configure and review only trusted browser or desktop connectors.',
           safety: 'Visible UI navigation; connector writes stay in confirmed setup forms.',
           requiresConfirmation: true,
@@ -471,10 +458,10 @@ export function setupHandoffsForItem(item: SetupPlanItem): readonly SetupHandoff
         setupHandoff({
           id: 'delegate-build-task',
           label: 'Delegate build task',
-          kind: 'workspace-action',
+          kind: 'capability',
           effect: 'confirmed-effect',
-          userRoute: 'Agent Workspace -> Work & Approvals -> Delegate a build task',
-          modelRoute: confirmedWorkspaceActionRoute('delegate-task', 'Delegate one explicit build, fix, review, or isolation task to GoodVibes TUI.'),
+          userRoute: 'Work and agents, Handed off, h (hand coding work on)',
+          modelRoute: capabilityRoute('work.delegate'),
           nextStep: 'Use only when isolation, parallelism, remote execution, or explicit user request makes delegation helpful.',
           safety: 'Confirmed delegation; preserves the original ask and keeps review explicit.',
           requiresConfirmation: true,
@@ -485,9 +472,9 @@ export function setupHandoffsForItem(item: SetupPlanItem): readonly SetupHandoff
         setupHandoff({
           id: 'finish-onboarding',
           label: 'Apply and close onboarding',
-          kind: 'workspace-action',
+          kind: 'capability',
           effect: 'confirmed-effect',
-          userRoute: 'Agent Workspace -> Finish',
+          userRoute: 'System, Setup (the menu, Ctrl+G then m)',
           modelRoute: 'setup action:"finish" confirm:true explicitUserRequest:"Finish Agent onboarding after setup review."',
           nextStep: 'Persist the setup completion marker only after the assistant is usable.',
           safety: 'Confirmed local onboarding marker write; no provider, host, channel, or automation mutation.',

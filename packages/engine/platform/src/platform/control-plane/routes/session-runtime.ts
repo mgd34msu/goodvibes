@@ -1,5 +1,4 @@
 import type { ApprovalBroker } from '../approval-broker.js';
-import { putToOwner } from '../owner-act.js';
 import { systemActor } from '@goodvibes/engine/daemon-api/http-policy';
 import { admitEffects } from '../../security/effect-authority.js';
 import { configKeyFacts } from '../../config/config-key-facts.js';
@@ -241,35 +240,16 @@ export function createSessionPermissionModeSetHandler(
     const sessionId = requireLocalSessionId(controls, params);
     const nextMode = toConfigPermissionMode(typeof params.mode === 'string' ? params.mode : '');
     const previousMode = toOperatorPermissionMode(controls.getPermissionMode(sessionId));
-    // A looser mode is the owner's own act (`settings.loosen`): from an admin who
-    // is not the owner it is put to the owner, and the mode changes when he
-    // approves it from his own app.
+    // A looser mode is decided by the one owner rule (daemon/method-owner-decision.ts): the dispatch tells this handler
+    // whether it admits the caller at once; one it does not is answered OWNER_DECISION_NEEDED, nothing changed, and the
+    // dispatch puts the same call to the owner's gate. A caller the effect table refuses outright is refused.
     const loosens = configKeyFacts('permissions.mode').loosens?.(controls.getPermissionMode(sessionId), nextMode) === true;
-    const admission = loosens ? admitEffects(invocation.context.actor ?? systemActor('in-process'), ['settings.loosen']) : undefined;
-    if (admission !== undefined && admission.kind !== 'allowed') {
-      if (admission.kind === 'refused' || !ownerApprovals) {
+    if (loosens && invocation.context.metadata?.['ownerAdmitted'] !== true) {
+      if (admitEffects(invocation.context.actor ?? systemActor('in-process'), ['settings.loosen']).kind === 'refused') {
         throw new GatewayVerbError(`Setting ${sessionId} to ${toOperatorPermissionMode(nextMode)} would loosen the permission mode, which only the owner does. Nothing was changed.`, 'OWNER_ONLY', 403, 'mode');
       }
-      const requestedBy = invocation.context.principalId ?? 'a caller who is not the owner';
-      const { approvalId } = await putToOwner(ownerApprovals, {
-        summary: `${requestedBy} asks to set session ${sessionId} to ${toOperatorPermissionMode(nextMode)}`,
-        reasons: [`Changing the permission mode from ${previousMode} to ${toOperatorPermissionMode(nextMode)} loosens it.`],
-        tool: 'sessions.permissionMode.set',
-        args: { sessionId, mode: toOperatorPermissionMode(nextMode) },
-        requestedBy,
-        apply: () => controls.setPermissionMode(nextMode, sessionId),
-      });
-      return Response.json({
-        sessionId,
-        code: 'OWNER_APPROVAL_PENDING',
-        approvalId,
-        // Whether this caller may read the approval (approvals.list) and so follow it to its outcome.
-        followable: admitEffects(invocation.context.actor ?? systemActor('in-process'), ['approvals.read']).kind === 'allowed',
-        mode: previousMode,
-        requestedMode: toOperatorPermissionMode(nextMode),
-        state: `nothing was changed yet; setting ${sessionId} to ${toOperatorPermissionMode(nextMode)} loosens the permission mode, which only the owner does, so it was put to the owner and changes when the owner approves it`,
-        next: [`Watch approval ${approvalId} (approvals.list with approvalId, or the approval-update event).`],
-      }, { status: 202 });
+      void ownerApprovals;
+      throw new GatewayVerbError(`Setting ${sessionId} from ${previousMode} to ${toOperatorPermissionMode(nextMode)} loosens the permission mode: the owner decides it.`, 'OWNER_DECISION_NEEDED', 409, 'mode');
     }
     const changed = controls.setPermissionMode(nextMode, sessionId);
     const result = {

@@ -18,7 +18,7 @@ import { summarizeError } from '../utils/error-display.js';
 import { ConversationManager } from '../core/conversation.js';
 import { Orchestrator, type OrchestratorUserInputOptions } from '../core/orchestrator.js';
 import { ToolRegistry } from '../tools/registry.js';
-import { registerAllTools } from '../tools/index.js';
+import { composeTurnTools } from '../agents/turn-composition.js';
 import { registerDevicePhoneTool } from '../devices/device-phone-tool.js';
 import { ContextAccountingHolder } from '../tools/context-accounting/index.js';
 import { bindSessionContextAccounting } from '../tools/context-accounting/session-source.js';
@@ -37,6 +37,7 @@ import type { HostedDaemonRequestPath, HostedSurfaceTools, HostedSurfaceTurn } f
 import { askingQuestions, type QuestionAsker } from '../agents/agent-owner-questions.js';
 import type { AgentWorkerSurface } from '../agents/orchestrator.js';
 import type { ConfigRoutingOptions } from '../tools/goodvibes-runtime/config-routing.js';
+import { projectSettingsInForce } from '../config/project-view.js';
 import { watchSessionAnswers, type SessionAnswerWatch } from '../agents/agent-inlets.js';
 import { callingAgentId } from '../agents/calling-agent.js';
 import type { OwnerInbox } from '../control-plane/owner-inbox.js';
@@ -44,7 +45,6 @@ import type { QuestionInbox } from '../tools/query/index.js';
 import { resolveSurfaceDirectory } from '../runtime/surface-root.js';
 import { getProcessUntrustedContentLedger, withUntrustedContentScope } from '../security/untrusted-content.js';
 import { currentTurn } from '../security/turn-boundary.js';
-import type { HostedSessionExecPosture } from './exec-posture.js';
 import { TURN_EXEC_CONTAINMENT } from '../tools/exec/containment.js';
 
 /**
@@ -136,12 +136,6 @@ export interface HostedSessionRuntimeOptions {
    * `agent_work_plan`) decides for itself. Absent: no `work_plan` tool.
    */
   readonly workPlan?: (import('../tools/work-plan/index.js').WorkPlanToolStore & { readonly projectRoot: string }) | undefined;
-  /**
-   * What this run's exec tool may do, when the caller decides per session
-   * rather than per floor. Omitted ⇒ the floor's own decider, and
-   * `conversational` when the floor states nothing either (exec-posture.ts).
-   */
-  readonly execPosture?: HostedSessionExecPosture | undefined;
   /**
    * What the engine keeps about the contracts this session starts
    * (session-contracts.ts): the record's list, and a notice when the session
@@ -335,15 +329,37 @@ export function createHostedSessionRuntime(options: HostedSessionRuntimeOptions)
     ? askingQuestions(inbox, () => ({ session: sessionId, host: 'hosted', sessionWatch: answers }))
     : undefined;
 
+  // The project's own facilities, the ones every other turn of the host in this project uses (workspace-floor.ts
+  // `project`): its tool servers, its checklist, its changed-files record, its long-output folder.
+  const project = options.floor.project;
   const workPlanProject = options.workPlan && !options.surfaceTurn ? options.workPlan : undefined;
   const workPlanHere = workPlanProject && resolve(workPlanProject.projectRoot) === resolve(options.workspaceRoot) ? workPlanProject : undefined;
-  if (workPlanProject && !workPlanHere) {
+  if (!project && workPlanProject && !workPlanHere) {
     toolRegistry.declareElsewhere(['work_plan'], {
       reason: `The work plan the daemon keeps is for its own project (${workPlanProject.projectRoot}), not this session's workspace (${options.workspaceRoot}).`,
       next: "Use work_plan from a GoodVibes session opened in that project, or start the hosted session in the daemon's project.",
     });
   }
-  const registeredTools = registerAllTools(toolRegistry, {
+  // The one composition every turn has (agents/turn-composition.ts): this session's host facts, the project's
+  // environment, and the session's program (its surface, admission and settings routing; a surface turn that brings
+  // its own plan tool is not offered the project's checklist as `work_plan`).
+  const registeredTools = composeTurnTools(toolRegistry, {
+    ...(project ? { project } : {}),
+    program: {
+      // The session's OWN surface, not the host's. Everything keyed on this,
+      // per-surface tool state under `.goodvibes/<surface>/`, and the store that
+      // answers client-owned settings, follows the surface the session belongs to.
+      surfaceRoot: originSurface,
+      // This process IS the daemon, so daemon-owned keys are already local. What
+      // must NOT be local is a client-owned key belonging to another surface, and
+      // that is what `clientOwnedStore` redirects: to the originating surface's
+      // own settings file, which the live surface is already watching.
+      configRouting,
+      // The surface's own admission for read and settings, as its own process builds them.
+      ...(options.surfaceTurn?.platformToolAdmission ?? {}),
+      ownPlanTool: options.surfaceTurn !== undefined,
+    },
+    host: {
     ...(ownerQuestions ? { ownerQuestions } : {}),
     ...(workPlanHere ? { workPlan: workPlanHere } : {}),
     ...(options.triggers ? { triggers: options.triggers } : {}),
@@ -363,7 +379,11 @@ export function createHostedSessionRuntime(options: HostedSessionRuntimeOptions)
     workflowServices: services.workflow,
     // `state mode=memory` reads and writes the workspace's one memory store.
     ...(services.memoryAccess ? { memoryAccess: services.memoryAccess } : {}),
-    mcpRegistry: services.mcpRegistry,
+    // The person's remote runners and owner profile, as every other turn of the host has them. A surface turn that
+    // brings its own `profile` (the Agent's, over the same daemon methods) keeps it: two tools cannot hold one name, and
+    // the session could not be made at all (every Agent message to the daemon failed before reaching the model).
+    ...(options.floor.hostTools?.remoteRunnerRegistry ? { remoteRunnerRegistry: options.floor.hostTools.remoteRunnerRegistry } : {}),
+    ...(options.floor.hostTools?.personalCapture && !options.surfaceTurn ? { personalCapture: options.floor.hostTools.personalCapture } : {}),
     sessionOrchestration: services.sessionOrchestration,
     // Per SESSION: without it every task-tool ref lands in the unowned legacy
     // namespace and owner-existence reaping cannot run.
@@ -378,17 +398,6 @@ export function createHostedSessionRuntime(options: HostedSessionRuntimeOptions)
     projectRoot: options.workspaceRoot,
     sandboxSessionRegistry: services.sandboxSessionRegistry,
     workingDirectory: options.workspaceRoot,
-    // The session's OWN surface, not the host's. Everything keyed on this,
-    // per-surface tool state under `.goodvibes/<surface>/`, and the store that
-    // answers client-owned settings, follows the surface the session belongs to.
-    surfaceRoot: originSurface,
-    // This process IS the daemon, so daemon-owned keys are already local. What
-    // must NOT be local is a client-owned key belonging to another surface, and
-    // that is what `clientOwnedStore` redirects: to the originating surface's
-    // own settings file, which the live surface is already watching.
-    configRouting,
-    // The surface's own admission for read and settings, as its own process builds them.
-    ...(options.surfaceTurn?.platformToolAdmission ?? {}),
     archetypeLoader: services.archetypeLoader,
     ...(options.cloudflareAuthToken ? { cloudflareAuthToken: options.cloudflareAuthToken } : {}),
     configManager: services.configManager,
@@ -410,6 +419,7 @@ export function createHostedSessionRuntime(options: HostedSessionRuntimeOptions)
     // setting decides the boundary and the gate under the owner's mode decides the command; a hosted turn is not
     // refused a command a terminal turn in the same folder would run. Nothing here reads the wire.
     execContainment: TURN_EXEC_CONTAINMENT,
+    },
   });
 
   if (options.floor.devicePosture) registerDevicePhoneTool(toolRegistry, options.floor.devicePosture);
@@ -436,6 +446,10 @@ export function createHostedSessionRuntime(options: HostedSessionRuntimeOptions)
     });
     throw error;
   }
+  // The host's own decoration (mail and calendar, the paired phone), after the session's own tools: a surface turn
+  // that brings its own `google` keeps it.
+  try { options.floor.hostTools?.decorateRegistry?.(toolRegistry); }
+  catch (error) { logger.warn('[hosted-sessions] the host\'s own tools were not added to a session; it runs without them', { sessionId, error: summarizeError(error) }); }
   // One composition per model-request signal: a turn's retries and tool rounds share it.
   const surfacePromptBySignal = new WeakMap<AbortSignal, Promise<string>>();
   const getSystemPrompt = surfaceTurn
@@ -461,7 +475,8 @@ export function createHostedSessionRuntime(options: HostedSessionRuntimeOptions)
     toolRegistry,
     permissionManager: services.permissionManager,
     getSystemPrompt,
-    hookDispatcher: services.hookDispatcher,
+    // The project's dispatcher (its hooks file, its hook trace), the one every turn of the host in the project fires.
+    hookDispatcher: project?.hookDispatcher ?? services.hookDispatcher,
     flagManager: services.featureFlags,
     runtimeBus: services.runtimeBus,
     sessionId,
@@ -471,13 +486,21 @@ export function createHostedSessionRuntime(options: HostedSessionRuntimeOptions)
       contractIntake: createContractIntake({ runner: options.floor.contractRunner, projectRoot: options.workspaceRoot, getSelectedModel: () => providerRegistry.getCurrentModel() }),
     },
   });
+  // The project's code index, opened when its keeping is on (absent otherwise).
+  const projectCode = project?.codeIndex?.();
   orchestrator.setCoreServices({
-    configManager: services.configManager,
+    // The turn's folder is this session's project, not the folder of the settings the daemon lends its floor (the
+    // daemon's own folder): the environment line, "this project" memory and verification records follow it.
+    configManager: project?.configManager ?? projectSettingsInForce(services.configManager, options.workspaceRoot),
     providerRegistry,
     // A session-mode contract's unit is this session's own turns.
     contractHooks: options.floor.contractRunner.hooks(),
     // Tasks another session handed to this one are said at the start of each turn until accepted.
     sessionOrchestration: services.sessionOrchestration,
+    // The owner's memory for this project and his own, and the project's code context while its index is kept, given
+    // to each turn as the host's other turns in the project are given them.
+    ...(options.floor.hostTools?.memoryRegistry ? { memoryRegistry: options.floor.hostTools.memoryRegistry } : {}),
+    ...(projectCode ? { codeIndex: projectCode.source, isCodeInjectionSettingEnabled: () => true } : {}),
   });
 
   // context_accounting answers for this session: its injections, token use and compaction.

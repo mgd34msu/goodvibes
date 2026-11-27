@@ -225,7 +225,7 @@ export class OpenAIProvider implements LLMProvider {
   private client(): Promise<OpenAI> {
     // Embeddings and the Batch API are API-key services: a ChatGPT subscription does not serve them.
     if (!this.apiKeyConfigured() && this.subscriptionConfigured()) {
-      return Promise.reject(new ProviderError('This OpenAI request needs an API key (OPENAI_API_KEY, or /secrets): the ChatGPT subscription serves chat only, not embeddings or the Batch API. Nothing was sent.', {
+      return Promise.reject(new ProviderError('This OpenAI request needs an API key (OPENAI_API_KEY, or "store its key" on the OpenAI row of the Providers tab in Models and providers): the ChatGPT subscription serves chat only, not embeddings or the Batch API. Nothing was sent.', {
         statusCode: 401, provider: this.name, operation: 'request', phase: 'auth',
       }));
     }

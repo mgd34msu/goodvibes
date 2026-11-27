@@ -13,6 +13,11 @@
  */
 // The words' own module (channel-words.ts re-exports it): the web UI draws this declaration too (places/browser.ts).
 import { CHANNEL_STATE_WORDS, channelReasonOf, channelStateOf, type ChannelState } from '@goodvibes/engine/platform/platform/channels/channel-state';
+import { OWN_MESSAGES_CHANNELS } from '@goodvibes/engine/platform/platform/channels/own-messages-proof';
+
+/** The channels whose own keys are entered on their row ("enter its keys": the daemon's channels.connect). */
+const KEYED_CHANNELS: readonly string[] = ['slack', 'discord', 'ntfy', 'webhook', 'homeassistant', 'telegram', 'google-chat', 'signal',
+  'whatsapp', 'telephony', 'imessage', 'msteams', 'bluebubbles', 'mattermost', 'matrix'];
 import { definePlace, type PlaceAction, type PlaceItem, type PlaceList } from './place-types.js';
 // The Google tab: the daemon's one Gmail and Google Calendar connection and the steps of connecting it (its own item kinds).
 import { MESSAGES_GOOGLE_ACTIONS, MESSAGES_GOOGLE_LISTS } from './messages-google-entries.js';
@@ -55,6 +60,8 @@ interface ChannelItem extends PlaceItem {
   readonly state: ChannelState;
   readonly label: string;
   readonly reason?: string | undefined;
+  /** The project its conversations work in, `none` when none is chosen ("Project for this channel" opens on it). */
+  readonly project: string;
 }
 
 /** A webhook address notifications go to, by its number in the daemon's one list (only its site is shown). */
@@ -221,8 +228,11 @@ function channels(output: unknown): readonly ChannelItem[] {
     if (!surface) return [];
     const reason = channelReasonOf(channel);
     const state = channelStateOf(channel);
+    // Its project (the daemon puts it in the channel's metadata), or `none` (the channels.projects row "None").
+    const metadata = channel['metadata'];
+    const project = (metadata && typeof metadata === 'object' && !Array.isArray(metadata) ? text((metadata as Readonly<Record<string, unknown>>)['project']) : '') || 'none';
     // A channel never set up is a line saying so, not counted in the tab's number.
-    return [{ id: surface, kind: 'channel', state, label: text(channel['label']) || surface, ...(reason ? { reason } : {}), ...(state === 'not-set-up' ? { uncounted: true as const } : {}) }];
+    return [{ id: surface, kind: 'channel', state, label: text(channel['label']) || surface, ...(reason ? { reason } : {}), project, ...(state === 'not-set-up' ? { uncounted: true as const } : {}) }];
   });
 }
 
@@ -465,10 +475,20 @@ export const MESSAGES_PLACE = definePlace<Item>({
     // A channel not set up or switched off: the program's own form for connecting chat apps (/setup's chat-apps
     // topic), declared next so it is the second key shown beside it.
     { key: 's', list: 'channels', states: ['not-set-up', 'off'], capability: 'setup.chat-apps', label: 'set it up' },
+    // A chat channel's own keys, in its form on its row (secrets masked there), stored in the daemon and switched on
+    // once everything it needs is set; "Pair something, A chat channel" in Devices and network opens this row.
+    { key: 'l', id: 'enter-keys', list: 'channels', offeredWhen: { field: 'id', isOneOf: KEYED_CHANNELS }, capability: 'channels.connect', label: 'enter its keys', fill: { channel: 'id' }, form: true },
     { key: 't', list: 'channels', states: ['working'], capability: 'channels.test', label: 'send a test', fill: { channel: 'id' } },
     { key: 'k', list: 'channels', states: TROUBLED, capability: 'channels.doctor', label: 'check it', fill: { channel: 'id' } },
     { key: 'w', list: 'channels', states: SET_UP, capability: 'channels.rules', label: 'who may write', fill: { channel: 'id' } },
     { key: 'e', list: 'channels', states: SET_UP, capability: 'channels.set-rules', label: 'change who may write', fill: { channel: 'id' } },
+    // Off by default: a message here is someone else's input, also from your own account (security/turn-input-party.ts).
+    // Offered only on a channel whose kind proves its sender and a one-to-one conversation (own-messages-proof.ts).
+    { key: 'm', list: 'channels', states: SET_UP, offeredWhen: { field: 'id', isOneOf: OWN_MESSAGES_CHANNELS }, capability: 'channels.own-messages', label: 'treat my own messages here as me', fill: { channel: 'id' } },
+    // Where a conversation here may change things: a registered project, or none (then it writes no file and runs no
+    // command; channels/channel-project.ts).
+    // Always its form: choosing the project is the whole point (its default, none, would otherwise run at once).
+    { key: 'j', list: 'channels', states: SET_UP, capability: 'channels.project', label: 'project for this channel', fill: { channel: 'id' }, startWith: { project: 'project' }, form: true },
     { key: 'p', list: 'channels', states: SET_UP, capability: 'channels.profile', label: 'what its sessions get', fill: { channel: 'id' } },
     { key: 'g', list: 'channels', states: SET_UP, capability: 'channels.set-profile', label: 'give it a model or mode', fill: { channel: 'id' } },
     { key: 'u', list: 'channels', states: SET_UP, capability: 'channels.remove-profile', label: 'use the defaults', fill: { channel: 'id' } },

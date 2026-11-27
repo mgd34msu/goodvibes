@@ -26,6 +26,7 @@ import type { ToolRegistry } from '@goodvibes/engine/platform/platform/tools';
 import type { ForensicsRegistry } from '@/runtime/index.ts';
 import type { PolicyRuntimeState } from '@/runtime/index.ts';
 import type { TaskManager } from '@/runtime/index.ts';
+import type { OpsControlPlane } from '@goodvibes/engine/platform/platform/runtime/operations';
 import type { UiRuntimeServices } from './ui-services.ts';
 import { GOODVIBES_AGENT_SURFACE_ROOT } from '../config/surface.ts';
 import { createKnowledgeApi } from '@goodvibes/engine/platform/platform/knowledge';
@@ -56,6 +57,8 @@ export interface BootstrapShellOptions {
   readonly policyRuntimeState: PolicyRuntimeState;
   readonly uiServices: UiRuntimeServices;
   readonly taskManager: TaskManager;
+  /** Pause, go on, cancel and run again on this session's tasks (terminal-shell's task interventions). */
+  readonly opsControlPlane?: OpsControlPlane | undefined;
   readonly completeModelSelectionSideEffect?: () => void;
 }
 
@@ -117,6 +120,7 @@ export function createBootstrapShell(options: BootstrapShellOptions): BootstrapS
     policyRuntimeState,
     uiServices,
     taskManager,
+    opsControlPlane,
     completeModelSelectionSideEffect,
   } = options;
 
@@ -142,10 +146,6 @@ export function createBootstrapShell(options: BootstrapShellOptions): BootstrapS
   registerBuiltinCommands(commandRegistry, {
     rememberedRules: () => rememberedRules instanceof UserPermissionRuleStore ? rememberedRules : undefined,
   });
-  // No opsControlPlane: the Agent's product boundary keeps connected-host
-  // tasks read-only (see /tasks: every mutation subcommand is blocked and
-  // routed to /workplan or /delegate), so the opsApi intervention verbs
-  // honestly report the control plane as unavailable.
   const foundationClients = createRuntimeFoundationClients({
     // The foundation clients read the session REGISTER (listSessions and the
     // rest), not the dispatch seam, so they get the daemon-grade view, the one
@@ -153,6 +153,7 @@ export function createBootstrapShell(options: BootstrapShellOptions): BootstrapS
     runtimeServices: services.asDaemonGradeView(),
     tasksReadModel: uiServices.readModels.tasks,
     taskManager,
+    ...(opsControlPlane === undefined ? {} : { opsControlPlane }),
   });
   const { directTransport, hookApi, mcpApi, opsApi, providerApi } = foundationClients;
   const agentKnowledgeApi = createKnowledgeApi(services.agentKnowledgeService, { memoryRegistry: services.memoryRegistry });

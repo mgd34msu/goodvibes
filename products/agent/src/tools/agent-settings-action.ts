@@ -1,13 +1,13 @@
 /**
  * The one reading of a settings call's `action` (or `mode`). The settings
- * tool, its input projector and the import projector all ask this module, so a
- * word that one of them reads as a write is a write for all of them: a write
- * that reached `execute` without its admission capture would be refused.
+ * tool and its input projector both ask this module, so a word that one of
+ * them reads as a write is a write for both: a write that reached `execute`
+ * without its admission capture would be refused.
  */
 
-export type SettingsAction = 'list' | 'get' | 'set' | 'reset' | 'import' | 'preview_import';
+export type SettingsAction = 'list' | 'get' | 'set' | 'reset' | 'import';
 
-export const SETTINGS_ACTION_WORDS: readonly SettingsAction[] = ['list', 'get', 'set', 'reset', 'import', 'preview_import'];
+export const SETTINGS_ACTION_WORDS: readonly SettingsAction[] = ['list', 'get', 'set', 'reset', 'import'];
 
 const SETTINGS_ACTION_ALIASES: ReadonlyMap<string, SettingsAction> = new Map<string, SettingsAction>([
   ...['list', 'status', 'settings', 'catalog', 'search', 'find', 'browse'].map(word => [word, 'list'] as const),
@@ -15,11 +15,7 @@ const SETTINGS_ACTION_ALIASES: ReadonlyMap<string, SettingsAction> = new Map<str
   ...['set', 'update', 'change', 'configure', 'set_setting'].map(word => [word, 'set'] as const),
   ...['reset', 'clear', 'default', 'restore', 'reset_setting'].map(word => [word, 'reset'] as const),
   ...['import', 'import_settings', 'settings_import', 'import_goodvibes', 'goodvibes_import', 'apply_import'].map(word => [word, 'import'] as const),
-  ['preview_import', 'preview_import'],
 ]);
-
-/** The words `import_goodvibes_settings` (and a workspace settings-import action) read as "apply the import". */
-const IMPORT_APPLY_WORDS: ReadonlySet<string> = new Set(['import', 'apply', 'confirm', 'import_settings', 'settings_import', 'import_goodvibes', 'goodvibes_import', 'apply_import']);
 
 /** Lower case, trimmed, `-` read as `_`; anything that is not a string is no word. */
 export function settingsActionWord(value: unknown): string {
@@ -40,14 +36,4 @@ export function readSettingsAction(args: Readonly<Record<string, unknown>>): Set
   if (settingsActionWord(args.action) || settingsActionWord(args.mode)) return aliasOf(args.action) ?? aliasOf(args.mode) ?? null;
   const named = (value: unknown) => typeof value === 'string' && value.trim() !== '';
   return named(args.key) || named(args.setting) ? 'get' : 'list';
-}
-
-/** The word a settings-import call was given: `action`, else `mode`. */
-export function settingsImportWord(args: Readonly<Record<string, unknown>>): string {
-  return settingsActionWord(args.action) || settingsActionWord(args.mode);
-}
-
-/** Whether an import word applies the import (any other word previews it). */
-export function isImportApplyWord(word: string): boolean {
-  return IMPORT_APPLY_WORDS.has(word);
 }

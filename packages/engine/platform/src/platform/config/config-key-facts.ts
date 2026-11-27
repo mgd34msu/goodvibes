@@ -13,7 +13,7 @@
  * loosening declarations and combines all of them into one record per key.
  */
 import type { ConfigKeyFacts } from './schema-shared.js';
-import { CONFIG_KEYS } from './schema.js';
+import { CONFIG_KEYS, CONFIG_SCHEMA, type ConfigValueKind } from './schema.js';
 import { configKeyScope } from './config-ownership.js';
 import { isSecretBearingConfigKey, isSecretReferenceValue } from './secret-bearing-config-keys.js';
 import { isSecret } from '../security/secret.js';
@@ -209,6 +209,28 @@ function addsToList(loosening: string): Loosening {
 function removesFromList(loosening: string): Loosening {
   return { loosening, loosens: BLOCKED_HOSTS.loosens };
 }
+/**
+ * A choice whose values run from the strictest (first) to the loosest (last): a move to a later value loosens, a move
+ * to an earlier one tightens. A value outside the list counts as any change.
+ */
+function ranked(loosening: string, strictestFirst: readonly string[]): Loosening {
+  return {
+    loosening,
+    loosens: (prev, next) => {
+      const proposed = typeof next === 'string' ? strictestFirst.indexOf(next) : -1;
+      const baseline = typeof prev === 'string' ? strictestFirst.indexOf(prev) : -1;
+      if (proposed < 0 || baseline < 0) return changes(prev, next);
+      return proposed > baseline;
+    },
+  };
+}
+/** A tool budget limit, where 0 is no limit: removing it or raising it loosens; lowering a set one tightens. */
+const raisesBudget = (prev: unknown, next: unknown): boolean => {
+  const proposed = amountOf(next), baseline = amountOf(prev);
+  if (proposed === undefined || baseline === undefined) return changes(prev, next);
+  if (proposed === baseline) return false;
+  return proposed === 0 || (baseline !== 0 && proposed > baseline);
+};
 
 const EXACT_LOOSENING = new Map<string, Loosening>();
 const PREFIX_LOOSENING: Array<readonly [string, Loosening]> = [];
@@ -239,6 +261,32 @@ for (const key of ['judgment.endpoint', 'judgment.model', 'judgment.backend', 'j
 }
 // No decision model chosen, turned off: a decision model (set here or in the environment) decides again.
 declareLoosening('judgment.noDecisionModel', { loosening: 'let a decision model decide for you again', loosens: flagTurnsOff });
+// Safety-gate and protection keys whose values say which way a change goes (each strict value is the closed posture
+// of settings-ingestion.ts `closedPostureOf`, or the schema row's own words): only a move away from the strict end
+// loosens, so a move toward it (secrets only in secure storage, MCP servers contained) is never held back or put to
+// the owner. Declared before the pinned keys below, whose first-rule-wins declaration would count any change.
+declareLoosening('storage.secretPolicy', ranked('let passwords and keys be kept outside secure storage', ['require_secure', 'preferred_secure', 'plaintext_allowed']));
+declareLoosening('sandbox.mcpIsolation', { loosening: 'run MCP servers outside their sandbox', loosens: becomes('disabled') });
+declareLoosening('conversationGate.mode', ranked('let a chat message start work with less confirmation', ['confirm-all', 'propose', 'off']));
+declareLoosening('fetch.sanitizeMode', ranked('clean fetched pages less', ['strict', 'safe-text', 'none']));
+declareLoosening('permissions.engine', { loosening: 'stop the policy engine deciding', loosens: becomes('baseline') });
+declareLoosening('policy.registryEnabled', { loosening: 'turn the policy registry off', loosens: flagTurnsOff });
+declareLoosening('policy.requireSignedBundles', { loosening: 'accept a policy bundle nobody signed', loosens: flagTurnsOff });
+declareLoosening('runtime.toolBudget.enforced', { loosening: 'stop enforcing the tool budget', loosens: flagTurnsOff });
+for (const key of ['runtime.toolBudget.maxMs', 'runtime.toolBudget.maxTokens', 'runtime.toolBudget.maxCostUsd']) {
+  declareLoosening(key, { loosening: 'raise or remove a tool budget limit', loosens: raisesBudget });
+}
+for (const key of ['controlPlane.hostMode', 'httpListener.hostMode']) {
+  declareLoosening(key, { loosening: 'listen beyond this computer', loosens: (prev, next) => next !== 'local' && changes(prev, next) });
+}
+declareLoosening('network.outboundTls.mode', { loosening: 'trust another certificate for outgoing connections', loosens: (prev, next) => next !== 'bundled' && changes(prev, next) });
+declareLoosening('network.outboundTls.allowInsecureLocalhost', { loosening: 'accept an unchecked certificate from this computer', loosens: flagTurnsOn });
+declareLoosening('device.capabilities.mode', ranked('let a paired phone\'s camera, location and more be reached more freely', ['off', 'ask-every-time', 'honor-grants']));
+declareLoosening('device.capabilities.allowAlwaysOffer', ranked('let more phone features be allowed for good', ['never', 'standard-only', 'every-capability']));
+declareLoosening('device.location.precision', ranked('let the phone report a more exact location', ['coarse-only', 'ask-precise', 'precise-grantable']));
+declareLoosening('device.clipboard.readMode', ranked('let the phone\'s clipboard be read more freely', ['off', 'ask-only', 'grantable']));
+declareLoosening('voice.wake.indicator', { loosening: 'stop showing when the microphone is listening', loosens: becomes('off') });
+declareLoosening('voice.wake.retainAudio', { loosening: 'keep recordings on disk', loosens: becomes('session-temp') });
 for (const key of [...PINNED_NETWORK, ...PINNED_SAFETY_GATE]) declareLoosening(key, PINNED);
 // Each names a program the host runs or a token variable it hands over when a secret reference resolves.
 declareLoosening('storage.secretProviders.', { loosening: 'change the program or token a password manager runs with', loosens: changes });
@@ -270,11 +318,36 @@ declareLoosening('daemon.timezone', {
   loosens: (prev, next) => timezoneChangeMovesToday(prev, next, Date.now()),
 });
 
+/**
+ * The rule a key gets from what its value IS (schema-types.ts `ConfigSetting.valueKind`), declared on its schema row,
+ * so a new key of such a kind is held back by every import, put to the owner when another caller sets it and refused
+ * from a project file, with nothing listed here. A key with its own rule above keeps that rule.
+ */
+const VALUE_KIND_LOOSENING: Readonly<Record<ConfigValueKind, Loosening>> = {
+  command: { loosening: 'change a command or program GoodVibes runs by itself', loosens: changes },
+  endpoint: { loosening: 'change where GoodVibes sends data or credentials', loosens: changes },
+  'request-target': { loosening: 'change which provider or model your requests are sent to', loosens: changes },
+  path: { loosening: 'change a file or folder GoodVibes reads or writes outside the project', loosens: changes },
+  'trusted-list': { loosening: 'change who or what GoodVibes trusts', loosens: changes },
+  'protection-switch': {
+    loosening: 'turn a protection off',
+    loosens: (prev, next) => (typeof next === 'boolean' || typeof prev === 'boolean' ? flagTurnsOff(prev, next) : changes(prev, next)),
+  },
+  'opening-switch': { loosening: 'open a door to this computer or its data', loosens: flagTurnsOn },
+};
+
+let valueKinds: Map<string, ConfigValueKind> | null = null;
+function valueKindOf(key: string): ConfigValueKind | undefined {
+  valueKinds ??= new Map(CONFIG_SCHEMA.flatMap((setting) => setting.valueKind ? [[setting.key, setting.valueKind] as const] : []));
+  return valueKinds.get(key);
+}
+
 function looseningFor(key: string): Loosening | undefined {
   const exact = EXACT_LOOSENING.get(key);
   if (exact) return exact;
   for (const [prefix, loosening] of PREFIX_LOOSENING) if (key.startsWith(prefix)) return loosening;
-  return undefined;
+  const kind = valueKindOf(key);
+  return kind === undefined ? undefined : VALUE_KIND_LOOSENING[kind];
 }
 
 function computeFacts(key: string): ConfigKeyFacts {

@@ -40,7 +40,7 @@ import type { HomeGraphService, KnowledgeService, ProjectPlanningService } from 
 import type { MediaProviderRegistry } from '@goodvibes/engine/platform/platform/media';
 import type { MultimodalService } from '@goodvibes/engine/platform/platform/multimodal';
 import type { AgentMessageBus, AgentOrchestrator, ArchetypeLoader } from '@goodvibes/engine/platform/platform/agents';
-import type { ContractIntake, ContractOperatorService, ContractRunner } from '@goodvibes/engine/platform/platform/contract';
+import type { ContractOperatorService, ContractRunner } from '@goodvibes/engine/platform/platform/contract';
 import type { AgentManager, ContextAccountingHolder, OverflowHandler, ProcessManager, WorkflowServices } from '@goodvibes/engine/platform/platform/tools';
 import type { FileUndoManager, MemoryConsolidationScheduler, MemoryUsageTracker, MemoryEmbeddingProviderRegistry, MemoryRegistry, MemoryStore, ModeManager, ProjectIndex, CodeIndexStore, CodeIndexReindexScheduler } from '@goodvibes/engine/platform/platform/state';
 import type { StoreSnapshotScheduler } from '@goodvibes/engine/platform/platform/state/store-snapshots';
@@ -283,9 +283,9 @@ export interface RuntimeServices {
   readonly permissionManager: import('@goodvibes/engine/platform/platform/runtime/client-services').ClientRuntimeServices['permissionManager'];
   readonly sandboxEscalationHandler: ReturnType<typeof import('@goodvibes/engine/platform/platform/runtime/bootstrap').createApprovalDerivedHandlers>['sandboxEscalationHandler'];
   readonly onSandboxedRun: ReturnType<typeof import('@goodvibes/engine/platform/platform/runtime/bootstrap').createApprovalDerivedHandlers>['onSandboxedRun'];
-  readonly contractRunner: ContractRunner;
+  /** Always null here: this program runs no contracts (its work runs on the daemon). */
+  readonly contractRunner: ContractRunner | null;
   readonly contractOperator: ContractOperatorService;
-  readonly contractIntake: ContractIntake;
   /** Joins the hosted-session floors' workers into this runtime's fleet (the composed graph's own). */
   readonly attachHostedFleetAgents: import('@goodvibes/engine/platform/platform/runtime/bootstrap').RuntimeServices['attachHostedFleetAgents'];
   readonly judgment: import('@goodvibes/engine/platform/platform/runtime/client-services').ClientRuntimeServices['judgment'];

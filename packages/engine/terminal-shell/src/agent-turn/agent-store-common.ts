@@ -3,7 +3,7 @@
  * context it runs in, and turning a store's failure into a refusal that says
  * what is true.
  */
-import { CapabilityRefusal, type ActionValues, type CapabilityResult } from '@goodvibes/engine/platform/platform/capabilities';
+import { CapabilityRefusal, UNNAMED_AUTHOR, authorWords, type ActionValues, type CapabilityResult, type RecordAuthor } from '@goodvibes/engine/platform/platform/capabilities';
 import type { ShellPathService } from '@goodvibes/engine/platform/platform/runtime/shell';
 import type { MemoryAccess } from '@goodvibes/engine/platform/platform/runtime/memory-spine';
 import type { ArtifactStore } from '@goodvibes/engine/platform/platform/artifacts';
@@ -21,6 +21,12 @@ export interface StoreActContext {
   readonly ingestUrl?: ((input: { readonly url: string; readonly tags: readonly string[]; readonly folderPath: string }) => Promise<{ readonly source: { readonly id: string; readonly title?: string | undefined } }>) | undefined;
   /** The person asked it himself (not a model, a script or another agent): a file outside the project is his to name. */
   readonly personAsked?: boolean | undefined;
+  /**
+   * Who writes what this act keeps that steers the owner's turns (a memory record, a persona, a note, a routine, a
+   * skill), from the credential the daemon authenticated (capabilities/types.ts `CapabilityCaller.author`). Absent:
+   * someone else's.
+   */
+  readonly author?: RecordAuthor | undefined;
   /** The caller named a project (its working directory); without one, a relative path has nothing to be relative to. */
   readonly projectGiven?: boolean | undefined;
   /** The daemon itself as the host a routine's schedule is made on (routine-schedules.ts); absent where it cannot be reached. */
@@ -54,6 +60,31 @@ export async function storeStepAsync<T>(work: () => Promise<T>): Promise<T> {
 }
 
 /** Comma- or newline-separated words, trimmed, empty ones dropped. */
+/**
+ * A record's provenance with who wrote it when that was not the owner himself ("Command, written by someone else (...),
+ * waiting for your review"): the Memory and knowledge place shows it, and a persona, note, routine or skill reaches no
+ * prompt until the owner reviews it (his own act).
+ */
+export function provenanceBy(context: Pick<StoreActContext, 'author'>, base: string): string {
+  const words = authorWords(context.author);
+  return words ? `${base}, ${words}` : base;
+}
+
+/** Who writes the record this act keeps, kept on it as its author (state/memory-author.ts); nobody named: someone else. */
+export function writtenBy(context: Pick<StoreActContext, 'author'>): RecordAuthor {
+  return context.author ?? UNNAMED_AUTHOR;
+}
+
+/**
+ * Marking a persona, note or routine reviewed lets its text reach the prompt: it counts only from the owner himself
+ * (his own press, his yes in Waiting for you), never from another credential's claim to be a person.
+ */
+export function ownersOwnReview(context: Pick<StoreActContext, 'author'>, what: string): void {
+  if (context.author?.kind === 'owner') return;
+  throw new CapabilityRefusal(`${what} is the owner's decision that its text may reach the prompt, so it counts only when the owner does it himself; nothing was changed.`,
+    'Ask the owner to review it in Memory and knowledge.', 'OWNER_REVIEW_REQUIRED');
+}
+
 export function splitWords(value: string | undefined): readonly string[] {
   return (value ?? '').split(/[,\n]/).map((entry) => entry.replace(/^[-*]\s+/, '').trim()).filter(Boolean);
 }

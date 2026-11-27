@@ -17,6 +17,8 @@ import type {
 } from './types.js';
 import type { RuntimeTask } from '../store/domains/tasks.js';
 import { summarizeError } from '../../utils/error-display.js';
+import { resolveGoodVibesDaemonHome, resolveGoodVibesHome } from '../../config/goodvibes-home.js';
+import { noProjectFacts, noProjectRefusal } from '../../workspace/caller-project.js';
 
 const DEFAULT_ARTIFACT_DIR = '.goodvibes/remote-artifacts';
 const DEFAULT_SESSION_BUNDLE_DIR = '.goodvibes/remote-sessions';
@@ -514,10 +516,22 @@ export class RemoteRunnerRegistry {
     if (!artifact) return null;
     const path = explicitPath
       ? resolve(explicitPath)
-      : resolve(this.workspaceRoot ?? process.cwd(), DEFAULT_ARTIFACT_DIR, `${artifact.id.replace(/[:]/g, '_')}.json`);
+      : this.defaultExportPath(DEFAULT_ARTIFACT_DIR, `${artifact.id.replace(/[:]/g, '_')}.json`);
     mkdirSync(dirname(path), { recursive: true });
     await writeFile(path, `${JSON.stringify(artifact, null, 2)}\n`, { encoding: 'utf-8', mode: 0o600 });
     return { artifact, path };
+  }
+
+  /**
+   * Where an export named by no path goes: inside the project this runtime works in. A runtime in no project (the
+   * daemon, in its own folder inside its home) writes nothing there: the caller names the file, in its own project.
+   */
+  private defaultExportPath(directory: string, file: string): string {
+    const base = this.workspaceRoot ?? process.cwd();
+    const home = resolveGoodVibesHome();
+    const never = noProjectRefusal(base, noProjectFacts(home, resolveGoodVibesDaemonHome(home)));
+    if (never) throw new Error(`Nothing was written: no file was named, and this runtime works in no project (${never}), so nothing is written in the daemon's own folder. Name the file to write, inside your project.`);
+    return resolve(base, directory, file);
   }
 
   /** Whether a record held under an id would be replaced by `next`; holding the same record under the id is no replacement. */
@@ -569,7 +583,7 @@ export class RemoteRunnerRegistry {
     const bundle = this.buildSessionBundle(store);
     const path = explicitPath
       ? resolve(explicitPath)
-      : resolve(this.workspaceRoot ?? process.cwd(), DEFAULT_SESSION_BUNDLE_DIR, `${bundle.sessionId}-${bundle.exportedAt}.json`);
+      : this.defaultExportPath(DEFAULT_SESSION_BUNDLE_DIR, `${bundle.sessionId}-${bundle.exportedAt}.json`);
     mkdirSync(dirname(path), { recursive: true });
     await writeFile(path, `${JSON.stringify(bundle, null, 2)}\n`, { encoding: 'utf-8', mode: 0o600 });
     return { bundle, path };

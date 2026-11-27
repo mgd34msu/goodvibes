@@ -126,12 +126,6 @@ const SHORTCUT_POLICY: GlobalShortcutPolicy<GlobalShortcutRouteState> = {
           state.requestRender();
           return true;
 
-        case 'contract-question-ordinary':
-          // A contract's open question: the next message is an ordinary one.
-          state.commandContext?.answerContractQuestionPlainly?.();
-          state.requestRender();
-          return true;
-
         case 'model-picker-group':
           // The model list's grouping, while the list is open.
           state.commandContext?.cycleModelPickerGroup?.();

@@ -1,5 +1,4 @@
 import type { BrowserControlPosture } from './agent-harness-browser-control.ts';
-import { previewAgentWorkspaceTuiSettingsImport } from '../input/agent-workspace-settings.ts';
 import { readRecord, readString, readStringArray } from './agent-harness-setup-posture-utils.ts';
 import type { SetupPlanStatus } from './agent-harness-setup-posture-types.ts';
 
@@ -13,24 +12,6 @@ export function browserControlSignals(posture: BrowserControlPosture): readonly 
   }
   if (signals.length === 0) signals.push('No browser, desktop, computer-use, screenshot, or screen-recording tool is configured.');
   return signals;
-}
-
-export function settingsImportChangeCount(preview: ReturnType<typeof previewAgentWorkspaceTuiSettingsImport>): number {
-  if (!preview) return 0;
-  return preview.summary.settingsToImport
-    + preview.summary.activeSubscriptionsToImport
-    + preview.summary.pendingSubscriptionsToImport;
-}
-
-export function settingsImportSignals(preview: ReturnType<typeof previewAgentWorkspaceTuiSettingsImport>): readonly string[] {
-  if (!preview) return ['Import preview unavailable in this runtime.'];
-  return [
-    `settings to import: ${preview.summary.settingsToImport}`,
-    `active subscriptions to import: ${preview.summary.activeSubscriptionsToImport}`,
-    `pending subscriptions to import: ${preview.summary.pendingSubscriptionsToImport}`,
-    `unchanged items: ${preview.summary.settingsUnchanged + preview.summary.subscriptionsUnchanged}`,
-    `parse issues: ${preview.summary.parseErrors}`,
-  ];
 }
 
 export function topLocalModelRecipe(cookbook: Record<string, unknown>): Record<string, unknown> {

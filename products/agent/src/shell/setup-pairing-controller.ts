@@ -18,7 +18,8 @@ export class SetupPairingController extends TerminalHostPairingController<Pairin
 
         format: formatSetupPairing,
         readRecovery: readAgentHostPairing,
-        command: '/setup pair',
+        // Named where it says how to see where pairing got to: the control, not a line to type.
+        command: 'Pair something in the Devices and network place',
         pairedRecovery: (host) =>
           formatSetupPairing({
             status: 'paired-unverified',
@@ -31,7 +32,7 @@ export class SetupPairingController extends TerminalHostPairingController<Pairin
             status: 'unknown',
             host,
             message:
-              'The host\'s answer to the pairing request was lost. Run /setup pair to repeat the same request: the host answers it with the key it made, never a second one; if that cannot be done, /setup pair offers to forget the attempt and pair from scratch.',
+              'The host\'s answer to the pairing request was lost. Pair something in the Devices and network place repeats the same request: the host answers it with the key it made, never a second one; if that cannot be done, it offers to forget the attempt and pair from scratch.',
           }),
       },
       ui,

@@ -51,7 +51,9 @@ import type { ConfigKey } from '@goodvibes/engine/platform/platform/config';
 import type { ConfigManager } from '@goodvibes/engine/platform/platform/config';
 import type { SecretsManager } from '../config/secrets.js';
 import type { ClusterTransport } from '@goodvibes/engine/platform/platform/cluster';
-import { logger, summarizeError } from '@goodvibes/engine/platform/platform/utils';
+import { logger as activityLogger, summarizeError } from '@goodvibes/engine/platform/platform/utils';
+import type { ClusterLogger } from '@goodvibes/engine/platform/platform/cluster';
+import { writeSync } from 'node:fs';
 import { noteListChanged } from '@goodvibes/engine/platform/platform/runtime/emitters';
 import type { ShellPathService } from './index.js';
 import { createClusterComposition } from './cluster-composition.js';
@@ -87,6 +89,40 @@ function nodeDisplayNameFor(configManager: ConfigManager, nodeId: string): strin
 const REJOIN_RETRY_DELAYS_MS: readonly number[] = Object.freeze([30_000, 120_000, 600_000]);
 
 /**
+ * The group layer's log. Everything goes to the activity log as before; a warning or an error also goes to the
+ * daemon's own output (stderr: what a service manager keeps as the daemon's log), one line with its cause, so a join
+ * that failed or a setting that was not replicated says why where the owner looks first. Only the cause fields are
+ * written there (an error's message, the words of a refusal and its fix, a setting's name), never a setting's value or
+ * a credential.
+ */
+const logger: ClusterLogger = {
+  debug: (message, meta) => activityLogger.debug(message, meta),
+  info: (message, meta) => activityLogger.info(message, meta),
+  warn: (message, meta) => { activityLogger.warn(message, meta); toDaemonOutput('warning', message, meta); },
+  error: (message, meta) => { activityLogger.error(message, meta); toDaemonOutput('error', message, meta); },
+};
+
+/** A join that failed says why in the log, not only in the answer to whoever asked. */
+function logFailedJoin(verbs: ClusterGroupVerbSurface): ClusterGroupVerbSurface {
+  return {
+    ...verbs,
+    join: async (input) => {
+      const result = await verbs.join(input);
+      if (!result.ok) logger.warn('cluster: this machine did not join the group', { reason: result.error, action: result.fix });
+      return result;
+    },
+  };
+}
+
+function toDaemonOutput(level: 'warning' | 'error', message: string, meta: Record<string, unknown> | undefined): void {
+  const cause = (['path', 'error', 'reason', 'action'] as const)
+    .map((field) => meta?.[field])
+    .filter((value): value is string => typeof value === 'string' && value.trim().length > 0)
+    .map((value) => value.replace(/\s+/g, ' ').trim());
+  try { writeSync(2, `[goodvibes-daemon] ${level}: ${message}${cause.length > 0 ? `: ${cause.join('; ')}` : ''}\n`); } catch { /* the activity log has it */ }
+}
+
+/**
  * Build the group layer.
  *
  * Constructing it is inert: no socket is opened and no key material is read
@@ -96,7 +132,7 @@ const REJOIN_RETRY_DELAYS_MS: readonly number[] = Object.freeze([30_000, 120_000
 export function createClusterGroupComposition(options: {
   readonly configManager: ConfigManager;
   readonly shellPaths: ShellPathService;
-  readonly secretsManager: Pick<SecretsManager, 'get' | 'set' | 'delete' | 'getWriteScopeEntry'> & Partial<Pick<SecretsManager, 'onDidChange' | 'resolveLocalSecretSync'>>;
+  readonly secretsManager: Pick<SecretsManager, 'get' | 'set' | 'delete' | 'getWriteScopeEntry'> & Partial<Pick<SecretsManager, 'onDidChange' | 'resolveLocalSecretSync' | 'writeAct'>>;
   /** Optional host/test seams; defaults preserve the real UDP/system-clock path. */
   readonly transport?: ClusterTransport | undefined;
   readonly clock?: ClusterClock | undefined;
@@ -123,6 +159,8 @@ export function createClusterGroupComposition(options: {
   readonly setAuthorityPeers?: ((peers: { divergence(): { readonly behindOn: readonly string[]; readonly behind: boolean } } | null) => void) | undefined;
   /** Tells the owner once how a join that waited for a restart ended. */
   readonly tellOwner?: ((title: string, detail: string) => void) | undefined;
+  /** When a 3.5.0 daemon put back on this machine last wrote the group's settings since the upgrade (daemon-records.ts). */
+  readonly olderReleaseRanAt?: number | undefined;
 }): ClusterGroupComposition {
   const { resolveLocalSecretSync } = options.secretsManager;
   const settings = readClusterSettings(options.configManager,
@@ -144,6 +182,7 @@ export function createClusterGroupComposition(options: {
     // report it. Called on every refresh until done; deferred, because it is
     // called from inside the record's change notice.
     onRemovedFromGroup: () => removedFromGroup(),
+    ...(options.olderReleaseRanAt !== undefined ? { olderReleaseRanAt: options.olderReleaseRanAt } : {}),
     ...(options.authorityRecord ? { authorityRecord: options.authorityRecord } : {}),
     settings: groupSettings,
     transport: options.transport ?? new UdpClusterTransport({
@@ -176,6 +215,9 @@ export function createClusterGroupComposition(options: {
       }).set(path, value),
       ...(typeof options.configManager.reset === 'function' ? { reset: (path: string) => options.configManager.reset(path as ConfigKey) } : {}),
       ...(typeof options.configManager.subscribe === 'function' ? { subscribe: (path: string, listener: () => void) => options.configManager.subscribe(path as ConfigKey, listener) } : {}),
+      // Who made the write whose notice is being delivered, and how it was decided (ConfigManager `writeAct`, from the
+      // write's press argument): kept with a shared setting's change and carried to every member.
+      ...(typeof options.configManager.writeAct === 'function' ? { writeAct: () => options.configManager.writeAct() } : {}),
     },
   });
 
@@ -246,7 +288,7 @@ export function createClusterGroupComposition(options: {
   };
   return {
     runtime,
-    verbs: createClusterGroupVerbs(context),
+    verbs: logFailedJoin(createClusterGroupVerbs(context)),
     electionTransport: runtime.electionTransport(),
     rejoin: () => runtime.catchUp(),
     start: () => {
@@ -345,6 +387,8 @@ async function resumePendingGroupAction(context: GroupOperationsContext, tellOwn
   }
   await clearPendingGroupAction(context.secrets);
   if (result.ok) {
+    // The owner's act that asked for the join, kept with it: this machine's settings the group lacks seed under it.
+    context.runtime.noteSeedAct(pending.act);
     tellOwner?.('This machine joined the group', `It joined "${result.data.groupName}" with ${result.data.memberCount} machine${result.data.memberCount === 1 ? '' : 's'}.${result.data.warning ? ` ${result.data.warning}` : ''}`);
   } else {
     tellOwner?.('This machine did not join the group', `${result.error}. ${result.fix}.`);
@@ -367,7 +411,7 @@ async function resumePendingGroupAction(context: GroupOperationsContext, tellOwn
 export function createClusterServices(options: {
   readonly configManager: ConfigManager;
   readonly shellPaths: ShellPathService;
-  readonly secretsManager: Pick<SecretsManager, 'get' | 'set' | 'delete' | 'getWriteScopeEntry'> & Partial<Pick<SecretsManager, 'onDidChange' | 'resolveLocalSecretSync'>>;
+  readonly secretsManager: Pick<SecretsManager, 'get' | 'set' | 'delete' | 'getWriteScopeEntry'> & Partial<Pick<SecretsManager, 'onDidChange' | 'resolveLocalSecretSync' | 'writeAct'>>;
   readonly authorityRecord?: AuthorityRecordFile | undefined;
   readonly setAuthorityPeers?: ((peers: { divergence(): { readonly behindOn: readonly string[]; readonly behind: boolean } } | null) => void) | undefined;
   /** Optional host/test seams; defaults preserve the real UDP/system-clock path. */
@@ -375,6 +419,8 @@ export function createClusterServices(options: {
   readonly clock?: ClusterClock | undefined;
   /** Tells the owner once how a join that waited for a restart ended. */
   readonly tellOwner?: ((title: string, detail: string) => void) | undefined;
+  /** When a 3.5.0 daemon put back on this machine last wrote the group's settings since the upgrade (daemon-records.ts). */
+  readonly olderReleaseRanAt?: number | undefined;
 }): { readonly clusterGroup: ClusterGroupComposition; readonly clusterCoordinator: ClusterCoordinator } {
   let coordinator: ClusterCoordinator | null = null;
   const clusterGroup = createClusterGroupComposition({

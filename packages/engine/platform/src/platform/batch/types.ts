@@ -69,6 +69,8 @@ export interface CreateDaemonBatchJobInput {
   };
   readonly metadata?: Record<string, string> | undefined;
   readonly flush?: boolean | undefined;
+  /** Who queued it (the authenticated principal, set by the daemon's route, never by a body): its job is its own. */
+  readonly createdBy?: string | undefined;
 }
 
 export interface DaemonBatchJob {
@@ -81,6 +83,8 @@ export interface DaemonBatchJob {
   readonly request: DaemonBatchChatRequest;
   readonly source?: CreateDaemonBatchJobInput['source'] | undefined;
   readonly metadata?: Record<string, string> | undefined;
+  /** Who queued it (see CreateDaemonBatchJobInput.createdBy); none: the owner's (queued before makers were kept). */
+  readonly createdBy?: string | undefined;
   readonly attempts: number;
   /** Sent to the provider as batch metadata, so a batch accepted just before the daemon stopped is found instead of paid for twice. */
   readonly submissionId?: string | undefined;

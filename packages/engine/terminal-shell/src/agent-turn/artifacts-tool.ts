@@ -6,6 +6,7 @@ import { dirname, join } from 'node:path';
 import type { ArtifactDescriptor, ArtifactRecord, ArtifactStore } from '@goodvibes/engine/platform/platform/artifacts';
 import type { Tool } from '@goodvibes/engine/platform/platform/types';
 import type { ToolRegistry, ToolExecuteOptions } from '@goodvibes/engine/platform/platform/tools';
+import { isHeldPath, writeHeldFiles } from '@goodvibes/engine/platform/platform/capabilities';
 import { toolErrorText } from './tool-error-text.js';
 import { agentArtifactEffectGuard, assertAgentArtifactBytes, captureAgentArtifactSource, captureAgentExportPath } from './artifact-effect.js';
 import { confirmParameter, requestParameter } from './effect-admission.js';
@@ -480,6 +481,17 @@ function packageDocuments(collected: PackageManifest): ArtifactPackageEntry[] {
  * returned so the result can list them.
  */
 async function writeArtifactPackageDirectory(resolvedPath: string, payload: ArtifactPackagePayload, assertCurrent: (target: string) => void): Promise<string[]> {
+  // A folder the caller named that is there already and held for this call (the daemon's store harness placed it,
+  // capabilities/held-paths.ts): worked on in place through its handle, never replaced by a folder beside it. Each file
+  // is written the one way (`writeHeldFiles`: all beside their places first, then each renamed onto its name inside the
+  // opened folder), so a link planted in it or swapped in at a file's name gains nothing; files already there that the
+  // package does not hold are left in place and listed.
+  if (isHeldPath(resolvedPath) && existsSync(resolvedPath)) {
+    const leftovers = await leftoverPackageFiles(resolvedPath, payload);
+    assertCurrent(resolvedPath);
+    writeHeldFiles(payload.entries.map((entry) => ({ path: join(resolvedPath, ...entry.path.split('/')), data: entry.buffer })));
+    return leftovers;
+  }
   // A swap a crash interrupted here earlier is settled first: a package that holds its manifest stays.
   await mkdir(dirname(resolvedPath), { recursive: true });
   recoverReplacements(dirname(resolvedPath), (path) => path !== resolvedPath || existsSync(join(path, 'manifest.json')));

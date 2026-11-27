@@ -309,6 +309,7 @@ async function evaluateGate(
     sessionId: deps.sessionId,
     contractId: workstream.id,
     targetId: workstream.id,
+    project: deps.projectRoot,
   })];
 
   const ranNames = new Set(results.map((r) => r.gate));

@@ -197,8 +197,6 @@ function createSessionDriver(floor: HostedWorkspaceFloor, projectRoot: string): 
         workspaceRoot: projectRoot,
         floor,
         systemPrompt: cliSystemPrompt(projectRoot),
-        // The person running the command authorized this work in their own project.
-        execPosture: 'workstream',
       });
       sessions.set(sessionId, session);
     }

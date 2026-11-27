@@ -1,7 +1,7 @@
 import { withConfiguredDecisionModelPolicy } from '@goodvibes/engine/platform/platform/runtime';
 import type { CatalogRankingOptions } from '@goodvibes/engine/terminal-shell/agent-turn/catalog-ranking';
 import type { CommandContext } from '../input/command-registry.ts';
-import { buildAgentWorkspacePersonalOpsPart } from '../input/agent-workspace-snapshot.ts';
+import { buildAgentPersonalOpsPart } from '../input/runtime-snapshot.ts';
 import { googleConnectionState, type AgentGoogleConnectionState } from '@goodvibes/engine/terminal-shell/agent-turn/google-tool';
 import { calendarWorkflows, connectorSignals, contractLaneMethods, inboxWorkflows, NO_CONNECTORS, readConnectorInventory, reminderWorkflows, taskWorkflows, type ConnectorInventory, type GoogleLaneRoute } from './agent-harness-personal-ops-discovery.ts';
 import { NOTE_CAPTURE_ROUTE } from './agent-harness-personal-ops-routes.ts';
@@ -44,7 +44,7 @@ function googleSignal(state: AgentGoogleConnectionState, route: GoogleLaneRoute 
   return 'No Google account connected';
 }
 
-function notesLane(snapshot: ReturnType<typeof buildAgentWorkspacePersonalOpsPart>): PersonalOpsLane {
+function notesLane(snapshot: ReturnType<typeof buildAgentPersonalOpsPart>): PersonalOpsLane {
   return {
     id: 'notes',
     label: 'Notes',
@@ -54,7 +54,7 @@ function notesLane(snapshot: ReturnType<typeof buildAgentWorkspacePersonalOpsPar
     next: snapshot.localNoteCount > 0
       ? 'Review or promote selected notes into memory, skills, routines, or Agent Knowledge when useful.'
       : 'Create a note from the Inbox & calendar or Notes area of the workspace when the next decision or source needs tracking.',
-    userRoute: 'Agent Workspace -> Inbox & calendar -> Create note',
+    userRoute: 'Memory and knowledge, Notes, c (new note)',
     modelRoute: NOTE_CAPTURE_ROUTE,
     signals: [
       `${snapshot.localNoteCount} local note(s)`,
@@ -77,7 +77,7 @@ function remindersLane(scheduleMethods: readonly string[],
     next: reminderEffectReceiptRecords.length > 0
       ? 'Review saved reminder provider-effect receipts, then repair or refresh the reminder provider before another provider update.'
       : 'Create one confirmed reminder or autonomous schedule with title, time, scope, delivery target, success criteria, and explicit user request.',
-    userRoute: 'Agent Workspace -> Inbox & calendar -> Create reminder',
+    userRoute: 'Automation, Schedules, n (new schedule)',
     modelRoute: 'schedule action:"remind"',
     signals: [
       `${cappedCount(reminderEffectReceiptRecords.length, 'record')} saved reminder provider-effect receipt(s)`,
@@ -94,7 +94,7 @@ function remindersLane(scheduleMethods: readonly string[],
 }
 
 function inboxLane({ snapshot, google, emailMethods, unavailableEmailMethods, emailConnectors, inboxArtifactRecords, inboxReviewQueueRecords, inboxEffectReceiptRecords, refreshableInboxQueueRecords, readyChannels }: {
-  readonly snapshot: ReturnType<typeof buildAgentWorkspacePersonalOpsPart>;
+  readonly snapshot: ReturnType<typeof buildAgentPersonalOpsPart>;
   readonly google: GoogleLanes;
   readonly emailMethods: readonly string[];
   readonly unavailableEmailMethods: readonly string[];
@@ -133,7 +133,7 @@ function inboxLane({ snapshot, google, emailMethods, unavailableEmailMethods, em
           : inboxEffectReceiptRecords.length > 0
             ? 'Review saved inbox provider-effect receipts, then repair an email connector before reading fresh inbox data or sending another provider effect.'
       : googleSetupNext(google.state, 'inbox'),
-    userRoute: 'Agent Workspace -> Inbox & calendar -> Delivery channels',
+    userRoute: 'Mail, calendar and channels, Channels',
     modelRoute: google.inbox ? google.inbox.modelRoute : emailConnectors.length > 0 ? 'agent_harness mode:"mcp_servers" query:"email"' : 'host action:"methods" query:"email"',
     signals: [
       googleSignal(google.state, google.inbox),
@@ -176,7 +176,7 @@ async function ownedBuildLanes(
 ): Promise<readonly PersonalOpsLane[]> {
   options.signal?.throwIfAborted();
   // Only the stores the lanes read (channels, notes, routines and their receipts), not the whole workspace.
-  const snapshot = buildAgentWorkspacePersonalOpsPart(context);
+  const snapshot = buildAgentPersonalOpsPart(context);
   if (exactLane === 'notes') return [notesLane(snapshot)];
   // A lane's reads are skipped when the caller asked for another lane alone.
   const wants = (lane: 'inbox' | 'calendar' | 'tasks' | 'reminders') => exactLane === undefined || exactLane === lane;
@@ -252,7 +252,7 @@ async function ownedBuildLanes(
             : calendarEffectReceiptRecords.length > 0
               ? 'Review saved calendar provider-effect receipts, then repair a calendar connector before reading fresh agenda data or editing events.'
         : googleSetupNext(google.state, 'calendar'),
-      userRoute: 'Agent Workspace -> Inbox & calendar -> Create reminder',
+      userRoute: 'Automation, Schedules, n (new schedule)',
       modelRoute: google.calendar ? google.calendar.modelRoute : calendarConnectors.length > 0 ? 'agent_harness mode:"mcp_servers" query:"calendar"' : 'host action:"methods" query:"calendar"',
       signals: [
         googleSignal(google.state, google.calendar),
@@ -283,7 +283,7 @@ async function ownedBuildLanes(
       outcome: 'Track user-visible work items, inspect host task state, and update work plan status without hidden jobs.',
       current: `Agent has work-plan actions and ${taskMethods.length} task/work-plan daemon method(s) in the platform contract.`,
       next: 'Use work plans for user-visible task tracking; inspect runtime host tasks separately before mutating anything.',
-      userRoute: 'Agent Workspace -> Work & Approvals -> Autonomy queue',
+      userRoute: 'Work and agents (the menu, Ctrl+G then m)',
       modelRoute: 'agent_work_plan action:"list"',
       signals: [
         `${taskMethods.length} task/work-plan daemon method(s)`,
@@ -303,8 +303,8 @@ async function ownedBuildLanes(
       next: scheduleReadyRoutines > 0
         ? 'Promote a reviewed routine to a connected schedule when the user asks for recurrence.'
         : 'Create or review a routine, resolve setup gaps, then promote only with explicit schedule confirmation.',
-      userRoute: 'Agent Workspace -> Inbox & calendar -> Routine library',
-      modelRoute: 'workspace action:"actions" categoryId:"routines"',
+      userRoute: 'Memory and knowledge, Routines',
+      modelRoute: 'capability_run id:"routines.list"',
       signals: [
         `${scheduleReadyRoutines} schedule-ready routine(s)`,
         `${snapshot.failedRoutineScheduleReceiptCount} failed promotion receipt(s)`,
@@ -323,7 +323,7 @@ async function ownedBuildLanes(
       next: readyChannels > 0
         ? 'Use confirmed channel send or notification tools when the user asks for delivery.'
         : 'Enable and configure one delivery channel so personal-ops reminders and summaries can reach the user.',
-      userRoute: 'Agent Workspace -> Inbox & calendar -> Delivery channels',
+      userRoute: 'Mail, calendar and channels, Channels',
       modelRoute: 'channels action:"status"',
       signals: [
         `${readyChannels} ready channel(s)`,

@@ -70,7 +70,9 @@ export async function handleBrowserSession(req: Request, deps: BrowserSessionDep
     const headers = new Headers(req.headers);
     headers.delete('content-length');
     const signedIn = await deps.passwordSignIn(new Request(req.url, {
-      method: 'POST', headers, body: JSON.stringify({ username: body.username, password: body.password }),
+      // `newPassword`: the owner's own password, set at the first sign-in with the generated first-run one (operator-login.ts).
+      method: 'POST', headers, body: JSON.stringify({ username: body.username, password: body.password,
+        ...(typeof body.newPassword === 'string' ? { newPassword: body.newPassword } : {}) }),
     }), req);
     if (!signedIn.ok) return withoutCookies(signedIn);
     const session = await signedIn.json() as { readonly token?: unknown; readonly username?: unknown; readonly expiresAt?: unknown };

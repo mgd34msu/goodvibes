@@ -8,7 +8,7 @@ import { writeOnboardingCheckMarker } from '../runtime/onboarding/markers.ts';
 import { readSetupState } from '@goodvibes/engine/platform/platform/capabilities';
 import { runDaemonCapability } from '@goodvibes/engine/terminal-shell/command-actions';
 import { capabilityBinding } from '../input/commands/capability-binding.ts';
-import { FirstRunModal, firstRunDecisionModel, installSplashAdditions, openWhoDecides, setSplashImportCommand, startFirstRun, type FirstRunDeps } from '@goodvibes/engine/terminal-shell/first-run';
+import { FirstRunModal, firstRunDecisionModel, installSplashAdditions, openWhoDecides, setSplashImportWhere, startFirstRun, type FirstRunDeps } from '@goodvibes/engine/terminal-shell/first-run';
 import { requireSecretsManager, requireServiceRegistry, requireSubscriptionManager } from '../input/commands/runtime-services.ts';
 import { scanThisComputerNow } from '../runtime/lan-scan-consent.ts';
 import { logger } from '@goodvibes/engine/platform/platform/utils';
@@ -17,6 +17,7 @@ import { checkRecoveryFile, readLastSessionPointer, type SessionSurface } from '
 import { resolveResumableSession, surfaceResumeRelaunchNotice } from './resume-relaunch-notice.ts';
 import { summarizeError } from '@goodvibes/engine/platform/platform/utils';
 import { writeFatalLine } from '../utils/fatal-boot-write.ts';
+import { existsSync } from 'node:fs';
 
 type NodeLikeError = Error & {
   readonly code?: string;
@@ -144,21 +145,22 @@ export function applyInitialTuiCliState(options: {
   // What the empty conversation shows under the splash: first run's lines.
   installSplashAdditions({
     configManager: commandContext.platform.configManager,
-    setupCommand: '/setup',
+    // No `/setup`: setup is the Setup tab of the System place, reached from the menu.
+    setupWhere: 'menu › System › Setup',
     splashShowing: () => input.conversationManager?.isSplashShowing() ?? false,
     renderRequest: render,
   });
-  // The first launch only: when the terminal app has settings this Agent does not, say once which command brings them over.
-  if (!onboardingDone) void offerTerminalSettingsImport(commandContext);
+  // The first launch only: when the terminal app has settings of its own, say once where they are brought over.
+  if (!onboardingDone) offerTerminalSettingsImport(commandContext);
   // First run: when the model this session will use is not ready, choose a
   // provider, sign in, and land in the conversation (first-run-flow.ts). The
-  // workspace's setup screens stay one key away (and /setup).
+  // setup topics stay in System, Setup in the menu.
   const runFirstRun = (): void => {
     void startFirstRun(firstRunDeps(commandContext, shellPaths, render, onboardingDone, () => { input.conversationManager?.invalidateRenderedLines(); })).catch((error: unknown) => {
       logger.warn('First run could not start', { error: summarizeError(error) });
     });
   };
-  // `/setup` → Run first-run again: the three steps, whether or not a model is ready.
+  // System, Setup → Run first-run again: the three steps, whether or not a model is ready.
   commandContext.openFirstRun = () => {
     // Asked for: "Who decides" follows the model whenever it is needed, answered before or not.
     const deps = { ...firstRunDeps(commandContext, shellPaths, render, true, () => { input.conversationManager?.invalidateRenderedLines(); }), whoDecidesAsked: () => false, includeWhoDecides: true };
@@ -172,8 +174,8 @@ export function applyInitialTuiCliState(options: {
   // The status line's mode segment, while no decision model can be asked, and the Setup list's row (always): "Who decides".
   commandContext.openWhoDecides = (whoOptions) => openWhoDecides(firstRunDeps(commandContext, shellPaths, render, true, () => { input.conversationManager?.invalidateRenderedLines(); }), whoOptions);
   if (cli.command === 'onboarding') {
-    // The setup topics, over the empty conversation.
-    void commandContext.executeCommand?.('setup', []);
+    // The System place on its Setup tab, over the empty conversation.
+    commandContext.openPlace?.('system', { list: 'setup' });
   } else if ((cli.command === 'sessions' && cli.commandArgs[0] === 'resume') || cli.flags.resume !== undefined) {
     const requested = cli.flags.resume ?? cli.commandArgs.slice(1).join(' ').trim();
     const target = requested === 'latest' ? (readLastSessionPointer({ surface }) ?? '') : requested;
@@ -214,29 +216,21 @@ export function applyInitialTuiCliState(options: {
 }
 
 /**
- * Under the first launch's splash, the command that brings over the terminal
- * app's settings, when its settings files hold something the Agent would take
- * (the import's own plan, read once). Loaded here rather than at the top: this
- * module is read before boot, when the workspace modules must not load yet.
+ * Under the first launch's splash, where the terminal app's settings are brought over, when the terminal app has a
+ * settings file of its own. Enter on the empty composer is the request: it runs the one capability that does it,
+ * settings.copy-from-terminal-app (the daemon's, as System, Setup, Import settings and a model's import run it), and
+ * prints its answer: every setting it copied, and any it held back.
  */
-async function offerTerminalSettingsImport(commandContext: CommandContext): Promise<void> {
-  try {
-    const settings = await import('../input/agent-workspace-settings.ts');
-    const plan = settings.planAgentWorkspaceTuiSettingsImport(commandContext);
-    if (plan === null || !settings.agentWorkspaceTuiSettingsImportHasChanges(plan)) return;
-    // A one-key choice where it is offered: Enter on the empty composer imports exactly that plan at once
-    // (the key is the request); the answer lists what changed and names the copy that puts it back.
-    setSplashImportCommand('/setup import-settings', () => {
-      void (async () => {
-        const outcome = await settings.applyAgentWorkspaceTuiSettingsImport(commandContext, plan);
-        commandContext.print([outcome.status, ...(outcome.result?.detail ? [outcome.result.detail] : [])].join('\n'));
-      })().catch((error: unknown) => {
-        commandContext.print(`The terminal app's settings were not imported: ${summarizeError(error)}`);
-      });
+function offerTerminalSettingsImport(commandContext: CommandContext): void {
+  const terminalAppSettings = commandContext.workspace?.shellPaths?.resolveUserPath('tui', 'settings.json');
+  if (!terminalAppSettings || !existsSync(terminalAppSettings)) return;
+  setSplashImportWhere('menu › System › Setup › Import settings', () => {
+    void runDaemonCapability('settings.copy-from-terminal-app', {}, commandContext, capabilityBinding).then((answer) => {
+      commandContext.print(answer.detail ?? answer.text ?? '');
+    }, (error: unknown) => {
+      commandContext.print(`The terminal app's settings were not copied: ${summarizeError(error)}`);
     });
-  } catch (error) {
-    logger.warn('The terminal app settings could not be read for the first-launch import line', { error: summarizeError(error) });
-  }
+  });
 }
 
 /** What first run needs from the Agent. */

@@ -346,7 +346,7 @@ export function formatOperatorActionPreview(request: OperatorActionRequest, expl
     `  route ${operatorActionHttpMethod(request.descriptor)} ${renderOperatorActionPath(request.descriptor, request.targetId)}`,
     explicitUserRequest ? `  requested by ${explicitUserRequest}` : '  requested by (missing)',
     '',
-    'Confirmation required: type yes in the workspace form or pass --yes only when the user explicitly asked GoodVibes Agent to perform this exact operator action.',
+    'Confirmation required: answer yes where it is asked or pass --yes only when the user explicitly asked GoodVibes Agent to perform this exact operator action.',
   ].join('\n');
 }
 

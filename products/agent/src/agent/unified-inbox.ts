@@ -8,7 +8,7 @@
  *   3. /api/routes/bindings     , live route binding continuity records
  *   4. channels.inbox.list      , provider-specific inbound messages
  *
- * The first three arrive already fetched, in an `AgentWorkspaceChannelTriage`.
+ * The first three arrive already fetched, in an `AgentChannelTriage`.
  * The fourth is fetched here, by `fetchInboundChannelFeed`, because it is a
  * method call rather than one of triage's routes.
  *
@@ -18,7 +18,7 @@
  * not observe sends whoever reads it to fix the wrong thing.
  */
 
-import { readTriageViewText, type AgentWorkspaceChannelTriage } from '../input/agent-workspace-channel-triage.ts';
+import { readTriageViewText, type AgentChannelTriage } from '../input/channel-triage.ts';
 import type { DaemonInvokeFailureKind, DaemonOperatorInvoke } from '@goodvibes/engine/terminal-shell/agent-turn/daemon-operator-client';
 import { UNKNOWN_SENDER_LABEL } from '@goodvibes/engine/platform/platform/channels';
 import { renderForModel, untrustedFrom } from './untrusted-content.ts';
@@ -431,14 +431,14 @@ const INBOUND_FEED_NOT_ATTEMPTED: InboundChannelFeedState = {
 // ---------------------------------------------------------------------------
 
 /**
- * Build a UnifiedInbox from an already-fetched AgentWorkspaceChannelTriage.
+ * Build a UnifiedInbox from an already-fetched AgentChannelTriage.
  *
  * This is intentionally a pure transformation, it does not perform any I/O.
  * The caller (command handler or tool) is responsible for calling
- * `buildAgentWorkspaceChannelTriage` first.
+ * `buildAgentChannelTriage` first.
  */
 export function aggregateUnifiedInbox(
-  triage: AgentWorkspaceChannelTriage,
+  triage: AgentChannelTriage,
   options: {
     readonly limit?: number;
     /** The feed a caller already fetched. Absent means it never asked. */

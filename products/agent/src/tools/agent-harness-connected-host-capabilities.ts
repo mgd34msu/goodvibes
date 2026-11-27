@@ -267,7 +267,7 @@ function connectedHostCapabilityDetail(entry: CapabilityEntry): Record<string, u
       operatorMethodMode: 'Use host action:"methods" for the public operator and Agent Knowledge method catalog. Use action:"method" for one method.',
       servicePostureMode: 'Use host action:"services" for endpoint binding, network-facing posture, issue, and redacted-log diagnostics. Use action:"service" for one endpoint.',
       statusMode: 'Use host action:"status" for live read-only reachability, token posture, and Agent Knowledge route readiness.',
-      boundary: 'Use only the listed first-class model tools, capabilities (capability_find / capability_run) and workspace categories. Mutations still go through the permission gate of those tools.',
+      boundary: 'Use only the listed first-class model tools, and capabilities (capability_find / capability_run). Mutations still go through the permission gate of those tools.',
     };
   }
   if (entry.access === 'gated') {

@@ -102,6 +102,13 @@ async function callLocalAuth<T>(runtime: CliCommandRuntime, methodId: string, in
     ? ((url, init) => daemon.fetchImpl(url, { ...init, headers: { ...(init?.headers as Record<string, string> | undefined), 'x-goodvibes-explicit-user-request': 'true' } })) as typeof fetch
     : daemon.fetchImpl;
   const answer = await callDaemonMethod<T>(daemon.target, methodId, { input, ...(write ? {} : { readOnly: true }) }, fetchImpl);
+  // Who may sign in is the owner's own act, and a command line never makes it by itself: the daemon put it to him.
+  const held = answer.ok ? answer.data as unknown as { readonly code?: unknown; readonly approvalId?: unknown; readonly state?: unknown } : undefined;
+  if (held?.code === 'OWNER_APPROVAL_PENDING' && typeof held.approvalId === 'string') {
+    return { ok: false, code: 'refused', daemonCode: 'OWNER_APPROVAL_PENDING',
+      error: `${typeof held.state === 'string' ? held.state : `Waiting for the owner (${held.approvalId})`}. It was not run at once because who may sign in is an act only you make, and a command line never makes it by itself. Answer it in Waiting for you: in the terminal app or the Agent, the web UI, or a paired phone.`,
+      fix: `Read what came of it: goodvibes do ${held.approvalId}` };
+  }
   return answer.ok ? { ok: true, data: answer.data } : signInCallFailure(daemon.target, answer);
 }
 
@@ -160,7 +167,8 @@ interface LocalAuthStatus {
 
 async function renderAuth(runtime: CliCommandRuntime): Promise<AuthCommandResult> {
   const ok = (output: string): AuthCommandResult => ({ output, exitCode: 0 });
-  const notFound = (output: string): AuthCommandResult => ({ output, exitCode: 1 });
+  // A sign-in change put to the owner exits 3, as `do` does (docs/exit-codes.md); any other failure 1.
+  const notFound = (output: string): AuthCommandResult => ({ output, exitCode: /Answer it in Waiting for you/.test(output) ? 3 : 1 });
   const usage = (output: string): AuthCommandResult => ({ output, exitCode: 2 });
   const call = localAuthCaller(runtime);
   {

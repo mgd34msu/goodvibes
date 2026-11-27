@@ -98,11 +98,46 @@ async function callServerTool(mcpRegistry: McpRegistry, input: McpToolInput, opt
       return { success: false, error: `MCP call to ${qualifiedName} was cancelled. It may already have reached the server; check the server's state before calling again.` };
     }
     // The registry's own words name the state (not connected, quarantined, denied, schema changed, deadline) and what lifts it.
-    return { success: false, error: `MCP call to ${qualifiedName} failed: ${boundedReason(error)}` };
+    const reason = boundedReason(error);
+    return { success: false, error: `MCP call to ${qualifiedName} failed: ${reason}`, ...refusalOwnerLine(qualifiedName, reason) };
   }
 }
 
-export function createMcpTool(mcpRegistry: McpRegistry): Tool {
+/**
+ * The row a person reads for a call the tool server's trust refused (mcp/registry.ts: "denied", "was not allowed"),
+ * in place of the model's text: which tool of which server, and why, in plain words. Nothing for any other failure,
+ * whose own words already say what happened.
+ */
+function refusalOwnerLine(qualifiedName: string, reason: string): { readonly ownerLine?: string } {
+  const [, server = '', tool = ''] = qualifiedName.split(':');
+  const what = tool && server ? `${tool} on the tool server ${server}` : qualifiedName;
+  if (/' was not allowed:/.test(reason)) return { ownerLine: `${what} was not run: you did not allow this call outside the limits that server has.` };
+  if (/' denied:/.test(reason)) {
+    if (/Nobody can be asked from here/.test(reason)) return { ownerLine: `${what} was not run: the call is outside the limits that server has, and nobody could be asked here.` };
+    if (/blocked/i.test(reason)) return { ownerLine: `${what} was not run: that server refuses every call (its trust is set so).` };
+    return { ownerLine: `${what} was not run: the call is outside the limits that server has, and its trust refuses such calls.` };
+  }
+  return {};
+}
+
+/**
+ * `connect`, when given, starts the registry's servers: on the tool's first call, once (a step of planned work that
+ * never uses a tool server starts none). Without it the servers were started by whoever built the registry.
+ */
+export function createMcpTool(mcpRegistry: McpRegistry, connect?: () => Promise<void>): Tool {
+  let started: Promise<void> | undefined;
+  const execute = createMcpToolExecute(mcpRegistry);
+  return {
+    ...execute,
+    async execute(args: Record<string, unknown>, options?: ToolExecuteOptions) {
+      // `connectAll` reports a server that did not start on that server (its phase and last error), never by throwing.
+      if (connect) await (started ??= connect().catch(() => undefined));
+      return execute.execute(args, options);
+    },
+  };
+}
+
+function createMcpToolExecute(mcpRegistry: McpRegistry): Tool {
   return {
     definition: {
       name: 'mcp',

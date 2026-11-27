@@ -64,7 +64,9 @@ export class HookTraceStore {
       // Kept in memory for this run of the daemon; the file catches up at the next write.
       logger.warn('HookTraceStore: the hook trace could not be written', { path: this.path, error: summarizeError(error) });
     }
-    noteListChanged({ list: 'hook-trace', change: 'created' });
+    // Each project whose runs were kept is told; runs that named no project are a change for every screen.
+    const projects = new Set(fresh.map((run) => run.project));
+    for (const project of projects) noteListChanged({ list: 'hook-trace', change: 'created', ...(project !== undefined ? { project } : {}) });
     return fresh.length;
   }
 

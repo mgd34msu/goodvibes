@@ -44,7 +44,7 @@ export async function runCommand(deps: AgentHarnessToolDeps, args: Record<string
   // sole yes requires the caller to name the selected command in a new call.
   if (resolved.lookup.resolvedBy === 'description') return output({
     status: 'selection_required', reason: 'exact_command_identity_required',
-    candidates: [{ commandName: resolved.command.name, inspectRoute: `workspace action:"command" commandName:"${resolved.command.name}"` }],
+    candidates: [{ commandName: resolved.command.name, inspectRoute: `screens_keys_commands action:"command" commandName:"${resolved.command.name}"` }],
   });
 
   const assertCommandEffect = (name: string, commandArgs: readonly string[]) => {

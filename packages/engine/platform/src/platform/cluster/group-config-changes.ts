@@ -5,9 +5,11 @@ import { ConfigReplicationPrivacyError, isSecretBearingConfigKey } from './confi
 import { AsyncLocalStorage } from 'node:async_hooks';
 import { listReplicatedConfigPaths, replicatedSecretKeys } from './config-replication-policy.js';
 import type { ReplicatedConfigStore, ReplicatedSecretStore } from './config-replication.js';
+import type { ReplicaAct } from './config-replica.js';
 import type { ClusterLogger } from './types.js';
 type ChangeKind = 'config' | 'secret';
-interface Change { readonly kind: ChangeKind; readonly path: string; readonly seed: boolean; readonly assertCurrent: () => void }
+/** `act`: who made a setting change and how it was decided, read from the settings store as its notice arrived. */
+interface Change { readonly kind: ChangeKind; readonly path: string; readonly seed: boolean; readonly assertCurrent: () => void; readonly act?: ReplicaAct | undefined }
 interface Owner { readonly revision: number; readonly generation: number; readonly master: boolean }
 interface ChangeHost {
   readonly config: ReplicatedConfigStore | undefined;
@@ -26,6 +28,8 @@ export class GroupConfigChanges {
   private readonly pending = new Map<string, Change>();
   /** `kind:path` of local changes made while suspended (finite policy paths, never values). */
   private readonly changedWhileSuspended = new Set<string>();
+  /** Who made each change remembered while suspended (`kind:path`), sent with it on resume. */
+  private readonly actsWhileSuspended = new Map<string, ReplicaAct>();
   private unsubscribers: Array<() => void> = [];
   private active = false;
   private suspended = false;
@@ -67,21 +71,26 @@ export class GroupConfigChanges {
     } catch (error) { this.stop(); throw error; }
   }
   stop(): void {
-    this.active = false; this.suspended = true; this.pending.clear(); this.changedWhileSuspended.clear(); this.seeded = null;
+    this.active = false; this.suspended = true; this.pending.clear(); this.changedWhileSuspended.clear(); this.actsWhileSuspended.clear(); this.seeded = null;
     const unsubscribe = this.unsubscribers; this.unsubscribers = [];
     for (const release of unsubscribe) { try { release(); } catch { this.host.logger.warn('cluster: a change subscription could not be released'); } }
   }
   /** Explicit local changes not yet sent are remembered (as `kind:path`), and sent again on resume. */
   suspend(): void {
-    for (const [key, change] of this.pending) if (!change.seed) this.changedWhileSuspended.add(key);
+    for (const [key, change] of this.pending) {
+      if (change.seed) continue;
+      this.changedWhileSuspended.add(key);
+      if (change.act) this.actsWhileSuspended.set(key, change.act);
+    }
     this.suspended = true; this.pending.clear(); this.seeded = null;
   }
   resume(): void {
     if (!this.active) return; this.suspended = false;
     const remembered = [...this.changedWhileSuspended]; this.changedWhileSuspended.clear();
+    const acts = new Map(this.actsWhileSuspended); this.actsWhileSuspended.clear();
     for (const key of remembered) {
       const split = key.indexOf(':');
-      this.enqueue(key.slice(0, split) as ChangeKind, key.slice(split + 1), false);
+      this.enqueue(key.slice(0, split) as ChangeKind, key.slice(split + 1), false, acts.get(key));
     }
     this.refresh();
   }
@@ -109,16 +118,23 @@ export class GroupConfigChanges {
       this.pending.delete(`${kind}:${path}`); this.changedWhileSuspended.delete(`${kind}:${path}`); return;
     }
     this.host.retireLocal?.(path);
-    if (this.active && this.suspended) { this.changedWhileSuspended.add(`${kind}:${path}`); return; }
-    this.enqueue(kind, path, false); this.kick();
+    // Who made it and how it was decided: the settings store, or the secret store for a credential, says so while it
+    // delivers this notice (`writeAct`, from the write's press argument). None for an edit outside the daemon's controls.
+    const act = kind === 'config' ? this.originalConfig?.writeAct?.() : this.originalSecrets.writeAct?.();
+    if (this.active && this.suspended) {
+      this.changedWhileSuspended.add(`${kind}:${path}`);
+      if (act) this.actsWhileSuspended.set(`${kind}:${path}`, act); else this.actsWhileSuspended.delete(`${kind}:${path}`);
+      return;
+    }
+    this.enqueue(kind, path, false, act); this.kick();
   }
-  private enqueue(kind: ChangeKind, path: string, seed: boolean): void {
+  private enqueue(kind: ChangeKind, path: string, seed: boolean, act?: ReplicaAct): void {
     if (!this.active || this.suspended || !this.host.owner()) return;
     let original: () => void; try { original = this.host.capture(); } catch { return; }
     const key = `${kind}:${path}`, previous = this.pending.get(key);
     // A startup seed must never replace an already queued explicit change.
     if (!seed || !previous) {
-      const change: Change = { kind, path, seed, assertCurrent: () => { original(); if (this.pending.get(key) !== change) throw new GroupConfigChangeRetiredError(); } };
+      const change: Change = { kind, path, seed, ...(act ? { act } : {}), assertCurrent: () => { original(); if (this.pending.get(key) !== change) throw new GroupConfigChangeRetiredError(); } };
       this.pending.set(key, change);
     }
   }
@@ -136,7 +152,9 @@ export class GroupConfigChanges {
       catch (error) {
         if (error instanceof ConfigReplicationPrivacyError) { if (this.pending.get(key) === change) this.pending.delete(key); continue; }
         try { change.assertCurrent(); } catch { if (this.pending.get(key) === change) this.pending.delete(key); continue; }
-        this.host.logger.warn('cluster: a local replicated change is awaiting retry', { path: change.path, kind: change.kind });
+        this.host.logger.warn('cluster: a shared setting changed here was not sent to the group yet; it is sent again on the next pass', {
+          path: change.path, kind: change.kind, error: error instanceof Error ? error.message : String(error),
+        });
         return; // bounded retry belongs to housekeeping, never a hot loop
       }
       if (this.pending.get(key) === change) this.pending.delete(key);

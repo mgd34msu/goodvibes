@@ -1,7 +1,6 @@
 /** Platform command lookup, dispatch and exact one-dispatch terminal owner provenance. */
 import { AsyncLocalStorage } from 'node:async_hooks';
 import type { SlashCommandRawRest } from './slash-command-parser.js';
-import { asPersonsOwnAct } from './persons-own-act.js';
 import { captureNativeConversationInput, type NativeConversationInput } from './native/native-conversation-input.js';
 import type { DaemonWriteRefusal } from '@goodvibes/engine/platform/platform/config';
 import { summarizeError } from '@goodvibes/engine/platform/platform/utils/native-error-summary';
@@ -42,7 +41,7 @@ export async function runPickedCommand(
 ): Promise<void> {
   try {
     const handled = run ? await run(name, args) : false;
-    if (!handled) report(`Unknown command: /${name}. Type /help for available commands.`);
+    if (!handled) report(`Unknown command: /${name}. Type /help for the commands; everything else is in the menu (the leader key, Ctrl+G unless you changed it, then m).`);
   } catch (error) {
     const refused = readRefusal(error);
     report(refused ? formatRefusal(refused) : `Command /${name} failed: ${summarizeError(error)}`);
@@ -56,9 +55,8 @@ export interface TerminalSlashCommand<Context> {
   usage?: string | undefined;
   argsHint?: string | undefined;
   /**
-   * False: left off the first screen (the bare `/` list, /help's list, the
-   * palette's opening view); it is still found as soon as its name is typed and
-   * still runs. Every command is reachable; this only orders the first screen.
+   * False: an unlisted command (one kept only to open its place): never in
+   * completion, /help's list or the palette; typed in full it still runs.
    */
   firstScreen?: boolean | undefined;
   /** The one description a command built with `defineCommand` is generated from (command-actions/). */
@@ -380,8 +378,8 @@ export function createTerminalCommandRegistry<
       return this.getAll();
     }
     /**
-     * fuzzyMatch - Return commands ranked by how well `query` matches their
-     * name or aliases. Returns all commands when query is empty.
+     * fuzzyMatch - Return the listed commands ranked by how well `query` matches
+     * their name or aliases. Returns every listed command when query is empty.
      */
     fuzzyMatch(query: string): Array<{
       command: TerminalSlashCommand<Context>;
@@ -399,8 +397,9 @@ export function createTerminalCommandRegistry<
           const score = scoreMatch(q, candidate);
           if (score > bestScore) bestScore = score;
         }
-        // Off the first screen means only that: an empty query leaves it out, any typed text finds it.
-        if (cmd.firstScreen === false && q === '') continue;
+        // Off the first screen (an unlisted command that opens its place): never offered, whatever is typed; typed in
+        // full it still runs (Enter runs the line as typed, autocomplete.ts).
+        if (cmd.firstScreen === false) continue;
         if (bestScore > 0 || q === '') {
           // with no query yet, rank the curated common tier (score 2)
           // ahead of everything else (score 1), the tie-break below then sorts
@@ -440,9 +439,7 @@ export function createTerminalCommandRegistry<
       if (person) directOwnerCommands.set(owned, { name: cmd.name, rawInput });
       const after = commandDispatchScope.getStore() ? undefined : options.afterCommand?.(context);
       try {
-        // A line the person typed: what it makes (an artifact it saves) is part of what he asked (persons-own-act.ts).
-        const run = () => commandDispatchScope.run(dispatchOf(cmd, args), () => cmd.handler(args, owned));
-        await (person ? asPersonsOwnAct(run) : run());
+        await commandDispatchScope.run(dispatchOf(cmd, args), () => cmd.handler(args, owned));
         return true;
       } finally {
         directOwnerCommands.delete(owned);

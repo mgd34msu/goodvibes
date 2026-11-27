@@ -18,6 +18,7 @@ import { conversationalTurnConfigReaderFrom, conversationalTurnSpawnOptions } fr
 import { logger } from '../utils/logger.js';
 import { spendingName } from '../runtime/cost/model-usage.js';
 import { existsSync } from 'node:fs';
+import { pairingTokenIdOfPrincipal } from '../pairing/principal-ids.js';
 import { readHeldCompanionTurn } from './held-companion-turn.js';
 import { daemonOperationLog, daemonOperationsPath } from './operations-log.js';
 import { resolveGitHubToken, startOwedGitHubEvents, type GitHubReplyOperation } from '../adapters/github/index.js';
@@ -78,6 +79,53 @@ import { resolveDaemonServiceDefault, resolveServiceUnitHome } from './daemon-se
 import type { ResolvedInboundTlsContext } from '../runtime/network/index.js';
 import { createBrokeredPermissionManager } from '../runtime/permissions/permission-composition.js';
 import { projectOfDecision } from '../permissions/call-project.js';
+import { checkCallerProject, type CallerProjectVerdict, type ProjectNamer } from '../workspace/caller-project.js';
+import { CallerProjectsStore } from '../workspace/caller-projects-store.js';
+import { CallerSharedStore, type SharedKind } from '../control-plane/shared-kinds.js';
+import { createEventReach, type EventReachContext, type EventReachRules } from '../control-plane/event-reach.js';
+import { setPushAudience } from '../push/index.js';
+import type { Actor } from '@goodvibes/engine/daemon-api/http-policy';
+import { createOutsideAgentProjects } from './outside-agent.js';
+import { createUnverifiedProgramProjects } from './unverified-programs.js';
+import { createSharedKindGifts, setDaemonSharedKindRule } from './shared-kind-gifts.js';
+import { setExposureFile } from '../security/conversation-exposure.js';
+import { programVerificationAvailable } from './program-socket.js';
+import { channelWorkProject, daemonAutomaticProjects, setWebChatHost } from './automatic-project-hosts.js';
+import { isHomeAssistantChatSession } from './homeassistant-chat.js';
+import { isChannelSurfaceKind } from '../../events/surfaces.js';
+import { registerRecordOwners } from './record-owners.js';
+import { setArtifactMakerOfTurn } from '../artifacts/turn-maker.js';
+import { whoseTurn } from '../security/turn-session.js';
+import { capabilityWorkFolderInputs } from '../capabilities/builtin/index.js';
+import { join } from 'node:path';
+import { resolveGoodVibesDaemonHome } from '../config/goodvibes-home.js';
+
+/**
+ * The daemon's one check of a caller's project (workspace/caller-project.ts), over this home: the GoodVibes and daemon
+ * homes kept out, the registered workspaces accepted, a device's or member's projects as the owner gave them
+ * (caller-projects-store.ts).
+ */
+export function daemonCallerProjectCheck(homeDirectory: string): (raw: string, who: ProjectNamer) => CallerProjectVerdict {
+  const daemonHome = resolveGoodVibesDaemonHome(homeDirectory);
+  const assigned = new CallerProjectsStore(daemonHome);
+  const facts = { homeDirectory, goodVibesHome: join(homeDirectory, '.goodvibes'), daemonHome, assignedProjects: (id: string) => assigned.projectsOf(id) };
+  return (raw, who) => checkCallerProject(raw, who, facts);
+}
+
+/** Forget what the owner gave these principals (a device unpaired, a member removed): caller-projects-store.ts. */
+export function daemonCallerProjectsForget(homeDirectory: string): (principalIds: readonly string[]) => void {
+  const store = new CallerProjectsStore(resolveGoodVibesDaemonHome(homeDirectory));
+  // And what of the owner's shared things it was given (control-plane/shared-kinds.ts): none for a device paired again.
+  const shared = new CallerSharedStore(resolveGoodVibesDaemonHome(homeDirectory));
+  return (principalIds) => {
+    const given = store.list();
+    const sharedGiven = shared.list();
+    for (const principalId of principalIds) {
+      if (given[principalId] !== undefined) store.set(principalId, []);
+      if (sharedGiven[principalId] !== undefined) shared.set(principalId, []);
+    }
+  };
+}
 // Re-export type definitions from the dedicated types module.
 export type {
   ResolvedDaemonFacadeRuntime,
@@ -437,6 +485,10 @@ export function resolveDaemonFacadeRuntime(
     // A turn's environment in the chat's project, by the one turn assembly every daemon turn uses
     // (agents/orchestrator.ts): its tools, tool servers, hooks and checkpoint, made once per project.
     turnEnvironment: (project) => runtimeServices.agentOrchestrator.acquireTurnEnvironment(project),
+    // A chat with no project gets its own, made the first time the owner's own message there needs somewhere to work.
+    automaticProject: (ask) => daemonAutomaticProjects(runtimeServices).ensure(ask, false),
+    // The owner among the sign-in users: an older chat he made (kept before its maker was) is his model's.
+    ownerUsername: () => (config.userAuth ?? runtimeServices.localUserAuthManager).ownerUsername?.() ?? null,
     configManager: runtimeServices.configManager,
     // Asks ride the daemon's approval broker like every other background caller's, so a tool call that needs
     // the owner raises a card on every surface instead of being denied as if the user had refused it.
@@ -472,7 +524,26 @@ export function resolveDaemonFacadeRuntime(
     const chat = companionChatManager.getSession(session.id);
     return chat === null ? null : { title: chat.title, messageCount: chat.messageCount, updatedAt: chat.updatedAt };
   });
+  // Sessions, Chats: the daemon's chats with their projects, and moving one to another project (history kept).
+  setWebChatHost({
+    list: () => companionChatManager.listSessions({ limit: 200 }).sessions.map((chat) => ({
+      id: chat.id, title: chat.title || 'untitled chat', kind: isHomeAssistantChatSession(chat) ? 'Home Assistant' : 'web chat',
+      ...(chat.project ? { project: chat.project } : {}) })),
+    move: (id, project) => { companionChatManager.moveSessionToProject(id, project); },
+    sessionTitle: (sessionId) => runtimeServices.sessionBroker.getSession(sessionId)?.title,
+    sessionChannel: (sessionId) => runtimeServices.sessionBroker.getSession(sessionId)?.surfaceKinds.find(isChannelSurfaceKind),
+  });
   runtimeServices.approvalBroker.setPublisher(controlPlaneGateway);
+  // A program that exits or dies closes its connections: then the daemon ends the questions only it was waiting on.
+  runtimeBus.on('CONTROL_PLANE_CLIENT_DISCONNECTED', () => { void runtimeServices.approvalBroker.releaseHoldsOfGonePrograms().catch(() => undefined); });
+  // An open question names a paired device by the name it has when shown (renamed since it asked); one unpaired since
+  // keeps the name the question kept.
+  runtimeServices.approvalBroker.useAskerNames((principalId, kept) => {
+    const deviceId = pairingTokenIdOfPrincipal(principalId);
+    if (deviceId === undefined || !(kept.startsWith('the paired device "') || kept.startsWith('a paired device ('))) return undefined;
+    const device = runtimeServices.pairingTokens.list().find((token) => token.id === deviceId);
+    return device ? `the paired device "${device.name}"` : undefined;
+  });
   runtimeServices.sessionBroker.setEventPublisher((event, payload) => {
     controlPlaneGateway.publishEvent(event, payload);
   });
@@ -750,11 +821,24 @@ export function createDaemonFacadeCollaborators(
     // The owner's own work proposal none of his conversations took waits in Waiting for you, answered there.
     ...(runtime.runtimeServices.ownerInbox ? { ownerInbox: runtime.runtimeServices.ownerInbox } : {}),
     deliverSurfaceNotice: (binding, text) => surfaceDeliveryHelper.deliverSurfaceNotice(binding, text),
+    // The owner's own conversation on a channel with no project works in its own automatic project.
+    projectForWork: channelWorkProject(daemonAutomaticProjects(runtime.runtimeServices), runtime.sessionBroker,
+      (surface) => runtime.channelPolicy.getPolicy(surface as Parameters<typeof runtime.channelPolicy.getPolicy>[0]).project),
   });
   // A channel message from someone it admits who is not its owner never directs a running agent.
   runtime.sessionBroker.setGuestSenderRule((surfaceKind, userId) => surfaceActionHelper.senderIsGuest(surfaceKind, userId));
   // One store answers repeats of every write that takes the shared Idempotency-Key, on each path a call arrives by.
   const idempotentReplay = new IdempotentReplayStore(controlPlaneStorePath(runtime.runtimeServices.shellPaths, runtime.runtimeServices.surfaceRoot, 'idempotent-replay'));
+  // The owner's shared things: who reaches each, and the one question the first time (shared-kind-gifts.ts). One rule,
+  // read by the dispatch and the REST router.
+  const sharedKindRule = createSharedKindGifts({
+    homeDirectory: runtime.runtimeServices.shellPaths.homeDirectory, broker: runtime.approvalBroker,
+    deviceName: (pairingId) => runtime.runtimeServices.pairingTokens?.list().find((device) => device.id === pairingId)?.name,
+  });
+  setDaemonSharedKindRule(sharedKindRule);
+  // What each conversation read from outside, kept in the daemon's home: it survives a restart
+  // (security/conversation-exposure.ts).
+  setExposureFile(join(resolveGoodVibesDaemonHome(runtime.runtimeServices.shellPaths.homeDirectory), 'conversation-exposure.json'));
   const controlPlaneHelper = new DaemonControlPlaneHelper({
     idempotentReplay,
     authToken: options.authToken,
@@ -774,6 +858,111 @@ export function createDaemonFacadeCollaborators(
     parseJsonBody: options.parseJsonBody,
     requireAuthenticatedSession: options.requireAuthenticatedSession,
     workAdmission,
+    callerProject: daemonCallerProjectCheck(runtime.runtimeServices.shellPaths.homeDirectory),
+    // A capability's inputs a turn or process works in, checked as the caller's projects (capabilities/work-folders.ts).
+    capabilityWorkFolders: capabilityWorkFolderInputs,
+    forgetCallerProjects: daemonCallerProjectsForget(runtime.runtimeServices.shellPaths.homeDirectory),
+    // The outside agent's first project: one question to the owner, the call held until he answers (outside-agent.ts).
+    outsideAgentProject: createOutsideAgentProjects({
+      homeDirectory: runtime.runtimeServices.shellPaths.homeDirectory, broker: runtime.approvalBroker, gatewayMethods: runtime.gatewayMethods,
+    }),
+    // Where this daemon cannot verify its programs: the first act in each folder asks the owner once (unverified-programs.ts).
+    unverifiedProgramProject: createUnverifiedProgramProjects({
+      homeDirectory: runtime.runtimeServices.shellPaths.homeDirectory, broker: runtime.approvalBroker, gatewayMethods: runtime.gatewayMethods,
+      verificationAvailable: programVerificationAvailable,
+    }),
+    // The owner's shared things: his own, and anyone else's only with his gift of that kind (shared-kind-gifts.ts); the
+    // same rule the REST router reads.
+    sharedKind: sharedKindRule,
+  });
+  // Each kind of record's owner, for the one check of what a caller may reach by id (control-plane/caller-reach.ts).
+  registerRecordOwners(runtime.gatewayMethods, {
+    chats: runtime.companionChatManager,
+    sessions: runtime.sessionBroker,
+    sessionSharedWith: (sessionId) => runtime.runtimeServices.sessionLiveTurnControls.ownersOf(sessionId),
+    approvals: runtime.approvalBroker,
+    schedules: runtime.automationManager,
+    ...(runtime.triggerManager ? { triggers: runtime.triggerManager } : {}),
+    rules: runtime.runtimeServices.userPermissionRuleStore,
+    memory: runtime.runtimeServices.memoryRegistry,
+    // Checkpoints: registered where the daemon builds its checkpoint verbs' surface, which reaches the store that holds
+    // one (products/daemon service-graph.ts, `registerCheckpointOwner`).
+    tasks: runtime.agentManager,
+    runtimeTaskOwner: (taskId) => runtime.runtimeServices.runtimeStore.getState().tasks.tasks.get(taskId)?.owner,
+    artifacts: runtime.runtimeServices.artifactStore,
+  });
+  // A channel route binding, and work queued for a remote peer, are held as the first record they name that this
+  // daemon holds: the session, else the schedule, else the run (else the question); naming none, the owner's.
+  const ownerOfFirstNamed = async (named: readonly (readonly ['session' | 'schedule' | 'schedule-run' | 'approval', string | undefined])[]) => {
+    const rules = runtime.gatewayMethods.reachRules();
+    for (const [kind, recordId] of named) {
+      if (!recordId) continue;
+      const owner = await rules?.recordOwner?.(kind)?.(recordId);
+      if (owner) return owner;
+    }
+    return { project: null };
+  };
+  runtime.gatewayMethods.setRecordOwner('route-binding', async (id) => {
+    const binding = runtime.routeBindings.getBinding(id);
+    return binding ? ownerOfFirstNamed([['session', binding.sessionId], ['schedule', binding.jobId], ['schedule-run', binding.runId]]) : undefined;
+  });
+  runtime.gatewayMethods.setRecordOwner('remote-work', async (id) => {
+    const work = runtime.distributedRuntime.listWork(Number.MAX_SAFE_INTEGER).find((item) => item.id === id);
+    return work ? ownerOfFirstNamed([['session', work.sessionId], ['schedule', work.automationJobId], ['schedule-run', work.automationRunId], ['approval', work.approvalId]]) : undefined;
+  });
+  // A remote runner's contract and what a runner handed back: the project of the work that made them (the contract's
+  // `workspaceRoot`, the folder it was started for). Read synchronously, so a list can be filtered by them.
+  const runnerFolder = (contract: { readonly workspaceRoot?: string | undefined } | null | undefined): string | null =>
+    typeof contract?.workspaceRoot === 'string' && contract.workspaceRoot.trim() ? contract.workspaceRoot.trim() : null;
+  runtime.gatewayMethods.setRecordOwner('remote-runner', (id) => {
+    const registry = runtime.runtimeServices.remoteRunnerRegistry;
+    const contract = registry.getContract(id) ?? registry.listContracts().find((entry) => entry.runnerId === id || entry.id === id);
+    return contract ? { project: runnerFolder(contract) } : undefined;
+  });
+  runtime.gatewayMethods.setRecordOwner('remote-artifact', (id) => {
+    const artifact = runtime.runtimeServices.remoteRunnerRegistry.getArtifact(id);
+    return artifact ? { project: runnerFolder(artifact.runnerContract) } : undefined;
+  });
+  // The same rule for what a caller follows: every stream, feed and replay delivers to a caller that is not the owner
+  // himself only events about records it may reach (control-plane/event-reach.ts).
+  // A frame about one of the owner's shared things goes to a caller only when he gave it that kind (shared-kinds.ts).
+  const sharedGifts = new CallerSharedStore(resolveGoodVibesDaemonHome(runtime.runtimeServices.shellPaths.homeDirectory));
+  const sharedKindGiven = (principalId: string, kind: SharedKind): boolean => sharedGifts.has(principalId, kind);
+  const eventReachRules = (): EventReachRules | undefined => {
+    const rules = runtime.gatewayMethods.reachRules();
+    return rules ? { ...rules, sharedKindGiven } : rules;
+  };
+  runtime.controlPlaneGateway.setEventReachRules(eventReachRules);
+  // A notification goes only to the devices of people who may see what it is about, by the same rule (push/service.ts):
+  // each device by the principal that registered it, as that principal follows a stream. The owner himself is told
+  // everything; his own paired device what his device may follow; anyone else what its projects and gifts reach.
+  setPushAudience((principalId) => {
+    if (principalId === (runtime.userAuth?.ownerUsername?.() ?? null)) return null;
+    let context: EventReachContext;
+    if (principalId.startsWith('pairing:')) {
+      const device = runtime.runtimeServices.pairingTokens?.list().find((token) => `pairing:${token.id}` === principalId);
+      if (!device) return () => false;
+      const actor: Actor = { class: device.scopes ? 'device' : 'admin', id: principalId, scopes: device.scopes ? new Set(device.scopes) : 'all', via: 'http',
+        ...(device.origin === 'owner-pairing' ? { ownerDevice: { madeFromIt: [] } } : {}) };
+      context = { credentialKind: 'device-token', principalId, actor };
+    } else {
+      context = { credentialKind: 'user-session', principalId, actor: { class: 'member', id: principalId, scopes: new Set<string>(), via: 'http' } };
+    }
+    return createEventReach(context, eventReachRules) ?? (() => true);
+  });
+  // A file a daemon turn makes is the chat's or session's whose turn made it: that one's maker and project. A web chat's
+  // turn runs in no turn record of its own: its tool calls run inside their chat's scope (security/turn-session.ts
+  // `whoseTurn`, the one reader every daemon-turn tool uses).
+  setArtifactMakerOfTurn(() => {
+    const { sessionId } = whoseTurn();
+    if (!sessionId) return undefined;
+    const chat = runtime.companionChatManager.getSession(sessionId);
+    // The project the turn works in (its tool calls are decided for it, companion-chat-turn-execution.ts): a chat moved
+    // to another project while this turn runs has the turn's files stamped with the project they were made in.
+    if (chat) return { createdBy: chat.createdBy, project: projectOfDecision() ?? chat.project };
+    const session = runtime.sessionBroker.getSession(sessionId);
+    if (!session) return undefined;
+    return { createdBy: runtime.sessionBroker.registrantOf?.(sessionId), project: session.project && session.project !== 'unknown' ? session.project : undefined };
   });
   const transportEventsHelper = new DaemonTransportEventsHelper({
     runtimeBus: runtime.runtimeBus,
@@ -802,11 +991,18 @@ export function createDaemonFacadeCollaborators(
     },
   });
   batchManager.start();
+  // A provider batch job is its maker's (control-plane/caller-reach.ts `batch-job`): none kept, the owner's.
+  runtime.gatewayMethods.setRecordOwner('batch-job', async (id) => {
+    const job = await batchManager.getJob(id).catch(() => null);
+    return job ? { project: null, ...(job.createdBy ? { madeBy: job.createdBy } : {}) } : undefined;
+  });
   // The daemon runs cloudflared for the tunnel provisioning recorded, while the
   // integration is on, and follows the tunnel settings; the router stops it.
   const cloudflareTunnel = new CloudflareTunnelConnector({
     configManager: runtime.configManager,
     secretsManager: runtime.runtimeServices.secretsManager,
+    // Its tunnel token in a 0600 file here, not its environment (a cloudflared that takes --token-file).
+    tokenFileFolder: resolveGoodVibesDaemonHome(runtime.runtimeServices.shellPaths.homeDirectory),
   });
   cloudflareTunnel.start();
   // Messages and agreed work held while admission was closed start when a refused handover reopens it.
@@ -842,17 +1038,6 @@ export function createDaemonFacadeCollaborators(
       captureSettingsAdminAuthority: (req) => controlPlaneHelper.captureSettingsAdminAuthority(req),
       withSettingsAdminAuthority: (req, authority, callback) => controlPlaneHelper.withSettingsAdminAuthority(req, authority, callback),
     },
-    settingsImportAuthority: {
-      settingsLifetime: options.settingsLifetime ?? (() => null),
-      captureSettingsAdminAuthority: (req) => controlPlaneHelper.captureSettingsAdminAuthority(req),
-      withSettingsAdminAuthority: (req, authority, callback) => controlPlaneHelper.withSettingsAdminAuthority(req, authority, callback),
-      captureNativeExecutionAuthority: (req) => controlPlaneHelper.createNativeExecutionAuthority(controlPlaneHelper.extractAuthToken(req), undefined,
-        controlPlaneHelper.authenticateRequest(req)?.principal.credentialKind),
-      extractAuthToken: (req) => controlPlaneHelper.extractAuthToken(req),
-      requireAdmin: (req) => controlPlaneHelper.requireAdmin(req),
-    },
-    // Channel routing and drafts, a settings import: daemon methods on what the daemon keeps, decided with no folder trust.
-    nativeMutationHost: runtime.runtimeServices.daemonMethodHost ?? runtime.runtimeServices.nativeMutationHost,
     browserJudgment: runtime.runtimeServices.browserJudgment,
     configManager: runtime.configManager,
     serviceRegistry: runtime.serviceRegistry,
@@ -922,6 +1107,7 @@ export function createDaemonFacadeCollaborators(
     companionChatManager: runtime.companionChatManager,
     secretsManager: runtime.runtimeServices.secretsManager,
     resolveDefaultProviderModel: options.resolveDefaultProviderModel,
+    callerProject: daemonCallerProjectCheck(runtime.runtimeServices.shellPaths.homeDirectory),
   });
   const providerRuntime = new ChannelProviderRuntimeManager({
     configManager: runtime.configManager,

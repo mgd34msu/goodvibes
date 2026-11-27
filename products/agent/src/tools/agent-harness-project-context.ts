@@ -45,7 +45,7 @@ function describeRecord(record: ProjectContextRecord, includeParameters: boolean
       ? previewHarnessText(record.reason, includeParameters ? 180 : 96)
       : previewHarnessText(record.body, includeParameters ? 240 : 96),
     modelRoute: 'context action:"file"',
-    userRoute: 'Agent Workspace -> Local Context -> Inspect project context',
+    userRoute: 'This conversation, See the project instruction files (the menu, Ctrl+G then m)',
     ...(includeParameters && 'body' in record ? { body: record.body, truncated: record.truncated } : {}),
     ...(includeParameters && !('body' in record) ? { reason: record.reason } : {}),
   };
@@ -87,7 +87,7 @@ export async function projectContextSummary(context: ProjectCatalogContext, args
       blocked: 0,
       truncated: 0,
       policy: 'Project context discovery requires workspace shell paths.',
-      nextActions: ['Open a normal Agent workspace before relying on project context files.'],
+      nextActions: ['Start the Agent with its home folder before relying on project context files.'],
     };
   }
   const records: readonly ProjectContextRecord[] = [...snapshot.files, ...snapshot.blocked];

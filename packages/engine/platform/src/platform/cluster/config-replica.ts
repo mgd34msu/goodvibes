@@ -23,6 +23,24 @@
 
 import { createHash } from 'node:crypto';
 
+/**
+ * Who made a replicated change on the machine it was made on, and how it was decided there (daemon-api setting-act.ts
+ * `SettingAct`, the same shape): `press`, the owner's own press; `yes`, his yes to a call put to him (`by` is the caller
+ * who asked); `rules`, admitted under his rules for the named caller. Recorded by the originating machine from its own
+ * dispatch, carried inside the group's authenticated messages, kept and shown by every member. A setting change from a
+ * peer that records none is not taken.
+ */
+export interface ReplicaAct {
+  readonly by: string;
+  readonly owner: boolean;
+  /** `carried`: made before this record existed (a group of released 3.5.0), marked the owner's once at the upgrade. */
+  readonly how: 'press' | 'yes' | 'rules' | 'carried';
+  readonly name?: string | undefined;
+}
+
+/** The record a change made before acts were kept carries once its machine marks it the owner's at the upgrade. */
+export const CARRIED_ACT: ReplicaAct = Object.freeze({ by: 'owner', owner: true, how: 'carried', name: 'carried from before this record existed' });
+
 /** One replicated setting. */
 export interface ConfigReplicaEntry {
   readonly path: string;
@@ -35,6 +53,30 @@ export interface ConfigReplicaEntry {
   readonly at: number;
   /** True when the value lives in the secret store rather than in config. */
   readonly secret: boolean;
+  /** Who made the change on its origin and how it was decided; absent only on a change made before this was kept. */
+  readonly act?: ReplicaAct | undefined;
+}
+
+/** A change's act read from the wire or disk, or undefined when it is missing or malformed. */
+export function readReplicaAct(value: unknown): ReplicaAct | undefined {
+  if (typeof value !== 'object' || value === null) return undefined;
+  const candidate = value as Record<string, unknown>;
+  const by = candidate['by'], how = candidate['how'], name = candidate['name'];
+  if (typeof by !== 'string' || by.length === 0 || by.length > 256) return undefined;
+  if (how !== 'press' && how !== 'yes' && how !== 'rules' && how !== 'carried') return undefined;
+  if (typeof candidate['owner'] !== 'boolean') return undefined;
+  return { by, owner: candidate['owner'], how, ...(typeof name === 'string' && name.length > 0 && name.length <= 200 ? { name } : {}) };
+}
+
+/**
+ * A peer's document with only the changes that record who made them: a setting or credential change (or deletion) with
+ * no recorded actor is not taken from another machine.
+ */
+export function withRecordedActsOnly(document: ConfigReplicaDocument): { readonly document: ConfigReplicaDocument; readonly dropped: number } {
+  const entries = document.entries.filter((entry) => entry.act !== undefined);
+  const tombstones = document.tombstones.filter((entry) => entry.act !== undefined);
+  const dropped = document.entries.length - entries.length + document.tombstones.length - tombstones.length;
+  return { document: dropped === 0 ? document : { ...document, entries, tombstones }, dropped };
 }
 
 /**
@@ -51,6 +93,8 @@ export interface ConfigReplicaTombstone {
   readonly origin: string;
   readonly at: number;
   readonly secret: boolean;
+  /** Who made the deletion on its origin and how it was decided (ReplicaAct). */
+  readonly act?: ReplicaAct | undefined;
 }
 
 export interface ConfigReplicaDocument {
@@ -70,11 +114,25 @@ export interface ConfigReplicaDocument {
    * credential counts as held only for the revision it was stored under.
    */
   readonly applied?: Readonly<Record<string, number>> | undefined;
+  /**
+   * LOCAL ONLY: this copy records who made each change (a document made by this release, or one whose changes from
+   * before the record existed were marked the owner's once, `carryUnrecorded`). Absent on a document a release that
+   * did not record it wrote (3.5.0), which is how the upgrade knows to mark them; never sent, never merged.
+   */
+  readonly carried?: true | undefined;
+  /** LOCAL ONLY: the last run of 3.5.0 put back on this machine whose changes were marked the owner's (`noteOlderReleaseRun`). */
+  readonly olderReleaseRun?: number | undefined;
+  /**
+   * LOCAL ONLY: the highest revision this copy held when this release first read it from this machine's disk (its own
+   * upgrade from 3.5.0). The carry mark applies once, to this machine's own changes at or below it, never to a change
+   * made after the upgrade, and never on behalf of another machine, a removed one included (gate-review-6 G14).
+   */
+  readonly carryThrough?: number | undefined;
 }
 
 /** The document as it goes on the wire: without this machine's applied state. */
 export function wireReplicaDocument(document: ConfigReplicaDocument): ConfigReplicaDocument {
-  if (document.applied === undefined) return document;
+  if (document.applied === undefined && document.carried === undefined && document.olderReleaseRun === undefined && document.carryThrough === undefined) return document;
   return { version: 1, groupId: document.groupId, revision: document.revision, entries: document.entries, tombstones: document.tombstones };
 }
 
@@ -141,6 +199,7 @@ function readEntry(value: unknown): ConfigReplicaEntry | null {
   if (!isRevision(candidate['revision'])) return null;
   if (typeof candidate['origin'] !== 'string') return null;
   if (!isReplicableValue(candidate['value'])) return null;
+  const act = readReplicaAct(candidate['act']);
   return {
     path: candidate['path'],
     value: candidate['value'],
@@ -148,6 +207,7 @@ function readEntry(value: unknown): ConfigReplicaEntry | null {
     origin: candidate['origin'],
     at: isFiniteNumber(candidate['at']) ? Math.trunc(candidate['at']) : 0,
     secret: candidate['secret'] === true,
+    ...(act ? { act } : {}),
   };
 }
 
@@ -157,18 +217,21 @@ function readTombstone(value: unknown): ConfigReplicaTombstone | null {
   if (typeof candidate['path'] !== 'string' || candidate['path'].length === 0) return null;
   if (!isRevision(candidate['revision'])) return null;
   if (typeof candidate['origin'] !== 'string') return null;
+  const act = readReplicaAct(candidate['act']);
   return {
     path: candidate['path'],
     revision: Math.trunc(candidate['revision']),
     origin: candidate['origin'],
     at: isFiniteNumber(candidate['at']) ? Math.trunc(candidate['at']) : 0,
     secret: candidate['secret'] === true,
+    ...(act ? { act } : {}),
   };
 }
 
 /** An empty document for a group that has replicated nothing yet. */
 export function createConfigReplicaDocument(groupId: string): ConfigReplicaDocument {
-  return { version: 1, groupId, revision: 0, entries: [], tombstones: [] };
+  // Born recording who made each change: nothing in it predates the record.
+  return { version: 1, groupId, revision: 0, entries: [], tombstones: [], carried: true };
 }
 
 /**
@@ -206,6 +269,9 @@ export function readConfigReplicaDocument(
     entries,
     tombstones,
     ...(Object.keys(applied).length > 0 ? { applied } : {}),
+    ...(candidate['carried'] === true ? { carried: true as const } : {}),
+    ...(isRevision(candidate['olderReleaseRun']) ? { olderReleaseRun: Math.trunc(candidate['olderReleaseRun']) } : {}),
+    ...(isRevision(candidate['carryThrough']) ? { carryThrough: Math.trunc(candidate['carryThrough']) } : {}),
   });
 }
 
@@ -225,7 +291,9 @@ function normalize(document: ConfigReplicaDocument): ConfigReplicaDocument {
     // Equal revisions are settled by origin, like entries, so two copies that
     // saw the same two deletions in a different order keep the same one.
     if (!existing || tombstone.revision > existing.revision
-      || (tombstone.revision === existing.revision && tombstone.origin < existing.origin)) tombstones.set(tombstone.path, tombstone);
+      || (tombstone.revision === existing.revision && tombstone.origin < existing.origin)
+      // The same deletion: the copy that keeps who made it wins (see `beats`).
+      || (tombstone.revision === existing.revision && tombstone.origin === existing.origin && tombstone.act !== undefined && existing.act === undefined)) tombstones.set(tombstone.path, tombstone);
   }
   // A deletion at or above an entry's revision removes it. Equal resolves to
   // DELETED, see the header: only two members writing at once produce a tie, and
@@ -267,6 +335,9 @@ function byPath(a: { path: string }, b: { path: string }): number {
 /** Higher revision wins; an equal revision is settled by origin, never by clock. */
 function beats(candidate: ConfigReplicaEntry, incumbent: ConfigReplicaEntry): boolean {
   if (candidate.revision !== incumbent.revision) return candidate.revision > incumbent.revision;
+  // The same change (one origin issues one revision once): the copy that keeps who made it wins over one a release
+  // that does not keep it (3.5.0) wrote back without it, so the record comes back from any member that held it.
+  if (candidate.origin === incumbent.origin) return candidate.act !== undefined && incumbent.act === undefined;
   return candidate.origin < incumbent.origin;
 }
 
@@ -287,13 +358,16 @@ export function mergeConfigReplica(
     entries: [...local.entries, ...remote.entries],
     tombstones: [...local.tombstones, ...remote.tombstones],
     ...(local.applied !== undefined ? { applied: local.applied } : {}),
+    ...(local.carried === true ? { carried: true as const } : {}),
+    ...(local.olderReleaseRun !== undefined ? { olderReleaseRun: local.olderReleaseRun } : {}),
+    ...(local.carryThrough !== undefined ? { carryThrough: local.carryThrough } : {}),
   });
 }
 
 /** Write (or overwrite) a setting at the next revision. */
 export function putReplicaEntry(
   document: ConfigReplicaDocument,
-  input: { path: string; value: unknown; origin: string; at: number; secret?: boolean },
+  input: { path: string; value: unknown; origin: string; at: number; secret?: boolean; act?: ReplicaAct | undefined },
 ): ConfigReplicaDocument {
   const revision = document.revision + 1;
   return normalize({
@@ -308,6 +382,7 @@ export function putReplicaEntry(
         origin: input.origin,
         at: Math.trunc(input.at),
         secret: input.secret === true,
+        ...(input.act ? { act: input.act } : {}),
       },
     ],
     // A re-write clears any earlier deletion of the same path, at a revision
@@ -319,7 +394,7 @@ export function putReplicaEntry(
 /** Delete a setting at the next revision. */
 export function deleteReplicaEntry(
   document: ConfigReplicaDocument,
-  input: { path: string; origin: string; at: number; secret?: boolean },
+  input: { path: string; origin: string; at: number; secret?: boolean; act?: ReplicaAct | undefined },
 ): ConfigReplicaDocument {
   const revision = document.revision + 1;
   return normalize({
@@ -334,6 +409,7 @@ export function deleteReplicaEntry(
         origin: input.origin,
         at: Math.trunc(input.at),
         secret: input.secret === true,
+        ...(input.act ? { act: input.act } : {}),
       },
     ],
   });
@@ -390,6 +466,10 @@ export function findReplicaEntry(
  */
 export function replicaDigest(document: ConfigReplicaDocument): string {
   const hash = createHash('sha256');
+  // A setting change that records no one who made it is kept only where it was made (no other member takes it), so it
+  // is left out here: two copies that differ only by such a change hold the same group settings.
+  const recorded = withRecordedActsOnly(document).document;
+  document = recorded;
   for (const entry of document.entries) hash.update(`e\0${entry.path}\0${entry.revision}\0${entry.origin}\0${entry.secret ? 1 : 0}\n`);
   for (const entry of document.tombstones) hash.update(`t\0${entry.path}\0${entry.revision}\0${entry.origin}\0${entry.secret ? 1 : 0}\n`);
   return hash.digest('hex').slice(0, 32);

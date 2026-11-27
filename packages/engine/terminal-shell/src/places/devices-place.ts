@@ -41,6 +41,16 @@ interface DeviceItem extends PlaceItem {
   readonly lastSeenAt?: number | undefined;
   readonly owner?: boolean | undefined;
   readonly scopes: readonly string[];
+  /** Who made it, in words (`madeByWords`). */
+  readonly madeBy: string;
+}
+
+/** Who made a credential, in words: the daemon records it from this release on (pairing-token-store.ts `PairingMaker`). */
+export function madeByWords(madeBy: unknown): string {
+  const maker = record(madeBy);
+  if (maker.owner === true) return 'you';
+  if (typeof maker.caller === 'string' && maker.caller) return `${plain(maker.caller)}, with your yes`;
+  return 'made before this was recorded';
 }
 /** `replaces`: the request names a device already paired (the daemon's `replacesPeerId`); approving it needs Replace. */
 /** `daemon`: another machine's daemon asking (it finishes pairing by itself once approved); a phone presses Finish pairing. */
@@ -50,7 +60,8 @@ interface GrantItem extends PlaceItem { readonly state: 'allowed'; readonly what
 interface CaptureItem extends PlaceItem { readonly state: 'kept'; readonly what: string; readonly node: string; readonly capturedAt?: number | undefined; readonly expiresAt?: number | undefined; readonly bytes: number; readonly reason: string }
 interface RelayItem extends PlaceItem { readonly state: 'paired'; readonly name: string; readonly createdAt?: number | undefined; readonly lastSeenAt?: number | undefined }
 /** `removedFrom`: the group another machine removed this one from (the daemon's report), shown while it is in none. */
-interface GroupItem extends PlaceItem { readonly state: 'no-group' | 'member' | 'unreadable'; readonly name: string; readonly machine: string; readonly members: number; readonly keyGeneration?: number | undefined; readonly keyChangedAt?: number | undefined; readonly awaitingSync: boolean; readonly removedFrom?: string | undefined; readonly sharing: boolean }
+/** `fromGroup`: the latest shared settings changed on the other machines, each with who made it there and how it was decided. */
+interface GroupItem extends PlaceItem { readonly state: 'no-group' | 'member' | 'unreadable'; readonly name: string; readonly machine: string; readonly members: number; readonly keyGeneration?: number | undefined; readonly keyChangedAt?: number | undefined; readonly awaitingSync: boolean; readonly removedFrom?: string | undefined; readonly sharing: boolean; readonly fromGroup?: readonly string[] | undefined; readonly notTaken?: readonly string[] | undefined; readonly olderRelease?: readonly string[] | undefined }
 interface MachineItem extends PlaceItem { readonly state: 'member' | 'this-machine'; readonly name: string; readonly lastSeenAt?: number | undefined; readonly heard: boolean }
 /** `sharing-off`: this machine is not on the group's network, so it hears no group: said, with the control that turns sharing on. */
 interface NearbyItem extends PlaceItem { readonly state: 'announced' | 'sharing-off' | 'sharing-next-start'; readonly name: string; readonly machines: number; readonly lastSeenAt?: number | undefined }
@@ -94,11 +105,24 @@ function settingsOf(match: (key: string) => boolean, said?: string) {
     // Only the one domain the tab is named for is left out: two domains' "host" or "enabled" must stay told apart.
     id: key, state: 'setting',
     label: said && key.startsWith(said) ? key.slice(said.length)
-      : LISTENER_WORDS[key.split('.')[0]!] && ADDRESS_KEYS.test(key) ? `${LISTENER_WORDS[key.split('.')[0]!]} ${key.slice(key.indexOf('.') + 1)}` : key,
+      : ADDRESS_WORDS[key] ?? (LISTENER_WORDS[key.split('.')[0]!] && ADDRESS_KEYS.test(key) ? `${LISTENER_WORDS[key.split('.')[0]!]} ${key.slice(key.indexOf('.') + 1)}` : key),
     value: value === undefined || value === null || value === '' ? 'not set' : typeof value === 'string' ? plain(value) : plain(JSON.stringify(value)),
   }));
 }
-const ADDRESS_KEYS = /^(controlPlane|httpListener|web)\.(hostMode|host|port|trustProxy|trustCloudflare)$/;
+// With whether each listener is open to other devices at all (the System, Setup topics "Only this computer", "Use it
+// in a browser", "Other devices" and "Receive webhooks" open this tab in both programs, and its `a` makes the account
+// that signs in from there) and each listener's encryption
+// (`tls.mode`), which the Security notice names here (tui runtime/bootstrap-core.ts).
+const ADDRESS_KEYS = /^(?:(controlPlane|httpListener|web)\.(hostMode|host|port|trustProxy|trustCloudflare|tls\.mode)|controlPlane\.enabled|web\.enabled|danger\.httpListener)$/;
+/** An address setting said in words where its key would not be ("Daemon encryption", not "Daemon tls.mode"). */
+const ADDRESS_WORDS: Readonly<Record<string, string>> = {
+  // Short enough to stand whole at 80 columns; the detail gives the key.
+  'controlPlane.enabled': 'Daemon on network',
+  'web.enabled': 'Web UI on',
+  'danger.httpListener': 'Webhooks receiver on',
+  'controlPlane.tls.mode': 'Daemon encryption',
+  'httpListener.tls.mode': 'Webhooks encryption',
+};
 /** A setting named by its whole key wherever the action says it (the form, the question, the done line). */
 const SETTING_KEY_SHOWN = { key: (item: PlaceItem): string => `"${item.id}"` };
 const settingRow = (item: PlaceItem) => ({ title: (item as SettingItem).label, right: (item as SettingItem).value.slice(0, 18) });
@@ -130,10 +154,11 @@ function devices(output: unknown): readonly DeviceItem[] {
     lastSeenAt: time(token.lastSeenAt),
     owner: token.origin === 'owner-pairing',
     scopes: strings(token.scopes),
+    madeBy: madeByWords(token.madeBy),
   }));
   // Shown and acted on (retire it, give a device its own token), but no device: the Paired tab counts devices only.
   const shared: DeviceItem = {
-    id: SHARED_TOKEN_ID, state: body.legacySharedRevoked === true ? 'shared-retired' : 'shared-active', name: 'The old shared token', scopes: [],
+    id: SHARED_TOKEN_ID, state: body.legacySharedRevoked === true ? 'shared-retired' : 'shared-active', name: 'The old shared token', scopes: [], madeBy: '',
     uncounted: true,
   };
   return [...tokens, shared];
@@ -215,6 +240,15 @@ function group(output: unknown): readonly GroupItem[] {
     ...(state === 'no-group' && report.removedFrom ? { removedFrom: plain(record(report.removedFrom).groupName) || 'its group' } : {}),
     // An older daemon that does not say is taken as on (it said "no group is announced" either way).
     sharing: report.sharing !== 'off',
+    fromGroup: Array.isArray(dataOf(output).fromGroup)
+      ? (dataOf(output).fromGroup as unknown[]).filter((line): line is string => typeof line === 'string').map(plain)
+      : [],
+    notTaken: Array.isArray(dataOf(output).notTaken)
+      ? (dataOf(output).notTaken as unknown[]).filter((line): line is string => typeof line === 'string').map(plain)
+      : [],
+    olderRelease: Array.isArray(dataOf(output).olderRelease)
+      ? (dataOf(output).olderRelease as unknown[]).filter((line): line is string => typeof line === 'string').map(plain)
+      : [],
     // One row, this machine's group (or none): there is nothing to count, so the tab says no number.
     uncounted: true,
   }];
@@ -318,6 +352,7 @@ export const DEVICES_PLACE = definePlace<Item>({
           { label: 'Paired', text: when(device.createdAt) },
           { label: 'Last seen', text: when(device.lastSeenAt) },
           { label: 'Kind', text: device.state === 'agent' ? 'the GoodVibes Agent\'s credential for calls it makes for you' : device.owner ? 'a device you paired yourself' : 'a device paired for automation' },
+          { label: 'Made by', text: device.madeBy },
           { label: 'Access', text: device.scopes.length > 0 ? `only ${device.scopes.join(', ')}` : 'everything the daemon offers' },
         ];
       },
@@ -428,7 +463,7 @@ export const DEVICES_PLACE = definePlace<Item>({
         const own = item as GroupItem;
         if (own.state === 'no-group') return { title: 'In no group', mark: 'paused' };
         if (own.state === 'unreadable') return { title: 'Group key could not be read', mark: 'attention' };
-        return { title: own.name, right: `${own.members} machine${own.members === 1 ? '' : 's'}`, mark: own.awaitingSync ? 'attention' : 'ok' };
+        return { title: own.name, right: `${own.members} machine${own.members === 1 ? '' : 's'}`, mark: own.awaitingSync || (own.notTaken?.length ?? 0) > 0 ? 'attention' : 'ok' };
       },
       detail: (item) => {
         const own = item as GroupItem;
@@ -446,6 +481,12 @@ export const DEVICES_PLACE = definePlace<Item>({
           ...(own.keyGeneration !== undefined ? [{ label: 'Group key', text: keyChangedWords(own.keyGeneration, own.keyChangedAt) }] : []),
           ...(own.awaitingSync ? [{ label: 'Needs a look', text: 'this machine does not hold the group\'s settings yet', tone: 'warning' as const }] : []),
           ...(own.sharing ? [] : [{ label: 'Sharing', text: 'off on this computer, so it is not on the group\'s network: nothing reaches the other machines from it until sharing is on', tone: 'warning' as const }]),
+          // What does not cross from another machine, and why (an older release there, or a change made outside its controls).
+          // A member on an older release, said as that (not as out of step).
+          ...(own.olderRelease ?? []).map((line) => ({ label: 'Older release', text: line })),
+          ...(own.notTaken ?? []).map((line) => ({ label: 'Not taken', text: line, tone: 'warning' as const })),
+          // Each shared setting changed on another machine with who made it there and how it was decided.
+          ...(own.fromGroup ?? []).map((line, index) => ({ ...(index === 0 ? { label: 'Changed elsewhere' } : {}), text: line })),
         ];
       },
     },
@@ -608,12 +649,18 @@ export const DEVICES_PLACE = definePlace<Item>({
     // A setting shown where its thing is, changed in place through Settings' own capability (the key given by the row).
     // The form names the setting by its whole key (the row shows it less the tab's domain).
     { key: 'enter', id: 'change-setting', list: 'addresses', states: ['setting'], capability: 'settings.set', label: 'change', fill: { key: 'id' }, shownAs: SETTING_KEY_SHOWN },
+    // Opening GoodVibes to a browser or another device needs an account that signs in there (builtin/network-account.ts).
+    { key: 'a', id: 'sign-in-account', list: 'addresses', whole: true, capability: 'devices.sign-in-account', label: 'the account that signs in' },
     { key: 'enter', id: 'change-phone-setting', list: 'phone-settings', states: ['setting'], capability: 'settings.set', label: 'change', fill: { key: 'id' }, shownAs: SETTING_KEY_SHOWN },
     { key: 'enter', id: 'change-cloudflare-setting', list: 'cloudflare-settings', states: ['setting'], capability: 'settings.set', label: 'change', fill: { key: 'id' }, shownAs: SETTING_KEY_SHOWN },
     // Pairing something new keeps its own screen: the QR code, and the other ways to sign in.
     { key: 'p', capability: 'devices.pair', label: 'pair something' },
     { key: 'n', list: 'devices', states: ['paired', 'agent'], capability: 'devices.rename', label: 'rename', fill: { device: 'id' } },
     { key: 'x', list: 'devices', states: ['paired', 'agent'], capability: 'devices.revoke', label: 'revoke', fill: { device: 'id' } },
+    // The projects of yours it may work in (builtin/devices-projects.ts): with none it acts on shared things only.
+    { key: 'w', id: 'give-project', list: 'devices', states: ['paired', 'agent'], capability: 'devices.give-project', label: 'let it work in a project', fill: { who: (item) => `pairing:${item.id}` }, form: true },
+    { key: 'W', id: 'take-project', list: 'devices', states: ['paired', 'agent'], capability: 'devices.take-project', label: 'stop it working in a project', fill: { who: (item) => `pairing:${item.id}` }, form: true },
+    { key: 'j', id: 'device-projects', list: 'devices', whole: true, capability: 'devices.projects', label: 'projects each device may work in' },
     { key: 'x', id: 'retire-shared', list: 'devices', states: ['shared-active'], capability: 'devices.revoke-shared', label: 'retire it' },
     // Its one-time token is the outcome's reveal: shown whole in the place's own pane, with the copy key, until left.
     { key: 'g', id: 'migrate-shared', list: 'devices', states: ['shared-active'], capability: 'devices.migrate-shared', label: 'give a device its own token' },
@@ -643,6 +690,8 @@ export const DEVICES_PLACE = definePlace<Item>({
     { key: 'o', list: 'group', states: ['member'], capability: 'cluster.rotate', label: 'new key', form: true },
     { key: 'u', list: 'group', states: ['member'], capability: 'cluster.publish', label: 'share a setting' },
     { key: 't', list: 'group', states: ['member'], capability: 'cluster.accept', label: 'take the group\'s setting' },
+    // The shared settings whose value here differs from the group's, with both values (commands-final: no control before).
+    { key: 'd', id: 'group-differences', list: 'group', states: ['member'], capability: 'cluster.differences', label: 'settings that differ' },
     // Leaving is on this machine's own row in Machines; here only when the key cannot be read (Machines cannot list then).
     { key: 'l', list: 'group', states: ['unreadable'], capability: 'cluster.leave', label: 'leave the group' },
     // One control per act: another machine's row removes it from the group or shows its own view (asked of it); this

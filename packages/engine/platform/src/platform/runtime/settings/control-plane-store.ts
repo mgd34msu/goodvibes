@@ -28,6 +28,12 @@ export interface ManagedSettingLock {
   readonly source: string;
   readonly reason: string;
   readonly updatedAt: number;
+  /**
+   * Set on a copy in the terminal app's lock file of a lock recorded elsewhere (that lock file's path), kept there only
+   * so a released 3.5.0 after a rollback honours it (control-plane.ts mirrorLocksForRelease). This version never reads
+   * a copy as a lock: it reads the lock where it was recorded.
+   */
+  readonly mirroredFrom?: string | undefined;
 }
 
 export interface SettingsLayerRecord {

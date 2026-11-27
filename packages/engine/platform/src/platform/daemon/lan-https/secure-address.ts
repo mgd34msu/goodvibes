@@ -753,7 +753,7 @@ export class SecureAddressService {
     const secrets = this.deps.secrets();
     const own = secrets ? await secrets.get('controlPlane.lanHttps.authority') : null;
     if (!own) { this.writeState((next) => { next.setAsideNoticeFor = groupId; }); return; }
-    const text = `This machine now serves https with the certificate of its group's lead, ${leadName}. Its own GoodVibes certificate authority is kept, set aside: phones that installed it trust this machine again if it leaves the group. While it is a member of ${leadName}, a phone trusts this machine only when it trusts the lead's certificate: when that is GoodVibes' own, the phone installs ${leadName}'s authority, from the page /lan-https on this machine's plain address or on ${leadName}'s.`;
+    const text = `This machine now serves https with the certificate of its group's lead, ${leadName}. Its own GoodVibes certificate authority is kept, set aside: phones that installed it trust this machine again if it leaves the group. While it is a member of ${leadName}, a phone trusts this machine only when it trusts the lead's certificate: when that is GoodVibes' own, the phone installs ${leadName}'s authority, from the link for phones (the page /lan-https on this machine's https address or on ${leadName}'s, which offers it only when it matches the fingerprint in the link).`;
     let carried = false;
     if (this.deps.noticeOwner) carried = await this.deps.noticeOwner(text).catch(() => false);
     else this.deps.alertOwner?.(text);

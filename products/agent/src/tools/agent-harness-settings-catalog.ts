@@ -1,6 +1,5 @@
 import { getAgentSettingsSchema, type AgentSettingsCatalog } from '../config/settings-catalog.ts';
 import { catalogRoutingInput } from '@goodvibes/engine/terminal-shell/agent-turn/catalog-ingress';
-import { isAgentWorkspaceSettingsImportPreview } from './agent-settings-import-admission.ts';
 import type { CatalogRankingOptions } from '@goodvibes/engine/terminal-shell/agent-turn/catalog-ranking';
 import type { ConfigManager } from '@goodvibes/engine/platform/platform/config';
 import { listEffectiveHarnessSettingsPage } from '../agent/harness-control.ts';
@@ -13,7 +12,6 @@ import type { AgentHarnessToolArgs } from './agent-harness-tool-types.ts';
 /** Exact catalog identities do not require semantic source projection. */
 export function isHarnessSettingsQuery(input: Record<string, unknown>, config?: AgentSettingsCatalog): boolean {
   const args = catalogRoutingInput(input);
-  if (args.mode === 'run_workspace_action') return isAgentWorkspaceSettingsImportPreview(input);
   if (args.mode === 'settings') return typeof args.query === 'string' && args.query.trim().length > 0;
   if (args.mode !== 'get_setting') return false;
   const value = [args.key, args.target, args.query].find(item => typeof item === 'string' && item.trim());

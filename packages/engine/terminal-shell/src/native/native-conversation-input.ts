@@ -8,6 +8,11 @@ import type { NativeConversationIntakeUnsupportedSource } from '@goodvibes/engin
 export interface NativeConversationInput {
   readonly text: string;
   readonly unsupportedSources: readonly NativeConversationIntakeUnsupportedSource[];
+  /**
+   * Files sent with the message (an image the person attached), uploaded first to the daemon's artifact store
+   * (`artifacts.create`): the host's turn gives them to the model as a chat message's are.
+   */
+  readonly attachments?: readonly { readonly artifactId: string; readonly label?: string | undefined }[] | undefined;
 }
 export interface ProductInputContext {
   readonly source?: NativeConversationInput;

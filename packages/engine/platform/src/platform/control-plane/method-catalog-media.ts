@@ -167,6 +167,9 @@ export const builtinGatewayMediaMethodDescriptors: readonly GatewayMethodDescrip
     category: 'artifacts',
     effects: ['artifacts.administer'],
     http: { method: 'POST', path: '/api/artifacts' },
+    // A daemon-local path or file: URI is read on the daemon's disk (control-plane/caller-paths.ts): from anyone but
+    // the owner's own program only inside a project given to it; a caller's own file is uploaded as its content.
+    daemonFiles: ['path', 'uri'],
     // The store refuses an input carrying none of the four content sources
     // (`Artifact input requires dataBase64, text, path, or uri`,
     // platform/artifacts/store.ts), surfacing as a 400 from the route. Exactly
@@ -308,6 +311,7 @@ export const builtinGatewayMediaMethodDescriptors: readonly GatewayMethodDescrip
     description: 'Analyze an image, audio file, video artifact, or document through the unified multimodal service. With a write-back requested, `writeback` reports it as an outcome: `state: "done"` with what was stored in `value` (201), or `state: "failed"` with its `refusal` (207: the analysis finished and is returned, but nothing was stored).',
     category: 'media',
     http: { method: 'POST', path: '/api/multimodal/analyze' },
+    notDaemonFiles: { 'writeback.folderPath': 'the knowledge folder a written-back result is filed under, a label in the store' },
     inputSchema: MULTIMODAL_ANALYZE_REQUEST_SCHEMA,
     outputSchema: MULTIMODAL_ANALYZE_OUTPUT_SCHEMA,
   }),
@@ -329,6 +333,7 @@ export const builtinGatewayMediaMethodDescriptors: readonly GatewayMethodDescrip
     category: 'media',
     effects: ['media.administer', 'knowledge.administer'],
     http: { method: 'POST', path: '/api/multimodal/writeback' },
+    notDaemonFiles: { folderPath: 'the knowledge folder the result is filed under, a label in the store' },
     inputSchema: MULTIMODAL_WRITEBACK_REQUEST_SCHEMA,
     outputSchema: MULTIMODAL_WRITEBACK_OUTPUT_SCHEMA,
   }),

@@ -40,12 +40,10 @@
 import { statSync } from 'node:fs';
 import { getOperatorMethod } from '@goodvibes/engine/contracts';
 import { validateOperatorResponse } from '@goodvibes/engine/operator-client/client-core';
-import { OwnedSelectionObservation, captureRemoteSettingsPrecondition, programCallHeaders } from '@goodvibes/engine/platform/platform/runtime/client';
-import { assertProjectionCurrent } from '@goodvibes/engine/platform/platform/tools/input-projection';
+import { OwnedSelectionObservation, PROGRAM_GATE_DECIDED_HEADER, captureRemoteSettingsPrecondition, programCallHeadersFor } from '@goodvibes/engine/platform/platform/runtime/client';
 import { agentHostPairingStorePath } from '@goodvibes/engine/terminal-shell/agent-turn/connected-host-pairing-store';
 import { connectedHostOperatorTokenPath } from '@goodvibes/engine/terminal-shell/agent-turn/connected-host-auth';
-import { resolveConnectedHostDialEnabled, captureRemoteSettingsImportPrecondition, observeImportFile,
-  assertImportFileCurrent } from '@goodvibes/engine/platform/platform/config';
+import { resolveConnectedHostDialEnabled } from '@goodvibes/engine/platform/platform/config';
 import type { ConfigManager } from '@goodvibes/engine/platform/platform/config';
 import type { DaemonReachability, DaemonVerbCaller } from '@goodvibes/engine/platform/platform/runtime/client';
 import {
@@ -230,6 +228,8 @@ export interface AgentDaemonVerbInvokeOptions {
   readonly idempotencyKey?: string | undefined;
   /** A person asked for exactly this, now: sent as the explicit-user-request claim (kept by the host only from a person's credential). */
   readonly explicitUserRequest?: boolean | undefined;
+  /** The Agent's own gate decided the model's call this is part of: sent as its mark. */
+  readonly decidedByProgramGate?: boolean | undefined;
 }
 
 /** The engine's verb caller, whose `invoke` also takes {@link AgentDaemonVerbInvokeOptions}. */
@@ -250,31 +250,7 @@ export function createAgentDaemonVerbCaller(options: AgentDaemonVerbCallerOption
 
   return {
     probe,
-    captureSettingsImportPrecondition: async (request, restriction) => {
-      const signal = restriction?.signal, restrictCurrent = restriction?.assertCurrent;
-      const manager = options.configManager, get = manager.get, homeSelection = options.homeDirectory;
-      const home = typeof homeSelection === 'function' ? homeSelection() : homeSelection;
-      const sources = [connectedHostOperatorTokenPath(home), agentHostPairingStorePath(home)]
-        .map(path => ({ path, observation: observeImportFile(path) }));
-      const resolved = resolveConnection(options);
-      if ('reason' in resolved) throw new Error('Settings connection owner unavailable.');
-      const assertCurrent = () => {
-        if (restriction?.signal !== signal || restriction?.assertCurrent !== restrictCurrent) throw new Error('Settings connection restriction changed.');
-        signal?.throwIfAborted(); assertProjectionCurrent(restrictCurrent);
-        if (options.configManager !== manager || manager.get !== get || options.homeDirectory !== homeSelection
-          || (typeof homeSelection === 'function' ? homeSelection() : homeSelection) !== home) throw new Error('Settings connection owner changed.');
-        for (const source of sources) assertImportFileCurrent(source.path, source.observation);
-        const current = resolveConnection(options);
-        if ('reason' in current || current.baseUrl !== resolved.baseUrl || current.token !== resolved.token
-          || current.selectionIdentity !== resolved.selectionIdentity || current.expectedPrincipalId !== resolved.expectedPrincipalId) throw new Error('Settings connection owner changed.');
-      };
-      // The registry/native settings plan owns config incarnation. This source
-      // binds the actual endpoint selection and its complete physical credentials.
-      assertCurrent();
-      return await captureRemoteSettingsImportPrecondition({ baseUrl: resolved.baseUrl, token: resolved.token, source: 'installed connected host' }, request,
-        { fetchImpl, ...(signal ? { signal } : {}), assertCurrent });
-    },
-    captureSettingsPrecondition: async (request) => {
+    captureSettingsPrecondition: async (request, press) => {
       const manager = options.configManager;
       // An unversioned embed cannot prove connection ABA, so it must not offer
       // a prepared write. Ordinary read/manual verb behavior stays unchanged.
@@ -301,8 +277,10 @@ export function createAgentDaemonVerbCaller(options: AgentDaemonVerbCallerOption
           || current.selectionIdentity !== resolved.selectionIdentity) throw new Error('Settings connection owner changed.');
       };
       assertCurrent();
-      return await captureRemoteSettingsPrecondition({ baseUrl: resolved.baseUrl, token: resolved.token, source: 'installed connected host' },
-        request, { fetchImpl, assertCurrent });
+      // With the Agent's call context and registration, and who decided the write (its gate, or the person's press).
+      const headers = await programCallHeadersFor(resolved.baseUrl, resolved.token, fetchImpl, 'agent');
+      return await captureRemoteSettingsPrecondition({ baseUrl: resolved.baseUrl, token: resolved.token, source: 'installed connected host', headers },
+        request, { fetchImpl, assertCurrent, press });
     },
     invoke: async <T,>(methodId: string, input?: unknown, invokeOptions?: AgentDaemonVerbInvokeOptions): Promise<T> => {
       const resolved = resolveConnection(options);
@@ -319,9 +297,14 @@ export function createAgentDaemonVerbCaller(options: AgentDaemonVerbCallerOption
             // The caller names the Agent, so the approvals it raises and the credentials it writes are attributed to it.
             headers: {
               // The Agent's call context (its project and conversation) goes with every call (call-context.ts).
-              Authorization: `Bearer ${resolved.token}`, 'Content-Type': 'application/json', ...programCallHeaders('agent'),
+              Authorization: `Bearer ${resolved.token}`, 'Content-Type': 'application/json',
+              // With the registration this daemon issued the Agent (asked for on the first call, sent to it only).
+              ...(await programCallHeadersFor(resolved.baseUrl, resolved.token, fetchImpl, 'agent')),
               ...(invokeOptions?.idempotencyKey ? { 'Idempotency-Key': invokeOptions.idempotencyKey } : {}),
               ...(invokeOptions?.explicitUserRequest === true ? { 'x-goodvibes-explicit-user-request': 'true' } : {}),
+              // The Agent's own gate decided the model's call this write is part of: its mark (believed only from its
+              // registration, or the Agent's credential).
+              ...(invokeOptions?.decidedByProgramGate === true ? { [PROGRAM_GATE_DECIDED_HEADER]: 'true' } : {}),
             },
             // The envelope the route requires: `body` must be PRESENT even when
             // empty, or the route refuses with a 400 naming the shape it wanted.

@@ -85,6 +85,11 @@ export interface CiWatchSubscription {
   readonly repo: string;
   readonly ref?: string | undefined;
   readonly prNumber?: number | undefined;
+  /**
+   * The project folder the watch belongs to: for a watch made automatically, the project of the turn whose push made it.
+   * Its repair session works there, never in the daemon's own folder.
+   */
+  readonly project?: string | undefined;
   /** Channel to notify on completion ('surfaceKind' or 'surfaceKind:address'). */
   readonly deliveryChannel: string;
   /** Historical standalone-service opt-in; production always requires original-source Jev admission. */
@@ -157,6 +162,8 @@ export interface FixSessionBrief {
   readonly failingJobs: readonly string[];
   readonly jobs?: readonly CiJob[] | undefined;
   readonly logs: string;
+  /** The project folder of the watch (CiWatchSubscription.project): the repair session works there. */
+  readonly project?: string | undefined;
 }
 
 /**

@@ -1,4 +1,5 @@
 import type { AuthorityRecordFile } from '../cluster/authority-record-file.js';
+import { noteRefusedFromGroup } from '../cluster/refused-from-group.js';
 import { randomBytes, randomUUID, scrypt, scryptSync, timingSafeEqual } from 'crypto';
 import { existsSync, readFileSync, renameSync, rmSync } from 'node:fs';
 import { logger } from '../utils/logger.js';
@@ -26,6 +27,12 @@ export interface AuthUser {
    * this mark.
    */
   bootstrap?: true | undefined;
+  /**
+   * This account is the owner: written once, on the account made at first start, and carried forward at an upgrade
+   * from the account that is the owner today (the first in the store, the one rule before this mark). Never inferred
+   * from the store's order again; the owner is never deleted or narrowed, and no other user is made the owner.
+   */
+  owner?: true | undefined;
 }
 
 export interface AuthSession {
@@ -129,16 +136,22 @@ interface AccountLockState {
 }
 
 /**
- * Failed network sign-ins for one username from every address. The per-address
- * lock never stops a guesser who changes address; this slows every sign-in for
- * the username once it has failed many times in an hour, without locking the
- * owner out the way a per-username lock would.
+ * Failed network sign-ins for one username from every source. The per-source
+ * lock never stops a guesser who changes source; past many failures in an hour
+ * this slows the SOURCES that failed for the username, never the username for
+ * everyone: a source with no failure of its own (the owner signing in from
+ * another address) is never held by what other sources did.
  */
 interface UsernameFailureWindow {
   failures: number;
   windowStart: number;
   slowedUntil: number;
+  /** The sources that failed for this username in the window (bounded: a source past the bound is held by its own lock only). */
+  readonly sources: Set<string>;
 }
+
+/** Sources one username's window remembers. */
+const USERNAME_FAILURE_SOURCES = 4_096;
 
 const USERNAME_FAILURE_WINDOW_MS = 60 * 60_000;
 const USERNAME_FAILURE_THRESHOLD = 50;
@@ -329,6 +342,7 @@ function readBootstrapUsers(filePath: string, observedRecovery?: () => void, fre
       && typeof user.passwordHash === 'string'
       && (user.roles === undefined || Array.isArray(user.roles))
       && (user.scopes === undefined || isScopeList(user.scopes))
+      && (user.owner === undefined || user.owner === true)
     );
     if (users.length === 0 || users.length !== parsed.users.length) observedRecovery?.();
     return users.length > 0 ? users : null;
@@ -369,7 +383,7 @@ function writeBootstrapCredentialFile(filePath: string, username: string, passwo
 function sameUser(a: AuthUser | undefined, b: AuthUser | undefined): boolean {
   if (!a || !b) return a === b;
   return a.passwordHash === b.passwordHash && JSON.stringify(a.roles ?? []) === JSON.stringify(b.roles ?? [])
-    && JSON.stringify(a.scopes ?? null) === JSON.stringify(b.scopes ?? null);
+    && JSON.stringify(a.scopes ?? null) === JSON.stringify(b.scopes ?? null) && (a.owner === true) === (b.owner === true);
 }
 
 /**
@@ -416,6 +430,8 @@ function loadOrBootstrapUsers(filePath: string, credentialPath: string, observed
       passwordHash: hashPassword(initialPassword, params),
       roles: ['admin'],
       bootstrap: true,
+      // The account made at first start is the owner, recorded (ownerUsername).
+      owner: true,
     },
   ];
   writeBootstrapUsers(filePath, users);
@@ -543,6 +559,7 @@ export class UserAuthManager {
     // No password is derived at start: a bootstrap file that fell behind the
     // store is explained at the failed sign-in that runs into it.
     if (this.persistUsers) this.rememberStore(this.users.values());
+    this.#recordOwnerOnce();
     this.users = this.#overlay(this.users);
     this.#authority?.onChange(() => this.#applyRecord());
   }
@@ -563,18 +580,100 @@ export class UserAuthManager {
     const conflicted = new Set(view.userConflicts().map((conflict) => conflict.username.toLowerCase()));
     for (const username of named) {
       if (conflicted.has(username.toLowerCase()) && local.has(username)) continue;
+      const current = next.get(username);
+      // The owner of this machine is never removed or narrowed from elsewhere: his account here stays his, and it
+      // takes from the record only a new password (the mark is this machine's fact, never the record's).
+      const owner = current?.owner === true;
+      // His password stays in step across his machines only as his own recorded act (#ownerInStep, gate-review-6 G2):
+      // nothing of his account here is taken from an entry of his name.
+      if (owner) continue;
       const live = view.user(username);
       if (!live) { next.delete(username); continue; }
       const hash = live.private?.passwordHash;
       if (!hash) continue;
-      const current = next.get(username);
-      const roles = [...live.public.roles];
-      const scopes = live.public.scopes === null ? undefined : [...live.public.scopes];
+      const roles = owner ? [...(current?.roles ?? [])] : [...live.public.roles];
+      const scopes = owner ? current?.scopes : live.public.scopes === null ? undefined : [...live.public.scopes];
       if (current && current.passwordHash === hash && JSON.stringify(current.roles ?? []) === JSON.stringify(roles)
         && JSON.stringify(current.scopes) === JSON.stringify(scopes)) continue;
-      next.set(username, { username, passwordHash: hash, roles, ...(scopes !== undefined ? { scopes } : {}) });
+      next.set(username, { username, passwordHash: hash, roles, ...(scopes !== undefined ? { scopes } : {}), ...(owner ? { owner: true as const } : {}) });
     }
-    return next;
+    return this.#ownerInStep(view, next);
+  }
+
+  /**
+   * The owner is the same person on each of his machines, so his password stays in step across the group: the latest
+   * password the owner himself set on any of them (a record version that records his own act there, `passwordByOwner`,
+   * the highest revision) is his password here too, whatever his account is named or numbered on each machine (each
+   * makes its own at its first start). Nothing else changes his password from the group: a version of his account that
+   * does not record his act is refused, logged and shown in the Machine group tab (gate-review-6 G2). The owner mark
+   * itself is never taken from the record.
+   */
+  #ownerInStep(view: NonNullable<ReturnType<AuthorityRecordFile['view']>>, users: Map<string, AuthUser>): Map<string, AuthUser> {
+    const owner = [...users.values()].find((user) => user.owner === true);
+    if (!owner) return users;
+    const self = this.#authority?.nodeId;
+    // A machine writes only its own entry for its owner (`owner-<its record id>`), and only on his act there: a version
+    // of it written by any other machine, or one that does not record his act, is refused.
+    let latest: { readonly rev: number; readonly at: number; readonly origin: string; readonly hash: string } | undefined;
+    let ownValid = false;
+    let ownBroken = false;
+    for (const entry of view.list('user')) {
+      if (view.isRevoked(`user:${entry.id}`)) continue;
+      const hash = entry.private?.passwordHash;
+      if (!hash) continue;
+      const ownersEntry = entry.id.startsWith('owner-');
+      const writtenByItsMachine = ownersEntry && entry.id === `owner-${entry.origin}`;
+      if (ownersEntry && writtenByItsMachine && entry.private?.passwordByOwner === true) {
+        if (entry.origin === self) ownValid = true;
+        const later = !latest || entry.rev > latest.rev || (entry.rev === latest.rev && (entry.at > latest.at || (entry.at === latest.at && entry.origin > latest.origin)));
+        if (later) latest = { rev: entry.rev, at: entry.at, origin: entry.origin, hash };
+        continue;
+      }
+      if (entry.id === `owner-${self}`) ownBroken = true;
+      if ((ownersEntry || entry.public.username === owner.username) && entry.origin !== self && hash !== owner.passwordHash) {
+        const what = `a new password for your account ${owner.username}`;
+        if (noteRefusedFromGroup(`user:${entry.id}@${entry.rev}`, { what, origin: entry.origin, at: this.nowFn() })) {
+          logger.warn('A new password for the owner\'s account arrived from another machine of the group without his own act there; refused, his password here is unchanged', { username: owner.username, from: entry.origin });
+        }
+      }
+    }
+    // This machine's own entry was written over from elsewhere: it is written again from his account here (a later
+    // revision than the one that replaced it), and nothing from the group changes his password until it is.
+    // None yet (an account kept from before this record, at this machine's own upgrade, or before its first sign-in
+    // published one): his account here is recorded once, as it is on this machine.
+    if (ownBroken || !ownValid) {
+      // Never the first-run generated password: it is no act of his (his first sign-in sets his own, and publishes it).
+      if (!this.#ownerRepublishing && this.#authority !== undefined && owner.bootstrap === undefined) {
+        this.#ownerRepublishing = true;
+        queueMicrotask(() => { this.#ownerRepublishing = false; this.#publish(owner.username, 'upsert', false); });
+      }
+      return users;
+    }
+    if (!latest || latest.origin === self || latest.hash === owner.passwordHash) return users;
+    return new Map(users).set(owner.username, { ...owner, passwordHash: latest.hash });
+  }
+
+  #ownerRepublishing = false;
+
+  /**
+   * The owner, recorded once (`AuthUser.owner`). A store made before the mark existed has none: the account that is the
+   * owner today (the first the store holds, the rule until now) is marked, once, and written, so from then on no
+   * reordering, renaming or deleting of other users makes anyone else the owner.
+   */
+  #recordOwnerOnce(): void {
+    const users = [...this.users.values()];
+    if (users.some((user) => user.owner === true)) return;
+    const first = users[0];
+    if (!first) return;
+    const marked: AuthUser = { ...first, owner: true };
+    try {
+      this.persist(new Map(this.users).set(first.username, marked));
+      logger.info('The owner account is now recorded in the user store', { username: first.username });
+    } catch (error) {
+      // Kept in memory for this run; written at the next user change.
+      this.users = new Map(this.users).set(first.username, marked);
+      logger.warn('The owner account could not be recorded in the user store; it holds for this run', { username: first.username, error: String(error) });
+    }
   }
 
   /** The record changed (here, in another process, or on another machine): take it in, ending sessions it made stale. */
@@ -622,6 +721,26 @@ export class UserAuthManager {
     const authority = this.#authority;
     if (!authority) return;
     const user = this.users.get(username);
+    // The owner's account: each machine keeps one entry of its own for him (`owner-<this machine's record id>`), which
+    // carries his own password changes made here to his other machines (#ownerInStep); never conflicts with them.
+    if (user?.owner === true && change === 'upsert') {
+      // The first-run generated password is never his act: nothing goes to the group until he sets his own.
+      if (user.bootstrap === true) return;
+      const id = `owner-${authority.nodeId}`;
+      const work = authority.write((view) => {
+        const live = view.list('user').find((entry) => entry.id === id && !view.isRevoked(`user:${id}`));
+        const privatePart = { passwordHash: user.passwordHash, passwordByOwner: true as const };
+        if (live) {
+          return { kind: 'update', key: `user:${id}`, value: null, narrowsOrWidens: false,
+            patch: { username, roles: [...(user.roles ?? [])], scopes: null }, privatePart };
+        }
+        return { kind: 'issue', value: null, entries: [{ kind: 'user', id, audience: { nodeId: authority.nodeId },
+          public: { username, roles: [...(user.roles ?? [])], scopes: null, epoch: 1, createdAt: this.nowFn() }, private: privatePart }] };
+      }).then(() => undefined, (error: unknown) => logger.warn('A change of the owner\'s password could not be written to the authority record; it holds on this machine only until it is', { error: String(error) }));
+      this.#publishing.add(work);
+      void work.finally(() => this.#publishing.delete(work));
+      return;
+    }
     const work = authority.write((view) => {
       // A name held by separate accounts on different machines: a change here
       // must not land on another machine's account. It stays on this machine.
@@ -635,14 +754,19 @@ export class UserAuthManager {
       }
       if (!user) return { kind: 'none', value: null };
       const scopes = user.scopes === undefined ? null : [...user.scopes];
+      // The owner's own account changes here only by his own act on this machine: his first sign-in setting his
+      // password, his sign-in (a stronger hash of the same password), or a rotation the owner's rule ran on his press or
+      // his yes (local_auth.users.password.rotate is the owner's own act; deleting or narrowing him is refused). That is
+      // recorded with the password, so his other machines take it as his (#overlay); no other version is taken there.
+      const privatePart = { passwordHash: user.passwordHash, ...(user.owner === true ? { passwordByOwner: true as const } : {}) };
       if (live) {
         return { kind: 'update', key: `user:${live.id}`, value: null, narrowsOrWidens: narrows,
           patch: { roles: [...(user.roles ?? [])], scopes, epoch: live.public.epoch + (narrows ? 1 : 0) },
-          privatePart: { passwordHash: user.passwordHash } };
+          privatePart };
       }
       return { kind: 'issue', value: null, entries: [{ kind: 'user', id: `u-${randomUUID()}`,
         public: { username, roles: [...(user.roles ?? [])], scopes, epoch: 1, createdAt: this.nowFn() },
-        private: { passwordHash: user.passwordHash } }] };
+        private: privatePart }] };
     }).then(() => undefined, (error: unknown) => logger.warn('A user change could not be written to the authority record; it holds on this machine only until it is', { username, error: String(error) }));
     this.#publishing.add(work);
     void work.finally(() => this.#publishing.delete(work));
@@ -726,11 +850,12 @@ export class UserAuthManager {
 
   /**
    * A sign-in from the network: the password check runs on the thread pool,
-   * one at a time, and a lock counts per username and client address, so a
-   * stranger repeating the owner's username locks out only their own address.
-   * Past 50 failures for a username in an hour from any addresses, every
-   * sign-in for it waits 30 seconds after the last failure, so changing
-   * address does not buy unlimited guesses. A burst beyond
+   * one at a time, and a lock counts per username and source (`clientAddress`:
+   * the caller's sign-in source, every loopback address being one), so a
+   * stranger repeating the owner's username locks out only their own source.
+   * Past 50 failures for a username in an hour, each source that failed for it
+   * waits 30 seconds after the last failure, so changing source does not buy
+   * unlimited guesses; a source that did not fail is never held. A burst beyond
    * {@link MAX_WAITING_SIGN_INS} is answered `busy` without a password check.
    */
   authenticateSignIn(username: string, password: string, clientAddress: string): Promise<AuthenticateResult> {
@@ -776,7 +901,7 @@ export class UserAuthManager {
 
   private beginAttempt(username: string, clientAddress: string | undefined):
     | { readonly result: AuthenticateResult }
-    | { readonly username: string; readonly lockKey: string; readonly network: boolean; readonly now: number; readonly user: AuthUser | undefined; readonly hashToCheck: string } {
+    | { readonly username: string; readonly lockKey: string; readonly network: boolean; readonly source: string | undefined; readonly now: number; readonly user: AuthUser | undefined; readonly hashToCheck: string } {
     const now = this.nowFn();
     this.refreshFromDisk();
     const lockKey = this.lockKey(username, clientAddress);
@@ -790,7 +915,8 @@ export class UserAuthManager {
     }
     const network = clientAddress !== undefined;
     const slowed = network ? this.usernameFailures.get(username) : undefined;
-    if (slowed && slowed.slowedUntil > now) {
+    // Only a source that itself failed for this username is slowed: never the username for everyone.
+    if (slowed && slowed.slowedUntil > now && slowed.sources.has(clientAddress!)) {
       return { result: { ok: false, lockedUntilMs: slowed.slowedUntil } };
     }
 
@@ -799,19 +925,19 @@ export class UserAuthManager {
     // bypassing password derivation.
     const target = this.scryptParams;
     const hashToCheck = user?.passwordHash ?? `Z29vZHZpYmVzLWR1bW15:${target.N}:${target.r}:${target.p}:${Buffer.alloc(SCRYPT_KEY_LENGTH).toString('base64')}`;
-    return { username, lockKey, network, now, user, hashToCheck };
+    return { username, lockKey, network, source: clientAddress, now, user, hashToCheck };
   }
 
   /** A failed check records the failure and answers; a passed one says whether the stored hash needs a stronger cost. */
   private settleAttempt(
-    attempt: { readonly username: string; readonly lockKey: string; readonly network: boolean; readonly now: number; readonly user: AuthUser | undefined },
+    attempt: { readonly username: string; readonly lockKey: string; readonly network: boolean; readonly source: string | undefined; readonly now: number; readonly user: AuthUser | undefined },
     verified: PasswordVerification,
   ): AuthenticateResult | { readonly user: AuthUser; readonly upgrade: ScryptParams | null } {
     const { lockKey, now, user } = attempt;
     if (!verified || !user) {
       this._recordLoginFailure(lockKey, now);
       const newLock = this.accountLocks.get(lockKey);
-      const slowedUntil = attempt.network ? this.recordUsernameFailure(attempt.username, now) : 0;
+      const slowedUntil = attempt.network ? this.recordUsernameFailure(attempt.username, now, attempt.source) : 0;
       const lockedUntilMs = Math.max(newLock && newLock.lockedUntil > now ? newLock.lockedUntil : 0, slowedUntil > now ? slowedUntil : 0);
       return lockedUntilMs > 0 ? { ok: false, lockedUntilMs } : { ok: false };
     }
@@ -868,7 +994,7 @@ export class UserAuthManager {
   }
 
   private completeAttempt(
-    attempt: { readonly username: string; readonly lockKey: string; readonly network: boolean; readonly now: number },
+    attempt: { readonly username: string; readonly lockKey: string; readonly network: boolean; readonly source: string | undefined; readonly now: number },
     password: string,
     user: AuthUser,
   ): AuthenticateResult {
@@ -880,7 +1006,7 @@ export class UserAuthManager {
     // A generated password lives only as long as the file that holds it.
     if (user.bootstrap === true && !usedBootstrapCredential) {
       this._recordLoginFailure(attempt.lockKey, attempt.now);
-      if (attempt.network) this.recordUsernameFailure(attempt.username, attempt.now);
+      if (attempt.network) this.recordUsernameFailure(attempt.username, attempt.now, attempt.source);
       return { ok: false, withdrawnBootstrapCredential: true };
     }
     this.accountLocks.delete(attempt.lockKey);
@@ -922,8 +1048,11 @@ export class UserAuthManager {
     this.accountLocks.set(lockKey, state);
   }
 
-  /** Count one failed network sign-in for the username; answers until when its sign-ins wait (0 when they do not). */
-  private recordUsernameFailure(username: string, now: number): number {
+  /**
+   * Count one failed network sign-in for the username from `source`; answers until when THAT source's sign-ins for it
+   * wait (0 when they do not). Another source is never held by it.
+   */
+  private recordUsernameFailure(username: string, now: number, source: string | undefined): number {
     let window = this.usernameFailures.get(username);
     if (!window || now - window.windowStart >= USERNAME_FAILURE_WINDOW_MS) {
       if (!window && this.usernameFailures.size >= this.maxAccountLocks) {
@@ -932,12 +1061,21 @@ export class UserAuthManager {
         if (!oldest.done) this.usernameFailures.delete(oldest.value);
       }
       this.usernameFailures.delete(username);
-      window = { failures: 0, windowStart: now, slowedUntil: 0 };
+      window = { failures: 0, windowStart: now, slowedUntil: 0, sources: new Set<string>() };
       this.usernameFailures.set(username, window);
     }
     window.failures++;
+    if (source !== undefined && (window.sources.has(source) || window.sources.size < USERNAME_FAILURE_SOURCES)) window.sources.add(source);
     if (window.failures >= USERNAME_FAILURE_THRESHOLD) window.slowedUntil = now + USERNAME_SLOWDOWN_MS;
-    return window.slowedUntil;
+    return source !== undefined && window.sources.has(source) ? window.slowedUntil : 0;
+  }
+
+  /** Every lock and failure count of `username`, from every source: its password changed (see rotatePassword). */
+  #forgetSignInFailures(username: string): void {
+    this.usernameFailures.delete(username);
+    for (const key of [...this.accountLocks.keys()]) {
+      if (key === username || key.startsWith(`${username}\u0000`)) this.accountLocks.delete(key);
+    }
   }
 
   /**
@@ -1118,13 +1256,19 @@ export class UserAuthManager {
   }
 
   /**
-   * The owner among the users: the first one the store holds, the user
-   * created at first start (the store keeps users in the order they were
-   * created). Null when there is none. Read from memory; no I/O.
+   * The owner among the users: the one account the store records as the owner (`AuthUser.owner`, written on the
+   * account made at first start, or carried forward at an upgrade), never the first in the store's order. Null when
+   * no account, or more than one, carries the mark (a store edited by hand): then nobody signs in as the owner. Read
+   * from memory; no I/O.
    */
   ownerUsername(): string | null {
-    for (const username of this.users.keys()) return username;
-    return null;
+    let found: string | null = null;
+    for (const user of this.users.values()) {
+      if (user.owner !== true) continue;
+      if (found !== null) return null;
+      found = user.username;
+    }
+    return found;
   }
 
   listUsers(): AuthUserRecord[] {
@@ -1178,6 +1322,9 @@ export class UserAuthManager {
     const normalized = username.trim();
     const existing = this.users.get(normalized);
     if (!existing) throw new Error(`Unknown local auth user: ${normalized}`);
+    if (existing.owner === true && scopes !== null && !scopes.includes('*')) {
+      throw new Error(`Cannot narrow ${normalized}: it is the owner's account, and the owner holds every scope. Nothing was changed.`);
+    }
     const { scopes: _previous, ...rest } = existing;
     const next: AuthUser = scopes === null ? rest : { ...rest, scopes: normalizeScopeList(scopes) };
     const previous = this.users;
@@ -1195,6 +1342,10 @@ export class UserAuthManager {
     if (this.users.size <= 1) {
       throw new Error('Cannot delete the last local auth user.');
     }
+    // The owner is the one recorded owner: removing him would leave the daemon with none (and no other user becomes him).
+    if (existing.owner === true) {
+      throw new Error(`Cannot delete ${normalized}: it is the owner's account, and the daemon has one owner. Nothing was deleted.`);
+    }
     // No session without the admin role can pass the admin check, so the last admin is protected too.
     const isAdmin = (user: AuthUser): boolean => user.roles?.includes('admin') === true;
     if (isAdmin(existing) && ![...this.users.values()].some(user => user.username !== normalized && isAdmin(user))) {
@@ -1205,7 +1356,14 @@ export class UserAuthManager {
     next.delete(normalized);
     this.persist(next);
     this.#publish(normalized, 'delete', true);
-    this.revokeSessionsForUser(normalized);
+    // A user deleted with no session open is told too (onRevoked): what was kept for him (the projects the owner gave
+    // him) goes with him.
+    if (this.revokeSessionsForUser(normalized) === 0) {
+      for (const listener of [...this.#revocationListeners]) {
+        try { listener([normalized]); }
+        catch (error) { logger.warn('Local auth revocation listener failed', { error: String(error) }); }
+      }
+    }
     this.#noticeAdminWithdrawn(previous, this.users);
     noteListChanged({ list: 'safety', change: 'deleted', id: normalized });
     return true;
@@ -1229,6 +1387,9 @@ export class UserAuthManager {
     }));
     this.#publish(normalized, 'upsert', true);
     this.revokeSessionsForUser(normalized);
+    // A new password starts the count again: whoever failed with the old one guessed at a password that no longer signs
+    // in, so no source stays held for it (the owner's own way back in after a flood: security/user-auth.ts sign-in locks).
+    this.#forgetSignInFailures(normalized);
     if (readBootstrapCredentialFile(this.bootstrapCredentialPath)?.username === normalized) {
       // The file now holds a password that no longer signs in; failing to delete it exposes nothing that works.
       try { rmSync(this.bootstrapCredentialPath, { force: true }); }

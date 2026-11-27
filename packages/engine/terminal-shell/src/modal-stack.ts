@@ -41,7 +41,7 @@ export function ownModal(name: string, modal: () => OwnModal, reopen?: () => voi
 /**
  * The handler's own modals that both apps have, each as one object on the
  * modal stack (surface-modal-host.ts). Register them with
- * `surfaceModals.track(...)`; a product adds its own (the Agent's workspace,
+ * `surfaceModals.track(...)`; a product adds its own (the Agent's
  * process monitor and live tail; the TUI's config surfaces and onboarding).
  *
  * Help, shortcuts, bookmarks, the context inspector and the MCP workspace come

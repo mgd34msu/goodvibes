@@ -91,7 +91,8 @@ export const EVAL_GATE = evalCapability({
   actionId: 'gate', label: 'Run a suite and stop on a regression', repeat: 'unsafe', touches: 'this-machine', lasts: 'kept',
   inputs: [
     SUITE,
-    BASELINE({ flag: '--baseline' }),
+    // Written when this run is saved as the baseline or none is there yet.
+    { ...BASELINE({ flag: '--baseline' }), file: 'written' },
     {
       id: 'save', label: 'Then', help: 'Whether this run becomes the baseline', kind: 'choice',
       choices: [{ value: 'no', label: 'Keep the baseline' }, { value: 'yes', label: 'Save this run as the baseline', help: 'The baseline file is written over.' }],

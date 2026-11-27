@@ -131,10 +131,19 @@ const MORE: readonly InputDescription[] = [
   { id: 'paused', label: 'Start paused', help: 'Kept, but runs only once you resume it', kind: 'choice', choices: NO_YES, required: { default: 'no', defaultMeans: 'no' }, typed: { flag: '--paused', switchOn: 'yes' }, step: 4 },
 ];
 
+/** The project a schedule runs in (its execution's folder): one schedule list for the person, each row naming its project. */
+export function scheduleProjectOf(job: Answer): string {
+  const execution = job['execution'];
+  const folder = execution && typeof execution === 'object' ? text((execution as Answer)['workingDirectory']) : '';
+  return folder;
+}
+
 function scheduleLine(job: Answer): string {
   const paused = job['enabled'] === false;
   const next = paused ? 'paused' : `next ${formatScheduleTime(count(job['nextRunAt']), zone())}`;
-  return `"${text(job['name']) || text(job['id'])}": ${timingOf(job['schedule'])}; ${next}.`;
+  const folder = scheduleProjectOf(job);
+  const where = folder ? ` In ${folder.split(/[\\/]/).filter(Boolean).pop() ?? folder} (${folder}).` : ' In no project (made before schedules kept one).';
+  return `"${text(job['name']) || text(job['id'])}": ${timingOf(job['schedule'])}; ${next}.${where}`;
 }
 
 const SCHEDULE_COMMAND = { name: 'schedule', title: 'Schedules' };

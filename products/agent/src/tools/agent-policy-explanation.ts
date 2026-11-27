@@ -256,7 +256,7 @@ export async function explainAgentPolicyDecision(
       routes: {
         explain: `security action:"explain" toolName:"${toolName}" toolArgs:{...}`,
         inspectTool: `agent_harness mode:"tool" toolName:"${toolName}" includeParameters:true`,
-        permissions: 'workspace action:"actions" categoryId:"tools-permissions"',
+        permissions: 'capability_find need:"see or change the permission rules"',
         securityPosture: 'security action:"status" includeParameters:true',
       },
       notes: [

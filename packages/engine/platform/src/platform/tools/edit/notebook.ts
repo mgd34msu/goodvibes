@@ -10,14 +10,6 @@ import type { EditInput, JupyterNotebook, NotebookCell, NotebookOperation, Noteb
 import { assertCapturedToolMutationCurrent, assertCapturedToolReadAccess } from '../shared/captured-input-tools.js';
 import { summarizeError } from '../../utils/error-display.js';
 
-/**
- * A refused edit stays refused until the file is read again (the edit tool
- * never records the newer content itself), so the text names that next step.
- */
-export function occConflictMessage(resolvedPath: string): string {
-  return `OCC conflict: '${resolvedPath}' was modified externally since last read. Nothing was changed; read it again before editing, then retry against its current content.`;
-}
-
 export function normalizeSource(source: string | string[]): string[] {
   if (Array.isArray(source)) return source;
   const lines = source.split('\n');
@@ -67,9 +59,8 @@ export function readNotebookFile(
     return { error: `File not found or unreadable: '${resolvedPath}'` };
   }
   // Compared with the bytes just read, so the check and the edit see one instant.
-  if (fileCache.compare(resolvedPath, rawContent) === 'modified') {
-    return { error: occConflictMessage(resolvedPath) };
-  }
+  const stale = fileCache.staleWrite(resolvedPath, rawContent);
+  if (stale !== null) return { error: stale };
 
   try {
     const parsed: unknown = JSON.parse(rawContent);

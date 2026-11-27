@@ -16,6 +16,7 @@ import {
   type HomeAssistantChatInput,
   type HomeAssistantChatPostResult,
   type HomeGraphGroundingReader,
+  type HomeAssistantChatRuntime,
 } from '../homeassistant-chat.js';
 import type { HomeGraphSpaceInput } from '../../knowledge/home-graph/types.js';
 
@@ -82,6 +83,8 @@ interface HomeAssistantRouteContext {
   readonly resolveDefaultProviderModel?: (() => { provider: string; model: string } | null) | undefined;
   /** Optional home-graph reader so a turn can ground itself in its pre-registered space. */
   readonly homeGraph?: HomeGraphGroundingReader | undefined;
+  /** The Home Assistant channel's policy, for "Treat my own messages here as me" (HomeAssistantChatRuntime.channelPolicy). */
+  readonly channelPolicy?: HomeAssistantChatRuntime['channelPolicy'];
 }
 
 interface ParsedHomeAssistantInput extends HomeAssistantChatInput {
@@ -333,6 +336,7 @@ export class HomeAssistantConversationRoutes {
           chatManager: this.context.chatManager,
           resolveDefaultProviderModel: this.context.resolveDefaultProviderModel,
           ...(this.context.homeGraph ? { homeGraph: this.context.homeGraph } : {}),
+          ...(this.context.channelPolicy ? { channelPolicy: this.context.channelPolicy } : {}),
         },
         input,
         {
@@ -607,12 +611,30 @@ export class HomeAssistantConversationRoutes {
       ...(modelId ? { modelId } : {}),
       ...(tools.length ? { tools } : {}),
       ...(haContext ? { context: haContext } : {}),
+      inputKind: this.parseInputKind(body, haContext),
       ...(grounding ? { grounding } : {}),
       clientMessageId: readString(body.messageId ?? body.message_id) !== undefined,
       wait: body.wait !== false,
       waitTimeoutMs: clampNumber(body.timeoutMs ?? body.waitTimeoutMs, DEFAULT_WAIT_TIMEOUT_MS, 1_000, MAX_WAIT_TIMEOUT_MS),
       remoteSessionTtlMs: this.readRemoteSessionTtlMs(body),
     };
+  }
+
+  /**
+   * Typed or spoken. Home Assistant's own conversation input carries no such field (text, context, conversation_id,
+   * device_id, satellite_id, language, agent_id, extra_system_prompt), so: the integration's `input` field
+   * (`"typed"` / `"spoken"`, also `inputKind`) when sent; otherwise a request that names a voice satellite or a device
+   * (at the top or in `context`: what a voice pipeline names, the device that heard it) is spoken, and one that names
+   * neither is typed. A `spoken` field always wins over a `typed` reading; a request naming a device or satellite is
+   * never read as typed whatever it says.
+   */
+  private parseInputKind(body: JsonRecord, context: JsonRecord | undefined): 'typed' | 'spoken' {
+    const named = (record: JsonRecord | undefined): boolean => record !== undefined && [
+      record.satelliteId, record.satellite_id, record.deviceId, record.device_id, record.pipelineId, record.pipeline_id,
+    ].some((value) => readString(value) !== undefined);
+    if (named(body) || named(context)) return 'spoken';
+    const said = readString(body.input ?? body.inputKind ?? body.input_kind)?.toLowerCase();
+    return said === 'typed' ? 'typed' : said === undefined ? 'typed' : 'spoken';
   }
 
   /** The installation and conversation a request names, with the defaults a submit and a cancel both apply. */

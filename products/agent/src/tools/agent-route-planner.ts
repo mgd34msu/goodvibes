@@ -11,7 +11,6 @@ import type { CommandContext } from '../input/command-registry.ts';
 import { listHarnessModes } from './agent-harness-mode-catalog.ts';
 import { prepareHarnessCatalog, rankHarnessCatalog, type CatalogRankingOptions } from '@goodvibes/engine/terminal-shell/agent-turn/catalog-ranking';
 import { captureModelReadingInput, withModelReadingSource } from './agent-harness-model-reading-source.ts';
-import { listWorkspaceActions } from './agent-harness-workspace-actions.ts';
 import { externalMemoryProviders } from './agent-harness-memory-external-providers.ts';
 
 export type AgentRoutePlannerArgs = TaskRouteArgs;
@@ -31,12 +30,12 @@ const describeRouteRecord = (record: RouteRecord) => ({
 });
 
 /**
- * Both catalogs are built from the product's own declarations, so a row's
- * description is the same whenever its id is: the prepared rows are kept per
- * kind and reused while the id list is unchanged (one join of ids per call).
+ * The catalog is built from the product's own declarations, so a row's
+ * description is the same whenever its id is: the prepared rows are kept
+ * and reused while the id list is unchanged (one join of ids per call).
  */
-const preparedRouteCatalogs = new Map<'modes' | 'workspace', { readonly ids: string; readonly rows: readonly RouteRecord[] }>();
-function preparedRouteCatalog(kind: 'modes' | 'workspace', records: readonly RouteRecord[]): readonly RouteRecord[] {
+const preparedRouteCatalogs = new Map<'modes', { readonly ids: string; readonly rows: readonly RouteRecord[] }>();
+function preparedRouteCatalog(kind: 'modes', records: readonly RouteRecord[]): readonly RouteRecord[] {
   const ids = records.map(record => String(record.id)).join('\n');
   const found = preparedRouteCatalogs.get(kind);
   if (found?.ids === ids) return found.rows;
@@ -50,7 +49,7 @@ function preparedRouteCatalog(kind: 'modes' | 'workspace', records: readonly Rou
  * no request). Only when the caller asked for parameters is the top of that
  * list read once more by the decision model. Matches are the current records.
  */
-async function catalogMatches(request: string, kind: 'modes' | 'workspace', records: readonly RouteRecord[],
+async function catalogMatches(request: string, kind: 'modes', records: readonly RouteRecord[],
   semantic: boolean, options: CatalogRankingOptions): Promise<readonly RouteRecord[]> {
   const byId = new Map(records.map(record => [String(record.id), record]));
   const result = await rankHarnessCatalog(preparedRouteCatalog(kind, records), request, describeRouteRecord,
@@ -72,7 +71,6 @@ export async function planAgentTaskRoute(
   const request = (typeof captured.query === 'string' ? captured.query.trim() : '') || (typeof captured.target === 'string' ? captured.target.trim() : '');
   if (!request) return planTaskRoute(captured);
   const semantic = captured.includeParameters === true;
-  const workspace = await listWorkspaceActions(context, { limit: 1000 }, options);
   const providers = context.provider?.providerRegistry;
   const channels = sources.channelRegistry;
   options.signal?.throwIfAborted(); options.assertCurrent?.();
@@ -91,7 +89,6 @@ export async function planAgentTaskRoute(
         ...(channels ? { channelTarget: () => channelTargetNamedIds(channels) } : {}),
         memoryProvider: () => memory.map(({ id, label }) => ({ id, names: [label, id] })),
       },
-      workspaceMatches: (currentRequest, _limit, current) => catalogMatches(currentRequest, 'workspace', workspace, semantic, rankOptions(current)),
       modeMatches: (currentRequest, _limit, current) => catalogMatches(currentRequest, 'modes', modes, semantic, rankOptions(current)),
     }, readingOptions);
   });

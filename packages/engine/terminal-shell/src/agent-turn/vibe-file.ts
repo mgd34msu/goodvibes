@@ -1,14 +1,16 @@
 // VIBE.md is the source of the persona prompt: the files found on disk are read
 // when a prompt is composed, so an edit to the file applies to the next turn, and
 // what "VIBE.md files" (Memory and knowledge, Personas) and the prompt receipt report is what the prompt carries.
-import { existsSync, readFileSync, statSync } from 'node:fs';
-import { dirname, isAbsolute, join, resolve } from 'node:path';
+import { existsSync, readFileSync, realpathSync, statSync } from 'node:fs';
+import { dirname, isAbsolute, join, relative, resolve } from 'node:path';
+import { readProjectFile } from '@goodvibes/engine/platform/platform/capabilities';
+import { projectFilesHeld } from '@goodvibes/engine/platform/platform/utils';
+import { projectIdentityOf } from '@goodvibes/engine/platform/platform/workspace';
 import { atomicWriteFileSync, type AtomicWriteOptions } from '@goodvibes/engine/platform/platform/config';
 import type { ShellPathService } from '@goodvibes/engine/platform/platform/runtime/shell';
 import { GOODVIBES_AGENT_SURFACE_ROOT } from './surface.js';
 import { assertNoSecretLikeText } from './persona-registry.js';
 import { parseMarkdownFrontmatter, stripMarkdownFrontmatter } from '../markdown-frontmatter.js';
-import { workspaceContainmentRefusal } from './project-context-files.js';
 
 export type AgentVibeScope = 'project' | 'global';
 
@@ -79,25 +81,31 @@ type AgentVibePaths = Pick<ShellPathService,
  * not read into the prompt. Global ones are outside the workspace by design,
  * and a path the owner named to import from (`boundary` null) is read as named.
  */
-function readVibeCandidate(path: string, scope: AgentVibeScope, boundary: string | null): AgentVibeFile | BlockedAgentVibeFile | null {
+function readVibeCandidate(path: string, scope: AgentVibeScope, boundary: string | null, held?: string | undefined): AgentVibeFile | BlockedAgentVibeFile | null {
   if (!existsSync(path)) return null;
-  if (scope === 'project' && boundary !== null) {
-    const refusal = workspaceContainmentRefusal(boundary, path);
-    if (refusal !== undefined) return { path, scope, reason: refusal };
-  }
   let content = '';
-  try {
-    const size = statSync(path).size;
-    if (size > MAX_VIBE_FILE_BYTES) {
-      return { path, scope, reason: `File is ${size} bytes, over the ${MAX_VIBE_FILE_BYTES} byte limit; not loaded. Keep VIBE.md to the instructions themselves.` };
+  if (scope === 'project' && boundary !== null) {
+    // A project's own VIBE.md: only for a project the owner trusted, opened as a held path (a link out of the project
+    // gives nothing), a plain file under the size limit (capabilities/held-paths.ts `readProjectFile`).
+    if (held !== undefined) return { path, scope, reason: `Not loaded: ${held}.` };
+    const reading = readProjectFile(path, boundary, { maxBytes: MAX_VIBE_FILE_BYTES, maxChars: Number.MAX_SAFE_INTEGER });
+    if (reading.kind === 'missing') return null;
+    if (reading.kind === 'refused') return { path, scope, reason: `Not loaded: ${reading.reason}.` };
+    content = reading.text;
+  } else {
+    try {
+      const size = statSync(path).size;
+      if (size > MAX_VIBE_FILE_BYTES) {
+        return { path, scope, reason: `File is ${size} bytes, over the ${MAX_VIBE_FILE_BYTES} byte limit; not loaded. Keep VIBE.md to the instructions themselves.` };
+      }
+      content = readFileSync(path, 'utf-8');
+    } catch (error) {
+      return {
+        path,
+        scope,
+        reason: `Could not read file: ${error instanceof Error ? error.message : String(error)}`,
+      };
     }
-    content = readFileSync(path, 'utf-8');
-  } catch (error) {
-    return {
-      path,
-      scope,
-      reason: `Could not read file: ${error instanceof Error ? error.message : String(error)}`,
-    };
   }
 
   const frontmatter = parseMarkdownFrontmatter(content);
@@ -128,21 +136,19 @@ function readVibeCandidate(path: string, scope: AgentVibeScope, boundary: string
   };
 }
 
+/** From the working directory up to its project's root (workspace/project-identity.ts), never a folder above it. */
 function projectWalkRoots(workingDirectory: string): readonly string[] {
+  const real = (path: string): string => { try { return realpathSync(path); } catch { return resolve(path); } };
+  const root = projectIdentityOf(workingDirectory);
   const roots: string[] = [];
-  let current = resolve(workingDirectory);
-  let foundGitRoot = false;
+  let current = real(workingDirectory);
   while (true) {
     roots.push(current);
-    if (existsSync(join(current, '.git'))) {
-      foundGitRoot = true;
-      break;
-    }
+    if (current === root) break;
     const parent = dirname(current);
-    if (parent === current) break;
+    if (parent === current || relative(root, parent).startsWith('..')) return [real(workingDirectory)];
     current = parent;
   }
-  if (!foundGitRoot) return [resolve(workingDirectory)];
   return roots.reverse();
 }
 
@@ -186,8 +192,10 @@ export function discoverVibeFiles(shellPaths: AgentVibePaths): AgentVibeSnapshot
   const blocked: BlockedAgentVibeFile[] = [];
   const walk = candidatePaths(shellPaths);
   const candidates = dedupeCandidates(walk.candidates);
+  // Only a project the owner trusted gives its VIBE.md to a prompt (utils/prompt-loader.ts, the same rule).
+  const held = projectFilesHeld(walk.boundary, shellPaths.homeDirectory);
   for (const candidate of candidates) {
-    const record = readVibeCandidate(candidate.path, candidate.scope, walk.boundary);
+    const record = readVibeCandidate(candidate.path, candidate.scope, walk.boundary, held);
     if (!record) continue;
     if ('body' in record) files.push(record);
     else blocked.push(record);

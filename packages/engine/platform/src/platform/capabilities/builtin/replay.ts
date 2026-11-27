@@ -8,6 +8,7 @@
 import type { DeterministicReplayEngine } from '../../core/deterministic-replay.js';
 import { handleReplayCommand, replayLedgerOf } from '../../core/replay-command-handler.js';
 import { CapabilityRefusal, type CapabilityDefinition, type InputDescription, type ListName } from '../types.js';
+import { callerPathOf } from '../path-inputs.js';
 
 export interface ReplayCapabilityServices {
   /** This program's replay engine; absent in a program that records no runs (the Agent). */
@@ -90,9 +91,10 @@ export const REPLAY_DIFF = replayCapability({
 
 export const REPLAY_EXPORT = replayCapability({
   actionId: 'export', label: 'Save the replay report to a file', changes: true,
-  inputs: [{ id: 'path', label: 'File', help: 'Where to write the JSON report', kind: 'path', freeTextReason: 'a file path', required: true, typed: { position: 1 } }],
+  inputs: [{ id: 'path', label: 'File', help: 'Where to write the JSON report', kind: 'path', file: 'written', freeTextReason: 'a file path', required: true, typed: { position: 1 } }],
   sentence: 'The report of the loaded run, with every difference found, is written to {path}.', example: { path: 'replay-report.json' },
-  async run(values, services) { return { text: await step(services, 'export', [values.path!]) }; },
+  // Placed by the one rule for every capability's path (capabilities/path-inputs.ts).
+  async run(values, services, caller) { return { text: await step(services, 'export', [callerPathOf(caller, values.path!, { personPathAsTyped: true })]) }; },
 });
 
 export const REPLAY_CAPABILITIES: readonly Definition[] = [REPLAY_STATUS, REPLAY_RUNS, REPLAY_LOAD, REPLAY_STEP, REPLAY_SEEK, REPLAY_DIFF, REPLAY_EXPORT];

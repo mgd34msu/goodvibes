@@ -33,10 +33,11 @@
  */
 import { randomUUID } from 'node:crypto';
 import { refusal, type Refusal } from '@goodvibes/engine/errors';
+import { currentRecordReach } from '@goodvibes/engine/daemon-api';
 import type { ApprovalBroker, SharedApprovalRecord } from './approval-broker.js';
 import { isSettledWording, settledPresentation } from './approval-broker.js';
 import { approvalViewerOfActor, localApprovalActions, type ApprovalActions } from './approval-actions.js';
-import type { Actor } from '@goodvibes/engine/daemon-api/http-policy';
+import { systemActor, type Actor } from '@goodvibes/engine/daemon-api/http-policy';
 import { formatApprovalRef, readApproval, type ApprovalReading, type ApprovalViewer } from './approval-lifecycle.js';
 import { FenceIssuer } from '../utils/owner-fence.js';
 import {
@@ -917,10 +918,12 @@ export class OwnerInbox implements RevisionSource, OwnerInboxPort, OwnerAnswerRe
     return this.#approvalActions?.viewerOf(actor) ?? approvalViewerOfActor(actor, 'local');
   }
 
-  /** The viewer an item is read for when none is named: the owner, in this process. */
+  /**
+   * The viewer an item is read for when none is named: the daemon itself, in this process (its system actor, named as
+   * such), never the owner filled in for a caller nobody named.
+   */
   #viewer(viewer: ApprovalViewer | undefined): ApprovalViewer {
-    return viewer ?? this.#approvalActions?.viewerOf(undefined)
-      ?? { kind: 'owner-route', scopes: ['*'], node: 'local', mayAnswer: true, mayAdminister: true };
+    return viewer ?? this.viewerOf(systemActor('owner-inbox'));
   }
 
   /**
@@ -991,19 +994,22 @@ export class OwnerInbox implements RevisionSource, OwnerInboxPort, OwnerAnswerRe
     const items: OwnerItem[] = [];
     const afterCursor = (item: OwnerItem): boolean => !after || sortTime(item) < after.time || (sortTime(item) === after.time && item.id > after.id);
     const actions = this.#approvalActions;
+    // A caller that is not the owner himself (daemon-api withRecordReach): only the questions of projects it may reach,
+    // before the page is cut (control-plane/caller-reach.ts); every other item is the owner's own and not listed.
+    const reach = currentRecordReach();
     if (actions && (!kinds || kinds.has('approval'))) {
       const viewer = this.#viewer(filter.viewer);
       // Every approval a person decided is kept, so only this page's rows (and one past it, to know
       // there is more) are read for the viewer; the rest are only matched against the filter.
       const rows = actions.page
-        ? actions.page(viewer, { limit: limit + 1, include: (record) => { const item = projectApproval(record, undefined, actions.homeNode); return matchesFilter(item, filter, kinds) && afterCursor(item); } })
+        ? actions.page(viewer, { limit: limit + 1, include: (record) => { const item = projectApproval(record, undefined, actions.homeNode); return matchesFilter(item, filter, kinds) && afterCursor(item) && (!reach || reach('approval', record.id)); } })
         : actions.list(viewer, MAX_LIST_LIMIT);
       for (const row of rows) {
         const item = projectApproval(row.record, row.reading, actions.homeNode);
         if (matchesFilter(item, filter, kinds)) items.push(item);
       }
     }
-    for (const entry of this.#questions.entries()) {
+    for (const entry of reach ? [] : this.#questions.entries()) {
       const item = this.#project(entry, now);
       if (matchesFilter(item, filter, kinds)) items.push(item);
     }
@@ -1410,7 +1416,7 @@ export class OwnerInbox implements RevisionSource, OwnerInboxPort, OwnerAnswerRe
           code: 'DECIDED_ELSEWHERE',
           state: 'still open',
           reason: `Jev made this decision in ${decidingAppWords(item.metadata?.['surface'])}, and only that app can apply a choice on it.`,
-          next: ['Choose it under Decisions in Waiting for you, in the app that made it, while that session is running.', 'Or set a standing rule with /permissions.'],
+          next: ['Choose it under Decisions in Waiting for you, in the app that made it, while that session is running.', 'Or add a standing rule in Permissions and safety, Rules ("add a rule").'],
           status: 409,
         }),
       };

@@ -44,7 +44,7 @@ import { bearerFor, type DaemonTarget } from '@goodvibes/engine/platform/platfor
 import { configuredDaemonIsThisMachine, configuredDaemonOrigin, resolveDaemonTarget, resolveDaemonTargetProven, type DaemonTargetResolution } from '@goodvibes/engine/platform/platform/runtime/client/daemon-target-resolver';
 import { operatorTokenPath } from '@goodvibes/engine/platform/platform/pairing/companion-token';
 import { readDaemonOperatorBearer } from '@goodvibes/engine/platform/platform/runtime/operations';
-import { programCallHeaders, type DaemonVerbCaller, type DaemonVerbInvokeOptions } from '@goodvibes/engine/platform/platform/runtime/client';
+import { PROGRAM_GATE_DECIDED_HEADER, programCallHeadersFor, type DaemonVerbCaller, type DaemonVerbInvokeOptions } from '@goodvibes/engine/platform/platform/runtime/client';
 import { CAPABILITY_METHOD_IDS } from '@goodvibes/engine/platform/platform/capabilities';
 import { DaemonVerbNotSentError } from '@goodvibes/engine/terminal-shell/agent-turn/connected-host-verb-error';
 
@@ -80,9 +80,8 @@ export function resolveControlPlaneBaseUrl(configManager: Pick<ConfigManager, 'g
   return configuredDaemonOrigin(configManager)?.baseUrl ?? null;
 }
 
-/** Where an enabled daemon answers, or null when it is disabled or has no address. Reads settings only. */
+/** Where the daemon answers, or null when it has no address. Reads settings only ("Use the background daemon" is retired). */
 export function resolveDaemonBaseUrl(configManager: Pick<ConfigManager, 'get'>): string | null {
-  if (configManager.get('daemon.enabled') === false) return null;
   return resolveControlPlaneBaseUrl(configManager);
 }
 
@@ -199,9 +198,10 @@ function operatorClientFor(baseUrl: string, bearer: () => Promise<string>, fetch
   // Every call names this app, so what the owner does here is attributed to the terminal (an inbox answer says tui),
   // and carries this app's call context: the project it works in and the conversation it holds (call-context.ts).
   const base = fetchImpl ?? fetch;
-  const named = ((input: Parameters<typeof fetch>[0], init?: RequestInit) => {
+  const named = (async (input: Parameters<typeof fetch>[0], init?: RequestInit) => {
     const headers = new Headers(init?.headers ?? (input instanceof Request ? input.headers : undefined));
-    for (const [name, value] of Object.entries(programCallHeaders('tui'))) headers.set(name, value);
+    // With the registration this daemon issued the app (asked for on the first call, sent to this daemon only).
+    for (const [name, value] of Object.entries(await programCallHeadersFor(baseUrl, await bearer(), base, 'tui'))) headers.set(name, value);
     return base(input, { ...init, headers });
   }) as typeof fetch;
   const platformClient = createGoodVibesPlatform({ baseUrl, getAuthToken: bearer, fetch: named });
@@ -265,6 +265,8 @@ async function invokeGatewayMethodOverHttp<T>(
       Authorization: `Bearer ${authToken}`, 'Content-Type': 'application/json',
       // A person's typed line or screen press, as the request itself; the daemon keeps the claim only from a person's credential.
       ...(options?.explicitUserRequest === true ? { 'x-goodvibes-explicit-user-request': 'true' } : {}),
+      // This app's own gate decided the model's call this is part of: its mark, believed only with its registration.
+      ...(options?.decidedByProgramGate === true ? { [PROGRAM_GATE_DECIDED_HEADER]: 'true' } : {}),
     },
     // The envelope the route requires: `body` must be PRESENT even when empty,
     // or the route refuses with a 400 naming the shape it wanted.
@@ -333,10 +335,23 @@ function withGatewayRouteForWsOnlyVerbs(
 ): GoodVibesPlatform {
   const typedInvoke = client.operator.invoke;
   const invoke = ((methodId: string, ...rest: unknown[]) => {
-    if (hasHttpBinding(client, methodId)) return (typedInvoke as (id: string, ...args: unknown[]) => Promise<unknown>)(methodId, ...rest);
+    // A person's own press goes by the generic route, which carries the claim as a header (the typed client's third
+    // argument is its own request options and would drop it): the daemon keeps it only from a person's credential.
+    const said = rest[1] as DaemonVerbInvokeOptions | undefined;
+    const personAsked = said?.explicitUserRequest === true || said?.decidedByProgramGate === true;
+    if (hasHttpBinding(client, methodId) && !personAsked) return (typedInvoke as (id: string, ...args: unknown[]) => Promise<unknown>)(methodId, ...rest);
     return invokeGatewayMethodOverHttp<unknown>(fetchImpl, baseUrl, bearer, methodId, rest[0], rest[1] as DaemonVerbInvokeOptions | undefined);
   }) as typeof typedInvoke;
   return { ...client, operator: { ...client.operator, invoke } };
+}
+
+/**
+ * A method the person asked for with a press of his own (a key in a place, a modal's button), as his request: the
+ * daemon runs an act it decides for the owner at once only on his own press in his own program, and puts the same
+ * call made without one to him. Through this client's generic route, which carries the claim.
+ */
+export function invokePressed<T = unknown>(client: GoodVibesPlatform, methodId: string, input: unknown): Promise<T> {
+  return (client.operator.invoke as unknown as (id: string, body: unknown, options: DaemonVerbInvokeOptions) => Promise<T>)(methodId, input, { explicitUserRequest: true });
 }
 
 /**
@@ -427,8 +442,11 @@ export function pinDaemonVerbCaller(deps: {
     isCurrent: () => { const rpc = live.probe() as unknown as OperatorRpc; return rpc.available && rpc.origin === origin; },
     caller: {
       probe: () => current(),
-      invoke: async <T,>(methodId: string, input?: unknown): Promise<T> =>
-        await current().platformClient.operator.invoke(methodId as never, (input ?? {}) as never) as T,
+      // The per-call facts (a person's press) travel with the call, as through the unpinned caller.
+      invoke: async <T,>(methodId: string, input?: unknown, options?: DaemonVerbInvokeOptions): Promise<T> => {
+        const invoke = current().platformClient.operator.invoke as (id: string, ...args: unknown[]) => Promise<unknown>;
+        return await (options === undefined ? invoke(methodId, input ?? {}) : invoke(methodId, input ?? {}, options)) as T;
+      },
     },
   };
 }

@@ -112,7 +112,7 @@ export function createDaemonBootOperations(runtime: RuntimeServices): DaemonBoot
   // before a restart is still announced with its real duration.
   const runtimeNotifications = {
     lookupContract: (contractId: string) => {
-      const contract = runtime.contractRunner.get(contractId);
+      const contract = runtime.contractRunner?.get(contractId);
       return contract ? { startedAt: contract.createdAt, name: contract.ask } : undefined;
     },
   };

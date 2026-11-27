@@ -1,5 +1,5 @@
 import { presetForMode } from '@goodvibes/engine/platform/platform/gate';
-import type { AgentWorkspaceRuntimeSnapshot } from '../input/agent-workspace-types.ts';
+import type { AgentRuntimeSnapshot } from '../input/runtime-snapshot-types.ts';
 
 /** `unmeasured`: the caller had no data for the lane, so it is neither healthy nor a finding. */
 export type AssistantCockpitLaneState = 'ready' | 'attention' | 'setup' | 'unmeasured';
@@ -178,7 +178,7 @@ export function assistantCockpitRouteMap(): AssistantCockpitRoutes {
   return { lanes: cockpit.lanes.map(({ id, label, routes }) => ({ id, label, routes })), boundaryPolicy: cockpit.boundaryPolicy };
 }
 
-export function buildAssistantCockpitFromWorkspaceSnapshot(snapshot: AgentWorkspaceRuntimeSnapshot): AssistantCockpit {
+export function buildAssistantCockpitFromWorkspaceSnapshot(snapshot: AgentRuntimeSnapshot): AssistantCockpit {
   const setupBlockers = snapshot.setupChecklist.filter((item) => item.status === 'blocked').length;
   const modelStatus = snapshot.provider === 'unknown' || snapshot.model === 'unknown' ? 'degraded' : 'ready';
   const readyChannels = snapshot.channels.filter((channel) => channel.ready).length;

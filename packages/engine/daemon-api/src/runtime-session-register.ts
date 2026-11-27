@@ -2,6 +2,7 @@ import { SESSION_KINDS, SESSION_SURFACE_KINDS, type DaemonRuntimeRouteContext } 
 import { jsonErrorResponse } from './error-response.js';
 import { isJsonRecord } from './route-helpers.js';
 import { toSharedSessionRecordResponse } from './runtime-session-routes.js';
+import { readProgramRegistration, registrantKeyOf } from './control-routes.js';
 
 function isOneOf<T extends string>(accepted: readonly T[], value: string): value is T {
   return (accepted as readonly string[]).includes(value);
@@ -58,9 +59,11 @@ export async function handleRegisterSharedSession(
   await context.sessionBroker.start();
 
   const reopen = body.reopen === true;
-  // Who registers it, from the credential the listener authenticated (never the body): a session this call makes is
-  // that principal's, the only one that may name it as a question's asker (inbox.post).
-  const registeredBy = context.requestPrincipalId?.(req);
+  // Who registers it, from the credential the listener authenticated (never the body), and which of that principal's
+  // programs (its registration key's fingerprint, when it sent one): a session this call makes is that program's, the
+  // only one that may name it as a question's asker (inbox.post) or raise an approval into it.
+  const principal = context.requestPrincipalId?.(req);
+  const registeredBy = principal ? registrantKeyOf(principal, readProgramRegistration(req)) : undefined;
   const result = await context.sessionBroker.register({
     ...(registeredBy ? { registeredBy } : {}),
     sessionId,

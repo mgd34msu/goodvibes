@@ -88,8 +88,9 @@ goodvibes
    GoodVibes asks before acting. When a key
    in your environment already makes a provider usable, `a` uses it and skips
    the sign-in step; with `OPENROUTER_API_KEY` set (the default model is
-   OpenRouter's free one), it asks nothing and opens the conversation. `/setup`
-   sets up the rest one topic at a time, `/model` switches this conversation's
+   OpenRouter's free one), it asks nothing and opens the conversation. The
+   Setup tab of System (in the menu, `Ctrl+G` then `m`) sets up the rest one
+   topic at a time, `/model` switches this conversation's
    model, and Models and providers (in the menu, `Ctrl+G` then `m`) holds the
    default model, your providers and sign-ins, and finds model servers on your
    machine.

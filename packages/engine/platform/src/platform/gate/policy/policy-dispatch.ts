@@ -15,7 +15,7 @@
  */
 import { contentDigest } from '../../utils/target-ref.js';
 import { readFileSync, statSync } from 'node:fs';
-import { resolve } from 'node:path';
+import { dirname, resolve } from 'node:path';
 import { summarizeError } from '../../utils/error-display.js';
 import { RefusalError, refusal } from '@goodvibes/engine/errors';
 import { isAbortError } from '../../contract/run-context.js';
@@ -51,6 +51,20 @@ export interface PolicyCommandContext {
   config(): DeepReadonly<GoodVibesConfig>;
   /** The MCP servers' security records the preflight review reads. */
   listMcpServerSecurity(): readonly PolicyMcpServerSecurity[];
+  /**
+   * Who asks, when it is not the owner: whether it may reach a project's things (control-plane/caller-reach.ts, by the
+   * folder; undefined, a thing of no project). Such a caller sees a candidate only when it was loaded from a project it
+   * may reach, and its preview decides again only the recorded calls of projects it may reach, without reviewing the
+   * candidate for the owner (its state, its kept impact). Absent: the owner, who sees and reviews everything.
+   */
+  readonly reach?: ((project: string | undefined) => boolean) | undefined;
+}
+
+/** The candidate as the asker may see it: the owner every one; anyone else one loaded from a project it may reach. */
+function visibleCandidate(context: PolicyCommandContext, registry: PolicyRegistry): ReturnType<PolicyRegistry['getCandidate']> {
+  const candidate = registry.getCandidate();
+  if (!candidate || !context.reach) return candidate;
+  return candidate.sourcePath && context.reach(dirname(candidate.sourcePath)) ? candidate : null;
 }
 
 function getPolicyState(ctx?: PolicyCommandContext): PolicyRuntimeState {
@@ -194,10 +208,21 @@ function candidateDigest(candidate: { readonly rules: unknown; readonly bundle: 
 async function handleSimulate(_args: string[], context: PolicyCommandContext): Promise<void> {
   const registry = getRegistry(context);
   const policyState = getPolicyState(context);
-  const candidate = registry.getCandidate();
+  const candidate = visibleCandidate(context, registry);
   const current = registry.getCurrent();
   if (!candidate) {
     context.print('[policy] No candidate policy is loaded: "Load a candidate policy" first.');
+    return;
+  }
+  // A caller that is not the owner sees what the candidate changes of the calls it may reach, each decided against its
+  // own project; the owner's review of the candidate (its state, its kept impact, what enforcing confirms) is untouched.
+  if (context.reach) {
+    const reached = policyImpact({
+      currentRules: current?.rules ?? [], candidateRules: candidate.rules,
+      projectRoot: context.workingDirectory(), calls: policyState.getRecentPermissionAudit(), reaches: context.reach,
+    });
+    await handleDiff([], context);
+    printImpact(context, reached);
     return;
   }
   if (!registry.markSimulating()) {
@@ -237,10 +262,10 @@ async function handleSimulate(_args: string[], context: PolicyCommandContext): P
 
 async function handleDiff(_args: string[], context: PolicyCommandContext): Promise<void> {
   const registry = getRegistry(context);
-  const diff = registry.diff();
+  const diff = visibleCandidate(context, registry) ? registry.diff() : null;
   if (!diff) {
     const current = registry.getCurrent();
-    const candidate = registry.getCandidate();
+    const candidate = visibleCandidate(context, registry);
     if (!current) context.print(candidate
       ? `[policy] No policy is in force yet: ${candidate.rules.length === 1 ? 'the one rule' : `all ${candidate.rules.length} rules`} of the candidate would be new.`
       : '[policy] No policy is in force and none is loaded: "Load a candidate policy" first.');
@@ -277,7 +302,7 @@ async function handleDiff(_args: string[], context: PolicyCommandContext): Promi
 async function handleLint(_args: string[], context: PolicyCommandContext): Promise<void> {
   const registry = getRegistry(context);
   const current = registry.getCurrent();
-  const candidate = registry.getCandidate();
+  const candidate = visibleCandidate(context, registry);
   if (!current && !candidate) {
     context.print('[policy] No policy is loaded: "Load a candidate policy" to begin.');
     return;
@@ -286,7 +311,7 @@ async function handleLint(_args: string[], context: PolicyCommandContext): Promi
     ...(current ? (await lintPolicyConfig({ mode: 'custom', rules: current.rules })).map((finding) => ({ scope: 'current', ...finding })) : []),
     ...(candidate ? (await lintPolicyConfig({ mode: 'custom', rules: candidate.rules })).map((finding) => ({ scope: 'candidate', ...finding })) : []),
   ];
-  if (registry.getCurrent() !== current || registry.getCandidate() !== candidate) {
+  if (registry.getCurrent() !== current || visibleCandidate(context, registry) !== candidate) {
     context.print('[policy] The policies changed while they were being checked; check them again.');
     return;
   }
@@ -305,7 +330,12 @@ async function handlePreflight(_args: string[], context: PolicyCommandContext): 
   const policyState = getPolicyState(context);
   const current = registry.getCurrent();
   const candidate = registry.getCandidate();
-  const lintFindings = await policyState.refreshLint(registry);
+  // A caller that is not the owner: the bundles it may see only (a candidate of a project it may not reach is neither
+  // read nor counted), and its review is its own, never kept as the owner's.
+  const lintFindings = context.reach
+    ? [...(current ? await lintPolicyConfig({ mode: 'custom', rules: current.rules }) : []),
+      ...(candidate && visibleCandidate(context, registry) === candidate ? await lintPolicyConfig({ mode: 'custom', rules: candidate.rules }) : [])]
+    : await policyState.refreshLint(registry);
   if (registry.getCurrent() !== current || registry.getCandidate() !== candidate) {
     context.print('[policy] The policies changed while they were being reviewed; review them again.');
     return;
@@ -321,7 +351,7 @@ async function handlePreflight(_args: string[], context: PolicyCommandContext): 
       allowedHosts: server.allowedHosts,
     })),
   });
-  policyState.recordPreflightReview(review);
+  if (!context.reach) policyState.recordPreflightReview(review);
   context.print(`[policy] Preflight review: ${review.status.toUpperCase()} (${review.issueCount} issue${review.issueCount === 1 ? '' : 's'})`);
   context.print(`[policy] ${review.summary}`);
   for (const issue of review.issues.slice(0, 8)) {
@@ -393,7 +423,7 @@ async function handleStatus(_args: string[], context: PolicyCommandContext): Pro
   const registry = getRegistry(context);
   const policyState = getPolicyState(context);
   const current = registry.getCurrent();
-  const candidate = registry.getCandidate();
+  const candidate = visibleCandidate(context, registry);
   const history = registry.getHistory();
   const bundleFailure = policyState.getConfiguredBundleFailure();
   if (bundleFailure !== null) {
@@ -406,7 +436,14 @@ async function handleStatus(_args: string[], context: PolicyCommandContext): Pro
   if (current) context.print(bundleSummary('[policy] In force', current));
   if (candidate) context.print(bundleSummary('[policy] Candidate', candidate));
   context.print(`[policy] History: ${history.length} previous bundle(s).`);
-  if (candidate?.impact) printImpact(context, candidate.impact);
+  if (!candidate?.impact) return;
+  // A caller that is not the owner: the owner's review counted every project's recorded calls, and a count is
+  // information about the projects too, so its calls of the projects it may reach are decided again for it (code, no
+  // model request), counted and listed like its rows.
+  printImpact(context, context.reach
+    ? policyImpact({ currentRules: current?.rules ?? [], candidateRules: candidate.rules, projectRoot: candidate.sourcePath ? dirname(candidate.sourcePath) : context.workingDirectory(),
+      calls: policyState.getRecentPermissionAudit(), reaches: context.reach })
+    : candidate.impact);
 }
 
 export async function dispatchPolicyCommand(args: readonly string[], context: PolicyCommandContext): Promise<void> {

@@ -1,6 +1,9 @@
 import { existsSync, readFileSync, readdirSync, realpathSync, statSync } from 'node:fs';
 import { dirname, isAbsolute, join, relative, resolve, sep } from 'node:path';
 import type { ShellPathService } from '@goodvibes/engine/platform/platform/runtime/shell';
+import { readProjectFile } from '@goodvibes/engine/platform/platform/capabilities';
+import { projectFilesHeld } from '@goodvibes/engine/platform/platform/utils';
+import { projectIdentityOf } from '@goodvibes/engine/platform/platform/workspace';
 import { assertNoSecretLikeText } from './persona-registry.js';
 
 export type AgentProjectContextKind =
@@ -113,16 +116,27 @@ function resolveTargetDirectory(shellPaths: AgentProjectContextPaths, targetPath
   return stat?.isDirectory() ? resolved : dirname(resolved);
 }
 
+function realOrResolved(path: string): string {
+  try { return realpathSync(path); } catch { return resolve(path); }
+}
+
+/**
+ * The folders walked for context files: from the target up to the project's root (workspace/project-identity.ts, the
+ * same project every check names), never a folder above it, so a repository at the home folder or a stray AGENTS.md
+ * above the project is not read. The boundary is that root.
+ */
 function contextWalkRoots(workingDirectory: string, targetDirectory: string): { readonly roots: readonly string[]; readonly gitRoot: string | null; readonly boundary: string } {
   const gitRoot = findGitRoot(workingDirectory);
-  const start = gitRoot && pathInside(gitRoot, targetDirectory) ? gitRoot : resolve(workingDirectory);
+  const projectRoot = projectIdentityOf(workingDirectory);
+  const target = realOrResolved(targetDirectory);
+  const start = pathInside(projectRoot, target) ? projectRoot : realOrResolved(workingDirectory);
   const roots: string[] = [];
-  let current = resolve(targetDirectory);
+  let current = target;
   while (true) {
     roots.push(current);
     if (current === start) break;
     const parent = dirname(current);
-    if (parent === current) break;
+    if (parent === current || !pathInside(start, parent)) break;
     current = parent;
   }
   return { roots: roots.reverse(), gitRoot, boundary: start };
@@ -201,26 +215,33 @@ function dedupeCandidates(candidates: readonly CandidateContextFile[]): readonly
   return result;
 }
 
-function readContextCandidate(candidate: CandidateContextFile, boundary: string): AgentProjectContextFile | BlockedAgentProjectContextFile | null {
-  const stat = safeStat(candidate.path);
-  if (!stat?.isFile()) return null;
-  // The user-level SOUL.md is outside the workspace by design.
-  if (candidate.scope !== 'global') {
-    const refusal = workspaceContainmentRefusal(boundary, candidate.path);
-    if (refusal !== undefined) return { ...candidate, id: contextFileId(candidate), reason: refusal };
-  }
-  if (stat.size > MAX_PROJECT_CONTEXT_FILE_BYTES) {
-    return { ...candidate, id: contextFileId(candidate), reason: `File is ${stat.size} bytes, over the ${MAX_PROJECT_CONTEXT_FILE_BYTES} byte limit; not loaded.` };
-  }
+function readContextCandidate(candidate: CandidateContextFile, boundary: string, held: string | undefined): AgentProjectContextFile | BlockedAgentProjectContextFile | null {
   let content = '';
-  try {
-    content = readFileSync(candidate.path, 'utf-8');
-  } catch (error) {
-    return {
-      ...candidate,
-      id: contextFileId(candidate),
-      reason: `Could not read file: ${error instanceof Error ? error.message : String(error)}`,
-    };
+  if (candidate.scope !== 'global') {
+    // A project's own file: read only for a project the owner trusted, opened as a held path (a link out of the
+    // project gives nothing, whatever is renamed around the read), a plain file under the size limit.
+    if (!safeStat(candidate.path)) return null;
+    if (held !== undefined) return { ...candidate, id: contextFileId(candidate), reason: `Not loaded: ${held}.` };
+    const reading = readProjectFile(candidate.path, boundary, { maxBytes: MAX_PROJECT_CONTEXT_FILE_BYTES, maxChars: Number.MAX_SAFE_INTEGER });
+    if (reading.kind === 'missing') return null;
+    if (reading.kind === 'refused') return { ...candidate, id: contextFileId(candidate), reason: `Not loaded: ${reading.reason}.` };
+    content = reading.text;
+  } else {
+    // The user-level SOUL.md is outside the workspace by design.
+    const stat = safeStat(candidate.path);
+    if (!stat?.isFile()) return null;
+    if (stat.size > MAX_PROJECT_CONTEXT_FILE_BYTES) {
+      return { ...candidate, id: contextFileId(candidate), reason: `File is ${stat.size} bytes, over the ${MAX_PROJECT_CONTEXT_FILE_BYTES} byte limit; not loaded.` };
+    }
+    try {
+      content = readFileSync(candidate.path, 'utf-8');
+    } catch (error) {
+      return {
+        ...candidate,
+        id: contextFileId(candidate),
+        reason: `Could not read file: ${error instanceof Error ? error.message : String(error)}`,
+      };
+    }
   }
   const body = content.trim();
   if (!body) {
@@ -257,8 +278,10 @@ export function discoverProjectContextFiles(
   const files: AgentProjectContextFile[] = [];
   const blocked: BlockedAgentProjectContextFile[] = [];
   const candidates = dedupeCandidates(candidateContextFiles(shellPaths, targetDirectory));
+  // Only a project the owner trusted gives its files to a prompt (utils/prompt-loader.ts, the same rule).
+  const held = projectFilesHeld(boundary, shellPaths.homeDirectory);
   for (const candidate of candidates) {
-    const record = readContextCandidate(candidate, boundary);
+    const record = readContextCandidate(candidate, boundary, held);
     if (!record) continue;
     if ('body' in record) files.push(record);
     else blocked.push(record);

@@ -45,6 +45,7 @@ import { getBuiltinSetupSchema } from './builtin/setup-schema.js';
 import { TelegramIngressSupervisor, type TelegramIngressStatus } from './telegram/ingress.js';
 import { TelegramOffsetStoreError } from './telegram/offset-store.js';
 import { logger } from '../utils/logger.js';
+import { outsideEveryCall } from '../utils/outside-every-call.js';
 import { registerBuiltinChannelPlugins } from './builtin/plugins.js';
 import type { BuiltinChannelRuntimeDeps, ManagedSurface } from './builtin/shared.js';
 import type { InboundMailHealthEntry } from '../email/inbound/health.js';
@@ -200,14 +201,16 @@ export class BuiltinChannelRuntime {
       // Coalesce: editing several keys in one save must re-decide once, not
       // once per key, or the modes race each other during the transition.
       if (this.telegramRestartTimer) clearTimeout(this.telegramRestartTimer);
-      this.telegramRestartTimer = setTimeout(() => {
+      // Told by whichever request saved the setting: the loop it starts (every message's turn after it) is no caller's
+      // (utils/outside-every-call.ts).
+      this.telegramRestartTimer = outsideEveryCall(() => setTimeout(() => {
         this.telegramRestartTimer = null;
         void this.telegramIngress?.start().catch((error: unknown) => {
           logger.warn('Telegram ingress restart after a config change failed', {
             error: error instanceof Error ? error.message : String(error),
           });
         });
-      }, 250);
+      }, 250));
       (this.telegramRestartTimer as unknown as { unref?: () => void }).unref?.();
     };
     for (const key of keys) {
@@ -323,10 +326,10 @@ export class BuiltinChannelRuntime {
     ] as const;
     const recheck = (): void => {
       if (this.inboundMailRecheckTimer) clearTimeout(this.inboundMailRecheckTimer);
-      this.inboundMailRecheckTimer = setTimeout(() => {
+      this.inboundMailRecheckTimer = outsideEveryCall(() => setTimeout(() => {
         this.inboundMailRecheckTimer = null;
         this.deps.inboundMail?.recheckNow();
-      }, 250);
+      }, 250));
       (this.inboundMailRecheckTimer as unknown as { unref?: () => void }).unref?.();
     };
     for (const key of keys) {
@@ -755,7 +758,8 @@ export class BuiltinChannelRuntime {
       deps: this.deps,
       restartTelegramIngress: async () => {
         if (!this.deps.telegramOffsetPath) return null;
-        await this.startIngress();
+        // An account action is a request: the loop it (re)starts is no caller's.
+        await outsideEveryCall(() => this.startIngress());
         return this.telegramIngressStatus();
       },
       buildAccount: (currentSurface) => this.buildAccount(currentSurface),

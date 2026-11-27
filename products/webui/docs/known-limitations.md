@@ -44,10 +44,10 @@ mistaken for hidden contracts.
 
 - The Calendar view shows what the daemon's calendar reads: a CalDAV server
   when one is set, otherwise the machine's one Google connection (the account
-  connected with the Agent's `/calendar connect google`, "connect" on the Google tab of Mail, calendar and channels, or
+  signed in on the Calendar accounts tab, "connect" on the Google tab of Mail, calendar and channels, or
   the model's `google` tool; they are the same connection), and beside either
-  a Microsoft Outlook account connected with the Agent's `/calendar connect
-  outlook` (the same connection the Agent's `/calendar` uses). Outlook's
+  a Microsoft Outlook account signed in on the Calendar accounts tab of Mail,
+  calendar and channels (the same connection both terminal programs use). Outlook's
   calendars are listed as "<name> (Outlook)" in the calendar choice; with no
   calendar chosen the view shows the events of both. An `.ics` import into an
   Outlook calendar is refused: import it in Outlook. With nothing usable the

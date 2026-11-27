@@ -36,9 +36,22 @@ export interface PersonalOpsReceiptWritten {
   readonly id: string | null;
   /**
    * Why the record was not saved, in words to say after the act's own result (the act already ran): a rule that
-   * refuses saves, or plan mode. Absent when it was saved, or when there was nowhere to save it.
+   * refuses saves, plan mode, a save refused or failed. Absent when it was saved, or when there was nowhere to save it.
    */
   readonly notSaved?: string | undefined;
+}
+
+/**
+ * Why a receipt's save did not happen, in plain words for "Its record was not saved: …": the owner's own rule ("a rule
+ * of yours refuses saves (<its description>)"), his No, or the failure's own words without the wrappers a save's path
+ * adds ("The artifact was not saved:", "Save an artifact was not done:") or a leading code (`outcome_unknown:`).
+ */
+function whyNotSaved(message: string): string {
+  const rule = /a rule of yours refuses it(?: \(([^)]*)\))?/.exec(message);
+  if (rule) return `a rule of yours refuses saves${rule[1] ? ` (${rule[1]})` : ''}`;
+  let words = message.replace(/^The artifact was not saved:\s*/i, '').replace(/^Error:\s*/, '').replace(/^[A-Za-z ]+ was not done:\s*/, '').replace(/^[a-z]+(?:_[a-z]+)+:\s*/, '');
+  words = words.replace(/\.+$/, '').trim();
+  return words || 'the save did not happen';
 }
 
 export async function writePersonalOpsEffectReceipt(store: ArtifactStore | undefined, receipt: PersonalOpsEffectReceipt): Promise<PersonalOpsReceiptWritten> {
@@ -69,9 +82,10 @@ export async function writePersonalOpsEffectReceipt(store: ArtifactStore | undef
     return { id: descriptor.id };
   } catch (error) {
     // The effect already happened and its result stands; a receipt that could not be saved is only missing from the lane.
-    // One a rule or plan mode refused is said after the act's result, truthfully.
-    const message = error instanceof Error ? error.message : String(error);
+    // Whatever kept it unsaved (a rule or plan mode that refuses saves, a save asked and refused, a store that failed) is
+    // said after the act's result, truthfully: the act is reported done, its record not saved.
+    const message = (error instanceof Error ? error.message : String(error)).trim();
     const at = message.indexOf(RECORD_NOT_SAVED);
-    return at < 0 ? { id: null } : { id: null, notSaved: message.slice(at).replace(/\.+$/, '') };
+    return { id: null, notSaved: at >= 0 ? message.slice(at).replace(/\.+$/, '') : `${RECORD_NOT_SAVED}: ${whyNotSaved(message)}` };
   }
 }

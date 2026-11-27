@@ -243,6 +243,12 @@ export const DAEMON_OWNED_CONFIG_KEYS: readonly string[] = [
   // program from its copy of the daemon's settings. The prices each program kept until 3.5.0 are carried into it once,
   // every model kept (settings-carry-forward.ts MERGED_DAEMON_RECORDS), and left in the program's file for a rollback.
   'pricing.modelPrices',
+  // Whether a project's code index is kept current: one choice for every project and every door's turns (the daemon
+  // builds a project's index the first time a turn there asks), set in Code and changes, Code index. The terminal app's
+  // own value until 3.5.0 is copied into the daemon's settings once and left in its file for a rollback.
+  'storage.codeIndexEnabled',
+  // Where the daemon makes a project for a chat that has none (workspace/automatic-projects.ts): the daemon makes them.
+  'storage.automaticProjectsFolder',
 ];
 
 

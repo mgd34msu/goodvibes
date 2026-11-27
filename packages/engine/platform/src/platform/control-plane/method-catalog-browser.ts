@@ -437,6 +437,8 @@ export const builtinGatewayBrowserMethodDescriptors: readonly GatewayMethodDescr
     category: 'browser',
     effects: ['browser-content.read'],
     http: { method: 'POST', path: '/api/browser/screenshot' },
+    // The PNG is written at this path on the daemon's disk (control-plane/caller-paths.ts).
+    daemonFiles: ['path'],
     inputSchema: pageInputSchema({
       fullPage: BOOLEAN_SCHEMA,
       path: STRING_SCHEMA,

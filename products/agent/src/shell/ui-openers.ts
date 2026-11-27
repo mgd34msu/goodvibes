@@ -323,10 +323,11 @@ export function wireShellUiOpeners(options: WireShellUiOpenersOptions): WiredShe
   // A described command's guided panel (command-actions/panel.ts) is a kit modal on the same stack.
   commandContext.pushSurfaceModal = (modal) => input.surfaceModals.push(modal);
   // The command palette the TUI has (terminal-shell/command-palette.ts): every
-  // registered command, built when it opens; Enter on a described command opens its guided path.
+  // listed command, built when it opens; Enter on a described command opens its guided path. An unlisted one (it
+  // opens its place) is typed, never offered.
   commandContext.openCommandPalette = () => openCommandPaletteOn({
     modals: input.surfaceModals,
-    commands: () => input.commandRegistry?.getAll(),
+    commands: () => input.commandRegistry?.getVisible(),
     categories: () => new Map((input.commandRegistry?.getAll() ?? []).flatMap((command) => command.described ? [[command.name, command.described.group] as const] : [])),
     // The keyboard shortcuts, the list's last group, from the live key table.
     shortcuts: () => paletteShortcuts(commandContext.workspace?.keybindingsManager),
@@ -373,27 +374,6 @@ export function wireShellUiOpeners(options: WireShellUiOpenersOptions): WiredShe
       // manager follows the setting itself (services.ts).
       return syncServiceSettingToPlatform({ configManager, workingDirectory, homeDirectory }, change);
     },
-  };
-
-  commandContext.openAgentWorkspace = (categoryId?: string) => {
-    const closed = input.openAgentWorkspace(commandContext, categoryId);
-    render();
-    return closed;
-  };
-
-  commandContext.openAgentSetupRows = (actionIds) => {
-    input.openAgentWorkspace(commandContext, 'setup', 'SETUP');
-    input.agentWorkspace.showOnlyActions(actionIds);
-    render();
-  };
-
-  commandContext.dismissAgentWorkspace = () => input.dismissAgentWorkspace();
-
-  commandContext.openWorkspacePicker = () => {
-    conversation.setSplashSuppressed(false);
-    input.openAgentWorkspace(commandContext, 'home');
-    conversation.rebuildHistory();
-    render();
   };
 
   // System notices: the /notifications history, counted on the status bar (notification-surfaces.ts).

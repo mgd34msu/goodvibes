@@ -129,6 +129,41 @@ export interface ConversationGateDeps {
    * the restart, so nothing (not even a proposal) answers it before then.
    */
   readonly workAdmitted?: (() => boolean) | undefined;
+  /**
+   * Where the work a channel conversation starts runs when its channel has no project ("Project for this channel" on
+   * None): the conversation's own automatic project (workspace/automatic-projects.ts), made now for the owner's own
+   * conversation the first time it needs one, with the sentence that says where its files are when it was just made.
+   * Undefined: the channel's project applies (trySpawnAgent). `refused`: the conversation is not the owner's own, so it
+   * has no project and makes none, and its work is not started anywhere (never in the daemon's own folder).
+   */
+  readonly projectForWork?: ((sessionId: string, message: string) => Promise<{ readonly folder: string; readonly said?: string | undefined } | { readonly refused: string } | undefined>) | undefined;
+}
+
+/**
+ * The spawn input with the folder its work runs in when the conversation's channel has none: the owner's own
+ * conversation's automatic project; a conversational turn (read-only tools) or one that names its folder is unchanged.
+ * Says where the project's files are, once, when it was just made. A conversation with no project that makes none
+ * (someone else's), or a project that could not be made: `refused`, said, and nothing is started.
+ */
+async function withWorkProject(deps: ConversationGateDeps, input: SpawnInput, sessionId: string | undefined,
+  binding: AutomationRouteBinding | undefined, message: string | undefined): Promise<SpawnInput | { readonly refused: string }> {
+  const asked = input as SpawnInput & { readonly workingDirectory?: string; readonly restrictTools?: boolean; readonly task?: string };
+  if (!sessionId || asked.workingDirectory !== undefined || asked.restrictTools === true || !deps.projectForWork) return input;
+  let project: Awaited<ReturnType<NonNullable<ConversationGateDeps['projectForWork']>>>;
+  try {
+    // Named from what the owner wrote (not the prompt built around it for the agent).
+    project = await deps.projectForWork(sessionId, message ?? (typeof asked.task === 'string' ? asked.task : ''));
+  } catch (error) {
+    logger.warn('No project could be made for a channel conversation\'s work', { sessionId, error: summarizeError(error) });
+    project = { refused: summarizeError(error) };
+  }
+  if (!project) return input;
+  if ('refused' in project) {
+    await deliverProposalNotice(deps, binding, project.refused);
+    return project;
+  }
+  if (project.said) await deliverProposalNotice(deps, binding, project.said);
+  return { ...input, workingDirectory: project.folder } as SpawnInput;
 }
 
 /**
@@ -389,11 +424,17 @@ async function spawnOrSettle(
   logLabel: string | undefined,
   sessionId: string | undefined,
 ): Promise<AgentRecord | Response> {
+  // The owner's own conversation on a channel with no project works in its own automatic project.
+  const placed = await withWorkProject(deps, input, sessionId, resolveOriginBinding(deps, origin, sessionId), origin?.text);
+  if ('refused' in placed) {
+    await failHeldInput(deps, origin, sessionId, placed.refused);
+    return Response.json({ ok: false, error: placed.refused, code: 'NO_PROJECT' }, { status: 422 });
+  }
   // A guest's message starts a guest's turn: the spawn runs in that scope, so the
   // agent (and any agent it starts) carries it to every tool call it makes.
   const spawned = origin?.guest === true
-    ? withGuestTurn(origin.surface, () => deps.trySpawnAgent(input, logLabel, sessionId), origin.userId)
-    : deps.trySpawnAgent(input, logLabel, sessionId);
+    ? withGuestTurn(origin.surface, () => deps.trySpawnAgent(placed, logLabel, sessionId), origin.userId)
+    : deps.trySpawnAgent(placed, logLabel, sessionId);
   if (!(spawned instanceof Response)) return spawned;
   if (isAdmissionRefusal(spawned)) {
     const kept = await holdForRestart(deps, origin, sessionId);
@@ -621,14 +662,20 @@ export async function startAgreedWork(
   deps.readingOptions?.signal?.throwIfAborted();
   assertSynchronousCurrent(deps.readingOptions?.beforeAttempt);
   const task = note ? `${proposal.task}\n\nAdditional direction from the owner: ${note}` : proposal.task;
-  // A guest's agreed work is still the guest's turn: the owner agreed to the
-  // request, not to letting its text direct changes, so each change is still his.
-  const start = () => deps.trySpawnAgent({ mode: 'spawn', task }, 'ConversationGate.startAgreedWork', proposal.sessionId);
   // A guest's proposal is answered from elsewhere by someone else (the owner); the owner's own proposal answered from
   // his own conversation or from Waiting for you keeps his id, and his agreed work is his turn.
   const guest = proposal.answerFrom !== undefined && proposal.answerFrom.userId !== proposal.userId;
-  const spawned = guest ? withGuestTurn(proposal.surfaceKind, start) : start();
   const binding = proposal.routeId ? deps.routeBindings.getBinding(proposal.routeId) : undefined;
+  // The owner's own conversation on a channel with no project works in its own automatic project.
+  const placed = await withWorkProject(deps, { mode: 'spawn', task }, proposal.sessionId, binding, proposal.summary);
+  if ('refused' in placed) {
+    await settleUnstartedWork(deps, proposal, placed.refused);
+    return 'not-started';
+  }
+  // A guest's agreed work is still the guest's turn: the owner agreed to the
+  // request, not to letting its text direct changes, so each change is still his.
+  const start = () => deps.trySpawnAgent(placed, 'ConversationGate.startAgreedWork', proposal.sessionId);
+  const spawned = guest ? withGuestTurn(proposal.surfaceKind, start) : start();
   // The daemon is restarting into an update: the proposal stays accepted and unstarted, and is started after the restart.
   if (spawned instanceof Response && isAdmissionRefusal(spawned)) return 'held';
   if (spawned instanceof Response) {

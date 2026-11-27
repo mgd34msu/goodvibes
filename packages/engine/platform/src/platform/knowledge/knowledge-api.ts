@@ -20,6 +20,7 @@ import type {
   MemorySearchFilter,
   MemorySemanticSearchResult,
 } from '../state/memory-store.js';
+import type { MemoryAuthor } from '../state/memory-author.js';
 import type { MemoryVectorStats } from '../state/memory-vector-store.js';
 import type { MemoryOperationOptions } from '../state/memory-operation.js';
 import type { MemoryRegistry } from '../state/memory-registry.js';
@@ -114,13 +115,17 @@ export interface MemoryApi {
   reviewQueue(limit?: number, scope?: MemoryScope): Promise<readonly MemoryRecord[]>;
   exportBundle(filter?: MemorySearchFilter): MemoryBundle;
   /** `intoProject`: the project an imported "this project" record is for (memoryProjectIdentity); absent, the person's own. */
-  importBundle(bundle: MemoryBundle, intoProject?: string): Promise<MemoryImportResult>;
+  /** `importedBy`: who loaded it (memory-author.ts), the author of every record it adds, whatever the file says. */
+  importBundle(bundle: MemoryBundle, intoProject?: string, importedBy?: MemoryAuthor): Promise<MemoryImportResult>;
   get(id: string): MemoryRecord | null;
   getAll(): readonly MemoryRecord[];
   link(fromId: string, toId: string, relation: string): Promise<MemoryLink | null>;
   linksFor(id: string): readonly MemoryLink[];
-  update(id: string, patch: { scope?: MemoryScope; project?: string | undefined; summary?: string; detail?: string; tags?: string[] }): MemoryRecord | null;
+  /** `by`: who makes the change (memory-store.ts update): someone else's makes it wait for the owner again. */
+  update(id: string, patch: { scope?: MemoryScope; project?: string | undefined; summary?: string; detail?: string; tags?: string[]; by?: MemoryAuthor }): MemoryRecord | null;
   review(id: string, patch: MemoryReviewPatch): MemoryRecord | null;
+  /** The owner accepts a record someone else wrote; null when there is none. */
+  accept(id: string): MemoryRecord | null;
   delete(id: string): boolean;
   /** `project`: the asking project (memoryProjectIdentity); another project's records are never given. */
   explain(task: string, writeScope?: readonly string[], limit?: number, project?: string): Promise<MemoryExplainResult>;
@@ -128,6 +133,7 @@ export interface MemoryApi {
 
 export type MemoryApiRegistry = Pick<
   MemoryRegistry,
+  | 'accept'
   | 'add'
   | 'doctor'
   | 'delete'
@@ -345,16 +351,17 @@ export function createMemoryApi(memoryRegistry: MemoryApiRegistry): MemoryApi {
     doctor: () => memoryRegistry.doctor(),
     reviewQueue: (limit = 10, scope?: MemoryScope) => memoryRegistry.reviewQueue(limit, scope),
     exportBundle: (filter: MemorySearchFilter = {}) => memoryRegistry.exportBundle(filter),
-    importBundle: (bundle: MemoryBundle, intoProject?: string) => intoProject === undefined
-      ? memoryRegistry.importBundle(bundle) : memoryRegistry.importBundle(bundle, undefined, intoProject),
+    importBundle: (bundle: MemoryBundle, intoProject?: string, importedBy?: MemoryAuthor) => intoProject === undefined && importedBy === undefined
+      ? memoryRegistry.importBundle(bundle) : memoryRegistry.importBundle(bundle, undefined, intoProject, importedBy),
     get: (id: string) => memoryRegistry.get(id),
     getAll: () => memoryRegistry.getAll(),
     link: (fromId: string, toId: string, relation: string) => memoryRegistry.link(fromId, toId, relation),
     linksFor: (id: string) => memoryRegistry.linksFor(id),
-    update: (id: string, patch: { scope?: MemoryScope; project?: string | undefined; summary?: string; detail?: string; tags?: string[] }) => (
+    update: (id: string, patch: { scope?: MemoryScope; project?: string | undefined; summary?: string; detail?: string; tags?: string[]; by?: MemoryAuthor }) => (
       memoryRegistry.update(id, patch)
     ),
     review: (id: string, patch: MemoryReviewPatch) => memoryRegistry.review(id, patch),
+    accept: (id: string) => memoryRegistry.accept(id),
     delete: (id: string) => memoryRegistry.delete(id),
     explain: async (task: string, writeScope: readonly string[] = [], limit = 3, project?: string): Promise<MemoryExplainResult> => {
       const injections = await selectKnowledgeForTask(memoryRegistry, task, writeScope, limit, project);

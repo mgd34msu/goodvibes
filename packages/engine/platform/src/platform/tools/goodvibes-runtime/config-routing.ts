@@ -42,9 +42,10 @@ import { isSecretBearingConfigKey } from '../../config/secret-bearing-config-key
 import { admitSettingValue } from '../../config/write-admission.js';
 import { agentSettingsWriteRefusal } from '../../gate/policy/agent-settings-refusals.js';
 import { currentAdmittedToolDecision } from '../../gate/admitted-decision.js';
-import { agentActor, localOwnerActor } from '@goodvibes/engine/daemon-api/http-policy';
-import { currentTurn } from '../../security/turn-boundary.js';
+import { programCallHeadersFor } from '../../runtime/client/call-context.js';
+import { turnModelActor } from '../../security/turn-session.js';
 import { ConfigError } from '../../types/errors.js';
+import { managedLockRefusalText } from '../../runtime/settings/host-setting-policy-read.js';
 
 /**
  * Why a model's settings write is refused before anything is written, with
@@ -55,7 +56,7 @@ import { ConfigError } from '../../types/errors.js';
  * the key, and it wins over the store the write would land in.
  */
 export interface SettingsWriteRefusal {
-  readonly code: 'unknown-key' | 'value-refused' | 'shadowed-by-overlay';
+  readonly code: 'unknown-key' | 'value-refused' | 'shadowed-by-overlay' | 'managed-lock';
   readonly message: string;
 }
 
@@ -80,6 +81,13 @@ export function settingsWriteRefusal(
   }
   const refused = agentSettingsWriteRefusal({ mode: request.mode, key, value: request.value });
   if (refused) return { code: 'value-refused', message: refused };
+  // A managed lock, wherever it was recorded on this machine, refuses the write before the gate asks anything.
+  if (request.mode === 'set' || request.mode === 'reset') {
+    let lock: ReturnType<ConfigManager['managedLockOf']>;
+    try { lock = configManager.managedLockOf(key); }
+    catch (error) { return { code: 'managed-lock', message: `Nothing was changed: ${error instanceof Error ? error.message : String(error)}` }; }
+    if (lock) return { code: 'managed-lock', message: managedLockRefusalText(lock, isSecretBearingConfigKey(key)) };
+  }
   if (request.mode !== 'set') return null;
   return projectOverlayRefusal(configManager, key, request.value, options);
 }
@@ -282,7 +290,8 @@ export function usesClientOwnedStore(key: string, options: ConfigRoutingOptions)
  * stand. Nothing is written.
  */
 export function routedLoosenRefusal(configManager: ConfigManager, key: ConfigKey, value: unknown): ReturnType<ConfigManager['loosenRefusal']> {
-  const writer = agentActor(currentTurn()?.actor ?? localOwnerActor());
+  // The model acting for whose turn it is (security/turn-session.ts): a member's or a device's chat is theirs.
+  const writer = turnModelActor();
   return configManager.loosenRefusal(key, value, writer, currentAdmittedToolDecision());
 }
 
@@ -313,7 +322,7 @@ export async function applyRoutedConfigWrite(
   // before a write is sent to the daemon or to another surface's file, so
   // routing cannot skip it.
   const decision = currentAdmittedToolDecision();
-  const writer = agentActor(currentTurn()?.actor ?? localOwnerActor());
+  const writer = turnModelActor();
   const loosening = routedLoosenRefusal(configManager, key, value);
   if (loosening) throw new ConfigError(loosening.reason);
 
@@ -351,7 +360,12 @@ export async function applyRoutedConfigWrite(
     };
   }
 
-  const deps = resolveRouterDeps(configManager, options);
+  // The model's call this write is part of was decided by this program's gate (its admitted decision): the write goes
+  // to the daemon with that gate's mark and this program's registration, so it is not decided a second time there.
+  const deps = {
+    ...resolveRouterDeps(configManager, options),
+    ...(decision !== undefined ? { press: { decidedByProgramGate: true }, programHeaders: (baseUrl: string, token: string | undefined) => programCallHeadersFor(baseUrl, token) } : {}),
+  };
   const outcome = await applyConfigWrite(key, value, {
     setDynamic: (k, v, o) => {
       const result = configManager.setMany([{ key: k as ConfigKey, value: v }], writer, { ...(o ?? {}), decision });

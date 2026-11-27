@@ -44,6 +44,7 @@ import { mintedPairingScopes } from './pairing.js';
 import type { Actor } from '@goodvibes/engine/daemon-api/http-policy';
 import { admitEffects } from '../../security/effect-authority.js';
 import { PAIRING_HANDOFF_COMPLETE_EFFECTS } from '../method-catalog-pairing.js';
+import { ownerHimself } from '../../daemon/method-owner-decision.js';
 
 /** What the hand-off verbs need from the surrounding composition. */
 export interface PairingHandoffDeps {
@@ -107,12 +108,12 @@ function availableOffers(deps: PairingHandoffDeps): Set<PairingHandoffOfferKind>
 
 /**
  * The actor a freshly minted pairing token will be (daemon-api actor.ts): a
- * full pairing is the owner's device or an admin, a narrowed one a device
- * holding its list.
+ * full pairing is an admin (the owner's own device too: a device is never the
+ * owner himself), a narrowed one a device holding its list.
  */
-function mintedActor(scopes: readonly string[] | undefined, ownerPairing: boolean): Actor {
+function mintedActor(scopes: readonly string[] | undefined): Actor {
   return {
-    class: scopes !== undefined ? 'device' : ownerPairing ? 'owner' : 'admin',
+    class: scopes !== undefined ? 'device' : 'admin',
     id: 'pairing:minted',
     scopes: scopes !== undefined ? new Set(scopes) : 'all',
     via: 'http',
@@ -163,15 +164,17 @@ function createHandoffCreateHandler(deps: PairingHandoffDeps): GatewayMethodHand
     }
     const available = availableOffers(deps);
     const scopes = mintedPairingScopes(invocation.context, undefined);
-    // The owner's pairing flow: a device paired by the owner himself (his actor, not a
-    // model acting for him) with full authority is his device. From an admin who is not
-    // the owner, the Agent, or narrowed, it is automation. Recorded at the mint and never
-    // changed afterwards.
-    const callerActor = invocation.context.actor;
-    const ownerPairing = scopes === undefined && callerActor?.class === 'owner' && callerActor.agentFor === undefined;
+    // The owner's pairing flow: a device is his only when the owner himself starts the pairing (his verified program
+    // or his signed-in session, method-owner-decision.ts `ownerHimself`) with full authority, and the code this call
+    // returns to his own screen is what the device uses. From anyone else (an admin who is not the owner, a script, a
+    // device, his own device included, the Agent's credential, a narrowed caller, a call made on his yes to someone
+    // else's request) it is automation. Recorded at the mint with its maker and never changed afterwards.
+    const context = invocation.context;
+    const ownerPairing = scopes === undefined
+      && ownerHimself({ actor: context.actor, credentialKind: context.credentialKind ?? undefined, registration: context.call?.registration });
     // Offered only what the paired device can complete: the completion's own effects, judged
     // for the actor the minted token will be (a narrowed pairing cannot complete, so it is offered nothing).
-    const completable = admitEffects(mintedActor(scopes, ownerPairing), PAIRING_HANDOFF_COMPLETE_EFFECTS).kind === 'allowed';
+    const completable = admitEffects(mintedActor(scopes), PAIRING_HANDOFF_COMPLETE_EFFECTS).kind === 'allowed';
     const offers = completable ? requestedOffers(params.offers).filter((kind) => available.has(kind)) : [];
 
     // Resolved before minting: a token whose secret is never returned would still count toward the paired-node cap.
@@ -192,7 +195,8 @@ function createHandoffCreateHandler(deps: PairingHandoffDeps): GatewayMethodHand
     const minted: MintedPairingToken = ((): MintedPairingToken => {
       try {
         const input = { name, mintedBy: pairingTokenIdOfCaller(invocation.context),
-          ...(scopes !== undefined ? { scopes } : {}), ...(ownerPairing ? { origin: 'owner-pairing' as const } : {}) };
+          ...(scopes !== undefined ? { scopes } : {}),
+          ...(ownerPairing ? { origin: 'owner-pairing' as const, madeBy: { owner: true } as const } : {}) };
         // A client moving off the shared token pairs ITSELF through this flow: it already
         // uses this daemon, so its mint is exempt from device.nodes.maxPaired as
         // pairing.tokens.migrate's is.

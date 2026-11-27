@@ -74,7 +74,7 @@ export const SECURE_ADDRESS_CHOICES: readonly SecureAddressChoiceWords[] = [
     id: 'local-authority',
     title: 'GoodVibes\' own certificate (no domain needed)',
     does: 'GoodVibes makes a certificate authority on this computer that can only vouch for this computer\'s own names and private network addresses, and serves https with a certificate it signs. It is made again at each start for the addresses the computer has then.',
-    needs: 'On each phone, once: open the page /lan-https on this computer\'s plain address and install the GoodVibes certificate (the page says how on iPhone and Android, and how to remove it).',
+    needs: 'On each phone, once: open the link for phones this screen shows (it opens the page /lan-https on the https address with the certificate\'s fingerprint; the page offers the certificate only when it matches) and install the GoodVibes certificate (the page says how on iPhone and Android, and how to remove it). Nothing of it is given over plain http.',
     phoneGains: 'Everything an https address gives, on each phone that installed the certificate; a phone that did not shows a certificate warning.',
     sends: 'Nothing leaves this computer.',
     caution: 'Installing a certificate on a phone is the one step it needs, and it has not been tried yet on a real iPhone or Android phone.',

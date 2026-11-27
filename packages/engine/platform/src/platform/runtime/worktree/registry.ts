@@ -8,6 +8,7 @@ import { writeJsonFileAtomic } from '../../utils/atomic-json-store.js';
 import { summarizeError } from '../../utils/error-display.js';
 import { resolveScopedDirectory } from '../surface-root.js';
 import { noteListChanged } from '../list-changes.js';
+import { projectIdentityOf } from '../../workspace/project-identity.js';
 import type { WorktreeSetupResult } from './setup.js';
 import {
   assessWorktree,
@@ -515,7 +516,8 @@ function writeStore(store: WorktreeStore, storePath: string): void {
   writeJsonFileAtomic(storePath, store, { durable: false });
   // A project's worktree register changed (made, set up, paused, kept, tied, removed): a list showing it reads again
   // (the daemon sends it as LIST_CHANGED `worktrees`, the register file as the id).
-  noteListChanged({ list: 'worktrees', change: 'changed', id: storePath });
+  // The register is its project's (`<project>/.goodvibes/worktrees.json`): only that project's screens read again.
+  noteListChanged({ list: 'worktrees', change: 'changed', id: storePath, project: projectIdentityOf(dirname(dirname(storePath))) });
 }
 
 /** True when both registers hold the same records (key order does not matter). */

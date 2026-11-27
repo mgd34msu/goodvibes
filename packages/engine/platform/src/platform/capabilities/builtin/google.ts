@@ -23,6 +23,7 @@ import { serviceWords, type GoogleApiOff } from '../../google/connection-proof.j
 import type { GoogleCredentialItem } from '../../google/credential-removal.js';
 import type { GoogleSetupState } from '../../google/setup-state.js';
 import { CapabilityRefusal, type CapabilityCaller, type CapabilityDefinition, type CapabilityResult, type InputDescription } from '../types.js';
+import { callerPathOf } from '../path-inputs.js';
 import { isHeldSend, plainInboxText } from './waiting.js';
 import type { CalendarHereCapabilityServices } from './calendar.js';
 
@@ -307,8 +308,8 @@ export const GOOGLE_CLIENT_FILE: CapabilityDefinition<GoogleCapabilityServices> 
   async run(values, services, caller) {
     const raw = (values.path ?? '').trim();
     if (!raw) throw new CapabilityRefusal('No client file was named; nothing was stored.');
-    // A path is the asking program's: relative to its folder.
-    const path = raw.startsWith('/') || !caller.workingDirectory ? raw : `${caller.workingDirectory.replace(/\/$/, '')}/${raw}`;
+    // A path is the asking program's, placed by the one rule for every capability's path (capabilities/path-inputs.ts).
+    const path = callerPathOf(caller, raw);
     const google = googleOf(services);
     return startedResult(await google.client({ kind: 'client-json-file', path }, { personAsked: person(caller) }), caller, google.openConsentUrl);
   },

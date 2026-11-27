@@ -353,10 +353,9 @@ export async function runDaemonCli(argv: readonly string[], options: DaemonCliOp
         return result(await runDaemonServiceCli({ subcommand: cli.command,
           binaryPath: serviceExecutable?.binaryPath ?? options.serviceBinaryPath ?? resolveInstalledDaemonBinary({ moduleUrl: import.meta.url }),
           ...(serviceExecutable ? { assertCurrent: serviceExecutable.assertCurrent } : {}),
-          configManager: config, homeDir: homeDirectory, daemonHomeDirectory, unitHomeDir: resolveServiceUnitHome(env), workingDirectory,
-          workingDirectoryExplicit: cli.flags.workingDir !== undefined || env.GOODVIBES_WORKING_DIR !== undefined,
-          requireInstalledDefinitionMatch: configuration.isOverridden || cli.flags.workingDir !== undefined
-            || env.GOODVIBES_WORKING_DIR !== undefined, actionRunner: options.serviceActionRunner,
+          // The service starts the daemon in the home: the daemon has no working folder (each program names its project).
+          configManager: config, homeDir: homeDirectory, daemonHomeDirectory, unitHomeDir: resolveServiceUnitHome(env), workingDirectory: homeDirectory,
+          requireInstalledDefinitionMatch: configuration.isOverridden, actionRunner: options.serviceActionRunner,
           json: cli.flags.json,
         }), stdout);
       }

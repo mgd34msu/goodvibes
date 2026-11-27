@@ -370,7 +370,8 @@ export function wireShellUiOpeners(options: WireShellUiOpenersOptions): WiredShe
     // from the same source the generated docs use (getCommandCategoryMap).
     openCommandPaletteOn({
       modals: input.surfaceModals,
-      commands: () => input.commandRegistry?.getAll(),
+      // The listed commands only: an unlisted one (it opens its place) is typed, never offered.
+      commands: () => input.commandRegistry?.getVisible(),
       categories: getCommandCategoryMap,
       extraKeywords: PALETTE_VIEW_KEYWORDS,
       // The keyboard shortcuts, the list's last group, from the live key table.

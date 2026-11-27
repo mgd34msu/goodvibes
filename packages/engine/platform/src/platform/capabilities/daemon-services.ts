@@ -2,12 +2,11 @@
  * The narrow services the daemon hands the capabilities that run there, built
  * from the daemon's own stores. Each capability reads only the ones it names.
  *
- *  - hooks: the hook API over a project's hooks file. The daemon's own
- *    working directory uses the daemon's live workbench and dispatcher (a
- *    change applies to the daemon's turns at once); any other project gets a
- *    workbench of its own over that project's file, applied to nothing here:
- *    the program running turns in that project reads the changed file before
- *    its next hook fires.
+ *  - hooks: the hook API over the caller's project's hooks file: a workbench
+ *    of its own over that project's file, applied to nothing here: the turns
+ *    in that project (a program's, or the daemon's own for that project) read
+ *    the changed file before their next hook fires. The daemon's own folder is
+ *    no project and holds no hooks file.
  *  - secrets: "All your projects" is the daemon's store, which every program
  *    on this machine reads first; "This project" is the asking program's
  *    project store.
@@ -17,15 +16,16 @@
  */
 import { basename, dirname, join, resolve } from 'node:path';
 import { noteListChanged } from '../runtime/list-changes.js';
-import { WorkspaceTrustManager } from '../runtime/workspace-trust.js';
+import { WorkspaceTrustManager, workspaceTrustOwnerOf } from '../runtime/workspace-trust.js';
 import { createShellPathService } from '../runtime/shell-paths.js';
 import type { SecretsView } from './builtin/secrets.js';
 import { ConfigManager } from '../config/manager.js';
 import { PROGRAM_HOST_SETTINGS, TERMINAL_PROGRAM_DEFAULTS } from '../runtime/program-host-settings.js';
 import { SecretsManager } from '../config/secrets.js';
+import { isDaemonNeededSecretKey } from '../config/credential-scope-registry.js';
 import { SkillLibrary } from '../skills/library.js';
 import { ProfileManager } from '../profiles/manager.js';
-import { resolveCallerPath } from './builtin/skills.js';
+import { callerPathOf } from './path-inputs.js';
 import { describePermissionModeInForce } from '../permissions/decision-model-readiness.js';
 import { carriedPolicyNote } from '../runtime/permissions/policy-config-loader.js';
 import { createHookApi, createHookApiDispatcher, type HookApi } from '../hooks/hook-api.js';
@@ -36,8 +36,14 @@ import type { HookActivityTracker } from '../hooks/activity.js';
 import { HookTraceStore, hookTraceRecordOf } from '../hooks/trace.js';
 import type { WebSearchCapabilityServices } from './builtin/tools.js';
 import { createMcpCapabilityServices, type McpServiceSources } from './mcp-services.js';
+import { loadMcpEffectiveConfig, MCP_DEFAULT_TRUST_MODE } from '../mcp/config.js';
 import { requireCallerProject } from './caller-project.js';
 import { projectIdentityOf } from '../workspace/project-identity.js';
+import { projectSettingsInForce } from '../config/project-view.js';
+import { noProjectFacts, noProjectRefusal } from '../workspace/caller-project.js';
+import { checkCallerProject, realPathOf, type CallerProjectVerdict } from '../workspace/caller-project.js';
+import { CallerProjectsStore } from '../workspace/caller-projects-store.js';
+import { CallerSharedStore } from '../control-plane/shared-kinds.js';
 import { createPluginCapabilityServices, type PluginServiceSources } from './plugins-services.js';
 import { controlPlaneStorePath } from '../control-plane/control-plane-store-paths.js';
 import { DAEMON_STATE_SURFACE_ROOT } from '../daemon/lifecycle-marker.js';
@@ -95,7 +101,6 @@ export interface DaemonCapabilityServiceSources {
   /** The daemon's channel router and the sends it keeps receipts of (builtin/channel-send.ts); absent, a send says so. */
   readonly channelSends?: ChannelSendCapabilityServices['channelSends'] | undefined;
   readonly hookDispatcher: HookDispatcher;
-  readonly hookWorkbench: HookWorkbench;
   readonly secretsManager: SecretsManager;
   readonly memoryRegistry: MemoryRegistry;
   /** The daemon's own hook runs, added to the hook trace as they happen. */
@@ -154,9 +159,9 @@ export interface DaemonCapabilityServiceSources {
   readonly serviceRegistry?: ModelsServiceSources['serviceRegistry'];
   readonly mediaProviders?: ModelsServiceSources['mediaProviders'];
   /** Work (builtin/work.ts): the daemon's plans before they run, where a proposed piece of work waits. */
-  readonly workPlans?: Pick<import('../workflow/work-ledger/work-plans.js').WorkPlans, 'propose'> | undefined;
+  readonly workPlans?: Pick<import('../workflow/work-ledger/work-plans.js').WorkPlans, 'propose' | 'noteCause'> | undefined;
   /** A project's own plans before they run (the daemon keeps Work per project), made on its first use. */
-  readonly workPlansFor?: ((project: string) => Promise<Pick<import('../workflow/work-ledger/work-plans.js').WorkPlans, 'propose'>>) | undefined;
+  readonly workPlansFor?: ((project: string) => Promise<Pick<import('../workflow/work-ledger/work-plans.js').WorkPlans, 'propose' | 'noteCause'>>) | undefined;
 }
 
 /** Something this daemon was composed without: every use of it says so, in one sentence. */
@@ -186,9 +191,10 @@ function memoryAndKnowledgeServices(sources: DaemonCapabilityServiceSources): Pi
       return knowledgeService.ask(input, options);
     },
     templates: {
-      // The caller's project's templates, and the ones every project shares (`~/.goodvibes/templates`).
+      // The caller's project's templates, and the ones every project shares (`~/.goodvibes/templates`). A caller that
+      // names no project gets the shared ones only (the home as the root), never the daemon's own folder's.
       forProject: (caller) => new TemplateManager({
-        projectRoot: caller.workingDirectory ? resolve(caller.workingDirectory) : sources.configManager.getWorkingDirectory() ?? homeDirectory,
+        projectRoot: caller.workingDirectory ? resolve(caller.workingDirectory) : homeDirectory,
         homeDirectory,
       }),
     },
@@ -209,7 +215,8 @@ function secretsViewFor(sources: DaemonCapabilityServiceSources, caller: Capabil
 function folderTrustServices(sources: DaemonCapabilityServiceSources): (directory: string) => WorkspaceTrustManager {
   const folders = new Map<string, WorkspaceTrustManager>();
   return (directory) => {
-    const root = resolve(directory);
+    // A folder inside a project is under its project's trust (one decision per project).
+    const root = workspaceTrustOwnerOf(resolve(directory));
     const own = sources.workspaceTrustManager;
     if (own && resolve(own.workspaceRoot) === root) return own;
     let trust = folders.get(root);
@@ -264,8 +271,8 @@ function remoteServices(sources: DaemonCapabilityServiceSources): RemoteCapabili
       });
     },
     setup: () => ({
-      // `daemon.enabled` governs, on unless set to false (config/index.ts resolveDaemonEnabled).
-      daemonEnabled: sources.configManager.get('daemon.enabled' as ConfigKey) !== false,
+      // Always: every program uses the daemon ("Use the background daemon" is retired, config/index.ts resolveDaemonEnabled).
+      daemonEnabled: true,
       httpListenerEnabled: Boolean(sources.configManager.get('danger.httpListener' as ConfigKey)),
     }),
   };
@@ -292,9 +299,13 @@ function daemonHookTrace(sources: DaemonCapabilityServiceSources): HookTraceStor
   if (tracker && !TRACED.has(tracker)) {
     TRACED.add(tracker);
     const kept = store;
+    // The daemon's own folder (inside its home) is no project: its own runs are stamped with none.
+    const home = sources.homeDirectory ?? (sources.shellPaths as Partial<Pick<ShellPathService, 'homeDirectory'>> | undefined)?.homeDirectory ?? resolveGoodVibesHome();
+    const facts = noProjectFacts(home, resolveGoodVibesDaemonHome(home));
     tracker.onRecord((record) => {
-      const project = sources.configManager.getWorkingDirectory();
-      kept.add([hookTraceRecordOf(record, { id: `daemon:${process.pid}:${TRACE_STARTED}:${++traceSequence}`, program: 'daemon', ...(project ? { project: resolve(project) } : {}) })]);
+      const folder = sources.configManager.getWorkingDirectory() ?? undefined;
+      const project = folder && !noProjectRefusal(folder, facts) ? resolve(folder) : undefined;
+      kept.add([hookTraceRecordOf(record, { id: `daemon:${process.pid}:${TRACE_STARTED}:${++traceSequence}`, program: 'daemon', ...(project ? { project } : {}) })]);
     });
   }
   return store;
@@ -331,9 +342,11 @@ function programFilesServices(sources: DaemonCapabilityServiceSources): Pick<Dae
   const config = sources.configManager as DaemonCapabilityServiceSources['configManager'] & Partial<Pick<ConfigManager, 'getHomeDirectory' | 'getDaemonTierPath'>>;
   const goodvibesRoot = (): string => sources.shellPaths?.resolveUserPath() ?? resolveGoodVibesTreeDirectory();
   const homeOf = (): string => config.getHomeDirectory?.() ?? sources.homeDirectory ?? dirname(goodvibesRoot());
-  const projectOf = (caller: CapabilityCaller): string | undefined => caller.workingDirectory ? resolve(caller.workingDirectory) : config.getWorkingDirectory() ?? undefined;
+  // The caller's project, or none: the daemon's own folder is no project (caller-project.ts).
+  const projectOf = (caller: CapabilityCaller): string | undefined => caller.workingDirectory ? resolve(caller.workingDirectory) : undefined;
   const programOf = (caller: CapabilityCaller): 'tui' | 'agent' => caller.program ?? 'tui';
-  const resolvePath = (caller: CapabilityCaller, path: string): string => resolveCallerPath(projectOf(caller) ?? homeOf(), path);
+  // A relative path with no project is refused: never placed in the daemon's own folder (capabilities/path-inputs.ts).
+  const resolvePath = (caller: CapabilityCaller, path: string): string => callerPathOf(caller, path);
   return {
     skills: {
       library: (caller) => SkillLibrary.forPaths({ workingDirectory: projectOf(caller), goodvibesRoot: goodvibesRoot(), surfaceRoot: programOf(caller) }),
@@ -441,8 +454,7 @@ function calendarHereServices(sources: DaemonCapabilityServiceSources): Calendar
       changed,
     }),
     caldavSet: () => configString('surfaces.calendar.caldavUrl').length > 0 && configString('surfaces.calendar.caldavUser').length > 0,
-    resolvePath: (caller, path) => resolveCallerPath(
-      caller.workingDirectory ? resolve(caller.workingDirectory) : sources.configManager.getWorkingDirectory() ?? homeOf(), path),
+    resolvePath: (caller, path) => callerPathOf(caller, path),
     changed,
   };
 }
@@ -469,15 +481,47 @@ function notifyServices(sources: DaemonCapabilityServiceSources): NotifyCapabili
   };
 }
 
+/**
+ * builtin/devices-projects.ts: the projects the owner gave each device or member (workspace/caller-projects-store.ts), in
+ * this home's daemon home. A project given passes the one check of a caller's project (workspace/caller-project.ts) as
+ * a device naming it would once given: a registered workspace or inside one, never the root, the home folder, or the
+ * GoodVibes or daemon home.
+ */
+function callerProjectsServices(homeDirectory: string): NonNullable<DaemonCapabilityServices['callerProjects']> {
+  const daemonHome = resolveGoodVibesDaemonHome(homeDirectory);
+  const store = new CallerProjectsStore(daemonHome);
+  const facts = { homeDirectory, goodVibesHome: join(homeDirectory, '.goodvibes'), daemonHome };
+  // The project a folder names, as a device would name it once given (every rule but "given to it": any project is
+  // the owner's to give, so the one it is in counts as given here).
+  const projectOf = (folder: string): CallerProjectVerdict => checkCallerProject(folder, { ownersProgram: false, principalId: 'owner-giving' },
+    { ...facts, assignedProjects: () => ['/'] });
+  return {
+    list: () => store.list(),
+    give(principalId, folder) {
+      const verdict = projectOf(folder);
+      if (!verdict.ok) return { ok: false, reason: verdict.reason };
+      const projects = store.set(principalId, [...store.projectsOf(principalId), verdict.project]);
+      return { ok: true, project: verdict.project, projects };
+    },
+    take(principalId, folder) {
+      const had = store.projectsOf(principalId);
+      const real = realPathOf(folder.trim());
+      const kept = had.filter((project) => project !== real && project !== folder.trim());
+      if (kept.length === had.length) return undefined;
+      return store.set(principalId, kept);
+    },
+  };
+}
+
 export function createDaemonCapabilityServices(sources: DaemonCapabilityServiceSources): DaemonCapabilityServices {
-  const own = createHookApi({
-    dispatcher: createHookApiDispatcher(sources.hookDispatcher),
-    workbench: sources.hookWorkbench,
-    listContracts: () => listHookPointContracts(),
-  });
   const projects = new Map<string, HookApi>();
   const hooksFileOf = (directory: string): string => resolve(directory, String(sources.configManager.get('tools.hooksFile')));
   const hookTrace = daemonHookTrace(sources);
+  // The asking project's plans before they run; a host with one set and no projects (a test's) answers with that set.
+  const workPlansOf = async (project: string | undefined): Promise<Pick<import('../workflow/work-ledger/work-plans.js').WorkPlans, 'propose' | 'noteCause'>> => {
+    if (sources.workPlansFor) return sources.workPlansFor(requireCallerProject(project, 'a piece of work'));
+    return sources.workPlans!;
+  };
   return {
     // Tools and extensions: the daemon's web search (builtin/tools.ts) and the projects' MCP config files (builtin/mcp.ts).
     ...(sources.webSearchService ? { webSearch: sources.webSearchService } : {}),
@@ -491,17 +535,20 @@ export function createDaemonCapabilityServices(sources: DaemonCapabilityServiceS
       subscriptionProviders: () => {
         try { return sources.subscriptionManager?.list().map((entry) => entry.provider) ?? []; } catch { return []; }
       },
-      resolvePath: (caller, path) => resolveCallerPath(
-        caller.workingDirectory ? resolve(caller.workingDirectory) : sources.configManager.getWorkingDirectory() ?? sources.homeDirectory ?? resolveGoodVibesHome(), path),
+      resolvePath: (caller, path) => callerPathOf(caller, path),
     },
     hooks: {
       trace: (options) => hookTrace.list(options),
       record: (runs) => hookTrace.add(runs),
       forProject(workingDirectory) {
         const daemonDirectory = sources.configManager.getWorkingDirectory();
-        // The caller's project only: with none named, nothing reads or writes the daemon folder's hooks file (caller-project.ts).
+        // The caller's project only (caller-project.ts). The daemon's own folder is no project and holds no hooks file:
+        // naming it is naming no project.
         const directory = requireCallerProject(workingDirectory, 'the hooks file');
-        if (daemonDirectory && directory === projectIdentityOf(daemonDirectory)) return own;
+        if (daemonDirectory && directory === projectIdentityOf(daemonDirectory)) {
+          throw new CapabilityRefusal('The daemon\'s own folder is not a project and holds no hooks file; nothing was read or changed.',
+            'Name the project whose hooks you mean: its folder, as a terminal program in it sends.', 'NO_PROJECT', 422);
+        }
         let api = projects.get(directory);
         if (!api) {
           const workbench = new HookWorkbench(DETACHED_DISPATCHER, () => hooksFileOf(directory));
@@ -514,12 +561,16 @@ export function createDaemonCapabilityServices(sources: DaemonCapabilityServiceS
       },
     },
     secrets: {
-      writerFor(scope, caller) {
-        if (scope === 'user') {
+      writerFor(scope, caller, key) {
+        // A key the daemon itself reads has one place, the daemon's store, whatever was asked; the answer says so.
+        const daemonHeld = isDaemonNeededSecretKey(key);
+        if (scope === 'user' || daemonHeld) {
           return {
-            set: (key, value, options) => sources.secretsManager.set(key, value, options),
+            set: (name, value, options) => sources.secretsManager.set(name, value, { ...options, scope: 'daemon' }),
             scope: 'daemon',
-            where: 'the daemon\'s secret store, which every GoodVibes program on this machine reads first',
+            where: daemonHeld
+              ? `the daemon's secret store: the daemon itself reads ${key}, so it is kept there for every project`
+              : 'the daemon\'s secret store, which every GoodVibes program on this machine reads first',
           };
         }
         // "This project" is the caller's project, never the folder the daemon started in: no folder, nothing kept.
@@ -567,6 +618,17 @@ export function createDaemonCapabilityServices(sources: DaemonCapabilityServiceS
         describeSenderClaim: describeSenderClaimNeutrally,
       })).testEach(),
     },
+    // A chat channel's own settings (`surfaces.<channel>.*`, the daemon's) and the secret store ("Enter a channel's keys").
+    channelKeys: {
+      get: (key: string) => sources.configManager.get(key as ConfigKey),
+      set: (key: string, value: unknown) => {
+        sources.configManager.validateDynamic(key as ConfigKey, value);
+        sources.configManager.setDynamic(key as ConfigKey, value);
+      },
+      storeSecret: async (key: string, value: string) => {
+        await persistSecretBackedConfigValue(sources.configManager as unknown as Parameters<typeof persistSecretBackedConfigValue>[0], sources.secretsManager as Parameters<typeof persistSecretBackedConfigValue>[1], key as ConfigKey, value);
+      },
+    },
     // The daemon's one list of webhook addresses (`notifications.webhookUrls`, the daemon's), its secret store and notifier.
     notify: notifyServices(sources),
     // The calendar on this computer, its feeds and the calendar accounts (builtin/calendar.ts).
@@ -587,11 +649,19 @@ export function createDaemonCapabilityServices(sources: DaemonCapabilityServiceS
     networkScan: networkScanServices(sources),
     // Devices and network (builtin/settings-sync.ts): the daemon's own settings (the asking program's are programSettings).
     settingsSync: { daemon: () => sources.configManager as ConfigManager },
+    // Devices and network, Permissions and safety (builtin/devices-projects.ts): the projects each device or member may work in.
+    callerProjects: callerProjectsServices(sources.homeDirectory ?? (sources.shellPaths as Partial<Pick<ShellPathService, 'homeDirectory'>> | undefined)?.homeDirectory ?? resolveGoodVibesHome()),
+    // What of the owner's shared things each caller may reach (control-plane/shared-kinds.ts), in the same daemon home.
+    callerShared: new CallerSharedStore(resolveGoodVibesDaemonHome(sources.homeDirectory ?? (sources.shellPaths as Partial<Pick<ShellPathService, 'homeDirectory'>> | undefined)?.homeDirectory ?? resolveGoodVibesHome())),
     // The daemon's one owner inbox (builtin/waiting.ts): what waits on the owner, and what was decided for him.
     ...(sources.ownerInbox ? { ownerInbox: sources.ownerInbox } : {}),
     // Work (builtin/work.ts): a piece of work proposed with its plan waits among the daemon's plans before they run.
     // Kept per project: the caller's project's plans when the daemon keeps Work per project, else its one set.
-    ...(sources.workPlans ? { workProposals: { propose: async (proposal, project) => (project && sources.workPlansFor ? await sources.workPlansFor(project) : sources.workPlans!).propose(proposal) } } : {}),
+    // A daemon keeps Work per project only (it has none of its own folder): a call naming no project is refused.
+    ...(sources.workPlans || sources.workPlansFor ? { workProposals: { propose: async (proposal, project) => (await workPlansOf(project)).propose(proposal) } } : {}),
+    // Who caused a piece of work to run, kept on its record in the same project's Work (work-plans.ts `WorkCause`).
+    ...(sources.workPlans || sources.workPlansFor ? { workCauses: { note: async (project: string | undefined, workId: string, cause: import('../workflow/work-ledger/work-plans.js').WorkCause) =>
+      (await workPlansOf(project)).noteCause(workId, cause) } } : {}),
     // Permissions and safety (builtin/permissions.ts, security.ts): the one rule store, the token audit, folder trust.
     permissionRules: {
       add: (record) => {
@@ -624,32 +694,57 @@ export function createDaemonCapabilityServices(sources: DaemonCapabilityServiceS
  */
 function securityReviewServices(sources: DaemonCapabilityServiceSources): DaemonCapabilityServices['securityReview'] {
   const config = sources.configManager as DaemonCapabilityServiceSources['configManager'] & Partial<Pick<ConfigManager, 'getAll' | 'getControlPlaneConfigDir'>>;
+  const pluginServices = createPluginCapabilityServices(sources);
+  // The settings in force for the asking project (config/project-view.ts projectSettingsInForce, the reader the
+  // permission manager decides that project's calls with); the daemon's own with no project or from its own folder.
+  const settingsFor = (caller: CapabilityCaller): typeof config => {
+    const folder = caller.workingDirectory?.trim();
+    const own = sources.configManager.getWorkingDirectory();
+    if (!folder || !(sources.configManager instanceof ConfigManager) || (own && projectIdentityOf(own) === projectIdentityOf(folder))) return config;
+    return projectSettingsInForce(sources.configManager, folder);
+  };
   return {
     policy: () => {
       if (!sources.policyRuntimeState) throw new CapabilityRefusal('This daemon was started without its policy state; no policy was read or changed.', undefined, 'UNAVAILABLE');
       return sources.policyRuntimeState;
     },
-    config: () => {
-      if (!config.getAll) throw new CapabilityRefusal('This daemon cannot read its settings whole for the review; nothing was reviewed.', undefined, 'UNAVAILABLE');
-      return config.getAll();
+    config: (caller) => {
+      const settings = settingsFor(caller);
+      if (!settings.getAll) throw new CapabilityRefusal('This daemon cannot read its settings whole for the review; nothing was reviewed.', undefined, 'UNAVAILABLE');
+      return settings.getAll();
     },
-    mcpServers: () => sources.mcpRegistry?.listServerSecurity() ?? [],
-    plugins: () => {
-      try { return sources.pluginManager?.list() ?? []; } catch { return []; }
+    // The asking project's tool servers and plugins, never the daemon's own folder's in their place: the daemon's live
+    // registry when the project is the daemon's own folder, else the servers the project's MCP files name (as
+    // configured: the daemon runs none of them) and the project's plugins.
+    mcpServers: (caller) => {
+      const project = requireCallerProject(caller.workingDirectory, 'the project\'s tool servers');
+      const daemonDirectory = sources.configManager.getWorkingDirectory() ?? undefined;
+      if (sources.mcpRegistry && daemonDirectory && projectIdentityOf(daemonDirectory) === project) return sources.mcpRegistry.listServerSecurity();
+      const { servers } = loadMcpEffectiveConfig({ workingDirectory: project, homeDirectory: sources.homeDirectory ?? resolveGoodVibesHome() });
+      return servers.map(({ server }) => ({
+        name: server.name, trustMode: server.trustMode ?? MCP_DEFAULT_TRUST_MODE, role: server.role ?? ('general' as const),
+        allowedPaths: server.allowedPaths ?? [], allowedHosts: server.allowedHosts ?? [], schemaFreshness: 'unknown',
+      }));
+    },
+    plugins: (caller) => {
+      const project = pluginServices.plugins.forProject(caller.workingDirectory);
+      try { return project?.manager.list() ?? []; } catch { return []; }
     },
     serviceNames: () => {
       try { return Object.keys(sources.serviceRegistry?.getAll() ?? {}); } catch { return []; }
     },
-    permissionMode: () => describePermissionModeInForce(sources.configManager),
-    sandboxConfig: () => ({ get: (key) => sources.configManager.get(key as ConfigKey) }),
+    permissionMode: (caller) => describePermissionModeInForce(settingsFor(caller)),
+    sandboxConfig: (caller) => {
+      const settings = settingsFor(caller);
+      return { get: (key) => settings.get(key as ConfigKey) };
+    },
     setMcpIsolation: (mode) => { sources.configManager.setDynamic('sandbox.mcpIsolation' as ConfigKey, mode as never); },
     setSandboxEnabled: (on) => { sources.configManager.setDynamic('sandbox.enabled' as ConfigKey, on as never); },
     carriedNote: () => {
       const dir = config.getControlPlaneConfigDir?.();
       return dir ? carriedPolicyNote(dir) : null;
     },
-    resolvePath: (caller, path) => resolveCallerPath(
-      caller.workingDirectory ? resolve(caller.workingDirectory) : sources.configManager.getWorkingDirectory() ?? sources.homeDirectory ?? resolveGoodVibesHome(), path),
+    resolvePath: (caller, path) => callerPathOf(caller, path),
     changed: () => safetyChanged('changed', 'policy'),
   };
 }

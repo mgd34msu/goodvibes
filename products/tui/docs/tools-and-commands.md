@@ -205,7 +205,7 @@ Session state, persistent memory, telemetry, hooks, and the print level, all in 
 - KV state: session-scoped key-value store with atomic persistence
 - Memory by key (`mode: "memory"`): get, set, list and delete project memories; each is one record in the project memory store, the record prompts retrieve, read and written through the daemon while it serves memory (the full durable-memory workflow lives under `/memory` and the knowledge modals)
 - Hook management: list, enable, disable, add, and remove hooks at runtime
-- Print level: read or set how much the app prints (`quiet`, `balanced`, `operator`), the same setting as `/verbosity set` (`behavior.hitlMode`)
+- Print level: read or set how much the app prints (`quiet`, `balanced`, `operator`), the same setting as the print level row of System, This session (`behavior.hitlMode`)
 - Analytics: every tool call this process ran (name, status, duration, result size; never arguments or results), queried by filter, exported as JSON/CSV, or summarized; kept in memory, the newest 10,000
 - Budget and context: the session's measured token usage and turns, and its context window (last request size, window size, compaction), with how many files this product has read or written in the workspace
 
@@ -270,7 +270,7 @@ Representative slash-command families, with a one-line summary of each:
 | Work and agents (the menu): Runners, Runner pools, Handed back | Start, follow, stop and review self-hosted remote runners and what they hand back; the daemon keeps them |
 | `/permissions` | Opens Permissions and safety: this conversation's permissions and plan mode, rules, secrets, this folder's trust, who may sign in, who is who, device tokens, phone grants, the policy bundles, the sandbox setting and sessions, and what needs attention |
 | Tools and extensions (the menu) | Hooks and the hooks that ran, hook points, the model's tools, tool servers (MCP), plugins and their trust, the marketplace and what you installed from it, skills, presets and managed settings; every action is a key on the thing it acts on |
-| `/session` | Sessions: resume, save, copy, export as a file or upload for a link, branches and cross-session tasks |
+| Sessions (the menu; `/resume` and `/fork` are typed) | Your conversations: resume, rename, copy, write to a file or upload for a link, delete, search, branches, the record, and cross-session tasks |
 | System place, This session and Voice | Hear an answer spoken, speak every answer, stop playback, and set up the local voice runtime and the wake word (voice has no slash command) |
 | `/mcp` | Opens Tools and extensions on its Servers tab: your MCP servers and their tools |
 | Work and agents (the menu): Recorded runs | Deterministic replay: load, step, jump, compare and save the report of recorded runs |
@@ -295,35 +295,17 @@ Automation, in the menu (the leader, then `m`), is the place for what runs by it
 
 "Make an image or a video" (`M` on the Tools tab, `media.make`) asks the daemon's first configured provider that makes images; a provider that only makes video is never sent the request. Each image is written to a file in the project, `generated/<prompt words>-<time>.<ext>` or the file given in the form inside the project (a file already there is never replaced), the path is said, and after your own press the terminal app opens it in the desktop's viewer (a model's call opens nothing). The daemon's artifact store keeps a second copy, so the image stays available after the provider's own link expires. When no configured provider makes images, it says each generation provider's status, what it makes, and the key it needs. A job the provider accepted but had not finished when the wait ended is reported with where to collect it later: "collect a media job" in the Work place. ("Send an image with a message", in This conversation, is the other direction; it sends a local image file with a message for multimodal analysis.)
 
-`/session` is the single front-door for all session work, split across two domains. The lifecycle subcommands operate on sessions themselves:
+Session work is the Sessions place (the menu, `Ctrl+G` then `m`); there is no `/session`, and `/resume` and `/fork` are the two typed commands that remain for it. Its tabs and keys:
 
-| Subcommand | Does |
+| Tab | Keys |
 | --- | --- |
-| `list` | List saved sessions for the workspace |
-| `rename` | Rename the current or a named session |
-| `resume` | Reopen a saved session |
-| `fork` | Branch a session into a new one |
-| `save [name] [--yes]` | Save the current session. Refuses to replace a different saved conversation that already uses the name; `--yes` replaces it deliberately |
-| `info` | Show the current session's details |
-| `save-file [format]` | Save this conversation as a file (Markdown or plain text) |
-| `save-saved <id\|.> [format]` | Save a saved session as a file (`.` is the current one) |
-| `upload [format]` | Upload this conversation and get a link (deleting the Gist on GitHub takes it down) |
-| `search <query>` | Search saved sessions |
-| `delete <id>` | Delete a saved session |
-| `events [kind] [start-row] [--last N]` | List transcript events, optionally filtered to one kind. Shows the newest 16 by default with the range (`events 285-300 of 300`) and the command for the earlier and later pages; a start row shows the page from that row, `--last N` sets the page size |
-| `groups [kind] [start-row] [--last N]` | List transcript events grouped, with per-group event counts and message ranges; pages like `events` (12 per page) |
-| `hotspots [kind]` | Show per-kind event counts and the busiest transcript groups, optionally for one kind |
+| Sessions | `Enter` resume a saved one here, `e` rename, `f` continue in a copy (this one), `u` upload this one for a link (deleting the Gist on GitHub takes it down), `w` write one to a file, `x` delete a saved one, `v` its details, `s` search saved sessions |
+| Branches | `Enter` switch to a branch, `m` bring its messages in |
+| Record | `Enter` opens the transcript's events, groups, hotspots, restored entries or a bookmarked block; `i` this session, `p` what the message box waits on, `c` find words in it |
+| Hand-offs | The cross-session task graph, with cycle detection: `g` the whole graph, `n` add a task, `o` hand a task to another session, `a` accept one, `w` take it back, `x` cancel it |
+| Hosted, Joined here | Hosted sessions: `h` start one, `Enter` join, `x` end; in one joined here `t` send a message now, `l` leave |
 
-The orchestration subcommands manage a cross-session task DAG with cycle detection:
-
-| Subcommand | Does |
-| --- | --- |
-| `link-task <taskId> [--session <sid>] [--depends-on <sid:taskId>] [--label <label>]` | Register a task in the graph, optionally with a dependency edge |
-| `hand-off <taskId> --to <sid>` | Hand a task off to another session |
-| `graph [--session <sid>] [--format text\|json]` | Render the task graph |
-| `cancel <taskId> [--scope task\|subtree\|session]` | Cancel a task, its subtree, or the session's tasks |
-
-Run `/session` with no arguments to open its list of actions; a model or a script gets this session's details.
+Saving this session under a name (refused when a different saved conversation already uses it, unless you choose to replace it) and saving it as a Markdown or text file are controls of This conversation. Each is a capability (`session.*`, `hosted.*`) a model or a script runs too.
 
 `/model` opens its list of actions: see your model and the others you can use (`list`), switch (`use <model>`), read the list of models again from every provider (`refresh`, which says for each provider how many models it found or why its list could not be read), and add or remove backup models (`backup`, `drop-backup`). Clicking the model in the status bar opens the fullscreen provider/model picker. It opens on `Main chat`; the other jobs (`Side work`, `Tool work`, `Spoken replies`, `Decision model`, `Search index`) sit behind `Other jobs (optional) ▸` and `Tab` reaches them. A model tab lists only models the catalog says read and write text, with models it does not describe last and marked `not in the catalog`, each row shows its price tier when known, and the list filters large model catalogs by search, price tier, capability, availability, benchmark sort, and grouping, with each filter key and its setting on the row under the search field.
 
@@ -337,7 +319,7 @@ The Work place (`/work`) holds your work: asking for it in your own words sends 
 
 Most shortcuts are customizable via `~/.goodvibes/tui/keybindings.json`. Use `/help keys` to view current bindings.
 
-Every key the program acts on is in that table, `Tab`, `Enter`, `Esc` and the arrows included (`next-field`, `choose`, `back`, `move-up` and the others): a key bound to one of them is that key on every screen, and one of those keys bound to another action does that action instead. Change one in the System place's Keys tab (`Ctrl+G` `m`, then System: `Enter` on a key, then press the new one; `d` puts back its default, `Shift+D` every default) or in the file. `F2` (Your agents, `open-agents`), `PageUp` / `PageDown` (`scroll-page-up`, `scroll-page-down`), the question card's arrows, `Enter` and `Esc`, and a contract question's "send it as an ordinary message" (`contract-question-ordinary`, `Ctrl+G` `q`) are in the table too, and each place's letters are a group of it (`place.automation.pause`, listed in the Keys place under the place's name). These keys are fixed: `Shift+Enter` (new line), `?` (the list of every command and key, on an empty prompt), `@` (file picker), the mouse, and the letter keys inside an older view, search or picker (`n` / `N`, `Ctrl+X` to stop, and the selection-modal keys below), which move into the table as those views become places.
+Every key the program acts on is in that table, `Tab`, `Enter`, `Esc` and the arrows included (`next-field`, `choose`, `back`, `move-up` and the others): a key bound to one of them is that key on every screen, and one of those keys bound to another action does that action instead. Change one in the System place's Keys tab (`Ctrl+G` `m`, then System: `Enter` on a key, then press the new one; `d` puts back its default, `Shift+D` every default) or in the file. `F2` (Your agents, `open-agents`), `PageUp` / `PageDown` (`scroll-page-up`, `scroll-page-down`), and the question card's arrows, `Enter` and `Esc` are in the table too, and each place's letters are a group of it (`place.automation.pause`, listed in the Keys place under the place's name). These keys are fixed: `Shift+Enter` (new line), `?` (the list of every command and key, on an empty prompt), `@` (file picker), the mouse, and the letter keys inside an older view, search or picker (`n` / `N`, `Ctrl+X` to stop, and the selection-modal keys below), which move into the table as those views become places.
 
 The leader (`Ctrl+G`, the rebindable `leader`) starts a two-key shortcut over every screen: after it, a strip at the bottom of the screen lists every key that can follow and what it does, and the next key completes the shortcut or cancels it (on a settings screen, the key after it is that screen's action letter when it has one, and the strip lists those letters first). There is no time limit. `Ctrl+G` `m` opens the menu of every place; `Ctrl+G` `g` groups the model list another way.
 
@@ -402,12 +384,12 @@ Every view opens as a modal over the dimmed conversation, and `Esc` closes one l
 
 | Key | Action |
 |-----|--------|
-| `Ctrl+P` / `Ctrl+K` | The list of every command and key (also `?` and `/help`); older view names (fleet, tokens, git, …) are search words too, and the keyboard shortcuts are the last group |
+| `Ctrl+P` / `Ctrl+K` | The list of the commands that remain and every key (also `?` and `/help`); older view names (fleet, tokens, git, …) are search words too, and the keyboard shortcuts are the last group; everything else is in the menu (`Ctrl+G` `m`) |
 | `F2` / `Ctrl+O` | Your agents: what is waiting for you, running, scheduled and finished, with background services behind one line; open an agent or background process full screen (`Enter`), stop it and what it started (`s` or `Ctrl+X`, asks first) |
 | `Ctrl+N` | The notices the status bar counts |
 | `Ctrl+G` `m`, Money | Spending: this conversation's context against the compaction threshold, totals and cost against the spending alert, its turns, its agents' costs; `c` shortens it now, `w` sets the spending alert |
 | `/changes` | Changes: changed files with +/- counts, a tinted syntax-colored diff, the semantic summary, hunk navigation (`]` `[`), stage hunk (`space`), review comments (`c`), mark reviewed (`m`), open in editor (`o`) |
-| `/notifications` | Notification history |
+| `Ctrl+G` `m`, System, Notices | Notification history |
 | `/resume` | Session picker, with hosted sessions in a Hosted group |
 
 An agent or a background process can take over the whole terminal. `Enter` on an agent's lane in the work tree (or on its row in Your agents) opens the agent: its work is the spine, its own children branch off it, the header reads `main › engineer` in the agent's color, and the composer steers the agent while main keeps running. `Enter` on a `▶` bead (or a process row) opens the process: live output with timestamps, errors in red, follow mode on. The process view takes no input, because GoodVibes cannot write to a background process's stdin; `/` searches its output and `y` copies it. While more than one session exists, a row of session chips under the header lists them, and `Ctrl+G` `n` / `Ctrl+G` `p` (the rebindable `next-session` and `previous-session`) switch between them; the row ends with those keys.
@@ -822,7 +804,7 @@ Without that override, "ask and hear it" uses the current chat provider/model. L
 
 ## Cloudflare batch commands
 
-Cloudflare integration is optional and keeps local immediate daemon behavior by default. `/setup cloudflare` (Use Cloudflare) configures it in one form, and the Cloudflare tab of **Devices and network** (the menu, `Ctrl+G` then `m`) runs the actions, in the order a setup normally uses them:
+Cloudflare integration is optional and keeps local immediate daemon behavior by default. "Use Cloudflare" on the Setup tab of System configures it in one form, and the Cloudflare tab of **Devices and network** (the menu, `Ctrl+G` then `m`) runs the actions, in the order a setup normally uses them:
 
 | Key | Does |
 | --- | --- |

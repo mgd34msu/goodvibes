@@ -48,7 +48,7 @@ import { WEBUI_BINDING_RESULT, WEBUI_ENABLE_RESULT } from '../cli/machine-contra
 import {
   explicitPublicBaseUrl, isLoopbackHost, lanHttpsOriginOf, lanHttpsPort, probeStableHostInputs, publicBaseUrlIsOwnOrigin, resolveControlPlaneOrigin, type StableHostInputs,
 } from '@goodvibes/engine/platform/platform/pairing';
-import { LAN_HTTPS_INSTALL_WORDS, LAN_HTTPS_PAGE_PATH, httpsCertificateSource, readOwnCertificate, type HttpsCertificateSource } from '@goodvibes/engine/platform/platform/daemon/lan-https/page';
+import { LAN_HTTPS_INSTALL_WORDS, httpsCertificateSource, readOwnCertificate, type HttpsCertificateSource } from '@goodvibes/engine/platform/platform/daemon/lan-https/page';
 
 
 export interface WebuiCommandResult {
@@ -490,7 +490,7 @@ function httpsOnLines(config: Pick<ConfigManager, 'get'>, plainOrigin: string): 
   const domain = String(config.get('secureAddress.domain') ?? '');
   const secure = source === 'lets-encrypt' && domain ? `https://${domain}:${port}` : sameHost;
   const trust = source === 'local-authority'
-    ? [`  Certificate: GoodVibes' own. Each phone trusts it once: open ${plainOrigin}${LAN_HTTPS_PAGE_PATH} on the phone and follow the page (iPhone and Android; it also says how to remove it).`]
+    ? [`  Certificate: GoodVibes' own. Each phone trusts it once: open the link for phones that goodvibes-daemon pair prints (or System, Secure address in the web UI on this computer shows) and follow the page (iPhone and Android; it also says how to remove it). The link carries the certificate's fingerprint, and the page offers the certificate only when it matches; it is never given over ${plainOrigin}.`]
     : source === 'lets-encrypt'
       ? [`  Certificate: Let's Encrypt for ${domain} and every name under it, asked for and renewed by the daemon (its DNS records written with the Cloudflare token in cloudflare.apiTokenRef, CLOUDFLARE_API_TOKEN or the stored secret). Nothing is installed on the phones.`,
         '  Let\'s Encrypt publishes the name in public logs. The daemon reports the outcome, the address record and the router check on the Secure address screen (Settings, General, Secure address).']

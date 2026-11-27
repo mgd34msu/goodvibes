@@ -29,7 +29,7 @@ import type { MintedPairingToken } from './pairing-token-store.js';
 
 /** The token-minting surface a handoff needs, satisfied by {@link PairingTokenManager}. */
 export interface PairingTokenMinter {
-  mint(input: { readonly name: string; readonly replacesOffer?: string | undefined; readonly origin?: 'owner-pairing' | 'automation' | undefined }): MintedPairingToken;
+  mint(input: { readonly name: string; readonly replacesOffer?: string | undefined; readonly origin?: 'owner-pairing' | 'automation' | undefined; readonly madeBy?: { readonly owner: true } | undefined }): MintedPairingToken;
 }
 
 export interface PairingHandoff {
@@ -77,8 +77,9 @@ export function defaultPairingTokenName(now: Date = new Date()): string {
 }
 
 export function mintPairingHandoff(input: MintPairingHandoffInput): PairingHandoff {
-  // Minted in the owner's own process, from the pairing screen at his terminal: the owner's device.
-  const token = input.pairingTokens.mint({ name: input.name, origin: 'owner-pairing', ...(input.replacesOffer !== undefined ? { replacesOffer: input.replacesOffer } : {}) });
+  // Minted in the owner's own process, from the pairing screen at his terminal, the code shown on his own screen: the
+  // owner's device, made by him (pairing-token-store.ts `ownerDeviceOf` counts the origin only with this maker).
+  const token = input.pairingTokens.mint({ name: input.name, origin: 'owner-pairing', madeBy: { owner: true }, ...(input.replacesOffer !== undefined ? { replacesOffer: input.replacesOffer } : {}) });
   const fragment = buildPairingHandoffFragment({ token: token.token, offers: input.offers });
   const deepLink = input.webOrigin
     ? buildPairingHandoffLink({ webOrigin: input.webOrigin, token: token.token, offers: input.offers })

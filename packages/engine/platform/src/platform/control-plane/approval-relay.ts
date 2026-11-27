@@ -44,6 +44,7 @@ import type { ResolveSharedApprovalInput } from './approval-broker-owner.js';
 import {
   approvalAdministerRefusal,
   approvalRefusal,
+  deviceAnswerRefusal,
   formatApprovalRef,
   isOpenApprovalStatus,
   readApproval,
@@ -81,6 +82,8 @@ export interface RelayPrincipal {
   readonly mayAnswer: boolean;
   /** May claim and cancel (`approvals.administer`); absent from a node of 3.3.4 or earlier, whose own gate already required it. */
   readonly mayAdminister?: boolean | undefined;
+  /** For the owner's own device: it answers only a question another caller raised (approval-lifecycle.ts). */
+  readonly answersOthersOnly?: { readonly self: string; readonly madeFromIt: readonly string[] } | undefined;
 }
 
 export type RelayedAction = Exclude<ApprovalAction, never>;
@@ -217,8 +220,18 @@ export class ApprovalRelay {
    * outcome, or NODE_UNREACHABLE (state `unknown`) when it did not answer.
    */
   async forward(node: string, id: string, input: RelayedDecisionInput, viewer: ApprovalViewer): Promise<RelayedOutcome> {
+    // A viewer the daemon cannot name is nobody: the relay never names the owner (or anyone) on its own.
+    if (viewer.id === undefined || viewer.id === '') {
+      const known = this.get(node, id);
+      return { applied: false, record: known, reading: known ? readApproval(known, viewer, this.#now(), false) : null,
+        refusal: refusal({ code: 'FORBIDDEN', state: known?.status ?? 'unknown', status: 403,
+          reason: `${formatApprovalRef({ node, id })} was not acted on: the daemon could not name who is acting, and another node is never told someone acted when nobody it can name did.`,
+          next: ['Act on it from a credential the daemon names (your sign-in, your program, your device).'] }) };
+    }
     const requestId = randomUUID();
-    const principal: RelayPrincipal = { node: this.#host.selfNode, id: viewer.id ?? 'owner', kind: viewer.kind, scopes: viewer.scopes, mayAnswer: viewer.mayAnswer, mayAdminister: viewer.mayAdminister };
+    const principal: RelayPrincipal = { node: this.#host.selfNode, id: viewer.id, kind: viewer.kind, scopes: viewer.scopes, mayAnswer: viewer.mayAnswer, mayAdminister: viewer.mayAdminister,
+      // The owner's own device answers only another caller's question: the owning node holds it to that too.
+      ...(viewer.answersOthersOnly ? { answersOthersOnly: { self: viewer.answersOthersOnly.self, madeFromIt: [...viewer.answersOthersOnly.madeFromIt] } } : {}) };
     const body = { requestId, id, principal, ...input, ...(input.selectedHunks ? { selectedHunks: [...input.selectedHunks] } : {}) };
     const answered = new Promise<Record<string, unknown>>((resolve) => { this.#waiting.set(requestId, resolve); });
     const timers: ReturnType<typeof setTimeout>[] = [];
@@ -359,6 +372,12 @@ export class ApprovalRelay {
     if (answering && principal.mayAnswer !== true) {
       return { applied: false, record, refusal: refusal({ code: 'OWNER_ONLY', state: record.status, status: 403,
         reason: 'Answering an approval is the owner\'s own act; the person this decision was relayed for may not answer it.', next: ['The owner answers it.'] }) };
+    }
+    const othersOnly = principal.answersOthersOnly;
+    if (answering && othersOnly !== undefined) {
+      const madeFromIt = Array.isArray(othersOnly.madeFromIt) ? othersOnly.madeFromIt.filter((one): one is string => typeof one === 'string') : [];
+      const own = deviceAnswerRefusal(record, { answersOthersOnly: { self: String(othersOnly.self), madeFromIt } });
+      if (own) return { applied: false, record, refusal: refusal({ code: own.code, state: record.status, status: 403, reason: own.reason, next: ['The owner answers it.'] }) };
     }
     if (action === 'claim' || action === 'cancel') {
       // The same claim and cancel rule a local action is held to (approval-actions.ts), for the person the

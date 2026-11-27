@@ -1,5 +1,5 @@
 /** Owned configured daemon host; native lifecycle requires an installed caller. */
-import { DaemonServer, HttpListener, createSafeHostServeFactory, secureAddressGroupAccess, type DaemonUpdateArtifact } from '@goodvibes/engine/platform/platform/daemon';
+import { DaemonServer, HttpListener, createSafeHostServeFactory, releaseDaemonActivityLogAtHostClose, secureAddressGroupAccess, type DaemonUpdateArtifact } from '@goodvibes/engine/platform/platform/daemon';
 import { BROWSER_PLACES } from '@goodvibes/engine/terminal-shell/places/browser';
 import { createAsyncDisposalScope } from '@goodvibes/engine/platform/platform/runtime/disposal';
 import { createDaemonProviderDiscovery, type DaemonProviderDiscoveryDependencies } from './provider-discovery.js';
@@ -145,6 +145,9 @@ function startupRefusal(phase: DaemonHostPhase, error: unknown): RefusalError {
  */
 export function createDaemonHost(options: DaemonHostOptions, factories: DaemonHostFactories = {}): DaemonHost {
   const scope = createAsyncDisposalScope('Daemon host');
+  // The daemon's stop leaves its activity log open; this host ends it after the runtime graph closed, so what that close
+  // waits on is in the log too.
+  const releaseActivityLog = releaseDaemonActivityLogAtHostClose(options.runtime.configManager);
   const updateArtifact = options.updateArtifact;
   const nativeGuard = updateArtifact?.assertCurrent, nativeExecPath = updateArtifact?.execPath, nativeVersion = updateArtifact?.version;
   const hasOverriddenHome = options.hasOverriddenHome;
@@ -469,6 +472,7 @@ export function createDaemonHost(options: DaemonHostOptions, factories: DaemonHo
       // Late runtime/server acquisitions have registered by this point. Their
       // dependencies survive until boot and accepted server startup drain.
       try { await scope.close(); } catch { /* Every callback retains its bounded failures. */ }
+      releaseActivityLog();
       if (cleanupFailures.length) throw new AggregateError([...cleanupFailures], 'Daemon host cleanup failed');
     })().then(() => { moveTo(startupFailure ? 'failed' : 'closed'); resolve(); }, (error: Error) => { moveTo('failed'); reject(error); });
     return closing;

@@ -31,7 +31,7 @@ import {
   type EditFailureStatus,
 } from './match.js';
 import type { EditInput, EditItem, EditResult, ValidatorName } from './types.js';
-import { executeNotebookEdit, occConflictMessage } from './notebook.js';
+import { executeNotebookEdit } from './notebook.js';
 import { summarizeError } from '../../utils/error-display.js';
 import { describeUnexpectedToolError } from '../input-projection.js';
 import { toRecord } from '../../utils/record-coerce.js';
@@ -150,10 +150,12 @@ async function prepareTextEditInput(
       fileReadErrors.set(resolvedPath, { error: msg, status: 'not_found' });
       continue;
     }
-    // The stale-file check compares the bytes this edit will change, read once.
-    // A refused edit records nothing, so it keeps refusing until the file is read again.
-    if (env.fileCache.compare(resolvedPath, content) === 'modified') {
-      const msg = occConflictMessage(resolvedPath);
+    // The stale-file check compares the bytes this edit will change, read once, with what this
+    // session or agent last read or wrote there: a file it never read, or one another writer changed
+    // since, is refused. A refused edit records nothing, so it keeps refusing until the file is read again.
+    const stale = env.fileCache.staleWrite(resolvedPath, content);
+    if (stale !== null) {
+      const msg = stale;
       if (transactionMode === 'atomic') {
         return { error: msg, status: 'conflict' };
       }
@@ -222,7 +224,11 @@ async function writeSuccessfulTextEdits(
       // (finalizeUncapturedBookkeeping, or the captured block of the caller's
       // finally), so a rollback leaves none.
     } catch (err) {
-      const msg = `Write failed for '${resolvedPath}': ${summarizeError(err)}`;
+      // Another writer wrote the file between this edit's read and its write (the revision check caught it): said as the
+      // stale-file refusal is, so the next step is the same: read it again.
+      const msg = /revision changed/i.test(summarizeError(err))
+        ? `'${resolvedPath}' changed since you last read it (another writer wrote it while this edit ran), so nothing was written: writing now would replace that change. Read it again, then edit against what it holds now.`
+        : `Write failed for '${resolvedPath}': ${summarizeError(err)}`;
       for (const res of results) {
         if (res.path === r.path) {
           res.success = false;

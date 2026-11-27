@@ -23,6 +23,7 @@ import {
 } from '../channels/builtin/homeassistant.js';
 import { requireSurfaceSecret } from '../channels/builtin/surface-secrets.js';
 import type { RouteBindingManager } from '../channels/index.js';
+import type { ChannelPolicyManager } from '../channels/policy-manager.js';
 import type { CompanionChatManager } from '../companion/companion-chat-manager.js';
 import type { ConfigManager } from '../config/manager.js';
 import type { SecretsManager } from '../config/secrets.js';
@@ -57,6 +58,8 @@ export interface HomeAssistantReplyDeps {
   readonly routeBindings: RouteBindingManager;
   readonly companionChatManager: CompanionChatManager | null;
   readonly resolveDefaultProviderModel?: (() => { provider: string; model: string } | null) | undefined;
+  /** The channel policies: Home Assistant's "Treat my own messages here as me" (daemon/owner-channel-conversation.ts). */
+  readonly channelPolicy?: Pick<ChannelPolicyManager, 'getPolicy'> | undefined;
 }
 
 export interface HomeAssistantSurfaceChatInput {
@@ -136,6 +139,7 @@ export async function postHomeAssistantSurfaceChatMessage(
         routeBindings: deps.routeBindings,
         chatManager: manager,
         resolveDefaultProviderModel: deps.resolveDefaultProviderModel,
+        ...(deps.channelPolicy ? { channelPolicy: () => deps.channelPolicy!.getPolicy('homeassistant') } : {}),
       },
       {
         text: input.body,

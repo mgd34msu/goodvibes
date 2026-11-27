@@ -604,9 +604,12 @@ export function applyFeatureUnitOperations(
   controller: OnboardingWizardControllerLike,
   setConfig: (key: ConfigKey, value: unknown) => void,
   overrides: Map<string, 'enabled' | 'disabled'>,
+  /** The fields the form shows: a feature not on it is left as it is (a form writes only what it shows). */
+  shown?: ReadonlySet<string>,
 ): void {
   for (const section of FEATURE_ONBOARDING_SECTIONS) {
     for (const unit of section.units) {
+      if (shown !== undefined && !shown.has(featureEnableFieldId(unit.flagId))) continue;
       const current = currentFeatureEnablement(controller, unit.flagId);
       const enabled = controller.getBooleanFieldValue(featureEnableFieldId(unit.flagId), current);
 

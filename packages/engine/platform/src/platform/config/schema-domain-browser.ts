@@ -28,7 +28,7 @@ export const browserConfigDefaults: { browser: BrowserConfig } = {
 
 export const browserConfigSettings: ConfigSettingDefinition[] = [
   {
-    key: 'browser.network.pinned',
+    key: 'browser.network.pinned', valueKind: 'protection-switch',
     label: 'Fetch browser pages through the checked address',
     type: 'boolean',
     description:

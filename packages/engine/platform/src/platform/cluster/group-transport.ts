@@ -229,12 +229,12 @@ export class GroupWireRouter {
         if (reason === 'no-group') {
           this.options.logger.info(
             'cluster: this machine is not in a group, so it is coordinating with nobody and reading its own inbox',
-            { action: 'create a group with `cluster create`, or join one with `cluster join`' },
+            { action: 'start a group in Devices and network, Machine group, or join one from Nearby groups' },
           );
         } else {
           this.options.logger.warn(
             'cluster: this machine\'s group membership could not be confirmed, so it is coordinating with nobody and reading its own inbox',
-            { action: 'the stored membership is read again every 30 seconds; see `cluster status`' },
+            { action: 'the stored membership is read again every 30 seconds; Devices and network, Machine group shows it' },
           );
         }
       }

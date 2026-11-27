@@ -30,6 +30,7 @@ import { memoryRecordTemporalStatus } from './memory-store.js';
 import { assertNoArrayIterationArgs } from './memory-temporal.js';
 import type { MemoryVectorStats } from './memory-vector-store.js';
 import { HASHED_MEMORY_EMBEDDING_PROVIDER } from './memory-embeddings.js';
+import { memoryAwaitsOwner } from './memory-author.js';
 
 /**
  * Recall-prompt confidence floor. Tied to the store's own baseline: MemoryStore.add
@@ -59,6 +60,14 @@ function provenanceSummary(record: MemoryRecord): string {
  */
 export function describeMemoryPromptEligibility(record: MemoryRecord, now: number = Date.now()): MemoryPromptEligibility {
   const provenance = provenanceSummary(record);
+  // Only the owner's own records steer his turns: one someone else wrote (a device, a member, an outside agent, a
+  // script, a turn on someone else's input) waits for his review and is given to no turn until he accepts it.
+  if (memoryAwaitsOwner(record)) {
+    return {
+      eligible: false,
+      reason: `written by someone else (${record.author?.who ?? 'not named'}) and waiting for the owner's review in Memory and knowledge; it is given to no turn until he accepts it (${provenance})`,
+    };
+  }
   if (record.reviewState === 'stale' || record.reviewState === 'contradicted') {
     return {
       eligible: false,
@@ -185,6 +194,8 @@ export interface HonestMemorySearchResult {
   readonly excludedBelowFloorCount: number;
   /** Records excluded because they fell OUTSIDE their temporal validity window (pending or expired). */
   readonly excludedOutOfWindowCount: number;
+  /** Records excluded because someone else wrote them and the owner has not accepted them (memory-author.ts). */
+  readonly excludedAwaitingOwnerCount: number;
   /** Result count BEFORE any recall-injection filtering, so a caller can tell "index empty" from "everything filtered out". */
   readonly totalBeforeRecallFilter: number;
   /**
@@ -251,6 +262,7 @@ export async function runHonestMemorySearch(
       excludedFlaggedCount: 0,
       excludedBelowFloorCount: 0,
       excludedOutOfWindowCount: 0,
+      excludedAwaitingOwnerCount: 0,
       totalBeforeRecallFilter,
       recallFloor: MIN_PROMPT_MEMORY_CONFIDENCE,
     };
@@ -261,15 +273,19 @@ export async function runHonestMemorySearch(
   let excludedFlaggedCount = 0;
   let excludedBelowFloorCount = 0;
   let excludedOutOfWindowCount = 0;
+  let excludedAwaitingOwnerCount = 0;
   for (const record of baseRecords) {
     if (isPromptActiveMemory(record, now)) {
       kept.push(record);
       continue;
     }
-    // Order matches describeMemoryPromptEligibility: flagged first, then the
-    // temporal window, then the confidence floor, so each exclusion is counted
-    // under the reason it was actually excluded for.
-    if (record.reviewState === 'stale' || record.reviewState === 'contradicted') {
+    // Order matches describeMemoryPromptEligibility: someone else's record waiting
+    // for the owner first, then flagged, then the temporal window, then the
+    // confidence floor, so each exclusion is counted under the reason it was
+    // actually excluded for.
+    if (memoryAwaitsOwner(record)) {
+      excludedAwaitingOwnerCount += 1;
+    } else if (record.reviewState === 'stale' || record.reviewState === 'contradicted') {
       excludedFlaggedCount += 1;
     } else if (memoryRecordTemporalStatus(record, now) !== 'active') {
       excludedOutOfWindowCount += 1;
@@ -288,6 +304,7 @@ export async function runHonestMemorySearch(
     excludedFlaggedCount,
     excludedBelowFloorCount,
     excludedOutOfWindowCount,
+    excludedAwaitingOwnerCount,
     totalBeforeRecallFilter,
     recallFloor: MIN_PROMPT_MEMORY_CONFIDENCE,
   };

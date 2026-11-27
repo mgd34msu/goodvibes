@@ -20,6 +20,7 @@ import { randomUUID } from 'node:crypto';
 import { existsSync } from 'node:fs';
 import { basename } from 'node:path';
 import { logger } from '../utils/logger.js';
+import { outsideEveryCall } from '../utils/outside-every-call.js';
 import { readDocument, writeDocument } from '../utils/atomic-json-store.js';
 import { defineLifecycle } from '../utils/lifecycle-machine.js';
 import { summarizeError } from '../utils/error-display.js';
@@ -358,11 +359,12 @@ export class WorkProposalStore {
     if (!this.sweepEnabled || this.sweepTimer || this.proposals.size === 0) return;
     // Resolved records are retained until expiry too. Stopping when only
     // resolved records remain would leave them in an idle store indefinitely.
-    this.sweepTimer = setInterval(() => {
+    // Armed by the request that made the first proposal: in the process's own context (utils/outside-every-call.ts).
+    this.sweepTimer = outsideEveryCall(() => setInterval(() => {
       const summary = this.reap();
       if (summary.total > 0) void this.persist();
       if (this.proposals.size === 0) this.clearSweep();
-    }, this.sweepInterval);
+    }, this.sweepInterval));
     this.sweepTimer.unref?.();
   }
 

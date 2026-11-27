@@ -37,6 +37,7 @@ export const builtinGatewayHookTraceMethodDescriptors: readonly GatewayMethodDes
     category: 'hooks',
     effects: ['control-plane.write'],
     transport: ['ws'],
+    notWorkFolders: { project: 'the project the posted hook runs happened in, kept on the trace; nothing works in it' },
     inputSchema: objectSchema({
       program: stringEnumSchema(['tui', 'agent']),
       project: STRING_SCHEMA,

@@ -35,6 +35,8 @@ import { looksLikeGoogleSignIn, readGoogleTwoStepState } from './browser-element
 import { safeConfigGet, safeConfigString } from './config-access.js';
 import { readGoogleSecretState } from './setup-state.js';
 import { secretReferenceFor } from '../config/plaintext-credential-sweep.js';
+import { unreadableFile } from '../capabilities/path-inputs.js';
+import { shownPath } from '../capabilities/held-paths.js';
 
 function readString(value: unknown): string | null {
   if (typeof value !== 'string') return null;
@@ -288,10 +290,14 @@ async function obtainClientCredentials(deps: GoogleSetupActionDeps, choice: Goog
     if (raw === null) {
       return {
         ok: false,
-        problem: `No readable file at ${choice.path}.`,
+        // The shared words for a file named by path that could not be used (capabilities/path-inputs.ts): never the
+        // system's or a parser's message, never the file's text, one answer whether it is missing or unreadable.
+        // A file held for the call that named it (capabilities/held-paths.ts) is named as the project's file: these words are kept with the run.
+        problem: unreadableFile(shownPath(choice.path), 'a Google client file', undefined, undefined, '').message.trim(),
         fix: 'Tell me the right path and I will read it, or say so and I will walk you through creating a client.',
       };
     }
+    // Its own refusals are fixed sentences: none quotes the parser or the file (client-intake.ts).
     return readClientCredentialsFromJson(raw);
   }
 

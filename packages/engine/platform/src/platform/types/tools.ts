@@ -195,6 +195,18 @@ export interface ToolOwnerDecisions {
    * so (`irreversible-operator`).
    */
   readonly irreversibleWhen?: Readonly<Record<string, readonly { readonly path: ToolArgumentPath; readonly values: readonly string[] }[]>> | undefined;
+  /**
+   * Values whose call makes something that runs by itself later (a schedule, a trigger, a watcher, a task, a piece of
+   * work): never made unasked from what a turn read (permissions/manager.ts `callFacts`: asked in every mode, each time,
+   * when the turn read text anyone can write).
+   */
+  readonly runsLater?: readonly string[] | undefined;
+  /**
+   * Values of `field` that send something out as the owner or spend his money (a capability of risk `sends-out` or
+   * `spends-money`, a method of class `spends-money`): after the conversation read text anyone can write, asked in every
+   * mode, each time (permissions/manager.ts `callFacts`, security/conversation-exposure.ts).
+   */
+  readonly sendsOrSpends?: readonly string[] | undefined;
 }
 
 /** A tool whose changes are recorded where the owner can undo them, except when a listed argument is present. */
@@ -296,6 +308,12 @@ export interface ToolDefinition {
      */
     readonly when?: Readonly<Record<string, readonly { readonly path: ToolArgumentPath; readonly values: readonly string[] }[]>> | undefined;
   }) | undefined;
+  /**
+   * The files a call of this tool writes, by the value at `field` (a `capability_run` of a capability that writes a file
+   * named by a path input: `inputs.path`). The gate reads them as it reads a file write's path, so a file that runs by
+   * itself later (gate/product-commands.ts `writesRunByItself`) is asked of the owner as a model's write of it is.
+   */
+  writesFiles?: { readonly field: ToolArgumentPath; readonly paths: Readonly<Record<string, readonly ToolArgumentPath[]>> } | undefined;
   /** Calls of this tool the owner decides, and where a sending call's recipients sit; see {@link ToolOwnerDecisions}. */
   ownerDecisions?: ToolOwnerDecisions | undefined;
   /**
@@ -305,6 +323,13 @@ export interface ToolDefinition {
    * the model.
    */
   hostArguments?: readonly string[] | undefined;
+  /**
+   * In a turn acting on someone else's input (security/turn-input-party.ts), every call of this tool that is not a
+   * read runs inside the real sandbox boundary or not at all, and the tool enforces that itself at the call (`exec`:
+   * tools/exec/containment.ts `containmentForTurn`). Only such a tool's calls pass admission in that turn
+   * (gate/classify.ts); every other tool's call that is not a read is refused there. Absent: not held to the boundary.
+   */
+  heldToBoundary?: boolean | undefined;
 }
 
 /** What happened to a call at the gate. */

@@ -8,7 +8,7 @@
  */
 import { spawnSync } from 'node:child_process';
 import { connect } from 'node:net';
-import { join, resolve } from 'node:path';
+import { join } from 'node:path';
 import { isDeepStrictEqual } from 'node:util';
 import type { JudgmentReadingOptions } from '@goodvibes/engine/errors';
 import type { ConfigManager } from '../config/manager.js';
@@ -17,7 +17,6 @@ import { resolveGoodVibesDaemonHome } from '../config/goodvibes-home.js';
 import { resolveServiceUnitHome } from '../daemon/daemon-service-default.js';
 import { resolveServiceName, serviceStateDirectory, type ManagedServiceStatus, type PlatformServiceManager } from '../daemon/service-manager.js';
 import { buildManagedDaemonServiceManager, MANAGED_SERVICE_NAME, resolveInstalledDaemonBinary } from '../daemon/managed-daemon-service.js';
-import { readDaemonSetting } from '../workspace/daemon-home.js';
 import { captureStrictJudgmentJson } from '../gate/judgment-result.js';
 import { redactText } from './config-redaction.js';
 import {
@@ -285,18 +284,11 @@ export function createPlatformServiceManager(
 }
 
 /**
- * The daemon's own working directory, resolved as `goodvibes-daemon` resolves
- * it (the variable, then its saved setting), so a definition written from
- * here is the one the daemon's install-service writes. The home stands in
- * for the daemon's start directory, which is the home when an installer runs it.
- * Throws, naming the file, when the daemon's saved settings exist and cannot be
- * read: the daemon refuses to start on that file, and a definition written
- * with another directory would hide why.
+ * The folder the service starts the daemon in: the home. The daemon has no working folder of its own to name (each
+ * program and schedule names its project), so nothing else is read for it.
  */
 function resolveDaemonWorkingDirectory(runtime: CliServiceRuntime): string {
-  return (process.env.GOODVIBES_WORKING_DIR?.trim() ? resolve(process.env.GOODVIBES_WORKING_DIR.trim()) : undefined)
-    || readDaemonSetting(getServiceStateRoot(runtime), 'runtime.workingDir')
-    || runtime.homeDirectory;
+  return runtime.homeDirectory;
 }
 
 export async function buildCliServicePosture(
@@ -315,16 +307,7 @@ export async function buildCliServicePosture(
     'Service posture input changed.',
   );
   assertCurrent();
-  // An unreadable daemon settings file is shown as such; the service's status
-  // is still read, since asking the service manager does not use the directory.
-  let unreadableWorkingDirectory: string | undefined;
-  let workingDirectory: string;
-  try {
-    workingDirectory = resolveDaemonWorkingDirectory(runtime);
-  } catch (error) {
-    unreadableWorkingDirectory = error instanceof Error ? error.message : String(error);
-    workingDirectory = runtime.homeDirectory;
-  }
+  const workingDirectory = resolveDaemonWorkingDirectory(runtime);
   const manager = options.manager ?? createPlatformServiceManager(runtime, workingDirectory, options.daemonCommand);
   const capturedStatus = captureStrictJudgmentJson(reconcileSystemdServiceStatus(runtime, manager.status(), options));
   const actionError =
@@ -364,15 +347,6 @@ export async function buildCliServicePosture(
       cause: 'The user service manager (systemd --user or launchd) did not answer from this session.',
       impact: 'Nothing can be said about the daemon service from here; the daemon itself may be running.',
       action: 'Run goodvibes doctor from a logged-in desktop or SSH session with a user manager. To keep this machine without a service: goodvibes-daemon config set service.enabled false',
-    });
-  }
-  if (unreadableWorkingDirectory !== undefined) {
-    findings.push({
-      id: 'daemon-working-directory-unreadable',
-      summary: `The daemon's working directory is unreadable: ${unreadableWorkingDirectory}.`,
-      cause: 'The daemon\'s saved settings file exists but could not be read or parsed.',
-      impact: 'The daemon refuses to start until the file is fixed or removed, or it is started with --working-dir.',
-      action: 'Fix or remove the file named above, or start the daemon with --working-dir.',
     });
   }
   findings.push(...serviceEndpointFindings(endpoints, options.probe));

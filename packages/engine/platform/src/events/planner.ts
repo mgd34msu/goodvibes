@@ -1,6 +1,7 @@
 /**
  * PlannerEvent, discriminated union for adaptive planner decisions and overrides.
  */
+import type { EventAbout } from './about.js';
 
 export type ExecutionStrategy = 'auto' | 'single' | 'cohort' | 'background' | 'remote';
 
@@ -68,6 +69,12 @@ export interface WorkPlanEventBase {
   readonly workPlanId: string;
   /** The plan's revision after the commit the event reports; it only moves up. */
   readonly revision: number;
+  /**
+   * The project folder the plan belongs to (about.ts): a task event is about that task (`kind: 'work-plan-task'`), a
+   * snapshot notice about the plan (`kind: 'work-plan'`, its id `workPlanId`). Set by the planning service for the
+   * stream filter.
+   */
+  readonly about?: EventAbout | undefined;
 }
 
 export type PlannerEvent =

@@ -1,6 +1,5 @@
 import { revealOrNull, type Secret } from '@goodvibes/engine/platform/platform/security';
 import { isGoodVibesSecretReferenceValue, type SecretScope } from '@goodvibes/engine/platform/platform/config';
-import type { UserAuthManager } from '@goodvibes/engine/platform/platform/security';
 import type { OnboardingAcknowledgementTarget, OnboardingShellPaths, OnboardingStateScope } from './onboarding-state-types.js';
 import type { OnboardingRuntimeStateRecord } from './onboarding-state.js';
 import { isDeepEqual } from './onboarding-values.js';
@@ -19,14 +18,7 @@ export interface OnboardingVerificationResult {
 export type CommonOnboardingVerificationOperation<Key extends string> =
   | { readonly kind: 'set-config'; readonly key: Key; readonly value: unknown }
   | { readonly kind: 'set-secret'; readonly key: string; readonly value: string; readonly scope?: SecretScope | undefined }
-  | { readonly kind: 'acknowledge'; readonly target: OnboardingAcknowledgementTarget; readonly acknowledged: boolean }
-  | {
-      readonly kind: 'ensure-auth-user';
-      readonly username: string;
-      readonly roles?: readonly string[] | undefined;
-      readonly createSession?: boolean | undefined;
-      readonly retireBootstrapCredential?: boolean | undefined;
-    };
+  | { readonly kind: 'acknowledge'; readonly target: OnboardingAcknowledgementTarget; readonly acknowledged: boolean };
 export interface OnboardingVerificationDependencies<Key extends string> {
   readonly clock?: (() => number) | undefined;
   readonly config: { get(key: Key): unknown };
@@ -34,7 +26,6 @@ export interface OnboardingVerificationDependencies<Key extends string> {
   readonly secrets?:
     | { get(key: string): Promise<Secret | null>; getFromScope(key: string, scope: SecretScope): Promise<Secret | null> }
     | undefined;
-  readonly auth?: Pick<UserAuthManager, 'inspect'> | undefined;
   readonly shellPaths: OnboardingShellPaths;
   readonly acknowledgementScope?: OnboardingStateScope | undefined;
 }
@@ -159,36 +150,6 @@ export function createOnboardingVerifier<
     return { id, status: 'pass', message: `${operation.key} was stored through the secret manager.`, target: operation.key };
   }
 
-  function verifyAuthOperation(
-    deps: Dependencies,
-    operation: Extract<CommonOnboardingVerificationOperation<Key>, { kind: 'ensure-auth-user' }>,
-  ): OnboardingVerificationItem {
-    if (!deps.auth) {
-      return {
-        id: `auth:${operation.username}`,
-        status: 'fail',
-        message: 'Local auth manager is unavailable.',
-        target: operation.username,
-      };
-    }
-
-    const snapshot = deps.auth.inspect();
-    const username = operation.username.trim();
-    const user = snapshot.users.find((entry) => entry.username === username);
-    const requiredRoles = operation.roles ?? ['admin'];
-    const userExists = user !== undefined && requiredRoles.every((role) => user.roles.includes(role));
-    const sessionExists = operation.createSession === false ? true : snapshot.sessions.some((session) => session.username === username);
-    const bootstrapRetired = operation.retireBootstrapCredential ? snapshot.bootstrapCredentialPresent === false : true;
-    const ok = userExists && sessionExists && bootstrapRetired;
-    return {
-      id: `auth:${username}`,
-      status: ok ? 'pass' : 'fail',
-      message: ok
-        ? `${username} local auth user has required role(s) and session state.`
-        : `${username} local auth user/session/role/bootstrap state was not created.`,
-      target: username,
-    };
-  }
   async function verifyOperation(deps: Dependencies, input: Operation): Promise<OnboardingVerificationItem> {
     const operation = ports.select(input);
     if (operation.kind === 'extension') {
@@ -197,7 +158,6 @@ export function createOnboardingVerifier<
     }
     if (operation.kind === 'set-config') return verifyConfigOperation(deps, operation);
     if (operation.kind === 'set-secret') return verifySecretOperation(deps, operation);
-    if (operation.kind === 'ensure-auth-user') return verifyAuthOperation(deps, operation);
     return verifyAcknowledgementOperation(deps, operation);
   }
   return async <Request extends { readonly operations: readonly Operation[] }>(

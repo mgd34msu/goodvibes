@@ -7,7 +7,7 @@
  * the person is in, by the program holding it.
  */
 import { CapabilityRefusal, type CapabilityDefinition, type InputDescription, type ListName } from '../types.js';
-import { fixedInput, pickedInput, storeCapability, storeRead, wordsInput } from './agent-stores.js';
+import { fixedInput, pickedInput, storeCapability, storeRead, wordsInput, type AgentStoresCapabilityServices } from './agent-stores.js';
 
 /** Your routines, and the routine files found in your routine folders (terminal-shell's lists read them). */
 export const ROUTINES_LIST = 'routines' as ListName;
@@ -55,7 +55,7 @@ export const ROUTINES_CREATE = storeCapability({
   ],
   sentence: 'A routine {name} ("{description}") is kept with the steps "{steps}", until you change it.',
   example: { name: 'morning-brief', description: 'Summarise my morning', steps: 'Read my inbox and calendar, then summarise.' },
-  undoneBy: 'delete',
+  undoneBy: 'delete', steersModel: true,
 });
 export const ROUTINES_UPDATE = storeCapability({
   id: 'routines.update', actionId: 'update', label: 'Change a routine', word: 'update',
@@ -70,7 +70,7 @@ export const ROUTINES_UPDATE = storeCapability({
     words('triggers', 'When to suggest it', 'New words that bring it up', '--triggers', 'keep them'),
   ],
   sentence: 'Routine {routine} takes the changes given, until you change it.', example: { routine: 'morning-brief', steps: 'Read my inbox only.' },
-  repeat: 'safe',
+  repeat: 'safe', steersModel: true,
 });
 export const ROUTINES_REVIEW = storeCapability({
   id: 'routines.review', actionId: 'review', label: 'Mark a routine reviewed', word: 'review', inputs: [ROUTINE],
@@ -94,6 +94,7 @@ export const ROUTINES_IMPORT = storeCapability({
   id: 'routines.import', actionId: 'import', label: 'Import a routine file', word: 'import',
   inputs: [pickedInput({ id: 'file', label: 'Routine file', help: 'Routine files found in your routine folders', list: ROUTINE_FILES_LIST, other: 'a routine file name or path' }), ENABLED],
   sentence: 'The routine in {file} is added to this Agent, not yet reviewed, until you change it.', example: { file: 'morning-brief' }, undoneBy: 'delete',
+  steersModel: true,
 });
 
 /** The times a routine was put on a schedule (terminal-shell's list reads them from routines.receipts). */
@@ -148,11 +149,14 @@ export const ROUTINES_RECONCILE = storeRead({
  * The daemon's count of a routine's starts, one for every program: a conversation starting a routine (`routines.start`)
  * counts it here and gets its steps back to run.
  */
-export const ROUTINES_COUNT_START = storeCapability({
-  id: 'routines.count-start', actionId: 'count-start', label: 'Count a routine as started', word: 'count-start', inputs: [ROUTINE],
-  sentence: 'Routine {routine} is counted as started once more, the one count every program shows, and its steps are given back.',
-  example: { routine: 'morning-brief' },
-});
+export const ROUTINES_COUNT_START: CapabilityDefinition<AgentStoresCapabilityServices> = {
+  ...storeCapability({
+    id: 'routines.count-start', actionId: 'count-start', label: 'Count a routine as started', word: 'count-start', inputs: [ROUTINE],
+    sentence: 'Routine {routine} is counted as started once more, the one count every program shows, and its steps are given back.',
+    example: { routine: 'morning-brief' },
+  }),
+  noControl: 'The program holding the conversation runs it when a routine starts there (routines.start); a person starts a routine on the Routines tab of Memory and knowledge.',
+};
 
 export const ROUTINES_CAPABILITIES = [
   ROUTINES_LIST_ALL, ROUTINES_SHOW, ROUTINES_SEARCH, ROUTINES_CREATE, ROUTINES_UPDATE, ROUTINES_REVIEW, ROUTINES_STALE, ROUTINES_DELETE,

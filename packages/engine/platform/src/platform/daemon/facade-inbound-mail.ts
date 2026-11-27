@@ -92,6 +92,7 @@ import { isLoopbackHost } from '../utils/reachable-base-url.js';
 import { registerEmailExpectationGatewayMethods } from '../control-plane/routes/email-expectations.js';
 import { registerEmailInboundStatusGatewayMethod } from '../control-plane/routes/email-inbound-status.js';
 import { logger } from '../utils/logger.js';
+import { outsideEveryCall } from '../utils/outside-every-call.js';
 import type { AutomationRouteBinding } from '../automation/routes.js';
 import { isOwnerConversation } from './owner-alert.js';
 import type { GatewayMethodCatalog } from '../control-plane/index.js';
@@ -723,7 +724,10 @@ export function composeInboundMail(
   const recheckSupervisor = supervisor.recheckNow.bind(supervisor);
   const supervisorHealth = supervisor.health.bind(supervisor);
   const describeSupervisor = supervisor.describeStatus.bind(supervisor);
-  supervisor.start = async () => {
+  // Started and rechecked from wherever (the daemon's start, a role change, a settings or credential change a request
+  // made): the reading loops, their revive timers and the sweeps run with no caller's context (utils/outside-every-call.ts).
+  supervisor.start = () => outsideEveryCall(() => startInboundMail());
+  const startInboundMail = async () => {
     // The owner's routes are read from disk on first use. Mail that arrived
     // while the daemon was down is read the moment the source starts, so the
     // routes are loaded first: otherwise that mail finds no route and is
@@ -741,7 +745,7 @@ export function composeInboundMail(
   supervisor.stop = async () => {
     try { await Promise.all([stopSupervisor(), further.stop()]); } finally { releaseBackground?.(); }
   };
-  supervisor.recheckNow = () => { recheckSupervisor(); further.recheckNow(); };
+  supervisor.recheckNow = () => outsideEveryCall(() => { recheckSupervisor(); further.recheckNow(); });
   supervisor.health = () => further.foldHealth(supervisorHealth());
   // The snapshot's health is read through `health()` above, so it already names the further mailboxes.
   supervisor.describeStatus = async () => {

@@ -19,6 +19,7 @@ import { TuiConfigManager } from '../config/host-settings.ts';
 import { formatProviderModel, getModelIdFromProviderModel, getProviderIdFromModel } from '@goodvibes/engine/platform/platform/providers/provider-model';
 import { GlobalNetworkTransportInstaller } from '@goodvibes/engine/platform/platform/runtime/transport';
 import { configureActivityLogger } from '@goodvibes/engine/platform/platform/utils';
+import { projectFolderOf } from '@goodvibes/engine/platform/platform/runtime/shell-paths';
 import {
   applyRuntimeCommandEndpointFlagOverrides,
   applyRuntimeConfigOverrides,
@@ -104,12 +105,13 @@ export async function prepareShellCliRuntime(
   // One daemon home for the whole process: the flag wins over GOODVIBES_DAEMON_HOME,
   // and every reader resolves it through resolveGoodVibesDaemonHome.
   if (cli.flags.daemonHome) process.env['GOODVIBES_DAEMON_HOME'] = resolve(cli.flags.daemonHome);
-  configureActivityLogger(join(bootstrapWorkingDir, '.goodvibes', 'logs'));
+  // The activity log is the project's, whatever folder of it the program was opened in.
+  configureActivityLogger(join(projectFolderOf(bootstrapWorkingDir), '.goodvibes', 'logs'));
   // Only prints the first time the rule is actually appended (not on every
   // launch), see ensureGoodvibesGitignore's return-value doc.
   // `status` and `doctor` are diagnostics: they never edit the project's files.
   const isDiagnostic = cli.command === 'status' || cli.command === 'doctor' || (cli.command === 'setup' && cli.commandArgs[0] === 'status');
-  if (cli.command !== 'run' && !isDiagnostic && ensureGoodvibesGitignore(bootstrapWorkingDir)) {
+  if (cli.command !== 'run' && !isDiagnostic && ensureGoodvibesGitignore(projectFolderOf(bootstrapWorkingDir))) {
     startupNoticeWriter(cli, { out: console.log, err: console.error })(
       "[goodvibes] git now ignores '.goodvibes/' in this clone (.git/info/exclude; your .gitignore is unchanged): it holds transient TUI state (logs, session cache, exec output), not project source.",
     );

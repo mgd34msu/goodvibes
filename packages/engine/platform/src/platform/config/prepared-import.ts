@@ -67,9 +67,3 @@ export function assertImportFileCurrent(path: string, observation: ImportFileObs
     const next = dirname(parent); if (next === parent) throw new Error('Import parent changed.'); parent = next;
   }
 }
-
-export interface PreparedImportTransitionFacts {
-  readonly beforeGeneration: number;
-  readonly afterGeneration: number;
-  readonly phase: 'pending' | 'committed';
-}

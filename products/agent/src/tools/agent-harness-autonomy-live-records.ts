@@ -5,7 +5,7 @@ import { ToolInputProjectionError } from '@goodvibes/engine/platform/platform/to
 import { redactSensitiveData } from '@goodvibes/engine/platform/platform/utils';
 import { isOpenApprovalStatus, type SharedApprovalStatus } from '@goodvibes/engine/platform/platform/control-plane';
 import { AgentResearchRunRegistry, researchRunStorePath, type AgentResearchRunRecord } from '@goodvibes/engine/terminal-shell/agent-turn/research-run-registry';
-import { summarizeResearchRunItem } from '../input/agent-workspace-local-library-snapshot.ts';
+import { summarizeResearchRunItem } from '../input/local-library-snapshot.ts';
 import type { CatalogRankingOptions } from '@goodvibes/engine/terminal-shell/agent-turn/catalog-ranking';
 import { previewHarnessText } from '@goodvibes/engine/terminal-shell/agent-turn/preview-text';
 import { researchCheckpointRoute, researchRouteString } from './agent-harness-research-catalog-source.ts';
@@ -257,9 +257,9 @@ function summarizeSchedule(schedule: UiAutomationSnapshot['jobs'][number]['sched
   return `at ${formatEpochMs(schedule.at) ?? schedule.at}`;
 }
 
-/** Slash commands are typed by the owner; the model reaches the read-only ones through workspace run_command. */
-function commandRoute(command: string): string {
-  return `workspace action:"run_command" command:"${quoteRouteValue(command)}"`;
+/** A task read the model runs itself: the capability (there is no /tasks command; a person has the task's row in Work). */
+function capabilityRoute(id: 'work.task' | 'work.task-output', taskId: string): string {
+  return `capability_run id:"${id}" inputs:{"task":"${quoteRouteValue(taskId)}"}`;
 }
 
 const SCHEDULE_LIST_ROUTE = 'schedule action:"list"';
@@ -319,7 +319,7 @@ export function firstAvailableControlRoute(records: readonly AutonomyQueueLiveRe
 }
 
 function taskOutputDescriptor(task: UiTasksSnapshot['tasks'][number]): AutonomyQueueRecordOutput {
-  const route = commandRoute(`/tasks output ${task.id}`);
+  const route = capabilityRoute('work.task-output', task.id);
   const resultPreview = task.result !== undefined ? compactUnknown(task.result) : '';
   if (resultPreview.length > 0) {
     return {
@@ -357,7 +357,7 @@ function taskDiagnostics(task: UiTasksSnapshot['tasks'][number]): readonly strin
     task.turnId ? `turn ${task.turnId}` : '',
     task.error ? `error ${compactUnknown(task.error)}` : '',
     task.result !== undefined ? `result ${compactUnknown(task.result)}` : '',
-    `output route ${commandRoute(`/tasks output ${task.id}`)}`,
+    `output route ${capabilityRoute('work.task-output', task.id)}`,
   ].filter((value): value is string => value.length > 0);
 }
 
@@ -464,14 +464,14 @@ function taskLiveRecords(snapshot: UiTasksSnapshot | null): readonly AutonomyQue
       phase: task.kind,
       updatedAt: formatEpochMs(task.endedAt ?? task.startedAt ?? task.queuedAt),
       summary,
-      inspectRoute: commandRoute(`/tasks show ${task.id}`),
+      inspectRoute: capabilityRoute('work.task', task.id),
       ...(canCancel ? { cancelRoute } : {}),
       nextSteps: [
-        commandRoute(`/tasks show ${task.id}`),
-        commandRoute(`/tasks output ${task.id}`),
+        capabilityRoute('work.task', task.id),
+        capabilityRoute('work.task-output', task.id),
         ...(canCancel ? [cancelRoute] : []),
         ...(canRetry ? [retryRoute] : []),
-        'Use /todo for Agent-owned visible task changes; host task mutation requires current recorded admission on the exact owning daemon method.',
+        'Use the checklist (capabilities work.checklist-add and work.checklist-mark) for Agent-owned visible task changes; host task mutation requires current recorded admission on the exact owning daemon method.',
       ],
       sourceIds: [
         task.parentTaskId,
@@ -483,8 +483,8 @@ function taskLiveRecords(snapshot: UiTasksSnapshot | null): readonly AutonomyQue
       output,
       diagnostics: taskDiagnostics(task),
       controls: [
-        availableControl('inspect', 'Inspect task', 'read-only', commandRoute(`/tasks show ${task.id}`)),
-        availableControl('output', 'Show output', 'read-only', commandRoute(`/tasks output ${task.id}`)),
+        availableControl('inspect', 'Inspect task', 'read-only', capabilityRoute('work.task', task.id)),
+        availableControl('output', 'Show output', 'read-only', capabilityRoute('work.task-output', task.id)),
         canCancel
           ? availableControl('cancel', 'Cancel task', 'confirmed-effect', cancelRoute)
           : unavailableControl('cancel', 'Cancel task', task.cancellable ? `Task is ${task.status}; cancel is only useful before terminal completion.` : 'Task owner did not mark this task cancellable.'),

@@ -18,6 +18,7 @@ import type { ClientLifetime } from '../../lib/client-lifetime';
 import { formatError } from '../../lib/errors';
 import { useToast } from '../../lib/toast';
 import { whenLabel } from '../../lib/when-label';
+import { usePlaceProjects } from '../../lib/place-project';
 import { useConfirm } from '../../components/ui/ConfirmDialog';
 import { EmptyState, SkeletonRows } from '../../components/data-view/DataView';
 import { Button } from '../../components/ui/Button';
@@ -81,7 +82,10 @@ interface Draft {
 export function WorkPlanPanel({ lifetime }: { lifetime: ClientLifetime }) {
   const { toast } = useToast();
   const confirm = useConfirm();
-  const { query, settle } = useWorkPlan(lifetime, true);
+  // A work plan is one project's: the project chosen in the places' chooser, named on every planning call.
+  const chosen = usePlaceProjects().project;
+  const project = chosen !== undefined && chosen.startsWith('/') ? chosen : undefined;
+  const { query, settle } = useWorkPlan(lifetime, true, project);
   const [newTitle, setNewTitle] = useState('');
   const [draft, setDraft] = useState<Draft | null>(null);
 
@@ -106,15 +110,17 @@ export function WorkPlanPanel({ lifetime }: { lifetime: ClientLifetime }) {
       toast({ title: `${request.label}: not done`, description: formatError(error), tone: 'danger' });
     },
   });
-  const busy = edit.isPending;
+  const busy = edit.isPending || project === undefined;
+  // Every edit names the plan's project (an edit is made only while one is chosen).
+  const where = { workingDirectory: project ?? '' };
 
   const add = (event: FormEvent) => {
     event.preventDefault();
     const title = newTitle.trim();
-    if (!title) return;
+    if (!title || project === undefined) return;
     edit.mutate({
       label: 'Item added',
-      run: () => platformClient.workPlan.tasks.create({ task: { title, source: 'web' } }),
+      run: () => platformClient.workPlan.tasks.create({ ...where, task: { title, source: 'web' } }),
     }, { onSuccess: () => setNewTitle('') });
   };
 
@@ -122,7 +128,7 @@ export function WorkPlanPanel({ lifetime }: { lifetime: ClientLifetime }) {
     if (status === task.status) return;
     edit.mutate({
       label: `“${task.title}” is ${statusLabel(status).toLowerCase()}`,
-      run: () => platformClient.workPlan.tasks.status(task.taskId, { status, source: 'web' }),
+      run: () => platformClient.workPlan.tasks.status(task.taskId, { ...where, status, source: 'web' }),
     });
   };
 
@@ -131,7 +137,7 @@ export function WorkPlanPanel({ lifetime }: { lifetime: ClientLifetime }) {
     if (target < 0 || target >= tasks.length) return;
     const ids = tasks.map((task) => task.taskId);
     [ids[index], ids[target]] = [ids[target]!, ids[index]!];
-    edit.mutate({ label: 'Item moved', run: () => platformClient.workPlan.tasks.reorder({ orderedTaskIds: ids }) });
+    edit.mutate({ label: 'Item moved', run: () => platformClient.workPlan.tasks.reorder({ ...where, orderedTaskIds: ids }) });
   };
 
   const remove = async (task: WorkPlanTask) => {
@@ -143,7 +149,7 @@ export function WorkPlanPanel({ lifetime }: { lifetime: ClientLifetime }) {
       tone: 'danger',
     });
     if (!ok) return;
-    edit.mutate({ label: 'Item deleted', run: () => platformClient.workPlan.tasks.delete(task.taskId) });
+    edit.mutate({ label: 'Item deleted', run: () => platformClient.workPlan.tasks.delete(task.taskId, where) });
   };
 
   const clearDone = async () => {
@@ -156,7 +162,7 @@ export function WorkPlanPanel({ lifetime }: { lifetime: ClientLifetime }) {
     if (!ok) return;
     edit.mutate({
       label: 'Finished items cleared',
-      run: () => platformClient.workPlan.tasks.clearCompleted({ statuses: ['done', 'cancelled'] }),
+      run: () => platformClient.workPlan.tasks.clearCompleted({ ...where, statuses: ['done', 'cancelled'] }),
     });
   };
 
@@ -174,13 +180,18 @@ export function WorkPlanPanel({ lifetime }: { lifetime: ClientLifetime }) {
     if (Object.keys(patch).length === 0) { setDraft(null); return; }
     edit.mutate({
       label: 'Item saved',
-      run: () => platformClient.workPlan.tasks.update(task.taskId, { patch }),
+      run: () => platformClient.workPlan.tasks.update(task.taskId, { ...where, patch }),
     }, { onSuccess: () => setDraft(null) });
   };
 
   return (
     <div className="work-plan" aria-label="Work plan">
       {confirm.element}
+      {project === undefined && (
+        <p className="dv-notice" role="status">
+          A work plan is one project’s. Choose a project in the project chooser to see and change its plan.
+        </p>
+      )}
       {plan && <p className="work-plan__summary" aria-live="polite">{workPlanSummary(plan.counts)}</p>}
 
       <form className="work-plan__add" onSubmit={add}>

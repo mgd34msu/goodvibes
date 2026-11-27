@@ -51,9 +51,10 @@ export const WORK_INTAKE_CAPABILITIES: readonly Intake[] = [
   act('work.new', 'new', 'Ask for new work, and say what done means',
     'New work is sent to the daemon: what you want done and the results that mean it is done, written here or read from a file. A copy is kept here until the daemon answers.',
     [
-      { ...GOAL, help: 'In your own words (leave it empty when the work comes from a file)', required: false },
-      { id: 'criteria', label: 'Done when', help: 'The results that mean it is done, one per line (1 to 100; empty when the work comes from a file)', kind: 'long-text', freeTextReason: 'what done means', required: false, typed: { flag: '--done-when' } },
-      { id: 'file', label: 'From a file', help: 'A JSON file on this computer with "goal" and "criteria", in place of the two above', kind: 'path', freeTextReason: 'a file on this computer', required: false, typed: { flag: '--file' } },
+      // An empty blank's words show in the form beside its label: what leaving it empty means there.
+      { ...GOAL, help: 'In your own words (leave it empty when the work comes from a file)', required: { default: '', defaultMeans: 'given by the file' } },
+      { id: 'criteria', label: 'Done when', help: 'The results that mean it is done, one per line (1 to 100; empty when the work comes from a file)', kind: 'long-text', freeTextReason: 'what done means', required: { default: '', defaultMeans: 'given by the file' }, typed: { flag: '--done-when' } },
+      { id: 'file', label: 'From a file', help: 'A JSON file on this computer with "goal" and "criteria", in place of the two above', kind: 'path', freeTextReason: 'a file on this computer', required: { default: '', defaultMeans: 'none: written here' }, typed: { flag: '--file' } },
     ], { goal: 'add retries to the uploader', criteria: 'an upload that fails twice still finishes' },
     (intake, values) => {
       if (blank(values.file) && (blank(values.goal) || blank(values.criteria))) {

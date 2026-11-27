@@ -91,7 +91,7 @@ export const updateConfigSettings: ConfigSettingDefinition[] = [
     ...intRange(0, 60 * 60),
   },
   {
-    key: 'update.releasesUrl',
+    key: 'update.releasesUrl', valueKind: 'endpoint',
     label: 'Where updates come from',
     type: 'string',
     description: 'GitHub releases/latest URL for a complete GoodVibes monorepo suite. Exact historical default feeds migrate to goodvibes. Native suite updates replace installed sibling programs and configured release WebUI/browser support together. Must be a release URL of the GoodVibes repository itself (https://github.com/mgd34msu/goodvibes/releases/...), or an http URL on this machine (loopback address) (empty turns the update loop off): the binaries and checksums are downloaded from this origin and are not signed, so any other repository or remote host would let a config write replace the installed programs',

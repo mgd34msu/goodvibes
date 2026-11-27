@@ -15,6 +15,7 @@ export * from './orchestrator-runner.js';
 export * from './planner-decomposition-runner.js';
 export * from './orchestrator-utils.js';
 export * from './orchestrator.js';
+export * from './turn-composition.js';
 // The per-turn injection record. AgentRecord.turnInjections already carried its
 // structural shape through the tools barrel, so a consumer could reach the shape
 // and not the name, and derived it positionally instead.

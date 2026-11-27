@@ -350,3 +350,4 @@ export {
   runLanguageServerInstall,
   type LanguageServerInstallDeps,
 } from './language-server-install.js';
+export { noSandboxStartupLine } from './no-sandbox-notice.js';

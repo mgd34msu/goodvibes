@@ -5,6 +5,7 @@ export * from './denial.js';
 export * from './held-for-owner.js';
 export * from './jev-decisions.js';
 export * from './manager.js';
+export { capabilityCommandsResolver, type CapabilityCommandsResolver } from './capability-commands.js';
 export * from './prompt.js';
 export * from './types.js';
 export * from './user-rule-store.js';
@@ -16,7 +17,7 @@ export type { AskChoice, AskFacts, AskKind, AskPresentation, PurchaseAskFacts, R
 export { codeUndoFact, commandEffect, composeConsequence, FAMILY_SENTENCES, readingAnswer, undoFactOf } from './ask-consequence.js';
 export type { CommandEffect, Consequence, ConsequenceInput, ReadingAnswer, SandboxFact, UndoFact } from './ask-consequence.js';
 export { hostApprovalPresentation, hostAskFacts, hostItemPresenter, settingLabelOf, type HostAskFactsSource } from './ask-facts-host.js';
-export { toolAskWords, type ToolAskWords } from './tool-ask-words.js';
+export { presentToolAskWith, toolAskWords, type ToolAskPresenter, type ToolAskWords } from './tool-ask-words.js';
 export { onRunAnswererChanged, runAnswersEveryQuestion, runHoldsForOwner, setRunAnswersEveryQuestion, setRunHoldsForOwner } from './run-answerer.js';
 
 export { decideAutonomousTool, captureAutonomousSource, captureAutonomousChoices, assertAutonomousData } from './autonomous.js';

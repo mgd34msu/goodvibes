@@ -2,12 +2,12 @@
  * What a review packet is read from: the shapes of its timeline, its steps and its defaults, an artifact's
  * metadata read as plain values, and which artifact plays which part (by the purpose the producing tool recorded,
  * never its file name). Shared by the daemon, which reports the packet (documents.readiness, packet-steps,
- * timeline), and the Agent workspace, which shows the same packet.
+ * timeline), and the Agent's model tools, which read the same packet.
  */
 import type { ArtifactDescriptor } from '@goodvibes/engine/platform/platform/artifacts';
 import { hasPurpose, PURPOSE_MODEL_COMPARE_ROUTE_DECISION } from './review-packet-presets-core.js';
 
-export interface AgentWorkspaceRecentReviewerHandoffArtifact {
+export interface AgentRecentReviewerHandoffArtifact {
   readonly id: string;
   readonly filename: string;
   readonly createdAt: number;
@@ -18,7 +18,7 @@ export interface AgentWorkspaceRecentReviewerHandoffArtifact {
   readonly relatedArtifactCount: number;
 }
 
-export type AgentWorkspaceReviewPacketTimelineEventKind =
+export type AgentReviewPacketTimelineEventKind =
   | 'document'
   | 'comment'
   | 'suggestion'
@@ -32,9 +32,9 @@ export type AgentWorkspaceReviewPacketTimelineEventKind =
   | 'handoff'
   | 'handoff-archive';
 
-export interface AgentWorkspaceReviewPacketTimelineEvent {
+export interface AgentReviewPacketTimelineEvent {
   readonly id: string;
-  readonly kind: AgentWorkspaceReviewPacketTimelineEventKind;
+  readonly kind: AgentReviewPacketTimelineEventKind;
   readonly at: number;
   readonly label: string;
   readonly detail: string;
@@ -43,14 +43,14 @@ export interface AgentWorkspaceReviewPacketTimelineEvent {
   readonly sourceId: string;
 }
 
-export interface AgentWorkspaceReviewPacketTimeline {
+export interface AgentReviewPacketTimeline {
   readonly available: boolean;
   readonly count: number;
   readonly next: string;
-  readonly items: readonly AgentWorkspaceReviewPacketTimelineEvent[];
+  readonly items: readonly AgentReviewPacketTimelineEvent[];
 }
 
-export interface AgentWorkspaceReviewPacketPresetLineage {
+export interface AgentReviewPacketPresetLineage {
   readonly artifactId: string;
   readonly presetId: string | null;
   readonly name: string | null;
@@ -64,7 +64,7 @@ export interface AgentWorkspaceReviewPacketPresetLineage {
   readonly inspectRoute: string;
 }
 
-export interface AgentWorkspaceReviewPacketDefaults {
+export interface AgentReviewPacketDefaults {
   readonly documentId: string | null;
   readonly documentTitle: string | null;
   readonly documentExportArtifactId: string | null;
@@ -77,28 +77,28 @@ export interface AgentWorkspaceReviewPacketDefaults {
   readonly handoffArchiveArtifactId: string | null;
   readonly reviewPacketPresetArtifactId: string | null;
   readonly reviewPacketPresetName: string | null;
-  readonly reviewPacketPresetLineage: AgentWorkspaceReviewPacketPresetLineage | null;
+  readonly reviewPacketPresetLineage: AgentReviewPacketPresetLineage | null;
   readonly relatedArtifactIds: readonly string[];
   readonly summary: string;
 }
 
-export type AgentWorkspaceReviewPacketWizardStepStatus = 'done' | 'current' | 'pending' | 'blocked';
+export type AgentReviewPacketWizardStepStatus = 'done' | 'current' | 'pending' | 'blocked';
 
-export interface AgentWorkspaceReviewPacketWizardStep {
+export interface AgentReviewPacketWizardStep {
   readonly id: string;
   readonly label: string;
-  readonly status: AgentWorkspaceReviewPacketWizardStepStatus;
+  readonly status: AgentReviewPacketWizardStepStatus;
   readonly detail: string;
   readonly userRoute: string;
   readonly modelRoute: string;
-  /** The Agent workspace row that runs this step; null when its control is in a place (`ownerLine` names it). */
-  readonly actionId: string | null;
+  /** The control that does this step: place, tab, key (what the key says); null when `ownerLine` names the place. */
+  readonly control: string | null;
   readonly backtrackRoute: string | null;
   /** The line a person types for this step, with a blank in angle brackets where they choose. */
   readonly ownerLine: string;
 }
 
-export interface AgentWorkspaceReviewPacketWizard {
+export interface AgentReviewPacketWizard {
   readonly available: boolean;
   readonly status: 'complete' | 'active' | 'blocked' | 'empty';
   readonly completedSteps: number;
@@ -107,8 +107,8 @@ export interface AgentWorkspaceReviewPacketWizard {
   readonly currentStepLabel: string | null;
   readonly next: string;
   readonly finalReview: string;
-  readonly presetLineage: AgentWorkspaceReviewPacketPresetLineage | null;
-  readonly steps: readonly AgentWorkspaceReviewPacketWizardStep[];
+  readonly presetLineage: AgentReviewPacketPresetLineage | null;
+  readonly steps: readonly AgentReviewPacketWizardStep[];
 }
 
 export function readArtifactMetadataString(metadata: Readonly<Record<string, unknown>>, key: string): string {
@@ -337,7 +337,7 @@ export function reviewPacketPresetFreshness(
   };
 }
 
-export function buildReviewPacketPresetLineage(preset: ArtifactDescriptor | null): AgentWorkspaceReviewPacketPresetLineage | null {
+export function buildReviewPacketPresetLineage(preset: ArtifactDescriptor | null): AgentReviewPacketPresetLineage | null {
   if (!preset) return null;
   const metadata = preset.metadata;
   const refreshedFromArtifactId = readArtifactMetadataString(metadata, 'refreshOfArtifactId') || null;
@@ -375,7 +375,7 @@ export function buildReviewPacketPresetLineage(preset: ArtifactDescriptor | null
   };
 }
 
-export function summarizeReviewerHandoffArtifact(artifact: ArtifactDescriptor): AgentWorkspaceRecentReviewerHandoffArtifact {
+export function summarizeReviewerHandoffArtifact(artifact: ArtifactDescriptor): AgentRecentReviewerHandoffArtifact {
   const metadata = artifact.metadata;
   return {
     id: artifact.id,

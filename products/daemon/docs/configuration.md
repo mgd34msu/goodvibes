@@ -8,18 +8,21 @@ settings you intend to change.
 ## Homes and workspace
 
 The tree root is the directory containing `.goodvibes`. The daemon identity
-directory and workspace are separate selections:
+directory is a separate selection:
 
 | Selection | Default | Override |
 | --- | --- | --- |
 | Tree root | Login home | `GOODVIBES_HOME` |
 | Daemon identity directory | `<tree-root>/.goodvibes/daemon` | `--daemon-home`, otherwise `GOODVIBES_DAEMON_HOME` |
-| Workspace | Invocation's current directory | `-C`, `--cd`, or `--working-dir`, otherwise `GOODVIBES_WORKING_DIR` |
+
+The daemon has no working folder: it serves every project at once, and each
+program and each schedule names its own project. The folder it is started in
+means nothing to it.
 
 `GOODVIBES_HOME` names the parent of `.goodvibes`, not `.goodvibes` itself.
 Changing only the daemon identity directory does not move the whole tree.
-Relative overrides resolve from the invocation's current directory, before the
-selected workspace is applied. Blank home environment overrides are ignored.
+Relative overrides resolve from the invocation's current directory. Blank home
+environment overrides are ignored.
 The CLI does not change the parent process's environment or working directory.
 See [CLI ownership](../src/cli/configuration.ts) and
 [home resolution](../../../packages/engine/platform/src/platform/config/goodvibes-home.ts).

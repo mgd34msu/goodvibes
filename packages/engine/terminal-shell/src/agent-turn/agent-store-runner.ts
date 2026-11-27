@@ -12,7 +12,7 @@
  * is named), the artifacts in the daemon's store. Each change is announced as
  * LIST_CHANGED, so every screen showing that list reads it again.
  */
-import { CapabilityRefusal, type AgentStoreRunner } from '@goodvibes/engine/platform/platform/capabilities';
+import { CapabilityRefusal, callerPathOf, type AgentStoreRunner } from '@goodvibes/engine/platform/platform/capabilities';
 import type { ArtifactStore } from '@goodvibes/engine/platform/platform/artifacts';
 import { createShellPathService } from '@goodvibes/engine/platform/platform/runtime/shell-paths';
 import type { ShellPathService } from '@goodvibes/engine/platform/platform/runtime/shell';
@@ -25,7 +25,7 @@ import type { ProtectedSourceOwner } from '@goodvibes/engine/platform/platform/s
 import { createClassicProtectedSourceOwner } from '@goodvibes/engine/platform/platform/security/source-screening/classic-owner';
 import { resolveGoodVibesDaemonHome } from '@goodvibes/engine/platform/platform/config';
 import { randomUUID } from 'node:crypto';
-import { resolve } from 'node:path';
+import { relative, resolve, sep } from 'node:path';
 import { registerAgentResearchRunsTool } from './research-runs-tool.js';
 import { registerAgentResearchSourcesTool } from './research-sources-tool.js';
 import { registerAgentResearchReportTool } from './research-report-tool.js';
@@ -34,6 +34,7 @@ import { runAdmittedResearchRunner } from './research-runner.js';
 import { RESEARCH_ACTS, researchRunnerArgs } from './agent-store-research.js';
 import { carryAgentHandOffsOnce, handOffActs, type HandOffSessions } from './agent-store-handoff.js';
 import { registerAgentArtifactsTool } from './artifacts-tool.js';
+import { declareAgentReadModes } from './read-modes.js';
 import { registerAgentDocumentsTool } from './documents-tool.js';
 import { registerAgentReviewPacketPresetsTool } from './review-packet-presets-tool.js';
 import { registerAgentReviewPacketShareTool, type AgentReviewPacketShareChannelRouter } from './review-packet-share-tool.js';
@@ -81,10 +82,23 @@ const READS = new Set(['list', 'show', 'search', 'active', 'discover', 'vibe', '
  * The acts that read or write a project's own folder (its drafts, a copy into it, the persona, routine, skill and VIBE.md
  * files found in it).
  */
-const PROJECT_ACTS = new Set(['artifacts.export', 'personas.discover', 'personas.import', 'personas.vibe', 'personas.vibe-show', 'personas.vibe-create', 'personas.vibe-import', 'routines.discover', 'routines.import',
+const PROJECT_ACTS = new Set(['artifacts.export', 'artifacts.package', 'personas.discover', 'personas.import', 'personas.vibe', 'personas.vibe-show', 'personas.vibe-create', 'personas.vibe-import', 'routines.discover', 'routines.import',
   'agent-home.create-learned', 'agent-home.starter-learned']);
+/** The acts that write a copy to a file or folder the caller names (input `path`): held like every capability's path. */
+const HELD_PATH_ACTS = new Set(['artifacts.export', 'artifacts.package']);
 function needsProject(id: string): boolean {
   return id.startsWith('documents.') || PROJECT_ACTS.has(id);
+}
+
+/** The carried scratch folder the call's values name a path in, if any (every carried call has one folder). */
+function carriedRootOf(values: Readonly<Record<string, string>>, carried: readonly string[] | undefined): string | undefined {
+  if (carried === undefined) return undefined;
+  return carried.find((root) => Object.values(values).some((value) => value.startsWith(`${root}${sep}`)));
+}
+
+/** The values with each path inside `root` written relative to it. */
+function relativeTo(values: Readonly<Record<string, string>>, root: string): Record<string, string> {
+  return Object.fromEntries(Object.entries(values).map(([key, value]) => [key, value.startsWith(`${root}${sep}`) ? relative(root, value) : value]));
 }
 
 /** What a change does to its list, for the notice. */
@@ -149,6 +163,9 @@ export function createAgentStoreRunner(deps: AgentStoreRunnerDeps): AgentStoreRu
       registerAgentResearchSourcesTool(registry, shellPaths);
       registerAgentResearchReportTool(registry, deps.artifactStore, owners().report, 'report-only', owners().shared);
       if (webSearch && !registry.has(webSearch.definition.name)) registry.register(webSearch);
+      // The Agent's table of read modes (read-modes.ts): a list or a look at one item is a read here too, so a caller
+      // that is not the owner reads what it may reach and is refused only a change.
+      declareAgentReadModes(registry);
       // A few projects at most are worked on from one daemon; the oldest is let go past that.
       if (registries.size >= 32) registries.delete(registries.keys().next().value!);
       registries.set(shellPaths.workingDirectory, registry);
@@ -156,7 +173,7 @@ export function createAgentStoreRunner(deps: AgentStoreRunnerDeps): AgentStoreRu
     return registry;
   };
   return {
-    async run(id, values, caller) {
+    async run(id, given, caller) {
       const act = acts[id];
       if (!act) throw new CapabilityRefusal(`${id} is not an act on the Agent's stores; nothing was done.`);
       // Drafts, a copy into a folder and the files found to import are a project's: the caller names it (a terminal
@@ -164,12 +181,24 @@ export function createAgentStoreRunner(deps: AgentStoreRunnerDeps): AgentStoreRu
       if (!caller.workingDirectory && needsProject(id)) {
         throw new CapabilityRefusal('No project folder came with the request, so nothing was done.', 'Ask from the project\'s folder, or send workingDirectory with the request', 'NO_PROJECT');
       }
-      const workingDirectory = caller.workingDirectory ? resolve(caller.workingDirectory) : deps.workingDirectory();
+      // A file the program asking sent from its own machine (capabilities/carried-files.ts) is in this call's scratch
+      // folder: the file work happens there, as in a project of its own, and only there.
+      const carriedRoot = carriedRootOf(given, caller.carried);
+      // A file or folder a copy goes to is held like every other capability's path (capabilities/path-inputs.ts
+      // `callerPathOf`, held-paths.ts): placed inside the caller's checked project, held from here to the end of the call
+      // (a folder worked on in place through its handle, a file as this call's own copy, one to be made staged and put
+      // in by rename), so the tool writes only what was checked. The tool takes a held path as placed (artifact-effect.ts).
+      const placedGiven = carriedRoot === undefined && HELD_PATH_ACTS.has(id) && given['path']
+        ? { ...given, path: callerPathOf(caller, given['path'], { label: id === 'artifacts.package' ? 'Folder or ZIP file' : 'File' }) }
+        : given;
+      const values = carriedRoot === undefined ? placedGiven : relativeTo(given, carriedRoot);
+      const workingDirectory = carriedRoot ?? (caller.workingDirectory ? resolve(caller.workingDirectory) : deps.workingDirectory());
       const shellPaths = createShellPathService({ workingDirectory, homeDirectory: deps.homeDirectory });
       const context: StoreActContext = {
         shellPaths,
         artifacts: deps.artifactStore,
         personAsked: caller.personAsked === true,
+        ...(caller.author ? { author: caller.author } : {}),
         projectGiven: Boolean(caller.workingDirectory),
         ...(deps.memory ? { memory: deps.memory } : {}),
         ...(deps.ingestUrl ? { ingestUrl: deps.ingestUrl } : {}),

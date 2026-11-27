@@ -20,13 +20,21 @@
  * other trigger carries on.
  */
 
-import { randomUUID } from 'node:crypto';
+import { createHash, randomUUID } from 'node:crypto';
+import { isAbsolute, resolve } from 'node:path';
 import { structuredTransience, type FailureTransience } from '@goodvibes/engine/errors';
 import { RefusalError, refusal } from '@goodvibes/engine/errors';
 import { summarizeError } from '../utils/error-display.js';
 import { newIncarnation } from '../utils/target-ref.js';
 import { logger } from '../utils/logger.js';
+import { outsideEveryCall } from '../utils/outside-every-call.js';
 import { noteListChanged } from '../runtime/list-changes.js';
+import { projectIdentityOf } from '../workspace/project-identity.js';
+
+/** The project a trigger's notice names (its folder's project), or nothing for a trigger kept with no project. */
+function triggerProjectOf(folder: string | undefined): { readonly project?: string } {
+  return folder ? { project: projectIdentityOf(folder) } : {};
+}
 import { TriggerManagerWork, stopTriggerResources } from './manager-work.js';
 import { restartDueStreams } from './manager-stream-restarts.js';
 import { runExtract, storedObservation, toObservation } from './extract.js';
@@ -60,15 +68,30 @@ import type {
 import { validateDefinition } from './validation.js';
 import type { TriggerSpec } from './types.js';
 
-/** A command the definition gives no folder of its own runs in the trigger's project, never the daemon's folder. */
+/**
+ * The id a trigger is stored under: the name a person chose and a part made from his project (its identity) and that
+ * name alone (`<name>-<8 hex>`). It is made the same way whatever any other project holds, so it never says whether
+ * another project has a trigger of that name; the chosen name is kept beside it (`chosenId`) and is what people see.
+ */
+export function storedTriggerId(chosen: string, project: string): string {
+  return `${chosen}-${createHash('sha256').update(`${project}\u0000${chosen}`).digest('hex').slice(0, 8)}`;
+}
+
+/**
+ * A command the definition gives no folder of its own runs in the trigger's project, never the daemon's folder; a file
+ * it watches by a relative path is the project's file (3.5.0 read it from the folder its daemon ran in, which was the
+ * project; the daemon's own process folder is no project).
+ */
 function inProjectFolder(spec: TriggerSpec, folder: string | undefined): TriggerSpec {
   if (!folder) return spec;
   if ((spec.kind === 'stream' || spec.kind === 'on-exit') && spec.cwd === undefined) return { ...spec, cwd: folder };
   if (spec.kind === 'condition' && spec.probe.kind === 'command' && spec.probe.cwd === undefined) return { ...spec, probe: { ...spec.probe, cwd: folder } };
+  if (spec.kind === 'condition' && spec.probe.kind === 'file' && !isAbsolute(spec.probe.path)) return { ...spec, probe: { ...spec.probe, path: resolve(folder, spec.probe.path) } };
   return spec;
 }
 import { retentionFrom, TriggerDisabledError, type TriggerManagerConfig, type TriggerManagerOptions } from './manager-types.js';
 import { WORK_ADMISSION_RECHECK_MS } from '../daemon/work-admission.js';
+import { stampExposure } from '../security/conversation-exposure.js';
 
 export * from './manager-types.js';
 
@@ -130,6 +153,8 @@ export class TriggerManager {
   private observing: 'other-process' | 'off' | null = null;
   /** Ids in the store, so a change writes only the state and never the definition again. */
   private readonly stored = new Set<string>();
+  /** Each saved trigger's project, so the notice of its removal names the project it was of (its record is gone). */
+  private readonly storedProjects = new Map<string, string | undefined>();
   /** Ids whose last save failed (or whose removal did); retried on the next tick. */
   private readonly unsaved = new Set<string>();
   private lastRecovery: TriggerRecoveryReport | null = null;
@@ -154,6 +179,31 @@ export class TriggerManager {
 
   private now(): number {
     return this.options.now ? this.options.now() : Date.now();
+  }
+
+  /**
+   * A trigger kept with no project (3.5.0 kept none) works in the folder it worked in then (`unplacedFolder`), given
+   * at every load: its definition is stored once and never written again, and a 3.5.0 binary after a rollback reads it
+   * as it was.
+   */
+  private placed(record: TriggerRecord): TriggerRecord {
+    const folder = this.options.unplacedFolder;
+    const placed = !folder || record.definition.workingDirectory !== undefined ? record
+      : { ...record, definition: { ...record.definition, workingDirectory: folder, spec: inProjectFolder(record.definition.spec, folder) } };
+    return this.heldWithoutProject(placed);
+  }
+
+  /**
+   * A trigger with no project (or the daemon's own folder) is held, never run: its breaker open with the reason, until
+   * the owner gives it a project (or removes it). Nothing runs in the daemon's own folder.
+   */
+  private heldWithoutProject(record: TriggerRecord): TriggerRecord {
+    const why = this.options.projectRefusal?.(record.definition.workingDirectory);
+    if (!why || record.state === 'circuit-open' || record.state === 'cancelled' || record.state === 'fired' || record.state === 'failed') return record;
+    const now = this.now();
+    const held = `held: ${why}, so it does not run (never in the daemon's own folder). Give it a project (make it again from the project it is for), or remove it`;
+    return { ...record, state: 'circuit-open', nextCheckAt: undefined, updatedAt: now, lastError: held,
+      runs: [...record.runs, { at: now, outcome: 'skipped', detail: held }] };
   }
 
   private get config(): TriggerManagerConfig {
@@ -226,9 +276,10 @@ export class TriggerManager {
 
     this.records.clear();
     this.stored.clear();
+    this.storedProjects.clear();
     const kept = new Set(swept.triggers);
-    for (const record of contents.records) this.stored.add(record.definition.id);
-    for (const record of swept.triggers) this.records.set(record.definition.id, this.reviveAfterRestart(record, now));
+    for (const record of contents.records) { this.stored.add(record.definition.id); this.storedProjects.set(record.definition.id, record.definition.workingDirectory); }
+    for (const record of swept.triggers) this.records.set(record.definition.id, this.reviveAfterRestart(this.placed(record), now));
     this.grants.clear();
     for (const grant of contents.grants) this.grants.set(grant.id, grant);
     this.eventLog = [...swept.eventLog];
@@ -322,9 +373,11 @@ export class TriggerManager {
     if (this.loaded) this.startSweep();
     if (!this.supervisionTimer) {
       const interval = Math.max(250, this.config.supervisionTickMs ?? 1_000);
-      this.supervisionTimer = setInterval(() => {
+      // Armed in the process's own context, never the request that made the first trigger (utils/outside-every-call.ts):
+      // every later check and every turn it fires runs as no caller, each trigger taking its project from its record.
+      this.supervisionTimer = outsideEveryCall(() => setInterval(() => {
         void this.supervisionTick();
-      }, interval);
+      }, interval));
       this.supervisionTimer.unref?.();
     }
     return report;
@@ -385,7 +438,7 @@ export class TriggerManager {
   startSweep(): void {
     if (this.sweepTimer) return;
     const interval = Math.max(10_000, this.config.sweepIntervalMs ?? 300_000);
-    this.sweepTimer = setInterval(() => { try { this.sweep(); } catch (error) { logger.warn('Trigger sweep failed', { error: summarizeError(error) }); } }, interval);
+    this.sweepTimer = outsideEveryCall(() => setInterval(() => { try { this.sweep(); } catch (error) { logger.warn('Trigger sweep failed', { error: summarizeError(error) }); } }, interval));
     this.sweepTimer.unref?.();
   }
 
@@ -451,7 +504,13 @@ export class TriggerManager {
     let record = this.records.get(id);
     try {
       if (!record) {
-        if (this.stored.has(id)) { this.store.remove(id); this.stored.delete(id); noteListChanged({ list: 'triggers', change: 'deleted', id }); }
+        if (this.stored.has(id)) {
+          this.store.remove(id); this.stored.delete(id);
+          // The removal names the project the trigger was of: only that project's screens read again.
+          const folder = this.storedProjects.get(id);
+          this.storedProjects.delete(id);
+          noteListChanged({ list: 'triggers', change: 'deleted', id, ...triggerProjectOf(folder) });
+        }
         this.unsaved.delete(id);
         return true;
       }
@@ -462,9 +521,10 @@ export class TriggerManager {
       const known = this.stored.has(id);
       if (known) this.store.update(record);
       else { this.store.insert(record); this.stored.add(id); }
+      this.storedProjects.set(id, record.definition.workingDirectory);
       this.unsaved.delete(id);
       // Every saved change of a trigger (its state, a firing, a stop or a start again) is said once it is durable.
-      noteListChanged({ list: 'triggers', change: known ? 'changed' : 'created', id });
+      noteListChanged({ list: 'triggers', change: known ? 'changed' : 'created', id, ...triggerProjectOf(record.definition.workingDirectory) });
       return true;
     } catch (error) {
       const failure = error instanceof TriggerStoreError ? error : new TriggerStoreError(this.store.path, `save trigger ${id}`, error);
@@ -514,7 +574,11 @@ export class TriggerManager {
     return [...this.grants.values()].sort((a, b) => a.id.localeCompare(b.id));
   }
 
-  create(input: unknown): Promise<TriggerRecord> { return this.work.own(() => this.createOwned(input)); }
+  create(input: unknown): Promise<TriggerRecord> {
+    // Made by a conversation that read text from outside: its turns start with what that conversation read
+    // (security/conversation-exposure.ts). Read in the caller's own context, where the conversation is.
+    return this.work.own(() => this.createOwned(input)).then((record) => { stampExposure(`trigger:${record.definition.id}`); return record; });
+  }
 
   /**
    * Offers a session's tool registry to platform-tool probes; returns the
@@ -527,6 +591,12 @@ export class TriggerManager {
   private async createOwned(input: unknown): Promise<TriggerRecord> {
     this.ensureOwner('create a trigger');
     const validated = validateDefinition(input);
+    // A trigger works in a project: none, or the daemon's own folder, is refused (whoever asks: a route, a tool).
+    const homeless = this.options.projectRefusal?.(validated.workingDirectory);
+    if (homeless) {
+      throw new RefusalError(refusal({ code: 'NO_PROJECT', state: 'the trigger has no project to run in', reason: `No trigger was made: ${homeless}; nothing is ever run in the daemon's own folder`,
+        next: ['Make it from the project it is for (its folder named as workingDirectory)'], status: 422 }));
+    }
     if (validated.spec.kind === 'condition' && validated.spec.probe.kind === 'platform-tool') {
       const probe = validated.spec.probe;
       const refused = this.options.probeTools
@@ -539,10 +609,23 @@ export class TriggerManager {
       const refused = probeHostRefusal(validated.spec.probe.url, this.options.probeHostPolicy);
       if (refused) throw new RefusalError(refusal({ code: 'TRIGGER_PROBE_HOST', state: 'the probe\'s URL may not be fetched', reason: refused, next: ['Probe a URL the fetch tool may reach, or ask the owner to change the fetch setting the refusal names'], status: 422 }));
     }
-    if (this.records.has(validated.id)) {
-      throw new RefusalError(refusal({ code: 'TRIGGER_EXISTS', state: `a trigger with the id "${validated.id}" exists`, reason: `A trigger with id "${validated.id}" already exists`, next: ['Pick another id, or cancel the existing trigger first'], status: 409 }));
+    // A trigger's id is the name a person chose: one per project, not one for every project. Taken in this project: refused,
+    // naming only this project's. Taken by another project's trigger: nothing about the other is said (the stored id below
+    // is made the same way whatever another project holds).
+    const project = validated.workingDirectory ? projectIdentityOf(validated.workingDirectory) : '';
+    const taken = [...this.records.values()].find((record) => (record.definition.chosenId ?? record.definition.id) === validated.id
+      && (record.definition.workingDirectory ? projectIdentityOf(record.definition.workingDirectory) : '') === project);
+    if (taken) {
+      throw new RefusalError(refusal({ code: 'TRIGGER_EXISTS', state: `this project has a trigger with the id "${validated.id}"`, reason: `This project already has a trigger with id "${validated.id}"`, next: ['Pick another id, or cancel this project\'s trigger first'], status: 409 }));
     }
-    const definition = { ...validated, spec: inProjectFolder(validated.spec, validated.workingDirectory), action: this.captureFireableAction(validated.action) };
+    // Stored under an id made from the name and this project alone (`<name>-<8 hex>`), the same way whatever any other
+    // project holds: the id never says whether another project has a trigger of that name. The name the person chose
+    // is kept beside it (never taken from the caller): it is what his project shows and what he types (`resolveName`).
+    let id = storedTriggerId(validated.id, project);
+    if (this.records.has(id)) id = `${validated.id}-${randomUUID().replace(/-/g, '').slice(0, 8)}`;
+    const { chosenId: _sent, ...chosen } = validated;
+    void _sent;
+    const definition = { ...chosen, id, chosenId: validated.id, spec: inProjectFolder(validated.spec, validated.workingDirectory), action: this.captureFireableAction(validated.action) };
 
     const now = this.now();
     let record: TriggerRecord = {
@@ -564,18 +647,21 @@ export class TriggerManager {
     const admitted = record;
     this.incarnations.set(definition.id, newIncarnation());
     this.records.set(definition.id, admitted);
-    try { this.store.insert(admitted); this.stored.add(definition.id); }
+    try { this.store.insert(admitted); this.stored.add(definition.id); this.storedProjects.set(definition.id, definition.workingDirectory); }
     catch (error) { this.records.delete(definition.id); throw error; }
-    noteListChanged({ list: 'triggers', change: 'created', id: definition.id });
+    noteListChanged({ list: 'triggers', change: 'created', id: definition.id, ...triggerProjectOf(definition.workingDirectory) });
     let ownedStream: StreamRuntime | undefined;
     try {
-      if (definition.spec.kind === 'on-exit') record = await this.startOnExit(record, definition.spec, now);
+      // Its child process (an on-exit command, a stream) is started in the process's own context: what its output and
+      // its exit fire later runs as no caller, never as the request that made the trigger (utils/outside-every-call.ts).
+      if (definition.spec.kind === 'on-exit') { const spec = definition.spec; const started = record; record = await outsideEveryCall(() => this.startOnExit(started, spec, now)); }
       else if (definition.spec.kind === 'stream') {
-        const starting = this.startStream(record, definition.spec, now); ownedStream = this.streams.get(definition.id); record = await starting;
+        const spec = definition.spec; const started = record;
+        const starting = outsideEveryCall(() => this.startStream(started, spec, now)); ownedStream = this.streams.get(definition.id); record = await starting;
       }
       if (this.work.stopped || this.records.get(definition.id) !== admitted) throw new Error('the trigger supervisor stopped while the trigger was starting');
       if (record !== admitted) { record = { ...record, lastError: undefined }; this.records.set(definition.id, record); this.persist(definition.id); }
-      if (definition.spec.kind === 'stream') activateStreamTrigger(this.streamOwner(), definition.id);
+      if (definition.spec.kind === 'stream') outsideEveryCall(() => activateStreamTrigger(this.streamOwner(), definition.id));
     } catch (error) {
       // Cancel only the actual resource returned by this admitted start. No PID
       // or command-name inference may target an unrelated process.
@@ -611,6 +697,23 @@ export class TriggerManager {
   get(id: string): TriggerRecord | null {
     if (!this.readable()) return null;
     return this.records.get(id) ?? null;
+  }
+
+  /**
+   * The stored id a name typed in a project means: that project's trigger of that id, else its trigger the person named
+   * so (stored as `<name>-<n>` because another project's held the name first); with no project, or none of its own so
+   * named, the name as it was typed (a stored id).
+   */
+  resolveName(name: string, project?: string | undefined): string {
+    const typed = name.trim();
+    if (!project || !project.trim()) return typed;
+    const here = projectIdentityOf(project.trim());
+    const inProject = [...this.records.values()].filter((record) => record.definition.workingDirectory !== undefined
+      && projectIdentityOf(record.definition.workingDirectory) === here);
+    // The name its people see first (a stored `<name>-<n>` of another name is reached by that other name).
+    return inProject.find((record) => (record.definition.chosenId ?? record.definition.id) === typed)?.definition.id
+      ?? inProject.find((record) => record.definition.id === typed)?.definition.id
+      ?? typed;
   }
 
   /** Run history for one trigger, newest last. */
@@ -670,6 +773,8 @@ export class TriggerManager {
   resetRefusal(id: string): string | null {
     const record = this.get(id);
     if (!record) return null;
+    const homeless = this.options.projectRefusal?.(record.definition.workingDirectory);
+    if (homeless) return `It is held: ${homeless}; give it a project (make it again from the project it is for), or remove it`;
     const check = checkReset(record);
     return check.ok ? null : check.reason;
   }
@@ -681,6 +786,10 @@ export class TriggerManager {
     this.ensureOwner('reset a trigger');
     const record = this.records.get(id);
     if (!record) return null;
+    if (this.options.projectRefusal?.(record.definition.workingDirectory)) {
+      logger.warn('Trigger reset refused: it has no project', { triggerId: id });
+      return null;
+    }
     const allowed = checkReset(record);
     if (!allowed.ok) {
       logger.warn('Trigger reset refused', { triggerId: id, reason: allowed.reason });

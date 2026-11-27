@@ -1,7 +1,6 @@
 import type { CommandContext } from '../input/command-registry.ts';
 import type { CliServicePosture } from '../cli/service-posture.ts';
 import type { OnboardingStep1CapabilityItem } from '../runtime/onboarding/index.ts';
-import { previewAgentWorkspaceTuiSettingsImport } from '../input/agent-workspace-settings.ts';
 import { browserControlPosture } from './agent-harness-browser-control.ts';
 import type { CatalogRankingOptions } from '@goodvibes/engine/terminal-shell/agent-turn/catalog-ranking';
 import { localModelCookbook } from './agent-harness-model-routing.ts';
@@ -9,7 +8,7 @@ import { sudoExecutionPosture } from './agent-harness-sudo-posture.ts';
 import { agentHarnessVibeHealth } from './agent-harness-vibe-health.ts';
 import { latestAgentKnowledgeReadiness } from './agent-harness-connected-host-status.ts';
 import { capabilityById, collectSnapshot, servicePostureFailure, setupPlanStatusForCapability, setupProviderSignalIds } from './agent-harness-setup-posture-utils.ts';
-import { browserControlSignals, localModelSetupNextAction, localModelSetupReadiness, localModelSetupSignals, localModelSetupStatus, settingsImportChangeCount, settingsImportSignals } from './agent-harness-setup-model-helpers.ts';
+import { browserControlSignals, localModelSetupNextAction, localModelSetupReadiness, localModelSetupSignals, localModelSetupStatus } from './agent-harness-setup-model-helpers.ts';
 import { connectedHostAuthModelRoute, connectedHostAuthNextAction, connectedHostAuthPosture, connectedHostAuthSignals, connectedHostAuthStatus, connectedHostBootstrapPlan, connectedHostRepairCards, connectedHostServiceProbe, hostSetupStatus, serviceProbeSignal, setupServiceLifecycleDecision } from './agent-harness-setup-connected-host.ts';
 import { installSmokePlan, installSmokeSignals, setupCompletionMarkerExists, setupSmokeArtifactResult, type SetupSmokeEvidenceList } from './agent-harness-setup-smoke.ts';
 import type { SetupPlanItem } from './agent-harness-setup-posture-types.ts';
@@ -42,7 +41,6 @@ export async function buildSetupPlan(
   const { snapshot, capabilities, smoke } = sources;
   const browserControl = once(() => browserControlPosture(context, context.extensions?.toolRegistry, options));
   const capability = (id: OnboardingStep1CapabilityItem['id']) => capabilityById(capabilities, id);
-  const settingsImport = once(() => previewAgentWorkspaceTuiSettingsImport(context));
   const localModels = once(() => localModelCookbook(context, true));
   const serviceProbe = once(async () => connectedHostServiceProbe(await sources.probeServices(), servicePostureFailure(context)));
   const authPosture = once(() => connectedHostAuthPosture(context, snapshot, options));
@@ -63,7 +61,7 @@ export async function buildSetupPlan(
         blocksAutonomy: true,
         reason: 'Daemon-backed automation, Agent Knowledge, channels, and companion routes need a reachable compatible GoodVibes host.',
         nextAction: 'Run connected-host status, then start, update, or repair the owning GoodVibes host if the live check reports a gap.',
-        userRoute: 'Agent Workspace -> Connected Host; System place, Health: check the connected host\'s compatibility',
+        userRoute: 'System, Health (the menu, Ctrl+G then m): check the connected host\'s compatibility',
         modelRoute: 'host action:"status"',
         relatedSetupItemId: 'operator-terminal',
         signals: [
@@ -87,30 +85,25 @@ export async function buildSetupPlan(
         blocksAutonomy: true,
         reason: 'Native intake needs a fresh selected-host check of a paired owner with read:work-ledger and write:work-ledger. Provider, workspace and Jev readiness are separate checks.',
         nextAction: connectedHostAuthNextAction(auth),
-        userRoute: 'Agent Workspace -> Connected Host; Models and providers, Providers',
+        userRoute: 'Devices and network, h (how this Agent connects) and p (pair something); Models and providers, Providers',
         modelRoute: connectedHostAuthModelRoute(auth),
         relatedSetupItemId: 'operator-terminal',
         signals: connectedHostAuthSignals(auth),
         authPosture: auth,
       };
     } },
-    { id: 'goodvibes-settings-import', build: () => {
-      const preview = settingsImport(), changes = settingsImportChangeCount(preview);
-      return {
-        id: 'goodvibes-settings-import',
-        label: 'GoodVibes settings import',
-        status: preview?.summary.parseErrors ? 'check' : changes > 0 ? 'recommended' : 'optional',
-        priority: 15,
-        blocksAutonomy: false,
-        reason: 'Existing shared GoodVibes settings can seed Agent provider, subscription, behavior, permission, UI, TTS, channel, helper, tool, release, and automation state.',
-        nextAction: changes > 0
-          ? 'Preview the import, explain the changed setting and subscription counts, then apply only after the user confirms the import.'
-          : 'Use this when reusing settings from GoodVibes TUI or another published GoodVibes platform store; the preview shows whether anything importable is present.',
-        userRoute: 'Agent Workspace -> Start -> Import GoodVibes settings',
-        modelRoute: 'import_goodvibes_settings action:"preview"',
-        signals: settingsImportSignals(preview),
-      };
-    } },
+    { id: 'goodvibes-settings-import', build: () => ({
+      id: 'goodvibes-settings-import',
+      label: 'The terminal app\'s settings',
+      status: 'optional',
+      priority: 15,
+      blocksAutonomy: false,
+      reason: 'The settings you set in the terminal app (display, provider, behaviour, storage, permissions, interface, voice, chat apps, side work, tools, updates, automation) can be given to the Agent; sign-ins are already shared by both programs.',
+      nextAction: 'When the user wants the Agent to have the terminal app\'s settings, run the capability: it copies each one the Agent holds differently and says what it copied; one that loosens a protection only when the user chose to copy those too.',
+      userRoute: 'System, Setup, Import settings (the menu, Ctrl+G then m)',
+      modelRoute: 'capability_run id:"settings.copy-from-terminal-app"',
+      signals: [],
+    }) },
     { id: 'provider-access', build: () => {
       const providerAccess = capability('provider-access');
       return {
@@ -121,7 +114,7 @@ export async function buildSetupPlan(
         blocksAutonomy: true,
         reason: providerAccess.detail,
         nextAction: providerAccess.selected ? 'Review the current model route and provider accounts.' : 'Choose a provider/model route or store a provider credential before relying on assistant turns.',
-        userRoute: 'Agent Workspace -> Start -> Choose main model',
+        userRoute: 'System, Setup, Choose a model (the menu, Ctrl+G then m)',
         modelRoute: 'models action:"status|providers"',
         relatedSetupItemId: providerAccess.id,
         signals: setupProviderSignalIds(snapshot),
@@ -145,7 +138,7 @@ export async function buildSetupPlan(
           : status === 'recommended'
             ? 'Have the user run the user-run checks, then save what they saw with setup action:"smoke" fields:{...}.'
             : 'Resolve connected-host, connected-host auth, and provider/model blockers; setup action:"item" setupItemId:"install-smoke" lists them.',
-        userRoute: 'Agent Workspace -> Start',
+        userRoute: 'System, Setup (the menu, Ctrl+G then m)',
         modelRoute: 'setup action:"item" setupItemId:"install-smoke"',
         signals: [...installSmokeSignals(smokePlan), `latest evidence: ${latestSmokeResult ?? 'none'}`],
         installSmokePlan: smokePlan,
@@ -161,7 +154,7 @@ export async function buildSetupPlan(
         blocksAutonomy: false,
         reason: 'A local route gives the assistant a private/offline fallback and can reduce cost, but it should be set up through visible server, refresh, and benchmark steps.',
         nextAction: localModelSetupNextAction(models),
-        userRoute: 'Agent Workspace -> Start -> Use a local model (no sign-in)',
+        userRoute: 'System, Setup, Choose a model (the menu, Ctrl+G then m)',
         modelRoute: 'models action:"local"',
         signals: localModelSetupSignals(models),
         localModelReadiness: localModelSetupReadiness(models),
@@ -189,7 +182,7 @@ export async function buildSetupPlan(
           : readiness === null
             ? 'Run host action:"status" to check the Agent Knowledge route.'
             : 'Update or repair the connected host, then run host action:"status" again.',
-        userRoute: 'Agent Workspace -> Knowledge',
+        userRoute: 'Memory and knowledge (the menu, Ctrl+G then m)',
         modelRoute: 'host action:"status"',
         relatedSetupItemId: agentKnowledge.id,
       };
@@ -220,8 +213,8 @@ export async function buildSetupPlan(
         blocksAutonomy: false,
         reason: localBehavior.detail,
         nextAction: localBehavior.selected ? 'Review imported or customized local behavior.' : 'Import discovered behavior files or create the first persona, skill, or routine.',
-        userRoute: 'Agent Workspace -> Local Context',
-        modelRoute: 'memory action:"curator" or agent_harness mode:"workspace_actions" categoryId:"onboarding-context"',
+        userRoute: 'Memory and knowledge, and This conversation (the menu, Ctrl+G then m)',
+        modelRoute: 'memory action:"curator" or capability_find need:"what the assistant should know about this project"',
         relatedSetupItemId: localBehavior.id,
       };
     } },
@@ -235,7 +228,7 @@ export async function buildSetupPlan(
         blocksAutonomy: false,
         reason: communicationChannels.detail,
         nextAction: communicationChannels.selected ? 'Review channel readiness and delivery safety.' : 'Enable only the channels where the assistant should be reachable.',
-        userRoute: 'Agent Workspace -> Messaging',
+        userRoute: 'Mail, calendar and channels, Channels (the menu, Ctrl+G then m)',
         modelRoute: 'channels action:"status"',
         relatedSetupItemId: communicationChannels.id,
         signals: snapshot.surfaces.configuredEnabledKinds,
@@ -251,7 +244,7 @@ export async function buildSetupPlan(
         blocksAutonomy: false,
         reason: automationReview.detail,
         nextAction: 'Review schedules, approvals, routine promotion, and visible autonomy queue controls before ongoing background work.',
-        userRoute: 'Agent Workspace -> Inbox & calendar -> Autonomy queue',
+        userRoute: 'Automation, and Work and agents (the menu, Ctrl+G then m)',
         modelRoute: 'autonomy action:"queue"',
         relatedSetupItemId: automationReview.id,
       };
@@ -274,7 +267,7 @@ export async function buildSetupPlan(
           : control.status === 'attention'
             ? 'Review the matching MCP server trust, connection, and schema freshness before using live UI automation.'
           : 'Configure and review a trusted browser or desktop MCP server, then inspect the execution route before offering live UI automation.',
-        userRoute: 'Agent Workspace -> Tools & MCP',
+        userRoute: 'Tools and extensions, Servers (the menu, Ctrl+G then m)',
         modelRoute: control.recommendedRoute,
         signals: browserControlSignals(control),
       };
@@ -289,7 +282,7 @@ export async function buildSetupPlan(
         blocksAutonomy: false,
         reason: 'Privilege escalation must stay explicit, visible, and user-supervised; background sudo prompts, stdin password writes, and raw password display are blocked until the platform/daemon publishes safe mediation.',
         nextAction: sudo.nextAction,
-        userRoute: 'Agent Workspace -> Work & Approvals -> Process capabilities',
+        userRoute: 'Your agents (Ctrl+O)',
         modelRoute: sudo.setupRoute,
         signals: sudo.signals,
         sudoPosture: sudo,
@@ -305,7 +298,7 @@ export async function buildSetupPlan(
         blocksAutonomy: false,
         reason: tuiDelegation.detail,
         nextAction: 'Use delegation for explicit build, fix, review, isolation, or parallelism work rather than as a setup prerequisite.',
-        userRoute: 'Agent Workspace -> Work & Approvals -> Delegate a build task',
+        userRoute: 'Work and agents, Handed off, h (hand coding work on)',
         modelRoute: 'delegation action:"status"',
         relatedSetupItemId: tuiDelegation.id,
       };
@@ -320,7 +313,7 @@ export async function buildSetupPlan(
         blocksAutonomy: false,
         reason: setupMarkerDone ? 'A setup marker already exists for this Agent scope.' : 'No setup marker exists yet, so the user may see first-run guidance again.',
         nextAction: setupMarkerDone ? 'Reopen setup only when changing provider, channel, automation, or local behavior decisions.' : 'Open onboarding, review the selected choices, then apply and close when the assistant is usable.',
-        userRoute: 'Agent Workspace -> Finish',
+        userRoute: 'System, Setup (the menu, Ctrl+G then m)',
         modelRoute: 'agent_harness mode:"open_ui_surface" surfaceId:"onboarding"',
       };
     } },

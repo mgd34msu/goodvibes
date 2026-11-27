@@ -6,8 +6,12 @@
  * decision, is the trust owner's revision, compared as an integer.
  */
 import { realpathSync } from 'node:fs';
-import { resolve } from 'node:path';
+import { resolve, sep } from 'node:path';
 import type { ExternalPermissionHost } from './external-request.js';
+
+function withinFolder(root: string, path: string): boolean {
+  return path === root || path.startsWith(root.endsWith(sep) ? root : `${root}${sep}`);
+}
 
 /** Capture revision only: the canonical manager still owns action classification. */
 export async function prepareExternalWorkspaceRevision(host: ExternalPermissionHost, signal: AbortSignal): Promise<() => void> {
@@ -29,7 +33,9 @@ export async function prepareExternalExecution(host: ExternalPermissionHost, cwd
   const target = resolver ? resolver(cwd) : origin;
   if (target === undefined) throw new Error('External process target has no workspace trust owner');
   const physical = realpathSync(resolve(cwd));
-  if (!resolver && origin !== null && (!root || realpathSync(resolve(root)) !== physical))
+  // The trust owner is a project (runtime/workspace-trust.ts workspaceTrustOwnerOf): a process starts in its root, or in
+  // a folder inside it (a program's sandbox rooted where it was opened), never outside the project its trust covers.
+  if (!resolver && origin !== null && (!root || !withinFolder(realpathSync(resolve(root)), physical)))
     throw new Error('External process target differs from its workspace trust owner');
   const originPrepare = origin?.prepareAutonomousConstraint;
   const targetPrepare = target?.prepareAutonomousConstraint;

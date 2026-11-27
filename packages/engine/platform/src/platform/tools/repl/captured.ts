@@ -118,6 +118,11 @@ export function isCapturedReplTool(tool: Tool, authority: ContractInputAuthority
   return tools.get(tool) === authority;
 }
 
+/** Whether this tool is a captured step's own REPL (any authority): a wrapper must leave it as built, or it stops working. */
+export function isAnyCapturedReplTool(tool: Tool): boolean {
+  return tools.has(tool);
+}
+
 export function createCapturedReplTool(
   binding: CapturedExecAuthority,
   featureFlags?: Pick<FeatureFlagManager, 'isEnabled'> | null,

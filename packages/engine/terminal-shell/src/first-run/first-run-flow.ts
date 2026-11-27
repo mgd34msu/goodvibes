@@ -218,8 +218,9 @@ export function firstRunDecisionModel(
     },
     readiness: (check) => decisionModelReadiness(source, check),
     storeKey: (pasted) => storeDecisionModelKey({ secrets, config }, pasted),
-    askMe: () => { config.set('permissions.mode', 'ask-me'); },
-    chooseJevDecides: () => { config.set('permissions.mode', 'jev-decides'); },
+    // The person's own choice on the first-run screen: his press goes with the write.
+    askMe: () => { config.set('permissions.mode', 'ask-me', { press: { personAsked: true } }); },
+    chooseJevDecides: () => { config.set('permissions.mode', 'jev-decides', { press: { personAsked: true } }); },
   };
 }
 

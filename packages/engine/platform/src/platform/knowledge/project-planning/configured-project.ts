@@ -9,9 +9,12 @@ import { retainConfiguredWorkspace, type ConfigManager } from '../../config/mana
 import { KnowledgeStore } from '../store.js';
 import { GOODVIBES_AGENT_KNOWLEDGE_DB_FILE, REGULAR_KNOWLEDGE_DB_FILE, type KnowledgeStoreConfig } from '../store-config.js';
 import { normalizeSpaceComponent } from '../spaces.js';
+import { projectIdentityOf } from '../../workspace/project-identity.js';
 import { inspectPersistedPlanningProjects, type PersistedPlanningProjects } from './persisted-projects.js';
 import { ProjectIdentityRegistry, ProjectIdentityUnavailableError, projectIdentityConflict, type RegisteredProjectIdentity } from './project-registry.js';
 export interface ConfiguredProjectInspection { readonly registration: 'registered' | 'unregistered'; readonly projectId: string | null }
+/** What the daemon's own folder, which is not a project, is prepared under: never a project's identity. */
+export const DAEMON_OWN_FOLDER_ID = 'daemon-own-folder';
 interface PreparedProject {
   readonly path: string;
   readonly projectId: string;
@@ -50,6 +53,12 @@ export async function prepareConfiguredProjectContext(config: ConfigManager, wor
      * file, as the terminal app and the daemon do, and keeps no knowledge file of its own.
      */
     readonly inDaemonStateFolder?: boolean;
+    /**
+     * The folder is the daemon's own, which is not a project: it gets no identity (nothing is read from or written to
+     * the project register), and the daemon's graph is prepared under {@link DAEMON_OWN_FOLDER_ID}, which no project
+     * has, so nothing a project keeps is ever filed under it.
+     */
+    readonly notAProject?: boolean;
   } = {}): Promise<ConfiguredProjectInspection> {
   const activate = options.activate === true;
   selectedFile(file); const workspace = retainConfiguredWorkspace(config);
@@ -57,9 +66,27 @@ export async function prepareConfiguredProjectContext(config: ConfigManager, wor
   workspace.assertCurrent(); if (workspace.directory !== resolve(workingDirectory)) throw new ProjectIdentityUnavailableError();
   const physicalWorkspace = captureExistingDirectory(workingDirectory);
   const current = () => { workspace.assertCurrent(); physicalWorkspace.assertCurrent(); };
+  if (options.notAProject === true) {
+    current();
+    if (!activate) return Object.freeze({ registration: 'unregistered', projectId: null });
+    const selectedPath = join(storeDirectory, file);
+    const source = await inspectPersistedPlanningProjects(selectedPath, current); current();
+    const binding: RegisteredProjectIdentity = Object.freeze({ projectId: DAEMON_OWN_FOLDER_ID, file: '', assertCurrent: current });
+    const prepared = Object.freeze({ path: selectedPath, projectId: DAEMON_OWN_FOLDER_ID, binding, source, assertCurrent: current });
+    let entries = preparations.get(config); if (!entries) { entries = new Map(); preparations.set(config, entries); }
+    const previous = entries.get(file); if (previous && previous.projectId !== prepared.projectId) throw new ProjectIdentityUnavailableError();
+    entries.set(file, prepared);
+    return Object.freeze({ registration: 'unregistered', projectId: DAEMON_OWN_FOLDER_ID });
+  }
   current(); const home = config.getHomeDirectory(); current();
   const registry = new ProjectIdentityRegistry(home ? join(home, '.goodvibes', 'project-identities') : join(workspace.configDirectory, 'project-identities'), current);
-  let registered = registry.inspect(physicalWorkspace.canonical);
+  // A program opened in a subfolder works for its project (workspace/project-identity.ts): the project's record is
+  // the one read and made, never one for the subfolder.
+  const projectRoot = projectIdentityOf(physicalWorkspace.canonical);
+  let registered = registry.inspect(projectRoot);
+  // A 3.5.0 program opened in the subfolder recorded the subfolder; its identity is carried to the project once
+  // (that old record is left as it is, and no longer read once the project has one).
+  const subfolderRecord = !registered && projectRoot !== physicalWorkspace.canonical ? registry.inspect(physicalWorkspace.canonical) : null;
   const paths = new Set([join(storeDirectory, file)]);
   if (!registered) {
     // Actual first-party saved stores may predate the monorepo/shared binding.
@@ -76,18 +103,18 @@ export async function prepareConfiguredProjectContext(config: ConfigManager, wor
     for (const selected of sources.values()) selected.assertInitialImage();
   };
   originalSourcesCurrent();
-  const associatedProjectId = registered?.projectId;
-  const old = previousDefault(workingDirectory, [...sources.values()].flatMap(selected => selected.projectIds), associatedProjectId);
+  const associatedProjectId = registered?.projectId ?? subfolderRecord?.projectId;
+  const old = previousDefault(projectRoot, [...sources.values()].flatMap(selected => selected.projectIds), associatedProjectId);
   if (registered && old !== null && old !== registered.projectId) {
     // A true conflict: the saved work names this folder one project, its identity record another. Both are named, nothing changes.
     const store = [...sources.entries()].find(([, selected]) => selected.projectIds.includes(old))?.[0] ?? 'a saved knowledge store';
-    throw projectIdentityConflict(physicalWorkspace.canonical, { id: old, where: store }, { id: registered.projectId, where: registered.file },
+    throw projectIdentityConflict(projectRoot, { id: old, where: store }, { id: registered.projectId, where: registered.file },
       `To keep the work saved in ${store}, move ${registered.file} out of ${dirname(registered.file)} and start again: the folder is then given the identity its saved work has.`);
   }
-  const previous = old;
+  const previous = old ?? subfolderRecord?.projectId ?? null;
   if (!registered) {
     if (!activate) { originalSourcesCurrent(); return Object.freeze({ registration: previous === null ? 'unregistered' : 'registered', projectId: previous }); }
-    registered = await registry.activate(physicalWorkspace.canonical, previous, config.getNativeDataWriter(), originalSourcesCurrent); current();
+    registered = await registry.activate(projectRoot, previous, config.getNativeDataWriter(), originalSourcesCurrent); current();
   }
   if (activate) {
     const binding = registered, prepared = Object.freeze({ path: selectedPath, projectId: binding.projectId, binding, source,
@@ -110,7 +137,10 @@ export async function projectIdentityOfFolder(config: ConfigManager, folder: str
   const home = config.getHomeDirectory();
   if (!home) throw new ProjectIdentityUnavailableError('This daemon has no home folder, so a project\'s identity cannot be kept.');
   const registry = new ProjectIdentityRegistry(join(home, '.goodvibes', 'project-identities'), current);
-  const registered = registry.inspect(physical.canonical) ?? await registry.activate(physical.canonical, null, config.getNativeDataWriter(), current);
+  // The project's record, as a program opened in the folder or any of its subfolders reads it (prepareConfiguredProjectContext).
+  const projectRoot = projectIdentityOf(physical.canonical);
+  const registered = registry.inspect(projectRoot) ?? await registry.activate(projectRoot,
+    projectRoot !== physical.canonical ? registry.inspect(physical.canonical)?.projectId ?? null : null, config.getNativeDataWriter(), current);
   return registered.projectId;
 }
 

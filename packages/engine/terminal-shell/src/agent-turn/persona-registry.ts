@@ -1,4 +1,5 @@
 import { freshReviewPatch, parseAgentReviewState, reviewedReviewPatch, staleReviewPatch } from './review-state.js';
+import { acceptedAuthor, authorAfterChange, memoryAwaitsOwner, newRecordAuthor, readRecordAuthor, type MemoryAuthor } from '@goodvibes/engine/platform/platform/state';
 import type { ShellPathService } from '@goodvibes/engine/platform/platform/runtime/shell';
 import {
   readJsonStore,
@@ -30,6 +31,8 @@ export interface AgentPersonaRecord {
   readonly createdAt: string;
   readonly updatedAt: string;
   readonly reviewedAt?: string | undefined;
+  /** Who wrote it (state/memory-author.ts, the same three as a memory record); absent: the owner's. */
+  readonly author?: MemoryAuthor | undefined;
 }
 
 export interface AgentPersonaCreateInput {
@@ -42,6 +45,8 @@ export interface AgentPersonaCreateInput {
   readonly provenance?: string | undefined;
   /** Make it the active persona in the same write that saves it. */
   readonly active?: boolean | undefined;
+  /** Who writes it, as the daemon authenticated the caller; absent: the owner's. */
+  readonly author?: MemoryAuthor | undefined;
 }
 
 export interface AgentPersonaUpdateInput {
@@ -53,6 +58,8 @@ export interface AgentPersonaUpdateInput {
   readonly provenance?: string | undefined;
   /** true makes it active, false stops it being active, absent leaves the active persona as it is; same write as the edit. */
   readonly active?: boolean | undefined;
+  /** Who makes the change (state/memory-author.ts `authorAfterChange`); absent: the author stays. */
+  readonly by?: MemoryAuthor | undefined;
 }
 
 export interface AgentPersonaSnapshot {
@@ -155,7 +162,13 @@ function parsePersona(value: unknown): AgentPersonaRecord | null {
     createdAt: readString(value.createdAt, nowIso()),
     updatedAt: readString(value.updatedAt, nowIso()),
     reviewedAt: reviewedAt || undefined,
+    ...authorField(readRecordAuthor(value.author)),
   };
+}
+
+/** The author field of a record, present only when there is one. */
+function authorField(author: MemoryAuthor | undefined): { author?: MemoryAuthor } {
+  return author === undefined ? {} : { author };
 }
 
 const PERSONA_STORE: JsonStoreSpec<AgentPersonaRecord> = {
@@ -254,6 +267,7 @@ export class AgentPersonaRegistry {
         ...(options.reviewed ? reviewedReviewPatch() : { reviewState: 'fresh' as const }),
         createdAt: timestamp,
         updatedAt: timestamp,
+        ...authorField(newRecordAuthor(input.author)),
       };
       this.writeStore({ ...store, personas: [...store.personas, persona], ...(input.active === true ? { activePersonaId: persona.id } : {}) });
       return persona;
@@ -282,6 +296,7 @@ export class AgentPersonaRegistry {
         provenance: input.provenance === undefined ? existing.provenance : input.provenance.trim() || existing.provenance,
         ...freshReviewPatch(),
         updatedAt: nowIso(),
+        ...authorField(authorAfterChange(existing.author, input.by, Date.now())),
       };
       const activePersonaId = input.active === true ? existing.id
         : input.active === false && store.activePersonaId === existing.id ? null
@@ -312,15 +327,18 @@ export class AgentPersonaRegistry {
     });
   }
 
-  public markReviewed(idOrName: string): AgentPersonaRecord {
+  /** `accept`: the owner himself reviewed it, which accepts a persona someone else wrote (never a model's review). */
+  public markReviewed(idOrName: string, options: { readonly accept?: boolean } = {}): AgentPersonaRecord {
     return this.locked(() => {
       const store = this.readStore();
       const existing = this.findInStore(store, idOrName);
       if (!existing) throw new Error(`Unknown persona ${idOrName}`);
+      // The owner's review accepts a persona someone else wrote.
       const updated: AgentPersonaRecord = {
         ...existing,
         ...reviewedReviewPatch(),
         updatedAt: nowIso(),
+        ...authorField(options.accept === true ? acceptedAuthor(existing.author, Date.now()) : existing.author),
       };
       this.writeStore({
         ...store,
@@ -415,10 +433,15 @@ export class AgentPersonaRegistry {
   }
 }
 
+/** A persona whose text may steer a turn: reviewed, and not someone else's words the owner has not accepted (state/memory-author.ts, the one rule). */
+export function personaGivenToTurns(persona: Pick<AgentPersonaRecord, 'reviewState' | 'author'>): boolean {
+  return persona.reviewState === 'reviewed' && !memoryAwaitsOwner(persona);
+}
+
 export function buildActivePersonaPrompt(shellPaths: ShellPathService, snapshot?: AgentPersonaSnapshot): string | null {
   const active = (snapshot ?? AgentPersonaRegistry.fromShellPaths(shellPaths).snapshot()).activePersona;
   if (!active) return null;
-  if (active.reviewState !== 'reviewed') {
+  if (!personaGivenToTurns(active)) {
     return [
       '## Active GoodVibes Agent Persona',
       `Name: ${active.name}`,

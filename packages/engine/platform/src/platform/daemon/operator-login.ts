@@ -22,6 +22,9 @@ import type { UserAuthManager } from '../security/user-auth.js';
 import { parseDaemonJsonBody } from './http/router-request-body.js';
 import { jsonErrorResponse } from './http/error-response.js';
 
+/** The refusal code of a first sign-in with the generated password that did not set the owner's own. */
+export const FIRST_SIGN_IN_SETS_PASSWORD = 'FIRST_SIGN_IN_SETS_PASSWORD';
+
 /** Sign-in attempts one client address may make in a minute. */
 export const SIGN_IN_ATTEMPTS_PER_MINUTE = 5;
 
@@ -36,15 +39,20 @@ export interface OperatorLoginDeps {
   readonly trustProxy: boolean;
 }
 
+/** The one sign-in source every loopback address of this machine counts as. */
+export const LOOPBACK_SIGN_IN_SOURCE = 'loopback';
+
 /**
- * The address a sign-in counts against: an IPv4 address as it is (an
- * IPv4-mapped IPv6 address as its IPv4 form), an IPv6 address by its /64.
+ * The source a sign-in counts against: every loopback address (all of 127.0.0.0/8, ::1, an IPv4-mapped 127 address)
+ * is ONE source, this machine, so a local process cannot use the 16 million loopback addresses as 16 million sources;
+ * any other IPv4 address as it is (an IPv4-mapped IPv6 address as its IPv4 form), an IPv6 address by its /64.
  */
-function signInAddressKey(address: string): string {
+export function signInAddressKey(address: string): string {
   const bare = address.replace(/^\[|\]$/g, '').split('%')[0]!.toLowerCase();
+  if (/^127\.\d{1,3}\.\d{1,3}\.\d{1,3}$/.test(bare) || /^(?:0{0,4}:){1,7}:?0{0,3}1$/.test(bare) || bare === '::1') return LOOPBACK_SIGN_IN_SOURCE;
   if (!bare.includes(':')) return bare;
   const mapped = /^(?:0{0,4}:){0,5}:?ffff:(\d{1,3}(?:\.\d{1,3}){3})$/.exec(bare);
-  if (mapped) return mapped[1]!;
+  if (mapped) return mapped[1]!.startsWith('127.') ? LOOPBACK_SIGN_IN_SOURCE : mapped[1]!;
   const halves = bare.split('::');
   if (halves.length > 2) return bare;
   const head = halves[0] ? halves[0].split(':') : [];
@@ -107,8 +115,14 @@ export async function handleOperatorLogin(req: Request, clientAddress: string, d
     if (lockedUntilMs) {
       const retryAfterSeconds = Math.max(1, Math.ceil((lockedUntilMs - Date.now()) / 1_000));
       return retryAfter(jsonErrorResponse({
-        error: 'Too many requests', code: 'SIGN_IN_LOCKED', state: 'repeated failed sign-ins locked this account for a short time',
-        next: [`Wait ${retryAfterSeconds} seconds, then sign in again`],
+        error: 'Too many requests', code: 'SIGN_IN_LOCKED',
+        state: addressKey === LOOPBACK_SIGN_IN_SOURCE
+          ? 'repeated failed sign-ins from this computer held its sign-ins for a short time; sign-ins from other addresses are not held by them'
+          : 'repeated failed sign-ins from this address held its sign-ins for a short time; sign-ins from other addresses are not held by them',
+        next: [
+          `Wait ${retryAfterSeconds} seconds, then sign in again`,
+          'Or, on the computer the daemon runs on, open the terminal app or the Agent, go to Permissions and safety, Sign-in, and change your password there (p): a new password ends every hold at once',
+        ],
       }, { status: 429 }), retryAfterSeconds);
     }
     if (authResult.staleBootstrapCredential) {
@@ -139,7 +153,35 @@ export async function handleOperatorLogin(req: Request, clientAddress: string, d
   }
 
   const { user } = authResult;
-  const session = deps.userAuth.createSession(user.username, { viaBootstrapCredential: authResult.usedBootstrapCredential });
+  // The first-run file's generated password is for the first sign-in only: that sign-in sets the owner's own password
+  // (`newPassword`), which removes the file and retires the generated one (UserAuthManager.rotatePassword). The
+  // generated pair alone never makes a session: a process that read the file is not the owner signing in.
+  if (authResult.usedBootstrapCredential) {
+    const chosen = typeof body.newPassword === 'string' ? body.newPassword : '';
+    if (!chosen) {
+      return jsonErrorResponse({
+        error: 'Set your own password to finish the first sign-in', code: FIRST_SIGN_IN_SETS_PASSWORD,
+        state: 'this is the generated first-run password: it signs in only once, by setting a password of your own; no session was made',
+        next: ['Sign in again with the same username and password and a new password of your own (newPassword, at least 8 characters)'],
+      }, { status: 409 });
+    }
+    if (chosen === password) {
+      return jsonErrorResponse({
+        error: 'Choose a password of your own', code: FIRST_SIGN_IN_SETS_PASSWORD,
+        state: 'the new password is the generated one; no session was made', next: ['Choose a different password (at least 8 characters)'],
+      }, { status: 400 });
+    }
+    try {
+      deps.userAuth.rotatePassword(user.username, chosen);
+    } catch (error) {
+      return jsonErrorResponse({
+        error: error instanceof Error ? error.message : String(error), code: FIRST_SIGN_IN_SETS_PASSWORD,
+        state: 'your password was not set; no session was made', next: ['Choose a password of at least 8 characters, then sign in again'],
+      }, { status: 400 });
+    }
+    logger.info('First sign-in: the owner set his own password; the first-run file was removed and its password retired', { username: user.username });
+  }
+  const session = deps.userAuth.createSession(user.username);
   authSuccessTotal.add(1);
   logger.info('AUTH_SUCCEEDED', { type: 'AUTH_SUCCEEDED', requestId, username: user.username, clientIp: clientAddress, method: 'password', source: deps.source });
   if (deps.runtimeBus) {
@@ -151,7 +193,7 @@ export async function handleOperatorLogin(req: Request, clientAddress: string, d
   // nothing signs in with it: while the user it names still has the generated
   // password, the file is that password (deleting it withdraws it), so another
   // user's sign-in never takes it away.
-  if (!authResult.usedBootstrapCredential && deps.userAuth.retireStaleBootstrapCredential()) {
+  if (deps.userAuth.retireStaleBootstrapCredential()) {
     logger.info('Bootstrap credential file retired: the user it names has a password of its own', { username: user.username });
   }
 

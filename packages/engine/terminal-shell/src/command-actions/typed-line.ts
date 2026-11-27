@@ -15,6 +15,7 @@ import {
   fillSentence as capabilityFillSentence,
   lastsWords as capabilityLastsWords,
   riskDoneLine,
+  sentenceWhenHolds,
   showWhenHolds,
 } from '@goodvibes/engine/platform/platform/capabilities/words';
 import {
@@ -329,7 +330,10 @@ export function actionSentence(action: ActionShape, values: ActionValues): strin
     const required = input.required;
     if (typeof required === 'object') shown[input.id] = required.defaultMeans;
   }
-  return fillSentence(action.sentence, shown, lastsWords(action, values));
+  // What will really happen with these values, when the capability says it differs (the ask says the same).
+  const when = (action as { readonly sentenceWhen?: { readonly input: string; readonly values: readonly string[]; readonly startsWith?: readonly string[] | undefined; readonly sentence: string } | undefined }).sentenceWhen;
+  const sentence = when && sentenceWhenHolds(when, values) ? when.sentence : action.sentence;
+  return fillSentence(sentence, shown, lastsWords(action, values));
 }
 
 /** The action's done line for these values; empty for an action that has none (a read). */

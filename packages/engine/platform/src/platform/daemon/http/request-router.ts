@@ -43,13 +43,29 @@ export interface DaemonRequestRouterOptions {
   /** The answer to a request without a valid credential. Absent: the plain authentication refusal. */
   readonly refuseUnauthenticated?: ((req: Request) => Response) | undefined;
   /** A refusal for an authenticated request before any route sees it, or null to let it through. */
-  readonly admit?: ((req: Request) => Response | null) | undefined;
+  readonly admit?: ((req: Request) => Response | null | Promise<Response | null>) | undefined;
+  /**
+   * The answer for a request whose method the dispatch must decide itself before a route module serves it (a method of
+   * a risk class the owner decides, daemon/method-owner-decision.ts): sent through the dispatch, which serves it on a
+   * yes. Null: the route serves it as it is.
+   */
+  readonly decide?: ((req: Request) => Promise<Response | null> | null) | undefined;
   /**
    * For a request carrying a retry key its method takes: the answer, served
    * once per key (control-plane/idempotent-replay.ts). Null: the request is
    * served as it is.
    */
   readonly keyedReplay?: ((req: Request, serve: (req: Request) => Promise<Response>) => Promise<Response> | null) | undefined;
+  /**
+   * The answer a route served, as this caller may read it (a list or a search its method declares, filtered to what the
+   * caller may reach: control-plane/caller-reach.ts). Absent, or null: the answer as served.
+   */
+  readonly answer?: ((req: Request, response: Response) => Promise<Response | null>) | undefined;
+  /**
+   * Serve the route as this request's caller reaches records: a paged list keeps only what the caller may reach before
+   * it cuts its page (control-plane/caller-reach.ts `reachFilterOf`, daemon-api `withRecordReach`). Absent: as served.
+   */
+  readonly withinReach?: (<T>(req: Request, serve: () => Promise<T>) => Promise<T>) | undefined;
 }
 
 export class DaemonRequestRouter {
@@ -88,18 +104,35 @@ export class DaemonRequestRouter {
   async route(req: Request): Promise<Response> {
     const preAuth = await this.options.preAuth?.(req);
     if (preAuth) return preAuth;
+    return this.routeAuthenticated(req);
+  }
 
+  /**
+   * One request past the routes that need no credential: the one authentication, then every check a request passes
+   * (admit, the owner's decision), the route, and the answer as its caller may read it. The door of a request built in
+   * process for a caller that has not passed them (a socket's method-and-path call: `markForAdmission`).
+   */
+  async routeAuthenticated(req: Request): Promise<Response> {
     // The one authentication of this request; every check after this reads the bound context.
     if (!this.options.authenticate(req)) {
       return this.options.refuseUnauthenticated?.(req) ?? authenticationRequired();
     }
 
-    const refusal = this.options.admit?.(req);
+    const refusal = await this.options.admit?.(req);
     if (refusal) return refusal;
 
-    const keyed = this.options.keyedReplay?.(req, (request) => this.serve(request));
-    if (keyed) return await keyed;
-    return await this.serve(req);
+    const decided = this.options.decide?.(req);
+    if (decided) {
+      const answer = await decided;
+      if (answer) return answer;
+    }
+
+    const serveOnce = async (): Promise<Response> => {
+      const keyed = this.options.keyedReplay?.(req, (request) => this.serve(request));
+      return keyed ? await keyed : await this.serve(req);
+    };
+    const served = this.options.withinReach ? await this.options.withinReach(req, serveOnce) : await serveOnce();
+    return (await this.options.answer?.(req, served)) ?? served;
   }
 
   /** The route's answer, or the 404 for a path no route serves. */
@@ -116,6 +149,22 @@ export class DaemonRequestRouter {
       { status: 404 },
     );
   }
+}
+
+const forAdmission = new WeakSet<Request>();
+
+/**
+ * Mark a request the daemon builds in process for a caller that has not passed the checks every request passes (a
+ * socket's method-and-path call): the router sends it through them (`routeAuthenticated`), never straight to its route.
+ */
+export function markForAdmission(req: Request): Request {
+  forAdmission.add(req);
+  return req;
+}
+
+/** Whether `req` was marked by {@link markForAdmission}. */
+export function isMarkedForAdmission(req: Request): boolean {
+  return forAdmission.has(req);
 }
 
 /** The refusal for a request that carries no valid credential. */

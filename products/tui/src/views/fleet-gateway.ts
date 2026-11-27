@@ -18,7 +18,7 @@
 
 import type { ConfigManager } from '@goodvibes/engine/platform/platform/config';
 import type { OperatorMethodOutput } from '@goodvibes/engine/platform';
-import { resolveOperatorRpc } from '../runtime/client/operator-endpoint.ts';
+import { invokePressed, resolveOperatorRpc } from '../runtime/client/operator-endpoint.ts';
 
 /** fleet.attempts.list output, the held-merge groups awaiting a winner pick. */
 export type FleetAttemptsList = OperatorMethodOutput<'fleet.attempts.list'>;
@@ -101,7 +101,8 @@ export function createFleetGateway(deps: FleetGatewayDeps): FleetGatewayResoluti
     listAttempts: (workstreamId) => platformClient.operator.invoke('fleet.attempts.list', { workstreamId }),
     pick: (input) => platformClient.operator.invoke('fleet.attempts.pick', input),
     resolveConflict: (itemId) => platformClient.operator.invoke('fleet.conflicts.resolve', { itemId }),
-    discardWorktree: (path) => platformClient.operator.invoke('worktrees.discard', { path }),
+    // Only from the person's own key (D on the row, fleet-acts.ts): his press.
+    discardWorktree: (path) => invokePressed<FleetWorktreeDiscardReceipt>(platformClient, 'worktrees.discard', { path }),
     listWorktreePaths: async () => (await platformClient.operator.invoke('worktrees.snapshot', {})).records.map((record) => record.path),
     getGraph: (workstreamId) => platformClient.operator.invoke('fleet.graph.get', { workstreamId }),
     steerObserved: (input) => platformClient.operator.invoke('fleet.observed.steer', input),

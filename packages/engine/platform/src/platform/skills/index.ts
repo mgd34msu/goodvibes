@@ -71,6 +71,7 @@ export {
   renderSkillStandardMarkdown,
   skillLibraryPath,
   skillMayLoad,
+  locatedSkillMayLoad,
   skillStandardFilePath,
   type SkillLibraryOptions,
   type SkillLibraryWriteEffects,

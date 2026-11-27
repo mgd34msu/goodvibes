@@ -1,4 +1,4 @@
-import type { AgentWorkspaceLocalLibraryItem } from './local-library-items.js';
+import type { AgentLocalLibraryItem } from './local-library-items.js';
 import type { LearningCandidateDraft, LearningCandidateStatus, LocalLearningCandidateDomain } from './learning-curator-types.js';
 import { MIN_PROMPT_MEMORY_CONFIDENCE } from './memory-prompt.js';
 export { MIN_PROMPT_MEMORY_CONFIDENCE };
@@ -7,17 +7,17 @@ export { MIN_PROMPT_MEMORY_CONFIDENCE };
  * Whether a stored memory is injected into prompts: the platform's own recall floor, plus the exclusions it applies
  * (stale or contradicted records, and records outside their validity window).
  */
-export function isMemoryPromptEligible(item: AgentWorkspaceLocalLibraryItem): boolean {
+export function isMemoryPromptEligible(item: AgentLocalLibraryItem): boolean {
   if (item.reviewState === 'stale' || item.reviewState === 'contradicted') return false;
   if (item.temporalStatus !== undefined && item.temporalStatus !== 'active') return false;
   return (item.confidence ?? 0) >= MIN_PROMPT_MEMORY_CONFIDENCE;
 }
 
-export function isReviewed(item: AgentWorkspaceLocalLibraryItem): boolean {
+export function isReviewed(item: AgentLocalLibraryItem): boolean {
   return item.reviewState === 'reviewed';
 }
 
-export function missingRequirementCount(item: AgentWorkspaceLocalLibraryItem): number {
+export function missingRequirementCount(item: AgentLocalLibraryItem): number {
   return item.missingRequirementCount ?? 0;
 }
 
@@ -43,7 +43,7 @@ export function routeList(values: readonly string[]): string {
 
 export function candidateBase(
   domain: LocalLearningCandidateDomain,
-  item: AgentWorkspaceLocalLibraryItem,
+  item: AgentLocalLibraryItem,
   status: LearningCandidateStatus,
   reason: string,
   next: string,

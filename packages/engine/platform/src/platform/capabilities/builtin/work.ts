@@ -11,8 +11,16 @@
  * `work.plan.*`), run as the same caller (`caller.method`): the capability
  * names only the work, `work.target` reads from it what the method takes, and
  * the outcome is said with the work's own title.
+ *
+ * Each act that makes a piece of work run (hand over, start, approve, go on, run a step again, go on without one) first
+ * keeps on the work's record who caused it (`caller.cause`, workflow/work-ledger/work-plans.ts `WorkCause`): its turns
+ * are the owner's own only when he himself asked for it or approved it; anyone else's work runs reads only and no
+ * command outside a real sandbox until he does. Handing work over and approving a plan are his own acts: anyone but
+ * the person is put to him, opening on No (a model's delegation from his own conversation is decided under his mode).
  */
 import { CapabilityRefusal, type CapabilityCaller, type CapabilityDefinition, type InputDescription, type ListName } from '../types.js';
+import type { WorkCause } from '../../workflow/work-ledger/work-plans.js';
+import { stampExposure } from '../../security/conversation-exposure.js';
 
 /** Your work (`work.list`), the list a work input chooses from; registered in terminal-shell (native/work-command.ts). */
 export const WORK_ITEMS_LIST = 'work.items' as ListName;
@@ -94,20 +102,79 @@ async function liveRunnerAct(caller: CapabilityCaller, work: string, title: stri
   }
 }
 
-function progressWords(snapshot: Answer): string {
+/** The piece of work as the Work place reads it (`work.list`): its state there and the line its run says. */
+interface WorkReading { readonly state: string; readonly statusLine: string; readonly question: string }
+
+async function workReading(caller: CapabilityCaller, work: string): Promise<WorkReading | undefined> {
+  try {
+    const listed = record(await methodOf(caller)('work.list', {}));
+    const works = Array.isArray(listed['works']) ? listed['works'].map(record) : [];
+    const found = works.find((entry) => text(entry['id']) === work || text(entry['title']) === work);
+    if (!found) return undefined;
+    const run = record(found['run']);
+    const questions = Array.isArray(run['questions']) ? run['questions'].map(record) : [];
+    return { state: text(found['state']), statusLine: text(run['statusLine']), question: text(questions[0]?.['question']).split('\n')[0] ?? '' };
+  } catch {
+    return undefined;
+  }
+}
+
+/**
+ * Where a piece of work stands, in the Work place's words: done when every step is done and its results are met and
+ * kept; "you stopped it" when it was stopped; waiting for you only when something waits for you, saying what; then how
+ * far its steps and results came. The runner's own state names (queued, cancelled, awaiting-owner) are never shown.
+ */
+function progressWords(snapshot: Answer, reading: WorkReading | undefined): string {
   const progress = record(snapshot['progress']);
   const units = record(progress['units']);
   const criteria = record(progress['criteria']);
-  if (Object.keys(progress).length === 0) {
-    return snapshot['kind'] === 'pending-intent' ? 'it is starting' : snapshot['state'] === 'cancelled' ? 'it was stopped' : 'it has not started';
-  }
   const status = text(progress['status']);
-  const steps = typeof units['total'] === 'number' ? `${units['passed'] ?? 0} of ${units['total']} steps done` : '';
-  const results = typeof criteria['total'] === 'number' ? `${criteria['met'] ?? 0} of ${criteria['total']} results met` : '';
-  return [status === 'passed' ? 'done' : status === 'awaiting-owner' ? 'it needs you' : status || 'running', steps, results].filter(Boolean).join(', ');
+  const stepsTotal = typeof units['total'] === 'number' ? units['total'] : 0;
+  const steps = stepsTotal > 0 ? `${units['passed'] ?? 0} of ${stepsTotal} steps done${typeof units['failed'] === 'number' && units['failed'] > 0 ? `, ${units['failed']} failed` : ''}` : '';
+  const results = stepsTotal > 0 && typeof criteria['total'] === 'number' ? `${criteria['met'] ?? 0} of ${criteria['total']} results met` : '';
+  const how = [steps, results].filter(Boolean).join(', ');
+  const said = (line: string): string => line.replace(/\.\s*$/u, '');
+  const stopped = snapshot['state'] === 'cancelled' || status === 'cancelled' || reading?.state === 'stopped';
+  const where = (() => {
+    if (stopped) return 'you stopped it';
+    if (Object.keys(progress).length === 0) return snapshot['kind'] === 'pending-intent' ? 'it is starting' : 'it has not started';
+    if (status === 'passed' || reading?.state === 'done') return 'done';
+    if (status === 'failed' || reading?.state === 'failed') return reading?.statusLine ? said(reading.statusLine) : 'it failed';
+    if (status === 'awaiting-owner' || reading?.state === 'needs-you' || reading?.state === 'step-failed' || reading?.state === 'interrupted') {
+      const what = reading?.statusLine || reading?.question;
+      return what ? `it waits for you: ${said(what)}` : 'it waits for you in Work';
+    }
+    if (stepsTotal === 0) return 'its plan is being written';
+    return 'it runs';
+  })();
+  return how ? `${where}; ${how}` : where;
 }
 
-type Work = CapabilityDefinition<unknown>;
+/** Where who caused a piece of work to run is kept: on its record in the caller's project's Work (work-plans.ts). */
+export interface WorkCauseCapabilityServices {
+  readonly workCauses?: { note(project: string | undefined, workId: string, cause: WorkCause): Promise<void> } | undefined;
+}
+
+/**
+ * Keep on the work's record who made it run, before it runs: the caller's cause (set by `capabilities.run`); a caller
+ * that names none is someone else. The owner's own act makes the work his; anyone else's never takes it from him.
+ */
+async function noteCause(services: WorkCauseCapabilityServices, caller: CapabilityCaller, workId: string): Promise<void> {
+  if (!workId) return;
+  // Work handed over from a conversation that read text from outside starts with what it read: what its steps make that
+  // runs later, sends, spends or loosens is asked of the owner (security/conversation-exposure.ts).
+  stampExposure(`work:${workId}`);
+  if (!services.workCauses) return;
+  try {
+    await services.workCauses.note(caller.workingDirectory, workId, caller.cause ?? { party: 'other', who: 'a caller that is not the owner himself' });
+  } catch (error) {
+    // Work made before causes were kept waits on the owner's answer in Waiting for you: it runs nothing until then.
+    if (error instanceof Error && error.name === 'WorkPlanRefusal') throw new CapabilityRefusal(error.message, 'Answer "keep it as mine" or "drop it" in Waiting for you.');
+    throw error;
+  }
+}
+
+type Work = CapabilityDefinition<WorkCauseCapabilityServices>;
 
 function daemonWork(fields: Omit<Work, 'capability' | 'done' | 'lasts' | 'touches' | 'risk'> & Partial<Pick<Work, 'lasts' | 'touches' | 'risk'>> & { readonly id: string; readonly repeat: 'safe' | 'unsafe' }): Work {
   const { id, repeat, ...rest } = fields;
@@ -130,8 +197,9 @@ export const WORK_START: Work = daemonWork({
   id: 'work.start', repeat: 'safe', actionId: 'start', label: 'Start a piece of work', word: 'start', inputs: [WORK],
   sentence: '{work} starts (kick off the job you asked for): its plan is written and its steps run on the daemon until it is done or you stop it.', undoneBy: 'cancel',
   example: { work: 'work-1a2b' },
-  async run(values, _services, caller) {
+  async run(values, services, caller) {
     const { title, input } = await target(caller, values.work!, 'execution');
+    await noteCause(services, caller, text(input['workId']) || values.work!);
     try {
       const snapshot = record(await methodOf(caller)('workLedger.execution.start', input));
       return { text: snapshot['kind'] === 'pending-intent' ? `"${title}" is starting.` : `Started "${title}".`, data: snapshot };
@@ -155,7 +223,7 @@ export const WORK_STATUS: Work = daemonWork({
     const { title, input } = await target(caller, values.work!, 'execution');
     try {
       const snapshot = record(await methodOf(caller)('workLedger.execution.status', input));
-      return { text: `"${title}": ${progressWords(snapshot)}.`, data: snapshot };
+      return { text: `"${title}": ${progressWords(snapshot, await workReading(caller, values.work!))}.`, data: snapshot };
     } catch (error) {
       // No run yet is an answer, not a failure: the work was never started.
       if (text(record(error)['code']) === 'NATIVE_EXECUTION_NOT_FOUND') return { text: `"${title}": not started.`, data: { started: false } };
@@ -177,8 +245,9 @@ export const WORK_CANCEL: Work = daemonWork({
 export const WORK_RESUME: Work = daemonWork({
   id: 'work.resume', repeat: 'safe', actionId: 'resume', label: 'Go on with a piece of work after a stop', word: 'resume', inputs: [WORK],
   sentence: 'Carry on with the job {work} that stopped halfway: it goes on from where it stopped; a finished one has its results checked and kept.', example: { work: 'work-1a2b' },
-  async run(values, _services, caller) {
+  async run(values, services, caller) {
     const { title, input } = await target(caller, values.work!, 'execution');
+    await noteCause(services, caller, text(input['workId']) || values.work!);
     const snapshot = await runnerAct(caller, title, 'workLedger.execution.resume', input);
     const settled = text(record(snapshot['settlement'])['state']) === 'published';
     return { text: settled ? `The results of "${title}" were checked and kept.` : `"${title}" goes on.`, data: snapshot };
@@ -206,8 +275,9 @@ export const WORK_RETRY: Work = daemonWork({
   id: 'work.retry', repeat: 'unsafe', actionId: 'retry', label: 'Run a failed step again', word: 'retry',
   inputs: [WORK, FAILED_STEP],
   sentence: 'Step {step} of {work} failed and runs again now with a fresh agent; the steps waiting on it run once it is done.', example: { work: 'work-1a2b', step: 'u-2' },
-  async run(values, _services, caller) {
+  async run(values, services, caller) {
     const { title, input } = await target(caller, values.work!, 'contract', { unitId: values.step });
+    await noteCause(services, caller, values.work!);
     const outcome = await liveRunnerAct(caller, values.work!, title, 'contracts.retryUnit', input);
     if (outcome['outcome'] === 'refused') throw new CapabilityRefusal(`Not run again: ${text(outcome['reason'])}.`);
     return { text: `The failed step of "${title}" runs again; the steps waiting on it run once it is done.`, data: outcome };
@@ -232,12 +302,13 @@ export const WORK_GO_ON_WITHOUT: Work = daemonWork({
   inputs: [WORK, FAILED_STEP], lasts: 'kept',
   sentence: 'Step {step} of {work} failed; the work goes on without it and its result, where no step still to run needs that result. Its results are checked as usual.',
   example: { work: 'work-1a2b', step: 'u-3' },
-  async run(values, _services, caller) {
+  async run(values, services, caller) {
     const failed = await failedStepOf(caller, values.work!, values.step!);
     const { title, input } = await target(caller, values.work!, 'contract', { escalationId: text(failed?.['pause']), text: 'go on' });
     if (!failed) throw new CapabilityRefusal(`"${title}" was left as it is: that step is not one it stopped at.`);
     const step = text(failed['title']) || values.step!;
     if (failed['canGoOn'] !== true) throw new CapabilityRefusal(`"${title}" was left as it is: the steps after "${step}" need its result. Run it again or stop the work.`);
+    await noteCause(services, caller, values.work!);
     const reply = await liveRunnerAct(caller, values.work!, title, 'contracts.reply', input);
     return { text: `"${title}" goes on without the step "${step}".`, data: reply };
   },
@@ -307,7 +378,11 @@ export const WORK_PLAN_DISCARD = planAct('work.plan-discard', 'plan-discard', 'T
 export const WORK_APPROVE: Work = daemonWork({
   id: 'work.approve', repeat: 'safe', actionId: 'approve', label: 'Approve a plan and start the work', word: 'approve', inputs: [WORK],
   sentence: 'The plan of {work} is approved and the work starts with exactly its steps.', undoneBy: 'cancel', example: { work: 'work-1a2b' },
-  async run(values, _services, caller) {
+  // Approving is the owner's own act: anyone but the person (a model, a device, a member, a script) is put to him,
+  // opening on No, and what he approves runs as his own.
+  ownerOnly: { reason: 'approving a plan starts the work as yours', instead: 'the owner approves it himself in Work, or answers yes when it is put to him' },
+  ownersAct: true,
+  async run(values, services, caller) {
     const method = methodOf(caller);
     const listed = record(await method('work.list', {}));
     const works = Array.isArray(listed['works']) ? listed['works'].map(record) : [];
@@ -327,6 +402,7 @@ export const WORK_APPROVE: Work = daemonWork({
       approved = record(await method('work.plan.approve', { work: values.work }));
     }
     const { title, input } = await target(caller, workId, 'execution');
+    await noteCause(services, caller, text(input['workId']) || workId);
     const snapshot = record(await method('workLedger.execution.start', input));
     return { text: `Approved the plan of "${title}" (${stepCount(record(approved['plan']))}) and started it.`, data: { ...snapshot, work: workId } };
   },
@@ -378,6 +454,7 @@ export const WORK_PROPOSE: CapabilityDefinition<WorkProposalCapabilityServices> 
   ],
   sentence: 'Proposes the work "{goal}" with its plan of steps for you to approve: it waits in Work, where you can change, move, take out or rewrite a step, approve it (that starts the work) or throw it away. Nothing runs until you approve.',
   example: { goal: 'Add retries to the uploader', criteria: 'an upload that fails twice still finishes', steps: '1. Find the uploader: read where uploads are sent\n2. Add retries: retry a failed upload twice with a pause (after 1)\n3. Test it: a test where the first two uploads fail (after 2)' },
+  noControl: 'It is what a model in plan mode offers in place of acting; a person asks for work with New work in the Work place, and approves, changes or throws away a proposal there.',
   async run(values, services, caller) {
     if (!services.workProposals) throw new CapabilityRefusal('This daemon holds no plans before they run, so nothing was proposed.', undefined, 'UNAVAILABLE');
     const criteria = (values.criteria ?? '').split(/\r?\n/).map((line) => line.trim()).filter(Boolean);
@@ -410,13 +487,19 @@ export const WORK_DELEGATE: Work = daemonWork({
   id: 'work.delegate', repeat: 'unsafe', actionId: 'delegate', label: 'Hand a task over as a piece of work', word: 'delegate', lasts: 'kept',
   inputs: [
     { id: 'goal', label: 'The task', help: 'What is to be done, in a sentence or a few', kind: 'long-text', freeTextReason: 'the task in words', required: true, typed: { tail: true } },
-    { id: 'criteria', label: 'Done when', help: 'The results that mean it is done, one per line (empty: the task done as asked)', kind: 'long-text', freeTextReason: 'what done means', required: false, typed: { flag: '--done-when' } },
+    { id: 'criteria', label: 'Done when', help: 'The results that mean it is done, one per line (empty: the task done as asked)', kind: 'long-text', freeTextReason: 'what done means', required: { default: '', defaultMeans: 'the task done as asked' }, typed: { flag: '--done-when' } },
   ],
   callerNeeds: { project: 'A task handed over is work in a project: the call names the project folder it is for.' },
   sentence: 'The task "{goal}" is handed over as a piece of work for this project: its plan is written and its steps run on the daemon; it shows in Work, and its result goes back to the conversation that asked.',
   undoneBy: 'cancel',
   example: { goal: 'Add retries to the uploader', criteria: 'an upload that fails twice still finishes' },
-  async run(values, _services, caller) {
+  noControl: 'It is how a model or an outside agent hands a task over; a person asks for work with New work in the Work place, or in the conversation.',
+  // Work handed over runs as whoever caused it: anyone but the person (a model, a device, a member, a script, an outside
+  // agent) is put to the owner, opening on No; a model's delegation from his own conversation is decided under his mode
+  // as an agent spawn (routes/capabilities.ts conversationDelegation) and carries that conversation's party.
+  ownerOnly: { reason: 'work handed over runs on your machine as yours', instead: 'the owner hands the task over himself, or answers yes when it is put to him' },
+  ownersAct: true,
+  async run(values, services, caller) {
     const method = methodOf(caller);
     const goal = (values.goal ?? '').trim();
     if (!goal) throw new CapabilityRefusal('Nothing was handed over: say what the task is.');
@@ -442,6 +525,8 @@ export const WORK_DELEGATE: Work = daemonWork({
         throw error;
       }
     }
+    // Who handed it over is on its record before anything of it runs.
+    await noteCause(services, caller, workId);
     let title = workId;
     try {
       // Started as it is now: a start that met the work a moment after it changed reads it again and starts it.

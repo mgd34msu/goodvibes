@@ -27,6 +27,7 @@
 import { randomUUID } from 'node:crypto';
 import type { ControlPlaneGateway } from '../../control-plane/index.js';
 import { RENDER_GRADE_SESSION_DOMAINS } from '../../control-plane/gateway-utils.js';
+import type { EventReachContext } from '../../control-plane/event-reach.js';
 
 export interface SessionEventStreamOptions {
   /** Distinguishes this route's subscribers, e.g. `shared-session`. */
@@ -38,6 +39,8 @@ export interface SessionEventStreamOptions {
   readonly principalId?: string | undefined;
   /** Whether the opening credential still holds, asked before each frame; false closes the stream. */
   readonly isAuthorized?: (() => boolean) | undefined;
+  /** Who follows, as a call names its caller: only events about records it may reach (control-plane/event-reach.ts). */
+  readonly reachContext?: EventReachContext | undefined;
 }
 
 /** Open a render-grade, session-scoped SSE stream for one session. */
@@ -62,5 +65,6 @@ export function openScopedSessionEventStream(
     label: `${options.clientPrefix}/${options.sessionId}`,
     ...(options.principalId === undefined ? {} : { principalId: options.principalId }),
     ...(options.isAuthorized === undefined ? {} : { isAuthorized: options.isAuthorized }),
+    ...(options.reachContext === undefined ? {} : { reachContext: options.reachContext }),
   });
 }

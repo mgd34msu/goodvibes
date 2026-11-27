@@ -7,9 +7,11 @@
  * under `generated/`, as `/media collect` did before; the outcome says where.
  * The job was paid for when it was accepted; nothing new is spent.
  */
-import { existsSync, mkdirSync, writeFileSync } from 'node:fs';
+import { existsSync } from 'node:fs';
 import { join } from 'node:path';
 import { CapabilityRefusal, type CapabilityCaller, type CapabilityDefinition, type ListName } from '../types.js';
+import { callerPathOf } from '../path-inputs.js';
+import { writeHeldFile } from '../held-paths.js';
 
 /** What the handler reads a collected file from: the daemon's artifact store. */
 export interface MediaCollectServices {
@@ -71,8 +73,9 @@ export const MEDIA_COLLECT: CapabilityDefinition<MediaCollectServices> = {
       if (existsSync(path)) return { id, where: `is kept with your artifacts and not saved to ${path}: a file is already there, left as it is` };
       try {
         const content = await services.artifactContent(id);
-        mkdirSync(join(folder, 'generated'), { recursive: true });
-        writeFileSync(path, content, { flag: 'wx' });
+        // Placed by the one rule (path-inputs.ts `callerPathOf`: inside the caller's checked project, held for the call,
+        // so a link planted at generated/ or at the file's name leads nowhere) and written the one way, never over a file.
+        writeHeldFile(callerPathOf(caller, path, { label: 'The saved file' }), content, undefined, true);
         return { id, where: `is saved to ${path}, and kept with your artifacts`, path };
       } catch (error) {
         return { id, where: `is kept with your artifacts and not saved to ${path} (${error instanceof Error ? error.message : String(error)})` };

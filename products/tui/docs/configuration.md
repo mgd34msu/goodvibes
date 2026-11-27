@@ -6,7 +6,7 @@ Settings are layered, not stored in a single working-directory file. Four layers
 | --- | --- |
 | 1. Defaults | Built into the platform config schema |
 | 2. Global TUI settings | `~/.goodvibes/tui/settings.json` |
-| 3. Project settings | `.goodvibes/tui/settings.json` in the working directory |
+| 3. Project settings | `.goodvibes/settings.json` at the project's root: one file every program and the daemon read for the project (a 3.5.0 project's `.goodvibes/tui/`, `.goodvibes/agent/` and `.goodvibes/daemon-host/settings.json` are carried into it once and left as they were) |
 | 4. CLI/runtime overrides | Flags at launch and live changes made during the session | The shared file `~/.goodvibes/goodvibes.json` is reserved for future
 cross-app state; TUI settings do not live there.
 
@@ -20,6 +20,18 @@ window settings, and `permissions.mode`, `permissions.tools.*`,
 Every other key in a project file, including `statusline.*`, provider and model
 choices, judgment settings, destinations and the update feed, is skipped with a
 notice naming it; set those in your own `~/.goodvibes/tui/settings.json`.
+
+The same file decides the daemon's turns in the project: a web chat, a schedule's
+run, a trigger's turn, a runner, a hosted session, a channel conversation and a
+step of Work there run under its permission settings, as this program opened
+there does. Where it sets nothing, the daemon's own settings apply; where both
+set a protection, the stricter wins.
+
+`storage.automaticProjectsFolder` ("Folder for automatic projects", kept in the
+daemon's settings; System, Workspaces, `f`): where the daemon makes a project for
+a chat that has none, the first time your own message there needs somewhere to
+work. Empty (the default) means `~/goodvibes-projects`; a folder inside the
+daemon's home is refused.
 
 Most settings live under the schema owned by the platform config system and
 are editable live from the fullscreen `/settings` workspace or `/settings`. See
@@ -111,7 +123,7 @@ for it to read when it starts.
 | --- | --- |
 | `ask-me` | Reads, edits inside the workspace and calls a saved rule or `permissions.tools.*` allows run without asking. Jev reads each other call's risk: calls it reads as critical, irreversible or security-weakening, and owner-only decisions, wait for your reply, bound to the exact action, and the rest run. With no decision model in use, every such call your tool settings do not allow asks you |
 | `jev-decides` (default) | Jev, the decision model, decides judgment calls: it permits ordinary work and justified risk and refuses genuinely harmful actions; owner-only decisions (granting access, loosening a security, judgment or payment setting, a call your own "always ask me" rule covers, a change asked for from a channel, a deletion nothing keeps a copy of, sending to a new recipient, sending content derived from untrusted text, and changing what a contract requires) still ask you, and Jev never answers them. With no working decision model it behaves as `ask-me`. While `jev-decides` is only the default (you have not chosen a mode), it also behaves as `ask-me` unless the endpoint, the model and every fallback target a decision can reach match the shipped calibration record (the hosted endpoint and `jev-latest`); choosing `jev-decides` yourself, in `/settings`, with Shift+Tab, for a hosted session or in a channel profile, applies it on any working decision model |
-| `just-vibes` | Does as much as it can without interrupting you: Jev decides judgment calls when a decision model works; an owner-only decision, or a judgment with no decision model, is not run and is held, and the end of each run lists what was held (a headless run reports it as `heldForOwner`); Waiting for you, Held calls, approves one for the session and the work carries on with it when you ask; a call held in a daemon-hosted session (web UI) is also posted to the owner inbox, answerable with `approve` or `dismiss` in `/questions` or the web UI |
+| `just-vibes` | Does as much as it can without interrupting you: Jev decides judgment calls when a decision model works; an owner-only decision, or a judgment with no decision model, is not run and is held, and the end of each run lists what was held (a headless run reports it as `heldForOwner`); Waiting for you, Held calls, approves one for the session and the work carries on with it when you ask; a call held in a daemon-hosted session (web UI) is also posted to the owner inbox, answerable with `approve` or `dismiss` in Waiting for you (the menu) or the web UI |
 | `yolo` | Runs actions without safety decisions or prompts, except that a change asked for from a channel still goes to you and an act only you perform (answering an approval, granting access) is refused to the model; host containment, secret storage and payment limits still apply |
 | `plan` | Allows read-only tools and refuses every mutating or exec tool with a structured plan-mode denial |
 

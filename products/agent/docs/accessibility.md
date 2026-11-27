@@ -9,7 +9,7 @@ switches that make the screen calmer or plainer.
 
 A screen reader reading the terminal reads what is painted, cell by cell, and a
 full-screen program repaints rows as they change. Expect the conversation and
-the workspace to be readable but noisy: the status line, the composer and an
+the places to be readable but noisy: the status line, the composer and an
 answer being written are repainted, so a reader that announces changes repeats
 them.
 
@@ -53,14 +53,13 @@ background (a transparent one) depends on that background colour.
 
 ## Focus and keys
 
-- `Ctrl+G` then `w` opens the workspace (`Ctrl+G` then `m` the menu of every
-  place; after `Ctrl+G` the screen lists every key that can follow, with no
-  time limit); the area list or the action list holds the
-  focus, drawn highlighted, and the workspace's last row lists its keys. `Esc`
-  closes the top overlay.
+- `Ctrl+G` then `m` opens the menu of every place (after `Ctrl+G` the screen
+  lists every key that can follow, with no time limit); in a place the
+  selected row is drawn highlighted, and its last rows list the keys that
+  apply (`?` lists every one). `Esc` closes the top overlay.
 - On the approval card the chosen button is drawn highlighted, and Enter presses
   it. It opens on `No` for anything that cannot be undone or that weakens a
   protection, so Enter never allows those.
 - `?` or `Ctrl+P` lists every command and key, searchable by words.
-- The workspace's `set_keybinding` and `reset_keybinding` actions change keys in
-  the Agent's own `keybindings.json`.
+- The Keys tab of System changes keys in the Agent's own `keybindings.json`
+  (Enter, then the key as pressed).

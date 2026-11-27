@@ -8,21 +8,6 @@
       "group": "Agents and work",
       "actions": [
         {
-          "id": "open",
-          "label": "Open Your agents",
-          "word": "open",
-          "line": "/agents open",
-          "sentence": "Opens the Work place on Your agents: what is running, the archetypes and the coding agents you can host.",
-          "done": "",
-          "touches": "reads",
-          "lasts": "not-a-change",
-          "risk": "none",
-          "operator": {
-            "terminalOnly": "It is a terminal screen; the web UI shows the same in its Work view."
-          },
-          "inputs": []
-        },
-        {
           "id": "hostable",
           "capability": {
             "id": "agents.hostable",
@@ -1004,7 +989,7 @@
     {
       "name": "help",
       "title": "Help",
-      "summary": "Every command and every key in one searchable list",
+      "summary": "The commands that remain and every key in one searchable list; everything else is in the menu",
       "group": "Shell",
       "actions": [
         {
@@ -1015,10 +1000,10 @@
             "home": "session",
             "repeat": "safe"
           },
-          "label": "See every command and every key",
+          "label": "See the commands, every key and the menu",
           "word": "",
           "line": "/help [<about>]",
-          "sentence": "Shows every command and every key, or one command's actions and lines.",
+          "sentence": "Shows the few commands that remain and every key, says the menu reaches everything else, or shows one command's actions and lines.",
           "done": "",
           "touches": "reads",
           "lasts": "not-a-change",
@@ -1035,7 +1020,7 @@
               "freeTextReason": "a command name as you type it, without the slash; or keys",
               "required": {
                 "default": "",
-                "defaultMeans": "every command and every key"
+                "defaultMeans": "the commands that remain and every key"
               },
               "typed": {
                 "position": 1
@@ -2176,24 +2161,7 @@
       "title": "Memory and knowledge",
       "summary": "Opens Memory and knowledge: what the project remembers, your knowledge, what is known about you, and your templates",
       "group": "Knowledge",
-      "report": "open",
-      "actions": [
-        {
-          "id": "open",
-          "label": "Open Memory and knowledge",
-          "word": "open",
-          "line": "/memory open",
-          "sentence": "Opens Memory and knowledge: memory, knowledge, what is known about you and your templates.",
-          "done": "",
-          "touches": "reads",
-          "lasts": "not-a-change",
-          "risk": "none",
-          "operator": {
-            "terminalOnly": "It is a terminal screen."
-          },
-          "inputs": []
-        }
-      ]
+      "actions": []
     },
     {
       "name": "model",
@@ -2482,7 +2450,7 @@
           "label": "Add a permission rule: always allow, ask or refuse",
           "word": "add",
           "line": "/permissions add <then> <for> <which...>",
-          "sentence": "In this project, a call matching {kind} {target} will {effect} until you change it.",
+          "sentence": "In this project, until you change it, a call that matches (For: {kind}; Which: {target}) gets: {effect}.",
           "done": "",
           "touches": "this-machine",
           "lasts": "kept",
@@ -2997,6 +2965,8 @@
                   "provider.optimizerMode",
                   "provider.optimizerPinnedModel",
                   "behavior.budgetAlertUsd",
+                  "storage.codeIndexEnabled",
+                  "storage.automaticProjectsFolder",
                   "storage.secretProviders.onePasswordCli",
                   "storage.secretProviders.bitwardenCli",
                   "storage.secretProviders.bitwardenAppDataDir",
@@ -3514,6 +3484,8 @@
                   "provider.optimizerMode",
                   "provider.optimizerPinnedModel",
                   "behavior.budgetAlertUsd",
+                  "storage.codeIndexEnabled",
+                  "storage.automaticProjectsFolder",
                   "storage.secretProviders.onePasswordCli",
                   "storage.secretProviders.bitwardenCli",
                   "storage.secretProviders.bitwardenAppDataDir",
@@ -4019,6 +3991,8 @@
                   "provider.optimizerMode",
                   "provider.optimizerPinnedModel",
                   "behavior.budgetAlertUsd",
+                  "storage.codeIndexEnabled",
+                  "storage.automaticProjectsFolder",
                   "storage.secretProviders.onePasswordCli",
                   "storage.secretProviders.bitwardenCli",
                   "storage.secretProviders.bitwardenAppDataDir",
@@ -4452,615 +4426,6 @@
               }
             }
           ]
-        }
-      ]
-    },
-    {
-      "name": "setup",
-      "title": "Set up GoodVibes",
-      "summary": "Set GoodVibes up, one topic at a time",
-      "group": "Settings",
-      "actions": [
-        {
-          "id": "checklist",
-          "label": "See what is set up",
-          "word": "checklist",
-          "line": "/setup checklist",
-          "sentence": "Shows which of the things most people set once are done, and the line that sets each one that is not.",
-          "done": "",
-          "touches": "reads",
-          "lasts": "not-a-change",
-          "risk": "none",
-          "operator": {
-            "terminalOnly": "Done from a terminal app."
-          },
-          "inputs": []
-        },
-        {
-          "id": "model",
-          "capability": {
-            "id": "setup.model",
-            "group": "models",
-            "home": "session",
-            "repeat": "safe"
-          },
-          "label": "Choose a model",
-          "word": "model",
-          "line": "/setup model",
-          "sentence": "Opens the form for the model new turns use and how hard it thinks.",
-          "done": "",
-          "touches": "reads",
-          "lasts": "not-a-change",
-          "risk": "none",
-          "operator": {
-            "terminalOnly": "It opens a form of the terminal program you are using."
-          },
-          "inputs": []
-        },
-        {
-          "id": "sign-in",
-          "capability": {
-            "id": "setup.sign-in",
-            "group": "models",
-            "home": "session",
-            "repeat": "safe"
-          },
-          "label": "Provider sign-in",
-          "word": "sign-in",
-          "line": "/setup sign-in",
-          "sentence": "Opens the form for signing in to a provider with your browser, finishing a sign-in, or signing out.",
-          "done": "",
-          "touches": "reads",
-          "lasts": "not-a-change",
-          "risk": "none",
-          "operator": {
-            "terminalOnly": "It opens a form of the terminal program you are using."
-          },
-          "inputs": []
-        },
-        {
-          "id": "add-provider",
-          "label": "Add a provider of your own",
-          "word": "add-provider",
-          "line": "/setup add-provider <name> <address>",
-          "sentence": "The provider {name} at {url} is added {lasts}.",
-          "done": "Added the provider {name} {lasts}.",
-          "touches": "this-machine",
-          "lasts": "kept",
-          "risk": "none",
-          "operator": {
-            "terminalOnly": "Done from a terminal app."
-          },
-          "inputs": [
-            {
-              "id": "name",
-              "label": "Name",
-              "help": "A short name for the provider: letters, numbers, - and _",
-              "kind": "text",
-              "freeTextReason": "A name you choose.",
-              "required": true,
-              "typed": {
-                "position": 1
-              }
-            },
-            {
-              "id": "url",
-              "label": "Address",
-              "help": "Its OpenAI-compatible address, ending in /v1",
-              "kind": "text",
-              "freeTextReason": "The address of a server you run or use.",
-              "required": true,
-              "typed": {
-                "position": 2
-              }
-            }
-          ]
-        },
-        {
-          "id": "store-key",
-          "capability": {
-            "id": "setup.store-key",
-            "group": "models",
-            "home": "session",
-            "repeat": "safe"
-          },
-          "label": "Store a password or key",
-          "word": "store-key",
-          "line": "/setup store-key",
-          "sentence": "Opens the form for storing a provider or channel key, and how keys are stored.",
-          "done": "",
-          "touches": "reads",
-          "lasts": "not-a-change",
-          "risk": "none",
-          "operator": {
-            "terminalOnly": "It opens a form of the terminal program you are using."
-          },
-          "inputs": []
-        },
-        {
-          "id": "local-only",
-          "capability": {
-            "id": "setup.local-only",
-            "group": "system",
-            "home": "session",
-            "repeat": "safe"
-          },
-          "label": "Only this computer",
-          "word": "local-only",
-          "line": "/setup local-only",
-          "sentence": "Opens the form that keeps everything on this computer: it turns off the browser, network and webhook access.",
-          "done": "",
-          "touches": "reads",
-          "lasts": "not-a-change",
-          "risk": "none",
-          "operator": {
-            "terminalOnly": "It opens a form of the terminal program you are using."
-          },
-          "inputs": []
-        },
-        {
-          "id": "browser",
-          "capability": {
-            "id": "setup.browser",
-            "group": "system",
-            "home": "session",
-            "repeat": "safe"
-          },
-          "label": "Use it in a browser",
-          "word": "browser",
-          "line": "/setup browser",
-          "sentence": "Opens the form for using GoodVibes from a web browser on this computer or your network.",
-          "done": "",
-          "touches": "reads",
-          "lasts": "not-a-change",
-          "risk": "none",
-          "operator": {
-            "terminalOnly": "It opens a form of the terminal program you are using."
-          },
-          "inputs": []
-        },
-        {
-          "id": "other-devices",
-          "capability": {
-            "id": "setup.other-devices",
-            "group": "devices",
-            "home": "session",
-            "repeat": "safe"
-          },
-          "label": "Other devices",
-          "word": "other-devices",
-          "line": "/setup other-devices",
-          "sentence": "Opens the form for letting your other devices reach GoodVibes: addresses and ports.",
-          "done": "",
-          "touches": "reads",
-          "lasts": "not-a-change",
-          "risk": "none",
-          "operator": {
-            "terminalOnly": "It opens a form of the terminal program you are using."
-          },
-          "inputs": []
-        },
-        {
-          "id": "connect-daemon",
-          "capability": {
-            "id": "setup.connect-daemon",
-            "group": "system",
-            "home": "session",
-            "repeat": "safe"
-          },
-          "label": "A daemon elsewhere",
-          "word": "connect-daemon",
-          "line": "/setup connect-daemon",
-          "sentence": "Opens the form for pointing this program at a GoodVibes daemon already running on another computer; nothing on this computer is opened to the network.",
-          "done": "",
-          "touches": "reads",
-          "lasts": "not-a-change",
-          "risk": "none",
-          "operator": {
-            "terminalOnly": "It opens a form of the terminal program you are using."
-          },
-          "inputs": []
-        },
-        {
-          "id": "webhooks",
-          "capability": {
-            "id": "setup.webhooks",
-            "group": "system",
-            "home": "session",
-            "repeat": "safe"
-          },
-          "label": "Receive webhooks",
-          "word": "webhooks",
-          "line": "/setup webhooks",
-          "sentence": "Opens the form for receiving webhooks and events from other tools.",
-          "done": "",
-          "touches": "reads",
-          "lasts": "not-a-change",
-          "risk": "none",
-          "operator": {
-            "terminalOnly": "It opens a form of the terminal program you are using."
-          },
-          "inputs": []
-        },
-        {
-          "id": "chat-apps",
-          "capability": {
-            "id": "setup.chat-apps",
-            "group": "messages",
-            "home": "session",
-            "repeat": "safe"
-          },
-          "label": "Chat apps and services",
-          "word": "chat-apps",
-          "line": "/setup chat-apps",
-          "sentence": "Opens the form for connecting Slack, Discord, Telegram and the other chat apps and services.",
-          "done": "",
-          "touches": "reads",
-          "lasts": "not-a-change",
-          "risk": "none",
-          "operator": {
-            "terminalOnly": "It opens a form of the terminal program you are using."
-          },
-          "inputs": []
-        },
-        {
-          "id": "cloudflare",
-          "capability": {
-            "id": "setup.cloudflare",
-            "group": "devices",
-            "home": "session",
-            "repeat": "safe"
-          },
-          "label": "Use Cloudflare",
-          "word": "cloudflare",
-          "line": "/setup cloudflare",
-          "sentence": "Opens the form for using Cloudflare for batch and remote work.",
-          "done": "",
-          "touches": "reads",
-          "lasts": "not-a-change",
-          "risk": "none",
-          "operator": {
-            "terminalOnly": "It opens a form of the terminal program you are using."
-          },
-          "inputs": []
-        },
-        {
-          "id": "who-signs-in",
-          "capability": {
-            "id": "setup.who-signs-in",
-            "group": "system",
-            "home": "session",
-            "repeat": "safe"
-          },
-          "label": "Who can sign in here",
-          "word": "who-signs-in",
-          "line": "/setup who-signs-in",
-          "sentence": "Opens the form for the account that signs in to this GoodVibes from other devices.",
-          "done": "",
-          "touches": "reads",
-          "lasts": "not-a-change",
-          "risk": "none",
-          "operator": {
-            "terminalOnly": "It opens a form of the terminal program you are using."
-          },
-          "inputs": []
-        },
-        {
-          "id": "how-it-works",
-          "capability": {
-            "id": "setup.how-it-works",
-            "group": "system",
-            "home": "session",
-            "repeat": "safe"
-          },
-          "label": "When it asks",
-          "word": "how-it-works",
-          "line": "/setup how-it-works",
-          "sentence": "Opens the form for how GoodVibes works with you: how much GoodVibes tells you, how much guidance it gives, and when it asks.",
-          "done": "",
-          "touches": "reads",
-          "lasts": "not-a-change",
-          "risk": "none",
-          "operator": {
-            "terminalOnly": "It opens a form of the terminal program you are using."
-          },
-          "inputs": []
-        },
-        {
-          "id": "safety",
-          "capability": {
-            "id": "setup.safety",
-            "group": "safety",
-            "home": "session",
-            "repeat": "safe"
-          },
-          "label": "Safety",
-          "word": "safety",
-          "line": "/setup safety",
-          "sentence": "Opens the form for sandboxing and the other safety features.",
-          "done": "",
-          "touches": "reads",
-          "lasts": "not-a-change",
-          "risk": "none",
-          "operator": {
-            "terminalOnly": "It opens a form of the terminal program you are using."
-          },
-          "inputs": []
-        },
-        {
-          "id": "memory",
-          "capability": {
-            "id": "setup.memory",
-            "group": "memory",
-            "home": "session",
-            "repeat": "safe"
-          },
-          "label": "Memory and context",
-          "word": "memory",
-          "line": "/setup memory",
-          "sentence": "Opens the form for memory and how a long conversation is kept in context.",
-          "done": "",
-          "touches": "reads",
-          "lasts": "not-a-change",
-          "risk": "none",
-          "operator": {
-            "terminalOnly": "It opens a form of the terminal program you are using."
-          },
-          "inputs": []
-        },
-        {
-          "id": "telemetry",
-          "capability": {
-            "id": "setup.telemetry",
-            "group": "system",
-            "home": "session",
-            "repeat": "safe"
-          },
-          "label": "Record traces",
-          "word": "telemetry",
-          "line": "/setup telemetry",
-          "sentence": "Opens the form for recording traces of what GoodVibes does.",
-          "done": "",
-          "touches": "reads",
-          "lasts": "not-a-change",
-          "risk": "none",
-          "operator": {
-            "terminalOnly": "It opens a form of the terminal program you are using."
-          },
-          "inputs": []
-        },
-        {
-          "id": "automation",
-          "capability": {
-            "id": "setup.automation",
-            "group": "automation",
-            "home": "session",
-            "repeat": "safe"
-          },
-          "label": "Automation settings",
-          "word": "automation",
-          "line": "/setup automation",
-          "sentence": "Opens the form for scheduled routines, watchers and triggers.",
-          "done": "",
-          "touches": "reads",
-          "lasts": "not-a-change",
-          "risk": "none",
-          "operator": {
-            "terminalOnly": "It opens a form of the terminal program you are using."
-          },
-          "inputs": []
-        },
-        {
-          "id": "devices-voice",
-          "capability": {
-            "id": "setup.devices-voice",
-            "group": "devices",
-            "home": "session",
-            "repeat": "safe"
-          },
-          "label": "Paired devices and voice",
-          "word": "devices-voice",
-          "line": "/setup devices-voice",
-          "sentence": "Opens the form for paired phones and voice.",
-          "done": "",
-          "touches": "reads",
-          "lasts": "not-a-change",
-          "risk": "none",
-          "operator": {
-            "terminalOnly": "It opens a form of the terminal program you are using."
-          },
-          "inputs": []
-        },
-        {
-          "id": "provider-behaviour",
-          "capability": {
-            "id": "setup.provider-behaviour",
-            "group": "system",
-            "home": "session",
-            "repeat": "safe"
-          },
-          "label": "Provider behaviour",
-          "word": "provider-behaviour",
-          "line": "/setup provider-behaviour",
-          "sentence": "Opens the form for how GoodVibes chooses and talks to providers.",
-          "done": "",
-          "touches": "reads",
-          "lasts": "not-a-change",
-          "risk": "none",
-          "operator": {
-            "terminalOnly": "It opens a form of the terminal program you are using."
-          },
-          "inputs": []
-        },
-        {
-          "id": "advanced",
-          "capability": {
-            "id": "setup.advanced",
-            "group": "system",
-            "home": "session",
-            "repeat": "safe"
-          },
-          "label": "Advanced switches",
-          "word": "advanced",
-          "line": "/setup advanced",
-          "sentence": "Opens the form for the advanced runtime switches.",
-          "done": "",
-          "touches": "reads",
-          "lasts": "not-a-change",
-          "risk": "none",
-          "operator": {
-            "terminalOnly": "It opens a form of the terminal program you are using."
-          },
-          "inputs": []
-        },
-        {
-          "id": "history",
-          "capability": {
-            "id": "setup.history",
-            "group": "system",
-            "home": "session",
-            "repeat": "safe"
-          },
-          "label": "Saved chats",
-          "word": "history",
-          "line": "/setup history",
-          "sentence": "Opens the setting for whether conversations are saved on this computer.",
-          "done": "",
-          "touches": "reads",
-          "lasts": "not-a-change",
-          "risk": "none",
-          "operator": {
-            "terminalOnly": "It opens a form of the terminal program you are using."
-          },
-          "inputs": []
-        },
-        {
-          "id": "import-settings",
-          "capability": {
-            "id": "setup.import-settings",
-            "group": "system",
-            "home": "session",
-            "repeat": "safe"
-          },
-          "label": "Import settings",
-          "word": "import-settings",
-          "line": "/setup import-settings",
-          "sentence": "Copies the settings the Agent shares with the terminal app into the Agent.",
-          "done": "",
-          "touches": "reads",
-          "lasts": "not-a-change",
-          "risk": "none",
-          "operator": {
-            "terminalOnly": "It opens a form of the terminal program you are using."
-          },
-          "inputs": []
-        },
-        {
-          "id": "first-run",
-          "capability": {
-            "id": "setup.first-run",
-            "group": "system",
-            "home": "session",
-            "repeat": "safe"
-          },
-          "label": "Run first-run again",
-          "word": "first-run",
-          "line": "/setup first-run",
-          "sentence": "Opens the three-step first run: choose a provider, sign in, start.",
-          "done": "",
-          "touches": "reads",
-          "lasts": "not-a-change",
-          "risk": "none",
-          "operator": {
-            "terminalOnly": "It opens a form of the terminal program you are using."
-          },
-          "inputs": []
-        },
-        {
-          "id": "pair",
-          "capability": {
-            "id": "devices.pair",
-            "group": "devices",
-            "home": "session",
-            "repeat": "unsafe"
-          },
-          "label": "Pair with a host",
-          "word": "pair",
-          "line": "/setup pair [--name <name>] [--apply]",
-          "sentence": "This Agent pairs with your GoodVibes host as {name}, after you confirm in this terminal.",
-          "done": "",
-          "touches": "another-machine",
-          "lasts": "not-a-change",
-          "risk": "none",
-          "operator": {
-            "terminalOnly": "Done from a terminal app."
-          },
-          "inputs": [
-            {
-              "id": "name",
-              "label": "Name",
-              "help": "What the host calls this Agent",
-              "kind": "text",
-              "freeTextReason": "A name you choose.",
-              "required": {
-                "default": "GoodVibes Agent",
-                "defaultMeans": "GoodVibes Agent"
-              },
-              "typed": {
-                "flag": "--name"
-              }
-            },
-            {
-              "id": "apply",
-              "label": "Pair now",
-              "help": "Pair now, or only see what pairing would do",
-              "kind": "choice",
-              "choices": [
-                {
-                  "value": "preview",
-                  "label": "Only show what it would do"
-                },
-                {
-                  "value": "apply",
-                  "label": "Pair now",
-                  "risk": "loosens-a-protection"
-                }
-              ],
-              "required": {
-                "default": "preview",
-                "defaultMeans": "only show what it would do"
-              },
-              "typed": {
-                "flag": "--apply",
-                "switchOn": "apply"
-              }
-            }
-          ]
-        },
-        {
-          "id": "unpair",
-          "capability": {
-            "id": "devices.unpair-host",
-            "group": "devices",
-            "home": "session",
-            "repeat": "safe"
-          },
-          "label": "Unpair from the host",
-          "word": "unpair",
-          "line": "/setup unpair",
-          "sentence": "This Agent forgets its GoodVibes host credential and stops reaching that host.",
-          "done": "",
-          "touches": "credential",
-          "lasts": "not-a-change",
-          "risk": "none",
-          "ownerOnly": {
-            "reason": "It takes this Agent's access to your GoodVibes host away.",
-            "instead": "Forget this terminal's daemon pairing, in the Devices and network place."
-          },
-          "operator": {
-            "terminalOnly": "Done from a terminal app."
-          },
-          "inputs": []
         }
       ]
     },
@@ -6082,6 +5447,10 @@
           "touches": "this-machine",
           "lasts": "not-a-change",
           "risk": "none",
+          "ownerOnly": {
+            "reason": "approving a plan starts the work as yours",
+            "instead": "the owner approves it himself in Work, or answers yes when it is put to him"
+          },
           "undoneBy": "cancel",
           "operator": {
             "method": "capabilities.run",
@@ -6266,7 +5635,10 @@
               "help": "In your own words (leave it empty when the work comes from a file)",
               "kind": "long-text",
               "freeTextReason": "your own words for the work",
-              "required": false,
+              "required": {
+                "default": "",
+                "defaultMeans": "given by the file"
+              },
               "typed": {
                 "tail": true
               }
@@ -6277,7 +5649,10 @@
               "help": "The results that mean it is done, one per line (1 to 100; empty when the work comes from a file)",
               "kind": "long-text",
               "freeTextReason": "what done means",
-              "required": false,
+              "required": {
+                "default": "",
+                "defaultMeans": "given by the file"
+              },
               "typed": {
                 "flag": "--done-when"
               }
@@ -6288,7 +5663,10 @@
               "help": "A JSON file on this computer with \"goal\" and \"criteria\", in place of the two above",
               "kind": "path",
               "freeTextReason": "a file on this computer",
-              "required": false,
+              "required": {
+                "default": "",
+                "defaultMeans": "none: written here"
+              },
               "typed": {
                 "flag": "--file"
               }
@@ -7179,7 +6557,7 @@
           "label": "Change a task's title, description or result",
           "word": "task-change",
           "line": "/work task-change <task> <what changes> <new text...>",
-          "sentence": "The {field} of task {task} becomes \"{value}\", until you change it.",
+          "sentence": "{field} of task {task} becomes \"{value}\", until you change it.",
           "done": "",
           "touches": "this-machine",
           "lasts": "kept",
@@ -7212,15 +6590,15 @@
               "choices": [
                 {
                   "value": "title",
-                  "label": "Its title"
+                  "label": "The title"
                 },
                 {
                   "value": "description",
-                  "label": "Its description"
+                  "label": "The description"
                 },
                 {
                   "value": "result",
-                  "label": "Its result"
+                  "label": "The result"
                 }
               ],
               "required": true,
@@ -7458,6 +6836,7 @@
             "repeat": "safe"
           },
           "label": "Cancel a task",
+          "button": "Stop the task",
           "word": "task-cancel",
           "line": "/work task-cancel <task> [<note...>]",
           "sentence": "Task {task} is stopped and marked cancelled.",
@@ -7728,6 +7107,15 @@
         "value": "surfaceKind",
         "label": "surfaceKind",
         "detail": "model"
+      }
+    },
+    "channels.projects": {
+      "method": "workspaces.registrations.list",
+      "input": {},
+      "rows": {
+        "from": "workspaces",
+        "value": "root",
+        "label": "root"
       }
     },
     "checkpoint.turns": {

@@ -214,10 +214,7 @@ export type SerializedRuntimeEnvelope = Transport.SerializedRuntimeEnvelope;
 // binary died on it at load. A grouped `export { ... } from '<subpath>'` is a
 // live binding resolved by the module system, not a module-scope value read,
 // so it is cycle-safe.
-// (OpsControlPlane and its error classes are deliberately NOT re-exported:
-// the Agent never constructs the ops intervention plane, connected-host
-// tasks are read-only by product policy, with mutations routed to
-// /workplan and /delegate.)
+// (The task intervention plane is built by terminal-shell's task-interventions, as the terminal app builds it.)
 export {
   ToolContractVerifier, McpLifecycleManager, McpPermissionManager, McpSchemaFreshnessTracker, buildMcpAttackPathReview, createMcpLifecycleManager,
   DEFAULT_RECONNECT_CONFIG, ALL_CAPABILITIES, PLUGIN_CAPABILITIES, HIGH_RISK_CAPABILITIES,

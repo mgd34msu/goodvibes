@@ -72,6 +72,11 @@ export interface DaemonConfigEndpoint {
    * then, so a daemon that wrote its own record during the probe keeps it.
    */
   readonly runtimeRecord?: DetachedDaemonRuntimeHint | undefined;
+  /**
+   * The calling program's own headers for this daemon (its call context and the registration the daemon issued it,
+   * runtime/client/call-context.ts), sent with every settings request, so the daemon knows which program it is.
+   */
+  readonly headers?: Readonly<Record<string, string>> | undefined;
 }
 
 /** The resolved destination for one config write. */
@@ -193,6 +198,10 @@ export interface DaemonConfigRouterDeps {
   readonly hostsDaemon: boolean;
   /** Explicit endpoint, required when the daemon runs on another machine. */
   readonly endpoint?: DaemonConfigEndpoint | null | undefined;
+  /** Who decided the writes sent through these deps (manager.ts `DaemonWritePress`), from the call site. */
+  readonly press?: { readonly personAsked?: boolean | undefined; readonly decidedByProgramGate?: boolean | undefined } | undefined;
+  /** This program's own headers for a daemon (runtime/client call-context.ts `programCallHeadersFor`). */
+  readonly programHeaders?: ((baseUrl: string, token: string | undefined) => Promise<Record<string, string>>) | undefined;
   /** Daemon home directory holding `detached-daemon.json`. */
   readonly daemonHomeDir?: string | undefined;
   /** Operator token for a discovered (rather than configured) daemon. */
@@ -620,7 +629,7 @@ export async function applyDaemonConfigWrites(
   try {
     response = await fetchImpl(`${route.endpoint.baseUrl.replace(/\/+$/, '')}/config/many`, {
       method: 'POST',
-      headers: daemonHeaders(route.endpoint),
+      headers: await writeHeaders(route.endpoint, deps),
       body: JSON.stringify({ entries: entries.map(({ key, value }) => ({ key, value })) }),
       signal: AbortSignal.timeout(deps.timeoutMs ?? 10_000),
     });
@@ -753,7 +762,7 @@ async function postDaemonConfig(
   try {
     response = await fetchImpl(url, {
       method: 'POST',
-      headers: daemonHeaders(endpoint),
+      headers: await writeHeaders(endpoint, deps),
       body: JSON.stringify({ key, value }),
       signal: AbortSignal.timeout(deps.timeoutMs ?? 10_000),
     });
@@ -821,9 +830,23 @@ export async function readDaemonConfig(
 }
 
 function daemonHeaders(endpoint: DaemonConfigEndpoint): Record<string, string> {
-  const headers: Record<string, string> = { 'content-type': 'application/json' };
+  const headers: Record<string, string> = { ...(endpoint.headers ?? {}), 'content-type': 'application/json' };
   if (endpoint.token) headers['authorization'] = `Bearer ${endpoint.token}`;
   return headers;
+}
+
+/**
+ * A write's headers: the endpoint's, this program's own (its call context and registration, `deps.programHeaders`), and
+ * who decided it (`deps.press`: the person's claim, the program's gate's mark), so the daemon decides it once.
+ */
+async function writeHeaders(endpoint: DaemonConfigEndpoint, deps: DaemonConfigRouterDeps): Promise<Record<string, string>> {
+  const own = deps.programHeaders ? await deps.programHeaders(endpoint.baseUrl, endpoint.token).catch(() => ({})) : {};
+  return {
+    ...own,
+    ...daemonHeaders(endpoint),
+    ...(deps.press?.personAsked === true ? { 'x-goodvibes-explicit-user-request': 'true' } : {}),
+    ...(deps.press?.decidedByProgramGate === true ? { 'x-goodvibes-decided-by-capability-gate': 'true' } : {}),
+  };
 }
 
 function describeCause(error: unknown): string {

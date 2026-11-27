@@ -16,6 +16,7 @@ import { isAbsolute, join, relative, sep } from 'node:path';
 import { loadMcpEffectiveConfig, ownerAddedServers } from '@goodvibes/engine/platform/platform/mcp';
 import { NOTHING_OF_ITS_OWN_TO_RUN, projectSetupCommandsFile, type WorkspaceTrustManager } from '@goodvibes/engine/platform/platform/runtime/operations';
 import { logger, summarizeError } from '@goodvibes/engine/platform/platform/utils';
+import { projectIdentityOf } from '@goodvibes/engine/platform/platform/workspace';
 import type { SelectionItem } from '../selection-modal.js';
 
 /** What the trust prompt names: the folder (home shortened to ~) and the files of its own that trusting would let run. */
@@ -37,9 +38,13 @@ export interface FolderTrustFacts {
 }
 
 /** Read which of the folder's own hooks and MCP files exist (two or three stat calls, once per prompt or run). */
-export function readFolderTrustFacts(workingDirectory: string, homeDirectory: string, hooksFile: string): FolderTrustFacts {
-  let real = workingDirectory;
-  try { real = realpathSync(workingDirectory); } catch { /* the folder as given */ }
+export function readFolderTrustFacts(openedIn: string, homeDirectory: string, hooksFile: string): FolderTrustFacts {
+  let opened = openedIn;
+  try { opened = realpathSync(openedIn); } catch { /* the folder as given */ }
+  // Trust is the project's: a program opened in a subfolder asks about the project it works for (its root), and
+  // what that project brings of its own is read there.
+  const workingDirectory = projectIdentityOf(opened);
+  const real = workingDirectory;
   const shownPath = homeDirectory && (real === homeDirectory || real.startsWith(`${homeDirectory}${sep}`)) ? `~${real.slice(homeDirectory.length)}` : real;
   const hooks = isAbsolute(hooksFile) ? hooksFile : join(workingDirectory, hooksFile || 'hooks.json');
   const hooksShown = existsSync(hooks) ? relative(workingDirectory, hooks) || hooks : null;

@@ -58,7 +58,7 @@ export function repairDaemonConnection(options: DaemonRepairOptions): void {
     })
     .catch((error: unknown) => {
       logger.error('[daemon-repair] the repair failed unexpectedly', { error: summarizeError(error) });
-      systemMessageRouter.userAction(`[Daemon] The connection to the daemon on this computer was not repaired: ${summarizeError(error)}. Turn on "Use the background daemon" in Settings and start the daemon with: goodvibes-daemon start-service`, 'error');
+      systemMessageRouter.userAction(`[Daemon] The connection to the daemon on this computer was not repaired: ${summarizeError(error)}. Start the daemon with: goodvibes-daemon start-service`, 'error');
       render();
     });
 }

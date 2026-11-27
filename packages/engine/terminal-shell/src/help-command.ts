@@ -24,6 +24,9 @@ export interface HelpSources<Context> {
   readonly keys: (context: Context) => { readonly lines: readonly string[]; readonly file: string };
 }
 
+/** How everything else is reached: no command is typed for it. */
+const MENU_LINE = 'Everything else is a control in a place: the leader key (Ctrl+G unless you changed it), then m, opens the menu of every place.';
+
 function commandListText<Context>(commands: readonly TerminalSlashCommand<Context>[]): string {
   return [
     'Commands:',
@@ -32,6 +35,7 @@ function commandListText<Context>(commands: readonly TerminalSlashCommand<Contex
       return `  /${command.name}${hint ? ` ${hint}` : ''} - ${command.description}`;
     }),
     '',
+    MENU_LINE,
     'Every key: /help keys. One command\'s actions and lines: /help <command>.',
   ].join('\n');
 }
@@ -48,13 +52,14 @@ export function helpOf<Context extends HelpContext>(sources: HelpSources<Context
     }
     if (about) {
       const command = sources.command(about);
-      if (!command) throw new CapabilityRefusal(`No command named /${about}.`);
+      if (!command) throw new CapabilityRefusal(`No command named /${about}.`, MENU_LINE);
       return helpForCommand(command);
     }
     if (context.openCommandPalette && context.invokedByModel !== true) {
       context.openCommandPalette();
-      // Said where the list was opened from (a place's line under its list): what happened, never a bare "Done.".
-      return 'Opened the list of every command and every key.';
+      // Typed, the list is on screen and nothing is printed under the conversation; pressed in a place (System's
+      // help row), the line under its list says it (SYSTEM_HELP `doneInPlace`).
+      return '';
     }
     return commandListText(sources.commands());
   };
@@ -65,7 +70,7 @@ export function createHelpCommand<Context extends HelpContext>(services: (contex
   return defineCommand<Context>({
     name: 'help',
     title: 'Help',
-    summary: 'Every command and every key in one searchable list',
+    summary: 'The commands that remain and every key in one searchable list; everything else is in the menu',
     group: 'Shell',
     actions: [sessionCapabilityAction<Context, SystemSessionServices>(SYSTEM_HELP, services, { terminalOnly: 'It lists the commands and keys of the terminal program you are using.' })],
   });

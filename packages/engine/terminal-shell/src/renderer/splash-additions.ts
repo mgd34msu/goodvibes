@@ -23,13 +23,13 @@ import { getDisplayWidth } from '@goodvibes/engine/platform/platform/utils/termi
 import { SurfaceCanvas } from './surface-kit.js';
 import { activeTokens } from './theme.js';
 import { drawSegments, wrapSegments, type StyledSegment } from './first-run.js';
-import { readSplashAdditions, requestSplashRender, takeDroppedLineFlash, takeSetFlash } from '../first-run/splash-state.js';
+import { noteSplashImportShown, readSplashAdditions, requestSplashRender, takeDroppedLineFlash, takeSetFlash } from '../first-run/splash-state.js';
 import { getSharedModeFlash } from '../session-permission-mode.js';
 
 const isBlank = (line: Line): boolean => line.every((cell) => cell.char === ' ' || cell.char === '');
 
 interface Block {
-  readonly kind: 'a' | 'b' | 'c' | 'd' | 'r';
+  readonly kind: 'a' | 'b' | 'c' | 'd' | 'r' | 's';
   readonly rows: readonly { readonly segments: readonly StyledSegment[]; readonly right?: string | undefined }[];
 }
 
@@ -41,7 +41,7 @@ export function drawSplashAdditions(viewport: readonly Line[], height: number, w
   const out = [...viewport];
   const view = readSplashAdditions();
   const first = out.findIndex((line) => !isBlank(line));
-  if (!view || first < 0) return out;
+  if (!view || first < 0) { noteSplashImportShown(false); return out; }
   let last = out.length - 1;
   while (last > first && isBlank(out[last]!)) last--;
   // The blocks line up with the splash's own left edge (its top rule), inside the screen.
@@ -59,6 +59,8 @@ export function drawSplashAdditions(viewport: readonly Line[], height: number, w
   const firstRun = view.firstRun;
   // The crash-recovery offer, first: the one line naming the key that restores the last conversation.
   if (view.recoveryLine) blocks.push({ kind: 'r', rows: wrapSegments([{ text: view.recoveryLine }], sentenceWidth).map((segments) => ({ segments })) });
+  // What the program said as it started (the daemon started or missing, the repair, the workspace, what was restored).
+  for (const line of view.startLines) blocks.push({ kind: 's', rows: wrapSegments([{ text: line, tone: 'dim' }], sentenceWidth).map((segments) => ({ segments })) });
   if (firstRun?.kind === 'set' && firstRun.using) {
     // Taken without asking: the one line that says which provider and model, and from where; no step count.
     const rows = wrapSegments([{ text: firstRun.using }], sentenceWidth);
@@ -76,24 +78,24 @@ export function drawSplashAdditions(viewport: readonly Line[], height: number, w
   } else if (firstRun?.kind === 'not-ready') {
     const rows = wrapSegments([
       { text: 'Not set up yet.', bold: true },
-      { text: `  Choose a model with /model, or run ${view.setupCommand}.`, tone: 'dim' },
+      { text: `  Choose a model with /model, or set up the rest in ${view.setupWhere}.`, tone: 'dim' },
     ], blockWidth);
     blocks.push({ kind: 'a', rows: rows.map((segments) => ({ segments })) });
   }
   // The mode in force and where "Who decides" is chosen: first run never asks it over the composer.
   const decides = firstRun?.kind === 'decides' || firstRun?.kind === 'set' ? firstRun.decides : undefined;
   if (decides) blocks.push({ kind: 'd', rows: wrapSegments([{ text: decides }], sentenceWidth).map((segments) => ({ segments })) });
-  if (view.importCommand && firstRun?.kind !== 'pending') {
-    // One key where it is offered: Enter on the empty composer; the command is named for later.
+  if (view.importWhere && firstRun?.kind !== 'pending') {
+    // One key where it is offered: Enter on the empty composer; where the control is is named for later.
     const rows = wrapSegments(view.importOnEnter ? [
       { text: 'The terminal app on this computer has settings.', tone: 'dim' },
       { text: ' ' },
       { text: '⏎', chip: true },
-      { text: ` brings them over and says what changed (later: ${view.importCommand}).`, tone: 'dim' },
+      { text: ` brings them over and says what changed (later: ${view.importWhere}).`, tone: 'dim' },
     ] : [
       { text: 'The terminal app on this computer has settings.', tone: 'dim' },
       { text: ' ' },
-      { text: view.importCommand, chip: true },
+      { text: view.importWhere, chip: true },
       { text: ' brings them over and says what changed.', tone: 'dim' },
     ], sentenceWidth);
     blocks.push({ kind: 'b', rows: rows.map((segments) => ({ segments })) });
@@ -105,7 +107,7 @@ export function drawSplashAdditions(viewport: readonly Line[], height: number, w
       ...(options.modeKey ? [{ text: ' ' }, { text: options.modeKey, chip: true }, { text: ' changes when GoodVibes asks.', tone: 'dim' as const }] : []),
       { text: '   Web UI, phone, channels and everything else:', tone: 'dim' },
       { text: ' ' },
-      { text: view.setupCommand, chip: true },
+      { text: view.setupWhere, chip: true },
       { text: ' whenever you want them.', tone: 'dim' },
     ], sentenceWidth);
     blocks.push({ kind: 'c', rows: rows.map((segments) => ({ segments })) });
@@ -117,10 +119,20 @@ export function drawSplashAdditions(viewport: readonly Line[], height: number, w
   // Too short for every block: the sentence goes first, then the import line, then block a, then the mode line (d);
   // the recovery offer's line (r) goes last.
   let shown: Block[] = blocks;
-  for (const drop of ['c', 'b', 'a', 'd', 'r'] as const) {
+  for (const drop of ['c', 'b', 'a', 's', 'd', 'r'] as const) {
     if (rowsOf(shown) <= free) break;
+    if (drop === 's') {
+      // The start lines go one at a time, the oldest first: as many as there is room for stay.
+      while (rowsOf(shown) > free && shown.some((block) => block.kind === 's')) {
+        const at = shown.findIndex((block) => block.kind === 's');
+        shown = shown.filter((_, index) => index !== at);
+      }
+      continue;
+    }
     shown = shown.filter((block) => block.kind !== drop);
   }
+  // The import offer acts on Enter only while its line is on screen (splash-state.ts takeSplashEnterAction).
+  noteSplashImportShown(shown.some((block) => block.kind === 'b'));
   if (firstRun?.kind === 'set' && !shown.some((block) => block.kind === 'a')) {
     // "You're set" left out: the status bar says it once instead (the mode segment's flash).
     const message = takeSetFlash();

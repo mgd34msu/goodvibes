@@ -315,7 +315,8 @@ export const WORK_COMMAND: CommandDescription<CommandActionContext> = {
   // --yes confirms only right after the action word: the same word in the text is text.
   leadingFlagsOnly: true,
   title: 'Work',
-  // Bare `/work` opens the Work place; every action is a control there.
+  // Unlisted: bare `/work` opens the Work place; every action is a control there.
+  firstScreen: false,
   opens: 'work',
   summary: 'Your work: ask for it, start, check, stop or resume it, answer what it asks, run a failed step again or go on without it, its spending limit, and the project\'s checklist',
   group: 'Agents and work',

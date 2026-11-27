@@ -47,7 +47,7 @@ import {
   CHANNEL_ROUTING_DELETE_METHOD,
   channelProfileRouteFilePath,
 } from '../agent/channel-profile-routing.ts';
-import { buildAgentWorkspaceChannelTriage } from '../input/agent-workspace-channel-triage.ts';
+import { buildAgentChannelTriage } from '../input/channel-triage.ts';
 import { ChannelDeliveryNotStartedError, deliverAgentChannelMessage } from '@goodvibes/engine/terminal-shell/agent-turn/channel-delivery';
 import { requireConfirmedAction, type EffectResult } from './agent-harness-tool-utils.ts';
 import { harnessDisplayPath } from './agent-harness-display-path.ts';
@@ -228,7 +228,7 @@ export async function unifiedInboxSummary(
   context: CommandContext,
   args: AgentHarnessCommsArgs,
 ): Promise<Record<string, unknown>> {
-  const triage = await buildAgentWorkspaceChannelTriage(context, {});
+  const triage = await buildAgentChannelTriage(context, {});
   const limit = readLimit(args.limit, 50);
   const invoke = commsDaemonInvoke(context);
   const inboundChannelFeed = invoke
@@ -287,7 +287,7 @@ export async function channelDraftsSummary(
       mode: 'channel_drafts',
       status: 'unavailable',
       drafts: [],
-      policy: 'Draft management requires an active Agent workspace with shell path context.',
+      policy: 'Draft management requires the Agent running with its home folder.',
     };
   }
   const draftId = readOptString(args.draftId || args.target || args.query);
@@ -653,7 +653,7 @@ export function channelRoutingSummary(
       mode: 'channel_routing',
       status: 'unavailable',
       routes: [],
-      policy: 'Channel routing requires an active Agent workspace with shell path context.',
+      policy: 'Channel routing requires the Agent running with its home folder.',
     };
   }
   const surfaceKind = readOptString(args.surfaceKind || args.target || args.query);

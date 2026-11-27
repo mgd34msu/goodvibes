@@ -14,7 +14,7 @@
  *    quarantining or lifting the quarantine of a plugin it runs.
  */
 import { readFileSync } from 'node:fs';
-import { isAbsolute, resolve } from 'node:path';
+import { callerPathOf, unreadableFile } from '../path-inputs.js';
 import type { PluginManager } from '../../plugins/manager.js';
 import { describeUnappliedTier } from '../../runtime/plugins/trust.js';
 import { getPluginDirectories, getUserPluginDirectory, type PluginPathOptions } from '../../plugins/loader.js';
@@ -200,13 +200,15 @@ export const PLUGIN_TRUST_KEY: CapabilityDefinition<PluginsCapabilityServices> =
   async run(values, services, caller) {
     const project = projectOf(services, caller);
     const name = values.plugin!;
-    const path = isAbsolute(values.key!) ? values.key! : resolve(project.paths.cwd, values.key!);
+    // Placed by the one rule for every capability's path (capabilities/path-inputs.ts).
+    const path = callerPathOf(caller, values.key!, { label: 'Key file' });
     let pem: string;
     try { pem = readFileSync(path, 'utf-8'); } catch (error) {
-      throw new CapabilityRefusal(`${values.key} could not be read: ${error instanceof Error ? error.message : String(error)}`, 'Give the path of the publisher\'s Ed25519 public key file.');
+      throw unreadableFile(values.key!, 'a public key file', caller, error, 'No key was saved.');
     }
     const saved = project.manager.setPublisherKey(name, pem);
-    if (!saved.ok) throw new CapabilityRefusal(saved.error ?? `The publisher key for '${name}' was not saved.`);
+    // The key reader's words can quote the file: only the person reads them.
+    if (!saved.ok) throw caller.personAsked === true ? new CapabilityRefusal(saved.error ?? `The publisher key for '${name}' was not saved.`) : unreadableFile(values.key!, 'a public key file', caller, undefined, 'No key was saved.');
     const check = project.manager.verify(name);
     changed();
     return {
@@ -345,7 +347,7 @@ export const PLUGIN_PUBLISH_LOCAL: CapabilityDefinition<PluginsCapabilityService
   actionId: 'publish-local', label: 'Publish a plugin folder to the local catalog', word: 'publish-local',
   inputs: [
     { id: 'id', label: 'Catalog id', help: 'A short id you choose', kind: 'text', freeTextReason: 'a new id you choose', required: true, typed: { position: 1 } },
-    { id: 'path', label: 'Plugin folder', help: 'The folder with its manifest.json', kind: 'path', freeTextReason: 'a folder on this machine', required: true, typed: { position: 2 } },
+    { id: 'path', label: 'Plugin folder', help: 'The folder with its manifest.json', kind: 'path', freeTextReason: 'a folder on this machine', workFolder: false, required: true, typed: { position: 2 } },
     { id: 'summary', label: 'Summary', help: 'One line on what it does', kind: 'text', freeTextReason: 'your own words', required: true, typed: { tail: true } },
   ],
   sentence: 'The plugin in {path} is listed in the local curated catalog as {id} ("{summary}"), until you change it.', done: '',

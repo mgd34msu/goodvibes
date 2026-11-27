@@ -63,7 +63,7 @@ const DEFAULT_LOOKAHEAD_MS = 90 * 24 * 60 * 60 * 1000;
 /** Events in one page when no limit is given. */
 const DEFAULT_LIMIT = 250;
 
-const RECONNECT = 'Connect it again with /calendar connect outlook in the Agent.';
+const RECONNECT = 'Connect it again with "sign in" on the Outlook row of the Calendar accounts tab in Mail, calendar and channels.';
 
 export interface MicrosoftCalendarGatewayServiceOptions {
   /** The daemon's secret store: where the token record is read, and a refreshed one written back. */
@@ -164,7 +164,7 @@ export function createMicrosoftCalendarGatewayService(options: MicrosoftCalendar
   async function connect(): Promise<{ readonly config: ResolvedClientConfig; readonly token: string; readonly label: string }> {
     const account = await store.loadAccount('microsoft');
     if (!account) {
-      throw new GatewayVerbError('No Microsoft Outlook account is connected. Connect one with /calendar connect outlook in the Agent.', 'CALENDAR_NOT_CONFIGURED', 400);
+      throw new GatewayVerbError('No Microsoft Outlook account is connected. Connect one with "sign in" on the Outlook row of the Calendar accounts tab in Mail, calendar and channels.', 'CALENDAR_NOT_CONFIGURED', 400);
     }
     const profile = providerProfile('microsoft');
     const config = resolveClientConfig(profile, await readCalendarClientOverrides(profile, {

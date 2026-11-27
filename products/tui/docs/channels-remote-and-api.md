@@ -39,7 +39,7 @@ the daemon restarts is started after the restart.
 
 ## Home Assistant
 
-The Home Assistant surface is configured from `/setup chat-apps` or Settings > Surfaces. The TUI stores the platform config keys and controls auto-start; the platform daemon owns the actual Home Assistant API/tool surface, callback verification, account metadata, and channel actions.
+The Home Assistant surface is configured from "Chat apps and services" on the Setup tab of System, or Settings > Surfaces. The TUI stores the platform config keys and controls auto-start; the platform daemon owns the actual Home Assistant API/tool surface, callback verification, account metadata, and channel actions.
 
 Relevant settings:
 

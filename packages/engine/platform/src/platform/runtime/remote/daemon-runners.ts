@@ -21,6 +21,7 @@ import type { AgentManager } from '../../tools/agent/index.js';
 import { AGENT_TEMPLATES } from '../../tools/agent/manager.js';
 import type { RuntimeEventBus } from '../events/index.js';
 import { createDomainDispatch, type RuntimeStore } from '../store/index.js';
+import { AgentTaskAdapter } from '../tasks/adapters/agent-adapter.js';
 import type { AcpConnection } from '../store/domains/acp.js';
 import type { HookDispatcher } from '../../hooks/dispatcher.js';
 import type { ExternalPermissionHost } from '../../permissions/external-request.js';
@@ -106,7 +107,14 @@ export class DaemonRemoteRunners {
       noteListChanged({ list: 'remote-runners', change: 'changed', id: runnerId });
     });
     this.lifetime.signal.addEventListener('abort', () => stop(), { once: true });
+    // An agent started here from what a runner handed back is a daemon task (Daemon tasks lists it, follows it to its
+    // end and stops it), as every agent the daemon starts for a request is (daemon/facade.ts trySpawnAgent).
+    this.tasks = new AgentTaskAdapter(sources.runtimeStore);
+    const detach = this.tasks.attachRuntimeBus(sources.runtimeBus);
+    this.lifetime.signal.addEventListener('abort', () => detach(), { once: true });
   }
+
+  private readonly tasks: AgentTaskAdapter;
 
   get registry(): RemoteRunnerRegistry { return this.sources.remoteRunnerRegistry; }
 
@@ -171,7 +179,9 @@ export class DaemonRemoteRunners {
   }
 
   /** Start a self-hosted runner on a task, from the person's own words, in `workingDirectory`. */
-  async dispatch(input: { readonly task: string; readonly template: string; readonly pool?: RemoteRunnerPool | undefined; readonly workingDirectory: string }): Promise<{ readonly runnerId: string; readonly template: string; readonly tools: readonly string[]; readonly inPool: boolean }> {
+  async dispatch(input: { readonly task: string; readonly template: string; readonly pool?: RemoteRunnerPool | undefined; readonly workingDirectory: string;
+    /** Who started it (the capability call's cause): its asks are decided as that party's turn. Absent: someone else's. */
+    readonly inputParty?: { readonly party: 'owner' } | { readonly party: 'other'; readonly who: string } | undefined }): Promise<{ readonly runnerId: string; readonly template: string; readonly tools: readonly string[]; readonly inPool: boolean }> {
     const template = isAgentTemplate(input.template) ? input.template : 'general';
     const templateDef = { defaultTools: [...templateTools(template)] };
     const goal = Object.freeze({ goal: input.task, criteria: Object.freeze([] as string[]) });
@@ -195,6 +205,8 @@ export class DaemonRemoteRunners {
       tools: [...templateDef.defaultTools],
       workingDirectory: input.workingDirectory,
       sessionId: session,
+      // Who started it, recorded on it: a runner anyone but the owner started acts on someone else's input (reads only).
+      inputParty: input.inputParty ?? { party: 'other', who: 'a runner no owner started' },
     }, { sourceOf: () => goal, assertCurrent() {}, signal: this.lifetime.signal }));
     const now = Date.now();
     // Its connection may have moved on while it started: the contract starts from the state the connection is in.
@@ -241,14 +253,18 @@ export class DaemonRemoteRunners {
     return true;
   }
 
-  /** Start an agent here on the task an artifact recorded, with only the tools it recorded. */
-  rerunLocal(artifact: RemoteExecutionArtifact): { readonly agentId: string; readonly template: string } {
+  /**
+   * Start an agent here on the task an artifact recorded, with only the tools it recorded, working in `workingDirectory`
+   * (the asking program's project): never the daemon's own folder.
+   */
+  rerunLocal(artifact: RemoteExecutionArtifact, workingDirectory: string): { readonly agentId: string; readonly template: string } {
     const template = isAgentTemplate(artifact.runnerContract.template) ? artifact.runnerContract.template : 'general';
     const ceiling = artifact.runnerContract.capabilityCeiling;
     const agent = this.sources.agentManager.spawn({
       mode: 'spawn',
       task: artifact.task.task,
       template,
+      workingDirectory,
       tools: [...ceiling.allowedTools],
       // Without this the spawn adds the template's default tools to the recorded set.
       restrictTools: true,
@@ -259,6 +275,8 @@ export class DaemonRemoteRunners {
       reviewMode: ceiling.reviewMode,
       communicationLane: ceiling.communicationLane,
     });
+    // One agent, one task row under the agent's own id (as the daemon's own starts do): Daemon tasks shows it.
+    this.tasks.wrapAgent(agent.id, artifact.task.task || artifact.runnerContract.label, { sessionId: 'daemon' }, agent.id);
     noteListChanged({ list: 'remote-runners', change: 'created', id: agent.id });
     return { agentId: agent.id, template };
   }

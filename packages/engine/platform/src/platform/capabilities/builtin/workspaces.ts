@@ -38,8 +38,8 @@ export interface RegisteredWorkspaceFacts {
   readonly root: string;
   readonly label?: string | undefined;
   readonly registeredAt: string;
-  /** Which program registered it: `agent` (started there), `tui` (trusted there), or `other`. */
-  readonly by: 'agent' | 'tui' | 'other';
+  /** Which program registered it: `agent` (started there), `tui` (trusted there), `chat` (made by the daemon for a chat that had none), or `other`. */
+  readonly by: 'agent' | 'tui' | 'chat' | 'other';
   /** The Agent's automatic checkpoints are on there. */
   readonly checkpoints: boolean;
 }
@@ -54,7 +54,7 @@ export function registeredWorkspaces(answer: unknown): readonly RegisteredWorksp
       root: text(row.root),
       ...(text(row.label) ? { label: text(row.label) } : {}),
       registeredAt: text(row.registeredAt),
-      by: origin.startsWith('agent') ? 'agent' : origin === 'tui' ? 'tui' : 'other',
+      by: origin.startsWith('agent') ? 'agent' : origin === 'tui' ? 'tui' : origin === 'automatic-project' ? 'chat' : 'other',
       checkpoints: row.checkpointEligible === true,
     };
   });
@@ -62,6 +62,8 @@ export function registeredWorkspaces(answer: unknown): readonly RegisteredWorksp
 
 const ROOT_INPUT: InputDescription = {
   id: 'root', label: 'Folder', help: 'The workspace folder, as a full path', kind: 'path', freeTextReason: 'a folder on this computer',
+  // Registered or unregistered as a workspace (the owner's own act); nothing works in it by this call.
+  workFolder: false,
   required: true, typed: { position: 1 },
 };
 

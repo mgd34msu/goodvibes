@@ -27,7 +27,6 @@ import { ContextInspectorModal } from '../renderer/context-inspector.ts';
 import type { SurfaceModalHost } from '@goodvibes/engine/terminal-shell/surface-modal-host';
 import { BookmarkModal } from './bookmark-modal.ts';
 import type { McpWorkspace } from './mcp-workspace.ts';
-import type { AgentWorkspace } from './agent-workspace.ts';
 import { SessionPickerModal } from './session-picker-modal.ts';
 import { ProfilePickerModal } from './profile-picker-modal.ts';
 import { handleIndicatorFocusToken, handleMouseToken, handlePromptKeyToken, handlePromptTextToken } from './handler-feed-routes.ts';
@@ -116,7 +115,6 @@ export interface InputFeedContext {
   selectionCallback: ((result: SelectionResult | null) => void) | null;
   readonly bookmarkModal: BookmarkModal;
   readonly mcpWorkspace: McpWorkspace;
-  readonly agentWorkspace: AgentWorkspace;
   readonly sessionPickerModal: SessionPickerModal;
   readonly profilePickerModal: ProfilePickerModal;
   readonly historySearch: HistorySearch;
@@ -166,8 +164,6 @@ export interface InputFeedContext {
   readonly ensureInputCursorVisible: (contentWidth?: number) => void;
   readonly registerPaste: (content: string) => string;
   readonly executeBlockAction: (id: string) => void;
-  readonly cycleAgentWorkspaceCategory: (direction: 'next' | 'prev') => void;
-  readonly dismissAgentWorkspace: () => boolean;
   readonly getWrappedPromptInfo: (contentWidth: number) => WrappedPromptInfo;
   readonly moveCursorVertical: (direction: -1 | 1) => boolean;
   readonly handlePathCompletion: () => boolean;
@@ -192,7 +188,6 @@ export const feedInputTokens = createFeedInputTokens<InputFeedContext>({
     {
       ...captureModalFeedState(context, token, history),
       surfaceModals: context.surfaceModals,
-      agentWorkspace: context.agentWorkspace,
       liveTailModal: context.liveTailModal,
       processModal: context.processModal,
     },
@@ -223,11 +218,7 @@ export const feedInputTokens = createFeedInputTokens<InputFeedContext>({
     openFooterTarget: context.openFooterTarget,
   }, token),
   shortcut: (context, token, { viewportHeight }) => {
-    const shortcutState = {
-      ...captureShortcutFeedState(context),
-      cycleAgentWorkspaceCategory: context.cycleAgentWorkspaceCategory,
-      dismissAgentWorkspace: context.dismissAgentWorkspace,
-    };
+    const shortcutState = captureShortcutFeedState(context);
     const handled = handleGlobalShortcutToken(shortcutState, token, viewportHeight);
     return { ...shortcutState, handled };
   },
@@ -240,11 +231,7 @@ export const feedInputTokens = createFeedInputTokens<InputFeedContext>({
     state: leaderOf,
     canArm: (context) => leaderMayArm(context.surfaceModals),
     run: (context, action) => {
-      const shortcutState = {
-        ...captureShortcutFeedState(context),
-        cycleAgentWorkspaceCategory: context.cycleAgentWorkspaceCategory,
-        dismissAgentWorkspace: context.dismissAgentWorkspace,
-      };
+      const shortcutState = captureShortcutFeedState(context);
       const handled = runShortcutAction(shortcutState, action);
       return { ...shortcutState, handled };
     },

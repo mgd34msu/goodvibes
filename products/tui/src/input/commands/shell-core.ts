@@ -7,6 +7,7 @@ import { createDaemonVerbCaller } from '../../runtime/client/operator-endpoint.t
 import { ensureProviderKeyThenSelect } from '../provider-key-intake.ts';
 import { createCompactCommand } from '@goodvibes/engine/terminal-shell/everyday-commands';
 import { conversationOf, systemSessionOf } from './session-capabilities.ts';
+import { provideHelp } from './session-capability-slots.ts';
 import { createHelpCommand, helpOf, type HelpSources } from '@goodvibes/engine/terminal-shell/help-command';
 import { shortcutGroups } from '../../renderer/shortcut-groups.ts';
 import { registerModelCommands } from '@goodvibes/engine/terminal-shell/model-command';
@@ -30,6 +31,8 @@ let helpSources: HelpSources<CommandContext> | undefined;
 export function helpServicesOf(ctx: CommandContext): ((about: string) => Promise<string>) | undefined {
   return helpSources ? helpOf(helpSources, ctx) : undefined;
 }
+// Read by session-capabilities.ts through its slot (session-capability-slots.ts), not by importing this file back.
+provideHelp(helpServicesOf);
 
 export function registerShellCoreCommands(registry: CommandRegistry): void {
   const navigation = createShellNavigationCommands<CommandContext>((ctx) => ({ systemSession: systemSessionOf(ctx) }));
@@ -44,7 +47,8 @@ export function registerShellCoreCommands(registry: CommandRegistry): void {
 
 
   helpSources = {
-    commands: () => registry.getAll(),
+    // The listed commands; an unlisted one (it opens its place) is typed, never listed.
+    commands: () => registry.getVisible(),
     command: (name) => registry.get(name),
     keys: (ctx) => {
       const km = requireKeybindingsManager(ctx);

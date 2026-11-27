@@ -141,7 +141,8 @@ export function openSettingsChoice(
   const save = (patch: ReadonlyArray<readonly [ConfigKey, unknown]>) => {
     if (!current()) return;
     const changes: ConfigChange[] = patch.map(([key, value]) => ({ key, value }));
-    const result = config.setMany(changes, localOwnerActor());
+    // The person's own choice on the screen: his press goes with the daemon's keys.
+    const result = config.setMany(changes, localOwnerActor(), { press: { personAsked: true } });
     if (!result.ok) ctx.print(`Not saved: ${result.refusal.reason} ${result.refusal.next.join(' ')}`.trim());
     if (result.saved.length > 0) changed();
     ctx.renderRequest();

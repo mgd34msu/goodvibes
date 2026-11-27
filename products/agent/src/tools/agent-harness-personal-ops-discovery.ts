@@ -495,7 +495,7 @@ export function taskWorkflows(methodIds: readonly string[]): readonly PersonalOp
       next: 'Review the plan, add or update one item when useful, and keep status changes visible.',
       modelRoute: 'agent_work_plan action:"list"',
       inspectRoutes: [
-        'workspace action:"action" actionId:"work-autonomy-queue"',
+        'autonomy action:"queue"',
         'agent_work_plan action:"create" title:"..."',
         'agent_work_plan action:"set_status" id:"..." status:"..."',
       ],
@@ -510,10 +510,10 @@ export function taskWorkflows(methodIds: readonly string[]): readonly PersonalOp
       next: hostTaskStatus === 'ready'
         ? 'List host tasks, inspect one exact task id, then cancel or retry only through confirmed daemon controls when the user asks.'
         : 'Update or connect the GoodVibes host until task inspection methods are present.',
-      modelRoute: 'workspace action:"action" actionId:"tasks-filter"',
+      modelRoute: 'capability_run id:"work.tasks"',
       inspectRoutes: [
-        'workspace action:"action" actionId:"tasks-filter"',
-        'workspace action:"action" actionId:"task-show"',
+        'capability_run id:"work.tasks"',
+        'capability_run id:"work.task"',
         ...methodIds.map((methodId) => `host action:"method" methodId:"${methodId}"`),
       ],
       prerequisites: hostTaskStatus === 'ready'
@@ -562,7 +562,7 @@ export function reminderWorkflows(methodIds: readonly string[], deliveryConfigur
       inspectRoutes: [
         'schedule action:"list"',
         'autonomy action:"item" queueItemId:"connected-schedules"',
-        'workspace action:"action" actionId:"schedule-edit"',
+        'capability_run id:"schedule.change"',
       ],
       prerequisites: scheduleStatus === 'ready'
         ? [`${methodIds.length} schedule/reminder daemon method(s) are discoverable.`]

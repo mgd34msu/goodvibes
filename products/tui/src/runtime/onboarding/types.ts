@@ -68,7 +68,6 @@ export type {
 } from '@goodvibes/engine/terminal-shell/onboarding-state-types';
 import type { ConfigManager, ConfigKey, GoodVibesConfig } from '@goodvibes/engine/platform/platform/config';
 import type { SecretsManager } from '../../config/secrets.ts';
-import type { UserAuthManager } from '@goodvibes/engine/platform/platform/security';
 import type { ShellPathService } from '@/runtime/index.ts';
 import type { LocalAuthInspectionQuery, ServiceInspectionQuery, SubscriptionAccessQuery } from '@/runtime/index.ts';
 
@@ -186,12 +185,8 @@ export interface OnboardingSnapshotDependencies {
 
 export interface OnboardingApplyDependencies {
   readonly clock?: () => number;
-  readonly config: Pick<ConfigManager, 'describeConfigKeySource' | 'get' | 'getRaw' | 'load' | 'reset' | 'setDynamic' | 'watchDaemonWrites'>;
+  readonly config: Pick<ConfigManager, 'describeConfigKeySource' | 'get' | 'getRaw' | 'load' | 'reset' | 'setDynamic' | 'setMany' | 'watchDaemonWrites'>;
   readonly secrets?: Pick<SecretsManager, 'delete' | 'deleteWriteScopeEntry' | 'get' | 'getFromScope' | 'getWriteScopeEntry' | 'inspect' | 'readWriteScopeEntries' | 'restoreWriteScopeEntriesIf' | 'set'>;
-  readonly auth?: Pick<
-    UserAuthManager,
-    'addUser' | 'clearBootstrapCredentialFile' | 'createSession' | 'deleteUser' | 'getUser' | 'inspect' | 'restoreState' | 'revokeSession' | 'rotatePassword' | 'snapshotState'
-  >;
   readonly shellPaths: OnboardingShellPaths;
   readonly acknowledgementScope?: OnboardingStateScope;
 }
@@ -200,7 +195,6 @@ export interface OnboardingVerificationDependencies {
   readonly clock?: () => number;
   readonly config: Pick<ConfigManager, 'get'>;
   readonly secrets?: Pick<SecretsManager, 'get' | 'getFromScope'>;
-  readonly auth?: Pick<UserAuthManager, 'inspect'>;
   readonly shellPaths: OnboardingShellPaths;
   readonly acknowledgementScope?: OnboardingStateScope;
 }

@@ -1,5 +1,5 @@
 import { existsSync, mkdirSync, readFileSync, statSync } from 'fs';
-import { join, dirname, sep } from 'path';
+import { join, dirname, isAbsolute, resolve, sep } from 'path';
 import { logger } from '../utils/logger.js';
 import { writeJsonFileAtomic } from '../utils/atomic-json-store.js';
 import { summarizeError } from '../utils/error-display.js';
@@ -68,11 +68,18 @@ export class ProjectIndex {
   private flushTimer: ReturnType<typeof setTimeout> | null = null;
   private createdAt: string = new Date().toISOString();
   private disposed = false;
+  /** A change recorded since the last write. */
+  private unsaved = false;
   private closing: Promise<void> | undefined;
 
-  constructor(baseDir: string) {
-    this.projectRoot = baseDir;
-    this.baseDir = this.projectRoot;
+  /**
+   * `baseDir`: the folder a relative path a tool names is read from (the program's working folder). `projectRoot`: the
+   * project it is in, whose `.goodvibes/project-index.json` this is and whose root the entries are relative to, so a
+   * program opened in a subfolder keeps the one index of its project.
+   */
+  constructor(baseDir: string, projectRoot: string = baseDir) {
+    this.projectRoot = resolve(projectRoot);
+    this.baseDir = baseDir;
     this.indexPath = join(this.projectRoot, '.goodvibes', 'project-index.json');
     try {
       const read = readIndexFile(this.indexPath);
@@ -208,9 +215,9 @@ export class ProjectIndex {
   // ---------------------------------------------------------------------------
 
   private normalizePath(inputPath: string): string {
-    let p = inputPath.split(sep).join('/');
-    // Strip project root prefix for absolute paths
-    const root = this.baseDir.split(sep).join('/');
+    // A relative path is the working folder's; every entry is relative to the project root.
+    let p = (isAbsolute(inputPath) ? inputPath : resolve(this.baseDir, inputPath)).split(sep).join('/');
+    const root = this.projectRoot.split(sep).join('/');
     if (p.startsWith(root + '/')) {
       p = p.slice(root.length + 1);
     }
@@ -225,11 +232,13 @@ export class ProjectIndex {
       clearTimeout(this.flushTimer);
       this.flushTimer = null;
     }
-    this.closing = this.flush();
+    // Nothing recorded since the last write: nothing is written (a folder nothing was read in gets no index file).
+    this.closing = this.unsaved ? this.flush() : Promise.resolve();
     return this.closing;
   }
 
   private scheduleFlush(): void {
+    this.unsaved = true;
     if (this.flushTimer !== null) clearTimeout(this.flushTimer);
     this.flushTimer = setTimeout(() => {
       this.flushTimer = null;
@@ -246,6 +255,7 @@ export class ProjectIndex {
   }
 
   private async flush(): Promise<void> {
+    this.unsaved = false;
     mkdirSync(dirname(this.indexPath), { recursive: true });
     const tree = buildTree(this.files);
     const totalFiles = this.files.size;

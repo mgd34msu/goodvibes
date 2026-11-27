@@ -24,8 +24,6 @@ export function normalizeText(value: string | null | undefined): string {
   return (value ?? '').trim();
 }
 
-/** Fields read exactly as typed: a password may begin or end with a space. */
-export const VERBATIM_FIELD_IDS: ReadonlySet<string> = new Set(['accounts.admin-password', 'accounts.admin-password-confirm']);
 
 export function isValidHostValue(value: string): boolean {
   const normalized = value.trim();

@@ -1,6 +1,6 @@
 import { captureStrictJudgmentJson } from '@goodvibes/engine/platform/platform/gate';
 import { currentTurn } from '@goodvibes/engine/platform/platform/security';
-import { programCallHeaders } from '@goodvibes/engine/platform/platform/runtime/client';
+import { programCallHeadersFor } from '@goodvibes/engine/platform/platform/runtime/client';
 import { isServiceMethodId, serviceExpectedOutcome, serviceLifecycleDecision, serviceOutcomeCertified, serviceReceiptEvidence } from './service-lifecycle.js';
 import type { Tool } from '@goodvibes/engine/platform/platform/types';
 import { assertCurrentToolInvocation, type ToolRegistry } from '@goodvibes/engine/platform/platform/tools';
@@ -24,10 +24,18 @@ function tighteningMethodIds(): readonly string[] {
   return movedCapabilityEntries().flatMap((entry) => (entry.tightens === true && entry.method ? [entry.method.id] : []));
 }
 import { publishOperatorMethodReceipt } from './operator-method-receipt.js';
-import { appendOperatorQuery, operatorMethodIsReadOnly, operatorOwnerDecisions, ownerOnlyOperatorMethodIds, READ_ONLY_HTTP_METHODS, resolveOperatorContractMethod, substituteOperatorPath } from './operator-contract-routes.js';
+import { appendOperatorQuery, operatorContractMethods, operatorMethodIsReadOnly, operatorOwnerDecisions, ownerOnlyOperatorMethodIds, READ_ONLY_HTTP_METHODS, resolveOperatorContractMethod, substituteOperatorPath } from './operator-contract-routes.js';
 import { createOperatorInputProjector, operatorExecutionConnection, operatorExecutionWireInput, operatorExecutionRequestPolicy, operatorMethodIsOutward, operatorMethodIsOwnerOnly } from './operator-input-projector.js';
 import { confirmParameter, requestParameter } from './effect-admission.js';
 import { readFlag, readString } from './tool-args.js';
+import { declaredMethodRisk, RUNS_LATER_METHOD_IDS, type MethodRisk } from '@goodvibes/engine/platform/platform/control-plane';
+import type { ToolDefinition } from '@goodvibes/engine/platform/platform/types';
+
+type ToolOwnerActs = NonNullable<ToolDefinition['ownerActs']>;
+type ToolOwnerDecisions = NonNullable<ToolDefinition['ownerDecisions']>;
+
+/** The mark the daemon reads as "the program's gate decided this call" (daemon-api control-routes.ts). */
+const CAPABILITY_GATE_DECIDED_HEADER = 'x-goodvibes-decided-by-capability-gate';
 
 type JsonRecord = Record<string, unknown>;
 /** The response fields a result declares, as the redaction reads them. */
@@ -354,6 +362,37 @@ async function readResponseBody(response: Response): Promise<unknown> {
   }
 }
 
+/** The contract's methods by their risk class (platform control-plane/method-risk.ts), read once. */
+function methodsOfRisk(...risks: readonly MethodRisk[]): readonly string[] {
+  return operatorContractMethods().map((method) => method.id).filter((id) => risks.includes(declaredMethodRisk(id, 'read') ?? 'none'));
+}
+
+/** The owner's own acts among the methods: refused to a model when it never calls them, else put to the owner. */
+function methodOwnerActs(): ToolOwnerActs {
+  // An answer to something addressed to the owner is never a model's: refused, never asked (method-risk.ts).
+  const refused = [...new Set([...ownerOnlyOperatorMethodIds(), ...methodsOfRisk('answers-the-owner')])];
+  // An owner's act the daemon admits natively for his model's own call (his profile, his replies to an occasion's nudge)
+  // is decided there, once, under his mode (`hostDecides`): not asked here as well.
+  const hostDecided = (id: string): boolean => NATIVELY_ADMITTED_METHOD_IDS.has(id) && agentCallCredential(id, 'agent') === 'delegated';
+  const asked = methodsOfRisk('owner-act').filter((id) => !refused.includes(id) && !hostDecided(id));
+  return { field: 'methodId', values: [...refused, ...asked], asked };
+}
+
+/** What the owner decides among the methods a model names: the contract's declarations and each method's risk class. */
+function methodOwnerDecisions(): ToolOwnerDecisions {
+  const declared = operatorOwnerDecisions('methodId', 'input');
+  return {
+    ...declared,
+    irreversible: [...new Set([...declared.irreversible, ...methodsOfRisk('cannot-be-undone')])],
+    loosens: methodsOfRisk('loosens-a-protection', 'writes-a-secret'),
+    // What runs by itself later is never made unasked from what the turn read (permissions/manager.ts `callFacts`).
+    runsLater: operatorContractMethods().map((method) => method.id).filter((id) => RUNS_LATER_METHOD_IDS.has(id)),
+    // What spends money: asked each time once the conversation read text from outside, as the daemon's own turns
+    // decide it (tools/capability/daemon-tools.ts `sendsOrSpends`).
+    sendsOrSpends: methodsOfRisk('spends-money'),
+  };
+}
+
 export function createAgentOperatorMethodTool(
   shellPaths: ShellPathService,
   configManager: AgentConnectedHostConfigReader,
@@ -390,12 +429,16 @@ export function createAgentOperatorMethodTool(
       // Folded into capability_run (capability-tools.ts): the model names a capability or a method there, and
       // capability_run and the schedule tools call this one nested, so its admission and credentials stay one path.
       nestedOnly: true,
-      ownerActs: { field: 'methodId', values: ownerOnlyOperatorMethodIds() },
+      // A method a model never calls stays refused; one whose risk class is the owner's own act (platform
+      // control-plane/method-risk.ts) is put to him, opening on No, as a capability that is his own act is.
+      ownerActs: methodOwnerActs(),
       // A method the daemon admits natively for the Agent's credential, and sent with it: the daemon's admission is
       // the one decision, so this gate does not decide it first.
       hostDecides: { field: 'methodId', values: [...NATIVELY_ADMITTED_METHOD_IDS].filter((methodId) => agentCallCredential(methodId, 'agent') === 'delegated') },
-      // Irreversible methods, contract changes and sends to a recipient nobody allowed are the owner's to decide.
-      ownerDecisions: operatorOwnerDecisions('methodId', 'input'),
+      // Irreversible methods, contract changes and sends to a recipient nobody allowed are the owner's to decide; so is a
+      // method whose risk class loosens a protection or writes a secret, or cannot be undone, as the capability doing
+      // the same act is. This gate's decision is the one: the call says so to the daemon (CAPABILITY_GATE_DECIDED_HEADER).
+      ownerDecisions: methodOwnerDecisions(),
       // A method reached only to tighten a protection (an "always allow" grant revoked) is never refused or asked about.
       tightens: { field: 'methodId', values: tighteningMethodIds() },
     },
@@ -535,6 +578,8 @@ export function createAgentOperatorMethodTool(
         // saying so, and the daemon does not put it to the owner a second time (permissions/run-answerer.ts).
         // A run nobody answers decided it here too (what the owner must decide was held for him before it got here).
         const decidedHere = nativelyAdmitted && (runAnswersEveryQuestion() || runHoldsForOwner());
+        // This program's call context and the registration this daemon issued it (call-context.ts), sent only to it.
+        const programHeaders = await programCallHeadersFor(connection.baseUrl, bearer, connection.fetch ?? fetch);
         // The connection's own transport: the network, or the daemon's request path in a turn it hosts.
         const response = await (connection.fetch ?? fetch)(`${connection.baseUrl}${requestPath}`, {
           ...(bounded ? { signal: bounded.signal } : options?.signal ? { signal: options.signal } : {}),
@@ -543,10 +588,14 @@ export function createAgentOperatorMethodTool(
           headers: {
             authorization: `Bearer ${bearer}`,
             // The program's call context (its project and conversation), when a terminal program set one (call-context.ts).
-            ...programCallHeaders(),
+            ...programHeaders,
             ...(READ_ONLY_HTTP_METHODS.has(route.httpMethod) ? {} : { 'content-type': 'application/json' }),
             ...(ownerRequest ? { 'x-goodvibes-explicit-user-request': 'true' } : {}),
             ...(decidedHere ? { [DECIDED_IN_RUN_HEADER]: 'true' } : {}),
+            // This program's gate decided this call (it was admitted as this tool's call, by the method's own risk class):
+            // the daemon takes it so from the Agent's credential or this program's own registration, and does not put it
+            // to the owner a second time (platform daemon/method-owner-decision.ts).
+            ...(requiresEffect ? { [CAPABILITY_GATE_DECIDED_HEADER]: 'true' } : {}),
           },
           ...(READ_ONLY_HTTP_METHODS.has(route.httpMethod) ? {} : { body: JSON.stringify(route.invokeEndpoint ? { body: wirePayload } : wirePayload) }),
         });

@@ -8,6 +8,7 @@
  * product adds what only it has over the finished graph, in its own scope.
  */
 import { dirname, join } from 'node:path';
+import { carrySubfolderRecords, projectRecordsFolder } from './project-folder-records.js';
 import { logger } from '../utils/logger.js';
 import { summarizeError } from '../utils/error-display.js';
 import { PRIVATE_DELIVERY_HOSTS_SETTING, parseApprovedHosts } from './network/destination.js';
@@ -88,7 +89,7 @@ import { createConfiguredFetchDeps } from '../tools/fetch/index.js';
 import type { LocalhostFetchApproval } from './permissions/localhost-fetch-approval.js';
 import { MemoryEmbeddingProviderRegistry } from '../state/memory-embeddings.js';
 import { HookActivityTracker } from '../hooks/activity.js';
-import { HookDispatcher, createHookWorkbench } from '../hooks/index.js';
+import { HookDispatcher } from '../hooks/index.js';
 import { PluginManager } from '../plugins/manager.js';
 import { BookmarkManager } from '../bookmarks/manager.js';
 import { ProfileManager } from '../profiles/manager.js';
@@ -99,7 +100,6 @@ import { PairingTokenManager } from '../pairing/pairing-token-store.js';
 import { AcpHostService } from '../acp/host.js';
 import { WebhookNotifier } from '../integrations/webhooks.js';
 import { resolveNotificationWebhook } from '../integrations/notification-webhooks.js';
-import { createMcpAutonomousElicitationHandler } from '../mcp/elicitation-autonomous.js';
 import { createMcpPersonElicitation } from '../mcp/elicitation.js';
 import {
   createApprovalDerivedHandlers,
@@ -108,7 +108,8 @@ import {
   type ApprovalRaiser,
 } from './permissions/permission-composition.js';
 import { resolveCanonicalMemoryDbPath } from '../state/canonical-memory.js';
-import { repositoryFileGate, WorkspaceTrustManager } from './workspace-trust.js';
+import { WorkspaceTrustManager } from './workspace-trust.js';
+import { createProjectEnvironment } from './project-environment.js';
 import { createWorkspaceTrustDecisionAsk, trustGatedApprovalRaiser, WORKSPACE_TRUST_ASK_TIMEOUT_MS } from './workspace-trust-approval.js';
 import { methodAskWords, nativeMutationAskWords } from '../control-plane/native-mutation-words.js';
 import { presentToolAskWith, toolAskWords } from '../permissions/tool-ask-words.js';
@@ -117,13 +118,11 @@ import { DeterministicReplayEngine } from '../core/deterministic-replay.js';
 import { buildPricingSeams } from './cost/pricing-seams.js';
 import { SessionMemoryStore } from '../core/session-memory.js';
 import { SessionLineageTracker } from '../core/session-lineage.js';
-import { SessionChangeTracker } from '../sessions/change-tracker.js';
 import { ExecutionPlanManager } from '../core/execution-plan.js';
 import { FileStateCache } from '../state/file-cache.js';
 import { FileWatcher } from '../state/file-watcher.js';
 import { ProjectIndex } from '../state/project-index.js';
 import { IdempotencyStore } from './idempotency/index.js';
-import { OverflowHandler } from '../tools/shared/overflow.js';
 import { createWiredHealthSystem } from './health/index.js';
 import { bindHealthDomainEvents } from './health/domain-events.js';
 import { WorktreeRegistry } from './worktree/registry.js';
@@ -138,6 +137,7 @@ import { describeModeInForceWords } from '../permissions/decision-model-readines
 import { requireSurfaceRoot } from './surface-root.js';
 import { createRuntimeSecretsManager } from './secrets-composition.js';
 import { resolveGoodVibesDaemonHome } from '../config/goodvibes-home.js';
+import { noProjectFacts, noProjectRefusal } from '../workspace/caller-project.js';
 import { createNoopKeybindingsManager, createNoopPanelManager } from './host-ui.js';
 import { createWorkflowServices } from '../tools/workflow/index.js';
 import { createProcessRegistry, withFleetArchive, attachFleetEmitBridge } from './fleet/index.js';
@@ -197,8 +197,13 @@ export function buildRuntimeGraph<X extends object>(product: ProductComposition<
   const resolveStatePath = (...segments: string[]): string => roots.stateScope === 'home'
     ? shellPaths.resolveUserPath(surfaceRoot, ...segments)
     : shellPaths.resolveProjectPath(surfaceRoot, ...segments);
-  // Built before anything that touches session state: every session path derives from it.
-  const { surface, sessionManager } = createSessionStorageServices({ nativeDataWriter: seams.nativeDataWriter, surfaceRoot, workingDirectory, homeDirectory });
+  // Built before anything that touches session state: every session path derives from it. A program opened in a
+  // subfolder of a project keeps every record it keeps for the project with the project's (project-folder-records.ts;
+  // the daemon's own folder is no project's subfolder); what a release kept under the subfolder is carried once, before
+  // any store below opens.
+  const recordsFolder = product.surface === 'daemon' ? workingDirectory : projectRecordsFolder(workingDirectory);
+  if (recordsFolder !== workingDirectory) carrySubfolderRecords(workingDirectory, recordsFolder);
+  const { surface, sessionManager } = createSessionStorageServices({ nativeDataWriter: seams.nativeDataWriter, surfaceRoot, workingDirectory: recordsFolder, homeDirectory });
   // A daemon serves the telemetry traces routes, so it records spans unless its settings say otherwise.
   const featureFlags = resolveRuntimeFeatureFlags({ configManager, featureFlags: seams.featureFlags, recordTracesUnlessSet: product.surface === 'daemon' });
   scope.registry.add('feature flag settings bridge', () => disposeRuntimeFeatureFlags(featureFlags));
@@ -380,7 +385,6 @@ export function buildRuntimeGraph<X extends object>(product: ProductComposition<
     projectRoot: workingDirectory,
   }, hookActivityTracker);
   scope.registry.add('config hook attachment', configManager.attachHookDispatcher(hookDispatcher));
-  const hookWorkbench = createHookWorkbench({ hookDispatcher, configManager });
   const approvalBroker = new ApprovalBroker({
     storePath: resolveStatePath('control-plane', 'approvals.jsonl'),
   });
@@ -410,7 +414,7 @@ export function buildRuntimeGraph<X extends object>(product: ProductComposition<
   const terminalProgram = product.surface === 'tui' || product.surface === 'agent';
   if (terminalProgram) {
     try {
-      const carried = carryTaskGraphsOnce(workingDirectory);
+      const carried = carryTaskGraphsOnce(recordsFolder);
       if (carried) logger.info('[sessions] the terminal programs\' task graphs were carried into the project\'s shared one', carried);
     } catch (error) {
       logger.warn('[sessions] the earlier task graphs were not carried; they are left as they are', { error: summarizeError(error) });
@@ -418,7 +422,7 @@ export function buildRuntimeGraph<X extends object>(product: ProductComposition<
   }
   const sessionOrchestration = new CrossSessionTaskRegistry(
     // A host's own task graph is one of its records (the daemon's records folder, whatever folder it started in).
-    terminalProgram ? projectTaskGraphPath(workingDirectory) : shellPaths.resolveProjectPath(surfaceRoot, 'sessions', 'task-graph.json'),
+    terminalProgram ? projectTaskGraphPath(recordsFolder) : shellPaths.resolveProjectPath(surfaceRoot, 'sessions', 'task-graph.json'),
     (product.taskGraphReaping ?? 'broker') === 'broker'
       ? { sessionExists: (sessionId: string) => sessionBroker.getSession(sessionId) !== null }
       : {},
@@ -474,6 +478,10 @@ export function buildRuntimeGraph<X extends object>(product: ProductComposition<
   const automationManager = new AutomationManager({
     configManager,
     defaultSurfaceKind: (product.automationSurfaceKind ?? surfaceRoot) as AutomationSurfaceKind,
+    unplacedJobsFolder: product.unplacedRecordsFolder,
+    // A schedule with no project, or in a folder that is never one (the daemon's own), never runs: held, or refused.
+    projectRefusal: (folder) => noProjectRefusal(folder, noProjectFacts(shellPaths.homeDirectory, resolveGoodVibesDaemonHome(shellPaths.homeDirectory))),
+    formerJobStores: product.formerJobStores,
     routeBindings,
     sessionBroker,
     runtimeStore,
@@ -650,12 +658,9 @@ export function buildRuntimeGraph<X extends object>(product: ProductComposition<
   });
   scope.registry.add('remote backends', () => remoteBackends.close());
   // Remote runners and the sandboxes tool calls are confined to, built as one.
-  const { remoteRunnerRegistry, remoteSupervisor, sandboxSessionRegistry, mcpRegistry } = createRemoteExecutionServices({
-    agentManager, workingDirectory, hookDispatcher, configManager, runtimeBus,
+  const { remoteRunnerRegistry, remoteSupervisor, sandboxSessionRegistry } = createRemoteExecutionServices({
+    agentManager, workingDirectory,
   });
-  let mcpClosing: Promise<void> | undefined;
-  const closeMcpConnections = (): Promise<void> => mcpClosing ??= mcpRegistry.disconnectAll();
-  scope.registry.add('MCP connections', closeMcpConnections);
   // The security.tokenAudit.* settings decide the audit; findings reach the security domain.
   const tokenAuditor = createConfiguredTokenAuditor({ configManager, featureFlags, runtimeBus });
   if (pairingTokensAtStart) scope.registry.add('pairing token audit', startPairingTokenAudit(pairingTokens(), tokenAuditor));
@@ -663,7 +668,7 @@ export function buildRuntimeGraph<X extends object>(product: ProductComposition<
   scope.registry.add('runtime health event bridge', bindHealthDomainEvents(runtimeBus, healthSystem.wiring));
   // One worktree register per working directory, shared by every surface over it,
   // unless the product brings its own.
-  const worktreeRegistry = seams.worktreeRegistry?.(workingDirectory) ?? new WorktreeRegistry(workingDirectory);
+  const worktreeRegistry = seams.worktreeRegistry?.(recordsFolder) ?? new WorktreeRegistry(recordsFolder);
   const notificationsMetadataOnly = seams.notificationsMetadataOnly
     ?? ((): boolean => readNotificationsMetadataOnly(() => configManager.get(NOTIFICATIONS_METADATA_ONLY_KEY as never)));
   // notifications.webhookUrls holds references; each URL is read from the secret store only for its delivery.
@@ -678,24 +683,23 @@ export function buildRuntimeGraph<X extends object>(product: ProductComposition<
   scope.registry.add('permission mode change event', bindPermissionModeChangeEvent(configManager, runtimeBus, 'runtime'));
   const sessionMemoryStore = new SessionMemoryStore();
   const sessionLineageTracker = new SessionLineageTracker();
-  const sessionChangeTracker = new SessionChangeTracker();
   const planManager = new ExecutionPlanManager(workPlan);
   const idempotencyStore = new IdempotencyStore();
-  const overflowHandler = new OverflowHandler({
-    baseDir: workingDirectory,
-    featureFlags,
-    spillBackend: configManager.get('tools.overflowSpillBackend'),
-  });
   // The configured policy bundle is loaded here, and a bundle promoted before is enforced.
   const policyRuntimeState = createPolicyRuntimeState(configManager, featureFlags);
   const fileCache = new FileStateCache();
-  const projectIndex = new ProjectIndex(workingDirectory);
+  // Relative paths a tool names are the working folder's; the index and its entries are the project's.
+  const projectIndex = new ProjectIndex(workingDirectory, recordsFolder);
   scope.ownUntilRegistered('default workspace project index', () => projectIndex.dispose());
   // Project files changed outside the write and edit tools: the project index
   // forgets deleted ones and Change:file:external hooks fire.
-  const fileWatcher = new FileWatcher(projectIndex, { projectRoot: workingDirectory }, hookDispatcher);
-  void fileWatcher.start();
-  scope.registry.add('file watcher', () => fileWatcher.stop());
+  // The daemon's own folder is no project: nothing there is watched (a project's turns watch nothing here either; their
+  // changes are the tools' own). A program's folder is its project.
+  if (product.surface !== 'daemon') {
+    const fileWatcher = new FileWatcher(projectIndex, { projectRoot: recordsFolder }, hookDispatcher);
+    void fileWatcher.start();
+    scope.registry.add('file watcher', () => fileWatcher.stop());
+  }
   // ONE delivery router: the one replies actually leave through.
   const channelDeliveryRouter = deliveryManager.getDeliveryRouter();
   const processManager = new ProcessManager();
@@ -704,8 +708,9 @@ export function buildRuntimeGraph<X extends object>(product: ProductComposition<
   // Opened now, or on first read for a product that chose `on-demand`.
   let codeIndexOpened: CodeIndexServices | undefined;
   const openCodeIndex = (): CodeIndexServices => codeIndexOpened ??= createCodeIndexServices({
-    workingDirectory,
-    // Relative reindex paths resolve against the project index's root, this graph's working directory.
+    // One index per project, of the project's root, kept at the project, whatever folder the program was opened in.
+    workingDirectory: recordsFolder,
+    // Relative reindex paths resolve against the folder the tools resolve them against, this graph's working directory.
     getWorkingDirectory: () => projectIndex.baseDir,
     surfaceRoot,
     configManager,
@@ -730,7 +735,7 @@ export function buildRuntimeGraph<X extends object>(product: ProductComposition<
     secretsManager,
     providerRegistry,
     memoryDbPath,
-    codeIndexDbPath: codeIndexDbPath(workingDirectory, surfaceRoot),
+    codeIndexDbPath: codeIndexDbPath(recordsFolder, surfaceRoot),
     surface,
     shellPaths,
     ...(roots.logDir === undefined ? {} : { logDir: roots.logDir }),
@@ -751,6 +756,9 @@ export function buildRuntimeGraph<X extends object>(product: ProductComposition<
     ? createTriggerSupervisor({
       configManager,
       resolveStorePath: (name) => shellPaths.resolveProjectPath(surfaceRoot, name),
+      unplacedFolder: product.unplacedRecordsFolder,
+      // A trigger with no project, or one in a folder that is never a project (the daemon's own), is neither made nor run.
+      projectRefusal: (folder) => noProjectRefusal(folder, noProjectFacts(shellPaths.homeDirectory, resolveGoodVibesDaemonHome(shellPaths.homeDirectory))),
       agents: agentManager,
       processManager,
       unattendedRuns,
@@ -803,9 +811,25 @@ export function buildRuntimeGraph<X extends object>(product: ProductComposition<
   // workspace in every product, including one whose own actions pass no trust gate: it reads the same
   // saved decision. An undecided workspace is not trusted.
   const repositoryTrust = workspaceTrustManager ?? new WorkspaceTrustManager({ shellPaths, surfaceRoot });
-  const repositoryGate = repositoryFileGate(repositoryTrust, homeDirectory);
-  scope.registry.add('repository hooks file trust', hookWorkbench.bindTrustGate(repositoryGate));
-  scope.registry.add('repository MCP file trust', mcpRegistry.bindRepositoryTrust(repositoryGate));
+  // This graph's project environment (a program's project, or the daemon's own folder), from the ONE builder every
+  // host uses (project-environment.ts): its hooks file and tool-server files waiting on that trust, its tool servers in
+  // the sandbox sessions the remote execution owns, its long-output folder and changed-files record.
+  const projectEnvironment = createProjectEnvironment({
+    folder: workingDirectory, homeDirectory, trust: repositoryTrust, hookDispatcher,
+    hooksFile: () => String(configManager.get('tools.hooksFile')),
+    toolServers: { configManager, runtimeBus, sandboxSessions: sandboxSessionRegistry },
+    // Long output is kept with this host's records: a program's project, the daemon's records (never its own folder).
+    overflow: { featureFlags, spillBackend: configManager.get('tools.overflowSpillBackend'), baseDir: shellPaths.recordsRoot },
+  });
+  const hookWorkbench = projectEnvironment.hooks.workbench;
+  const projectToolServers = projectEnvironment.toolServers!;
+  const mcpRegistry = projectToolServers.mcpRegistry;
+  const overflowHandler = projectEnvironment.overflowHandler;
+  const sessionChangeTracker = projectEnvironment.changeTracker;
+  scope.registry.add('repository hooks file trust', () => projectEnvironment.hooks.release());
+  let mcpClosing: Promise<void> | undefined;
+  const closeMcpConnections = (): Promise<void> => mcpClosing ??= projectToolServers.release();
+  scope.registry.add('MCP connections', closeMcpConnections);
   const permissionManager = createBrokeredPermissionManager({
     // A product with no workspace trust gate still honours a headless run's refusal (WorkspaceTrustManager.refuseForThisRun).
     workspaceTrust: workspaceTrustManager ?? repositoryTrust.runRefusalConstraint(),
@@ -824,7 +848,9 @@ export function buildRuntimeGraph<X extends object>(product: ProductComposition<
   scope.registry.add('autonomous permission lifetime', () => autonomousLifetime.abort());
   const externalPermissionHost = {
     port: judgment.port, permissionManager, config: configManager, signal: autonomousLifetime.signal,
-    workspaceTrust: workspaceTrustManager ?? null, workspaceRoot: workingDirectory,
+    // The trust owner is the project (a program opened in a subfolder works for its project): its tool servers start
+    // in the project's root, the folder this owner's trust is checked against (permissions/external-execution.ts).
+    workspaceTrust: workspaceTrustManager ?? null, workspaceRoot: repositoryTrust.workspaceRoot,
     ...(workspaceTrustFor ? { workspaceTrustFor } : {}),
   };
   // A natively admitted daemon method (schedules, channel routing and drafts, the owner profile and occasions, a
@@ -872,14 +898,11 @@ export function buildRuntimeGraph<X extends object>(product: ProductComposition<
     permissionMode: () => permissionManager.getMode(),
   });
   localhostFetchApprovalForSearch = localhostFetchApproval;
-  // ACP/MCP protocol decisions use the same recorded autonomous owner as native tools.
-  mcpRegistry.setPermissionHost(externalPermissionHost);
-  // A server question the call's own facts cannot answer goes to the person at
-  // this surface when there is one; otherwise it is declined and handed back to
-  // the agent in the tool result.
-  mcpRegistry.setElicitationHandler(product.permissionHost.personElicitation === true
-    ? createMcpAutonomousElicitationHandler(externalPermissionHost, createMcpPersonElicitation(requestApproval, configManager))
-    : createMcpAutonomousElicitationHandler(externalPermissionHost));
+  // ACP/MCP protocol decisions use the same recorded autonomous owner as native tools. A server question the call's own
+  // facts cannot answer goes to the person at this surface when there is one; otherwise it is declined and handed back
+  // to the agent in the tool result.
+  projectToolServers.bindPermissions(externalPermissionHost, product.permissionHost.personElicitation === true
+    ? { person: createMcpPersonElicitation(requestApproval, configManager) } : {});
   // Child prose never replaces the original host prompt; absent origins refuse.
   const acpHost = new AcpHostService({
     permissionHost: externalPermissionHost,
@@ -906,9 +929,11 @@ export function buildRuntimeGraph<X extends object>(product: ProductComposition<
 
   // The contract runner over the project's work plan and execution plans. Its
   // units share the fleet ceiling: native agents, whatever else this product
-  // owns, and the ACP sessions it hosts.
+  // owns, and the ACP sessions it hosts. A terminal program builds none
+  // (`contracts: 'none'`): its work runs on the daemon, a model's delegation is
+  // handed to the daemon as a piece of work (tools/agent/work-delegation.ts).
   const fleetCapacity = makeRuntimeFleetProbe({ readConfig: (key) => configManager.get(key as never), fleet: agentManager });
-  const contracts = composeContractRunner({
+  const contracts = product.contracts === 'none' ? null : composeContractRunner({
     nativeDataWriter,
     judgmentLog: judgment.decisionLog,
     surfaceRoot,
@@ -923,13 +948,15 @@ export function buildRuntimeGraph<X extends object>(product: ProductComposition<
     agentMessageBus,
     configManager,
     providerRegistry,
-    projectRoot: workingDirectory,
+    // The daemon's own folder is no project: the contracts its turns start (each working in its own project) keep their
+    // records with the daemon's other records (`<daemon home>/records`), never in that folder. A program's are its project's.
+    projectRoot: product.surface === 'daemon' ? shellPaths.recordsRoot : workingDirectory,
     fleetCapacity,
     workPlanService: projectPlanningService,
     planManager,
   });
-  scope.ownUntilRegistered('contract runner', () => contracts.dispose());
-  const contractRunner = contracts.runner;
+  if (contracts) scope.ownUntilRegistered('contract runner', () => contracts.dispose());
+  const contractRunner = contracts?.runner ?? null;
   const contractOperator = createContractOperatorService({ runner: contractRunner, workingDirectory });
 
   // The live process registry over every source manager: archive-aware, folding
@@ -950,7 +977,7 @@ export function buildRuntimeGraph<X extends object>(product: ProductComposition<
   };
   const baseProcessRegistry = createProcessRegistry({
     agentManager: fleetAgentManager,
-    contractRunner,
+    ...(contractRunner ? { contractRunner } : {}),
     processManager,
     watcherRegistry,
     ...(triggerManager ? { triggerSupervisor: triggerManager } : {}),
@@ -1077,10 +1104,13 @@ export function buildRuntimeGraph<X extends object>(product: ProductComposition<
   });
 
   // The tool dependencies every agent this graph runs is given.
-  let ciAutoWatchObserver: ((toolName: string, args: Record<string, unknown>, success: boolean) => void) | null = null;
+  let ciAutoWatchObserver: ((toolName: string, args: Record<string, unknown>, success: boolean, turn: { readonly project?: string | undefined }) => void) | null = null;
   const agentToolDependencies: AgentToolDependencies = {
-    contractRunner,
-    contractHooks: contractRunner.hooks(),
+    // A program's agents keep their journals with the project's records, whatever folder it was opened in (the daemon
+    // sets its own, records/projects/..., service-graph.ts).
+    ...(product.surface === 'daemon' ? {} : { runRecordsRootOf: (folder: string) => projectRecordsFolder(folder) }),
+    // A graph that runs no contracts gives its agents none (their delegation goes to the daemon).
+    ...(contractRunner ? { contractRunner, contractHooks: contractRunner.hooks() } : {}),
     // A native request's files, read for the agents that do its work (the store artifacts.create writes).
     artifacts: artifactStore,
     ...(product.profileCapture === false ? {} : { personalCapture }),
@@ -1113,7 +1143,7 @@ export function buildRuntimeGraph<X extends object>(product: ProductComposition<
       isCodeInjectionSettingEnabled: isCodeIndexEnabled,
       codeIndexReindexScheduler: codeIndexAtStart.codeIndexReindexScheduler,
     } : {}),
-    toolExecutionObserver: (toolName, args, success) => ciAutoWatchObserver?.(toolName, args, success),
+    toolExecutionObserver: (toolName, args, success, turn) => ciAutoWatchObserver?.(toolName, args, success, turn),
     archetypeLoader,
     configManager,
     providerRegistry,
@@ -1143,6 +1173,8 @@ export function buildRuntimeGraph<X extends object>(product: ProductComposition<
     }
   };
   if ((product.gatewayVerbs ?? 'platform') === 'platform') {
+    // The verbs a host serves itself include the contracts' and the fleet's: such a host runs contracts.
+    if (!contractRunner) throw new Error('A graph that serves the gateway verbs itself runs contracts: compose it with contracts: \'run\'.');
     registerGatewayVerbGroups(gatewayMethods, {
       longWaits: { add: (label, end) => { longWaitEnds.push({ label, end }); } },
       triggerSupervisor: triggerManager, homeDirectory, processRegistry, workspaceCheckpointManager, sessionBroker, secretsManager,
@@ -1169,7 +1201,7 @@ export function buildRuntimeGraph<X extends object>(product: ProductComposition<
   registerRuntimePollers(scope.registry, {
     stopConfigWatch, watcherRegistry: { dispose: stopRequests.watchers }, storeSnapshotScheduler, appendOnlyRetentionScheduler,
     memoryConsolidationScheduler, codeIndexReindexScheduler: { dispose: () => codeIndexOpened?.codeIndexReindexScheduler.dispose() }, sessionOrchestration,
-    knowledgeService, agentKnowledgeService, contractRunner: contracts, homeGraphService: { dispose: stopRequests.homeGraph },
+    knowledgeService, agentKnowledgeService, ...(contracts ? { contractRunner: contracts } : {}), homeGraphService: { dispose: stopRequests.homeGraph },
     processRegistry, memoryGovernor: { stop: stopRequests.memoryGovernor }, triggerManager, agentOrchestrator, cancelHostedAgentRuns,
   });
   scope.registry.add('durability housekeeping', stopDurabilityHousekeeping);
@@ -1178,7 +1210,7 @@ export function buildRuntimeGraph<X extends object>(product: ProductComposition<
   // Drain plugin work before releasing the graph it can call into.
   scope.registry.add('plugins', () => pluginManager.close());
   // Contracts left on disk resume once the services are up.
-  if ((product.contractRecovery ?? 'platform') === 'platform') void resumeContracts(contractRunner, workingDirectory);
+  if (contractRunner && (product.contractRecovery ?? 'platform') === 'platform') void resumeContracts(contractRunner, workingDirectory);
 
   const close = (): Promise<void> => { stopAutonomousWork(); stopRequests.request(); endLongWaits(); return scope.close(); };
   return {
@@ -1312,7 +1344,7 @@ export function buildRuntimeGraph<X extends object>(product: ProductComposition<
     contractRunner,
     contractOperator,
     attachHostedFleetAgents: (source) => { hostedFleetAgents = source ?? (() => []); },
-    sessionSnapshot: (sessionId, conversation) => ({ ...conversation, contracts: contractRunner.list({ sessionId, includeTerminal: true }) }),
+    sessionSnapshot: (sessionId, conversation) => ({ ...conversation, contracts: contractRunner?.list({ sessionId, includeTerminal: true }) ?? [] }),
     processManager,
     processRegistry,
     modeManager,

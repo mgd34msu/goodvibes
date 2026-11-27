@@ -77,6 +77,18 @@ export interface TriggerManagerOptions {
   /** The trigger database (`…/triggers.db`). */
   readonly storePath: string;
   /**
+   * The folder a trigger kept with no project (3.5.0 kept none) ran in: such a trigger keeps working there, given it
+   * at every load (its watched command's folder and its turn's project). Absent: such a trigger is left as it is.
+   */
+  readonly unplacedFolder?: string | undefined;
+  /**
+   * Why a trigger may not be made or run in its folder (workspace/caller-project.ts noProjectRefusal: no project, or a
+   * folder that is never one, the daemon's own folder among them), or undefined. A trigger made with none is refused
+   * (NO_PROJECT); one kept with none (3.5.0's, with no former folder) is held, never run, until the owner gives it one.
+   * Absent: every folder is taken as it is.
+   */
+  readonly projectRefusal?: ((folder: string | undefined) => string | undefined) | undefined;
+  /**
    * A snapshot, or a function read on every access. Hosts pass the function
    * form so `watchers.triggers.enabled` is genuinely runtime-toggleable: with
    * a frozen snapshot, turning the flag on would do nothing until restart,

@@ -35,7 +35,7 @@ export class HostPairingController extends TerminalHostPairingController<Pairing
             status: 'unknown',
             host,
             message:
-              `The reply to a pairing request was lost. ${REPEAT_LOST_REQUEST} Or pair it again with Apply set to Review and confirm it, to forget the attempt and pair from scratch.`,
+              `The reply to a pairing request was lost. ${REPEAT_LOST_REQUEST} Or run goodvibes host pair --apply in a shell to forget the attempt and pair from scratch.`,
           }),
       },
       ui,

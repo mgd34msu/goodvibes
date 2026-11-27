@@ -171,6 +171,7 @@ export function createDaemonMediaRouteHandlers(
         : jsonErrorResponse({ error: 'Unknown artifact' }, { status: 404 });
     },
     getArtifactContent: async (artifactId, request) => handleArtifactContent(context, artifactId, request),
+    deleteArtifact: (artifactId, request) => handleArtifactDiscard(context, artifactId, request),
     getMediaProviders: async () => Response.json({ providers: await context.mediaProviders.status() }),
     postMediaAnalyze: async (request) => handleMediaAnalyze(context, request),
     postMediaTransform: async (request) => handleMediaTransform(context, request),
@@ -475,8 +476,18 @@ async function handleMediaAnalyze(context: DaemonMediaRouteContext, req: Request
 async function handleArtifactCreate(context: DaemonMediaRouteContext, req: Request): Promise<Response> {
   const admin = context.requireAdmin(req);
   if (admin) return admin;
+  // Who stores it is who it belongs to (platform control-plane/caller-reach.ts): the authenticated caller, never the body.
+  const createdBy = context.callerPrincipal?.(req);
   if (isArtifactUploadRequest(req)) {
-    const uploaded = await createArtifactFromUploadRequest(context.artifactStore, req);
+    const store = context.artifactStore;
+    // The upload's own metadata, with who stored it.
+    const withMaker = <T extends { readonly metadata?: Record<string, unknown> | undefined }>(input: T): T => createdBy ? { ...input, metadata: { ...(input.metadata ?? {}), createdBy } } : input;
+    const uploaded = await createArtifactFromUploadRequest({
+      create: (input) => store.create(withMaker(input)),
+      ...(store.getMaxBytes ? { getMaxBytes: () => store.getMaxBytes!() } : {}),
+      ...(store.createFromStream ? { createFromStream: (input: Parameters<NonNullable<typeof store.createFromStream>>[0]) => store.createFromStream!(withMaker(input)) } : {}),
+      ...(store.delete ? { delete: (id: string) => store.delete!(id) } : {}),
+    }, req);
     if (uploaded instanceof Response) return uploaded;
     return Response.json({ artifact: uploaded.artifact }, { status: 201 });
   }
@@ -506,12 +517,35 @@ async function handleArtifactCreate(context: DaemonMediaRouteContext, req: Reque
       ...(typeof body.uri === 'string' ? { uri: body.uri } : {}),
       ...(privateHostFetchOptions ?? {}),
       ...(typeof body.retentionMs === 'number' ? { retentionMs: body.retentionMs } : {}),
-      ...(typeof body.metadata === 'object' && body.metadata !== null ? { metadata: body.metadata as Record<string, unknown> } : {}),
+      ...(typeof body.metadata === 'object' && body.metadata !== null || createdBy
+        ? { metadata: { ...(typeof body.metadata === 'object' && body.metadata !== null ? body.metadata as Record<string, unknown> : {}), ...(createdBy ? { createdBy } : {}) } } : {}),
     });
     return Response.json({ artifact }, { status: 201 });
   } catch (error) {
     return readServiceErrorResponse(error);
   }
+}
+
+/** The purpose a program's knowledge-ingest upload carries (knowledge-ingest-tool.ts): the only artifact this discards. */
+const KNOWLEDGE_INGEST_UPLOAD_PURPOSE = 'knowledge-ingest';
+
+/**
+ * Discard a file a program uploaded so the owner could be asked to add it to his knowledge, once he said No (or the
+ * add was refused): the upload is the program's own, made a moment before for that one question. Any other artifact
+ * is refused (409), so this never deletes what the owner saved. Admin, as the upload is.
+ */
+function handleArtifactDiscard(context: DaemonMediaRouteContext, artifactId: string, req: Request): Response {
+  const admin = context.requireAdmin(req);
+  if (admin) return admin;
+  const artifact = context.artifactStore.get(artifactId);
+  if (!artifact) return jsonErrorResponse({ error: `Unknown artifact: ${artifactId}` }, { status: 404 });
+  const metadata = typeof artifact === 'object' && artifact !== null ? (artifact as { readonly metadata?: unknown }).metadata : undefined;
+  const purpose = typeof metadata === 'object' && metadata !== null ? (metadata as Record<string, unknown>)['purpose'] : undefined;
+  if (purpose !== KNOWLEDGE_INGEST_UPLOAD_PURPOSE) {
+    return jsonErrorResponse({ error: `Artifact ${artifactId} was not uploaded for a knowledge ingest, so it is not discarded here; nothing was changed.`, code: 'NOT_AN_INGEST_UPLOAD' }, { status: 409 });
+  }
+  if (!context.artifactStore.delete) return jsonErrorResponse({ error: 'This daemon cannot discard artifacts; nothing was changed.', code: 'UNAVAILABLE' }, { status: 503 });
+  return Response.json({ discarded: context.artifactStore.delete(artifactId), artifactId });
 }
 
 /**

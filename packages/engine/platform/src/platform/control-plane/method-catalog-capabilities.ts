@@ -72,6 +72,8 @@ export const builtinGatewayCapabilityMethodDescriptors: readonly GatewayMethodDe
     category: 'capabilities',
     effects: ['control-plane.read'],
     transport: ['ws'],
+    // The caller's project, each project-bound read made there: a project the caller may name.
+    workFolders: ['workingDirectory'],
     inputSchema: objectSchema({ program: stringEnumSchema(['tui', 'agent', 'web']), workingDirectory: STRING_SCHEMA }, []),
     outputSchema: objectSchema({ places: arraySchema(PLACE_COUNT_SCHEMA) }, ['places']),
   }),
@@ -106,6 +108,9 @@ export const builtinGatewayCapabilityMethodDescriptors: readonly GatewayMethodDe
     category: 'capabilities',
     effects: ['control-plane.write'],
     transport: ['ws'],
+    // The caller's project; and each input the capability run declares as a folder worked in (`workFolder`, a hosted
+    // agent's folder, a tool server's folders) is checked the same way by the dispatch, as `inputs.<id>`.
+    workFolders: ['workingDirectory'],
     inputSchema: objectSchema({
       id: STRING_SCHEMA,
       inputs: JSON_OBJECT_SCHEMA,
@@ -114,8 +119,16 @@ export const builtinGatewayCapabilityMethodDescriptors: readonly GatewayMethodDe
       model: STRING_SCHEMA,
       // The asking program's conversation, for a capability that records where it came from (a memory record's session).
       sessionId: STRING_SCHEMA,
+      // Every project at once, with no workingDirectory: the owner's own choice in his place's project chooser (taken only
+      // from the owner himself; from anyone else the call reads only what belongs to no project).
+      everyProject: BOOLEAN_SCHEMA,
       // The outcome of an earlier call put to the owner, read by the id its 202 answer gave (sent without id).
       approvalId: STRING_SCHEMA,
+      // A model's delegation from a conversation in the owner's own program (work.delegate only, taken only from the
+      // program's own credential): decided under his mode as an agent spawn; otherParty names who that conversation's
+      // turn acts for when it is someone else's input (routes/capabilities.ts conversationDelegation).
+      delegatedFrom: stringEnumSchema(['conversation']),
+      otherParty: STRING_SCHEMA,
     }, []),
     outputSchema: { anyOf: [objectSchema({
       id: STRING_SCHEMA, ok: BOOLEAN_SCHEMA, text: STRING_SCHEMA, detail: STRING_SCHEMA, data: JSON_OBJECT_SCHEMA, risk: STRING_SCHEMA,

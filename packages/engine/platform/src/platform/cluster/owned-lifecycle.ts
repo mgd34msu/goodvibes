@@ -73,10 +73,10 @@ export class ClusterPeriodicTasks {
     let failing = false;
     const tick = (): void => {
       if (!active) return;
-      const work = Promise.resolve().then(task).then(() => { failing = false; }, () => {
+      const work = Promise.resolve().then(task).then(() => { failing = false; }, (error: unknown) => {
         if (failing) return;
         failing = true;
-        this.logger.warn('cluster: a periodic group task failed');
+        this.logger.warn('cluster: a periodic group task failed', { error: error instanceof Error ? error.message : String(error) });
       }).finally(() => { this.pending.delete(work); });
       this.pending.add(work);
       cancel = this.clock.setTimer(tick, intervalMs);

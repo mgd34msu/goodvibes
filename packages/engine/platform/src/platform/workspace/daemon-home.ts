@@ -155,7 +155,7 @@ export function readDaemonSetting(daemonHomeDir: string, key: string): string | 
 }
 
 function unreadableDaemonSettings(settingsPath: string, cause: string): Error {
-  return new Error(`${settingsPath} could not be read (${cause}); fix or remove it, or start with --working-dir`);
+  return new Error(`${settingsPath} could not be read (${cause}); fix or remove it`);
 }
 
 type DaemonSettingsFile =

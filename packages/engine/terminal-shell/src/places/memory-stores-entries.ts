@@ -504,6 +504,8 @@ export const MEMORY_STORE_ACTIONS: readonly PlaceAction<MemoryStoreItem>[] = [
   { key: 'u', id: 'artifact-refresh-preset', list: 'artifacts', capability: 'documents.refresh-preset', label: 'refresh as a preset', fill: { preset: 'id' } },
   { key: 'd', id: 'artifact-send-packet', list: 'artifacts', capability: 'documents.share-packet', label: 'send as a review packet', fill: { archive: 'id' } },
   { key: 'f', id: 'artifact-search', list: 'artifacts', whole: true, capability: 'artifacts.list', label: 'search' },
+  // Keeping a text of your own as an artifact (commands-final: it had no control; a turn saves what it makes the same way).
+  { key: 's', id: 'artifact-save', list: 'artifacts', whole: true, capability: 'artifacts.save', label: 'save one' },
   // Agent homes
   { key: 'enter', id: 'home-show', list: 'agent-homes', capability: 'agent-home.show', label: 'look at it', fill: { home: 'id' } },
   { key: 'u', id: 'home-use', list: 'agent-homes', states: ['kept'], capability: 'agent-home.use', label: 'start the Agent in it', fill: { home: 'id' } },

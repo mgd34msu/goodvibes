@@ -5,8 +5,7 @@ import { createPreferredSettingsProjector, executeAdmittedPreferredSettings, set
 import type { Tool } from '@goodvibes/engine/platform/platform/types';
 import type { ToolRegistry } from '@goodvibes/engine/platform/platform/tools';
 import type { CommandContext, CommandRegistry } from '../input/command-registry.ts';
-import { createAgentSettingsImportTool } from './agent-settings-import-tool.ts';
-import { executeAdmittedAgentSettingsImport } from './agent-settings-import-admission.ts';
+import { runCopyFromTerminalApp } from './agent-settings-import-tool.ts';
 import { readSettingsAction, SETTINGS_ACTION_WORDS } from './agent-settings-action.ts';
 import { confirmParameter } from '@goodvibes/engine/terminal-shell/agent-turn/effect-admission';
 import { readString } from '@goodvibes/engine/terminal-shell/agent-turn/tool-args';
@@ -26,11 +25,10 @@ interface AgentSettingsToolArgs {
   readonly limit?: unknown;
   readonly offset?: unknown;
   readonly confirm?: unknown;
+  readonly security?: unknown;
 }
 
-interface AgentSettingsToolDeps extends HarnessFacadeDeps {
-  readonly settingsImportTool?: Tool;
-}
+type AgentSettingsToolDeps = HarnessFacadeDeps;
 
 function error(message: string): { readonly success: false; readonly error: string } {
   return { success: false, error: message };
@@ -86,8 +84,6 @@ function isSettingsQuery(input: Record<string, unknown>, context: CommandContext
 }
 
 export function createAgentSettingsTool(deps: AgentSettingsToolDeps): Tool {
-  const settingsImportTool = deps.settingsImportTool ?? createAgentSettingsImportTool(deps.commandContext);
-
   return createHarnessFacade<AgentSettingsToolArgs>(deps, {
     definition: {
       name: 'settings',
@@ -95,14 +91,14 @@ export function createAgentSettingsTool(deps: AgentSettingsToolDeps): Tool {
         doing: 'Adjusting', did: 'adjusted', object: 'settings',
         byAction: { read: { doing: 'Checking', did: 'checked', object: 'settings' } },
       },
-      description: 'List, inspect, change, reset, or import settings.',
+      description: 'List, inspect, change or reset settings, or give the Agent the settings the terminal app has (import: the capability settings.copy-from-terminal-app).',
       parameters: {
         type: 'object',
         properties: {
           action: {
             type: 'string',
             enum: [...SETTINGS_ACTION_WORDS],
-            description: 'list/get read; set/reset change one setting and import applies the captured import, each through recorded admission; preview_import only shows what import would apply.',
+            description: 'list/get read; set/reset change one setting through recorded admission; import runs settings.copy-from-terminal-app (each setting the terminal app holds differently is set the same here; one that loosens a protection only with security:"yes").',
           },
           key: { type: 'string', description: 'Exact setting key.' },
           setting: { type: 'string', description: 'Alias for key.' },
@@ -116,6 +112,7 @@ export function createAgentSettingsTool(deps: AgentSettingsToolDeps): Tool {
           limit: { type: 'number', description: 'Settings per page (default 50, at most 100).' },
           offset: { type: 'number', description: 'Row to start the page at; a short page names the next offset.' },
           confirm: confirmParameter(),
+          security: { type: 'string', enum: ['no', 'yes'], description: 'For import: yes also copies the settings that loosen a protection; no (the default) leaves them as they are.' },
         },
         additionalProperties: false,
       },
@@ -129,16 +126,13 @@ export function createAgentSettingsTool(deps: AgentSettingsToolDeps): Tool {
 
       if (action === 'list') return forward(settingsListArgs(args));
       if (action === 'get') return forward(settingsLookupArgs('get_setting', args));
-      // Writes and the import carry their own admission (registered as this tool's fallback projection).
+      // Writes carry their own admission (registered as this tool's fallback projection).
       if (action === 'set' || action === 'reset') {
         try { return await executeAdmittedPreferredSettings(rawArgs, options); }
         catch (thrown) { return settingsThrownFailure('mutation', thrown); }
       }
-      if (action === 'preview_import') return settingsImportTool.execute({ action: 'preview' }, options);
-      if (action === 'import') {
-        try { return await executeAdmittedAgentSettingsImport(deps.commandContext, rawArgs, options); }
-        catch (thrown) { return settingsThrownFailure('import', thrown); }
-      }
+      // The terminal app's settings: the one capability, as a nested capability_run of this call.
+      if (action === 'import') return runCopyFromTerminalApp(deps.toolRegistry, rawArgs, options);
 
       return error(`Unknown settings action. Use one of: ${SETTINGS_ACTION_WORDS.join(', ')}.`);
     },

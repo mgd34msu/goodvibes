@@ -1,5 +1,5 @@
 import { normalizePermissionMode } from '@goodvibes/engine/platform/platform/gate';
-import { NETWORK_MODE_OPTIONS, REASONING_OPTIONS, HITL_MODE_OPTIONS, GUIDANCE_MODE_OPTIONS, PERMISSION_MODE_OPTIONS, SECRET_POLICY_OPTIONS } from './onboarding-wizard-constants.ts';
+import { INBOUND_EXTERNAL_SURFACE_IDS, NETWORK_MODE_OPTIONS, REASONING_OPTIONS, HITL_MODE_OPTIONS, GUIDANCE_MODE_OPTIONS, PERMISSION_MODE_OPTIONS, SECRET_POLICY_OPTIONS } from './onboarding-wizard-constants.ts';
 import { shouldShowCloudflareStep } from './onboarding-wizard-cloudflare.ts';
 import { buildCloudflareStep } from './onboarding-wizard-cloudflare-step.ts';
 import {
@@ -22,20 +22,12 @@ import { SETUP_TOPICS } from '@goodvibes/engine/terminal-shell/setup-command';
 import type { OnboardingWizardAcknowledgementFieldDefinition, OnboardingWizardActionFieldDefinition, OnboardingWizardChecklistFieldDefinition, OnboardingWizardExternalSurfaceStepId, OnboardingWizardFieldDefinition, OnboardingWizardModelPickerFieldDefinition, OnboardingWizardRadioFieldDefinition, OnboardingWizardRadioOption, OnboardingWizardStepDefinition } from './onboarding-wizard-types.ts';
 
 /** The capability a topic switches on, shown as that topic's first row. */
+// The four network topics (Only this computer, Use it in a browser, Other devices, Receive webhooks) and "Who can sign
+// in here" have no form here: they open Devices and network's Addresses and ports, which makes the account that signs
+// in from there (`a`).
 const TOPIC_CAPABILITY: Partial<Record<OnboardingWizardTopic, string>> = {
-  'local-only': 'local-tui-only',
-  'browser': 'browser-access',
-  'other-devices': 'network-access',
-  'webhooks': 'webhook-events',
   'chat-apps': 'external-integrations',
   'cloudflare': 'cloudflare-batch',
-};
-
-/** The network rows each reach topic shows (the rest of the network page belongs to the others). */
-const TOPIC_NETWORK_FIELDS: Partial<Record<OnboardingWizardTopic, readonly string[]>> = {
-  'browser': ['network.mode', 'network.shared-ip', 'network.shared-ip-address', 'network.service-', 'network.browser-', 'network.tls-warn'],
-  'other-devices': ['network.mode', 'network.shared-ip', 'network.shared-ip-address', 'network.service-', 'network.tls-warn'],
-  'webhooks': ['network.mode', 'network.shared-ip', 'network.shared-ip-address', 'network.webhook-', 'network.cors-note', 'network.tls-warn'],
 };
 
 const FEATURE_TOPIC_STEP: Partial<Record<OnboardingWizardTopic, OnboardingWizardStepDefinition['id']>> = {
@@ -50,9 +42,21 @@ const FEATURE_TOPIC_STEP: Partial<Record<OnboardingWizardTopic, OnboardingWizard
 
 const KEY_FIELD_PREFIXES = ['providers.api-key.', 'providers.api-key-inventory'];
 const isKeyField = (id: string): boolean => KEY_FIELD_PREFIXES.some((prefix) => id.startsWith(prefix));
-const ACCOUNT_ADMIN_FIELDS = ['accounts.admin-username', 'accounts.admin-password', 'accounts.admin-password-confirm', 'accounts.auth', 'accounts.bootstrap', 'accounts.user-store'];
-/** The sign-in account rows a reach topic adds when it opens the computer to the network. */
-const REACH_ADMIN_FIELDS = ['accounts.admin-username', 'accounts.admin-password', 'accounts.admin-password-confirm', 'accounts.auth'];
+
+/**
+ * The account that signs in from other devices is made by one control, `a` on Devices and network, Addresses and
+ * ports: a form that opens the computer to the network (chat apps) sends the person there, as the network topics do.
+ */
+function signInAccountRow(): OnboardingWizardActionFieldDefinition {
+  return {
+    kind: 'action',
+    id: 'accounts.open-sign-in-account',
+    label: 'The account that signs in',
+    hint: 'Made in Devices and network, Addresses and ports (a): its user name and password. Enter opens it.',
+    action: 'open-sign-in-account',
+    defaultValue: 'Open',
+  };
+}
 
 function pick(step: OnboardingWizardStepDefinition, keep: (id: string) => boolean): OnboardingWizardFieldDefinition[] {
   return step.fields.filter((field) => keep(field.id));
@@ -61,12 +65,8 @@ function pick(step: OnboardingWizardStepDefinition, keep: (id: string) => boolea
 /** The rows of one topic's form, from the page builders that hold them. */
 function topicFields(controller: OnboardingWizardControllerLike, topic: OnboardingWizardTopic): { readonly id: OnboardingWizardStepDefinition['id']; readonly description: string; readonly fields: OnboardingWizardFieldDefinition[] } {
   const capabilityId = TOPIC_CAPABILITY[topic];
-  const capabilityRow = capabilityId ? pick(buildCapabilitiesStep(controller), (id) => id === `capabilities.${capabilityId}` || (topic === 'local-only' && id === 'capabilities.clear')) : [];
+  const capabilityRow = capabilityId ? pick(buildCapabilitiesStep(controller), (id) => id === `capabilities.${capabilityId}`) : [];
   const capabilityOn = capabilityId ? controller.isCapabilitySelected(capabilityId as OnboardingStep1CapabilityId) : false;
-  // A reach topic that opens the machine to the network asks for the account that signs in.
-  const adminRows = (): OnboardingWizardFieldDefinition[] => controller.requiresAuthBootstrap()
-    ? pick(buildAccessStep(controller), (id) => REACH_ADMIN_FIELDS.includes(id))
-    : [];
   switch (topic) {
     case 'model': {
       const step = buildDefaultModelStep(controller);
@@ -88,20 +88,6 @@ function topicFields(controller: OnboardingWizardControllerLike, topic: Onboardi
         fields: [...pick(providers, isKeyField), ...pick(buildExternalServicesStep(controller), (id) => id === 'external-services.secret-policy')],
       };
     }
-    case 'local-only':
-      return { id: 'capabilities', description: 'Use GoodVibes only in this terminal: no browser access, no network access, no webhooks. The background service on this computer still runs.', fields: capabilityRow };
-    case 'browser':
-    case 'other-devices':
-    case 'webhooks': {
-      const prefixes = TOPIC_NETWORK_FIELDS[topic] ?? [];
-      const network = capabilityOn ? pick(buildNetworkStep(controller), (id) => prefixes.some((prefix) => id.startsWith(prefix))) : [];
-      const description = topic === 'browser'
-        ? 'Turn on the web UI and choose where it listens.'
-        : topic === 'other-devices'
-          ? 'Let your other devices reach GoodVibes, and choose the addresses and ports. Someone must sign in from those devices.'
-          : 'Turn on the receiver for webhooks and events from other tools, and choose where it listens.';
-      return { id: 'network', description, fields: [...capabilityRow, ...network, ...(capabilityOn ? adminRows() : [])] };
-    }
     case 'connect-daemon': {
       // Which daemon this terminal dials is a client-side choice: no capability, no exposure of this machine, no sign-in account.
       const network = pick(buildNetworkStep(controller), (id) => id === DAEMON_SOURCE_FIELD_ID || id.startsWith('network.adopt-'));
@@ -111,17 +97,17 @@ function topicFields(controller: OnboardingWizardControllerLike, topic: Onboardi
       const services = capabilityOn ? pick(buildExternalServicesStep(controller), (id) => id !== 'external-services.secret-policy') : [];
       const surfaces = capabilityOn ? getSelectedExternalSurfaceSpecs(controller).flatMap((surface) => {
         const step = buildExternalSurfaceStep(controller, surface);
-        return [{ kind: 'status' as const, id: `${step.id}.heading`, label: step.title, hint: step.description, defaultValue: '', spacerBeforeRows: 1 }, ...step.fields];
+        // This form saves the app's own settings only; an app that is sent its messages needs the webhook listener,
+        // which the person turns on himself in the one place for it.
+        const inbound = INBOUND_EXTERNAL_SURFACE_IDS.has(surface.id)
+          ? ` ${step.title.replace(/ surface$/, '')} sends its messages to GoodVibes by webhook: turn the webhook listener on in Devices and network, Addresses and ports (this form does not).` : '';
+        return [{ kind: 'status' as const, id: `${step.id}.heading`, label: step.title, hint: `${step.description}${inbound}`, defaultValue: '', spacerBeforeRows: 1 }, ...step.fields];
       }) : [];
-      return { id: 'external-services', description: 'Choose the chat apps and services GoodVibes connects to, and fill in each one.', fields: [...capabilityRow, ...services, ...surfaces, ...(capabilityOn ? adminRows() : [])] };
+      return { id: 'external-services', description: 'Choose the chat apps and services GoodVibes connects to, and fill in each one. Only their own settings are saved; how this computer is reached is set in Devices and network, Addresses and ports.', fields: [...capabilityRow, ...services, ...surfaces, ...(capabilityOn ? [signInAccountRow()] : [])] };
     }
     case 'cloudflare': {
       const cloudflare = shouldShowCloudflareStep(controller) ? buildCloudflareStep(controller) : null;
       return { id: 'cloudflare', description: cloudflare?.description ?? 'Use Cloudflare Workers and Queues for batch and remote work.', fields: [...capabilityRow, ...(cloudflare?.fields ?? [])] };
-    }
-    case 'who-signs-in': {
-      const access = buildAccessStep(controller);
-      return { id: access.id, description: 'The account that signs in to this GoodVibes from a browser or another device.', fields: pick(access, (id) => ACCOUNT_ADMIN_FIELDS.includes(id)) };
     }
     case 'how-it-works': {
       const step = buildExperienceStep(controller);
@@ -758,52 +744,8 @@ export function buildNetworkStep(controller: OnboardingWizardControllerLike): On
 
 export function buildAccountsStep(controller: OnboardingWizardControllerLike): OnboardingWizardStepDefinition {
     const subscriptionsAck = controller.runtimeDerived.reopenEditAcknowledgements.subscriptions;
-    const authAck = controller.runtimeDerived.reopenEditAcknowledgements.auth;
-    const auth = controller.runtimeSnapshot?.auth.snapshot;
-    const needsAuthBootstrap = controller.requiresAuthBootstrap();
-    const needsExistingAuthAcknowledgement = controller.hasServerCapabilitiesSelected()
-      && !needsAuthBootstrap
-      && controller.hasLocalAuthUser();
-    const fields: OnboardingWizardFieldDefinition[] = [];
-    const defaultAdminUsername = controller.getDefaultAdminUsername();
-
-    fields.push(
-      {
-        kind: 'text',
-        id: 'accounts.admin-username',
-        label: 'Local auth admin username',
-        hint: needsAuthBootstrap
-          ? 'Required before any background service, browser surface, or listener is exposed.'
-          : 'Optional. Enter an existing admin username to rotate its password, or a new username to create another admin.',
-        placeholder: defaultAdminUsername,
-        defaultValue: defaultAdminUsername,
-        required: needsAuthBootstrap,
-      },
-      {
-        kind: 'masked',
-        id: 'accounts.admin-password',
-        label: 'Local auth admin password',
-        hint: needsAuthBootstrap
-          ? controller.hasBootstrapCredentialPresent()
-            ? 'Creates or updates the named local admin, removes the bootstrap credential file, and retires the bootstrap admin when it is a different user.'
-            : 'Creates the first local admin user and an initial session before LAN/server settings are applied.'
-          : 'Optional. Leave blank to keep existing local auth unchanged; enter a password to create or rotate the named admin user.',
-        placeholder: needsAuthBootstrap ? 'password required' : 'leave blank to keep unchanged',
-        defaultValue: '',
-        required: needsAuthBootstrap,
-      },
-      {
-        kind: 'masked',
-        id: 'accounts.admin-password-confirm',
-        label: 'Confirm local auth admin password',
-        hint: 'Type the same password again. Nothing is created or rotated until both entries match, so one mistyped character cannot lock you out (a rotation signs the account out everywhere).',
-        placeholder: 'type the password again',
-        defaultValue: '',
-        required: false,
-      },
-    );
-
-    fields.push(
+    // The account that signs in is made in Devices and network, Addresses and ports (`a`), never here.
+    const fields: OnboardingWizardFieldDefinition[] = [
       {
         kind: 'acknowledgement',
         id: 'accounts.subscriptions',
@@ -814,56 +756,16 @@ export function buildAccountsStep(controller: OnboardingWizardControllerLike): O
         reason: subscriptionsAck.reason,
         target: 'subscriptions',
       },
-      {
-        kind: 'acknowledgement',
-        id: 'accounts.auth',
-        label: 'Confirm local auth posture',
-        hint: authAck.detail,
-        defaultValue: authAck.accepted,
-        required: needsExistingAuthAcknowledgement || (controller.mode !== 'new' && authAck.required),
-        reason: authAck.reason,
-        target: 'auth',
-      },
-      {
-        kind: 'status',
-        id: 'accounts.bootstrap',
-        label: 'Local auth readiness',
-        hint: needsAuthBootstrap
-          ? 'The wizard will create local auth before applying network-accessible settings.'
-          : controller.hasAdminAuthUser()
-            ? 'An existing local auth admin user was detected and will be kept.'
-            : controller.hasLocalAuthUser()
-              ? 'Existing local auth users were detected and will be kept.'
-              : 'No server-backed capability is selected, so local auth is not required.',
-        defaultValue: needsAuthBootstrap
-          ? controller.hasBootstrapCredentialPresent() ? 'Bootstrap replacement required' : 'Local admin required'
-          : controller.hasAdminAuthUser() ? 'Admin detected' : controller.hasLocalAuthUser() ? 'Local auth detected' : 'Not required',
-      },
-      {
-        kind: 'status',
-        id: 'accounts.user-store',
-        label: 'Local auth store path',
-        hint: 'Carry the current auth store location into edit/review mode.',
-        defaultValue: normalizeText(auth?.userStorePath) || 'No local auth store path',
-      },
-    );
+    ];
 
     return {
       id: 'access',
-      title: 'Subscriptions and auth review',
+      title: 'Subscriptions review',
       shortLabel: 'Accounts',
-      description: needsAuthBootstrap
-        ? 'Create wizard-owned local auth before any LAN, browser, service, or listener settings are applied.'
-        : 'Review existing subscription and local auth state. Existing local auth is kept unless you change it elsewhere.',
+      description: 'Review the stored provider sign-ins.',
       summaryTitle: 'Stored account state',
       summaryLines: [
         `Subscriptions: ${controller.runtimeSnapshot?.subscriptions.active.length ?? 0} active / ${controller.runtimeSnapshot?.subscriptions.pending.length ?? 0} pending`,
-        `Auth: ${auth?.userCount ?? 0} users / ${auth?.sessionCount ?? 0} sessions`,
-        needsAuthBootstrap
-          ? controller.hasBootstrapCredentialPresent()
-            ? 'Bootstrap credentials will be replaced before network settings are applied'
-            : 'Local admin will be created before network settings are applied'
-          : controller.hasLocalAuthUser() ? 'Existing local auth will be kept' : 'Local auth is not required for this setup',
       ],
       fields,
     };

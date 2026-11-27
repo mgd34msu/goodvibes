@@ -169,6 +169,47 @@ function targetMatches(target: WorkEvidenceTarget, work: LedgerWork, attempt: Le
     && target.attemptRevision === attempt.revision;
 }
 
+/**
+ * The host's own reports of where a daemon run stands (waiting for the owner, cut off by a stop, going on again,
+ * failed): requests named with these prefixes. They say what Work says and change nothing a run is bound to.
+ */
+export const NATIVE_STATUS_REQUEST_PREFIX = 'native-status:';
+const NATIVE_FAILED_REQUEST_PREFIX = 'native-failed:';
+/** What the rule reads of a history event: the ledger's own events and the read client's both have these. */
+type StatusHistory = readonly { readonly type: string; readonly requestId: string; readonly workId?: string; readonly attemptId?: string | null }[];
+function isNativeStatusReport(event: StatusHistory[number]): boolean {
+  return event.type === 'report' && (event.requestId.startsWith(NATIVE_STATUS_REQUEST_PREFIX) || event.requestId.startsWith(NATIVE_FAILED_REQUEST_PREFIX));
+}
+
+/**
+ * How many host status reports moved this work and attempt (each moves both revisions by one), among the first
+ * `before` events of the history (all when absent).
+ */
+export function nativeStatusReports(history: StatusHistory, workId: string, attemptId: string, before = history.length): number {
+  let count = 0;
+  for (const event of history.slice(0, before)) {
+    if (event.workId === workId && event.attemptId === attemptId && isNativeStatusReport(event)) count += 1;
+  }
+  return count;
+}
+
+/**
+ * The revisions a daemon run is bound to, read off the ledger: the work's and attempt's own, less the host's status
+ * reports since. A run's target, the work's current target as a caller is given it, and every comparison of the two
+ * use this, so the ledger can say "waiting for you" or "going on" while the run stays bound to what it was started on.
+ */
+export function nativeBoundRevisions(history: StatusHistory, work: Pick<LedgerWork, 'id' | 'revision'>, attempt: Pick<LedgerAttempt, 'id' | 'revision'>): { readonly workRevision: number; readonly attemptRevision: number } {
+  const reports = nativeStatusReports(history, work.id, attempt.id);
+  return { workRevision: work.revision - reports, attemptRevision: attempt.revision - reports };
+}
+
+/** Whether a run's target is the work's current one, its host status reports aside. */
+export function nativeTargetMatches(history: StatusHistory, target: WorkEvidenceTarget, work: LedgerWork, attempt: LedgerAttempt | null | undefined): boolean {
+  if (!attempt || target.workId !== work.id || target.attemptId !== attempt.id || target.criteriaRevision !== work.criteriaRevision) return false;
+  const bound = nativeBoundRevisions(history, work, attempt);
+  return target.workRevision === bound.workRevision && target.attemptRevision === bound.attemptRevision;
+}
+
 function actions(work: LedgerWork, attempt: LedgerAttempt | null, actor: WorkLedgerHostIdentity): WorkLedgerAction[] {
   const coordinator = actor.role === 'coordinator';
   if (work.reportedState === 'cancelled') return coordinator ? ['reopen'] : [];
@@ -698,7 +739,7 @@ export function reduceWorkLedgerSettlement(state: WorkLedgerState, input: {
   const next = workLedgerStateSchema.parse(state);
   const work = next.works.find(value => value.id === input.target.workId);
   const attempt = next.attempts.find(value => value.id === input.target.attemptId);
-  if (!work || !attempt || !targetMatches(input.target, work, attempt) || attempt.ownerId !== input.actorId
+  if (!work || !attempt || !nativeTargetMatches(next.history, input.target, work, attempt) || attempt.ownerId !== input.actorId
     || attempt.state !== 'active' || work.reportedState === 'complete' || work.reportedState === 'cancelled') throw new Error('Native settlement target is stale');
   const reportCommand = workLedgerCommandSchema.parse({ type: 'report', requestId: input.reportRequestId, expectedRevision: next.revision,
     workId: work.id, attemptId: attempt.id, state: 'complete', report: input.report });
@@ -722,13 +763,55 @@ export function reduceWorkLedgerFailure(state: WorkLedgerState, input: {
   const next = workLedgerStateSchema.parse(state);
   const work = next.works.find(value => value.id === input.target.workId);
   const attempt = next.attempts.find(value => value.id === input.target.attemptId);
-  if (!work || !attempt || !targetMatches(input.target, work, attempt) || attempt.ownerId !== input.actorId
+  if (!work || !attempt || !nativeTargetMatches(next.history, input.target, work, attempt) || attempt.ownerId !== input.actorId
     || attempt.state !== 'active' || work.reportedState === 'complete' || work.reportedState === 'cancelled') throw new Error('Native failure target is stale');
   const command = workLedgerCommandSchema.parse({ type: 'report', requestId: input.requestId, expectedRevision: next.revision,
     workId: work.id, attemptId: attempt.id, state: 'blocked', report: input.reason, blocker: input.reason });
   const result = reduceWorkLedger(next, command, { projectId: next.projectId, actorId: input.actorId, role: 'worker' }, clock);
   if (result.kind !== 'accepted') throw new Error('Native failure report refused');
   return { state: next };
+}
+
+/**
+ * Where a live daemon run stands, said in the ledger: `blocked` with the words (it waits for the owner: a question, a
+ * failed step, cut off by a daemon stop) or `in_progress` (it goes on). Only at the run's own target, while the work is
+ * in progress or blocked; nothing when the ledger already says exactly this. The request is named
+ * `native-status:...`, so the run stays bound to its target (`nativeTargetMatches`).
+ */
+export function reduceWorkLedgerStatus(state: WorkLedgerState, input: {
+  readonly target: WorkEvidenceTarget; readonly actorId: string; readonly state: 'in_progress' | 'blocked'; readonly words: string; readonly requestId: string;
+}, clock: WorkLedgerClock): { readonly state: WorkLedgerState; readonly changed: boolean } {
+  if (!input.requestId.startsWith(NATIVE_STATUS_REQUEST_PREFIX)) throw new Error('Native status report needs its own request name');
+  const next = workLedgerStateSchema.parse(state);
+  const work = next.works.find(value => value.id === input.target.workId);
+  const attempt = next.attempts.find(value => value.id === input.target.attemptId);
+  if (!work || !attempt || !nativeTargetMatches(next.history, input.target, work, attempt) || attempt.ownerId !== input.actorId
+    || attempt.state !== 'active' || work.reportedState === 'complete' || work.reportedState === 'cancelled') throw new Error('Native status target is stale');
+  if (work.reportedState === input.state && (input.state === 'in_progress' || attempt.blocker === input.words)) return { state: next, changed: false };
+  const command = workLedgerCommandSchema.parse({ type: 'report', requestId: input.requestId, expectedRevision: next.revision,
+    workId: work.id, attemptId: attempt.id, state: input.state, report: input.words, ...(input.state === 'blocked' ? { blocker: input.words } : {}) });
+  const result = reduceWorkLedger(next, command, { projectId: next.projectId, actorId: input.actorId, role: 'worker' }, clock);
+  if (result.kind !== 'accepted') throw new Error('Native status report refused');
+  return { state: next, changed: true };
+}
+
+/**
+ * A daemon run the owner stopped, said in the ledger: the work cancelled with the reason (Work's "stopped"), by the
+ * host as the coordinator for the attempt's owner. Only while that attempt is the work's current one and the work is
+ * neither complete nor cancelled.
+ */
+export function reduceWorkLedgerStopped(state: WorkLedgerState, input: {
+  readonly workId: string; readonly attemptId: string; readonly reason: string; readonly requestId: string;
+}, clock: WorkLedgerClock): { readonly state: WorkLedgerState; readonly changed: boolean } {
+  const next = workLedgerStateSchema.parse(state);
+  const work = next.works.find(value => value.id === input.workId);
+  const attempt = next.attempts.find(value => value.id === input.attemptId);
+  if (!work || !attempt || work.currentAttemptId !== attempt.id || attempt.state === 'complete' || attempt.state === 'cancelled'
+    || work.reportedState === 'complete' || work.reportedState === 'cancelled') return { state: next, changed: false };
+  const command = workLedgerCommandSchema.parse({ type: 'cancel', requestId: input.requestId, expectedRevision: next.revision, workId: work.id, reason: input.reason });
+  const result = reduceWorkLedger(next, command, { projectId: next.projectId, actorId: attempt.ownerId, role: 'coordinator' }, clock);
+  if (result.kind !== 'accepted') throw new Error('Native stop report refused');
+  return { state: next, changed: true };
 }
 
 /** Native owner-only successor reduction; ledger events remain evidence, never launch authority. */
@@ -739,7 +822,7 @@ export function reduceWorkLedgerContinuation(state: WorkLedgerState, input: {
   const next = workLedgerStateSchema.parse(state);
   const work = next.works.find(value => value.id === input.target.workId);
   const attempt = next.attempts.find(value => value.id === input.target.attemptId);
-  if (!work?.source || !attempt || !targetMatches(input.target, work, attempt) || attempt.ownerId !== input.actorId
+  if (!work?.source || !attempt || !nativeTargetMatches(next.history, input.target, work, attempt) || attempt.ownerId !== input.actorId
     || !['active', 'complete'].includes(attempt.state) || work.reportedState === 'cancelled') throw new Error('Native continuation target is stale');
   const transition = attempt.state === 'complete'
     ? { type: 'reopen' as const, reason: 'Continue the issued native CI repair' }

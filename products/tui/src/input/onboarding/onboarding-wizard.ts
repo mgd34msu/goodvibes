@@ -7,22 +7,17 @@ import { buildDefaultDerivedState, clamp, cloneSelection, getRuntimeDerivedState
 import {
   clearExternalSurfaces as clearExternalSurfacesForController,
   getBooleanFieldValue as getBooleanFieldValueForController,
-  getDefaultAdminUsername as getDefaultAdminUsernameForController,
   getNumberFieldValue as getNumberFieldValueForController,
   getPortFieldValue as getPortFieldValueForController,
   getSelectedSecretMedium as getSelectedSecretMediumForController,
   getSharedIpDefault as getSharedIpDefaultForController,
   getSharedIpHostDefault as getSharedIpHostDefaultForController,
   getStringFieldValue as getStringFieldValueForController,
-  hasAdminAuthUser as hasAdminAuthUserForController,
-  hasBootstrapCredentialPresent as hasBootstrapCredentialPresentForController,
-  hasLocalAuthUser as hasLocalAuthUserForController,
   hasSelectedInboundExternalSurface as hasSelectedInboundExternalSurfaceForController,
   hasServerCapabilitiesSelected as hasServerCapabilitiesSelectedForController,
   isCapabilitySelected as isCapabilitySelectedForController,
   isRequiredExternalSetupField as isRequiredExternalSetupFieldForController,
   parseIntegerFieldValue as parseIntegerFieldValueForController,
-  requiresAuthBootstrap as requiresAuthBootstrapForController,
   selectAllExternalSurfaces as selectAllExternalSurfacesForController,
   selectAllServerCapabilities as selectAllServerCapabilitiesForController,
   selectLocalTuiOnly as selectLocalTuiOnlyForController,
@@ -772,11 +767,6 @@ export class OnboardingWizardController implements OnboardingWizardControllerLik
   public shouldEnableHttpListener(): boolean { return shouldEnableHttpListenerForController(this); }
   public shouldExposeHttpListenerNetworkFields(): boolean { return shouldExposeHttpListenerNetworkFieldsForController(this); }
   public shouldExposeControlPlaneNetwork(): boolean { return shouldExposeControlPlaneNetworkForController(this); }
-  public requiresAuthBootstrap(): boolean { return requiresAuthBootstrapForController(this); }
-  public hasAdminAuthUser(): boolean { return hasAdminAuthUserForController(this); }
-  public hasLocalAuthUser(): boolean { return hasLocalAuthUserForController(this); }
-  public hasBootstrapCredentialPresent(): boolean { return hasBootstrapCredentialPresentForController(this); }
-  public getDefaultAdminUsername(): string { return getDefaultAdminUsernameForController(this); }
   public getBooleanFieldValue(fieldId: string, fallback: boolean): boolean { return getBooleanFieldValueForController(this, fieldId, fallback); }
   public getStringFieldValue(fieldId: string, fallback: string): string { return getStringFieldValueForController(this, fieldId, fallback); }
   public parseIntegerFieldValue(fieldId: string, fallback: number): number | null { return parseIntegerFieldValueForController(this, fieldId, fallback); }

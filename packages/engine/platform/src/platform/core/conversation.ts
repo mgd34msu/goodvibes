@@ -73,16 +73,19 @@ export const TURN_RETRY_EVENT = 'STREAM_RETRY';
 export const SHELL_OUTPUT_EVENT = 'SHELL_PASSTHROUGH';
 /** Why the person's message was not sent, or what it needs from them (`addInputNotice`). */
 export const INPUT_NOTICE_EVENT = 'INPUT_NOTICE';
+/** Files this session changed were changed back under it by someone else (`addWorkspaceNotice`). */
+export const WORKSPACE_NOTICE_EVENT = 'WORKSPACE_CHANGED_UNDER';
 
 /**
  * True for a line the transcript draws in place even where other notices are
  * shown only as toasts and notifications: why a turn failed, why it is waiting
- * on a retry, the output of a `!` command the person ran, and why a message
- * the person sent was not taken.
+ * on a retry, the output of a `!` command the person ran, why a message the
+ * person sent was not taken, and that another session took back this one's change.
  */
 export function isTranscriptNotice(message: { readonly role: string; readonly runtimeEvent?: RuntimeEventProvenance | undefined }): boolean {
   const type = message.role === 'system' ? message.runtimeEvent?.type : undefined;
-  return type === TURN_FAILURE_EVENT || type === TURN_RETRY_EVENT || type === SHELL_OUTPUT_EVENT || type === INPUT_NOTICE_EVENT;
+  return type === TURN_FAILURE_EVENT || type === TURN_RETRY_EVENT || type === SHELL_OUTPUT_EVENT || type === INPUT_NOTICE_EVENT
+    || type === WORKSPACE_NOTICE_EVENT;
 }
 
 /** The level a line takes when its writer declared nothing: shown as information, never read by a model. */
@@ -572,6 +575,14 @@ export class ConversationManager {
   /** Why the person's message was not sent (or what it needs from them), with what to do: shown in the transcript at once. */
   public addInputNotice(content: string, level: NoticeLevel = 'warning'): void {
     this.addTurnStateNotice(content, level, INPUT_NOTICE_EVENT);
+  }
+
+  /**
+   * Another session changed back files this session changed (it restored a checkpoint from before them): shown in
+   * the transcript where it is learned. Display only; the model is told through `hostInstructions` ('workspace').
+   */
+  public addWorkspaceNotice(content: string): void {
+    this.addTurnStateNotice(content, 'warning', WORKSPACE_NOTICE_EVENT);
   }
 
   private addTurnStateNotice(content: string, level: NoticeLevel, type: string): void {

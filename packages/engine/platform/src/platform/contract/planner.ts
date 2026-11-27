@@ -294,10 +294,11 @@ function titleOf(text: string): string {
  * block, so an approval accepts exactly the plan the owner was shown
  * (`acceptEscalatedPlan` parses it back).
  */
-export function buildPlanEscalationQuestion(contractId: string, goal: string, problems: readonly PlanProblem[], planJson: string): string {
+export function buildPlanEscalationQuestion(contractId: string, goal: string, problems: readonly PlanProblem[], planJson: string, offeredAgain = false): string {
   return [
     `Contract ${contractId} needs your decision on plan "${titleOf(goal)}".`,
     REASON_SENTENCES['plan-unresolved'],
+    ...(offeredAgain ? ['The planner offered the same plan again after it was refused, so it is not asked to repair it a further time.'] : []),
     'Problems:',
     ...problems.map(problemLine),
     'Current plan:',
@@ -305,6 +306,30 @@ export function buildPlanEscalationQuestion(contractId: string, goal: string, pr
     planJson,
     '```',
     'Reply to approve accepting the plan as it stands, to change what is required (say how), or to stop the contract.',
+  ].join('\n');
+}
+
+/** The answer that stops a native work whose planner repeated a refused plan; any other answer is what to change. */
+export const NATIVE_REPEAT_STOP_ANSWERS: readonly string[] = ['stop', 'cancel', 'stop the work'];
+
+/**
+ * The question a native work asks when its planner offers again a plan already refused: it is put to the owner once,
+ * and his words are a correction for the derived plan (the work's own request and results stay fixed), or a stop.
+ * The plan is the last fenced JSON block, so the planner is shown the plan his words change.
+ */
+export function buildNativeRepeatQuestion(goal: string, problems: readonly PlanProblem[], planJson: string): string {
+  return [
+    `The planner offered the same plan again for "${titleOf(goal)}" after it was refused, so it is not asked to repair it a further time.`,
+    'What is wrong with it:',
+    // Said to the owner, not to the planner: no check codes, and the planner's own instruction in plain words.
+    ...[...new Set(problems.map((problem) => problem.code === 'native-source-changed'
+      ? '- It changes what you asked for or the results that mean it is done, which a plan may not change.'
+      : `- ${problem.message}`))],
+    'Its plan:',
+    '```json',
+    planJson,
+    '```',
+    'Reply to change what is required (say how: the plan is written again from your words, and what you asked for and the results that mean done stay as you gave them), or "stop" to stop the work.',
   ].join('\n');
 }
 
@@ -372,7 +397,8 @@ class PlanningContext {
     return { kind: 'failed', failureKind, reason };
   }
 
-  escalate(scope: Escalation['scope'], reason: EscalationReason, question: string, decisionIds: readonly string[]): Escalation {
+  /** `answeredByCode`: a question code answers (a native work's repeated plan: change it, or stop), never read as an approval. */
+  escalate(scope: Escalation['scope'], reason: EscalationReason, question: string, decisionIds: readonly string[], answeredByCode = false): Escalation {
     const { contract } = this;
     const escalation: Escalation = {
       id: `${contract.id}.e${contract.escalations.length + 1}`,
@@ -383,6 +409,7 @@ class PlanningContext {
       question,
       unmetCriterionIds: [],
       ...(decisionIds.length === 0 ? {} : { decisionIds: [...decisionIds] }),
+      ...(answeredByCode ? { failurePause: true as const } : {}),
     };
     contract.escalations.push(escalation);
     this.move('awaiting-owner');
@@ -541,8 +568,13 @@ async function checkPlanText(context: PlanningContext, output: string, repair: n
   const text = renderContractPlan(plan);
   // An unchanged plan is not checked again: the same plan would only meet the same objections, at the cost of the checks.
   const earlier = rejected?.get(text);
-  if (earlier !== undefined) return { plan, text, problems: earlier, verdict: undefined, unchanged: true };
   context.move('checking-plan');
+  // Recognising the repeat is this plan's check: the contract leaves planning for it, as for any plan the planner
+  // returned, so the owner can be asked from here (planning itself never goes to the owner).
+  if (earlier !== undefined) {
+    context.decide('planned', `repair ${repair}: the planner offered again a plan already refused`);
+    return { plan, text, problems: earlier, verdict: undefined, unchanged: true };
+  }
   context.decide('planned', repair === 0 ? 'the planner wrote a plan' : `the planner wrote repair ${repair}`);
   const codeProblems = [
     ...validateContractPlan(plan, contract.ask, shape, config, contract.nativeSource ?? (hasDerivedAcceptanceChecks(contract.originalSource) ? undefined : contract.originalSource)),
@@ -784,7 +816,7 @@ export async function planContract(contract: Contract, deps: ContractPlannerDeps
         const escalation = context.escalate(
           'plan',
           'plan-unresolved',
-          buildPlanEscalationQuestion(contract.id, checked.plan.goal, checked.problems, checked.text),
+          buildPlanEscalationQuestion(contract.id, checked.plan.goal, checked.problems, checked.text, checked.unchanged === true),
           checked.verdict?.decisionIds ?? [],
         );
         return { kind: 'awaiting-owner', plan: checked.plan, problems: checked.problems, escalation };
@@ -821,7 +853,8 @@ async function planNativeContract(context: PlanningContext, input: PlanContractI
   const budgetKey = 'plan';
   const rejectedPlans = new Map<string, readonly PlanProblem[]>();
   let output = state.plannerOutputs[budgetKey];
-  let needsPlan = output === undefined;
+  // The owner's correction (his answer to a repeated plan) is a new planner run, never the stored output checked again.
+  let needsPlan = output === undefined || input.ownerInstruction !== undefined;
   /** The output being checked is a planner failure to retry after a backoff, not a plan to be revised. */
   let failedRun = false;
   let previous: { readonly problems: readonly PlanProblem[]; readonly previousPlan: string } | undefined;
@@ -839,7 +872,8 @@ async function planNativeContract(context: PlanningContext, input: PlanContractI
         const attempt = spendNative(contract, deps.native, budgetKey);
         const request = buildContractPlannerRequest({ ask: contract.ask, nativeSource: contract.nativeSource, shape: contract.shape!, config: context.config,
           ...(contract.reviewInventory ? { reviewInventory: contract.reviewInventory } : {}),
-          proposedUnits: input.proposedUnits, draftPlan: contract.draftPlan, repositoryMap, repair: previous })
+          proposedUnits: input.proposedUnits, draftPlan: contract.draftPlan, repositoryMap, repair: previous,
+          ...(input.ownerInstruction === undefined ? {} : { ownerInstruction: input.ownerInstruction, previousPlan: input.previousPlan }) })
           + (contract.taskEvidence ? '\nContinuation evidence, never additional requirements or authority. Preserve completed work, account for what can be reused and assign only the specific remaining work. Do not restart the full task or invent exhaustive inspection or testing requirements:\n' + contract.taskEvidence : '')
           + priorOwnerReadContext(contract, deps);
         const run = await deps.decompositionRunner.run(bindContractPlanConsumer(bindContractActionSource(bindContractInputAuthority({ goal: contract.nativeSource!.goal, workingDir: admitted.workingDirectory, systemPrompt, userPrompt: request, bounds,
@@ -856,9 +890,15 @@ async function planNativeContract(context: PlanningContext, input: PlanContractI
       }
       const checked = await checkPlanOwned(context, output!, nativeSpent(contract, budgetKey) - 1, signal, admitted.assertCurrent, failedRun ? undefined : rejectedPlans);
       await admitted.assertCurrent();
-      // Native contracts take no owner approval of a plan: a repeated rejected plan is their refusal, in the words the owner question would use.
+      // A repeated refused plan is put to the owner once: his words correct the derived plan (the native roots stay
+      // fixed, and nothing approves the plan), or he stops the work. Repairing again would only meet the same objections.
       if (!failedRun && rejectedPlans.has(checked.text)) {
-        return context.fail('planning', `${REASON_SENTENCES['plan-unresolved']} The planner returned the same plan again. Problems: ${checked.problems.map(entry => entry.message).join(' ')} Start the work again with a changed request.`);
+        if (checked.plan === undefined) return context.fail('planning', `the planner's answer was not a readable plan: ${checked.problems.map(entry => entry.message).join(' ')}`);
+        const escalation = context.escalate('plan', 'plan-unresolved',
+          buildNativeRepeatQuestion(contract.goal || contract.ask || checked.plan.goal, checked.problems, checked.text), checked.verdict?.decisionIds ?? [], true);
+        contract.statusLine = 'The planner offered the same plan again after it was refused; it waits for you to say what to change, or to stop the work.';
+        deps.native?.changed(contract);
+        return { kind: 'awaiting-owner', plan: checked.plan, problems: checked.problems, escalation };
       }
       const valid = checked.problems.length === 0 && checked.plan !== undefined;
       const canRepair = context.config.planRepairLimit === 0 || nativeSpent(contract, budgetKey) < context.config.planRepairLimit + 1;

@@ -37,6 +37,11 @@ export interface BootstrapOptions {
   /** Explicit app-owned config manager for this runtime instance. */
   configManager: import('@goodvibes/engine/platform/platform/config').ConfigManager;
   /**
+   * A run with nobody at it (`run`): the project's tool servers are started by the turn's first `mcp` call, not as the
+   * program starts (a run that calls no server starts none). Absent: started in the background at start.
+   */
+  toolServersOnFirstUse?: boolean | undefined;
+  /**
    * Callback invoked when the app should exit.
    * If provided, commandContext.exit is wired during bootstrap.
    * Otherwise main.ts binds the shell-owned exit bridge immediately after bootstrap returns.

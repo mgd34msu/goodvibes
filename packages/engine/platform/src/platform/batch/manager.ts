@@ -631,6 +631,7 @@ export class DaemonBatchManager {
       request: copyBatchRequest(input.request),
       ...(input.source ? { source: input.source } : {}),
       ...(input.metadata ? { metadata: { ...input.metadata } } : {}),
+      ...(input.createdBy ? { createdBy: input.createdBy } : {}),
       attempts: 0,
     };
     try {
@@ -692,6 +693,7 @@ export class DaemonBatchManager {
       ...(input.source ? { source: input.source } : {}),
       // Says how the job ran: the provider has no batch for it, and none was billed at batch rates.
       metadata: { ...(input.metadata ?? {}), 'goodvibes.execution': 'live-fallback' },
+      ...(input.createdBy ? { createdBy: input.createdBy } : {}),
       attempts: 1,
     };
     this.load()[job.id] = job;

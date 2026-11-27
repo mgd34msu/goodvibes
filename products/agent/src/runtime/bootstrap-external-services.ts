@@ -23,6 +23,7 @@ import { startExternalServices } from '@/runtime/index.ts';
 import {
   autostartInstalledDaemon,
   createDaemonServiceControl,
+  daemonAddressAnswers,
   DAEMON_PROGRAM_STARTED_LINE,
   daemonNotInstalledNotice,
   daemonProgramStartFailedLine,
@@ -207,7 +208,7 @@ export function wireAgentExternalServices(options: {
   // waits on it, and stopping this controller (app exit) ends the wait.
   const startingDaemonWait = new AbortController();
   let missingDaemonLine: string | undefined;
-  const adoptOnceAnswered = async (serviceName: string, since: number): Promise<DaemonBringUpResult & { readonly level: 'low' | 'high' | null }> => {
+  const adoptOnceAnswered = async (serviceName: string, since: number, startedHere = false): Promise<DaemonBringUpResult & { readonly level: 'low' | 'high' | null }> => {
     const result = await waitForStartingDaemon({
       control: daemonServiceControl(),
       serviceName,
@@ -215,7 +216,8 @@ export function wireAgentExternalServices(options: {
       markerPath: daemonLifecycleMarkerPathForHome(services.homeDirectory),
       signal: startingDaemonWait.signal,
     });
-    if (result === 'online') return adoptStarted({ action: 'came-online', serviceName });
+    // Started by this program's start of the service: said as started, not as one that was already starting.
+    if (result === 'online') return adoptStarted({ action: startedHere ? 'started' : 'came-online', serviceName });
     if (result === 'aborted') return { answered: false, level: null, detail: 'Stopped waiting for the connected host: GoodVibes Agent is exiting' };
     return {
       answered: false,
@@ -263,6 +265,8 @@ export function wireAgentExternalServices(options: {
       daemonMode: externalServices.daemonStatus.mode,
       control: daemonServiceControl(),
       isReachable: async () => (await probeReachability()) === 'online',
+      // A daemon program started here may be the first ever: it is heard at its address before any credential exists.
+      programAnswers: () => daemonAddressAnswers(services.configManager),
       waitTimeoutMs: seams.waitTimeoutMs,
       pollIntervalMs: seams.pollIntervalMs,
       sleep: seams.sleep,
@@ -281,8 +285,8 @@ export function wireAgentExternalServices(options: {
         missingDaemonLine = daemonProgramStartFailedLine(outcome.reason);
         return { answered: false, level: 'high', detail: missingDaemonLine };
       case 'starting':
-        if (whenStarting === 'await') return adoptOnceAnswered(outcome.serviceName, outcome.since);
-        void adoptOnceAnswered(outcome.serviceName, outcome.since)
+        if (whenStarting === 'await') return adoptOnceAnswered(outcome.serviceName, outcome.since, outcome.startedHere === true);
+        void adoptOnceAnswered(outcome.serviceName, outcome.since, outcome.startedHere === true)
           .then(reportBringUp)
           .catch((error: unknown) => logger.warn('Adopting the connected host once it answered failed', { error: summarizeError(error) }));
         return { answered: false, level: 'low', detail: 'The GoodVibes daemon is starting; shared sessions, phone access and the other things that need it work once it is ready' };

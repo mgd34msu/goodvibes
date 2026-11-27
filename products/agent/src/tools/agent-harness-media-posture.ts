@@ -3,8 +3,8 @@ import type { CatalogRankingOptions } from '@goodvibes/engine/terminal-shell/age
 import { browserDeviceCatalogMatches } from './agent-harness-browser-device-readings.ts';
 import { selectHarnessCatalog } from './agent-harness-catalog-selection.ts';
 import { captureCatalogNativeFacts, withModelReadingSource } from './agent-harness-model-reading-source.ts';
-import { buildAgentWorkspaceVoiceMediaReadiness } from '../input/agent-workspace-voice-media.ts';
-import type { AgentWorkspaceVoiceMediaProviderStatus } from '../input/agent-workspace-voice-media.ts';
+import { buildAgentVoiceMediaReadiness } from '../input/voice-media-readiness.ts';
+import type { AgentVoiceMediaProviderStatus } from '../input/voice-media-readiness.ts';
 import type { CommandContext } from '../input/command-registry.ts';
 import { previewHarnessText } from '@goodvibes/engine/terminal-shell/agent-turn/preview-text';
 import { logger, summarizeError } from '@goodvibes/engine/platform/platform/utils';
@@ -80,7 +80,7 @@ function readConfigString(context: CommandContext, key: string): string {
   }
 }
 
-function providerCatalogDescription(provider: AgentWorkspaceVoiceMediaProviderStatus): string {
+function providerCatalogDescription(provider: AgentVoiceMediaProviderStatus): string {
   return [provider.label, provider.domain, provider.setupState, provider.nextStep, ...provider.features].join('\n');
 }
 
@@ -325,7 +325,7 @@ function statusMap(statuses: readonly RuntimeProviderStatus[]): ReadonlyMap<stri
 }
 
 function describeProvider(
-  provider: AgentWorkspaceVoiceMediaProviderStatus,
+  provider: AgentVoiceMediaProviderStatus,
   runtimeStatus: RuntimeProviderStatus | undefined,
   options: {
     readonly includeParameters?: boolean;
@@ -394,7 +394,7 @@ async function readRuntimeStatuses(context: CommandContext, options: CatalogRank
 function buildReadiness(context: CommandContext) {
   const voice = context.platform.voiceProviderRegistry?.list() ?? [];
   const media = context.platform.mediaProviderRegistry?.list() ?? [];
-  return { ...buildAgentWorkspaceVoiceMediaReadiness({ context, voiceProviders: voice, mediaProviders: media }),
+  return { ...buildAgentVoiceMediaReadiness({ context, voiceProviders: voice, mediaProviders: media }),
     originalProviders: { voice, media } };
 }
 
@@ -474,7 +474,7 @@ export async function mediaPostureSummary(context: CommandContext, rawArgs: Agen
         returned: filtered.length,
         total: providers.length,
         ...(runtimeStatuses.readErrors.length > 0 ? { readErrors: runtimeStatuses.readErrors, readErrorNote: 'Runtime status was not available for some providers; absent status here is not evidence they are unconfigured.' } : {}),
-        policy: 'Read-only voice/media posture. Media generation, voice enable/disable, TTS setting changes, and bundle export stay confirmation-gated through first-class tools, settings modes, workspace actions, or slash-command mirrors.',
+        policy: 'Read-only voice/media posture. Media generation, voice enable/disable, TTS setting changes, and bundle export stay confirmation-gated through first-class tools, settings modes, capabilities, or slash-command mirrors.',
         ...(args.includeParameters === true ? { modelAccess: {
           mediaGenerateTool: 'agent_media_generate',
           providerCatalogMode: 'media_posture',

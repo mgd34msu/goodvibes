@@ -73,8 +73,8 @@ confidential registration only if you specifically want one.
 
 The scopes requested are `gmail.readonly`, `gmail.send`, `calendar.readonly` and
 `calendar.events`: a Google sign-in here is the one Google connection on the machine,
-which the daemon's calendar (the web Calendar), its Gmail access and the Agent's
-`/calendar` all read, so it asks once for what all of them need. Enable the Gmail API
+which the daemon's calendar (the web Calendar and both terminal programs' calendar
+tabs) and its Gmail access all read, so it asks once for what all of them need. Enable the Gmail API
 beside the Calendar API in the same project. There is no config key that narrows this
 from the CLI. An embedder calling the platform's calendar connector directly can pass
 its own scope list, but a `config set` install always gets all four.
@@ -122,15 +122,16 @@ so a headless install cannot slip past the check.
 
 ## Connecting from a machine with no browser
 
-`/calendar connect <google|outlook> --with device` connects without a browser on this
-machine.
+Signing in on the Calendar accounts tab of Mail, calendar and channels (Enter on the
+account's row) with the device route chosen in its form connects without a browser on
+this machine.
 
 - **Outlook** shows a device code: open the link it prints on any device and enter
   the code.
 - **Google** does not grant calendar access through a device code, so it prints a
   sign-in link instead. Open it on any device and approve. The browser then lands on
-  a `127.0.0.1` address that does not load; copy that whole address and run
-  `/calendar connect google --with code --code <address>` within ten minutes. The same Desktop-app
+  a `127.0.0.1` address that does not load; copy that whole address and sign in again
+  with the code route, giving that address (asked for masked), within ten minutes. The same Desktop-app
   client works for both the browser and the pasted sign-in.
 
 ## Verifying it took
@@ -162,7 +163,7 @@ whose text repeats untrusted content read in the same turn, or that carries card
 details, is refused. When the provider refuses the request, the result says no event
 was created and why. When the request was sent and no answer came back (the
 connection dropped or the deadline passed), the result says the event may or may not
-exist; check the calendar (`/calendar upcoming`) before creating it again.
+exist; check the calendar (the Calendar tab of Mail, calendar and channels) before creating it again.
 
 ## Related
 

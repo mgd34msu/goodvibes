@@ -145,7 +145,8 @@ export function applyInitialTuiCliState(options: {
   // What the empty conversation shows under the splash: first run's lines.
   installSplashAdditions({
     configManager: commandContext.platform.configManager,
-    setupCommand: '/setup',
+    // No `/setup`: setup is the Setup tab of the System place, reached from the menu.
+    setupWhere: 'menu › System › Setup',
     splashShowing: () => input.conversationManager?.isSplashShowing() ?? false,
     renderRequest: render,
   });
@@ -158,7 +159,7 @@ export function applyInitialTuiCliState(options: {
       logger.warn('First run could not start', { error: summarizeError(error) });
     });
   };
-  // `/setup` → Run first-run again: the three steps, whether or not a model is ready.
+  // System, Setup → Run first-run again: the three steps, whether or not a model is ready.
   commandContext.openFirstRun = () => {
     // Asked for: "Who decides" follows the model whenever it is needed, answered before or not.
     const deps = { ...firstRunDeps(commandContext, shellPaths, render, true, () => { input.conversationManager?.invalidateRenderedLines(); }), whoDecidesAsked: () => false, includeWhoDecides: true };
@@ -179,8 +180,8 @@ export function applyInitialTuiCliState(options: {
   };
 
   if (cli.command === 'setup') {
-    // `goodvibes setup`: the /setup topics, over the empty conversation.
-    void commandContext.executeCommand?.('setup', []);
+    // `goodvibes setup`: the System place on its Setup tab, over the empty conversation.
+    commandContext.openPlace?.('system', { list: 'setup' });
   } else if (cli.command === 'open') {
     // The entry point refused a link that does not parse, so this one does.
     const link = parseDeepLink(cli.commandArgs[0] ?? '');

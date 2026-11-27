@@ -141,6 +141,14 @@ function ownerRuleId(kind: string, tool: string, now: number): string {
   return `owner-${kind}-${tool.replace(/[^A-Za-z0-9_.-]/g, '')}-${now.toString(36)}-${Math.random().toString(36).slice(2, 8)}`;
 }
 
+/** The tool every capability call goes through (tools/capability/definitions.ts). */
+const CAPABILITY_RUN_TOOL = 'capability_run';
+
+/** A capability's id (`artifacts.save`, `knowledge.ingest-artifact`): words joined by dots; no tool name has a dot. */
+function isCapabilityId(target: string): boolean {
+  return /^[a-z][a-z0-9-]*(?:\.[a-z0-9-]+)+$/.test(target);
+}
+
 /** The record `/permissions add` writes, or the reason it cannot (also the daemon's, capabilities/builtin/permissions.ts). */
 export function ownerRuleRecord(args: readonly string[], projectRoot: string | null, now: number): StoredUserPermissionRule | string {
   const first = (args[0] ?? '').toLowerCase();
@@ -160,11 +168,14 @@ export function ownerRuleRecord(args: readonly string[], projectRoot: string | n
   const tier = kind === 'command' ? 'exact' : kind === 'class' ? 'command-class' : kind === 'path' ? 'path' : kind === 'tool' ? 'tool' : undefined;
   if (tier === undefined) return ADD_USAGE;
   if (tier === 'command-class' && /\s/.test(target)) return 'A command class is one word, for example: /permissions add allow class git';
-  const toolName = tier === 'tool' ? target : tier === 'path' ? 'edit' : 'exec';
+  // A capability (`artifacts.save`) is run through the `capability_run` tool: a rule for it is that tool's rule keyed by
+  // the capability's id, the shape the gate matches; a rule on a tool named `artifacts.save` would never match a call.
+  const capability = tier === 'tool' && isCapabilityId(target);
+  const toolName = capability ? CAPABILITY_RUN_TOOL : tier === 'tool' ? target : tier === 'path' ? 'edit' : 'exec';
   const built = buildDurableRuleForDecision({
     toolName, tier, effect: first, now,
     // The path tier covers the directory of the path it is given: a placeholder file inside the directory names it.
-    args: tier === 'path' ? { path: `${target.replace(/\/+$/, '')}/*` } : tier === 'tool' ? {} : { command: target },
+    args: tier === 'path' ? { path: `${target.replace(/\/+$/, '')}/*` } : capability ? { id: target } : tier === 'tool' ? {} : { command: target },
   });
   if (!built) return ADD_USAGE;
   return { rule: { ...built, id: ownerRuleId(tier, toolName, now) }, tier, tool: toolName, createdAt: now, project: projectIdentity(projectRoot) };

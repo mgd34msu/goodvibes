@@ -121,6 +121,8 @@ export { publishDaemonRuntimeRecord, type PublishedDaemonRuntimeRecord } from '.
 export * from './session-maintenance.js';
 export * from './session-persistence.js';
 export * from './session-surface.js';
+export { projectRecordsFolder } from './project-folder-records.js';
+export { carryRecordsBetween, type RecordsCarryResult } from './records-carry.js';
 export * from './session-return-context.js';
 export * from './retention/index.js';
 export type {
@@ -288,6 +290,10 @@ export {
   surfaceFeatureGateSettingsKeys,
 } from './surface-feature-flags.js';
 
+// The ONE builder of a project's environment (hooks, tool servers, long output, changed files), every host's.
+export { createProjectEnvironment, createProjectHooks, createProjectToolServers } from './project-environment.js';
+export type { ProjectEnvironment, ProjectEnvironmentOptions, ProjectHooks, ProjectToolServers } from './project-environment.js';
+
 export { WorkspaceRegistrationManager } from './workspace-registration.js';
 export type {
   WorkspaceRegistrationEvaluation,
@@ -305,6 +311,7 @@ export {
   repositoryTrustNotice,
   trustGatedAsk,
   WorkspaceTrustManager,
+  workspaceTrustOwnerOf,
 } from './workspace-trust.js';
 export type {
   PersistedWorkspaceTrustView,

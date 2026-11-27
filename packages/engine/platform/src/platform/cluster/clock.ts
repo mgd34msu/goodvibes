@@ -9,6 +9,7 @@
  * between the two IS the sleep.
  */
 import type { ClusterClock } from './types.js';
+import { outsideEveryCall } from '../utils/outside-every-call.js';
 
 /** The clock a running daemon uses. */
 export function createSystemClusterClock(): ClusterClock {
@@ -16,7 +17,9 @@ export function createSystemClusterClock(): ClusterClock {
     now: () => Date.now(),
     monotonicNow: () => Math.round(performance.now()),
     setTimer: (fn, ms) => {
-      const handle = setTimeout(fn, ms);
+      // Every heartbeat, election, replication and group timer of the cluster is armed here, also from a request (a
+      // group made or joined, a setting replicated): in the process's own context (utils/outside-every-call.ts).
+      const handle = outsideEveryCall(() => setTimeout(fn, ms));
       // Never hold the process open for a heartbeat.
       (handle as unknown as { unref?: () => void }).unref?.();
       return () => clearTimeout(handle);

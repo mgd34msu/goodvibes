@@ -64,7 +64,8 @@ export function registerPermissionsCommand<Ctx extends CommandActionContext>(
     title: 'Permissions',
     summary: 'See which permission settings are in force, and the rules that decide calls without asking',
     group: 'Permissions',
-    // Typed bare by a person, it opens Permissions and safety; a model or a script gets the mode in force.
+    // Unlisted: typed bare by a person, it opens Permissions and safety; a model or a script gets the mode in force.
+    firstScreen: false,
     opens: 'safety',
     report: 'mode',
     actions: [

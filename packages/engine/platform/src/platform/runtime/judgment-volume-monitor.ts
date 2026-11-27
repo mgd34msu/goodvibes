@@ -1,6 +1,7 @@
 import { readFileSync } from 'node:fs';
 import { captureJudgmentVolumeMonitorControl, captureJudgmentVolumeMonitorSettings, startJudgmentVolumeMonitor, type JudgmentVolumeAlert, type JudgmentVolumeMonitorSettings, type JudgmentVolumeLog } from '../observe/judgment-volume-monitor.js';
 import { logger } from '../utils/logger.js';
+import { outsideEveryCall } from '../utils/outside-every-call.js';
 import type { DisposalRegistry } from './disposal.js';
 
 interface VolumeSettingsSource {
@@ -70,9 +71,10 @@ export function composeJudgmentVolumeMonitor(
     queued = true;
     queueMicrotask(() => { queued = false; reload(); });
   };
+  // A settings change is made by a request: the monitor it re-arms runs with no caller's context (utils/outside-every-call.ts).
   const release = config?.subscribe
-    ? config.subscribe('judgment.volumeMonitor', reload)
-    : config?.onDidChangeIncarnation?.(queueReload);
+    ? config.subscribe('judgment.volumeMonitor', () => outsideEveryCall(reload))
+    : config?.onDidChangeIncarnation?.(() => outsideEveryCall(queueReload));
   if (release) { if (disposed) release(); else unsubscribe = release; }
   reload();
   return handle;

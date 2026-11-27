@@ -13,12 +13,13 @@
  * pointer; denied → how to re-enable in browser settings; unsupported → plain).
  */
 
-import { client as platformClient } from '../goodvibes';
+import { client as platformClient, releaseAtSignOut } from '../goodvibes';
 import type { PublicPushSubscription, PushReconcileDrift } from '../goodvibes';
 import type { OperatorMethodOutput } from '@goodvibes/engine/contracts';
 import { errorCode, formatError } from '../errors';
 import { randomUuid } from '../uuid';
 import { detectPushSupport, urlBase64ToUint8Array } from './push-support';
+import { readSignedInIdentity } from '../client-lifetime';
 
 export type PushSubscribeFailure =
   | 'insecure-context'
@@ -213,7 +214,75 @@ export async function subscribeToPush(): Promise<PublicPushSubscription> {
   const payload = await ensureBrowserPushSubscription();
   const { subscription: stored } = await platformClient.operator.push.subscribe({ ...payload, deviceId: ensureDeviceId() });
   rememberSubscriptionId(stored.id);
+  rememberSubscriber();
   return stored;
+}
+
+// This browser's push subscription belongs to the person signed in. It is let go at sign-out (its daemon record removed
+// and the browser's subscription with its endpoint dropped, so no record of the person leaving can reach this browser
+// again) and made again at the next sign-in, for whoever signs in, under their own sign-in: the daemon then sends it only
+// what that person may see. Kept per browser: who it was last registered for, and that it is to be made again.
+const SUBSCRIBER_KEY = 'goodvibes.webui.push.subscriber';
+const REMAKE_KEY = 'goodvibes.webui.push.remakeAtSignIn';
+
+/** Who is signed in now: the readable sign-in marker's principal (relay sign-ins have none: null). */
+function signedInPrincipal(): string | null {
+  return readSignedInIdentity()?.principal ?? null;
+}
+function readKey(key: string): string | null {
+  try { return window.localStorage.getItem(key); } catch { return null; }
+}
+function writeKey(key: string, value: string | null): void {
+  try {
+    if (value === null) window.localStorage.removeItem(key);
+    else window.localStorage.setItem(key, value);
+  } catch { /* storage unavailable: the browser's subscription is dropped at sign-out anyway */ }
+}
+function rememberSubscriber(): void {
+  writeKey(SUBSCRIBER_KEY, signedInPrincipal());
+}
+
+/** Drop the browser's own subscription (its endpoint stops working: the push service answers 410 to any sender). */
+async function dropBrowserSubscription(): Promise<void> {
+  if (detectPushSupport() !== 'ok') return;
+  const registration = await navigator.serviceWorker.ready;
+  const subscription = await registration.pushManager.getSubscription();
+  if (subscription) await subscription.unsubscribe();
+}
+
+/**
+ * Sign-out (goodvibes.ts `signOut`, before the daemon sign-in ends): the daemon's record of this browser for the person
+ * leaving is removed, and the browser's subscription is dropped whether that worked or not, so its endpoint is dead for
+ * any record left behind; it is made again, with a new endpoint, at the next sign-in. Nothing to do when the browser
+ * holds none.
+ */
+export async function releasePushAtSignOut(): Promise<void> {
+  const subscription = await currentSubscription();
+  if (!subscription && recallSubscriptionId() === null) return;
+  try {
+    const { subscriptions } = await platformClient.operator.push.list();
+    const host = hostRecordFor(subscriptions);
+    if (host) await platformClient.operator.push.unsubscribe(host.id);
+  } catch {
+    /* the endpoint is dropped below: a record that could not be removed reaches nobody */
+  }
+  forgetSubscriptionId();
+  writeKey(SUBSCRIBER_KEY, null);
+  if (subscription && !removalPending()) writeKey(REMAKE_KEY, '1');
+  try { await dropBrowserSubscription(); } catch { /* a browser that refuses keeps no record of ours: removed above */ }
+}
+
+releaseAtSignOut(releasePushAtSignOut);
+
+/** Make this browser's subscription again for the person signed in now (permission already given: no prompt). */
+async function remakeForSignedIn(): Promise<PushReconcileOnOpenOutcome> {
+  if (typeof Notification === 'undefined' || Notification.permission !== 'granted') {
+    writeKey(REMAKE_KEY, null);
+    return { drift: 'not-subscribed', subscription: null };
+  }
+  const stored = await subscribeToPush();
+  writeKey(REMAKE_KEY, null);
+  return { drift: 'created', subscription: stored };
 }
 
 // Turning notifications off has two halves, the browser's subscription and the
@@ -292,6 +361,9 @@ export async function unsubscribeFromPush(): Promise<void> {
     }
   }
   forgetSubscriptionId();
+  // Turned off: nothing is made again at a later sign-in.
+  writeKey(REMAKE_KEY, null);
+  writeKey(SUBSCRIBER_KEY, null);
   if (browserFailure) {
     throw browserFailure instanceof Error ? browserFailure : new PushSubscribeError('subscribe-failed', 'The browser did not turn off its push subscription.');
   }
@@ -367,13 +439,23 @@ export async function reconcilePushSubscriptionOnOpen(): Promise<PushReconcileOn
   } catch {
     return { drift: 'not-subscribed', subscription: null };
   }
-  if (!subscription) return { drift: 'not-subscribed', subscription: null };
+  // Let go at the last sign-out: made again for the person signed in now.
+  if (!subscription) return readKey(REMAKE_KEY) !== null ? remakeForSignedIn() : { drift: 'not-subscribed', subscription: null };
+  // Made for someone else (a sign-in that ended without this browser's sign-out, or one kept from before this record):
+  // its endpoint may still be on the daemon under that person, so it is dropped and made again for the one signed in.
+  const principal = signedInPrincipal();
+  if (principal !== null && readKey(SUBSCRIBER_KEY) !== principal) {
+    await subscription.unsubscribe();
+    forgetSubscriptionId();
+    return remakeForSignedIn();
+  }
 
   const deviceId = ensureDeviceId();
   const payload = extractSubscriptionPayload(subscription.toJSON());
 
   const { subscription: stored, drift } = await platformClient.operator.push.reconcile({ ...payload, deviceId });
   rememberSubscriptionId(stored.id);
+  rememberSubscriber();
   return { drift, subscription: stored };
 }
 

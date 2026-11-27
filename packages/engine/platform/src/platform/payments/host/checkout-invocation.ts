@@ -3,6 +3,7 @@ import { captureOwnedJson } from '../../gate/judgment-input.js';
 import { readPaymentsEnabled, readPaymentsServiceConfig } from '../payments-config.js';
 import type { HandlerContextEnvelope } from '../../control-plane/host-handlers.js';
 import { GatewayVerbError } from '../../control-plane/routes/gateway-verb-error.js';
+import { nativeIdentityIsCaller } from '../../control-plane/routes/native-owner.js';
 import type { PaymentsHandlerDeps } from './register.js';
 import type { BrowserCheckoutSeam } from '../../control-plane/routes/browser-composition.js';
 import { retainTaintEvidence } from '../../security/untrusted-content.js';
@@ -68,8 +69,8 @@ export function retainDetachedCheckout(deps: PaymentsHandlerDeps, seam: BrowserC
   // request): no pairing on the owner's own machine. The operator token from
   // elsewhere has no native authority, so it never reaches here.
   if (!native || !native.issueContinuation || !native.revokeContinuation || !authorized || !paired
-    || (paired.kind !== 'pairing-token' && paired.kind !== 'local') || !context.admin || context.principalKind !== 'token'
-    || (options.ownerRequest && !context.explicitUserRequest) || context.principalId !== paired.principalId
+    || !context.admin || !nativeIdentityIsCaller(context, paired)
+    || (options.ownerRequest && !context.explicitUserRequest)
     || missingScopes(context.scopes, ['write:payments']).length > 0
     || missingScopes(paired.scopes, ['write:payments']).length > 0
     || authorized?.(['write:payments']) !== true) {

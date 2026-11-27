@@ -8,7 +8,8 @@
  * (another program's part is left for that program to pull). A bundle a 3.5.0
  * terminal app wrote (one `settings` object) is split by owner the same way.
  */
-import { copyFileSync, existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
+import { copyFileSync, existsSync, mkdirSync, writeFileSync } from 'node:fs';
+import { readCallerJson } from '../path-inputs.js';
 import { dirname } from 'node:path';
 import type { ConfigManager } from '../../config/manager.js';
 import type { ConfigKey } from '../../config/schema-types.js';
@@ -22,6 +23,10 @@ import {
 import { CapabilityRefusal, type ActionValues, type CapabilityCaller, type CapabilityDefinition, type CapabilityResult, type InputDescription, type ListName } from '../types.js';
 import type { ProgramSettingsCapabilityServices } from './program-settings.js';
 import { noteListChanged } from '../../runtime/list-changes.js';
+import { splitIncomingSettings, type IncomingSettingChange } from '../../support/setup-transfer.js';
+import { bringsSecurity, heldBackLines, incomingSecurityInput } from './incoming-settings.js';
+import { lockedFileSettingsRefusal, lockedSettingRefusal } from './system-settings.js';
+import { CONTENT_INPUT, FILES_AT } from './system-bundles.js';
 
 /** The daemon's own settings, beside the asking program's (ProgramSettingsCapabilityServices). */
 export interface SettingsSyncCapabilityServices extends ProgramSettingsCapabilityServices {
@@ -49,12 +54,16 @@ const PATH: InputDescription = { id: 'path', label: 'Bundle file', help: 'A sett
 const KEY: InputDescription = { id: 'key', label: 'Setting', help: 'A setting key, as Settings shows it', kind: 'text', freeTextReason: 'a setting key', required: true, typed: { position: 1 } };
 export const SETTINGS_SYNC_CONFLICTS_LIST = 'settings-sync.conflicts' as ListName;
 
-/** Read a bundle file, refusing in words a file that is unreadable, not JSON, or not shaped like a bundle. */
-function readBundle(path: string): OwnedBundle {
-  let text: string;
-  try { text = readFileSync(path, 'utf-8'); } catch (error) { throw new CapabilityRefusal(`Cannot read ${path}: ${reason(error)}.`); }
+/**
+ * Read a bundle file, refusing in words a file that is unreadable, not JSON, or not shaped like a bundle; never the
+ * system's or the parser's words (capabilities/path-inputs.ts).
+ */
+function readBundle(path: string, caller: CapabilityCaller, content?: string): OwnedBundle {
+  // `content`: the bundle as the daemon read it before asking (readsFileBefore), or as the owner's program sent it.
   let parsed: unknown;
-  try { parsed = JSON.parse(text); } catch { throw new CapabilityRefusal(`${path} is not valid JSON, so it is not a settings sync bundle.`); }
+  if (content !== undefined) {
+    try { parsed = JSON.parse(content); } catch { throw new CapabilityRefusal(`${path} is not a settings sync bundle: it is not JSON. Nothing was applied.`); }
+  } else parsed = readCallerJson(path, 'a settings sync bundle', caller, 'Nothing was applied.');
   const bundle = parsed as Partial<Record<string, unknown>> | null;
   const settings = bundle?.settings;
   if (typeof bundle !== 'object' || bundle === null || Array.isArray(bundle) || typeof settings !== 'object' || settings === null || Array.isArray(settings)
@@ -168,13 +177,27 @@ export const SETTINGS_SYNC_RESOLVE: Definition = {
   inputs: [
     { ...KEY, help: 'A setting whose pulled value differs from this machine\'s', kind: 'choice', choices: { list: SETTINGS_SYNC_CONFLICTS_LIST } },
     { id: 'keep', label: 'Keep', help: 'Which value wins', kind: 'choice', choices: [{ value: 'local', label: 'This machine\'s value' }, { value: 'synced', label: 'The pulled value' }], required: true, typed: { position: 2 } },
+    incomingSecurityInput('Take it even so'),
   ],
-  sentence: '{key} keeps the {keep} value until you change it.', done: '',
+  sentence: '{key} keeps the {keep} value until you change it; a pulled value that loosens a protection only if you choose to take it even so.', done: '',
   touches: 'this-machine', lasts: 'kept', risk: 'none', example: { key: 'provider.model', keep: 'local' },
+  // Settling writes the setting: a locked one is refused before any question.
+  check: (values) => lockedSettingRefusal(values.key?.trim()),
   async run(values, services, caller) {
     const key = values.key!.trim();
     const owner = ownerOfKey(key, caller);
-    if (!resolveSettingsSyncConflict(configOf(services, owner, caller), key as ConfigKey, values.keep === 'synced' ? 'synced' : 'local')) {
+    const config = configOf(services, owner, caller);
+    if (values.keep === 'synced' && CONFIG_KEYS.has(key as ConfigKey)) {
+      // The pulled value comes from another machine: one rule for every import of settings (incoming-settings.ts).
+      const entry = getResolvedSettingLookup(config, key as ConfigKey)?.entry;
+      const split = entry === undefined ? undefined
+        : splitIncomingSettings((_key: ConfigKey) => entry.effectiveValue, [{ key: key as ConfigKey, value: entry.syncedValue }], bringsSecurity(values));
+      if (split && split.heldBack.length > 0) {
+        return { text: [`${key} keeps this machine's value for now: the pulled value loosens a protection.`, ...heldBackLines(split.heldBack, 'settle it again choosing to take it even so')].join('\n'),
+          data: { key, owner, keep: 'local', heldBack: [key] } };
+      }
+    }
+    if (!resolveSettingsSyncConflict(config, key as ConfigKey, values.keep === 'synced' ? 'synced' : 'local')) {
       throw new CapabilityRefusal(`No pulled value of ${key} disagrees with this machine's.`, 'See settings that disagree lists the open ones.');
     }
     noteListChanged({ list: 'settings-sync', change: 'changed', id: key });
@@ -193,7 +216,7 @@ export const SETTINGS_SYNC_FAILURES = read({
 
 export const SETTINGS_SYNC_EXPORT: Definition = {
   capability: { id: 'settings-sync.export', group: 'devices', home: 'daemon', repeat: 'safe' },
-  actionId: 'export', label: 'Save your settings to a file for another machine', word: 'export', inputs: [{ ...PATH, help: 'Where to write the bundle, in your project folder unless the path says where' }],
+  actionId: 'export', label: 'Save your settings to a file for another machine', word: 'export', inputs: [{ ...PATH, file: 'written', help: 'Where to write the bundle, in your project folder unless the path says where' }],
   sentence: 'The daemon\'s settings and this program\'s are written to the sync bundle file {path}, each part labelled with its owner, for another machine (a laptop, a second computer) to pull and use.', done: '',
   touches: 'this-machine', lasts: 'kept', risk: 'none', example: { path: 'settings-sync.json' },
   async run(values, services, caller) {
@@ -225,7 +248,7 @@ export const SETTINGS_SYNC_INSPECT = read({
   async run(values, services, caller) {
     const path = services.programSettings.resolvePath(caller, values.path!);
     let bundle: OwnedBundle;
-    try { bundle = readBundle(path); } catch (error) {
+    try { bundle = readBundle(path, caller); } catch (error) {
       recordSettingsSyncFailure('settings-sync', reason(error), services.settingsSync.daemon().getControlPlaneConfigDir());
       throw error;
     }
@@ -240,28 +263,47 @@ export const SETTINGS_SYNC_INSPECT = read({
 
 export const SETTINGS_SYNC_PULL: Definition = {
   capability: { id: 'settings-sync.pull', group: 'devices', home: 'daemon', repeat: 'safe' },
-  actionId: 'pull', label: 'Take the settings from a sync bundle', word: 'pull', inputs: [PATH],
-  sentence: 'Each part of {path} replaces its owner\'s settings (the daemon\'s, this program\'s) until you change it, except keys a managed lock owns; another program\'s part is left for it. What changed is listed, with the copy of each settings file from before that puts it back.', done: '',
-  touches: 'this-machine', lasts: 'kept', risk: 'loosens-a-protection',
+  actionId: 'pull', label: 'Take the settings from a sync bundle', word: 'pull', inputs: [PATH, incomingSecurityInput('Take them too'), FILES_AT, CONTENT_INPUT],
+  sentence: 'Each part of {path} replaces its owner\'s settings (the daemon\'s, this program\'s) until you change it, except settings that loosen a protection unless you choose to take them too; another program\'s part is left for it. A bundle that would change a setting locked as managed is refused whole, before anything is asked. What changed is listed, with the copy of each settings file from before that puts it back.', done: '',
+  touches: 'this-machine', lasts: 'kept', risk: 'none',
   ownerOnly: { reason: 'a sync bundle can change security settings on this machine', instead: 'See where your settings come from, in the Devices and network place.' },
   example: { path: 'settings-sync.json' },
+  // Read once before anything is asked: a bundle that would change a setting locked as managed is refused now, and what
+  // runs is the content read.
+  readsFileBefore(values, services, caller) {
+    const path = values.filesAt === 'program' ? values.path! : services.programSettings.resolvePath(caller, values.path!);
+    const bundle = readBundle(path, caller, values.filesAt === 'program' ? values.content ?? '' : undefined);
+    const entries = partsOf(bundle, caller).flatMap((part) => Object.entries(part.settings).map(([key, value]) => ({ key, value })));
+    const differs = (key: string, value: unknown): boolean => {
+      if (!CONFIG_KEYS.has(key as ConfigKey)) return false;
+      let now: unknown;
+      try { now = configOf(services, ownerOfKey(key, caller), caller).get(key as ConfigKey); } catch { return true; }
+      return JSON.stringify(now) !== JSON.stringify(value);
+    };
+    return lockedFileSettingsRefusal(path, entries, differs) ?? (values.filesAt === 'program' ? undefined : { ...values, filesAt: 'program', path, content: JSON.stringify(bundle) });
+  },
   async run(values: ActionValues, services, caller): Promise<CapabilityResult> {
-    const path = services.programSettings.resolvePath(caller, values.path!);
+    const path = values.filesAt === 'program' ? values.path! : services.programSettings.resolvePath(caller, values.path!);
     const failed = (error: unknown): never => {
       recordSettingsSyncFailure('settings-sync', reason(error), services.settingsSync.daemon().getControlPlaneConfigDir());
       throw error instanceof CapabilityRefusal ? error : new CapabilityRefusal(`Not pulled: ${reason(error)}.`, 'Look inside a sync bundle shows what it holds.');
     };
     let bundle: OwnedBundle;
-    try { bundle = readBundle(path); } catch (error) { return failed(error); }
+    try { bundle = readBundle(path, caller, values.filesAt === 'program' ? values.content ?? '' : undefined); } catch (error) { return failed(error); }
     const lines: string[] = [];
     const applied: { owner: Owner; applied: number; conflicts: number; locked: readonly string[] }[] = [];
     const left: { owner: Owner; count: number }[] = [];
+    const heldBack: IncomingSettingChange<ConfigKey>[] = [];
     for (const part of partsOf(bundle, caller)) {
       if (part.owner !== 'daemon' && part.owner !== programOf(caller)) { left.push({ owner: part.owner, count: Object.keys(part.settings).length }); continue; }
       // A key of the other owner in this part is left: each part is applied to its owner only.
       const own = Object.fromEntries(Object.entries(part.settings).filter(([key]) => ownerOfKey(key, caller) === part.owner));
       const config = configOf(services, part.owner, caller);
-      const changes = Object.entries(own).filter(([key, next]) => CONFIG_KEYS.has(key as ConfigKey) && JSON.stringify(config.get(key as ConfigKey)) !== JSON.stringify(next));
+      // One rule for every import of settings: what loosens a protection is held back unless chosen (incoming-settings.ts).
+      const split = splitIncomingSettings((key: ConfigKey) => config.get(key),
+        Object.entries(own).filter(([key]) => CONFIG_KEYS.has(key as ConfigKey)).map(([key, value]) => ({ key: key as ConfigKey, value })), bringsSecurity(values));
+      const changes = split.apply.map((change) => [change.key, change.next] as const);
+      heldBack.push(...split.heldBack);
       // The file these keys are written to: the daemon's part is daemon-owned keys, kept in the daemon's settings file
       // (its tier), not in the file of the daemon's own program settings.
       const settingsPath = part.owner === 'daemon' ? (config.getDaemonTierPath() ?? config.getConfigPath()) : config.getConfigPath();
@@ -275,17 +317,20 @@ export const SETTINGS_SYNC_PULL: Definition = {
         // make it bind again, closing every connection, the asking one included.
         const result = applySettingsSyncBundle(config, { ...bundle, settings: Object.fromEntries(changes) }, path);
         applied.push({ owner: part.owner, applied: result.appliedCount, conflicts: result.conflictCount, locked: result.skippedLockedKeys ?? [] });
-        lines.push(`${Whose(part.owner)} settings: ${result.appliedCount} applied, ${changes.length} changed${result.skippedLockedKeys?.length ? `, ${result.skippedLockedKeys.length} left because managed locks own them (${result.skippedLockedKeys.join(', ')})` : ''}.`);
-        if (changes.length > 0) lines.push(`  Changed: ${changes.map(([key]) => key).join(', ')}.`);
+        // A key a managed lock holds was left, not changed.
+        const taken = changes.filter(([key]) => !(result.skippedLockedKeys ?? []).includes(key));
+        lines.push(`${Whose(part.owner)} settings: ${result.appliedCount} applied, ${taken.length} changed${result.skippedLockedKeys?.length ? `, ${result.skippedLockedKeys.length} left because managed locks own them (${result.skippedLockedKeys.join(', ')})` : ''}.`);
+        if (taken.length > 0) lines.push(`  Changed: ${taken.map(([key]) => key).join(', ')}.`);
         if (kept) lines.push(`  To put them back: the file as it was is kept as ${kept}; copy it over ${settingsPath}.`);
       } catch (error) {
         return failed(error);
       }
     }
     for (const part of left) lines.push(`Left: ${OWNER_WORDS[part.owner]}'s part (${part.count} settings); pull the same file from ${OWNER_WORDS[part.owner]} to apply it there.`);
+    lines.push(...heldBackLines(heldBack, 'pull the file again choosing to take them too'));
     if (lines.length === 0) lines.push('The bundle held nothing for the daemon or this program; nothing was applied.');
     if (applied.length > 0) noteListChanged({ list: 'settings-sync', change: 'changed' });
-    return { text: [`Pulled ${path}.`, ...lines].join('\n'), data: { path, applied, left } };
+    return { text: [`Pulled ${path}.`, ...lines].join('\n'), data: { path, applied, left, heldBack: heldBack.map((change) => change.key) } };
   },
 };
 

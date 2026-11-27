@@ -3,8 +3,8 @@ import type { CommandContext } from '../input/command-registry.ts';
 import { GOODVIBES_AGENT_PAIRING_SURFACE } from '../config/surface.ts';
 import { resolveRuntimeEndpointBinding, type RuntimeEndpointConfigReader } from '../cli/endpoints.ts';
 import { readConnectedHostOperatorToken } from '@goodvibes/engine/terminal-shell/agent-turn/connected-host-auth';
-import { buildAgentWorkspaceChannels } from '../input/agent-workspace-channels.ts';
-import { buildAgentWorkspaceVoiceMediaReadiness } from '../input/agent-workspace-voice-media.ts';
+import { buildAgentChannels } from '../input/channel-readiness.ts';
+import { buildAgentVoiceMediaReadiness } from '../input/voice-media-readiness.ts';
 import { requirePlatform, requireShellPaths } from '../input/commands/runtime-services.ts';
 import { browserControlPosture, type BrowserControlPosture } from './agent-harness-browser-control.ts';
 import { browserDeviceCatalogMatches } from './agent-harness-browser-device-readings.ts';
@@ -168,11 +168,11 @@ function pairingRoutes(): readonly PairingRoute[] {
     },
     {
       id: 'pairing-ui',
-      label: 'Pairing workspace route',
-      detail: 'Visible Agent workspace route for companion pairing and channel setup.',
+      label: 'Pairing in Devices and network',
+      detail: 'Devices and network, in the menu: Pair something, and the devices paired so far.',
       effect: 'visible-navigation',
       command: 'Devices and network, in the menu (Ctrl+G then m)',
-      harnessRoute: 'agent_harness mode:"workspace_action" target:"pair"',
+      harnessRoute: 'agent_harness mode:"open_ui_surface" surfaceId:"places" target:"devices"',
       capabilityIds: ['companion-pairing', 'mobile-command-routing'],
     },
     {
@@ -291,7 +291,7 @@ function describeRoute(route: PairingRoute, options: {
 
 function pairingRouteModelRoute(route: PairingRoute): string {
   if (route.effect === 'owner-terminal-only') return `none for a model; ask the user to press ${route.command ?? 'Devices and network, Pair something, A phone or another device'}`;
-  if (route.id === 'pairing-ui') return 'agent_harness mode:"workspace_action" target:"pair"';
+  if (route.id === 'pairing-ui') return 'agent_harness mode:"open_ui_surface" surfaceId:"places" target:"devices"';
   return previewHarnessText(route.harnessRoute ?? 'agent_harness mode:"pairing_route"');
 }
 
@@ -375,12 +375,12 @@ async function buildDeviceCapabilityMap(context: CommandContext, browserPosture:
   const webBinding = resolveRuntimeEndpointBinding(requirePlatform(context).configManager, 'web');
   const webUrl = advertisedEndpoint(webBinding.host, webBinding.port, hostInputs).url;
   const voiceEnabled = readConfigBooleanOrNull(context, 'ui.voiceEnabled');
-  const voiceReadiness = buildAgentWorkspaceVoiceMediaReadiness({
+  const voiceReadiness = buildAgentVoiceMediaReadiness({
     context,
     voiceProviders: context.platform.voiceProviderRegistry?.list() ?? [],
     mediaProviders: context.platform.mediaProviderRegistry?.list() ?? [],
   });
-  const channels = buildAgentWorkspaceChannels(context);
+  const channels = buildAgentChannels(context);
   const readyChannels = channels.filter((channel) => channel.ready);
   const enabledChannels = channels.filter((channel) => channel.enabled);
   const notificationWebhookCount = readConfigStringArray(context, 'notifications.webhookUrls').length;

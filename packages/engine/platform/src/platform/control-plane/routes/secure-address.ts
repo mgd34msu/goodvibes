@@ -25,7 +25,7 @@ import { attachHandler } from './attach-handler.js';
 import { GatewayVerbError } from './gateway-verb-error.js';
 import { readInvocationParams } from './invocation-params.js';
 import type { LanHttpsListener } from '../../daemon/lan-https/listener.js';
-import { LAN_HTTPS_PAGE_PATH } from '../../daemon/lan-https/page.js';
+import { lanHttpsInstallLink } from '../../daemon/lan-https/page.js';
 import { readOwnCertificate } from '../../daemon/lan-https/own-certificate.js';
 import { primaryLanAddress } from '../../daemon/lan-https/secure-address.js';
 import { DnsProviderError } from '../../daemon/lan-https/dns-provider.js';
@@ -59,8 +59,6 @@ async function status(deps: SecureAddressRouteDeps): Promise<Record<string, unkn
   const host = state.hostName ?? primaryLanAddress();
   const address = state.serving && state.port !== undefined && host ? `https://${host}:${state.port}` : undefined;
   const authority = await service.localAuthority();
-  const plainPort = Number(config.get('controlPlane.port'));
-  const lan = primaryLanAddress();
   // A machine that held the group's certificate and stopped following: until when it can present it, per kind.
   const former = following ? [] : facts.group.formerHolders.map((holder) => secureAddressFormerHolderLine(holder));
   const groupLines = following
@@ -93,7 +91,9 @@ async function status(deps: SecureAddressRouteDeps): Promise<Record<string, unkn
     },
     letsEncrypt: facts.letsEncrypt,
     ownFiles: facts.ownFiles,
-    localAuthority: { ...authority, ...(lan && Number.isInteger(plainPort) ? { page: `http://${lan}:${plainPort}${LAN_HTTPS_PAGE_PATH}` } : {}) },
+    // The link for phones, shown on the owner's own screen: the page on the https address with the certificate's
+    // fingerprint in it, which the phone checks the certificate against (lan-https/page.ts); never the plain address.
+    localAuthority: { ...authority, ...(address && authority.fingerprint ? { page: lanHttpsInstallLink(address, authority.fingerprint) } : {}) },
     tailscale: { ...(deps.tailscaleOrigin() ? { address: deps.tailscaleOrigin()! } : {}) },
     group: facts.group,
     // The lead's "Issue a new certificate now" (secureAddress.reissue): shown where it can act.

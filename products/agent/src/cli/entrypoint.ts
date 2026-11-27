@@ -19,6 +19,7 @@ import { AgentConfigManager } from '../config/host-settings.ts';
 import { formatProviderModel, getModelIdFromProviderModel, getProviderIdFromModel } from '@goodvibes/engine/platform/platform/providers/provider-model';
 import { GlobalNetworkTransportInstaller } from '@goodvibes/engine/platform/platform/runtime/transport';
 import { configureActivityLogger } from '@goodvibes/engine/platform/platform/utils';
+import { projectFolderOf } from '@goodvibes/engine/platform/platform/runtime/shell-paths';
 import {
   applyRuntimeCommandEndpointFlagOverrides,
   applyRuntimeConfigOverrides,
@@ -113,7 +114,8 @@ export async function prepareShellCliRuntime(
     process.exit(error instanceof AgentProfileUsageError ? 2 : 1);
   }
   const { workingDirectory: bootstrapWorkingDir, homeDirectory: bootstrapHomeDirectory } = ownership;
-  configureActivityLogger(join(bootstrapWorkingDir, '.goodvibes', 'logs'));
+  // The activity log is the project's, whatever folder of it the program was opened in.
+  configureActivityLogger(join(projectFolderOf(bootstrapWorkingDir), '.goodvibes', 'logs'));
   // The full-screen app shows skipped settings itself; stderr would repeat them under it.
   if (cli.command === 'tui') deferIngestionNoticesToApp();
   const configManager = new AgentConfigManager({

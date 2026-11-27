@@ -189,12 +189,12 @@ function calendarRead(options: BuiltinCapabilityOptions): CapabilityDeclaration 
       },
       {
         // A private calendar feed address (google.calendar-address) is
-        // subscribed as a feed; /calendar upcoming reads it with no Google
-        // account at all.
+        // subscribed as a feed; calendar.upcoming reads it with no Google
+        // account at all (there is no /calendar command).
         kind: 'model-tool',
-        toolName: 'workspace',
-        modelRoute: 'workspace action:"run_command" command:"/calendar upcoming --days 7"',
-        availability: { kind: 'model-tool-registered', toolName: 'workspace' },
+        toolName: 'capability_run',
+        modelRoute: 'capability_run id:"calendar.upcoming" inputs:{"days":"7"}',
+        availability: { kind: 'model-tool-registered', toolName: 'capability_run' },
         prerequisites: [
           {
             id: 'google-calendar-feed',

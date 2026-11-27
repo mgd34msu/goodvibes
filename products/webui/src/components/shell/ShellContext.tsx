@@ -41,8 +41,10 @@ import { useHotkeys } from '../../hooks/useHotkeys';
 import { registerCommand, unregisterCommand } from '../../lib/commands';
 import { PHONE_QUERY, useMediaQuery } from '../ui/overlay';
 import { useReducedMotion } from '../motion/useReducedMotion';
+import { accountKey } from '../../lib/account-storage';
 
-export const SIDEBAR_STORAGE_KEY = 'goodvibes.webui.sidebar';
+/** Kept for the person signed in (account-storage.ts). */
+export const SIDEBAR_STORAGE_KEY = 'goodvibes.webui.sidebar' as const;
 export const SIDEBAR_MIN_WIDTH = 220;
 export const SIDEBAR_MAX_WIDTH = 360;
 export const SIDEBAR_DEFAULT_WIDTH = 260;
@@ -69,7 +71,7 @@ export function clampSidebarWidth(width: number): number {
 export function readStoredSidebar(): StoredSidebar {
   const fallback: StoredSidebar = { collapsed: false, pinned: false, width: SIDEBAR_DEFAULT_WIDTH };
   try {
-    const raw = window.localStorage.getItem(SIDEBAR_STORAGE_KEY);
+    const raw = window.localStorage.getItem(accountKey(SIDEBAR_STORAGE_KEY));
     if (!raw) return fallback;
     const parsed = JSON.parse(raw) as Partial<StoredSidebar>;
     return {
@@ -84,7 +86,7 @@ export function readStoredSidebar(): StoredSidebar {
 
 function writeStoredSidebar(next: StoredSidebar): void {
   try {
-    window.localStorage.setItem(SIDEBAR_STORAGE_KEY, JSON.stringify(next));
+    window.localStorage.setItem(accountKey(SIDEBAR_STORAGE_KEY), JSON.stringify(next));
   } catch {
     // Storage blocked (private window): the choice lasts for this page only.
   }

@@ -14,7 +14,7 @@
  * the following (the work runs on, and its result waits in Work), and only
  * the conversation's own cancel of the record stops the work.
  */
-import { subscribeDaemonEventFrames } from '@goodvibes/engine/platform/platform/runtime/client';
+import { programCallHeadersFor, subscribeDaemonEventFrames } from '@goodvibes/engine/platform/platform/runtime/client';
 import type { AgentRecord, AgentWorkDelegation, DelegatedWork, DelegatedWorkUpdate } from '@goodvibes/engine/platform/platform/tools';
 import type { ShellPathService } from '@goodvibes/engine/platform/platform/runtime/shell';
 import { logger, summarizeError } from '@goodvibes/engine/platform/platform/utils';
@@ -78,16 +78,19 @@ export function createDaemonWorkDelegation(options: DaemonWorkDelegationOptions)
    * delegated credential would make it that credential's, which the owner's Work then cannot read). No person's claim:
    * the daemon decides it under the owner's mode, as any caller's.
    */
-  async function ask(id: string, inputs: Record<string, string>): Promise<{ readonly ok: true; readonly text: string; readonly data: Answer } | { readonly ok: false; readonly error: string }> {
+  async function ask(id: string, inputs: Record<string, string>, extra: Record<string, string> = {}): Promise<{ readonly ok: true; readonly text: string; readonly data: Answer } | { readonly ok: false; readonly error: string }> {
     const connection = captureOperatorConnection(options.shellPaths, options.configManager, () => {});
     if (!connection.token) return { ok: false, error: `auth_required: ${connection.unavailable?.reason ?? 'no daemon credential was found'}; nothing was sent.` };
     connection.assertCurrent();
     let response: Response;
     try {
+      // The program's call context (the registration that daemon issued it, and the conversation it holds): the daemon
+      // believes a delegation from a conversation only from this program's own registration, for a session it registered.
+      const callHeaders = await programCallHeadersFor(connection.baseUrl, connection.token, connection.fetch ?? fetch, options.program);
       response = await (connection.fetch ?? fetch)(`${connection.baseUrl}/api/control-plane/methods/${encodeURIComponent('capabilities.run')}/invoke`, {
         method: 'POST', redirect: 'error',
-        headers: { authorization: `Bearer ${connection.token}`, 'content-type': 'application/json' },
-        body: JSON.stringify({ body: { id, inputs, workingDirectory: options.shellPaths.workingDirectory, program: options.program } }),
+        headers: { ...callHeaders, authorization: `Bearer ${connection.token}`, 'content-type': 'application/json' },
+        body: JSON.stringify({ body: { id, inputs, workingDirectory: options.shellPaths.workingDirectory, program: options.program, ...extra } }),
       });
     } catch (error) {
       return { ok: false, error: `The daemon did not answer, so nothing was handed over (${summarizeError(error)}).` };
@@ -109,10 +112,13 @@ export function createDaemonWorkDelegation(options: DaemonWorkDelegationOptions)
   }
 
   return {
-    async delegate(owner, { signal, report }): Promise<DelegatedWork> {
+    async delegate(owner, { signal, report, otherParty }): Promise<DelegatedWork> {
       signal.throwIfAborted();
       const criteria = (owner.successCriteria ?? []).map((line) => line.trim()).filter(Boolean).join('\n');
-      const ran = await ask('work.delegate', { goal: goalOf(owner), ...(criteria ? { criteria } : {}) });
+      // A model's delegation from this conversation: the daemon decides it under the owner's mode as an agent spawn, and
+      // the work carries the conversation's party (someone else's when its turn acts on someone else's input).
+      const ran = await ask('work.delegate', { goal: goalOf(owner), ...(criteria ? { criteria } : {}) },
+        { delegatedFrom: 'conversation', ...(otherParty ? { otherParty } : {}) });
       if (!ran.ok) throw new Error(ran.error);
       const workId = text(ran.data['work']);
       if (!workId) throw new Error(ran.text || 'The daemon did not say which piece of work it made.');

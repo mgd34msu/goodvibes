@@ -26,6 +26,7 @@
 import { dirname } from 'node:path';
 import { sharedWorkspaceRegisterPath } from '../workspace/registration/shared-register-path.js';
 import { broadRootReason } from '../workspace/checkpoint/root-guard.js';
+import { projectIdentityOf } from '../workspace/project-identity.js';
 import {
   openWorkspaceRegistrationStore,
   type WorkspaceRegistrationStore,
@@ -146,7 +147,9 @@ export class WorkspaceRegistrationManager {
       ? { ...(label ? { label } : {}), ...(origin ? { origin } : {}) }
       : undefined;
     try {
-      const result = await this.store.add(this.workingDirectory, opts);
+      // The folder's project is what is recorded (its repository's root when it is in one), never a subfolder of a
+      // repository: a registered subfolder would be a project of its own (workspace/project-identity.ts).
+      const result = await this.store.add(projectIdentityOf(this.workingDirectory), opts);
       return { registered: true, result };
     } catch (error) {
       if (error instanceof WorkspaceRegistrationError) {

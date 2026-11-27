@@ -182,6 +182,18 @@ export interface CompanionChatSession {
    * chosen, works in the daemon's own folder as before.
    */
   readonly project?: string | undefined;
+  /**
+   * The principal that made the chat (its credential's, at create). With its project, who the chat belongs to: anyone
+   * but the owner reaches a chat only when it made it, in a project given to it (control-plane/caller-reach.ts). Absent:
+   * a chat made before this was kept, or in process: the owner's only.
+   */
+  readonly createdBy?: string | undefined;
+  /**
+   * What the maker was when it made the chat (its class and scopes, as its credential was authenticated): the chat's
+   * model acts for that one (security/turn-session.ts). Absent on a chat made before this was kept (see
+   * companion-chat-manager.ts `makerActorOf`).
+   */
+  readonly maker?: CompanionChatMaker | undefined;
   readonly status: CompanionChatSessionStatus;
   readonly createdAt: number;
   readonly updatedAt: number;
@@ -201,6 +213,16 @@ export interface CreateCompanionChatSessionInput {
   readonly systemPrompt?: string | undefined;
   /** The project folder the chat works in (absolute); see CompanionChatSession.project. */
   readonly project?: string | undefined;
+  /** The principal that made it; see CompanionChatSession.createdBy. */
+  readonly createdBy?: string | undefined;
+  /** What that principal was; see CompanionChatSession.maker. */
+  readonly maker?: CompanionChatMaker | undefined;
+}
+
+/** A chat maker's class and scopes, kept with the chat (an Actor's, its scopes as a list). */
+export interface CompanionChatMaker {
+  readonly class: 'owner' | 'admin' | 'script' | 'member' | 'device' | 'guest' | 'peer' | 'system';
+  readonly scopes: readonly string[] | 'all';
 }
 
 export interface ListCompanionChatSessionsInput {

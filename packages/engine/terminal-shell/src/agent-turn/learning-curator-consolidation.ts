@@ -1,4 +1,4 @@
-import type { AgentWorkspaceLocalLibraryItem } from './local-library-items.js';
+import type { AgentLocalLibraryItem } from './local-library-items.js';
 import type { LearningCandidateDraft, LearningConsolidationDiff, LearningConsolidationPlan, LocalLearningCandidateDomain } from './learning-curator-types.js';
 import { isReviewed, localRegistryRoute, routeValue } from './learning-curator-common.js';
 import type { LearningRecord } from './learning-curator-source.js';
@@ -18,7 +18,7 @@ function uniqueText(values: readonly string[]): readonly string[] {
   return result;
 }
 
-function mergeableDescription(domain: LocalLearningCandidateDomain, item: AgentWorkspaceLocalLibraryItem): string {
+function mergeableDescription(domain: LocalLearningCandidateDomain, item: AgentLocalLibraryItem): string {
   if (domain === 'memory') {
     const fallback = item.scope && item.cls ? `${item.scope}/${item.cls}` : '';
     return item.description === fallback ? '' : item.description;
@@ -48,8 +48,8 @@ function consolidationDiff(
 
 function consolidationDiffs(
   domain: LocalLearningCandidateDomain,
-  survivor: AgentWorkspaceLocalLibraryItem,
-  duplicates: readonly AgentWorkspaceLocalLibraryItem[],
+  survivor: AgentLocalLibraryItem,
+  duplicates: readonly AgentLocalLibraryItem[],
 ): readonly LearningConsolidationDiff[] {
   const tags = survivor.tags.join(', ');
   const triggers = survivor.triggers.join(', ');
@@ -79,8 +79,8 @@ export type ConsolidationBasis = 'readings' | 'identical';
 function consolidationCandidate(
   domain: LocalLearningCandidateDomain,
   key: string,
-  items: readonly AgentWorkspaceLocalLibraryItem[],
-  survivor: AgentWorkspaceLocalLibraryItem,
+  items: readonly AgentLocalLibraryItem[],
+  survivor: AgentLocalLibraryItem,
   basis: ConsolidationBasis,
 ): LearningCandidateDraft | null {
   if (items.length < 2) return null;

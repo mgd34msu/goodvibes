@@ -2,8 +2,8 @@
 
 GoodVibes Agent (`goodvibes-agent`) is the GoodVibes personal assistant: chat,
 research, mail and calendar, reminders, notes and memory in one terminal
-workspace. This guide covers installing it, its first run and each area of the
-workspace. Where an area described below and the setup requirements differ,
+program. This guide covers installing it, its first run and the places of its
+menu. Where a place described below and the setup requirements differ,
 the setup requirements apply.
 
 ## Requirements and installation
@@ -48,57 +48,35 @@ Enter, and the answer streams in. When a key in your environment already makes a
 provider usable, first run uses it and you start here.
 
 Leaving part way and starting again resumes from where you were. After first
-run the splash names the model in use. Everything else is set up later with
-`/setup`, which lists topics and opens one form per topic (`/setup first-run`
-runs the three steps again).
+run the splash names the model in use. Everything else is set up later on the
+Setup tab of the System place (the menu, `Ctrl+G` then `m`), which lists topics
+and opens what sets each one up (its row `Run first-run again` runs the three
+steps again).
 
-## The Agent workspace
+## The menu of every place
 
-`Ctrl+G` then `w` opens the Agent workspace; `Ctrl+G` then `m`
-(or a click on `ctrl+g m menu` at the right end of the status bar) opens the
-menu of every place; `Ctrl+P`, `?` and `/help` open the list of every command
-and key instead. `Ctrl+G` is the leader: after it the screen lists every key
-that can follow. The workspace is a set of pages, each a
-list of rows. A row changes a setting, opens the shared model picker, or opens
-the guided form of the slash command that does it, the same form the command
-opens when you type it. Under the rows, the pane says what the selected row
-does and shows that command's own report, with the time it was read.
-Reports are read by themselves: what is waiting at every start, each area's
-reports as soon as you open it (the pane says "reading…" until they arrive),
-and `Ctrl+R` reads everything again now. A reading of something that changes
-on its own (the host, a mailbox, a provider) says "may be out of date" once
-it is more than 5 minutes old. The title row names the Agent home you are in,
-the model and provider it answers with, and the daemon it works with. On a
-small screen the groups you are not in fold to their name and count; moving
-into one opens it. Typing a letter takes you to the composer to ask the
-assistant, and a line above the composer says Esc brings you back.
+`Ctrl+G` then `m` (or a click on `ctrl+g m menu` at the right end of the
+status bar) opens the menu of every place, the same places as in the terminal
+app; `Ctrl+P`, `?` and `/help` open the list of the few commands that remain
+and every key. `Ctrl+G` is the leader: after it the screen lists every key
+that can follow. Each place reads what it shows by itself and keeps it up to
+date; a key on the selected row does each thing, and the line under the list
+says what happened. Typing in the menu finds a place, a tab or an action by
+name.
 
-The pages are listed everyday work first, setting up after:
-
-| Page | What it holds |
+| Place | What you do there |
 | --- | --- |
-| Home | Everything the assistant can do, grouped by what you want to get done; or close it and type |
-| Inbox & calendar | Your inbox, calendar, notes and reminders, and the accounts behind them |
-| Research | Web research with its sources, and sourced reports |
-| Documents & Files | Drafts and their review, saved files, and comparing models on one task |
-| Conversation | This conversation and your saved ones: save, resume, find and export |
-| Work & Approvals | What is running, what waits for your answer, and your to-do list |
-| Schedules | Schedules on the connected host, and the limits on them |
-| Your Profile | What GoodVibes knows about you, and how to correct or forget a fact |
-| Memory, Notes, How it talks, Procedures, Saved workflows | What the assistant remembers, your scratchpad, its personas, its skills, and routines you start by name or on a schedule |
-| Tools & MCP | The tool servers the assistant can use, and the secrets they need |
-| Knowledge | What the assistant knows from the pages, files and bookmarks you added |
-| Agent homes | Separate Agent homes and the starters they are made from |
-| Connected Host | What the connected host is running and how it is set up |
-| Setup | The rows of one `/setup` topic |
-| Models | The model the assistant answers with, and optional models for side jobs |
-| Behavior | How much it checks in, when it shortens the history, and whether you see its reasoning |
-| Tools & Permissions | What the assistant may do without asking |
-| Interface | Theme, streaming, line numbers and where messages go |
-| Messaging | Chat apps and notification channels |
-| Finish | Mark setup finished, so later starts open the conversation |
-
-Press `/` inside the Agent workspace to search actions by name, category, command, or detail.
+| Work and agents | Your work and its plans, research (`Q` a question, `W` a web page, the Research and Sources tabs), your briefing (`O`), the tasks here and on the daemon |
+| Mail, calendar and channels | Your inbox, calendar and its accounts and feeds, Google, chat channels and notification addresses |
+| Memory and knowledge | Memory, knowledge (sources, entries, issues, connectors), notes, personas, routines, drafts and saved artifacts, About you, Agent homes and starters |
+| Automation | Schedules and their runs, routines on a schedule, triggers and check-ins; `o` its settings |
+| Sessions | Your saved conversations, this conversation's record, hand-offs |
+| This conversation | Context, an image with a message, saving or exporting this conversation |
+| Tools and extensions | Tool servers, skills and skill bundles, plugins, media |
+| Models and providers | Models, providers and their sign-ins, routing, comparisons |
+| Permissions and safety | The mode and rules, secrets, sign-in, policy, the sandbox |
+| Devices and network | Paired devices, pairing this Agent with its daemon, addresses and ports, phones |
+| System | This session, Setup (one topic at a time, `Import settings` among them), health, updates, voice, keys, support and transfer; `S` opens the settings screen |
 
 ## Model access
 
@@ -107,7 +85,7 @@ The main Agent model can use the Agent-controlled harness through Agent-owned to
 Default discovery is intentionally compact:
 
 - plural modes return ids, labels, counts, safe state, effect class, and route hints;
-- workspace action, slash-command, CLI, UI surface, shortcut/keybinding, settings, tool, connected-host posture/status/capability, and operator/audit catalogs include short `modelRoute` or `modelAccess` hints for route choice;
+- slash-command, CLI, UI surface, shortcut/keybinding, settings, tool, connected-host posture/status/capability, and operator/audit catalogs include short `modelRoute` or `modelAccess` hints for route choice;
 - singular modes return detailed policy and lookup metadata;
 - `includeParameters:true` adds schemas, editor fields, model routes, parameter hints, release artifact data, redacted log tail, and detail that would be too large for normal discovery.
 
@@ -117,12 +95,12 @@ Common model routes:
 | --- | --- |
 | Choose the best route for a user task | `route action:"plan" query:"..."`; host diagnostics route through `host action:"status"`; settings route through `settings action:"list"`; model provider/local-cookbook/smoke/route-fit requests route through `models action:"provider\|local\|smoke\|route"`; Personal Ops briefing/queue/fresh-read/connector requests route through `personal_ops action:"briefing\|queue\|intake\|lane"`; reminders/schedules route through `schedule action:"list"`; local background commands route through `execution action:"processes"`; interactive PTY/stdin/sudo questions route through `execution action:"process_capabilities"`, which reports the tracked processes and stdin writes of the process manager, foreground-only sudo, and that no PTY session owner exists; external memory-provider/backend/sync requests route through `memory action:"provider"`, which shows a provider connected as an MCP server and the exact MCP tools for its read, write, forget and sync; browser-backed research runner requests route through `research action:"runner"`; visual research report rendering routes through `research action:"plan"` plus report artifacts; voice workflow and TTS-provider requests route through `device action:"voice\|provider"`; browser cockpit/PWA requests route through `computer action:"browser"` before confirmed open handoff; channel setup/triage/delivery-receipt/send requests route through `channels action:"setup\|triage\|deliveries\|channel"`; permission posture/finding/blocked-action questions route through `security action:"status\|finding\|explain"`; support-bundle requests route through `support action:"status\|bundle"`; saved-session/bookmark/continuity requests route through `sessions action:"list\|search\|get"`; release readiness/evidence requests route through `audit action:"readiness\|evidence\|item\|artifact"`; file undo/redo routes through `execution action:"recovery"`; media generation routes through provider readiness plus `agent_media_generate`; screenshot/browser/desktop-control tasks route through `computer action:"plan"`; lower-level `agent_harness mode:"route_decision"` remains available for compatibility/detail |
 | Harness mode discovery | `agent_harness mode:"modes"`, `mode:"mode"` |
-| Workspace actions | `workspace action:"status\|actions\|action\|run"`; lower-level workspace harness modes remain available for compatibility/detail |
-| Slash commands | `workspace action:"commands\|command\|run_command"`; lower-level command harness modes remain available for compatibility/detail |
+| Everything a person does in the places | `capability_find need:"..."`, then `capability_run id:"..."` |
+| Slash commands | `screens_keys_commands action:"commands\|command\|run_command"`; lower-level command harness modes remain available for compatibility/detail |
 | Settings | `settings action:"list\|get\|set\|reset\|import"`; lower-level `agent_harness mode:"settings"`, `mode:"get_setting"`, `mode:"set_setting"`, `mode:"reset_setting"` remain available for compatibility/detail |
-| GoodVibes settings import | `settings action:"preview_import"` previews; `settings action:"import"` applies under a current recorded admission; `import_goodvibes_settings action:"preview\|apply"` remains available |
-| Visible UI and devices | `workspace action:"surfaces\|surface\|open"` for visible navigation; `computer action:"status\|plan\|control\|browser\|setup\|mcp\|open_browser"` for browser/PWA readiness, certified browser-native category routes and first-run receipts, browser/screenshot/desktop-control planning, and computer-use UX; `device action:"status\|capability\|voice\|provider\|open_tts_provider\|open_tts_voice"` for device/voice UX |
-| Keybindings | `workspace action:"shortcuts\|keybindings\|keybinding\|run_keybinding\|set_keybinding\|reset_keybinding"` |
+| The terminal app's settings | `capability_run id:"settings.copy-from-terminal-app"` (also `settings action:"import"`, `setup action:"import_settings"` and `import_goodvibes_settings`, which run that capability); `security:"yes"` copies the settings that loosen a protection too |
+| Visible UI and devices | `screens_keys_commands action:"surfaces\|surface\|open"` for visible navigation; `computer action:"status\|plan\|control\|browser\|setup\|mcp\|open_browser"` for browser/PWA readiness, certified browser-native category routes and first-run receipts, browser/screenshot/desktop-control planning, and computer-use UX; `device action:"status\|capability\|voice\|provider\|open_tts_provider\|open_tts_voice"` for device/voice UX |
+| Keybindings | `screens_keys_commands action:"shortcuts\|keybindings\|keybinding\|run_keybinding"`; a key is bound with `capability_run id:"keys.bind"` and put back with `keys.reset` |
 | Tool contracts | `agent_harness mode:"tools"`, `mode:"tool"` |
 | Agent Knowledge | `agent_knowledge`, `agent_knowledge_ingest` |
 | Research runs, sources, and reports | `research action:"briefing\|plan\|search\|runner\|runs\|run\|sources\|source\|bundle\|reports\|report_artifact\|create_run\|start_run\|checkpoint\|pause\|resume\|cancel\|complete\|fail\|delete_run\|add_source\|review_source\|reject_source\|use_source\|delete_source\|report"`; lower-level `agent_research_runs`, `agent_research_sources`, `agent_research_report`, and harness research modes remain available for detailed inspection |
@@ -131,7 +109,7 @@ Common model routes:
 | Model and local model choice | `models action:"status\|route\|local\|providers\|provider\|smoke"` for route readiness with route-level provider-health records, local cookbook, certified daemon-published local serving diagnostics, provider posture, and confirmed local smoke checks; lower-level `agent_harness mode:"model_routing"`, `mode:"model_route"`, `mode:"provider_accounts"`, `mode:"provider_account"`, and `mode:"run_local_model_smoke"` remain available for detailed inspection |
 | Local background processes | `execution action:"processes\|process"` for inspection, `execution action:"process_capabilities"` for PTY/stdin/sudo posture, `terminal command:"..." background:true` to start, and `process action:"list\|poll\|log\|wait\|kill"` for lifecycle controls |
 | Documents, artifacts, compare | `agent_harness mode:"document_ops"`, `mode:"document_ops_lane"`, `agent_documents`, `agent_review_packet_presets`, `agent_review_packet_share`, `agent_artifacts`, `agent_model_compare` |
-| VIBE.md, project context, and local memory/notes/personas/skills/routines | `vibe action:"status\|show\|init\|import_persona"`, the Personas tab of Memory and knowledge, `context action:"status\|files\|file\|prompt\|receipts\|receipt"`, `memory action:"status\|provider\|curator\|candidate\|list\|search\|get"` for local memory plus external provider next routes/checklists/receipt contracts, `agent_local_registry`, `agent_learning_consolidation`, or confirmed workspace actions |
+| VIBE.md, project context, and local memory/notes/personas/skills/routines | `vibe action:"status\|show\|init\|import_persona"`, the Personas tab of Memory and knowledge, `context action:"status\|files\|file\|prompt\|receipts\|receipt"`, `memory action:"status\|provider\|curator\|candidate\|list\|search\|get"` for local memory plus external provider next routes/checklists/receipt contracts, `agent_local_registry`, `agent_learning_consolidation`, or the capabilities of Memory and knowledge (`capability_find`, `capability_run`) |
 | Learning curator and prompt plan | `memory action:"curate"` (reads new or changed records once), `memory action:"curator" includeParameters:true`, `memory action:"candidate"`, `agent_learning_consolidation`; lower-level learning harness modes remain available for detail |
 | Checklist | `agent_work_plan`, the project's checklist; New work and Work from a file in the Work place for work you ask for |
 | Visible autonomous work | `agent_harness mode:"agent_orchestration"`, `mode:"agent_orchestration_agent"`, then `agent` with `mode:"spawn"`, `mode:"batch-spawn"`, `mode:"status"`, `mode:"message"`, `mode:"wait"`, or `mode:"cancel"` |
@@ -153,7 +131,7 @@ Use a separate Agent home for isolated local state:
 GOODVIBES_AGENT_HOME=/path/to/agent-home goodvibes-agent
 ```
 
-Use named Agent profiles from Agent Workspace -> Profiles. Scriptable equivalents:
+Use named Agent homes from the Agent homes and Starters tabs of Memory and knowledge (the menu, `Ctrl+G` then `m`). Scriptable equivalents:
 
 ```sh
 goodvibes-agent profiles templates
@@ -164,11 +142,11 @@ goodvibes-agent profiles templates export research ./research-starter.json --inc
 goodvibes-agent profiles templates import ./research-starter.json --yes
 ```
 
-Named profiles isolate Agent-local config, sessions, VIBE.md, memory, notes, personas, skills, routines, and setup state. Starter export/from-discovered flows can include the current safe VIBE.md with `--include-vibe`; blocked VIBE.md files must be repaired first. A profile made from a built-in starter gets its VIBE.md at once; one made from a local or imported starter gets it as `VIBE.md.pending`, held for review with its persona, skills and routines, and applies once you rename it to `VIBE.md`. Shared GoodVibes settings import can reuse existing provider, UI, permission, subscription, surface, tool, and daemon endpoint settings from goodvibes-tui and other published GoodVibes platform stores. `settings action:"preview_import"` shows what would change without applying it, and `settings action:"import"` applies it. The `import_goodvibes_settings` compatibility route also previews changed counts first, shows source-package ownership metadata, redacts secret values, and requires confirmation before applying Agent-owned settings or provider subscriptions without mutating the source package stores. The workspace row (Start -> Import GoodVibes settings) reads the source files once and shows that plan first: counts per settings family, every permission and provider change in full, and provider sign-ins by name. Typing yes writes exactly that plan, and the previous values of the changed settings are appended to `agent/settings-import-undo.json` in the Agent's user state, one entry per import with its time, so each import can be reversed in order. Provider sign-ins an import replaces are not kept there; sign in again to restore one.
+Named profiles isolate Agent-local config, sessions, VIBE.md, memory, notes, personas, skills, routines, and setup state. Starter export/from-discovered flows can include the current safe VIBE.md with `--include-vibe`; blocked VIBE.md files must be repaired first. A profile made from a built-in starter gets its VIBE.md at once; one made from a local or imported starter gets it as `VIBE.md.pending`, held for review with its persona, skills and routines, and applies once you rename it to `VIBE.md`. The terminal app's settings reach the Agent one way: the capability `settings.copy-from-terminal-app`, run by the daemon. The row "Import settings" of System, Setup runs it (pressing it is the request), and so do the first launch's offer under the splash, a model's `capability_run`, `settings action:"import"`, `setup action:"import_settings"` and `import_goodvibes_settings`. Each setting of the display, provider, behaviour, storage, permissions, interface, voice, chat apps, side work, tools, updates and automation families that you set in the terminal app (in your own settings, or the project's where a project may set it) and the Agent holds differently is set the same in the Agent, until you change it; the answer names every one. A setting that loosens a protection is held back, and named, unless you choose to copy those too. The terminal app's settings are not changed; provider sign-ins are one store both programs read, so there is nothing to copy for them.
 
 ## Local behavior
 
-VIBE.md is the friendly personality file for GoodVibes Agent. Project and global VIBE.md files are discovered, scanned for secret-looking content, surfaced in the Local Context and Personas workspaces, setup, and the learning curator when blocked or truncated, optionally carried through profile starter export/import with `--include-vibe`, and applied to the serial Agent conversation. The files are read when each turn's prompt is built, so an edit applies to the next turn. Up to 16,000 characters of each file are applied; a longer file is cut and shown as truncated, and a file over 1 MB is not loaded. The model-visible route is `vibe action:"status|show"` for inspection and `vibe action:"init|import_persona" confirm:true explicitUserRequest:"..."` for confirmed personality changes; previews also return exact model and CLI `confirmationRoutes` for the same init/import action. They do not write into default knowledge or other product segments.
+VIBE.md is the friendly personality file for GoodVibes Agent. Project and global VIBE.md files are discovered, scanned for secret-looking content, surfaced on the Personas tab of Memory and knowledge (`g`), and the learning curator when blocked or truncated, optionally carried through profile starter export/import with `--include-vibe`, and applied to the serial Agent conversation. The files are read when each turn's prompt is built, so an edit applies to the next turn. Up to 16,000 characters of each file are applied; a longer file is cut and shown as truncated, and a file over 1 MB is not loaded. The model-visible route is `vibe action:"status|show"` for inspection and `vibe action:"init|import_persona" confirm:true explicitUserRequest:"..."` for confirmed personality changes; previews also return exact model and CLI `confirmationRoutes` for the same init/import action. They do not write into default knowledge or other product segments.
 
 Project context files are workspace instructions, not personality. GoodVibes Agent discovers them from these sources, in this application order:
 
@@ -181,31 +159,29 @@ Project context files are workspace instructions, not personality. GoodVibes Age
 | `.cursorrules` | The working directory | Cursor's single-file rules format |
 | `.cursor/rules/*.mdc` | The working directory, sorted by filename | Cursor's per-rule files |
 
-Every discovered file is scanned for secret-looking content, and bounded safe content is applied to the serial Agent prompt. Local Context shows loaded/blocked/truncated counts, and `context action:"files"` and `context action:"file"` expose loaded or blocked files to the model. Subdirectory context is discovered when a target path is supplied.
+Every discovered file is scanned for secret-looking content, and bounded safe content is applied to the serial Agent prompt. "See the project instruction files" in This conversation shows the files loaded, cut short and held back, and `context action:"files"` and `context action:"file"` expose loaded or blocked files to the model. Subdirectory context is discovered when a target path is supplied.
 
 Memory, notes, personas, routines, and Agent skills are local to GoodVibes Agent. Only reviewed, high-confidence local context should steer the assistant. Prompt context includes reviewed memory at or above the durable confidence threshold and reviewed setup-ready skills, routines, bundles, and personas. Enabled but unreviewed, stale, low-confidence, setup-blocked, or blocked context records are surfaced as suppressed review work instead of being applied silently.
 
-Prompt builds write durable receipts with ids, turn/source/model/provider, selected and suppressed record refs, segment counts, prompt hash, size, timestamp, and sanitized completed/error/cancelled outcome without storing raw prompt or response text. Agent Workspace -> Local Context shows a compact receipt timeline with outcome counts, latest turn outcome, applied/suppressed counts, bounded outcome detail, exact latest-receipt drill-in, and outcome filter routes.
+Prompt builds write durable receipts with ids, turn/source/model/provider, selected and suppressed record refs, segment counts, prompt hash, size, timestamp, and sanitized completed/error/cancelled outcome without storing raw prompt or response text. "See what the last turns were given" in This conversation shows what the last turns were given (memories, persona, skills, routines, what was left out, roughly how many tokens).
 
 Use `context action:"prompt"`, `context action:"receipts"`, or `context action:"receipt"` when the model or operator needs the current applied order, recent receipt ids, exact `receiptId`, `turnId`, or `outcomeStatus` filtering, turn outcomes, selected records, suppressed records, prompt previews on request, and approximate token budget.
 
-Use the workspace first:
+Use the places first (the menu, `Ctrl+G` then `m`):
 
-- Memory & Skills -> Create memory, Create note, or Capture learned behavior.
-- Memory & Skills -> Prompt plan to see which reviewed memories and setup-ready behaviors can guide the assistant now, what is suppressed, and which scored review/proposal/consolidation routes should run before context expands.
-- Memory & Skills -> Learning curator to rank stale, low-confidence, missing-setup, VIBE.md personality health, duplicate-consolidation candidates with visible diffs and rollback/recreate routes, expose an ordered duplicate-consolidation batch review plan, apply confirmed stale/delete/rollback/recreate phases through `agent_learning_consolidation`, surface reviewed-note memory/behavior proposals, completed-work memory/behavior proposals, completed-research memory/behavior proposals, saved-session memory/behavior proposals, and review-needed local behavior records before they silently guide the assistant.
-- Local Context -> Prompt context, Inspect VIBE.md, Inspect project context, or Inspect one context file before relying on persistent personality or project instructions.
-- Notes -> Create notes for source triage, temporary decisions, and operator handoff.
-- Personas -> Inspect, create, show, or import VIBE.md; create, inspect, activate, review, stale, or delete personas.
-- Skills -> Create, enable/disable, review, bundle, or delete.
-- Routines -> Create, start in chat, review receipts, or explicitly promote to a connected schedule.
-- Work -> Add work item, review work plan, and update status.
+- Memory and knowledge, Memory: remember something (`n`), search, correct, mark reviewed or out of date, forget; Proposals for what the curator proposes.
+- Memory and knowledge, Notes: write notes for source triage, temporary decisions and handoff, and make a memory, persona, skill or routine from one.
+- Memory and knowledge, Personas: make, change, use, review or delete personas; `g` the VIBE.md files that apply.
+- This conversation: see the project instruction files, and what the last turns were given.
+- Tools and extensions, Skills and Skill bundles: make, switch on or off, review, bundle or delete skills.
+- Memory and knowledge, Routines (and Automation, Routines): make, start now, review, switch on or off, or put a routine on a schedule.
+- Work and agents: new work, its plan, and the checklist.
 
 Starting a routine records local usage and prints its steps in the main conversation. Promotion to a connected schedule or automation job is separate, explicit, confirmation-gated, visible in the autonomy queue, and keeps Agent Knowledge isolated. When the user asks for recurring autonomous work directly, use `schedule action:"create"` to create one connected schedule only with explicit task, cadence, success criteria, confirmation, and user request provenance; use `schedule action:"remind"` for reminders and `schedule action:"pause|resume|run|delete"` for exact-id lifecycle controls. Confirmed schedule creation, routine promotion, reminders, edits, and lifecycle actions return next routes for schedule list, autonomy queue inspection, run, edit, pause, resume, and delete when applicable.
 
 ## Knowledge and artifacts
 
-Use Agent Workspace -> Knowledge for source-backed Agent Knowledge. The valid connected-host route family is:
+Use Memory and knowledge (Sources, Entries, Issues, Connectors) for source-backed Agent Knowledge. The valid connected-host route family is:
 
 ```text
 /api/goodvibes-agent/knowledge/*
@@ -213,11 +189,11 @@ Use Agent Workspace -> Knowledge for source-backed Agent Knowledge. The valid co
 
 Agent commands fail closed if the route is unavailable or a successful-looking response carries non-Agent contamination. Parseable public Agent-route scope aliases are normalized before rendering.
 
-The Knowledge workspace also exposes route-backed and command-backed workflows for issue review, prompt packet previews, context-selection explain output, consolidation, and reindex. Read-only ask/search/list/get/map/connector/packet/explain paths do not require mutation confirmation. Ingest, review-issue, consolidation, and reindex paths require explicit confirmation.
+Memory and knowledge also has controls for issue review, prompt packet previews, context-selection explain output, consolidation, and reindex. Read-only ask/search/list/get/map/connector/packet/explain paths do not require mutation confirmation. Ingest, review-issue, consolidation, and reindex paths require explicit confirmation.
 
-Use Agent Workspace -> Research for read-only web research, URL inspection, visible checkpointable research run state, a read-only Research briefing queue, bounded public source-candidate search, certified live platform/daemon browser-runner and visual-report render evidence when published, project-local source queue review, reviewed-source bundles, saved report inspection, and confirmed sourced report artifacts. Research requests do not ingest sources.
+Use Work and agents for research: `Q` researches a question and `W` looks at a web page (both in the conversation), the Research tab lists the research runs (`s` starts one, `w` saves a sourced report) and the Sources tab the research queue (`a` adds a source). Saved reports are on the Artifacts tab of Memory and knowledge. Research requests do not ingest sources.
 
-The Research workspace shows browser-runner and visual-report readiness, the direct `research` run/source/report routes, a Research briefing action for `research action:"briefing"`, a Plan workflow action for `research action:"plan"`, a Public source search action for `research action:"search"`, a Browser runner readiness action for `research action:"runner"`, and a Report artifacts action for `research action:"reports"`.
+For a research briefing, a plan, a public source search or the browser runner's readiness, ask in the conversation; the model answers with `research action:"briefing"`, `"plan"`, `"search"` and `"runner"`.
 
 Use `research action:"briefing"` first when the model needs one read-only next-action queue across visible runs, source review, saved report artifacts, certified live runner/render evidence, browser readiness, and exact follow-up routes. Use `research action:"search"` for one bounded public web search that returns capture-ready source candidates plus exact confirmed `add_source` routes; pass `runId` to use an existing visible run's saved question and receive run-specific start/checkpoint follow-up routes. It does not create runs or write source records by itself.
 
@@ -303,7 +279,7 @@ One bounded exception happens at boot: when the host is already installed on thi
 
 ## Current product notes
 
-Agent uses the GoodVibes terminal shell, renderer, input, fullscreen workspace, command registry, and release foundation. Use `execution action:"status"` before computer-work handoffs. Local read/edit/exec is the preferred route when the current workspace and permissions are sufficient, and Agent Workspace -> Work & Approvals shows local process supervision with tracked/running/completed counts, stdin/PTY/sudo parity, and Background processes / Process capabilities actions.
+Agent uses the GoodVibes terminal shell, renderer, input, places, command registry, and release foundation. Use `execution action:"status"` before computer-work handoffs. Local read/edit/exec is the preferred route when the current project and permissions are sufficient; Your agents (`Ctrl+O`) shows the background processes.
 
 Local shell/edit routes advertise process monitor/live tail/tool inspector supervision. First-class `execution`, `terminal`, and `process` adapters expose `execution action:"status|route|history|record|processes|process_capabilities|process|recovery"`, `terminal(command, background:true)`, and `process(action:"list|poll|wait|log|kill|write")` over the same tracked ProcessManager lifecycle. `execution action:"capabilities|doctor|parity"` goes straight to the read-only process capability report, while `process action:"capabilities"` remains available for users already in the process lifecycle tool. Lower-level `mode:"execution_posture|execution_route|browser_control_route|background_processes|background_process|run_background_process|execution_history|execution_history_item|file_recovery|run_file_recovery"` routes remain available for compatibility and detailed inspection.
 

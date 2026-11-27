@@ -347,6 +347,8 @@ export interface ClusterSecretStore {
   delete(key: string): Promise<void>;
   /** Successful local credential writes/deletes; values are never in events. */
   onDidChange?(listener: (key: string) => void): () => void;
+  /** Who made the write whose notice is being delivered now, and how it was decided (`SecretsManager.writeAct`). */
+  writeAct?(): import('./config-replica.js').ReplicaAct | undefined;
 }
 
 /** What {@link clusterSecretStoreFrom} needs of the secrets store; `SecretsManager` satisfies it. */
@@ -357,6 +359,7 @@ export interface ClusterSecretsSource {
   /** The daemon tier's own entry; throws when that store exists but cannot be read. */
   getWriteScopeEntry(key: string, scope: 'daemon'): Promise<Secret | null>;
   onDidChange?(listener: (key: string) => void): () => void;
+  writeAct?(): import('./config-replica.js').ReplicaAct | undefined;
 }
 
 /**
@@ -370,7 +373,9 @@ export interface ClusterSecretsSource {
  */
 export function clusterSecretStoreFrom(source: ClusterSecretsSource): ClusterSecretStore {
   const onDidChange = source.onDidChange;
+  const writeAct = source.writeAct;
   return {
+    ...(writeAct ? { writeAct: () => writeAct.call(source) } : {}),
     // The cluster layer reads its own material (the group key, replicated settings) as text.
     get: async (key) => {
       const value = revealOrNull(await source.get(key), 'dispatch');
@@ -392,7 +397,7 @@ export async function observeGroupKeyMaterial(secrets: ClusterSecretStore, logge
   let raw: string | null;
   try { raw = await secrets.get(GROUP_MATERIAL_SECRET_KEY); }
   catch {
-    logger?.error('cluster: the encrypted group membership could not be read', { action: 'check the secrets store, then restart and inspect cluster status' });
+    logger?.error('cluster: the encrypted group membership could not be read', { action: 'check the secrets store, then restart and look at Devices and network, Machine group' });
     return { material: null, unreadable: true };
   }
   if (raw === null) return { material: null, unreadable: false };

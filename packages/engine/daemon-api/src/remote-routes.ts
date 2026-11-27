@@ -3,6 +3,7 @@ import type { DaemonRemoteManagementRouteHandlers } from './context.js';
 import { jsonErrorResponse, readJsonErrorResponse, serviceFailureStatus } from './error-response.js';
 import { requestActor } from './http-policy.js';
 import type { Selection } from '@goodvibes/engine/errors';
+import { keepReachableNaming } from './pagination.js';
 import {
   createRouteBodySchema,
   createRouteBodySchemaRegistry,
@@ -385,7 +386,19 @@ export function createDaemonRemoteRouteHandlers(
     rotateRemotePeerToken: async (peerId, request) => handleRotateRemotePeerToken(context, peerId, request),
     revokeRemotePeerToken: async (peerId, request) => handleRevokeRemotePeerToken(context, peerId, request),
     disconnectRemotePeer: async (peerId, request) => handleDisconnectRemotePeer(context, peerId, request),
-    getRemoteWork: () => Response.json({ work: context.distributedRuntime.listWork() }),
+    // A work item is of the session, schedule, run and question it names: a caller that is not the owner himself is
+    // listed only those it may reach every one of (pagination.ts keepReachableNaming, control-plane/caller-reach.ts).
+    getRemoteWork: () => {
+      const work = context.distributedRuntime.listWork();
+      const field = (item: unknown, key: string): string | undefined => {
+        const value = item !== null && typeof item === 'object' ? (item as Record<string, unknown>)[key] : undefined;
+        return typeof value === 'string' ? value : undefined;
+      };
+      return Response.json({ work: Array.isArray(work) ? keepReachableNaming(work as readonly unknown[], [
+        ['session', (item) => field(item, 'sessionId')], ['schedule', (item) => field(item, 'automationJobId')],
+        ['schedule-run', (item) => field(item, 'automationRunId')], ['approval', (item) => field(item, 'approvalId')],
+      ]) : work });
+    },
     invokeRemotePeer: async (peerId, request) => handleInvokeRemotePeer(context, peerId, request),
     cancelRemoteWork: async (workId, request) => handleCancelRemoteWork(context, workId, request),
     getRemoteNodeHostContract: () => serializableJsonResponse({ contract: context.distributedRuntime.getNodeHostContract() }),

@@ -5,7 +5,7 @@ import { agentHarnessModes, hostActions, settingsActions } from './agent-harness
 
 export function describeCliCommandPolicy(commandName: string): CommandExecutionPolicy {
   const root = commandName.trim().toLowerCase();
-  const confirmation = 'agent_harness CLI command modes are discovery-only. Use first-class model tools, workspace actions, slash-command mirrors, or an explicit external shell request to execute equivalent CLI workflows.';
+  const confirmation = 'agent_harness CLI command modes are discovery-only. Use first-class model tools, capabilities, slash-command mirrors, or an explicit external shell request to execute equivalent CLI workflows.';
   if ([
     'app',
     'bridge',
@@ -38,9 +38,9 @@ export function describeCliCommandPolicy(commandName: string): CommandExecutionP
       effect: root === 'tui' || root === 'onboarding' ? 'ui-navigation' : 'read-only',
       confirmation,
       preferredModelTool: root === 'onboarding' || root === 'tui'
-        ? agentHarnessModes('workspace', 'workspace_actions', 'workspace_action', 'run_workspace_action')
+        ? 'capability_find and capability_run'
         : agentHarnessModes('cli_commands', 'cli_command'),
-      boundary: 'Top-level CLI launch, setup, help, version, and completion commands are package entrypoint surfaces; use in-process workspace and slash-command routes from the model when operating inside this agent\'s own interactive session.',
+      boundary: 'Top-level CLI launch, setup, help, version, and completion commands are package entrypoint surfaces; use capability_find and capability_run, and the slash-command routes, from the model when operating inside this agent\'s own interactive session.',
     };
   }
   if (root === 'run') {
@@ -63,7 +63,7 @@ export function describeCliCommandPolicy(commandName: string): CommandExecutionP
     return {
       effect: 'local-state',
       confirmation,
-      preferredModelTool: root === 'profiles' || root === 'workspaces' || root === 'fleet' ? agentHarnessModes('workspace_actions', 'workspace_action', 'run_workspace_action') : 'agent_local_registry',
+      preferredModelTool: root === 'profiles' || root === 'workspaces' || root === 'fleet' ? 'capability_find and capability_run' : 'agent_local_registry',
       boundary: root === 'workspaces'
         ? 'The registered-workspace list that gates automatic checkpoints (owner ruling, 2026-07-10) is Agent-local, user-scoped state. There is no dedicated model tool yet; registration/unregistration is a mutating action and requires explicit user intent (the CLI itself requires --yes).'
         : root === 'fleet'
@@ -109,7 +109,7 @@ export function describeCliCommandPolicy(commandName: string): CommandExecutionP
     return {
       effect: 'delegated-work',
       confirmation,
-      preferredModelTool: agentHarnessModes('workspace_actions', 'workspace_action', 'run_workspace_action'),
+      preferredModelTool: 'capability_find and capability_run',
       boundary: 'Delegation is explicit user-directed work only; no hidden background review or separate Agent job should be created implicitly.',
     };
   }
@@ -136,8 +136,8 @@ export function describeCliCommandPolicy(commandName: string): CommandExecutionP
       effect: root === 'pair' ? 'external-network' : 'mixed',
       confirmation,
       preferredModelTool: root === 'pair'
-        ? agentHarnessModes('workspace_actions', 'workspace_action', 'run_workspace_action')
-        : `${settingsActions('list', 'get', 'set', 'reset')} or ${agentHarnessModes('workspace_actions')}`,
+        ? 'capability_find and capability_run'
+        : `${settingsActions('list', 'get', 'set', 'reset')} or capability_find and capability_run`,
       boundary: 'Provider subscription, secret, and pairing flows can expose credentials or external account state. Use only explicit user-directed flows and prefer secret refs over raw values.',
     };
   }

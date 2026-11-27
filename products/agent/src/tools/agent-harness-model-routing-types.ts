@@ -145,7 +145,7 @@ export interface LocalModelBenchmarkPlan {
   readonly status: 'plan-ready';
   readonly prompt: string;
   readonly measurements: readonly string[];
-  readonly workspaceActionRoute: string;
+  readonly capabilityRoute: string;
   readonly compareRoute: string;
   readonly refreshRoute: string;
   readonly notes: readonly string[];

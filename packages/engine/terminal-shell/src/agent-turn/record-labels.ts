@@ -58,9 +58,9 @@ export function formatAgentRecordProvenance(provenance: string | undefined): str
   const raw = (provenance ?? '').trim();
   const normalized = raw.toLowerCase();
   if (!raw) return '';
-  if (normalized === 'agent-workspace') return 'Workspace';
-  if (normalized === 'agent-workspace-learned-behavior') return 'Workspace capture';
-  if (normalized === 'workspace capture') return 'Workspace capture';
+  // Records written by the Agent's former workspace screen keep these provenance values; they read as the Agent's.
+  if (normalized === 'agent-workspace') return 'Agent';
+  if (normalized === 'agent-workspace-learned-behavior' || normalized === 'workspace capture') return 'Agent capture';
   if (normalized === 'slash-command') return 'Command';
   if (normalized === 'agent-memory') return 'Agent memory';
   if (normalized === 'manual') return 'Manual';

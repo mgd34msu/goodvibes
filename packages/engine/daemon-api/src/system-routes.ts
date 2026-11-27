@@ -9,7 +9,7 @@ import {
 } from './route-helpers.js';
 import { jsonErrorResponse, readJsonErrorResponse } from './error-response.js';
 import { withAdmin } from './auth-helpers.js';
-import { actorHoldsScope, requestActor, systemActor } from './http-policy.js';
+import { requestActor, systemActor } from './http-policy.js';
 import type {
   ApprovalActionResultLike,
   ApprovalRememberTier,
@@ -28,9 +28,12 @@ import {
   AUTOMATION_THREAD_POLICIES,
   ROUTE_BINDING_KINDS,
   ROUTE_BINDING_SURFACE_KINDS,
+  WATCHER_KINDS,
 } from './system-route-types.js';
 import type { WatcherRecord } from './system-route-types.js';
 import { RefusalError } from '@goodvibes/engine/errors';
+import { readSettingAct, type SettingAct } from './setting-act.js';
+import { keepReachableNaming } from './pagination.js';
 
 async function serviceAction(context: DaemonSystemRouteContext, req: Request, action: PlatformServiceAction): Promise<Response> {
   const admin = context.requireAdmin(req);
@@ -39,7 +42,8 @@ async function serviceAction(context: DaemonSystemRouteContext, req: Request, ac
   return Response.json(manager.requestFromDaemon ? await manager.requestFromDaemon(action) : manager[action]());
 }
 
-const WATCHER_KIND_VALUES: readonly WatcherKind[] = ['filesystem', 'webhook', 'socket', 'integration', 'polling'];
+/** Every kind a watcher can be (system-route-types.ts `WATCHER_KINDS`, the registry's own): `manual` among them. */
+const WATCHER_KIND_VALUES: readonly WatcherKind[] = WATCHER_KINDS;
 
 function isOneOf<T extends string>(accepted: readonly T[], value: string): value is T {
   return (accepted as readonly string[]).includes(value);
@@ -158,7 +162,15 @@ export function createDaemonSystemRouteHandlers(
     getRouteBindings: (req) => {
       const admin = context.requireAdmin(req);
       if (admin) return admin;
-      return Response.json({ bindings: context.routeBindings.listBindings() });
+      // A binding is of the session, schedule and run it names: a caller that is not the owner himself is listed only
+      // those it may reach every one of (pagination.ts keepReachableNaming, platform control-plane/caller-reach.ts).
+      const field = (binding: unknown, key: string): string | undefined => {
+        const value = binding !== null && typeof binding === 'object' ? (binding as Record<string, unknown>)[key] : undefined;
+        return typeof value === 'string' ? value : undefined;
+      };
+      return Response.json({ bindings: keepReachableNaming(context.routeBindings.listBindings(), [
+        ['session', (binding) => field(binding, 'sessionId')], ['schedule', (binding) => field(binding, 'jobId')], ['schedule-run', (binding) => field(binding, 'runId')],
+      ]) });
     },
     postRouteBinding: async (req) => {
       const admin = context.requireAdmin(req);
@@ -285,22 +297,12 @@ export function createDaemonSystemRouteHandlers(
     },
     postConfig: async (req) => {
       const requestLifetime = context.settingsPrecondition?.lifetime() ?? null;
-      const importLifetime = context.settingsImportPrecondition?.lifetime() ?? null;
       const admin = context.requireAdmin(req);
       if (admin) return admin;
       const payload = await context.parseJsonBody(req);
       if (payload instanceof Response) return payload;
-      // The two owner lanes take the caller's authority themselves and check it
-      // once more immediately before the write, so they are not checked again here.
-      // A settings import replaces the owner's settings wholesale: a paired
-      // device's credential does not carry that act.
-      if (Object.hasOwn(payload, 'settingsImportPrecondition') && (context.settingsLoosenAdmission?.(req) ?? 'allowed') !== 'allowed') {
-        return jsonErrorResponse({
-          error: 'A settings import is the owner\'s own act; only his own credential makes it. Nothing was imported.',
-          code: 'OWNER_ONLY', state: 'the settings are unchanged',
-          next: ['Import the settings from the owner\'s own app (the operator token, an admin sign-in or a terminal on the daemon\'s machine).'],
-        }, { status: 403 });
-      }
+      // The owner lane takes the caller's authority itself and checks it once
+      // more immediately before the write, so it is not checked again here.
       if (Object.hasOwn(payload, 'settingsPrecondition')) {
         const arm = isJsonRecord(payload.settingsPrecondition) ? payload.settingsPrecondition : null;
         if (arm && arm.action === 'write' && typeof arm.key === 'string' && arm.key) {
@@ -312,15 +314,9 @@ export function createDaemonSystemRouteHandlers(
             return jsonErrorResponse({ error: unbound.reason, code: unbound.code, state: unbound.state, next: [...unbound.next] },
               { status: unbound.status ?? 409 });
           }
-          const putToOwner = await ownerActResponse(context, req, '/config', [{ key, value, ...(reset ? { toDefault: true } : {}) }],
-            reset ? 'config.reset' : 'config.set', reset ? { key } : { key, value },
-            () => (reset ? context.configManager.reset?.(key) : context.configManager.setDynamic(key, value)));
+          const putToOwner = await ownerActResponse(context, req, '/config', [{ key, value, ...(reset ? { toDefault: true } : {}) }]);
           if (putToOwner) return putToOwner;
         }
-      }
-      if (Object.hasOwn(payload, 'settingsImportPrecondition')) {
-        return context.settingsImportPrecondition?.handle(req, payload, importLifetime)
-          ?? jsonErrorResponse({ error: 'Settings import owner unavailable', code: 'SETTINGS_IMPORT_PRECONDITION_UNSUPPORTED' }, { status: 409 });
       }
       if (Object.hasOwn(payload, 'settingsPrecondition')) {
         return context.settingsPrecondition?.handle(req, payload, requestLifetime)
@@ -353,14 +349,14 @@ export function createDaemonSystemRouteHandlers(
           { status: 400 },
         );
       }
-      const putToOwner = await ownerActResponse(context, req, '/config', [{ key, value }], 'config.set', { key, value },
-        () => context.configManager.setDynamic(key, value));
+      const putToOwner = await ownerActResponse(context, req, '/config', [{ key, value }]);
       if (putToOwner) return putToOwner;
       // The owner question may have yielded; the caller's authority is read again before the write.
       const writeAdmin = context.requireAdmin(req);
       if (writeAdmin) return writeAdmin;
       try {
-        context.configManager.setDynamic(key, value);
+        // Who made it and how it was decided, as the daemon's dispatch bound it: kept with the change.
+        context.configManager.setDynamic(key, value, settingPress(req));
       } catch (error: unknown) {
         if (error instanceof RefusalError) return jsonErrorResponse(error, { status: error.refusal.status ?? 400 });
         return readJsonErrorResponse(error, { status: 400, fallbackMessage: 'Failed to set config' });
@@ -443,20 +439,14 @@ export function createDaemonSystemRouteHandlers(
         return jsonErrorResponse({ error: 'This host cannot write several settings as one update.', code: 'CONFIG_SET_MANY_UNSUPPORTED', state: unchanged,
           next: ['Send each setting with config.set.'] }, { status: 409 });
       }
-      const setMany = context.configManager.setMany.bind(context.configManager);
-      const putToOwner = await ownerActResponse(context, req, '/config/many', changes, 'config.setMany', { entries: changes },
-        () => {
-          // Applied when the owner approves it: the program carries out what he decided.
-          const applied = setMany(changes, systemActor('owner-approved:config.setMany'));
-          if (!applied.ok) throw new Error(applied.refusal.reason);
-        });
+      const putToOwner = await ownerActResponse(context, req, '/config/many', changes);
       if (putToOwner) return putToOwner;
       const writeAdmin = context.requireAdmin(req);
       if (writeAdmin) return writeAdmin;
       // One admission, one write per settings file, one revision and one change event per key,
       // for the caller's own actor: the manager admits a loosening change for it again.
       const writer = context.resolveAuthenticatedPrincipal?.(req)?.actor ?? systemActor('daemon-api');
-      const result = context.configManager.setMany(changes, writer);
+      const result = context.configManager.setMany(changes, writer, settingPress(req));
       if (!result.ok) {
         const { refusal } = result;
         return jsonErrorResponse({ error: refusal.reason, code: refusal.code, state: refusal.state, next: [...refusal.next],
@@ -545,15 +535,13 @@ export function createDaemonSystemRouteHandlers(
         return jsonErrorResponse({ error: unbound.reason, code: unbound.code, state: unbound.state, next: [...unbound.next] },
           { status: unbound.status ?? 409 });
       }
-      const reset = context.configManager.reset.bind(context.configManager);
-      const putToOwner = await ownerActResponse(context, req, '/config/reset', [{ key, value: undefined, toDefault: true }], 'config.reset', { key },
-        () => reset(key));
+      const putToOwner = await ownerActResponse(context, req, '/config/reset', [{ key, value: undefined, toDefault: true }]);
       if (putToOwner) return putToOwner;
       const writeAdmin = context.requireAdmin(req);
       if (writeAdmin) return writeAdmin;
       try {
         // The manager owns the managed-policy lock and refuses a locked key here.
-        context.configManager.reset(key);
+        context.configManager.reset(key, settingPress(req));
       } catch (error: unknown) {
         if (error instanceof RefusalError) return jsonErrorResponse(error, { status: error.refusal.status ?? 400 });
         return readJsonErrorResponse(error, { status: 400, fallbackMessage: 'Failed to reset config' });
@@ -656,6 +644,7 @@ async function handleRegisterWatcher(context: DaemonSystemRouteContext, req: Req
         })()
       : `watcher-${Date.now()}`;
   const kind = readWatcherKind(body.kind, body.sourceKind, 'polling');
+  if (kind instanceof Response) return kind;
   const intervalMs = readWatcherIntervalMs(body.intervalMs, context.configManager.get('watchers.pollIntervalMs'));
   if (!label) {
     return jsonErrorResponse({ error: 'Missing watcher label' }, { status: 400 });
@@ -719,8 +708,14 @@ function handleWorkingDirectoryConfig(): Response {
   }, { status: 409 });
 }
 
-function readWatcherKind(kind: unknown, sourceKind: unknown, fallback: WatcherKind): WatcherKind {
-  if (typeof kind === 'string' && isOneOf(WATCHER_KIND_VALUES, kind)) return kind;
+/**
+ * The kind a watcher is made or changed to: the kind named (each of `WATCHER_KIND_VALUES`, so a `manual` watcher is
+ * manual, never read as polling), else the one its source kind names, else `fallback`. A kind named that is none of
+ * them is a 400 naming the kinds: a watcher never silently becomes another kind than the one asked for.
+ */
+function readWatcherKind(kind: unknown, sourceKind: unknown, fallback: WatcherKind): WatcherKind | Response {
+  const named = readChoice(kind, 'kind', WATCHER_KIND_VALUES);
+  if (named !== undefined) return named;
   return typeof sourceKind === 'string'
     ? WATCHER_SOURCE_KIND_MAP[sourceKind] ?? fallback
     : fallback;
@@ -749,12 +744,14 @@ async function handleUpdateWatcher(context: DaemonSystemRouteContext, watcherId:
     : current.source.kind;
   const sourcePatch = readWatcherSourcePatch(body.source);
   if (sourcePatch instanceof Response) return sourcePatch;
+  const kind = readWatcherKind(body.kind, undefined, current.kind);
+  if (kind instanceof Response) return kind;
   let updated: WatcherRecord;
   try {
     updated = context.watcherRegistry.registerWatcher({
       id: watcherId,
       label: typeof body.label === 'string' ? body.label : current.label,
-      kind: readWatcherKind(body.kind, undefined, current.kind),
+      kind,
       source: {
         ...current.source,
         ...sourcePatch,
@@ -915,23 +912,26 @@ async function handleApprovalAction(
 }
 
 /**
- * A settings write that loosens a security, permission, judgment or payment
- * setting is the owner's own act (`settings.loosen` in the effect table).
- * From an admin who is not the owner (an admin sign-in, a full pairing minted
- * for automation) it is not made: it is put to the owner as an approval,
- * applied when he approves it, and the caller is answered 202 with the
- * approval's id. The owner's own credential, or a change that loosens nothing,
- * gets null and the write goes on.
+ * A settings write that loosens a security, permission, judgment or payment setting is decided by the one owner rule
+ * (platform daemon/method-owner-decision.ts): the daemon's dispatch tells this route whether the caller is one the rule
+ * admits at once (`settingsLoosenAdmission`). A caller it does not admit gets `OWNER_DECISION_NEEDED` here, nothing
+ * changed, and the dispatch puts that same call to the owner's gate, as every other call of a class he decides; a
+ * caller the effect table refuses outright is refused. Null: the write goes on (admitted, or it loosens nothing).
  */
 async function ownerActResponse(
   context: DaemonSystemRouteContext,
   req: Request,
   path: string,
   changes: readonly { readonly key: string; readonly value: unknown; readonly toDefault?: boolean }[],
-  tool: string,
-  args: Record<string, unknown>,
-  apply: () => unknown,
 ): Promise<Response | null> {
+  // A locked setting is refused first, whoever asks: nothing is put to the owner for a write that cannot happen.
+  const locked = context.managedLockRefusal ? changes.map(({ key }) => context.managedLockRefusal!(key)).filter((said): said is string => said !== null) : [];
+  if (locked.length > 0) {
+    return context.recordApiResponse(req, path, jsonErrorResponse({
+      error: locked.join(' '), code: 'CONFIG_MANAGED', state: 'nothing was saved',
+      next: ['Ask the owner: only he removes a managed lock (Tools and extensions, Managed settings, unlock).'],
+    }, { status: 403 }));
+  }
   const admission = context.settingsLoosenAdmission?.(req) ?? 'allowed';
   if (admission === 'allowed' || !context.configLoosening) return null;
   const reasons = changes.flatMap(({ key, value, toDefault }) => {
@@ -940,33 +940,22 @@ async function ownerActResponse(
   });
   if (reasons.length === 0) return null;
   const keys = changes.map(({ key }) => key);
-  if (admission === 'refused' || !context.putToOwner) {
+  if (admission === 'ask-owner') {
     return context.recordApiResponse(req, path, jsonErrorResponse({
-      error: `${reasons.join(' ')} Only the owner makes that change. Nothing was changed.`,
-      code: 'OWNER_ONLY', state: 'the settings are unchanged',
-      next: ['Make the change from the owner\'s own app (the operator token, an admin sign-in or a terminal on the daemon\'s machine).'],
-    }, { status: 403 }));
+      error: `${reasons.join(' ')} The owner decides that change.`, code: 'OWNER_DECISION_NEEDED', keys,
+    }, { status: 409 }));
   }
-  const caller = context.resolveAuthenticatedPrincipal?.(req) ?? null;
-  const requestedBy = caller?.principalId ?? 'a caller who is not the owner';
-  // Whether the caller may read the approval (approvals.list, read:approvals) and so follow it to its outcome.
-  const actor = caller?.actor;
-  const followable = actor === undefined || (actor.class !== 'guest' && actor.class !== 'peer' && actorHoldsScope(actor, 'read:approvals'));
-  const { approvalId } = await context.putToOwner({
-    summary: `${requestedBy} asks to change ${keys.join(', ')}`,
-    reasons, tool, args, requestedBy, apply,
-  });
-  return context.recordApiResponse(req, path, Response.json({
-    success: false,
-    code: 'OWNER_APPROVAL_PENDING',
-    approvalId,
-    followable,
-    ...(keys.length === 1 ? { key: keys[0] } : {}),
-    keys,
-    reasons,
-    state: 'nothing was changed yet; the change waits for the owner\'s answer and is applied when he approves it',
-    next: [`Watch approval ${approvalId} (approvals.list with approvalId, or the approval-update event); the setting changes only if the owner approves it from his own app.`],
-  }, { status: 202 }));
+  return context.recordApiResponse(req, path, jsonErrorResponse({
+    error: `${reasons.join(' ')} Only the owner makes that change. Nothing was changed.`,
+    code: 'OWNER_ONLY', state: 'the settings are unchanged',
+    next: ['Make the change from the owner\'s own app (his sign-in, a device he paired, or the terminal app or the Agent on the daemon\'s machine).'],
+  }, { status: 403 }));
+}
+
+/** The write's press option carrying who made it and how it was decided (control-routes.ts `SettingAct`), when bound. */
+function settingPress(req: Request): { readonly press: { readonly act: SettingAct } } | undefined {
+  const act = readSettingAct(req);
+  return act ? { press: { act } } : undefined;
 }
 
 /**

@@ -308,11 +308,11 @@ export function localModelBenchmarkPlan(recipe: LocalModelRecipe): LocalModelBen
       'whether the model handled project-specific nouns without hallucinating',
       'whether the route supports the needed context window and tool workflow',
     ],
-    workspaceActionRoute: 'agent_harness mode:"run_workspace_action" actionId:"account-run-local-model-benchmark" fields.confirm:"yes" fields.modelRefs:"<local-route>,<baseline-route>" explicitUserRequest:"<the user request, in their own words>"',
+    capabilityRoute: 'capability_find need:"benchmark a local model against a baseline", then capability_run with the routes to compare',
     compareRoute: `agent_model_compare run prompt:"local model benchmark: ${recipe.label}" benchmarkKind:"local-model-route" taskType:"local-model-route" explicitUserRequest:"<the user request, in their own words>"`,
     refreshRoute: 'agent_harness mode:"run_command" command:"/model refresh" explicitUserRequest:"<the user request, in their own words>"',
     notes: [
-      'Use the workspace action when the user wants a form with benchmark defaults; use compareRoute when the model already has exact modelRefs.',
+      'Use capabilityRoute when the user wants a form with benchmark defaults; use compareRoute when the model already has exact modelRefs.',
       'Run the same prompt against the local route and a baseline route before selecting a winner.',
       'Keep benchmark notes in the saved comparison artifact before changing the default model.',
       'Do not treat cached public benchmark scores as a substitute for this local latency and fit check.',

@@ -41,7 +41,7 @@ export function readLimit(value: unknown, fallback: number, max = 500): number {
 }
 
 /**
- * The page a large catalog (settings, workspace actions, operator methods)
+ * The page a large catalog (settings, commands, operator methods)
  * returns when the caller names no `limit`. A whole catalog runs to hundreds
  * of thousands of characters, past the cut every tool result gets, and a cut
  * document loses its own `returned`/`total`; a page that says where the next
@@ -120,7 +120,7 @@ export function catalogFilters(
  * section and a `/payments` command sat one mode away. An empty page now says
  * where else to look.
  */
-const SIBLING_CATALOG_ROUTES = 'agent_harness mode:"settings"|"commands"|"workspace_actions"|"tools"|"modes"';
+const SIBLING_CATALOG_ROUTES = 'agent_harness mode:"settings"|"commands"|"tools"|"modes", or capability_find need:"..."';
 
 export function catalogEnvelope(
   key: string,

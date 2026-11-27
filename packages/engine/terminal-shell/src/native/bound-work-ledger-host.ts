@@ -122,7 +122,9 @@ export function createBoundNativeWorkLedgerView(
           const reason = error instanceof Error ? error.message : String(error);
           to({
             kind: 'unavailable',
-            reason: `The daemon at ${host.baseUrl} did not say which project it serves: ${reason.split(host.token).join('[redacted]')}. This program needs the daemon's own sign-in, or a pairing that may read your work.`,
+            // The daemon's own words say why (a folder it does not take as a project, a sign-in it refused); nothing
+            // here guesses at a cause it did not give.
+            reason: `The work of this folder could not be read from the daemon at ${host.baseUrl}: ${reason.split(host.token).join('[redacted]').replace(/\.+\s*$/u, '')}.`,
           });
         },
       );

@@ -23,7 +23,6 @@ import { registerModelsLists } from '@goodvibes/engine/terminal-shell/models-lis
 // Who may sign in is the daemon's, in Permissions and safety (no slash command): the lists a form chooses a user or session from.
 import './commands/local-auth-runtime.ts';
 import { registerDevicesRuntimeCommands } from './commands/devices-runtime.ts';
-import { registerOnboardingRuntimeCommands } from './commands/onboarding-runtime.ts';
 import { registerPermissionsRuntimeCommands } from './commands/permissions-runtime.ts';
 import { registerAutomationLists } from '@goodvibes/engine/terminal-shell/automation-lists';
 import './commands/hosted-runtime.ts';
@@ -82,7 +81,7 @@ export const BUILTIN_COMMAND_GROUPS: readonly BuiltinCommandGroup[] = [
   // Models and providers: the lists their forms choose from, read from the daemon (models-lists.ts).
   { category: TASK.models, register: () => registerModelsLists<CommandContext>(capabilityBinding) },
   { category: TASK.channels, register: registerDevicesRuntimeCommands },
-  { category: TASK.help, register: registerOnboardingRuntimeCommands },
+  // `/setup` is gone: every setup topic is a row of System's Setup tab (capabilities setup.<topic>, onboarding-runtime.ts).
   { category: TASK.models, register: registerLocalRuntimeCommands },
   // Plan mode is a control on This conversation in Permissions and safety (capabilities/builtin/plan.ts): no slash command.
   // Money is the daemon's (capabilities/builtin/money.ts): no slash command; every action a control in the Money place

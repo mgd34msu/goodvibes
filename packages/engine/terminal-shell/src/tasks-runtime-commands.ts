@@ -28,8 +28,8 @@ export interface TasksPolicy<Context> {
   readonly listTitle: string;
   readonly local: (context: Context) => LocalTaskSource;
   readonly verbs: (context: Context) => DaemonVerbCaller;
-  /** The program's own task registry; absent where tasks are read only (with the reason). */
-  readonly mutations: ((context: Context) => Pick<OpsApi, 'tasks'>) | { readonly readOnly: string };
+  /** The program's own task registry. */
+  readonly mutations: (context: Context) => Pick<OpsApi, 'tasks'>;
   readonly row: (entry: UnionTask) => string;
   readonly detail: (context: Context, entry: UnionTask) => string[];
   /** The commands running in the background here and what they take (the Agent; the terminal app shows them in its process monitor). */
@@ -86,11 +86,9 @@ defineList<CommandActionContext>({
   operator: { terminalOnly: 'A task this program runs is retried from it.' },
 });
 
-/** The program's task registry, or a refusal naming why this program only reads tasks. */
+/** The program's task registry. */
 function mutationsOf(ctx: CommandActionContext): Pick<OpsApi, 'tasks'> {
-  const mutations = policyOf().mutations;
-  if (typeof mutations !== 'function') throw commandRefusal(mutations.readOnly);
-  return mutations(ctx);
+  return policyOf().mutations(ctx);
 }
 
 /**
@@ -145,8 +143,10 @@ export function tasksServices(ctx: CommandActionContext): NonNullable<TasksCapab
     async show(id) { return policyOf().detail(ctx, await findTask(ctx, id)).join('\n'); },
     async output(id) {
       const { task } = await findTask(ctx, id);
+      // Its result, else its error; with neither, said so (its own description or title read as if it were output).
       return typeof task.result === 'string' ? task.result
-        : task.result !== undefined ? JSON.stringify(task.result, null, 2) : (task.error ?? task.description ?? task.title);
+        : task.result !== undefined ? JSON.stringify(task.result, null, 2)
+          : task.error ?? `"${task.title}" has produced nothing yet${task.status === 'running' || task.status === 'queued' || task.status === 'blocked' ? '' : ': it ended with no result'}.`;
     },
     async processes() {
       const policy = policyOf();
@@ -159,14 +159,17 @@ export function tasksServices(ctx: CommandActionContext): NonNullable<TasksCapab
     },
     start: (id) => changeTask(ctx, id, 'start', async (tasks) => `"${await title(id)}" is ${tasks.start(id).status}.`),
     update: (id, field, value) => changeTask(ctx, id, 'update', async (tasks) => {
-      tasks.update(id, field === 'result' ? { result: value } : { [field]: value });
-      return `Changed the ${field} of "${await title(id)}".`;
+      // The part named as its choice reads it ("The title"); the record's field is its last word.
+      const part = field.trim().toLowerCase().replace(/^(?:its|the)\s+/u, '');
+      tasks.update(id, part === 'result' ? { result: value } : { [part]: value });
+      return `Changed the ${part} of "${await title(id)}".`;
     }),
     complete: (id, result) => changeTask(ctx, id, 'complete', async (tasks) => { tasks.complete(id, result || undefined); return `"${await title(id)}" is done.`; }),
     fail: (id, error) => changeTask(ctx, id, 'fail', async (tasks) => { tasks.fail(id, { error }); return `"${await title(id)}" is marked failed.`; }),
     pause: (id, note) => changeTask(ctx, id, 'pause', async (tasks) => { await tasks.pause(id, note || undefined); return `Paused "${await title(id)}".`; }),
     resume: (id, note) => changeTask(ctx, id, 'resume', async (tasks) => { await tasks.resume(id, note || undefined); return `"${await title(id)}" goes on.`; }),
     cancel: (id, note) => changeTask(ctx, id, 'cancel', async (tasks) => { await tasks.cancel(id, note || undefined); return `Cancelled "${await title(id)}".`; }, note || undefined),
-    retry: (id, note) => changeTask(ctx, id, 'retry', async (tasks) => { await tasks.retry(id, note || undefined); return `"${await title(id)}" runs again.`; }, note || undefined),
+    // A task of this program run again waits to be started, as a new one does: said as it is.
+    retry: (id, note) => changeTask(ctx, id, 'retry', async (tasks) => { await tasks.retry(id, note || undefined); return `"${await title(id)}" is set to run again; it waits until it is started (s).`; }, note || undefined),
   };
 }

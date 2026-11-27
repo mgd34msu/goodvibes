@@ -128,6 +128,8 @@ export function createStatusCommand<Ctx extends CommandActionContext>(
     title: 'Status',
     summary: 'See this session at a glance: model, context window and what is in force',
     group: 'Health',
+    // Unlisted: typed, it opens System on This session; a model or script typing it gets the status.
+    firstScreen: false,
     opens: 'system/session',
     actions: [sessionCapabilityAction<Ctx, SystemSessionServices>(SYSTEM_STATUS, services, { terminalOnly: 'It reports the terminal program you are using.' })],
   });

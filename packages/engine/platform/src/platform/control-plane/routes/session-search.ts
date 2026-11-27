@@ -32,7 +32,7 @@ import {
 } from '../session-types.js';
 import type { SurfaceKind } from '../../../events/surfaces.js';
 import { SURFACE_KINDS } from '../../../events/surfaces.js';
-import { paginateItems } from '@goodvibes/engine/daemon-api';
+import { keepReachable, paginateItems } from '@goodvibes/engine/daemon-api';
 import { GatewayVerbError } from './gateway-verb-error.js';
 import { readInvocationParams } from './invocation-params.js';
 import { mayReadSession } from './session-admission.js';
@@ -134,8 +134,9 @@ export function createSessionsSearchHandler(broker: SessionSearchBroker, ownersO
       return true;
     });
 
-    // Mirrors sortSessions (session-broker-state.ts): updatedAt desc, id asc tiebreak.
-    const sorted = [...filtered].sort((a, b) => b.updatedAt - a.updatedAt || a.id.localeCompare(b.id));
+    // Mirrors sortSessions (session-broker-state.ts): updatedAt desc, id asc tiebreak. Only the sessions the caller may
+    // reach, before the page is cut (control-plane/caller-reach.ts), so `hasMore` and the cursor are about those.
+    const sorted = [...keepReachable(filtered, 'session', (session) => session.id)].sort((a, b) => b.updatedAt - a.updatedAt || a.id.localeCompare(b.id));
 
     const page = paginateItems(
       sorted,

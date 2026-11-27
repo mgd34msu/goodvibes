@@ -5,9 +5,37 @@
  * these run there (home `session`): a task of this program changes in its own
  * registry; a daemon task takes only cancel and run-again, through the
  * daemon's own methods (`tasks.cancel`, `tasks.retry`), and a change the daemon
- * has no method for is refused by name. The Agent reads tasks and changes none.
+ * has no method for is refused by name. The terminal app and the Agent change their own tasks alike.
+ * `work.daemon-task-add` (home `daemon`) starts an agent on a task on the daemon itself (`tasks.create`): the way to
+ * add a task from the web, or from either program's Daemon tasks list.
  */
 import { CapabilityRefusal, type CapabilityDefinition, type FixedChoice, type InputDescription, type ListName } from '../types.js';
+import { withInputParty } from '../../security/turn-input-party.js';
+import { UNRECORDED_WORK_CAUSE } from '../../workflow/work-ledger/work-plans.js';
+
+/** A task given to an agent on the daemon, through the daemon's own `tasks.create`, as the same caller. */
+export const WORK_DAEMON_TASK_ADD: CapabilityDefinition<Record<string, never>> = {
+  capability: { id: 'work.daemon-task-add', group: 'work', home: 'daemon', repeat: 'unsafe' },
+  actionId: 'daemon-task-add', label: 'Give a task to an agent on the daemon', word: 'daemon-task-add',
+  inputs: [{ id: 'task', label: 'Task', help: 'What the agent does', kind: 'long-text', freeTextReason: 'your own words', required: true, typed: { tail: true } }],
+  sentence: 'An agent on the daemon starts on {task} and is listed in Daemon tasks, where it runs until it is done or until you change it.',
+  done: '', touches: 'this-machine', lasts: 'kept', risk: 'none', undoneBy: 'task-cancel', example: { task: 'count the beds in the garden notes' },
+  // The agent works in the caller's project, never the daemon's own folder: a caller that names none is refused.
+  callerNeeds: { project: 'No project folder came with the request, so no agent was started. Ask from the project\'s folder, or send workingDirectory with the request.' },
+  async run(values, _services, caller) {
+    if (!caller.method) throw new CapabilityRefusal('This runs on the daemon, through capabilities.run.');
+    const task = (values.task ?? '').trim();
+    if (!task) throw new CapabilityRefusal('Say what the agent should do; nothing was started.');
+    const project = caller.workingDirectory;
+    if (!project) throw new CapabilityRefusal('No project folder came with the request, so no agent was started.', 'Ask from the project\'s folder, or send workingDirectory with the request', 'NO_PROJECT');
+    // Its turns act on the input of whoever caused it (the caller's cause, set by capabilities.run; none: someone
+    // else's): a task a device or a script gave runs as someone else's input, never as the owner's own turn.
+    const method = caller.method;
+    const answer = await withInputParty(caller.cause ?? UNRECORDED_WORK_CAUSE, () => method('tasks.create', { task, workingDirectory: project })) as Record<string, unknown>;
+    const agentId = typeof answer['agentId'] === 'string' ? answer['agentId'] : '';
+    return { text: `An agent on the daemon started on "${task.split('\n')[0]!.slice(0, 80)}". It is listed in Daemon tasks.`, data: { agentId, status: answer['status'] } };
+  },
+};
 
 /** What the task capabilities need: this program's tasks and the daemon's, each act in words. */
 export interface TasksCapabilityServices {
@@ -69,7 +97,7 @@ function read(id: string, actionId: string, label: string, sentence: string, inp
 
 function change(id: string, actionId: string, label: string, sentence: string, inputs: readonly InputDescription[], example: Record<string, string>,
   run: (tasks: NonNullable<TasksCapabilityServices['tasks']>, values: Readonly<Record<string, string>>) => Promise<string>,
-  extra: Partial<Pick<Tasks, 'risk' | 'undoneBy'>> & { readonly repeat?: 'safe' | 'unsafe' } = {}): Tasks {
+  extra: Partial<Pick<Tasks, 'risk' | 'undoneBy' | 'button'>> & { readonly repeat?: 'safe' | 'unsafe' } = {}): Tasks {
   const { repeat, ...rest } = extra;
   return {
     capability: { id, group: 'work', home: 'session', repeat: repeat ?? 'safe' }, actionId, label, word: actionId, inputs, sentence, done: '',
@@ -102,10 +130,11 @@ export const TASKS_CAPABILITIES: readonly Tasks[] = [
     (tasks, values) => tasks.create(values.kind!, values.owner!, values.title!), { repeat: 'unsafe', undoneBy: 'task-cancel' }),
   change('work.task-start', 'task-start', 'Start a waiting task', 'Task {task} starts now, until you change it.', [OPEN], { task: 'task-1a2b' },
     (tasks, values) => tasks.start(values.task!), { undoneBy: 'task-pause' }),
-  change('work.task-change', 'task-change', 'Change a task\'s title, description or result', 'The {field} of task {task} becomes "{value}", until you change it.',
+  change('work.task-change', 'task-change', 'Change a task\'s title, description or result', '{field} of task {task} becomes "{value}", until you change it.',
     [
       ANY,
-      { id: 'field', label: 'What changes', help: 'Which part of the task', kind: 'choice', choices: [{ value: 'title', label: 'Its title' }, { value: 'description', label: 'Its description' }, { value: 'result', label: 'Its result' }], required: true, typed: { position: 2 } },
+      // Each label reads both as the choice and at the head of the sentence ("The title of task ... becomes ...").
+      { id: 'field', label: 'What changes', help: 'Which part of the task', kind: 'choice', choices: [{ value: 'title', label: 'The title' }, { value: 'description', label: 'The description' }, { value: 'result', label: 'The result' }], required: true, typed: { position: 2 } },
       { id: 'value', label: 'New text', help: 'What it says now', kind: 'long-text', freeTextReason: 'your own words', required: true, typed: { tail: true } },
     ], { task: 'task-1a2b', field: 'title', value: 'run the migrations again' }, (tasks, values) => tasks.update(values.task!, values.field!, values.value!)),
   change('work.task-done', 'task-done', 'Mark a task done', 'Task {task} is marked done, until you change it.',
@@ -119,7 +148,8 @@ export const TASKS_CAPABILITIES: readonly Tasks[] = [
   change('work.task-resume', 'task-resume', 'Resume a paused task', 'Task {task} goes on from where it waited, until you change it.', [OPEN, NOTE], { task: 'task-1a2b' },
     (tasks, values) => tasks.resume(values.task!, values.note ?? ''), { undoneBy: 'task-pause' }),
   change('work.task-cancel', 'task-cancel', 'Cancel a task', 'Task {task} is stopped and marked cancelled.', [OPEN, NOTE], { task: 'task-1a2b' },
-    (tasks, values) => tasks.cancel(values.task!, values.note ?? ''), { risk: 'cannot-be-undone' }),
+    // Its own button word: the question's way back is "Cancel" too, and two buttons both read "Cancel".
+    (tasks, values) => tasks.cancel(values.task!, values.note ?? ''), { risk: 'cannot-be-undone', button: 'Stop the task' }),
   change('work.task-retry', 'task-retry', 'Run a failed task again', 'Task {task} is queued to run again, until you change it.', [ENDED, NOTE], { task: 'task-1a2b' },
     (tasks, values) => tasks.retry(values.task!, values.note ?? ''), { repeat: 'unsafe' }),
 ];

@@ -893,6 +893,9 @@ Schema blocks below are emitted directly from the synced contract JSON and may c
                   },
                   "releasedAt": {
                     "type": "number"
+                  },
+                  "process": {
+                    "type": "string"
                   }
                 },
                 "required": [

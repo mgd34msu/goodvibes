@@ -15,7 +15,7 @@ Agent channel UX should show:
 - the ordered setup guide step for the next channel, including setup schema, secret-backed settings, allowlist policy, live status or doctor checks, and explicit test-send boundary;
 - channel triage across setup blockers, daemon delivery attempts, visible control-plane surface messages, route bindings, and Agent receipts;
 - recent confirmed-send receipts with webhook/link target values redacted and message previews bounded;
-- the command or workspace action needed to pair companion clients through QR-first setup;
+- the place and key needed to pair companion clients through QR-first setup;
 - the confirmed `Send channel message` action when the user explicitly wants a one-off delivery.
 
 VIBE.md, project context files, Agent-local memory, routines, skills, and personas are not automatically broadcast to channels. External delivery is an effect and requires an exact command, an explicit routine promotion, or a user-approved connected-host request.
@@ -24,9 +24,9 @@ Device pairing uses Pair something, A phone or another device, in Devices and ne
 
 The model can inspect pairing and device posture with `device action:"status"`, and inspect one pairing route with `device action:"capability"` using `capabilityId`, `pairingRouteId`, `target`, or `query`. Lower-level `agent_harness` modes `pairing_posture` and `pairing_route` remain available for detailed compatibility. Those routes return endpoint binding, pairing surface id, route catalog, token fingerprint, and companion device capability posture only; raw tokens and QR payloads are never returned by the read-only posture modes. Device pairing (Pair something in Devices and network), companion connection, channel delivery, task, approval, provider/model, and attachment actions stay visible user flows.
 
-The model can inspect channel-facing workspace actions with `workspace action:"actions|action"`, but the preferred channel route is `channels action:"status|channel|setup|triage|deliveries"`. It lists the structured channel readiness map, inspects one channel, inspects channel triage, inspects recent redacted delivery receipts, and shows the ordered channel setup guide using `channelId`, `target`, or `query`.
+The model can find channel capabilities with `capability_find`, but the preferred channel route is `channels action:"status|channel|setup|triage|deliveries"`. It lists the structured channel readiness map, inspects one channel, inspects channel triage, inspects recent redacted delivery receipts, and shows the ordered channel setup guide using `channelId`, `target`, or `query`.
 
-Channel discovery is compact by default, and workspace action rows include `modelRoute` hints for send/setup actions. Use `includeParameters:true`, single-channel inspection, triage, the receipt ledger, or the setup guide when the model needs delivery target shape, read-only connected-route hints, current setup step, allowlist review route, live-check route, recent confirmed-send outcome ids, route-binding continuity, surface messages, or delivery retry candidates.
+Channel discovery is compact by default; `capability_find` gives the send and setup capabilities. Use `includeParameters:true`, single-channel inspection, triage, the receipt ledger, or the setup guide when the model needs delivery target shape, read-only connected-route hints, current setup step, allowlist review route, live-check route, recent confirmed-send outcome ids, route-binding continuity, surface messages, or delivery retry candidates.
 
 These actions are read-only. They return setup state, delivery posture, risk labels, safe config-key names, default-target key names, route ids, redacted/digested external ids, and redacted receipt summaries without printing secret values or sending messages.
 
@@ -36,7 +36,7 @@ The model can send one explicit configured delivery through `agent_channel_send`
 
 Saved channel drafts use `agent_harness` modes `channel_draft_save` and `channel_draft_send`. A draft moves from `draft` to `queued` when it is sent, then to `sent` or `failed` when delivery reports its outcome. A sent draft is final and a failed draft can be queued again. A draft is marked `queued` before anything is sent, and a queued draft is never queued again: while it reads `queued` its delivery is in progress or its outcome was not recorded, so it may already have been delivered. If the recipient did not get it, save the text as a new draft and send that.
 
-The model can inspect configured notification target posture with `agent_harness` mode `notifications`, and inspect one redacted target with mode `notification_target` using `notificationTargetId`, `target`, or `query`. Notification discovery is compact by default, while `workspace action:"actions"` distinguishes direct `agent_notify` sends/tests from confirmed workspace routes for add/remove/clear management. Use `includeParameters:true` or single-target inspection when management route hints are needed.
+The model can inspect configured notification target posture with `agent_harness` mode `notifications`, and inspect one redacted target with mode `notification_target` using `notificationTargetId`, `target`, or `query`. Notification discovery is compact by default; direct sends and tests are `agent_notify`, and adding, removing or clearing a target is a capability (`capability_find`). Use `includeParameters:true` or single-target inspection when management route hints are needed.
 
 These modes return target count, validity, protocol/host posture, and fingerprints, but not full webhook URLs. Use `agent_notify` for one explicit confirmed notification. Run the `notify.*` capabilities (`capability_run`) for target management only when the user supplies the exact add/remove/clear/test intent; a person manages them on the Notifications tab of Mail, calendar and channels.
 

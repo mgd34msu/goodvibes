@@ -2,6 +2,7 @@ import type { FailureReadOptions } from '@goodvibes/engine/errors';
 import { createNativeHostedTurnHost, type NativeHostedTurnDependencies, type NativeHostedTurnHost } from '../hosted-sessions/native-turn-host.js';
 import { registerNativeHostedTurnGatewayMethods } from '../control-plane/routes/native-hosted-turn.js';
 import { projectProxy } from '../control-plane/project-routing.js';
+import { GatewayVerbError } from '../control-plane/routes/gateway-verb-error.js';
 import type { SharedSessionBroker } from '../control-plane/session-broker.js';
 import { hostedSessionPresence } from '../agents/agent-owner-questions.js';
 /**
@@ -67,7 +68,8 @@ export interface DaemonHostedSessionsOptions {
   /**
    * Native turns per project: the catalog the native turn methods are registered on, which runs each request in the
    * project it names (control-plane/project-routing.ts), and that project's turn dependencies (its intake, its
-   * journal), made once. A request that names no project is the daemon's own folder's (`nativeConversation`).
+   * journal), made once. A request that names no project is served by `nativeConversation` when the product gives one;
+   * without it (the daemon: its own folder is no project) such a request is refused NO_PROJECT.
    */
   readonly nativeConversationProjects?: {
     readonly route: (catalog: import('../control-plane/method-catalog.js').GatewayMethodCatalog) => import('../control-plane/method-catalog.js').GatewayMethodCatalog;
@@ -199,19 +201,23 @@ export function composeHostedSessions(input: HostedSessionCompositionInput): Hos
   if (rootsDescriptor) {
     input.gatewayMethods.register(rootsDescriptor, () => ({ roots: [...manager.workspaceRoots()] }), { replace: true });
   }
-  if (input.options.nativeConversation) {
+  if (input.options.nativeConversation || input.options.nativeConversationProjects) {
     const broker = input.spine as SharedSessionBroker | undefined;
     if (!broker || typeof broker.reserveNativeTurnInput !== 'function') throw new Error('Native hosted delivery requires the canonical session broker');
-    const own = createNativeHostedTurnHost({ ...input.options.nativeConversation, manager, broker });
+    const own = input.options.nativeConversation ? createNativeHostedTurnHost({ ...input.options.nativeConversation, manager, broker }) : undefined;
     const projects = input.options.nativeConversationProjects;
     native = own;
     if (!projects) {
-      registerNativeHostedTurnGatewayMethods(input.gatewayMethods, own);
+      if (own) registerNativeHostedTurnGatewayMethods(input.gatewayMethods, own);
     } else {
       // Each project's turns: its own host over its own intake and journal, made on its first request.
       const hosts = new Map<string, NativeHostedTurnHost>();
       const hostFor = (folder: string | undefined): NativeHostedTurnHost => {
-        if (folder === undefined) return own;
+        if (folder === undefined) {
+          if (own) return own;
+          throw new GatewayVerbError('No project folder came with the request, so no project\'s native turn was read or changed. Send workingDirectory, the absolute path of the project folder. Nothing was done.',
+            'NO_PROJECT', 422, 'workingDirectory');
+        }
         let host = hosts.get(folder);
         if (!host) {
           host = createNativeHostedTurnHost({ ...projects.forProject(folder), manager, broker });
@@ -269,6 +275,9 @@ export function composeHostedSessionsForFacade(
     // A session is shared only with a principal a credential of this daemon authenticates as.
     isKnownPrincipal: (principalId) => {
       if (principalId === LOCAL_OWNER_PRINCIPAL) return true;
+      // A sign-in user whose name is another credential's id is owned as `user:<name>` (daemon-api actor.ts), never as
+      // that credential: share with it by that form.
+      if (principalId.startsWith('user:') && runtimeServices.localUserAuthManager.getUser(principalId.slice('user:'.length)) !== null) return true;
       const tokenId = pairingTokenIdOfPrincipal(principalId);
       if (tokenId !== undefined) return runtimeServices.pairingTokens.list().some((token) => token.id === tokenId);
       return runtimeServices.localUserAuthManager.getUser(principalId) !== null;

@@ -12,14 +12,15 @@ interface Operation<Result> {
   readonly home: string;
   phase: 'preview' | 'confirmation' | 'applying';
   host?: string | undefined;
-  confirm?: ((answer: string, signal: AbortSignal) => Promise<Result>) | undefined;
+  confirm?: ((answer: string, signal: AbortSignal, note?: (text: string) => void) => Promise<Result>) | undefined;
   value: string;
   invalidInput: boolean;
 }
 /** What a pairing preview yields: the displayable result, and the capability to confirm it when it can be applied. */
 export interface HostPairingPreview<Result> {
   readonly result: Result;
-  readonly confirm?: ((answer: string, signal: AbortSignal) => Promise<Result>) | undefined;
+  /** `note`: a line shown while the host waits (the daemon put the pairing to the owner, in Waiting for you). */
+  readonly confirm?: ((answer: string, signal: AbortSignal, note?: (text: string) => void) => Promise<Result>) | undefined;
 }
 export class TerminalHostPairingController<
   Request extends {
@@ -205,11 +206,11 @@ export class TerminalHostPairingController<
   }
   private async apply(
     operation: Operation<Result>,
-    confirm: (answer: string, signal: AbortSignal) => Promise<Result>,
+    confirm: (answer: string, signal: AbortSignal, note?: (text: string) => void) => Promise<Result>,
     answer: string,
   ): Promise<void> {
     try {
-      const result = await confirm(answer, operation.abort.signal);
+      const result = await confirm(answer, operation.abort.signal, (text) => { if (this.current(operation)) this.ui.print(text); });
       if (!this.current(operation)) return;
       if (!this.ui.canPresent() || this.promptReplaced(operation)) {
         this.cancelForTakeover(this.promptReplaced(operation));

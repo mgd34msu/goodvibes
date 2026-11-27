@@ -4,10 +4,10 @@ import { COMPILED_VERSION } from '../version.js';
 const installedDataWriter = process.platform === 'darwin' ? undefined : admitInstalledClientDataWriter({ moduleUrl: import.meta.url, execPath: process.execPath, compiledVersion: COMPILED_VERSION, platform: process.platform });
 /** One home/tier resolution shared by command and explicit serving entrypoints. */
 import { copyFileSync, constants as fsConstants, existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
-import { dirname, join, resolve } from 'node:path';
+import { dirname, join } from 'node:path';
 import { ConfigManager, daemonConfigPathForHome, resolveGoodVibesHomeOwnership } from '@goodvibes/engine/platform/platform/config';
-import { readDaemonSetting } from '@goodvibes/engine/platform/platform/workspace/daemon-home';
 import { GOODVIBES_DAEMON_SETTINGS_ROOT, GOODVIBES_DAEMON_SURFACE_ROOT } from '../config/surface.js';
+import { mirrorManagedLocksForRelease } from '@goodvibes/engine/platform/platform/runtime/settings';
 import type { DaemonCliFlags } from './types.js';
 import { daemonHomeEnvironment } from './daemon-home-environment.js';
 
@@ -16,17 +16,20 @@ export function resolveDaemonCliOwnership(
   env: NodeJS.ProcessEnv = process.env,
   cwd = process.cwd(),
 ) {
+  // A working folder named for the daemon is refused, with the one sentence, before anything is read or made.
+  if (flags.workingDir !== undefined || env.GOODVIBES_WORKING_DIR !== undefined) throw new Error(DAEMON_HAS_NO_WORKING_FOLDER);
   // Resolve flags without mutating the parent environment or process cwd.
   const homes = resolveGoodVibesHomeOwnership(daemonHomeEnvironment(flags, env, cwd));
-  // The folder the daemon was started in (flag > env > a folder a 3.5.0 daemon saved > cwd) means nothing: the daemon
-  // serves every project at once and makes a project's files, code index, checkpoints and identity only for a project a
-  // call or a turn names. Its own working folder is a folder of its own in its home, which no project is and nobody
-  // works in; its records are in its home too (daemon-records.ts), carried from the folders a 3.5.0 daemon used.
-  const startFolder = resolve(cwd, flags.workingDir ?? env.GOODVIBES_WORKING_DIR
-    ?? readDaemonSetting(homes.daemonHomeDirectory, 'runtime.workingDir') ?? cwd);
+  // The folder the daemon was started in (or a folder a 3.5.0 daemon saved) means nothing: the daemon serves every
+  // project at once and makes a project's files, code index, checkpoints and identity only for a project a call or a
+  // turn names. Its own working folder is a folder of its own in its home, which no project is and nobody works in;
+  // its records are in its home too (daemon-records.ts), carried from the folders a 3.5.0 daemon used.
   const workingDirectory = daemonOwnFolder(homes.daemonHomeDirectory);
-  return { ...homes, workingDirectory, startFolder };
+  return { ...homes, workingDirectory };
 }
+
+/** What the daemon says when started with `--working-dir` (`-C`, `--cd`) or GOODVIBES_WORKING_DIR. */
+export const DAEMON_HAS_NO_WORKING_FOLDER = 'The daemon no longer has a working folder, so --working-dir (-C, --cd) and GOODVIBES_WORKING_DIR are refused: each program and each schedule names its own project; start goodvibes-daemon without them.';
 
 /** The daemon's own working folder, in its home: nothing a project does lands here, and it is never a project. */
 export function daemonOwnFolder(daemonHomeDirectory: string): string {
@@ -65,6 +68,9 @@ export function createDaemonCliConfiguration(
     diagnosticMode: options.diagnosticMode,
     readOnly: options.readOnly,
   });
+  // Every managed lock that holds is also kept where a released 3.5.0 reads locks, so a rollback weakens nothing
+  // (a lock an administrator put in a folder of this version by hand is copied there at this start).
+  if (options.readOnly !== true) mirrorManagedLocksForRelease(config);
   return { ...homes, workingDirectory, config };
 }
 export type DaemonCliConfiguration = ReturnType<typeof createDaemonCliConfiguration>;

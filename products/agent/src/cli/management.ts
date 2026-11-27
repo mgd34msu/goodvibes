@@ -74,6 +74,11 @@ function agentCapabilityInvoke(runtime: CliCommandRuntime): CapabilityCliInvoke 
         return { ok: false, code: typeof code === 'string' ? code : 'refused', error: error.said.error, fix: error.said.next ?? '' };
       }
       const message = summarizeError(error).replace(/^'[^']+' failed:\s*/, '');
+      // No host token on this machine (connected-host-auth.ts connectedHostTokenRequiredMessage): its daemon never ran,
+      // so it is started as a stopped one is (support-bundle-cli.ts daemonStartingInvoke).
+      if (error instanceof DaemonVerbNotSentError && message.includes('there is no host token') && configuredDaemonIsThisMachine(runtime.configManager)) {
+        return { ok: false, code: 'token-missing', error: message, fix: `${runtime.cli.binary} status shows the connected host` };
+      }
       // No answer at all (the connection was refused or dropped): the host was not reached, so nothing was sent to it.
       const unreached = !(error instanceof ConnectedHostVerbError) && !(error instanceof DaemonVerbNotSentError) && (error as { readonly name?: unknown } | null)?.name !== 'TimeoutError';
       if (unreached) {

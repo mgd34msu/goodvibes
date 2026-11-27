@@ -9,6 +9,7 @@ import { WEBUI_METHOD_ROUTES } from '@goodvibes/engine/contracts/generated/webui
 import { getClientLifetime, heldBearerSync, invalidateClientLifetime, isClientLifetimeCurrent, readSignedInIdentity, tokenStore } from './client-lifetime';
 import { clearHeldInputs } from './held-input';
 import { clearChatDrafts } from './chat-drafts';
+import { accountStorageOwner, clearAccountStorage } from './account-storage';
 import { randomUuid } from './uuid';
 export { hasSignInSync, tokenStore } from './client-lifetime';
 import { isRuntimeEventDomain } from '@goodvibes/engine/contracts';
@@ -355,21 +356,56 @@ async function authHeaders(): Promise<Record<string, string>> {
  * that names none, so a place, an action sheet, a chat, a piece of work or a session read is for the chosen project.
  */
 let callProject: string | undefined;
+/** The open chat's project: while a chat is open, every call names it, whatever the places have chosen. */
+let chatProject: string | undefined;
 
-/** Set by the project chooser whenever the project in use changes. */
+/** Set by the project chooser whenever the project in use changes ("Every project" names none). */
 export function setCallProject(project: string | undefined): void {
   callProject = project && project.startsWith('/') ? project : undefined;
+  // The chooser's "Every project" (place-project.ts EVERY_PROJECT): no project named, every project's memory asked for.
+  callEveryProject = project === '*every-project*';
+}
+let callEveryProject = false;
+
+/** A memory read's filter: every project's when the owner chose "Every project" and no chat is open. */
+function withEveryProject<T extends object>(input: T): T {
+  return callEveryProject && !chatProject && !chatWithoutProject && !('project' in input) ? { ...input, everyProject: true } : input;
+}
+
+/** A chat is open (or a new one is being started) that works in no project yet: its calls name none. */
+let chatWithoutProject = false;
+
+/**
+ * Set by the chat view while a chat is open, and cleared when it closes. `open` with no project: the chat has none yet
+ * (started with "No project", its own project made when the owner's first message needs one), so calls made from it
+ * name no project rather than the places' choice.
+ */
+export function setChatCallProject(project: string | undefined, open = false): void {
+  chatProject = project && project.startsWith('/') ? project : undefined;
+  chatWithoutProject = open && chatProject === undefined;
+}
+
+/** The open chat's project, if a chat is open. */
+export function chatCallProject(): string | undefined {
+  return chatProject;
+}
+
+/** The project every call names now: the open chat's, none for a chat with none yet, else the places' choice. */
+function effectiveCallProject(): string | undefined {
+  return chatProject ?? (chatWithoutProject ? undefined : callProject);
 }
 
 function callContextHeaders(): Record<string, string> {
-  return callProject ? { 'x-goodvibes-project': encodeURIComponent(callProject) } : {};
+  const project = effectiveCallProject();
+  return project ? { 'x-goodvibes-project': encodeURIComponent(project) } : {};
 }
 
 /** routedFetch with the call context's project added (the SDK's every operator call goes through it). */
 const projectRoutedFetch: typeof fetch = Object.assign((input: RequestInfo | URL, init?: RequestInit): Promise<Response> => {
-  if (!callProject) return routedFetch(input, init);
+  const project = effectiveCallProject();
+  if (!project) return routedFetch(input, init);
   const headers = new Headers(init?.headers ?? (input instanceof Request ? input.headers : undefined));
-  if (!headers.has('x-goodvibes-project')) headers.set('x-goodvibes-project', encodeURIComponent(callProject));
+  if (!headers.has('x-goodvibes-project')) headers.set('x-goodvibes-project', encodeURIComponent(project));
   return routedFetch(input, { ...(init ?? {}), headers });
 }, { preconnect: routedFetch.preconnect });
 
@@ -599,14 +635,22 @@ async function invokeOperatorOnce(methodId: string, input?: unknown, signal?: Ab
     return scopedPlatform.operator.invoke(
       methodId as BrowserKnowledgeMethodId,
       input as OperatorMethodInput<BrowserKnowledgeMethodId>,
-      { signal, ...keyed },
+      { signal, ...keyed, headers: PERSONS_REQUEST_HEADERS },
     );
   }
   const { path, rest } = interpolateRoute(route, input);
   if (route.method === 'GET') return requestJson(path, { method: route.method, query: rest, signal });
-  if (route.method === 'DELETE' && !Object.keys(rest).length) return requestJson(path, { method: route.method, signal, ...keyed });
-  return requestJson(path, { method: route.method, body: rest, signal, ...keyed });
+  if (route.method === 'DELETE' && !Object.keys(rest).length) return requestJson(path, { method: route.method, signal, ...keyed, explicitUserRequest: true });
+  return requestJson(path, { method: route.method, body: rest, signal, ...keyed, explicitUserRequest: true });
 }
+
+/**
+ * Every method this page sends that changes something is the person's own request: the page changes nothing by itself
+ * (its effects, queries and timers only read: the 2026-11-26 audit of every call the web UI makes with no press). The
+ * daemon runs an act it decides for the owner at once only on his own press in his own program (his sign-in), so a
+ * change sent without the claim would be put to him as if someone else had asked. A read sent with it changes nothing.
+ */
+const PERSONS_REQUEST_HEADERS: Readonly<Record<string, string>> = { 'x-goodvibes-explicit-user-request': 'true' };
 
 /**
  * The operation key of one thing a person asked for (a draft to save, a chat to
@@ -832,6 +876,8 @@ async function invokeGatewayMethod<TMethodId extends OperatorMethodId, TOutput =
     body: { body: body ?? {} },
     signal,
     ...(idempotencyKey ? { idempotencyKey } : {}),
+    // The person's own request (PERSONS_REQUEST_HEADERS): this page sends no change by itself.
+    explicitUserRequest: true,
   });
 }
 
@@ -1693,7 +1739,7 @@ export const client = {
     // memory.records.* / memory.review-queue / memory.consolidation.receipts,
     // REST-routed through EXTRA_METHOD_ROUTES.
     memory: {
-      search: (input?: MemorySearchInput) => invokeOperator('memory.records.search', input ?? {}),
+      search: (input?: MemorySearchInput) => invokeOperator('memory.records.search', withEveryProject(input ?? {}) as MemorySearchInput),
       add: (input: MemoryAddInput) => invokeOperator('memory.records.add', input),
       get: (id: string) => invokeOperator('memory.records.get', { id }),
       update: (id: string, input: MemoryUpdateInput) => invokeOperator('memory.records.update', { id, ...input }),
@@ -1997,7 +2043,8 @@ export const client = {
         create: (name: string) => invokeGatewayMethod('pairing.tokens.create', { name }),
         // migrate: mint a new per-device token for a client still on the legacy
         // shared token, without yet revoking it. Minted through the API, so the token
-        // is an automation token; this browser moves with handoff.selfFromSharedToken.
+        // is an automation token, never your device: a browser becomes your own with the
+        // sign-in code your own screen shows (Settings, Paired devices, "Make this browser yours").
         migrate: (name: string) => invokeGatewayMethod('pairing.tokens.migrate', { name }),
         rename: (id: string, name: string) => invokeGatewayMethod('pairing.tokens.rename', { id, name }),
         delete: (id: string) => invokeGatewayMethod('pairing.tokens.delete', { id }),
@@ -2016,12 +2063,6 @@ export const client = {
             ...(offers && offers.length > 0 ? { offers } : {}),
             ...(forThisMachine ? { forThisMachine: true } : {}),
           }),
-        // The owner's own browser, signed in with the shared operator token, pairs ITSELF
-        // onto its own token through the owner's pairing flow: the token it gets is an
-        // owner device (origin owner-pairing). pairing.tokens.migrate is a script's path
-        // and gives an automation token.
-        selfFromSharedToken: (name: string) =>
-          invokeGatewayMethod('pairing.handoff.create', { name, offers: [], fromSharedToken: true }),
         complete: (input: PairingHandoffCompleteInput) => invokeGatewayMethod('pairing.handoff.complete', input),
       },
       // posture.get: the same honest TLS/capability read outside a pairing exchange, a
@@ -2359,7 +2400,7 @@ function signInRefusal(response: Response, url: string, body: unknown, label: st
  * password) to its HttpOnly, SameSite=Strict cookie and answers who is signed in, never
  * the credential. One request per sign-in.
  */
-async function bindBrowserSession(credential: { readonly token: string } | { readonly username: string; readonly password: string }, epoch: number): Promise<Record<string, unknown>> {
+async function bindBrowserSession(credential: { readonly token: string } | { readonly username: string; readonly password: string; readonly newPassword?: string }, epoch: number): Promise<Record<string, unknown>> {
   const url = `${GOODVIBES_BASE_URL.replace(/\/+$/, '')}/api/browser-session`;
   const response = await globalThis.fetch(url, {
     method: 'POST',
@@ -2379,14 +2420,28 @@ async function bindBrowserSession(credential: { readonly token: string } | { rea
   return asRecord(body);
 }
 
-export function login(username: string, password: string): Promise<unknown> {
+/** The daemon's answer to a first sign-in with the generated first-run password that set no password of the owner's own. */
+export const FIRST_SIGN_IN_SETS_PASSWORD = 'FIRST_SIGN_IN_SETS_PASSWORD';
+
+/** Whether a sign-in was refused because it is the first one, which sets the owner's own password. */
+export function isFirstSignInPasswordNeeded(error: unknown): boolean {
+  if (error === null || typeof error !== 'object') return false;
+  return asRecord((error as { readonly body?: unknown }).body).code === FIRST_SIGN_IN_SETS_PASSWORD;
+}
+
+/**
+ * Sign in with a username and password. `newPassword`: the owner's own password, set at the first sign-in with the
+ * generated first-run one (the daemon refuses that sign-in with {@link FIRST_SIGN_IN_SETS_PASSWORD} without it).
+ */
+export function login(username: string, password: string, newPassword?: string): Promise<unknown> {
   // The sign-in this call is: a sign-out, or another sign-in, asked for while it is in flight is newer and wins.
   const epoch = ++credentialEpoch;
+  const chosen = newPassword ? { newPassword } : {};
   return inCredentialOrder(async () => {
     const url = buildLoginUrl();
     if (credentialEpoch !== epoch) throw supersededSignIn(url);
     if (getActiveRoute() !== 'relay') {
-      const bound = await bindBrowserSession({ username, password }, epoch);
+      const bound = await bindBrowserSession({ username, password, ...chosen }, epoch);
       return { authenticated: true, username: bound.principalId, expiresAt: bound.expiresAt };
     }
     // Relay route: the tunnel builds each request in this page, so the session token is held in memory only.
@@ -2394,7 +2449,7 @@ export function login(username: string, password: string): Promise<unknown> {
       method: 'POST',
       credentials: 'omit',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ username, password }),
+      body: JSON.stringify({ username, password, ...chosen }),
     });
     const body = await readJson(response);
     if (!response.ok) throw signInRefusal(response, url, body, 'Login failed');
@@ -2519,6 +2574,18 @@ async function endDaemonSignIn(bearer: string | null): Promise<SignOutOutcome> {
   }
 }
 
+/** What is let go at sign-out while the sign-in still works (registered by the module that holds it). */
+const signOutReleases = new Set<() => Promise<void>>();
+
+/**
+ * Something the daemon holds for this browser under the person signed in, to let go at sign-out before the daemon
+ * sign-in ends (push-client.ts: this browser's push subscription). Returns its removal.
+ */
+export function releaseAtSignOut(release: () => Promise<void>): () => void {
+  signOutReleases.add(release);
+  return () => { signOutReleases.delete(release); };
+}
+
 /**
  * Sign out: a new identity generation first (every reply, login or transcript still in
  * flight for the old sign-in is dropped), the bearer held in memory is forgotten, then the
@@ -2526,6 +2593,10 @@ async function endDaemonSignIn(bearer: string | null): Promise<SignOutOutcome> {
  * so the old credential stops working everywhere.
  */
 export function signOut(): Promise<SignOutOutcome> {
+  // What this browser kept for the person signing out (the project chosen, the chats listed, preferences): gone, read
+  // while the sign-in marker still names them (account-storage.ts). Nothing of theirs reaches the next sign-in.
+  const leaving = accountStorageOwner();
+  clearAccountStorage(leaving);
   ++credentialEpoch;
   // A new identity generation even when nothing was held: a sign-in still in flight is older and is dropped.
   invalidateClientLifetime();
@@ -2533,12 +2604,19 @@ export function signOut(): Promise<SignOutOutcome> {
   clearHeldInputs();
   clearChatDrafts();
   return inCredentialOrder(async () => {
+    // What the daemon holds for this browser under the person leaving (its push subscription, push-client.ts) is let go
+    // while their sign-in still works; one that cannot be is made harmless by its own release.
+    for (const release of [...signOutReleases]) {
+      try { await release(); } catch { /* each release makes its own failure harmless */ }
+    }
     const bearer = await tokenStore.getToken();
     await tokenStore.clearToken();
     // The bearer held for the relay route, and the cookie the marker says this browser holds (both, after a route change).
     const held = [...(bearer ? [bearer] : []), ...(readSignedInIdentity() !== null || !bearer ? [null] : [])];
     const { outcome, unended } = await endDaemonSignIns(held);
     unendedSignIns = unended;
+    // What a screen wrote for the person signing out while the sign-out ran (its last state) goes too.
+    clearAccountStorage(leaving);
     return outcome;
   });
 }

@@ -822,6 +822,9 @@ async function executeToolCallsInMode(
         let outcome: StopOutcome<ToolResult>;
         try {
         // The person's stop of this call ends the wait at once (untilStopped); the time limit and the turn's cancel do not.
+        // The owner himself said yes to exactly this call, as his card showed it (his prompt's answer, the arguments
+        // unchanged): a one-call grant, read by the daemon for this call's own nested methods (gate/admitted-decision.ts).
+        const ownersOneCallYes = checkResult.approved && checkResult.sourceLayer === 'user_prompt' && checkResult.modifiedArgs === undefined;
         outcome = await untilStopped(withAdmittedToolDecision(admittedDecision, () => withExternalOperationSource(sourceOf && autonomous ? {
           sourceOf, signal: callSignal, assertCurrent: () => { assertTurnActive(); callSignal?.throwIfAborted(); },
           inputFacts: [prepared?.args ?? call.arguments],
@@ -842,7 +845,7 @@ async function executeToolCallsInMode(
               ? admission : admission.claim;
             return deps.toolRegistry.executePrepared(prepared, preparedAdmission, executeOptions);
           },
-        ))), perCallSignal);
+        )), ownersOneCallYes), perCallSignal);
         } finally {
           leaveLane?.();
         }

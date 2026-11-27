@@ -420,6 +420,7 @@ export const OPERATOR_METHOD_IDS = [
   "ops.memory.get",
   "pairing.handoff.complete",
   "pairing.handoff.create",
+  "pairing.outsideAgent.issue",
   "pairing.posture.get",
   "pairing.serve.network",
   "pairing.tokens.create",

@@ -373,6 +373,8 @@ export const AUTOMATION_EXECUTION_POLICY_SCHEMA = objectSchema({
   allowUnsafeExternalContent: BOOLEAN_SCHEMA,
   externalContentSource: AUTOMATION_EXTERNAL_CONTENT_SOURCE_SCHEMA,
   lightContext: BOOLEAN_SCHEMA,
+  // The project folder its runs work in (automation/session-targets.ts `AutomationExecutionPolicy.workingDirectory`).
+  workingDirectory: STRING_SCHEMA,
 }, ['target'], { additionalProperties: false });
 
 export const AUTOMATION_DELIVERY_TARGET_SCHEMA = objectSchema({

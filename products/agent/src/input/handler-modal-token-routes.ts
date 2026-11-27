@@ -7,7 +7,6 @@ import type { SessionPickerModal } from './session-picker-modal.ts';
 import type { ProfilePickerModal } from './profile-picker-modal.ts';
 import type { HistorySearch } from './input-history.ts';
 import type { ModelPickerModal } from './model-picker.ts';
-import { handleAgentWorkspaceToken, type AgentWorkspace } from './agent-workspace.ts';
 import { handleMcpWorkspaceToken, type McpWorkspace } from './mcp-workspace.ts';
 import type { CommandContext } from './command-registry.ts';
 import type { LiveTailModal } from '../renderer/live-tail-modal.ts';
@@ -42,7 +41,6 @@ export type ModalTokenRouteState = {
   setSelectionCallback?: (callback: ((result: SelectionResult | null) => void) | null) => void;
   bookmarkModal: BookmarkModal;
   mcpWorkspace: McpWorkspace;
-  agentWorkspace: AgentWorkspace;
   sessionPickerModal: SessionPickerModal;
   profilePickerModal: ProfilePickerModal;
   historySearch: HistorySearch;
@@ -97,7 +95,6 @@ export const handleModalTokenRoutes = createModalTokenPipeline<ModalTokenRouteSt
   },
   {
     additional: {
-      'agent-workspace': (state, token) => handleAgentWorkspaceToken(state.agentWorkspace, token, state.handleEscape, state.requestRender),
       'live-tail': (state, token) =>
         handleLiveTailToken(
           {

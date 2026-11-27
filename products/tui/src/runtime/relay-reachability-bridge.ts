@@ -149,7 +149,8 @@ export function createRelayReadAccessors(verbs: DaemonVerbCaller): RelayReadAcce
     async mintRelayPairing(name, options = {}) {
       try {
         const answer = await mintRelayPairingInOneRun<{ pairing: unknown; status: string; codeId?: string; codeName?: string }>(
-          <T>(method: string, input: Record<string, unknown>) => verbs.invoke<T>(method, input),
+          // Only from the person's own command or press: his request.
+          <T>(method: string, input: Record<string, unknown>) => verbs.invoke<T>(method, input, { explicitUserRequest: true }),
           { name, configuredUrl: options.configuredUrl, ask: options.ask },
         );
         if (isPairingPayload(answer?.pairing)) {
@@ -175,7 +176,7 @@ export function createRelayReadAccessors(verbs: DaemonVerbCaller): RelayReadAcce
     },
     async revokeRelayCode(id) {
       try {
-        await verbs.invoke('relay.codes.revoke', { id });
+        await verbs.invoke('relay.codes.revoke', { id }, { explicitUserRequest: true });
         return { revoked: true, id };
       } catch (error) {
         return { revoked: false, reason: failureReason(error) };

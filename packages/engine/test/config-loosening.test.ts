@@ -2,6 +2,8 @@
 // Red when: A credential literal or card material is accepted into a settings file, or the refusal echoes the value.
 // Proves: An agent loosens the sandbox, a payments limit or the permission mode through a settings write that neither the owner, his rule nor the mode settled.
 // Red when: `ConfigManager.setMany` saves a loosening change from an agent with no decision or with only Jev's, saves part of a refused update, or a new key under a security prefix has neither a loosening rule nor a review.
+// Proves: A setting locked as managed in the daemon's folder or another program's is written through the daemon's settings.
+// Red when: The daemon's settings manager reads managed locks only from its own folder, so a lock kept beside the daemon's settings file, beside its own client settings or in the Agent's folder lets the write through.
 /**
  * An agent cannot loosen security through settings: a write that widens the
  * sandbox or loosens any payments key is refused unless the owner, his rule or
@@ -12,7 +14,7 @@
  * Real ConfigManager over a temp directory, real config-key facts.
  */
 import { afterEach, beforeEach, expect, test } from 'bun:test';
-import { existsSync, mkdtempSync, readFileSync, rmSync } from 'node:fs';
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { ConfigManager, type ConfigSetOptions } from '../platform/src/platform/config/manager.ts';
@@ -138,6 +140,43 @@ test('every key under a security prefix is classified: it has a loosening rule, 
   expect(unclassified).toEqual([]);
   expect(stale).toEqual([]);
   for (const key of Object.keys(REVIEWED_NOT_LOOSENING)) expect(`${key} in schema: ${CONFIG_KEYS.has(key)}`).toBe(`${key} in schema: true`);
+});
+
+/** A managed lock as an administrator or a program's "Lock a setting" keeps it: `<folder>/settings-sync.json`. */
+function lockIn(folder: string, key: string): void {
+  mkdirSync(folder, { recursive: true });
+  writeFileSync(join(folder, 'settings-sync.json'), JSON.stringify({ version: 2, events: [], failures: [], syncedSettings: [], managedSettings: [], conflicts: [], rollbackHistory: [],
+    managedLocks: [{ key, source: 'the security team', reason: 'set by policy', updatedAt: 1 }] }));
+}
+
+test('a setting locked in the daemon folder or in another program folder is refused by the daemon settings and stays unchanged', () => {
+  // The daemon's settings manager as its start builds it (products/daemon cli/configuration.ts): the terminal app's
+  // state folder as its own, its client settings in daemon-host, its daemon-owned settings in the daemon home.
+  const home = dir;
+  const daemonHome = join(home, '.goodvibes', 'daemon');
+  const daemon = (): ConfigManager => new ConfigManager({ homeDir: home, surfaceRoot: 'tui', settingsSurfaceRoot: 'daemon-host',
+    daemonTierPath: join(daemonHome, 'settings.json'), ownsDaemonTier: true });
+  const key = 'behavior.budgetAlertUsd' as ConfigKey;
+  const where: readonly { readonly name: string; readonly folder: string }[] = [
+    { name: 'the daemon\'s own folder', folder: daemonHome },
+    { name: 'the daemon\'s client folder', folder: join(home, '.goodvibes', 'daemon-host') },
+    { name: 'the Agent\'s folder', folder: join(home, '.goodvibes', 'agent') },
+  ];
+  let value = 10;
+  for (const place of where) {
+    lockIn(place.folder, key);
+    const config = daemon();
+    const before = config.get(key);
+    const many = config.setMany([{ key, value: ++value }], owner);
+    expect(`${place.name}: ${many.ok ? 'saved' : `${many.refusal.code} ${many.refusal.reason}`}`)
+      .toBe(`${place.name}: CONFIG_MANAGED ${key} is locked as managed by the security team (set by policy), so it was not changed. Only the owner removes the lock: Tools and extensions, Managed settings, unlock (it is kept in ${join(place.folder, 'settings-sync.json')}).`);
+    expect(() => config.set(key, ++value as never)).toThrow('locked as managed by the security team');
+    expect(`${place.name}: ${String(daemon().get(key))}`).toBe(`${place.name}: ${String(before)}`);
+    // Control: the lock removed, the same write is saved.
+    rmSync(join(place.folder, 'settings-sync.json'));
+    expect(`${place.name} unlocked: ${daemon().setMany([{ key, value: ++value }], owner).ok}`).toBe(`${place.name} unlocked: true`);
+    expect(daemon().get(key)).toBe(value as never);
+  }
 });
 
 /** A manager over its own temp directory, for a case that reads the daemon tier file itself. */

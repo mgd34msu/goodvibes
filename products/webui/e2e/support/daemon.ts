@@ -155,7 +155,7 @@ export async function startRealDaemon(options: {
   const own = new Set([ports.controlPlane, ports.http, ports.web, Number(new URL(model.baseURL).port)]);
   const env: Record<string, string> = {
     PATH: process.env.PATH ?? '/usr/bin:/bin', LANG: 'C.UTF-8', TERM: 'dumb', TZ: 'UTC', NO_COLOR: '1',
-    HOME: home, USERPROFILE: home, GOODVIBES_HOME: home, GOODVIBES_DAEMON_HOME: daemonHome, GOODVIBES_WORKING_DIR: workspace,
+    HOME: home, USERPROFILE: home, GOODVIBES_HOME: home, GOODVIBES_DAEMON_HOME: daemonHome,
     XDG_CONFIG_HOME: join(home, '.config'), XDG_DATA_HOME: join(home, '.local/share'), XDG_CACHE_HOME: join(home, '.cache'),
     XDG_STATE_HOME: join(home, '.local/state'), XDG_RUNTIME_DIR: tmp, TMPDIR: tmp, TMP: tmp, TEMP: tmp,
     E2E_FAKE_API_KEY: 'e2e-local-key',

@@ -1,21 +1,32 @@
-import { defineCommand, runDaemonCapability } from '@goodvibes/engine/terminal-shell/command-actions';
 import { capabilityBinding } from './capability-binding.ts';
 import {
-  daemonSetupSkips, setupCommandDescription, setupPlaceHooks, setupTopicOf,
+  daemonSetupSkips, setupPlaceHooks, setupTopicOf,
   type SetupCommandOptions, type SetupPlaceHooks, type SetupRun, type SetupTopicId, type WhoDecidesState,
 } from '@goodvibes/engine/terminal-shell/setup-command';
 import { firstRunDecisionModel, whoDecidesOnChecklist } from '@goodvibes/engine/terminal-shell/first-run';
-import type { CommandContext, CommandRegistry } from '../command-registry.ts';
+import type { CommandContext } from '../command-registry.ts';
 import type { OnboardingWizardTopic } from '../onboarding/onboarding-wizard-types.ts';
 import { openOnboardingWizard, requireSecretsManager } from './runtime-services.ts';
 import { readSetupState } from '@goodvibes/engine/platform/platform/capabilities';
-import { systemSessionOf } from './session-capabilities.ts';
+// The System session through its slot: session-capabilities.ts imports this file (session-capability-slots.ts).
+import { systemSessionOfSlot as systemSessionOf } from './session-capability-slots.ts';
 
 /** The topics the terminal app opens as one form of its own (the former wizard pages). */
 const FORM_TOPICS: readonly OnboardingWizardTopic[] = [
-  'model', 'sign-in', 'store-key', 'local-only', 'browser', 'other-devices', 'connect-daemon', 'webhooks', 'chat-apps', 'cloudflare',
-  'who-signs-in', 'how-it-works', 'safety', 'memory', 'telemetry', 'automation', 'devices-voice', 'provider-behaviour', 'advanced',
+  'model', 'sign-in', 'store-key', 'connect-daemon', 'chat-apps', 'cloudflare',
+  'how-it-works', 'safety', 'memory', 'telemetry', 'automation', 'devices-voice', 'provider-behaviour', 'advanced',
 ];
+
+/**
+ * Where this computer listens and who reaches it: one control in both programs, Devices and network's Addresses and
+ * ports (each listener on or off, its address, port and encryption, changed through the daemon; `a` there makes the
+ * account that signs in from a browser or another device). "Who can sign in here" is that account: the same control.
+ */
+const NETWORK_TOPICS: readonly SetupTopicId[] = ['local-only', 'browser', 'other-devices', 'webhooks', 'who-signs-in'];
+const openAddresses: SetupRun<CommandContext> = async (_values, ctx) => {
+  if (!ctx.openPlace) return 'Devices and network cannot be shown here.';
+  ctx.openPlace('devices', { list: 'addresses' });
+};
 
 /**
  * The form opens on top of what is open (a place included); the run ends when it is submitted or left, and its
@@ -42,13 +53,10 @@ async function whoDecides(ctx: CommandContext): Promise<WhoDecidesState> {
 }
 
 const SETUP_OPTIONS: SetupCommandOptions<CommandContext> = {
+  program: 'tui',
   runs: {
     ...Object.fromEntries(FORM_TOPICS.map((topic) => [topic, openForm(topic)])) as Partial<Record<SetupTopicId, SetupRun<CommandContext>>>,
-    // A provider of your own is the daemon's (capabilities/builtin/models.ts provider.add), run there as your request.
-    'add-provider': async (values, ctx) => {
-      const answer = await runDaemonCapability('provider.add', { name: values.name!, address: values.url! }, ctx, capabilityBinding);
-      if (answer.detail ?? answer.text) ctx.print(answer.detail ?? answer.text ?? '');
-    },
+    ...Object.fromEntries(NETWORK_TOPICS.map((topic) => [topic, openAddresses])),
     'history': async (_values, ctx) => { ctx.openSettingsModal?.('behavior.saveHistory'); },
     // Safety and sandboxing is the Permissions and safety place (terminal-shell places/safety-place.ts), on its sandbox setting.
     'safety': async (_values, ctx) => {
@@ -60,10 +68,7 @@ const SETUP_OPTIONS: SetupCommandOptions<CommandContext> = {
       ctx.openFirstRun();
     },
   },
-  elsewhere: (id) => id === 'import-settings'
-    ? 'Only the Agent keeps its own settings; the terminal app already uses these.'
-    : `This is done in the Agent: run goodvibes-agent and type /setup ${id}.`,
-  notes: { 'import-settings': 'Agent only', 'pair': 'Agent only', 'unpair': 'Agent only' },
+  elsewhere: (_id, label) => `"${label}" is done in the Agent: in goodvibes-agent, open the menu (Ctrl+G, then m), then System, Setup, and choose it there.`,
   // The checklist: done marks beside each recommended topic, `N of M set up` first, and Skip for now.
   settings: (ctx) => ctx.platform.configManager,
   // Skipped for now: the daemon's one setup record, the same in both programs.
@@ -78,20 +83,11 @@ export function setupTopicsOf(ctx: CommandContext): (topic: string) => Promise<s
   return setupTopicOf(SETUP_OPTIONS, ctx);
 }
 
-/** `/setup` with its topics; the setup checks and transfers are the System place's (local-setup.ts). */
-export const SETUP_COMMAND = defineCommand<CommandContext>(setupCommandDescription<CommandContext>(SETUP_OPTIONS));
-
-/** The System place's Setup list over this app's `/setup`, its settings and its "Who decides" record. */
+/** The System place's Setup list over this app's setup topics, its settings and its "Who decides" record. */
 export function setupPlace(ctx: CommandContext): SetupPlaceHooks {
   return setupPlaceHooks(SETUP_OPTIONS, ctx, {
     // The row is the person coming to choose: "Who decides" opens whatever is in force.
     openWhoDecides: () => ctx.openWhoDecides?.({ always: true }) ?? Promise.resolve(false),
     onSettingsChange: (listener) => ctx.platform.configManager.onDidChangeIncarnation(listener),
   });
-}
-
-export function registerOnboardingRuntimeCommands(registry: CommandRegistry): void {
-  registry.register(SETUP_COMMAND);
-  // `/startup` is gone: its checks and transfers are the System place's Health and Support and transfer tabs, the
-  // remote runners Work and agents' Runners tab (local-setup.ts keeps the program's own start the checks read).
 }

@@ -1,16 +1,9 @@
 import type { Tool } from '@goodvibes/engine/platform/platform/types';
 import type { ToolInputProjector, ToolRegistry } from '@goodvibes/engine/platform/platform/tools';
 import { agentResearchReportSourceOwner, captureResearchInput, hasPreparedResearchReport, inheritPreparedResearchReport, prepareProtectedResearchReport } from '@goodvibes/engine/terminal-shell/agent-turn/protected-research-report';
-import { resolveWorkspaceActionIdentity } from './agent-harness-workspace-actions.ts';
 import { forwardCatalogCall, harnessCatalogExecutionGuard, releaseCatalogProjection } from '@goodvibes/engine/terminal-shell/agent-turn/catalog-ingress';
 
 export function isResearchReportEditor(args: Record<string, unknown>): boolean {
-  if (args.mode === 'run_workspace_action') {
-    const resolved = resolveWorkspaceActionIdentity(args);
-    // Other rows can legitimately have a field named sources (for example,
-    // browser-history import). Their explicit route retains its own boundary.
-    if (resolved?.status === 'found') return resolved.action.act?.command === 'research' && resolved.action.act.action === 'save-report';
-  }
   return !!args.fields && typeof args.fields === 'object' && !Array.isArray(args.fields)
     && ['sources', 'reportMarkdown'].some(key => Object.hasOwn(args.fields as object, key));
 }
@@ -43,7 +36,7 @@ export function createAgentHarnessResearchProjector(registry: ToolRegistry, isRe
 /** Read only the routing fields; unrelated private setup bodies keep their own boundary. */
 function reportRouting(input: Record<string, unknown>): Record<string, unknown> {
   const routing: Record<string, unknown> = {};
-  for (const key of ['mode', 'action', 'id', 'actionId', 'workspaceActionId', 'command', 'target', 'query', 'category', 'categoryId']) {
+  for (const key of ['mode', 'action', 'id', 'actionId', 'command', 'target', 'query']) {
     if (Object.hasOwn(input, key)) routing[key] = input[key];
   }
   const fields = input.fields;

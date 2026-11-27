@@ -845,6 +845,15 @@ and the reply together), and
 `remoteSessionTtlMs`. The session TTL is clamped to between 1 minute and 24
 hours, so a smaller configured value is raised to 60 seconds.
 
+`input` says how the message came: `typed` or `spoken`. Home Assistant's own
+conversation input does not say, so the integration should send it; a request
+that names a voice satellite or a device (`satelliteId`, `deviceId` or
+`pipelineId`, snake_case too, at the top or in `context`) is read as spoken
+whatever `input` says, and one that names none and says nothing is read as
+typed. A spoken message never acts as the owner, also with "Treat my own
+messages here as me" on: a voice pipeline names the device that heard it, not
+who spoke.
+
 To ground a turn in the Home Graph, send `grounding: { knowledgeSpaceId,
 installationId }` (or the same two ids at the top level, camelCase or
 snake_case). The turn then reads that knowledge space before answering and

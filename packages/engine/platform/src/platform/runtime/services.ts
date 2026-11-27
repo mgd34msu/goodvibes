@@ -307,8 +307,24 @@ export interface ProductComposition<X extends object = Record<never, never>> {
   readonly profileCapture?: boolean | undefined;
   /** The surface a job created here is attributed to. Default: the surface root. */
   readonly automationSurfaceKind?: AutomationSurfaceKind | undefined;
+  /**
+   * The folder a schedule or trigger kept before records named their project ran in (3.5.0 kept none): such a record
+   * is given it once, at load. The daemon names the folder its 3.5.0 self ran in, never its own folder in its home.
+   * Default: this program's working folder.
+   */
+  readonly unplacedRecordsFolder?: string | undefined;
+  /**
+   * Schedule files an earlier terminal app kept (automation/manager-runtime.ts `formerJobStores`): the daemon takes what
+   * they hold and it does not, at load, as its own upgrade step. Default: none.
+   */
+  readonly formerJobStores?: readonly string[] | undefined;
   /** `platform` resumes contracts left on disk once the graph is up; `product` resumes them itself, later in its boot. Default `platform`. */
   readonly contractRecovery?: 'platform' | 'product' | undefined;
+  /**
+   * `run` (default): this graph runs contracts (the daemon). `none`: it builds no contract runner (the terminal programs:
+   * every piece of work runs on the daemon, and a model's delegation is handed to it as work), so `contractRunner` is null.
+   */
+  readonly contracts?: 'run' | 'none' | undefined;
   /**
    * Which knowledge files this program opens. `wiki` (default): the project wiki in this program's state folder
    * (the daemon's one store, for the terminal app and the daemon), beside the agent-routes store and the home graph.
@@ -524,8 +540,11 @@ export interface RuntimeServices {
   readonly contextAccountingHolder: ContextAccountingHolder;
   /** Settable holder an interactive consumer binds its Orchestrator into, powering sessions.toolCalls.cancel + sessions.queuedMessages.* (same pattern as contextAccountingHolder). */
   readonly sessionLiveTurnControls: SessionLiveTurnControlsHolder;
-  /** The contract runner (contract-composition.ts): every spawn that is not outside a contract, every turn routed to work, and the fleet's contract tree go through it. */
-  readonly contractRunner: ContractRunner;
+  /**
+   * The contract runner (contract-composition.ts): every spawn that is not outside a contract, every turn routed to work,
+   * and the fleet's contract tree go through it. Null in a graph built with `contracts: 'none'` (the terminal programs).
+   */
+  readonly contractRunner: ContractRunner | null;
   /** The contracts operator surface over this runner and, once attached, the hosted-session floors' runners. */
   readonly contractOperator: ContractOperatorService;
   /** Joins the hosted-session floors' agent managers into this runtime's fleet (null takes them out), as contractOperator.attachHosted does for their contracts. */

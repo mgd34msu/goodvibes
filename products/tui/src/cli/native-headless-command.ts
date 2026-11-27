@@ -13,10 +13,11 @@ import { resolveGoodVibesDaemonHome } from '@goodvibes/engine/platform/platform/
 import { resolveNativeHostCredential } from '../runtime/client/native-host-credential.ts';
 import { createDaemonVerbCaller } from '../runtime/client/operator-endpoint.ts';
 import { claimHeadlessSession, restoreHeadlessSession } from '@goodvibes/engine/terminal-shell/startup-lifecycle';
-import { closeSessionHere, createSessionSurface } from '@goodvibes/engine/platform/platform/runtime/operations';
+import { closeSessionHere, createSessionSurface, projectRecordsFolder } from '@goodvibes/engine/platform/platform/runtime/operations';
 import { GOODVIBES_TUI_SURFACE_ROOT } from '../config/surface.ts';
 import { announceHeadlessRecovery, announceHeadlessSession, readFolderTrustFacts, refusedHeadlessRun, settleHeadlessFolderTrust } from '@goodvibes/engine/terminal-shell/headless-command';
 import { keepHeadlessSessionRecoverable } from '@goodvibes/engine/terminal-shell/session-crash-recovery';
+import { setProgramCallContext } from '@goodvibes/engine/platform/platform/runtime/client';
 
 export async function runNativeHeadlessCommand(runtime: HeadlessCommandRuntime, mode: NativeHeadlessMode = 'submit', limits: HeadlessRunFlags = {}): Promise<number> {
   const credentialObservation = new OwnedSelectionObservation();
@@ -35,6 +36,9 @@ export async function runNativeHeadlessCommand(runtime: HeadlessCommandRuntime, 
         }
       : { reason: credential.reason };
   };
+  // Native intake runs before the runtime starts: this program says what it is now, so its first native call carries
+  // the registration the daemon issues it (call-context.ts); the runtime's start sets the same context with its session.
+  setProgramCallContext({ program: 'tui', project: () => workingDirectory, sessionId: () => undefined });
   return runHeadlessCommand(runtime, mode, {
     write: writeNativeHeadlessResult,
     run: (prompt, mode, outer) => runWithHeadlessTimeout(outer, limits.timeoutMs, async (signal) => {
@@ -45,6 +49,8 @@ export async function runNativeHeadlessCommand(runtime: HeadlessCommandRuntime, 
           workingDir: workingDirectory,
           homeDirectory,
           daemonHomeDirectory: resolveGoodVibesDaemonHome(homeDirectory),
+          // The project's tool servers start on the turn's first `mcp` call, as the Agent's do.
+          toolServersOnFirstUse: true,
         });
         const sessionSnapshot = () => headlessSessionSnapshot(
           ctx.conversation.toJSON() as { messages: Array<ConversationMessageSnapshot> },
@@ -118,7 +124,8 @@ export async function runNativeHeadlessCommand(runtime: HeadlessCommandRuntime, 
         });
       };
       // The session to resume is taken, or refused, before anything is sent anywhere (native intake included).
-      const surface = createSessionSurface({ surfaceRoot: GOODVIBES_TUI_SURFACE_ROOT, workingDirectory, homeDirectory });
+      // A program opened in a subfolder keeps its sessions with its project's (as the runtime graph does).
+      const surface = createSessionSurface({ surfaceRoot: GOODVIBES_TUI_SURFACE_ROOT, workingDirectory: projectRecordsFolder(workingDirectory), homeDirectory });
       let claimed: string | undefined;
       try {
         claimed = await claimHeadlessSession(cli.flags, surface);

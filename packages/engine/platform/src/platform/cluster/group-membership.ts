@@ -253,7 +253,7 @@ export function decideAdmission(
 export function describeRefusal(reason: AdmissionRefusal): string {
   switch (reason) {
     case 'join-key-did-not-match':
-      return 'that join key does not match this group, check it with `cluster key` on a machine already in the group';
+      return 'that join key does not match this group, check it on a machine already in the group (Devices and network, Machine group, join key)';
     case 'identity-did-not-match':
       return 'this machine could not prove it is the node id it claims';
     case 'not-on-the-roster':
@@ -263,7 +263,7 @@ export function describeRefusal(reason: AdmissionRefusal): string {
     case 'request-is-stale':
       return 'the request was too old to accept, check that the clocks on both machines are roughly right';
     case 'group-is-full':
-      return 'the group is at its member limit, remove a machine first with `cluster forget`';
+      return 'the group is at its member limit, remove a machine first (Devices and network, Machines, remove from the group)';
   }
 }
 

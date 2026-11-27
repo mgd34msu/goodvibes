@@ -60,7 +60,8 @@ const APPROVAL_CAUSE_SCHEMA = enumSchema([
 // until it releases the hold), or a requester that reads the record itself.
 const APPROVAL_REQUESTER_SCHEMA = objectSchema({
   kind: enumSchema(['in-process', 'wire', 'record-reader']),
-  holds: arraySchema(objectSchema({ id: STRING_SCHEMA, releasedAt: NUMBER_SCHEMA }, ['id'])),
+  // `process`: the raising program's process on the daemon's machine (`<pid>:<start>`); its hold ends with it.
+  holds: arraySchema(objectSchema({ id: STRING_SCHEMA, releasedAt: NUMBER_SCHEMA, process: STRING_SCHEMA }, ['id'])),
 }, ['kind']);
 
 const APPROVAL_ACTION_NAMES = ['claim', 'approve', 'deny', 'amend', 'cancel'] as const;

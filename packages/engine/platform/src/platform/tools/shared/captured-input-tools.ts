@@ -249,6 +249,12 @@ export function capturedInputTool(
                 } else if (name === 'write') {
                   if (!contractInputAuthorityMutable(authority))
                     throw new UnsupportedCapturedWorkflow('immutable captured planner input cannot be written');
+                } else if (name === 'mcp' || name === 'work_plan') {
+                  // A step that changes its project has the project's tool servers, started inside this copy and every
+                  // call decided for the project, and the project's checklist (agents/orchestrator.ts capturedStepProject);
+                  // a read-only planner has neither.
+                  if (!contractInputAuthorityMutable(authority))
+                    throw new UnsupportedCapturedWorkflow(`immutable captured planner input has no ${name === 'mcp' ? 'tool servers' : 'checklist'}`);
                 } else {
                   throw new UnsupportedCapturedWorkflow(
                     `captured ${name} requires an original-owner-authorized backend; this workflow is not yet available`,

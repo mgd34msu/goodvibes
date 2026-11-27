@@ -122,6 +122,7 @@ export const builtinGatewayStepUpMethodDescriptors: readonly GatewayMethodDescri
     category: 'relay',
     effects: ['relay.read'],
     http: { method: 'POST', path: '/api/stepup/challenge' },
+    notDaemonFiles: { path: 'the HTTP path of the relay call the challenge is for, no file' },
     inputSchema: STEP_UP_CHALLENGE_MINT_INPUT_SCHEMA,
     outputSchema: STEP_UP_CHALLENGE_MINT_OUTPUT_SCHEMA,
     errorCodes: [STEP_UP_CHALLENGES_FULL],

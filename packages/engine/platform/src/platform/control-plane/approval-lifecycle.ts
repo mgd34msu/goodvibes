@@ -78,6 +78,12 @@ export function parseApprovalRef(value: string, localNode: string): ApprovalRef 
 export interface ApprovalHold {
   readonly id: string;
   readonly releasedAt?: number | undefined;
+  /**
+   * The raising program's process on this machine (`<pid>:<start>`, utils/process-identity.ts), when its checked
+   * registration named one: once that process is no longer running the daemon gives the hold up for it (its caller is
+   * gone), and the last hold to go cancels the open ask. No timer decides it.
+   */
+  readonly process?: string | undefined;
 }
 
 /** Who waits for the answer, which is what receipt evidence is read from. */
@@ -124,7 +130,7 @@ export type ApprovalTransition =
   | {
     readonly to: 'updated'; readonly actor: ApprovalActor; readonly metadata?: Record<string, unknown> | undefined; readonly note?: string | undefined;
     /** Another wire raiser attached to this open ask: its hold is recorded, so the ask stays open until it too leaves. */
-    readonly addHold?: string | undefined;
+    readonly addHold?: ApprovalHold | undefined;
   }
   /** A wire raiser gives up its hold: on an open ask it leaves, on a decided one it confirms it received the answer. */
   | { readonly to: 'released'; readonly actor: ApprovalActor; readonly holdId?: string | undefined; readonly note?: string | undefined };
@@ -166,6 +172,37 @@ export interface ApprovalViewer {
   readonly mayAnswer: boolean;
   /** May claim and cancel (`approvals.administer`). */
   readonly mayAdminister: boolean;
+  /**
+   * Set for the owner's own device (daemon-api actor.ts `ownerDevice`): it answers only a question some OTHER caller
+   * raised, never one asked by `self` or by a credential made from it (`madeFromIt`), and never one whose asker
+   * cannot be told.
+   */
+  readonly answersOthersOnly?: { readonly self: string; readonly madeFromIt: readonly string[] } | undefined;
+}
+
+/**
+ * Who asked a question, as its record names the asker: the caller a held call was put to the owner for
+ * (`requestedBy`), the principal that raised it over the wire (`raisedByPrincipal`), and the outside caller of its
+ * attribution. Empty for a question the owner's own programs, his models' turns or the daemon raised.
+ */
+function askersOf(record: SharedApprovalRecord): readonly string[] {
+  const askers: string[] = [];
+  for (const key of ['requestedBy', 'raisedByPrincipal'] as const) {
+    const value = metadataText(record, key);
+    if (value !== undefined) askers.push(value);
+  }
+  const attribution = record.request.attribution;
+  if (attribution?.kind === 'outside-caller' && attribution.principalId) askers.push(attribution.principalId);
+  return askers;
+}
+
+/** Why the owner's device may not answer this question (it asked it, or a credential made from it did), or undefined. */
+export function deviceAnswerRefusal(record: SharedApprovalRecord, viewer: Pick<ApprovalViewer, 'answersOthersOnly'>): { code: string; reason: string } | undefined {
+  const only = viewer.answersOthersOnly;
+  if (only === undefined) return undefined;
+  const own = new Set([only.self, ...only.madeFromIt]);
+  if (!askersOf(record).some((asker) => own.has(asker))) return undefined;
+  return { code: 'OWNER_ONLY', reason: 'A device answers only a question another caller raised; this one was asked by this device or by a credential made from it, so the owner answers it himself (his signed-in session or his own program).' };
 }
 
 export type ApprovalAction = 'claim' | 'approve' | 'deny' | 'amend' | 'cancel';
@@ -296,7 +333,8 @@ function refusalFor(record: SharedApprovalRecord, viewer: ApprovalViewer, action
     if (viewer.kind === 'agent') {
       if (action === 'claim') return { code: 'OWNER_ONLY', reason: 'An agent can read approvals but never claims one.' };
       const raisedBy = metadataText(record, 'raisedByPrincipal');
-      if (viewer.id === undefined || raisedBy !== viewer.id) {
+      // By kind first: an ask a sign-in user raised is never the agent's, whatever the user's name.
+      if (viewer.id === undefined || raisedBy !== viewer.id || metadataText(record, 'raisedByPrincipalKind') === 'user') {
         return { code: 'OWNER_ONLY', reason: 'An agent can cancel only an ask it raised itself; this one was raised by someone else.' };
       }
     }
@@ -306,6 +344,8 @@ function refusalFor(record: SharedApprovalRecord, viewer: ApprovalViewer, action
   if (viewer.kind === 'agent' || !viewer.mayAnswer) {
     return { code: 'OWNER_ONLY', reason: 'Answering an approval is the owner\'s own act.' };
   }
+  const ownQuestion = deviceAnswerRefusal(record, viewer);
+  if (ownQuestion) return ownQuestion;
   if (action === 'approve' && record.requiresOwnerDecision) {
     return { code: 'OWNER_DECISION_REQUIRED', reason: 'Only the paired-owner decision on the device that raised it can approve it; it can be denied from here.' };
   }

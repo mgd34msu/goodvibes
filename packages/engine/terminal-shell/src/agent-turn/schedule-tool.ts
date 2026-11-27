@@ -305,6 +305,10 @@ export function createAgentScheduleTool(
         additionalProperties: false,
       },
       sideEffects: ['network', 'state'],
+      // Every action only routes to another tool decided as itself (agent_operator_method, agent_autonomy_schedule,
+      // agent_reminder_schedule, agent_schedule_edit, agent_operator_action): classed a read, so that tool's question
+      // is the only one. One act, one question.
+      category: 'read',
       // A webhook target is chosen in the call: one the owner has not configured or allowed is his to decide.
       subjects: { recipients: ['deliveryWebhook'] },
       concurrency: 'serial',

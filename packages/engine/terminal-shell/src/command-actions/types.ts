@@ -108,9 +108,9 @@ export interface ActionDescription<Ctx> {
   /**
    * On a command's report action: it reads only this machine's own files and
    * settings, never a mailbox, a daemon or remote host, or a provider, and costs
-   * nothing to run. The Agent workspace reads every report by itself; it marks
-   * an old reading "may be out of date" only for a report without this flag,
-   * since only those change on their own.
+   * nothing to run. A screen that reads every report by itself marks an old
+   * reading "may be out of date" only for a report without this flag, since
+   * only those change on their own.
    */
   readonly readsOnlyThisMachine?: true | undefined;
   /**

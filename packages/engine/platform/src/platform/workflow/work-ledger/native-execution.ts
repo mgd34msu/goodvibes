@@ -30,6 +30,8 @@ import type { NativeContractCompositionOwner } from '../../runtime/contract-comp
 import { NativeWorkExecutionError, parseNativeWorkExecutionRecord, parseNativeWorkExecutionIntent, nativeExecutionOwnerMatches, nativeExecutionTargetRevision, bindNativeExecutionRequest, type NativeExecutionOwnerFacts, type NativeWorkExecutionIntent, type NativeWorkExecutionRecord, type NativeWorkExecutionStorage, type NativeWorkExecutionTarget, type NativeWorkExecutionTransaction } from './native-execution-types.js';
 import { missingScopes } from '@goodvibes/engine/daemon-api/route-helpers';
 import { isNativeWorkSession, nativeWorkSessionId } from './native-work-session.js';
+import { nativeBoundRevisions, nativeTargetMatches } from './service.js';
+import type { LedgerAttempt, LedgerWork } from './types.js';
 
 export interface NativePairedExecutionSnapshot {
   /** `local`: the owner's own machine, whose apps use the operator token they already hold. */
@@ -60,7 +62,7 @@ export interface NativeExecutionScopeOwner {
   currentScope(root: string): NativeExecutionScope;
   withCurrentScope<T>(expected: NativeExecutionScope, callback: (assertCurrent: () => void) => T | Promise<T>): Promise<T>;
 }
-type NativeRunner = Pick<ContractRunner, 'startDurable' | 'resumeDurable' | 'get' | 'list' | 'cancel' | 'join' | 'inspectDurable' | 'joinDurable' | 'inspectIntegration'>;
+type NativeRunner = Pick<ContractRunner, 'startDurable' | 'resumeDurable' | 'get' | 'list' | 'cancel' | 'join' | 'inspectDurable' | 'joinDurable' | 'inspectIntegration'> & Partial<Pick<ContractRunner, 'on'>>;
 export interface NativeWorkExecutionStatus {
   readonly kind: 'execution';
   readonly execution: NativeWorkExecutionRecord;
@@ -108,6 +110,8 @@ export interface NativeWorkExecutionHost {
   resume(key: DurableContractKey, authority: NativePairedExecutionAuthority, options?: { readonly signal?: AbortSignal }): Promise<DurableStartedContract>;
   /** Explicit proof/publication recovery; never calls runner start or resume. */
   settle(key: DurableContractKey, authority: NativePairedExecutionAuthority, options?: { readonly signal?: AbortSignal }): Promise<NativeWorkSettlementReceipt>;
+  /** A plan that waited was thrown away before any run: the ledger reads not started again. */
+  planDropped(workId: string, attemptId: string): Promise<void>;
   close(): Promise<void>;
 }
 const REQUIRED_SCOPES = ['write:fleet', 'read:work-ledger'] as const;
@@ -127,11 +131,37 @@ function captureTarget(value: NativeWorkExecutionTarget): NativeWorkExecutionTar
   return target;
 }
 function captureKey(value: DurableContractKey): DurableContractKey { return freezeDurableKey(value); }
+/** The target a caller is given for this work now: its revisions less the host's status reports (`nativeBoundRevisions`). */
+function boundTargetOf(ledger: NativeWorkExecutionTransaction['ledger'], work: LedgerWork, attempt: LedgerAttempt): NativeWorkExecutionTarget {
+  const bound = nativeBoundRevisions(ledger.history, work, attempt);
+  return { workId: work.id, workRevision: bound.workRevision, criteriaRevision: work.criteriaRevision, attemptId: attempt.id, attemptRevision: bound.attemptRevision };
+}
+/**
+ * Where a live daemon run stands, in the ledger's words: `blocked` while it waits for the owner (a question, its
+ * result to accept, a failed step), else `in_progress`. Null for an ended run (its settlement, failure or stop says it).
+ */
+function standingOf(contract: ContractView): { readonly status: 'in_progress' | 'blocked'; readonly words: string } | null {
+  if (isTerminalContractStatus(contract.status)) return null;
+  const open = contract.escalations.filter(entry => entry.resolvedAt === undefined);
+  // A failed step's own pause asks nothing (routes/work.ts `isStepFailure`): the work stopped at that step.
+  const stepFailure = (entry: ContractView['escalations'][number]) => entry.failurePause === true && entry.scope === 'unit';
+  const question = open.find(entry => !stepFailure(entry));
+  if (question) return { status: 'blocked', words: `Waits for you in Work: ${question.question.split('\n')[0]!.trim().slice(0, 300)}` };
+  const failed = open.find(stepFailure);
+  if (failed) {
+    const step = contract.units.find(unit => unit.id === failed.targetId);
+    return { status: 'blocked', words: `Stopped at the failed step "${step?.title ?? failed.targetId}"; it waits for you in Work to run it again or stop the work.` };
+  }
+  return { status: 'in_progress', words: 'Running.' };
+}
+const PLAN_WAITING_WORDS = 'Its plan waits for you in Work, to be changed or approved before it runs.';
+const CUT_OFF_WORDS ='Cut off when the daemon stopped; it waits for you in Work to go on, which runs the parts that were running again.';
 function workFor(current: NativeWorkExecutionTransaction, target: NativeWorkExecutionTarget, principal: string) {
   const work = current.ledger.works.find(item => item.id === target.workId);
   const attempt = current.ledger.attempts.find(item => item.id === target.attemptId);
-  if (!work || !attempt || work.revision !== target.workRevision || work.criteriaRevision !== target.criteriaRevision
-    || work.currentAttemptId !== target.attemptId || attempt.workId !== target.workId || attempt.revision !== target.attemptRevision
+  // The host's own status reports ("waits for you", "goes on") leave a run bound to what it started on.
+  if (!work || !attempt || !nativeTargetMatches(current.ledger.history, target, work, attempt)
+    || work.currentAttemptId !== target.attemptId || attempt.workId !== target.workId
     || attempt.ownerId !== principal || attempt.state !== 'active' || work.reportedState === 'cancelled' || work.reportedState === 'complete') throw new NativeWorkExecutionError('stale');
   return work;
 }
@@ -191,7 +221,7 @@ export function createNativeWorkExecutionHost(deps: {
     const contract = execution.receipt ? currentContract(execution) : null;
     const work = current.ledger.works.find(item => item.id === execution.target.workId);
     const attempt = current.ledger.attempts.find(item => item.id === execution.target.attemptId && item.workId === execution.target.workId);
-    const currentTarget = work && attempt ? { workId: work.id, workRevision: work.revision, criteriaRevision: work.criteriaRevision, attemptId: attempt.id, attemptRevision: attempt.revision } : null;
+    const currentTarget = work && attempt ? boundTargetOf(current.ledger, work, attempt) : null;
     const recovery = execution.state === 'cancelled' ? 'cancelled' : (contract && isTerminalContractStatus(contract.status)) || current.settlement ? 'terminal'
       : execution.state === 'launch-claimed' && !active.get(execution.target.attemptId)?.claimed ? 'required' : 'available';
     const key = durableKeyIdentity(execution.request.key);
@@ -493,6 +523,8 @@ export function createNativeWorkExecutionHost(deps: {
         void deps.storage.reportFailed(key, `The work failed: ${reason}`, record).catch((reportError: unknown) => {
           logger.warn('Native work failure was not written to the ledger', { attemptId: key.attemptId, error: summarizeError(reportError) });
         });
+        // A failed run has nothing to settle: its end is the failure just written, not a fault of the settlement.
+        return;
       }
       logger.warn('Native work settlement failed', { attemptId: key.attemptId, reason: code, error: summarizeError(error) });    });
     return promise;
@@ -602,6 +634,14 @@ export function createNativeWorkExecutionHost(deps: {
     }
     // Persist first, release locks, then abort and join real evaluation settlement.
     await drain();
+    // Stopped, and the ledger says so (Work's "stopped" and the ledger's "cancelled" are the same thing), with the reason.
+    const stopped = deps.storage.currentByAttempt(attemptId);
+    const stoppedSource = stopped.record ?? stopped.intent;
+    if (stoppedSource && deps.storage.reportStopped) {
+      await deps.storage.reportStopped(stoppedSource.request.key, reason.trim(), stopped.record ?? undefined).catch((error: unknown) => {
+        logger.warn('A stopped piece of work was not written to the ledger as stopped', { attemptId, error: summarizeError(error) });
+      });
+    }
     // Cancelled: no run owns this attempt any more.
     active.delete(attemptId);
   }
@@ -636,6 +676,40 @@ export function createNativeWorkExecutionHost(deps: {
     }
     return result;
   }
+  let stopWatching: (() => void) | undefined;
+  /** What was last said in the ledger for each run, so a run that keeps moving writes only when its standing changes. */
+  const lastStanding = new Map<string, string>();
+  const standingWrites = new Set<Promise<unknown>>();
+  function writeStanding(key: DurableContractKey, contractId: string, standing: { readonly status: 'in_progress' | 'blocked'; readonly words: string }): void {
+    const said = `${standing.status}\n${standing.words}`;
+    if (!deps.storage.reportStatus || lastStanding.get(contractId) === said) return;
+    lastStanding.set(contractId, said);
+    const write = deps.storage.reportStatus(key, standing.status, standing.words, active.get(key.attemptId)?.record).then((said) => {
+      // Not said (the run's receipt is not stored yet): the next change of the run says it.
+      if (!said && lastStanding.get(contractId) === `${standing.status}\n${standing.words}`) lastStanding.delete(contractId);
+    }, (error: unknown) => {
+      lastStanding.delete(contractId);
+      logger.warn('Where a piece of work stands was not written to the ledger', { attemptId: key.attemptId, error: summarizeError(error) });
+    });
+    standingWrites.add(write); void write.finally(() => standingWrites.delete(write));
+  }
+  /** Runs the owner stopped by his answer to a question ("stop", "cancel"), already written to the ledger as stopped. */
+  const answeredStops = new Set<string>();
+  function sayStanding(contract: ContractView): void {
+    const key = contract.durableAdmission?.key; if (!key) return;
+    // Stopped by the owner's answer (not through cancel here): the ledger says stopped too, as for his stop in Work.
+    if (contract.status === 'cancelled' && contract.failureKind === 'owner-rejected' && deps.storage.reportStopped && !answeredStops.has(contract.id)) {
+      answeredStops.add(contract.id);
+      const write = deps.storage.reportStopped(key, contract.error ?? 'Stopped by you.', active.get(key.attemptId)?.record).catch((error: unknown) => {
+        answeredStops.delete(contract.id);
+        logger.warn('A piece of work the owner stopped by his answer was not written to the ledger as stopped', { attemptId: key.attemptId, error: summarizeError(error) });
+      });
+      standingWrites.add(write); void write.finally(() => standingWrites.delete(write));
+      return;
+    }
+    const standing = standingOf(contract);
+    if (standing) writeStanding(key, contract.id, standing);
+  }
   const continuations = createNativeCiContinuationHost({ projectId: deps.projectId, projectRoot, storage: deps.storage,
     scopes: deps.scopes, ...(deps.continuationGrants ? { grants: deps.continuationGrants } : {}),
     ...(deps.continuationPolicy ? { policy: deps.continuationPolicy } : {}), signal: lifetime.signal,
@@ -669,7 +743,16 @@ export function createNativeWorkExecutionHost(deps: {
       const binding = current.record.request.binding;
       return { authorityId: binding.authorityId, authorityRevision: binding.authorityRevision, scopeId: binding.scopeId, scopeRevision: binding.scopeRevision };
     } } },
-    attachRunner(value) { assertOpen(); if (runner) throw new NativeWorkExecutionError('conflict'); runner = value; },
+    attachRunner(value) {
+      assertOpen(); if (runner) throw new NativeWorkExecutionError('conflict'); runner = value;
+      // Ledger and Work say the same thing: every change of a live run says in the ledger where it stands.
+      stopWatching = value.on?.((event) => {
+        const contractId = (event as { readonly contractId?: unknown }).contractId;
+        if (closed || typeof contractId !== 'string') return;
+        const contract = value.get(contractId);
+        if (contract) sayStanding(contract);
+      });
+    },
     start(input, authority, options = {}) {
       const target = captureTarget(input);
       return ownedDelivery(target, authority, options.signal, async (delivery, signal) => {
@@ -685,7 +768,13 @@ export function createNativeWorkExecutionHost(deps: {
             const work = deps.storage.currentByAttempt(target.attemptId).ledger.works.find((item) => item.id === target.workId);
             if (work) {
               const gate = deps.plans.gate({ id: work.id, goal: work.goal, criteria: work.criteria });
-              if (gate.kind === 'waiting') throw new NativeWorkExecutionError('plan-waiting');
+              if (gate.kind === 'waiting') {
+                // Work says "its plan waits for you"; so does the ledger (no run of this attempt exists yet).
+                await deps.storage.reportBeforeRun?.(target.workId, target.attemptId, 'blocked', PLAN_WAITING_WORDS).catch((error: unknown) => {
+                  logger.warn('A waiting plan was not written to the ledger', { attemptId: target.attemptId, error: summarizeError(error) });
+                });
+                throw new NativeWorkExecutionError('plan-waiting');
+              }
               draftPlan = gate.draftPlan;
             }
           }
@@ -713,7 +802,7 @@ export function createNativeWorkExecutionHost(deps: {
       const work = current.ledger.works.find(item => item.id === workId);
       const attempt = current.ledger.attempts.find(item => item.id === attemptId && item.workId === workId);
       const delivery = deliveries.get(deliveryIdentity(intent.target));
-      return { kind: 'intent', intent, currentTarget: work && attempt ? { workId, attemptId, workRevision: work.revision, criteriaRevision: work.criteriaRevision, attemptRevision: attempt.revision } : null,
+      return { kind: 'intent', intent, currentTarget: work && attempt ? boundTargetOf(current.ledger, work, attempt) : null,
         currentAttempt: !!work && !!attempt && work.currentAttemptId === attemptId && attempt.state === 'active',
         recovery: intent.state === 'cancelled' ? 'cancelled' : intent.state === 'admitting' && delivery?.generation === intent.generation ? 'pending' : 'required' };
     },
@@ -746,8 +835,23 @@ export function createNativeWorkExecutionHost(deps: {
       });
     },
     settle,
+    async planDropped(workId, attemptId) {
+      if (closed) return;
+      await deps.storage.reportBeforeRun?.(workId, attemptId, 'in_progress', 'Not started; its plan was thrown away.').catch((error: unknown) => {
+        logger.warn('A thrown-away plan was not written to the ledger', { attemptId, error: summarizeError(error) });
+      });
+    },
     close() {
-      if (closing) return closing; closed = true; const continuationDrain = continuations.close(); lifetime.abort();
+      if (closing) return closing;
+      // Every run still going is cut off by this stop: the ledger says so, as Work will at the next start
+      // ("interrupted"); a run waiting for the owner already says so and stays as it is. Written before `closed`, so
+      // the store takes it; nothing said after this point (the agents ending with the daemon) moves it back.
+      stopWatching?.(); stopWatching = undefined;
+      for (const contract of runner?.list({ includeTerminal: false, includeInputSnapshot: false }) ?? []) {
+        const key = contract.durableAdmission?.key;
+        if (key && standingOf(contract)?.status === 'in_progress') writeStanding(key, contract.id, { status: 'blocked', words: CUT_OFF_WORDS });
+      }
+      closed = true; const continuationDrain = continuations.close(); lifetime.abort();
       // A restart of the daemon never fails or stops a piece of work: nothing of it is cancelled here. The runner's own
       // disposal keeps a restart checkpoint of every run (contract/runner.ts `dispose`); the parts that were running end
       // with the daemon, and at the next start the work stands as interrupted (routes/work.ts) until the person goes
@@ -756,7 +860,7 @@ export function createNativeWorkExecutionHost(deps: {
       // A settlement waits for its run to end, which it no longer does here: it is not waited for (the lifetime's
       // abort ends it), and the next start settles the work once it is done.
       const settling = new Set<Promise<unknown>>([...settlements.values()].map(entry => entry.promise));
-      closing = Promise.allSettled([continuationDrain, ...[...pending].filter(promise => !settling.has(promise))]).then(() => { active.clear(); }); return closing;
+      closing = Promise.allSettled([continuationDrain, ...standingWrites, ...[...pending].filter(promise => !settling.has(promise))]).then(() => { active.clear(); }); return closing;
     },
   };
   return host;

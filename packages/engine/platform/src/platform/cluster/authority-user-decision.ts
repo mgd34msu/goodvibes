@@ -40,7 +40,7 @@ export async function decideUserAccount(file: AuthorityRecordFile, username: str
       throw new UserAccountDecisionError(`this machine holds no account of user "${username}" of its own; run the command on the machine whose account the group should keep`);
     }
     if (decision === 'accept' && others.length !== 1) {
-      throw new UserAccountDecisionError(`user "${username}" is held by ${others.length} other accounts, so "the group's account" names none; run \`cluster publish user:${username}\` on the machine whose account the group should keep`);
+      throw new UserAccountDecisionError(`user "${username}" is held by ${others.length} other accounts, so "the group's account" names none; on the machine whose account the group should keep, share it with the group (Devices and network, Machine group, share a setting: user:${username})`);
     }
     const revoke = decision === 'publish' ? others : mine;
     const reason = decision === 'publish' ? 'another machine\'s account of this name became the group\'s' : 'this machine took the group\'s account of this name';

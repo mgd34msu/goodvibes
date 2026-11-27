@@ -16,5 +16,5 @@ export function registerDelegationRuntimeCommands(registry: CommandRegistry): vo
   registerAgentsCommand<CommandContext>(registry, {
     contracts: { unavailable: TERMINAL_APP_ONLY },
     team: { unavailable: TERMINAL_APP_ONLY },
-  }, capabilityBinding);
+  }, capabilityBinding, 'work/coding-agents');
 }

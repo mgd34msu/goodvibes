@@ -1,0 +1,362 @@
+import { readExecutionMode } from '../permissions/execution-mode.ts';
+// Sub-builders extracted out of the single ~516-line `buildAgentRuntimeSnapshot`
+// function in runtime-snapshot.ts (per the design ruling's
+// giant-single-function-assembler verdict: "splitting into cohesive sub-builders...
+// would reduce single-function size without changing behavior"). Each function here
+// is the verbatim body of one of that function's local IIFEs or local variable blocks,
+// moved unchanged so the top-level snapshot builder now composes named sub-builders
+// instead of assembling everything inline. No behavior changes: same context reads,
+// same try/catch fallbacks, same field shapes.
+import { listAvailableSubscriptionProviders } from '@goodvibes/engine/platform/platform/config';
+import type { ArtifactDescriptor } from '@goodvibes/engine/platform/platform/artifacts';
+import type { CommandContext } from './command-registry.ts';
+import { AgentNoteRegistry } from '@goodvibes/engine/terminal-shell/agent-turn/note-registry';
+import { AgentPersonaRegistry } from '@goodvibes/engine/terminal-shell/agent-turn/persona-registry';
+import { AgentResearchRunRegistry } from '@goodvibes/engine/terminal-shell/agent-turn/research-run-registry';
+import { AgentSkillRegistry } from '@goodvibes/engine/terminal-shell/agent-turn/skill-registry';
+import { RoutineScheduleReceiptStore } from '@goodvibes/engine/terminal-shell/agent-turn/routine-schedules';
+import {
+  getAgentRuntimeProfilesRoot,
+  listAgentRuntimeProfiles,
+  listAgentRuntimeProfileTemplates,
+  readAgentRuntimeProfileSelection,
+} from '../agent/runtime-profile.ts';
+import { GOODVIBES_AGENT_PAIRING_SURFACE } from '../config/surface.ts';
+import { readConnectedHostOperatorToken, type ConnectedHostOperatorToken } from '@goodvibes/engine/terminal-shell/agent-turn/connected-host-auth';
+import { summarizePersonaItem, summarizeNoteItem, summarizeResearchRunItem, summarizeRoutineScheduleReceipt, summarizeSkillBundleItem, summarizeSkillItem } from './local-library-snapshot.ts';
+import { isReviewerHandoffArtifact, summarizeReviewerHandoffArtifact } from './review-packet-utils.ts';
+import { readConfigBoolean, readConfigNumber, readConfigString } from './runtime-snapshot-config.ts';
+
+/**
+ * Store ids whose read failed, with the reason. A snapshot builder that cannot
+ * read its store reports it here instead of passing off an empty default as the
+ * real contents, so the workspace can say "unreadable" rather than "none yet".
+ */
+export type AgentReadFailures = Map<string, string>;
+
+function recordReadFailure(failures: AgentReadFailures | undefined, id: string, error: unknown): void {
+  failures?.set(id, error instanceof Error ? error.message : String(error));
+}
+
+export function buildAgentCurrentModelSnapshot(context: CommandContext): ReturnType<NonNullable<NonNullable<CommandContext['provider']>['providerRegistry']>['getCurrentModel']> | null | undefined {
+  try {
+    return context.provider?.providerRegistry?.getCurrentModel?.();
+  } catch {
+    return null;
+  }
+}
+
+export function buildAgentSessionMemoryCount(context: CommandContext): number {
+  try {
+    return context.session?.sessionMemoryStore?.list?.().length ?? 0;
+  } catch {
+    return 0;
+  }
+}
+
+export function buildAgentPersonaSnapshot(context: CommandContext, failures?: AgentReadFailures) {
+  try {
+    const shellPaths = context.workspace?.shellPaths;
+    if (!shellPaths) return { count: 0, activeName: '(none)', items: [] };
+    const snapshot = AgentPersonaRegistry.fromShellPaths(shellPaths).snapshot();
+    return {
+      count: snapshot.personas.length,
+      activeName: snapshot.activePersona?.name ?? '(none)',
+      items: snapshot.personas.map((persona) => summarizePersonaItem(persona, snapshot.activePersonaId)),
+    };
+  } catch (error) {
+    recordReadFailure(failures, 'personas', error);
+    return { count: 0, activeName: '(unavailable)', items: [] };
+  }
+}
+
+export function buildAgentNoteSnapshot(context: CommandContext, failures?: AgentReadFailures) {
+  try {
+    const shellPaths = context.workspace?.shellPaths;
+    if (!shellPaths) return { count: 0, reviewQueueCount: 0, items: [] };
+    const snapshot = AgentNoteRegistry.fromShellPaths(shellPaths).snapshot();
+    return {
+      count: snapshot.notes.length,
+      reviewQueueCount: snapshot.reviewQueue.length,
+      items: snapshot.notes.map(summarizeNoteItem),
+    };
+  } catch (error) {
+    recordReadFailure(failures, 'notes', error);
+    return { count: 0, reviewQueueCount: 0, items: [] };
+  }
+}
+
+export function buildAgentSkillSnapshot(context: CommandContext, failures?: AgentReadFailures) {
+  try {
+    const shellPaths = context.workspace?.shellPaths;
+    if (!shellPaths) return { count: 0, enabled: 0, active: 0, bundleCount: 0, enabledBundleCount: 0, items: [], bundleItems: [] };
+    const snapshot = AgentSkillRegistry.fromShellPaths(shellPaths).snapshot();
+    return {
+      count: snapshot.skills.length,
+      enabled: snapshot.enabledSkills.length,
+      active: snapshot.activeSkills.length,
+      bundleCount: snapshot.bundles.length,
+      enabledBundleCount: snapshot.enabledBundles.length,
+      items: snapshot.skills.map(summarizeSkillItem),
+      bundleItems: snapshot.bundles.map((bundle) => summarizeSkillBundleItem(bundle, snapshot.skills)),
+    };
+  } catch (error) {
+    recordReadFailure(failures, 'skills', error);
+    return { count: 0, enabled: 0, active: 0, bundleCount: 0, enabledBundleCount: 0, items: [], bundleItems: [] };
+  }
+}
+
+export function buildAgentRoutineScheduleReceiptsSnapshot(context: CommandContext, failures?: AgentReadFailures) {
+  try {
+    const shellPaths = context.workspace?.shellPaths;
+    if (!shellPaths) return { count: 0, successful: 0, failed: 0, latest: null };
+    const receipts = RoutineScheduleReceiptStore.fromShellPaths(shellPaths).snapshot().receipts;
+    return {
+      count: receipts.length,
+      successful: receipts.filter((receipt) => receipt.status === 'created').length,
+      failed: receipts.filter((receipt) => receipt.status === 'failed').length,
+      latest: receipts[0] ? summarizeRoutineScheduleReceipt(receipts[0]) : null,
+    };
+  } catch (error) {
+    recordReadFailure(failures, 'routine-receipts', error);
+    return { count: 0, successful: 0, failed: 0, latest: null };
+  }
+}
+
+export function buildAgentResearchRunSnapshot(context: CommandContext, failures?: AgentReadFailures) {
+  try {
+    const shellPaths = context.workspace?.shellPaths;
+    if (!shellPaths) return { count: 0, planned: 0, running: 0, paused: 0, blocked: 0, terminal: 0, items: [] };
+    const snapshot = AgentResearchRunRegistry.fromShellPaths(shellPaths).snapshot();
+    const actionable = [
+      ...snapshot.blocked,
+      ...snapshot.running,
+      ...snapshot.paused,
+      ...snapshot.planned,
+      ...snapshot.failed,
+      ...snapshot.completed,
+      ...snapshot.cancelled,
+    ];
+    return {
+      count: snapshot.runs.length,
+      planned: snapshot.planned.length,
+      running: snapshot.running.length,
+      paused: snapshot.paused.length,
+      blocked: snapshot.blocked.length,
+      terminal: snapshot.cancelled.length + snapshot.completed.length + snapshot.failed.length,
+      items: actionable.slice(0, 8).map(summarizeResearchRunItem),
+    };
+  } catch (error) {
+    recordReadFailure(failures, 'research-runs', error);
+    return { count: 0, planned: 0, running: 0, paused: 0, blocked: 0, terminal: 0, items: [] };
+  }
+}
+
+/** The artifact list is a window onto the newest artifacts, not the whole store. */
+export const AGENT_ARTIFACT_LIST_LIMIT = 100;
+
+export function buildAgentArtifactListSnapshot(context: CommandContext, failures?: AgentReadFailures) {
+  try {
+    const store = context.platform?.artifactStore;
+    const list = store?.list;
+    const items = [...(list?.call(store, AGENT_ARTIFACT_LIST_LIMIT) ?? [])];
+    return {
+      available: Boolean(list),
+      items,
+      // A full page means older artifacts may exist that this snapshot never saw.
+      truncated: items.length >= AGENT_ARTIFACT_LIST_LIMIT,
+    };
+  } catch (error) {
+    recordReadFailure(failures, 'artifacts', error);
+    return { available: false, items: [], truncated: false };
+  }
+}
+
+/** Looks one artifact up by id, so a reference older than the list window is not reported missing. */
+export function buildAgentArtifactResolver(context: CommandContext): (artifactId: string) => ArtifactDescriptor | null {
+  return (artifactId) => {
+    try {
+      return context.platform?.artifactStore?.get?.(artifactId) ?? null;
+    } catch {
+      return null;
+    }
+  };
+}
+
+export function buildAgentRecentReviewerHandoffsSnapshot(artifactItems: ReturnType<typeof buildAgentArtifactListSnapshot>['items']) {
+  try {
+    const handoffs = artifactItems
+      .filter(isReviewerHandoffArtifact)
+      .sort((left, right) => right.createdAt - left.createdAt);
+    return {
+      count: handoffs.length,
+      items: handoffs.slice(0, 6).map(summarizeReviewerHandoffArtifact),
+    };
+  } catch {
+    return { count: 0, items: [] };
+  }
+}
+
+export function buildAgentRuntimeProfilesSnapshot(profileBaseHome: string) {
+  const runtimeProfiles = (() => {
+    try {
+      return listAgentRuntimeProfiles(profileBaseHome);
+    } catch {
+      return [];
+    }
+  })();
+  const runtimeStarterTemplates = (() => {
+    try {
+      return listAgentRuntimeProfileTemplates(profileBaseHome);
+    } catch {
+      return [];
+    }
+  })();
+  const selectedRuntimeProfile = (() => {
+    try {
+      return readAgentRuntimeProfileSelection(profileBaseHome);
+    } catch {
+      return null;
+    }
+  })();
+  return { runtimeProfiles, runtimeStarterTemplates, selectedRuntimeProfile, runtimeProfileRoot: getAgentRuntimeProfilesRoot(profileBaseHome) };
+}
+
+export function buildAgentVoiceMediaProvidersSnapshot(context: CommandContext) {
+  const voiceProviders = (() => {
+    try {
+      return context.platform?.voiceProviderRegistry?.list?.() ?? [];
+    } catch {
+      return [];
+    }
+  })();
+  const mediaProviders = (() => {
+    try {
+      return context.platform?.mediaProviderRegistry?.list?.() ?? [];
+    } catch {
+      return [];
+    }
+  })();
+  return { voiceProviders, mediaProviders };
+}
+
+export function buildAgentMcpServerSnapshot(context: CommandContext) {
+  try {
+    const servers = context.clients?.mcpApi?.listServerSecurity?.() ?? context.extensions?.mcpRegistry?.listServerSecurity?.() ?? [];
+    return {
+      serverCount: servers.length,
+      connectedCount: servers.filter((server) => server.connected).length,
+      quarantinedCount: servers.filter((server) => server.schemaFreshness === 'quarantined').length,
+      allowAllCount: servers.filter((server) => server.trustMode === 'allow-all').length,
+    };
+  } catch {
+    return {
+      serverCount: 0,
+      connectedCount: 0,
+      quarantinedCount: 0,
+      allowAllCount: 0,
+    };
+  }
+}
+
+export function buildAgentCompanionAccessSnapshot(context: CommandContext, runtimeBaseUrl: string) {
+  const homeDirectory = context.workspace?.shellPaths?.homeDirectory ?? '';
+  const tokenRecord: Pick<ConnectedHostOperatorToken, 'path' | 'present' | 'token' | 'error'> = homeDirectory.length > 0
+    ? readConnectedHostOperatorToken(homeDirectory)
+    : { path: '(Agent home unavailable)', present: false, token: null };
+  const pairingReady = Boolean(tokenRecord.token);
+  const nextStep = tokenRecord.error
+    ? 'Repair the connected-host operator token file through the owning GoodVibes host, then press Pair something in Devices and network again'
+    : pairingReady
+      ? 'In Devices and network press Pair something, A phone or another device (a name is optional): it mints a named, revocable device token on the connected host and shows its link and QR code to scan.'
+      : 'Pair or provision connected-host access through the owning GoodVibes host, then press Pair something in Devices and network again';
+  return {
+    surface: GOODVIBES_AGENT_PAIRING_SURFACE,
+    hostUrl: runtimeBaseUrl,
+    tokenPath: tokenRecord.path,
+    tokenPresent: tokenRecord.present,
+    tokenReadable: Boolean(tokenRecord.token),
+    tokenError: tokenRecord.error ?? null,
+    pairingReady,
+    qrCommand: 'Devices and network, Pair something, A phone or another device',
+    nextStep,
+  } as const;
+}
+
+export function buildAgentSubscriptionSnapshot(context: CommandContext) {
+  try {
+    const manager = context.platform?.subscriptionManager;
+    const services = context.platform?.serviceRegistry;
+    const active = manager?.list?.().length ?? 0;
+    const pending = manager?.listPending?.().length ?? 0;
+    const available = services ? listAvailableSubscriptionProviders(services.getAll()).length : 0;
+    return { active, pending, available };
+  } catch {
+    return { active: 0, pending: 0, available: 0 };
+  }
+}
+
+export interface AgentConfigSettingsSnapshot {
+  readonly embeddingProvider: string;
+  readonly reasoningEffort: string;
+  readonly helperEnabled: boolean;
+  readonly toolLlmEnabled: boolean;
+  readonly hitlMode: string;
+  readonly guidanceMode: string;
+  readonly saveHistory: boolean;
+  readonly autoApprove: boolean;
+  readonly autoCompactThreshold: number;
+  readonly staleContextWarnings: boolean;
+  readonly showThinking: boolean;
+  readonly showReasoningSummary: boolean;
+  readonly theme: string;
+  readonly stream: boolean;
+  readonly lineNumbers: string;
+  readonly operationalMessages: string;
+  readonly systemMessages: string;
+  readonly permissionMode: string;
+  readonly artifactMaxBytes: number;
+  readonly rawPromptTelemetry: boolean;
+  readonly browserPwaEnabled: boolean;
+  readonly voiceSurfaceEnabled: boolean;
+}
+
+function readPermissionMode(context: CommandContext, failures: AgentReadFailures | undefined): string {
+  try {
+    return (context.platform?.configManager ? readExecutionMode(context.platform.configManager) : undefined) ?? 'unavailable';
+  } catch (error) {
+    recordReadFailure(failures, 'config:permissions.mode', error);
+    return 'unavailable';
+  }
+}
+
+/** The flat sequence of config reads driving most of the runtime snapshot's settings fields. */
+export function buildAgentConfigSettingsSnapshot(context: CommandContext, failures?: AgentReadFailures): AgentConfigSettingsSnapshot {
+  const str = (key: string, fallback: string) => readConfigString(context, key, fallback, failures);
+  const num = (key: string, fallback: number) => readConfigNumber(context, key, fallback, failures);
+  const bool = (key: string, fallback: boolean) => readConfigBoolean(context, key, fallback, failures);
+  return {
+    embeddingProvider: str('provider.embeddingProvider', '(provider default)'),
+    reasoningEffort: str('provider.reasoningEffort', '(default)'),
+    helperEnabled: bool('helper.enabled', false),
+    toolLlmEnabled: bool('tools.llmEnabled', false),
+    hitlMode: str('behavior.hitlMode', '(default)'),
+    guidanceMode: str('behavior.guidanceMode', '(default)'),
+    saveHistory: bool('behavior.saveHistory', true),
+    autoApprove: bool('behavior.autoApprove', false),
+    autoCompactThreshold: num('behavior.autoCompactThreshold', 0),
+    staleContextWarnings: bool('behavior.staleContextWarnings', false),
+    showThinking: bool('display.showThinking', false),
+    showReasoningSummary: bool('display.showReasoningSummary', false),
+    theme: str('display.theme', '(default)'),
+    stream: bool('display.stream', true),
+    lineNumbers: str('display.lineNumbers', '(default)'),
+    operationalMessages: str('ui.operationalMessages', '(default)'),
+    systemMessages: str('ui.systemMessages', '(default)'),
+    permissionMode: readPermissionMode(context, failures),
+    artifactMaxBytes: num('storage.artifacts.maxBytes', 512 * 1024 * 1024),
+    rawPromptTelemetry: bool('telemetry.includeRawPrompts', false),
+    browserPwaEnabled: bool('web.enabled', false),
+    voiceSurfaceEnabled: bool('ui.voiceEnabled', false),
+  };
+}

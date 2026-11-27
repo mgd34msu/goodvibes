@@ -249,6 +249,8 @@ const GROUP_SCHEMA = objectSchema({
     scope: enumSchema(['unit', 'group', 'deliverable']),
     targetId: STRING_SCHEMA,
     criterionIds: STRING_LIST_SCHEMA,
+    // Present only on a repair of a step's conflicting merge: that step's branch and the files both sides changed.
+    conflict: objectSchema({ branch: STRING_SCHEMA, files: STRING_LIST_SCHEMA }, ['branch', 'files']),
   }, ['scope', 'targetId', 'criterionIds']),
   dependsOn: STRING_LIST_SCHEMA,
   criteria: arraySchema(CRITERION_SCHEMA),

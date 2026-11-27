@@ -92,7 +92,7 @@ export const featureControlSettings: ConfigSettingRow[] = [
     appliesWhen: 'restart',
     type: 'boolean',
     description:
-      'The unified RuntimeTask interface used for task tracking across all subsystems (exec, agent, acp, scheduler, daemon, mcp, plugin, integration), including the /tasks command and operator interventions (cancel/pause/resume/retry). Restart to apply. Default on. Set false to turn the runtime task manager off.',
+      'The unified RuntimeTask interface used for task tracking across all subsystems (exec, agent, acp, scheduler, daemon, mcp, plugin, integration), including the tasks of the Work place and operator interventions (cancel/pause/resume/retry). Restart to apply. Default on. Set false to turn the runtime task manager off.',
   },
   {
     key: 'runtime.pluginLifecycle',

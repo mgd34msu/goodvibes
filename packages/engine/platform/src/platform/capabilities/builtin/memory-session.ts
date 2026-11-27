@@ -13,6 +13,7 @@ import {
   type MemoryProjectionProposal,
 } from '../../state/memory-file-projection.js';
 import type { MemoryRecord, MemoryScope } from '../../state/memory-store.js';
+import { heldPath } from '../held-paths.js';
 import { CapabilityRefusal, type CapabilityDefinition, type InputDescription, type ListName } from '../types.js';
 
 /** The most records one read takes; a read that reaches it is not the whole store. */
@@ -58,7 +59,8 @@ async function allRecords(services: NonNullable<MemorySessionCapabilityServices[
 /** What your file edits would change in memory, the files whose record is gone, and the files that cannot be read. */
 export async function memoryFileProposals(services: NonNullable<MemorySessionCapabilityServices['memorySession']>, dir: string) {
   const { records, complete } = await allRecords(services);
-  const files = readProjectedMemoryFiles(dir);
+  // A folder the caller named is worked on in place, through its held handle (capabilities/held-paths.ts).
+  const files = readProjectedMemoryFiles(dir, heldPath);
   return {
     proposals: diffProjectionToProposals(records, files),
     orphans: findOrphanedProjectionFiles(records, files, { complete }),
@@ -111,7 +113,7 @@ export const MEMORY_CAPTURE: SessionDefinition = {
 
 export const MEMORY_SYNC_FILES: SessionDefinition = {
   capability: session('memory.sync-files', 'safe'),
-  actionId: 'sync-files', label: 'Write memory as files', word: 'sync-files', inputs: [PROJECTION_DIR],
+  actionId: 'sync-files', label: 'Write memory as files', word: 'sync-files', inputs: [{ ...PROJECTION_DIR, file: 'written' }],
   sentence: 'Each project and team record is written as a file in {dir} and committed in that folder\'s own repository, until you change it; a file you edited is kept as it is.',
   done: '',
   touches: 'this-machine', lasts: 'kept', risk: 'none', example: { dir: 'notes/memory' },
@@ -121,7 +123,7 @@ export const MEMORY_SYNC_FILES: SessionDefinition = {
     const { records, complete } = await allRecords(memory);
     let report;
     try {
-      report = projectMemoryToFiles(records, dir, { git: createMemoryProjectionGit(), complete });
+      report = projectMemoryToFiles(records, dir, { git: createMemoryProjectionGit(), complete, place: heldPath });
     } catch (error) {
       throw new CapabilityRefusal(`Memory files were not written: ${error instanceof Error ? error.message : String(error)}`);
     }

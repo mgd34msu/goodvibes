@@ -14,6 +14,7 @@
 import { homedir } from 'node:os';
 import { isAbsolute, relative } from 'node:path';
 import { CapabilityRefusal, REPLACED_DONE, type CapabilityDefinition, type FixedChoice, type InputDescription, type ListName } from '../types.js';
+import { callerPathOf } from '../path-inputs.js';
 import type { LiveConversation, UndoServices } from './conversation.js';
 import type { SessionsCapabilityServices } from './sessions.js';
 
@@ -299,7 +300,7 @@ export const SESSION_SAVE_FILE: CapabilityDefinition<RecordServices> = {
       { value: 'markdown', label: 'Markdown' }, { value: 'text', label: 'Plain text' },
       { value: 'html', label: 'A web page', help: 'Self-contained, with code highlighted' }, { value: 'json', label: 'JSON', help: 'For programs' },
     ], required: { default: 'markdown', defaultMeans: 'Markdown' }, typed: { position: 1 } },
-    { id: 'path', label: 'File', help: 'Where to write it', kind: 'path', freeTextReason: 'a file path', required: { default: '', defaultMeans: 'a new file named for the time' }, typed: { position: 2 } },
+    { id: 'path', label: 'File', help: 'Where to write it', kind: 'path', file: 'written', freeTextReason: 'a file path', required: { default: '', defaultMeans: 'a new file named for the time' }, typed: { position: 2 } },
     { id: 'redact', label: 'Keys and paths', help: 'API keys, tokens and your home path and login name', kind: 'choice', choices: [
       { value: 'hide', label: 'Hide them' }, { value: 'keep', label: 'Keep them as they are' },
     ], required: { default: 'hide', defaultMeans: 'hide them' }, typed: { flag: '--keep-secrets', switchOn: 'keep' } },
@@ -312,13 +313,15 @@ export const SESSION_SAVE_FILE: CapabilityDefinition<RecordServices> = {
   ],
   sentence: 'This conversation (the chat) is exported to a file on this machine, as Markdown, plain text, a web page or JSON; the answer says where it is.', done: '',
   touches: 'this-machine', lasts: 'kept', risk: 'none', example: { format: 'html', path: 'notes/session.html' },
-  async run(values, services) {
+  async run(values, services, caller) {
     const record = need(services.record, 'Saving this conversation as a file');
-    if (values.path && values.replace !== 'yes' && record.fileExists(values.path)) {
+    // Placed by the one rule for every capability's path (capabilities/path-inputs.ts).
+    const path = values.path ? callerPathOf(caller, values.path, { personPathAsTyped: true }) : '';
+    if (path && values.replace !== 'yes' && record.fileExists(path)) {
       throw new CapabilityRefusal(`${values.path} already exists; nothing was written.`, 'Choose "Write over it" for "If the file exists", or another file');
     }
     const said = await record.saveFile({
-      format: (values.format || 'markdown') as 'markdown' | 'text' | 'html' | 'json', path: values.path ?? '',
+      format: (values.format || 'markdown') as 'markdown' | 'text' | 'html' | 'json', path,
       redact: values.redact !== 'keep', open: values.open === 'open', copy: values.open === 'copy',
     });
     // A file in the project is named from the project's folder (`exports/session.md`): a whole path is one long run a
@@ -479,8 +482,9 @@ export const CONVERSATION_IMAGE: CapabilityDefinition<ComposerServices> = {
   ],
   sentence: 'The image (a screenshot, picture or photo) {path} is sent to the model with your message, as a new turn.', done: '',
   touches: 'another-machine', lasts: 'not-a-change', risk: 'none', example: { path: 'screenshots/error.png', message: 'what is wrong here?' },
-  async run(values, services) {
-    return { text: await need(services.composer, 'The composer').attachImage(values.path!, values.message ?? ''), data: { path: values.path } };
+  async run(values, services, caller) {
+    // Placed by the one rule for every capability's path (capabilities/path-inputs.ts).
+    return { text: await need(services.composer, 'The composer').attachImage(callerPathOf(caller, values.path!, { personPathAsTyped: true }), values.message ?? ''), data: { path: values.path } };
   },
 };
 

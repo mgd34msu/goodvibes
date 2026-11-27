@@ -6,7 +6,7 @@
  * Agent sees every home, starter and choice made here.
  */
 import { REPLACED_DONE, type InputDescription, type ListName } from '../types.js';
-import { fileInProjectCheck, fixedInput, pickedInput, storeCapability, storeRead, wordsInput } from './agent-stores.js';
+import { fixedInput, pickedInput, storeCapability, storeRead, wordsInput } from './agent-stores.js';
 
 export const AGENT_HOMES_LIST = 'agent-home.homes' as ListName;
 export const AGENT_STARTERS_LIST = 'agent-home.starters' as ListName;
@@ -98,21 +98,20 @@ export const AGENT_HOMES_GUIDE = storeRead({
 
 export const AGENT_HOMES_EXPORT_STARTER = storeCapability({
   id: 'agent-home.export-starter', actionId: 'export-starter', label: 'Save a starter template to a file', word: 'export-starter',
-  inputs: [STARTER, PATH, VIBE, fixedInput({
+  inputs: [STARTER, { ...PATH, file: 'written' }, VIBE, fixedInput({
     id: 'overwrite', label: 'If the file exists', help: 'Keep it, or write over it',
     choices: [{ value: 'no', label: 'Keep it and stop' }, { value: 'yes', label: 'Write over it', risk: 'cannot-be-undone', riskDone: REPLACED_DONE }],
     typed: { flag: '--overwrite', switchOn: 'yes' }, optional: { default: 'no', means: 'keep it and stop' },
   })],
+  // A file outside the project, named by anyone but the person, is refused at every door before the owner is asked
+  // (capabilities/path-inputs.ts), and again where the file is written.
   sentence: 'Starter {starter} is written to {path} to change and add back, until you change it.', example: { starter: 'research', path: 'agent-starter.json' },
-  // A file outside the project, named by anyone but the person, is refused before the owner is asked.
-  check: fileInProjectCheck('path', 'write'),
 });
 
 export const AGENT_HOMES_IMPORT_STARTER = storeCapability({
   id: 'agent-home.import-starter', actionId: 'import-starter', label: 'Add a starter template from a file', word: 'import-starter',
   inputs: [{ ...PATH, typed: { position: 1 } }, REPLACE_STARTER],
   sentence: 'The starter in {path} is added to your starter templates, until you change it.', example: { path: 'agent-starter.json' },
-  check: fileInProjectCheck('path', 'read'),
 });
 
 export const AGENT_HOMES_STARTER_LEARNED = storeCapability({

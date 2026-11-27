@@ -24,7 +24,7 @@ export function deriveRemoteRecoveryActions(
       id: 'review-health',
       label: 'What went wrong',
       command: 'System, Health: check one area, Remote runners',
-      reason: connection?.lastError ?? contract?.transport?.lastError ?? 'Remote transport reported an error.',
+      reason: connection?.lastError ?? contract?.transport?.lastError ?? 'the connection to the runner reported an error',
     });
   }
   // Lost for good (its agent stopped answering or went away): nothing brings this one back, a new one takes the task up.
@@ -39,7 +39,7 @@ export function deriveRemoteRecoveryActions(
   if (heartbeat?.status === 'stale') {
     actions.push({
       id: 'inspect',
-      label: 'Inspect the remote connection',
+      label: 'Look at its connection',
       // The Work place opens on the runners, where the connection is one key away.
       command: `/work`,
       reason: heartbeat.detail,
@@ -48,16 +48,17 @@ export function deriveRemoteRecoveryActions(
   if (taskId) {
     actions.push({
       id: 'task',
-      label: 'Show the bound task',
-      command: `/tasks show ${taskId}`,
-      reason: `Remote session is still bound to task ${taskId}.`,
+      label: 'Look at its task',
+      // The task's own row in the Work place (Tasks here or Daemon tasks); typed, `/work task` shows it.
+      command: `/work task ${taskId}`,
+      reason: 'the runner is still working on a task; its row in Tasks here or Daemon tasks, in the Work place, says how far it got',
     });
   }
   actions.push({
     id: 'remote-panel',
     label: 'Open the runners in the Work place',
     command: '/work',
-    reason: 'Inspect transport, runner contracts, and artifacts together.',
+    reason: 'its connection, what it is held to and what it handed back are side by side there',
   });
 
   return actions;

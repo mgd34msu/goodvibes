@@ -21,6 +21,7 @@ import { mcpResultIngest } from './mcp/result-ingest.js';
 import { deferUntrustedIngests, getProcessUntrustedContentLedger, type UntrustedIngest } from '../security/untrusted-content.js';
 import { type JudgmentPort } from '@goodvibes/judgment';
 import { captureOwnedJson, snapshotJudgmentInput } from '../gate/judgment-input.js';
+import type { PermissionCheckResult } from '../permissions/types.js';
 import { assertAutonomousConfigTransition, completeAutonomousConfigTransition, bindAutonomousNestedAdmission, readAutonomousSettingsPresentation, readAutonomousWorkspaceConstraint, readAutonomousEffectConstraint, readAutonomousNestedOwner, consumeAutonomousAdmission, type AutonomousNestedOwner, type AutonomousPermissionAdmission, type PermissionManager } from '../permissions/manager.js';
 import type { AutonomousChoiceProjection } from '../permissions/autonomous-input-projection.js';
 import { captureAutonomousSource } from '../permissions/autonomous.js';
@@ -28,11 +29,7 @@ import { toolAskWords } from '../permissions/tool-ask-words.js';
 import { buildDenialErrorMessage, toolDecisionOf } from '../permissions/denial.js';
 import { withAdmittedToolDecision } from '../gate/admitted-decision.js';
 import type { PreparedConfigMutationReceipt } from '../config/manager.js';
-import type { PreparedSecretImportTransition } from '../config/secrets.js';
-import type { PreparedSubscriptionImportTransition } from '../config/subscriptions.js';
 import { assertPreparedConfigWriteRoute } from '../config/settings-precondition-client.js';
-import { assertRemoteSettingsImportPrecondition, applyRemoteSettingsImportPrecondition,
-  assertCompletedRemoteSettingsImportPrecondition } from '../config/settings-import-precondition-client.js';
 import { firstJsonSchemaFailure, firstJsonSchemaFailureAsync } from '@goodvibes/engine/transport-http';
 import { PERMISSION_CATEGORIES, type Tool, type ToolDefinition, type ToolExecuteOptions, type ToolResult } from '../types/tools.js';
 import type { ToolActivity } from '@goodvibes/engine/contracts';
@@ -146,6 +143,12 @@ interface CurrentToolExecution {
   readonly settingsPresentation?: Readonly<{ previous: unknown; current: unknown }> | undefined;
   settingsReceipt?: PreparedConfigMutationReceipt | undefined;
   settingsRetired?: boolean | undefined;
+  /**
+   * The decided act was sent (noteCurrentToolEffectSent): its decision was complete, and checked whole, before the
+   * effect ran. A change the effect itself makes (an import that changes permission settings) is not a change
+   * underneath that decision, so the act's own answer is published even when the authority it ran under is stale after.
+   */
+  effectSent?: boolean | undefined;
   /** The invocation's own cancellation signal, checked at every checkpoint. */
   readonly signal: AbortSignal | undefined;
   /** The registered definition declares local reads as its only side effect. */
@@ -184,6 +187,8 @@ export function relaxCurrentToolReadFences(args: Record<string, unknown>, option
 // and no exported minting operation can construct an authentic body proof.
 const currentToolExecutions = new WeakMap<ToolExecuteOptions, CurrentToolExecution>();
 const settingsResultReceipts = new WeakMap<ToolResult, PreparedConfigMutationReceipt>();
+/** Published results of calls whose decided act was sent (CurrentToolExecution.effectSent). */
+const effectSentResults = new WeakSet<ToolResult>();
 /** Options of a call made through `executeNested`; its parent records what it ingested. */
 const nestedCallOptions = new WeakSet<ToolExecuteOptions>();
 /** The registry running each call that has no admission proof, for {@link runRegisteredTool}. */
@@ -327,6 +332,18 @@ function verifyToolExecution(args: Record<string, unknown>, options: ToolExecute
  * `args`, without asking or running anything (ToolRegistry.previewDecision): undefined when that registry is not
  * known or has no permission owner.
  */
+/**
+ * Why a nested call was refused, in plain words: the owner's own rule by its description ("a rule of yours refuses it
+ * (deny every call to Save an artifact in this project)"), his No, or the gate's own reason. Never a decision code.
+ */
+export function nestedRefusalWords(result: Pick<PermissionCheckResult, 'reasonCode' | 'userReason' | 'detail' | 'decision'>): string {
+  const decision = result.decision;
+  if (result.reasonCode === 'user_denied') return `you said no${result.userReason ? ` (${result.userReason.replace(/\.+$/, '')})` : ''}`;
+  if (decision?.decidedBy === 'rule' && decision.limit) return `a rule of yours refuses it (${decision.limit})`;
+  const words = (decision?.reason ?? result.detail ?? '').trim().replace(/\.+$/, '');
+  return words || 'it was not allowed';
+}
+
 export function previewRegisteredTool(name: string, args: Record<string, unknown>, options: ToolExecuteOptions | undefined): ReturnType<PermissionManager['previewDecision']> | undefined {
   const registry = options ? currentToolExecutions.get(options)?.registry ?? ordinaryCallRegistries.get(options) : undefined;
   return registry?.previewDecision(name, args, options?.signal);
@@ -353,7 +370,9 @@ export async function runRegisteredTool(callId: string, name: string, args: Reco
   }
   const admitted = toolDecisionOf({ reasonCode: verdict.reasonCode, sourceLayer: verdict.sourceLayer, userReason: verdict.userReason,
     detail: verdict.detail, decision: verdict.decision, approved: true }, name);
-  return withAdmittedToolDecision(admitted, () => registry.execute(callId, name, verdict.modifiedArgs ?? hooked.args, signal ? { signal } : undefined));
+  // The owner's own yes to exactly this call, as his card showed it: a one-call grant (gate/admitted-decision.ts).
+  const ownersYes = verdict.sourceLayer === 'user_prompt' && verdict.modifiedArgs === undefined;
+  return withAdmittedToolDecision(admitted, () => registry.execute(callId, name, verdict.modifiedArgs ?? hooked.args, signal ? { signal } : undefined), ownersYes);
 }
 
 /** The result of a call the owner's Pre:tool hook refused (or that failed): not run, with the hook's reason. */
@@ -377,6 +396,19 @@ export async function commitCurrentToolSettingsPlan(args: Record<string, unknown
   if (!proof?.commitSettingsPlan || !verifyToolExecution(args, options, true)) throw new ToolInputProjectionError('held');
   proof.active = false;
   const receipt = await proof.commitSettingsPlan(); proof.settingsReceipt = receipt; return receipt;
+}
+
+/**
+ * The body is about to send the act its call was decided for (a capability run on the daemon). The call is verified
+ * whole here, effect included, so a change underneath a decision (a permission setting changed by someone else while
+ * it was pending) still ends the call as it always did. From here on the act is the decided one: what it changes (an
+ * import that changes permission settings) is its effect, not a change underneath its decision, and its answer is
+ * published even when this call's authority is stale once it returns. Grants nothing: the call must be current.
+ */
+export function noteCurrentToolEffectSent(args: Record<string, unknown>, options?: ToolExecuteOptions): void {
+  if (!assertInvocation(args, options, true)) return;
+  const proof = currentToolExecutions.get(options!);
+  if (proof) proof.effectSent = true;
 }
 
 /** Captured display data is not execution authority and can accompany the committed receipt. */
@@ -1059,6 +1091,8 @@ export class ToolRegistry {
     let assertReadPublication: (() => void) | undefined;
     // The tool's own result, once it has run: a cleanup failure after that must not hide an effect that happened.
     let outcome: ToolResult | undefined;
+    // What the body answered, before any check after it (see `execute` below).
+    let ranResult: Awaited<ReturnType<Tool['execute']>> | undefined;
     try {
       const signal = combineProjectionSignals(record.projection.signal, record.projection.preparationSignal, opts === undefined ? undefined : projectionSignal(projectionProperty(opts, 'signal')));
       executionSignal = signal;
@@ -1099,33 +1133,10 @@ export class ToolRegistry {
         const assertEffect = readAutonomousEffectConstraint(assertAdmissionCurrent);
         if (!assertEffect) throw new ToolInputProjectionError('held');
         const mutation = record.projection.settingsMutation;
-        let secretTransition: PreparedSecretImportTransition | undefined;
-        let subscriptionTransition: PreparedSubscriptionImportTransition | undefined;
-        let secretCompleted = false, subscriptionCompleted = false, remoteStarted = false, remoteCompleted = false;
-        const assertImports = () => {
-          if (mutation?.remoteImport) {
-            if (remoteCompleted) assertCompletedRemoteSettingsImportPrecondition(mutation.remoteImport);
-            else if (!remoteStarted) assertRemoteSettingsImportPrecondition(mutation.remoteImport);
-            // The native pending operation retains its private source at every
-            // wire boundary; the unspent precondition cannot be reused here.
-          }
-          const secret = mutation?.secretImport, subscription = mutation?.subscriptionImport;
-          if (secret) {
-            if (secretCompleted) secret.owner.assertCompletedImport(secret.mutation);
-            else if (secretTransition) secret.owner.assertPreparedImportTransition(secret.mutation, secretTransition);
-            else secret.owner.assertPreparedImport(secret.mutation);
-          }
-          if (subscription) {
-            if (subscriptionCompleted) subscription.owner.assertCompletedImport(subscription.mutation);
-            else if (subscriptionTransition) subscription.owner.assertPreparedImportTransition(subscription.mutation, subscriptionTransition);
-            else subscription.owner.assertPreparedImport(subscription.mutation);
-          }
-        };
         const assertPlanSource = () => {
           mutation?.owner.assertSettingsWritable();
           assertProjectionCurrent(mutation?.assertSourceCurrent);
           if (mutation?.route) assertPreparedConfigWriteRoute(mutation.route);
-          assertImports();
         };
         const assertPlanAuthority = () => {
           assertProjectionCurrent(callerCurrent); assertPlanSource();
@@ -1137,7 +1148,6 @@ export class ToolRegistry {
         };
         const configMutation = mutation?.mutation;
         let configReceipt: PreparedConfigMutationReceipt | undefined;
-        let remoteReceipt: PreparedConfigMutationReceipt | undefined;
         let priorPlanPaths: readonly string[] = [];
         const commitConfig = mutation && configMutation ? () => {
           assertPlanAuthority();
@@ -1166,32 +1176,6 @@ export class ToolRegistry {
             completedPaths: Object.freeze([...completedPaths, ...receipt.completedPaths]) });
           try {
             assertPlanAuthority();
-            if (mutation.remoteImport) {
-              remoteStarted = true;
-              const receipt = await applyRemoteSettingsImportPrecondition(mutation.remoteImport, {
-                ...(signal ? { signal } : {}), assertCurrent: assertPlanAuthority,
-              });
-              remoteReceipt = receipt;
-              if (receipt.status !== 'committed') return joined(receipt);
-              completedPaths.push(...receipt.completedPaths); remoteCompleted = true;
-              assertCompletedRemoteSettingsImportPrecondition(mutation.remoteImport); assertPlanAuthority();
-            }
-            if (mutation.secretImport) {
-              const imported = mutation.secretImport;
-              secretTransition = imported.owner.beginPreparedImport(imported.mutation);
-              const receipt = await imported.owner.finishPreparedImport(imported.mutation, secretTransition, assertPlanAuthority);
-              if (receipt.status !== 'committed') return joined(receipt);
-              completedPaths.push(...receipt.completedPaths); secretCompleted = true;
-              imported.owner.assertCompletedImport(imported.mutation); assertPlanAuthority();
-            }
-            if (mutation.subscriptionImport) {
-              const imported = mutation.subscriptionImport;
-              subscriptionTransition = imported.owner.beginPreparedImport(imported.mutation);
-              const receipt = await imported.owner.finishPreparedImport(imported.mutation, subscriptionTransition, assertPlanAuthority);
-              if (receipt.status !== 'committed') return joined(receipt);
-              completedPaths.push(...receipt.completedPaths); subscriptionCompleted = true;
-              imported.owner.assertCompletedImport(imported.mutation); assertPlanAuthority();
-            }
             if (!mutation.secretDeletion) {
               return commitConfig ? joined(commitConfig()) : Object.freeze({ status: 'committed', completedPaths: Object.freeze(completedPaths) });
             }
@@ -1238,9 +1222,8 @@ export class ToolRegistry {
           } catch {
             // Completion/source retirement cannot erase a native receipt for
             // physical effects that already happened. It still retires authority.
-            if (proof && (configReceipt || remoteReceipt?.status === 'committed' || completedPaths.length)) proof.settingsRetired = true;
+            if (proof && (configReceipt || completedPaths.length)) proof.settingsRetired = true;
             if (configReceipt) return joined(configReceipt);
-            if (remoteReceipt && !mutation.mutation && !mutation.secretDeletion && !mutation.secretImport && !mutation.subscriptionImport) return remoteReceipt;
             return Object.freeze({ status: completedPaths.length ? 'partial' : 'unknown', completedPaths: Object.freeze(completedPaths) });
           }
         } : undefined;
@@ -1251,7 +1234,7 @@ export class ToolRegistry {
           signal, readOnlyDefinition: Array.isArray(declaredEffects) && declaredEffects.length > 0 && declaredEffects.every(effect => effect === 'read_fs'),
           assertWorkspace: readAutonomousWorkspaceConstraint(assertAdmissionCurrent),
           settingsPresentation: readAutonomousSettingsPresentation(assertAdmissionCurrent),
-          ...(mutation && commitPlan ? { ...(commitConfig && !mutation.remoteImport && !mutation.secretDeletion && !mutation.secretImport && !mutation.subscriptionImport ? { commitSettings: commitConfig } : {}), commitSettingsPlan: commitPlan } : {}), assertCurrent: () => {
+          ...(mutation && commitPlan ? { ...(commitConfig && !mutation.secretDeletion ? { commitSettings: commitConfig } : {}), commitSettingsPlan: commitPlan } : {}), assertCurrent: () => {
           this.assertExecuting(call, record);
           assertProjectionSignal(signal);
           assertAdmissionCurrent();
@@ -1272,7 +1255,14 @@ export class ToolRegistry {
       const body = () => applyIntrinsic(record.executor, record.tool, [call.args, executionOptions]);
       const deferred = proof?.deferredIngests;
       // What the body reads is recorded when it ends, as below: recording it now would make this call's own authority stale.
-      const execute = deferred ? () => deferUntrustedIngests(recordIngest => { deferred.push(recordIngest); }, body) : body;
+      const executeBody = deferred ? () => deferUntrustedIngests(recordIngest => { deferred.push(recordIngest); }, body) : body;
+      // The body's own answer, kept for a call whose decided act was sent (effectSent): published even when a check
+      // after the body finds this call's authority changed by that act.
+      const execute = async (): Promise<Awaited<ReturnType<typeof body>>> => {
+        const value = await executeBody();
+        ranResult = value;
+        return value;
+      };
       const mode = currentExecutionMode() ?? registryPermissionOwners.get(this)?.getMode();
       const invoke = () => executingContext.run(proof ? { proof, options: executionOptions } : undefined, execute);
       const assertModeCurrent = proof ? () => {
@@ -1294,11 +1284,23 @@ export class ToolRegistry {
       outcome = published;
       annotateRepairs(published, record.repairs, record.unknownParameters, executionSignal);
       if (proof?.settingsReceipt) settingsResultReceipts.set(published, proof.settingsReceipt);
+      if (proof?.effectSent) effectSentResults.add(published);
       return published;
     } catch (error) {
       if (proof?.settingsReceipt && (proof.settingsReceipt.status === 'committed' || proof.settingsReceipt.completedPaths.length)) {
         proof.active = false;
         return retiredSettingsResult(call.callId, proof.settingsReceipt, executionSignal);
+      }
+      // The decided act was sent and answered: a check after it that finds this call's authority changed (the act's own
+      // effect changed permission settings) does not turn the act's answer into a failure. Its authority is retired.
+      if (proof?.effectSent && ranResult !== undefined && !executionSignal?.aborted) {
+        proof.active = false;
+        const published = { ...ranResult, callId: call.callId,
+          ...(record.warnings.length ? { warnings: [...(ranResult.warnings ?? []), ...record.warnings] } : {}) };
+        outcome = published;
+        annotateRepairs(published, record.repairs, record.unknownParameters, executionSignal);
+        effectSentResults.add(published);
+        return published;
       }
       throw error;
     } finally {
@@ -1415,8 +1417,10 @@ export class ToolRegistry {
             const asked = toolAskWords(current.name, current.args)?.question.replace(/\?$/, '') ?? `${current.name} was not run`;
             return { callId, success: false, error: `Plan mode is on, so nothing was changed: ${asked}.` };
           }
-          return { callId, success: false,
-            error: `Nested tool admission ${admission.result.autonomousDecision?.outcome ?? 'held'}: ${admission.result.reasonCode}` };
+          // Any other refusal in plain words, naming what was asked and why: the owner's own rule by its description, his
+          // No, the gate's own reason; never a decision code.
+          const asked = toolAskWords(current.name, current.args)?.question.replace(/\?$/, '') ?? current.name;
+          return { callId, success: false, error: `${asked} was not done: ${nestedRefusalWords(admission.result)}.` };
         }
         bindAutonomousNestedAdmission(parent.admissionGuard, admission);
         const childOptions: ToolExecuteOptions = { signal, assertCurrent: assertParent };
@@ -1424,8 +1428,13 @@ export class ToolRegistry {
         const result = await this.executePrepared(current, admission, childOptions);
         const receipt = settingsResultReceipts.get(result);
         if (receipt) retainSettingsReceipt(parent, receipt);
+        // An act sent by the child is an act of the parent's call too: a call that routes it answers with it.
+        if (effectSentResults.has(result)) parent.effectSent = true;
         try { assertParent(); }
         catch (error) {
+          // The child's decided act was sent and answered (its effect may be what changed the parent's authority, as an
+          // import that changes permission settings does): its answer is the parent's, and the parent is retired.
+          if (!receipt && effectSentResults.has(result) && !signal?.aborted) { parent.active = false; return result; }
           if (!receipt) throw error;
           parent.active = false;
           return retiredSettingsResult(current.callId, parent.settingsReceipt!, signal);

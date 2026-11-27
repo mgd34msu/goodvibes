@@ -23,6 +23,7 @@
  * method of that one call is admitted as him, never as the caller, whose credential cannot make it.
  */
 import type { Actor } from '@goodvibes/engine/daemon-api/http-policy';
+import type { SettingAct } from '@goodvibes/engine/daemon-api/control-routes';
 import { effectFacts, type EffectId } from '../security/effect-authority.js';
 
 type CoveredDescriptor = { readonly confirmation?: string | undefined; readonly effects?: readonly EffectId[] | undefined } | null | undefined;
@@ -84,6 +85,71 @@ export function takeOwnerApprovalGrant(invocation: object, descriptor: CoveredDe
   const grant: OwnerApprovedCallGrant = Object.freeze({ approvalId: run.approvalId, personRequest: covers, ...(run.owner ? { owner: run.owner } : {}) });
   grants.add(grant);
   return grant;
+}
+
+/**
+ * A mark a capability's own nested method call carries (daemon/capability-wiring.ts): the capability that runs it was
+ * decided already, by `capabilities.run` (its admission, and the owner's gate for a caller who needed it), so the
+ * dispatch does not decide the method's risk class again (daemon/method-owner-decision.ts). Issued only here, kept in
+ * process: no value read from a request is one.
+ */
+const decidedMarks = new WeakSet<object>();
+/** Who made the decided capability's act and how it was decided, carried by its nested call's mark. */
+const markActs = new WeakMap<object, SettingAct>();
+/** Who made each capability run's act and how it was decided (routes/capabilities.ts), by the run's invocation. */
+const runActs = new WeakMap<object, SettingAct>();
+
+/** Record who made a capability run's act and how it was decided, for the methods it calls (a settings write keeps it). */
+export function markRunAct(invocation: object, act: SettingAct): void {
+  runActs.set(invocation, act);
+}
+
+/** The act recorded for a capability run, or undefined. */
+export function runActOf(invocation: object): SettingAct | undefined {
+  return runActs.get(invocation);
+}
+
+/** The owner-decision classes a capability run's own decision covered (routes/capabilities.ts), by the run's invocation. */
+const runCovers = new WeakMap<object, ReadonlySet<string>>();
+/** The classes each mark's decision covered. */
+const markCovers = new WeakMap<object, ReadonlySet<string>>();
+
+/**
+ * Record the owner-decision classes a capability run's own decision covered (its risk, a secret it writes, an act of
+ * the owner's...): a method it calls of a class outside them was not decided by it (method-owner-decision.ts).
+ */
+export function markRunCovers(invocation: object, classes: ReadonlySet<string>): void {
+  runCovers.set(invocation, classes);
+}
+
+/** The classes recorded for a capability run, or undefined. */
+export function runCoversOf(invocation: object): ReadonlySet<string> | undefined {
+  return runCovers.get(invocation);
+}
+
+export function capabilityDecidedMark(act?: SettingAct, covers?: ReadonlySet<string>): object {
+  const mark = Object.freeze({});
+  decidedMarks.add(mark);
+  if (act) markActs.set(mark, act);
+  if (covers) markCovers.set(mark, covers);
+  return mark;
+}
+
+/** The classes a decided mark's decision covered (read before the mark is spent), or undefined when none were recorded. */
+export function decidedMarkCovers(mark: unknown): ReadonlySet<string> | undefined {
+  return mark !== null && typeof mark === 'object' && decidedMarks.has(mark) ? markCovers.get(mark) : undefined;
+}
+
+/** The act a decided mark carries (read before the mark is spent), or undefined. */
+export function decidedMarkAct(mark: unknown): SettingAct | undefined {
+  return mark !== null && typeof mark === 'object' && decidedMarks.has(mark) ? markActs.get(mark) : undefined;
+}
+
+/** Whether `mark` is one this module issued and not spent yet; reading it spends it. */
+export function spendCapabilityDecidedMark(mark: unknown): boolean {
+  if (mark === null || typeof mark !== 'object' || !decidedMarks.has(mark)) return false;
+  decidedMarks.delete(mark);
+  return true;
 }
 
 /** The grant when it was issued here and not spent; reading it spends it, so it stands for one call only. */

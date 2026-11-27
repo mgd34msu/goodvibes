@@ -9,10 +9,18 @@ import { commandRefusal } from '@goodvibes/engine/terminal-shell/command-confirm
 import { requireShellPaths } from '@goodvibes/engine/terminal-shell/command-service-access';
 import { openModalCommand } from './runtime-services.ts';
 import { capabilityBinding } from './capability-binding.ts';
-import { runChannelPairing } from './channel-pairing.ts';
 import { pairRelay, relayCodes } from './relay-runtime.ts';
 import { resolveNativeHostCredential } from '../../runtime/client/native-host-credential.ts';
-import { formatTuiHostPairing, unpairTuiHost } from '../../runtime/tui-host-pairing.ts';
+import { formatTuiHostPairing, pairTuiHostWithCode, unpairTuiHost } from '../../runtime/tui-host-pairing.ts';
+
+/**
+ * "Pair something, A chat channel": the channel's row in Mail, calendar and channels, where its keys are entered in its
+ * own form ("enter its keys") and set up ("set it up").
+ */
+async function openChannelRow(ctx: CommandContext, channel: string): Promise<string | void> {
+  if (!ctx.openPlace) return `A chat channel is set up on its row in Mail, calendar and channels, on the Channels tab: open the menu (Ctrl+G, then m) and choose it.`;
+  ctx.openPlace('messages', { list: 'channels', ...(channel ? { item: channel } : {}) });
+}
 
 /** Where the person pairs this terminal with a daemon on another machine: the place's control, never a line to type. */
 const PAIR_HOST_CONTROL = 'Pair something in the Devices and network place, then "This program with its daemon"';
@@ -76,6 +84,24 @@ function hostStatus(ctx: CommandContext): string {
 }
 
 /**
+ * "This program with its daemon" with no code: with the daemon on this machine there is nothing to pair (this terminal is
+ * your own program there, its registration checked at every start); with one on another machine, where the code comes
+ * from. Local inspection only.
+ */
+function pairWithCodeWords(ctx: CommandContext): string {
+  try {
+    const credential = resolveNativeHostCredential({ configManager: ctx.platform.configManager, homeDirectory: requireShellPaths(ctx).homeDirectory });
+    if (credential.available && !credential.expectedPrincipalId) {
+      return `This terminal runs on the same computer as its daemon (${credential.baseUrl}): it is your own program there and already acts as you. There is nothing to pair.`;
+    }
+    if (credential.available) return `This terminal already keeps a device credential for ${credential.baseUrl}. There is nothing to pair; to pair it again, forget it first (Paired tab, Forget its daemon pairing).`;
+  } catch {
+    // Unreadable here: say where the code comes from.
+  }
+  return 'To make this terminal your own device on a daemon on another computer: where you are signed in as yourself (that daemon\'s web UI with your password, or your terminal app on that computer), open Devices and network, Pair something, A phone or another device, and press "Show the sign-in code once". Then choose This program with its daemon here and type that code under Sign-in code.';
+}
+
+/**
  * This terminal's pairing on its own screen and its own credential for its daemon (platform builtin/devices-session.ts),
  * for its session capabilities' services. Only the owner's own press or line pairs or forgets: a model's call of
  * either is refused before it gets here (the capabilities are owner-only).
@@ -88,12 +114,17 @@ export const TUI_PAIRING: DevicesPairingHost<CommandContext> = {
     return name ? `Opened the pairing QR for "${name}"; the device is listed by that name once it pairs.` : 'Opened the pairing QR. Press r in it for a new offer; the one it replaces stops working unless a device already paired with it.';
   },
   async pairHost(ctx, request) {
-    if (ctx.invokedByModel !== true && ctx.beginHostPairing) {
-      await ctx.beginHostPairing({ apply: request.apply, bootstrapShared: request.bootstrapShared, name: request.name || 'GoodVibes TUI' });
-      return undefined;
+    // The one way a device becomes yours: you start it on your own screen and this terminal completes it with that code.
+    if (!request.code) return pairWithCodeWords(ctx);
+    if (ctx.invokedByModel === true) throw commandRefusal(`Only you can pair this terminal with a daemon, on its own screen: ${PAIR_HOST_CONTROL}. A model or another program cannot.`);
+    let result: Awaited<ReturnType<typeof pairTuiHostWithCode>>;
+    try {
+      result = await pairTuiHostWithCode({ configManager: ctx.platform.configManager, homeDirectory: requireShellPaths(ctx).homeDirectory }, request.code, request.name || 'GoodVibes TUI');
+    } catch {
+      throw commandRefusal('This terminal\'s host credentials are unavailable here. Nothing was changed.');
     }
-    if (request.apply) throw commandRefusal(`Only you can pair this terminal with a daemon, on its own screen: ${PAIR_HOST_CONTROL}. A model or another program cannot grant lasting administrative access.`);
-    return hostStatus(ctx);
+    if (result.status !== 'paired') throw commandRefusal(result.message);
+    return formatTuiHostPairing(result);
   },
   hostStatus: async (ctx) => hostStatus(ctx),
   async unpairHost(ctx) {
@@ -110,7 +141,7 @@ export const TUI_PAIRING: DevicesPairingHost<CommandContext> = {
     return formatTuiHostPairing(result);
   },
   pairRelay: (ctx, name) => pairRelay(ctx, name || undefined),
-  async pairChannel(ctx, channel) { await runChannelPairing(channel, ctx); },
+  pairChannel: openChannelRow,
 };
 
 /** The device lists this app's forms choose from (there is no `/devices` command: its actions are the place's controls). */

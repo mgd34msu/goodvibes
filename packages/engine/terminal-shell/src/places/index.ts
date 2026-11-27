@@ -191,7 +191,7 @@ export interface WiredPlaces {
   /** Open the menu of every place. */
   openMenu(): void;
   /** Open one place by id, on its list `start.list` when given; false when there is none by that id. */
-  openPlace(id: string, start?: { readonly list?: string | undefined; readonly action?: string | undefined }): boolean;
+  openPlace(id: string, start?: { readonly list?: string | undefined; readonly action?: string | undefined; readonly item?: string | undefined }): boolean;
   /** Stop what the places hold open (the held-call bridge). */
   stop(): void;
   /** Run what a place's key read in the composer names (`place.conversation-composer.<control>`), saying the outcome in the conversation. */
@@ -267,7 +267,7 @@ export function wirePlaces(options: WirePlacesOptions): WiredPlaces {
     // Work and agents: the task suites this program ran this session (the terminal app's).
     ...evaluationsPlaceSource(options.sessionServices) };
   let host: PlaceHost | undefined;
-  const openPlace = (id: string, start?: { readonly list?: string | undefined; readonly action?: string | undefined }): boolean => {
+  const openPlace = (id: string, start?: { readonly list?: string | undefined; readonly action?: string | undefined; readonly item?: string | undefined }): boolean => {
     const place = PLACES.find((candidate) => candidate.id === id);
     if (!place || !host) return false;
     options.modals.push(new PlaceModal(listsHere(place, host, options.program), host, start));

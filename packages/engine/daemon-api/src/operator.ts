@@ -83,14 +83,14 @@ async function dispatchOperatorRoutesInner(
   if (pathname === '/login' && method === 'POST') return handlers.postLogin(req);
   if (pathname === '/status' && method === 'GET') return handlers.getStatus(req);
   if (pathname === '/api/control-plane/auth' && method === 'GET') return handlers.getCurrentAuth(req);
-  if (pathname === '/api/control-plane' && method === 'GET') return handlers.getControlPlaneSnapshot();
+  if (pathname === '/api/control-plane' && method === 'GET') return handlers.getControlPlaneSnapshot(req);
   if (pathname === '/api/control-plane/contract' && method === 'GET') return handlers.getOperatorContract();
   if (pathname === '/api/control-plane/web' && method === 'GET') return handlers.getControlPlaneWeb();
   if (pathname === '/api/control-plane/recent-events' && method === 'GET') {
     const limit = readBoundedPositiveInteger(url.searchParams.get('limit'), 100);
-    return handlers.getControlPlaneRecentEvents(limit);
+    return handlers.getControlPlaneRecentEvents(limit, req);
   }
-  if (pathname === '/api/control-plane/messages' && method === 'GET') return handlers.getControlPlaneMessages();
+  if (pathname === '/api/control-plane/messages' && method === 'GET') return handlers.getControlPlaneMessages(req);
   if (pathname === '/api/control-plane/clients' && method === 'GET') return handlers.getControlPlaneClients();
   if (pathname === '/api/v1/telemetry' && method === 'GET') return handlers.getTelemetrySnapshot(req);
   if (pathname === '/api/v1/telemetry/events' && method === 'GET') return handlers.getTelemetryEvents(req);
@@ -202,8 +202,8 @@ async function dispatchOperatorRoutesInner(
   }
   if (pathname === '/api/channels/policies' && method === 'GET') return handlers.getChannelPolicies();
   const channelPolicyMatch = pathname.match(/^\/api\/channels\/policies\/([^/]+)$/);
-  if (channelPolicyMatch && method === 'POST') return handlers.postChannelPolicy(safeDecodeURIComponent(channelPolicyMatch[1]!), req);
-  if (channelPolicyMatch && method === 'PATCH') return handlers.patchChannelPolicy(safeDecodeURIComponent(channelPolicyMatch[1]!), req);
+  // POST and PATCH are one method (`channels.policies.update`, its binding's `alsoAt`), decided once where the method is.
+  if (channelPolicyMatch && (method === 'POST' || method === 'PATCH')) return handlers.postChannelPolicy(safeDecodeURIComponent(channelPolicyMatch[1]!), req);
   if (pathname === '/api/channels/policies/audit' && method === 'GET') {
     const limit = readBoundedPositiveInteger(url.searchParams.get('limit'), 100);
     return handlers.getChannelPolicyAudit(limit);
@@ -364,6 +364,7 @@ async function dispatchOperatorRoutesInner(
   if (artifactContentMatch && method === 'GET') return handlers.getArtifactContent(safeDecodeURIComponent(artifactContentMatch[1]!), req);
   const artifactMatch = pathname.match(/^\/api\/artifacts\/([^/]+)$/);
   if (artifactMatch && method === 'GET') return handlers.getArtifact(safeDecodeURIComponent(artifactMatch[1]!), req);
+  if (artifactMatch && method === 'DELETE') return handlers.deleteArtifact(safeDecodeURIComponent(artifactMatch[1]!), req);
 
   if (pathname === '/api/media/providers' && method === 'GET') return handlers.getMediaProviders();
   if (pathname === '/api/media/analyze' && method === 'POST') return handlers.postMediaAnalyze(req);

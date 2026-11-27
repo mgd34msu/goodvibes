@@ -3,6 +3,12 @@ import type { ShellPathService } from '@goodvibes/engine/platform/platform/runti
 import { readJsonStore, runStoreFileUpdateSync, writeJsonStore, type JsonStoreContents, type JsonStoreSpec, type JsonStoreWriteReport, type writeStoreFile } from './store-file.js';
 import { GOODVIBES_AGENT_SURFACE_ROOT } from './surface.js';
 import { assertNoSecretLikeText } from './persona-registry.js';
+import { acceptedAuthor, authorAfterChange, newRecordAuthor, readRecordAuthor, type MemoryAuthor } from '@goodvibes/engine/platform/platform/state';
+
+/** The author field of a note, present only when there is one. */
+function noteAuthorField(author: MemoryAuthor | undefined): { author?: MemoryAuthor } {
+  return author === undefined ? {} : { author };
+}
 
 export type AgentNoteSource = 'user' | 'agent' | 'imported' | 'system';
 export type AgentNoteReviewState = 'fresh' | 'reviewed' | 'stale';
@@ -22,6 +28,8 @@ export interface AgentNoteRecord {
   readonly reviewedAt?: string | undefined;
   /** The records made from this note, by either promotion path; the one record of "already promoted". */
   readonly promoted?: readonly AgentNotePromotion[] | undefined;
+  /** Who wrote it (state/memory-author.ts, the same three as a memory record); absent: the owner's. */
+  readonly author?: MemoryAuthor | undefined;
 }
 
 export interface AgentNotePromotion {
@@ -37,6 +45,8 @@ export interface AgentNoteCreateInput {
   readonly sourceUrl?: string | undefined;
   readonly source?: AgentNoteSource | undefined;
   readonly provenance?: string | undefined;
+  /** Who writes it, as the daemon authenticated the caller; absent: the owner's. */
+  readonly author?: MemoryAuthor | undefined;
 }
 
 export interface AgentNoteUpdateInput {
@@ -45,6 +55,8 @@ export interface AgentNoteUpdateInput {
   readonly tags?: readonly string[] | undefined;
   readonly sourceUrl?: string | undefined;
   readonly provenance?: string | undefined;
+  /** Who makes the change (state/memory-author.ts `authorAfterChange`); absent: the author stays. */
+  readonly by?: MemoryAuthor | undefined;
 }
 
 export interface AgentNoteSnapshot {
@@ -133,6 +145,7 @@ function parseNote(value: unknown): AgentNoteRecord | null {
     updatedAt: readString(value.updatedAt, nowIso()),
     reviewedAt: reviewedAt || undefined,
     ...(promoted.length > 0 ? { promoted } : {}),
+    ...noteAuthorField(readRecordAuthor(value.author)),
   };
 }
 
@@ -226,6 +239,7 @@ export class AgentNoteRegistry {
         reviewState: 'fresh',
         createdAt: timestamp,
         updatedAt: timestamp,
+        ...noteAuthorField(newRecordAuthor(input.author)),
       };
       this.writeStore({ ...store, notes: [...store.notes, note] });
       return note;
@@ -253,6 +267,7 @@ export class AgentNoteRegistry {
         provenance: input.provenance === undefined ? existing.provenance : input.provenance.trim() || existing.provenance,
         ...freshReviewPatch(),
         updatedAt: nowIso(),
+        ...noteAuthorField(authorAfterChange(existing.author, input.by, Date.now())),
       };
       this.writeStore({
         ...store,
@@ -262,7 +277,8 @@ export class AgentNoteRegistry {
     });
   }
 
-  public markReviewed(idOrTitle: string): AgentNoteRecord {
+  /** `accept`: the owner himself reviewed it, which accepts a note someone else wrote (never a model's review). */
+  public markReviewed(idOrTitle: string, options: { readonly accept?: boolean } = {}): AgentNoteRecord {
     return this.locked(() => {
       const store = this.readStore();
       const existing = this.findInStore(store, idOrTitle);
@@ -271,6 +287,7 @@ export class AgentNoteRegistry {
         ...existing,
         ...reviewedReviewPatch(),
         updatedAt: nowIso(),
+        ...noteAuthorField(options.accept === true ? acceptedAuthor(existing.author, Date.now()) : existing.author),
       };
       this.writeStore({
         ...store,

@@ -21,6 +21,7 @@ export {
   actorHoldsScope,
   agentActor,
   localOwnerActor,
+  scriptActor,
   systemActor,
   principalHasScope,
   resolveAuthenticatedPrincipal,

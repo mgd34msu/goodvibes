@@ -6,9 +6,12 @@
  * call takes is the host's fact about who sent it, never a field this Agent
  * writes in the body.
  *
- * It is minted once per host with the Agent's ordinary credential (which
- * already has owner access, so there is no pairing step), kept in a file only
- * this user can read, and reused. The mint carries an attempt id saved before
+ * It is minted once per host with the Agent's ordinary credential and the
+ * registration the host issued this Agent's process (the host makes it only
+ * for the owner himself), kept in a file only this user can read, and reused.
+ * The file is no authority by itself: every call made with the credential
+ * carries that registration, and the host takes a call with the credential
+ * alone for a script's (call-context.ts `bindDelegatedCredential`). The mint carries an attempt id saved before
  * the request leaves, so a lost reply is settled by repeating the same request,
  * never by minting a second credential. When the host no longer accepts the
  * stored credential (it was revoked), it is forgotten and the next call mints
@@ -19,6 +22,7 @@ import { hostname } from 'node:os';
 import { createHostPairingStore, type HostPairingAttempt } from '../host-pairing-store.js';
 import { parseMintedPairingToken, readHostPairingResponse } from '../native/native-paired-principal.js';
 import type { CapturedOperatorConnection } from './operator-connection-owner.js';
+import { bindDelegatedCredential, programCallHeadersFor } from '@goodvibes/engine/platform/platform/runtime/client';
 
 const DELEGATION_UNAVAILABLE_REASON = 'The Agent delegation credential store is unavailable.';
 const store = createHostPairingStore({
@@ -81,6 +85,9 @@ export async function delegatedOperatorConnection(connection: CapturedOperatorCo
     credential = await pending;
   }
   signal?.throwIfAborted();
+  // Every call made with it carries the registration the daemon issued this Agent for its ordinary credential: without
+  // it the daemon takes the credential for a script (platform daemon/method-owner-decision.ts `ownersAgentProgram`).
+  if (connection.token) bindDelegatedCredential(credential.token, connection.token);
   return {
     ...connection,
     token: credential.token,
@@ -122,11 +129,14 @@ async function mintDelegation(connection: CapturedOperatorConnection, homeDirect
   }
   let response: Response;
   try {
+    // The daemon makes the Agent's credential only for the owner himself: this Agent's registered program (its
+    // registration, sent with the call), a device he paired, or a turn the daemon hosts.
+    const programHeaders = await programCallHeadersFor(host, connection.token, connection.fetch ?? fetch, 'agent');
     // `pairing.tokens.create` has no route of its own in the operator contract.
     // The connection's own transport: the network, or the daemon's request path in a turn it hosts.
     response = await (connection.fetch ?? fetch)(`${host}/api/control-plane/methods/pairing.tokens.create/invoke`, {
       method: 'POST', redirect: 'error',
-      headers: { authorization: `Bearer ${connection.token}`, 'content-type': 'application/json' },
+      headers: { ...programHeaders, authorization: `Bearer ${connection.token}`, 'content-type': 'application/json' },
       body: JSON.stringify({ body: { name: attempt.name, attemptId: attempt.attemptId, client: 'agent' } }),
       signal: AbortSignal.timeout(MINT_DEADLINE_MS),
     });

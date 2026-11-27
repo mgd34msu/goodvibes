@@ -5,6 +5,17 @@ import { storeFileChangeStamp } from './store-change-stamp.js';
 import { GOODVIBES_AGENT_SURFACE_ROOT } from './surface.js';
 import { assertNoSecretLikeText, runLockedStoreUpdate } from './persona-registry.js';
 import { formatAgentRecordReviewState } from './record-labels.js';
+import { acceptedAuthor, authorAfterChange, memoryAwaitsOwner, newRecordAuthor, readRecordAuthor, type MemoryAuthor } from '@goodvibes/engine/platform/platform/state';
+
+/** The author field of a routine, present only when there is one. */
+function routineAuthorField(author: MemoryAuthor | undefined): { author?: MemoryAuthor } {
+  return author === undefined ? {} : { author };
+}
+
+/** A routine its steps may be given to a turn from: reviewed by the owner, and not someone else's words he has not accepted. */
+export function routineGivenToTurns(routine: Pick<AgentRoutineRecord, 'reviewState' | 'author'>): boolean {
+  return routine.reviewState === 'reviewed' && !memoryAwaitsOwner(routine);
+}
 import {
   evaluateAgentSkillReadiness,
   formatAgentSkillRequirement,
@@ -36,6 +47,8 @@ export interface AgentRoutineRecord {
   readonly reviewedAt?: string | undefined;
   readonly lastStartedAt?: string | undefined;
   readonly startCount: number;
+  /** Who wrote it (state/memory-author.ts, the same three as a memory record); absent: the owner's. */
+  readonly author?: MemoryAuthor | undefined;
 }
 
 export interface AgentRoutineCreateInput {
@@ -48,6 +61,8 @@ export interface AgentRoutineCreateInput {
   readonly enabled?: boolean | undefined;
   readonly source?: AgentRoutineSource | undefined;
   readonly provenance?: string | undefined;
+  /** Who writes it, as the daemon authenticated the caller; absent: the owner's. */
+  readonly author?: MemoryAuthor | undefined;
 }
 
 export interface AgentRoutineUpdateInput {
@@ -60,6 +75,8 @@ export interface AgentRoutineUpdateInput {
   /** Applied in the same write as the field edit. */
   readonly enabled?: boolean | undefined;
   readonly provenance?: string | undefined;
+  /** Who makes the change (state/memory-author.ts `authorAfterChange`); absent: the author stays. */
+  readonly by?: MemoryAuthor | undefined;
 }
 
 export interface AgentRoutineSnapshot {
@@ -162,6 +179,7 @@ function parseRoutine(value: unknown): AgentRoutineRecord | null {
     reviewedAt: reviewedAt || undefined,
     lastStartedAt: lastStartedAt || undefined,
     startCount: readNonNegativeInteger(value.startCount),
+    ...routineAuthorField(readRecordAuthor(value.author)),
   };
 }
 
@@ -256,6 +274,7 @@ export class AgentRoutineRegistry {
         createdAt: timestamp,
         updatedAt: timestamp,
         startCount: 0,
+        ...routineAuthorField(newRecordAuthor(input.author)),
       };
       this.writeStore({ ...store, routines: [...store.routines, routine] });
       return routine;
@@ -287,6 +306,7 @@ export class AgentRoutineRegistry {
         provenance: input.provenance === undefined ? existing.provenance : input.provenance.trim() || existing.provenance,
         ...freshReviewPatch(),
         updatedAt: nowIso(),
+        ...routineAuthorField(authorAfterChange(existing.author, input.by, Date.now())),
       };
       this.writeStore({
         ...store,
@@ -330,7 +350,8 @@ export class AgentRoutineRegistry {
     });
   }
 
-  public markReviewed(idOrName: string): AgentRoutineRecord {
+  /** `accept`: the owner himself reviewed it, which accepts a routine someone else wrote (never a model's review). */
+  public markReviewed(idOrName: string, options: { readonly accept?: boolean } = {}): AgentRoutineRecord {
     return this.locked(() => {
       const store = this.readStore();
       const existing = this.findInStore(store, idOrName);
@@ -339,6 +360,7 @@ export class AgentRoutineRegistry {
         ...existing,
         ...reviewedReviewPatch(),
         updatedAt: nowIso(),
+        ...routineAuthorField(options.accept === true ? acceptedAuthor(existing.author, Date.now()) : existing.author),
       };
       this.writeStore({
         ...store,
@@ -446,7 +468,7 @@ export const ENABLED_ROUTINES_PROMPT_LIMIT = 8;
 
 export function buildEnabledRoutinesPrompt(shellPaths: ShellPathService, snapshot?: AgentRoutineSnapshot): string | null {
   const enabledRecords = (snapshot ?? AgentRoutineRegistry.fromShellPaths(shellPaths).snapshot()).enabledRoutines;
-  const enabled = enabledRecords.filter((routine) => routine.reviewState === 'reviewed' && evaluateAgentRoutineReadiness(routine).ready);
+  const enabled = enabledRecords.filter((routine) => routineGivenToTurns(routine) && evaluateAgentRoutineReadiness(routine).ready);
   const suppressed = enabledRecords
     .filter((routine) => !enabled.some((activeRoutine) => activeRoutine.id === routine.id))
     .slice(0, ENABLED_ROUTINES_PROMPT_LIMIT)

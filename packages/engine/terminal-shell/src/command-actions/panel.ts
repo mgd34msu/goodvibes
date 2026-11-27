@@ -140,6 +140,13 @@ export class GuidedPanel implements SurfaceModal {
     this.stepIndex = Math.max(0, Math.min(step, stepsOf(action, this.given).length - 1));
     this.field = this.firstOpenField();
     this.note = '';
+    // A blank of a list that opens holding a value (what is set now) reads as that row's name once the list is read.
+    for (const input of action.inputs) {
+      const list = listChoices(input);
+      if (!list || !this.texts[input.id] || this.given.has(input.id)) continue;
+      void listByName<CommandActionContext>(list.list).read(this.ctx, this.values(), new AbortController().signal)
+        .then(() => this.ctx.renderRequest?.(), () => undefined);
+    }
   }
 
   /** The values so far, with suggestions taken where nothing was typed. */
@@ -227,7 +234,10 @@ export class GuidedPanel implements SurfaceModal {
     const values = this.values();
     void listByName<CommandActionContext>(list.list).read(this.ctx, values, new AbortController().signal).then((rows) => {
       const items: SelectionItem[] = rows.map((row) => ({ id: row.value, label: row.label, ...(row.detail ? { detail: row.detail } : {}), ...(row.state ? { right: row.state } : {}) }));
+      // The list opens on what is set now (a value the form opened on, else the input's default), not on its first row.
+      const current = this.texts[input.id] || (input.required === true ? '' : input.required.default);
       open(`${this.action?.label ?? ''}  ›  ${input.label}`, items, {
+        ...(current && items.some((item) => item.id === current) ? { preSelectId: current } : {}),
         allowSearch: true,
         primaryVerbLabel: 'Choose',
         ...(list.allowOther ? { customItem: (query: string) => query ? { id: query, label: `Use "${query}"`, detail: list.allowOther!.reason } : null } : {}),
@@ -299,6 +309,8 @@ export class GuidedPanel implements SurfaceModal {
     if (key === 'tab' || key === 'down') this.field = (this.field + 1) % Math.max(1, fields.length);
     else if (key === 'up') this.field = (this.field - 1 + fields.length) % Math.max(1, fields.length);
     else if ((key === 'left' || key === 'right') && input && fixedChoices(input)) this.cycle(input, key === 'left' ? -1 : 1);
+    // A blank chosen from a list that already holds a value (one the form opened on): ⏎ keeps it, → opens the list on it.
+    else if (key === 'right' && input && listChoices(input)) this.pick(input);
     else if (key === 'backspace' && input && !fixedChoices(input)) this.texts[input.id] = (this.texts[input.id] ?? '').slice(0, -1);
     else if (key === 'enter') this.advance();
   }
@@ -385,8 +397,28 @@ export class GuidedPanel implements SurfaceModal {
       const choices = fixedChoices(input);
       return choices !== undefined && choices.length <= 3 && choices.reduce((sum, choice) => sum + choice.label.length + 5, 0) < width - 4;
     };
+    // A fixed choice whose answers carry a sentence keeps one row under it for the chosen answer's sentence.
+    const described = (input: InputDescription): boolean => fixedChoices(input)?.some((choice) => Boolean(choice.help)) === true;
     const heightOf = (index: number, first: number): number =>
-      inline(fields[index]!) ? 3 : index === first || inline(fields[index - 1]!) ? 2 : 1;
+      (inline(fields[index]!) ? 3 : index === first || inline(fields[index - 1]!) ? 2 : 1) + (described(fields[index]!) ? 2 : 0);
+    // The chosen answer's sentence, on up to two rows under it (cut with "…" past them).
+    const sentenceUnder = (input: InputDescription, x: number): void => {
+      if (!described(input)) return;
+      const chosen = fixedChoices(input)?.find((choice) => choice.value === this.texts[input.id]);
+      const room = Math.max(10, f.r - x - 1);
+      const rows: string[] = [];
+      let row = '';
+      for (const word of (chosen?.help ?? '').split(/\s+/).filter(Boolean)) {
+        if (row && row.length + 1 + word.length > room) { rows.push(row); row = word; } else row = row ? `${row} ${word}` : word;
+      }
+      if (row) rows.push(row);
+      const shown = rows.slice(0, 2);
+      if (rows.length > 2) shown[1] = `${shown[1]!.slice(0, room - 1)}…`;
+      for (let k = 0; k < 2; k++) {
+        y += 1;
+        if (shown[k]) f.canvas.put(x, y, shown[k]!, { fg: t.textMuted });
+      }
+    };
     // Rows left for blanks: the run line and its gap (and a note) stay at the bottom.
     const room = f.bottom - y - 2 - (this.note ? 2 : 0) - (consequence.length > 0 ? consequence.length + 1 : 0);
     let first = 0;
@@ -413,6 +445,8 @@ export class GuidedPanel implements SurfaceModal {
           x = f.canvas.put(x, y, ` ${choice.label} `, on ? (focused ? { fg: t.selectedListItemText, bg: t.brand, bold: true } : { fg: t.text, bg: t.border }) : { fg: t.textMuted });
           x += 3;
         }
+        // What the chosen answer means, under the answers (each answer's own sentence as the arrows move).
+        sentenceUnder(input, l + 4);
         y += 1;
         continue;
       }
@@ -425,11 +459,14 @@ export class GuidedPanel implements SurfaceModal {
         const chosen = choices.find((choice) => choice.value === typed);
         x = f.canvas.put(x, y, `‹ ${chosen?.label ?? (input.required === true ? 'choose' : input.required.defaultMeans)} ›`, { fg: focused ? t.brand : t.text });
         if (chosen?.risk && chosen.risk !== 'none') f.canvas.put(x + 2, y, riskWords(chosen.risk), { fg: t.textMuted });
+        // The chosen answer's sentence under it, as the arrows move from one answer to the next.
+        sentenceUnder(input, l + label.length);
       } else if (typed !== '') {
         // A value picked from a list reads as its label; the id is what is sent.
         const shown = input.kind === 'secret' && input.plainWhen?.(values) !== true ? '•'.repeat(Math.min(typed.length, 24)) : valuesAsShown([input], { [input.id]: typed })[input.id] ?? typed;
         x = f.canvas.put(x, y, shown.slice(-(f.r - x - 2)), { fg: t.brand });
         if (focused) f.canvas.put(x, y, '▏', { fg: t.textMuted });
+        if (focused && listChoices(input)) f.canvas.put(x + 2, y, '→ to change', { fg: t.textFaint });
       } else {
         const suggested = input.suggest?.(values);
         if (suggested) {

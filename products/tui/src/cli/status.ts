@@ -417,7 +417,7 @@ export function buildCliDoctorFindings(options: CliStatusOptions): readonly CliD
       summary: 'First run has not been finished for this user.',
       cause: 'No global user onboarding check marker was found: no model was ready at a start, and first run was left before a model was chosen.',
       impact: 'Important service, network, provider, auth, or permission choices may still be implicit defaults.',
-      action: 'Run /setup in the TUI, or goodvibes setup status.',
+      action: 'Start goodvibes and finish first run, or open System, Setup in the menu ("Run first-run again"); goodvibes setup status says where it stands.',
     });
   }
 

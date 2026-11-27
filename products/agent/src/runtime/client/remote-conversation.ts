@@ -43,7 +43,7 @@ import { nativeHostedTurnSnapshotSchema, type NativeHostedTurnSnapshot } from '@
 import { createOperatorApiClient } from '@goodvibes/engine/operator-client';
 import { transport } from '@goodvibes/engine/platform/platform/runtime';
 import { TERMINAL_TURN_EVENT_TYPES, createTurnLifecycleGate, readTurnLifecycleFrame } from '@goodvibes/engine/platform/transport-realtime';
-import type { DaemonVerbCaller } from '@goodvibes/engine/platform/platform/runtime/client';
+import { programCallHeadersFor, type DaemonVerbCaller } from '@goodvibes/engine/platform/platform/runtime/client';
 import { logger } from '@goodvibes/engine/platform/platform/utils';
 import {
   createHostedFrameRenderer,
@@ -265,7 +265,10 @@ export function createRemoteConversationRouter(
     const operator = createOperatorApiClient({ baseUrl: owner.connection.baseUrl, authToken: owner.connection.token, fetchImpl: options.fetchImpl ?? globalThis.fetch });
     let pendingApproval: string | undefined;
     try {
-      const reply = await operator.invoke('sessions.permissionMode.set', { sessionId: owner.id, mode });
+      // Only from the person's own choice of mode: his request, with this program's call context and the registration
+      // the daemon issued it (a looser mode is the owner's own act, run at once only on his press in his own program).
+      const pressed = { ...(await programCallHeadersFor(owner.connection.baseUrl, owner.connection.token, options.fetchImpl ?? globalThis.fetch, 'agent')), 'x-goodvibes-explicit-user-request': 'true' };
+      const reply = await operator.invoke('sessions.permissionMode.set', { sessionId: owner.id, mode }, { headers: pressed });
       // A looser mode asked with a token minted for automation is put to the owner, not applied.
       if ('code' in reply) {
         pendingApproval = reply.approvalId;
@@ -348,7 +351,7 @@ export function createRemoteConversationRouter(
           notice(turn, '[Stop] Native cancellation recorded for this original input; waiting for its terminal event.');
         }
       } catch {
-        notice(turn, '[Stop] Native cancellation is unconfirmed. Inspect /work intake or press Stop to retry the same input.');
+        notice(turn, '[Stop] Whether the daemon stopped answering is not known. Check it in Work, under Unanswered, or press Stop again.');
       } finally { turn.cancelRequest = null; }
     });
   };
@@ -454,10 +457,10 @@ export function createRemoteConversationRouter(
 
   const observeNative = async (raw: NativeHostedTurnSnapshot, cancel: () => Promise<void>, current: () => boolean = () => true): Promise<RemoteTurnOutcome> => {
     const parsed = nativeHostedTurnSnapshotSchema.safeParse(raw);
-    if (!parsed.success) return refuse('Native hosted delivery identity is invalid. No legacy turn was started.', true);
+    if (!parsed.success) return refuse('The daemon\'s answer about your message could not be read, so nothing was run here.', true);
     const snapshot = parsed.data;
     if (!snapshot.sessionId || !snapshot.correlationId || !snapshot.brokerInputId) {
-      return refuse(`Native hosted turn is ${snapshot.state}; inspect /work intake. No legacy turn was started.`, true);
+      return refuse('The daemon has not started answering your message yet, so nothing was run here. Check it in Work, under Unanswered.', true);
     }
     const connection = options.resolveConnection();
     if (disposed || !current() || 'reason' in connection) return stopped();
@@ -466,15 +469,15 @@ export function createRemoteConversationRouter(
     if (observed) {
       if (observed.turn.sessionId !== snapshot.sessionId || observed.turn.correlationId !== snapshot.correlationId
         || observed.turn.nativeBrokerInputId !== snapshot.brokerInputId) {
-        abandon(observed.turn, 'The host returned a different dispatch identity for the original native source. Observation was detached without replay.');
-        return refuse('Native hosted dispatch identity changed. Inspect the original input; no replacement was adopted.', true);
+        abandon(observed.turn, 'The daemon now names a different answer for your message, so this one is no longer followed here; nothing was sent again.');
+        return refuse('The daemon changed which answer belongs to your message, so nothing more was done here. Check the message in Work, under Unanswered.', true);
       }
       if (snapshot.state === 'completed' || snapshot.state === 'cancelled') observed.turn.nativeTerminal = snapshot.state;
       if (isCurrent(observed.turn) || observed.turn.settledByHost) return observed.outcome;
       nativeObservations.delete(key);
-      abandon(observed.turn, 'The previous native observation was detached. Reopening the saved original with current selection.');
+      abandon(observed.turn, 'The earlier view of this answer was closed; it is opened again for the conversation chosen now.');
     }
-    if (active) { abandon(active, 'This surface switched observations. The original remote outcome is unconfirmed; switching did not cancel it.'); }
+    if (active) { abandon(active, 'This window now follows another answer. How the earlier one ends is not shown here; switching did not stop it.'); }
     const turn: WatchedTurn = {
       correlationId: snapshot.correlationId, sessionId: snapshot.sessionId,
       turnId: nativeTurnIds.get(key) ?? null, renderer: null, closeStream: null, finished: false,
@@ -501,8 +504,8 @@ export function createRemoteConversationRouter(
       void outcome.completion.then(value => { if (value.status === 'abandoned' && nativeObservations.get(key)?.outcome === outcome) nativeObservations.delete(key); });
       return outcome;
     } catch {
-      abandon(turn, 'Native turn observation could not be opened. The original hosted dispatch remains authoritative; inspect /work intake.');
-      return refuse('Native turn observation is unavailable. No legacy turn was started.', true);
+      abandon(turn, 'The daemon\'s answer could not be followed here; the daemon still answers it. Check it in Work, under Unanswered.');
+      return refuse('The daemon\'s answer could not be followed here, so nothing was run here.', true);
     }
   };
 

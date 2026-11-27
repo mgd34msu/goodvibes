@@ -194,7 +194,7 @@ export const featureConfigSettings: ConfigSettingRow[] = [
       'Comma-separated default blocked hosts for fetch trust-tier classification. Blocked hosts are always refused regardless of sanitize mode or permission mode. Per-call blocked_hosts are added on top of this default. Patterns match as in fetch.trustedHosts (* one label, ** across dots, * or ** alone every host), and a.example.com. is the same host as a.example.com. The built-in SSRF-risk block (private, link-local, metadata and other non-public addresses, and encoded IP forms) applies independently of this list, in every mode.',
   },
   {
-    key: 'webSearch.defaultProvider',
+    key: 'webSearch.defaultProvider', valueKind: 'request-target',
     label: 'Web search provider',
     appliesWhen: 'now',
     type: 'string',
@@ -202,7 +202,7 @@ export const featureConfigSettings: ConfigSettingRow[] = [
       'The provider that answers a web search that names none: a registered provider id (duckduckgo, searxng, brave, exa, firecrawl, tavily, perplexity, or one a plugin adds). auto (the default) uses the first configured of searxng, brave, exa, firecrawl, tavily and perplexity, else duckduckgo, which needs no key. A provider named here that is not registered or has no credential falls back to the auto rule; a search that passes providerId uses that one.',
   },
   {
-    key: 'security.tokenAudit.enabled',
+    key: 'security.tokenAudit.enabled', valueKind: 'protection-switch',
     label: 'Check access tokens for broad access and age',
     appliesWhen: 'now',
     type: 'boolean',
@@ -226,7 +226,7 @@ export const featureConfigSettings: ConfigSettingRow[] = [
     ...intRange(0, 3650),
   },
   {
-    key: 'security.tokenAudit.managed',
+    key: 'security.tokenAudit.managed', valueKind: 'protection-switch',
     label: 'Block tokens that fail the check',
     type: 'boolean',
     description:

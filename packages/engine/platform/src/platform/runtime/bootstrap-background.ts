@@ -5,6 +5,7 @@ import type { ProviderRegistry } from '../providers/registry.js';
 import { scan, scanLocalhost, loadPersistedProviders, persistProviders, scanMcpServers } from '../discovery/index.js';
 import type { McpRegistry } from '../mcp/registry.js';
 import type { ShellPathService } from './shell-paths.js';
+import { projectIdentityOf } from '../workspace/project-identity.js';
 import { summarizeError } from '../utils/error-display.js';
 import { isLoopbackHost } from '../utils/reachable-base-url.js';
 import { splitModelRegistryKey } from '../providers/registry-helpers.js';
@@ -214,6 +215,8 @@ export interface BackgroundMcpDiscoveryOptions {
   requestRender: () => void;
   shellPaths: Pick<ShellPathService, 'workingDirectory' | 'homeDirectory'>;
   surfaceRoot: string;
+  /** False: the servers are not started here (a headless run starts them on its turn's first `mcp` call). Default true. */
+  connectOnStart?: boolean | undefined;
 }
 
 /**
@@ -242,16 +245,20 @@ export function scheduleBackgroundMcpDiscovery(options: BackgroundMcpDiscoveryOp
     },
   };
 
-  mcpRegistry.connectAll(shellPaths).catch((err) => {
-    if (stopped) return;
-    logger.warn('MCP auto-connect failed', { error: summarizeError(err) });
-  });
+  // The servers' files are the project's (its root's `.goodvibes/mcp.json`), wherever in it the program was started.
+  const projectRoots = { workingDirectory: projectIdentityOf(shellPaths.workingDirectory), homeDirectory: shellPaths.homeDirectory };
+  if (options.connectOnStart !== false) {
+    mcpRegistry.connectAll(projectRoots).catch((err) => {
+      if (stopped) return;
+      logger.warn('MCP auto-connect failed', { error: summarizeError(err) });
+    });
+  }
 
   scanTimer = setTimeout(() => {
     scanTimer = null;
     if (stopped) return;
     const registeredNames = new Set(mcpRegistry.serverNames);
-    scanMcpServers({ ...shellPaths, surfaceRoot }, registeredNames).then((result) => {
+    scanMcpServers({ ...projectRoots, surfaceRoot }, registeredNames).then((result) => {
       if (stopped) return;
       if (result.suggestions.length === 0) return;
       for (const suggestion of result.suggestions) {

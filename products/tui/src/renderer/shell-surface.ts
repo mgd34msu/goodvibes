@@ -110,8 +110,6 @@ export interface ShellFooterBuildOptions {
   readonly scriptableStatusLine?: string | null;
   /** The one-key retry/switch-model affordance's transient hint, topmost while armed. */
   readonly retryHint?: string | null;
-  /** A contract's open question the next typed message answers (contract-question-composer.ts). */
-  readonly contractQuestionHint?: string | null;
   /** True while power.keepAwake holds, renders the always-visible "sleep disabled" chip. */
   readonly powerKeepAwake?: boolean;
   /** Live microphone state; a non-null visible state renders the microphone chip. */
@@ -188,7 +186,6 @@ export const { buildShellFooter, estimateShellFooterHeight } = createShellFooter
       for (const line of wrapText(status, Math.max(1, options.width - 6)).slice(0, 4))
         above.push(UIFactory.stringToLine(`   ${line}`, options.width, { fg: t.textMuted }));
     }
-    if (options.contractQuestionHint) above.push(UIFactory.stringToLine(`   ${options.contractQuestionHint}`, options.width, { fg: t.textMuted, bold: true }));
     if (options.retryHint) above.push(UIFactory.stringToLine(`   ${options.retryHint}`, options.width, { fg: t.textMuted, bold: true }));
     if (options.contextStatusHint)
       above.push(UIFactory.stringToLine(`   ${options.contextStatusHint}`, options.width, { fg: t.textMuted }));

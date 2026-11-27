@@ -12,7 +12,7 @@
  *    program's live conversation.
  */
 import {
-  CAPABILITY_RUN_METHOD_ID, CapabilityRefusal,
+  CAPABILITY_RUN_METHOD_ID, CapabilityRefusal, runHoldingPaths,
   type CapabilityCaller, type CapabilityDefinition, type CapabilityResult,
 } from '@goodvibes/engine/platform/platform/capabilities';
 import type { DaemonVerbCaller } from '@goodvibes/engine/platform/platform/runtime/client';
@@ -190,7 +190,8 @@ export function sessionCapabilityAction<Ctx extends CommandActionContext, Servic
       let result: CapabilityResult;
       try {
         // The person's own request unless a model ran the line, as a daemon capability is asked (runDaemonCapability).
-        result = await definition.run(values, services(ctx), { personAsked: ctx.invokedByModel !== true });
+        // A file named by path is held from its check to its use (capabilities/held-paths.ts).
+        result = await runHoldingPaths(() => definition.run(values, services(ctx), { personAsked: ctx.invokedByModel !== true }));
       } catch (error) {
         if (error instanceof CapabilityRefusal) throw commandRefusal(error.message, error.next);
         throw error;

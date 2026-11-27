@@ -68,12 +68,12 @@ function formatRuntimeActiveFailureMessage(
   if (endpoint === 'daemon') {
     const lost = 'so the web UI, your phone and your other devices cannot reach GoodVibes yet. Your settings were saved.';
     return taken
-      ? `Another program (or another version of GoodVibes) is using ${where}, ${lost} Stop that program, or choose another port in /setup, "Use it from other devices".`
+      ? `Another program (or another version of GoodVibes) is using ${where}, ${lost} Stop that program, or choose another port in System, Setup, "Other devices".`
       : `GoodVibes' background service is not running at ${where}, ${lost} To start it and keep it running, run goodvibes-daemon install-service in a terminal.`;
   }
   const lost = 'so webhooks and events from other tools do not arrive yet. Your settings were saved.';
   return taken
-    ? `Another program is using ${where}, ${lost} Stop that program, or choose another port in /setup, "Receive webhooks".`
+    ? `Another program is using ${where}, ${lost} Stop that program, or choose another port in System, Setup, "Receive webhooks".`
     : `The webhook receiver is not running at ${where}, ${lost} It starts with GoodVibes' background service.`;
 }
 
@@ -223,6 +223,12 @@ export async function handleOnboardingActionForHandler(handler: InputHandler, ac
       await handleConnectExistingDaemonForHandler(handler);
       return;
     }
+    // The account that signs in has one control: Devices and network, Addresses and ports (`a`), opened over the form.
+    if (action === 'open-sign-in-account') {
+      handler.commandContext?.openPlace?.('devices', { list: 'addresses' });
+      handler.requestRender();
+      return;
+    }
     if (action === 'start-openai-subscription') {
       await handler.handleOpenAiSubscriptionStart();
       return;
@@ -275,7 +281,6 @@ export async function handleOnboardingActionForHandler(handler: InputHandler, ac
     const deps = {
       config: handler.uiServices.platform.configManager,
       secrets: handler.uiServices.platform.secretsManager,
-      auth: handler.uiServices.platform.localUserAuthManager,
       shellPaths: handler.uiServices.environment.shellPaths,
       acknowledgementScope: 'project' as const,
     };
@@ -372,7 +377,7 @@ export async function handleOnboardingActionForHandler(handler: InputHandler, ac
       handler.commandContext?.print?.([
         `Setup saved your settings, but ${failedChecks.length} check(s) of them failed; the session and services use the new settings:`,
         ...failedChecks.map((check) => `  ${check}`),
-        'Fix each one (rerun setup with /setup to see it), then apply again.',
+        'Fix each one (open its topic again from System, Setup to see it), then apply again.',
       ].join('\n'));
     }
     handler.requestRender();
@@ -380,14 +385,12 @@ export async function handleOnboardingActionForHandler(handler: InputHandler, ac
 
 /**
  * Why the request would expose a surface on the network with no local auth to
- * guard it, or null. Local auth counts when a user exists already or the request
- * creates one.
+ * guard it, or null. Local auth counts when a user exists already.
  */
 function unsafeNetworkBind(handler: InputHandler, request: OnboardingApplyRequest): string | null {
   if (!handler.getOnboardingRuntimePosture(request).remoteExposure) return null;
   if (handler.uiServices.platform.localUserAuthManager.inspect().users.length > 0) return null;
-  if (request.operations.some((operation) => operation.kind === 'ensure-auth-user')) return null;
-  return 'A control plane, HTTP listener or web surface is set to listen beyond this machine, and no local user exists to sign in. Add a local user in the Auth step, or set the host to loopback, then apply.';
+  return 'A control plane, HTTP listener or web surface is set to listen beyond this machine, and no account exists to sign in. Make it in Devices and network, Addresses and ports (a), or set the host to loopback, then apply.';
 }
 
 
@@ -747,7 +750,7 @@ export function verifyOnboardingRuntimePostureForHandler(handler: InputHandler, 
         ? 'Local auth is configured and bootstrap credentials are not present.'
         : hasLocalAuth
           ? 'The first-run sign-in file is still on this computer: remove it with "Remove the first-run sign-in file" in System once you have signed in, so other devices can only sign in with your account.'
-          : 'Other devices can reach GoodVibes, but no account is set up to sign in with yet: create one in /setup, "Who can sign in here".',
+          : 'Other devices can reach GoodVibes, but no account is set up to sign in with yet: create one in System, Setup, "Who can sign in here".',
       target: 'auth',
     });
     if (posture.remoteExposure) {

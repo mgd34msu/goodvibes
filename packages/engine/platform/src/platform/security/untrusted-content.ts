@@ -65,6 +65,7 @@ import {
 
 
 import type { UntrustedContentPort } from '../browser/browser-types.js';
+import { conversationKeyOf, noteExposure, withConversation } from './conversation-exposure.js';
 import { revisionSource, type RevisionSource } from '../utils/revision.js';
 
 export type { UntrustedSurface, UntrustedExposure };
@@ -249,7 +250,10 @@ const contentScope = new AsyncLocalStorage<{ readonly scope: string | undefined 
  * thread it. Work outside any scope sees everything since the shared watermark.
  */
 export function withUntrustedContentScope<T>(scope: string | undefined, fn: () => T): T {
-  return contentScope.run({ scope }, fn);
+  // A scope that is a conversation (a web chat, a hosted session, an agent's run, a piece of Work) is entered as one:
+  // what it reads stays read for its later turns, and one started inside another starts with what that one read
+  // (security/conversation-exposure.ts).
+  return withConversation(conversationKeyOf(scope), () => contentScope.run({ scope }, fn));
 }
 
 /** The scope of the work running now, or undefined outside one. */
@@ -448,6 +452,8 @@ export class UntrustedContentLedger {
   private evictedFloor = 0;
 
   record(ingest: UntrustedIngest): void {
+    // What a conversation read stays read for its later turns (security/conversation-exposure.ts).
+    noteExposure(ingest.surface, ingest.origin);
     this.#publicationRevision++;
     this.ingestSequence++;
     const content = ingest.content;
@@ -519,7 +525,14 @@ export class UntrustedContentLedger {
   /** Called when a new owner turn begins: the previous turn's exposure ends. */
   startTurn(scope: string | undefined = currentUntrustedContentScope()): void {
     this.#publicationRevision++;
-    this.#bumpScope(scope);
+    // A scoped turn boundary moves what that scope's windows see only when one of them held something (an ingest since
+    // its earlier boundary, an evicted one, a private date shown): only then is its revision moved. An owner request
+    // that opens on an empty window (the web UI's places read in parallel, each a request of the person's) leaves
+    // every other decision of that scope in flight standing, instead of failing it as "authority changed".
+    const earlierBoundary = scope === undefined ? 0 : this.previousTurnStartOf(scope);
+    const seen = scope === undefined || this.ingestedSince(earlierBoundary, scope).length > 0 || this.evictedSince(earlierBoundary, scope)
+      || (this.disclosedDates.get(scope)?.length ?? 0) > 0;
+    if (seen) this.#bumpScope(scope);
     this.disclosedDates.delete(scope ?? '');
     if (scope === undefined) {
       this.previousTurnStartSequence = this.turnStartSequence;
@@ -1187,6 +1200,8 @@ export function createUntrustedContentPort(options: UntrustedContentPortOptions)
         ...(input.content === undefined ? {} : { content: input.content }),
       };
       const defer = deferredIngests.getStore();
+      // The conversation is marked at once, in the scope the read happened in (the ledger's record may come later).
+      noteExposure(surface, input.origin);
       if (defer) defer(() => { ledger.record(ingest); });
       else ledger.record(ingest);
     },

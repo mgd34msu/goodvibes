@@ -37,9 +37,9 @@ import {
   asksFirst, capabilityButton, capabilityRiskSentences, capabilitySentence, displayValues, loadCapabilities, opensForm, outcomeLine, resolvePlaceCapability,
   runPlaceCapability, useCapabilityIndex, type CapabilityReveal, type PlaceCapability,
 } from '../../lib/place-capabilities';
-import { projectName, usePlaceProjects, type PlaceProjects } from '../../lib/place-project';
+import { EVERY_PROJECT, projectName, usePlaceProjects, type PlaceProjects } from '../../lib/place-project';
 import {
-  PLACE_GROUPS, RICHER_VIEWS, allActionsOf, answersItem, elsewhereOf, filledFrom, itemActions, paneOf, placeActions, placeById, plainText, undoActionOf, webListsOf, wholeActions,
+  PLACE_GROUPS, RICHER_VIEWS, actionOfferedFor, allActionsOf, answersItem, elsewhereOf, filledFrom, itemActions, paneOf, placeActions, placeById, plainText, startingValues, undoActionOf, webListsOf, wholeActions,
   type AnyPlace, type PlaceAnswer, type PlaceCapabilityAction, type PlaceCount, type PlaceDetailLine, type PlaceItem, type PlaceList, type PlaceRow,
   type RicherView,
 } from '../../lib/places';
@@ -79,7 +79,7 @@ function ProjectChooser({ projects }: { readonly projects: PlaceProjects }) {
         aria-label="Project"
         value={projects.project ?? ''}
         onChange={projects.choose}
-        options={projects.projects.map((project) => ({ value: project, label: projectName(project) }))}
+        options={[...projects.projects.map((project) => ({ value: project, label: projectName(project) })), { value: EVERY_PROJECT, label: 'Every project' }]}
       />
     </label>
   );
@@ -363,7 +363,7 @@ function PlaceScreen({ place, listParam, lists, projects, onOpenList, onBack, on
     const actions = allActionsOf(place).filter((action) => (scope === 'place' ? action.list === undefined
       : action.list === list?.id && (scope === 'whole'
         ? action.kind !== 'program' && action.whole === true
-        : (action.kind === 'program' || action.whole !== true) && target !== undefined && (!action.states || action.states.includes(target.state)))));
+        : (action.kind === 'program' || action.whole !== true) && target !== undefined && actionOfferedFor(action, target))));
     const byWhere = new Map<string, string[]>();
     for (const action of actions) {
       const capability = action.kind === 'program' ? undefined : resolvePlaceCapability(capabilities, action.capability);
@@ -393,7 +393,7 @@ function PlaceScreen({ place, listParam, lists, projects, onOpenList, onBack, on
     const names: Record<string, string> = target && title ? { [target.id]: `"${title}"` } : {};
     // A form when a required input is left, or always for an action that declares `form`.
     if (opensForm(capability, values, action.form === true)) {
-      setForm({ request: { capability, place: place.title, given: values, names }, action, item: target });
+      setForm({ request: { capability, place: place.title, given: values, start: startingValues(action, target), names }, action, item: target });
       return;
     }
     void run(action, capability, values, names, target, answer);

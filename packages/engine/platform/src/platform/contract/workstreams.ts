@@ -86,7 +86,9 @@ export function unitWorkItem(contract: Contract, group: ContractGroup, unit: Con
     contractUnitId: unit.id,
     ...(unit.route === undefined ? {} : { route: unit.route }),
     // A unit's agent can always read how its own criteria read; the name only takes effect where the tool is registered.
-    tools: [...(tools.tools ?? []), UNIT_SELF_CHECK_TOOL],
+    // A unit that changes the project has its project's tool servers and checklist too, inside the copy it works in
+    // (agents/orchestrator.ts capturedStepProject); a read-only unit's list stays its own.
+    tools: [...(tools.tools ?? []), UNIT_SELF_CHECK_TOOL, ...(tools.readOnly ? [] : ['mcp', 'work_plan'])],
     restrictTools: tools.restrictTools,
     template: unitTemplate(unit.role),
     files: [...unit.files],

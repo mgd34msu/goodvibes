@@ -69,6 +69,41 @@ export function createSessionBoundKvState(
   };
 }
 
+/**
+ * A KVState per conversation, for a registry several conversations use at once (a project's registry in the daemon,
+ * shared by every web chat and run there): each call reads and writes the file of the conversation it belongs to
+ * (`conversationOf`, security/turn-session.ts `whoseTurn`), never another's; a call that names none uses the one
+ * unkeyed file, as every call did before. Nothing is swapped or flushed between them (two chats' turns interleave).
+ */
+export function createPerConversationKvState(
+  options: Omit<KVStateOptions, 'sessionId'>,
+  conversationOf: () => string | undefined,
+): SessionBoundKvState {
+  const unkeyed = new KVState({ ...options });
+  const byConversation = new Map<string, KVState>();
+  const current = (): KVState => {
+    const id = conversationOf();
+    if (typeof id !== 'string' || id.length === 0) return unkeyed;
+    let state = byConversation.get(id);
+    if (!state) { state = new KVState({ ...options, sessionId: id }); byConversation.set(id, state); }
+    return state;
+  };
+  const state = new Proxy(unkeyed, {
+    get(_target, property) {
+      const live = current();
+      const value = Reflect.get(live, property, live) as unknown;
+      return typeof value === 'function' ? (value as (...args: unknown[]) => unknown).bind(live) : value;
+    },
+  });
+  return {
+    state,
+    current,
+    async dispose(): Promise<void> {
+      await Promise.all([unkeyed, ...byConversation.values()].map((one) => one.dispose()));
+    },
+  };
+}
+
 /** A `session-<id>` state file whose name carries a hash of an unsafe id: the saved conversation's file name cannot be derived from it. */
 const HASHED_KEYED_TOKEN = /-[0-9a-f]{16}$/;
 

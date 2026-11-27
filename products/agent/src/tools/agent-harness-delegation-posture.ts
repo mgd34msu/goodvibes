@@ -35,7 +35,8 @@ interface DelegationRoute {
   readonly recoveryRoutes?: readonly string[];
   readonly command?: string;
   readonly commandTemplate?: string;
-  readonly workspaceActionId?: string;
+  /** The capability a model runs for this route (capability_run). */
+  readonly capabilityId?: string;
   readonly confirmationRequired?: boolean;
   readonly reviewPolicy?: 'explicit-only' | 'not-applicable';
 }
@@ -94,7 +95,7 @@ function routes(): readonly DelegationRoute[] {
       statusRoutes: ['execution action:"history"', 'System place, Health: check one area, Remote runners', 'delegation action:"status"'],
       recoveryRoutes: ['Open GoodVibes TUI shared session', 'Use local Agent read/edit/exec when the current workspace is sufficient'],
       commandTemplate: '/agents hand-off <full original user ask>',
-      workspaceActionId: 'delegate-task',
+      capabilityId: 'work.delegate',
       confirmationRequired: true,
       reviewPolicy: 'explicit-only',
     },
@@ -115,7 +116,7 @@ function routes(): readonly DelegationRoute[] {
       statusRoutes: ['execution action:"history"', 'System place, Health: check one area, Remote runners', 'delegation action:"route" delegationRouteId:"delegate-build-task-with-review"'],
       recoveryRoutes: ['Use local Agent review when the current workspace is sufficient', 'Open GoodVibes TUI shared session for review follow-up'],
       commandTemplate: '/agents hand-off --review <full original user ask>',
-      workspaceActionId: 'delegate-task',
+      capabilityId: 'work.delegate',
       confirmationRequired: true,
       reviewPolicy: 'explicit-only',
     },
@@ -173,7 +174,7 @@ function routes(): readonly DelegationRoute[] {
       optionalFields: ['visible work-plan item', 'delegation reason', 'success criteria'],
       successEvidence: ['chosen visible route', 'confirmation receipt when delegated'],
       statusRoutes: ['execution action:"status"', 'autonomy action:"intake"'],
-      recoveryRoutes: ['delegation action:"status"', 'Agent Workspace -> Work & Approvals'],
+      recoveryRoutes: ['delegation action:"status"', 'Work and agents (the menu, Ctrl+G then m)'],
       reviewPolicy: 'not-applicable',
     },
   ];
@@ -189,7 +190,7 @@ export function delegationDecisionCards(context: CommandContext): readonly Deleg
       status: 'ready',
       userBenefit: 'Fastest path for current-workspace work: no handoff, no duplicate context, direct verification and recovery.',
       chooseWhen: [
-        'The current Agent workspace is the target.',
+        'The current working folder is the target.',
         'Local read/edit/exec tools can complete and verify the work.',
         'The user did not ask for a separate runner, worktree, or delegated review.',
       ],
@@ -286,7 +287,7 @@ function routeSearchText(route: DelegationRoute): string {
     route.lane ?? '',
     route.command ?? '',
     route.commandTemplate ?? '',
-    route.workspaceActionId ?? '',
+    route.capabilityId ?? '',
     route.reviewPolicy ?? '',
     ...(route.bestFor ?? []),
     ...(route.requiredFields ?? []),
@@ -333,7 +334,7 @@ function describeRoute(
     ...(options.includeParameters ? {
       ...(route.command ? { command: route.command } : {}),
       ...(route.commandTemplate ? { commandTemplate: route.commandTemplate } : {}),
-      ...(route.workspaceActionId ? { workspaceActionId: route.workspaceActionId } : {}),
+      ...(route.capabilityId ? { capabilityId: route.capabilityId } : {}),
       bestFor: route.bestFor ?? [],
       requiredFields: route.requiredFields ?? [],
       optionalFields: route.optionalFields ?? [],
@@ -346,15 +347,14 @@ function describeRoute(
       policy: {
         effect: route.effect,
         values: 'Delegation posture returns policy, route, confirmation, and runtime availability metadata only; it does not submit delegated work.',
-        mutation: 'Delegated work submission stays a visible confirmed workspace or slash-command flow and must preserve the full original user ask.',
+        mutation: 'Delegated work submission is a capability run (asked under the person\'s mode) or a slash-command flow, and must preserve the full original user ask.',
       },
       modelAccess: {
         inspectDelegation: 'delegation action:"status"',
         inspectRoute: 'delegation action:"route"',
-        workspaceAction: route.workspaceActionId ? `workspace action:"action" actionId:"${route.workspaceActionId}"` : null,
-        runWorkspaceAction: route.workspaceActionId ? `workspace action:"run" actionId:"${route.workspaceActionId}" confirm:true explicitUserRequest:"..."` : null,
-        runCommand: route.command ? `workspace action:"run_command" command:"${route.command}" confirm:true explicitUserRequest:"..."` : null,
-        runCommandTemplate: route.commandTemplate ? `workspace action:"run_command" command:"${route.commandTemplate}" confirm:true explicitUserRequest:"..."` : null,
+        runCapability: route.capabilityId ? `capability_run id:"${route.capabilityId}"` : null,
+        runCommand: route.command ? `screens_keys_commands action:"run_command" command:"${route.command}" confirm:true explicitUserRequest:"..."` : null,
+        runCommandTemplate: route.commandTemplate ? `screens_keys_commands action:"run_command" command:"${route.commandTemplate}" confirm:true explicitUserRequest:"..."` : null,
       },
     } : {}),
   };

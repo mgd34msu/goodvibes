@@ -49,11 +49,9 @@ export interface DaemonVerbCaller {
   /** Whether a daemon is reachable in principle, with the honest reason when not. */
   probe(): DaemonReachability;
   /** Capture through this exact connection owner; never rediscover on apply. */
-  captureSettingsPrecondition?(request: import('../../config/settings-precondition-client.js').SettingsPreconditionRequest):
+  captureSettingsPrecondition?(request: import('../../config/settings-precondition-client.js').SettingsPreconditionRequest,
+    press?: import('../../config/manager.js').DaemonWritePress):
     Promise<import('../../config/settings-precondition-client.js').RemoteSettingsPrecondition>;
-  captureSettingsImportPrecondition?(request: import('../../config/settings-import-precondition-client.js').SettingsImportPreconditionRequest,
-    restriction?: import('../../config/settings-import-precondition-client.js').RemoteSettingsImportRestriction):
-    Promise<import('../../config/settings-import-precondition-client.js').RemoteSettingsImportPrecondition>;
   /**
    * Invoke a verb. Throws on a non-2xx, and on "no daemon is configured at all"
    *, a seam that wants to degrade instead of failing calls `probe()` first.
@@ -69,4 +67,18 @@ export interface DaemonVerbInvokeOptions {
    * daemon keeps only from a person's credential.
    */
   readonly explicitUserRequest?: boolean | undefined;
+  /**
+   * The program's own gate decided the model's call this is part of: sent as its mark, which the daemon believes only
+   * from the owner's own registered program (or the Agent's credential), so the call is not decided twice.
+   */
+  readonly decidedByProgramGate?: boolean | undefined;
+}
+
+/** The program's gate's mark on a call it decided (read by the daemon's dispatch). */
+export const PROGRAM_GATE_DECIDED_HEADER = 'x-goodvibes-decided-by-capability-gate';
+
+/** The invoke options that carry who decided a write (config/manager.ts `DaemonWritePress`), or undefined for neither. */
+export function pressInvokeOptions(press: { readonly personAsked?: boolean | undefined; readonly decidedByProgramGate?: boolean | undefined } | undefined): DaemonVerbInvokeOptions | undefined {
+  if (!press || (press.personAsked !== true && press.decidedByProgramGate !== true)) return undefined;
+  return { ...(press.personAsked === true ? { explicitUserRequest: true } : {}), ...(press.decidedByProgramGate === true ? { decidedByProgramGate: true } : {}) };
 }

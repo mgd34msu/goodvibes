@@ -14,6 +14,7 @@
 
 import { summarizeError } from '../utils/error-display.js';
 import { logger } from '../utils/logger.js';
+import { outsideEveryCall } from '../utils/outside-every-call.js';
 import { renderStreamPrompt, resolveStreamOptions, StreamLineProcessor } from './stream-watchers.js';
 import { applyFailure, backoffDelayFor, type SupervisionPolicy } from './supervision.js';
 import type { TriggerManagerConfig, TriggerStreamHost } from './manager-types.js';
@@ -122,7 +123,8 @@ export function activateStreamTrigger(owner: StreamOwner, id: string): void {
   runtime.activatedAt = owner.now();
   const config = owner.config(), spec = record.definition.spec;
   const interval = Math.max(50, spec.batchIntervalMs ?? config.streamBatchIntervalMs ?? 1_000);
-  runtime.timer = setInterval(() => { drainStreamTrigger(owner, id); }, interval); runtime.timer.unref?.();
+  // In the process's own context, whoever activated it (utils/outside-every-call.ts).
+  runtime.timer = outsideEveryCall(() => setInterval(() => { drainStreamTrigger(owner, id); }, interval)); runtime.timer.unref?.();
   if (runtime.pendingExit) {
     const { code } = runtime.pendingExit; delete runtime.pendingExit;
     drainStreamTrigger(owner, id, true); handleStreamExit(owner, id, code);

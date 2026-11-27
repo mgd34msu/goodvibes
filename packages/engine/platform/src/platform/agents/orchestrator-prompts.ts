@@ -18,6 +18,9 @@ import { presetForMode } from '../gate/presets.js';
 import { knowledgeQueryText } from './turn-knowledge-injection.js';
 import { builtinAgentTemplate } from './builtin-templates.js';
 import { memoryProjectOf } from '../state/memory-project.js';
+import { withRecordReach } from '@goodvibes/engine/daemon-api';
+import { knowledgeTurnReach } from '../knowledge/knowledge-reach.js';
+import { turnInputParty } from '../security/turn-input-party.js';
 
 type PromptContextDeps = {
   readonly workingDirectory: string;
@@ -72,7 +75,7 @@ function knowledgePromptTask(record: AgentRecord): string {
 }
 
 /** Packets prepared for recent agents, by agent id, per knowledge service; a sub-agent reuses its parent's. */
-const preparedPackets = new WeakMap<object, Map<string, PreparedKnowledgePromptPacket>>();
+const preparedPackets = new WeakMap<object, Map<string, { readonly packet: PreparedKnowledgePromptPacket; readonly reach: string }>>();
 const PREPARED_PACKETS_PER_SERVICE = 64;
 
 /**
@@ -84,11 +87,19 @@ async function prepareDecisionOrchestratorPromptContext(record: AgentRecord, dep
   if (!deps?.knowledgeService) return deps;
   let packets = preparedPackets.get(deps.knowledgeService);
   if (!packets) { packets = new Map(); preparedPackets.set(deps.knowledgeService, packets); }
-  const inherited = record.parentAgentId ? packets.get(record.parentAgentId) : undefined;
-  const preparedKnowledgePrompt = inherited ?? await deps.knowledgeService.preparePromptPacket(
+  // What the packet may hold: ALWAYS this run's own project and party (knowledge-reach.ts `knowledgeTurnReach`), whatever
+  // reach is or is not in scope here: its project's knowledge, and the owner's shared knowledge for his own run or a
+  // caller he gave it. A sub-agent reuses its parent's packet only for the same project and party.
+  const project = record.workingDirectory ?? deps.workingDirectory;
+  const party = turnInputParty();
+  const reach = `${project}\u0000${party.party === 'owner' ? 'owner' : `other\u0000${party.madeFor ?? ''}`}`;
+  const parent = record.parentAgentId ? packets.get(record.parentAgentId) : undefined;
+  const inherited = parent?.reach === reach ? parent.packet : undefined;
+  const knowledgeService = deps.knowledgeService;
+  const preparedKnowledgePrompt = inherited ?? await withRecordReach(knowledgeTurnReach(project, party), () => knowledgeService.preparePromptPacket(
     knowledgePromptTask(record), record.writeScope ?? [], undefined, { ...(signal ? { signal } : {}) },
-  );
-  packets.delete(record.id); packets.set(record.id, preparedKnowledgePrompt);
+  ));
+  packets.delete(record.id); packets.set(record.id, { packet: preparedKnowledgePrompt, reach });
   while (packets.size > PREPARED_PACKETS_PER_SERVICE) packets.delete(packets.keys().next().value!);
   return { ...deps, preparedKnowledgePrompt };
 }

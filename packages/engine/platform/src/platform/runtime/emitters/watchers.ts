@@ -13,7 +13,10 @@ function watcherEvent<T extends WatcherEvent['type']>(
   data: Omit<Extract<WatcherEvent, { type: T }>, 'type'>,
   ctx: EmitterContext,
 ): RuntimeEventEnvelope<T, Extract<WatcherEvent, { type: T }>> {
-  return createEventEnvelope(type, { type, ...data } as Extract<WatcherEvent, { type: T }>, ctx);
+  // A watcher belongs to no project (the registry keeps none for it): each event says it is about that watcher of the
+  // owner's own (events/about.ts), so the stream filter gives it to the owner alone, by what it declares.
+  const about = { project: null, kind: 'watcher' as const, id: data.watcherId };
+  return createEventEnvelope(type, { type, ...data, about } as Extract<WatcherEvent, { type: T }>, ctx);
 }
 
 export function emitWatcherStarted(

@@ -27,6 +27,7 @@
  * Which credential, and so which credential kind, a call presents is decided
  * here and nowhere else.
  */
+import { programRegistrationFor } from '@goodvibes/engine/platform/platform/runtime/client';
 import { delegatedOperatorConnection, type DelegatedOperatorConnection } from './agent-delegation-credential.js';
 import { isOperatorAutomationTargetMethod } from './operator-automation-target.js';
 import type { CapturedOperatorConnection } from './operator-connection-owner.js';
@@ -79,6 +80,11 @@ export interface AgentCallConnection {
 export async function agentCallConnection(ordinary: CapturedOperatorConnection, methodId: string, actor: AgentCallActor,
   homeDirectory: string, signal?: AbortSignal): Promise<AgentCallConnection> {
   if (agentCallCredential(methodId, actor) === 'ordinary') return { connection: ordinary };
+  // A program the host could not verify (no registration: another system than Linux, a host on another machine, a
+  // daemon that refused it) is no program of the owner's to that host, and the host makes the Agent's credential for
+  // none: the call goes with the ordinary credential, and the host puts its acts that the owner decides to him (held
+  // for his answer in his signed-in session), never on this program's word. A turn the daemon hosts is the daemon's.
+  if (ordinary.fetch === undefined && !(await programRegistrationFor(ordinary.baseUrl, ordinary.token ?? undefined))) return { connection: ordinary };
   const delegated = await delegatedOperatorConnection(ordinary, homeDirectory, signal);
   return { connection: delegated, delegated };
 }

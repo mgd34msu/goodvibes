@@ -2,7 +2,6 @@ import { normalizePermissionMode } from '@goodvibes/engine/platform/platform/gat
 import { DEFAULT_CONFIG } from '@goodvibes/engine/platform/platform/config';
 import type { OnboardingAcknowledgementTarget, OnboardingApplyOperation, OnboardingApplyRequest } from '../../runtime/onboarding/index.ts';
 import { formatProviderModel } from '@goodvibes/engine/platform/platform/providers';
-import { getServerSurfaceFeatureFlags } from '@goodvibes/engine/platform/platform/runtime/operations';
 import { featureEnablementWrite } from '@goodvibes/engine/terminal-shell';
 import {
   buildCloudflareApiTokenRef,
@@ -34,13 +33,6 @@ export function buildOnboardingApplyRequest(controller: OnboardingWizardControll
     // one batch. A later write for the same flag id wins (surface enables are
     // authoritative for the network-exposing flags they own).
     const featureFlagOverrides = new Map<string, 'enabled' | 'disabled'>();
-    const hasServers = controller.hasServerCapabilitiesSelected();
-    const browserAccess = controller.shouldEnableBrowserSurface();
-    const httpListener = controller.shouldEnableHttpListener();
-    const httpListenerNetworkFields = controller.shouldExposeHttpListenerNetworkFields();
-    const controlPlaneRemote = controller.shouldExposeControlPlaneNetwork();
-    const networkMode = controller.getStringFieldValue('network.mode', controller.runtimeDerived.step1_5NetworkMode);
-    const customNetwork = hasServers && networkMode === 'custom';
 
     const setConfig = (
       key: Extract<OnboardingApplyOperation, { kind: 'set-config' }>['key'],
@@ -95,46 +87,10 @@ export function buildOnboardingApplyRequest(controller: OnboardingWizardControll
       setConfig(key, buildGoodVibesSecretRef(secretKey));
     };
 
-    const requestedAdminPassword = controller.getStringFieldValue('accounts.admin-password', '');
-    // The sign-in account is written only by a form that shows it.
-    const shouldEnsureAuthUser = shownFieldIds.has('accounts.admin-username')
-      && (controller.requiresAuthBootstrap() || requestedAdminPassword.length > 0);
-    if (shouldEnsureAuthUser) {
-      operations.push({
-        kind: 'ensure-auth-user',
-        username: controller.getStringFieldValue('accounts.admin-username', controller.getDefaultAdminUsername()),
-        password: requestedAdminPassword,
-        roles: ['admin'],
-        createSession: true,
-        retireBootstrapCredential: controller.hasBootstrapCredentialPresent(),
-      });
-    }
-
-    // The daemon's service is the daemon's own (installed by the installer or
-    // `goodvibes-daemon install-service`) and keeps running for Local TUI Only,
-    // so that choice leaves the service settings as they are; a server-backed
-    // choice needs the service, so it turns them on.
-    // Pointing this terminal at a daemon elsewhere is a client-side choice: it
-    // leaves this machine's service, control plane and binds as they are.
-    const exposureWrites = controller.topic !== 'connect-daemon';
-    if (hasServers && exposureWrites) {
-      setConfig('service.enabled', true);
-      setConfig('service.autostart', true);
-      setConfig('service.restartOnFailure', true);
-    }
-    // One-Platform daemon-by-default (platform docs/decisions/2026-07-05-daemon-by-default.md):
-    // the loopback-only cross-surface session daemon is safe-by-design
-    // (loopback bind, auth-gated, rate-limited) and runs regardless of whether
-    // browser/LAN/webhook/external-app capabilities are selected here, it is no
-    // longer bundled with those network-exposing surfaces, so onboarding leaves
-    // daemon.enabled untouched and lets the platform's own default-true (or an existing
-    // explicit user override) govern. (The deprecated danger.daemon alias this
-    // comment used to also name was later removed.)
-    if (exposureWrites) {
-      setConfig('controlPlane.enabled', hasServers);
-      setConfig('danger.httpListener', httpListener);
-      setConfig('web.enabled', browserAccess);
-    }
+    // No form makes the account that signs in: Devices and network, Addresses and ports (`a`) does.
+    // No form writes how this computer is reached either (the service, the control plane, its listeners, their binds
+    // and the web UI): every setup form writes only the settings it shows and the person changed. Those are changed on
+    // Devices and network, Addresses and ports, the one control for them (the four network topics open it).
 
     // Which daemon this terminal dials is its own setting, apart from how a daemon on
     // this machine binds: connecting to an existing one points there, starting one here clears it.
@@ -143,37 +99,21 @@ export function buildOnboardingApplyRequest(controller: OnboardingWizardControll
       setConfig('daemon.connectedHost.url', getDaemonSource(controller) === 'adopt' ? readAdoptedDaemonUrl(controller) : '');
     }
 
-    if (exposureWrites && hasServers) {
-      addNetworkOperations(controller, operations, customNetwork, {
-        controlPlane: hasServers,
-        controlPlaneRemote,
-        httpListener: httpListenerNetworkFields,
-        web: browserAccess,
-      });
-    } else if (exposureWrites) {
-      setConfig('controlPlane.hostMode', 'local');
-      setConfig('controlPlane.host', controller.runtimeSnapshot?.bindSettings.controlPlane.host || '127.0.0.1');
-      setConfig('httpListener.hostMode', 'local');
-      setConfig('httpListener.host', controller.runtimeSnapshot?.bindSettings.httpListener.host || '127.0.0.1');
-      setConfig('web.hostMode', 'local');
-      setConfig('web.host', controller.runtimeSnapshot?.bindSettings.web.host || '127.0.0.1');
-    }
-
+    // Every write below comes from a field this form shows (a form writes only what it shows and the person changed;
+    // the apply then drops every write equal to what was read).
+    const shows = (fieldId: string): boolean => shownFieldIds.has(fieldId);
     const defaultModel = controller.modelSelectionState.get('main');
-    if (defaultModel && defaultModel.enabled !== false && defaultModel.providerId.length > 0 && defaultModel.modelId.length > 0) {
+    if (controller.topic === 'model' && defaultModel && defaultModel.enabled !== false && defaultModel.providerId.length > 0 && defaultModel.modelId.length > 0) {
       setConfig('provider.model', formatProviderModel(defaultModel.providerId, defaultModel.modelId));
     }
-    setConfig('provider.reasoningEffort', controller.getStringFieldValue('default-model.reasoning', controller.runtimeSnapshot?.providerRouting.primaryReasoningEffort ?? 'medium'));
-    const hitlMode = controller.getStringFieldValue('experience.hitl', controller.runtimeSnapshot?.runtimeDefaults.behavior.hitlMode ?? 'balanced');
-    setConfig('behavior.hitlMode', hitlMode);
+    if (shows('default-model.reasoning')) setConfig('provider.reasoningEffort', controller.getStringFieldValue('default-model.reasoning', controller.runtimeSnapshot?.providerRouting.primaryReasoningEffort ?? 'medium'));
     // behavior.hitlMode IS the enablement key of the hitl-ux-modes capability
     // (active for quiet/balanced/operator, off only at 'off'), so the write
-    // above already carries the enablement, no separate gating write exists,
-    // and adding one here would clobber a non-default choice with the stock
-    // mode when the batch flushes.
-    setConfig('behavior.guidanceMode', controller.getStringFieldValue('experience.guidance', controller.runtimeSnapshot?.runtimeDefaults.behavior.guidanceMode ?? 'minimal'));
-    setConfig('permissions.mode', normalizePermissionMode(controller.getStringFieldValue('experience.permissions', controller.runtimeSnapshot?.runtimeDefaults.permissionsMode ?? 'jev-decides')));
-    setConfig('storage.secretPolicy', controller.getStringFieldValue('external-services.secret-policy', controller.runtimeSnapshot?.runtimeDefaults.secretStoragePolicy ?? 'preferred_secure'));
+    // carries the enablement, no separate gating write exists.
+    if (shows('experience.hitl')) setConfig('behavior.hitlMode', controller.getStringFieldValue('experience.hitl', controller.runtimeSnapshot?.runtimeDefaults.behavior.hitlMode ?? 'balanced'));
+    if (shows('experience.guidance')) setConfig('behavior.guidanceMode', controller.getStringFieldValue('experience.guidance', controller.runtimeSnapshot?.runtimeDefaults.behavior.guidanceMode ?? 'minimal'));
+    if (shows('experience.permissions')) setConfig('permissions.mode', normalizePermissionMode(controller.getStringFieldValue('experience.permissions', controller.runtimeSnapshot?.runtimeDefaults.permissionsMode ?? 'jev-decides')));
+    if (shows('external-services.secret-policy')) setConfig('storage.secretPolicy', controller.getStringFieldValue('external-services.secret-policy', controller.runtimeSnapshot?.runtimeDefaults.secretStoragePolicy ?? 'preferred_secure'));
 
     // Provider-agnostic key capture: store each entered key under the provider's
     // own declared secret key. Empty fields are skipped (setSecret no-ops), so
@@ -182,13 +122,14 @@ export function buildOnboardingApplyRequest(controller: OnboardingWizardControll
       setSecret(target.apiKeyEnvVar, controller.getStringFieldValue(providerKeyFieldId(target.providerId), ''));
     }
 
-    if (shouldShowCloudflareStep(controller)) {
+    if (controller.topic === 'cloudflare' && shouldShowCloudflareStep(controller)) {
       addCloudflareOperations(controller, operations, setSecret);
     }
 
     const externalIntegrations = controller.isCapabilitySelected('external-integrations');
     const enabledExternalSurfaceIds: string[] = [];
-    for (const surface of EXTERNAL_SURFACE_SPECS) {
+    // The chat apps are the chat-apps form's: no other form writes them.
+    for (const surface of controller.topic === 'chat-apps' ? EXTERNAL_SURFACE_SPECS : []) {
       const selected = externalIntegrations
         && controller.getBooleanFieldValue(
           surface.enabledFieldId,
@@ -226,18 +167,8 @@ export function buildOnboardingApplyRequest(controller: OnboardingWizardControll
     // Feature units from the guided feature steps (safety, memory & context,
     // telemetry, automation, provider, advanced): enable/disable each feature
     // the user changed from its default and write its chosen sub-options.
-    applyFeatureUnitOperations(controller, setConfig, featureFlagOverrides);
-
-    // Surface/server capabilities are authoritative for the network-exposing
-    // features they own, apply them last so they win over any feature-step
-    // override.
-    for (const surfaceFlag of getServerSurfaceFeatureFlags({
-      serverBacked: hasServers,
-      web: browserAccess,
-      externalSurfaces: enabledExternalSurfaceIds,
-    })) {
-      featureFlagOverrides.set(surfaceFlag, 'enabled');
-    }
+    // Only the features this form shows.
+    applyFeatureUnitOperations(controller, setConfig, featureFlagOverrides, shownFieldIds);
     // Each selection lands as a plain domain-settings write on the feature's
     // real enablement key (e.g. sandbox.enabled, controlPlane.gateway).
     for (const flagId of [...featureFlagOverrides.keys()].sort((left, right) => left.localeCompare(right))) {
@@ -247,16 +178,32 @@ export function buildOnboardingApplyRequest(controller: OnboardingWizardControll
 
     acknowledge('providers', 'providers.reviewed');
     acknowledge('subscriptions', 'accounts.subscriptions');
-    acknowledge('auth', 'accounts.auth');
 
     // Fields start from the saved settings; a write equal to what was read is
     // not a change, so it is left out and a setting tuned elsewhere is kept.
+    const changed = dropUnchangedConfigOperations(controller, operations);
     return {
       mode: controller.mode,
       source: 'wizard',
-      operations: dropUnchangedConfigOperations(controller, operations),
+      // The chat-apps form (the Channels row's "set it up") saves the chat apps chosen on it and nothing else, as its
+      // Save says: no exposure, service, model, mode or feature setting. An app that needs inbound webhooks says so on
+      // its form; the listener is turned on in Devices and network, Addresses and ports.
+      operations: controller.topic === 'chat-apps' ? chatAppOperationsOnly(changed, enabledExternalSurfaceIds) : changed,
     };
   }
+
+/** The writes of the chosen chat apps only: each app's switch and its own fields, and the secrets those fields hold. */
+function chatAppOperationsOnly(operations: readonly OnboardingApplyOperation[], chosen: readonly string[]): OnboardingApplyOperation[] {
+  const keys = new Set<string>();
+  for (const surface of EXTERNAL_SURFACE_SPECS) {
+    if (!chosen.includes(surface.id)) continue;
+    keys.add(surface.enabledConfigKey);
+    for (const field of surface.fields) keys.add(field.configKey);
+  }
+  const secrets = new Set([...keys].map((key) => buildGoodVibesSecretKey(key)));
+  return operations.filter((operation) => (operation.kind === 'set-config' && keys.has(operation.key))
+    || (operation.kind === 'set-secret' && secrets.has(operation.key)));
+}
 
 function addCloudflareOperations(
   controller: OnboardingWizardControllerLike,
@@ -371,56 +318,3 @@ function readAdoptedDaemonUrl(controller: OnboardingWizardControllerLike): strin
   return adoptedDaemonUrl(adoptHost, controller.getPortFieldValue('network.adopt-daemon-port', 3421), adoptedDaemonScheme(controller));
 }
 
-export function addNetworkOperations(
-  controller: OnboardingWizardControllerLike,
-    operations: OnboardingApplyOperation[],
-    customNetwork: boolean,
-    enabled: {
-      readonly controlPlane: boolean;
-      readonly controlPlaneRemote: boolean;
-      readonly httpListener: boolean;
-      readonly web: boolean;
-    },
-  ): void {
-    const setConfig = (
-      key: Extract<OnboardingApplyOperation, { kind: 'set-config' }>['key'],
-      value: unknown,
-    ): void => {
-      operations.push({ kind: 'set-config', key, value });
-    };
-    const networkFacingEnabled = {
-      controlPlane: enabled.controlPlaneRemote,
-      httpListener: enabled.httpListener,
-      web: enabled.web,
-    };
-    const sharedIpDefault = controller.getSharedIpDefault(networkFacingEnabled);
-    const sharedIp = controller.getBooleanFieldValue('network.shared-ip', sharedIpDefault);
-    const sharedHost = controller.getStringFieldValue('network.shared-ip-address', controller.getSharedIpHostDefault(networkFacingEnabled)) || '0.0.0.0';
-    const controlPlaneHost = sharedIp
-      ? sharedHost
-      : controller.getStringFieldValue('network.service-ip', controller.runtimeSnapshot?.bindSettings.controlPlane.host ?? '0.0.0.0');
-    const httpListenerHost = sharedIp
-      ? sharedHost
-      : controller.getStringFieldValue('network.webhook-ip', controller.runtimeSnapshot?.bindSettings.httpListener.host ?? '0.0.0.0');
-    const webHost = sharedIp
-      ? sharedHost
-      : controller.getStringFieldValue('network.browser-ip', controller.runtimeSnapshot?.bindSettings.web.host ?? '0.0.0.0');
-
-    if (enabled.controlPlane) {
-      setConfig('controlPlane.hostMode', enabled.controlPlaneRemote ? (customNetwork ? 'custom' : 'network') : 'local');
-      setConfig('controlPlane.host', enabled.controlPlaneRemote ? (customNetwork ? controlPlaneHost : '0.0.0.0') : '127.0.0.1');
-      setConfig('controlPlane.port', controller.getPortFieldValue('network.service-port', controller.runtimeSnapshot?.bindSettings.controlPlane.port ?? 3421));
-    }
-
-    if (enabled.httpListener) {
-      setConfig('httpListener.hostMode', customNetwork ? 'custom' : 'network');
-      setConfig('httpListener.host', customNetwork ? httpListenerHost : '0.0.0.0');
-      setConfig('httpListener.port', controller.getPortFieldValue('network.webhook-port', controller.runtimeSnapshot?.bindSettings.httpListener.port ?? 3422));
-    }
-
-    if (enabled.web) {
-      setConfig('web.hostMode', customNetwork ? 'custom' : 'network');
-      setConfig('web.host', customNetwork ? webHost : '0.0.0.0');
-      setConfig('web.port', controller.getPortFieldValue('network.browser-port', controller.runtimeSnapshot?.bindSettings.web.port ?? 3423));
-    }
-  }

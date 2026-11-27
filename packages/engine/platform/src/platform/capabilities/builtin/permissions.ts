@@ -140,7 +140,9 @@ export const PERMISSIONS_ADD: CapabilityDefinition<PermissionRulesCapabilityServ
       ] },
     { id: 'target', label: 'Which', help: 'The command, word, folder or tool', kind: 'text', freeTextReason: 'a command, word, folder or tool name', required: true, typed: { tail: true } },
   ],
-  sentence: 'In this project, a call matching {kind} {target} will {effect} until you change it.', done: '',
+  // The choices are filled in by their labels ("This exact command", "Run it without asking"): each stands after its own
+  // field name, never inside the sentence's grammar.
+  sentence: 'In this project, until you change it, a call that matches (For: {kind}; Which: {target}) gets: {effect}.', done: '',
   touches: 'this-machine', lasts: 'kept', risk: 'none', undoneBy: 'revoke',
   // A rule that refuses or asks only tightens; one that runs a call without asking loosens (its choice's risk).
   tightens: { input: 'effect', values: ['deny', 'ask'] }, example: { effect: 'deny', kind: 'class', target: 'rm' },

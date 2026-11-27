@@ -37,7 +37,8 @@ export interface HeadlessTurnContext {
   readonly permissions?: Pick<PermissionManager, 'listHeldForOwner'> | undefined;
   readonly uiServices: {
     readonly agents: {
-      readonly contractRunner: Pick<ContractRunner, 'list' | 'cancel' | 'get' | 'on' | 'join'>;
+      /** Null in a program that runs no contracts: a delegation is daemon work, followed as an agent record. */
+      readonly contractRunner: Pick<ContractRunner, 'list' | 'cancel' | 'get' | 'on' | 'join'> | null;
       readonly agentManager: Pick<AgentManager, 'list' | 'cancel' | 'join' | 'getStatus'> & Partial<Pick<AgentManager, 'stopFollowingDelegatedWork'>>;
     };
   };
@@ -82,7 +83,7 @@ export async function executeHeadlessTurn(
   const existingAgents = new Set(agents.list().map((agent) => agent.id));
   const ownedAgents = () => agents.list().filter((agent) => !existingAgents.has(agent.id));
   // Only ids and statuses are read from these lists: the captured input manifest is left out.
-  const listSession = () => runner.list({ sessionId: ctx.runtime.sessionId, includeTerminal: true, includeInputSnapshot: false });
+  const listSession = () => runner?.list({ sessionId: ctx.runtime.sessionId, includeTerminal: true, includeInputSnapshot: false }) ?? [];
   const existing = new Set(listSession().map((contract) => contract.id));
   const owned = () => listSession().filter((contract) => !existing.has(contract.id));
   // This freshly bootstrapped executor belongs only to this invocation.
@@ -90,7 +91,7 @@ export async function executeHeadlessTurn(
     ctx.orchestrator.abort();
     // Work this run handed to the daemon is the daemon's: it runs on and its result waits in Work; only following it ends.
     agents.stopFollowingDelegatedWork?.();
-    for (const contract of owned()) runner.cancel(contract.id, 'Headless invocation cancelled');
+    for (const contract of owned()) runner?.cancel(contract.id, 'Headless invocation cancelled');
     for (const agent of ownedAgents()) agents.cancel(agent.id);
   };
   const { answerPermissions, settings, daemon, ...observerLimits } = limits;
@@ -144,10 +145,11 @@ export async function executeHeadlessTurn(
     const answers: string[] = [];
     const collectedAgents = new Set<string>();
     for (;;) {
-      const contracts = owned().filter((contract) => !collected.has(contract.id));
+      const contracts = runner ? owned().filter((contract) => !collected.has(contract.id)) : [];
       const standalone = ownedAgents().filter((agent) => !agent.contractId && !collectedAgents.has(agent.id));
       if (!contracts.length && !standalone.length) break;
       for (const contract of contracts) {
+        if (!runner) break;
         collected.add(contract.id);
         await new Promise<void>((resolve) => {
           let finished = false;

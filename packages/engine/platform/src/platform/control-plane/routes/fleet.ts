@@ -37,7 +37,7 @@ import { FLEET_NODE_KINDS, FLEET_NODE_STATES } from '../../../events/fleet.js';
 import { contractRawForWire } from '../../runtime/fleet/contract-wire.js';
 import type { AttemptJudgment, AttemptPickResult, HeldMergeGroup } from '../../orchestration/types.js';
 import { AttemptError } from '../../orchestration/attempts.js';
-import { paginateItems } from '@goodvibes/engine/daemon-api';
+import { currentRecordReach, paginateItems } from '@goodvibes/engine/daemon-api';
 import { GatewayVerbError } from './gateway-verb-error.js';
 import { readInvocationParams, requireString } from './invocation-params.js';
 import { attachHandler } from './attach-handler.js';
@@ -129,10 +129,25 @@ function toWireNode(node: ProcessNode): ProcessNode {
   return wire;
 }
 
+/**
+ * The fleet's nodes the request's caller may reach (control-plane/caller-reach.ts), before a page is cut or a count is
+ * made: an agent as its task, a schedule and a trigger as themselves. Every other node (a contract, a watcher, a
+ * background process, an outside agent, the code index) holds no project the daemon can tell apart: the owner's only.
+ */
+function reachableNodes(nodes: readonly ProcessNode[]): readonly ProcessNode[] {
+  const reach = currentRecordReach();
+  if (!reach) return nodes;
+  return nodes.filter((node) => node.kind === 'agent' ? reach('task', node.id)
+    : node.kind === 'trigger' ? reach('trigger', node.id)
+      : node.kind === 'schedule' && node.id.startsWith('automation-job:') ? reach('schedule', node.id.slice('automation-job:'.length))
+        : false);
+}
+
 export function createFleetSnapshotHandler(registry: FleetQueryOnlyRegistry): GatewayMethodHandler {
   return (invocation) => {
     const filter = readFleetQueryFilter(readInvocationParams(invocation));
-    const snapshot = registry.query(filter);
+    const queried = registry.query(filter);
+    const snapshot = { ...queried, nodes: reachableNodes(queried.nodes) };
     const truncated = snapshot.nodes.length > FLEET_SNAPSHOT_NODE_CAP;
     const nodes = (truncated
       ? snapshot.nodes.slice(0, FLEET_SNAPSHOT_NODE_CAP)
@@ -152,7 +167,8 @@ export function createFleetListHandler(registry: FleetQueryOnlyRegistry): Gatewa
     const filter = readFleetQueryFilter(params);
     const limit = clampLimit(params.limit, FLEET_LIST_DEFAULT_LIMIT, FLEET_LIST_MAX_LIMIT);
     const rawCursor = typeof params.cursor === 'string' ? params.cursor : null;
-    const snapshot = registry.query(filter);
+    const queried = registry.query(filter);
+    const snapshot = { ...queried, nodes: reachableNodes(queried.nodes) };
     // Sort key and recovery key MUST agree (mirrors sessions.search's
     // sortSessions-then-paginateItems pattern in session-search.ts): the array
     // is sorted newest-first by startedAt (id tiebreak for determinism when

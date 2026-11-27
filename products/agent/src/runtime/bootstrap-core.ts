@@ -1,6 +1,9 @@
 import { REGULAR_KNOWLEDGE_DB_FILE, prepareConfiguredProjectContext } from '@goodvibes/engine/platform/platform/knowledge';
+import { declareUnmarkedWorkIsOwners } from '@goodvibes/engine/platform/platform/security';
 import { initialTerminalRuntimeFields } from '@goodvibes/engine/terminal-shell/bootstrap-primitives';
-import { setProgramCallContext } from '@goodvibes/engine/platform/platform/runtime/client';
+import { agentVerificationRefusal, onProgramRegistrationRefused, setProgramCallContext } from '@goodvibes/engine/platform/platform/runtime/client';
+import { resolveConnectedHost } from '@goodvibes/engine/terminal-shell/agent-turn/connected-host-client';
+import { shortCheckpointId } from '@goodvibes/engine/terminal-shell/recovery-commands';
 import { projectAgentToolDependencies } from '@goodvibes/engine/terminal-shell/bootstrap-command-context';
 import {
   createTerminalFeatureFlags,
@@ -22,13 +25,14 @@ import { ConversationManager } from '../core/conversation';
 import { publishToSharedFeed } from '../core/notices.ts';
 import { getSharedNotificationFeed } from '../core/notifications-feed.ts';
 import { registerSessionConversation, unregisterSessionConversation } from './conversation-rewind-port.ts';
-import { SelectionManager } from '@goodvibes/engine/terminal-shell';
+import { noSandboxStartupLine, SelectionManager } from '@goodvibes/engine/terminal-shell';
 import { logger } from '@goodvibes/engine/platform/platform/utils';
 import { repositoryTrustNotice } from '@goodvibes/engine/platform/platform/runtime/operations';
 import { HooksFileAwaitingTrustError } from '@goodvibes/engine/platform/platform/hooks';
 import { existingGoogleConnectionOwner } from '@goodvibes/engine/platform/platform/google';
 import { installCloudflareAccessFetch } from '@goodvibes/engine/platform/platform/cloudflare';
 import { getConfiguredSystemPrompt } from '../config/index.ts';
+import type { DaemonWritePress } from '@goodvibes/engine/platform/platform/config';
 import { buildAgentConfigRouting, installAgentDaemonConfigClient } from '../config/daemon-config-routing.ts';
 import { installAgentDaemonCredentialsClient } from '../config/daemon-credential-routing.ts';
 import { AGENT_PLATFORM_TOOL_ADMISSION } from '@goodvibes/engine/terminal-shell/agent-turn/read-modes';
@@ -139,6 +143,9 @@ export async function initializeBootstrapCore(
   const workingDir = options.workingDir;
   const homeDirectory = options.homeDirectory;
   const configManager = options.configManager;
+  // This program is the person at his own keyboard: work in it that no turn or mark names is his (unknown is someone
+  // else's everywhere else, the daemon included: security/turn-input-party.ts).
+  declareUnmarkedWorkIsOwners();
   // The daemon's one knowledge store, in the daemon's state folder (runtime/services.ts `knowledge: 'daemon'`).
   await prepareConfiguredProjectContext(configManager, workingDir, REGULAR_KNOWLEDGE_DB_FILE, { activate: true, inDaemonStateFolder: true });
 
@@ -198,9 +205,10 @@ export async function initializeBootstrapCore(
     thisMachine: () => daemonConfigClient.thisMachine(),
     describe: () => `the connected host at ${resolveConnectedHostAddress(configManager).baseUrl}`,
     snapshot: () => daemonConfigClient.snapshot(),
-    write: (key, value) => daemonConfigClient.set(key, value),
-    writeMany: (changes) => daemonConfigClient.setMany(changes),
-    ...(daemonConfigClient.reset ? { reset: (key: string) => daemonConfigClient.reset!(key) } : {}),
+    // Who decided each write (the person's press, the gate's decision) goes with it, from the call site.
+    write: (key, value, press) => daemonConfigClient.set(key, value, press),
+    writeMany: (changes, press) => daemonConfigClient.setMany(changes, press),
+    ...(daemonConfigClient.reset ? { reset: (key: string, press?: DaemonWritePress) => daemonConfigClient.reset!(key, press) } : {}),
     refused: (key, error) => logger.warn('The connected host refused a setting written from the Agent; the previous value is back', { key, error: summarizeError(error) }),
   });
   const providerRegistry = services.providerRegistry;
@@ -269,7 +277,8 @@ export async function initializeBootstrapCore(
     services.agentOrchestrator,
     {
       ...projectAgentToolDependencies({ services, fileCache, projectIndex, configManager }),
-      contractHooks: services.contractRunner.hooks(),
+      // The Agent runs no contracts (its work runs on the daemon): its agents have no contract hooks.
+      ...(services.contractRunner ? { contractHooks: services.contractRunner.hooks() } : {}),
       secretsManager: services.secretsManager,
       cloudflareAuthToken: () => readDaemonOperatorToken(homeDirectory),
       surfaceRoot: GOODVIBES_AGENT_SURFACE_ROOT,
@@ -292,6 +301,13 @@ export async function initializeBootstrapCore(
   const bootstrapUnsubs: Array<() => void | Promise<void>> = [];
   // A saved session is handed the owner's answers that waited for it when it is opened; deleting it settles its questions.
   bootstrapUnsubs.push(wireOwnerQuestionSessions(services, { configManager, homeDirectory }, conversation, () => runtimeSessionIdRef.value));
+  // A change of this session that another session's restore took back is said here, at this session's next turn:
+  // a line in the conversation, and the model is told with that turn's first request.
+  bootstrapUnsubs.push(services.workspaceCheckpointManager.followTakenBack(() => runtimeSessionIdRef.value,
+    (line, forModel) => {
+      conversation.addWorkspaceNotice(line);
+      conversation.hostInstructions.set('workspace', forModel, { once: true, append: true });
+    }, shortCheckpointId));
   bootstrapUnsubs.push(stopRuntimeBindings);
   bootstrapUnsubs.push(disposeToolRegistry);
   bootstrapUnsubs.push(() => disposeTerminalFeatureFlags(featureFlags));
@@ -320,6 +336,19 @@ export async function initializeBootstrapCore(
   for (const notice of keybindingNotices) startupNotices.report(`[Startup] ${notice}`);
   // A decision log that had to start empty after damage is said on screen, not only in the log file.
   if (services.judgment.decisionLogNotice) startupNotices.report(`[Startup] ${services.judgment.decisionLogNotice}`);
+  // Where this computer cannot prove the program to the daemon: said once, in one sentence. For the Agent it says its
+  // own work is refused here and the way through (pair this computer as the owner's device), until it holds a key of
+  // its own from that pairing.
+  const unverifiedNotice = resolveConnectedHost({ configManager, homeDirectory }).source === 'pairing' ? undefined : agentVerificationRefusal();
+  if (unverifiedNotice) startupNotices.report(`[Security] ${unverifiedNotice}`);
+  // Where the daemon could not verify this program (something loaded into it): said on screen, with what to do.
+  onProgramRegistrationRefused((why) => startupNotices.report(`[Security] ${why}`));
+  // With no working sandbox, said once at start: what a model's command can then reach, and the control that turns
+  // the sandbox on (no-sandbox-notice.ts).
+  startupNotices.guard('Whether commands run in a sandbox could not be read', async () => {
+    const line = await noSandboxStartupLine(configManager.get('sandbox.enabled'));
+    if (line) startupNotices.report(line);
+  });
   // A rejected load must be seen: later approval operations rethrow the same
   // error with no hint of the cause, and a discarded promise reaches only the log.
   startupNotices.guard(
@@ -353,7 +382,8 @@ export async function initializeBootstrapCore(
     requestRender,
     configManager,
     agentManager: services.agentManager,
-    contractRunner: services.contractRunner,
+    // The Agent runs no contracts: none are read, so no contract event is announced here.
+    contractRunner: services.contractRunner ?? { get: () => null, list: () => [] },
     toolRegistry,
   });
 
@@ -393,7 +423,7 @@ export async function initializeBootstrapCore(
   // before a restart is still announced by its request and real duration.
   const runtimeNotifications = {
     lookupContract: (contractId: string) => {
-      const contract = services.contractRunner.get(contractId);
+      const contract = services.contractRunner?.get(contractId);
       return contract ? { startedAt: contract.createdAt, name: contract.ask } : undefined;
     },
   };
@@ -422,7 +452,7 @@ export async function initializeBootstrapCore(
       hooksFileWaiting: hookWorkbench.getAwaitingTrust(),
       heldMcpServers: () => services.mcpRegistry.heldForWorkspaceTrust(services.shellPaths),
     }).then((notice) => { if (notice) startupNotices.report(notice); },
-      (error: unknown) => { logger.warn('agent workspace trust notice not shown', { error: summarizeError(error) }); });
+      (error: unknown) => { logger.warn('folder trust notice not shown', { error: summarizeError(error) }); });
   }
 
   // The automation session register's record for a session: created for the
@@ -503,6 +533,9 @@ export async function initializeBootstrapCore(
   openSessionRecord(runtime.sessionId);
   // The Agent's call context, carried on every call it makes to the daemon: its project folder and the conversation it
   // holds now (call-context.ts). The daemon never takes its own folder for a call that names none.
+  // The registration each daemon it reaches issues it (call-context.ts `programCallHeadersFor`, kept in memory only) tells
+  // it apart from the terminal app, a command line and a script that hold the same operator token: a remembered answer
+  // and a conversation it registered are its own.
   setProgramCallContext({ program: 'agent', project: () => services.shellPaths.workingDirectory, sessionId: () => runtimeSessionIdRef.value });
 
   // Mirror the create into the daemon spine (fire-and-forget; the local

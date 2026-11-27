@@ -26,8 +26,9 @@ import { assertPermissionActive, awaitPermission } from '../permissions/cancella
  * chain.
  *
  * Trust is the owner's decision about a directory, so it is kept in the
- * owner's own state, never in the directory it judges: one row per directory
- * (keyed by its real path) in the user's workspace register
+ * owner's own state, never in the directory it judges: one row per project
+ * (keyed by its root's real path, workspaceTrustOwnerOf: a subfolder is under
+ * its project's decision) in the user's workspace register
  * (~/.goodvibes/shared/workspace-registrations.json), shared by every product.
  * A `trust.json` found inside a project, which earlier builds wrote there, is
  * not honored: a checkout could ship one saying "trusted". Such a directory
@@ -42,6 +43,7 @@ import {
   type WorkspaceRegistrationStore,
 } from '../workspace/index.js';
 import { normalizeWorkspaceRoot, pathCovers } from '../workspace/registration/resolution.js';
+import { projectIdentityOf } from '../workspace/project-identity.js';
 import { logger } from '../utils/logger.js';
 import { fileIdentity } from '../security/read-source.js';
 import { readJsonFileOrQuarantine, writeJsonFileAtomic } from '../utils/atomic-json-store.js';
@@ -326,6 +328,16 @@ function canonicalWorkspaceRoot(workingDirectory: string): string {
 }
 
 /**
+ * Whose trust a folder is under: its project's (workspace/project-identity.ts, the same answer the folder's hooks file,
+ * tool-server files and trust card use). A program opened in a subfolder of a project is in that project: the project
+ * root's decision is the one read and written, so a subfolder of a trusted project is trusted and a subfolder of a
+ * restricted or undecided one gains nothing.
+ */
+export function workspaceTrustOwnerOf(workingDirectory: string): string {
+  return canonicalWorkspaceRoot(projectIdentityOf(workingDirectory));
+}
+
+/**
  * detectPriorWorkspaceState, true if <workingDirectory>/.goodvibes already
  * holds GoodVibes RUNTIME state from a prior session. Deliberately keyed on
  * generated state (sessions/checkpoints/state/memory/onboarding marker), not on
@@ -408,7 +420,7 @@ export function readPersistedWorkspaceTrust(
   if (read.state === 'unreadable') {
     return { level: 'undecided', legacyIgnored: false, fault: `the workspace register ${registerPath} could not be read (${read.reason})` };
   }
-  const root = canonicalWorkspaceRoot(paths.workingDirectory);
+  const root = workspaceTrustOwnerOf(paths.workingDirectory);
   const row = read.state === 'ok' ? read.trust.find((entry) => entry.root === root) : undefined;
   if (row) return { level: row.level, legacyIgnored: false };
   // Trusted for having nothing of its own to run (its own file, beside the register).
@@ -464,7 +476,7 @@ export class WorkspaceTrustManager {
 
   constructor(options: WorkspaceTrustManagerOptions) {
     const { shellPaths } = options;
-    this.workspaceRoot = canonicalWorkspaceRoot(shellPaths.workingDirectory);
+    this.workspaceRoot = workspaceTrustOwnerOf(shellPaths.workingDirectory);
     this.legacyFile = shellPaths.resolveProjectPath(options.surfaceRoot, LEGACY_TRUST_FILE);
     this.registerPath = sharedWorkspaceRegisterPath(shellPaths);
     this.nothingToRunPath = nothingToRunPath(this.registerPath);

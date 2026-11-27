@@ -5,6 +5,7 @@ import { daemonSecretKeyFor } from './daemon-secret-keys.js';
 export { normalizeSecretKeyPart } from './daemon-secret-keys.js';
 import type { ConfigKey } from './schema.js';
 import type { SecretScope, SecretStorageMedium } from './secrets.js';
+import type { DaemonWritePress } from './manager.js';
 /**
  * The settings whose value is a credential: a write of one stores the value in
  * the secret store and leaves a `goodvibes://secrets/` reference in the
@@ -23,7 +24,7 @@ export interface SecretBackedConfigUpdate {
 }
 export interface SecretBackedConfigManager {
     readonly get: (key: ConfigKey) => unknown;
-    readonly setDynamic: (key: ConfigKey, value: unknown) => void;
+    readonly setDynamic: (key: ConfigKey, value: unknown, options?: { readonly press?: DaemonWritePress | undefined }) => void;
     readonly validateDynamic?: ((key: ConfigKey, value: unknown) => void) | undefined;
 }
 export interface SecretBackedSecretStore {
@@ -116,20 +117,26 @@ export function defaultSecretBackedScope(configKey: ConfigKey): SecretScope {
  * configured-but-broken credential.
  */
 export interface DaemonCredentialWriter {
-    set(configKey: string, value: string): Promise<unknown>;
-    clear(configKey: string): Promise<void>;
+    set(configKey: string, value: string, press?: DaemonWritePress): Promise<unknown>;
+    clear(configKey: string, press?: DaemonWritePress): Promise<void>;
 }
-export type SecretBackedConfigRoute = (configKey: ConfigKey, rawValue: string, update: SecretBackedConfigUpdate) => Promise<boolean>;
+export type SecretBackedConfigRoute = (configKey: ConfigKey, rawValue: string, update: SecretBackedConfigUpdate, press?: DaemonWritePress) => Promise<boolean>;
 /** Preserve connected-owner routing without letting a local fallback swallow a refusal. */
 export function createSecretBackedConfigWriter(route?: SecretBackedConfigRoute | undefined) {
     return async function persistSecretBackedConfigValue(configManager: SecretBackedConfigManager, secretsManager: SecretBackedSecretStore | null | undefined, configKey: ConfigKey, rawValue: string, options: {
         readonly scope?: SecretScope | undefined;
         readonly daemonWriter?: DaemonCredentialWriter | null | undefined;
+        /**
+         * Who decided this write, from the call site that handled it (the person's own press, or the program's gate
+         * deciding a model's call): sent with what reaches the daemon (manager.ts `DaemonWritePress`).
+         */
+        readonly press?: DaemonWritePress | undefined;
     } = {}): Promise<string> {
         const update = buildSecretBackedConfigUpdate(configKey, rawValue);
+        const press = options.press;
         // The value that is stored: as typed for a password, trimmed otherwise.
         const trimmedValue = update.secretValue ?? rawValue.trim();
-        if (route && options.scope === undefined && await route(configKey, trimmedValue, update))
+        if (route && options.scope === undefined && await route(configKey, trimmedValue, update, press))
             return update.configValue;
         const scope = options.scope ?? defaultSecretBackedScope(configKey);
         // A daemon-scoped credential is the daemon's to store, and the daemon does
@@ -139,10 +146,10 @@ export function createSecretBackedConfigWriter(route?: SecretBackedConfigRoute |
         if ((update.secretKey || update.clearSecretKey) && scope === 'daemon' && options.daemonWriter) {
             const trimmed = rawValue.trim();
             if (trimmed.length === 0) {
-                await options.daemonWriter.clear(configKey);
+                await options.daemonWriter.clear(configKey, press);
                 return '';
             }
-            await options.daemonWriter.set(configKey, trimmedValue);
+            await options.daemonWriter.set(configKey, trimmedValue, press);
             return update.configValue;
         }
         if (update.secretKey && !secretsManager)
@@ -161,7 +168,7 @@ export function createSecretBackedConfigWriter(route?: SecretBackedConfigRoute |
             await secretsManager.set(update.secretKey, update.secretValue, { scope: scope, medium });
         }
         configManager.validateDynamic?.(configKey, update.configValue);
-        configManager.setDynamic(configKey, update.configValue);
+        configManager.setDynamic(configKey, update.configValue, press ? { press } : undefined);
         // Revocation includes material written under earlier storage policies.
         // The reference is unpublished first: failing at the config write must not
         // leave a reference that resolves to a deleted secret.

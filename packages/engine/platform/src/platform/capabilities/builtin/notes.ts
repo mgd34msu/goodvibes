@@ -49,7 +49,7 @@ export const NOTES_CREATE = storeCapability({
     words('tags', 'Tags', 'Words to find it by, separated by commas', '--tags', 'none'),
   ],
   sentence: 'A note with the text "{body}" is kept, until you change it.', example: { body: 'They can ship in May.', title: 'Vendor call' },
-  undoneBy: 'delete',
+  undoneBy: 'delete', steersModel: true,
 });
 export const NOTES_EDIT = storeCapability({
   id: 'notes.edit', actionId: 'edit', label: 'Change a note', word: 'edit',
@@ -61,7 +61,7 @@ export const NOTES_EDIT = storeCapability({
     words('tags', 'Tags', 'New tags, separated by commas', '--tags', 'keep them'),
   ],
   sentence: 'Note {note} takes the changes given and is no longer marked reviewed, until you change it.', example: { note: 'vendor-call', body: 'They can ship in June.' },
-  repeat: 'safe',
+  repeat: 'safe', steersModel: true,
 });
 export const NOTES_REVIEW = storeCapability({
   id: 'notes.review', actionId: 'review', label: 'Mark a note reviewed', word: 'review', inputs: [NOTE],
@@ -85,18 +85,22 @@ export const NOTES_TO_MEMORY = storeCapability({
     fixedInput({ id: 'scope', label: 'Where it applies', help: 'This project, this session, or shared with the team', choices: MEMORY_SCOPES, typed: { flag: '--scope' }, optional: { default: 'project', means: 'this project' } }),
   ],
   sentence: 'Note {note} becomes a memory record (its title the summary, its text the detail), until you change it; the note stays.', example: { note: 'vendor-call' },
+  steersModel: true,
 });
 export const NOTES_TO_PERSONA = storeCapability({
   id: 'notes.to-persona', actionId: 'to-persona', label: 'Make a persona from a note', word: 'to-persona', inputs: [NOTE],
   sentence: 'Note {note} becomes a persona (its text the instructions), not in use, until you change it; the note stays.', example: { note: 'house-style' },
+  steersModel: true,
 });
 export const NOTES_TO_SKILL = storeCapability({
   id: 'notes.to-skill', actionId: 'to-skill', label: 'Make a skill from a note', word: 'to-skill', inputs: [NOTE, ENABLE],
   sentence: 'Note {note} becomes a skill (its text the steps), until you change it; the note stays.', example: { note: 'release-steps' },
+  steersModel: true,
 });
 export const NOTES_TO_ROUTINE = storeCapability({
   id: 'notes.to-routine', actionId: 'to-routine', label: 'Make a routine from a note', word: 'to-routine', inputs: [NOTE, ENABLE],
   sentence: 'Note {note} becomes a routine (its text the steps), until you change it; the note stays.', example: { note: 'morning-check' },
+  steersModel: true,
 });
 export const NOTES_TO_KNOWLEDGE = storeCapability({
   id: 'notes.to-knowledge', actionId: 'to-knowledge', label: 'Add a note\'s web page to Agent Knowledge', word: 'to-knowledge', inputs: [NOTE],

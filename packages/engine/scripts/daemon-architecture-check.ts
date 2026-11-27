@@ -246,6 +246,7 @@ export const PRODUCT_PROGRAM_SPAWN_FILES: ReadonlySet<string> = new Set([
   'platform/contract/review-inventory.ts',
   'platform/contract/tree-baseline.ts',
   'platform/contract/tree-identity.ts',
+  'platform/daemon/automatic-project-hosts.ts', // git init and a first empty commit in a chat's new project
   'platform/daemon/launchd-handover.ts',
   'platform/daemon/service-handover.ts',
   'platform/daemon/service-manager.ts',

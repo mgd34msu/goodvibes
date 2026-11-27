@@ -9,6 +9,7 @@ export {
   actorHoldsScope,
   agentActor,
   localOwnerActor,
+  scriptActor,
   systemActor,
 } from './actor.js';
 export type { Actor, ActorClass, ActorPrincipal, OwnerIdentity } from './actor.js';
@@ -85,7 +86,7 @@ export interface RequestContext {
 /** The two ways a route context can name who made a request. */
 export interface RequestActorSource {
   /** The principal the daemon's gate authenticated for the request. */
-  readonly resolveAuthenticatedPrincipal?: ((req: Request) => Pick<AuthenticatedPrincipal, 'principalId'> | null) | undefined;
+  readonly resolveAuthenticatedPrincipal?: ((req: Request) => (Pick<AuthenticatedPrincipal, 'principalId'> & { readonly actor?: Actor | undefined }) | null) | undefined;
   readonly requireAuthenticatedSession?: ((req: Request) => { readonly username: string } | null) | undefined;
 }
 
@@ -96,7 +97,13 @@ export interface RequestActorSource {
  * principal falls back to the login session, then to `operator`.
  */
 export function requestActor(context: RequestActorSource, req: Request): string {
-  return context.resolveAuthenticatedPrincipal?.(req)?.principalId
+  // The actor's id first: a sign-in user named like another credential (`shared-token`) is `user:<name>` there
+  // (actor.ts), so a record of what it did never names this machine's token.
+  const principal = context.resolveAuthenticatedPrincipal?.(req);
+  const actor = principal?.actor;
+  const actorId = actor !== undefined && actor.class !== 'peer' && actor.class !== 'system' ? actor.id : undefined;
+  return actorId
+    ?? principal?.principalId
     ?? context.requireAuthenticatedSession?.(req)?.username
     ?? 'operator';
 }

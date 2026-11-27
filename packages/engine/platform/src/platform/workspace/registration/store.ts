@@ -38,7 +38,9 @@ import { PersistentStore } from '../../state/persistent-store.js';
 import { confirmFileDurable } from '../../utils/atomic-json-store.js';
 import { createHash, randomUUID } from 'node:crypto';
 import { closeSync, fstatSync, openSync, readFileSync, realpathSync, statSync, type BigIntStats } from 'node:fs';
-import { sep } from 'node:path';
+import { join, sep } from 'node:path';
+import { resolveGoodVibesDaemonHome } from '../../config/goodvibes-home.js';
+import { whyNeverAProject } from '../caller-project.js';
 import { acquireCrossProcessLock, CrossProcessLockBusyError, withCrossProcessLockSync } from '../checkpoint/cross-process-lock.js';
 import { broadRootReason } from '../checkpoint/root-guard.js';
 import { normalizeWorkspaceRoot, resolveWorkspaceRegistration } from './resolution.js';
@@ -647,6 +649,14 @@ export class WorkspaceRegistrationStore {
         `refusing to register "${target}" because it is ${broad}: coverage flows down a root's whole subtree, ` +
           `so registering a root this broad would sweep far more than a project. Register a specific project root.`,
       );
+    }
+    // The one rule every project is held to (workspace/caller-project.ts): never the root, the home folder itself, or
+    // anything in or above the GoodVibes or daemon home, whoever registers it.
+    const never = whyNeverAProject(target, {
+      homeDirectory: this.homeDir, goodVibesHome: join(this.homeDir, '.goodvibes'), daemonHome: resolveGoodVibesDaemonHome(this.homeDir),
+    });
+    if (never) {
+      throw new WorkspaceRegistrationError(`refusing to register "${target}" because it cannot be a project: ${never}. Register a specific project folder.`);
     }
     return target;
   }

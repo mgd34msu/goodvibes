@@ -40,4 +40,9 @@ export interface ControlPlaneAuthSnapshot {
    * a credential that does not expire; absent from daemons that do not report it.
    */
   readonly expiresAt?: number | null | undefined;
+  /**
+   * Whether the caller is the owner himself (his signed-in session, a device he paired, or his own program: the
+   * daemon's one test), so a client offers the acts only he makes. Absent from daemons that do not report it.
+   */
+  readonly ownerHimself?: boolean | undefined;
 }

@@ -2,6 +2,7 @@ import { assertSynchronousJudgmentGuard } from '@goodvibes/judgment/decisions';
 import { readNativeConversationTurnPermit, revalidateNativeConversationTurnPermit, type NativeConversationTurnPermit } from '../workflow/work-ledger/native-intake-client.js';
 import type { Page } from '@goodvibes/engine/errors';
 import { logger } from '../utils/logger.js';
+import { outsideEveryCall } from '../utils/outside-every-call.js';
 import { withChannelExecutionMode, type ChannelIntake } from '../channel-profiles/install-inbound-intake.js';
 import type { ChannelProfileDefaults } from '../channel-profiles/types.js';
 import type { GatePresetName } from '../gate/presets.js';
@@ -14,7 +15,7 @@ import type { RuntimeEventBus } from '../runtime/events/index.js';
 import { RouteBindingManager } from '../channels/index.js';
 import type { AutomationRouteBinding } from '../automation/routes.js';
 import type { ConversationGateConfigReader } from '../agents/conversation-gate.js';
-import { LOCAL_OWNER_PRINCIPAL } from '../pairing/principal-ids.js';
+import { keptCallerKey, LOCAL_OWNER_PRINCIPAL } from '../pairing/principal-ids.js';
 import type {
   SharedSessionCompletion,
   SharedSessionContinuationRunner,
@@ -85,6 +86,7 @@ import {
   type AppendSharedSessionMessageInput,
 } from './session-broker-messages.js';
 import {
+  REGISTRATION_MARK,
   SESSION_REGISTERED_BY_METADATA_KEY,
   SESSION_SURFACE_MANAGED_METADATA_KEY,
   SURFACE_ROUTE_FRESHNESS_MS,
@@ -422,7 +424,9 @@ export class SharedSessionBroker {
   /** Start waiting messages now; `idle()` waits for the pass. */
   private scheduleCapacityDrain(): void {
     if (this.capacityWaiting.size === 0) return;
-    const pending = this.drainCapacityWaiting().catch((error: unknown) => {
+    // Started by whichever agent's end freed a slot: the waiting messages of other sessions are started in the process's
+    // own context (utils/outside-every-call.ts), each as its own session says, never as the run that ended.
+    const pending = outsideEveryCall(() => this.drainCapacityWaiting()).catch((error: unknown) => {
       logger.warn('Messages waiting for a free agent could not be started', { error: summarizeError(error) });
     });
     this.capacityDrainsPending.add(pending);
@@ -639,7 +643,8 @@ export class SharedSessionBroker {
     // it cannot leave a broker that later reports loaded but never reaps.
     if (!this._gcInterval) {
       // .unref() so the GC interval does not keep the process alive past shutdown.
-      const iv = setInterval(() => { this.gcSweep(); }, 60_000);
+      // Armed in the process's own context, whichever call loaded the broker first (utils/outside-every-call.ts).
+      const iv = outsideEveryCall(() => setInterval(() => { this.gcSweep(); }, 60_000));
       (iv as unknown as { unref?: () => void }).unref?.();
       this._gcInterval = iv;
     }
@@ -697,7 +702,13 @@ export class SharedSessionBroker {
    * for a session this daemon does not hold.
    */
   registrantOf(sessionId: string): string | undefined {
-    return sessionRegistrant(this.sessions.get(sessionId), LOCAL_OWNER_PRINCIPAL);
+    // Read back as a kept caller key (pairing/principal-ids.ts): a sign-in's is `user:<name>`, one kept bare by its form.
+    const kept = sessionRegistrant(this.sessions.get(sessionId), LOCAL_OWNER_PRINCIPAL);
+    if (kept === undefined) return undefined;
+    // `<caller key>#<program registration>`: the program of that caller that registered it (session-broker-sessions.ts
+    // `registrantMayName`); the caller key part is read back as any kept key is.
+    const mark = kept.indexOf(REGISTRATION_MARK);
+    return mark < 0 ? keptCallerKey(kept) : `${keptCallerKey(kept.slice(0, mark))}${kept.slice(mark)}`;
   }
 
   async findPreferredSession(options: FindSharedSessionOptions = {}): Promise<SharedSessionRecord | null> {

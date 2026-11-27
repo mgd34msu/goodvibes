@@ -21,7 +21,7 @@ export const queryKeys = {
   // The project work plan, read again only when a planner event or an edit
   // carries a revision other than the one shown (hooks/useWorkPlan.ts).
   workPlan: ['work-plan'] as const,
-  workPlanSnapshot: (revision: number) => ['work-plan', revision] as const,
+  workPlanSnapshot: (revision: number, project: string | undefined) => ['work-plan', revision, project ?? ''] as const,
   approvals: ['approvals'] as const,
   // The owner inbox's questions and Jev's decisions (views/work/OwnerQuestions.tsx).
   ownerInbox: ['owner-inbox'] as const,

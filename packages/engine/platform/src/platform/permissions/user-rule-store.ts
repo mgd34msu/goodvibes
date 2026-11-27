@@ -25,7 +25,7 @@
 
 import { isDeepStrictEqual } from 'node:util';
 import { existsSync, readFileSync, rmSync, statSync, watch, type FSWatcher } from 'node:fs';
-import { dirname, join } from 'node:path';
+import { dirname, isAbsolute, join, relative, sep } from 'node:path';
 import { projectIdentityOf } from '../workspace/project-identity.js';
 import type { PolicyRule } from '../runtime/permissions/types.js';
 import { PersistentStore } from '../state/persistent-store.js';
@@ -133,10 +133,35 @@ function readHere(record: StoredUserPermissionRule): boolean {
   return record.keptFor === undefined;
 }
 
+/**
+ * A rule that refuses a capability (`capability_run` keyed by its id): the project a caller names never decides which
+ * refusals apply, so it applies in every project; a project only narrows where an allow (or an ask) applies.
+ */
+function refusesACapability(record: StoredUserPermissionRule): boolean {
+  const pattern = record.rule.toolPattern;
+  return record.rule.effect === 'deny' && (pattern === 'capability_run' || (Array.isArray(pattern) && pattern.includes('capability_run')));
+}
+
+/** Whether `path` is `folder` or inside it, by their paths as kept (identities are resolved project roots). */
+function withinFolder(path: string, folder: string): boolean {
+  const rel = relative(folder, path);
+  return rel === '' || (!rel.startsWith(`..${sep}`) && rel !== '..' && !isAbsolute(rel));
+}
+
+/**
+ * Whether a rule applies in `project`. A rule with no project applies everywhere; one that refuses a capability too.
+ * A refusing or asking rule made in a project also applies in every folder beneath it, whatever repositories are made
+ * inside it later (`git init sub`, a submodule checkout: a nested repository is its own project identity, and would
+ * otherwise escape its parent's refusals). An allow applies only in the project it was made in: a nested repository is
+ * its own project for allows.
+ */
 function appliesIn(record: StoredUserPermissionRule, project: string | null | undefined): boolean {
   if (!readHere(record)) return false;
-  if (record.project === undefined) return true;
-  return typeof project === 'string' && project.length > 0 && projectIdentity(project) === record.project;
+  if (record.project === undefined || refusesACapability(record)) return true;
+  if (typeof project !== 'string' || project.length === 0) return false;
+  const here = projectIdentity(project);
+  if (here === record.project) return true;
+  return record.rule.effect !== 'allow' && withinFolder(here, record.project);
 }
 
 interface UserRuleFile extends Record<string, unknown> {

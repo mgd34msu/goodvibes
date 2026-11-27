@@ -25,6 +25,8 @@ import type { AgentRecord } from '../tools/agent/record.js';
 import type { UnattendedRuns } from '../automation/unattended-runs.js';
 import { summarizeError } from '../utils/error-display.js';
 import { logger } from '../utils/logger.js';
+import { withOwnerInput } from '../security/turn-input-party.js';
+import { withConversation } from '../security/conversation-exposure.js';
 import { ProbeTimeoutError, type ProbeIo } from './probes.js';
 
 /**
@@ -191,7 +193,7 @@ export function createProcessManagerCommandRunner(processManager: ProcessManager
 
 /** What a fired trigger needs in order to actually start an agent turn and read its answer. */
 export interface TriggerAgentSpawner {
-  spawn(input: { mode: 'spawn'; task: string; model?: string | undefined; tools?: string[] | undefined; workingDirectory?: string | undefined }): { id: string };
+  spawn(input: { mode: 'spawn'; task: string; outsideContract?: boolean | undefined; model?: string | undefined; tools?: string[] | undefined; workingDirectory?: string | undefined }): { id: string };
   /** Settles once the agent's work (and its cleanup) is done. */
   join(agentId: string): Promise<void>;
   getStatus(agentId: string): Pick<AgentRecord, 'status' | 'fullOutput' | 'progress' | 'error'> | null;
@@ -225,14 +227,21 @@ export function createTriggerActionExecutor(deps: {
   return {
     runAgentTurn(input) {
       const tools = [...(deps.unattendedRuns?.connectedTools() ?? []), ...(deps.conversationTools?.() ?? [])];
-      const record = deps.agents.spawn({
+      // A trigger's turn is the owner's own, marked so (security/turn-input-party.ts: unmarked work is someone else's):
+      // every trigger is his, made by him or on his yes (control-plane/method-risk.ts: anyone else's is put to him).
+      // Inside the trigger's own conversation key: with what the conversation that made it had read.
+      const record = withConversation(`trigger:${input.triggerId}`, () => withOwnerInput(() => deps.agents.spawn({
         mode: 'spawn',
         task: input.prompt,
+        // A turn, as a conversation's is: its prompt goes to the model. Without this, a spawn with a decision model set
+        // became the owner of a contract (tools/agent/manager.ts `startsContract`): its prompt went to a planner and
+        // step agents, and the trigger's own turn never reached the model.
+        outsideContract: true,
         ...(input.model !== undefined ? { model: input.model } : {}),
         ...(tools.length > 0 ? { tools: [...tools] } : {}),
         // It works in its trigger's project, never the daemon's own folder.
         ...(input.workingDirectory !== undefined ? { workingDirectory: input.workingDirectory } : {}),
-      });
+      })));
       // The firing is recorded once the turn has started; its answer is
       // delivered when the turn ends: to the channel the action names, else
       // (or when that send fails) to the owner inbox.

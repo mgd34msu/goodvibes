@@ -90,7 +90,7 @@ function describeSessionCandidate(session: SessionInfoLike, currentSessionId: st
 }
 
 function sessionModelRoute(): string {
-  return 'sessions action:"get" or workspace action:"run_command"';
+  return 'sessions action:"get" or screens_keys_commands action:"run_command"';
 }
 
 function bookmarkModelRoute(): string {

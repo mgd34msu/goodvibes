@@ -472,6 +472,7 @@ export async function collectUnitEvidence(
       sessionId: contract.sessionId,
       contractId: contract.id,
       targetId: unit.id,
+      project: contract.projectRoot,
       // In a shared tree the results are evidence for this unit's files only, so the owner's other saves leave them current.
       ...(contract.isolation === 'shared' ? { scope: changes.map((change) => change.path) } : {}),
       // Only the gates that check something this unit changed run: a unit that changed nothing is not gated.

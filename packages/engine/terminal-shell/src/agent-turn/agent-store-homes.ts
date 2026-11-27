@@ -3,8 +3,8 @@
  * the owner's home: the same files the Agent reads when it starts (agent-homes.ts).
  */
 import { existsSync, mkdirSync } from 'node:fs';
-import { dirname, isAbsolute } from 'node:path';
-import { CapabilityRefusal, type ActionValues } from '@goodvibes/engine/platform/platform/capabilities';
+import { dirname } from 'node:path';
+import { CapabilityRefusal, callerPathOf, type ActionValues } from '@goodvibes/engine/platform/platform/capabilities';
 import {
   clearAgentRuntimeProfileSelection, createAgentRuntimeProfile, createAgentRuntimeProfileFromDiscovered, createAgentRuntimeProfileTemplateFromDiscovered,
   deleteAgentRuntimeProfile, exportAgentRuntimeProfileTemplate, getAgentRuntimeProfileTemplateFile, importAgentRuntimeProfileTemplate, listAgentRuntimeProfiles,
@@ -48,15 +48,9 @@ function starterLine(template: AgentRuntimeProfileTemplateSummary): string {
  * A file a starter is written to or read from: in the caller's project unless the path is absolute. Only the person
  * may name one outside the project; a model's or a script's stays inside it.
  */
-function starterFile(context: StoreActContext, raw: string, purpose: 'read' | 'write'): string {
-  if (!isAbsolute(raw) && !raw.startsWith('~/') && !context.projectGiven) {
-    throw new CapabilityRefusal(`${raw} names no folder and no project came with the request; nothing was done.`, 'Give the whole path, or ask from the project\'s folder.', 'NO_PROJECT');
-  }
-  const resolved = context.shellPaths.resolveWorkspacePath(raw);
-  if (context.personAsked !== true && !context.shellPaths.isWithinWorkingDirectory(resolved)) {
-    throw new CapabilityRefusal(`Not done: ${raw} is outside the project (${context.shellPaths.workingDirectory}); only you can ${purpose} a file there yourself.`);
-  }
-  return resolved;
+/** The starter file a path input names, placed by the one rule for every capability (capabilities/path-inputs.ts `callerPathOf`). */
+function starterFile(context: StoreActContext, raw: string): string {
+  return callerPathOf({ workingDirectory: context.projectGiven ? context.shellPaths.workingDirectory : undefined, personAsked: context.personAsked }, raw);
 }
 
 /** A starter made from the persona, skill and routine files found, for a home or alone. */
@@ -196,7 +190,7 @@ export const HOME_ACTS: Readonly<Record<string, StoreAct>> = {
     };
   },
   async 'agent-home.export-starter'(values, context) {
-    const target = starterFile(context, values.path!, 'write');
+    const target = starterFile(context, values.path!);
     if (existsSync(target) && values.overwrite !== 'yes') throw new CapabilityRefusal(`${target} already exists; nothing was written.`, 'Choose to write over it, or give another file.');
     const template = storeStep(() => {
       mkdirSync(dirname(target), { recursive: true });
@@ -208,7 +202,7 @@ export const HOME_ACTS: Readonly<Record<string, StoreAct>> = {
     };
   },
   async 'agent-home.import-starter'(values, context) {
-    const source = starterFile(context, values.path!, 'read');
+    const source = starterFile(context, values.path!);
     const template = storeStep(() => importAgentRuntimeProfileTemplate(homeOf(context), source, { replace: values.replace === 'yes' }));
     return { text: `Added starter ${template.id} (yours).\n  make an Agent home from it with "Make a separate Agent home".`, data: { starter: starterFacts(template) } };
   },

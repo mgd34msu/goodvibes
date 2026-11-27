@@ -7,7 +7,6 @@ export function orderOnboardingOperations<Operation extends { readonly kind: str
 ): readonly Operation[] {
   return [
     ...operations.filter((operation) => operation.kind === 'set-config' && operation.key === 'storage.secretPolicy'),
-    ...operations.filter((operation) => operation.kind === 'ensure-auth-user'),
     ...operations.filter((operation) => operation.kind === 'set-secret'),
     ...operations.filter((operation) => operation.kind === 'set-config' && operation.key !== 'storage.secretPolicy'),
     ...extraGroups.flatMap((kinds) => operations.filter((operation) => kinds.includes(operation.kind))),
@@ -29,6 +28,12 @@ export function createOnboardingApplyPipeline<
   readonly verify: (deps: Dependencies, request: Request) => Promise<OnboardingVerificationResult>;
   readonly verificationFailureKind: (id: string) => Operation['kind'];
   readonly describeError: (error: unknown) => string;
+  /**
+   * The last act, after every other operation was applied and verified: the operations `order` left out (the daemon's
+   * own settings, sent as one update the daemon admits and writes whole, so nothing of it needs undoing from here).
+   * When it throws, everything applied before it is rolled back and its error reported.
+   */
+  readonly commit?: ((deps: Dependencies, request: Request) => Promise<readonly Applied[]>) | undefined;
 }) {
   async function applyOnboardingRequest(deps: Dependencies, request: Request) {
     const applied: Applied[] = [],
@@ -77,6 +82,19 @@ export function createOnboardingApplyPipeline<
       });
       return { ok: false, applied, skipped, errors };
     }
+    if (okay && errors.length === 0 && ports.commit) {
+      try {
+        applied.push(...await ports.commit(deps, request));
+      } catch (error) {
+        const failures = await ports.rollback(rollbacks);
+        applied.length = 0;
+        errors.push({
+          kind: ports.verificationFailureKind('config:commit'),
+          message: [ports.describeError(error), ...failures.map((failure) => 'rollback: ' + failure)].join('; '),
+        });
+        return { ok: false, applied, skipped, errors };
+      }
+    }
     return { ok: okay && errors.length === 0, applied, skipped, errors };
   }
   return { applyOnboardingRequest };
@@ -99,9 +117,8 @@ export function prevalidateOnboardingOperations<Operation extends { readonly kin
   return errors;
 }
 
-export function onboardingVerificationFailureKind(itemId: string): 'set-config' | 'set-secret' | 'ensure-auth-user' | 'acknowledge' {
+export function onboardingVerificationFailureKind(itemId: string): 'set-config' | 'set-secret' | 'acknowledge' {
   if (itemId.startsWith('secret:')) return 'set-secret';
-  if (itemId.startsWith('auth:')) return 'ensure-auth-user';
   if (itemId.startsWith('acknowledge:')) return 'acknowledge';
   return 'set-config';
 }

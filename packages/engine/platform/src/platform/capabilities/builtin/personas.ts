@@ -62,7 +62,7 @@ export const PERSONAS_CREATE = storeCapability({
   ],
   sentence: 'A persona {name} ("{description}"), how the Agent talks and behaves, is kept with the instructions "{body}", until you change it.',
   example: { name: 'editor', description: 'A careful copy editor', body: 'Edit for clarity; keep the author\'s voice.' },
-  undoneBy: 'delete',
+  undoneBy: 'delete', steersModel: true,
 });
 export const PERSONAS_UPDATE = storeCapability({
   id: 'personas.update', actionId: 'update', label: 'Change a persona', word: 'update',
@@ -75,11 +75,12 @@ export const PERSONAS_UPDATE = storeCapability({
     words('triggers', 'When to suggest it', 'New words that bring it up', '--triggers', 'keep them'),
   ],
   sentence: 'Persona {persona} takes the changes given, until you change it.', example: { persona: 'editor', description: 'A strict copy editor' },
-  repeat: 'safe',
+  repeat: 'safe', steersModel: true,
 });
 export const PERSONAS_USE = storeCapability({
   id: 'personas.use', actionId: 'use', label: 'Switch to a persona', word: 'use', inputs: [PERSONA],
   sentence: 'The Agent switches to persona {persona} and talks and behaves as it, until you change it.', example: { persona: 'editor' }, undoneBy: 'stop-using', repeat: 'safe',
+  steersModel: true,
 });
 export const PERSONAS_STOP_USING = storeCapability({
   id: 'personas.stop-using', actionId: 'stop-using', label: 'Stop using a persona', word: 'stop-using', inputs: [],
@@ -107,6 +108,7 @@ export const PERSONAS_IMPORT = storeCapability({
   id: 'personas.import', actionId: 'import', label: 'Import a persona file', word: 'import',
   inputs: [pickedInput({ id: 'file', label: 'Persona file', help: 'Persona files found in your persona folders', list: PERSONA_FILES_LIST, other: 'a persona file name or path' }), USE_NOW],
   sentence: 'The persona in {file} is added to this Agent, not yet reviewed, until you change it.', example: { file: 'editor' }, undoneBy: 'delete',
+  steersModel: true,
 });
 export const PERSONAS_VIBE = storeRead({
   id: 'personas.vibe', actionId: 'vibe', label: 'See your VIBE.md files', word: 'vibe', inputs: [],
@@ -124,6 +126,7 @@ export const PERSONAS_VIBE_CREATE = storeCapability({
     typed: { flag: '--force', switchOn: 'yes' }, optional: { default: 'no', means: 'keep it and stop' },
   })],
   sentence: 'A starter VIBE.md personality file ({where}) is written for you to fill in, until you change it.', example: { where: 'project' }, repeat: 'safe',
+  steersModel: true,
 });
 export const PERSONAS_VIBE_IMPORT = storeCapability({
   id: 'personas.vibe-import', actionId: 'vibe-import', label: 'Use a VIBE.md as a persona', word: 'vibe-import',
@@ -139,6 +142,7 @@ export const PERSONAS_VIBE_IMPORT = storeCapability({
     USE_NOW,
   ],
   sentence: 'The VIBE.md named {where} becomes a persona of this Agent, until you change it.', example: { where: 'project' }, undoneBy: 'delete',
+  steersModel: true,
 });
 
 export const PERSONAS_CAPABILITIES = [

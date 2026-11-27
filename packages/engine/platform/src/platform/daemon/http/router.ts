@@ -1,9 +1,8 @@
 import { DAEMON_CHALLENGE_HEADER, daemonIdentityHeaders, dialledPort } from '../identity-proof.js';
 import { createServingSettingsPrecondition } from './settings-precondition.js';
-import { createServingSettingsImportPrecondition } from './settings-import-precondition.js';
 import type { ConfigManager } from '../../config/manager.js';
 import { deriveControlPlaneBaseUrl, readControlPlaneBinding } from '../../config/control-plane-base-url.js';
-import { AddressRateLimiter, type BrowserJudgmentCapability } from '@goodvibes/engine/daemon-api';
+import { AddressRateLimiter, withRecordReach, type BrowserJudgmentCapability } from '@goodvibes/engine/daemon-api';
 import type { ServiceRegistry } from '../../config/service-registry.js';
 import { CONFIG_SCHEMA, isValidConfigKey } from '../../config/schema.js';
 import { coerceSchemaValue } from '../../config/manager-bootstrap.js';
@@ -18,6 +17,7 @@ import { buildAutomationEmptyState } from '../../runtime/feature-announcements.j
 import type { UserAuthManager } from '../../security/user-auth.js';
 import { OPERATOR_SESSION_COOKIE_NAME, buildIdentityMarkerCookie, buildOperatorSessionCookie, extractOperatorAuthToken, readIdentityMarker, type CredentialRefusal } from '../../security/http-auth.js';
 import { webAppLink } from '../web-app-link.js';
+import { callerKey, LOCAL_OWNER_PRINCIPAL } from '../../pairing/principal-ids.js';
 import type { AgentManager } from '../../tools/agent/index.js';
 import {
   normalizeAtSchedule,
@@ -43,7 +43,7 @@ import type { WatcherRegistry } from '../../watchers/index.js';
 import type { InboundMailHealthLike } from './channel-route-types.js';
 import type { DistributedPeerAuth, DistributedRuntimeManager, RemoteBackendHost } from '../../runtime/remote/index.js';
 import type { HomeGraphService, KnowledgeService, ProjectPlanningService } from '../../knowledge/index.js';
-import { inspectKnowledgeGraphqlAccess, KnowledgeGraphqlService } from '../../knowledge/index.js';
+import { inspectKnowledgeGraphqlAccess, KnowledgeGraphqlService, projectIdentityOfFolder } from '../../knowledge/index.js';
 import type { VoiceService } from '../../voice/index.js';
 import type { WebSearchService } from '../../web-search/index.js';
 import type { ArtifactStore } from '../../artifacts/index.js';
@@ -62,6 +62,7 @@ import { correlationCtx } from '../../runtime/correlation.js';
 import { TelemetryApiService } from '../../runtime/telemetry/api.js';
 import { inspectInboundTls, inspectOutboundTls } from '../../runtime/network/index.js';
 import type { MemoryEmbeddingProviderRegistry, MemoryRegistry } from '../../state/index.js';
+import { memoryProjectOf } from '../../state/memory-project.js';
 import { clusterGroupRouteExtension, type ClusterGroupVerbs } from './cluster-group-routes.js';
 import { buildRouterKnowledgeContext } from './router-knowledge-context.js';
 import { handleGitHubAutomationWebhook, handleSlackSurfaceWebhook, handleDiscordSurfaceWebhook, handleNtfySurfaceWebhook, handleGenericWebhookSurface } from '../../adapters/index.js';
@@ -76,7 +77,7 @@ import {
   matchPeerRoute,
 } from './remote-routes.js';
 import { buildRouterSessionBrokerAdapter } from './router-session-broker-adapter.js';
-import { authenticationRequired, DaemonRequestRouter, type DaemonRouteDispatcher } from './request-router.js';
+import { authenticationRequired, DaemonRequestRouter, isMarkedForAdmission, type DaemonRouteDispatcher } from './request-router.js';
 import { buildDaemonRouteTable, type DaemonRouteFamilies } from './route-table.js';
 import {
   buildChannelRouteContext,
@@ -87,17 +88,36 @@ import {
 import type { GenericWebhookAdapterContext, SurfaceAdapterContext } from '../../adapters/index.js';
 import type { PlatformServiceManager } from '../service-manager.js';
 import type { JsonRecord } from '../helpers.js';
-import { jsonErrorResponse, serviceFailureStatus } from './error-response.js';
+import { buildErrorResponseBody, jsonErrorResponse, serviceFailureStatus } from './error-response.js';
+import { CALLER_RULES_ABSENT, callerPathRefusal } from '../../control-plane/caller-paths.js';
+import { callerReachRefusal, reachableAnswer, reachFilterOf } from '../../control-plane/caller-reach.js';
+import { SHARED_KIND_NOT_GIVEN } from '../../control-plane/shared-kinds.js';
+import { callReachesKnowledge } from '../../knowledge/knowledge-reach.js';
+import { hasArtifactMaker, withArtifactMaker, type ArtifactTurnMaker } from '../../artifacts/turn-maker.js';
+import { daemonSharedKindRule, sharedKindAdmission } from '../shared-kind-gifts.js';
+import type { EventReachContext } from '../../control-plane/event-reach.js';
+import { methodListsOf } from '../../control-plane/record-addresses.js';
+import { RECORD_NOT_YOURS } from '../../control-plane/method-catalog.js';
 import { missingScopeRefusal } from '@goodvibes/engine/daemon-api/error-response';
 import { VERSION } from '../../version.js';
 import type { CompanionChatManager } from '../../companion/companion-chat-manager.js';
 import { principalHasScope, type RequestContext, type RequestPrincipal } from '../http-policy.js';
+import { memoryAuthorOfRequest, requestMayNameSession } from './memory-route-author.js';
+import { ownerHimselfOf, ownerTypedAtProgram } from './owner-typed.js';
+import { projectNamerOf, type CallerProjectVerdict, type ProjectNamer } from '../../workspace/caller-project.js';
 import { admitEffects } from '../../security/effect-authority.js';
 import { dispatchCompanionChatRoutes, isCompanionChatPath } from '../../companion/companion-chat-routes.js';
 import { dispatchModelRoutes } from './model-routes.js';
 import { dispatchBatchRoutes } from './batch-routes.js';
 import { gateGatewayBinding } from './gateway-binding-gate.js';
-import { assertDaemonRouteManifest, catalogPathname } from './route-manifest.js';
+import { riskOfDescriptor } from '../../control-plane/method-risk.js';
+import { daemonProgramRegistrations } from '../program-registrations.js';
+import { expectProgramNonce, PROGRAM_NONCE_PATH, startProgramSocket, type ProgramSocket } from '../program-socket.js';
+import { bindLocalOrigin, isInProcessRequest, isLocalOrigin } from '../client-address.js';
+import { bindDaemonHosted, bindProgramProcess, bindProgramRegistration, CALL_PROGRAM_KEY_HEADER, readDaemonHosted, readProgramRegistration } from '@goodvibes/engine/daemon-api/control-routes';
+import { resolveGoodVibesDaemonHome } from '../../config/goodvibes-home.js';
+import { homedir } from 'node:os';
+import { assertDaemonRouteManifest, catalogPathname, declaredRouteTarget, type DaemonRouteTarget } from './route-manifest.js';
 import { IdempotentReplayStore, replayKeyedRequest, takesIdempotencyKey } from '../../control-plane/idempotent-replay.js';
 import { deriveRequestWithBody } from '../derived-request.js';
 import { ownBrowserOrigins, refuseCookieWriteFromOtherOrigin } from './browser-origin.js';
@@ -184,8 +204,6 @@ interface DaemonHttpRouterContext {
   readonly githubWebhookSecret: string | null;
   readonly authToken: () => string | null;
   readonly settingsAuthority?: import('./settings-precondition.js').ServingSettingsAuthority | undefined;
-  readonly settingsImportAuthority?: import('./settings-import-precondition.js').ServingSettingsImportAuthority | undefined;
-  readonly nativeMutationHost?: import('../../permissions/external-request.js').ExternalPermissionHost | undefined;
   readonly buildSurfaceAdapterContext: () => SurfaceAdapterContext;
   readonly buildGenericWebhookAdapterContext: () => GenericWebhookAdapterContext;
   /**
@@ -238,10 +256,12 @@ interface DaemonHttpRouterContext {
    * when the companion feature is active.
    */
   readonly companionChatManager?: CompanionChatManager | null | undefined;
+  /** The one check of a caller's project (workspace/caller-project.ts); absent: a chat's project is taken as given. */
+  readonly callerProject?: ((raw: string, who: ProjectNamer) => CallerProjectVerdict) | undefined;
   /** Resolve the current provider/model for companion-chat session creation. */
   readonly resolveDefaultProviderModel?: (() => { provider: string; model: string } | null) | undefined;
   /** Resolves provider API keys from the configured secret store. */
-  readonly secretsManager?: Pick<import('../../config/secrets.js').SecretsManager, 'get' | 'set' | 'getGlobalHome' | 'list' | 'listDetailed'> & Partial<import('./settings-precondition.js').ServingSettingsSecrets & import('./settings-import-precondition.js').ServingSettingsImportSecrets> | null | undefined;
+  readonly secretsManager?: Pick<import('../../config/secrets.js').SecretsManager, 'get' | 'set' | 'getGlobalHome' | 'list' | 'listDetailed'> & Partial<import('./settings-precondition.js').ServingSettingsSecrets> | null | undefined;
   readonly trySpawnAgent: (
     input: Parameters<AgentManager['spawn']>[0],
     logLabel?: string,
@@ -265,7 +285,6 @@ async function pairedTokenId(response: Response): Promise<string> {
 
 export class DaemonHttpRouter {
   private readonly settingsPrecondition: ReturnType<typeof createServingSettingsPrecondition> | undefined;
-  private readonly settingsImportPrecondition: ReturnType<typeof createServingSettingsImportPrecondition> | undefined;
   private readonly telemetryApi: TelemetryApiService | null;
   private homeAssistantRoutes: HomeAssistantConversationRoutes | null = null;
   private homeGraphRoutes: HomeGraphRoutes | null = null;
@@ -290,6 +309,8 @@ export class DaemonHttpRouter {
   private servingPostureCache: { readonly revision: number; readonly posture: WebuiServingPosture } | null = null;
   /** The request path: who is calling and what is served, see request-router.ts. */
   private readonly requests: DaemonRequestRouter;
+  /** A knowledge call's maker (its caller, the project it named, checked), from its admission to its route. */
+  private readonly knowledgeMakers = new WeakMap<Request, ArtifactTurnMaker>();
 
   constructor(private readonly context: DaemonHttpRouterContext) {
     // Every uncataloged route is declared with its effect or its reason; a manifest that is not sound stops the router here.
@@ -303,7 +324,21 @@ export class DaemonHttpRouter {
       preAuth: (req) => this.dispatchPreAuthRoutes(req),
       refuseUnauthenticated: (req) => this.refuseUnauthenticated(req),
       // A write made with the sign-in cookie is checked for the page's origin as the socket is, then for access.
-      admit: (req) => refuseCookieWriteFromOtherOrigin(req, () => ownBrowserOrigins(context.configManager, context.listenerBinding)) ?? gateGatewayBinding(req, context),
+      // Then every folder a turn or process will work in that the call names: a project this caller may name.
+      admit: (req) => this.bindCheckedRegistration(req) ?? refuseCookieWriteFromOtherOrigin(req, () => ownBrowserOrigins(context.configManager, context.listenerBinding)) ?? gateGatewayBinding(req, context)
+        ?? this.refuseUncheckedFolders(req).then((refused) => refused ?? this.refuseUnreachableRecords(req))
+          .then((refused) => refused ?? this.refuseKnowledgeProject(req)),
+      // The answer of a list or a search its method declares: what this caller may reach of it (caller-reach.ts).
+      answer: (req, response) => this.reachableResponse(req, response),
+      // A paged list a route serves keeps only what this caller may reach before it cuts its page (caller-reach.ts).
+      // A knowledge call adds as its caller, in the project it named (checked at admission): knowledge-reach.ts.
+      withinReach: (req, serve) => withRecordReach(this.reachFilterOfRequest(req), () => {
+        const maker = this.knowledgeMakers.get(req);
+        return maker !== undefined && !hasArtifactMaker() ? withArtifactMaker(maker, serve) : serve();
+      }),
+      // A method of a risk class the owner decides, served by a route module: sent through the dispatch, which decides it
+      // once for every door (daemon/method-owner-decision.ts) and serves the route on a yes.
+      decide: (req) => this.decideRiskyRoute(req),
       keyedReplay: (req, serve) => {
         // Only a write whose method takes the shared key, and only when a key was sent.
         const store = context.idempotentReplay;
@@ -326,20 +361,6 @@ export class DaemonHttpRouter {
     this.authFailures = createAuthFailureAudit(context.runtimeBus);
     const settingsConfigOwner = context.configManager;
     const settingsAuthorityOwner = context.settingsAuthority;
-    const importAuthorityOwner = context.settingsImportAuthority;
-    this.settingsImportPrecondition = importAuthorityOwner ? createServingSettingsImportPrecondition({
-      manager: settingsConfigOwner, authority: importAuthorityOwner,
-      secrets: () => {
-        const owner = context.secretsManager;
-        return owner?.prepareImport && owner.inspectPreparedImport && owner.assertPreparedImport && owner.withPreparedImport && owner.assertCompletedImport
-          && owner.prepareScopedDeletion && owner.inspectPreparedScopedDeletion && owner.assertPreparedScopedDeletion && owner.applyPreparedScopedDeletion && owner.assertCompletedScopedDeletion
-          ? owner as import('./settings-import-precondition.js').ServingSettingsImportSecrets : null;
-      },
-      host: () => context.nativeMutationHost,
-      assertServingOwner: () => {
-        if (context.configManager !== settingsConfigOwner || context.settingsImportAuthority !== importAuthorityOwner) throw new Error('Settings import serving owner changed.');
-      },
-    }) : undefined;
     this.settingsPrecondition = context.settingsAuthority ? createServingSettingsPrecondition(context.configManager, context.settingsAuthority, () => {
       const owner = context.secretsManager;
       return owner?.prepareScopedDeletion && owner.inspectPreparedScopedDeletion && owner.assertPreparedScopedDeletion && owner.withPreparedScopedDeletion && owner.assertCompletedScopedDeletion
@@ -356,10 +377,26 @@ export class DaemonHttpRouter {
         listApprovals: () => context.approvalBroker.listApprovals(Number.MAX_SAFE_INTEGER),
       })
       : null;
+    // The one door a terminal program registers through (daemon/program-socket.ts): the kernel names who connected.
+    const daemonHome = resolveGoodVibesDaemonHome(homedir());
+    this.programSocket = startProgramSocket(daemonHome, daemonProgramRegistrations(), {
+      authenticate: (token) => {
+        // The token as it arrived over the socket, from this machine's own account: the operator token is `local` here.
+        const request = new Request('http://127.0.0.1/api/control-plane/programs', { headers: { authorization: `Bearer ${token}` } });
+        bindLocalOrigin(request);
+        const principal = context.authenticateRequest(request)?.principal;
+        return principal ? { principalId: principal.principalId, credentialKind: principal.credentialKind } : undefined;
+      },
+      port: () => this.listeningPort(),
+    });
   }
+
+  /** The program socket this router opened (stopped with it). */
+  private readonly programSocket: ProgramSocket | undefined;
 
   /** Resolves once the tunnel connector's child exited; rejects naming it when its exit could not be seen. */
   async dispose(): Promise<void> {
+    this.programSocket?.stop();
     this.telemetryApi?.dispose();
     this.context.batchManager?.dispose();
     const tunnel = await this.context.cloudflareTunnel?.dispose();
@@ -509,6 +546,15 @@ export class DaemonHttpRouter {
 
     if (url.pathname === '/login' && req.method === 'POST') {
       return this.handleLogin(req);
+    }
+    // A program of this machine names a secret of its own here, just before it connects to the program socket, so the
+    // daemon can prove over the socket that it is the daemon behind this listener (program-socket.ts `expected`). From
+    // this machine only (as the listener established it); it grants nothing and needs no credential.
+    if (url.pathname === PROGRAM_NONCE_PATH && req.method === 'POST') {
+      if (!isLocalOrigin(req)) return jsonErrorResponse({ error: 'Only a program on the daemon\'s own machine names its secret here.', code: 'FORBIDDEN' }, { status: 403 });
+      let nonce: unknown;
+      try { nonce = ((await req.json()) as { nonce?: unknown } | null)?.nonce; } catch { nonce = undefined; }
+      return expectProgramNonce(nonce) ? new Response(null, { status: 204 }) : jsonErrorResponse({ error: 'nonce must be 64 hex characters', code: 'INVALID_ARGUMENT' }, { status: 400 });
     }
     // A session may end itself even when it no longer passes the gate's other checks.
     if (url.pathname === '/logout' && req.method === 'POST') {
@@ -669,6 +715,173 @@ export class DaemonHttpRouter {
     return this.context.authenticateRequest(req)?.principal ?? null;
   }
 
+  /** Who names the project a request names (workspace/caller-project.ts `projectNamerOf`, on the one owner definition). */
+  private projectNamerOfRequest(req: Request): ProjectNamer {
+    const principal = this.principalOf(req);
+    if (!principal) return { ownersProgram: false };
+    return projectNamerOf({ credentialKind: principal.credentialKind, actor: principal.actor, registration: readProgramRegistration(req), principalId: principal.principalId,
+      ...(readDaemonHosted(req) ? { daemonHosted: true } : {}) });
+  }
+
+  /** What the daemon bound about a request's program (its checked registration, and whether it serves it to itself). */
+  private checkedCallOf(req: Request): { readonly registration?: string; readonly daemonHosted?: true } | undefined {
+    const registration = readProgramRegistration(req);
+    const daemonHosted = readDaemonHosted(req);
+    if (!registration && !daemonHosted) return undefined;
+    return { ...(registration ? { registration } : {}), ...(daemonHosted ? { daemonHosted: true as const } : {}) };
+  }
+
+  /**
+   * A REST call to a method that declares folders a turn or process works in, or files on this disk (`workFolders`,
+   * `daemonFiles`): the same one check the method catalog applies before a handler (control-plane/caller-paths.ts), for
+   * the credential that made the call, before the route reads the body. The refusal, or null.
+   */
+  private async refuseUncheckedFolders(req: Request): Promise<Response | null> {
+    // No rules to read is never no check: only the owner himself names a folder then (caller-paths.ts).
+    const rules = this.context.gatewayMethods.pathRules?.() ?? CALLER_RULES_ABSENT;
+    const url = new URL(req.url);
+    // Every route: a method's binding, an alias of one, or an effect row with its declared folders (route-manifest.ts).
+    const target = declaredRouteTarget(this.context.gatewayMethods, req.method, catalogPathname(url.pathname));
+    if (!target) return null;
+    const descriptor = target.descriptor;
+    if ((descriptor.workFolders ?? []).length === 0 && (descriptor.daemonFiles ?? []).length === 0) return null;
+    const principal = this.principalOf(req);
+    const query = { ...Object.fromEntries(url.searchParams.entries()), ...target.params };
+    let body: unknown;
+    if (req.method !== 'GET' && req.method !== 'DELETE') {
+      // A body that is not JSON (an upload of the caller's own file) is the route's own to read.
+      try { body = await req.clone().json(); } catch { body = undefined; }
+    }
+    let project: string | undefined;
+    try { project = req.headers.get('x-goodvibes-project') ? decodeURIComponent(req.headers.get('x-goodvibes-project')!) : undefined; } catch { project = undefined; }
+    const checkedCall = this.checkedCallOf(req);
+    const refusal = callerPathRefusal(descriptor, body, query, {
+      ...(principal?.credentialKind ? { credentialKind: principal.credentialKind } : {}), ...(principal ? { principalId: principal.principalId } : {}),
+      ...(principal?.actor ? { actor: principal.actor } : {}),
+      ...(project || checkedCall ? { call: { ...checkedCall, ...(project ? { project } : {}) } } : {}),
+    }, rules);
+    return refusal === undefined ? null
+      : Response.json(buildErrorResponseBody({ message: `Not done: ${refusal}. Nothing was read or changed.`, code: 'PROJECT_NOT_ALLOWED', status: 403 }), { status: 403 });
+  }
+
+  /** The caller a REST request reaches records as (control-plane/caller-reach.ts), and its method. */
+  private reachOfRequest(req: Request): { readonly descriptor: DaemonRouteTarget['descriptor']; readonly context: Parameters<typeof callerReachRefusal>[3]; readonly params: Record<string, string> } | null {
+    const url = new URL(req.url);
+    const pathname = catalogPathname(url.pathname);
+    // Every route: a method's binding, an alias of one (its method, the values the request path gives that method's
+    // path), or an effect row (its declared addresses, kept under its id; route-manifest.ts). None: a route declared
+    // public, its own credential's, or retired.
+    const target = declaredRouteTarget(this.context.gatewayMethods, req.method, pathname);
+    if (!target) return null;
+    const principal = this.principalOf(req);
+    let project: string | undefined;
+    try { project = req.headers.get('x-goodvibes-project') ? decodeURIComponent(req.headers.get('x-goodvibes-project')!) : undefined; } catch { project = undefined; }
+    // The route's own path values: what it names by id in its path.
+    const params: Record<string, string> = { ...Object.fromEntries(url.searchParams.entries()), ...target.params };
+    const descriptor = target.descriptor;
+    return { descriptor, params, context: {
+      ...(principal?.credentialKind ? { credentialKind: principal.credentialKind } : {}), ...(principal ? { principalId: principal.principalId } : {}),
+      ...(principal?.actor ? { actor: principal.actor } : {}),
+      ...(project || this.checkedCallOf(req) ? { call: { ...this.checkedCallOf(req), ...(project ? { project } : {}) } } : {}),
+    } };
+  }
+
+  /**
+   * The request's caller's reach, as the filter a paged list applies before it cuts its page (caller-reach.ts
+   * `reachFilterOf`); null for the owner at large. Read for every request, whatever its route: who asks is the same.
+   */
+  private reachFilterOfRequest(req: Request): ((kind: string, id: string) => boolean) | null {
+    const rules = this.context.gatewayMethods.reachRules?.();
+    const principal = this.principalOf(req);
+    // Nobody this daemon authenticated, or no rules to tell records apart: unknown is someone else, given no record.
+    if (!principal) return () => false;
+    if (!rules) return reachFilterOf({ credentialKind: principal.credentialKind, principalId: principal.principalId, actor: principal.actor }, undefined);
+    const checkedCall = this.checkedCallOf(req);
+    return reachFilterOf({
+      credentialKind: principal.credentialKind, principalId: principal.principalId, actor: principal.actor,
+      ...(checkedCall ? { call: checkedCall } : {}),
+    }, rules);
+  }
+
+  /**
+   * A REST call naming by id a record its caller may not reach (control-plane/caller-reach.ts): refused before the route
+   * reads it, in the words that never say whether it exists. Null: it may reach every one it names.
+   */
+  private async refuseUnreachableRecords(req: Request): Promise<Response | null> {
+    // No rules to read is never no check: only the owner himself reaches a record by id then (caller-reach.ts).
+    const rules = this.context.gatewayMethods.reachRules?.() ?? CALLER_RULES_ABSENT;
+    const reach = this.reachOfRequest(req);
+    if (!reach) return null;
+    let body: unknown;
+    if (req.method !== 'GET' && req.method !== 'DELETE') {
+      try { body = await req.clone().json(); } catch { body = undefined; }
+    }
+    const refusal = await callerReachRefusal(reach.descriptor.id, body, reach.params, reach.context, rules);
+    if (refusal !== undefined) {
+      return Response.json(buildErrorResponseBody({ message: `Not done: ${refusal}. Nothing was read or changed.`, code: RECORD_NOT_YOURS, status: 403 }), { status: 403 });
+    }
+    // The owner's shared things by their REST routes too (control-plane/shared-kinds.ts): the same rule the dispatch
+    // reads. A public or peer route is admitted by its own proof.
+    if (reach.descriptor.access === 'public' || reach.descriptor.access === 'remote-peer') return null;
+    const shared = await sharedKindAdmission(daemonSharedKindRule(), reach.descriptor.id, body ?? reach.params, reach.context);
+    if (shared.ok) return null;
+    if (shared.pendingApprovalId !== undefined) {
+      return Response.json({ id: reach.descriptor.id, ok: false, success: false, code: 'OWNER_APPROVAL_PENDING', approvalId: shared.pendingApprovalId,
+        state: `Not done yet: ${shared.reason}.`,
+        next: ['The owner answers it in Waiting for you (the terminal app or the Agent, the web UI, or a paired phone).', 'Send the same call again after he answers.'] }, { status: 202 });
+    }
+    return Response.json(buildErrorResponseBody({ message: `Not done: ${shared.reason}. Nothing was read or changed.`, code: SHARED_KIND_NOT_GIVEN, status: 403 }), { status: 403 });
+  }
+
+  /**
+   * A knowledge call over REST (the family of the owner's shared kind `knowledge`, control-plane/shared-kinds.ts): the
+   * project it names (`x-goodvibes-project`, else `workingDirectory` in its body or query), held by the one project
+   * check for its caller, and the caller, kept as what it adds is recorded (knowledge/knowledge-reach.ts: that project's
+   * knowledge; naming none, the owner's shared knowledge, which only he and those he gave it add to). The refusal of a
+   * project it may not name, or null.
+   */
+  private async refuseKnowledgeProject(req: Request): Promise<Response | null> {
+    const url = new URL(req.url);
+    const target = declaredRouteTarget(this.context.gatewayMethods, req.method, catalogPathname(url.pathname));
+    if (!target || !callReachesKnowledge(target.descriptor.id)) return null;
+    const principal = this.principalOf(req);
+    let raw: string | undefined;
+    try { raw = req.headers.get('x-goodvibes-project') ? decodeURIComponent(req.headers.get('x-goodvibes-project')!) : undefined; } catch { raw = undefined; }
+    if (!raw && req.method !== 'GET' && req.method !== 'DELETE') {
+      try {
+        const body = await req.clone().json() as unknown;
+        const named = body !== null && typeof body === 'object' && !Array.isArray(body) ? (body as Record<string, unknown>)['workingDirectory'] : undefined;
+        if (typeof named === 'string') raw = named;
+      } catch { /* not JSON: the route reads it */ }
+    }
+    raw = (raw ?? url.searchParams.get('workingDirectory') ?? '').trim() || undefined;
+    let project: string | undefined;
+    if (raw) {
+      const verdict = (this.context.gatewayMethods.pathRules?.() ?? CALLER_RULES_ABSENT).project(raw, this.projectNamerOfRequest(req));
+      if (!verdict.ok) {
+        return Response.json(buildErrorResponseBody({ message: `Not done: ${verdict.reason}. Nothing was read or changed.`, code: 'PROJECT_NOT_ALLOWED', status: 403 }), { status: 403 });
+      }
+      project = verdict.project;
+    }
+    if (principal || project) this.knowledgeMakers.set(req, { ...(principal ? { createdBy: principal.principalId } : {}), ...(project ? { project } : {}) });
+    return null;
+  }
+
+  /** A REST answer of a list or a search its method declares, as the caller may read it; null: as served. */
+  private async reachableResponse(req: Request, response: Response): Promise<Response | null> {
+    if (!response.ok || !(response.headers.get('content-type') ?? '').includes('application/json')) return null;
+    const rules = this.context.gatewayMethods.reachRules?.() ?? CALLER_RULES_ABSENT;
+    const reach = this.reachOfRequest(req);
+    if (!reach || methodListsOf(reach.descriptor.id).length === 0) return null;
+    let answer: unknown;
+    try { answer = await response.clone().json(); } catch { return null; }
+    const filtered = await reachableAnswer(reach.descriptor.id, answer, reach.context, rules);
+    if (filtered === answer) return null;
+    const headers = new Headers(response.headers);
+    headers.delete('content-length');
+    return new Response(JSON.stringify(filtered), { status: response.status, headers });
+  }
+
   /**
    * Whether the request's caller may read a shared session: any session but a
    * hosted one, and a hosted one only as its owners and admins
@@ -686,9 +899,14 @@ export class DaemonHttpRouter {
    * so a revoked credential's streams close: by `closeClientsOf` at once, or
    * at the next frame after a single session ended.
    */
-  private streamAuthority(req: Request): { readonly principalId?: string; readonly isAuthorized?: () => boolean } {
+  private streamAuthority(req: Request): { readonly principalId?: string; readonly isAuthorized?: () => boolean; readonly reachContext?: EventReachContext } {
     const opened = this.context.authenticateRequest(req)?.principal;
     if (!opened) return {};
+    // Who follows: only the events about records this caller may reach (control-plane/event-reach.ts).
+    const reachContext = this.reachOfRequest(req)?.context ?? {
+      credentialKind: opened.credentialKind, principalId: opened.principalId, actor: opened.actor,
+      ...(this.checkedCallOf(req) ? { call: this.checkedCallOf(req)! } : {}),
+    };
     // A stream's grant is fixed when it opens: a credential whose rights narrowed
     // since then closes it (the client reopens it under the narrower grant), so a
     // frame the narrower grant does not cover is never written.
@@ -696,6 +914,7 @@ export class DaemonHttpRouter {
       && (now.scopeSet.has('*') || opened.scopes.every((scope) => now.scopeSet.has(scope)));
     return {
       principalId: opened.principalId,
+      reachContext,
       isAuthorized: () => {
         const now = this.context.authenticateRequest(req)?.principal;
         return now !== undefined && now.principalId === opened.principalId && (now === opened || covered(now));
@@ -703,8 +922,64 @@ export class DaemonHttpRouter {
     };
   }
 
+  /**
+   * The registration a terminal program sent (`x-goodvibes-program-key`), checked once for this request against its own
+   * principal and credential kind (daemon/program-registrations.ts) and bound to it in process; a key that is not this
+   * caller's names nothing. Always null: it never refuses a request by itself.
+   */
+  private bindCheckedRegistration(req: Request): null {
+    // A request the daemon serves to itself in process (a turn it hosts): bound as such, never from a header.
+    if (isInProcessRequest(req)) bindDaemonHosted(req);
+    const sent = req.headers.get(CALL_PROGRAM_KEY_HEADER)?.trim();
+    if (!sent) return null;
+    const principal = this.principalOf(req);
+    // The Agent's credential (the owner's model, kind `agent`; the terminal app's and the Agent's model tools both use
+    // it) is no credential a registration is issued to: the program sends the registration the daemon issued it for the
+    // operator token it registered with, and only that names it (method-owner-decision.ts `ownersAgentProgram`).
+    // Without it, that credential is a script.
+    const program = principal?.credentialKind === 'agent'
+      ? daemonProgramRegistrations().verify(sent, LOCAL_OWNER_PRINCIPAL, 'local')
+      : daemonProgramRegistrations().verify(sent, principal?.principalId, principal?.credentialKind);
+    bindProgramRegistration(req, program);
+    // The registered process too, so a question it raises is held while that process runs (approvals-raise.ts).
+    if (program !== undefined) bindProgramProcess(req, daemonProgramRegistrations().processOf(sent));
+    return null;
+  }
+
+  /**
+   * A REST request for a method a route module serves (no handler: the dispatch's invoke arm never sees it) whose risk
+   * class is not `none`: sent through the dispatch as that method's call (the same `invokeGatewayRestVerb` a handler's
+   * route takes, its path parameters folded in), so it is decided there as every other door is. The dispatch serves the
+   * route itself when the call may run (a request it makes in process, which never comes back here). Every such call
+   * goes this way whatever its body: one that is not a method's JSON input is refused there (400), never served around
+   * the decision. Null: served as it is (a method of no risk, or one a handler serves, which the dispatch reaches).
+   */
+  private decideRiskyRoute(req: Request): Promise<Response | null> | null {
+    const pathname = catalogPathname(new URL(req.url).pathname);
+    // A method's binding or an alias of one (an effect row declares how it is decided: route-manifest.ts `decided`).
+    const descriptor = declaredRouteTarget(this.context.gatewayMethods, req.method, pathname)?.method;
+    if (!descriptor?.http || this.context.gatewayMethods.hasHandler(descriptor.id)) return null;
+    if (riskOfDescriptor(descriptor) === 'none') return null;
+    const refuse = (error: string, status: number): Promise<Response> => Promise.resolve(Response.json({ error, code: status === 400 ? 'INVALID_ARGUMENT' : 'NOT_INVOKABLE', status }, { status }));
+    const invoke = this.requests.routeTable().handlers.invokeGatewayRestVerb;
+    if (typeof invoke !== 'function') return refuse(`${descriptor.id} is decided by the owner's rule, and this daemon cannot send it through its dispatch. Nothing was changed.`, 501);
+    const template = (descriptor.http.path.replace(/\/+$/, '') || '/').split('/');
+    const parts = (pathname.replace(/\/+$/, '') || '/').split('/');
+    if (template.length !== parts.length) return refuse(`${pathname} does not fit ${descriptor.http.path}.`, 400);
+    const params: Record<string, string> = {};
+    for (let index = 0; index < template.length; index += 1) {
+      const want = template[index]!;
+      if (!want.startsWith('{') || !want.endsWith('}')) continue;
+      try { params[want.slice(1, -1)] = decodeURIComponent(parts[index]!); } catch { return refuse(`${want} in ${pathname} is not a readable path value.`, 400); }
+    }
+    return Promise.resolve(invoke({ methodId: descriptor.id, req, params }));
+  }
+
   /** The route that serves this request, for a caller that already established who is asking. */
   async dispatchApiRoutes(req: Request): Promise<Response | null> {
+    // A request built for a caller that has not passed the checks (a socket's method-and-path call): through every one
+    // of them first, as a request over the wire is (request-router.ts `markForAdmission`).
+    if (isMarkedForAdmission(req)) return this.requests.routeAuthenticated(req).catch((error: unknown) => this.routeFailureResponse(req, error));
     return this.requests.dispatch(req).catch((error: unknown) => this.routeFailureResponse(req, error));
   }
 
@@ -726,9 +1001,11 @@ export class DaemonHttpRouter {
       requireAdmin,
       // A non-streaming completion is batch-capable: batch.mode decides whether it is queued.
       ...(context.batchManager ? { batch: context.batchManager } : {}),
+      // Who queues a completion, and who reads it back: the job is the caller's own (control-plane/caller-reach.ts).
+      callerPrincipal: (request: Request) => this.principalOf(request)?.principalId,
     };
     const batch: Parameters<typeof dispatchBatchRoutes>[1] | null = context.batchManager
-      ? { batchManager: context.batchManager, parseJsonBody, parseOptionalJsonBody }
+      ? { batchManager: context.batchManager, parseJsonBody, parseOptionalJsonBody, callerPrincipal: (request: Request) => this.principalOf(request)?.principalId }
       : null;
     // One manager for the router's life: its write chain serializes token
     // creation, provision and disable across requests.
@@ -764,8 +1041,14 @@ export class DaemonHttpRouter {
       resolveDefaultProviderModel: context.resolveDefaultProviderModel,
       requireAdmin,
       requireScope: (request, scope) => this.requireCallerScope(request, scope),
-      // Whose input a message is (security/turn-input-party.ts): the owner's credential, or someone else's.
-      isOwnerCaller: (request) => this.principalOf(request)?.actor.class === 'owner',
+      // Whose input a message is (security/turn-input-party.ts): the owner himself (his sign-in, a device he paired, his
+      // own registered terminal program: owner-typed.ts), or someone else's; the operator token alone is a script.
+      isOwnerCaller: (request) => ownerHimselfOf(this.principalOf(request), readProgramRegistration(request)),
+      ...(context.callerProject ? { checkProject: (request: Request, raw: string) => context.callerProject!(raw, this.projectNamerOfRequest(request)) } : {}),
+      // Who made a chat: with its project, who it belongs to (control-plane/caller-reach.ts).
+      callerPrincipal: (request: Request) => this.principalOf(request)?.principalId,
+      // And what it is: the chat's model acts for that maker (security/turn-session.ts).
+      callerActor: (request: Request) => this.principalOf(request)?.actor,
       openSessionEventStream: (request: Request, sessionId: string) => {
         // Turn events are published to the registered client, so it must be this connection's own id.
         return openScopedSessionEventStream(gateway, request, {
@@ -866,6 +1149,8 @@ export class DaemonHttpRouter {
         controlPlaneGateway: this.context.controlPlaneGateway,
         extractAuthToken: this.context.extractAuthToken,
         resolveAuthenticatedPrincipal: (request) => this.principalOf(request),
+        // `control.auth.current` says whether the caller is the owner himself, so the web offers his own acts.
+        ownerHimself: (request: Request) => ownerHimselfOf(this.principalOf(request), readProgramRegistration(request)),
         gatewayMethods: this.context.gatewayMethods,
         getOperatorContract: () => buildOperatorContract(this.context.gatewayMethods),
         invokeGatewayMethodCall: this.context.invokeGatewayMethodCall,
@@ -880,6 +1165,15 @@ export class DaemonHttpRouter {
         ...(this.context.servingListener ? { servingListener: this.context.servingListener } : {}),
         memoryEmbeddingRegistry: this.context.memoryEmbeddingRegistry,
         memoryRegistry: this.context.memoryRegistry,
+        // A memory read is the project its call names (memory-project.ts), the same identity a record is kept under.
+        memoryProjectOf: memoryProjectOf,
+        // The one project check for the caller that sent the read (a device or a member names only a project given to it).
+        ...(this.context.callerProject ? { callerProjectRefusal: (request: Request, folder: string) => {
+          const verdict = this.context.callerProject!(folder, this.projectNamerOfRequest(request));
+          return verdict.ok ? undefined : verdict.reason;
+        } } : {}),
+        // Only the owner himself reads every project's memory at once (his place's "Every project" choice).
+        ownerHimself: (request: Request) => ownerHimselfOf(this.principalOf(request), readProgramRegistration(request)),
         memoryConsolidation: this.context.memoryConsolidation ?? null,
         parseJsonBody: (request) => this.parseJsonBody(request),
         providerRuntime: {
@@ -898,6 +1192,10 @@ export class DaemonHttpRouter {
         resolveAuthenticatedPrincipal: (request) => this.principalOf(request),
         mayReadSession: (request, session) => this.mayReadSession(request, session),
         userAuth: this.context.userAuth,
+        // Who writes a memory record over these routes, from the credential (memory-route-author.ts), and whether a
+        // session it names as the record's origin is its own.
+        memoryAuthorOf: (request) => memoryAuthorOfRequest(request, this.principalOf(request), this.context.configManager.getHomeDirectory()),
+        mayNameSession: (request, sessionId) => requestMayNameSession(request, this.principalOf(request), (id) => this.context.sessionBroker.registrantOf(id), sessionId),
       },
       telemetry: {
         telemetryApi: this.telemetryApi,
@@ -922,7 +1220,6 @@ export class DaemonHttpRouter {
       system: {
         ...buildSystemRouteContext({
           settingsPrecondition: this.settingsPrecondition,
-          settingsImportPrecondition: this.settingsImportPrecondition,
           approvalBroker: this.context.approvalBroker,
           configManager: this.context.configManager,
           credentialStatus: this.context.secretsManager
@@ -952,7 +1249,8 @@ export class DaemonHttpRouter {
         requireAdmin: (request) => this.context.requireAdmin(request),
         sessionBroker: buildRouterSessionBrokerAdapter(this.context.sessionBroker),
         mayReadSession: (request, session) => this.mayReadSession(request, session),
-        requestPrincipalId: (request) => this.principalOf(request)?.principalId ?? undefined,
+        // Kept with its kind (a sign-in user named `shared-token` is never this machine's token).
+        requestPrincipalId: (request) => { const principal = this.principalOf(request); return principal ? callerKey(principal) : undefined; },
         agentManager: { getStatus: (agentId) => this.context.agentManager.getStatus(agentId), cancel: (agentId) => this.context.agentManager.cancel(agentId) },
         // platform-owned empty-state copy, served while automation is enabled with zero routines (see feature-announcements).
         automationEmptyState: () => buildAutomationEmptyState({ enabled: this.getConfigValue('automation.enabled') === true, routineCount: this.context.automationManager.listJobs().length }),
@@ -1012,15 +1310,7 @@ export class DaemonHttpRouter {
         ),
         // The owner typed this into his own program: the owner, with a person's credential, a terminal app or the
         // Agent by its label, and a person's claim (runtime-session-routes.ts OWNER_TYPED_METADATA_KEY).
-        ownerTypedAtProgram: (req) => {
-          const principal = this.principalOf(req);
-          if (!principal || principal.actor.class !== 'owner') return false;
-          const credential = principal.credentialKind;
-          if (credential !== 'local' && credential !== 'device-token' && credential !== 'user-session') return false;
-          const program = req.headers.get('x-goodvibes-client')?.trim().toLowerCase();
-          if (program !== 'tui' && program !== 'agent') return false;
-          return req.headers.get('x-goodvibes-explicit-user-request')?.trim().toLowerCase() === 'true';
-        },
+        ownerTypedAtProgram: (req) => ownerTypedAtProgram(this.principalOf(req), req.headers, readProgramRegistration(req)),
       },
       remote: {
         resolveAuthenticatedPrincipal: (request) => this.principalOf(request),
@@ -1046,6 +1336,8 @@ export class DaemonHttpRouter {
           voiceService: this.context.voiceService,
           webSearchService: this.context.webSearchService,
         }),
+        // Who stores a file is who it belongs to (control-plane/caller-reach.ts).
+        callerPrincipal: (request: Request) => this.principalOf(request)?.principalId,
       },
       browserJudgment: {
         authenticate: (request) => this.principalOf(request),
@@ -1100,6 +1392,8 @@ export class DaemonHttpRouter {
         requireAdmin: (request) => this.context.requireAdmin(request),
         resolveDefaultProviderModel: this.context.resolveDefaultProviderModel,
         homeGraph: this.context.homeGraphService,
+        // "Treat my own messages here as me" on Home Assistant (daemon/owner-channel-conversation.ts).
+        channelPolicy: () => this.context.channelPolicy.getPolicy('homeassistant'),
       });
     }
     return this.homeAssistantRoutes;
@@ -1126,6 +1420,16 @@ export class DaemonHttpRouter {
         parseJsonBody: (request) => this.parseJsonBody(request),
         parseOptionalJsonBody: (request) => this.parseOptionalJsonBody(request),
         requireAdmin: (request) => this.context.requireAdmin(request),
+        // The one folder check for the project a planning call names, as every call's folders are (caller-paths.ts).
+        refuseProject: (request, folder) => {
+          const principal = this.principalOf(request);
+          const checkedCall = this.checkedCallOf(request);
+          return callerPathRefusal({ id: 'projectPlanning', workFolders: ['workingDirectory'] }, { workingDirectory: folder }, undefined, {
+            ...(principal?.credentialKind ? { credentialKind: principal.credentialKind } : {}), ...(principal ? { principalId: principal.principalId } : {}),
+            ...(principal?.actor ? { actor: principal.actor } : {}), ...(checkedCall ? { call: checkedCall } : {}),
+          }, this.context.gatewayMethods.pathRules?.() ?? CALLER_RULES_ABSENT);
+        },
+        projectIdOf: (folder) => projectIdentityOfFolder(this.context.configManager, folder),
       });
     }
     return this.projectPlanningRoutes;

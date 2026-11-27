@@ -67,7 +67,7 @@ export const secureAddressConfigSettings: ConfigSettingDefinition[] = [
     description: 'The DNS service whose API the daemon uses for the Let\'s Encrypt proof record and the address record. Cloudflare is the one supported now.',
   },
   {
-    key: 'secureAddress.acmeDirectory',
+    key: 'secureAddress.acmeDirectory', valueKind: 'endpoint',
     label: 'Certificate authority address (ACME)',
     type: 'string',
     description: `Where the certificate is asked for: an ACME directory. Leave it as ${LETS_ENCRYPT_DIRECTORY} (Let's Encrypt). Another ACME authority that offers DNS proofs works the same way.`,
@@ -75,13 +75,13 @@ export const secureAddressConfigSettings: ConfigSettingDefinition[] = [
     validationHint: 'an http(s) address of an ACME directory',
   },
   {
-    key: 'secureAddress.certFile',
+    key: 'secureAddress.certFile', valueKind: 'path',
     label: 'Your certificate file',
     type: 'string',
     description: 'Path of the certificate (PEM, with its chain) served when secureAddress.certificate is own-files. Read on this computer, checked when given and again when the file changes; never sent anywhere.',
   },
   {
-    key: 'secureAddress.keyFile',
+    key: 'secureAddress.keyFile', valueKind: 'path',
     label: 'Your certificate\'s key file',
     type: 'string',
     description: 'Path of the certificate\'s private key (PEM, not passphrase-protected) for own-files. The setting holds the path, never the key; the key is read on this computer and never logged or sent, except sealed to the machines of your group when this computer leads one.',

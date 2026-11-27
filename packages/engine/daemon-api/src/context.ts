@@ -81,11 +81,12 @@ export interface DaemonControlRouteHandlers {
   postLogin(req: Request): MaybeResponse;
   getStatus(req: Request): MaybeResponse;
   getCurrentAuth(req: Request): MaybeResponse;
-  getControlPlaneSnapshot(): MaybeResponse;
+  /** `req`: who reads; its kept events and messages are only those about records it may reach. */
+  getControlPlaneSnapshot(req?: Request): MaybeResponse;
   getOperatorContract(): MaybeResponse;
   getControlPlaneWeb(): MaybeResponse;
-  getControlPlaneRecentEvents(limit: number): MaybeResponse;
-  getControlPlaneMessages(): MaybeResponse;
+  getControlPlaneRecentEvents(limit: number, req?: Request): MaybeResponse;
+  getControlPlaneMessages(req?: Request): MaybeResponse;
   getControlPlaneClients(): MaybeResponse;
   getGatewayMethods(url: URL): MaybeResponse;
   getGatewayEvents(url: URL): MaybeResponse;
@@ -140,7 +141,6 @@ export interface DaemonChannelRouteHandlers {
   postChannelAllowlistEdit(surface: string, req: Request): MaybeResponse;
   getChannelPolicies(): MaybeResponse;
   postChannelPolicy(surface: string, req: Request): MaybeResponse;
-  patchChannelPolicy(surface: string, req: Request): MaybeResponse;
   getChannelPolicyAudit(limit: number): MaybeResponse;
   getChannelStatus(): MaybeResponse;
   getChannelDirectory(surface: string, url: URL): MaybeResponse;
@@ -372,6 +372,8 @@ export interface DaemonArtifactRouteHandlers {
   postArtifact(req: Request): MaybeResponse;
   getArtifact(artifactId: string, req: Request): MaybeResponse;
   getArtifactContent(artifactId: string, req: Request): MaybeResponse;
+  /** Discards a file uploaded for a knowledge ingest the owner said No to (only such an upload). */
+  deleteArtifact(artifactId: string, req: Request): MaybeResponse;
 }
 
 /** Route handlers for media provider operations: analyze, transform, and generate. */
@@ -406,7 +408,7 @@ export interface DaemonRuntimeSessionRouteHandlers {
   deleteSharedSession(sessionId: string, req: Request): MaybeResponse;
   /** `req` names the caller: a hosted session's messages are read only by its owners and admins. */
   getSharedSessionMessages(sessionId: string, url: URL, req?: Request): MaybeResponse;
-  getSharedSessionInputs(sessionId: string, url: URL): MaybeResponse;
+  getSharedSessionInputs(sessionId: string, url: URL, req?: Request): MaybeResponse;
   postSharedSessionMessage(sessionId: string, req: Request): MaybeResponse;
   postSharedSessionSteer(sessionId: string, req: Request): MaybeResponse;
   postSharedSessionFollowUp(sessionId: string, req: Request): MaybeResponse;

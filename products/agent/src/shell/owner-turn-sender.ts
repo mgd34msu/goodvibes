@@ -144,7 +144,10 @@ export function createOwnerTurnSender(deps: OwnerTurnSenderDeps): OwnerTurnSende
     });
     const spokenOutput = options.spokenOutput === true;
     const shell = how.attachShellOutput ? deps.shellContextHold.take() : null;
-    const source: NativeConversationInput = { text: shell ? withShellContext(shell.blocks, text) : text, unsupportedSources: [] };
+    // The images a message carries (uploaded to the host first, owner-submission.ts) go with it as its attachments.
+    const attachments = options.source?.attachments;
+    const source: NativeConversationInput = { text: shell ? withShellContext(shell.blocks, text) : text, unsupportedSources: [],
+      ...(attachments && attachments.length > 0 ? { attachments } : {}) };
     const refused = (): false => {
       shell?.restore();
       notSent(text);

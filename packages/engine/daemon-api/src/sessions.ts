@@ -44,7 +44,7 @@ async function dispatchSessionRoutesInner(
   if (sharedSessionMessagesMatch && method === 'POST') return handlers.postSharedSessionMessage(safeDecodeURIComponent(sharedSessionMessagesMatch[1]!), req);
 
   const sharedSessionInputsMatch = pathname.match(/^\/api\/sessions\/([^/]+)\/inputs$/);
-  if (sharedSessionInputsMatch && method === 'GET') return handlers.getSharedSessionInputs(safeDecodeURIComponent(sharedSessionInputsMatch[1]!), url);
+  if (sharedSessionInputsMatch && method === 'GET') return handlers.getSharedSessionInputs(safeDecodeURIComponent(sharedSessionInputsMatch[1]!), url, req);
 
   const sharedSessionSteerMatch = pathname.match(/^\/api\/sessions\/([^/]+)\/steer$/);
   if (sharedSessionSteerMatch && method === 'POST') return handlers.postSharedSessionSteer(safeDecodeURIComponent(sharedSessionSteerMatch[1]!), req);

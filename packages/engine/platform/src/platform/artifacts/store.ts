@@ -30,6 +30,8 @@ import {
   sanitizeArtifactFilename,
 } from './types.js';
 import { instrumentedFetch } from '../utils/fetch-with-timeout.js';
+import { withTurnMaker } from './turn-maker.js';
+import { keepReachable } from '@goodvibes/engine/daemon-api';
 import { checkDestination, DestinationRefusedError, pinnedFetch, type CheckedDestination } from '../runtime/network/destination.js';
 
 /** Caller-owned publication fence; never populated from artifact metadata. */
@@ -432,9 +434,11 @@ export class ArtifactStore {
   list(limit = 100): ArtifactDescriptor[] {
     const now = Date.now();
     this.pruneExpired(now);
-    return [...this.records.values()]
-      .filter((record) => !isExpired(record, now))
-      .sort((a, b) => b.createdAt - a.createdAt || a.id.localeCompare(b.id))
+    // Served for a caller that is not the owner himself (daemon-api withRecordReach): only the files it may reach, before
+    // the newest `limit` are cut (control-plane/caller-reach.ts). Every reader of this list is filtered the same way:
+    // the method, the Agent's artifacts capability and its tool.
+    return keepReachable([...this.records.values()].filter((record) => !isExpired(record, now)), 'artifact', (record) => record.id)
+      .slice().sort((a, b) => b.createdAt - a.createdAt || a.id.localeCompare(b.id))
       .slice(0, Math.max(1, limit))
       .map((record) => this.toDescriptor(record));
   }
@@ -629,7 +633,8 @@ export class ArtifactStore {
         ...(input.sourceUri ? { sourceUri: input.sourceUri } : {}),
         acquisitionMode: input.acquisitionMode ?? 'inline-data',
         fetchMode: input.fetchMode ?? 'not-applicable',
-        metadata: input.metadata ?? {},
+        // A file a daemon turn makes is its chat's: that chat's maker and project (turn-maker.ts).
+        metadata: withTurnMaker(input.metadata ?? {}),
         contentPath,
         metadataPath,
       };

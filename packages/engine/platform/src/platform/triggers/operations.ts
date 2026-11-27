@@ -67,10 +67,15 @@ export function summarizeTrigger(record: TriggerRecord): TriggerSummary {
     ? `${spec.probe.kind} probe, ${spec.rule.kind} rule${spec.intervalMs !== undefined ? `, every ${spec.intervalMs}ms` : ''}`
     : `${[spec.command, ...(spec.args ?? [])].join(' ')}${spec.kind === 'stream' ? ` (lines matching ${spec.match.pattern})` : ''}`;
   return {
-    id: record.definition.id,
+    // The name its project's people chose and type (TriggerManager resolveName), and how it is kept when that differs.
+    id: record.definition.chosenId ?? record.definition.id,
+    ...(record.definition.chosenId !== undefined && record.definition.chosenId !== record.definition.id ? { storedId: record.definition.id } : {}),
     label: record.definition.label,
     kind: spec.kind,
     watching,
+    // The project its turns and commands work in: each row names its project (a 3.5.0 trigger, placed at load,
+    // names the folder its 3.5.0 daemon ran in).
+    ...(record.definition.workingDirectory !== undefined ? { project: record.definition.workingDirectory } : {}),
     state: record.state,
     firedCount: record.firedCount,
     ...(record.lastFiredAt !== undefined ? { lastFiredAt: new Date(record.lastFiredAt).toISOString() } : {}),

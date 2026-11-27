@@ -5,6 +5,7 @@
  */
 
 import type { CompanionChatManager } from './companion-chat-manager.js';
+import type { Actor } from '@goodvibes/engine/daemon-api/http-policy';
 
 export interface CompanionChatRouteContext {
   /**
@@ -38,6 +39,21 @@ export interface CompanionChatRouteContext {
    * runs no command outside a real sandbox and writes no file. Omitted: every caller is the owner.
    */
   readonly isOwnerCaller?: ((req: Request) => boolean) | undefined;
+  /**
+   * The one check of the project the request names (workspace/caller-project.ts), for the request's credential: a chat
+   * is made only in a project that passes it, and in the checked project. Omitted: the project is taken as given.
+   */
+  readonly checkProject?: ((req: Request, raw: string) => { readonly ok: true; readonly project: string } | { readonly ok: false; readonly reason: string }) | undefined;
+  /**
+   * The principal the request authenticated as: kept on a chat it makes as who made it, which with the chat's project
+   * is who the chat belongs to (control-plane/caller-reach.ts). Omitted: no maker is kept (the owner's only).
+   */
+  readonly callerPrincipal?: ((req: Request) => string | undefined) | undefined;
+  /**
+   * The actor the request authenticated as (its class and scopes): kept on a chat it makes, so the chat's model acts for
+   * that maker (security/turn-session.ts). Omitted: no maker kept.
+   */
+  readonly callerActor?: ((req: Request) => Actor | undefined) | undefined;
   /**
    * Stable identity of the authenticated caller for the per-client message cap
    * (a token id). Omitted: derived from the request's credential headers.

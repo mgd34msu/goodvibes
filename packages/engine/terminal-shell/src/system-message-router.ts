@@ -10,6 +10,7 @@ import {
   type SystemMessageTarget,
 } from '@goodvibes/engine/platform/platform/runtime/shell';
 import { classifyNoise, foldProviderReplayLines, providerNameFromReplay, type NoiseGateDeps } from './system-message-noise.js';
+import { noteSplashStartLine } from './first-run/splash-state.js';
 export type { SystemMessageActivity, SystemMessageKind, SystemMessageTarget } from '@goodvibes/engine/platform/platform/runtime/shell';
 export type SystemMessagePriority = 'high' | 'low';
 export interface SystemMessageActivityFeed {
@@ -129,6 +130,8 @@ export class TerminalSystemMessageRouter<Feed extends SystemMessageActivityFeed 
     // log, the Health tab, /model). Dropped noise is drop-from-the-feed, not delete.
     const verdict = classifyNoise(message, this.noiseDeps, this.presentation.suppressCapturedOutput);
     if (verdict.action === 'drop') return;
+    // A line said at start is also drawn under the splash while it shows (first-run/splash-state.ts).
+    noteSplashStartLine(message);
     if (verdict.action === 'foldProviderReplay') {
       this.bufferProviderReplay(message);
       return;
@@ -218,6 +221,7 @@ export class TerminalSystemMessageRouter<Feed extends SystemMessageActivityFeed 
   }
   /** Direct response to a user action, or an offer waiting for the person's answer: always visible on the main screen once. */
   userAction(message: string, level?: NoticeLevel | undefined): void {
+    noteSplashStartLine(message);
     this.addDeclared(message, 'high', undefined, level);
     this.feed?.push(message, 'high', activityKindFor(message));
   }

@@ -15,6 +15,7 @@
 
 import { buildUrl } from '@goodvibes/engine/transport-http/paths';
 import { openRawServerSentEventStream } from '@goodvibes/engine/transport-http/sse-stream';
+import { programFetch } from '@goodvibes/engine/platform/platform/runtime/client';
 import { logger, summarizeError } from '@goodvibes/engine/platform/platform/utils';
 
 export interface OccasionAnnouncementWatch {
@@ -55,7 +56,8 @@ export async function watchOccasionAnnouncements(options: WatchOccasionAnnouncem
   let greetings = 0;
   const ended = (): void => { if (!closed) { closed = true; options.onEnded(); } };
   try {
-    const close = await openRawServerSentEventStream(options.fetchImpl ?? globalThis.fetch, url.toString(), {
+    // With this program's registration: the operator token alone is a script and hears none of the owner's occasions.
+    const close = await openRawServerSentEventStream(programFetch(options.fetchImpl ?? globalThis.fetch), url.toString(), {
       onReady: () => { greetings += 1; if (greetings > 1 && !closed) options.onBack?.(); },
       onEvent: ({ name: domain, payload }) => {
         if (domain === 'deliveries' && isOccasionWaitingFrame(payload)) options.onWaiting();

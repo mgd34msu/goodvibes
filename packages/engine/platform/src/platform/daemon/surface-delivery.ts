@@ -444,8 +444,8 @@ export class DaemonSurfaceDeliveryHelper {
    * Keeps an owner alert that reached no conversation, for the owner's next
    * attached terminal or web UI to show: only an owner-class reader sees or takes it.
    */
-  recordOwnerReceipt(text: string): void {
-    daemonReceiptStoreAt(daemonReceiptsPath(this.context.configManager)).record(text, { audience: 'owner' });
+  recordOwnerReceipt(text: string, about?: string): void {
+    daemonReceiptStoreAt(daemonReceiptsPath(this.context.configManager)).record(text, { audience: 'owner', about });
   }
 
   /**
@@ -909,7 +909,12 @@ export class DaemonSurfaceDeliveryHelper {
    * Agent or the web UI is on the owner's screen already: nothing more is done.
    */
   async notifyApprovalUpdate(approval: SharedApprovalRecord): Promise<void> {
-    if (!isOpenApprovalStatus(approval.status)) this.ownerAlertedApprovals.delete(approval.id);
+    if (!isOpenApprovalStatus(approval.status)) {
+      this.ownerAlertedApprovals.delete(approval.id);
+      // Answered (or ended): a kept "Waiting for your answer" line about it is retired, so a program's start-up lines
+      // read what Waiting for you lists and never name an ask that was answered and ran.
+      daemonReceiptStoreAt(daemonReceiptsPath(this.context.configManager)).retire(`approval:${approval.id}`);
+    }
     await this.context.sessionBroker.start();
     await this.context.routeBindings.start();
     // An ask is shown on a channel only in a conversation proven to be the
@@ -938,7 +943,7 @@ export class DaemonSurfaceDeliveryHelper {
       + (guestChannel === undefined ? 'It could not be shown in the conversation it came from. '
         : `It is about a conversation on ${channelName(guestChannel)} that is not yours alone, so it is not shown there, and none of your own conversations took it. `)
       + `Answer it in Waiting for you${webUrl ? `, or here: ${webUrl}` : ''}.`;
-    const reached = await deliverOwnerAlert(this.context.routeBindings, this, null, text);
+    const reached = await deliverOwnerAlert(this.context.routeBindings, this, null, text, `approval:${approval.id}`);
     logger.warn('An approval prompt did not reach its conversation', {
       approvalId: approval.id, reason, reachedSurface: reached?.surfaceKind ?? null,
     });

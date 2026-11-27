@@ -176,6 +176,7 @@ export const builtinGatewayKnowledgeMethodDescriptors: readonly GatewayMethodDes
     category: 'knowledge',
     effects: ['knowledge.administer'],
     http: { method: 'POST', path: '/api/knowledge/ingest/url' },
+    notDaemonFiles: { folderPath: 'the knowledge folder the entry is filed under, a label in the store' },
     inputSchema: bodyEnvelopeSchema({
       url: STRING_SCHEMA,
       title: STRING_SCHEMA,
@@ -196,6 +197,8 @@ export const builtinGatewayKnowledgeMethodDescriptors: readonly GatewayMethodDes
     category: 'knowledge',
     effects: ['knowledge.administer'],
     http: { method: 'POST', path: '/api/knowledge/ingest/bookmarks' },
+    // The bookmark file is read on the daemon's disk (control-plane/caller-paths.ts).
+    daemonFiles: ['path'],
     inputSchema: bodyEnvelopeSchema({
       path: STRING_SCHEMA,
       sessionId: STRING_SCHEMA,
@@ -212,6 +215,8 @@ export const builtinGatewayKnowledgeMethodDescriptors: readonly GatewayMethodDes
     category: 'knowledge',
     effects: ['knowledge.administer'],
     http: { method: 'POST', path: '/api/knowledge/ingest/urls' },
+    // The URL list file is read on the daemon's disk (control-plane/caller-paths.ts).
+    daemonFiles: ['path'],
     inputSchema: bodyEnvelopeSchema({
       path: STRING_SCHEMA,
       sessionId: STRING_SCHEMA,
@@ -228,6 +233,8 @@ export const builtinGatewayKnowledgeMethodDescriptors: readonly GatewayMethodDes
     category: 'knowledge',
     effects: ['knowledge.administer'],
     http: { method: 'POST', path: '/api/knowledge/ingest/connector' },
+    // File-backed content is read on the daemon's disk (control-plane/caller-paths.ts).
+    daemonFiles: ['path'],
     inputSchema: KNOWLEDGE_CONNECTOR_INGEST_INPUT_SCHEMA,
     outputSchema: KNOWLEDGE_BATCH_INGEST_RESULT_SCHEMA,
   }),
@@ -240,6 +247,9 @@ export const builtinGatewayKnowledgeMethodDescriptors: readonly GatewayMethodDes
     effects: ['knowledge.administer'],
     http: { method: 'POST', path: '/api/knowledge/ingest/artifact' },
     events: [runtimeEventId('knowledge')],
+    // A daemon-local path or file: URI is read on the daemon's disk (control-plane/caller-paths.ts).
+    daemonFiles: ['path', 'uri'],
+    notDaemonFiles: { folderPath: 'the knowledge folder the entry is filed under, a label in the store' },
     inputSchema: bodyEnvelopeSchema({
       artifactId: STRING_SCHEMA,
       path: STRING_SCHEMA,
@@ -742,6 +752,8 @@ export const builtinGatewayKnowledgeMethodDescriptors: readonly GatewayMethodDes
     description: 'Return passive, project-scoped planning artifact counts and platform capabilities without starting a planning loop.',
     category: 'knowledge',
     effects: ['knowledge.read'],
+    // Every planning call names its project: the folder its plan is of (daemon/http/project-planning-routes.ts).
+    workFolders: ['workingDirectory'],
     http: { method: 'GET', path: '/api/projects/planning/status' },
     inputSchema: PROJECT_PLANNING_SPACE_INPUT_SCHEMA,
     outputSchema: PROJECT_PLANNING_STATUS_SCHEMA,
@@ -753,7 +765,8 @@ export const builtinGatewayKnowledgeMethodDescriptors: readonly GatewayMethodDes
     category: 'knowledge',
     effects: ['knowledge-content.read'],
     http: { method: 'GET', path: '/api/projects/planning/state' },
-    inputSchema: objectSchema({ projectId: STRING_SCHEMA, knowledgeSpaceId: STRING_SCHEMA, planningId: STRING_SCHEMA }),
+    workFolders: ['workingDirectory'],
+    inputSchema: objectSchema({ workingDirectory: STRING_SCHEMA, projectId: STRING_SCHEMA, knowledgeSpaceId: STRING_SCHEMA, planningId: STRING_SCHEMA }),
     outputSchema: PROJECT_PLANNING_STATE_OUTPUT_SCHEMA,
   }),
   methodDescriptor({
@@ -763,6 +776,7 @@ export const builtinGatewayKnowledgeMethodDescriptors: readonly GatewayMethodDes
     category: 'knowledge',
     effects: ['knowledge-content.read'],
     http: { method: 'GET', path: '/api/projects/planning/decisions' },
+    workFolders: ['workingDirectory'],
     inputSchema: PROJECT_PLANNING_SPACE_INPUT_SCHEMA,
     outputSchema: PROJECT_PLANNING_DECISIONS_OUTPUT_SCHEMA,
   }),
@@ -774,7 +788,9 @@ export const builtinGatewayKnowledgeMethodDescriptors: readonly GatewayMethodDes
     category: 'knowledge',
     effects: ['knowledge.administer'],
     http: { method: 'POST', path: '/api/projects/planning/decisions' },
+    workFolders: ['workingDirectory'],
     inputSchema: bodyEnvelopeSchema({
+      workingDirectory: STRING_SCHEMA,
       projectId: STRING_SCHEMA,
       knowledgeSpaceId: STRING_SCHEMA,
       decision: PROJECT_PLANNING_DECISION_INPUT_SCHEMA,
@@ -788,6 +804,7 @@ export const builtinGatewayKnowledgeMethodDescriptors: readonly GatewayMethodDes
     category: 'knowledge',
     effects: ['knowledge-content.read'],
     http: { method: 'GET', path: '/api/projects/planning/language' },
+    workFolders: ['workingDirectory'],
     inputSchema: PROJECT_PLANNING_SPACE_INPUT_SCHEMA,
     outputSchema: PROJECT_PLANNING_LANGUAGE_OUTPUT_SCHEMA,
   }),
@@ -798,7 +815,9 @@ export const builtinGatewayKnowledgeMethodDescriptors: readonly GatewayMethodDes
     category: 'knowledge',
     effects: ['knowledge-content.read'],
     http: { method: 'GET', path: '/api/projects/planning/work-plan' },
+    workFolders: ['workingDirectory'],
     inputSchema: objectSchema({
+      workingDirectory: STRING_SCHEMA,
       projectId: STRING_SCHEMA,
       knowledgeSpaceId: STRING_SCHEMA,
       workPlanId: STRING_SCHEMA,
@@ -817,7 +836,9 @@ export const builtinGatewayKnowledgeMethodDescriptors: readonly GatewayMethodDes
     category: 'knowledge',
     effects: ['knowledge-content.read'],
     http: { method: 'GET', path: '/api/projects/planning/work-plan/tasks' },
+    workFolders: ['workingDirectory'],
     inputSchema: objectSchema({
+      workingDirectory: STRING_SCHEMA,
       projectId: STRING_SCHEMA,
       knowledgeSpaceId: STRING_SCHEMA,
       workPlanId: STRING_SCHEMA,
@@ -836,7 +857,9 @@ export const builtinGatewayKnowledgeMethodDescriptors: readonly GatewayMethodDes
     category: 'knowledge',
     effects: ['knowledge-content.read'],
     http: { method: 'GET', path: '/api/projects/planning/work-plan/tasks/{taskId}' },
+    workFolders: ['workingDirectory'],
     inputSchema: objectSchema({
+      workingDirectory: STRING_SCHEMA,
       projectId: STRING_SCHEMA,
       knowledgeSpaceId: STRING_SCHEMA,
       workPlanId: STRING_SCHEMA,
@@ -852,7 +875,9 @@ export const builtinGatewayKnowledgeMethodDescriptors: readonly GatewayMethodDes
     category: 'knowledge',
     effects: ['knowledge.administer'],
     http: { method: 'POST', path: '/api/projects/planning/work-plan/tasks' },
+    workFolders: ['workingDirectory'],
     inputSchema: bodyEnvelopeSchema({
+      workingDirectory: STRING_SCHEMA,
       projectId: STRING_SCHEMA,
       knowledgeSpaceId: STRING_SCHEMA,
       workPlanId: STRING_SCHEMA,
@@ -868,7 +893,9 @@ export const builtinGatewayKnowledgeMethodDescriptors: readonly GatewayMethodDes
     category: 'knowledge',
     effects: ['knowledge.administer'],
     http: { method: 'PATCH', path: '/api/projects/planning/work-plan/tasks/{taskId}' },
+    workFolders: ['workingDirectory'],
     inputSchema: bodyEnvelopeSchema({
+      workingDirectory: STRING_SCHEMA,
       projectId: STRING_SCHEMA,
       knowledgeSpaceId: STRING_SCHEMA,
       workPlanId: STRING_SCHEMA,
@@ -885,7 +912,9 @@ export const builtinGatewayKnowledgeMethodDescriptors: readonly GatewayMethodDes
     category: 'knowledge',
     effects: ['knowledge.administer'],
     http: { method: 'POST', path: '/api/projects/planning/work-plan/tasks/{taskId}/status' },
+    workFolders: ['workingDirectory'],
     inputSchema: bodyEnvelopeSchema({
+      workingDirectory: STRING_SCHEMA,
       projectId: STRING_SCHEMA,
       knowledgeSpaceId: STRING_SCHEMA,
       workPlanId: STRING_SCHEMA,
@@ -904,7 +933,9 @@ export const builtinGatewayKnowledgeMethodDescriptors: readonly GatewayMethodDes
     category: 'knowledge',
     effects: ['knowledge.administer'],
     http: { method: 'POST', path: '/api/projects/planning/work-plan/tasks/reorder' },
+    workFolders: ['workingDirectory'],
     inputSchema: bodyEnvelopeSchema({
+      workingDirectory: STRING_SCHEMA,
       projectId: STRING_SCHEMA,
       knowledgeSpaceId: STRING_SCHEMA,
       workPlanId: STRING_SCHEMA,
@@ -920,7 +951,9 @@ export const builtinGatewayKnowledgeMethodDescriptors: readonly GatewayMethodDes
     category: 'knowledge',
     effects: ['knowledge.administer'],
     http: { method: 'DELETE', path: '/api/projects/planning/work-plan/tasks/{taskId}' },
+    workFolders: ['workingDirectory'],
     inputSchema: objectSchema({
+      workingDirectory: STRING_SCHEMA,
       projectId: STRING_SCHEMA,
       knowledgeSpaceId: STRING_SCHEMA,
       workPlanId: STRING_SCHEMA,
@@ -936,7 +969,9 @@ export const builtinGatewayKnowledgeMethodDescriptors: readonly GatewayMethodDes
     category: 'knowledge',
     effects: ['knowledge.administer'],
     http: { method: 'POST', path: '/api/projects/planning/work-plan/clear-completed' },
+    workFolders: ['workingDirectory'],
     inputSchema: bodyEnvelopeSchema({
+      workingDirectory: STRING_SCHEMA,
       projectId: STRING_SCHEMA,
       knowledgeSpaceId: STRING_SCHEMA,
       workPlanId: STRING_SCHEMA,

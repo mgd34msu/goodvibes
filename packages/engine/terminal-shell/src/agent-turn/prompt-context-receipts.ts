@@ -25,9 +25,9 @@ import {
   relevanceBand,
   DEFAULT_LIMIT,
 } from './memory-prompt.js';
-import { AgentPersonaRegistry, buildActivePersonaPrompt, type AgentPersonaSnapshot } from './persona-registry.js';
+import { AgentPersonaRegistry, buildActivePersonaPrompt, personaGivenToTurns, type AgentPersonaSnapshot } from './persona-registry.js';
 import { buildProjectContextPrompt, discoverProjectContextFiles, type AgentProjectContextSnapshot } from './project-context-files.js';
-import { AgentRoutineRegistry, type AgentRoutineSnapshot, ENABLED_ROUTINES_PROMPT_LIMIT, buildEnabledRoutinesPrompt, evaluateAgentRoutineReadiness } from './routine-registry.js';
+import { AgentRoutineRegistry, type AgentRoutineSnapshot, ENABLED_ROUTINES_PROMPT_LIMIT, buildEnabledRoutinesPrompt, evaluateAgentRoutineReadiness, routineGivenToTurns } from './routine-registry.js';
 import {
   AgentSkillRegistry,
   ENABLED_SKILLS_PROMPT_LIMIT,
@@ -291,7 +291,7 @@ function buildRuntimePromptReceiptSegments(
   const suppressedMemory = memoryRecords.filter((record) => !activeMemoryIds.has(record.id));
   const routineSnapshot = composed.routineSnapshot;
   const readyRoutines = routineSnapshot.enabledRoutines.filter(
-    (routine) => routine.reviewState === 'reviewed' && evaluateAgentRoutineReadiness(routine).ready,
+    (routine) => routineGivenToTurns(routine) && evaluateAgentRoutineReadiness(routine).ready,
   );
   // Only the first few ready routines reach the prompt; the receipt counts what
   // was injected, and reports the cut ones as suppressed rather than applied.
@@ -498,14 +498,14 @@ function buildRuntimePromptReceiptSegments(
       id: 'persona',
       label: 'Active persona',
       order: 8,
-      status: activePersona && activePersona.reviewState !== 'reviewed' ? 'attention' : activePersona ? 'active' : 'empty',
-      activeCount: activePersona?.reviewState === 'reviewed' ? 1 : 0,
-      suppressedCount: activePersona && activePersona.reviewState !== 'reviewed' ? 1 : 0,
+      status: activePersona && !personaGivenToTurns(activePersona) ? 'attention' : activePersona ? 'active' : 'empty',
+      activeCount: activePersona && personaGivenToTurns(activePersona) ? 1 : 0,
+      suppressedCount: activePersona && !personaGivenToTurns(activePersona) ? 1 : 0,
       promptChars: personaPrompt.length,
       promptText: personaPrompt,
-      selected: activePersona?.reviewState === 'reviewed' ? [{ id: activePersona.id, name: activePersona.name }] : [],
+      selected: activePersona && personaGivenToTurns(activePersona) ? [{ id: activePersona.id, name: activePersona.name }] : [],
       suppressed:
-        activePersona && activePersona.reviewState !== 'reviewed'
+        activePersona && !personaGivenToTurns(activePersona)
           ? [{ id: activePersona.id, name: activePersona.name, reviewState: activePersona.reviewState }]
           : [],
     }),

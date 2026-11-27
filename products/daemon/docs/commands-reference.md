@@ -20,7 +20,6 @@ use environment homes for them (see [passthrough commands](#passthrough-commands
 | Flag | Takes | Meaning |
 | --- | --- | --- |
 | `--daemon-home <dir>` | value | The daemon's own identity directory (operator tokens, daemon settings) |
-| `-C`, `--cd`, `--working-dir <dir>` | value | The directory the daemon treats as its workspace |
 | `-h`, `--help` | none | Print help and exit 0 |
 | `-v`, `--version` | none | Print the version and exit 0 |
 
@@ -151,8 +150,9 @@ earlier, or where none exists, and register it with the service manager (systemd
 `daemon-reload`). Nothing is started or stopped: a running service keeps its previous
 launch until `restart-service`, and a stopped one stays stopped. Lingering is not
 changed. A definition that already matches is left untouched; a rewritten one is first
-copied to `<path>.bak.<YYYYMMDDHHMMSS>` and keeps the working directory it named (unless
-`--working-dir` or `GOODVIBES_WORKING_DIR` names another). A definition GoodVibes did not
+copied to `<path>.bak.<YYYYMMDDHHMMSS>`. The definition starts the daemon in the home: the
+daemon has no working folder, so one a 3.5.0 install wrote naming a project folder is
+rewritten to the home (the backup keeps it). A definition GoodVibes did not
 write (no GoodVibes description or installer marker, or a link) is never written over.
 Exits `0` when the definition is current (rewritten, written or already so), `5` when it
 was not written by GoodVibes, and `1` when it could not be read, backed up or written.
@@ -207,9 +207,9 @@ dispatching a call that was always going to fail. A start or restart that leaves
 service not running exits `3`, the same "installed, not running" answer `service-status`
 gives; a stop that leaves it running exits `1`. `restart-service` is the usual way to
 pick up a settings change that only applies at boot (an endpoint binding, for example).
-With a moved home (`GOODVIBES_HOME`, `--daemon-home`/`GOODVIBES_DAEMON_HOME`) or an
-explicit `--working-dir`, the installed systemd definition must name this same
-executable and all three directories, or the start or restart is refused without
+With a moved home (`GOODVIBES_HOME`, `--daemon-home`/`GOODVIBES_DAEMON_HOME`), the
+installed systemd definition must name this same executable and these directories, or
+the start or restart is refused without
 touching the service; on other platforms a start or restart with a moved home is
 refused. Unit files stay under the login home.
 
@@ -583,7 +583,7 @@ The daemon manifest and compiled fallback use the repository root version.
 The top-level parser recognizes the command but leaves its trailing arguments to its adapter. Every token
 after the command word belongs to that command's own vocabulary rather than to the
 daemon parser (a `send` message may itself start with a dash, or contain `--port`).
-Global options go before the command word, as for every other command: `goodvibes-daemon --daemon-home <dir> webui status` reads `<dir>`. After the command word, `--daemon-home` and `--working-dir` are that command's own arguments, not global options.
+Global options go before the command word, as for every other command: `goodvibes-daemon --daemon-home <dir> webui status` reads `<dir>`. After the command word, `--daemon-home` is that command's own argument, not a global option.
 
 ## Flags this binary refuses by name
 

@@ -11,12 +11,12 @@ const researchRunner: TaskRouteEntry = {
   build: (request, slots) => ({
     id: 'research-browser-runner-readiness',
     label: 'Browser-backed research runner readiness',
-    userSurface: 'Research workspace',
+    userSurface: 'Work and agents, Research',
     userOutcome: 'Check browser-backed research readiness and fallback routes before pretending live browser research can run.',
     why: 'The request mentions a browser-backed research runner or runner readiness.',
     modelRoute: `research action:"runner" query:${quote(request)} includeParameters:true`,
     inspectRoute: 'research action:"runner" includeParameters:true',
-    userRoute: 'Agent Workspace -> Research -> Browser runner readiness',
+    userRoute: 'the conversation: ask whether research can use a browser here',
     requiresConfirmation: slots.starts,
     missingFields: slots.starts
       ? ['visible research run id or research question', 'published browser-runner ready state', 'confirmation before any live browser execution']
@@ -39,12 +39,12 @@ const researchVisualReport: TaskRouteEntry = {
     return {
       id: 'research-visual-report-workflow',
       label: 'Visual research report workflow',
-      userSurface: 'Research workspace',
+      userSurface: 'Work and agents, Research',
       userOutcome: 'Route visual report requests through reviewed source/report artifacts and expose browser-rendering gaps honestly.',
       why: 'The request mentions visual report packets, report rendering, or a browser/PWA research report view.',
       modelRoute: `research action:"plan" query:${quote(request)} includeParameters:true`,
       inspectRoute: 'research action:"reports" query:"visual report" includeParameters:true',
-      userRoute: 'Agent Workspace -> Research -> Report artifacts',
+      userRoute: 'Memory and knowledge, Artifacts (the menu, Ctrl+G then m)',
       requiresConfirmation: renderEffect,
       missingFields: [
         'reviewed source bundle or saved report artifact id',
@@ -56,7 +56,6 @@ const researchVisualReport: TaskRouteEntry = {
         `research action:"plan" query:${quote(request)} includeParameters:true`,
         'research action:"report" question:"..." sources:[...] visualReport:true requireCitationCoverage:true confirm:true explicitUserRequest:"..."',
         'agent_artifacts action:"show" artifactId:"..." includeContent:true',
-        'workspace action:"action" actionId:"research-report-artifacts" includeParameters:true',
       ],
       policy: 'Visual report planning is read-only. Markdown visual-report packets can be saved after confirmation; browser/PWA rendering is not claimed until a connected-host route publishes concrete readiness evidence.',
     };
@@ -71,12 +70,12 @@ const deepResearch: TaskRouteEntry = {
     return {
       id: 'deep-research-workflow',
       label: 'Visible research workflow',
-      userSurface: 'Research workspace',
+      userSurface: 'Work and agents, Research',
       userOutcome: 'Turn research into a visible run, reviewed sources, and a sourced report artifact.',
       why: 'The request asks for research, source gathering, citations, or a report.',
       modelRoute: `research action:"plan" query:${quote(request)} includeParameters:true`,
       inspectRoute: 'research action:"briefing"',
-      userRoute: 'Agent Workspace -> Research',
+      userRoute: 'Work and agents, Research (the menu, Ctrl+G then m)',
       requiresConfirmation: effect,
       missingFields: slots.starts ? ['research question', 'deliverable or success criteria'] : undefined,
       supportingRoutes: [
@@ -95,12 +94,12 @@ const directSchedule: TaskRouteEntry = {
   build: (request, slots) => ({
     id: 'direct-schedule-route',
     label: slots.reminder ? 'Reminder scheduling route' : 'Schedule management route',
-    userSurface: 'Work and schedules workspace',
+    userSurface: 'Automation',
     userOutcome: 'Create, inspect, edit, or control schedules through the first-class schedule tool with confirmation boundaries.',
     why: 'The request directly mentions reminders, schedules, cron, or schedule lifecycle controls.',
     modelRoute: `schedule action:"list" query:${quote(request)} limit:5`,
     inspectRoute: 'schedule action:"list"',
-    userRoute: 'Agent Workspace -> Work & Approvals',
+    userRoute: 'Work and agents (the menu, Ctrl+G then m)',
     requiresConfirmation: slots.reminder || slots.controls || slots.changes || slots.starts,
     missingFields: slots.reminder
       ? ['reminder message', 'time or cadence', 'confirmation']
@@ -123,12 +122,12 @@ const autonomyIntake: TaskRouteEntry = {
   build: (request, slots) => ({
     id: 'autonomy-intake',
     label: 'Visible autonomy or schedule intake',
-    userSurface: 'Work and schedules workspace',
+    userSurface: 'Automation',
     userOutcome: 'Create or supervise ongoing work only through visible, cancellable routes.',
     why: 'The request sounds scheduled, recurring, event-triggered, long-running, or autonomous.',
     modelRoute: `autonomy action:"intake" query:${quote(request)} includeParameters:true`,
     inspectRoute: 'autonomy action:"queue"',
-    userRoute: 'Agent Workspace -> Work & Approvals',
+    userRoute: 'Work and agents (the menu, Ctrl+G then m)',
     requiresConfirmation: slots.changes || slots.starts || slots.controls || slots.reminder,
     missingFields: ['exact cadence/event source when applicable', 'task', 'success criteria'],
     supportingRoutes: [
@@ -171,12 +170,12 @@ const interactiveProcess: TaskRouteEntry = {
     return {
       id: 'interactive-process-capability',
       label: 'Interactive process, PTY, stdin, or sudo capability',
-      userSurface: 'Work and process supervision workspace',
+      userSurface: 'Work and agents',
       userOutcome: 'Check whether interactive CLI, stdin, PTY, or sudo mediation is safely available before starting hidden work.',
       why: 'The request mentions interactive terminal behavior, PTY, stdin/process input, sudo, or privilege prompts.',
       modelRoute: 'execution action:"process_capabilities"',
       inspectRoute: 'setup action:"item" setupItemId:"sudo-execution-posture"',
-      userRoute: 'Agent Workspace -> Work & Approvals',
+      userRoute: 'Work and agents (the menu, Ctrl+G then m)',
       requiresConfirmation: interactiveEffect,
       missingFields: interactiveEffect
         ? ['exact command or process id', 'whether foreground supervision is acceptable', 'confirmation before any start/write/credential effect']
@@ -199,12 +198,12 @@ const localBackgroundProcess: TaskRouteEntry = {
   build: (_request, slots) => ({
     id: 'local-background-process',
     label: 'Local background process controls',
-    userSurface: 'Work and process supervision workspace',
+    userSurface: 'Work and agents',
     userOutcome: 'Start or manage long-running local commands through visible process ids, logs, and cancellation routes.',
     why: 'The request mentions terminal background commands, process lifecycle actions, stdin, PTY, or process supervision.',
     modelRoute: 'execution action:"processes" includeParameters:true',
     inspectRoute: 'execution action:"capabilities"',
-    userRoute: 'Agent Workspace -> Work & Approvals',
+    userRoute: 'Work and agents (the menu, Ctrl+G then m)',
     requiresConfirmation: slots.starts || slots.controls,
     missingFields: slots.starts
       ? ['command', 'working directory when not the current workspace', 'confirmation']
@@ -230,7 +229,7 @@ const buildWork: TaskRouteEntry = {
     return {
       id: delegated ? 'delegated-build-work' : 'local-first-execution',
       label: delegated ? 'Delegated or isolated build work' : 'Local-first execution and file work',
-      userSurface: delegated ? 'Work plan and delegation workspace' : 'Main conversation and Work workspace',
+      userSurface: delegated ? 'Work and agents' : 'This conversation, and Work and agents',
       userOutcome: delegated
         ? 'Use isolated or parallel execution only when it improves the user result.'
         : 'Use the current workspace directly when local read/edit/exec is sufficient.',
@@ -239,7 +238,7 @@ const buildWork: TaskRouteEntry = {
         : 'The request is ordinary coding, shell, test, review, or file work in the current workspace.',
       modelRoute: delegated ? 'delegation action:"status" includeParameters:true' : 'execution action:"status" includeParameters:true',
       inspectRoute: delegated ? 'delegation action:"routes" includeParameters:true' : 'execution action:"route" target:"local"',
-      userRoute: 'Agent Workspace -> Work & Approvals',
+      userRoute: 'Work and agents (the menu, Ctrl+G then m)',
       requiresConfirmation: delegated,
       missingFields: delegated ? ['task scope', 'workspace or worktree target', 'success criteria', 'review expectation'] : undefined,
       supportingRoutes: delegated

@@ -2,6 +2,7 @@ import type { Refusal } from '@goodvibes/engine/errors';
 import type { JsonRecord } from './route-helpers.js';
 import type { CredentialKind } from './http-policy.js';
 import type { Actor } from './actor.js';
+import type { SettingAct } from './setting-act.js';
 import { AUTOMATION_SURFACE_KINDS, type AutomationSurfaceKind } from './runtime-route-types.js';
 export type { AutomationSurfaceKind };
 
@@ -41,7 +42,8 @@ export type WatcherSourceKind = typeof WATCHER_SOURCE_KINDS[number];
 export interface ConfigManagerLike {
   get(key: string): unknown;
   getAll(): Record<string, unknown>;
-  setDynamic(key: string, value: unknown): void;
+  /** `options.press.act`: who made the write and how it was decided (ConfigSetOptions `press`), kept with the change. */
+  setDynamic(key: string, value: unknown, options?: { readonly press?: { readonly act?: SettingAct | undefined } | undefined }): void;
   /**
    * Several settings as one update: every change is admitted before anything
    * is written, each settings file is written once, and the revision moves once.
@@ -50,11 +52,12 @@ export interface ConfigManagerLike {
     changes: readonly { readonly key: string; readonly value: unknown }[],
     /** Who the write is from; a change that loosens security is admitted for this actor (`settings.loosen`). */
     by: Actor,
+    options?: { readonly press?: { readonly act?: SettingAct | undefined } | undefined },
   ):
     | { readonly ok: true; readonly revision: number; readonly saved: readonly string[] }
     | { readonly ok: false; readonly refusal: Refusal; readonly saved: readonly string[] };
   /** Remove the explicit value of one key (every key when omitted) so it reads as its default again, in every tier that holds it. */
-  reset?(key?: string): void;
+  reset?(key?: string, options?: { readonly press?: { readonly act?: SettingAct | undefined } | undefined }): void;
   /** Why resetting `key` would be refused for moving where a configured credential is sent (CREDENTIAL_DESTINATION_UNBOUND), or null. */
   resetRefusal?(key: string): Refusal | null;
   /**
@@ -322,7 +325,6 @@ export interface OwnerActRequestLike {
 export interface DaemonSystemRouteContext {
   /** Optional adopted lane; absent hosts fail closed without changing legacy writes. */
   readonly settingsPrecondition?: import('./settings-precondition.js').SettingsPreconditionHandler | undefined;
-  readonly settingsImportPrecondition?: import('./settings-import-precondition.js').SettingsImportPreconditionHandler | undefined;
   readonly approvalBroker: ApprovalActionsLike;
   readonly configManager: ConfigManagerLike;
   /**
@@ -331,16 +333,17 @@ export interface DaemonSystemRouteContext {
    */
   readonly configLoosening?: ((key: string, value: unknown, options?: { readonly toDefault?: boolean }) => string | null) | undefined;
   /**
-   * Put a change only the owner makes to him as an approval; `apply` runs when
-   * he approves it. Absent hosts refuse such a change outright.
+   * The sentence a write of `key` is refused with when a managed lock holds it anywhere on this machine (who set it, why,
+   * the value it holds), or null. Read before anything is asked of the owner. Absent hosts leave it to the write.
    */
-  readonly putToOwner?: ((request: OwnerActRequestLike) => Promise<{ readonly approvalId: string }>) | undefined;
+  readonly managedLockRefusal?: ((key: string) => string | null) | undefined;
   /**
    * Whether the request's caller may loosen a security, permission, judgment
-   * or payment setting: the `settings.loosen` row of the effect table
-   * (security/effect-authority.ts) admitted for the request's actor.
-   * `ask-owner`: the change is put to the owner. Absent hosts treat every
-   * caller as allowed.
+   * or payment setting at once: the one owner rule (platform
+   * daemon/method-owner-decision.ts), told to this request by the daemon's
+   * dispatch. `ask-owner`: the route answers OWNER_DECISION_NEEDED and the
+   * dispatch puts the call to the owner's gate; `refused`: the effect table
+   * refuses the caller outright. Absent hosts treat every caller as allowed.
    */
   readonly settingsLoosenAdmission?: ((req: Request) => 'allowed' | 'ask-owner' | 'refused') | undefined;
   /**

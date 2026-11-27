@@ -23,6 +23,11 @@ export interface TaskToolOptions {
    * about owner-existence reaping must pass this.
    */
   readonly resolveSessionId?: (() => string) | undefined;
+  /**
+   * A registry several conversations use at once (the daemon's, for every web chat and run): a conversation reads its
+   * own refs, and the ones kept before refs had an owner (the legacy namespace) as before; never another's.
+   */
+  readonly ownSessionOnly?: boolean | undefined;
 }
 
 function summarizeRef(ref: CrossSessionTaskRef | null) {
@@ -104,6 +109,9 @@ export function createTaskTool(registry: CrossSessionTaskRegistry, options: Task
       const sessionId = options.resolveSessionId?.().trim() || LEGACY_TASK_NAMESPACE;
       // Read-only selector: which session's refs to display. Defaults to ours.
       const readSessionId = input.sessionId?.trim() || sessionId;
+      if (options.ownSessionOnly === true && readSessionId !== sessionId && readSessionId !== LEGACY_TASK_NAMESPACE) {
+        return { success: false, error: 'Another conversation\'s tasks are not read from here: this conversation reads its own, and the ones kept before tasks had an owner.' };
+      }
       const view = input.view ?? 'summary';
 
       const ok = (value: object) => {
@@ -138,7 +146,10 @@ export function createTaskTool(registry: CrossSessionTaskRegistry, options: Task
         }
 
         if (input.mode === 'list') {
-          const refs = registry.getRefsBySession(readSessionId);
+          // A conversation's own list carries the refs kept before refs had an owner, as every conversation read them.
+          const older = options.ownSessionOnly === true && !input.sessionId?.trim() && sessionId !== LEGACY_TASK_NAMESPACE
+            ? registry.getRefsBySession(LEGACY_TASK_NAMESPACE) : [];
+          const refs = [...registry.getRefsBySession(readSessionId), ...older];
           return ok({
             sessionId: readSessionId,
             view,

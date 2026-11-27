@@ -27,7 +27,7 @@ import type { ConfigKey } from '../config/schema-types.js';
 import { resolveAtRestPolicy } from '../runtime/at-rest-persistence.js';
 import type { ConversationMessageSnapshot } from '../core/conversation.js';
 import type { ProviderRegistry } from '../providers/registry.js';
-import { registerAllTools } from '../tools/index.js';
+import { composeTurnTools } from './turn-composition.js';
 import { registerChannelAgentTools } from '../tools/channel/agent-tools.js';
 import { AgentMessageBus } from './message-bus.js';
 import type { ChannelPluginRegistry } from '../channels/index.js';
@@ -57,6 +57,10 @@ import { readFallbackOrder } from '../providers/failover.js';
 import { runAgentTask, type AgentOrchestratorRunContext } from './orchestrator-runner.js';
 import { forgetProjectFramework } from './orchestrator-observations.js';
 import { decideInProject } from '../permissions/call-project.js';
+import { currentUntrustedContentScope, getProcessUntrustedContentLedger, withUntrustedContentScope } from '../security/untrusted-content.js';
+import { buildPerTurnKnowledgeInjection, defaultTurnKnowledgeBudgetTokens, DEFAULT_TURN_KNOWLEDGE_RELEVANCE_FLOOR } from './turn-knowledge-injection.js';
+import { memoryProjectOf } from '../state/memory-project.js';
+import { isPassiveCodeInjectionEnabled, isPassiveKnowledgeInjectionEnabled, turnFlagSources } from '../core/orchestrator-turn-flags.js';
 export { summarizeToolArgs } from './orchestrator-utils.js';
 
 /**
@@ -116,6 +120,8 @@ export interface AgentProjectFacilities {
   readonly overflowHandler?: import('../tools/shared/overflow.js').OverflowHandler | undefined;
   /** The project's own tool servers (its MCP files and the owner's), started under that project's trust. */
   readonly mcpRegistry?: import('../mcp/index.js').McpRegistry | undefined;
+  /** Starts `mcpRegistry`'s servers on the `mcp` tool's first call; absent, they were started with the registry. */
+  readonly mcpConnect?: (() => Promise<void>) | undefined;
   /** The project's checklist (`work_plan`), the same plan a terminal program in that folder keeps. */
   readonly workPlan?: import('../tools/work-plan/index.js').WorkPlanToolStore | undefined;
   /** The files the turns in this project changed (the record `/review` and the changed-files view read). */
@@ -128,6 +134,56 @@ export interface AgentProjectFacilities {
   readonly hookDispatcher?: import('../hooks/dispatcher.js').HookDispatcher | undefined;
   /** Resolves once the project's hooks file is read and its checkpoint store holds its baseline (never rejects). */
   readonly ready?: (() => Promise<void>) | undefined;
+  /** The host's settings as a turn in this project reads them: the project as its working folder (config/project-view.ts). */
+  readonly configManager?: ConfigManager | undefined;
+  /** The feature gates as a turn in this project reads them: a gate whose state is a setting follows the project's layer. */
+  readonly featureFlags?: Pick<FeatureFlagManager, 'isEnabled'> | undefined;
+  /** The secret stores as a turn in this project reads them: the host's and the owner's, then the project's own. */
+  readonly secretsManager?: Pick<import('../config/secrets.js').SecretsManager, 'get' | 'set' | 'getGlobalHome'> | undefined;
+  /** The services a turn in this project reaches (`fetch`'s service sign-in), their credentials read from the project's secrets first. */
+  readonly serviceRegistry?: import('../config/service-registry.js').ServiceRegistry | undefined;
+  /**
+   * The project's code index (the one a terminal program in that folder keeps), opened on first use while the code
+   * index is switched on: what a turn's passive code context is read from, kept current after its edits. Undefined
+   * while it is off.
+   */
+  readonly codeIndex?: (() => AgentProjectCodeIndex | undefined) | undefined;
+  /** The project's hooks file in its dispatcher (runtime/project-environment.ts), for a composition that lends it on. */
+  readonly hookWorkbench?: import('../hooks/workbench.js').HookWorkbench | undefined;
+  readonly hookActivityTracker?: import('../hooks/activity.js').HookActivityTracker | undefined;
+  /**
+   * The project's tool servers for a step of planned work that runs in a captured copy of the project: started inside
+   * that copy by `connect` (on the step's first `mcp` call), under the project's trust, its calls decided for the
+   * project. Released when the step's registry goes.
+   */
+  readonly capturedToolServers?: ((copyRoot: string) => {
+    readonly mcpRegistry: import('../mcp/index.js').McpRegistry; connect(): Promise<void>; release(): Promise<void>;
+  }) | undefined;
+}
+
+/** What a turn asks its environment for its knowledge with. */
+export interface AgentTurnKnowledgeInput {
+  /** The message this turn answers. */
+  readonly task: string;
+  readonly conversationTail: Parameters<typeof buildPerTurnKnowledgeInjection>[0]['conversationTail'];
+  /** Records given on this conversation's earlier turns, not given again. */
+  readonly alreadyInjectedIds: readonly string[];
+  readonly turn: number;
+  /** The model's context window in tokens (0: unknown); the block takes at most 3% of it. */
+  readonly contextWindow: number;
+}
+
+/** The knowledge block of one turn and the records it gave. */
+export interface AgentTurnKnowledge {
+  readonly block: string;
+  readonly injectedIds: readonly string[];
+}
+
+/** A project's code index as its turns read it and keep it current. */
+export interface AgentProjectCodeIndex {
+  readonly source: import('./turn-knowledge-injection.js').TurnCodeIndexSource;
+  readonly reindex: Pick<import('../state/code-index-reindex.js').CodeIndexReindexScheduler, 'onToolExecuted'>
+    & Partial<Pick<import('../state/code-index-reindex.js').CodeIndexReindexScheduler, 'schedule'>>;
 }
 
 /** One finished turn or run in a project, for its checkpoint. */
@@ -149,6 +205,19 @@ export interface AgentTurnEnvironment {
   readonly hookDispatcher?: AgentProjectFacilities['hookDispatcher'];
   /** Resolves once the project's hooks file is read and its checkpoint baseline is taken: awaited before the turn's first tool call. */
   ready(): Promise<void>;
+  /** The settings a turn engine there reads (the project as its working folder); absent, the host's own. */
+  readonly configManager?: ConfigManager | undefined;
+  /**
+   * The knowledge a turn there is given before its first request, as a terminal conversation's turn is given it: the
+   * owner's memory for this project and his own (never another project's), and the project's code context when the
+   * code index is on. Null when passive knowledge is off or nothing cleared the relevance floor.
+   */
+  knowledge(input: AgentTurnKnowledgeInput): Promise<AgentTurnKnowledge | null>;
+  /**
+   * The project's own facilities (its tool servers, checklist, changed-files record, long-output folder, hooks), for a
+   * turn that composes its own per-session registry (a hosted session) from them. Absent for the host's own folder.
+   */
+  readonly project?: AgentProjectFacilities | undefined;
   afterTurn(turn: AgentProjectTurn): void;
   release(): Promise<void>;
 }
@@ -188,16 +257,21 @@ type AgentOrchestratorToolDeps = {
     | (Pick<import('../state/code-index-reindex.js').CodeIndexReindexScheduler, 'onToolExecuted'>
       & Partial<Pick<import('../state/code-index-reindex.js').CodeIndexReindexScheduler, 'schedule'>>)
     | undefined;
-  /** Additional per-tool-execution tap (e.g. CI auto-watch minting); composed with the reindex scheduler, never blocking. */
+  /**
+   * Additional per-tool-execution tap (e.g. CI auto-watch minting); composed with the reindex scheduler, never blocking.
+   * `turn.project` is the project folder the run works in (absent for a run in the host's own folder, which is no project).
+   */
   readonly toolExecutionObserver?:
-    | ((toolName: string, args: Record<string, unknown>, success: boolean) => void)
+    | ((toolName: string, args: Record<string, unknown>, success: boolean, turn: { readonly project?: string | undefined }) => void)
     | undefined;
-  /** The contract runner's agent-loop seams (`runner.hooks()`), passed into every run context; see AgentOrchestratorRunContext.contractHooks. */
-  readonly contractHooks: import('../contract/agent-hooks.js').ContractAgentHooks;
+  /** The contract runner's agent-loop seams (`runner.hooks()`), passed into every run context; see AgentOrchestratorRunContext.contractHooks. Absent where no contracts run. */
+  readonly contractHooks?: import('../contract/agent-hooks.js').ContractAgentHooks | undefined;
   /** The owner inbox a spawned agent's `query` tool leaves questions in (registerAllTools); absent, it has no `query`. */
   readonly ownerQuestions?: import('../tools/query/index.js').QuestionInbox | (() => import('../tools/query/index.js').QuestionInbox) | undefined;
+  /** The conversation each call belongs to, for a registry every web chat and run of a project shares (registerAllTools). */
+  readonly turnSessionId?: (() => string | undefined) | undefined;
   /** Starts the contracts the agent and workflow tools hand work to (registerAllTools). */
-  readonly contractRunner: Pick<import('../contract/runner.js').ContractRunner, 'start' | 'list' | 'get'>;
+  readonly contractRunner?: Pick<import('../contract/runner.js').ContractRunner, 'start' | 'list' | 'get'> | undefined;
   /** The artifact store a native request's files are read from, for the agents that do its work. */
   readonly artifacts?: Pick<import('../companion/companion-chat-attachments.js').CompanionChatArtifactStore, 'readContent'> | undefined;
   readonly sessionOrchestration: import('../sessions/orchestration/index.js').CrossSessionTaskRegistry;
@@ -235,10 +309,22 @@ type AgentOrchestratorToolDeps = {
    */
   readonly projectFacilities?: ((workingDirectory: string) => AgentProjectFacilities) | undefined;
   /**
+   * No registry of this folder is kept any more (its last idle one let go, IDLE_REGISTRIES_KEPT): the host may let the
+   * folder's project facilities go too (its tool servers stopped, its checkpoint store closed); they are built again on
+   * the next run there.
+   */
+  readonly releaseProjectFacilities?: ((workingDirectory: string) => void) | undefined;
+  /**
    * The host's own folder is a project (a project's Work graph, rooted in that project): its turns and runs there take
    * that project's facilities as any other project's do, instead of the host's own. Absent: the host's folder is its own.
    */
   readonly ownFolderIsProject?: boolean | undefined;
+  /**
+   * Where the host keeps the run records (agent journals, run state) of a run working in `workingDirectory`, when not in
+   * its own folder: the daemon keeps them under its records root, one folder per project, so a daemon run never writes
+   * them in the daemon's own folder. Absent: the host's own folder (a terminal program's is its project).
+   */
+  readonly runRecordsRootOf?: ((workingDirectory: string) => string) | undefined;
   /** The host has no terminal screen (the daemon): every run is told so in one line. */
   readonly screenless?: boolean | undefined;
   readonly permissionManager?:
@@ -391,6 +477,8 @@ export class AgentOrchestrator {
   private retiredRegistryDisposers: Array<() => Promise<void>> = [];
   /** Registries built for one captured run; the run deletes its own, a channel change must not. */
   private runKeyedRegistries = new Set<string>();
+  /** The tool servers a captured step's registry started in its copy, stopped when that registry is let go. */
+  private readonly capturedStepServers = new Map<string, () => Promise<void>>();
   /**
    * Runs currently using a shared registry other than the default one (a
    * non-default working directory's, or one built for a surface), by registry
@@ -577,18 +665,29 @@ export class AgentOrchestrator {
 
   /** Drop one cached registry and release the index and key-value store built for it. */
   private async releaseRegistry(key: string): Promise<void> {
+    const runKeyed = this.runKeyedRegistries.has(key);
     this.fullRegistries.delete(key);
     this.runKeyedRegistries.delete(key);
+    // The folder's project facilities go with its last registry, kept or counted (a surface's registry of the same
+    // folder keeps them); a run's own registry is not a folder's.
+    if (!runKeyed) {
+      const folder = key.split('\u0000')[0]!;
+      const held = [...this.fullRegistries.keys(), ...this.cwdRunCounts.keys()].some((other) => other.split('\u0000')[0] === folder);
+      if (!held) this.toolDeps?.releaseProjectFacilities?.(folder);
+    }
     const index = this.ownedProjectIndexes.get(key);
     const disposeState = this.registryDisposers.get(key);
+    const stopServers = this.capturedStepServers.get(key);
     this.ownedProjectIndexes.delete(key);
     this.registryDisposers.delete(key);
+    this.capturedStepServers.delete(key);
     const failed = (what: string) => (error: unknown): void => {
       logger.warn(`AgentOrchestrator: ${what} teardown failed`, { workingDirectory: key, error: summarizeError(error) });
     };
     await Promise.all([
       index?.dispose().catch(failed('project index')),
       disposeState?.().catch(failed('session state')),
+      stopServers?.().catch(failed('captured tool servers')),
     ]);
   }
 
@@ -616,7 +715,8 @@ export class AgentOrchestrator {
     const cwd = workingDirectory ?? defaultCwd;
     if (cwd === defaultCwd && this.toolDeps?.ownFolderIsProject !== true) {
       const hooks = this.toolDeps?.toolCallHooks ?? undefined;
-      return { workingDirectory: cwd, registry: this.getFullRegistry(), ...(hooks ? { toolCallHooks: hooks } : {}), ready: () => Promise.resolve(), afterTurn: () => {}, release: async () => {} };
+      return { workingDirectory: cwd, registry: this.getFullRegistry(), ...(hooks ? { toolCallHooks: hooks } : {}), ready: () => Promise.resolve(),
+        knowledge: (input) => this.turnKnowledge(cwd, undefined, input), afterTurn: () => {}, release: async () => {} };
     }
     // The host's own folder when it is a project (a project's Work graph): its registry is the host's shared one, kept.
     const own = cwd === defaultCwd;
@@ -640,7 +740,10 @@ export class AgentOrchestrator {
       registry,
       ...(project?.toolCallHooks ? { toolCallHooks: project.toolCallHooks } : {}),
       ...(project?.hookDispatcher ? { hookDispatcher: project.hookDispatcher } : {}),
+      ...(project?.configManager ? { configManager: project.configManager } : {}),
+      ...(project ? { project } : {}),
       ready: () => project?.ready?.() ?? Promise.resolve(),
+      knowledge: (input) => this.turnKnowledge(cwd, project, input),
       afterTurn: (turn) => {
         try { project?.afterTurn?.(turn); }
         catch (error) { logger.warn('AgentOrchestrator: the project\'s after-turn step failed', { workingDirectory: cwd, error: summarizeError(error) }); }
@@ -654,6 +757,74 @@ export class AgentOrchestrator {
         await this.keepIdleRegistry(key);
       },
     };
+  }
+
+  /**
+   * The tools of the person's own things this host gives every turn it runs (remote runners, the owner profile, and its
+   * own registry decoration: mail and calendar, the paired phone), for a turn whose registry is composed elsewhere in
+   * this host (a hosted session's), so every door's turn has the same.
+   */
+  hostTurnTools(): {
+    readonly remoteRunnerRegistry?: import('../runtime/remote/index.js').RemoteRunnerRegistry | undefined;
+    readonly personalCapture?: import('../personal-capture/index.js').PersonalCaptureHolder | undefined;
+    readonly decorateRegistry?: ((registry: ToolRegistry) => void) | undefined;
+    readonly memoryRegistry?: import('../state/index.js').MemoryRegistry | undefined;
+  } {
+    const deps = this.toolDeps;
+    return {
+      ...(deps?.memoryRegistry ? { memoryRegistry: deps.memoryRegistry } : {}),
+      ...(deps?.remoteRunnerRegistry ? { remoteRunnerRegistry: deps.remoteRunnerRegistry } : {}),
+      ...(deps?.personalCapture ? { personalCapture: deps.personalCapture } : {}),
+      ...(deps?.decorateRegistry ? { decorateRegistry: (registry: ToolRegistry) => this.toolDeps?.decorateRegistry?.(registry) } : {}),
+    };
+  }
+
+  /**
+   * One turn's knowledge in `cwd`, the same selection a terminal conversation's turn makes (core/orchestrator-turn-loop.ts):
+   * the owner's memory for that project and his own, ranked against the turn's message and the conversation, within
+   * the passive-injection budget and relevance floor; the project's code context when the code index and its flag are
+   * on. Null when passive knowledge is off, there is no memory, or nothing cleared the floor.
+   */
+  private async turnKnowledge(cwd: string, project: AgentProjectFacilities | undefined, input: AgentTurnKnowledgeInput): Promise<AgentTurnKnowledge | null> {
+    const memoryRegistry = this.toolDeps?.memoryRegistry;
+    const config = this.toolDeps?.configManager;
+    if (!memoryRegistry || !config) return null;
+    const permissionManager = this.toolDeps?.permissionManager;
+    // A project's turn reads its project's gates (a gate whose state is a setting follows the project's one settings
+    // file), and its code index is the project's own, there only while that index is kept.
+    const code = project?.codeIndex?.();
+    const flags = project
+      ? turnFlagSources(project.featureFlags ?? this.featureFlagManager, { isCodeInjectionSettingEnabled: () => code !== undefined })
+      : turnFlagSources(this.featureFlagManager, { isCodeInjectionSettingEnabled: this.toolDeps?.isCodeInjectionSettingEnabled });
+    if (!isPassiveKnowledgeInjectionEnabled(flags)) return null;
+    try {
+      const injection = await buildPerTurnKnowledgeInjection({
+        memoryRegistry,
+        project: memoryProjectOf(cwd),
+        task: input.task,
+        conversationTail: input.conversationTail,
+        budgetTokens: defaultTurnKnowledgeBudgetTokens(input.contextWindow, config.get('agents.passiveInjection.budgetTokens')),
+        relevanceFloor: config.get('agents.passiveInjection.relevanceFloor') ?? DEFAULT_TURN_KNOWLEDGE_RELEVANCE_FLOOR,
+        alreadyInjectedIds: input.alreadyInjectedIds,
+        turn: input.turn,
+        ...(code ? { codeIndex: code.source, codeInjectionEnabled: isPassiveCodeInjectionEnabled(flags), codeLimit: config.get('agents.passiveInjection.codeLimit') } : {}),
+        // A code chunk is read back from its file under the owner's read decision for this project, as the read tool would.
+        ...(code && permissionManager ? { codeAuthority: { readAccessFilter: async (path: string) =>
+          (await decideInProject(cwd, () => permissionManager.readAccess(path))) === 'allow' } } : {}),
+      });
+      if (!injection.block) return null;
+      // The code chunks are checked once more as they are handed to the turn: a file changed since it was read is not
+      // sent, and the memory records go alone.
+      if (injection.assertCodeCurrent) {
+        try { await injection.assertCodeCurrent(); }
+        catch { return injection.memoryBlock ? { block: injection.memoryBlock, injectedIds: injection.record.injectedIds.filter((_, index) => injection.record.injectedSources[index] === 'memory') } : null; }
+      }
+      return { block: injection.block, injectedIds: injection.record.injectedIds };
+    } catch (error) {
+      // Optional context: its failure never stops the turn.
+      logger.warn('AgentOrchestrator: a turn\'s knowledge was not read; it goes on without it', { workingDirectory: cwd, error: summarizeError(error) });
+      return null;
+    }
   }
 
   /**
@@ -679,6 +850,7 @@ export class AgentOrchestrator {
     bunRuntimeAdmission?: import('../tools/exec/captured-exec.js').CapturedExecAuthority['bunRuntimeAdmission'],
     capturedReplHistory?: CapturedReplHistory,
     surface?: AgentWorkerSurface,
+    projectToolsInCopy = false,
   ): ToolRegistry {
     const channelVersion = this.channelRegistry?.getVersion() ?? -1;
     if (this.fullRegistryChannelVersion !== channelVersion) {
@@ -731,28 +903,31 @@ export class AgentOrchestrator {
       const readAccessFilter = authority
         ? capturedInputReadFilter(authority, cwd, ownerReadAccess, signal, delivered)
         : ownerReadAccess;
-      const registered = registerAllTools(registry, {
-        ...this.toolDeps,
+      // A run in another project (or this host's own folder when it is a project's Work graph) works for that project:
+      // its environment comes from the project (agents/turn-composition.ts, the one composition every turn has).
+      const projectHere = !((isDefaultCwd && this.toolDeps.ownFolderIsProject !== true) || authority);
+      // A step of planned work runs in a captured copy of its project: it is given the project's checklist and the
+      // project's tool servers started inside that copy (agents/orchestrator.ts AgentProjectFacilities.capturedToolServers),
+      // nothing else of the project's (its hooks, long output and settings stay the host's, as for every captured step).
+      const capturedProject = authority && runKey && projectToolsInCopy ? this.capturedStepProject(contractInputAuthoritySourceRoot(authority), cwd, runKey) : undefined;
+      const project = projectHere ? this.toolDeps.projectFacilities?.(cwd) : capturedProject;
+      const registered = composeTurnTools(registry, { program: {
         // A worker spawned for another surface gets that surface's state root, settings routing and admission.
-        ...(surface?.surfaceRoot !== undefined ? { surfaceRoot: surface.surfaceRoot } : {}),
+        surfaceRoot: surface?.surfaceRoot ?? this.toolDeps.surfaceRoot,
         ...(surface?.configRouting !== undefined ? { configRouting: surface.configRouting } : {}),
         ...(surface?.readAdmissionPolicy !== undefined ? { readAdmissionPolicy: surface.readAdmissionPolicy } : {}),
         ...(surface?.settingsAdmissionPolicy !== undefined ? { settingsAdmissionPolicy: surface.settingsAdmissionPolicy } : {}),
+      }, ...(project ? { project } : {}), host: {
+        ...this.toolDeps,
         ...(authority && capturedProcessManager ? { processManager: capturedProcessManager } : {}),
         contractRunner: this.toolDeps.contractRunner,
         // A run in another project works for that project, never the host's folder: its agent and workflow
         // tools start contracts there, its capability calls name it, and the host's own work plan and the host's
-        // long-output folder are not its own.
+        // long-output folder are not its own (those are the project's, above).
         projectRoot: isDefaultCwd || authority ? defaultCwd : cwd,
-        // The project's own environment, the same things a terminal conversation in that folder has: its tool
-        // servers, its checklist, its changed-files record and its long-output folder (built once per project).
-        ...((isDefaultCwd && this.toolDeps.ownFolderIsProject !== true) || authority ? {} : ((project) => ({
-          workPlan: project?.workPlan,
-          ...(this.toolDeps!.capabilityTools ? { capabilityTools: { ...this.toolDeps!.capabilityTools, workingDirectory: () => cwd } } : {}),
-          overflowHandler: project?.overflowHandler,
-          ...(project?.mcpRegistry ? { mcpRegistry: project.mcpRegistry } : {}),
-          ...(project?.changeTracker ? { changeTracker: project.changeTracker } : {}),
-        }))(this.toolDeps.projectFacilities?.(cwd))),
+        // The agent tool reads a finished agent's journal where this folder's runs keep it (runRecordsRootOf).
+        ...(!authority && this.toolDeps.runRecordsRootOf ? { agentJournalRoot: this.toolDeps.runRecordsRootOf(cwd) } : {}),
+        ...(projectHere && this.toolDeps.capabilityTools ? { capabilityTools: { ...this.toolDeps.capabilityTools, workingDirectory: () => cwd } } : {}),
         workingDirectory: cwd,
         ...(this.runtimeBus ? { runtimeBus: this.runtimeBus } : {}),
         fileCache: isDefaultCwd && !authority ? this.toolDeps.fileCache : undefined,
@@ -775,7 +950,7 @@ export class AgentOrchestrator {
               diagnosticsProvider: null,
             }
           : {}),
-      });
+      } });
       // Keep the index registerAllTools built for us. Only for a non-default
       // cwd: for the default one it hands back the very object the composition
       // root passed in, which this class borrows and must not dispose.
@@ -797,6 +972,31 @@ export class AgentOrchestrator {
       this.fullRegistries.set(key, registry);
     }
     return registry;
+  }
+
+  /**
+   * What a step of planned work in a captured copy (`copyRoot`) of `projectRoot` has of its project: the project's
+   * checklist and its tool servers started inside the copy, kept until the step's own registry (`runKey`) is let go.
+   * The host's long-output folder stays the step's, as before. Undefined when the host builds no project facilities.
+   */
+  private capturedStepProject(projectRoot: string, copyRoot: string, runKey: string): AgentProjectFacilities | undefined {
+    let project: AgentProjectFacilities | undefined;
+    try { project = this.toolDeps?.projectFacilities?.(projectRoot); }
+    catch (error) {
+      logger.warn('AgentOrchestrator: a step\'s project facilities were not built; it runs without its tool servers and checklist', { projectRoot, error: summarizeError(error) });
+      return undefined;
+    }
+    if (!project) return undefined;
+    let servers: ReturnType<NonNullable<AgentProjectFacilities['capturedToolServers']>> | undefined;
+    try { servers = project.capturedToolServers?.(copyRoot); }
+    catch (error) { logger.warn('AgentOrchestrator: a step\'s tool servers were not started in its copy', { copyRoot, error: summarizeError(error) }); }
+    if (servers) this.capturedStepServers.set(runKey, servers.release);
+    return {
+      ...(this.toolDeps?.overflowHandler ? { overflowHandler: this.toolDeps.overflowHandler } : {}),
+      ...(project.workPlan ? { workPlan: project.workPlan } : {}),
+      // Started on the step's first `mcp` call, not when the step starts: a step that uses no tool server starts none.
+      ...(servers ? { mcpRegistry: servers.mcpRegistry, mcpConnect: servers.connect } : {}),
+    };
   }
 
   /**
@@ -1007,6 +1207,7 @@ export class AgentOrchestrator {
     autonomousSource?: () => import('../permissions/autonomous.js').AutonomousToolSource,
     autonomousPort?: ContractActionPort,
     surface?: AgentWorkerSurface,
+    needsProjectTools = false,
   ): Promise<AgentOrchestratorRunContext> {
     const cwd = workingDirectory ?? this.toolDeps?.workingDirectory ?? '';
     const delivered = new Set<string>();
@@ -1103,10 +1304,13 @@ export class AgentOrchestrator {
       const projectHere = !authority && (!ownFolder || this.toolDeps?.ownFolderIsProject === true);
       const project = projectHere ? this.toolDeps?.projectFacilities?.(cwd) : undefined;
       const turnHooks = !projectHere ? this.toolDeps?.toolCallHooks : project?.toolCallHooks;
+      // A run in a project reads that project's code index (when it is on), never the host's.
+      const projectCode = projectHere ? project?.codeIndex?.() : undefined;
       return {
         workingDirectory: cwd,
-        // The run's journal is the host's record, kept with the host's records (never written into the project).
-        journalRoot: authority ? contractInputAuthoritySourceRoot(authority) : this.toolDeps?.workingDirectory ?? cwd,
+        // The run's journal is the host's record, kept with the host's records (never written into the project): the
+        // daemon's records of the run's project, else the host's own folder.
+        journalRoot: authority ? contractInputAuthoritySourceRoot(authority) : this.toolDeps?.runRecordsRootOf?.(cwd) ?? this.toolDeps?.workingDirectory ?? cwd,
         agentManager: this.toolDeps?.agentManager,
         contextAccountingHolder: this.toolDeps?.contextAccountingHolder,
         ...(autonomousSource ? { autonomousSource } : {}),
@@ -1150,17 +1354,23 @@ export class AgentOrchestrator {
         knowledgeService: this.toolDeps?.knowledgeService,
         memoryRegistry: this.toolDeps?.memoryRegistry,
         codeReadAccessFilter: ownerReadAccess,
-        codeIndex: authority ? createCapturedCodeContext({ authority, root: cwd, readAccessFilter: ownerReadAccess, registry: this.toolDeps?.memoryEmbeddingRegistry, signal }) : ownFolder ? this.toolDeps?.codeIndex : undefined,
+        codeIndex: authority ? createCapturedCodeContext({ authority, root: cwd, readAccessFilter: ownerReadAccess, registry: this.toolDeps?.memoryEmbeddingRegistry, signal })
+          : projectHere ? projectCode?.source : ownFolder ? this.toolDeps?.codeIndex : undefined,
         isCodeInjectionSettingEnabled: this.toolDeps?.isCodeInjectionSettingEnabled,
         // A captured tree is not the shared index; only the shared one is reindexed, and only from its own folder.
-        onCodeSourcesChanged: !authority && ownFolder && this.toolDeps?.codeIndexReindexScheduler?.schedule
-          ? (paths) => { for (const path of paths) this.toolDeps?.codeIndexReindexScheduler?.schedule?.(path); }
-          : undefined,
+        onCodeSourcesChanged: projectCode?.reindex.schedule
+          ? (paths) => { for (const path of paths) projectCode.reindex.schedule?.(path); }
+          : !authority && ownFolder && !projectHere && this.toolDeps?.codeIndexReindexScheduler?.schedule
+            ? (paths) => { for (const path of paths) this.toolDeps?.codeIndexReindexScheduler?.schedule?.(path); }
+            : undefined,
         onToolExecuted:
-          this.toolDeps?.codeIndexReindexScheduler || this.toolDeps?.toolExecutionObserver
+          this.toolDeps?.codeIndexReindexScheduler || this.toolDeps?.toolExecutionObserver || projectCode
             ? (toolName, args, success) => {
-                if (!authority && ownFolder) this.toolDeps?.codeIndexReindexScheduler?.onToolExecuted(toolName, args, success);
-                this.toolDeps?.toolExecutionObserver?.(toolName, args, success);
+                if (projectCode) projectCode.reindex.onToolExecuted(toolName, args, success);
+                else if (!authority && ownFolder) this.toolDeps?.codeIndexReindexScheduler?.onToolExecuted(toolName, args, success);
+                // The run's project: its folder when it works in one, the captured input's project for a contract run.
+                const turnProject = projectHere ? cwd : authority ? contractInputAuthoritySourceRoot(authority) : undefined;
+                this.toolDeps?.toolExecutionObserver?.(toolName, args, success, { ...(turnProject ? { project: turnProject } : {}) });
               }
             : undefined,
         contractHooks: authority && contractHooks && processManager
@@ -1201,6 +1411,7 @@ export class AgentOrchestrator {
             bunRuntimeAdmission,
             capturedReplHistory,
             surface,
+            needsProjectTools,
           ),
         buildScopedRegistry: (allowedNames, fullRegistry, captureAuthority) =>
           this.buildScopedRegistry(allowedNames, fullRegistry, captureAuthority),
@@ -1225,7 +1436,7 @@ export class AgentOrchestrator {
   async runAgent(record: AgentRecord): Promise<void> {
     const authority = getContractInputAuthority(record);
     const autonomousSource = getContractActionSource(record);
-    if (record.contractId && this.toolDeps?.contractRunner.get(record.contractId)?.nativeSource !== undefined && !autonomousSource)
+    if (record.contractId && this.toolDeps?.contractRunner?.get(record.contractId)?.nativeSource !== undefined && !autonomousSource)
       throw new Error('Native member has no construction-owned action source');
     const cwd = record.workingDirectory ?? this.toolDeps?.workingDirectory ?? '';
     if (!authority && isCapturedInputPath(cwd))
@@ -1257,16 +1468,28 @@ export class AgentOrchestrator {
         autonomousSource,
         getContractActionPort(record),
         surface,
+        // A step of planned work that names its project's tool servers or checklist is given them in its copy.
+        record.tools.some((name) => name === 'mcp' || name === 'work_plan'),
       );
       // A native request's files reach the agents that do its work, read through the chat attachment path.
       // Kept with the contract's source getter (whichever runner owns the contract), else read from this runner's contract.
       const attachments = getSourceAttachments(autonomousSource)
-        ?? (record.contractId ? this.toolDeps?.contractRunner.get(record.contractId)?.nativeSource?.attachments : undefined);
+        ?? (record.contractId ? this.toolDeps?.contractRunner?.get(record.contractId)?.nativeSource?.attachments : undefined);
       if (attachments && attachments.length > 0) context = { ...context, taskAttachments: { attachments, artifacts: this.toolDeps?.artifacts ?? null } };
       // Every permission decision of this run is made for its own project (a captured view's: the project it was
       // captured from): that project's rules, folder trust and session answers, never the folder this daemon started in.
       const runContext = context;
-      await decideInProject(authority ? contractInputAuthoritySourceRoot(authority) : cwd, () => runAgentTask(runContext, record));
+      const run = () => decideInProject(authority ? contractInputAuthoritySourceRoot(authority) : cwd, () => runAgentTask(runContext, record));
+      // What a run of its own (a schedule, a trigger, a channel's agent) reads from outside is its own: judged against its
+      // own outward actions, never counted in another project's or conversation's turn. A run started inside a
+      // conversation's or a piece of work's window stays in that window (stricter, never looser).
+      if (currentUntrustedContentScope() !== undefined) await run();
+      else {
+        await withUntrustedContentScope(`agent:${record.id}`, () => {
+          getProcessUntrustedContentLedger().startTurn();
+          return run();
+        });
+      }
     } finally {
       // A run in another project ends as a turn there does: a checkpoint of that project when its files changed.
       if (!authority && (cwd !== defaultCwd || this.toolDeps?.ownFolderIsProject === true)) {

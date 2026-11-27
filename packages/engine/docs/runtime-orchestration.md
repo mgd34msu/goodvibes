@@ -29,8 +29,8 @@ tools.
 
 The TUI delivers composer messages and `goodvibes --prompt` directly to the
 selected conversation model. Jev does not approve or divert those inputs into
-contract work. Explicit `/workstream start` and `/work submit-file` commands
-use the daemon's source-bearing native intake/submission routes, with retained
+contract work. Work asked for explicitly (New work in the Work place, or
+`/work request <goal>` typed in full) uses the daemon's source-bearing native intake/submission routes, with retained
 identity and recovery. See the [TUI input and work controls](../../../products/tui/README.md#conversation-input).
 
 Embedders can still compose legacy `createContractIntake` routing. Its
@@ -270,9 +270,8 @@ on its record (`contractIds`), says each contract's question for its owner
 and its outcome in its conversation. An operator's message whose `metadata`
 carries `answersContractQuestion` (the open escalation id) goes to that
 contract as the owner's answer, with no model request to decide it; any other
-message is an ordinary turn. In both terminal apps the open question shows
-above the composer and the next typed message is its answer, unless Alt+X
-sends it as an ordinary message (`terminal-shell/contract-question-composer.ts`).
+message is an ordinary turn. The terminal programs run no contracts: a
+question of a piece of work waits in Waiting for you and in Work.
 `contracts.reply` answers a question directly. The external work seam (`ContractExternalWorkAdapter`: `dispatch`,
 `status`, `cancel`, `result`) maps a contract to a snapshot and a result the
 same way in both adapters (`contract-work.ts` in the contracts package).

@@ -14,7 +14,7 @@
 // ---------------------------------------------------------------------------
 
 import type { ConfigManager } from '@goodvibes/engine/platform/platform/config';
-import { resolveOperatorRpc } from '../runtime/client/operator-endpoint.ts';
+import { invokePressed, resolveOperatorRpc } from '../runtime/client/operator-endpoint.ts';
 import type {
   PairingTailscaleServeReceipt,
   PairingTailscaleStatus,
@@ -49,7 +49,8 @@ export async function runPairingTailscaleServe(
 ): Promise<PairingTailscaleServeReceipt | null> {
   const rpc = resolveOperatorRpc(deps);
   if (!rpc.available) return null;
-  const result = (await rpc.platformClient.operator.invoke('tailscale.serve.run', {})) as {
+  // Only from the person's own answer in the pairing modal: his press.
+  const result = (await invokePressed(rpc.platformClient, 'tailscale.serve.run', {})) as {
     readonly receipt: PairingTailscaleServeReceipt;
   };
   return result.receipt;

@@ -12,8 +12,9 @@
  * and the programs use it from their next start. Going back puts back the
  * version the last update kept, for every program (`rollbackSuiteUpdate`).
  */
-import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, writeFileSync } from 'node:fs';
 import { dirname } from 'node:path';
+import { readCallerJson, unreadableFile } from '../path-inputs.js';
 import { atomicWriteFileSync } from '../../config/atomic-write.js';
 import { detectInstallKind, type InstallKind } from '../../runtime/install-kind.js';
 import { compareVersions, normalizeVersion, PREVIOUS_FILE_SUFFIX, resolveArtifactNames, resolveLatestReleaseTag, type UpdateFetchLike } from '../../runtime/self-update.js';
@@ -136,8 +137,7 @@ function reviewLines(review: UpdateReview, title: string): string[] {
 }
 
 /** A saved update state, refused when the file is not one rather than shown with missing fields. */
-function parseReview(raw: string): UpdateReview {
-  const value: unknown = JSON.parse(raw);
+function parseReview(value: unknown): UpdateReview {
   const review = record(value);
   const latest = record(review.latest);
   if (review.version !== 2 || typeof review.appVersion !== 'string' || typeof review.installKind !== 'string' || typeof review.channel !== 'string'
@@ -181,7 +181,7 @@ export const UPDATE_REVIEW: Def = {
 export const UPDATE_SAVE_REVIEW: Def = {
   capability: { id: 'update.save-review', group: 'system', home: 'daemon', repeat: 'safe' },
   actionId: 'save-review', label: 'Save this install\'s update state to a file', word: 'save-review',
-  inputs: [FILE('Where to write it; it holds no secret'), {
+  inputs: [{ ...FILE('Where to write it; it holds no secret'), file: 'written' }, {
     id: 'replace', label: 'If the file exists', help: 'Keep it, or write over it', kind: 'choice', typed: { flag: '--replace', switchOn: 'yes' },
     choices: [{ value: 'no', label: 'Keep it and stop' }, { value: 'yes', label: 'Write over it', help: 'What the file holds now is lost.', risk: 'cannot-be-undone', riskDone: REPLACED_DONE }],
     required: { default: 'no', defaultMeans: 'keep it and stop' },
@@ -212,11 +212,11 @@ export const UPDATE_READ_REVIEW: Def = {
   touches: 'reads', lasts: 'not-a-change', risk: 'none', example: { path: 'update-review.json' },
   async run(values, services, caller) {
     const target = updatesOf(services).resolvePath(caller, values.path!);
-    try {
-      return { text: reviewLines(parseReview(readFileSync(target, 'utf-8')), `Update state (saved ${target})`).join('\n') };
-    } catch (error) {
-      throw new CapabilityRefusal(`Cannot read ${target}: ${errorText(error)}.`);
-    }
+    // Never the system's or the parser's words (capabilities/path-inputs.ts).
+    const value = readCallerJson(target, 'a saved update state', caller, 'Nothing was read from it.');
+    let review: UpdateReview;
+    try { review = parseReview(value); } catch (error) { throw unreadableFile(target, 'a saved update state', caller, error, 'Nothing was read from it.'); }
+    return { text: reviewLines(review, `Update state (saved ${target})`).join('\n') };
   },
 };
 

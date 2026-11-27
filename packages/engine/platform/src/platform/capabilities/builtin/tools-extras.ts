@@ -15,9 +15,11 @@
  *    session this terminal joined, stopped through the daemon with this
  *    terminal's own join.
  */
-import { existsSync, mkdirSync, writeFileSync } from 'node:fs';
-import { dirname, extname, isAbsolute, join, resolve } from 'node:path';
+import { existsSync } from 'node:fs';
+import { extname, isAbsolute, join, resolve } from 'node:path';
 import { CapabilityRefusal, type CapabilityCaller, type CapabilityDefinition, type ListName } from '../types.js';
+import { callerPathOf } from '../path-inputs.js';
+import { writeHeldFile } from '../held-paths.js';
 import type { MediaCollectServices } from './media-collect.js';
 
 const record = (value: unknown): Record<string, unknown> => value !== null && typeof value === 'object' && !Array.isArray(value) ? value as Record<string, unknown> : {};
@@ -68,7 +70,7 @@ export const MEDIA_MAKE: CapabilityDefinition<MediaCollectServices> = {
     { id: 'kind', label: 'Make', help: 'A picture or a video', kind: 'choice', choices: [{ value: 'image', label: 'An image' }, { value: 'video', label: 'A video' }], required: { default: 'image', defaultMeans: 'an image' }, typed: { flag: '--as' } },
     { id: 'provider', label: 'Provider', help: 'The providers that make media', kind: 'choice', choices: { list: MEDIA_PROVIDERS_LIST, allowOther: { reason: 'a provider id' } }, required: { default: '', defaultMeans: 'the first set-up provider that makes it' }, typed: { flag: '--provider' } },
     { id: 'model', label: 'Model', help: 'One of the provider\'s models', kind: 'text', freeTextReason: 'a model id the provider names', required: { default: '', defaultMeans: 'the provider\'s own choice' }, typed: { flag: '--model' } },
-    { id: 'out', label: 'Save as', help: 'The file to write in this project; a number is added for each further one', kind: 'path', freeTextReason: 'a file path', required: { default: '', defaultMeans: 'a new file under generated/ named from the description' }, typed: { flag: '--out' } },
+    { id: 'out', label: 'Save as', help: 'The file to write in this project; a number is added for each further one', kind: 'path', file: 'written', freeTextReason: 'a file path', required: { default: '', defaultMeans: 'a new file under generated/ named from the description' }, typed: { flag: '--out' } },
   ],
   sentence: 'A media provider is asked to make "{prompt}" as {kind} (a picture, an image or a video generated from your words) and may charge for it; what it makes is kept with your artifacts and saved as a file in this project.',
   done: '', touches: 'another-machine', lasts: 'kept', risk: 'spends-money', example: { prompt: 'a lighthouse at dusk', kind: 'image' },
@@ -76,11 +78,10 @@ export const MEDIA_MAKE: CapabilityDefinition<MediaCollectServices> = {
     const prompt = (values.prompt ?? '').trim();
     if (!prompt) throw new CapabilityRefusal('Say what it should show; nothing was asked for.');
     const folder = caller.workingDirectory;
-    const out = (values.out ?? '').trim();
-    // A file outside the project is refused before anything is asked for, so a refused path costs nothing.
-    if (out && folder && !resolve(folder, out).startsWith(resolve(folder))) {
-      throw new CapabilityRefusal(`${out} is outside this project; nothing was asked for.`, 'Give a path inside the project.');
-    }
+    // A file outside the project is refused before anything is asked for, so a refused path costs nothing; placed by the
+    // one rule for every capability's path (capabilities/path-inputs.ts).
+    // Only checked here (nothing held yet): each file made is placed and held on its own when it is written, below.
+    const out = (values.out ?? '').trim() && folder ? callerPathOf(caller, values.out!, { label: 'Save as', checkOnly: true }) : '';
     let made: unknown;
     try {
       made = await methodOf(caller)('media.generate', {
@@ -123,9 +124,10 @@ export const MEDIA_MAKE: CapabilityDefinition<MediaCollectServices> = {
       if (existsSync(path)) return { id, where: `${kept}; not saved to ${path}, a file is already there and was left as it is` };
       try {
         const content = id ? await services.artifactContent!(id) : Buffer.from(inline, 'base64');
-        mkdirSync(dirname(path), { recursive: true });
-        // `wx`: an existing file is never replaced.
-        writeFileSync(path, content, { flag: 'wx' });
+        // Each file made (the one named, a numbered one beside it, or one under generated/) placed by the one rule
+        // (path-inputs.ts `callerPathOf`: inside the caller's checked project, held for the call, so a link planted on
+        // the way or at its name leads nowhere) and written the one way; exclusive: an existing file is never replaced.
+        writeHeldFile(callerPathOf(caller, path, { label: 'Save as' }), content, undefined, true);
         return { id, where: `saved to ${path}`, path };
       } catch (error) {
         return { id, where: `${kept}; not saved to ${path} (${error instanceof Error ? error.message : String(error)})` };
@@ -168,13 +170,13 @@ export const TOOLS_HELPERS: CapabilityDefinition<ToolsExtrasSessionServices> = {
 export const DEEPLINK_EXPORT: CapabilityDefinition<ToolsExtrasSessionServices> = {
   capability: { id: 'deeplink.export', group: 'tools', home: 'session', repeat: 'safe' },
   actionId: 'export', label: 'Save the links to a file', word: 'export',
-  inputs: [{ id: 'path', label: 'File', help: 'Where to write them, in the project', kind: 'path', freeTextReason: 'a file path', required: true, typed: { position: 1 } }],
+  inputs: [{ id: 'path', label: 'File', help: 'Where to write them, in the project', kind: 'path', file: 'written', freeTextReason: 'a file path', required: true, typed: { position: 1 } }],
   sentence: 'Every view\'s link (goodvibes://open/...) is written to {path}.', done: '',
   touches: 'this-machine', lasts: 'kept', risk: 'none', example: { path: 'links.json' },
   available: (services) => services.viewLinkFile !== undefined,
-  async run(values, services) {
+  async run(values, services, caller) {
     if (!services.viewLinkFile) throw new CapabilityRefusal('Links open views of the terminal app; this program has none.', undefined, 'UNAVAILABLE');
-    return { text: services.viewLinkFile.save(values.path!) };
+    return { text: services.viewLinkFile.save(callerPathOf(caller, values.path!, { personPathAsTyped: true })) };
   },
 };
 

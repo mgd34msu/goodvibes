@@ -1,6 +1,6 @@
 /**
- * The reviewer readiness checklist as the Agent workspace reads it: the same computation the daemon reports
- * (`documents.readiness`, terminal-shell agent-turn/review-packet-report.ts), over this workspace's drafts and the
+ * The reviewer readiness checklist as the Agent's model tools read it: the same computation the daemon reports
+ * (`documents.readiness`, terminal-shell agent-turn/review-packet-report.ts), over this project's drafts and the
  * artifact store this program opened.
  */
 import type { CommandContext } from '../input/command-registry.ts';

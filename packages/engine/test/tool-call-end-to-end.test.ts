@@ -126,7 +126,8 @@ async function turn(app: Awaited<ReturnType<typeof composeApp>>, calls: ToolCall
 test('a read, an edit and a remembered command each run and return their real output; the owner is not asked', async () => {
   const app = await composeApp();
   const { outcome, results } = await turn(app, [
-    { id: 'read-1', name: 'read', arguments: { files: [{ path: 'note.txt' }] } },
+    // The edit's file is read first: an existing file never read is refused (tools/edit/core.ts staleWrite).
+    { id: 'read-1', name: 'read', arguments: { files: [{ path: 'note.txt' }, { path: 'edit-target.txt' }] } },
     { id: 'edit-1', name: 'edit', arguments: { edits: [{ path: 'edit-target.txt', find: 'beta', replace: 'BETA' }] } },
     { id: 'exec-1', name: 'exec', arguments: { commands: [{ cmd: 'echo remembered' }] } },
   ]);

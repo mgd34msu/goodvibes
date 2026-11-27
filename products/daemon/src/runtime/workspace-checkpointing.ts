@@ -1,11 +1,11 @@
 import { readFileSync } from 'node:fs';
 import { isAbsolute, join, resolve } from 'node:path';
-import { WorkspaceCheckpointManager, checkpointEligibilityRefusal } from '@goodvibes/engine/platform/platform/workspace';
+import { WorkspaceCheckpointManager, checkpointEligibilityRefusal, projectIdentityOf } from '@goodvibes/engine/platform/platform/workspace';
 import type { ConfigManager } from '@goodvibes/engine/platform/platform/config';
 import type { RuntimeEventBus, SessionSurface } from './index.js';
-import { createSessionSurface } from '@goodvibes/engine/platform/platform/runtime/operations';
+import { createSessionSurface, formerCheckpointsDirs } from '@goodvibes/engine/platform/platform/runtime/operations';
 import { GOODVIBES_DAEMON_SURFACE_ROOT } from '../config/surface.js';
-import { logger } from '@goodvibes/engine/platform/platform/utils';
+import { logger, outsideEveryCall } from '@goodvibes/engine/platform/platform/utils';
 import { readCheckpointGuardSettings, readCheckpointRegistrationSetting } from '../config/checkpoint-settings.js';
 import { createWorkspaceRegistrationLiveChecker, type StoreShellPaths } from './trust/checkpoint-eligibility.js';
 
@@ -58,7 +58,13 @@ export function createWorkspaceCheckpointing(opts: {
   readonly resolveSessionId?: (ctx: { readonly turnId?: string | undefined; readonly agentId?: string | undefined }) => string | undefined;
   /** Which sessions' turns this workspace snapshots, when the bus carries several workspaces' sessions. */
   readonly ownsSession?: (sessionId: string | undefined) => boolean;
+  /**
+   * The daemon's own folder, which is not a project: no checkpoint store is made there, nothing is snapshotted, the
+   * verbs list none and refuse to make or restore one (a project's checkpoints are reached through its sessions).
+   */
+  readonly notAProject?: boolean;
 }): WorkspaceCheckpointing {
+  if (opts.notAProject === true) return noCheckpointsHere(opts.workspaceRoot);
   const registration = createWorkspaceRegistrationLiveChecker(opts.shellPaths, opts.workspaceRoot);
   const guarded = (): boolean => readCheckpointRegistrationSetting(opts.configManager) === 'guarded';
   const currentlyAllowed = (): boolean => {
@@ -112,12 +118,34 @@ export function createWorkspaceCheckpointing(opts: {
   return { manager, gatewayManager, currentlyAllowed, close: () => manager.drain() };
 }
 
+/**
+ * The daemon's own folder: not a project, so it has no checkpoints. The manager object exists for the graph's seams but
+ * is never initialised (no store is made) and takes no snapshot; the verbs list none and refuse the rest in one sentence.
+ */
+function noCheckpointsHere(workspaceRoot: string): WorkspaceCheckpointing {
+  const manager = new WorkspaceCheckpointManager({ workspaceRoot, automaticSnapshotsAllowed: () => false, autoRetention: false });
+  const refuse = (): never => {
+    throw new Error('The daemon\'s own folder is not a project, so it has no checkpoints: name the session (or the checkpoint) of the project whose checkpoints you want.');
+  };
+  const gatewayManager: WorkspaceCheckpointing['gatewayManager'] = {
+    get workspaceRoot() { return workspaceRoot; },
+    resolveRoot: async () => workspaceRoot,
+    list: async () => [],
+    diff: async () => refuse(),
+    restore: async () => refuse(),
+    create: async () => refuse(),
+    sessionChanges: async (sessionId) => ({ sessionId, checkpointCount: 0, checkpointIds: [], from: 'EMPTY', to: 'EMPTY', files: [], unifiedDiff: '', stat: '' }),
+  };
+  return { manager, gatewayManager, currentlyAllowed: () => false, close: async () => {} };
+}
+
 /** The verbs' surface over one workspace's checkpointing, with the routes to the others. */
 export type RoutedCheckpointGateway = WorkspaceCheckpointing['gatewayManager'] & {
   retentionFailure(): ReturnType<WorkspaceCheckpointManager['retentionFailure']>;
   historyTrimmed(): ReturnType<WorkspaceCheckpointManager['historyTrimmed']>;
   forSession?(sessionId: string): RoutedCheckpointGateway | undefined;
   forCheckpoint?(id: string): Promise<RoutedCheckpointGateway | undefined>;
+  forProject?(folder: string): RoutedCheckpointGateway | undefined;
 };
 
 /**
@@ -191,6 +219,12 @@ export interface DaemonWorkspaceCheckpoints {
   ownsSession(workspaceRoot: string, options?: { readonly daemonOwn?: boolean }): (sessionId: string | undefined) => boolean;
   /** The open checkpointing of a hosted workspace, opened on first use; null for the daemon's own workspace (its manager covers it). */
   acquire(workspaceRoot: string): WorkspaceCheckpointing | null;
+  /**
+   * Close a workspace's checkpointing that nothing uses now (its project's turn environment let go when idle,
+   * project-turn-facilities.ts): kept open while a session is bound to it, whose review and rewind read it. Opened again
+   * on its next use.
+   */
+  release(workspaceRoot: string): Promise<void>;
   /** Whether `workspaceRoot` is the daemon's own (its manager already covers it). */
   isDaemonWorkspace(workspaceRoot: string): boolean;
   /** The gateway surface for the verbs: the daemon's own, routed by session and by checkpoint id. */
@@ -227,14 +261,17 @@ export function daemonWorkspaceCheckpoints(runtimeBus: RuntimeEventBus): DaemonW
     if (open) return open;
     if (!sources) throw new Error(`The daemon cannot open the checkpoints of ${root}: its checkpoint registry was not given the hosted workspaces. This is a daemon composition fault; restart the daemon.`);
     if (closed) throw new Error(`The daemon is stopping, so the checkpoints of ${root} were not opened. Retry once it has restarted.`);
-    const checkpointing = createWorkspaceCheckpointing({
+    // Opened by whichever turn or call first needs it: its file-write record and its snapshots are the project's, made in
+    // the process's own context (engine utils/outside-every-call.ts).
+    const opening = sources;
+    const checkpointing = outsideEveryCall(() => createWorkspaceCheckpointing({
       workspaceRoot: root,
-      surface: createSessionSurface({ surfaceRoot: GOODVIBES_DAEMON_SURFACE_ROOT, workingDirectory: root, homeDirectory: sources.homeDirectory }),
+      surface: createSessionSurface({ surfaceRoot: GOODVIBES_DAEMON_SURFACE_ROOT, workingDirectory: root, homeDirectory: opening.homeDirectory }),
       runtimeBus,
-      configManager: sources.configManager,
-      shellPaths: sources.shellPaths,
+      configManager: opening.configManager,
+      shellPaths: opening.shellPaths,
       ownsSession: registry.ownsSession(root),
-    });
+    }));
     workspaces.set(root, checkpointing);
     return checkpointing;
   };
@@ -257,6 +294,15 @@ export function daemonWorkspaceCheckpoints(runtimeBus: RuntimeEventBus): DaemonW
       };
     },
     acquire,
+    async release(workspaceRoot) {
+      const root = resolve(workspaceRoot);
+      const open = workspaces.get(root);
+      if (!open || [...sessions.values()].includes(root)) return;
+      workspaces.delete(root);
+      await open.close().catch((error: unknown) => {
+        logger.warn('a workspace\'s checkpoints did not close cleanly', { workspaceRoot: root, error: error instanceof Error ? error.message : String(error) });
+      });
+    },
     isDaemonWorkspace(workspaceRoot) {
       return isDaemonRoot(resolve(workspaceRoot));
     },
@@ -277,6 +323,19 @@ export function daemonWorkspaceCheckpoints(runtimeBus: RuntimeEventBus): DaemonW
             return refusingGateway(bound, failure);
           }
           return hosted ? gatewayOf(hosted, bound) : undefined;
+        },
+        forProject(folder) {
+          // The project a call names (a program's or the web UI's call context): its one store, which the terminal app,
+          // the Agent and the daemon's runs in that project all keep their checkpoints in.
+          if (!isAbsolute(folder)) return undefined;
+          const project = projectIdentityOf(folder);
+          if (isDaemonRoot(project)) return undefined;
+          try {
+            const opened = acquire(project);
+            return opened ? gatewayOf(opened, project) : undefined;
+          } catch (error) {
+            return refusingGateway(project, new Error(hostedStoreUnavailable(project, error), { cause: error }));
+          }
         },
         async forCheckpoint(id) {
           const holds = async (checkpointing: WorkspaceCheckpointing): Promise<boolean> =>
@@ -340,7 +399,8 @@ export function daemonWorkspaceCheckpoints(runtimeBus: RuntimeEventBus): DaemonW
  */
 function manifestLists(workspaceRoot: string, homeDirectory: string, id: string): boolean {
   const scoped = createSessionSurface({ surfaceRoot: GOODVIBES_DAEMON_SURFACE_ROOT, workingDirectory: workspaceRoot, homeDirectory }).checkpointsDir;
-  for (const dir of [scoped, join(workspaceRoot, '.goodvibes', 'checkpoints')]) {
+  // The project's one store, and the stores each program kept before it (merged into it on first use).
+  for (const dir of [scoped, ...formerCheckpointsDirs(workspaceRoot)]) {
     let text: string;
     try {
       text = readFileSync(join(dir, 'index.json'), 'utf-8');

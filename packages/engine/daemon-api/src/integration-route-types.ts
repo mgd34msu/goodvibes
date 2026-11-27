@@ -83,6 +83,8 @@ export interface MemoryRecordAddInput {
     readonly reviewedBy?: string | undefined;
     readonly staleReason?: string | undefined;
   } | undefined;
+  /** Who wrote it: set by the route from the authenticated caller (`memoryAuthorOf`), never read from the body. */
+  readonly author?: MemoryRecordAuthorLike | undefined;
 }
 
 /** The search filter body, structurally compatible with the platform's MemorySearchFilter. */
@@ -90,6 +92,13 @@ export interface MemoryRecordSearchFilterInput {
   readonly scope?: string | undefined;
   /** The asking project (its resolved folder): only its records and the person's own. */
   readonly project?: string | undefined;
+  /**
+   * Every project's records: the owner's explicit choice in his place's project chooser ("Every project"), refused from
+   * anyone else. Without it and without a project, only the records that belong to no project.
+   */
+  readonly everyProject?: boolean | undefined;
+  /** Only the records that belong to no project (the person's own, given everywhere). Set by the daemon, never read from a body. */
+  readonly projectless?: boolean | undefined;
   readonly cls?: string | undefined;
   readonly tags?: readonly string[] | undefined;
   readonly query?: string | undefined;
@@ -127,6 +136,8 @@ export interface MemoryRecordUpdateInput {
   readonly tags?: readonly string[] | undefined;
   readonly validFrom?: number | null | undefined;
   readonly validUntil?: number | null | undefined;
+  /** Who makes the change: set by the route from the authenticated caller, never read from the body. */
+  readonly by?: MemoryRecordAuthorLike | undefined;
 }
 
 /** The link-create body, the source id comes from the path, target + relation from the body. */
@@ -182,8 +193,11 @@ export interface MemoryRegistryLike {
   linksFor(id: string): unknown[];
   /** Export a no-loss bundle for the given filter. */
   exportBundle(filter?: MemoryRecordSearchFilterInput): unknown;
-  /** Import a bundle (id-keyed union, no overwrite). Returns the import result. */
-  importBundle(bundle: unknown): Promise<unknown>;
+  /**
+   * Import a bundle (id-keyed union, no overwrite). Returns the import result. `importedBy`: who loaded it, the author
+   * of every record it adds, whatever the file says.
+   */
+  importBundle(bundle: unknown, options?: undefined, intoProject?: string, importedBy?: MemoryRecordAuthorLike): Promise<unknown>;
 }
 
 export interface MemoryEmbeddingRegistryLike {
@@ -218,6 +232,22 @@ export interface DaemonIntegrationRouteContext {
   readonly servingListener?: (() => { readonly host: string; readonly port: number; readonly scheme: 'http' | 'https' } | null) | undefined;
   readonly memoryEmbeddingRegistry: MemoryEmbeddingRegistryLike;
   readonly memoryRegistry: MemoryRegistryLike;
+  /**
+   * The project a folder is in, as the memory store keys "this project" records (memory-project.ts). A memory read
+   * whose call names a project (`x-goodvibes-project`) is that project's and the person's own records only.
+   */
+  readonly memoryProjectOf?: ((folder: string) => string | undefined) | undefined;
+  /**
+   * Why the caller of `req` may not name `folder` as its project (the one project check, workspace/caller-project.ts:
+   * a device or a member who is not the owner names only a project given to it), or undefined when it may. A memory read
+   * naming a project it may not name is refused, nothing read.
+   */
+  readonly callerProjectRefusal?: ((req: Request, folder: string) => string | undefined) | undefined;
+  /**
+   * Whether the request is the owner himself (the one definition, method-owner-decision.ts `ownerHimself`): only he may
+   * read every project's memory at once (`everyProject`). Absent: nobody may.
+   */
+  readonly ownerHimself?: ((req: Request) => boolean) | undefined;
   /** Optional: absent on embedders without the consolidation scheduler, the receipts route answers 501 honestly. */
   readonly memoryConsolidation?: MemoryConsolidationSchedulerLike | null | undefined;
   readonly parseJsonBody: (req: Request) => Promise<JsonRecord | Response>;
@@ -233,4 +263,18 @@ export interface DaemonIntegrationRouteContext {
   /** Which sessions `GET /api/sessions` lists to the caller. Absent: all of them. */
   readonly mayReadSession?: SessionReadPolicy | undefined;
   readonly userAuth: UserAuthManagerLike;
+  /**
+   * Who writes a memory record over these routes, from the credential the daemon authenticated (never a body field):
+   * the owner himself (his own press from one of his terminal programs), his model (a terminal program's own call), or
+   * someone else, named. Absent: every write is someone else's.
+   */
+  readonly memoryAuthorOf?: ((req: Request) => MemoryRecordAuthorLike) | undefined;
+  /** Whether the caller registered a session: a session a caller names is kept as a record's origin only then. */
+  readonly mayNameSession?: ((req: Request, sessionId: string) => boolean) | undefined;
+}
+
+/** Who wrote a memory record (the platform's state/memory-author.ts MemoryAuthor, without its acceptance). */
+export interface MemoryRecordAuthorLike {
+  readonly kind: 'owner' | 'owner-model' | 'other';
+  readonly who?: string | undefined;
 }

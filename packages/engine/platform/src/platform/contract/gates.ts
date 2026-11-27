@@ -338,6 +338,8 @@ export interface RunContractGatesOptions {
   readonly contractId: string;
   /** The unit, group or contract the gates are evidence for; carried by CONTRACT_GATE_RESULT. */
   readonly targetId: string;
+  /** The project the contract works in (its `projectRoot`): what each result says it is about (events/about.ts). */
+  readonly project?: string | null | undefined;
   /**
    * The paths, relative to `cwd`, whose content the results are evidence for
    * (a shared tree the owner keeps working in). Absent: the whole tree.
@@ -413,7 +415,7 @@ export async function runContractGates(options: RunContractGatesOptions): Promis
     emitContractEvent(options.runtimeBus, options.sessionId, {
       type: 'CONTRACT_GATE_RESULT', contractId: options.contractId, targetId: options.targetId,
       ...gateEventSummary(result), durationMs: result.durationMs,
-    });
+    }, options.project);
   };
 
   for (const gate of gates) {

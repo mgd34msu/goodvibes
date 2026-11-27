@@ -66,6 +66,9 @@ export function followPurchaseNotices(options: PurchaseNoticesFollowOptions): ()
           body: typeof item.detail === 'string' ? item.detail.split('\n').map(plain).join('\n').trim() : '',
           timestamp: typeof item.createdAt === 'number' ? item.createdAt : Date.now(),
         });
+        // A notice needs no answer, and this program never answers one by itself: an answer in the owner inbox is the
+        // owner's own act (put to him when no press of his makes it). It stays in the inbox until it expires; Waiting
+        // for you neither lists nor counts it, and its notification key keeps it in Notices once.
       }
     }, () => { /* Not read now: read again at the next inbox change or when the daemon is back. */ });
   };

@@ -9,6 +9,7 @@ import { GoodVibesError, RefusalError, classifyFailure, refusal } from '@goodvib
 import { summarizeError } from '../utils/error-display.js';
 import { defineLifecycle } from '../utils/lifecycle-machine.js';
 import { logger } from '../utils/logger.js';
+import { outsideEveryCall } from '../utils/outside-every-call.js';
 import { FenceIssuer, type Fence } from '../utils/owner-fence.js';
 import {
   emitWatcherFailed,
@@ -543,6 +544,12 @@ export class WatcherRegistry {
    * group's rhythm).
    */
   private armInterval(id: string, intervalMs: number, firstDelayMs?: number): void {
+    // Armed in the process's own context, never the request that made or started the watcher (utils/outside-every-call.ts):
+    // each run is no caller's, and takes its project from the watcher's record.
+    outsideEveryCall(() => this.armIntervalHere(id, intervalMs, firstDelayMs));
+  }
+
+  private armIntervalHere(id: string, intervalMs: number, firstDelayMs?: number): void {
     const tick = () => this.runOnTimer(id);
     if (firstDelayMs === undefined) {
       const timer = setInterval(tick, intervalMs);
@@ -1147,10 +1154,11 @@ export class WatcherRegistry {
   /** One snapshot write for every heartbeat that lands within the delay. */
   private persistSoon(): void {
     if (this.pendingSave !== null) return;
-    const timer = setTimeout(() => {
+    // The write and the group's copy it sends are the daemon's own, whoever's heartbeat asked for it.
+    const timer = outsideEveryCall(() => setTimeout(() => {
       this.pendingSave = null;
       this.persistNow();
-    }, HEARTBEAT_SAVE_DELAY_MS);
+    }, HEARTBEAT_SAVE_DELAY_MS));
     timer.unref?.();
     this.pendingSave = timer;
   }

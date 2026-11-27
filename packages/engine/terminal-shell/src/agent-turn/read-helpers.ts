@@ -62,7 +62,7 @@ export function stringList(value: unknown, cap: number): readonly string[] {
 const PUBLISHED_ROUTE_LIMIT = 240;
 // The call grammar the Agent's own tools use: tool name, then key:value arguments. Shell-like tools (terminal,
 // process, execution) are deliberately absent: a published text never gets to point a model at them.
-const ROUTE_GRAMMAR = /^(research|autonomy|workspace|computer|audit|browser|channels|context|delegation|device|host|memory|models|occasions|personal_ops|profile|route|schedule|security|sessions|setup|support|vibe|agent_[a-z0-9_]+) [A-Za-z]+:/;
+const ROUTE_GRAMMAR = /^(research|autonomy|screens_keys_commands|computer|audit|browser|channels|context|delegation|device|host|memory|models|occasions|personal_ops|profile|route|schedule|security|sessions|setup|support|vibe|agent_[a-z0-9_]+) [A-Za-z]+:/;
 
 /** A route a read model published is offered to the model as something to run, so it must look like a call to one of the
  * Agent's tools and fit on one line. Anything else is treated as not published; the caller falls back to its own route. */

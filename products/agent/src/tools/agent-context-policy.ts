@@ -12,7 +12,7 @@ const AGENT_CONTEXT_TOOL_MODES = [
   'setting',
   'commands',
   'command',
-  'workspace',
+  'places',
   'status',
 ] as const;
 
@@ -42,8 +42,8 @@ const CONTEXT_TOOL_FALLBACK = {
     tools: 'agent_harness mode:"tools"',
     tool: 'agent_harness mode:"tool"',
     settings: 'settings action:"list"',
-    commands: 'workspace action:"commands"',
-    workspace: 'workspace action:"status"',
+    commands: 'screens_keys_commands action:"commands"',
+    places: 'screens_keys_commands action:"surfaces"',
     status: 'host action:"status"',
   },
 };
@@ -133,7 +133,7 @@ function agentContextModeToHarnessMode(mode: AgentContextMode): string {
   if (mode === 'setting') return 'get_setting';
   if (mode === 'commands') return 'commands';
   if (mode === 'command') return 'command';
-  if (mode === 'workspace') return 'workspace';
+  if (mode === 'places') return 'ui_surfaces';
   if (mode === 'status') return 'connected_host_status';
   return 'summary';
 }

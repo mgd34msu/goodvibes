@@ -27,6 +27,7 @@ import {
   restoreConfirmMessage,
   restoreConfirmTitle,
   restoreConfirmMessageWithPreview,
+  previewTakesBack,
   retentionLabel,
   sortCheckpointsNewestFirst,
 } from '../../lib/checkpoints';
@@ -120,7 +121,11 @@ export function CheckpointsPanel({ sessionId }: CheckpointsPanelProps = {}) {
 
   const restore = useMutation({
     mutationFn: ({ checkpoint, confirmToken }: { checkpoint: WorkspaceCheckpoint; confirmToken?: string }) =>
-      platformClient.operator.checkpoints.restore(confirmToken ? { id: checkpoint.id, confirmToken } : { id: checkpoint.id, confirm: true }),
+      platformClient.operator.checkpoints.restore(confirmToken
+        ? { id: checkpoint.id, confirmToken, ...(sessionId ? { sessionId } : {}) }
+        // Without a preview the daemon refuses a restore that takes back another session's change (its reason names
+        // them, shown below); nothing goes back unseen.
+        : { id: checkpoint.id, confirm: true, ...(sessionId ? { sessionId } : {}) }),
     onSuccess: async (result, { checkpoint }) => {
       if (result.refused || result.result === null) {
         toast({
@@ -159,10 +164,13 @@ export function CheckpointsPanel({ sessionId }: CheckpointsPanelProps = {}) {
   async function handleRestore(checkpoint: WorkspaceCheckpoint): Promise<void> {
     let confirmToken: string | undefined;
     let description = restoreConfirmMessage();
+    // The daemon names the other sessions whose changes this takes back (its preview); its token confirms those.
+    let namedByDaemon = false;
     try {
-      const preview = await platformClient.operator.checkpoints.restorePreview({ id: checkpoint.id });
+      const preview = await platformClient.operator.checkpoints.restorePreview({ id: checkpoint.id, ...(sessionId ? { sessionId } : {}) });
       confirmToken = preview.token;
       description = restoreConfirmMessageWithPreview(preview.preview);
+      namedByDaemon = previewTakesBack(preview.preview) !== undefined;
     } catch (error) {
       if (isNotFound(error)) {
         toast({
@@ -176,7 +184,7 @@ export function CheckpointsPanel({ sessionId }: CheckpointsPanelProps = {}) {
     }
     // A restore rewrites the whole workspace, not one session's files: name the
     // other sessions whose later work it puts back. Read only when restoring.
-    try {
+    if (!namedByDaemon) try {
       const workspace = await platformClient.operator.checkpoints.list({ since: checkpoint.createdAt });
       const others = otherSessionsSince(workspace.checkpoints, checkpoint, sessionId);
       if (others.length > 0) {

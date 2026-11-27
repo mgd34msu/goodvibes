@@ -7,7 +7,8 @@
  * the program's own live state, so it runs there with the program's services
  * (system-session.ts `SystemSessionServices`); nothing here reaches a screen.
  */
-import { CapabilityRefusal, REPLACED_DONE, type CapabilityDefinition, type FixedChoice, type InputDescription, type ListName } from '../types.js';
+import { CapabilityRefusal, REPLACED_DONE, type CapabilityCaller, type CapabilityDefinition, type FixedChoice, type InputDescription, type ListName } from '../types.js';
+import { callerPathOf } from '../path-inputs.js';
 import type { SystemHealthServices, SystemSessionServices } from './system-session.js';
 
 type System = NonNullable<SystemSessionServices['systemSession']>;
@@ -20,7 +21,7 @@ function systemOf(services: SystemSessionServices): System {
 
 const session = (id: string, repeat: 'safe' | 'unsafe' = 'safe') => ({ id, group: 'system' as const, home: 'session' as const, repeat });
 
-const read = (fields: Pick<Def, 'capability' | 'actionId' | 'label' | 'word' | 'sentence' | 'run'> & Partial<Pick<Def, 'inputs' | 'example' | 'available'>>): Def => ({
+const read = (fields: Pick<Def, 'capability' | 'actionId' | 'label' | 'word' | 'sentence' | 'run'> & Partial<Pick<Def, 'inputs' | 'example' | 'available' | 'doneInPlace'>>): Def => ({
   inputs: [], example: {}, ...fields, done: '', touches: 'reads', lasts: 'not-a-change', risk: 'none',
 });
 
@@ -33,6 +34,9 @@ const REPLACE: InputDescription = {
 const pathInput = (help: string): InputDescription => ({
   id: 'path', label: 'File', help, kind: 'path', freeTextReason: 'a file path', required: true, typed: { position: 1 },
 });
+
+/** A path input, placed by the one rule for every capability's path (capabilities/path-inputs.ts) before this program acts on it. */
+const placed = (caller: CapabilityCaller, raw: string): string => callerPathOf(caller, raw, { personPathAsTyped: true });
 
 // ---------------------------------------------------------------------------
 // Whether this program is working: health.*
@@ -126,7 +130,7 @@ export const HEALTH_FAILURE: Def = read({
 export const HEALTH_SAVE_FAILURE: Def = {
   capability: session('health.save-failure'), actionId: 'save-failure', label: 'Save a failure report as a file', word: 'save-failure',
   inputs: [
-    pathInput('Where to write it'),
+    { ...pathInput('Where to write it'), file: 'written' },
     { ...REPORT_INPUT, typed: { flag: '--report' } },
     {
       id: 'replay', label: 'Replay snapshot', help: 'The recorded turn, to replay it elsewhere', kind: 'choice', typed: { flag: '--with-replay', switchOn: 'yes' },
@@ -136,8 +140,8 @@ export const HEALTH_SAVE_FAILURE: Def = {
   ],
   sentence: 'The failure report\'s bundle will be written to {path} on this machine, until you change it.', done: '',
   touches: 'this-machine', lasts: 'kept', risk: 'none', example: { path: 'incident.json', report: 'latest' },
-  async run(values, services) {
-    return { text: failuresOf(services).save({ report: values.report || 'latest', path: values.path!, replay: values.replay === 'yes', replace: values.replace === 'yes' }) };
+  async run(values, services, caller) {
+    return { text: failuresOf(services).save({ report: values.report || 'latest', path: placed(caller, values.path!), replay: values.replay === 'yes', replace: values.replace === 'yes' }) };
   },
 };
 
@@ -211,10 +215,10 @@ export const RELEASE_CHECKLIST: Def = read({
 
 export const RELEASE_SAVE: Def = {
   capability: session('release.save'), actionId: 'save', label: 'Save the release evidence to a file', word: 'save',
-  inputs: [pathInput('Where to write it'), REPLACE],
+  inputs: [{ ...pathInput('Where to write it'), file: 'written' }, REPLACE],
   sentence: 'The release evidence (what "See release readiness" shows) will be written to {path}, until you change it.', done: '',
   touches: 'this-machine', lasts: 'kept', risk: 'none', example: { path: 'release-evidence.json' }, available: hasRelease,
-  async run(values, services) { return { text: await releaseOf(services).save(values.path!, values.replace === 'yes') }; },
+  async run(values, services, caller) { return { text: await releaseOf(services).save(placed(caller, values.path!), values.replace === 'yes') }; },
 };
 
 export const RELEASE_READ: Def = read({
@@ -222,7 +226,7 @@ export const RELEASE_READ: Def = read({
   inputs: [pathInput('Release evidence saved earlier')],
   sentence: 'Reads the release evidence saved in {path} and shows what it recorded.', example: { path: 'release-evidence.json' },
   available: hasRelease,
-  async run(values, services) { return { text: await releaseOf(services).read(values.path!) }; },
+  async run(values, services, caller) { return { text: await releaseOf(services).read(placed(caller, values.path!)) }; },
 });
 
 // ---------------------------------------------------------------------------
@@ -256,10 +260,10 @@ export const STARTUP_SERVICES: Def = read({
 
 export const STARTUP_EXPORT: Def = {
   capability: session('startup.export'), actionId: 'export', label: 'Save the setup review to a file', word: 'export',
-  inputs: [pathInput('The file the setup review is written to'), REPLACE],
+  inputs: [{ ...pathInput('The file the setup review is written to'), file: 'written' }, REPLACE],
   sentence: 'The setup review is written as JSON to {path}.', done: '',
   touches: 'this-machine', lasts: 'kept', risk: 'none', example: { path: 'setup-review.json' }, available: hasStartup,
-  async run(values, services) { return { text: await startupOf(services).save(values.path!, values.replace === 'yes') }; },
+  async run(values, services, caller) { return { text: await startupOf(services).save(placed(caller, values.path!), values.replace === 'yes') }; },
 };
 
 export const STARTUP_LINK: Def = read({
@@ -300,12 +304,14 @@ export const DEEPLINK_REVIEW: Def = read({
 });
 
 export const SYSTEM_HELP: Def = read({
-  capability: session('system.help'), actionId: 'help', label: 'See every command and every key', word: '',
+  capability: session('system.help'), actionId: 'help', label: 'See the commands, every key and the menu', word: '',
   inputs: [{
     id: 'about', label: 'About', help: 'A command\'s name to see its actions and lines, or keys for every key', kind: 'text',
-    freeTextReason: 'a command name as you type it, without the slash; or keys', required: { default: '', defaultMeans: 'every command and every key' }, typed: { position: 1 },
+    freeTextReason: 'a command name as you type it, without the slash; or keys', required: { default: '', defaultMeans: 'the commands that remain and every key' }, typed: { position: 1 },
   }],
-  sentence: 'Shows every command and every key, or one command\'s actions and lines.', example: { about: 'keys' },
+  sentence: 'Shows the few commands that remain and every key, says the menu reaches everything else, or shows one command\'s actions and lines.', example: { about: 'keys' },
+  // A typed /help opens the list and prints nothing; pressed in a place (System's help row), the line says it.
+  doneInPlace: 'Opened the list of the commands and every key.',
   async run(values, services) {
     const help = systemOf(services).help;
     if (!help) throw new CapabilityRefusal('This program has no help of its own to show.', undefined, 'UNAVAILABLE');
@@ -358,38 +364,114 @@ export const VOICE_WAKE_SETUP: Def = {
 // The setup topics: setup.<topic>, each opening this program's form for it
 // ---------------------------------------------------------------------------
 
-/** A `/setup` topic: its words, and the group whose place offers it (a key of that place runs it by id). */
+/**
+ * A setup topic: its words, and the group whose place offers it (System's Setup tab lists every one; a key of that
+ * place runs it by id). The terminal app and the Agent open different things for some topics (a form of the terminal
+ * app's own; the settings screen, the model picker or a place's tab in the Agent): each program's Setup list says what
+ * that program opens (`tui`, `agent`), and the capability's sentence says both.
+ */
 export interface SetupTopicWords {
   readonly label: string;
   readonly word: string;
-  /** One sentence: what the form lets you do. */
+  /** One sentence: what opening the topic does, in either program (the capability's own, which a model reads). */
   readonly sentence: string;
+  /** What the terminal app opens, when it is not the sentence. */
+  readonly tui?: string;
+  /** What the Agent opens, when it is not the sentence. */
+  readonly agent?: string;
   readonly group: Def['capability']['group'];
 }
 
-/** Every topic a form opens for, in list order (pairing and a provider of your own are capabilities of their own). */
+/** Every topic, in list order (pairing and a provider of your own are capabilities of their own). */
 export const SETUP_TOPIC_WORDS = {
-  'model': { label: 'Choose a model', word: 'model', sentence: 'Opens the form for the model new turns use and how hard it thinks.', group: 'models' },
+  'model': {
+    label: 'Choose a model', word: 'model', group: 'models',
+    sentence: 'Opens what chooses the model new turns use: the model form in the terminal app, the model picker in the Agent.',
+    tui: 'Opens the form for the model new turns use and how hard it thinks.',
+    agent: 'Opens the model picker: the model this conversation uses, and the models for the side jobs.',
+  },
   // Labels are short enough to stand whole in a list at 80 columns; the sentence says the rest.
-  'sign-in': { label: 'Provider sign-in', word: 'sign-in', sentence: 'Opens the form for signing in to a provider with your browser, finishing a sign-in, or signing out.', group: 'models' },
-  'store-key': { label: 'Store a password or key', word: 'store-key', sentence: 'Opens the form for storing a provider or channel key, and how keys are stored.', group: 'models' },
-  'local-only': { label: 'Only this computer', word: 'local-only', sentence: 'Opens the form that keeps everything on this computer: it turns off the browser, network and webhook access.', group: 'system' },
-  'browser': { label: 'Use it in a browser', word: 'browser', sentence: 'Opens the form for using GoodVibes from a web browser on this computer or your network.', group: 'system' },
-  'other-devices': { label: 'Other devices', word: 'other-devices', sentence: 'Opens the form for letting your other devices reach GoodVibes: addresses and ports.', group: 'devices' },
-  'connect-daemon': { label: 'A daemon elsewhere', word: 'connect-daemon', sentence: 'Opens the form for pointing this program at a GoodVibes daemon already running on another computer; nothing on this computer is opened to the network.', group: 'system' },
-  'webhooks': { label: 'Receive webhooks', word: 'webhooks', sentence: 'Opens the form for receiving webhooks and events from other tools.', group: 'system' },
-  'chat-apps': { label: 'Chat apps and services', word: 'chat-apps', sentence: 'Opens the form for connecting Slack, Discord, Telegram and the other chat apps and services.', group: 'messages' },
-  'cloudflare': { label: 'Use Cloudflare', word: 'cloudflare', sentence: 'Opens the form for using Cloudflare for batch and remote work.', group: 'devices' },
-  'who-signs-in': { label: 'Who can sign in here', word: 'who-signs-in', sentence: 'Opens the form for the account that signs in to this GoodVibes from other devices.', group: 'system' },
-  'how-it-works': { label: 'When it asks', word: 'how-it-works', sentence: 'Opens the form for how GoodVibes works with you: how much GoodVibes tells you, how much guidance it gives, and when it asks.', group: 'system' },
-  'safety': { label: 'Safety', word: 'safety', sentence: 'Opens the form for sandboxing and the other safety features.', group: 'safety' },
-  'memory': { label: 'Memory and context', word: 'memory', sentence: 'Opens the form for memory and how a long conversation is kept in context.', group: 'memory' },
-  'telemetry': { label: 'Record traces', word: 'telemetry', sentence: 'Opens the form for recording traces of what GoodVibes does.', group: 'system' },
-  'automation': { label: 'Automation settings', word: 'automation', sentence: 'Opens the form for scheduled routines, watchers and triggers.', group: 'automation' },
-  'devices-voice': { label: 'Paired devices and voice', word: 'devices-voice', sentence: 'Opens the form for paired phones and voice.', group: 'devices' },
-  'provider-behaviour': { label: 'Provider behaviour', word: 'provider-behaviour', sentence: 'Opens the form for how GoodVibes chooses and talks to providers.', group: 'system' },
-  'advanced': { label: 'Advanced switches', word: 'advanced', sentence: 'Opens the form for the advanced runtime switches.', group: 'system' },
-  'history': { label: 'Saved chats', word: 'history', sentence: 'Opens the setting for whether conversations are saved on this computer.', group: 'system' },
+  'sign-in': {
+    label: 'Provider sign-in', word: 'sign-in', group: 'models',
+    sentence: 'Opens where you sign in to a provider: a form in the terminal app, Models and providers in the Agent.',
+    tui: 'Opens the form for signing in to a provider with your browser, finishing a sign-in, or signing out.',
+    agent: 'Opens Models and providers, where you sign in to a provider with your browser, finish a sign-in, or sign out.',
+  },
+  'store-key': {
+    label: 'Store a password or key', word: 'store-key', group: 'models',
+    sentence: 'Opens where a provider or channel key is stored: a form in the terminal app, the Secrets tab of Permissions and safety in the Agent.',
+    tui: 'Opens the form for storing a provider or channel key, and how keys are stored.',
+    agent: 'Opens the Secrets tab of Permissions and safety, where a provider or channel key is stored.',
+  },
+  // The four network topics and "Who can sign in here" open one control in both programs: Devices and network,
+  // Addresses and ports (`a` there makes the account that signs in from a browser or another device).
+  'local-only': { label: 'Only this computer', word: 'local-only', sentence: 'Opens Addresses and ports in Devices and network, where the daemon, web UI and webhook listeners are turned off so everything stays on this computer.', group: 'system' },
+  'browser': { label: 'Use it in a browser', word: 'browser', sentence: 'Opens Addresses and ports in Devices and network: the web UI switch, where it listens, and the account that signs in from a browser.', group: 'system' },
+  'other-devices': { label: 'Other devices', word: 'other-devices', sentence: 'Opens Addresses and ports in Devices and network: the addresses and ports your other devices reach, and the account that signs in from them.', group: 'devices' },
+  'connect-daemon': {
+    label: 'A daemon elsewhere', word: 'connect-daemon', group: 'system',
+    sentence: 'Opens where this program is pointed at a GoodVibes daemon on another computer (a form in the terminal app, the settings screen in the Agent); nothing on this computer is opened to the network.',
+    tui: 'Opens the form for pointing this program at a GoodVibes daemon already running on another computer; nothing on this computer is opened to the network.',
+    agent: 'Opens the settings screen at the address of the daemon this program reaches; nothing on this computer is opened to the network.',
+  },
+  'webhooks': { label: 'Receive webhooks', word: 'webhooks', sentence: 'Opens Addresses and ports in Devices and network: the switch for receiving webhooks and events from other tools, and where it listens.', group: 'system' },
+  'chat-apps': {
+    label: 'Chat apps and services', word: 'chat-apps', group: 'messages',
+    sentence: 'Opens where Slack, Discord, Telegram and the other chat apps and services are connected: a form in the terminal app, the settings screen in the Agent. The account that signs in from other devices is made in Devices and network, Addresses and ports.',
+    tui: 'Opens the form for connecting Slack, Discord, Telegram and the other chat apps and services. The account that signs in from other devices is made in Devices and network, Addresses and ports.',
+    agent: 'Opens the settings screen at the chat apps and services: Slack, Discord, Telegram and the others. The account that signs in from other devices is made in Devices and network, Addresses and ports.',
+  },
+  'cloudflare': {
+    label: 'Use Cloudflare', word: 'cloudflare', group: 'devices',
+    sentence: 'Opens where Cloudflare is set up for batch and remote work: a form in the terminal app, the Cloudflare settings tab of Devices and network in the Agent.',
+    tui: 'Opens the form for using Cloudflare for batch and remote work.',
+    agent: 'Opens the Cloudflare settings tab of Devices and network, for batch and remote work.',
+  },
+  'who-signs-in': { label: 'Who can sign in here', word: 'who-signs-in', sentence: 'Opens Addresses and ports in Devices and network, where the account that signs in to this GoodVibes from a browser or another device is made.', group: 'system' },
+  'how-it-works': {
+    label: 'When it asks', word: 'how-it-works', group: 'system',
+    sentence: 'Opens where you choose how GoodVibes works with you (how much it tells you, how much guidance it gives, when it asks): a form in the terminal app, the settings screen in the Agent.',
+    tui: 'Opens the form for how GoodVibes works with you: how much GoodVibes tells you, how much guidance it gives, and when it asks.',
+    agent: 'Opens the settings screen at how GoodVibes works with you: how much it tells you, how much guidance it gives, and when it asks.',
+  },
+  'safety': { label: 'Safety', word: 'safety', sentence: 'Opens Permissions and safety at the sandbox switch, beside the other safety settings.', group: 'safety' },
+  'memory': {
+    label: 'Memory and context', word: 'memory', group: 'memory',
+    sentence: 'Opens where memory and keeping a long conversation in context are set up: a form in the terminal app, the settings screen in the Agent.',
+    tui: 'Opens the form for memory and how a long conversation is kept in context.',
+    agent: 'Opens the settings screen at how a long conversation is kept in context.',
+  },
+  'telemetry': {
+    label: 'Record traces', word: 'telemetry', group: 'system',
+    sentence: 'Opens where recording traces of what GoodVibes does is set up: a form in the terminal app, the settings screen in the Agent.',
+    tui: 'Opens the form for recording traces of what GoodVibes does.',
+    agent: 'Opens the settings screen at recording traces of what GoodVibes does.',
+  },
+  'automation': {
+    label: 'Automation settings', word: 'automation', group: 'automation',
+    sentence: 'Opens where scheduled routines, watchers and triggers are set up: a form in the terminal app, the settings screen in the Agent.',
+    tui: 'Opens the form for scheduled routines, watchers and triggers.',
+    agent: 'Opens the settings screen at scheduled routines, watchers and triggers.',
+  },
+  'devices-voice': {
+    label: 'Paired devices and voice', word: 'devices-voice', group: 'devices',
+    sentence: 'Opens where paired phones and voice are set up: a form in the terminal app, the phone and voice settings tab of Devices and network in the Agent.',
+    tui: 'Opens the form for paired phones and voice.',
+    agent: 'Opens the phone and voice settings tab of Devices and network.',
+  },
+  'provider-behaviour': {
+    label: 'Provider behaviour', word: 'provider-behaviour', group: 'system',
+    sentence: 'Opens where GoodVibes is told how to choose and talk to providers: a form in the terminal app, the settings screen in the Agent.',
+    tui: 'Opens the form for how GoodVibes chooses and talks to providers.',
+    agent: 'Opens the settings screen at how GoodVibes chooses and talks to providers.',
+  },
+  'advanced': {
+    label: 'Advanced switches', word: 'advanced', group: 'system',
+    sentence: 'Opens the advanced runtime switches: a form in the terminal app, the settings screen in the Agent.',
+    tui: 'Opens the form for the advanced runtime switches.',
+    agent: 'Opens the settings screen at the advanced runtime switches.',
+  },
+  'history': { label: 'Saved chats', word: 'history', sentence: 'Opens the settings screen at whether conversations are saved on this computer.', group: 'system' },
   'import-settings': { label: 'Import settings', word: 'import-settings', sentence: 'Copies the settings the Agent shares with the terminal app into the Agent.', group: 'system' },
   'first-run': { label: 'Run first-run again', word: 'first-run', sentence: 'Opens the three-step first run: choose a provider, sign in, start.', group: 'system' },
 } as const satisfies Readonly<Record<string, SetupTopicWords>>;
@@ -424,5 +506,6 @@ export const SYSTEM_PROGRAM_CAPABILITIES: readonly { readonly definition: Def; r
   { definition: DEEPLINK_REVIEW, command: { name: 'deeplink', title: 'Links to views' } },
   { definition: SYSTEM_HELP, command: { name: 'help', title: 'Help' } },
   ...[VOICE_STOP, VOICE_WAKE_STATUS, VOICE_WAKE_SETUP].map((definition) => ({ definition, command: { name: 'voice', title: 'Voice' } })),
+  // No `/setup` command: the name only groups the topics in the catalog; each is a row of System's Setup tab.
   ...SETUP_TOPIC_CAPABILITIES.map((definition) => ({ definition, command: { name: 'setup', title: 'Set up GoodVibes' } })),
 ];

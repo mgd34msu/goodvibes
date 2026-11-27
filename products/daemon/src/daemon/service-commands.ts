@@ -38,7 +38,6 @@ import { PlatformServiceManager, type ManagedServiceStatus } from '@goodvibes/en
 import {
   buildManagedDaemonServiceManager,
   listProductServiceNames,
-  readDefinitionWorkingDirectory,
   readManagedDefinitionOwner,
   type ManagedDefinitionOwner,
   type ManagedServiceActionRunner,
@@ -90,15 +89,8 @@ export interface DaemonServiceCliInput {
    * where the service manager actually looks.
    */
   readonly unitHomeDir: string;
-  /** Defaults to `homeDir`, overridable so tests can scope both to one tempdir. */
+  /** The folder the service starts the daemon in; defaults to `homeDir` (the daemon has no working folder of its own). */
   readonly workingDirectory?: string | undefined;
-  /**
-   * The working directory was named for this command (`--working-dir`,
-   * GOODVIBES_WORKING_DIR). Otherwise `refresh-service` keeps the one the
-   * existing definition names: a refresh re-derives the launch, not the
-   * workspace the owner chose.
-   */
-  readonly workingDirectoryExplicit?: boolean | undefined;
   /** Injected in tests; a real `ConfigManager` rooted at `homeDir` otherwise. */
   readonly configManager?: ConfigManager | undefined;
   /** Injectable systemctl/launchctl/schtasks runner so tests never touch the host. */
@@ -377,16 +369,15 @@ function backupDefinition(path: string, now: Date = new Date()): string {
  * `refresh-service`: write the current definition over this product's own
  * (or where none exists), without starting, stopping or changing lingering.
  * An existing definition that already matches is left untouched; a rewritten
- * one is backed up first and keeps the working directory it named.
+ * one is backed up first. The daemon has no working folder, so the definition
+ * starts it in the home: one a 3.5.0 install wrote naming a project folder is
+ * rewritten to the home (the backup keeps the old one).
  */
 function refreshService(input: DaemonServiceCliInput, initial: PlatformServiceManager): DaemonServiceCliResult {
   const before = initial.status();
   const owner = definitionOwner(before);
   if (owner === 'other' || owner === 'unreadable') return notOurs('refresh', owner, before);
-  const kept = owner === 'product' && input.workingDirectoryExplicit !== true ? readDefinitionWorkingDirectory(before.path) : undefined;
-  const manager = kept === undefined || kept === (input.workingDirectory ?? input.homeDir)
-    ? initial
-    : buildManager({ ...input, workingDirectory: kept });
+  const manager = initial;
   // Current means the file matches AND the service manager has taken it: a
   // reload that failed after the write is run again, never reported current.
   if (owner === 'product' && manager.installedDefinitionMatches() && !manager.registrationPending()) {

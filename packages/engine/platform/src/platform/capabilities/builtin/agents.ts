@@ -222,7 +222,7 @@ export const AGENTS_HOST: DaemonDefinition = {
   actionId: 'host', label: 'Host a coding agent', word: 'host',
   inputs: [
     { id: 'agent', label: 'Coding agent', help: 'The coding agents found on this machine', kind: 'choice', choices: { list: AGENTS_HOSTABLE_LIST }, required: true, typed: { position: 1 } },
-    { id: 'directory', label: 'Folder', help: 'Where it works', kind: 'path', freeTextReason: 'a folder on this machine', required: { default: '', defaultMeans: 'the current folder' }, typed: { position: 2 } },
+    { id: 'directory', label: 'Folder', help: 'Where it works', kind: 'path', freeTextReason: 'a folder on this machine', workFolder: true, required: { default: '', defaultMeans: 'the current folder' }, typed: { position: 2 } },
   ],
   sentence: '{agent} starts as a long-running session in the folder given; it is listed in the Sessions place as a shared session, where you send it work and close it.',
   // Another coding agent, long-running in that folder, that runs its own tools under its own rules, not this gate's:

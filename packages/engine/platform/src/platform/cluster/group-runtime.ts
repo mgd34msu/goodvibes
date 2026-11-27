@@ -111,6 +111,7 @@ import {
   createConfigReplicaDocument,
   readConfigReplicaDocument,
   type ConfigReplicaDocument,
+  type ReplicaAct,
 } from './config-replica.js';
 import { isReplicatedConfigPath } from './config-replication-policy.js';
 import { encodeEnvelope, isWireSurfaceId, type ClusterEnvelope, type ClusterKeyring } from './protocol-envelope.js';
@@ -181,6 +182,11 @@ export interface ClusterGroupRuntimeOptions {
    * called again on later passes until it has.
    */
   readonly onRemovedFromGroup?: (() => void) | undefined;
+  /**
+   * When a 3.5.0 daemon put back on this machine last wrote the group's settings after the upgrade: the shared settings
+   * it changed in that run are marked the owner's once (config-replication.ts `noteOlderReleaseRun`).
+   */
+  readonly olderReleaseRanAt?: number | undefined;
 }
 
 /** How a membership is put into the authority record when it is adopted. */
@@ -361,8 +367,8 @@ export class ClusterGroupRuntime {
       capture: () => this.captureConfigAuthority(),
       retireLocal: path => this.replication?.observeLocalChange(path),
       apply: change => this.runGroupWork(() => change.kind === 'secret'
-        ? this.replication?.announceLocalSecret(change.path, change.assertCurrent, change.seed)
-        : this.replication?.announceLocalChange(change.path, change.assertCurrent)),
+        ? this.replication?.announceLocalSecret(change.path, change.assertCurrent, change.seed, change.act)
+        : this.replication?.announceLocalChange(change.path, change.assertCurrent, change.act)),
     });
     const observedConfig = this.configChanges.configStore();
     this.replication = new ConfigReplicationService({
@@ -379,6 +385,7 @@ export class ClusterGroupRuntime {
       persist: (document) => this.persistReplica(document),
       persistHeld: (groupId, held) => this.persistHeldConfig(groupId, held),
     }, '');
+    this.replication.noteOlderReleaseRun(options.olderReleaseRanAt);
     this.admissions = new GroupAdmissionService({
       nodeId: options.nodeId,
       version: options.version,
@@ -454,7 +461,7 @@ export class ClusterGroupRuntime {
     if (!this.material) {
       this.options.logger.info(
         'cluster: sharing is switched on but this machine is not in a group; it is listening only',
-        { action: 'create one with `cluster create`, or join one with `cluster join`' },
+        { action: 'start one in Devices and network, Machine group, or join one from Nearby groups' },
       );
     }
   }
@@ -606,7 +613,11 @@ export class ClusterGroupRuntime {
   /** Operator work reserves one cancellable owner before its first await. */
   withMembershipOperation<T>(work: (owner: ClusterMembershipOperation) => Promise<T>): Promise<T> {
     return this.membershipOperations.run(async owner => {
-      try { this.stateOwner.assertCurrent(); } catch { throw new ClusterMembershipOperationError('abandoned'); }
+      try { this.stateOwner.assertCurrent(); } catch (error) {
+        // The answer to the person is only "cancelled"; the cause goes to the log, where it can be found.
+        this.options.logger.warn('cluster: a group action was refused: the group\'s state files on this machine changed outside the group layer', { error: summarizeError(error) });
+        throw new ClusterMembershipOperationError('abandoned');
+      }
       return work(owner);
     });
   }
@@ -649,7 +660,7 @@ export class ClusterGroupRuntime {
       if (!(error instanceof ClusterMembershipOperationError) && !(error instanceof GroupConfigChangeRetiredError)
         && !(error instanceof ConfigReplicationPrivacyError) && !(error instanceof GroupKeyNotSavedError)
         && !(error instanceof ConfigLocalDifferenceError)) {
-        this.options.logger.warn('cluster: owned group work failed', { error: summarizeError(error) });
+        this.options.logger.warn('cluster: work for the group failed on this machine', { error: summarizeError(error) });
       }
     });
     return task;
@@ -919,7 +930,7 @@ export class ClusterGroupRuntime {
     this.recordRemoval(note);
     this.options.logger.error('cluster: this machine was removed from its group by another member and no longer holds its keys', {
       groupId: note.groupId,
-      action: 'to put it back, run `cluster key` on a machine in the group, then `cluster join` here with that key',
+      action: 'to put it back, read the join key on a machine in the group (Devices and network, Machine group, join key), then join here from Nearby groups with it',
     });
   }
 
@@ -1108,11 +1119,19 @@ export class ClusterGroupRuntime {
     await this.runGroupWork(() => this.replication?.announceLocalChange(path));
   }
 
+  /**
+   * The owner's act that started or joined the group on this machine: the shared settings in force here that the group
+   * holds no entry for become the group's under it, at the next reconcile (config-replication.ts `seedWith`).
+   */
+  noteSeedAct(act: ReplicaAct | undefined): void {
+    this.replication?.seedWith(act);
+  }
+
   /** Send this machine's value of a shared setting to the group (the owner's answer to a local difference). */
-  async publishConfigValue(path: string): Promise<'published' | 'held'> {
+  async publishConfigValue(path: string, act?: ReplicaAct): Promise<'published' | 'held'> {
     let outcome: 'published' | 'held' = 'published';
     await this.runGroupWork(async () => {
-      if (this.replication) outcome = await this.replication.publishLocalValue(path);
+      if (this.replication) outcome = await this.replication.publishLocalValue(path, act);
     });
     return outcome;
   }

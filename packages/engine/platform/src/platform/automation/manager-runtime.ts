@@ -1,8 +1,10 @@
 import type { ExternalOperationSource } from '../permissions/external-request.js';
 import type { UnattendedRuns } from './unattended-runs.js';
 import { captureAutomationSource } from './action-source.js';
+import { stampExposure } from '../security/conversation-exposure.js';
 import { ConfigManager } from '../config/manager.js';
 import { logger } from '../utils/logger.js';
+import { outsideEveryCall } from '../utils/outside-every-call.js';
 import { createDomainDispatch } from '../runtime/store/index.js';
 import type { DomainDispatch, RuntimeStore } from '../runtime/store/index.js';
 import type { RuntimeEventBus } from '../runtime/events/index.js';
@@ -10,6 +12,14 @@ import type { AgentManager } from '../tools/agent/index.js';
 import { AgentMessageBus } from '../agents/message-bus.js';
 import { computeSchedulerCapacity, scheduleCapacityWaitKey, type AutomationCapacityWait, type SchedulerCapacityReport } from './scheduler-capacity.js';
 import { AutomationJobStore } from './store/jobs.js';
+import { resolveAutomationStorePath } from './store/paths.js';
+import { readFileSync, realpathSync } from 'node:fs';
+import { resolve as resolvePath } from 'node:path';
+
+/** A path's real location, or the path resolved when it does not exist. */
+function realPathOrSelf(path: string): string {
+  try { return realpathSync(path); } catch { return resolvePath(path); }
+}
 import { ownerTimezone } from './schedules.js';
 import { AutomationRunStore } from './store/runs.js';
 import { AutomationJobMap, automationJobRevision, ownedAutomationJob, withCurrentSchedulerState, AutomationCheckinJobOwnedError, AutomationJobCommitIndeterminateError, AutomationJobMutationStaleError, CHECKIN_JOB_OWNER, retainAutomationMutation, type AutomationJobMutationOptions, type RetainedAutomationJobTarget } from './job-mutations.js';
@@ -79,6 +89,7 @@ import { recordAutomationMissedRun } from './manager-runtime-missed.js';
 import { summarizeError } from '../utils/error-display.js';
 import {
   createAutomationJobRecord,
+  sameProjectJobOfChosenId,
   toggleAutomationJobEnabled,
   updateAutomationJobRecord,
 } from './manager-runtime-job-mutations.js';
@@ -125,6 +136,25 @@ interface AutomationManagerConfig {
    * due stays due and runs once after the restart. Absent: always admitted.
    */
   readonly workAdmitted?: (() => boolean) | undefined;
+  /**
+   * The folder a schedule kept with no project (3.5.0 kept none) ran in: it is recorded on such a schedule once, at
+   * load. Absent: the configuration's working folder (a terminal program's own).
+   */
+  readonly unplacedJobsFolder?: string | undefined;
+  /**
+   * Why a schedule may not run in a folder (workspace/caller-project.ts noProjectRefusal: no project, or a folder that
+   * is never one, the daemon's own among them), or undefined. A run of such a schedule is refused before anything
+   * starts; one kept from 3.5.0 with no former folder is held (paused, saying why) for the owner to give it a project.
+   * Absent: every folder is taken as it is.
+   */
+  readonly projectRefusal?: ((folder: string | undefined) => string | undefined) | undefined;
+  /**
+   * Schedule files an earlier terminal app kept that this manager does not keep its own in (a terminal app whose store
+   * was not the daemon's): what they hold and this manager does not is taken at load, once, as the daemon's own
+   * upgrade step, placed in `unplacedJobsFolder` as a 3.5.0 schedule is. The files are read only, never changed, so an
+   * earlier release put back finds them as it left them.
+   */
+  readonly formerJobStores?: readonly string[] | undefined;
 }
 
 /**
@@ -157,6 +187,9 @@ export class AutomationManager {
   private readonly cancelTask?: ((agentId: string) => void) | undefined;
   private readonly agentStatusProvider?: Pick<AgentManager, 'getStatus'> | undefined;
   private readonly configManager: ConfigManager;
+  private readonly unplacedJobsFolder?: string | undefined;
+  private readonly projectRefusal: AutomationManagerConfig['projectRefusal'];
+  private readonly formerJobStores: readonly string[];
   private readonly routeBindings: RouteBindingManager;
   private readonly sessionBroker: SharedSessionBroker;
   private readonly defaultSurfaceKind?: AutomationSurfaceKind | undefined;
@@ -216,6 +249,9 @@ export class AutomationManager {
 
   constructor(config: AutomationManagerConfig) {
     this.configManager = config.configManager;
+    this.unplacedJobsFolder = config.unplacedJobsFolder;
+    this.projectRefusal = config.projectRefusal;
+    this.formerJobStores = config.formerJobStores ?? [];
     this.jobStore = config.jobStore ?? new AutomationJobStore({ configManager: this.configManager });
     this.runStore = config.runStore ?? new AutomationRunStore({ configManager: this.configManager });
     this.routeBindings = config.routeBindings;
@@ -266,6 +302,7 @@ export class AutomationManager {
       defaultSurfaceKind: this.defaultSurfaceKind,
       defaultSurfaceId: this.defaultSurfaceId,
       spawnTask: (input: SpawnAutomationTaskInput) => this.requireSpawnTask()(input),
+      ...(this.projectRefusal ? { projectRefusal: this.projectRefusal } : {}),
       saveJobs: () => this.saveJobs(),
       saveRuns: () => this.saveRuns(),
       pruneRunHistory: (jobId?: string) => this.pruneRunHistory(jobId),
@@ -454,7 +491,9 @@ export class AutomationManager {
       return;
     }
     this.startLifetime = lifetime;
-    this.startPromise = this.load()
+    // Started by whichever call reaches it first (a request among them): loaded and armed in the process's own context
+    // (utils/outside-every-call.ts), so the reconcile pass, the owed deliveries and every schedule's timer run as no caller.
+    this.startPromise = outsideEveryCall(() => this.load()
       .then(() => {
         if (this.mutationLifetime !== lifetime) return;
         this.running = true;
@@ -468,7 +507,7 @@ export class AutomationManager {
       })
       .finally(() => {
         this.startPromise = null;
-      });
+      }));
     return await this.startPromise;
   }
 
@@ -732,12 +771,16 @@ export class AutomationManager {
     this.requireEnabled('create automation job');
     await this.start();
     current();
-    // A create that names its id is repeatable: sent again after a lost reply,
-    // or for a job this manager already holds, it returns that job instead of
-    // making a second copy.
-    const existing = input.id?.trim() ? this.jobs.get(input.id.trim()) : undefined;
+    // A create that names its id is repeatable: sent again after a lost reply, it returns this project's job of that
+    // id instead of making a second copy. Only this project's: another project's job of the same chosen id is never
+    // returned, and the id a new one is stored under says nothing about it (manager-runtime-job-mutations.ts).
+    const existing = input.id?.trim() ? sameProjectJobOfChosenId(this.jobs, input) : undefined;
     if (existing) return existing;
-    return await createAutomationJobRecord(this.jobMutationContext(), input, { signal: options.signal, assertCurrent: current, withPublication: options.withPublication });
+    const made = await createAutomationJobRecord(this.jobMutationContext(), input, { signal: options.signal, assertCurrent: current, withPublication: options.withPublication });
+    // Made by a conversation that read text from outside: its runs start with what that conversation read, so what runs
+    // later from it is asked of the owner as it would be there (security/conversation-exposure.ts).
+    stampExposure(`schedule:${made.id}`);
+    return made;
   }
 
   async removeJob(jobId: string, options: AutomationJobMutationOptions = {}): Promise<boolean> {
@@ -936,17 +979,30 @@ export class AutomationManager {
       this.jobStore.load(),
       this.runStore.load(),
     ]);
-    // A schedule kept by 3.5.0 names no project: its runs keep working in the folder the daemon used then (this one),
-    // recorded on it once now. A 3.5.0 binary after a rollback reads the job as before and ignores the field.
-    const daemonFolder = this.configManager.getWorkingDirectory();
+    // A schedule kept by 3.5.0 names no project: its runs keep working in the folder the daemon used then (the one the
+    // host names; a daemon's own folder in its home is no project), recorded on it once now. A 3.5.0 binary after a
+    // rollback reads the job as before and ignores the field.
+    // The configuration's own folder only when it is a project (a terminal program's); the daemon's own folder never is.
+    const ownFolder = this.configManager.getWorkingDirectory() ?? undefined;
+    const daemonFolder = this.unplacedJobsFolder ?? (this.projectRefusal?.(ownFolder) ? undefined : ownFolder);
     let carried = false;
     for (const job of jobSnapshot.jobs) {
       const normalizedJob = normalizeJobRecord(job, this.configManager);
       const needsProject = normalizedJob.kind !== 'checkin' && !normalizedJob.execution.workingDirectory && daemonFolder;
       const withProject = needsProject ? { ...normalizedJob, execution: { ...normalizedJob.execution, workingDirectory: daemonFolder } } : normalizedJob;
       if (needsProject) carried = true;
-      this.jobs.restore({ ...withProject, mutationRevision: automationJobRevision(needsProject ? withProject : job) });
+      // A schedule with no project left (3.5.0's, with no former daemon folder) is held for the owner, never run.
+      const homeless = withProject.kind !== 'checkin' ? this.projectRefusal?.(withProject.execution.workingDirectory) : undefined;
+      const held = homeless && withProject.status === 'enabled'
+        ? { ...withProject, status: 'paused' as const, enabled: false, pausedReason: `held: ${homeless}, so it does not run (never in the daemon's own folder); make it again from the project it is for, or remove it` }
+        : withProject;
+      if (held !== withProject) carried = true;
+      this.jobs.restore({ ...held, mutationRevision: automationJobRevision(needsProject || held !== withProject ? held : job) });
     }
+    // An earlier terminal app's own schedule file: what it holds and this daemon does not is taken now, by the daemon
+    // itself (its upgrade step: nothing is asked), placed as a 3.5.0 schedule is. Read only; a later start finds each
+    // taken one held by its id and takes nothing again.
+    if (this.takeFormerJobStores(daemonFolder)) carried = true;
     for (const run of runSnapshot.runs) {
       const normalizedRun = normalizeRunRecord(run, this.jobs.get(run.jobId));
       this.runs.set(normalizedRun.id, normalizedRun);
@@ -957,6 +1013,42 @@ export class AutomationManager {
     this.syncRuntimeSnapshot();
     this.takeFromGroup();
     if (carried) await this.saveJobs();
+  }
+
+  /** Takes the schedules of `formerJobStores` this manager does not hold (see the option). True when it took any. */
+  private takeFormerJobStores(daemonFolder: string | undefined): boolean {
+    let ownPath: string | undefined;
+    try { ownPath = realPathOrSelf(resolveAutomationStorePath('automation-jobs.json', this.configManager)); } catch { ownPath = undefined; }
+    const now = Date.now();
+    const taken: string[] = [];
+    for (const path of this.formerJobStores) {
+      if (realPathOrSelf(path) === ownPath) continue;
+      let rows: readonly unknown[];
+      try {
+        const parsed = JSON.parse(readFileSync(path, 'utf-8')) as { jobs?: unknown };
+        rows = Array.isArray(parsed.jobs) ? parsed.jobs : [];
+      } catch { continue; }
+      for (const row of rows) {
+        if (row === null || typeof row !== 'object') continue;
+        const record = row as AutomationJob & { readonly archivedAt?: unknown };
+        if (typeof record.id !== 'string' || !record.id || this.jobs.has(record.id)) continue;
+        // Archived, or a one-time schedule whose time has passed: nothing left to run.
+        if (record.archivedAt !== undefined && record.archivedAt !== null) continue;
+        const schedule = record.schedule as { readonly kind?: unknown; readonly at?: unknown } | undefined;
+        if (schedule?.kind === 'at' && typeof schedule.at === 'number' && schedule.at <= now) continue;
+        try {
+          const normalized = normalizeJobRecord(record, this.configManager);
+          const placed = normalized.kind !== 'checkin' && !normalized.execution.workingDirectory && daemonFolder
+            ? { ...normalized, execution: { ...normalized.execution, workingDirectory: daemonFolder } } : normalized;
+          this.jobs.restore({ ...placed, mutationRevision: automationJobRevision(placed) });
+          taken.push(`${placed.name} (${placed.id})`);
+        } catch (error) {
+          logger.warn('Automation: a schedule an earlier terminal app kept could not be read', { path, id: record.id, error: summarizeError(error) });
+        }
+      }
+      if (taken.length > 0) logger.info(`Automation: took the schedules an earlier terminal app kept in ${path}: ${taken.join(', ')}; the file is left as it was`);
+    }
+    return taken.length > 0;
   }
 
   private scheduleJob(job: AutomationJob): void {

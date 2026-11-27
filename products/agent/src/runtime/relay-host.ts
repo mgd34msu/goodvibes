@@ -160,7 +160,8 @@ export async function mintRelayPairing(
   options: { readonly ask?: ((configuredUrl: string) => Promise<RelayTurnOnAnswer>) | undefined; readonly url?: string | undefined } = {},
 ): Promise<RelayPairAnswer> {
   return await mintRelayPairingInOneRun<RelayPairAnswer>(
-    <T>(method: string, input: Record<string, unknown>) => verbs.invoke<T>(method, input),
+    // Only from the person's own command or press: his request.
+    <T>(method: string, input: Record<string, unknown>) => verbs.invoke<T>(method, input, { explicitUserRequest: true }),
     { name, configuredUrl: options.url, ask: options.ask },
   );
 }
@@ -209,6 +210,6 @@ export async function listRelayCodes(verbs: AgentDaemonVerbCaller): Promise<read
 
 /** Revoke one relay code on the host. Throws the verb's error. */
 export async function revokeRelayCode(verbs: AgentDaemonVerbCaller, id: string): Promise<string> {
-  await verbs.invoke('relay.codes.revoke', { id });
+  await verbs.invoke('relay.codes.revoke', { id }, { explicitUserRequest: true });
   return `Relay code ${id} revoked: that device is refused at its next request through the relay. Pair it again on the home network to restore it.`;
 }

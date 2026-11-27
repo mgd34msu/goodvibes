@@ -57,6 +57,7 @@ import {
   type ScopedControlPlaneRecentEvent,
 } from './gateway-utils.js';
 export type { ControlPlaneRecentEvent } from './gateway-utils.js';
+import { createEventReach, type EventReach, type EventReachContext, type EventReachRules } from './event-reach.js';
 
 export interface ControlPlaneGatewayConfig {
   readonly runtimeBus?: RuntimeEventBus | null | undefined;
@@ -105,6 +106,12 @@ export interface ControlPlaneEventStreamOptions {
    * False closes the stream with a `closed` frame naming the reason.
    */
   readonly isAuthorized?: (() => boolean) | undefined;
+  /**
+   * Who opened the stream, as a call names its caller (credential kind, principal, actor, call context): the events it
+   * receives are only those about records this caller may reach (event-reach.ts). Absent while the daemon set rules:
+   * a caller of no credential, who receives only what names something every caller may reach.
+   */
+  readonly reachContext?: EventReachContext | undefined;
 }
 
 /** What a stream or socket closed for a revoked credential tells its client. */
@@ -138,6 +145,8 @@ interface LiveControlPlaneClient {
    * force when the frame is sent, never the one from when it subscribed.
    */
   readonly current?: (() => boolean) | undefined;
+  /** Whether this client may receive an event by what it names (event-reach.ts); null: it reaches everything. */
+  reach: EventReach | null;
 }
 
 const sseEncoder = new TextEncoder();
@@ -303,7 +312,8 @@ export class ControlPlaneGateway {
       .map(toClientDescriptor);
   }
 
-  getSnapshot(): Record<string, unknown> {
+  /** The gateway's state; `reader`: its kept messages and events (and their counts) only those it may reach. */
+  getSnapshot(reader?: EventReachContext): Record<string, unknown> {
     if (!this.isEnabled()) {
       return {
         server: { ...this.serverConfig, enabled: false },
@@ -324,30 +334,40 @@ export class ControlPlaneGateway {
     }
     pruneDisconnectedClientRecords(this.clients);
     const active = [...this.clients.values()].filter((client) => client.connected);
+    const reach = reader ? this.reachOfClient(reader) : null;
     return {
       server: this.serverConfig,
       totals: {
         clients: this.clients.size,
         activeClients: active.length,
-        surfaceMessages: this.recentMessages.length,
-        recentEvents: this._recentEventsCount,
+        surfaceMessages: reach ? this.listSurfaceMessages(Number.MAX_SAFE_INTEGER, reader).length : this.recentMessages.length,
+        recentEvents: reach ? this.listRecentEvents(Number.MAX_SAFE_INTEGER, reader).length : this._recentEventsCount,
         requests: this.requestCount,
         errors: this.errorCount,
       },
       clients: this.listClients(),
-      messages: this.listSurfaceMessages(20),
-      recentEvents: this.listRecentEvents(30),
+      messages: this.listSurfaceMessages(20, reader),
+      recentEvents: this.listRecentEvents(30, reader),
     };
   }
 
-  listSurfaceMessages(limit = 50): ControlPlaneSurfaceMessage[] {
+  /**
+   * The kept surface messages; `reader` (who asks, as a stream names its caller): only those about records it may reach
+   * (event-reach.ts), before the newest `limit` are cut. Absent: every one (the daemon's own reads).
+   */
+  listSurfaceMessages(limit = 50, reader?: EventReachContext): ControlPlaneSurfaceMessage[] {
     if (!this.isEnabled()) return [];
-    return this.recentMessages.slice(0, Math.max(1, limit));
+    const reach = reader ? this.reachOfClient(reader) : null;
+    const kept = reach ? this.recentMessages.filter((message) => reach('surface-message', message)) : this.recentMessages;
+    return kept.slice(0, Math.max(1, limit));
   }
 
-  listRecentEvents(limit = 100): ControlPlaneRecentEvent[] {
+  /** The kept events; `reader`: only those about records it may reach, as a stream's replay is (event-reach.ts). */
+  listRecentEvents(limit = 100, reader?: EventReachContext): ControlPlaneRecentEvent[] {
     if (!this.isEnabled()) return [];
-    return this.recentEvents.slice(0, Math.max(1, limit)).map(stripReplayScope);
+    const reach = reader ? this.reachOfClient(reader) : null;
+    const kept = reach ? this.recentEvents.filter((entry) => reach(entry.event, entry.payload)) : this.recentEvents;
+    return kept.slice(0, Math.max(1, limit)).map(stripReplayScope);
   }
 
   publishSurfaceMessage(input: Omit<ControlPlaneSurfaceMessage, 'id' | 'createdAt'>): ControlPlaneSurfaceMessage {
@@ -372,6 +392,7 @@ export class ControlPlaneGateway {
       if (!canReplayEventToClient(record, { clientKind: client.kind, clientId: client.clientId, routeId: client.routeId, surfaceId: client.surfaceId })) continue;
       if (client.current && !client.current()) continue;
       if (!grantAllowsEvent(client.grant, 'surface-message', Boolean(message.clientId))) continue;
+      if (client.reach && !client.reach('surface-message', message)) continue;
       client.send('surface-message', message, record.id);
     }
     return message;
@@ -384,6 +405,22 @@ export class ControlPlaneGateway {
    */
   setSessionOwnership(ownedBy: ((sessionId: string, principalId: string) => boolean) | null): void {
     this.sessionOwnedBy = ownedBy;
+  }
+
+  /**
+   * The rules of the one check of what a caller may reach (the method catalog's `reachRules`), set once by the daemon:
+   * from then on every client that is not the owner himself receives only events about records it may reach
+   * (event-reach.ts), live and replayed. Unset (a program's own gateway, no daemon): every client as its grant says.
+   */
+  setEventReachRules(rules: () => EventReachRules | undefined): void {
+    this.eventReachRules = rules;
+  }
+
+  private eventReachRules: (() => EventReachRules | undefined) | null = null;
+
+  /** A new client's reach: null (everything) without rules or for the owner himself. */
+  private reachOfClient(context: EventReachContext | undefined): EventReach | null {
+    return this.eventReachRules ? createEventReach(context, this.eventReachRules) : null;
   }
 
   /** Whether a frame belongs to a session `principalId` owns; a frame naming no session belongs to none. */
@@ -418,6 +455,8 @@ export class ControlPlaneGateway {
         && !ownApprovalReadable(client.grant, event)) continue;
       // Domain filter, AND-ed with the grant (null = deliver-all; untagged = delivered).
       if (!clientMayReceiveEventDomain(client.domains, event)) continue;
+      // Only what names records this client may reach (event-reach.ts).
+      if (client.reach && !client.reach(event, payload)) continue;
       client.send(event, payload, record.id);
     }
   }
@@ -558,6 +597,7 @@ export class ControlPlaneGateway {
     // Live ref to the WS subscription set, shared with the liveClient (null = deliver-all).
     const wsDomains = new Set<RuntimeEventDomain>();
     const explicitDomains = (options.domains?.length ?? 0) > 0;
+    const reach = this.reachOfClient(options.reachContext);
     this.clients.set(clientId, clientRecord);
     this.liveClients.set(clientId, {
       clientId,
@@ -570,6 +610,7 @@ export class ControlPlaneGateway {
       principalId: options.principalId,
       close,
       current,
+      reach,
     });
     this.websocketClients.set(clientId, {
       clientId,
@@ -624,7 +665,7 @@ export class ControlPlaneGateway {
     if (!explicitDomains) this.liveClients.get(clientId)!.domains = null;
     // As on the SSE stream: the client is told what its position turned into before any replay
     // lands, and which asked-for domains this credential may not read.
-    const replayable = this.recentEventsFor(grant, options.principalId);
+    const replayable = this.recentEventsFor(grant, options.principalId, reach);
     send('ready', {
       clientId,
       domains: selectedDomains,
@@ -659,13 +700,18 @@ export class ControlPlaneGateway {
     readonly admin?: boolean | undefined;
     readonly label?: string | undefined;
     readonly capabilities?: readonly string[] | undefined;
+    /** Who the client follows as from now on (event-reach.ts); absent: a caller of no credential. */
+    readonly reachContext?: EventReachContext | undefined;
   }): void {
     if (!this.isEnabled()) return;
     const existing = this.clients.get(clientId);
     if (!existing || !this.runtimeBus) return;
     this.regrantClient(clientId, { admin: input.admin === true, scopes: input.scopes ?? [] });
     const liveClient = this.liveClients.get(clientId);
-    if (liveClient) liveClient.principalId = input.principalId;
+    if (liveClient) {
+      liveClient.principalId = input.principalId;
+      liveClient.reach = this.reachOfClient(input.reachContext);
+    }
     const updated: ControlPlaneClientRecord = {
       ...existing,
       label: input.label ?? existing.label,
@@ -712,8 +758,10 @@ export class ControlPlaneGateway {
         // A credential narrowed since the subscription may no longer cover this domain (the narrowing unsubscribes it for later frames).
         if (liveClient.current && (!liveClient.current() || !grantAllowsDomain(liveClient.grant, domain))) return;
         if (grantNeedsOwnedSession(liveClient.grant, domain) && !this.ownsFrame(liveClient.principalId, envelope.sessionId)) return;
-        this.touchWebSocketClient(clientId, { lastEventType: envelope.type });
         const record = this.rememberRuntimeEvent(domain, envelope);
+        // Only what names records this client may reach (event-reach.ts).
+        if (liveClient.reach && !liveClient.reach(domain, record.payload)) return;
+        this.touchWebSocketClient(clientId, { lastEventType: envelope.type });
         liveClient.send(domain, this.liveRuntimePayload(record, wsClient.streamBases), record.id);
       });
       wsClient.unsubscribers.set(domain, unsubscribe);
@@ -888,6 +936,8 @@ export class ControlPlaneGateway {
 
     // One predicate for live delivery AND replay, so they cannot drift apart.
     const scoped = createScopedSessionDelivery(options.sessionScopedDelivery === true ? options.sessionId : undefined);
+    // What this caller may follow: only events about records it may reach (event-reach.ts), live and replayed.
+    const reach = this.reachOfClient(options.reachContext);
     let teardown = (): void => {};
     // HWM 256 (default 1 drops handshake/replay chunks before the consumer pulls).
     const stream = new ReadableStream<Uint8Array>({
@@ -929,6 +979,8 @@ export class ControlPlaneGateway {
         const unsubs = selectedDomains.map((domain) => this.runtimeBus!.onDomain(domain, (envelope) => {
           if (!scoped.mayDeliver(envelope.sessionId)) return;
           if (grantNeedsOwnedSession(grant, domain) && !this.ownsFrame(options.principalId, envelope.sessionId)) return;
+          const record = this.rememberRuntimeEvent(domain, envelope);
+          if (reach && !reach(domain, record.payload)) return;
           const updated: ControlPlaneClientRecord = {
             ...clientRecord,
             lastSeenAt: Date.now(),
@@ -938,7 +990,6 @@ export class ControlPlaneGateway {
             },
           };
           this.clients.set(clientId, updated);
-          const record = this.rememberRuntimeEvent(domain, envelope);
           send(domain, this.liveRuntimePayload(record, streamBases), record.id);
         }));
         // Opt-in narrowing (null=deliver-all, never the DEFAULT_DOMAINS fallback); reused below for replay.
@@ -953,6 +1004,7 @@ export class ControlPlaneGateway {
           send,
           principalId: options.principalId,
           close: (reason) => closeFromDaemon(reason),
+          reach,
         });
         emitStreamSubscriberConnected(this.runtimeBus!, evtCtx, {
           streamId: clientId,
@@ -1028,7 +1080,7 @@ export class ControlPlaneGateway {
         // A resuming client is told what its position turned into BEFORE any
         // replay lands, so "I asked to resume and received nothing" is a stated
         // outcome rather than something it has to infer from silence.
-        const replayable = this.recentEventsFor(grant, options.principalId);
+        const replayable = this.recentEventsFor(grant, options.principalId, reach);
         rawSend('ready', {
           clientId,
           domains: selectedDomains,
@@ -1073,8 +1125,10 @@ export class ControlPlaneGateway {
   }
 
   /** The replay ring cut to what `grant` covers; an event addressed to one client keeps its own replay scope check. */
-  private recentEventsFor(grant: EventGrant, principalId?: string): ScopedControlPlaneRecentEvent[] {
-    const events = this.recentEvents;
+  private recentEventsFor(grant: EventGrant, principalId?: string, reach?: EventReach | null): ScopedControlPlaneRecentEvent[] {
+    // Replay passes the same reach as live delivery (event-reach.ts): a reconnect never brings back what the live
+    // filter keeps out.
+    const events = reach ? this.recentEvents.filter((entry) => reach(entry.event, entry.payload)) : this.recentEvents;
     if (grant.all) return events;
     return events.filter((entry) => grantAllowsEvent(grant, entry.event, Boolean(entry.replayScope?.clientId || entry.replayScope?.clientIdPrefix))
       && (!grantNeedsOwnedSession(grant, entry.event) || this.ownsFrame(principalId, ownedFrameSessionId(entry.payload))

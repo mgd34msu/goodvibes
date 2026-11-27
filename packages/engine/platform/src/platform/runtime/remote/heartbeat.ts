@@ -38,13 +38,14 @@ export function deriveRemoteHeartbeat(
       status: 'stale',
       lastSeenAt,
       ageMs,
-      detail: `the connection is ${state}, so contact with the runner was lost`,
+      detail: state === 'degraded' ? 'contact with the runner was lost; it may come back' : 'contact with the runner was lost; it is being reconnected',
     };
   }
+  // Said to a person: what the runner is doing, never the transport's own state names.
   return {
     status: 'fresh',
     lastSeenAt,
     ageMs,
-    detail: `the connection is ${state} and has not reported lost contact`,
+    detail: state === 'syncing' ? 'it is working and in contact' : state === 'connected' ? 'it is connected and in contact' : 'it is starting',
   };
 }

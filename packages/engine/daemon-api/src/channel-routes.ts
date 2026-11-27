@@ -35,6 +35,8 @@ const POLICY_BOOLEAN_FIELDS = [
   'allowThreadMessages',
   'allowTextCommandsWithoutMention',
   'open',
+  // "Treat my own messages here as me": the owner's own messages in a conversation proven his alone act as him.
+  'ownMessagesAsOwner',
 ] as const;
 const POLICY_MODE_FIELDS = ['dmPolicy', 'groupPolicy'] as const;
 const POLICY_LIST_FIELDS = ['allowlistUserIds', 'allowlistChannelIds', 'allowlistGroupIds', 'allowedCommands'] as const;
@@ -50,6 +52,21 @@ function channelActionRefusalResponse(outcome: Exclude<ChannelActionOutcomeLike,
   return jsonErrorResponse(
     { error: refusal.reason, code: refusal.code, state: refusal.state, next: refusal.next, status },
     { status },
+  );
+}
+
+/**
+ * "Treat my own messages here as me" turned on for a channel kind it does not exist for (no sender the channel
+ * authenticates, or no conversation provable the owner's alone: ntfy, a webhook, phone texts and the rest), refused
+ * through every door that writes a policy; turning it off is never refused.
+ */
+function ownMessagesNotHere(context: DaemonChannelRouteContext, surface: string, fields: { readonly ownMessagesAsOwner?: boolean | undefined }): Response | null {
+  if (fields.ownMessagesAsOwner !== true) return null;
+  const why = context.ownMessagesRefusal ? context.ownMessagesRefusal(surface) : `"Treat my own messages here as me" cannot be checked for ${surface} by this daemon`;
+  if (why === undefined) return null;
+  return jsonErrorResponse(
+    { error: `${why}. Nothing was changed.`, code: 'OWN_MESSAGES_NOT_HERE', state: 'the policy is unchanged', next: ['Every message on this channel stays someone else\'s input: it is read and answered, and changes nothing.'] },
+    { status: 409 },
   );
 }
 
@@ -175,9 +192,8 @@ function readPolicyFields(source: JsonRecord, label: string, keys: {
   return { ...booleans, ...modes, ...lists };
 }
 
-// Shared by patchChannelPolicy and postChannelPolicy. Excludes `metadata` so
-// each caller can place it after its own extra fields (postChannelPolicy
-// inserts `groupPolicies` between the fields below and `metadata`).
+// The fields of postChannelPolicy (POST and PATCH, one method). Excludes `metadata` so the
+// caller can place it after `groupPolicies`.
 function buildChannelPolicyPatchFields(body: JsonRecord, extraKeys: readonly string[] = []): PolicyFields | Response {
   const unknown = refuseUnknownKeys(body, '', new Set([...POLICY_KEYS, ...extraKeys]));
   if (unknown) return unknown;
@@ -411,26 +427,30 @@ export function createDaemonChannelRouteHandlers(
         : jsonErrorResponse({ error: 'Unknown channel allowlist surface' }, { status: 404 });
     },
     getChannelPolicies: () => Response.json({ policies: context.channelPolicy.listPolicies() }),
-    patchChannelPolicy: async (surface, req) => {
-      const admin = context.requireAdmin(req);
-      if (admin) return admin;
-      const body = await context.parseJsonBody(req);
-      if (body instanceof Response) return body;
-      const fields = buildChannelPolicyPatchFields(body);
-      if (fields instanceof Response) return fields;
-      const updated = await context.channelPolicy.upsertPolicy(surface as ChannelSurface, {
-        ...fields,
-        ...(isJsonRecord(body.metadata) ? { metadata: body.metadata } : {}),
-      });
-      return updated === null ? unknownPolicySurface(surface) : Response.json(updated);
-    },
+    // POST and PATCH /api/channels/policies/{surface}: one method (`channels.policies.update`), decided where the method is.
     postChannelPolicy: async (surface, req) => {
       const admin = context.requireAdmin(req);
       if (admin) return admin;
       const body = await context.parseJsonBody(req);
       if (body instanceof Response) return body;
-      const fields = buildChannelPolicyPatchFields(body, ['groupPolicies']);
+      const fields = buildChannelPolicyPatchFields(body, ['groupPolicies', 'project']);
       if (fields instanceof Response) return fields;
+      const ownMessages = ownMessagesNotHere(context, surface, fields);
+      if (ownMessages) return ownMessages;
+      // "Project for this channel": a registered project's folder, or empty (or `none`) for none.
+      let project: { readonly project: string | undefined } | undefined;
+      if (body.project !== undefined) {
+        if (typeof body.project !== 'string') return invalidPolicyField('project', 'the folder of a registered project, or empty for none');
+        const folder = body.project.trim() === 'none' ? '' : body.project.trim();
+        if (folder) {
+          const why = context.channelProjectRefusal ? context.channelProjectRefusal(folder) : 'no project can be chosen for a channel on this daemon';
+          if (why !== undefined) {
+            return jsonErrorResponse({ error: `${why}. Nothing was changed.`, code: 'CHANNEL_PROJECT_NOT_REGISTERED', state: 'the policy is unchanged',
+              next: ['Choose one of the registered projects for this channel, or none.'] }, { status: 409 });
+          }
+        }
+        project = { project: folder || undefined };
+      }
       let groupPolicies: ChannelGroupPolicyInput[] | undefined;
       if (body.groupPolicies !== undefined) {
         if (!Array.isArray(body.groupPolicies)) return invalidPolicyField('groupPolicies', 'an array of group policy objects');
@@ -463,6 +483,7 @@ export function createDaemonChannelRouteHandlers(
       }
       const updated = await context.channelPolicy.upsertPolicy(surface as ChannelSurface, {
         ...fields,
+        ...(project ?? {}),
         ...(groupPolicies ? { groupPolicies } : {}),
         ...(isJsonRecord(body.metadata) ? { metadata: body.metadata } : {}),
       });
@@ -480,8 +501,15 @@ export function createDaemonChannelRouteHandlers(
     // rather than whether a credential is present, and flattening the two
     // would either lie or dilute the channel model. A discriminated union is
     // what the `kind` field was declared for.
-    getChannelStatus: () => context.channelPlugins.listStatus().then((channels) => {
+    getChannelStatus: () => context.channelPlugins.listStatus().then((listed) => {
       const inboundMail = context.inboundMailHealth?.() ?? null;
+      // Each channel's project ("Project for this channel") in its metadata (an open record in the contract), so its row
+      // opens that control on what is chosen now.
+      const projects = new Map(context.channelPolicy.listPolicies().flatMap((policy) => (policy.project ? [[policy.surface, policy.project] as const] : [])));
+      const channels = listed.map((entry) => {
+        const project = projects.get(entry.surface);
+        return project ? { ...entry, metadata: { ...entry.metadata, project } } : entry;
+      });
       return Response.json({
         channels,
         health: [

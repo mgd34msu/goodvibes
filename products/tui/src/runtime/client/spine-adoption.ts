@@ -7,7 +7,7 @@
  * The platform's `@goodvibes/engine/platform/platform/runtime/client` now owns WHEN the
  * wire comes up and goes down: idempotent per base URL, torn down on a
  * change, the one-time legacy-store fold. This module owns WHAT the wire is,
- * this terminal's own `createDaemonHttpTransport` + `createSessionsClientSpineTransport` +
+ * this terminal's own `createDaemonHttpTransport` + `createSessionSpineRestTransport` +
  * `createTuiMemorySpineTransport`, injected as the platform's `connect(baseUrl,
  * authToken)` callback, because building the actual HTTP client is the same
  * connection-resolution concern the verb caller already keeps product-side.
@@ -48,10 +48,10 @@
  */
 import { parseDaemonOrigin } from '@goodvibes/engine/platform/platform/config/control-plane-base-url';
 import { createDaemonHttpTransport, type HostServiceStatus, type DaemonHttpTransportOptions } from '@/runtime/index.ts';
-import { createSessionInputChangeSubscriber, createSpineAdoptionSync as createPlatformSpineAdoptionSync } from '@goodvibes/engine/platform/platform/runtime/client';
+import { createSessionInputChangeSubscriber, createSpineAdoptionSync as createPlatformSpineAdoptionSync, programFetch } from '@goodvibes/engine/platform/platform/runtime/client';
 import type { SpineAdoptionOptions as PlatformSpineAdoptionOptions } from '@goodvibes/engine/platform/platform/runtime/client';
 
-import { createSessionsClientSpineTransport, type SpineSessionsClient } from '@goodvibes/engine/platform/platform/runtime/session-spine';
+import { createSessionSpineRestTransport } from '@goodvibes/engine/platform/platform/runtime/session-spine';
 import { createTuiMemorySpineTransport } from '../memory-spine-transport.ts';
 
 /** This module's own options: the platform's shape minus the two fields it builds itself. */
@@ -78,14 +78,16 @@ export function createSpineAdoptionSync(
     // moment it is handed a base URL.
     activation: 'adopt-on-status',
     connect: (baseUrl, authToken) => {
-      const httpTransport = createDaemonHttpTransport({ baseUrl, authToken, ...retryHooks });
-      const sessionsClient: SpineSessionsClient = {
-        register: (input) => httpTransport.operator.sessions.register(input),
-        close: (sessionId) => httpTransport.operator.sessions.close(sessionId),
-      };
+      // Its calls and its event stream with this program's registration: the operator token alone is a script on this
+      // machine and reaches none of the owner's sessions (their inputs included).
+      const httpTransport = createDaemonHttpTransport({ baseUrl, authToken, fetchImpl: programFetch(fetch), ...retryHooks });
       return {
+        // The conversation is registered with this program's own registration (the session spine's REST transport sends
+        // the call context and the key the daemon issued this program, as the Agent's does): the daemon then knows the
+        // conversation as this program's, so a model's delegation from it is decided under the owner's mode
+        // (control-plane/routes/capabilities.ts conversationDelegation), not put to him as a script's.
         // Pinned to this daemon: a close owed to it is sent only through a transport for it.
-        sessionTransport: { ...createSessionsClientSpineTransport(sessionsClient), targetId: () => parseDaemonOrigin(baseUrl)?.baseUrl ?? baseUrl },
+        sessionTransport: { ...createSessionSpineRestTransport({ resolveConnection: () => ({ baseUrl, token: authToken || null }) }), targetId: () => parseDaemonOrigin(baseUrl)?.baseUrl ?? baseUrl },
         inboundInputs: {
           listInputs: (sessionId, opts) => httpTransport.operator.sessions.inputsPage(sessionId, opts),
           // A renewal sends the claim's token (its epoch), so a held input stays this surface's while it waits.

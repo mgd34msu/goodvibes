@@ -350,7 +350,10 @@ export const builtinGatewayChannelMethodDescriptors: readonly GatewayMethodDescr
     title: 'Update Channel Policy',
     description: 'Update ingress policy configuration for a channel surface. `open` makes it a shared channel: while every allowlist is empty, every sender is admitted and no owner claim is raised (off by default, so the first unknown sender raises a claim the owner accepts or declines). Anyone admitted who is not the channel\'s owner talks as a guest: their turn may read and answer, and every change it asks for is put to the owner.',
     category: 'channels',
-    http: { method: 'POST', path: '/api/channels/policies/{surface}' },
+    // PATCH at the same path is this same method (one route serves both), so every door is decided here.
+    http: { method: 'POST', path: '/api/channels/policies/{surface}', alsoAt: ['PATCH'] },
+    // The channel's project: the folder its conversations' turns work in (empty for none).
+    workFolders: ['project'],
     inputSchema: bodyEnvelopeSchema({
       surface: STRING_SCHEMA,
       enabled: BOOLEAN_SCHEMA,
@@ -362,6 +365,9 @@ export const builtinGatewayChannelMethodDescriptors: readonly GatewayMethodDescr
       dmPolicy: STRING_SCHEMA,
       groupPolicy: STRING_SCHEMA,
       allowTextCommandsWithoutMention: BOOLEAN_SCHEMA,
+      ownMessagesAsOwner: BOOLEAN_SCHEMA,
+      // "Project for this channel": a registered project's folder; empty for none.
+      project: STRING_SCHEMA,
       allowlistUserIds: arraySchema(STRING_SCHEMA),
       allowlistChannelIds: arraySchema(STRING_SCHEMA),
       allowlistGroupIds: arraySchema(STRING_SCHEMA),
@@ -428,6 +434,8 @@ export const builtinGatewayChannelMethodDescriptors: readonly GatewayMethodDescr
     effects: ['watchers.administer'],
     http: { method: 'POST', path: '/api/watchers' },
     events: [runtimeEventId('watchers')],
+    // A filesystem watcher observes this file on the daemon's disk (control-plane/caller-paths.ts).
+    daemonFiles: ['path'],
     inputSchema: bodyEnvelopeSchema({
       id: STRING_SCHEMA,
       label: STRING_SCHEMA,
@@ -454,6 +462,8 @@ export const builtinGatewayChannelMethodDescriptors: readonly GatewayMethodDescr
     effects: ['watchers.administer'],
     http: { method: 'PATCH', path: '/api/watchers/{watcherId}' },
     events: [runtimeEventId('watchers')],
+    // A filesystem watcher observes this file on the daemon's disk (control-plane/caller-paths.ts).
+    daemonFiles: ['path'],
     inputSchema: bodyEnvelopeSchema({
       watcherId: STRING_SCHEMA,
       label: STRING_SCHEMA,

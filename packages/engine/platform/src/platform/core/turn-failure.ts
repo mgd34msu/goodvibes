@@ -205,7 +205,7 @@ export function readTurnFailure(input: TurnFailureInput): TurnFailureReading {
     case 'no-provider':
     case 'no-model':
       next.push({ action: 'choose-model', label: 'choose a model' });
-      also = 'or run /setup';
+      also = 'or set it up in the menu: System, Setup';
       break;
     case 'daemon-unreachable':
       next.push({ action: 'start-daemon', label: input.startCommand ?? 'goodvibes-daemon' });

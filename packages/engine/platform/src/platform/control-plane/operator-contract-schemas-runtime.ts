@@ -184,6 +184,8 @@ export const COMPANION_CHAT_SESSION_SCHEMA = objectSchema({
   systemPrompt: nullableSchema(STRING_SCHEMA),
   /** The project folder the chat works in, when one was chosen. */
   project: STRING_SCHEMA,
+  /** The principal that made the chat; with its project, who it belongs to. Absent: the owner's only. */
+  createdBy: STRING_SCHEMA,
   status: COMPANION_CHAT_SESSION_STATUS_SCHEMA,
   createdAt: NUMBER_SCHEMA,
   updatedAt: NUMBER_SCHEMA,
@@ -446,6 +448,8 @@ export const TASK_CREATE_INPUT_SCHEMA = objectSchema({
   displayName: STRING_SCHEMA,
   title: STRING_SCHEMA,
   metadata: METADATA_SCHEMA,
+  // The project the agent works in (its folder's full path); the caller must be allowed to name it.
+  workingDirectory: STRING_SCHEMA,
 }, ['task'], { additionalProperties: true });
 
 export const TASK_CREATE_OUTPUT_SCHEMA = objectSchema({

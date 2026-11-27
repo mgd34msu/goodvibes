@@ -140,7 +140,7 @@ export interface GoogleCalendarHost {
  * they present the Agent's ordinary credential for the host
  * (agent-call-credential.ts), and the daemon admits and identifies them as
  * the paired Agent's. Null while calendar work stays in this process
- * (`daemon.enabled` off in the Agent's own process, or no usable credential).
+ * (no usable credential).
  * One config read and one credential lookup per call.
  */
 export function connectedHostGoogleCalendar(selection: ConnectedHostSelection): () => GoogleCalendarHost | null {
@@ -150,9 +150,8 @@ export function connectedHostGoogleCalendar(selection: ConnectedHostSelection): 
     createEvent: (input) => remote.invoke('calendar.events.create', input),
     failureOf: (error) => isHostFailure(error) ? { message: error.message, applied: error.applied } : undefined,
   };
+  // Every program uses the daemon ("Use the background daemon" is retired): the host answers whenever it can be reached.
   return () => {
-    // In a turn the daemon hosts, the daemon is the host: there is no daemon to adopt.
-    if (!selection.inProcess && selection.configManager.get('daemon.enabled') !== true) return null;
     return resolveConnectedHost(selection).unavailable === undefined ? host : null;
   };
 }

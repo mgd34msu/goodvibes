@@ -161,6 +161,18 @@ export function artifactReferences(contractId: string, paths: readonly string[])
   return [{ kind: 'artifact' as const, ref: `artifact-set:${contractId}:${sorted.length} files`, digest: hashState(sorted as unknown as EntryType) }];
 }
 
+/**
+ * The state the unit judge actually sends for a unit (`judge` in @goodvibes/judgment patterns/judge.ts): the goal,
+ * the judged criteria's texts in order, the output and the evidence of `judgeState`. The judged criteria sit in the
+ * state beside the goal, so an expectation built from `judgeState` alone never equalled what was recorded and every
+ * settlement with a decision model failed its provenance check.
+ */
+function unitJudgeState(unit: ContractUnit, evidence: Parameters<typeof judgeState>[1]): Record<string, unknown> {
+  const judged = judgeState(unit, evidence);
+  return JSON.parse(JSON.stringify({ goal: unit.goal, criteria: unit.criteria.filter(criterion => criterion.disposition === 'judged').map(criterion => criterion.text),
+    output: judged['output'], ...(judged['evidence'] === undefined ? {} : { evidence: judged['evidence'] }) })) as Record<string, unknown>;
+}
+
 export interface VerifiedNativeWorkExecution {
   readonly attestation: NativeWorkAttestation;
   readonly report: string;
@@ -475,7 +487,7 @@ export async function verifyNativeWorkExecution(options: {
   options.signal.throwIfAborted();
   const decisionReferences = result.check.decisionIds.map((id, index): WorkEvidenceReference => {
     const entry = options.decisionLog.get(id); const site = index === 0 ? CHECK_SITES.judge : CHECK_SITES.quality;
-    const expected = { ...(index === 0 ? judgeState(unit, evidence) : qualityState(unit, evidence)), originalSource } as unknown as EntryType;
+    const expected = { ...(index === 0 ? unitJudgeState(unit, evidence) : qualityState(unit, evidence)), originalSource } as unknown as EntryType;
     const observed = states.get(site);
     if (!entry || !observed || entry.id !== id || entry.status !== 'answered') throw new Error('Native decision provenance is missing or mismatched');
     const savedStateHash = entry.stateHash;

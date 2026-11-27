@@ -2,7 +2,7 @@ import { createProfilePickerRenderer } from '@goodvibes/engine/terminal-shell/re
 import { renderProfilePickerStatePackageText } from '../input/profile-picker-modal.ts';
 const renderer = createProfilePickerRenderer({
  hints:[['↑↓','move'],['⏎','load']],canDelete:false,
- emptyHint:'Open Agent Workspace -> Agent homes to create and manage isolated Agent profile homes.',
+ emptyHint:'Separate Agent homes are made and managed on the Agent homes tab of Memory and knowledge, in the menu (Ctrl+G then m).',
  description:'display, provider, behavior',note:'Agent profiles: Memory and knowledge, in the menu', trackVisibleRows:true,mouseNavigation:false,
 });
 export const renderProfilePickerModal = renderer.renderProfilePickerModal;

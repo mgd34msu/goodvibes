@@ -56,7 +56,7 @@ import { healthPolicy } from './health-runtime.ts';
 import { releaseOf } from './product-runtime.ts';
 import { startupOf } from './local-setup.ts';
 import { voiceWakeOf } from './experience-runtime.ts';
-import { helpServicesOf } from './shell-core.ts';
+import { helpOfSlot, provideSessionCapabilities } from './session-capability-slots.ts';
 import { DEEP_LINK_SURFACES, buildDeepLink } from './deep-link.ts';
 import { setupTopicsOf } from './onboarding-runtime.ts';
 import { writeSetting, type SettingWriteContext } from '@goodvibes/engine/terminal-shell/settings-writes';
@@ -298,7 +298,7 @@ export function systemSessionOf(ctx: CommandContext): NonNullable<SessionCapabil
         getSharedNotificationFeed().recordNotice({ domain: notice.domain ?? 'payments', title: notice.title, body: notice.body, timestamp: notice.timestamp, eventKey: notice.key, level: 'info' });
       },
     },
-    help: helpServicesOf(ctx),
+    help: helpOfSlot(ctx),
     // The setup forms (builtin/system-program.ts setup.<topic>).
     setupTopic: setupTopicsOf(ctx),
   };
@@ -326,3 +326,6 @@ function conversationControlsOf(ctx: CommandContext): Omit<ConversationControlSe
 function ownerInboxOf(shellPaths: NonNullable<CommandContext['workspace']['shellPaths']>, ctx: CommandContext) {
   return terminalOwnerInbox({ configManager: ctx.platform.configManager, homeDirectory: () => shellPaths.homeDirectory, shellPaths });
 }
+
+// The commands that use these read them through the slots, never by importing this file back (session-capability-slots.ts).
+provideSessionCapabilities(sessionCapabilityServices, systemSessionOf);

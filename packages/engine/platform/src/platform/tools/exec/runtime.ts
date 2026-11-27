@@ -1207,6 +1207,11 @@ export function isCapturedExecTool(tool: Tool, authority: CapturedExecAuthority[
   return capturedExecTools.get(tool) === authority;
 }
 
+/** Whether this tool is a captured step's own exec (any authority): a wrapper must leave it as built, or it stops working. */
+export function isAnyCapturedExecTool(tool: Tool): boolean {
+  return capturedExecTools.has(tool);
+}
+
 /** What a composition states about its exec tool. */
 export interface ExecToolOptions {
   readonly capturedInput?: CapturedExecAuthority | undefined;
@@ -1332,6 +1337,11 @@ export function createExecTool(
         + ' expectation-checking, until-pattern, and pre-command file operations.',
       parameters: EXEC_TOOL_SCHEMA,
       sideEffects: ['exec', 'read_fs', 'write_fs'],
+      // In a turn on someone else's input its commands run inside the real sandbox boundary or not at all
+      // (containmentForTurn, applied at every command and file operation below; a captured run is that boundary). Only
+      // where such a boundary exists (a captured run, or the sandbox wired and available on this host) is that turn's
+      // command admitted to be decided; with none it is refused at admission, before anyone is asked (gate/classify.ts).
+      heldToBoundary: options.capturedInput !== undefined || (options.sandbox?.featureEnabled === true && options.sandbox.availability.available === true),
       concurrency: 'serial',
       supportsProgress: true,
       supportsStreamingOutput: true,

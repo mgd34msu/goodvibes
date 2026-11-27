@@ -4,7 +4,7 @@ Generated from the synced GoodVibes operator contract artifact.
 
 ## Summary
 
-- Methods: `678`
+- Methods: `679`
 - Events: `37`
 - Auth modes: `shared-bearer`, `session-login`
 - HTTP status path: `/status`
@@ -1181,6 +1181,9 @@ Approve a pending approval. Optionally pass selectedHunks (edit-tool approvals o
                   },
                   "releasedAt": {
                     "type": "number"
+                  },
+                  "process": {
+                    "type": "string"
                   }
                 },
                 "required": [
@@ -2288,6 +2291,9 @@ Cancel a pending approval; send `expectedRevision`, the `revision` you read. An 
                   },
                   "releasedAt": {
                     "type": "number"
+                  },
+                  "process": {
+                    "type": "string"
                   }
                 },
                 "required": [
@@ -3390,6 +3396,9 @@ Claim a pending approval for operator handling. A claim is advisory: it shows wh
                   },
                   "releasedAt": {
                     "type": "number"
+                  },
+                  "process": {
+                    "type": "string"
                   }
                 },
                 "required": [
@@ -4512,6 +4521,9 @@ Deny a pending approval. rememberTier generalizes the denial (a generalizing tie
                   },
                   "releasedAt": {
                     "type": "number"
+                  },
+                  "process": {
+                    "type": "string"
                   }
                 },
                 "required": [
@@ -5750,6 +5762,9 @@ Return pending and historical approval records, newest 50. Pass `approvalId` to 
                     },
                     "releasedAt": {
                       "type": "number"
+                    },
+                    "process": {
+                      "type": "string"
                     }
                   },
                   "required": [
@@ -7454,6 +7469,9 @@ Raise a permission ask INTO the shared broker from a surface that is not in the 
                   },
                   "releasedAt": {
                     "type": "number"
+                  },
+                  "process": {
+                    "type": "string"
                   }
                 },
                 "required": [
@@ -12802,7 +12820,7 @@ Return local auth posture, users, and sessions.
 
 #### `local_auth.users.create`
 
-Create a local auth user. roles: omitted creates an admin. scopes: the operator scopes the user holds (for example read:sessions, read:transcripts and write:sessions for someone who only chats); omitted, the user holds its role's default set. A narrowed user is not an admin, whatever its roles.
+Create a local auth user. roles: omitted creates an admin. scopes: the operator scopes the user holds (for example read:sessions and write:sessions for someone who only chats: she reads her own chats under them; read:transcripts adds anyone else's); omitted, the user holds its role's default set. A narrowed user is not an admin, whatever its roles.
 
 - Title: `Create Local Auth User`
 - Source: `builtin`
@@ -13795,6 +13813,9 @@ Process automation jobs queued for the next heartbeat.
               },
               "lightContext": {
                 "type": "boolean"
+              },
+              "workingDirectory": {
+                "type": "string"
               }
             },
             "required": [
@@ -14574,7 +14595,7 @@ Return the automation integration snapshot.
 
 #### `automation.jobs.create`
 
-Create a durable automation job. An optional id keeps the job under that id and makes the create repeatable: when a job with that id already exists it is returned unchanged.
+Create a durable automation job. An optional id makes the create repeatable in its project: the job is kept under an id made from that id and the project (`<id>-<8 hex>`, the same for every create of it in that project), and when this project already has that job it is returned unchanged. Another project's job of the same id is never returned, and the id given says nothing about it.
 
 - Title: `Create Automation Job`
 - Source: `builtin`
@@ -15512,6 +15533,9 @@ Create a durable automation job. An optional id keeps the job under that id and 
         },
         "lightContext": {
           "type": "boolean"
+        },
+        "workingDirectory": {
+          "type": "string"
         }
       },
       "required": [
@@ -16508,6 +16532,9 @@ Return automation jobs as { items, hasMore, nextCursor?, jobs } (jobs repeats it
               },
               "lightContext": {
                 "type": "boolean"
+              },
+              "workingDirectory": {
+                "type": "string"
               }
             },
             "required": [
@@ -17308,6 +17335,9 @@ Return automation jobs as { items, hasMore, nextCursor?, jobs } (jobs repeats it
               },
               "lightContext": {
                 "type": "boolean"
+              },
+              "workingDirectory": {
+                "type": "string"
               }
             },
             "required": [
@@ -18688,6 +18718,9 @@ Update a durable automation job. (Renamed from automation.jobs.patch in the 1.0.
         },
         "lightContext": {
           "type": "boolean"
+        },
+        "workingDirectory": {
+          "type": "string"
         }
       },
       "required": [
@@ -19601,6 +19634,9 @@ Cancel an active automation run.
             },
             "lightContext": {
               "type": "boolean"
+            },
+            "workingDirectory": {
+              "type": "string"
             }
           },
           "required": [
@@ -20589,6 +20625,9 @@ Return a single automation run record.
             },
             "lightContext": {
               "type": "boolean"
+            },
+            "workingDirectory": {
+              "type": "string"
             }
           },
           "required": [
@@ -21681,6 +21720,9 @@ Return automation run history as { items, hasMore, nextCursor?, runs } (runs rep
               },
               "lightContext": {
                 "type": "boolean"
+              },
+              "workingDirectory": {
+                "type": "string"
               }
             },
             "required": [
@@ -22633,6 +22675,9 @@ Return automation run history as { items, hasMore, nextCursor?, runs } (runs rep
               },
               "lightContext": {
                 "type": "boolean"
+              },
+              "workingDirectory": {
+                "type": "string"
               }
             },
             "required": [
@@ -23624,6 +23669,9 @@ Retry a completed or failed automation run.
             },
             "lightContext": {
               "type": "boolean"
+            },
+            "workingDirectory": {
+              "type": "string"
             }
           },
           "required": [
@@ -24970,6 +25018,9 @@ Create a schedule record.
         },
         "lightContext": {
           "type": "boolean"
+        },
+        "workingDirectory": {
+          "type": "string"
         }
       },
       "required": [
@@ -25849,6 +25900,9 @@ Return schedule records.
               },
               "lightContext": {
                 "type": "boolean"
+              },
+              "workingDirectory": {
+                "type": "string"
               }
             },
             "required": [
@@ -26726,6 +26780,9 @@ Return schedule records.
               },
               "lightContext": {
                 "type": "boolean"
+              },
+              "workingDirectory": {
+                "type": "string"
               }
             },
             "required": [
@@ -32168,7 +32225,19 @@ Runs one capability by id with its inputs (names and values as capabilities.find
     "sessionId": {
       "type": "string"
     },
+    "everyProject": {
+      "type": "boolean"
+    },
     "approvalId": {
+      "type": "string"
+    },
+    "delegatedFrom": {
+      "type": "string",
+      "enum": [
+        "conversation"
+      ]
+    },
+    "otherParty": {
       "type": "string"
     }
   },
@@ -34445,6 +34514,12 @@ Apply allowlist additions or removals for a channel surface.
         },
         "open": {
           "type": "boolean"
+        },
+        "ownMessagesAsOwner": {
+          "type": "boolean"
+        },
+        "project": {
+          "type": "string"
         },
         "updatedAt": {
           "type": "number"
@@ -37061,6 +37136,12 @@ Return ingress policy configuration for channels.
           "open": {
             "type": "boolean"
           },
+          "ownMessagesAsOwner": {
+            "type": "boolean"
+          },
+          "project": {
+            "type": "string"
+          },
           "updatedAt": {
             "type": "number"
           },
@@ -37170,6 +37251,12 @@ Update ingress policy configuration for a channel surface. `open` makes it a sha
     },
     "allowTextCommandsWithoutMention": {
       "type": "boolean"
+    },
+    "ownMessagesAsOwner": {
+      "type": "boolean"
+    },
+    "project": {
+      "type": "string"
     },
     "allowlistUserIds": {
       "type": "array",
@@ -37469,6 +37556,12 @@ Update ingress policy configuration for a channel surface. `open` makes it a sha
     },
     "open": {
       "type": "boolean"
+    },
+    "ownMessagesAsOwner": {
+      "type": "boolean"
+    },
+    "project": {
+      "type": "string"
     },
     "updatedAt": {
       "type": "number"
@@ -40893,7 +40986,7 @@ Return workspace checkpoints (whole-workspace filesystem snapshots), newest firs
 
 #### `checkpoints.restore`
 
-DESTRUCTIVE: restore the workspace to the state captured by a checkpoint (git-backed workspace rewrite). Refuses to run unconfirmed: pass confirm:true to execute immediately, OR a confirmToken from checkpoints.restorePreview (bound to the checkpoint and its workspace; another one is refused with TARGET_CHANGED). An unconfirmed call returns a structured refusal (result:null, refused:true, refusal naming both options), not an error. An unknown/gc'd checkpoint id (once confirmed) is an honest 404, not a silent no-op.
+DESTRUCTIVE: restore the workspace to the state captured by a checkpoint (git-backed workspace rewrite). Refuses to run unconfirmed: pass confirm:true to execute immediately, OR a confirmToken from checkpoints.restorePreview (bound to the checkpoint, its workspace and the other sessions' changes it showed; another one, or another session's change made since, is refused with TARGET_CHANGED). A restore that would take back changes other sessions made after the checkpoint runs with confirm:true only when takeBack names each of those sessions; otherwise it is refused (refusal.otherSessions names them and their files) and nothing changes. Those sessions are told in their conversations. An unconfirmed call returns a structured refusal (result:null, refused:true, refusal naming the options), not an error. An unknown/gc'd checkpoint id (once confirmed) is an honest 404, not a silent no-op.
 
 - Title: `Restore Workspace Checkpoint`
 - Source: `builtin`
@@ -40927,6 +41020,15 @@ DESTRUCTIVE: restore the workspace to the state captured by a checkpoint (git-ba
       "type": "boolean"
     },
     "confirmToken": {
+      "type": "string"
+    },
+    "takeBack": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      }
+    },
+    "sessionId": {
       "type": "string"
     }
   },
@@ -41028,6 +41130,35 @@ DESTRUCTIVE: restore the workspace to the state captured by a checkpoint (git-ba
               "items": {
                 "type": "string"
               }
+            },
+            "otherSessions": {
+              "type": "array",
+              "items": {
+                "type": "object",
+                "properties": {
+                  "sessionId": {
+                    "type": "string"
+                  },
+                  "agentIds": {
+                    "type": "array",
+                    "items": {
+                      "type": "string"
+                    }
+                  },
+                  "files": {
+                    "type": "array",
+                    "items": {
+                      "type": "string"
+                    }
+                  }
+                },
+                "required": [
+                  "sessionId",
+                  "agentIds",
+                  "files"
+                ],
+                "additionalProperties": false
+              }
             }
           },
           "required": [
@@ -41055,7 +41186,7 @@ DESTRUCTIVE: restore the workspace to the state captured by a checkpoint (git-ba
 
 #### `checkpoints.restorePreview`
 
-Read-only: preview what a checkpoints.restore of this checkpoint would change (label, affected-path count + sample, diffstat) and mint a short-lived (~2 min), single-use confirmToken that authorizes the matching restore. No workspace mutation. An unknown/gc'd checkpoint id is an honest 404.
+Read-only: preview what a checkpoints.restore of this checkpoint would change (label, affected-path count + sample, diffstat, and otherSessions: the other sessions whose changes it takes back, with their files) and mint a short-lived (~2 min), single-use confirmToken that authorizes the matching restore, those sessions' changes included. No workspace mutation. An unknown/gc'd checkpoint id is an honest 404.
 
 - Title: `Preview Workspace Checkpoint Restore`
 - Source: `builtin`
@@ -41074,6 +41205,9 @@ Read-only: preview what a checkpoints.restore of this checkpoint would change (l
   "type": "object",
   "properties": {
     "id": {
+      "type": "string"
+    },
+    "sessionId": {
       "type": "string"
     }
   },
@@ -41116,6 +41250,38 @@ Read-only: preview what a checkpoints.restore of this checkpoint would change (l
         },
         "stat": {
           "type": "string"
+        },
+        "otherSessions": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "sessionId": {
+                "type": "string"
+              },
+              "agentIds": {
+                "type": "array",
+                "items": {
+                  "type": "string"
+                }
+              },
+              "files": {
+                "type": "array",
+                "items": {
+                  "type": "string"
+                }
+              }
+            },
+            "required": [
+              "sessionId",
+              "agentIds",
+              "files"
+            ],
+            "additionalProperties": false
+          }
+        },
+        "takesBack": {
+          "type": "string"
         }
       },
       "required": [
@@ -41123,7 +41289,8 @@ Read-only: preview what a checkpoints.restore of this checkpoint would change (l
         "label",
         "affectedPathCount",
         "affectedPathSample",
-        "stat"
+        "stat",
+        "otherSessions"
       ],
       "additionalProperties": false
     }
@@ -43536,7 +43703,7 @@ Put another version of a turn on the conversation. A turn has versions when a us
 
 #### `companion.chat.events.stream`
 
-Server-Sent Events stream of turn and agent events scoped to a single companion-chat session. Besides the turn frames (`companion-chat.turn.*`), `companion-chat.transcript.changed` (`{ type: "transcript.changed", sessionId, change: "attachment-removed" | "branch-switched", messageIds }`) says the transcript changed outside a turn (companion.chat.attachments.remove, companion.chat.branches.switch): read the messages again.
+Server-Sent Events stream of turn and agent events scoped to a single companion-chat session. Besides the turn frames (`companion-chat.turn.*`), `companion-chat.transcript.changed` (`{ type: "transcript.changed", sessionId, change: "attachment-removed" | "branch-switched", messageIds }`) says the transcript changed outside a turn (companion.chat.attachments.remove, companion.chat.branches.switch): read the messages again. Needs read:transcripts; the chat's own maker follows it under read:sessions or write:sessions as well.
 
 - Title: `Stream Companion Chat Events`
 - Source: `builtin`
@@ -43886,7 +44053,7 @@ Edit a user message and branch the conversation from it. `messageId` (required) 
 
 #### `companion.chat.messages.list`
 
-Return the messages of a companion-chat session, oldest first. With neither `limit` nor `before` the whole transcript is returned. With `limit` (1-1000, default 100 when only `before` is given) and/or `before` (a message id) one page is returned: the messages just before `before`, or the newest ones. Every answer carries `total` and `more`; while `more` is true, pass `nextBefore` back as `before` to read the page before it. A `before` that names no message in the chat is 404 MESSAGE_NOT_FOUND.
+Return the messages of a companion-chat session, oldest first. With neither `limit` nor `before` the whole transcript is returned. With `limit` (1-1000, default 100 when only `before` is given) and/or `before` (a message id) one page is returned: the messages just before `before`, or the newest ones. Every answer carries `total` and `more`; while `more` is true, pass `nextBefore` back as `before` to read the page before it. A `before` that names no message in the chat is 404 MESSAGE_NOT_FOUND. Needs read:transcripts; the chat's own maker reads it under read:sessions or write:sessions as well.
 
 - Title: `List Companion Chat Messages`
 - Source: `builtin`
@@ -44336,7 +44503,7 @@ Regenerate an assistant response. Omitted `messageId`: the latest answered user 
 
 #### `companion.chat.messages.search`
 
-Find companion-chat messages whose text contains `query` (case-insensitive) across every chat, newest first. Each item names the chat (`sessionId`, `sessionTitle`), the message (`messageId`, `role`), a snippet around the match and `createdAt`. History retained behind a regenerate or edit is not searched. Closed chats are searched only with `includeClosed`. Paged: `limit` 1-100 (default 25); pass `nextCursor` back as `cursor` while `hasMore` is true. A blank query is 400 INVALID_ARGUMENT; a cursor this search did not return is 400 INVALID_CURSOR.
+Find companion-chat messages whose text contains `query` (case-insensitive) across every chat, newest first. Each item names the chat (`sessionId`, `sessionTitle`), the message (`messageId`, `role`), a snippet around the match and `createdAt`. History retained behind a regenerate or edit is not searched. Closed chats are searched only with `includeClosed`. Paged: `limit` 1-100 (default 25); pass `nextCursor` back as `cursor` while `hasMore` is true. A blank query is 400 INVALID_ARGUMENT; a cursor this search did not return is 400 INVALID_CURSOR. A caller below admin searches only the chats it made (under read:transcripts, read:sessions or write:sessions).
 
 - Title: `Search Companion Chat Messages`
 - Source: `builtin`
@@ -44725,7 +44892,7 @@ Replace the text of a companion chat message still waiting for its turn; its att
 
 #### `companion.chat.queuedMessages.list`
 
-The messages of a companion chat waiting behind the running reply (sent while it was still being written), in the order they will be answered. Each stays editable and removable until its turn starts; a message whose turn has started no longer appears. An unknown chat is 404 SESSION_NOT_FOUND.
+The messages of a companion chat waiting behind the running reply (sent while it was still being written), in the order they will be answered. Each stays editable and removable until its turn starts; a message whose turn has started no longer appears. An unknown chat is 404 SESSION_NOT_FOUND. Needs read:transcripts; the chat's own maker reads it under read:sessions or write:sessions as well.
 
 - Title: `List Queued Companion Chat Messages`
 - Source: `builtin`
@@ -44995,6 +45162,9 @@ Create a new companion-chat session. Optional `provider` / `model` override the 
         "project": {
           "type": "string"
         },
+        "createdBy": {
+          "type": "string"
+        },
         "status": {
           "type": "string",
           "enum": [
@@ -45101,7 +45271,7 @@ Permanently remove a companion-chat session: the on-disk record file is deleted 
 
 #### `companion.chat.sessions.get`
 
-Return a companion-chat session record together with its full message history.
+Return a companion-chat session record together with its full message history. Needs read:transcripts; the chat's own maker reads it under read:sessions or write:sessions as well.
 
 - Title: `Get Companion Chat Session`
 - Source: `builtin`
@@ -45202,6 +45372,9 @@ Return a companion-chat session record together with its full message history.
           ]
         },
         "project": {
+          "type": "string"
+        },
+        "createdBy": {
           "type": "string"
         },
         "status": {
@@ -45575,7 +45748,7 @@ Return a companion-chat session record together with its full message history.
 
 #### `companion.chat.sessions.list`
 
-List active companion-chat sessions, newest first, one page of `limit` (default 100). Pass `includeClosed` to include closed sessions. While `hasMore` is true, pass `nextCursor` back as `cursor` for the page of older chats; a cursor this list did not return is 400 INVALID_CURSOR. Each record carries its title and system prompt, so it needs read:transcripts.
+List active companion-chat sessions, newest first, one page of `limit` (default 100). Pass `includeClosed` to include closed sessions. While `hasMore` is true, pass `nextCursor` back as `cursor` for the page of older chats; a cursor this list did not return is 400 INVALID_CURSOR. Each record carries its title and system prompt, so it needs read:transcripts; a caller below admin is listed only the chats it made, under read:sessions or write:sessions as well.
 
 - Title: `List Companion Chat Sessions`
 - Source: `builtin`
@@ -45681,6 +45854,9 @@ List active companion-chat sessions, newest first, one page of `limit` (default 
             ]
           },
           "project": {
+            "type": "string"
+          },
+          "createdBy": {
             "type": "string"
           },
           "status": {
@@ -46039,6 +46215,9 @@ Update companion-chat session metadata, including session-local provider, model 
           ]
         },
         "project": {
+          "type": "string"
+        },
+        "createdBy": {
           "type": "string"
         },
         "status": {
@@ -46474,7 +46653,7 @@ Return the resolved GoodVibes config snapshot.
 
 #### `config.reset`
 
-Remove the explicit value of one config key through the daemon API so it reads as its default again, in every settings file that holds it. The response reports the value the host now holds and which file and tier it came from. Refuses a key that holds a credential (use credentials.delete), a key the host does not know, a key locked by managed policy, and runtime.workingDir (no caller moves the daemon). A change that loosens a security, permission, judgment or payment setting is the owner's own act: asked with a token minted for automation (one minted through the API by another token, such as pairing.tokens.create or pairing.tokens.migrate, or with narrowed scopes or for a named client; pairing.tokens.list shows it as origin automation) it is not made, but put to the owner as an approval only his own credential answers, and the answer is 202 with code OWNER_APPROVAL_PENDING and the `approvalId`; the change is applied when he approves it, and lapses after a day unanswered or if the daemon restarts first. The operator token, an admin sign-in, the apps on the daemon's machine and a device the owner paired himself (origin owner-pairing) make it at once.
+Remove the explicit value of one config key through the daemon API so it reads as its default again, in every settings file that holds it. The response reports the value the host now holds and which file and tier it came from. Refuses a key that holds a credential (use credentials.delete), a key the host does not know, a key locked by managed policy, and runtime.workingDir (no caller moves the daemon). A change that loosens a security, permission, judgment or payment setting is the owner's own act: asked with a token minted for automation (one minted through the API by another token, such as pairing.tokens.create or pairing.tokens.migrate, or with narrowed scopes or for a named client; pairing.tokens.list shows it as origin automation) it is not made, but put to the owner as an approval only his own credential answers, and the answer is 202 with code OWNER_APPROVAL_PENDING and the `approvalId`; the change is applied when he approves it, and lapses after a day unanswered or if the daemon restarts first. The owner himself (his sign-in, his own terminal program with a verified registration) makes it at once; any paired device, his own included, is put to him.
 
 - Title: `Reset Config Value`
 - Source: `builtin`
@@ -46621,7 +46800,7 @@ Remove the explicit value of one config key through the daemon API so it reads a
 
 #### `config.set`
 
-Write one config value on the daemon: `{ key, value }`, where value is any JSON the key accepts. The response reports the value the host now holds and which file and tier it is in; a value that did not take is refused with what the host holds instead. A key that holds a credential takes only a goodvibes://secrets/ reference (store the secret with credentials.set); runtime.workingDir is refused (409 WORKSPACE_CHANGE_UNAVAILABLE): the daemon serves every project at once and no caller moves it, so a call names its project itself. The same route also serves the settings clients' lanes, which answer with that lane's own object: `{ settingsPrecondition }` takes action `capture` (read the facts a change would act on) or `write` (make it, optionally only while `ifServing` and `ifIncarnation` still hold; a repeated `requestId` returns the first answer), and `{ settingsImportPrecondition }` takes the same two actions plus `apply`, which spends a captured `reference`; a settings import is refused (403 OWNER_ONLY) for a token minted for automation. A change that loosens a security, permission, judgment or payment setting is the owner's own act: asked with a token minted for automation (one minted through the API by another token, such as pairing.tokens.create or pairing.tokens.migrate, or with narrowed scopes or for a named client; pairing.tokens.list shows it as origin automation) it is not made, but put to the owner as an approval only his own credential answers, and the answer is 202 with code OWNER_APPROVAL_PENDING and the `approvalId`; the change is applied when he approves it, and lapses after a day unanswered or if the daemon restarts first. The operator token, an admin sign-in, the apps on the daemon's machine and a device the owner paired himself (origin owner-pairing) make it at once.
+Write one config value on the daemon: `{ key, value }`, where value is any JSON the key accepts. The response reports the value the host now holds and which file and tier it is in; a value that did not take is refused with what the host holds instead. A key that holds a credential takes only a goodvibes://secrets/ reference (store the secret with credentials.set); runtime.workingDir is refused (409 WORKSPACE_CHANGE_UNAVAILABLE): the daemon serves every project at once and no caller moves it, so a call names its project itself. The same route also serves the settings clients' lane, which answers with its own object: `{ settingsPrecondition }` takes action `capture` (read the facts a change would act on) or `write` (make it, optionally only while `ifServing` and `ifIncarnation` still hold; a repeated `requestId` returns the first answer). A change that loosens a security, permission, judgment or payment setting is the owner's own act: asked with a token minted for automation (one minted through the API by another token, such as pairing.tokens.create or pairing.tokens.migrate, or with narrowed scopes or for a named client; pairing.tokens.list shows it as origin automation) it is not made, but put to the owner as an approval only his own credential answers, and the answer is 202 with code OWNER_APPROVAL_PENDING and the `approvalId`; the change is applied when he approves it, and lapses after a day unanswered or if the daemon restarts first. The owner himself (his sign-in, his own terminal program with a verified registration) makes it at once; any paired device, his own included, is put to him.
 
 - Title: `Set Config Value`
 - Source: `builtin`
@@ -46678,43 +46857,6 @@ Write one config value on the daemon: `{ key, value }`, where value is any JSON 
             "capture",
             "write"
           ]
-        },
-        "reference": {
-          "type": "string"
-        },
-        "ifIncarnation": {
-          "type": "integer",
-          "minimum": 0
-        },
-        "ifServing": {
-          "type": "string"
-        },
-        "requestId": {
-          "type": "string"
-        }
-      },
-      "required": [
-        "version",
-        "action"
-      ],
-      "additionalProperties": true
-    },
-    "settingsImportPrecondition": {
-      "type": "object",
-      "properties": {
-        "version": {
-          "type": "number"
-        },
-        "action": {
-          "type": "string",
-          "enum": [
-            "capture",
-            "apply",
-            "write"
-          ]
-        },
-        "reference": {
-          "type": "string"
         },
         "ifIncarnation": {
           "type": "integer",
@@ -46789,9 +46931,6 @@ Write one config value on the daemon: `{ key, value }`, where value is any JSON 
                 "write"
               ]
             },
-            "reference": {
-              "type": "string"
-            },
             "ifIncarnation": {
               "type": "integer",
               "minimum": 0
@@ -46812,49 +46951,6 @@ Write one config value on the daemon: `{ key, value }`, where value is any JSON 
       },
       "required": [
         "settingsPrecondition"
-      ],
-      "additionalProperties": true
-    },
-    {
-      "type": "object",
-      "properties": {
-        "settingsImportPrecondition": {
-          "type": "object",
-          "properties": {
-            "version": {
-              "type": "number"
-            },
-            "action": {
-              "type": "string",
-              "enum": [
-                "capture",
-                "apply",
-                "write"
-              ]
-            },
-            "reference": {
-              "type": "string"
-            },
-            "ifIncarnation": {
-              "type": "integer",
-              "minimum": 0
-            },
-            "ifServing": {
-              "type": "string"
-            },
-            "requestId": {
-              "type": "string"
-            }
-          },
-          "required": [
-            "version",
-            "action"
-          ],
-          "additionalProperties": true
-        }
-      },
-      "required": [
-        "settingsImportPrecondition"
       ],
       "additionalProperties": true
     }
@@ -46980,7 +47076,7 @@ Write one config value on the daemon: `{ key, value }`, where value is any JSON 
 
 #### `config.setMany`
 
-Write several config values on the daemon as one update: `{ entries: [{ key, value }] }`. Every entry is admitted before anything is written, each settings file is written once and the configuration revision moves once, so a pair of settings that only make sense together never lands half-applied. A refusal names the setting, the reason and the next step, and says what was saved (nothing, unless a later settings file could not be written after an earlier one was). The answer lists, per key, the value the host now holds and which file and tier it is in; when a key does not hold the value asked for (a higher tier overrides it, or it was coerced), the answer is 409 CONFIG_SET_NOT_APPLIED naming those keys in `notApplied`, with the revision written and every entry's held value. A key that holds a credential takes only a goodvibes://secrets/ reference; runtime.workingDir is refused (409 WORKSPACE_CHANGE_UNAVAILABLE), as with config.set. A change that loosens a security, permission, judgment or payment setting is the owner's own act: asked with a token minted for automation (one minted through the API by another token, such as pairing.tokens.create or pairing.tokens.migrate, or with narrowed scopes or for a named client; pairing.tokens.list shows it as origin automation) it is not made, but put to the owner as an approval only his own credential answers, and the answer is 202 with code OWNER_APPROVAL_PENDING and the `approvalId`; the change is applied when he approves it, and lapses after a day unanswered or if the daemon restarts first. The operator token, an admin sign-in, the apps on the daemon's machine and a device the owner paired himself (origin owner-pairing) make it at once.
+Write several config values on the daemon as one update: `{ entries: [{ key, value }] }`. Every entry is admitted before anything is written, each settings file is written once and the configuration revision moves once, so a pair of settings that only make sense together never lands half-applied. A refusal names the setting, the reason and the next step, and says what was saved (nothing, unless a later settings file could not be written after an earlier one was). The answer lists, per key, the value the host now holds and which file and tier it is in; when a key does not hold the value asked for (a higher tier overrides it, or it was coerced), the answer is 409 CONFIG_SET_NOT_APPLIED naming those keys in `notApplied`, with the revision written and every entry's held value. A key that holds a credential takes only a goodvibes://secrets/ reference; runtime.workingDir is refused (409 WORKSPACE_CHANGE_UNAVAILABLE), as with config.set. A change that loosens a security, permission, judgment or payment setting is the owner's own act: asked with a token minted for automation (one minted through the API by another token, such as pairing.tokens.create or pairing.tokens.migrate, or with narrowed scopes or for a named client; pairing.tokens.list shows it as origin automation) it is not made, but put to the owner as an approval only his own credential answers, and the answer is 202 with code OWNER_APPROVAL_PENDING and the `approvalId`; the change is applied when he approves it, and lapses after a day unanswered or if the daemon restarts first. The owner himself (his sign-in, his own terminal program with a verified registration) makes it at once; any paired device, his own included, is put to him.
 
 - Title: `Set Several Config Values`
 - Source: `builtin`
@@ -81663,6 +81759,9 @@ Return the current control-plane principal, granted scopes, and authentication m
           "type": "null"
         }
       ]
+    },
+    "ownerHimself": {
+      "type": "boolean"
     }
   },
   "required": [
@@ -81684,7 +81783,7 @@ Return the current control-plane principal, granted scopes, and authentication m
 
 #### `control.auth.login`
 
-Authenticate a local control-plane user and create a session token.
+Authenticate a local control-plane user and create a session token. The first sign-in with the generated first-run password (the owner account, `auth-bootstrap.txt`) also sets the owner's own password: send it as newPassword; without it the answer is 409 FIRST_SIGN_IN_SETS_PASSWORD and no session is made. Setting it removes the first-run file, and the generated password no longer signs in.
 
 - Title: `Login`
 - Source: `builtin`
@@ -81706,6 +81805,9 @@ Authenticate a local control-plane user and create a session token.
       "type": "string"
     },
     "password": {
+      "type": "string"
+    },
+    "newPassword": {
       "type": "string"
     }
   },
@@ -81941,6 +82043,9 @@ Return the operator-facing control-plane contract manifest, including auth, tran
                     },
                     "password": {
                       "type": "string"
+                    },
+                    "newPassword": {
+                      "type": "string"
                     }
                   },
                   "required": [
@@ -82088,6 +82193,9 @@ Return the operator-facing control-plane contract manifest, including auth, tran
                           "type": "null"
                         }
                       ]
+                    },
+                    "ownerHimself": {
+                      "type": "boolean"
                     }
                   },
                   "required": [
@@ -82434,6 +82542,79 @@ Return the operator-facing control-plane contract manifest, including auth, tran
                   },
                   "invokable": {
                     "type": "boolean"
+                  },
+                  "workFolders": {
+                    "type": "array",
+                    "items": {
+                      "type": "string"
+                    }
+                  },
+                  "notWorkFolders": {
+                    "type": "object",
+                    "additionalProperties": {
+                      "anyOf": [
+                        {
+                          "type": "string"
+                        },
+                        {
+                          "type": "number"
+                        },
+                        {
+                          "type": "boolean"
+                        },
+                        {
+                          "type": "null"
+                        },
+                        {},
+                        {
+                          "type": "array",
+                          "items": {}
+                        }
+                      ]
+                    }
+                  },
+                  "daemonFiles": {
+                    "type": "array",
+                    "items": {
+                      "type": "string"
+                    }
+                  },
+                  "notDaemonFiles": {
+                    "type": "object",
+                    "additionalProperties": {
+                      "anyOf": [
+                        {
+                          "type": "string"
+                        },
+                        {
+                          "type": "number"
+                        },
+                        {
+                          "type": "boolean"
+                        },
+                        {
+                          "type": "null"
+                        },
+                        {},
+                        {
+                          "type": "array",
+                          "items": {}
+                        }
+                      ]
+                    }
+                  },
+                  "risk": {
+                    "type": "string",
+                    "enum": [
+                      "none",
+                      "loosens-a-protection",
+                      "steers-a-model",
+                      "cannot-be-undone",
+                      "spends-money",
+                      "writes-a-secret",
+                      "owner-act",
+                      "answers-the-owner"
+                    ]
                   },
                   "replay": {
                     "type": "object",
@@ -83347,6 +83528,79 @@ Return a single gateway method descriptor.
         "invokable": {
           "type": "boolean"
         },
+        "workFolders": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "notWorkFolders": {
+          "type": "object",
+          "additionalProperties": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "number"
+              },
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              },
+              {},
+              {
+                "type": "array",
+                "items": {}
+              }
+            ]
+          }
+        },
+        "daemonFiles": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "notDaemonFiles": {
+          "type": "object",
+          "additionalProperties": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "number"
+              },
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              },
+              {},
+              {
+                "type": "array",
+                "items": {}
+              }
+            ]
+          }
+        },
+        "risk": {
+          "type": "string",
+          "enum": [
+            "none",
+            "loosens-a-protection",
+            "steers-a-model",
+            "cannot-be-undone",
+            "spends-money",
+            "writes-a-secret",
+            "owner-act",
+            "answers-the-owner"
+          ]
+        },
         "replay": {
           "type": "object",
           "properties": {
@@ -83633,6 +83887,79 @@ Return the gateway method catalog.
           },
           "invokable": {
             "type": "boolean"
+          },
+          "workFolders": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "notWorkFolders": {
+            "type": "object",
+            "additionalProperties": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "number"
+                },
+                {
+                  "type": "boolean"
+                },
+                {
+                  "type": "null"
+                },
+                {},
+                {
+                  "type": "array",
+                  "items": {}
+                }
+              ]
+            }
+          },
+          "daemonFiles": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "notDaemonFiles": {
+            "type": "object",
+            "additionalProperties": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "number"
+                },
+                {
+                  "type": "boolean"
+                },
+                {
+                  "type": "null"
+                },
+                {},
+                {
+                  "type": "array",
+                  "items": {}
+                }
+              ]
+            }
+          },
+          "risk": {
+            "type": "string",
+            "enum": [
+              "none",
+              "loosens-a-protection",
+              "steers-a-model",
+              "cannot-be-undone",
+              "spends-money",
+              "writes-a-secret",
+              "owner-act",
+              "answers-the-owner"
+            ]
           },
           "replay": {
             "type": "object",
@@ -118054,6 +118381,9 @@ Return durable decision records from the current project planning knowledge spac
 {
   "type": "object",
   "properties": {
+    "workingDirectory": {
+      "type": "string"
+    },
     "projectId": {
       "type": "string"
     },
@@ -118188,6 +118518,9 @@ Persist a meaningful project decision record for future TUI and agent context.
 {
   "type": "object",
   "properties": {
+    "workingDirectory": {
+      "type": "string"
+    },
     "projectId": {
       "type": "string"
     },
@@ -118478,6 +118811,9 @@ Return the saved historical project vocabulary and resolved ambiguity records fr
 {
   "type": "object",
   "properties": {
+    "workingDirectory": {
+      "type": "string"
+    },
     "projectId": {
       "type": "string"
     },
@@ -118756,6 +119092,9 @@ Return a saved historical planning state record. Planning state is read-only his
 {
   "type": "object",
   "properties": {
+    "workingDirectory": {
+      "type": "string"
+    },
     "projectId": {
       "type": "string"
     },
@@ -119440,6 +119779,9 @@ Return passive, project-scoped planning artifact counts and platform capabilitie
 {
   "type": "object",
   "properties": {
+    "workingDirectory": {
+      "type": "string"
+    },
     "projectId": {
       "type": "string"
     },
@@ -119535,6 +119877,9 @@ Remove completed project work-plan tasks. Defaults to clearing status done only.
 {
   "type": "object",
   "properties": {
+    "workingDirectory": {
+      "type": "string"
+    },
     "projectId": {
       "type": "string"
     },
@@ -120216,6 +120561,9 @@ Return the durable project-scoped work-plan snapshot, including tasks and status
 {
   "type": "object",
   "properties": {
+    "workingDirectory": {
+      "type": "string"
+    },
     "projectId": {
       "type": "string"
     },
@@ -120480,6 +120828,9 @@ Create a durable project-scoped work-plan task for TUI, WebUI, APK, daemon plann
 {
   "type": "object",
   "properties": {
+    "workingDirectory": {
+      "type": "string"
+    },
     "projectId": {
       "type": "string"
     },
@@ -121245,6 +121596,9 @@ Delete a durable project-scoped work-plan task.
 {
   "type": "object",
   "properties": {
+    "workingDirectory": {
+      "type": "string"
+    },
     "projectId": {
       "type": "string"
     },
@@ -121926,6 +122280,9 @@ Fetch one durable project-scoped work-plan task by id, with the plan revision.
 {
   "type": "object",
   "properties": {
+    "workingDirectory": {
+      "type": "string"
+    },
     "projectId": {
       "type": "string"
     },
@@ -122144,6 +122501,9 @@ Set a task's status and optional reason.
 {
   "type": "object",
   "properties": {
+    "workingDirectory": {
+      "type": "string"
+    },
     "projectId": {
       "type": "string"
     },
@@ -122835,6 +123195,9 @@ Patch a durable project-scoped work-plan task. Returns the task before and after
 {
   "type": "object",
   "properties": {
+    "workingDirectory": {
+      "type": "string"
+    },
     "projectId": {
       "type": "string"
     },
@@ -123544,6 +123907,9 @@ List durable project-scoped work-plan tasks with optional status, owner, parent,
 {
   "type": "object",
   "properties": {
+    "workingDirectory": {
+      "type": "string"
+    },
     "projectId": {
       "type": "string"
     },
@@ -123808,6 +124174,9 @@ Replace task ordering for the current project work plan. Returns the tasks whose
 {
   "type": "object",
   "properties": {
+    "workingDirectory": {
+      "type": "string"
+    },
     "projectId": {
       "type": "string"
     },
@@ -132025,6 +132394,9 @@ Export a no-loss bundle (records + links) for the given filter from the canonica
     },
     "limit": {
       "type": "number"
+    },
+    "everyProject": {
+      "type": "boolean"
     }
   },
   "additionalProperties": true
@@ -132783,7 +133155,7 @@ Return every link where the record is the source or the target. Returns 404 when
 
 #### `memory.records.list`
 
-Bulk read from the canonical store: a literal (non-semantic) search returning the matching records as a plain array. An empty filter returns every record (getAll). This is the read a client surface uses instead of opening the store file for its browse/list and knowledge-injection paths.
+Bulk read from the canonical store: a literal (non-semantic) search returning the matching records as a plain array. A call that names a project (its call context, or project in the filter) reads that project's records and the ones that belong to no project; a call naming none reads only the records that belong to no project; everyProject (the owner himself only, his place's "Every project") reads every record. This is the read a client surface uses instead of opening the store file for its browse/list and knowledge-injection paths.
 
 - Title: `List Memory Records`
 - Source: `builtin`
@@ -132871,6 +133243,9 @@ Bulk read from the canonical store: a literal (non-semantic) search returning th
     },
     "limit": {
       "type": "number"
+    },
+    "everyProject": {
+      "type": "boolean"
     }
   },
   "additionalProperties": true
@@ -133100,6 +133475,9 @@ Search the canonical store, literal or semantic. When semantic is requested but 
       "type": "number"
     },
     "recall": {
+      "type": "boolean"
+    },
+    "everyProject": {
       "type": "boolean"
     }
   },
@@ -133382,6 +133760,9 @@ Rank records by semantic similarity against the query, returning scored results 
     },
     "limit": {
       "type": "number"
+    },
+    "everyProject": {
+      "type": "boolean"
     }
   },
   "additionalProperties": true
@@ -137521,7 +137902,7 @@ Apply the surface's per-offer decisions in ONE pass: an accepted notifications o
 
 #### `pairing.handoff.create`
 
-The owner's pairing flow. Mint a per-device token AND assemble the set-up OFFER SET this daemon can satisfy (notifications, carrying the VAPID public key; relay; passkey step-up), so a freshly-paired surface can complete them in one pass. Returns the offer set, the `#pair=<token>` deep-link fragment (the exact URL-fragment shape the web app consumes, token in `pair=`, offers in `offers=`), a full deep link when a web origin is configured, and that origin's honest TLS/capability POSTURE: the one plain-http-on-LAN notice line (stated here, never a nag) plus per-capability availability labels so surfaces render "needs https: set up a secure address in Settings, General, Secure address (...)" instead of dead buttons. The token secret is returned exactly once. When a paired device asks, the new token records that device (mintedBy) and is revoked with it; a device whose own pairing is gone is refused with 403 PAIRING_TOKEN_NOT_FOUND. Each offer is independently declinable at completion. A pairing minted narrower than full authority cannot complete a hand-off (pairing.handoff.complete needs what stepup.credentials.register needs), so it is offered nothing to complete and gets its token alone. The device it pairs is recorded as the owner's own (origin owner-pairing) when the caller holds the owner's own credential (the operator token, an admin sign-in, an app on his machine, or a device he paired himself) with full authority; from a token minted for automation, the Agent's credential or a narrowed caller it is recorded as automation. `fromSharedToken: true` is how a client signed in with the shared operator token (the owner's own browser) moves onto its own token: it pairs itself here, exempt from device.nodes.maxPaired as pairing.tokens.migrate is, and the token it gets is an owner device; only a caller on the shared token may send it (400 INVALID_ARGUMENT otherwise). No code is made that a phone could not open: when the daemon's web address is reachable only from its own machine (a loopback address, or controlPlane.enabled off without web.publicBaseUrl naming it), the call is refused with 409 PAIRING_CODE_UNREACHABLE, saying why and the command to run in a terminal on the daemon's machine (goodvibes-daemon webui enable --lan); pairing.posture.get gives the same decision with numbered steps before anything is minted. `serveToNetwork: true` is the owner's yes to "Phones on your network cannot reach GoodVibes yet. Serve it to your network?", which a pairing surface asks in place of that refusal: the daemon writes what goodvibes-daemon webui enable --lan writes, waits for its own listener to report it is bound again (TRANSPORT_CONNECTED; no sleep, no poll), and then mints for the address phones can open, in the same call; refused 409 PAIRING_CODE_UNREACHABLE only when it still cannot be reached. `fromSharedToken: true`, and `forThisMachine: true` (a code for a browser on the daemon's own machine), are not refused for that.
+The owner's pairing flow. Mint a per-device token AND assemble the set-up OFFER SET this daemon can satisfy (notifications, carrying the VAPID public key; relay; passkey step-up), so a freshly-paired surface can complete them in one pass. Returns the offer set, the `#pair=<token>` deep-link fragment (the exact URL-fragment shape the web app consumes, token in `pair=`, offers in `offers=`), a full deep link when a web origin is configured, and that origin's honest TLS/capability POSTURE: the one plain-http-on-LAN notice line (stated here, never a nag) plus per-capability availability labels so surfaces render "needs https: set up a secure address in Settings, General, Secure address (...)" instead of dead buttons. The token secret is returned exactly once. When a paired device asks, the new token records that device (mintedBy) and is revoked with it; a device whose own pairing is gone is refused with 403 PAIRING_TOKEN_NOT_FOUND. Each offer is independently declinable at completion. A pairing minted narrower than full authority cannot complete a hand-off (pairing.handoff.complete needs what stepup.credentials.register needs), so it is offered nothing to complete and gets its token alone. The device it pairs is recorded as the owner's own (origin owner-pairing, madeBy owner) only when the owner himself asks (his signed-in session, or his own terminal program with a verified registration) with full authority; from anyone else (an admin, a script, the operator token alone, any device, the Agent's credential, a narrowed caller, a call run on his yes to another's request) it is recorded as automation. `fromSharedToken: true` is how a client signed in with the shared operator token (the owner's own browser) moves onto its own token: it pairs itself here, exempt from device.nodes.maxPaired as pairing.tokens.migrate is, and the token it gets is an owner device; only a caller on the shared token may send it (400 INVALID_ARGUMENT otherwise). No code is made that a phone could not open: when the daemon's web address is reachable only from its own machine (a loopback address, or controlPlane.enabled off without web.publicBaseUrl naming it), the call is refused with 409 PAIRING_CODE_UNREACHABLE, saying why and the command to run in a terminal on the daemon's machine (goodvibes-daemon webui enable --lan); pairing.posture.get gives the same decision with numbered steps before anything is minted. `serveToNetwork: true` is the owner's yes to "Phones on your network cannot reach GoodVibes yet. Serve it to your network?", which a pairing surface asks in place of that refusal: the daemon writes what goodvibes-daemon webui enable --lan writes, waits for its own listener to report it is bound again (TRANSPORT_CONNECTED; no sleep, no poll), and then mints for the address phones can open, in the same call; refused 409 PAIRING_CODE_UNREACHABLE only when it still cannot be reached. `fromSharedToken: true`, and `forThisMachine: true` (a code for a browser on the daemon's own machine), are not refused for that.
 
 - Title: `Create Pairing Hand-off`
 - Source: `builtin`
@@ -137731,9 +138112,65 @@ The owner's pairing flow. Mint a per-device token AND assemble the set-up OFFER 
 }
 ```
 
+#### `pairing.outsideAgent.issue`
+
+The one credential this daemon gives `goodvibes-daemon mcp serve`, asked for with the operator token: a paired-device token named "Outside agent (goodvibes-daemon mcp serve)" (origin automation), with no person's claim, answered once with `token` and `id`. Making it is the owner's own act: from anyone but him it is put to him as ONE question, "Let the outside agent "goodvibes-daemon mcp serve" work in <project>?" when the call names the folder it was started in (`project`), else its credential for shared things only; his yes issues it and gives it that project. A second ask while it is kept is refused 409 OUTSIDE_AGENT_ISSUED (revoke it among the paired devices to have a new one issued). Every act of it the owner decides is put to him, and the first time it names a project it was not given he is asked whether it may work there.
+
+- Title: `Issue the Outside Agent Credential`
+- Source: `builtin`
+- Access: `admin`
+- Transport: `http`, `ws`
+- HTTP: none
+- Scopes: `write:control-plane`
+- Emits events: none
+- Dangerous: `no`
+- Invokable: `yes`
+
+##### Input schema
+
+```json
+{
+  "type": "object",
+  "properties": {
+    "confirm": {
+      "type": "boolean"
+    },
+    "project": {
+      "type": "string"
+    }
+  },
+  "additionalProperties": false
+}
+```
+
+##### Output schema
+
+```json
+{
+  "type": "object",
+  "properties": {
+    "id": {
+      "type": "string"
+    },
+    "token": {
+      "type": "string"
+    },
+    "name": {
+      "type": "string"
+    }
+  },
+  "required": [
+    "id",
+    "token",
+    "name"
+  ],
+  "additionalProperties": false
+}
+```
+
 #### `pairing.posture.get`
 
-The honest TLS/capability posture of a web origin, pass your surface's current origin (or omit it to read the configured web origin). Plain http on a private-network origin (LAN IP, .local, localhost) is a supported posture reported with its ONE notice line; browser-gated capabilities (service worker/PWA install, push, microphone) are each labeled available or "needs https: set up a secure address in Settings, General, Secure address (...)" so surfaces render labels instead of dead buttons. Localhost keeps all three. https on a private address that is not a tailnet name is the daemon's own LAN certificate (controlPlane.lanHttps): its capabilities are available and its notice says each phone installs the certificate once from /lan-https on the plain address. With no origin supplied the answer is about the address a pairing code carries and adds `reach`: whether a phone can open it (otherDevices), decided by the daemon from its settings with no request on the network, and when not, the reason, the fix (a command to run in a terminal on the daemon's machine) and the numbered steps (state done|next|then, text, detail, command). Every pairing surface asks this before minting. With controlPlane.lanHttps on (the Secure address), the address a pairing code carries is the https one the listener serves: at the certificate's own name for Let's Encrypt, a certificate you made or a group's (secureAddress.get), with no install notice; at the same host for GoodVibes' own certificate, with its install notice. Plain http keeps working as before.
+The honest TLS/capability posture of a web origin, pass your surface's current origin (or omit it to read the configured web origin). Plain http on a private-network origin (LAN IP, .local, localhost) is a supported posture reported with its ONE notice line; browser-gated capabilities (service worker/PWA install, push, microphone) are each labeled available or "needs https: set up a secure address in Settings, General, Secure address (...)" so surfaces render labels instead of dead buttons. Localhost keeps all three. https on a private address that is not a tailnet name is the daemon's own LAN certificate (controlPlane.lanHttps): its capabilities are available and its notice says each phone installs the certificate once from the link for phones (the page /lan-https on the https address, which offers it only when it matches the fingerprint in the link). With no origin supplied the answer is about the address a pairing code carries and adds `reach`: whether a phone can open it (otherDevices), decided by the daemon from its settings with no request on the network, and when not, the reason, the fix (a command to run in a terminal on the daemon's machine) and the numbered steps (state done|next|then, text, detail, command). Every pairing surface asks this before minting. With controlPlane.lanHttps on (the Secure address), the address a pairing code carries is the https one the listener serves: at the certificate's own name for Let's Encrypt, a certificate you made or a group's (secureAddress.get), with no install notice; at the same host for GoodVibes' own certificate, with its install notice. Plain http keeps working as before.
 
 - Title: `Get Origin TLS/Capability Posture`
 - Source: `builtin`
@@ -138009,7 +138446,7 @@ What goodvibes-daemon webui enable --lan does, from any surface, after the owner
 
 #### `pairing.tokens.create`
 
-Mint a new named per-device operator token and return its plaintext secret EXACTLY ONCE (for a QR / pairing hand-off). Only a hash is persisted; the secret is never listed or returned again. The name is user-visible and editable. When a paired device asks, the new token records that device (mintedBy) and is revoked with it; a device whose own pairing is gone is refused with 403 PAIRING_TOKEN_NOT_FOUND. client "agent" mints the GoodVibes Agent's credential for the calls it makes on the owner's behalf: the daemon reports it as credential "agent" and judges every call made with it; it is listed with client "agent" and does not count toward device.nodes.maxPaired. Send an attemptId and send the same one again when a reply is lost: while the token that attempt produced is unused, the repeat returns that token (same id) under a new secret. scopes limits the device to that list of operator scopes (for example read:sessions, read:transcripts and write:sessions for a phone that only chats); left out, the device holds full operator authority. A caller grants only scopes it holds: a narrowed caller's token inherits its list when scopes is left out, and naming a scope the caller does not hold is 403 MISSING_SCOPE. A token minted here is automation (origin automation): it does not make the owner's own acts, such as loosening a security, permission, judgment or payment setting. A device the owner pairs himself is paired with pairing.handoff.create.
+Mint a new named per-device operator token and return its plaintext secret EXACTLY ONCE (for a QR / pairing hand-off). Only a hash is persisted; the secret is never listed or returned again. The name is user-visible and editable. When a paired device asks, the new token records that device (mintedBy) and is revoked with it; a device whose own pairing is gone is refused with 403 PAIRING_TOKEN_NOT_FOUND. client "agent" mints the GoodVibes Agent's credential for the calls it makes on the owner's behalf: the daemon reports it as credential "agent" and judges every call made with it; it is listed with client "agent" and does not count toward device.nodes.maxPaired. Send an attemptId and send the same one again when a reply is lost: while the token that attempt produced is unused, the repeat returns that token (same id) under a new secret. scopes limits the device to that list of operator scopes (for example read:sessions and write:sessions for a phone that only chats: it reads the chats it made under them); left out, the device holds full operator authority. A caller grants only scopes it holds: a narrowed caller's token inherits its list when scopes is left out, and naming a scope the caller does not hold is 403 MISSING_SCOPE. A token minted here is automation (origin automation): it does not make the owner's own acts, such as loosening a security, permission, judgment or payment setting. A device the owner pairs himself is paired with pairing.handoff.create.
 
 - Title: `Mint Paired Device Token`
 - Source: `builtin`
@@ -138214,7 +138651,7 @@ Revoke (permanently delete) one paired device token. Revocation is immediate: th
 
 #### `pairing.tokens.list`
 
-List the per-pairing operator tokens (paired devices/browsers) as redacted views: id, user-visible name, created timestamp, last-seen timestamp, mintedBy (the paired device that minted it, when one did), scopes (the operator scopes it holds, when it was paired with a narrower list; absent means full operator authority) and origin: `owner-pairing` for a device the owner paired himself through the pairing flow (pairing.handoff.create or the pairing screen, from the operator token, an admin sign-in, an app on his machine or another owner device, with full authority), which makes the owner's own acts (loosening a security, permission, judgment or payment setting; answering a change put to him), or `automation` for every other token (pairing.tokens.create, pairing.tokens.migrate, a narrowed list, the Agent's credential, and every token minted before origin was recorded), which does not. Origin is recorded at the mint and never changes; to make a device an owner device, pair it again from the pairing screen and revoke the old token. The token secret is never stored in listable form and is never returned.
+List the per-pairing operator tokens (paired devices/browsers) as redacted views: id, user-visible name, created timestamp, last-seen timestamp, mintedBy (the paired device that minted it, when one did), scopes (the operator scopes it holds, when it was paired with a narrower list; absent means full operator authority) and origin: `owner-pairing` for a device the owner paired himself (pairing.handoff.create or the pairing screen asked by the owner himself, his sign-in or his verified program, with full authority, completed with the code his own screen showed; pairing.tokens.migrate by the owner himself), which answers an approval another caller raised and does his native work, and is never the owner himself (its own risky acts are put to him), or `automation` for every other token (pairing.tokens.create, a migration or mint made on his yes to someone else's request, a narrowed list, the Agent's credential, and every token minted before origin was recorded), which answers nothing. Origin is recorded at the mint and never changes; to make a device an owner device, pair it again from the pairing screen and revoke the old token. The token secret is never stored in listable form and is never returned.
 
 - Title: `List Paired Device Tokens`
 - Source: `builtin`
@@ -168249,6 +168686,9 @@ Start an agent on `task`. Without `sessionId`, `routeId` or `surfaceKind` the ag
           }
         ]
       }
+    },
+    "workingDirectory": {
+      "type": "string"
     }
   },
   "required": [
@@ -173773,6 +174213,9 @@ Cancel a trigger; a command an on-exit trigger supervises is stopped.
         },
         "next": {
           "type": "string"
+        },
+        "storedId": {
+          "type": "string"
         }
       },
       "required": [
@@ -173891,6 +174334,9 @@ Create a trigger from a definition { id, label, description?, spec, action?, own
           "type": "number"
         },
         "next": {
+          "type": "string"
+        },
+        "storedId": {
           "type": "string"
         }
       },
@@ -174177,6 +174623,9 @@ The newest runs of one trigger (default 20, at most 200): when, outcome, detail 
         },
         "next": {
           "type": "string"
+        },
+        "storedId": {
+          "type": "string"
         }
       },
       "required": [
@@ -174302,6 +174751,9 @@ List the supervised triggers: id, label, kind, what each watches, state, how oft
             "type": "number"
           },
           "next": {
+            "type": "string"
+          },
+          "storedId": {
             "type": "string"
           }
         },
@@ -174514,6 +174966,9 @@ Close the breaker of a trigger that stopped after repeated failures, once the ca
           "type": "number"
         },
         "next": {
+          "type": "string"
+        },
+        "storedId": {
           "type": "string"
         }
       },
@@ -197215,6 +197670,9 @@ Every approval record transition, pushed the moment the broker records it: an as
                   },
                   "releasedAt": {
                     "type": "number"
+                  },
+                  "process": {
+                    "type": "string"
                   }
                 },
                 "required": [

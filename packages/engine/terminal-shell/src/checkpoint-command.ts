@@ -135,7 +135,7 @@ export function checkpointsOf<Ctx extends CheckpointCommandShape>(policy: Checkp
       if ('error' in resolved) throw commandRefusal(resolved.error, undefined, 'NOT_FOUND');
       const lines: string[] = [];
       // What the restore says, its receipt included, is its answer: the line typed prints it, a place shows it, a model reads it.
-      await restoreCheckpointFiles({ ...ctx, print: (text: string) => { lines.push(text); } }, manager, resolved, { yes: false, record: (text) => { lines.push(text); } });
+      await restoreCheckpointFiles({ ...ctx, print: (text: string) => { lines.push(text); } }, manager, resolved, { yes: false, record: (text) => { lines.push(text); }, sessionId: ctx.session.runtime.sessionId });
       return lines.join('\n');
     },
     rewind: 'refused' in rewind ? rewind : async (turn, scope) => (await rewind(ctx, { turn, scope })) ?? '',

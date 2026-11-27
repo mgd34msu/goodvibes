@@ -44,7 +44,6 @@ afterEach(async () => {
 
 function daemon() {
   const userAuth = new UserAuthManager({ bootstrapFilePath: join(dir, 'users.json'), bootstrapCredentialPath: join(dir, 'bootstrap.txt'), scryptParams: FAST });
-  userAuth.addUser('owner', 'owner-password', ['admin']);
   userAuth.addUser('viewer', 'viewer-password', ['viewer']);
   const catalog = new GatewayMethodCatalog();
   const pairing = new PairingTokenManager(join(dir, 'pairing-tokens.json'));
@@ -61,11 +60,14 @@ function daemon() {
     authToken: () => 'fixture-operator-token', trustProxyEnabled: () => false, host: '127.0.0.1', port: 0,
     dispatchApiRoutes: taskRoutes,
   } as unknown as DaemonControlPlaneContext);
-  const owner = userAuth.createSession('owner').token;
+  // The owner himself: his signed-in session, the account made at first start (another admin is not the owner).
+  const ownerName = userAuth.ownerUsername();
+  if (ownerName === null) throw new Error('the user store made no owner account at first start');
+  const owner = userAuth.createSession(ownerName).token;
   const viewer = userAuth.createSession('viewer').token;
   const call = (token: string, methodId: string, body: Record<string, unknown> = {}) =>
     helper.invokeGatewayMethodCall({ authToken: token, methodId, body });
-  return { userAuth, catalog, pairing, helper, owner, viewer, call, tasks };
+  return { userAuth, catalog, pairing, helper, owner, ownerName, viewer, call, tasks };
 }
 
 test('a non-admin user cannot read transcripts, paired devices or any owner-private record', async () => {
@@ -78,7 +80,7 @@ test('a non-admin user cannot read transcripts, paired devices or any owner-priv
   for (const methodId of ['sessions.get', 'sessions.messages.list', 'sessions.inputs.list', 'pairing.tokens.list', 'browser.readText',
     'calendar.events.list', 'channels.inbox.list', 'channels.drafts.get', 'knowledge.search', 'approvals.list', 'inbox.list',
     'checkpoints.diff', 'fleet.snapshot', 'control.messages.list', 'tasks.status', 'principals.list', 'remote.peers.list',
-    'sessions.list', 'sessions.search', 'sessions.hosted.list', 'companion.chat.sessions.list', 'routes.snapshot', 'deliveries.list']) {
+    'sessions.list', 'sessions.search', 'sessions.hosted.list', 'routes.snapshot', 'deliveries.list']) {
     const refused = await d.call(d.viewer, methodId, { sessionId: 'owner-session' });
     expect(`${methodId}: ${refused.status}`).toBe(`${methodId}: 403`);
     expect(JSON.stringify(refused.body)).not.toContain('owner phone');
@@ -106,6 +108,7 @@ const OPEN_TO_NON_ADMIN: ReadonlyMap<string, string> = new Map([
   ['automation.integration.snapshot', 'job names, schedules and run states; no prompt or output'],
   ['batch.runtime.get', 'the batch queue mode'],
   ['capabilities.find', 'three to five of the product\'s own capabilities (id, words, inputs, risk) for a need; no owner record'],
+  ['capabilities.list', 'the product\'s own capabilities as a screen draws them (words, inputs, risk); no owner record'],
   ['browser.sessions.list', 'open browser sessions and page counts; no URL or page text'],
   ['browser.status', 'whether a browser is available and which sessions are open'],
   ['channels.actions.list', 'actions channel plugins register'],
@@ -128,6 +131,14 @@ const OPEN_TO_NON_ADMIN: ReadonlyMap<string, string> = new Map([
   ['checkin.config.get', 'check-in settings and whether the schedule is installed'],
   ['ci.status', 'job conclusions of a repository ref'],
   ['ci.watches.list', 'standing CI watches and their states'],
+  // A person's own web chat is one permission with making it: the record reach keeps a caller that is not the owner to
+  // the chats it made (caller-reach.ts `madeBy: 'required'`); anyone else's still needs read:transcripts.
+  ['companion.chat.events.stream', 'only the caller\'s own web chat\'s live frames'],
+  ['companion.chat.messages.list', 'only the caller\'s own web chat\'s messages'],
+  ['companion.chat.messages.search', 'only the caller\'s own web chats are searched'],
+  ['companion.chat.queuedMessages.list', 'only the caller\'s own web chat\'s queued messages'],
+  ['companion.chat.sessions.get', 'only the caller\'s own web chat'],
+  ['companion.chat.sessions.list', 'only the web chats the caller made'],
   ['continuity.snapshot', 'session recovery state'],
   ['contracts.get', 'only a contract the caller started (see the contract test below)'],
   ['contracts.list', 'only contracts the caller started'],
@@ -174,6 +185,7 @@ const OPEN_TO_NON_ADMIN: ReadonlyMap<string, string> = new Map([
   ['ops.memory.get', 'memory pressure of the daemon'],
   ['pairing.posture.get', 'TLS posture of a web origin'],
   ['panels.list', 'integration panel descriptors'],
+  ['places.counts', 'counts made from the lists the caller may read itself (each read is sent with its own credential); a list it may not read is named unread, never counted'],
   ['power.status.get', 'whether the host is kept awake and why'],
   ['projectPlanning.status', 'planning artifact counts; the plan needs read:knowledge-content'],
   ['providers.get', 'one provider\'s runtime metadata'],
@@ -213,6 +225,7 @@ const OPEN_TO_NON_ADMIN: ReadonlyMap<string, string> = new Map([
   ['voice.wake.status', 'whether the wake-word model is on disk and verified'],
   ['watchers.list', 'configured watchers and their states'],
   ['web_search.providers.list', 'web search provider capabilities'],
+  ['workspaces.projects.list', 'registered workspace roots and their labels, as workspaces.registrations.list'],
   ['workspaces.registrations.list', 'registered workspace roots'],
   ['workspaces.resolve', 'whether a path is in a registered workspace'],
   ['worktrees.snapshot', 'worktree records: paths, branches, owners'],
@@ -256,7 +269,7 @@ test('a contract is shown only to the principal that started it, also after the 
   // The owner is attached to the session; detaching leaves it owned by nobody.
   let ownerAttached = true;
   service.attachHosted({ runners: () => [], forSession: async () => null, knows: () => false,
-    ownedByOthers: (_session, principalId) => ownerAttached && principalId !== 'owner' });
+    ownedByOthers: (_session, principalId) => ownerAttached && principalId !== d.ownerName });
   registerContractGatewayMethods(d.catalog, service);
 
   const started = await d.call(d.owner, 'contracts.start', { ask: 'Add a CSV parser module', sessionId: 'owner-session', workspaceRoot: root, isolation: 'shared' });

@@ -116,7 +116,7 @@ export async function runHostedSessionProof({ binary, boundary, env, root }) {
       client = new Agent();
       output = ''; errors = ''; childPid = undefined; exited = false;
       host = spawn('bwrap', [...boundary.slice(0, -1), '--as-pid-1', '--json-status-fd', '3', '--', binary, 'serve', '--hostname', '127.0.0.1', '--port', String(port)], {
-        env: { ...env, HOME: home, GOODVIBES_HOME: tree, GOODVIBES_DAEMON_HOME: daemon, GOODVIBES_WORKING_DIR: work, GOODVIBES_DAEMON_TOKEN: token,
+        env: { ...env, HOME: home, GOODVIBES_HOME: tree, GOODVIBES_DAEMON_HOME: daemon, GOODVIBES_DAEMON_TOKEN: token,
           TYPESAFE_BASE_URL: `http://127.0.0.1:${judgmentPort}`, TYPESAFE_API_KEY: 'synthetic-system-one-key', TYPESAFE_DEFAULT_MODEL: 'jev-latest' },
         stdio: ['ignore', 'pipe', 'pipe', 'pipe'],
       });

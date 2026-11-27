@@ -6,6 +6,7 @@ import { knowledgeScopeSelection } from './batteries/scope-selection.js';
 import { knowledgeSourceJudgmentUris } from './source-structural-references.js';
 import { DEFAULT_KNOWLEDGE_SPACE_ID, getKnowledgeSpaceId, getExplicitKnowledgeSpaceId, resolveKnowledgeSpaceScope, type KnowledgeSpaceScopeInput } from './spaces.js';
 import { knowledgeIssueMatchesScope, knowledgeNodeMatchesScope, knowledgeSourceMatchesScope } from './scope-records.js';
+import { knowledgeReachNow } from './knowledge-reach.js';
 import { knowledgeRecordVersion } from './store-record-representation.js';
 import type { KnowledgeStore } from './store.js';
 import type { KnowledgeScopeVerdict } from './store-scope-verdicts.js';
@@ -235,8 +236,11 @@ export async function prepareKnowledgeScopeSelection(
   const accepted = new Set<string>();
   let unsettled = 0, readable = false;
   const now = Date.now();
+  // A caller that is not the owner at large: a project's knowledge only of a project given to it (knowledge-reach.ts).
+  const reachable = knowledgeReachNow(store);
   for (const value of records) {
     if (!inBounds(value) || !membership(store, edgeIndex, value, scope)) continue;
+    if (reachable && !reachable(value.kind, value.record)) continue;
     if (needsReading(store, edgeIndex, value)) {
       const verdict = currentVerdict(store, value);
       // Explicit all-space browsing shows every record; other views leave out what was read as not belonging.

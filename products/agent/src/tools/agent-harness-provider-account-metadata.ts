@@ -270,7 +270,7 @@ export async function providerAccountSummary(context: ProviderCatalogContext, ar
     return { capturedAt: source.capturedAt, providers: accounts.map(account => describeAccount(account, { includeParameters })),
       returned: accounts.length, total: snapshot.providers.length, configured: snapshot.configuredCount, issues: snapshot.issueCount,
       ...(query ? { judgments: selected.judgments } : {}),
-      policy: 'Read-only provider account posture. Use confirmed workspace actions or slash-command mirrors for login/logout/bundle mutations.' };
+      policy: 'Read-only provider account posture. Use confirmed capabilities or slash-command mirrors for login/logout/bundle mutations.' };
   });
 }
 

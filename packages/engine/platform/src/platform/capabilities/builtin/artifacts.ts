@@ -60,7 +60,7 @@ export const ARTIFACTS_EXPORT = storeCapability({
   id: 'artifacts.export', actionId: 'export', label: 'Copy an artifact to a file', word: 'export',
   inputs: [
     artifactPick(),
-    wordsInput({ id: 'path', label: 'File', help: 'Where in this workspace, such as exports/report.md', why: 'a file path', kind: 'path', typed: { position: 2 } }),
+    { ...wordsInput({ id: 'path', label: 'File', help: 'Where in this workspace, such as exports/report.md', why: 'a file path', kind: 'path', typed: { position: 2 } }), file: 'written' },
     OVERWRITE,
   ],
   sentence: 'Artifact {artifact} is copied, byte for byte, to {path} in this workspace, until you change it.', example: { artifact: 'artifact-123', path: 'exports/report.md' },
@@ -69,7 +69,7 @@ export const ARTIFACTS_PACKAGE = storeCapability({
   id: 'artifacts.package', actionId: 'package', label: 'Copy several artifacts into a package', word: 'package',
   inputs: [
     wordsInput({ id: 'artifacts', label: 'Artifacts', help: 'Their ids, separated by commas', why: 'several artifact ids', typed: { position: 1 } }),
-    wordsInput({ id: 'path', label: 'Folder or ZIP file', help: 'Where in this workspace, such as exports/research-package or exports/research.zip', why: 'a path', kind: 'path', typed: { position: 2 } }),
+    { ...wordsInput({ id: 'path', label: 'Folder or ZIP file', help: 'Where in this workspace, such as exports/research-package or exports/research.zip', why: 'a path', kind: 'path', typed: { position: 2 } }), file: 'written', workFolder: false },
     fixedInput({
       id: 'format', label: 'As', help: 'A folder you can look through, or one ZIP file',
       choices: [{ value: 'directory', label: 'A folder' }, { value: 'zip', label: 'One ZIP file' }],

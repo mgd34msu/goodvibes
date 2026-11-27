@@ -292,6 +292,30 @@ export async function postAgentKnowledgeUpload<TData>(
 }
 
 /**
+ * Discard a file this program uploaded for a knowledge ingest (`postAgentKnowledgeUpload`, purpose `knowledge-ingest`)
+ * once the owner said No to adding it, or the add was refused: the daemon removes only such an upload. Undefined when
+ * it was discarded, else why not (said to the model; the ingest's own answer stands).
+ */
+export async function discardAgentKnowledgeUpload(connection: AgentKnowledgeConnection, artifactId: string, options: AgentKnowledgeRequestOptions = {}): Promise<string | undefined> {
+  const deadline = AbortSignal.timeout(AGENT_KNOWLEDGE_WRITE_DEADLINE_MS);
+  try {
+    const response = await (connection.fetch ?? fetch)(new URL(`/api/artifacts/${encodeURIComponent(artifactId)}`, connection.baseUrl), {
+      method: 'DELETE',
+      redirect: 'error',
+      signal: AbortSignal.any([deadline, ...(options.signal ? [options.signal] : [])]),
+      headers: connection.token ? { Authorization: `Bearer ${connection.token}` } : {},
+    });
+    if (response.ok) return undefined;
+    const text = await response.text();
+    let body: unknown = text;
+    try { body = JSON.parse(text) as unknown; } catch { /* text */ }
+    return isRecord(body) && typeof body.error === 'string' ? body.error : text.trim() || `HTTP ${response.status}`;
+  } catch (error) {
+    return error instanceof Error ? error.message : String(error);
+  }
+}
+
+/**
  * Whether the host runs on this machine: the daemon hosting this turn (reached
  * in process) or a loopback address. A browser profile home is a directory the
  * host opens itself, so it is sent only to such a host.

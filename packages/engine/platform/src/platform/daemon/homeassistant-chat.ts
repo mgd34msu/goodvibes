@@ -1,5 +1,7 @@
 import type { AutomationRouteBinding } from '../automation/routes.js';
 import type { RouteBindingManager } from '../channels/index.js';
+import type { ChannelPolicyRecord } from '../channels/types.js';
+import { isOwnersAloneConversation } from './owner-channel-conversation.js';
 import { HOME_ASSISTANT_SURFACE, HOME_STATE_PROVENANCE_CONTRACT } from '../channels/builtin/homeassistant.js';
 import type { CompanionChatManager } from '../companion/companion-chat-manager.js';
 import type { CompanionChatSession, CompanionChatTurnEvent } from '../companion/companion-chat-types.js';
@@ -51,6 +53,14 @@ export interface HomeAssistantChatInput {
   readonly tools?: readonly string[] | undefined;
   readonly context?: JsonRecord | undefined;
   /**
+   * How the message came: `typed` (Assist's text box) or `spoken` (a voice pipeline). Home Assistant's conversation
+   * input says neither (its fields: text, context, conversation_id, device_id, satellite_id, language, agent_id,
+   * extra_system_prompt), so the route takes the integration's `input` field when it sends one, and otherwise reads a
+   * request that names a voice satellite or a device (what a voice pipeline names: the device that heard it) as spoken.
+   * A spoken message never counts as the owner's: a voice pipeline names the device, not who spoke.
+   */
+  readonly inputKind?: 'typed' | 'spoken' | undefined;
+  /**
    * Optional grounding reference, the pre-registered home-graph knowledge
    * space / Home Assistant installation this turn should consult. When present
    * (and a home-graph reader is wired), the turn queries that space and folds
@@ -89,6 +99,11 @@ export interface HomeAssistantChatRuntime {
   readonly resolveDefaultProviderModel?: (() => { provider: string; model: string } | null) | undefined;
   /** Optional home-graph reader used to ground a turn against its pre-registered space. */
   readonly homeGraph?: HomeGraphGroundingReader | undefined;
+  /**
+   * The Home Assistant channel's policy ("Treat my own messages here as me", its owner): a message in a conversation
+   * proven the owner's alone (daemon/owner-channel-conversation.ts) is his own input when it is on. Absent: never.
+   */
+  readonly channelPolicy?: (() => Pick<ChannelPolicyRecord, 'ownMessagesAsOwner' | 'ownerId' | 'project'>) | undefined;
 }
 
 export async function postHomeAssistantChatMessage(
@@ -133,10 +148,18 @@ export async function postHomeAssistantChatMessage(
   // The daemon genuinely cannot establish the owner here, so it does not claim
   // to, the window stays open and outward effects stay judged on derivation.
   // Wiring this honestly would need speaker identification, not a flag.
+  // Its turn is someone else's input, unless the owner chose "Treat my own messages here as me" for Home Assistant and
+  // this conversation is proven his alone (Home Assistant's user id of the channel's owner, one-to-one): then it is his.
+  const policy = runtime.channelPolicy?.();
+  // A spoken message (a voice pipeline: it names the device that heard it, not who spoke) is never his; only a message
+  // known to be typed can be.
+  const ownerParty = policy?.ownMessagesAsOwner === true && input.inputKind === 'typed'
+    && isOwnersAloneConversation(resolution.binding, policy.ownerId);
   if (options.wait === false) {
     const messageId = await runtime.chatManager.postMessage(resolution.session.id, message, clientId, {
       ...(options.onTurnEvent ? { onTurnEvent: options.onTurnEvent } : {}),
       ...(clientMessageId !== undefined ? { clientMessageId } : {}),
+      ...(ownerParty ? { ownerParty: true } : {}),
     });
     return { ...resolution, messageId };
   }
@@ -152,6 +175,7 @@ export async function postHomeAssistantChatMessage(
         options.onTurnEvent?.(event);
       },
       ...(clientMessageId !== undefined ? { clientMessageId } : {}),
+      ...(ownerParty ? { ownerParty: true } : {}),
     },
   );
   return {
@@ -235,6 +259,8 @@ async function resolveHomeAssistantChatSessionNow(
       // Who it is with and whether it is one-to-one: the owner's own conversations (owner-alert.ts isOwnerConversation).
       ...(input.userId ? { userId: input.userId } : {}),
       conversationKind: input.threadId ? 'thread' : input.conversationKind ?? 'direct',
+      // Typed or spoken, for this message (the owner rule reads it: a spoken message is never his).
+      inputKind: input.inputKind ?? 'spoken',
       messageId: input.messageId,
       conversationId: input.conversationId,
       remoteSessionTtlMs: input.remoteSessionTtlMs,
@@ -256,13 +282,22 @@ async function resolveHomeAssistantChatSessionNow(
   // The prompt is stable for the conversation, so the provider's prompt cache
   // holds across turns; per-turn grounding travels in the user message.
   const systemPrompt = buildHomeAssistantSystemPrompt(input);
+  // The project the channel's conversations work in ("Project for this channel"): every conversation there works in it,
+  // and one made for another project (the choice changed since) moves to it and keeps its history. With none chosen, a
+  // conversation keeps the project it has (its own, made the first time the owner's own message there needed one:
+  // workspace/automatic-projects.ts, or one the owner attached it to).
+  const project = runtime.channelPolicy?.().project || undefined;
   const shouldCreate = !existing || existing.status === 'closed' || expired;
+  if (!shouldCreate && existing && project !== undefined && (existing.project ?? undefined) !== project) {
+    runtime.chatManager.moveSessionToProject(existing.id, project);
+  }
   const session = shouldCreate
     ? runtime.chatManager.createSession({
         title: input.title || 'Home Assistant',
         ...(provider ? { provider } : {}),
         ...(model ? { model } : {}),
         systemPrompt,
+        ...(project ? { project } : {}),
       })
     : runtime.chatManager.updateSession(existing.id, {
         title: input.title || existing.title,

@@ -10,14 +10,16 @@
  * `hooks.reload` is the one hooks capability of the program holding the
  * conversation: it reads the file again into that program's own dispatcher.
  */
-import { realpathSync } from 'node:fs';
-import { basename, dirname, isAbsolute, relative, resolve } from 'node:path';
+import { resolve } from 'node:path';
+import { currentRecordReach } from '@goodvibes/engine/daemon-api';
+import { callerPathOf, fileWorkRefusal } from '../path-inputs.js';
 import type { HookApi } from '../../hooks/hook-api.js';
 import { HOOK_TRACE_PROGRAM_WORDS, hookRunOutcome, type HookTraceRecord } from '../../hooks/trace-words.js';
 import { HooksFileAwaitingTrustError } from '../../hooks/workbench.js';
 import { hookPatternProblem } from '../../hooks/contracts.js';
 import type { HookType } from '../../hooks/types.js';
 import { noteListChanged } from '../../runtime/list-changes.js';
+import { projectIdentityOf } from '../../workspace/project-identity.js';
 import { CapabilityRefusal, REPLACED_DONE, type CapabilityCaller, type CapabilityDefinition, type FixedChoice, type InputDescription, type ListName } from '../types.js';
 
 /** What the hooks capabilities need: the hook API for the caller's project, and the hook trace. */
@@ -77,75 +79,12 @@ function managedOf(api: HookApi) {
     ? [{ name: hook.name, pattern, type: hook.type, enabled: hook.enabled !== false, state: hook.enabled === false ? 'off' : 'on', detail: `${pattern} (${hook.type})`, ...(hook.description ? { description: hook.description } : {}) }] : []);
 }
 
-/** A path the caller gave, in its project when it is not absolute (the daemon's own folder is not the caller's). */
-function pathOf(api: HookApi, caller: CapabilityCaller, path: string): string {
-  if (isAbsolute(path)) return path;
-  return resolve(caller.workingDirectory ?? dirname(api.workbench.getFilePath()), path);
-}
-
 /**
- * Where a path really is: its real path when it exists, else its nearest existing folder's real path with the rest
- * after it, so a link (`/proc/self/root`, a symlink in the project) is followed to what it names.
+ * The file a path input names, as capabilities/path-inputs.ts places it for this caller: inside its checked project for
+ * anyone but the person; a relative path with no project is refused.
  */
-function realPathOf(path: string): string {
-  const absolute = resolve(path);
-  let existing = absolute;
-  const rest: string[] = [];
-  for (;;) {
-    try {
-      return resolve(realpathSync(existing), ...rest.reverse());
-    } catch {
-      const parent = dirname(existing);
-      if (parent === existing) return absolute;
-      rest.push(basename(existing));
-      existing = parent;
-    }
-  }
-}
-
-function within(path: string, root: string): boolean {
-  const rel = relative(root, path);
-  return rel === '' || (!rel.startsWith('..') && !isAbsolute(rel));
-}
-
-/**
- * The folders a hooks file or bundle may be read from or written to: the caller's project and the folder its managed
- * hooks file is in. Any other path is refused before anything is read, written or asked.
- */
-function hookFolders(caller: CapabilityCaller, api?: HookApi): readonly string[] {
-  return [caller.workingDirectory, api ? dirname(api.workbench.getFilePath()) : undefined]
-    .filter((folder): folder is string => typeof folder === 'string' && folder.length > 0).map(realPathOf);
-}
-
-/** Why a hooks path may not be used by this caller, or undefined when it may. `anywhere`: the person may name any place. */
-function hookPathRefusal(path: string, caller: CapabilityCaller, purpose: 'read' | 'write', api?: HookApi, anywhere = false): CapabilityRefusal | undefined {
-  if (anywhere && caller.personAsked === true) return undefined;
-  const folders = hookFolders(caller, api);
-  if (folders.length === 0) return new CapabilityRefusal(`Not done: ${path} is not in a project, and a hooks file is only ${purpose === 'read' ? 'read' : 'written'} in the project it belongs to.`, 'Send the project folder (workingDirectory) with the call');
-  const real = realPathOf(isAbsolute(path) ? path : resolve(caller.workingDirectory ?? folders[0]!, path));
-  if (folders.some((folder) => within(real, folder))) return undefined;
-  return new CapabilityRefusal(`Not done: ${path} is outside the project and its hooks folder, so it is not ${purpose === 'read' ? 'read' : 'written'}.`,
-    purpose === 'write' ? 'Name a file inside the project, or save it elsewhere yourself from your own terminal' : 'Copy the bundle into the project first');
-}
-
-/** The preview check (before the gate, at every door) of a capability that reads or writes the file in `input`. */
-function hookPathCheck(input: string, purpose: 'read' | 'write', anywhere = false): NonNullable<CapabilityDefinition<HooksCapabilityServices>['check']> {
-  return (values, caller) => {
-    const raw = (values[input] ?? '').trim();
-    if (raw === '') return undefined;
-    // The person's own hooks folder is known only to the handler (it reads the hooks file setting); here the project.
-    return hookPathRefusal(raw, caller, purpose, undefined, anywhere);
-  };
-}
-
-/** A hooks file that is not JSON is said so, never with its parser's words, which quote the file's own text. */
-function readFailure(path: string, error: unknown): string {
-  if (error instanceof SyntaxError) return `${path} could not be read as a hooks file`;
-  const code = (error as { readonly code?: unknown } | null)?.code;
-  if (code === 'ENOENT') return `${path} does not exist`;
-  if (code === 'EACCES' || code === 'EPERM') return `${path} could not be opened`;
-  if (code === 'EISDIR') return `${path} is a folder, not a hooks file`;
-  return `${path} could not be read as a hooks file`;
+function pathOf(_api: HookApi, caller: CapabilityCaller, path: string): string {
+  return callerPathOf(caller, path);
 }
 
 /**
@@ -153,14 +92,16 @@ function readFailure(path: string, error: unknown): string {
  * from running, and that is said. Every screen showing the hooks is told the
  * file changed (LIST_CHANGED `tools`).
  */
-async function written<T>(work: () => Promise<T>): Promise<{ readonly value: T | undefined; readonly held: boolean; readonly rejected: readonly string[] }> {
+async function written<T>(caller: CapabilityCaller, work: () => Promise<T>): Promise<{ readonly value: T | undefined; readonly held: boolean; readonly rejected: readonly string[] }> {
+  // The hooks file is its project's: only that project's screens read again.
+  const project = caller.workingDirectory ? { project: projectIdentityOf(caller.workingDirectory) } : {};
   try {
     const value = await work();
-    noteListChanged({ list: 'tools', change: 'changed' });
+    noteListChanged({ list: 'tools', change: 'changed', ...project });
     return { value, held: false, rejected: [] };
   } catch (error) {
     if (!(error instanceof HooksFileAwaitingTrustError)) throw error;
-    noteListChanged({ list: 'tools', change: 'changed' });
+    noteListChanged({ list: 'tools', change: 'changed', ...project });
     // An import carries what its bundle left out on the error (hook-api.ts).
     const rejected = (error as { readonly rejected?: unknown }).rejected;
     return { value: undefined, held: true, rejected: Array.isArray(rejected) ? rejected.filter((entry): entry is string => typeof entry === 'string') : [] };
@@ -225,7 +166,7 @@ function toggle(enabled: boolean): CapabilityDefinition<HooksCapabilityServices>
     async run(values, services, caller) {
       const api = services.hooks.forProject(caller.workingDirectory);
       const name = values.hook!;
-      const { value, held } = await written(() => api.workbench.toggle(name, enabled));
+      const { value, held } = await written(caller, () => api.workbench.toggle(name, enabled));
       // The file was written when the folder is only waiting on trust.
       if (!held && !value) throw toggleRefusal(api, name);
       return {
@@ -260,7 +201,7 @@ export const HOOKS_SCAFFOLD: CapabilityDefinition<HooksCapabilityServices> = {
     const point = values.match!.trim();
     const problem = hookPatternProblem(point);
     if (problem) throw new CapabilityRefusal(`Nothing was added: ${pointWords(problem)}.`, 'The Hook points list names every point a hook can run at.');
-    const { held } = await written(() => api.workbench.scaffoldHook(name, point, values.type as HookType));
+    const { held } = await written(caller, () => api.workbench.scaffoldHook(name, point, values.type as HookType));
     return {
       text: `Made managed hook ${name} at ${values.match} in ${api.workbench.getFilePath()}; fill in what it runs there, then switch it on.${held ? HELD_WORDS : ''}`,
       data: { hook: name, point: values.match, type: values.type, file: api.workbench.getFilePath(), enabled: false, ...(held ? { awaitingTrust: true } : {}) },
@@ -288,7 +229,7 @@ export const HOOKS_CHAIN: CapabilityDefinition<HooksCapabilityServices> = {
     if (managedOf(api).some((hook) => hook.name === name) || api.workbench.listManagedChains().some((chain) => chain.name === name)) {
       throw new CapabilityRefusal(`A managed hook or chain named ${name} is already in the hooks file; nothing was added.`, 'Choose another name, or change that one.');
     }
-    const { held } = await written(() => api.workbench.scaffoldChain(name, matches));
+    const { held } = await written(caller, () => api.workbench.scaffoldChain(name, matches));
     return {
       text: `Made managed hook chain ${name} with ${matches.length} step${matches.length === 1 ? '' : 's'}.${held ? HELD_WORDS : ''}`,
       data: { chain: name, points: matches, file: api.workbench.getFilePath(), ...(held ? { awaitingTrust: true } : {}) },
@@ -303,7 +244,7 @@ export const HOOKS_REMOVE: CapabilityDefinition<HooksCapabilityServices> = {
   touches: 'this-machine', lasts: 'kept', risk: 'cannot-be-undone', example: { hook: 'lint-before-commit' },
   async run(values, services, caller) {
     const api = services.hooks.forProject(caller.workingDirectory);
-    const { value, held } = await written(() => api.workbench.remove(values.hook!));
+    const { value, held } = await written(caller, () => api.workbench.remove(values.hook!));
     if (!held && !value) throw new CapabilityRefusal(`No managed hook or chain named ${values.hook}.`, 'The Hooks list shows the managed hooks file and its entries.', 'NOT_FOUND');
     return { text: `Removed managed hook entry ${values.hook}.${held ? HELD_WORDS : ''}`, data: { hook: values.hook, file: api.workbench.getFilePath() } };
   },
@@ -334,16 +275,13 @@ export const HOOKS_SIMULATE: CapabilityDefinition<HooksCapabilityServices> = {
 export const HOOKS_EXPORT: CapabilityDefinition<HooksCapabilityServices> = {
   capability: { id: 'hooks.export', group: 'tools', home: 'daemon', repeat: 'safe' },
   actionId: 'export', label: 'Save the hooks to a file', word: 'export',
-  inputs: [{ ...FILE, help: 'Where to write the bundle', required: { default: '', defaultMeans: 'the hooks file itself' } }],
+  inputs: [{ ...FILE, file: 'written', help: 'Where to write the bundle', required: { default: '', defaultMeans: 'the hooks file itself' } }],
   sentence: 'Every managed hook and chain is written to {path} as a bundle: a copy to back up, or to move to another machine.', done: '',
   touches: 'this-machine', lasts: 'not-a-change', risk: 'none', example: { path: 'hooks-bundle.json' },
-  // Written only inside the caller's project or its hooks folder; the person may name any place himself.
-  check: hookPathCheck('path', 'write', true),
+  // Written only inside the caller's project (path-inputs.ts, at every door and here); the person may name any place himself.
   async run(values, services, caller) {
     const api = services.hooks.forProject(caller.workingDirectory);
     const target = values.path ? pathOf(api, caller, values.path) : api.workbench.getFilePath();
-    const refused = values.path ? hookPathRefusal(values.path, caller, 'write', api, true) : undefined;
-    if (refused) throw refused;
     const saved = await api.workbench.export(target);
     return { text: `Saved the managed hooks to ${saved}`, data: { path: saved } };
   },
@@ -354,18 +292,16 @@ export const HOOKS_INSPECT: CapabilityDefinition<HooksCapabilityServices> = {
   actionId: 'inspect', label: 'Look inside a hooks bundle', word: 'inspect', inputs: [FILE],
   sentence: 'Shows how many hooks and chains {path} holds and their hook points; nothing is installed.', done: '',
   touches: 'reads', lasts: 'not-a-change', risk: 'none', example: { path: 'hooks-bundle.json' },
-  // A read with no risk runs for any caller without a question, so it reads only inside the project and its hooks folder.
-  check: hookPathCheck('path', 'read'),
+  // A read with no risk runs for any caller without a question, so it reads only inside the caller's checked project.
   async run(values, services, caller) {
     const api = services.hooks.forProject(caller.workingDirectory);
-    const refused = hookPathRefusal(values.path!, caller, 'read', api);
-    if (refused) throw refused;
+    const source = pathOf(api, caller, values.path!);
     let inspection;
     try {
-      inspection = api.workbench.inspect(pathOf(api, caller, values.path!));
+      inspection = api.workbench.inspect(source);
     } catch (error) {
-      // Never the parser's words: they quote the file.
-      throw new CapabilityRefusal(`${readFailure(values.path!, error)}; nothing was read from it.`);
+      // Never the parser's words: they quote the file (path-inputs.ts).
+      throw fileWorkRefusal(values.path!, 'a hooks bundle', caller, error, 'Nothing was read from it.');
     }
     return {
       text: [`Hook bundle: ${inspection.path}`, `  hooks: ${inspection.hookCount}`, `  chains: ${inspection.chainCount}`, `  patterns: ${inspection.patterns.join(', ') || '(none)'}`].join('\n'),
@@ -386,18 +322,15 @@ export const HOOKS_IMPORT: CapabilityDefinition<HooksCapabilityServices> = {
   // Installing hooks makes what they run (commands, scripts, agents, calls) run by itself at their hook points, outside
   // the command gate and the sandbox: it loosens a protection, asked of the owner and opening on No.
   touches: 'this-machine', lasts: 'kept', risk: 'loosens-a-protection', example: { path: 'hooks-bundle.json', strategy: 'replace' },
-  check: hookPathCheck('path', 'read'),
   async run(values, services, caller) {
     const api = services.hooks.forProject(caller.workingDirectory);
     const strategy = values.strategy === 'replace' ? 'replace' : 'merge';
-    const refused = hookPathRefusal(values.path!, caller, 'read', api);
-    if (refused) throw refused;
     const source = pathOf(api, caller, values.path!);
     let outcome;
     try {
-      outcome = await written(() => api.workbench.import(source, strategy));
+      outcome = await written(caller, () => api.workbench.import(source, strategy));
     } catch (error) {
-      throw new CapabilityRefusal(`Nothing was installed: ${error instanceof SyntaxError || (error as { code?: unknown } | null)?.code !== undefined ? readFailure(values.path!, error) : error instanceof Error ? error.message : String(error)}.`);
+      throw fileWorkRefusal(values.path!, 'a hooks bundle', caller, error, 'Nothing was installed.');
     }
     const rejected = (outcome.value ?? outcome.rejected).map(pointWords);
     return {
@@ -419,7 +352,12 @@ export const HOOKS_TRACE: CapabilityDefinition<HooksCapabilityServices> = {
   async run(values, services, caller) {
     const asked = Number.parseInt(values.limit || '20', 10);
     if (!Number.isFinite(asked) || asked < 1) throw new CapabilityRefusal(`How many: "${values.limit}" is not a whole number from 1.`);
-    const runs = services.hooks.trace({ ...(caller.workingDirectory ? { project: resolve(caller.workingDirectory) } : {}), limit: asked });
+    // A caller that is not the owner himself: only runs of a project it may reach, or of none, before the latest are cut.
+    const reach = currentRecordReach();
+    const project = caller.workingDirectory ? { project: resolve(caller.workingDirectory) } : {};
+    const runs = reach
+      ? services.hooks.trace({ ...project, limit: Number.MAX_SAFE_INTEGER }).filter((run) => run.project === undefined || reach('project', run.project)).slice(0, asked)
+      : services.hooks.trace({ ...project, limit: asked });
     const data = { runs: runs.map((run) => ({ ...run, did: hookRunOutcome(run) })) };
     if (runs.length === 0) return { text: 'No hook has run here yet.', data };
     return {

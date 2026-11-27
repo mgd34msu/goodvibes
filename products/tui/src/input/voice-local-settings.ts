@@ -45,8 +45,8 @@ export function localVoiceSetupOffer(configGet: (key: string) => unknown): Local
   let detail: string;
   if (!supported) detail = 'local voice: no managed build for this platform (set voice.local.* by hand to use it)';
   else if (provisioned) detail = 'local voice: configured (managed engine set)';
-  else detail = `local voice: not installed yet; /voice setup installs it (${sizeLabel})`;
+  else detail = `local voice: not installed yet; "install" on the Voice tab of System installs it (${sizeLabel})`;
 
-  const actions = supported && !provisioned ? '[Enter] select · /voice setup installs it' : '[Enter] set provider';
+  const actions = supported && !provisioned ? '[Enter] select · System, Voice, "install" installs it' : '[Enter] set provider';
   return { supported, provisioned, sizeLabel, detail, actions };
 }

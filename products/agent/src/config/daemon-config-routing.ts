@@ -30,10 +30,6 @@
 import {
   applyConfigWrite,
   configKeyScope,
-
-  readControlPlaneBinding,
-  readDaemonTierFile,
-  readDotPath,
   createEffectiveConfigView,
   isDaemonOwnedConfigKey,
   isClientOwnedConfigKey,
@@ -44,11 +40,11 @@ import {
   type EffectiveConfigView,
   type LocalConfigReader,
   type LocalConfigWriter,
+  type DaemonWritePress,
 } from '@goodvibes/engine/platform/platform/config';
 import type { DaemonConfigClient } from '@goodvibes/engine/platform/platform/runtime/client';
-import { bearerFor, type DaemonTarget } from '@goodvibes/engine/platform/platform/runtime/client/daemon-target';
-import { readOperatorTokenFile, resolveDaemonHomeDir } from '@goodvibes/engine/platform/platform/workspace/daemon-home';
-import { join } from 'node:path';
+import type { DaemonTarget } from '@goodvibes/engine/platform/platform/runtime/client/daemon-target';
+import { buildProgramConfigRouting } from '@goodvibes/engine/terminal-shell/program-config-routing';
 import { logger, summarizeError } from '@goodvibes/engine/platform/platform/utils';
 
 export {
@@ -107,29 +103,12 @@ export function agentDaemonConfigClientInstalled(): boolean {
  * the refusal reason when the daemon owns the key and could not be reached: a
  * setting that configures nothing must not report success.
  */
-export async function routeDaemonOwnedConfigWrite(key: string, value: unknown): Promise<'daemon' | null> {
+export async function routeDaemonOwnedConfigWrite(key: string, value: unknown, press?: DaemonWritePress): Promise<'daemon' | null> {
   const client = installedConfigClient;
   if (!client || !client.ownsKey(key)) return null;
-  await client.set(key, value);
+  // Who decided it (the person's press, the Agent's gate on the model's call), from the call site: sent with it.
+  await client.set(key, value, press);
   return 'daemon';
-}
-
-/** Extract the bearer token the daemon's admin routes require, if present. */
-function readOperatorToken(daemonHomeDir: string): string | undefined {
-  const raw = readOperatorTokenFile(daemonHomeDir);
-  if (!raw) return undefined;
-  try {
-    const parsed = JSON.parse(raw) as unknown;
-    if (typeof parsed === 'string') return parsed;
-    if (parsed && typeof parsed === 'object' && typeof (parsed as { token?: unknown }).token === 'string') {
-      return (parsed as { token: string }).token;
-    }
-  } catch {
-    // A non-JSON token file is treated as the raw token, matching how the
-    // daemon's own reader tolerates both shapes.
-    return raw.trim() || undefined;
-  }
-  return undefined;
 }
 
 export interface AgentConfigRoutingOptions {
@@ -151,6 +130,8 @@ export interface AgentConfigRoutingOptions {
   readonly daemonHomeDir?: string | undefined;
   /** True only when THIS process hosts the daemon. The agent normally does not. */
   readonly hostsDaemon?: boolean | undefined;
+  /** Who decided the write (the person's press, the Agent's gate on the model's call), from the call site: sent with it. */
+  readonly press?: DaemonWritePress | undefined;
 }
 
 /**
@@ -160,20 +141,10 @@ export interface AgentConfigRoutingOptions {
  * out of the daemon's settings file behind its back.
  */
 export function buildAgentConfigRouting(options: AgentConfigRoutingOptions = {}): DaemonConfigRouterDeps {
-  const daemonHomeDir = options.daemonHomeDir ?? resolveAgentDaemonHome(options.homeDir);
-  const token = readOperatorToken(daemonHomeDir);
-  const target = options.target;
-  return {
-    hostsDaemon: options.hostsDaemon ?? false,
-    daemonHomeDir,
-    token,
-    // Where the daemon listens is DERIVED from its own control-plane binding,
-    // never from a stored base-URL string (which drifts on port, scheme and
-    // host, see the platform's control-plane-base-url.ts). This is also what makes
-    // a foreground daemon discoverable: it writes no detached-daemon record, so
-    // without this a live daemon looked absent and daemon-owned writes went to
-    // the local file while it was running.
-    readDaemonBinding: () => readDaemonBindingFromStore(daemonHomeDir),
+  // The one routing both terminal programs build (terminal-shell program-config-routing.ts): the daemon's address from
+  // its own control-plane binding, this machine's operator token, a named daemon's own credential.
+  return buildProgramConfigRouting({
+    ...options,
     // READS COME BACK FROM THE HOST THE WRITES WENT TO.
     //
     // `routeConfigWrite` below prefers the installed connected-host client: one
@@ -204,43 +175,7 @@ export function buildAgentConfigRouting(options: AgentConfigRoutingOptions = {})
     ...(installedConfigClient
       ? { readDaemonSnapshot: async () => await (agentDaemonConfigClient()?.snapshot() ?? null) }
       : {}),
-    // A named daemon gets only its own bound credential, never this machine's token.
-    ...(target
-      ? { endpoint: { baseUrl: target.origin.baseUrl, token: target.credential ? bearerFor(target.credential, target.origin.baseUrl) : undefined, source: `the daemon at ${target.origin.baseUrl}` } }
-      : {}),
-  };
-}
-
-/**
- * The daemon home for a caller rooted at `homeDir`. An explicit
- * GOODVIBES_DAEMON_HOME still wins (it is a deliberate operator override);
- * otherwise the daemon home follows the CALLER's home rather than the process
- * user's, so a config manager on a different home never talks to the machine's
- * real daemon by accident.
- */
-function resolveAgentDaemonHome(homeDir: string | undefined): string {
-  if (process.env['GOODVIBES_DAEMON_HOME']?.trim()) return resolveDaemonHomeDir();
-  if (homeDir?.trim()) return join(homeDir, '.goodvibes', 'daemon');
-  return resolveDaemonHomeDir();
-}
-
-/**
- * Read the daemon's control-plane binding out of the daemon's own settings
- * store. This is address discovery, not value reading: settings VALUES always
- * come from the daemon over the wire.
- */
-function readDaemonBindingFromStore(daemonHomeDir: string) {
-  try {
-    const stored = readDaemonTierFile(join(daemonHomeDir, 'settings.json'));
-    const read = (key: string): unknown => readDotPath(stored, key).value;
-    if (readDotPath(stored, 'controlPlane.port').present === false
-      && readDotPath(stored, 'controlPlane.hostMode').present === false) {
-      return null;
-    }
-    return readControlPlaneBinding(read);
-  } catch {
-    return null;
-  }
+  });
 }
 
 /**
@@ -286,7 +221,7 @@ export async function routeConfigWrite(
   // path that has no daemon in it at all.
   // The host the write goes to, captured once: the read-back asks the same host.
   const host = agentDaemonConfigClientInstalled() ? agentDaemonConfigClient() : null;
-  const routed = host ? await routeDaemonOwnedConfigWrite(key, value) : null;
+  const routed = host ? await routeDaemonOwnedConfigWrite(key, value, options.press) : null;
   if (routed === 'daemon') {
     logger.debug('[config] routed write over config.set', { key });
     // The write is already applied; a failed read-back must not turn it into a reported failure.

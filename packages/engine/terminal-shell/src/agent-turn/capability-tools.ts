@@ -18,7 +18,7 @@
 import { AsyncLocalStorage } from 'node:async_hooks';
 import {
   CAPABILITY_RUN_METHOD_ID, CAPABILITY_RUN_TOOL as CAPABILITY_RUN_TOOL_NAME, CapabilityRefusal, SESSION_CAPABILITIES, capabilityFindDefinition, capabilityOutcomeText, capabilityRunDefinition,
-  checkCapabilityInputs, createSecretInputProjector, daemonCapability, findCapabilities, methodBodyOf, operatorInputFromValues, pathInputsRefusal, revealSecretInputs,
+  checkCapabilityInputs, createSecretInputProjector, daemonCapability, findCapabilities, methodBodyOf, methodCapability, operatorInputFromValues, pathInputsRefusal, revealSecretInputs,
   hiddenSecret, type CapabilityCatalog, type CapabilityDefinition, type CapabilityEntry, type ClearServices, type CompactServices, type KeysCapabilityServices, type UndoServices,
   type SessionsCapabilityServices, type ConversationControlServices,
   type CodeCapabilityServices,
@@ -41,23 +41,24 @@ import {
 } from '@goodvibes/engine/platform/platform/capabilities';
 import { dropNestedSecretInputs, holdNestedSecretInputs, type SecretInputLeaf } from './operator-input-projector.js';
 import type { Tool, ToolExecuteOptions } from '@goodvibes/engine/platform/platform/types';
-import { assertCurrentToolInvocation, currentToolExecuteOptions, previewRegisteredTool, runRegisteredTool, type ToolRegistry } from '@goodvibes/engine/platform/platform/tools';
+import { assertCurrentToolInvocation, currentToolExecuteOptions, noteCurrentToolEffectSent, previewRegisteredTool, runRegisteredTool, type ToolRegistry } from '@goodvibes/engine/platform/platform/tools';
 import type { ShellPathService } from '@goodvibes/engine/platform/platform/runtime/shell';
+import { programCallHeadersFor } from '@goodvibes/engine/platform/platform/runtime/client';
 import type { ConnectedHostConfigReader } from './connected-host-client.js';
 import type { AgentInProcessHost } from './in-process-host.js';
 import { registerAgentOperatorMethodTool } from './operator-method-tool.js';
 import { operatorContractMethods, operatorMethodIsReadOnly, ownerOnlyOperatorMethodIds, resolveOperatorContractMethod } from './operator-contract-routes.js';
 import { hasDecidedAct, inRecordOfDecidedCall, noteDecidedAct, RECORD_NOT_SAVED } from './record-of-decided-call.js';
 import { connectionIsThisMachine } from './knowledge-runtime.js';
+import { carriedPartBody, carryFilesHere, partIdOf } from '../bundle-file-work.js';
+import { PLACE_PATH_CAPABILITIES, runHoldingPaths } from '@goodvibes/engine/platform/platform/capabilities';
 import { captureOperatorConnection } from './operator-connection-owner.js';
 import { agentCallConnection } from './agent-call-credential.js';
 import { forgetDelegatedCredential } from './agent-delegation-credential.js';
 import { createDaemonRemoteTool } from './daemon-remote-tool.js';
-import { NATIVELY_ADMITTED_METHOD_IDS } from '@goodvibes/engine/platform/platform/control-plane';
+import { declaredMethodRisk, NATIVELY_ADMITTED_METHOD_IDS, RUNS_LATER_METHOD_IDS, type MethodRisk } from '@goodvibes/engine/platform/platform/control-plane';
 import { onRunAnswererChanged, runHoldsForOwner } from '@goodvibes/engine/platform/platform/permissions';
 import { listedTitle } from '../places/place-titles.js';
-import { currentTurn } from '@goodvibes/engine/platform/platform/security';
-import { inPersonsOwnAct } from '../persons-own-act.js';
 
 /** The live conversation's services, from the program holding it, and its key table (builtin/keys.ts). */
 export type SessionCapabilityServices = ClearServices & CompactServices & UndoServices & KeysCapabilityServices
@@ -220,11 +221,23 @@ function runDefinitionFor(catalog: () => CapabilityCatalog): () => ReturnType<ty
     // In a run nobody answers, an action whose own method the daemon admits by asking the owner is decided as this
     // call (its own risk, under the mode): one the owner must decide is then held for him through the daemon's
     // capabilities.run (native/headless-held-calls.ts), never sent on to wait at the daemon.
-    const routedThere = (methodId: string): boolean => !(holds && NATIVELY_ADMITTED_METHOD_IDS.has(methodId));
+    // A method that makes something run by itself later, or spends money, is decided HERE, by this program's gate, as the
+    // daemon's own turns decide it (tools/capability/daemon-tools.ts): only this program sees what its conversation read
+    // from outside, and after such a read the gate asks before it in every mode (security/conversation-exposure.ts,
+    // permissions/manager.ts `callFacts`). Routed on, the daemon would decide it by its class alone, never asking. Every
+    // other class of such a method is declared here too, so nothing the daemon would have decided is lost.
+    const decidedHere = (methodId: string): boolean => RUNS_LATER_METHOD_IDS.has(methodId) || declaredMethodRisk(methodId, 'read') === 'spends-money';
+    const routedThere = (methodId: string): boolean => !(holds && NATIVELY_ADMITTED_METHOD_IDS.has(methodId)) && !decidedHere(methodId);
+    const here = operatorContractMethods().map((method) => method.id).filter(decidedHere);
+    const ofRisk = (...risks: readonly MethodRisk[]): string[] => here.filter((methodId) => risks.includes(declaredMethodRisk(methodId, 'read') ?? 'none'));
     const definition = capabilityRunDefinition(entries, {
       // Refused here at once; what else the owner decides about a method (cannot be undone, changes a contract, a new
       // recipient) is decided at the nested call with the method's own declarations.
       ownerActs: ownerOnlyOperatorMethodIds(),
+      runsLater: here.filter((methodId) => RUNS_LATER_METHOD_IDS.has(methodId)),
+      sendsOrSpends: ofRisk('spends-money'),
+      irreversible: ofRisk('cannot-be-undone'),
+      loosens: ofRisk('loosens-a-protection', 'writes-a-secret'),
       // A daemon method named by id (or reached through an action's own method) is decided once, as the nested
       // daemon-method call it becomes; this call only routes it there.
       routed: [
@@ -287,30 +300,56 @@ type Posted = { readonly ok: true; readonly body: Record<string, unknown> } | { 
  * `capabilities.run` with the Agent's delegated credential (the host judges it as the Agent's after this gate), a
  * read such as an action's preview with the ordinary one.
  */
-function daemonPoster(host: RunHost): (methodId: string, input: Record<string, unknown>, signal: AbortSignal | undefined, what: string, gateDecided?: true, person?: true) => Promise<Posted> {
-  return async (methodId, input, signal, what, gateDecided, person) => {
+function daemonPoster(host: RunHost): (methodId: string, input: Record<string, unknown>, signal: AbortSignal | undefined, what: string, gateDecided?: true) => Promise<Posted> {
+  return async (methodId, input, signal, what, gateDecided) => {
     let sending = false;
     try {
       const ordinary = captureOperatorConnection(host.shellPaths, host.configManager, () => signal?.throwIfAborted(), host.inProcess);
       if (!ordinary.token) return { ok: false, error: `auth_required: ${ordinary.unavailable?.reason ?? 'no daemon credential was found'}; nothing was sent.` };
-      // A person's own act is sent with the program's own credential, the one the daemon keeps a person's claim from;
-      // anything else with the credential the one rule names for it.
-      const { connection, delegated } = person === true ? { connection: ordinary, delegated: undefined } : await agentCallConnection(ordinary, methodId, 'agent', host.shellPaths.homeDirectory, signal);
+      // Sent with the credential the one rule names for it (a model's call: its delegated credential).
+      const { connection, delegated } = await agentCallConnection(ordinary, methodId, 'agent', host.shellPaths.homeDirectory, signal);
+      // A daemon on another machine: a file or folder the call names by path is this machine's, read here and sent, and
+      // what the run makes there is written back here (bundle-file-work.ts `carryFilesHere`).
+      let carry: Awaited<ReturnType<typeof carryFilesHere>>;
+      if (methodId === 'capabilities.run' && !connectionIsThisMachine(connection)) {
+        // A part of a large file goes ahead with the same credential, as one artifact made for the call.
+        const upload = async (bytes: Buffer, name: string): Promise<string> => {
+          const stored = await (connection.fetch ?? fetch)(`${connection.baseUrl}/api/control-plane/methods/artifacts.create/invoke`, {
+            method: 'POST', redirect: 'error', ...(signal ? { signal } : {}),
+            headers: { authorization: `Bearer ${connection.token}`, 'content-type': 'application/json' },
+            body: JSON.stringify({ body: await carriedPartBody(bytes, name) }),
+          });
+          const answer = record(await stored.json().catch(() => null));
+          if (!stored.ok) throw new Error(`A part of the file could not be sent ahead: ${typeof answer.error === 'string' ? answer.error : `the daemon answered ${stored.status}`}.`);
+          return partIdOf(answer);
+        };
+        try { carry = await carryFilesHere(input, host.shellPaths.workingDirectory, upload); } catch (error) {
+          return { ok: false, error: `${error instanceof Error ? error.message : String(error)} Nothing was sent.` };
+        }
+      }
+      // The program's call context and the registration this daemon issued it for this credential: the conversation a
+      // record says it came from is believed only from the program that registered it.
+      const callHeaders = await programCallHeadersFor(connection.baseUrl, connection.token, connection.fetch ?? fetch);
       sending = true;
       const response = await (connection.fetch ?? fetch)(`${connection.baseUrl}/api/control-plane/methods/${encodeURIComponent(methodId)}/invoke`, {
         method: 'POST', redirect: 'error', ...(signal ? { signal } : {}),
-        headers: { authorization: `Bearer ${connection.token}`, 'content-type': 'application/json',
+        headers: { ...callHeaders, authorization: `Bearer ${connection.token}`, 'content-type': 'application/json',
           // Only `capability_run`'s own run, after this program's gate judged the capability, says the gate decided it.
-          ...(gateDecided === true && delegated ? { [CAPABILITY_GATE_DECIDED_HEADER]: 'true' } : {}),
-          // What a person's own typed line or press made (an artifact it saves) carries the person's claim.
-          ...(person === true ? { 'x-goodvibes-explicit-user-request': 'true' } : {}) },
-        body: JSON.stringify({ body: input }),
+          ...(gateDecided === true && delegated ? { [CAPABILITY_GATE_DECIDED_HEADER]: 'true' } : {}) },
+        body: JSON.stringify({ body: carry?.body ?? input }),
       });
       if (response.status === 401 && delegated) await forgetDelegatedCredential(delegated).catch(() => {});
       const body = record(await response.json().catch(() => null));
       if (!response.ok) {
         const next = Array.isArray(body.next) && typeof body.next[0] === 'string' ? ` ${body.next[0]}` : '';
         return { ok: false, error: `${typeof body.error === 'string' ? body.error : `The daemon answered ${response.status}.`}${next}` };
+      }
+      if (carry) {
+        try { carry.after(body); } catch (error) {
+          return { ok: false, error: `It ran on the daemon, but what it made could not be written on this computer: ${error instanceof Error ? error.message : String(error)}.` };
+        }
+        const data = record(body.data);
+        if (data.carried !== undefined) { const { carried: _carried, ...rest } = data; return { ok: true, body: { ...body, data: rest } }; }
       }
       return { ok: true, body };
     } catch (error) {
@@ -352,6 +391,27 @@ function previewBodies(): { keep(id: string, values: Readonly<Record<string, str
       return body;
     },
   };
+}
+
+/**
+ * What a capability that runs a daemon method answers in this program's own turn: the capability's own words for what
+ * ran and how it came out (builtin/method-capability.ts `said` and `did`, with its done line), then the method's answer
+ * as its data, the shape the daemon's `capabilities.run` gives a daemon-hosted turn. The nested method call's output
+ * is its facts as JSON (`body` the answer); one that cannot be read is handed on as it came.
+ */
+function methodCapabilityAnswer(entry: CapabilityEntry, values: Readonly<Record<string, string>>, output: string): string {
+  let facts: Record<string, unknown>;
+  try { facts = record(JSON.parse(output)); } catch { return output; }
+  if (!('body' in facts)) return output;
+  const body = facts.body;
+  const data = body !== null && typeof body === 'object' && !Array.isArray(body) ? body as Record<string, unknown> : { result: body };
+  const definition = methodCapability(entry.id);
+  let said = '';
+  try { said = definition?.said?.(data, values) ?? ''; } catch { said = ''; }
+  let did: string | undefined;
+  try { did = definition?.did?.(data, values); } catch { did = undefined; }
+  const text = capabilityOutcomeText(entry, values, { text: said, ...(did !== undefined ? { riskDone: did } : {}) }) || `${entry.label}: done.`;
+  return `${text}\n\nData: ${JSON.stringify(data, null, 2)}`;
 }
 
 function createRunTool(registry: ToolRegistry, options: CapabilityToolOptions, host: RunHost): Tool {
@@ -396,10 +456,11 @@ function createRunTool(registry: ToolRegistry, options: CapabilityToolOptions, h
       // Its preview check (a file outside the project named by the model; an act on the live conversation, which cannot
       // run inside the model's own turn): refused before this program's gate asks anyone.
       const moved = entry.home === 'daemon' ? daemonCapability(entry.id) : entry.home === 'session' ? sessionDefinition(entry.id) : undefined;
-      // A daemon on another machine reads by path only what is on its own machine: a path named here for it is refused
-      // before anyone is asked, as that daemon would refuse it.
+      // A daemon on another machine: a file the model names in this program's project is read here and carried with the
+      // call (bundle-file-work.ts `carryFilesHere`), so it is checked here as this machine's file; only a path naming a
+      // place the daemon keeps using (never carried) is refused before anyone is asked, as that daemon would refuse it.
       const modelCaller = { workingDirectory: options.workingDirectory(), ...(options.program ? { program: options.program } : {}), personAsked: false,
-        ...(entry.home === 'daemon' && daemonOnAnotherMachine(host) ? { elsewhere: true } : {}) };
+        ...(entry.home === 'daemon' && daemonOnAnotherMachine(host) && PLACE_PATH_CAPABILITIES.has(entry.id) ? { elsewhere: true } : {}) };
       // Every file named by path is inside the project (capabilities/path-inputs.ts), then the capability's own check.
       const previewRefusal = pathInputsRefusal(entry, checked.values, modelCaller) ?? moved?.check?.(checked.values, modelCaller);
       if (previewRefusal) return previewRefusal.next ? `${previewRefusal.message} ${previewRefusal.next}.` : previewRefusal.message;
@@ -463,7 +524,8 @@ function createRunTool(registry: ToolRegistry, options: CapabilityToolOptions, h
         // A routine the model starts is read as its answer, never sent as the owner's next message (builtin/routines.ts).
         const session: SessionCapabilityServices = { ...live, conversation: { ...live.conversation, isGenerating: () => true }, send: undefined };
         try {
-          const result = await capability.run(values, session, { workingDirectory: options.workingDirectory(), ...(options.program ? { program: options.program } : {}) });
+          // Every file it names by path is held from its check to its use, for the whole run (capabilities/held-paths.ts).
+          const result = await runHoldingPaths(() => capability.run(values, session, { workingDirectory: options.workingDirectory(), ...(options.program ? { program: options.program } : {}) }));
           return { success: true, output: capabilityOutcomeText(entry, values, result) || `${entry.label}: done.` };
         } catch (error) {
           if (error instanceof CapabilityRefusal) return { success: false, error: error.next ? `${error.message} ${error.next}.` : error.message };
@@ -474,6 +536,9 @@ function createRunTool(registry: ToolRegistry, options: CapabilityToolOptions, h
       if (entry.home === 'terminal') {
         return { success: false, error: `${entry.id} (/${entry.command}${entry.word ? ` ${entry.word}` : ''}) has not moved to a capability that can be run from here yet; only the person can run it, from that slash command.` };
       }
+      // The decided act is sent now (a daemon capability): its decision is checked whole here, and what the act itself
+      // changes (an import that changes permission settings) is its effect, never a change underneath this decision.
+      if (daemonCapability(entry.id)) noteCurrentToolEffectSent(args, executeOptions);
       const result: Settled = daemonCapability(entry.id)
         ? await runOnDaemon({ id: entry.id, inputs: values, workingDirectory: options.workingDirectory(), ...(options.program ? { program: options.program } : {}), ...modelNow(options), ...sessionNow(options) }, executeOptions)
         : entry.method
@@ -495,7 +560,10 @@ function createRunTool(registry: ToolRegistry, options: CapabilityToolOptions, h
             return nested(method.id, shown, {}, leaves);
           })()
           : { success: false, error: `${entry.id} has no way to run from here.` };
-      return { success: result.success, ...(result.output !== undefined ? { output: result.output } : {}), ...(result.error !== undefined ? { error: result.error } : {}) };
+      // A capability run through its own method answers as the daemon's capabilities.run does: its sentence, then its data.
+      const output = result.success && result.output !== undefined && entry.method && !daemonCapability(entry.id)
+        ? methodCapabilityAnswer(entry, values, result.output) : result.output;
+      return { success: result.success, ...(output !== undefined ? { output } : {}), ...(result.error !== undefined ? { error: result.error } : {}) };
     },
   };
   // The program lends its commands after this tool exists: the definition is built again then (the registry
@@ -543,9 +611,9 @@ export type DaemonCapabilityRun = (id: string, inputs: Readonly<Record<string, u
  * asked as `capability_run` asks it), and only that gate's run says to the daemon that it decided the call. The
  * wrapping tool's own call only routes it there and is classed a read by its definition: one question, the
  * capability's. Outside an admitted tool call nothing is sent, unless `outside` names how the program reaches its
- * daemon (an artifact save made by the program's own flow): a save a person's own typed line or press made
- * (persons-own-act.ts) is sent with the person's claim, as part of what he asked; any other (a turn's work outside a
- * tool call) with no mark, and the daemon decides it under the owner's mode as any outside caller's. A write made this
+ * daemon (an artifact save made by the program's own flow, which only a model's tool runs: no typed line or press saves
+ * an artifact in the program): such a save (a turn's work outside a tool call) is sent with no mark, and the daemon
+ * decides it under the owner's mode as any outside caller's. A write made this
  * way is the daemon's, so every program's lists follow it (the capability announces its change).
  */
 export function daemonCapabilityRunner(outside?: { readonly shellPaths: ShellPathService; readonly configManager: ConnectedHostConfigReader; readonly program: 'tui' | 'agent' }): DaemonCapabilityRun {
@@ -569,12 +637,10 @@ export function daemonCapabilityRunner(outside?: { readonly shellPaths: ShellPat
       const now = await previewRegisteredTool(CAPABILITY_RUN_TOOL_NAME, { id, inputs: { ...inputs } }, executing);
       if (now === undefined) return { ok: false, error: `${RECORD_NOT_SAVED}: the program's gate could not be read for it` };
       if (now.decided.kind === 'fact' && !now.decided.allow) {
-        return { ok: false, error: `${RECORD_NOT_SAVED} because ${now.mode === 'plan' ? 'plan mode is on' : `a rule refuses saves (${now.decided.decision.reason ?? 'refused'})`}` };
+        return { ok: false, error: `${RECORD_NOT_SAVED} because ${now.mode === 'plan' ? 'plan mode is on' : `a rule of yours refuses saves${now.decided.decision.limit ? ` (${now.decided.decision.limit})` : ''}`}` };
       }
       return answerOf(await post(CAPABILITY_RUN_METHOD_ID, { id, inputs, workingDirectory: outside.shellPaths.workingDirectory, program: outside.program }, executing!.signal, id, true), id);
     }
-    // The person's own typed line or press, with no model turn or tool call running under it.
-    const person = executing === undefined && currentTurn() === undefined && inPersonsOwnAct();
     const sink: { body?: Record<string, unknown> } = {};
     let ran: Awaited<ReturnType<typeof runRegisteredTool>>;
     try {
@@ -587,8 +653,7 @@ export function daemonCapabilityRunner(outside?: { readonly shellPaths: ShellPat
       ran = undefined;
     }
     if (ran === undefined && post && outside) {
-      return answerOf(await post(CAPABILITY_RUN_METHOD_ID, { id, inputs, workingDirectory: outside.shellPaths.workingDirectory, program: outside.program }, options?.signal, id,
-        undefined, person ? true : undefined), id);
+      return answerOf(await post(CAPABILITY_RUN_METHOD_ID, { id, inputs, workingDirectory: outside.shellPaths.workingDirectory, program: outside.program }, options?.signal, id), id);
     }
     if (ran === undefined) {
       return { ok: false, error: `${id} was not run: a turn tool runs a capability only inside a tool call this program's gate admitted, as capability_run. Nothing was sent.` };

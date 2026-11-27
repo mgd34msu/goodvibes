@@ -196,7 +196,11 @@ function readFacts(value: unknown, request: SettingsPreconditionRequest): Settin
 export async function captureRemoteSettingsPrecondition(
   endpoint: DaemonConfigEndpoint,
   request: SettingsPreconditionRequest,
-  deps: Pick<DaemonConfigRouterDeps, 'fetchImpl' | 'timeoutMs'> & { readonly assertCurrent?: () => void } = {},
+  deps: Pick<DaemonConfigRouterDeps, 'fetchImpl' | 'timeoutMs'> & {
+    readonly assertCurrent?: () => void;
+    /** Who decided this write, from the call site (manager.ts `DaemonWritePress`): sent with the capture and the apply. */
+    readonly press?: { readonly personAsked?: boolean | undefined; readonly decidedByProgramGate?: boolean | undefined } | undefined;
+  } = {},
 ): Promise<RemoteSettingsPrecondition> {
   try { deps.assertCurrent?.(); } catch { throw stale(); }
   if (!['set', 'reset-default'].includes(request.operation)) throw invalidRequest(`operation ${String(request.operation)}`);
@@ -210,7 +214,11 @@ export async function captureRemoteSettingsPrecondition(
     ...(request.operation === 'set' ? { value: input.value } : {}), ...(request.credentialClear ? { credentialClear: true } : {}) });
   const endpointUrl = baseUrl(endpoint);
   const url = `${endpointUrl}/config`;
-  const authHeaders = headers(endpoint);
+  const authHeaders = Object.freeze({
+    ...headers(endpoint),
+    ...(deps.press?.personAsked === true ? { 'x-goodvibes-explicit-user-request': 'true' } : {}),
+    ...(deps.press?.decidedByProgramGate === true ? { 'x-goodvibes-decided-by-capability-gate': 'true' } : {}),
+  });
   const fetchImpl = deps.fetchImpl ?? globalThis.fetch;
   const timeoutMs = deps.timeoutMs ?? 10_000;
   let response: Response;

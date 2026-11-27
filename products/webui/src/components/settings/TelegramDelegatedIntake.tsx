@@ -96,8 +96,16 @@ export function TelegramDelegatedIntake() {
 
   const refresh = useCallback(async () => {
     try {
-      const result = await invoke('list', {}) as IntakeList;
-      if (mounted.current) setList(result);
+      const result = await invoke('list', {}) as Partial<IntakeList> & { readonly state?: unknown };
+      if (!mounted.current) return;
+      // A caller that may not read the owner's channels gets the daemon's answer about that (a question put to the
+      // owner, 202, with its words), not the list: said as it is, never read as an empty or a broken list.
+      if (!Array.isArray(result.pending) || !Array.isArray(result.records)) {
+        setList(null);
+        setMessage(typeof result.state === 'string' ? result.state : 'The delegated intake list was not given to this browser.');
+        return;
+      }
+      setList(result as IntakeList);
     } catch (error) {
       if (mounted.current) setMessage(formatError(error));
     }

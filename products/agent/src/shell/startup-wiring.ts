@@ -16,6 +16,7 @@ import { deriveOnboardingState } from '../runtime/onboarding/onboarding-state.ts
 import { readOnboardingDoneMarker } from '../runtime/onboarding/completion.ts';
 import { buildSetupIncompleteHint } from '../core/setup-incomplete-hint.ts';
 import { isBroadWorkspaceRoot, normalizeWorkspaceRoot, registerStartedWorkspace, resolveWorkspaceRegistrationSync } from '../config/workspace-registration.ts';
+import { projectIdentityOf } from '@goodvibes/engine/platform/platform/workspace';
 import { repairDaemonConnection } from './daemon-repair-prompt.ts';
 import { recoveryOfferLine } from '@goodvibes/engine/terminal-shell/session-crash-recovery';
 import { setSplashRecoveryLine } from '@goodvibes/engine/terminal-shell/first-run';
@@ -273,7 +274,9 @@ export function wireSessionPersistenceAndRecovery(
   if (deps.registersStartedWorkspace) {
     const resolution = resolveWorkspaceRegistrationSync(shellPaths, workingDir);
     if ((resolution.status === 'unknown' || resolution.status === 'declined') && !isBroadWorkspaceRoot(shellPaths, workingDir)) {
-      const root = normalizeWorkspaceRoot(workingDir);
+      // The folder's project (its repository's root when it is in one), never a subfolder of a repository, which
+      // would be a project of its own once registered (workspace/project-identity.ts).
+      const root = normalizeWorkspaceRoot(projectIdentityOf(workingDir));
       workspaceRegistered = root;
       void registerStartedWorkspace(shellPaths, root, resolution.status === 'declined').then((registered) => {
         const name = registered.root.split('/').filter(Boolean).at(-1) ?? registered.root;
@@ -338,7 +341,7 @@ export function wireSetupIncompleteHint(deps: SetupIncompleteHintDeps): void {
     const completionMarker = readOnboardingDoneMarker(shellPaths);
 
     // Build a minimal plan with BOTH provider-access AND local-model-readiness so
-    // that deriveReadyToChat mirrors the workspace's canonical definition:
+    // that deriveReadyToChat mirrors the onboarding state's canonical definition:
     //   readyToChat = providerItem.ready OR localModelItem.ready
     //
     // local-model-readiness uses blocksAutonomy:false so it never becomes a false
@@ -354,7 +357,7 @@ export function wireSetupIncompleteHint(deps: SetupIncompleteHintDeps): void {
         blocksAutonomy: true,
         reason: '',
         nextAction: 'Choose a model to start chatting.',
-        userRoute: 'Agent Workspace -> Start -> Choose main model',
+        userRoute: 'System, Setup, Choose a model (the menu, Ctrl+G then m)',
         modelRoute: '',
       },
       {
@@ -365,7 +368,7 @@ export function wireSetupIncompleteHint(deps: SetupIncompleteHintDeps): void {
         blocksAutonomy: false,
         reason: '',
         nextAction: 'Set up a local model route from Setup, in System in the menu.',
-        userRoute: 'Agent Workspace -> Start -> Use a local model (no sign-in)',
+        userRoute: 'System, Setup, Choose a model (the menu, Ctrl+G then m)',
         modelRoute: '',
       },
     ];

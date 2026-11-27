@@ -5,7 +5,10 @@
  * back). Raised there; nothing here polls or waits. Readers that failed
  * because the daemon did not answer (a place opened while it was down) read
  * again when it fires. The Agent has the same signal in its own runtime.
+ * The program's registration needs nothing here: it ends with the connection that proved it (a daemon that went away
+ * closed it), and the next call registers again (platform runtime/client/call-context.ts).
  */
+
 type Listener = () => void;
 
 const listeners = new Set<Listener>();

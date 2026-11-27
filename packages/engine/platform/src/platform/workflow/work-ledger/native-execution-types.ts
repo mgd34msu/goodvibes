@@ -296,5 +296,21 @@ export interface NativeWorkExecutionStorage {
    * (no launched record, the work moved on, or it says so already).
    */
   reportFailed?(key: DurableContractRequest['key'], reason: string, original?: NativeExecutionOriginal): Promise<boolean>;
+  /**
+   * Where a live run stands, said in the ledger in one transaction: `blocked` with the words (it waits for the
+   * owner: a question, a failed step, cut off by a daemon stop) or `in_progress` (it goes on). True when the ledger
+   * says it (now or already); false when it could not be said (no launched record yet, settled, stopped, moved on).
+   */
+  reportStatus?(key: DurableContractRequest['key'], status: 'in_progress' | 'blocked', words: string, original?: NativeExecutionOriginal): Promise<boolean>;
+  /**
+   * A run the owner stopped: its work is cancelled in the ledger with the reason, in one transaction, while the
+   * work is still in progress or blocked at the run's own attempt; false when there was nothing to say.
+   */
+  reportStopped?(key: DurableContractRequest['key'], reason: string, original?: NativeExecutionOriginal): Promise<boolean>;
+  /**
+   * Before any run of an attempt exists: its plan waits for the owner (`blocked` with the words), or it is back to not
+   * started, its plan thrown away (`in_progress`, what a submitted work reads before it starts).
+   */
+  reportBeforeRun?(workId: string, attemptId: string, status: 'in_progress' | 'blocked', words: string): Promise<boolean>;
   close(): Promise<void>;
 }

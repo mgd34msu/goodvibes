@@ -1,5 +1,6 @@
 import { realpathSync } from 'node:fs';
 import { basename, dirname, isAbsolute, join, resolve } from 'node:path';
+import { projectIdentityOf, registeredWorkspaceRoots } from '../workspace/project-identity.js';
 
 export interface ShellPathService {
   readonly workingDirectory: string;
@@ -8,11 +9,11 @@ export interface ShellPathService {
   readonly userGoodVibesRoot: string;
   expandHomePath(path: string): string;
   resolveWorkspacePath(path: string): string;
-  /** This host's own records: under the working directory's `.goodvibes/`, or the daemon's records folder (`recordsRoot`). */
+  /** This host's own records: under its project's `.goodvibes/`, or the daemon's records folder (`recordsRoot`). */
   resolveProjectPath(...segments: string[]): string;
   /**
-   * The folder whose `.goodvibes/` holds this host's own records (`resolveProjectPath`): the working directory, or
-   * the daemon's records folder. A store that is given a folder and keeps its file under `<folder>/.goodvibes/` is
+   * The folder whose `.goodvibes/` holds this host's own records (`resolveProjectPath`): the project the working
+   * directory is in, or the daemon's records folder. A store that is given a folder and keeps its file under `<folder>/.goodvibes/` is
    * given this one.
    */
   readonly recordsRoot: string;
@@ -29,7 +30,8 @@ export interface CreateShellPathServiceOptions {
    * folder (`<daemon home>/records`, see daemon-records-root.ts), so its
    * sessions, devices, cluster identity, approvals, channel offsets and the
    * rest are the same whatever folder it was started in. `<recordsRoot>/.goodvibes/<segments>`.
-   * Absent (a terminal program): `<working directory>/.goodvibes/<segments>`.
+   * Absent (a terminal program): `<project>/.goodvibes/<segments>`, the project the working directory is in
+   * ({@link projectFolderOf}), so a program opened in a subfolder keeps one set of records with its project.
    */
   readonly recordsRoot?: string | undefined;
 }
@@ -77,6 +79,18 @@ export function isPathWithinRoot(root: string, path: string): boolean {
   return resolved === physicalRoot || resolved.startsWith(prefix);
 }
 
+/**
+ * The folder whose `.goodvibes/` holds the records of a program working in `folder`: the project it is in
+ * (workspace/project-identity.ts), or the folder itself when it is no project's subfolder (taken as written then).
+ */
+export function projectFolderOf(folder: string, homeDirectory?: string): string {
+  let real = resolve(folder);
+  try { real = realpathSync.native(folder); } catch { /* taken as written */ }
+  // The registered workspaces of the program's own home when it names one, else this process's home's.
+  const project = homeDirectory === undefined ? projectIdentityOf(real) : projectIdentityOf(real, registeredWorkspaceRoots(homeDirectory));
+  return project === real ? resolve(folder) : project;
+}
+
 export function createShellPathService(
   options: CreateShellPathServiceOptions,
 ): ShellPathService {
@@ -84,7 +98,8 @@ export function createShellPathService(
   const homeDirectory = requireAbsoluteOwnedRoot(options.homeDirectory, 'homeDirectory');
   const projectGoodVibesRoot = join(workingDirectory, '.goodvibes');
   const userGoodVibesRoot = join(homeDirectory, '.goodvibes');
-  const recordsRoot = options.recordsRoot === undefined ? workingDirectory : requireAbsoluteOwnedRoot(options.recordsRoot, 'recordsRoot');
+  // A program opened in a subfolder of a project keeps its records with the project's, never under the subfolder.
+  const recordsRoot = options.recordsRoot === undefined ? projectFolderOf(workingDirectory, homeDirectory) : requireAbsoluteOwnedRoot(options.recordsRoot, 'recordsRoot');
   const recordsGoodVibesRoot = join(recordsRoot, '.goodvibes');
 
   const expandHomePath = (path: string): string => {

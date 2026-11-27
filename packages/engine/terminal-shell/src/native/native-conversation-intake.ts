@@ -144,6 +144,11 @@ type IntakePhase =
     | `hosted-${'status' | 'start' | 'cancel'}`
     | 'journal-read' | 'journal-save' | 'journal-confirm' | 'journal-claim' | 'journal-execution' | 'journal-hosted-source' | 'journal-remove';
 const isJournalPhase = (phase: IntakePhase): boolean => phase.startsWith('journal-');
+/** The files a message carries, as the capture request names them (artifact ids uploaded first); none, nothing. */
+const attachmentsOf = (source: NativeConversationInput): { readonly attachments?: { artifactId: string; label?: string }[] } =>
+    source.attachments && source.attachments.length > 0
+        ? { attachments: source.attachments.map((item) => ({ artifactId: item.artifactId, ...(item.label !== undefined ? { label: item.label } : {}) })) }
+        : {};
 const terminal = (result: NativeConversationIntakeResult) => ['turn', 'work', 'blocked', 'refused', 'cancelled'].includes(result.kind);
 /** A hosted turn the host will not run again: completed, cancelled, or failed without a retry. */
 const hostedTurnEnded = (turn: Exclude<NativeHostedTurnLookup, { kind: 'not-found' }>) => turn.state === 'completed' || turn.state === 'cancelled' || (turn.state === 'failed' && turn.failure?.retryable !== true);
@@ -178,6 +183,11 @@ export class NativeConversationIntakeControls implements NativeConversationIntak
         }
     }
     close(): void { ++this.selectionLifetime; ++this.epoch; this.active?.detach(); this.active = undefined; }
+    /** The saved record of this message was removed: its in-memory copy goes with it. */
+    private forgetRetained(requestId: string): void {
+        if (this.retained?.command.requestId === requestId)
+            this.retained = undefined;
+    }
     submit(source: NativeConversationInput, options?: NativeConversationIntakeSubmitOptions | undefined) { return this.run('submit', structuredClone(source), options ? structuredClone(options) : undefined); }
     status() { return this.run('status'); }
     retry() { return this.run('retry'); }
@@ -217,7 +227,7 @@ export class NativeConversationIntakeControls implements NativeConversationIntak
         // Validate source before network access or identity allocation.
         if (source && ((!this.policy.allowHosted && options?.delivery !== undefined) || (options?.continuationSessionId !== undefined && options.delivery !== 'hosted')
             || (options?.delivery !== undefined && options.delivery !== 'hosted')
-            || !nativeConversationIntakeCaptureRequestSchema.safeParse({ requestId: 'validation', inputId: 'validation', text: source.text, unsupportedSources: source.unsupportedSources, ...(options?.continuationSessionId !== undefined ? { continuation: { sessionId: options.continuationSessionId } } : {}) }).success)) {
+            || !nativeConversationIntakeCaptureRequestSchema.safeParse({ requestId: 'validation', inputId: 'validation', text: source.text, unsupportedSources: source.unsupportedSources, ...attachmentsOf(source), ...(options?.continuationSessionId !== undefined ? { continuation: { sessionId: options.continuationSessionId } } : {}) }).success)) {
             return { status: 'invalid', message: 'This message is too long, or names more than 100 files or attachments, to be sent whole.' };
         }
         const epoch = ++this.epoch;
@@ -310,6 +320,9 @@ export class NativeConversationIntakeControls implements NativeConversationIntak
                 phase = 'journal-remove';
                 try {
                     await selected.journal.remove(scope, command);
+                    // The record is gone, so this process must not adopt its copy as the earlier message either:
+                    // the next submit would find it on the host with no delivery and refuse to send.
+                    this.forgetRetained(command.requestId);
                 }
                 catch {
                     removeFailed = true;
@@ -430,7 +443,7 @@ export class NativeConversationIntakeControls implements NativeConversationIntak
                             ? 'Your previous message was never saved and the daemon has no record of it. Try it again or drop it in Work, under Unanswered. This new message was not sent.'
                             : unresolvedMessage(next), request: request(), ...(result ? { result } : {}), nextStep: next, notSent: true };
                 }
-                command = nativeConversationIntakeCaptureRequestSchema.parse({ requestId: this.newId(), inputId: this.newId(), text: source!.text, unsupportedSources: source!.unsupportedSources, ...(nextContinuation !== undefined ? { continuation: { sessionId: nextContinuation } } : {}) });
+                command = nativeConversationIntakeCaptureRequestSchema.parse({ requestId: this.newId(), inputId: this.newId(), text: source!.text, unsupportedSources: source!.unsupportedSources, ...attachmentsOf(source!), ...(nextContinuation !== undefined ? { continuation: { sessionId: nextContinuation } } : {}) });
                 delivery = options?.delivery;
                 observedSource = undefined;
                 this.retained = { identity: selected.identity, scope, command: structuredClone(command), ...(delivery ? { delivery } : {}), persisted: false, expectedRequestId: stored?.command.requestId ?? null };
@@ -652,12 +665,16 @@ export class NativeConversationIntakeControls implements NativeConversationIntak
             const finishTurn = async (): Promise<void> => {
                 try {
                     await selected.journal.finishTurn?.(scope, claimedCommand, claimedRevision);
+                    if (selected.journal.finishTurn)
+                        this.forgetRetained(claimedCommand.requestId);
                 }
                 catch { /* the next save under this binding replaces the record */ }
             };
             const message = mode === 'cancel' && result.kind === 'work'
                 ? 'This message already became work, so the work was not stopped; the message was dropped and the work stays in Work, where it can be started or stopped.'
-                : hostedTurn ? 'The daemon took your message as part of the conversation and answers it there.' : describeResult(result, turnReady, Boolean(stored?.dispatch));
+                : hostedTurn ? (!('kind' in hostedTurn) && (hostedTurn.state === 'failed' || (hostedTurn.state === 'cancelled' && hostedTurn.sessionId === null))
+                    ? 'The daemon took your message but did not answer it.'
+                    : 'The daemon took your message as part of the conversation and answers it there.') : describeResult(result, turnReady, Boolean(stored?.dispatch));
             return { status: 'recorded', message: removeFailed ? `${message} Its saved copy could not be removed now; the next message replaces it.` : message, request: request(), result, ...(hostedTurn ? { hostedTurn, hostedCurrent } : {}), ...(execution ? { execution } : {}), ...(turnReady ? { turnReady: true, turnPermit, releaseTurnClaim: releaseClaim, finishTurn } : {}) };
         }
         catch (error) {
@@ -709,7 +726,9 @@ export function nativeConversationIntakeAccepted(state: NativeConversationIntake
     if (state.turnReady)
         return true;
     const hosted = state.hostedTurn;
-    return hosted !== undefined && !('kind' in hosted) && hosted.state !== 'recovery-required' && hosted.state !== 'failed';
+    // A turn the daemon stopped before it had a session never ran: the person is told, not the activity feed.
+    return hosted !== undefined && !('kind' in hosted) && hosted.state !== 'recovery-required' && hosted.state !== 'failed'
+        && !(hosted.state === 'cancelled' && hosted.sessionId === null);
 }
 function describeResult(result: NativeConversationIntakeResult, turnReady: boolean, dispatched: boolean): string {
     switch (result.kind) {

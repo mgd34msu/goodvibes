@@ -11,6 +11,7 @@ import { FeatureAnnouncementStore, featureAnnouncementsPath, createSandboxContai
 import { readClientCompatibilityFloor } from '@goodvibes/engine/platform/platform/control-plane/build-compatibility';
 import type { ConfigManager } from '@goodvibes/engine/platform/platform/config';
 import { firstShowingOfSettingsNotice } from '@goodvibes/engine/terminal-shell/cli-config-overrides';
+import { programCallHeadersFor } from '@goodvibes/engine/platform/platform/runtime/client';
 
 /** A daemon receipt line (already a human one-liner, e.g. "restarted after a crash at 2026-11-15 14:32"). */
 export interface DaemonReceiptLike {
@@ -83,7 +84,9 @@ export async function readExternalDaemonAttach(
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), deps.timeoutMs ?? EXTERNAL_RECEIPTS_TIMEOUT_MS);
   try {
-    const headers = new Headers();
+    // With this program's registration: an owner alert kept as a receipt goes to the owner's own programs only, and the
+    // shared bearer alone is a script on this machine.
+    const headers = new Headers(await programCallHeadersFor(deps.baseUrl, deps.authToken.trim() || undefined, fetchImpl, 'tui'));
     if (deps.authToken.trim()) headers.set('Authorization', `Bearer ${deps.authToken.trim()}`);
     const statusUrl = `${deps.baseUrl.replace(/\/+$/, '')}/status`;
     const response = await fetchImpl(deps.consumeReceipts ? `${statusUrl}?receipts=peek` : statusUrl, { headers, signal: controller.signal });

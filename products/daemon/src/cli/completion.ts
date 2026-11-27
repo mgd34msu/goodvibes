@@ -13,7 +13,7 @@ import { DAEMON_COMMANDS, GLOBAL_FLAGS } from './command-catalog.ts';
 
 export { COMPLETION_SHELLS, isCompletionShell, type CompletionShell } from '@goodvibes/engine/terminal-shell/shell-completion';
 
-const DIRECTORY_FLAGS: ReadonlySet<string> = new Set(['--daemon-home', '--working-dir', '--cd', '-C']);
+const DIRECTORY_FLAGS: ReadonlySet<string> = new Set(['--daemon-home']);
 
 /** The daemon's command table: every catalog command, its sub-words and its own flags. */
 export function daemonCompletionTable(binary = 'goodvibes-daemon'): CompletionTable {

@@ -20,7 +20,7 @@
 
 import type { ConfigManager } from '@goodvibes/engine/platform/platform/config';
 import { GoodVibesError } from '@goodvibes/engine/errors';
-import { resolveOperatorRpc, describeOperatorRpcError } from '../runtime/client/operator-endpoint.ts';
+import { resolveOperatorRpc, describeOperatorRpcError, invokePressed } from '../runtime/client/operator-endpoint.ts';
 import type { VoiceRuntimeStatusResult, VoiceLocalInstallResult } from './voice-provision-status.ts';
 
 /** The last install the daemon finished, as voice.local.status serves it once a run ends. */
@@ -89,7 +89,8 @@ export function createVoiceProvisionGateway(deps: VoiceProvisionGatewayDeps): Vo
     available: true,
     gateway: {
       fetchStatus: async () => await platformClient.operator.invoke('voice.local.status', {}) as VoiceStatusRead,
-      startInstall: async () => readInstallStart(await platformClient.operator.invoke('voice.local.install', {})),
+      // Only from the person's own yes on the wake-word setup line: his press.
+      startInstall: async () => readInstallStart(await invokePressed(platformClient, 'voice.local.install', {})),
     },
   };
 }

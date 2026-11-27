@@ -158,9 +158,19 @@ export class PlaceMenu implements SurfaceModal {
       .map(({ row }) => row);
     // A place's action that opens or shows something, needing nothing from a selected item ("secure address": Settings
     // on Secure address), found by its words: Enter runs it from the menu.
-    const byAction = all.flatMap((row) => (row.place?.actions ?? [])
-      .filter((action): action is PlaceCapabilityAction<PlaceItem> => action.kind !== 'program' && action.label !== undefined && has(action.label) && this.runsFromMenu(action))
-      .map((action): MenuRow => ({ ...row, title: `${row.title}: ${action.label!}`, action })));
+    // One row per action of a place: a control a place offers both on its row and as a key of its own (This
+    // conversation's: the same capability under the same words) is one entry here.
+    // The one kept is the one tied to no row's state (the key), where the place offers both.
+    const byAction = all.flatMap((row) => {
+      const offered = new Map<string, PlaceCapabilityAction<PlaceItem>>();
+      for (const action of row.place?.actions ?? []) {
+        if (action.kind === 'program' || action.label === undefined || !has(action.label) || !this.runsFromMenu(action as PlaceCapabilityAction<PlaceItem>)) continue;
+        const same = `${action.capability}\u0000${action.label}`;
+        const kept = offered.get(same);
+        if (!kept || (kept.states !== undefined && action.states === undefined)) offered.set(same, action as PlaceCapabilityAction<PlaceItem>);
+      }
+      return [...offered.values()].map((action): MenuRow => ({ ...row, title: `${row.title}: ${action.label!}`, action }));
+    });
     const found = new Set([...byName, ...byTab, ...byAction].map((row) => row.group));
     const byLine = all.filter((row) => !found.has(row.group) && has(row.line));
     // An entry whose own name is the typed word comes first ("settings" opens Settings on Enter).

@@ -47,6 +47,7 @@
 import { captureMemoryOperation, assertMemoryOperationCurrent, awaitMemoryOperation, type MemoryOperationOptions } from '../../state/memory-operation.js';
 import { buildUrl, createJsonRequestInit, requestJsonRaw } from '@goodvibes/engine/transport-http';
 import { newMemoryId } from '../../state/memory-id.js';
+import { programCallHeadersFor } from '../client/call-context.js';
 import type {
   MemoryAddOptions,
   MemoryBundle,
@@ -137,7 +138,9 @@ export function createMemorySpineRestTransport(options: MemorySpineRestTransport
       const body: MemoryAddOptions = { ...opts, id };
       try {
         const response = await request<{ record: MemoryRecord }>(
-          operation, url('/api/memory/records'), createJsonRequestInit(token, body, 'POST'),
+          // The program's call context (its registration key): the daemon keeps who wrote a record from the credential and
+          // that key, never from the body (daemon/http/memory-route-author.ts).
+          operation, url('/api/memory/records'), createJsonRequestInit(token, body, 'POST', await programCallHeadersFor(baseUrl, token ?? undefined, fetchImpl)),
         );
         return response.record;
       } catch (error) {
@@ -203,7 +206,7 @@ export function createMemorySpineRestTransport(options: MemorySpineRestTransport
     update: async (id: string, patch: MemoryUpdatePatch, operation?: MemoryOperationOptions): Promise<MemoryRecord | null> => {
       try {
         const response = await request<{ record: MemoryRecord }>(
-          operation, url(`/api/memory/records/${encodeURIComponent(id)}/update`), createJsonRequestInit(token, patch, 'POST'),
+          operation, url(`/api/memory/records/${encodeURIComponent(id)}/update`), createJsonRequestInit(token, patch, 'POST', await programCallHeadersFor(baseUrl, token ?? undefined, fetchImpl)),
         );
         return response.record;
       } catch (error) {
@@ -257,7 +260,7 @@ export function createMemorySpineRestTransport(options: MemorySpineRestTransport
     importBundle: async (bundle: MemoryBundle, operation?: MemoryOperationOptions): Promise<MemoryImportResult> => {
       try {
         const response = await request<{ result: MemoryImportResult }>(
-          operation, url('/api/memory/records/import'), createJsonRequestInit(token, { bundle }, 'POST'),
+          operation, url('/api/memory/records/import'), createJsonRequestInit(token, { bundle }, 'POST', await programCallHeadersFor(baseUrl, token ?? undefined, fetchImpl)),
         );
         return response.result;
       } catch (error) {
@@ -299,7 +302,7 @@ export function createMemorySpineRestTransport(options: MemorySpineRestTransport
       try {
         return await request<MemoryRestoreResult>(
           operation, url('/api/memory/snapshots/restore'),
-          createJsonRequestInit(token, { snapshot, confirm: true }, 'POST', { 'x-goodvibes-explicit-user-request': 'true' }),
+          createJsonRequestInit(token, { snapshot, confirm: true }, 'POST', { ...(await programCallHeadersFor(baseUrl, token ?? undefined, fetchImpl)), 'x-goodvibes-explicit-user-request': 'true' }),
         );
       } catch (error) {
         // "No such copy" is the daemon's answer, not a missing route.

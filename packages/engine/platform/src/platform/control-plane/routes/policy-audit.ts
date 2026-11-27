@@ -26,7 +26,7 @@ function when(value: unknown): number | undefined {
 }
 
 /** One posted call as an audit entry, or undefined when it does not read as one. */
-function decidedCallOf(program: 'tui' | 'agent', value: unknown): PermissionAuditEntry | undefined {
+function decidedCallOf(program: 'tui' | 'agent', value: unknown, project: string | undefined): PermissionAuditEntry | undefined {
   if (!value || typeof value !== 'object') return undefined;
   const call = value as Record<string, unknown>;
   const callId = text(call['callId']);
@@ -51,6 +51,8 @@ function decidedCallOf(program: 'tui' | 'agent', value: unknown): PermissionAudi
     ...(text(call['host']) ? { host: text(call['host']) } : {}),
     requestedAt,
     ...(decidedAt !== undefined ? { decidedAt } : {}),
+    // The posting program's project, as the dispatch checked it for this caller (never a field of the call itself).
+    ...(project ? { project } : {}),
   };
 }
 
@@ -64,8 +66,9 @@ export function registerPolicyAuditGatewayMethods(catalog: GatewayMethodCatalog,
     if (calls.length > MAX_CALLS) throw new GatewayVerbError(`At most ${MAX_CALLS} calls in one post; this one had ${calls.length}.`, 'INVALID_ARGUMENT', 400, 'calls');
     const kept: PermissionAuditEntry[] = [];
     let refused = 0;
+    const project = typeof invocation.context.call?.project === 'string' && invocation.context.call.project.trim() ? invocation.context.call.project.trim() : undefined;
     for (const call of calls) {
-      const entry = decidedCallOf(program, call);
+      const entry = decidedCallOf(program, call, project);
       if (entry) kept.push(entry);
       else refused += 1;
     }

@@ -46,6 +46,8 @@ export const coreConfigDefaults = {
   },
   storage: {
     secretPolicy: 'preferred_secure',
+    codeIndexEnabled: false,
+    automaticProjectsFolder: '',
     artifacts: {
       maxBytes: 512 * 1024 * 1024,
     },
@@ -263,7 +265,7 @@ export const coreHeadConfigSettings: (ConfigSettingDefinition | ConfigSettingRow
     description: 'On: the terminal programs take the mouse (click a row or a status segment, scroll with the wheel). Off: the terminal keeps the mouse, so you select and copy text the terminal\'s own way. Read when the program starts',
   },
   {
-    key: 'provider.decisionRouter',
+    key: 'provider.decisionRouter', valueKind: 'request-target',
     label: 'Which model answers each kind of decision',
     type: 'object',
     description: 'Which model answers which kind of decision, and how hard it thinks. Used only when decision-router:auto is selected. Empty categories use the required General target. Contains no credentials.',
@@ -279,7 +281,7 @@ export const coreHeadConfigSettings: (ConfigSettingDefinition | ConfigSettingRow
     ...reasoningEffortSetting(),
   },
   {
-    key: 'provider.model',
+    key: 'provider.model', valueKind: 'request-target',
     label: 'Model for new conversations',
     type: 'string',
     description: 'The model new conversations use, written as provider:model',
@@ -290,20 +292,20 @@ export const coreHeadConfigSettings: (ConfigSettingDefinition | ConfigSettingRow
     },
   },
   {
-    key: 'provider.embeddingProvider',
+    key: 'provider.embeddingProvider', valueKind: 'request-target',
     label: 'Service that indexes memory for search',
     type: 'string',
     description: 'The provider that turns memories into a form GoodVibes can search',
   },
   {
-    key: 'provider.systemPromptFile',
+    key: 'provider.systemPromptFile', valueKind: 'path',
     label: 'File with your own system prompt',
     appliesWhen: 'next-session',
     type: 'string',
     description: 'A file of standing instructions the model gets at the start of every conversation; empty for none',
   },
   {
-    key: 'provider.optimizerMode',
+    key: 'provider.optimizerMode', valueKind: 'request-target',
     label: 'Pick the provider for each request',
     appliesWhen: 'now',
     type: 'enum',
@@ -312,7 +314,7 @@ export const coreHeadConfigSettings: (ConfigSettingDefinition | ConfigSettingRow
     enumValues: ['off', 'manual', 'auto', 'pinned'],
   },
   {
-    key: 'provider.optimizerPinnedModel',
+    key: 'provider.optimizerPinnedModel', valueKind: 'request-target',
     label: 'Model every request goes to when pinned',
     appliesWhen: 'now',
     type: 'string',
@@ -320,7 +322,7 @@ export const coreHeadConfigSettings: (ConfigSettingDefinition | ConfigSettingRow
       'The one model used while provider choice is pinned, written as provider:model (for example anthropic:claude-sonnet-4); a change applies at once. Empty leaves the optimizer unpinned (falls back to manual).',
   },
   {
-    key: 'provider.visionFallbackModel',
+    key: 'provider.visionFallbackModel', valueKind: 'request-target',
     label: "Model that reads images the current model can't",
     appliesWhen: 'next-answer',
     type: 'string',
@@ -407,6 +409,23 @@ export const coreHeadConfigSettings: (ConfigSettingDefinition | ConfigSettingRow
     type: 'enum',
     description: 'Secret persistence policy: plaintext allowed, preferred secure, or require secure',
     enumValues: ['plaintext_allowed', 'preferred_secure', 'require_secure'],
+  },
+  {
+    key: 'storage.codeIndexEnabled',
+    label: 'Keep the code index up to date',
+    appliesWhen: 'next-answer',
+    type: 'boolean',
+    description: 'One choice for every project on this machine (kept in the daemon\'s settings): a project\'s source code index is built the first time a turn there asks for code, and reindexed after edits; with the agent-passive-code-injection flag, code hits are given to coding turns. Bounded file/size scan. Off by default: "build it" (Code and changes, Code index) builds one on demand. Also set from Code and changes, Code index.',
+  },
+  {
+    key: 'storage.automaticProjectsFolder',
+    label: 'Folder for automatic projects',
+    appliesWhen: 'now',
+    type: 'string',
+    valueKind: 'path',
+    description: 'Where the daemon makes a project for a chat that has none (a channel conversation whose channel has no project, a web chat started with none), the first time your own message there needs somewhere to work: one folder per chat inside this one, named from what the chat is about. Empty: a folder named goodvibes-projects in your home folder. Never inside the daemon\'s home. Also set from System, Workspaces.',
+    validate: (value) => typeof value === 'string' && (value === '' || value.startsWith('/') || value.startsWith('~/')),
+    validationHint: 'the full path of a folder (or ~/...), or empty for ~/goodvibes-projects',
   },
   {
     key: 'storage.artifacts.maxBytes',
@@ -680,7 +699,7 @@ export const coreHeadConfigSettings: (ConfigSettingDefinition | ConfigSettingRow
     enumValues: ['panel', 'conversation', 'both'],
   },
   {
-    key: 'tts.provider',
+    key: 'tts.provider', valueKind: 'request-target',
     label: 'Voice service for spoken replies',
     type: 'string',
     description: 'Default TTS provider used by spoken-output clients when no provider is supplied on the request',
@@ -692,13 +711,13 @@ export const coreHeadConfigSettings: (ConfigSettingDefinition | ConfigSettingRow
     description: 'Default TTS voice id used by spoken-output clients when no voice is supplied on the request',
   },
   {
-    key: 'tts.llmProvider',
+    key: 'tts.llmProvider', valueKind: 'request-target',
     label: 'Provider for spoken conversations',
     type: 'string',
     description: 'The provider that writes answers meant to be spoken; empty uses the conversation\'s provider',
   },
   {
-    key: 'tts.llmModel',
+    key: 'tts.llmModel', valueKind: 'request-target',
     label: 'Model for spoken conversations',
     type: 'string',
     description: 'The model that writes answers meant to be spoken; empty uses the conversation\'s model',
@@ -731,22 +750,24 @@ export const coreTailConfigSettings: ConfigSettingDefinition[] = [
     key: 'daemon.enabled',
     label: 'Use the background daemon',
     type: 'boolean',
+    // Kept only so a 3.5.0 file that holds it still reads (and a 3.5.0 program after a rollback reads its own value).
+    deprecated: true,
     description:
-      'Whether THIS surface ADOPTS a session daemon of its own, the background service hosting the shared session broker and companion chat, bound to loopback (127.0.0.1). On (the default), the surface looks for one and adopts it. Off, it makes no adoption attempt and probes no port. It does not control the daemon process itself: a daemon started on its own runs regardless of this setting, which is a per-surface choice about adopting one. It is also NOT the switch for talking to a daemon this surface is already connected to, that is daemon.connectedHost.enabled, and the two were one key until they were split apart.',
+      'Retired. Every program uses the daemon and starts it when it is not running, so this no longer turns the daemon off. A person\'s "off" was carried once to Start the daemon at login (service.autostart), which keeps the daemon from starting by itself when you sign in. Left in a settings file for a 3.5.0 program after a rollback, which still reads it.',
   },
   {
-    key: 'daemon.connectedHost.enabled',
+    key: 'daemon.connectedHost.enabled', valueKind: 'opening-switch',
     label: 'Let this app reach its connected daemon',
     type: 'boolean',
     description:
       'Whether this surface may DIAL the daemon it is connected to. On (the default), the features that reach a connected host work: the session-inputs poll that delivers inbound messages, conversation rewind registration, the live approvals stream, daemon-routed conversation turns, and the operator verbs. Off, each of those refuses plainly rather than failing at a connection. This is separate from daemon.enabled on purpose: adopting a daemon of your own and talking to one that is already there are different decisions, and while they shared a single key, turning adoption off silently stopped the inputs poll, the approvals stream and rewind registration on machines whose connected host was live and answering, the session and memory spines kept dialing the same host perfectly well, which is how the split showed itself.',
   },
   {
-    key: 'daemon.connectedHost.url',
+    key: 'daemon.connectedHost.url', valueKind: 'endpoint',
     label: 'Address of the daemon to connect to',
     type: 'string',
     description:
-      'Where the terminal app (goodvibes) and the Agent (goodvibes-agent) dial their daemon, as an origin such as http://10.0.0.7:3421. Empty (the default) means the daemon on this machine, at the address derived from controlPlane.hostMode, controlPlane.host and controlPlane.port; those settings describe only how a local daemon listens. /setup connect-daemon ("Use a daemon on another computer") writes this, so finishing setup or changing the local bind does not move the client off the daemon it connected to; the Agent\'s --runtime-url sets it for one run. Clear it to go back to the daemon on this machine.',
+      'Where the terminal app (goodvibes) and the Agent (goodvibes-agent) dial their daemon, as an origin such as http://10.0.0.7:3421. Empty (the default) means the daemon on this machine, at the address derived from controlPlane.hostMode, controlPlane.host and controlPlane.port; those settings describe only how a local daemon listens. System, Setup, "A daemon elsewhere" writes this, so finishing setup or changing the local bind does not move the client off the daemon it connected to; the Agent\'s --runtime-url sets it for one run. Clear it to go back to the daemon on this machine.',
     validate: (value: unknown): boolean => typeof value === 'string' && (value.trim().length === 0 || parseDaemonOrigin(value) !== null),
     validationHint: 'empty, or an http(s) origin with no path, user name or password, e.g. http://10.0.0.7:3421',
   },
@@ -763,13 +784,13 @@ export const coreTailConfigSettings: ConfigSettingDefinition[] = [
     description: 'Uses a separate model for GoodVibes\'s own background work; off, that work uses the conversation\'s model when it needs one',
   },
   {
-    key: 'tools.llmProvider',
+    key: 'tools.llmProvider', valueKind: 'request-target',
     label: 'Provider for tool work',
     type: 'string',
     description: 'The provider of that separate model; empty uses the conversation\'s provider',
   },
   {
-    key: 'tools.llmModel',
+    key: 'tools.llmModel', valueKind: 'request-target',
     label: 'Model for tool work',
     type: 'string',
     description: 'That separate model; empty uses the provider\'s fastest',
@@ -788,31 +809,31 @@ export const coreTailConfigSettings: ConfigSettingDefinition[] = [
     ...optionalWorkLimit(),
   },
   {
-    key: 'tools.hooksFile',
+    key: 'tools.hooksFile', valueKind: 'command',
     label: 'File that defines hooks',
     type: 'string',
     description: 'Hook configuration file name, relative to the project working directory (so the default is <project>/hooks.json, not a file under .goodvibes)',
   },
   {
-    key: 'tools.validators.typecheck',
+    key: 'tools.validators.typecheck', valueKind: 'command',
     label: 'Type check command',
     type: 'string',
     description: 'Command the write and edit tools run for validate "typecheck" in a project that declares no typecheck command of its own (no package.json script, Cargo or Go toolchain, Makefile target or pyproject tool), e.g. "pnpm -r typecheck" for a monorepo whose scripts live in its packages. Split like a shell command line, without pipes or substitution, and run through the exec tool\'s own path. Your own settings only: a project settings file cannot set a command. Empty: the validator is refused with what the project does declare.',
   },
   {
-    key: 'tools.validators.lint',
+    key: 'tools.validators.lint', valueKind: 'command',
     label: 'Lint command',
     type: 'string',
     description: 'Command the write and edit tools run for validate "lint" in a project that declares no lint command of its own (no package.json script, Cargo or Go toolchain, Makefile target or pyproject tool), e.g. "pnpm -r lint" for a monorepo whose scripts live in its packages. Split like a shell command line, without pipes or substitution, and run through the exec tool\'s own path. Your own settings only: a project settings file cannot set a command. Empty: the validator is refused with what the project does declare.',
   },
   {
-    key: 'tools.validators.test',
+    key: 'tools.validators.test', valueKind: 'command',
     label: 'Test command',
     type: 'string',
     description: 'Command the write and edit tools run for validate "test" in a project that declares no test command of its own (no package.json script, Cargo or Go toolchain, Makefile target or pyproject tool), e.g. "pnpm -r test" for a monorepo whose scripts live in its packages. Split like a shell command line, without pipes or substitution, and run through the exec tool\'s own path. Your own settings only: a project settings file cannot set a command. Empty: the validator is refused with what the project does declare.',
   },
   {
-    key: 'tools.validators.build',
+    key: 'tools.validators.build', valueKind: 'command',
     label: 'Build command',
     type: 'string',
     description: 'Command the write and edit tools run for validate "build" in a project that declares no build command of its own (no package.json script, Cargo or Go toolchain, Makefile target or pyproject tool), e.g. "pnpm -r build" for a monorepo whose scripts live in its packages. Split like a shell command line, without pipes or substitution, and run through the exec tool\'s own path. Your own settings only: a project settings file cannot set a command. Empty: the validator is refused with what the project does declare.',
@@ -860,13 +881,13 @@ export const coreTailConfigSettings: ConfigSettingDefinition[] = [
     description: 'Send supporting work (compaction and resume summaries, session titles) to the helper route below; off, it stays on the main model (titles on the tool LLM)',
   },
   {
-    key: 'helper.globalProvider',
+    key: 'helper.globalProvider', valueKind: 'request-target',
     label: 'Provider for the helper model',
     type: 'string',
     description: 'Provider for the global helper model (empty = the tool LLM when enabled, else the main model)',
   },
   {
-    key: 'helper.globalModel',
+    key: 'helper.globalModel', valueKind: 'request-target',
     label: 'Helper model',
     type: 'string',
     description: 'Model ID for the global helper model (empty = the tool LLM when enabled, else the main model)',

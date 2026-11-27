@@ -142,6 +142,8 @@ export function createSelfUpdateCommand<Context extends CommandActionContext & {
     summary: 'See whether a newer release is out, install it, or go back to the version before',
     group: 'Product',
     report: 'check',
+    // Unlisted: typed bare, it opens System on Updates; each action is a control there.
+    firstScreen: false,
     opens: 'system/updates',
     actions: [
       daemonOwn(UPDATE_CHECK as CapabilityDefinition<never>),

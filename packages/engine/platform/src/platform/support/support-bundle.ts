@@ -95,13 +95,19 @@ export function inspectBundle(path: string, parsed: Record<string, unknown>, sch
 const PLACEMENT_SETTING = /^(service|storage|mcp|daemon\.connectedHost)\.|(Path|Dir)$/;
 
 /**
+ * Keys under a placement family that are a protection with a direction of their own (config-key-facts.ts), not a
+ * place: judged by that direction alone, so a move to the stricter value is not held back.
+ */
+const POLICY_NOT_PLACEMENT: ReadonlySet<string> = new Set(['storage.secretPolicy']);
+
+/**
  * A change an import holds back unless security settings are asked for: one the
  * key's own facts say loosens security (config-key-facts.ts, the one owner of
  * that rule, read from the current and new value), or one to a placement
  * setting above.
  */
 export function securityRelevantSetting(key: string, from: unknown, value: unknown): boolean {
-  return configKeyFacts(key).loosens?.(from, value) === true || PLACEMENT_SETTING.test(key);
+  return configKeyFacts(key).loosens?.(from, value) === true || (PLACEMENT_SETTING.test(key) && !POLICY_NOT_PLACEMENT.has(key));
 }
 
 /** A value as one short line; credential settings show only whether they are set. */

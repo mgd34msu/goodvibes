@@ -117,6 +117,8 @@ export interface WebSearchServiceLike {
 export interface ArtifactStoreLike extends ArtifactStoreUploadLike {
   readonly list: () => readonly unknown[];
   readonly get: (artifactId: string) => unknown | null;
+  /** Removes one artifact (its record and content); false when there was none. */
+  readonly delete?: ((artifactId: string) => boolean) | undefined;
   readonly readContent: (artifactId: string) => Promise<{
     // `| undefined` is required: the real ArtifactRecord declares
     // `filename?: string | undefined`, and under exactOptionalPropertyTypes
@@ -240,4 +242,9 @@ export interface DaemonMediaRouteContext {
   readonly requireAdmin: (req: Request) => Response | null;
   readonly voiceService: VoiceServiceLike;
   readonly webSearchService: WebSearchServiceLike;
+  /**
+   * The principal the request authenticated as: kept on a file it stores (`metadata.createdBy`), which is who the file
+   * belongs to (platform control-plane/caller-reach.ts). Absent: no maker is kept (the owner's only).
+   */
+  readonly callerPrincipal?: ((req: Request) => string | undefined) | undefined;
 }

@@ -10,7 +10,9 @@
  * `capability_run`).
  */
 import { NATIVELY_ADMITTED_METHOD_IDS } from './native-admission-methods.js';
+import { OUTSIDE_AGENT_ISSUE_METHOD_ID, outsideAgentQuestion } from './method-catalog-programs.js';
 import { formatScheduleTiming } from '../automation/schedule-words.js';
+import { METHOD_QUESTIONS } from './method-questions.js';
 import type { AutomationScheduleDefinition } from '../automation/schedules.js';
 import type { ToolAskWords } from '../permissions/tool-ask-words.js';
 
@@ -27,6 +29,12 @@ function text(value: unknown): string | undefined {
 }
 
 const clip = (words: string, max = 80): string => words.length <= max ? words : `${words.slice(0, max - 1)}…`;
+
+/** A held method call's body (kept as JSON under `request`, `{ body, query }`), or the request itself. */
+function heldBody(request: Fields): Fields {
+  if (typeof request['request'] !== 'string') return request;
+  try { return record(record(JSON.parse(request['request']))['body']); } catch { return {}; }
+}
 
 /** A field's name as a person reads it: `profileId` is "Profile id", `surface_kind` "Surface kind". */
 function fieldWords(name: string): string {
@@ -63,11 +71,32 @@ function named(target: Fields, request: Fields, ...ids: string[]): string {
 function question(method: string, request: Fields, target: Fields, zone: string, title: string | undefined): string {
   const thing = (noun: string, ...ids: string[]): string => { const it = named(target, request, ...ids); return it ? `the ${noun} ${it}` : `a ${noun}`; };
   switch (method) {
+    // The outside agent's one question at its first start (held as its method call: its body as JSON under `request`).
+    case OUTSIDE_AGENT_ISSUE_METHOD_ID: {
+      let project = text(request['project']);
+      if (project === undefined && typeof request['request'] === 'string') {
+        try { project = text(record(record(JSON.parse(request['request']))['body'])['project']); } catch { project = undefined; }
+      }
+      return `${outsideAgentQuestion(project?.trim() || undefined)}?`;
+    }
     case 'automation.schedules.create':
     case 'automation.jobs.create': {
       const name = text(request['name']) ?? text(request['prompt']);
       const timing = timingOf(target['schedule'], zone);
       return `Add a schedule${name ? ` "${clip(name, 60)}"` : ''}${timing ? `, ${timing}` : ''}?`;
+    }
+    // A credential asked for by someone other than the owner himself (the card names who asks): what his yes gives that
+    // caller, in plain words. A yes to someone else's request never makes his own device (gate-review-6 G1).
+    case 'pairing.tokens.migrate':
+    case 'pairing.tokens.create':
+    case 'pairing.handoff.create': {
+      const body = heldBody(request);
+      const name = text(body['name']) ?? text(request['name']);
+      const scopes = Array.isArray(body['scopes']) ? body['scopes'].filter((scope): scope is string => typeof scope === 'string') : [];
+      const holds = scopes.length > 0 ? `only ${clip(scopes.join(', '), 80)}` : 'every operator right on this daemon';
+      if (body['client'] === 'agent') return 'Make the Agent\'s credential for the caller asking? (It is refused: only your own Agent or your sign-in has it made.)';
+      const what = method === 'pairing.handoff.create' ? `Make a pairing code${name ? ` for "${clip(name, 60)}"` : ''}: whoever uses it gets` : `Give the caller asking${name ? ` (it names it "${clip(name, 60)}")` : ''}`;
+      return `${what} its own lasting key to this daemon, holding ${holds}, until you revoke it? It will not be your device: it answers none of your questions, and its risky acts are put to you here. To make one of your programs your own device, pair it with the code your own screen shows (Devices and network, Pair something).`;
     }
     case 'automation.jobs.update': return `Change ${thing('schedule', 'jobId')}?`;
     case 'automation.jobs.enable': case 'automation.schedules.resume': return `Resume ${thing('schedule', 'jobId', 'scheduleId')}?`;
@@ -93,7 +122,10 @@ function question(method: string, request: Fields, target: Fields, zone: string,
     const verb = method === 'profile.set' ? 'Set' : method === 'profile.append' ? 'Add to' : method === 'profile.forget' ? 'Forget' : 'Put back the earlier value of';
     return `${verb} ${key ? `"${key}"` : 'a fact'} in your profile?`;
   }
-  // Every other natively admitted method: its catalog title, as a question ("Confirm an occasion?").
+  // Every other builtin method: its own question about the act, in plain words (method-questions.ts).
+  const own = Object.hasOwn(METHOD_QUESTIONS, method) ? METHOD_QUESTIONS[method] : undefined;
+  if (own !== undefined) return own;
+  // A plugin's method: its catalog title, as a question.
   const words = (title ?? method).trim();
   return `${words.charAt(0).toUpperCase()}${words.slice(1).toLowerCase()}?`;
 }

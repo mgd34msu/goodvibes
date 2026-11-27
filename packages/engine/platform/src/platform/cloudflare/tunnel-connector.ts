@@ -1,12 +1,13 @@
 import { revealOrNull } from '../security/secret.js';
-import { spawn } from 'node:child_process';
-import { accessSync, constants as fsConstants } from 'node:fs';
+import { spawn, spawnSync } from 'node:child_process';
+import { accessSync, constants as fsConstants, mkdirSync, rmSync, statSync, writeFileSync } from 'node:fs';
 import { delimiter, join } from 'node:path';
 import type { ConfigManager } from '../config/manager.js';
 import type { SecretsManager } from '../config/secrets.js';
 import { unreadableSecretStore, type StoredSecretReader } from '../config/secret-store-unreadable.js';
 import { summarizeError } from '../utils/error-display.js';
 import { logger } from '../utils/logger.js';
+import { inheritedEnvWithoutCredentials } from '../tools/exec/credential-env.js';
 import { readCloudflareConfig } from './config.js';
 import { CLOUDFLARE_TUNNEL_TOKEN_KEY } from './constants.js';
 import { resolveSecretRef } from './cloudflare-token-resolvers.js';
@@ -50,6 +51,24 @@ export interface CloudflareTunnelConnectorOptions {
   readonly binary?: string | undefined;
   readonly spawnConnector?: ((binary: string, args: readonly string[], env: NodeJS.ProcessEnv) => TunnelConnectorProcess) | undefined;
   readonly findBinary?: (() => string | null) | undefined;
+  /** Where the tunnel token is handed to cloudflared in a 0600 file (the daemon's home); absent: in its environment. */
+  readonly tokenFileFolder?: string | undefined;
+  /** Whether this cloudflared takes `--token-file` (tests); default: its own `tunnel run --help` names the option. */
+  readonly supportsTokenFile?: ((binary: string) => boolean) | undefined;
+}
+
+const tokenFileSupport = new Map<string, boolean>();
+/** Whether `binary` is a cloudflared that takes `tunnel run --token-file` (2025.4.0 and later), read from its own help once. */
+function cloudflaredTakesTokenFile(binary: string): boolean {
+  // Keyed by the file as it is now: an upgraded or replaced cloudflared is asked again.
+  let key = binary;
+  try { const stat = statSync(binary); key = `${binary}\u0000${stat.mtimeMs}\u0000${stat.size}`; } catch { /* asked below; spawning reports it */ }
+  const known = tokenFileSupport.get(key);
+  if (known !== undefined) return known;
+  const help = spawnSync(binary, ['tunnel', 'run', '--help'], { encoding: 'utf8' });
+  const supports = `${help.stdout ?? ''}${help.stderr ?? ''}`.includes('--token-file');
+  tokenFileSupport.set(key, supports);
+  return supports;
 }
 
 /** Owned by the daemon: start, stop and observe the connector. */
@@ -84,8 +103,9 @@ function findOnPath(name: string): string | null {
 
 /**
  * Supervises `cloudflared tunnel run` for the tunnel provisioning created. The
- * token goes to the child in TUNNEL_TOKEN, never on the command line, so it is
- * not visible in a process listing. One child process; nothing per request.
+ * token goes to the child in a 0600 file in the daemon's home (`--token-file`),
+ * or in TUNNEL_TOKEN for a cloudflared older than that option, never on the
+ * command line. One child process; nothing per request.
  */
 export class CloudflareTunnelConnector implements CloudflareTunnelConnectorHandle {
   private child: TunnelConnectorProcess | null = null;
@@ -274,6 +294,23 @@ export class CloudflareTunnelConnector implements CloudflareTunnelConnectorHandl
     }
   }
 
+  /**
+   * The 0600 file the token is handed over in, written fresh for this start in the folder named
+   * (`tokenFileFolder`, the daemon's home); undefined when no folder is named or this cloudflared has no
+   * `--token-file` (read once per binary from its own help).
+   */
+  private tokenFileFor(binary: string, token: string): string | undefined {
+    const folder = this.options.tokenFileFolder;
+    if (!folder) return undefined;
+    const supports = this.options.supportsTokenFile ?? cloudflaredTakesTokenFile;
+    if (!supports(binary)) return undefined;
+    const file = join(folder, 'cloudflared-tunnel-token');
+    mkdirSync(folder, { recursive: true, mode: 0o700 });
+    rmSync(file, { force: true });
+    writeFileSync(file, token, { mode: 0o600, flag: 'wx' });
+    return file;
+  }
+
   private launch(binary: string): void {
     const running = this.running;
     if (!running) return;
@@ -281,7 +318,13 @@ export class CloudflareTunnelConnector implements CloudflareTunnelConnectorHandl
     const spawnConnector = this.options.spawnConnector ?? ((command, args, env) => spawn(command, [...args], { env, stdio: ['ignore', 'ignore', 'pipe'] }));
     let child: TunnelConnectorProcess;
     try {
-      child = spawnConnector(binary, ['tunnel', '--no-autoupdate', 'run'], { ...process.env, TUNNEL_TOKEN: running.token });
+      // It inherits no other credential of this process (tools/exec/credential-env.ts). Its own tunnel token it gets in
+      // a file only this account reads (`--token-file`, cloudflared 2025.4.0 and later), never in its environment, which
+      // every program it starts would inherit; an older cloudflared, without that option, still gets TUNNEL_TOKEN.
+      const tokenFile = this.tokenFileFor(binary, running.token);
+      child = tokenFile
+        ? spawnConnector(binary, ['tunnel', '--no-autoupdate', 'run', '--token-file', tokenFile], { ...inheritedEnvWithoutCredentials() })
+        : spawnConnector(binary, ['tunnel', '--no-autoupdate', 'run'], { ...inheritedEnvWithoutCredentials(), TUNNEL_TOKEN: running.token });
     } catch (error: unknown) {
       this.onExit(binary, `could not start: ${summarizeError(error)}`);
       return;

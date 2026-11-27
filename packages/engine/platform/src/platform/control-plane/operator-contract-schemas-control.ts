@@ -32,6 +32,9 @@ const CONTROL_PLANE_SERVER_CONFIG_SCHEMA = objectSchema({
 export const CONTROL_AUTH_LOGIN_REQUEST_SCHEMA = objectSchema({
   username: STRING_SCHEMA,
   password: STRING_SCHEMA,
+  // The first sign-in with the generated first-run password sets the owner's own password: required then (refused 409
+  // FIRST_SIGN_IN_SETS_PASSWORD without it), ignored at any other sign-in.
+  newPassword: STRING_SCHEMA,
 }, ['username', 'password']);
 
 export const CONTROL_AUTH_LOGIN_RESPONSE_SCHEMA = objectSchema({

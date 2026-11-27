@@ -869,7 +869,7 @@ export function formatRoutineSchedulePreview(preview: RoutineSchedulePromotionPr
     `  delivery: ${delivery?.mode ?? 'none'}${deliveryTargetCount > 0 ? ` (${deliveryTargetCount} target${deliveryTargetCount === 1 ? '' : 's'})` : ''}`,
     '  target connected GoodVibes host/main conversation route',
     '  policy isolated Agent Knowledge only; no default knowledge/non-Agent fallback; no delegated review unless explicitly requested',
-    ...scheduleConfirmationRouteLines({ workspace: 'workspace action:"run" actionId:"schedule-promote-routine"', cli: routineScheduleConfirmCommand(preview, { redactWebhook: true }) }),
+    ...scheduleConfirmationRouteLines({ capability: 'capability_run id:"routines.promote"', cli: routineScheduleConfirmCommand(preview, { redactWebhook: true }) }),
   ].join('\n');
 }
 

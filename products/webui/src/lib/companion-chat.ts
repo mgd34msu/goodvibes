@@ -1,7 +1,9 @@
 import { asRecord, bestId, firstString, readPath } from './object';
+import { accountKey } from './account-storage';
 
-export const STORED_COMPANION_SESSIONS_KEY = 'goodvibes.webui.companionSessions';
-export const STORED_ACTIVE_COMPANION_SESSION_KEY = 'goodvibes.webui.activeCompanionSessionId';
+// Kept for the person signed in (account-storage.ts): another person's chats are never read here.
+export const STORED_COMPANION_SESSIONS_KEY = 'goodvibes.webui.companionSessions' as const;
+export const STORED_ACTIVE_COMPANION_SESSION_KEY = 'goodvibes.webui.activeCompanionSessionId' as const;
 const MAX_STORED_COMPANION_SESSIONS = 100;
 
 export interface LocalCompanionMessage {
@@ -131,7 +133,7 @@ export function readStoredCompanionSessions(): unknown[] {
   const storage = browserStorage();
   if (!storage) return [];
   try {
-    const parsed: unknown = JSON.parse(storage.getItem(STORED_COMPANION_SESSIONS_KEY) ?? '[]');
+    const parsed: unknown = JSON.parse(storage.getItem(accountKey(STORED_COMPANION_SESSIONS_KEY)) ?? '[]');
     return Array.isArray(parsed) ? parsed : [];
   } catch {
     return [];
@@ -145,22 +147,22 @@ export function writeStoredCompanionSessions(sessions: unknown[]) {
     .filter((session) => Boolean(extractSessionId(session)))
     .slice(0, MAX_STORED_COMPANION_SESSIONS);
   try {
-    storage.setItem(STORED_COMPANION_SESSIONS_KEY, JSON.stringify(persisted));
+    storage.setItem(accountKey(STORED_COMPANION_SESSIONS_KEY), JSON.stringify(persisted));
   } catch {
     // Best-effort cache only; daemon session storage remains the source of truth.
   }
 }
 
 export function readStoredActiveCompanionSessionId(): string {
-  return browserStorage()?.getItem(STORED_ACTIVE_COMPANION_SESSION_KEY) ?? '';
+  return browserStorage()?.getItem(accountKey(STORED_ACTIVE_COMPANION_SESSION_KEY)) ?? '';
 }
 
 export function writeStoredActiveCompanionSessionId(sessionId: string) {
   const storage = browserStorage();
   if (!storage) return;
   try {
-    if (sessionId) storage.setItem(STORED_ACTIVE_COMPANION_SESSION_KEY, sessionId);
-    else storage.removeItem(STORED_ACTIVE_COMPANION_SESSION_KEY);
+    if (sessionId) storage.setItem(accountKey(STORED_ACTIVE_COMPANION_SESSION_KEY), sessionId);
+    else storage.removeItem(accountKey(STORED_ACTIVE_COMPANION_SESSION_KEY));
   } catch {
     // Best-effort cache only; the current React state still owns the active view.
   }

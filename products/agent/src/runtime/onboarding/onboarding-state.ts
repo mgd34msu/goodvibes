@@ -1,33 +1,6 @@
 import type { SetupPlanItem, SetupPlanStatus } from '../../tools/agent-harness-setup-posture-types.ts';
 import type { OnboardingCheckMarkerState } from './types.ts';
 
-/**
- * Maps each setup plan item id to the Agent Workspace category that resolves it.
- * This is the single sequencing table, every onboarding surface reads from here.
- */
-const PLAN_ITEM_CATEGORY_MAP: Readonly<Record<string, string>> = {
-  'connected-host-readiness': 'setup',
-  'connected-host-auth': 'setup',
-  'goodvibes-settings-import': 'setup',
-  'provider-access': 'account-model',
-  'install-smoke': 'setup',
-  'local-model-readiness': 'account-model',
-  'agent-knowledge': 'setup',
-  'vibe-personality': 'assistant-behavior',
-  'local-behavior': 'onboarding-context',
-  'communication-channels': 'onboarding-channels',
-  'automation-review': 'tools-permissions',
-  'browser-desktop-control': 'tools-permissions',
-  'sudo-execution-posture': 'tools-permissions',
-  'build-delegation': 'tools-permissions',
-  'finish-onboarding': 'setup',
-};
-
-const DEFAULT_CATEGORY_ID = 'setup';
-
-function planItemCategoryId(planItemId: string): string {
-  return PLAN_ITEM_CATEGORY_MAP[planItemId] ?? DEFAULT_CATEGORY_ID;
-}
 
 export interface OnboardingStep {
   readonly id: string;
@@ -36,8 +9,6 @@ export interface OnboardingStep {
   readonly blocksAutonomy: boolean;
   /** Human-readable hint shown in the UI for the next action. */
   readonly nextLabel: string;
-  /** Agent Workspace category id that resolves this step. */
-  readonly categoryId: string;
 }
 
 export interface OnboardingRecap {
@@ -99,7 +70,6 @@ function planItemToStep(item: SetupPlanItem): OnboardingStep {
     status: item.status,
     blocksAutonomy: item.blocksAutonomy,
     nextLabel: item.nextAction,
-    categoryId: planItemCategoryId(item.id),
   };
 }
 

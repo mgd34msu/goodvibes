@@ -36,8 +36,6 @@ export interface OwnerSubmissionPorts {
   readonly applyModelSwitches: (text: string) => string;
   /** True when the message carries what a turn cannot (an image): it was refused and the draft given back. */
   readonly refuseUnsendable: (draft: string, source: NativeConversationInput | undefined, content: readonly ContentPart[] | undefined) => boolean;
-  /** The contract question a typed message answers, unless it was dismissed. */
-  readonly answerOptions: () => { readonly answersContractQuestion?: string };
   /** Starts the turn (or routes it to the connected host). */
   readonly sendTurn: (text: string, options: ProductInputContext, turnOptions: OrchestratorUserInputOptions | undefined, how: OwnerTurnHow) => Promise<boolean>;
   /**
@@ -45,6 +43,11 @@ export interface OwnerSubmissionPorts {
    * connected host and the native intake take text only.
    */
   readonly sendImageTurn: (text: string, content: ContentPart[]) => void;
+  /**
+   * The message's images uploaded to the host the conversation's turns run on (its artifact store), so the turn there
+   * is given them as a chat message's are; undefined when turns run here (no host, routing off) or an upload failed.
+   */
+  readonly attachImages?: ((content: readonly ContentPart[]) => Promise<NativeConversationInput['attachments'] | undefined>) | undefined;
   /** A refused, unsent prompt goes back into an empty composer. */
   readonly restoreDraft: (text: string) => void;
   /** How many `!` commands are running, after each start and finish. */
@@ -121,15 +124,13 @@ export function createOwnerSubmission(ports: OwnerSubmissionPorts): OwnerSubmiss
       processedText = capture.text;
     }
     // Model directives and the memory markers are the composer's own grammar; what remains is what the user sent.
-    // A typed message answers the contract question on offer, unless it was dismissed.
-    const answer: { readonly answersContractQuestion?: string } = options.spokenOutput ? {} : ports.answerOptions();
     // A refused message goes back to the composer as typed, not with its references expanded
     // into file text; a `!#` pin already saved is not repeated on the resend.
     const expandedReferences = options.source?.unsupportedSources.some((part) => part.kind === 'file' || part.kind === 'context') === true;
     const resendable = (unsent: string): string => !expandedReferences ? unsent
       : marker.kind === 'memory-pin' ? draft.replace(/^\s*!#\s*/, '') : draft;
     // The held `!` output goes with this message, once every running command has finished.
-    shellCommands.afterShellCommands(() => ports.sendTurn(processedText, options, answer.answersContractQuestion ? answer : undefined, {
+    shellCommands.afterShellCommands(() => ports.sendTurn(processedText, options, undefined, {
       notSent: (unsent) => ports.restoreDraft(resendable(unsent)),
       attachShellOutput: true,
     }));
@@ -137,9 +138,17 @@ export function createOwnerSubmission(ports: OwnerSubmissionPorts): OwnerSubmiss
 
   const submitTurn = (text: string, content?: ContentPart[], options: ProductInputContext = {}): void => {
     ports.prepare();
-    // An image sent by the conversation's image control goes with its message, in a turn of this process.
+    // An image sent by the conversation's image control goes with its message: to the host the conversation's turns
+    // run on (uploaded first, then sent as the message's attachments), else in a turn of this process.
     if (content?.some((part) => part.type === 'image') && !options.source) {
-      shellCommands.afterShellCommands(() => { ports.sendImageTurn(text, content); });
+      shellCommands.afterShellCommands(async () => {
+        const attachments = text.trim() ? await ports.attachImages?.(content).catch(() => undefined) : undefined;
+        if (attachments && attachments.length > 0) {
+          await ports.sendTurn(text, { source: { ...captureNativeConversationInput(text), attachments } }, undefined, { attachShellOutput: true });
+          return;
+        }
+        ports.sendImageTurn(text, content);
+      });
       return;
     }
     if (ports.refuseUnsendable(text, options.source, content)) return;

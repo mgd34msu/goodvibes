@@ -121,7 +121,7 @@ function unconfiguredNote(error: unknown): CalendarNote | null {
       : said;
     return {
       title,
-      description: description || 'Connect Google with /calendar connect google in the Agent, or set the CalDAV settings.',
+      description: description || 'Connect Google on the Google tab of Mail, calendar and channels, or set the CalDAV settings.',
       settings: 'all',
     };
   }

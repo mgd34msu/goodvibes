@@ -69,7 +69,8 @@ export function composeCiWatchGatewayVerbs(catalog: GatewayMethodCatalog, deps: 
   // the operator web surface; the watch retires itself after its verdict).
   if (deps.onCiAutoWatch && deps.workingDirectory) {
     const autoMinter = new CiWatchAutoMinter({ service: ciWatchService, workingDirectory: deps.workingDirectory });
-    deps.onCiAutoWatch((toolName, args, success) => autoMinter.onToolExecuted(toolName, args, success));
+    // The watch belongs to the turn's project, and its repair works there; a turn in no project makes no watch.
+    deps.onCiAutoWatch((toolName, args, success, turn) => autoMinter.onToolExecuted(toolName, args, success, turn));
   }
   // The daemon polls registered watches on the watchers.ciPollIntervalMs
   // cadence (15s floor, sequential passes, overlap-guarded) via the existing

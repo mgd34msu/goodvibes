@@ -25,6 +25,7 @@ import type {
 } from './method-catalog-shared.js';
 import { RefusalError } from '@goodvibes/engine/errors';
 import { GatewayVerbError, readGatewayVerbRefusal } from './routes/gateway-verb-error.js';
+import { isRegisteredProgram } from '../daemon/program-registrations.js';
 
 /** Function returned by every registration; calling it removes the attached handler. */
 export type Unregister = () => void;
@@ -40,6 +41,8 @@ export interface HandlerContextEnvelope {
   readonly principalKind?: GatewayMethodInvocationContext['principalKind'];
   /** Which credential the transport authenticated the caller with; absent for an in-process call. */
   readonly credentialKind?: GatewayMethodInvocationContext['credentialKind'];
+  /** Who the caller is admitted as, from the verified principal; absent for an in-process call. */
+  readonly actor?: GatewayMethodInvocationContext['actor'];
   readonly nativeExecutionAuthority?: GatewayMethodInvocation['nativeExecutionAuthority'];
   readonly isAuthorized?: GatewayMethodInvocation['isAuthorized'];
   /** How the request reached the daemon, as the transport established it; absent for an in-process call. */
@@ -92,9 +95,13 @@ export function normalizeContext(
     authToken: context.authToken ?? '',
     ...(context.principalKind ? { principalKind: context.principalKind } : {}),
     ...(context.credentialKind ? { credentialKind: context.credentialKind } : {}),
+    // Who the caller is (the one owner definition reads it: the owner's sign-in holds his machine's native identity).
+    ...(context.actor ? { actor: context.actor } : {}),
     ...(context.transport ? { transport: context.transport } : {}),
-    // Set by the dispatch only for the Agent's credential (daemon/control-plane.ts `decidedInRun`).
-    ...(metadata['decidedInRun'] === true && context.credentialKind === 'agent' ? { decidedInRun: true } : {}),
+    // Set by the dispatch only for the owner's own Agent program (daemon/control-plane.ts `decidedInRun`,
+    // method-owner-decision.ts `ownersAgentProgram`): its credential with its checked registration, or a hosted turn.
+    ...(metadata['decidedInRun'] === true && context.credentialKind === 'agent'
+      && (isRegisteredProgram(context.call?.registration) || context.call?.daemonHosted === true) ? { decidedInRun: true } : {}),
   };
 }
 

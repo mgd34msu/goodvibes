@@ -13,7 +13,7 @@
  * the command ends, exit 0, when the editor closes stdin or the process is
  * told to stop.
  */
-import { serveAcpAgent, type AcpStdio } from '@goodvibes/engine/platform/platform/acp';
+import { acpConnectionParty, serveAcpAgent, type AcpStdio } from '@goodvibes/engine/platform/platform/acp';
 import { resolveGoodVibesHome } from '@goodvibes/engine/platform/platform/config';
 
 export const ACP_USAGE = 'Usage: goodvibes acp   (speaks the Agent Client Protocol on stdin/stdout; configure it as the editor\'s agent-server command)';
@@ -60,7 +60,9 @@ export async function runAcpCommand(input: RunAcpCommandInput): Promise<number> 
       // The same tree root every other entry point uses, so an editor that
       // launches this with HOME unset or GOODVIBES_HOME blank still reaches the
       // installed settings and accounts rather than the project directory.
-      const served = await serveAcpAgent({ homeDirectory: resolveGoodVibesHome(input.env) }, input.stdio);
+      // Whose input the editor's prompts are: the owner's own program on a connection his editor started is his turn;
+      // a `goodvibes acp` the daemon started for anyone else (its hosted agents and runners say who) is theirs.
+      const served = await serveAcpAgent({ homeDirectory: resolveGoodVibesHome(input.env), inputParty: acpConnectionParty(input.env) }, input.stdio);
       dispose = served.dispose;
       const stopped = new Promise<void>((resolve) => {
         if (input.signal?.aborted) resolve();

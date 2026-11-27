@@ -1,4 +1,6 @@
 export { DaemonServer } from './facade.js';
+// The product's daemon host ends the daemon's activity log at the end of its own close (after the runtime graph's).
+export { releaseDaemonActivityLogAtHostClose } from './facade-boot-guarantees.js';
 export { bootDaemon } from './boot.js';
 export type { BootDaemonOptions, BootedDaemon } from './boot.js';
 // Fatal-boot disclosure: a direct, unbuffered descriptor write immune to a

@@ -34,12 +34,12 @@ export function mainConversationRoute(request: string): TaskRouteDraft {
     userOutcome: 'Answer or plan directly before escalating into a specialized tool or workspace.',
     why: 'The request does not clearly need a specialized route yet.',
     modelRoute: 'main conversation',
-    inspectRoute: `workspace action:"actions" query:${quote(request, 72)}`,
+    inspectRoute: `capability_find need:${quote(request, 72)}`,
     userRoute: 'Main conversation',
     requiresConfirmation: false,
     supportingRoutes: [
       `route action:"plan" query:${quote(request, 72)}`,
-      `workspace action:"actions" query:${quote(request, 72)}`,
+      `capability_find need:${quote(request, 72)}`,
     ],
     policy: 'Stay in the main conversation unless a visible specialized route improves clarity, durability, safety, or autonomy.',
   };

@@ -75,18 +75,30 @@ import {
   type WriteScopeEntries,
 } from '../../config/secrets.js';
 import { logger } from '../../utils/logger.js';
+import type { DaemonWritePress } from '../../config/manager.js';
+import { readReplicaAct } from '../../cluster/config-replica.js';
+
+/**
+ * Who made this credential write and how it was decided, as the daemon's dispatch put it in the invocation's metadata
+ * (in process only, control-plane.ts `settingActOf`): carried on the write's press to the secret store and the setting.
+ */
+function pressOf(invocation: GatewayMethodInvocation): { readonly press: DaemonWritePress } | undefined {
+  const act = readReplicaAct(invocation.context.metadata?.['settingAct']);
+  return act ? { press: { act } } : undefined;
+}
 
 /** The narrow config surface a credential write needs. Structural, so it is testable. */
 export interface CredentialWriteConfig {
   get(key: string): unknown;
-  setDynamic(key: string, value: unknown): void;
+  /** `press.act`: who made the write and how it was decided, kept with the change (ConfigSetOptions `press`). */
+  setDynamic(key: string, value: unknown, options?: { readonly press?: DaemonWritePress | undefined }): void;
 }
 
-/** The narrow secret surface a credential write needs. */
+/** The narrow secret surface a credential write needs. `press`: as the settings writers carry it (SecretWriteOptions). */
 export interface CredentialWriteSecrets {
-  set(key: string, value: string, options?: { scope?: SecretScope | undefined }): Promise<void>;
+  set(key: string, value: string, options?: { scope?: SecretScope | undefined; press?: DaemonWritePress | undefined }): Promise<void>;
   get(key: string): Promise<Secret | null>;
-  delete(key: string, options?: { scope?: SecretScope | undefined }): Promise<void>;
+  delete(key: string, options?: { scope?: SecretScope | undefined; press?: DaemonWritePress | undefined }): Promise<void>;
   /** The raw entry the scope's own stores hold: no environment, other tier or followed reference. */
   getWriteScopeEntry(key: string, scope: SecretScope): Promise<Secret | null>;
   /** Remove the entry from the scope's own stores only. */
@@ -241,7 +253,7 @@ export function createCredentialSetHandler(deps: CredentialWriteDeps): GatewayMe
       // own answer for this key (resolveSecretWriteScope), so a reviewer can
       // see where a credential written through the wire lands, and the
       // credential-scope gate has a classified write to check.
-      await deps.secrets.set(secretKey, value, { scope });
+      await deps.secrets.set(secretKey, value, { scope, ...pressOf(invocation) });
     } catch (error) {
       const detail = error instanceof Error ? error.message : String(error);
       const restored = await restorePrevious();
@@ -284,7 +296,7 @@ export function createCredentialSetHandler(deps: CredentialWriteDeps): GatewayMe
 
     const reference = secretReferenceFor(secretKey);
     try {
-      deps.config.setDynamic(key, reference);
+      deps.config.setDynamic(key, reference, pressOf(invocation));
     } catch (error) {
       const detail = error instanceof Error ? error.message : String(error);
       const restored = await restorePrevious();
@@ -353,7 +365,7 @@ export function createCredentialDeleteHandler(deps: CredentialWriteDeps): Gatewa
     const hadConfigValue = deps.config.get(key) !== undefined && deps.config.get(key) !== '';
 
     try {
-      await deps.secrets.delete(secretKey);
+      await deps.secrets.delete(secretKey, pressOf(invocation));
     } catch (error) {
       const detail = error instanceof Error ? error.message : String(error);
       record(deps, { action: 'delete', configKey: key, secretKey, scope, outcome: 'refused', ...audited, detail });
@@ -366,7 +378,7 @@ export function createCredentialDeleteHandler(deps: CredentialWriteDeps): Gatewa
     }
     if (hadConfigValue) {
       try {
-        deps.config.setDynamic(key, '');
+        deps.config.setDynamic(key, '', pressOf(invocation));
       } catch (error) {
         const detail = error instanceof Error ? error.message : String(error);
         record(deps, {

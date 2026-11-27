@@ -124,6 +124,8 @@ export const builtinGatewayHostedSessionMethodDescriptors: readonly GatewayMetho
       { code: 'HOSTED_SESSION_LIMIT_REACHED', status: 429, meaning: 'hostedSessions.maxSessions live sessions already exist; end one or raise the setting.' },
       { code: 'HOSTED_SESSION_UNAVAILABLE', status: 409, meaning: 'The workspace\'s provider setup failed or the daemon is shutting down; nothing was created.' },
     ],
+    // The hosted conversation works in this folder: a project the caller may name (control-plane dispatch).
+    workFolders: ['workspaceRoot'],
     inputSchema: objectSchema({
       workspaceRoot: STRING_SCHEMA,
       title: STRING_SCHEMA,

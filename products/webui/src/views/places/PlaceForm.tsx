@@ -28,6 +28,8 @@ export interface PlaceFormRequest {
   readonly place: string;
   /** The inputs the selected item (or the pressed answer) gave: shown, never asked. */
   readonly given: ActionValues;
+  /** What the item has set now: the form opens on it, still asked (place-types.ts `startWith`). */
+  readonly start?: ActionValues;
   /** How the item's own values read (its id as its title). */
   readonly names: Readonly<Record<string, string>>;
 }
@@ -39,7 +41,7 @@ export function PlaceForm({ request, onSubmit, onClose }: {
 }) {
   const { capability, given, names } = request;
   const action = capability.action;
-  const [values, setValues] = useState<Record<string, string>>(() => initialValues(action, given));
+  const [values, setValues] = useState<Record<string, string>>(() => initialValues(action, { ...(request.start ?? {}), ...given }));
   /** The names of things chosen from live lists, by value: the sentence says a schedule's name, not its id. */
   const [labels, setLabels] = useState<Record<string, string>>({});
   const asked = useMemo(() => action.inputs.filter((input) => given[input.id] === undefined

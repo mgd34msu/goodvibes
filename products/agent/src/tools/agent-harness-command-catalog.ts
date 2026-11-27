@@ -79,7 +79,7 @@ async function matchingCommands(commandRegistry: CommandRegistry, query: string,
 
 function describeCommand(command: CatalogCommand, lookup?: CommandDetailLookup): Record<string, unknown> {
   const policy = describeCommandPolicy(command.name, command);
-  const modelRoute = policy.preferredModelTool ?? `workspace action:"command" commandName:"${command.name}"`;
+  const modelRoute = policy.preferredModelTool ?? `screens_keys_commands action:"command" commandName:"${command.name}"`;
   return {
     name: command.name,
     slash: `/${command.name}`,
@@ -92,8 +92,8 @@ function describeCommand(command: CatalogCommand, lookup?: CommandDetailLookup):
       inspect: `agent_harness mode:"command" commandName:"${command.name}"`,
       run: `agent_harness mode:"run_command" commandName:"${command.name}"`,
       preferred: modelRoute,
-      directInspect: `workspace action:"command" commandName:"${command.name}"`,
-      directRun: `workspace action:"run_command" commandName:"${command.name}"`,
+      directInspect: `screens_keys_commands action:"command" commandName:"${command.name}"`,
+      directRun: `screens_keys_commands action:"run_command" commandName:"${command.name}"`,
     },
     ...(lookup ? {
       lookup: {
@@ -118,7 +118,7 @@ function describeCommandCandidate(command: CatalogCommand): Record<string, unkno
     aliases: command.aliases ?? [],
     summary: previewText(command.description),
     effect: policy.effect,
-    modelRoute: policy.preferredModelTool ?? `workspace action:"command" commandName:"${command.name}"`,
+    modelRoute: policy.preferredModelTool ?? `screens_keys_commands action:"command" commandName:"${command.name}"`,
     ...(command.argsHint ? { argsHint: command.argsHint } : {}),
   };
 }

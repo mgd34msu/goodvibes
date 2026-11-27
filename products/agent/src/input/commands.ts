@@ -3,6 +3,7 @@ import type { CommandRegistry } from './command-registry.ts';
 import type { CommandContext } from './command-registry.ts';
 import { forkCommand, resumeCommand } from './commands/session.ts';
 import { memoryCommand } from './commands/memory.ts';
+import { registerChangesCommand } from './commands/changes-runtime.ts';
 import { registerShellCoreCommands } from './commands/shell-core.ts';
 import { registerOperatorRuntimeCommands } from './commands/operator-runtime.ts';
 import { registerNotifyRuntimeCommands } from './commands/notify-runtime.ts';
@@ -15,8 +16,7 @@ import { registerDevicesRuntimeCommands } from './commands/devices-runtime.ts';
 import { registerTasksRuntimeCommands } from './commands/tasks-runtime.ts';
 import { registerStatusRuntimeCommands } from './commands/status-runtime.ts';
 import { registerModelsLists } from '@goodvibes/engine/terminal-shell/models-lists';
-import { registerOnboardingRuntimeCommands } from './commands/onboarding-runtime.ts';
-import { registerAgentWorkspaceRuntimeCommands } from './commands/agent-workspace-runtime.ts';
+import { registerWorkRuntimeCommands } from './commands/work-runtime.ts';
 import { registerDelegationRuntimeCommands } from './commands/delegation-runtime.ts';
 import { registerChannelLists } from '@goodvibes/engine/terminal-shell/channel-lists';
 import { registerKnowledgeLists } from '@goodvibes/engine/terminal-shell/knowledge-lists';
@@ -43,7 +43,7 @@ export function registerBuiltinCommands(
   registerShellCoreCommands(registry);
   // Automation is the daemon's (capabilities/builtin/automation.ts): no slash command; its lists reach the daemon with this binding.
   registerAutomationLists<CommandContext>(capabilityBinding);
-  registerAgentWorkspaceRuntimeCommands(registry);
+  registerWorkRuntimeCommands(registry);
   // Memory and knowledge: notes, personas, routines, saved artifacts and drafts are the daemon's (capabilities/builtin/agent-stores.ts),
   // controls in the Memory and knowledge place (routines that run by themselves in Automation too; the review packet's
   // readiness, steps and timeline on the Drafts tab).
@@ -91,13 +91,15 @@ export function registerBuiltinCommands(
   // Models and providers are the daemon's (capabilities/builtin/models.ts, services.ts): controls in their place; the
   // lists their forms choose from reach the daemon with this binding.
   registerModelsLists<CommandContext>(capabilityBinding);
-  registerOnboardingRuntimeCommands(registry);
+  // `/setup` is gone: every setup topic is a row of System's Setup tab (capabilities setup.<topic>, onboarding-runtime.ts).
   registerLocalRuntimeCommands(registry);
   registerDevicesRuntimeCommands(registry);
   registerSessionContentCommands(registry);
   // Money is the daemon's (capabilities/builtin/money.ts): no slash command; every action a control in the Money place
   // (the purchases waiting, Waiting for you's Purchases tab); its lists read the daemon (places/money-lists.ts, bound in wirePlaces).
   registry.register(memoryCommand);
+  // `/changes`: typed, it opens Code and changes, as in the terminal app.
+  registerChangesCommand(registry);
 
   // ── /resume and /fork (every other session action is a control of the Sessions place) ──
   registry.register(resumeCommand);

@@ -1,5 +1,6 @@
 import { REGULAR_KNOWLEDGE_DB_FILE, prepareConfiguredProjectContext } from '@goodvibes/engine/platform/platform/knowledge';
-import { initialTerminalRuntimeFields } from '@goodvibes/engine/terminal-shell/bootstrap-primitives';
+import { declareUnmarkedWorkIsOwners } from '@goodvibes/engine/platform/platform/security';
+import { onProgramRegistrationRefused, programVerificationNotice } from '@goodvibes/engine/platform/platform/runtime/client';import { initialTerminalRuntimeFields } from '@goodvibes/engine/terminal-shell/bootstrap-primitives';
 import { projectAgentToolDependencies } from '@goodvibes/engine/terminal-shell/bootstrap-command-context';
 import {
   createTerminalFeatureFlags,
@@ -14,14 +15,14 @@ import {
   attachTerminalRuntimeBindings,
 } from '@goodvibes/engine/terminal-shell/bootstrap-runtime-bindings';
 import { createTerminalRenderScheduler } from '@goodvibes/engine/terminal-shell/render-scheduler';
-import { createTuiTurnPermissionManager, registerTuiTurnTools } from './turn-tool-composition.ts';
+import { createTuiTurnPermissionManager, registerTuiTurnTools, terminalSettingsToolProgram } from './turn-tool-composition.ts';
 import { terminalOwnerQuestions, wireOwnerQuestionSessions } from './client/owner-questions.ts';
 import { readDaemonOperatorToken } from './daemon-operator-token.ts';
 import { ConversationManager } from '../core/conversation';
 import { createShellNoticeSink } from './notification-dispatch.ts';
 import { getSharedNotificationFeed } from '../views/notifications-feed.ts';
 import { registerSessionConversation, unregisterSessionConversation } from './conversation-rewind-port.ts';
-import { SelectionManager } from '@goodvibes/engine/terminal-shell';
+import { noSandboxStartupLine, SelectionManager } from '@goodvibes/engine/terminal-shell';
 import { logger, summarizeError } from '@goodvibes/engine/platform/platform/utils';
 import { getConfiguredSystemPrompt } from '@goodvibes/engine/platform/platform/config';
 import { installCloudflareAccessFetch } from '@goodvibes/engine/platform/platform/cloudflare';
@@ -50,6 +51,7 @@ import {
 } from '@/runtime/index.ts';
 import { createRuntimeServices, type RuntimeServices } from './services.ts';
 import { registerClientPhoneTool, setProgramCallContext } from '@goodvibes/engine/platform/platform/runtime/client';
+import { shortCheckpointId } from '@goodvibes/engine/terminal-shell/recovery-commands';
 import { createHostPowerSeam } from '@goodvibes/engine/platform/platform/power';
 import { createUiRuntimeServices, type UiRuntimeServices } from './ui-services.ts';
 import { join } from 'node:path';
@@ -157,6 +159,9 @@ export async function initializeBootstrapCore(
   const workingDir = options.workingDir;
   const homeDirectory = options.homeDirectory;
   const configManager = options.configManager;
+  // This program is the person at his own keyboard: work in it that no turn or mark names is his (unknown is someone
+  // else's everywhere else, the daemon included: security/turn-input-party.ts).
+  declareUnmarkedWorkIsOwners();
   await prepareConfiguredProjectContext(configManager, workingDir, REGULAR_KNOWLEDGE_DB_FILE, { activate: true });
 
   // Gate states derive from the domain settings keys; the bridge keeps live
@@ -230,6 +235,7 @@ export async function initializeBootstrapCore(
     // `permissionManager` is created further down; the gate only runs when a model asks to change a hook, long after bootstrap.
     hookChangeGate: (request, { signal }) => permissionManager.checkHookChange(request, { signal }),
     resolveSessionId: () => runtimeSessionIdRef.value,
+    ...(options.toolServersOnFirstUse ? { toolServersOnFirstUse: true } : {}),
     onSandboxedRun: createSandboxContainmentNotice({
       configManager,
       notify: (text) => conversation.log(`[Sandbox] ${text}`, { fg: activeTokens().secondary }),
@@ -238,17 +244,30 @@ export async function initializeBootstrapCore(
   registerClientPhoneTool(toolRegistry, services.devices, { sessionId: () => runtimeSessionIdRef.value }); // the `phone` tool follows the LOOP, so it is registered here; the posture runtime it used to call is the daemon's now and this tool reaches it over the devices.* verbs (see the platform's client/phone-tool.ts)
   services.agentOrchestrator.setDependencies({
     ...projectAgentToolDependencies({ services, fileCache, projectIndex, configManager }),
-    contractHooks: services.contractRunner.hooks(),
+    // This program runs no contracts (its work runs on the daemon): its agents have no contract hooks.
+    ...(services.contractRunner ? { contractHooks: services.contractRunner.hooks() } : {}),
     surfaceRoot: services.surface.surfaceRoot,
     knowledgeService: services.knowledgeService,
     cloudflareAuthToken: () => readDaemonOperatorToken(services.shellPaths.homeDirectory),
     // A spawned agent asks the owner in the same inbox; the answer comes back to this conversation.
     ownerQuestions: () => terminalOwnerQuestions(services, () => runtimeSessionIdRef.value),
+    // A spawned agent's settings tool reaches the daemon the way this program's own turns do (and the Agent's).
+    ...terminalSettingsToolProgram(services),
   });
 
   const bootstrapUnsubs: Array<() => void | Promise<void>> = [];
   // A saved session is handed the owner's answers that waited for it when it is opened; deleting it settles its questions.
   bootstrapUnsubs.push(wireOwnerQuestionSessions(services, conversation, () => runtimeSessionIdRef.value));
+  // Every checkpoint this program takes (its turns, its agents' runs) records this program's live session, so a
+  // restore elsewhere can say whose change it takes back.
+  services.workspaceCheckpointManager.setSessionResolver(() => runtimeSessionIdRef.value || undefined);
+  // A change of this session that another session's restore took back is said here, at this session's next turn:
+  // a line in the conversation, and the model is told with that turn's first request.
+  bootstrapUnsubs.push(services.workspaceCheckpointManager.followTakenBack(() => runtimeSessionIdRef.value,
+    (line, forModel) => {
+      conversation.addWorkspaceNotice(line);
+      conversation.hostInstructions.set('workspace', forModel, { once: true, append: true });
+    }, shortCheckpointId));
   bootstrapUnsubs.push(stopRuntimeBindings);
   bootstrapUnsubs.push(disposeTurnTools);
   bootstrapUnsubs.push(() => disposeTerminalFeatureFlags(featureFlags));
@@ -277,7 +296,11 @@ export async function initializeBootstrapCore(
   for (const notice of keybindingNotices) startupNoticeBuffer.push(`[Startup] ${notice}`, 'high');
   // A decision log that had to start empty after damage is said on screen, not only in the log file.
   if (services.judgment.decisionLogNotice) startupNoticeBuffer.push(`[Startup] ${services.judgment.decisionLogNotice}`, 'high');
-  // Smart ref: setting .value auto-flushes the pre-router buffer so events
+  // Where this computer cannot prove the program to the daemon: said once, in one sentence.
+  const unverifiedNotice = programVerificationNotice();
+  if (unverifiedNotice) startupNoticeBuffer.push(`[Security] ${unverifiedNotice}`, 'high');
+  // Where the daemon could not verify this program (something loaded into it): said on screen, with what to do.
+  onProgramRegistrationRefused((why) => startupNoticeBuffer.push(`[Security] ${why}`, 'high'));  // Smart ref: setting .value auto-flushes the pre-router buffer so events
   // buffered before the SystemMessageRouter attaches are not permanently lost.
   const systemMessageRouterRef = ((): { value: SystemMessageRouter | null } => {
     let _value: SystemMessageRouter | null = null;
@@ -306,7 +329,8 @@ export async function initializeBootstrapCore(
     queueConversationFollowUp: (item) => conversationFollowUpRef.value?.(item),
     requestRender,
     agentManager: services.agentManager,
-    contractRunner: services.contractRunner,
+    // This program runs no contracts: none are read, so no contract event is announced here.
+    contractRunner: services.contractRunner ?? { get: () => null, list: () => [] },
   });
 
   const routeOrBuffer = (message: string, priority: SystemMessagePriority): void => {
@@ -314,6 +338,10 @@ export async function initializeBootstrapCore(
     if (router) router.routeSystemMessage(message, priority);
     else startupNoticeBuffer.push(message, priority);
   };
+  // With no working sandbox, said once at start: what a model's command can then reach, and the control that turns
+  // the sandbox on (no-sandbox-notice.ts).
+  void noSandboxStartupLine(configManager.get('sandbox.enabled')).then((line) => { if (line) routeOrBuffer(line, 'high'); })
+    .catch((error: unknown) => logger.warn('the no-sandbox notice could not be read', { error: String(error) }));
 
   // Startup TLS banner, emitted via startupNoticeBuffer.push() because the
   // SystemMessageRouter is not attached yet at this point in bootstrap. The
@@ -332,10 +360,11 @@ export async function initializeBootstrapCore(
     if (cpNetworkPlaintext || hlNetworkPlaintext) {
       const affected: string[] = [];
       const settings: string[] = [];
-      if (cpNetworkPlaintext) { affected.push('the daemon'); settings.push('"Encryption for the daemon\'s connections"'); }
-      if (hlNetworkPlaintext) { affected.push('the webhook receiver'); settings.push('"Encryption for webhooks"'); }
+      // The rows of Devices and network, Addresses and ports (terminal-shell places/devices-place.ts).
+      if (cpNetworkPlaintext) { affected.push('the daemon'); settings.push('"Daemon encryption"'); }
+      if (hlNetworkPlaintext) { affected.push('the webhook receiver'); settings.push('"Webhooks encryption"'); }
       startupNoticeBuffer.push(
-        `[Security] Other devices can reach ${affected.join(' and ')} without encryption: passwords, keys and your conversations travel in plain text. Turn on ${settings.join(' and ')} in /settings open, or keep GoodVibes to this computer with /setup, "Keep everything on this computer".`,
+        `[Security] Other devices can reach ${affected.join(' and ')} without encryption: passwords, keys and your conversations travel in plain text. Turn on ${settings.join(' and ')} in the menu: Devices and network, Addresses and ports; or keep GoodVibes to this computer: System, Setup, "Only this computer".`,
         'high',
       );
     }
@@ -377,7 +406,7 @@ export async function initializeBootstrapCore(
   // before a restart is still announced by its request and real duration.
   const runtimeNotifications = {
     lookupContract: (contractId: string) => {
-      const contract = services.contractRunner.get(contractId);
+      const contract = services.contractRunner?.get(contractId);
       return contract ? { startedAt: contract.createdAt, name: contract.ask } : undefined;
     },
   };
@@ -405,7 +434,7 @@ export async function initializeBootstrapCore(
     hooksFileWaiting: hookWorkbench.getAwaitingTrust(),
     heldMcpServers: () => services.mcpRegistry.heldForWorkspaceTrust(services.shellPaths),
   }).then((notice) => { if (notice) routeOrBuffer(notice, 'high'); },
-    (error: unknown) => { logger.warn('tui workspace trust notice not shown', { error: summarizeError(error) }); });
+    (error: unknown) => { logger.warn('folder trust notice not shown', { error: summarizeError(error) }); });
 
   const runtime: MutableRuntimeState = {
     ...initialTerminalRuntimeFields(
@@ -434,6 +463,9 @@ export async function initializeBootstrapCore(
   services.liveSessionIdRef.value = runtime.sessionId; // the session an ask raised on the daemon belongs to
   // This app's call context, carried on every call it makes to the daemon: its project folder and the conversation it
   // holds now (call-context.ts). The daemon never takes its own folder for a call that names none.
+  // The registration each daemon it reaches issues it (call-context.ts `programCallHeadersFor`, kept in memory only) tells
+  // it apart from the Agent, a command line and a script that hold the same operator token: a remembered answer and a
+  // conversation it registered are its own.
   setProgramCallContext({ program: 'tui', project: () => services.shellPaths.workingDirectory, sessionId: () => runtimeSessionIdRef.value });
   // The live conversation, for this process's own /checkpoint rewind AND for the daemon's
   // questions about it, only the process holding the messages can count or

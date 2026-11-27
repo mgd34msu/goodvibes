@@ -26,6 +26,7 @@
  */
 import { RefusalError } from '@goodvibes/engine/errors';
 import { openRawServerSentEventStream } from '@goodvibes/engine/transport-http/sse-stream';
+import { programFetch } from '@goodvibes/engine/platform/platform/runtime/client';
 import { buildUrl } from '@goodvibes/engine/transport-http';
 import { createStreamTextAssembler } from '@goodvibes/engine/transport-core';
 import { logger, summarizeError } from '@goodvibes/engine/platform/platform/utils';
@@ -169,7 +170,8 @@ export async function watchHostedSession(
   };
   try {
     const close = await openRawServerSentEventStream(
-      fetchImpl,
+      // With this program's registration: the operator token alone is a script and hears none of the owner's sessions.
+      programFetch(fetchImpl),
       hostedSessionStreamUrl(options.baseUrl),
       {
         onEvent: ({ name: eventName, payload }) => {

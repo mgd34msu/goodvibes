@@ -1,53 +1,60 @@
-import { defineCommand } from '@goodvibes/engine/terminal-shell/command-actions';
 import {
-  daemonSetupSkips, setupCommandDescription, setupPlaceHooks, setupTopicOf,
+  daemonSetupSkips, setupPlaceHooks, setupTopicOf,
   type SetupCommandOptions, type SetupPlaceHooks, type SetupRun, type SetupTopicId, type WhoDecidesState,
 } from '@goodvibes/engine/terminal-shell/setup-command';
 import { firstRunDecisionModel, whoDecidesOnChecklist } from '@goodvibes/engine/terminal-shell/first-run';
 import { readSetupState } from '@goodvibes/engine/platform/platform/capabilities';
 import { systemSessionOf } from './session-capabilities.ts';
 import { requireSecretsManager } from './runtime-services.ts';
-import { previewAgentHostPairing, unpairAgentHost } from '../../runtime/agent-host-pairing.ts';
+import { unpairAgentHost } from '../../runtime/agent-host-pairing.ts';
 import { resolveConnectedHost } from '@goodvibes/engine/terminal-shell/agent-turn/connected-host-client';
 import { inspectCliExternalRuntime } from '../../cli/external-runtime.ts';
 import { formatSetupPairing } from '../../runtime/setup-pairing-presentation.ts';
-import { isDirectOwnerCommandContext, type CommandContext, type CommandRegistry } from '../command-registry.ts';
-import { AGENT_SETUP_TOPIC_ROWS } from '../agent-workspace-categories.ts';
+import { isDirectOwnerCommandContext, type CommandContext } from '../command-registry.ts';
+import { getFeatureSetting } from '@goodvibes/engine/terminal-shell';
 import { runDaemonCapability } from '@goodvibes/engine/terminal-shell/command-actions';
 import { capabilityBinding } from './capability-binding.ts';
 
-/** A topic opens the Agent's own forms for it: the setup rows of that topic, and nothing else. */
-function openRows(topic: SetupTopicId): SetupRun<CommandContext> {
+/**
+ * Topics that are settings, each opened on the settings screen where they are (the one settings screen both programs
+ * show): a setting by key, or a section by its namespace. The terminal app's forms for these write the same settings.
+ */
+const SETTINGS_TOPICS: Partial<Record<SetupTopicId, () => string>> = {
+  'connect-daemon': () => 'daemon.connectedHost.url',
+  'history': () => 'behavior.saveHistory',
+  'how-it-works': () => 'behavior',
+  'chat-apps': () => 'surfaces',
+  'automation': () => 'automation',
+  'telemetry': () => 'telemetry',
+  // The switch of the topic's first feature (the terminal app's form for the topic starts with it; `memory.*` is the
+  // process's memory budget, not this topic).
+  'memory': () => getFeatureSetting('session-compaction')?.enablement.key ?? 'behavior.compactionStrategy',
+  'provider-behaviour': () => getFeatureSetting('provider-optimizer')?.enablement.key ?? 'provider',
+  'advanced': () => getFeatureSetting('unified-runtime-task')?.enablement.key ?? 'runtime',
+};
+
+/** Open the settings screen on a topic's settings. */
+function openSettingsAt(where: () => string): SetupRun<CommandContext> {
   return async (_values, ctx) => {
-    const rows = (AGENT_SETUP_TOPIC_ROWS as Readonly<Partial<Record<SetupTopicId, readonly string[]>>>)[topic];
-    if (!rows || !ctx.openAgentSetupRows) return 'The Agent workspace is not available here.';
-    ctx.openAgentSetupRows(rows);
+    if (!ctx.openSettingsModal) return 'The settings screen cannot be shown here.';
+    ctx.openSettingsModal(where());
   };
 }
 
+/** "Choose a model": the model picker `/model` opens (its other tabs choose the models for side jobs). */
+const openModelPicker: SetupRun<CommandContext> = async (_values, ctx) => {
+  if (!ctx.openModelPicker) return 'The model picker cannot be shown here.';
+  ctx.openModelPicker();
+};
+
 /**
- * Pair this Agent with its connected host: `/setup pair` and the Devices and
- * network place's Pair something (`command` 'devices', `owner` the place's
- * press, which is the owner's own). Asked by the owner, it is one step: what
- * pairing allows is shown, then the confirmation is asked for right there
- * (`--apply` is accepted and changes nothing here; it is what a script passes
- * to the CLI). Anything else (a model, a nested command) gets only the summary.
+ * "Import settings": the row pressed is the request. The daemon's settings.copy-from-terminal-app (it holds both
+ * programs' settings) copies what the terminal app has set and the Agent holds differently; the answer says what.
  */
-export async function runAgentHostPair(ctx: CommandContext, request: { readonly apply: boolean; readonly name: string }, command: string, owner?: boolean): Promise<string | void> {
-  const name = request.name || 'GoodVibes Agent';
-  const typed = command === 'devices' ? 'Pair something in the Devices and network place' : 'type /setup pair';
-  if ((owner ?? isDirectOwnerCommandContext(ctx, command)) && ctx.beginSetupPairing) {
-    await ctx.beginSetupPairing({ apply: true, name });
-    return;
-  }
-  if (request.apply) {
-    return `Only you can pair this Agent: ${typed} in the Agent's own terminal. A model or another command cannot give lasting administrator access to the host.`;
-  }
-  const homeDirectory = ctx.workspace?.shellPaths?.homeDirectory;
-  if (!homeDirectory) return 'Pairing is not available without an Agent home.';
-  const preview = await previewAgentHostPairing({ configManager: ctx.platform.configManager, homeDirectory }, name);
-  return `${formatSetupPairing(preview.result)}\n  Nothing was created. To pair, ${typed} in the Agent's own terminal and confirm there.`;
-}
+const importTerminalSettings: SetupRun<CommandContext> = async (_values, ctx) => {
+  const answer = await runDaemonCapability('settings.copy-from-terminal-app', {}, ctx, capabilityBinding);
+  return answer.detail ?? answer.text ?? '';
+};
 
 /**
  * How this Agent reaches its daemon, as it stands now: the address it dials, the credential it presents (a key of its
@@ -88,58 +95,41 @@ function displayPath(path: string, home: string): string {
   return home && path.startsWith(`${home}/`) ? `~/${path.slice(home.length + 1)}` : path;
 }
 
-/** Forget this Agent's device credential for its connected host: `/setup unpair` and the Devices and network place. */
+/** Forget this Agent's device credential for its connected host: the Devices and network place (and the Setup list's row). */
 export async function runAgentHostUnpair(ctx: CommandContext, command: string, owner?: boolean): Promise<string> {
-  // Forgetting the credential cuts this Agent off from the host: the owner's own keystrokes or press only.
+  // Forgetting the credential cuts this Agent off from the host: the owner's own press only.
   if (!(owner ?? isDirectOwnerCommandContext(ctx, command))) {
-    return command === 'devices'
-      ? 'Only you can unpair this Agent, from the Devices and network place in its own terminal. Nothing was forgotten.'
-      : `Only you can unpair this Agent: type /${command} in the Agent's own terminal. Nothing was forgotten.`;
+    return 'Only you can unpair this Agent, from the Devices and network place in its own terminal. Nothing was forgotten.';
   }
   const homeDirectory = ctx.workspace?.shellPaths?.homeDirectory;
   if (!homeDirectory) return 'Unpairing is not available without an Agent home. Nothing was forgotten.';
   return formatSetupPairing(await unpairAgentHost({ configManager: ctx.platform.configManager, homeDirectory }));
 }
 
-/** Topics the Agent sets up in one of its workspace areas. */
-const AGENT_TOPIC_AREAS: Partial<Record<SetupTopicId, string>> = {
-  'chat-apps': 'onboarding-channels',
-  'how-it-works': 'assistant-behavior',
-  'memory': 'onboarding-context',
-  'devices-voice': 'onboarding-voice-media',
-  // The Schedules area holds the automation settings (agent-workspace-categories.ts `automation`).
-  'automation': 'automation',
+/**
+ * Topics that are the daemon's settings, each opened on the tab whose rows change them through the daemon: the
+ * addresses and switches of Devices and network (settings.set), its Cloudflare tab, and Permissions and safety's
+ * Sign-in list (local-auth.add and the rest).
+ */
+const DAEMON_TOPIC_TABS: Partial<Record<SetupTopicId, { readonly place: string; readonly list: string }>> = {
+  'local-only': { place: 'devices', list: 'addresses' },
+  'browser': { place: 'devices', list: 'addresses' },
+  'other-devices': { place: 'devices', list: 'addresses' },
+  'webhooks': { place: 'devices', list: 'addresses' },
+  'cloudflare': { place: 'devices', list: 'cloudflare' },
+  // The account that signs in from other devices: `a` on Addresses and ports, the four network topics' own control.
+  'who-signs-in': { place: 'devices', list: 'addresses' },
+  // A provider's key is stored on the Secrets tab (`n`), the secret store's one control.
+  'store-key': { place: 'safety', list: 'secrets' },
+  // What a paired phone may be asked to do, and speaking and listening: the daemon's settings for them.
+  'devices-voice': { place: 'devices', list: 'phone-settings' },
 };
 
-/** The channels set up, by their settings (`surfaces.<channel>.enabled`), to say what a form set up. */
-function enabledChannels(ctx: CommandContext): ReadonlyMap<string, string> {
-  let surfaces: unknown;
-  try { surfaces = (ctx.platform.configManager as { getCategory(category: string): unknown }).getCategory('surfaces'); } catch { surfaces = undefined; }
-  const out = new Map<string, string>();
-  if (surfaces === null || typeof surfaces !== 'object') return out;
-  for (const [name, value] of Object.entries(surfaces as Record<string, unknown>)) {
-    if (value !== null && typeof value === 'object') out.set(name, JSON.stringify(value));
-  }
-  return out;
-}
-
-/**
- * A workspace area opens on top of what is open (a place included); the run ends when it closes, and its line says
- * what was set up, so a place says nothing until then.
- */
-function openArea(categoryId: string): SetupRun<CommandContext> {
+/** Open a place on one tab, on top of what is open. */
+function openTab(place: string, list: string): SetupRun<CommandContext> {
   return async (_values, ctx) => {
-    if (!ctx.openAgentWorkspace) return 'The Agent workspace is not available here.';
-    const config = ctx.platform.configManager as { getConfigurationIncarnation?(): number };
-    const before = config.getConfigurationIncarnation?.();
-    const channelsBefore = enabledChannels(ctx);
-    await ctx.openAgentWorkspace(categoryId);
-    if (categoryId === 'onboarding-channels') {
-      const after = enabledChannels(ctx);
-      const changed = [...after.keys()].filter((name) => after.get(name) !== channelsBefore.get(name));
-      return changed.length > 0 ? `Set up: ${changed.join(', ')}.` : 'The form was left; no channel was set up.';
-    }
-    return config.getConfigurationIncarnation?.() !== before ? 'Your changes were saved.' : 'The form was left; nothing was set up.';
+    if (!ctx.openPlace) return 'The menu\'s places cannot be shown here.';
+    ctx.openPlace(place, { list });
   };
 }
 
@@ -156,9 +146,11 @@ async function whoDecides(ctx: CommandContext): Promise<WhoDecidesState> {
 }
 
 const SETUP_OPTIONS: SetupCommandOptions<CommandContext> = {
+  program: 'agent',
   runs: {
-    ...Object.fromEntries((Object.keys(AGENT_SETUP_TOPIC_ROWS) as SetupTopicId[]).map((topic) => [topic, openRows(topic)])),
-    ...Object.fromEntries(Object.entries(AGENT_TOPIC_AREAS).map(([topic, area]) => [topic, openArea(area!)])),
+    ...Object.fromEntries((Object.entries(SETTINGS_TOPICS) as [SetupTopicId, () => string][]).map(([topic, where]) => [topic, openSettingsAt(where)])),
+    'model': openModelPicker,
+    'import-settings': importTerminalSettings,
     // Signing in and providers of your own are the daemon's (capabilities/builtin/models.ts): Models and providers holds their controls.
     'sign-in': async (_values, ctx) => {
       if (!ctx.openPlace) return 'Models and providers is not available here.';
@@ -169,24 +161,19 @@ const SETUP_OPTIONS: SetupCommandOptions<CommandContext> = {
       if (!ctx.openPlace) return 'Permissions and safety is not available here.';
       ctx.openPlace('safety', { list: 'sandbox-setting' });
     },
-    'add-provider': async (values, ctx) => {
-      const answer = await runDaemonCapability('provider.add', { name: values.name!, address: values.url! }, ctx, capabilityBinding);
-      if (answer.detail ?? answer.text) ctx.print(answer.detail ?? answer.text ?? '');
-    },
+    // The daemon's own settings, changed through the daemon (its settings.set and local-auth capabilities) on the tab
+    // that holds them, as the terminal app's forms change them through it.
+    ...Object.fromEntries((Object.entries(DAEMON_TOPIC_TABS) as [SetupTopicId, { place: string; list: string }][])
+      .map(([topic, tab]) => [topic, openTab(tab.place, tab.list)])),
     'first-run': async (_values, ctx) => {
       if (!ctx.openFirstRun) return 'First run is not available here.';
       ctx.openFirstRun();
     },
-    'pair': async (values, ctx) => {
-      const text = await runAgentHostPair(ctx, { apply: values.apply === 'apply', name: values.name ?? '' }, 'setup');
-      if (text) ctx.print(text);
-    },
-    'unpair': async (_values, ctx) => { ctx.print(await runAgentHostUnpair(ctx, 'setup')); },
   },
-  // Network access, sign-in accounts and the runtime switches belong to the daemon the Agent connects to.
-  elsewhere: (id, label) => `${label} is set where the daemon runs: run goodvibes setup there and choose it (/setup ${id}).`,
-  notes: { 'local-only': 'on the daemon', 'browser': 'on the daemon', 'other-devices': 'on the daemon', 'webhooks': 'on the daemon',
-    'cloudflare': 'on the daemon', 'who-signs-in': 'on the daemon', 'telemetry': 'on the daemon', 'provider-behaviour': 'on the daemon', 'advanced': 'on the daemon' },
+  // Pairing with the host and forgetting it are Devices and network's capabilities; the Setup list shows them too.
+  pairsWithHost: true,
+  // Every topic of the Setup list has a run above; a provider of your own is Models and providers' own control.
+  elsewhere: (_id, label) => `"${label}" is in Models and providers: open the menu (Ctrl+G, then m), then Models and providers, and press n.`,
   // The same checklist as the terminal app: done marks, `N of M set up` first, and Skip for now.
   settings: (ctx) => ctx.platform.configManager,
   // Skipped for now: the daemon's one setup record, the same in both programs.
@@ -201,18 +188,11 @@ export function setupTopicsOf(ctx: CommandContext): (topic: string) => Promise<s
   return setupTopicOf(SETUP_OPTIONS, ctx);
 }
 
-/** `/setup` in the Agent: the same topics as the terminal app, each opening the Agent's own rows for it. */
-export const SETUP_COMMAND = defineCommand<CommandContext>(setupCommandDescription<CommandContext>(SETUP_OPTIONS));
-
-/** The System place's Setup list over the Agent's `/setup`, its settings and its "Who decides" record. */
+/** The System place's Setup list over the Agent's setup topics, its settings and its "Who decides" record. */
 export function setupPlace(ctx: CommandContext): SetupPlaceHooks {
   return setupPlaceHooks(SETUP_OPTIONS, ctx, {
     // The row is the person coming to choose: "Who decides" opens whatever is in force.
     openWhoDecides: () => ctx.openWhoDecides?.({ always: true }) ?? Promise.resolve(false),
     onSettingsChange: (listener) => ctx.platform.configManager.onDidChangeIncarnation(listener),
   });
-}
-
-export function registerOnboardingRuntimeCommands(registry: CommandRegistry): void {
-  registry.register(SETUP_COMMAND);
 }

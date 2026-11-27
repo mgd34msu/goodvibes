@@ -58,6 +58,12 @@
   overflow-wrap: anywhere;
 }
 
+/* The link for phones and the fingerprint: one unbroken run each, wrapped inside the panel at any width. */
+.secure-address__phone-link code {
+  overflow-wrap: anywhere;
+  word-break: break-all;
+}
+
 /* "Issue a new certificate now", its line and its outcome, as one group apart from "Switch https off". */
 .secure-address__reissue {
   margin-bottom: var(--space-4);

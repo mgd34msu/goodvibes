@@ -67,8 +67,7 @@
  *   Pick, so this narrowing renames an idiom rather than inventing one.
  */
 
-import { resolve } from 'node:path';
-import { projectIdentityOf } from '../workspace/project-identity.js';
+import { createProjectEnvironment } from './project-environment.js';
 import type { ConfigManager } from '../config/manager.js';
 import type { SecretsManager } from '../config/secrets.js';
 import { ServiceRegistry } from '../config/service-registry.js';
@@ -95,14 +94,11 @@ import { FileStateCache } from '../state/file-cache.js';
 import { FileWatcher } from '../state/file-watcher.js';
 import { ProjectIndex } from '../state/project-index.js';
 import { HookActivityTracker } from '../hooks/activity.js';
-import { HookDispatcher, createHookWorkbench, type HookWorkbench } from '../hooks/index.js';
+import { HookDispatcher, type HookWorkbench } from '../hooks/index.js';
 import { PluginManager } from '../plugins/manager.js';
 import { DAEMON_STATE_SURFACE_ROOT } from '../daemon/lifecycle-marker.js';
 import { SessionManager } from '../sessions/manager.js';
 import { CrossSessionTaskRegistry } from '../sessions/orchestration/index.js';
-import { McpRegistry } from '../mcp/registry.js';
-import { createMcpAutonomousElicitationHandler } from '../mcp/elicitation-autonomous.js';
-import { createMcpPersonElicitation } from '../mcp/elicitation.js';
 import { WebSearchProviderRegistry, WebSearchService } from '../web-search/index.js';
 import { createConfiguredFetchDeps } from '../tools/fetch/index.js';
 import { PermissionManager } from '../permissions/manager.js';
@@ -246,8 +242,7 @@ export interface ClientRuntimeServices {
   /** Settable holder an interactive consumer binds its Orchestrator into (turn cancel, queued-message edits). */
   readonly sessionLiveTurnControls: SessionLiveTurnControlsHolder;
 
-  // Tools that execute in this process.
-  readonly mcpRegistry: McpRegistry;
+  // Tools that execute in this process (its tool servers are its project's, from its host: project-environment.ts).
   readonly artifactStore: ArtifactStore;
   readonly webSearchProviders: WebSearchProviderRegistry;
   readonly webSearchService: WebSearchService;
@@ -472,6 +467,19 @@ export interface ClientRuntimeServicesOptions {
    * composition's own.
    */
   readonly workerSurface?: (() => import('../agents/orchestrator.js').AgentWorkerSurface | undefined) | undefined;
+  /**
+   * The project's environment, lent by a host that built it with the ONE builder (project-environment.ts): a daemon's
+   * hosted floor takes the project's from the daemon (its hook dispatcher with the project's hooks file, its long-output
+   * folder), so its permission decisions, file watch and workers fire the project's hooks, not a second copy. Absent:
+   * this composition builds its own project's hooks and long-output folder with the same builder. Either way it
+   * builds no tool servers of its own: a turn's servers are its project's, from its host.
+   */
+  readonly projectEnvironment?: {
+    readonly hookDispatcher: HookDispatcher;
+    readonly hookActivityTracker: HookActivityTracker;
+    readonly hookWorkbench: HookWorkbench;
+    readonly overflowHandler: OverflowHandler;
+  } | undefined;
 }
 
 /**
@@ -571,8 +579,13 @@ function composeClientRuntimeServices(
     workingDirectory,
   });
 
-  const hookActivityTracker = new HookActivityTracker();
-  const hookDispatcher = new HookDispatcher(
+  // The project's environment: lent by the host that built it (a daemon's hosted floor takes the project's), else built
+  // here with the ONE builder (project-environment.ts): the hooks file of this composition's own project (at the
+  // project's root, also for a program opened in a subfolder of it) and its long-output folder. No tool servers: a turn's
+  // are its project's, from its host.
+  const lent = options.projectEnvironment;
+  const hookActivityTracker = lent?.hookActivityTracker ?? new HookActivityTracker();
+  const hookDispatcher = lent?.hookDispatcher ?? new HookDispatcher(
     {
       // Withheld only when the caller says so by name, see `hookAgentManager`.
       ...((options.hookAgentManager ?? 'attach') === 'attach' ? { agentManager: agents.agentManager } : {}),
@@ -584,13 +597,17 @@ function composeClientRuntimeServices(
   // A settings manager lent by a host (a daemon's hosted floor) keeps the host's own dispatcher in its one hook slot:
   // a floor taking it would take the host's settings-change hooks, and leave none when it closes.
   if (options.configHookSlot !== 'host') disposalScope.registry.add('config hook attachment', configManager.attachHookDispatcher(hookDispatcher));
-  // The hooks file of this composition's own project (a hosted floor's project, not the lent settings' folder): the
-  // one at the project's root, also for a program opened in a subfolder of it (workspace/project-identity.ts).
-  const hookWorkbench = createHookWorkbench({ hookDispatcher, configManager,
-    hooksFilePathResolver: () => resolve(projectIdentityOf(workingDirectory), String(configManager.get('tools.hooksFile'))) });
+  const ownEnvironment = lent ? undefined : createProjectEnvironment({
+    folder: workingDirectory, homeDirectory, trust: null, hookDispatcher,
+    hooksFile: () => String(configManager.get('tools.hooksFile')),
+    overflow: { featureFlags, spillBackend: configManager.get('tools.overflowSpillBackend') },
+  });
+  const hookWorkbench = lent?.hookWorkbench ?? ownEnvironment!.hooks.workbench;
+  if (ownEnvironment) disposalScope.registry.add('project environment', () => ownEnvironment.release());
 
   const workflow = createWorkflowServices({ workingDirectory: shellPaths.workingDirectory });
-  disposalScope.registry.add('hook action dispatch', hookDispatcher.setHookActions(workflow.hookActions, featureFlags));
+  // A lent dispatcher runs its host's hook actions already.
+  if (!lent) disposalScope.registry.add('hook action dispatch', hookDispatcher.setHookActions(workflow.hookActions, featureFlags));
   // A scheduled command still running when this runtime closes is stopped with it, not left to its own time limit.
   disposalScope.registry.add('workflow schedules', () => workflow.scheduleManager.destroy());
 
@@ -637,15 +654,8 @@ function composeClientRuntimeServices(
     serviceRegistry, featureFlags, configManager, localhostFetchApproval: approvalHandlers.localhostFetchApproval,
   }));
 
+  // The sandboxes this composition's own commands are confined to. Its tool servers are its project's, from its host.
   const sandboxSessionRegistry = new SandboxSessionRegistry(workingDirectory);
-  const mcpRegistry = new McpRegistry({ hookDispatcher, sandboxSessions: sandboxSessionRegistry });
-  mcpRegistry.setRuntimeBus(options.runtimeBus);
-  mcpRegistry.setSandboxRuntime(configManager, sandboxSessionRegistry);
-  // MCP input requests use the canonical autonomous owner and current operation facts.
-
-  mcpRegistry.setPermissionHost(externalPermissionHost);
-  // The person at this surface is asked a server question the call's own facts cannot answer.
-  mcpRegistry.setElicitationHandler(createMcpAutonomousElicitationHandler(externalPermissionHost, createMcpPersonElicitation(options.requestApproval, configManager)));
 
   const pluginManager = new PluginManager({
     pathOptions: { cwd: shellPaths.workingDirectory, homeDir: shellPaths.homeDirectory },
@@ -670,18 +680,15 @@ function composeClientRuntimeServices(
   disposalScope.registry.add('background processes', () => processManager.close());
   const modeManager = new ModeManager({ featureFlags });
   const fileUndoManager = new FileUndoManager({ onFileChanged: (path) => fileCache.invalidate(path) });
-  const overflowHandler = new OverflowHandler({
-    baseDir: workingDirectory,
-    featureFlags,
-    spillBackend: configManager.get('tools.overflowSpillBackend'),
-  });
+  const overflowHandler = lent?.overflowHandler ?? ownEnvironment!.overflowHandler;
   const fileCache = new FileStateCache();
-  const projectIndex = new ProjectIndex(workingDirectory);
+  // The project's one index (kept at the project root), relative paths the working folder's.
+  const projectIndex = new ProjectIndex(workingDirectory, shellPaths.recordsRoot);
   // Its debounced flush is written and its timer stopped when the composition closes (after the file watcher stops feeding it).
   disposalScope.registry.add('project index', () => projectIndex.dispose());
   // Project files changed outside the write and edit tools: the project index
   // forgets deleted ones and Change:file:external hooks fire.
-  const fileWatcher = new FileWatcher(projectIndex, { projectRoot: workingDirectory }, hookDispatcher);
+  const fileWatcher = new FileWatcher(projectIndex, { projectRoot: shellPaths.recordsRoot }, hookDispatcher);
   void fileWatcher.start();
   disposalScope.registry.add('file watcher', () => fileWatcher.stop());
   const contextAccountingHolder = new ContextAccountingHolder();
@@ -809,7 +816,6 @@ function composeClientRuntimeServices(
     overflowHandler,
     contextAccountingHolder,
     sessionLiveTurnControls,
-    mcpRegistry,
     artifactStore,
     webSearchProviders,
     webSearchService,

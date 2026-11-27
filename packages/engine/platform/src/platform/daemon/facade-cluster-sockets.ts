@@ -63,6 +63,7 @@
  * situation actually calls for.
  */
 import { providerSurface, type ClusterSurfaceKey } from '../cluster/index.js';
+import { outsideEveryCall } from '../utils/outside-every-call.js';
 
 /** Base delay before a node that could not identify a surface tries again. */
 const DEFAULT_RETRY_MS = 60_000;
@@ -279,7 +280,8 @@ export class SocketSurfaceSupervisor {
 }
 
 function defaultTimer(fn: () => void, ms: number): () => void {
-  const handle = setTimeout(fn, ms);
+  // A socket surface's retry (its connection's later messages too) is no caller's (utils/outside-every-call.ts).
+  const handle = outsideEveryCall(() => setTimeout(fn, ms));
   // Never hold the process open just to retry an identity lookup.
   (handle as unknown as { unref?: () => void }).unref?.();
   return () => { clearTimeout(handle); };

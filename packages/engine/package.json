@@ -623,6 +623,11 @@
       "types": "./platform/dist/platform/channels/channel-state.d.ts",
       "import": "./platform/dist/platform/channels/channel-state.js"
     },
+    "./platform/platform/channels/own-messages-proof": {
+      "bun": "./platform/src/platform/channels/own-messages-proof.ts",
+      "types": "./platform/dist/platform/channels/own-messages-proof.d.ts",
+      "import": "./platform/dist/platform/channels/own-messages-proof.js"
+    },
     "./platform/platform/channels/telegram-cursor": {
       "bun": "./platform/src/platform/channels/telegram/cursor-migration-data.ts",
       "types": "./platform/dist/platform/channels/telegram/cursor-migration-data.d.ts",
@@ -717,6 +722,11 @@
       "bun": "./platform/src/platform/daemon/auto-updater.ts",
       "types": "./platform/dist/platform/daemon/auto-updater.d.ts",
       "import": "./platform/dist/platform/daemon/auto-updater.js"
+    },
+    "./platform/platform/daemon/program-hashes": {
+      "bun": "./platform/src/platform/daemon/program-hashes.ts",
+      "types": "./platform/dist/platform/daemon/program-hashes.d.ts",
+      "import": "./platform/dist/platform/daemon/program-hashes.js"
     },
     "./platform/platform/daemon/launchd-handover": {
       "bun": "./platform/src/platform/daemon/launchd-handover.ts",
@@ -1312,6 +1322,16 @@
       "bun": "./platform/src/platform/utils/process-lock.ts",
       "types": "./platform/dist/platform/utils/process-lock.d.ts",
       "import": "./platform/dist/platform/utils/process-lock.js"
+    },
+    "./platform/platform/utils/process-privacy": {
+      "bun": "./platform/src/platform/utils/process-privacy.ts",
+      "types": "./platform/dist/platform/utils/process-privacy.d.ts",
+      "import": "./platform/dist/platform/utils/process-privacy.js"
+    },
+    "./platform/platform/utils/private-from-start": {
+      "bun": "./platform/src/platform/utils/private-from-start.ts",
+      "types": "./platform/dist/platform/utils/private-from-start.d.ts",
+      "import": "./platform/dist/platform/utils/private-from-start.js"
     },
     "./platform/platform/runtime/ecosystem/catalog": {
       "bun": "./platform/src/platform/runtime/ecosystem/catalog.ts",
@@ -1918,6 +1938,11 @@
       "types": "./terminal-shell/dist/process-output-log.d.ts",
       "import": "./terminal-shell/dist/process-output-log.js"
     },
+    "./terminal-shell/program-config-routing": {
+      "bun": "./terminal-shell/src/program-config-routing.ts",
+      "types": "./terminal-shell/dist/program-config-routing.d.ts",
+      "import": "./terminal-shell/dist/program-config-routing.js"
+    },
     "./terminal-shell/format": {
       "bun": "./terminal-shell/src/format.ts",
       "types": "./terminal-shell/dist/format.d.ts",
@@ -2257,11 +2282,6 @@
       "bun": "./terminal-shell/src/work-tree-wiring.ts",
       "types": "./terminal-shell/dist/work-tree-wiring.d.ts",
       "import": "./terminal-shell/dist/work-tree-wiring.js"
-    },
-    "./terminal-shell/contract-question-composer": {
-      "bun": "./terminal-shell/src/contract-question-composer.ts",
-      "types": "./terminal-shell/dist/contract-question-composer.d.ts",
-      "import": "./terminal-shell/dist/contract-question-composer.js"
     },
     "./terminal-shell/context-inspector": {
       "bun": "./terminal-shell/src/renderer/context-inspector.ts",
@@ -3757,6 +3777,11 @@
       "bun": "./terminal-shell/src/bootstrap-lifecycle.ts",
       "types": "./terminal-shell/dist/bootstrap-lifecycle.d.ts",
       "import": "./terminal-shell/dist/bootstrap-lifecycle.js"
+    },
+    "./terminal-shell/task-interventions": {
+      "bun": "./terminal-shell/src/task-interventions.ts",
+      "types": "./terminal-shell/dist/task-interventions.d.ts",
+      "import": "./terminal-shell/dist/task-interventions.js"
     },
     "./terminal-shell/hooks-command": {
       "bun": "./terminal-shell/src/hooks-command.ts",

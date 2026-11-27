@@ -33,6 +33,7 @@ import type { RegisterSharedSessionInput, SharedSessionRecord } from '../../cont
 import { readClientCompatibilityFloor } from '../../control-plane/client-compatibility.js';
 import type { DaemonReceipt } from '../../daemon/receipts.js';
 import { classifySpineFailure, type SpineResult, type SpineTransport } from './client.js';
+import { programCallHeadersFor } from '../client/call-context.js';
 
 const DEFAULT_REGISTER_TIMEOUT_MS = 1_500;
 const DEFAULT_CLOSE_TIMEOUT_MS = 500;
@@ -137,6 +138,9 @@ export async function postSessionSpineRegister(
       headers: {
         authorization: `Bearer ${connection.token}`,
         'content-type': 'application/json',
+        // The program's own registration (issued by this daemon, asked for first): the conversation it registers is its
+        // own, not every operator-token holder's.
+        ...(await programCallHeadersFor(connection.baseUrl, connection.token)),
       },
       body: JSON.stringify(input),
       signal: controller.signal,
@@ -321,8 +325,10 @@ async function readStatusBody(
   try {
     const url = new URL(`${connection.baseUrl}/status`);
     for (const [key, value] of Object.entries(query)) url.searchParams.set(key, value);
+    // With the program's registration: an owner alert kept as a receipt goes to the owner's own programs only, and the
+    // operator token alone is a script (daemon-api control-routes.ts `ownerReader`).
     const response = await fetch(url, {
-      ...(connection.token ? { headers: { authorization: `Bearer ${connection.token}` } } : {}),
+      headers: { ...(await programCallHeadersFor(connection.baseUrl, connection.token)), ...(connection.token ? { authorization: `Bearer ${connection.token}` } : {}) },
       signal: controller.signal,
     });
     if (!response.ok) return null;

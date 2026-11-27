@@ -15,8 +15,9 @@
  * sign-in code (setExplicitAuthToken has the daemon check it and bind it to an
  * HttpOnly cookie, or, over the relay, holds it in memory; a refused code
  * changes nothing), the relay code for a device that cannot reach the computer
- * directly, the username and password (works only while the first-run password
- * is still kept), and where to find a code.
+ * directly, the username and password (the first sign-in with the generated
+ * first-run password sets the owner's own, asked for here when the daemon says
+ * so), and where to find a code.
  *
  * `pairingError` is set when a pairing link's code was refused (an expired or
  * malformed QR), so a failed scan is never a silent bounce back to this screen.
@@ -31,7 +32,7 @@
 import { Camera, KeyRound, Radio, ShieldCheck } from 'lucide-react';
 import { useEffect, useState, useSyncExternalStore, type SyntheticEvent } from 'react';
 import { useMutation, useQueryClient } from '@tanstack/react-query';
-import { GOODVIBES_BASE_URL, login, setExplicitAuthToken } from '../../lib/goodvibes';
+import { GOODVIBES_BASE_URL, isFirstSignInPasswordNeeded, login, setExplicitAuthToken } from '../../lib/goodvibes';
 import { formatError, isAuthExpiredError, isDaemonUnreachableError } from '../../lib/errors';
 import { decodeRelayPairingCode, getStoredRelayPairing, storeRelayPairing, type RelayPairingPayload } from '../../lib/relay-pairing';
 import { RelayPairingOffer } from './RelayPairingOffer';
@@ -109,6 +110,8 @@ export function SignedOutGate({ pairingError, relayPairingError }: SignedOutGate
   const [showPassword, setShowPassword] = useState(false);
   const [username, setUsername] = useState('');
   const [password, setPassword] = useState('');
+  // The owner's own password, asked for when the daemon says this is the first sign-in with the generated one.
+  const [newPassword, setNewPassword] = useState('');
   const [showRelayPaste, setShowRelayPasteState] = useState(() => relayPasteOpenNow);
   const setShowRelayPaste = (next: boolean | ((current: boolean) => boolean)) => {
     setShowRelayPasteState((current) => { relayPasteOpenNow = typeof next === 'function' ? next(current) : next; return relayPasteOpenNow; });
@@ -139,10 +142,11 @@ export function SignedOutGate({ pairingError, relayPairingError }: SignedOutGate
   });
 
   const loginMutation = useMutation({
-    mutationFn: (credentials: { username: string; password: string }) =>
-      validateSignIn(() => login(credentials.username, credentials.password)),
+    mutationFn: (credentials: { username: string; password: string; newPassword?: string }) =>
+      validateSignIn(() => login(credentials.username, credentials.password, credentials.newPassword)),
     onSuccess: async () => {
       setPassword('');
+      setNewPassword('');
       typedToken = '';
       await queryClient.cancelQueries();
       await queryClient.invalidateQueries();
@@ -187,9 +191,13 @@ export function SignedOutGate({ pairingError, relayPairingError }: SignedOutGate
     }
   }
 
+  // The first sign-in with the generated first-run password: it signs in only by setting the owner's own password.
+  const settingOwnPassword = isFirstSignInPasswordNeeded(loginMutation.error) || newPassword !== '';
+
   function submitLogin(event: SyntheticEvent<HTMLFormElement>) {
     event.preventDefault();
-    if (username && password) loginMutation.mutate({ username, password });
+    if (!username || !password) return;
+    loginMutation.mutate(newPassword ? { username, password, newPassword } : { username, password });
   }
 
   function storeScannedRelay(code: string) {
@@ -405,8 +413,9 @@ export function SignedOutGate({ pairingError, relayPairingError }: SignedOutGate
               {showPassword && (
                 <form className="signed-out-form signed-out-password" onSubmit={submitLogin}>
                   <p className="signed-out-note">
-                    Works only while GoodVibes still keeps its first-run password; once that has
-                    been used up or removed, sign in with a code.
+                    Your username and the password you chose. The first time, use the first-run password
+                    GoodVibes made (in <code>~/.goodvibes/tui/auth-bootstrap.txt</code>): that sign-in sets a
+                    password of your own, and the first-run one stops working.
                   </p>
                   <Field label="Username">
                     <Input value={username} onChange={(event) => setUsername(event.target.value)} autoComplete="username" />
@@ -419,11 +428,25 @@ export function SignedOutGate({ pairingError, relayPairingError }: SignedOutGate
                       autoComplete="current-password"
                     />
                   </Field>
-                  <Button type="submit" disabled={loginMutation.isPending || !username || !password}>
-                    {loginMutation.isPending ? 'Signing in…' : 'Sign in with password'}
+                  {settingOwnPassword && (
+                    <Field label="A password of your own (at least 8 characters)">
+                      <Input
+                        value={newPassword}
+                        onChange={(event) => setNewPassword(event.target.value)}
+                        type="password"
+                        autoComplete="new-password"
+                      />
+                    </Field>
+                  )}
+                  <Button type="submit" disabled={loginMutation.isPending || !username || !password || (settingOwnPassword && newPassword.length < 8)}>
+                    {loginMutation.isPending ? 'Signing in…' : settingOwnPassword ? 'Set my password and sign in' : 'Sign in with password'}
                   </Button>
                   {loginMutation.error && (
-                    <div className="banner warning" role="alert">{formatError(loginMutation.error)}</div>
+                    <div className="banner warning" role="alert">
+                      {isFirstSignInPasswordNeeded(loginMutation.error)
+                        ? 'This is the first sign-in with the first-run password: choose a password of your own above to finish it.'
+                        : formatError(loginMutation.error)}
+                    </div>
                   )}
                 </form>
               )}

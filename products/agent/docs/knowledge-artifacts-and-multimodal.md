@@ -134,8 +134,6 @@ The drafts and artifacts are the Drafts and Artifacts tabs of Memory and knowled
 
 `autonomy` adds ongoing-work route selection plus visible queue and item inspection. Lower-level `agent_harness` adds:
 
-- workspace-action lookup/execution
-- compact `modelRoute` hints in `workspace_actions`
 - compatibility autonomy modes
 - live research run, connected-host task, approval, automation run, and schedule records/log tails
 - lower-level research/device/media mode inspection

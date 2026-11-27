@@ -3,6 +3,7 @@ import { resolve, relative, sep } from 'node:path';
 import type { ArtifactDescriptor, ArtifactStore } from '@goodvibes/engine/platform/platform/artifacts';
 import { assertCurrentToolEffect, ToolInputProjectionError, type ToolExecuteOptions } from '@goodvibes/engine/platform/platform/tools';
 import { resolveAndValidatePath } from '@goodvibes/engine/platform/platform/utils';
+import { isHeldPath } from '@goodvibes/engine/platform/platform/capabilities';
 
 export function agentArtifactEffectGuard(args: Record<string, unknown>, options: ToolExecuteOptions | undefined, effect: 'write' | 'send' = 'write'): () => void {
   return () => {
@@ -13,6 +14,9 @@ export function agentArtifactEffectGuard(args: Record<string, unknown>, options:
 
 /** Keep the physical workspace and destination current across asynchronous reads. */
 export function captureAgentExportPath(projectRoot: string, destination: string): { readonly path: string; readonly assertCurrent: (target?: string) => void } {
+  // A path this call holds (the daemon's store harness placed it by capabilities/path-inputs.ts `callerPathOf`): checked
+  // already, and held from the check to the act, so it is taken as it is (held-paths.ts).
+  if (isHeldPath(destination)) return { path: destination, assertCurrent: () => undefined };
   const root = realpathSync(projectRoot);
   const identity = statSync(root);
   const path = resolveAndValidatePath(destination, root);

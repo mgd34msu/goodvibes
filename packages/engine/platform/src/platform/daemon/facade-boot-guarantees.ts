@@ -65,8 +65,28 @@ const daemonLogHolders = new Set<object>();
  * a no-op.
  */
 export function releaseDaemonActivityLog(holder: object): void {
+  if (hostReleased.has(holder)) return;
   if (!daemonLogHolders.delete(holder)) return;
   if (daemonLogHolders.size === 0) logger.dispose();
+}
+
+/** Holders whose log the daemon's host ends at its own close, after everything it closes (see below). */
+const hostReleased = new WeakSet<object>();
+
+/**
+ * A host that closes the daemon's runtime graph after the daemon itself (the product's daemon host) keeps the log open
+ * until its own close is over, so what the runtime graph's close waits on reaches the log too: the daemon's stop leaves
+ * the log open for this holder, and the returned function ends it, once, at the end of the host's close.
+ */
+export function releaseDaemonActivityLogAtHostClose(holder: object): () => void {
+  hostReleased.add(holder);
+  let released = false;
+  return () => {
+    if (released) return;
+    released = true;
+    hostReleased.delete(holder);
+    releaseDaemonActivityLog(holder);
+  };
 }
 
 /**

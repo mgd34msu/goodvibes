@@ -42,8 +42,6 @@ export interface LeaderKeyTable {
 /** Short words for the strip, where an action's description is a sentence. */
 const SHORT_WORDS: Readonly<Record<string, string>> = {
   'open-menu': 'menu',
-  'workspace-picker': 'workspace',
-  'workspace-close-all': 'close workspace',
   'clear-prompt': 'clear the prompt',
   'kill-line': 'cut to end of line',
   'word-back': 'word back',
@@ -65,7 +63,6 @@ const SHORT_WORDS: Readonly<Record<string, string>> = {
   'focus-work-tree': 'work tree',
   'next-session': 'next session',
   'previous-session': 'previous session',
-  'contract-question-ordinary': 'not an answer',
   'model-picker-group': 'group models',
 };
 

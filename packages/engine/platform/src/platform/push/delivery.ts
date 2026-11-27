@@ -134,6 +134,8 @@ export interface DeliveryDeps {
   readonly requestTimeoutMs?: number | undefined;
   /** Told the daemon's own reason whenever a message could not be sent at all (key custody, the message itself). */
   readonly onNotSent?: ((reason: string) => void) | undefined;
+  /** A fan-out's devices: only those of people who may be told what it is about (push/service.ts `PushAudience`). */
+  readonly recipients?: ((subscription: StoredPushSubscription) => boolean) | undefined;
 }
 
 /** The effective bound: the configured value when sane, else the module default. */
@@ -307,7 +309,8 @@ export async function deliverToAll(
   deps: DeliveryDeps,
   lifetime: DeliveryLifetime = {},
 ): Promise<PushDeliveryReceipt[]> {
-  const subscriptions = await deps.store.all();
+  const recipients = deps.recipients;
+  const subscriptions = recipients ? (await deps.store.all()).filter((subscription) => recipients(subscription)) : await deps.store.all();
   const results = new Array<SendResult>(subscriptions.length);
   // One device registered twice is still one device: send it the message once.
   const firstByEndpoint = new Map<string, number>();

@@ -370,7 +370,7 @@ export class CalendarTokenStore {
     if (unreadable) throw new TokenRefreshError(provider, unreadable);
     if (!tokens) throw new TokenRefreshError(provider, `No ${provider} account is connected.`);
     if (provider === 'google' && tokens.refreshToken && refusedGoogleGrants.has(tokens.refreshToken)) {
-      throw new TokenRefreshError(provider, 'Google refused this connection earlier. Connect Google again with /calendar connect google.');
+      throw new TokenRefreshError(provider, 'Google refused this connection earlier. Connect Google again with "connect" on the Google tab of Mail, calendar and channels.');
     }
     const due = typeof tokens.expiresAt === 'number' && this.clock() >= tokens.expiresAt - this.leewayMs;
     if (!due) return tokens.accessToken;
@@ -574,10 +574,10 @@ export async function carryGoogleCalendarConnectionForward(
     const heldLabel = held?.label ?? (options.daemonAccountHint?.trim() || '');
     const sameAccount = heldLabel.length > 0 && heldLabel.toLowerCase() === account.label.toLowerCase();
     noteCarriedForwardChange(sameAccount
-      ? `The Google account ${account.label} was connected twice: once with /calendar connect in the Agent and once for the daemon's calendar and mail. The daemon's connection is now the one Google connection for calendar, mail and the Agent; the other is kept unused until Google is connected again.`
-      : `Two Google accounts were connected: ${account.label} with /calendar connect in the Agent, and ${heldLabel || 'the account the daemon\'s calendar and mail use'} for the daemon. `
+      ? `The Google account ${account.label} was connected twice: once by the Agent's calendar of an earlier version and once for the daemon's calendar and mail. The daemon's connection is now the one Google connection for calendar, mail and the Agent; the other is kept unused until Google is connected again.`
+      : `Two Google accounts were connected: ${account.label} by the Agent's calendar of an earlier version, and ${heldLabel || 'the account the daemon\'s calendar and mail use'} for the daemon. `
         + `${heldLabel || 'The daemon\'s account'} stays the one Google connection for calendar, mail and the Agent; ${account.label} is kept unused until Google is connected again. `
-        + `To use ${account.label} everywhere instead, run /calendar connect google in the Agent and sign in as it.`);
+        + `To use ${account.label} everywhere instead, disconnect Google on the Google tab of Mail, calendar and channels, then "connect" there and sign in as it.`);
     return 'set-aside';
   }
   if (current === null) {

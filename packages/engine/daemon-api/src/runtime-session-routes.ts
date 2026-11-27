@@ -68,6 +68,8 @@ type RuntimeTaskBody = {
   readonly provider?: string | undefined;
   readonly tools?: string[] | undefined;
   readonly routing?: SharedSessionRoutingIntent | undefined;
+  /** The project a standalone agent works in: a folder's full path (the dispatch checked the caller may name it). */
+  readonly workingDirectory?: string | undefined;
 };
 
 /**
@@ -332,7 +334,8 @@ export function createDaemonRuntimeSessionRouteHandlers(
     detachSharedSession: (sessionId, request) => withAdmin(context, request, () => handleSharedSessionDetach(context, sessionId, request)),
     deleteSharedSession: (sessionId, request) => withAdmin(context, request, () => handleDeleteSharedSession(context, sessionId)),
     getSharedSessionMessages: async (sessionId, url, request) => (await refuseUnreadableSession(context, sessionId, request)) ?? handleGetSharedSessionMessages(context, sessionId, url),
-    getSharedSessionInputs: async (sessionId, url) => handleGetSharedSessionInputs(context, sessionId, url),
+    // What was typed or sent into the session is its transcript: read only as its messages are.
+    getSharedSessionInputs: async (sessionId, url, request) => (await refuseUnreadableSession(context, sessionId, request)) ?? handleGetSharedSessionInputs(context, sessionId, url),
     postSharedSessionMessage: (sessionId, request) => withAdmin(context, request, () => handlePostSharedSessionMessage(context, sessionId, request)),
     postSharedSessionSteer: (sessionId, request) => withAdmin(context, request, () => handlePostSharedSessionSteer(context, sessionId, request)),
     postSharedSessionFollowUp: (sessionId, request) => withAdmin(context, request, () => handlePostSharedSessionFollowUp(context, sessionId, request)),
@@ -359,8 +362,13 @@ const runtimeSessionBodySchemas = createRouteBodySchemaRegistry({
     const tools = readStringArrayField(body, 'tools', MAX_SESSION_TOOL_NAMES);
     // An explicit empty tool list selects no tool; it is never "the default tool set".
     if (tools?.length === 0) return refuseEmptySelection('tools', "give the agent its default tools");
+    const workingDirectory = readOptionalStringField(body, 'workingDirectory');
+    if (workingDirectory !== undefined && !(workingDirectory.startsWith('/') || /^[A-Za-z]:[\\/]/.test(workingDirectory))) {
+      return jsonErrorResponse({ error: 'workingDirectory is a folder\'s full path; nothing was started.', code: 'INVALID_ARGUMENT', field: 'workingDirectory' }, { status: 400 });
+    }
     return {
       task,
+      ...(workingDirectory ? { workingDirectory } : {}),
       ...(model ? { model } : {}),
       ...(provider ? { provider } : {}),
       ...(tools ? { tools } : {}),
@@ -486,6 +494,7 @@ async function handlePostTask(context: DaemonRuntimeRouteContext, req: Request):
   const spawnResult = context.trySpawnAgent({
     mode: 'spawn',
     task: input.task,
+    ...(input.workingDirectory ? { workingDirectory: input.workingDirectory } : {}),
     ...spawnRoutingFields(input),
   }, 'DaemonServer');
   if (spawnResult instanceof Response) return spawnResult;

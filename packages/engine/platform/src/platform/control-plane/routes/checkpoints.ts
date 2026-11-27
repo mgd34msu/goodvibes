@@ -28,12 +28,14 @@ import type { GatewayMethodCatalog } from '../method-catalog.js';
 import type { GatewayMethodHandler } from '../method-catalog-shared.js';
 import type { WorkspaceCheckpointManager } from '../../workspace/checkpoint/manager.js';
 import type { CheckpointKind, RetentionClass } from '../../workspace/checkpoint/types.js';
+import { othersUndoneLines, type OtherSessionChanges } from '../../workspace/checkpoint/taken-back.js';
 import { applyHunkRevert, HunkRevertConflictError, previewHunkRevert } from '../../workspace/hunk-revert.js';
 import type { WorkspaceEvent } from '../../../events/workspace.js';
 import { GatewayVerbError } from './gateway-verb-error.js';
 import { readInvocationParams, requireStringValue } from './invocation-params.js';
 import { ReviewTokenStore } from '../review-tokens.js';
 import { noteListChanged, type ListChange } from '../../runtime/list-changes.js';
+import { projectIdentityOf } from '../../workspace/project-identity.js';
 import { contentDigest, TargetChangedError, targetRef, type TargetRef } from '../../utils/target-ref.js';
 
 /** Sink for the checkpoints.revertHunk receipt event (adapted onto the RuntimeEventBus by the registrar). */
@@ -87,9 +89,34 @@ async function callOrHonestNotFound<T>(fn: () => Promise<T>): Promise<T> {
   }
 }
 
-/** What a restore preview showed: the checkpoint, in the workspace root it restores. */
-function checkpointTarget(id: string, root: string): TargetRef<'checkpoint'> {
-  return targetRef('checkpoint', id, { root }, { root }, root);
+/**
+ * What a restore preview showed: the checkpoint, in the workspace root it restores, and the other sessions' changes it
+ * takes back. A token confirms exactly those: another session's change made since the preview is a changed target.
+ */
+function checkpointTarget(id: string, root: string, others: readonly OtherSessionChanges[], laterByOthers: readonly string[]): TargetRef<'checkpoint'> {
+  const takesBack = others.map((other) => ({ sessionId: other.sessionId, files: [...other.files] }));
+  return targetRef('checkpoint', id, { root, takesBack, laterByOthers: [...laterByOthers] },
+    { root, takesBack: othersSentence(others) || 'no other session\'s change', laterByOthers: laterByOthers.join(', ') || 'none' }, root);
+}
+
+/** The checkpoints other sessions made after checkpoint `id`: a change made since a preview adds one, even to the same file. */
+async function laterCheckpointsByOthers(holder: CheckpointsGatewayManager, id: string, caller: string | undefined): Promise<string[]> {
+  const all = await holder.list({ limit: CHECKPOINTS_LIST_MAX_LIMIT });
+  const target = all.find((checkpoint) => checkpoint.id === id);
+  if (!target) return [];
+  return all.filter((checkpoint) => checkpoint.createdAt > target.createdAt && checkpoint.sessionId !== undefined && checkpoint.sessionId !== caller)
+    .map((checkpoint) => checkpoint.id).sort();
+}
+
+/** The other sessions' changes, in one line a person reads ("session s-1 (its agent a-2): b.txt; session s-3: c.txt"). */
+function othersSentence(others: readonly OtherSessionChanges[]): string {
+  return othersUndoneLines(others).map((line) => line.trim()).join('; ');
+}
+
+/** The other sessions' changes a restore of `id` by `caller` would take back (none when the host keeps no record of whose). */
+async function othersTakenBack(holder: CheckpointsGatewayManager, id: string, caller: string | undefined, paths?: readonly string[]): Promise<OtherSessionChanges[]> {
+  if (!holder.othersUndoneBy) return [];
+  return callOrHonestNotFound(() => holder.othersUndoneBy!(id, { sessionId: caller, paths }));
 }
 
 /**
@@ -199,7 +226,7 @@ function clampLimit(raw: unknown): number {
 
 /** Structural deps, the read/write surface `checkpoints.*` + `sessions.changes.get` needs. */
 export type CheckpointsGatewayManager = Pick<WorkspaceCheckpointManager, 'list' | 'create' | 'diff' | 'restore' | 'sessionChanges' | 'workspaceRoot' | 'resolveRoot'>
-  & Partial<Pick<WorkspaceCheckpointManager, 'retentionFailure' | 'historyTrimmed'>>
+  & Partial<Pick<WorkspaceCheckpointManager, 'retentionFailure' | 'historyTrimmed' | 'othersUndoneBy' | 'noteTakenBack'>>
   & {
     /**
      * The manager of the workspace a session works in, when the host keeps one
@@ -209,16 +236,32 @@ export type CheckpointsGatewayManager = Pick<WorkspaceCheckpointManager, 'list' 
     forSession?(sessionId: string): CheckpointsGatewayManager | undefined;
     /** The manager whose store holds checkpoint `id`, when the host keeps several. Undefined: this one. */
     forCheckpoint?(id: string): Promise<CheckpointsGatewayManager | undefined>;
+    /**
+     * The manager of the project a call names (its call context), when the host keeps one per project: the project's one
+     * store, which every program of that project (the terminal app, the Agent, the daemon's own runs) keeps its
+     * checkpoints in. Undefined: this one.
+     */
+    forProject?(folder: string): CheckpointsGatewayManager | undefined;
   };
 
-/** The manager for the session's workspace, or the default one. */
-function managerFor(manager: CheckpointsGatewayManager, sessionId: string | undefined): CheckpointsGatewayManager {
-  return (sessionId === undefined ? undefined : manager.forSession?.(sessionId)) ?? manager;
+/** The project a call names (a program's or the web UI's call context), if any. */
+function callProjectOf(invocation: { readonly context?: { readonly call?: { readonly project?: string | undefined } | undefined } | undefined }): string | undefined {
+  return invocation.context?.call?.project;
 }
 
-/** The manager whose store holds the checkpoint, or the default one (which answers an unknown id with its 404). */
-async function managerHolding(manager: CheckpointsGatewayManager, id: string): Promise<CheckpointsGatewayManager> {
-  return (await manager.forCheckpoint?.(id)) ?? manager;
+/** The manager for the session's workspace, else for the project the call names, or the default one. */
+function managerFor(manager: CheckpointsGatewayManager, sessionId: string | undefined, project?: string): CheckpointsGatewayManager {
+  return (sessionId === undefined ? undefined : manager.forSession?.(sessionId))
+    ?? (project === undefined ? undefined : manager.forProject?.(project))
+    ?? manager;
+}
+
+/**
+ * The manager whose store holds the checkpoint, else the project's the call names, or the default one (each answers
+ * an unknown id with its 404).
+ */
+async function managerHolding(manager: CheckpointsGatewayManager, id: string, project?: string): Promise<CheckpointsGatewayManager> {
+  return (await manager.forCheckpoint?.(id)) ?? (project === undefined ? undefined : manager.forProject?.(project)) ?? manager;
 }
 
 export function createCheckpointsListHandler(manager: CheckpointsGatewayManager): GatewayMethodHandler {
@@ -228,7 +271,7 @@ export function createCheckpointsListHandler(manager: CheckpointsGatewayManager)
     const sessionId = optionalString(params.sessionId);
     const since = optionalNumber(params.since, 'since');
     const limit = clampLimit(params.limit);
-    const scoped = managerFor(manager, sessionId);
+    const scoped = managerFor(manager, sessionId, callProjectOf(invocation));
     const checkpoints = await scoped.list({ kind, sessionId, since, limit });
     // Present only while the last automatic retention sweep is failing, so a
     // store that is growing past its limits says why instead of looking healthy.
@@ -253,7 +296,7 @@ export function createSessionChangesHandler(manager: CheckpointsGatewayManager):
   return async (invocation) => {
     const params = readInvocationParams(invocation);
     const sessionId = requireStringValue(params.sessionId, 'sessionId');
-    const changes = await managerFor(manager, sessionId).sessionChanges(sessionId);
+    const changes = await managerFor(manager, sessionId, callProjectOf(invocation)).sessionChanges(sessionId);
     return changes;
   };
 }
@@ -263,7 +306,7 @@ export function createCheckpointsCreateHandler(manager: CheckpointsGatewayManage
     const body = readInvocationParams(invocation);
     const kind = validateCheckpointKind(body.kind, true);
     if (!kind) throw new GatewayVerbError('Missing required field: kind', 'INVALID_ARGUMENT', 400, 'kind');
-    const checkpoint = await managerFor(manager, optionalString(body.sessionId)).create({
+    const checkpoint = await managerFor(manager, optionalString(body.sessionId), callProjectOf(invocation)).create({
       kind,
       label: optionalString(body.label),
       retentionClass: validateRetentionClass(body.retentionClass),
@@ -284,7 +327,7 @@ export function createCheckpointsDiffHandler(manager: CheckpointsGatewayManager)
     const params = readInvocationParams(invocation);
     const a = requireStringValue(params.a, 'a');
     const b = optionalString(params.b);
-    const holder = await managerHolding(manager, a);
+    const holder = await managerHolding(manager, a, callProjectOf(invocation));
     const diff = await callOrHonestNotFound(() => holder.diff(a, b));
     return { diff };
   };
@@ -306,11 +349,15 @@ export function createCheckpointsRestorePreviewHandler(
     // `diff(id)` (second arg omitted) diffs the checkpoint against the live
     // working tree and routes through requireCheckpoint, so an unknown id is a
     // 404 here before any token is minted.
-    const holder = await managerHolding(manager, id);
+    const holder = await managerHolding(manager, id, callProjectOf(invocation));
     const diff = await callOrHonestNotFound(() => holder.diff(id));
     const checkpoint = (await holder.list()).find((c) => c.id === id);
     const affectedPaths = diff.files;
-    const { token, expiresAt } = tokens.issue(checkpointTarget(id, await holder.resolveRoot()));
+    // Whose changes it takes back, as the programs ask before a restore (recovery-commands.ts): every session but the
+    // one restoring (the caller's own, from its call or the body).
+    const caller = invocation.context?.call?.sessionId ?? optionalString(body.sessionId);
+    const others = await othersTakenBack(holder, id, caller);
+    const { token, expiresAt } = tokens.issue(checkpointTarget(id, await holder.resolveRoot(), others, await laterCheckpointsByOthers(holder, id, caller)));
     return {
       token,
       expiresAt,
@@ -320,6 +367,8 @@ export function createCheckpointsRestorePreviewHandler(
         affectedPathCount: affectedPaths.length,
         affectedPathSample: affectedPaths.slice(0, RESTORE_PREVIEW_PATH_SAMPLE_LIMIT),
         stat: diff.stat,
+        otherSessions: others.map((other) => ({ sessionId: other.sessionId, agentIds: [...other.agentIds], files: [...other.files] })),
+        ...(others.length > 0 ? { takesBack: `It takes back changes other sessions made: ${othersSentence(others)}. They are told in their conversations.` } : {}),
       },
     };
   };
@@ -336,6 +385,14 @@ export function createCheckpointsRestoreHandler(
     const confirmToken = optionalString(body.confirmToken);
     // Checked before the token is spent so a rejected scope costs no re-preview.
     const paths = restorePaths(body.paths);
+    if (body.takeBack !== undefined && body.takeBack !== null && !(Array.isArray(body.takeBack) && body.takeBack.every((v) => typeof v === 'string'))) {
+      throw new GatewayVerbError('takeBack must be a list of session ids (as checkpoints.restorePreview lists them); nothing was restored.', 'INVALID_ARGUMENT', 400, 'takeBack');
+    }
+    const takeBack = Array.isArray(body.takeBack) ? body.takeBack as string[] : undefined;
+    // Whose changes this restore takes back (every session but the caller's own), read before anything is decided.
+    const caller = invocation.context?.call?.sessionId ?? optionalString(body.sessionId);
+    const holding = await managerHolding(manager, id, callProjectOf(invocation));
+    const others = await othersTakenBack(holding, id, caller, paths);
 
     if (confirmToken !== undefined) {
       // The preview a token vouches for described a restore with its undo
@@ -352,9 +409,10 @@ export function createCheckpointsRestoreHandler(
       // An explicit token that does not check out is a real failure of the
       // caller's confirm attempt (not the "you didn't confirm" refusal), so it
       // is an honest 400 that names the remedy, mint a fresh one. A token for
-      // another checkpoint or workspace is refused with what differs.
-      const holding = await managerHolding(manager, id);
-      const spent = tokens.consume(confirmToken, checkpointTarget(id, await holding.resolveRoot()));
+      // another checkpoint or workspace, or one whose preview showed other sessions' changes than this restore would
+      // take back now, is refused with what differs.
+      const spent = tokens.consume(confirmToken, checkpointTarget(id, await holding.resolveRoot(), paths ? await othersTakenBack(holding, id, caller) : others,
+        await laterCheckpointsByOthers(holding, id, caller)));
       if (!spent.ok && spent.reason === 'changed' && spent.reviewed) {
         throw new TargetChangedError(spent.reviewed, spent.changes ?? [], `checkpoints.restorePreview with id ${id}`);
       }
@@ -372,13 +430,37 @@ export function createCheckpointsRestoreHandler(
           options: RESTORE_CONFIRM_OPTIONS,
         },
       };
+    } else {
+      // confirm:true takes back another session's change only when the caller named that session (as the programs ask
+      // the person before such a restore): so no caller takes back another session's work unseen.
+      const named = new Set(takeBack ?? []);
+      const unnamed = others.filter((other) => !named.has(other.sessionId));
+      if (unnamed.length > 0) {
+        return {
+          result: null,
+          refused: true,
+          refusal: {
+            reason: `Not restored: it would take back changes other sessions made: ${othersSentence(unnamed)}. Nothing was changed, and their changes are kept.`,
+            confirmField: 'takeBack',
+            previewMethod: 'checkpoints.restorePreview',
+            options: [
+              `Pass takeBack naming ${unnamed.length === 1 ? 'that session' : 'each of those sessions'} (${unnamed.map((other) => other.sessionId).join(', ')}) with confirm:true to take ${unnamed.length === 1 ? 'its changes' : 'their changes'} back; ${unnamed.length === 1 ? 'it is' : 'they are'} told in ${unnamed.length === 1 ? 'its conversation' : 'their conversations'}.`,
+              'Call checkpoints.restorePreview for this id, show what it lists, then pass its token as confirmToken.',
+              'Restore only paths none of them changed (paths).',
+            ],
+            otherSessions: unnamed.map((other) => ({ sessionId: other.sessionId, agentIds: [...other.agentIds], files: [...other.files] })),
+          },
+        };
+      }
     }
 
-    const holder = await managerHolding(manager, id);
+    const holder = holding;
+    // Other sessions whose changes this takes back are told in their conversations (taken-back.ts).
     const result = await callOrHonestNotFound(() => holder.restore(id, {
       paths,
       safetyCheckpoint: optionalBoolean(body.safetyCheckpoint, 'safetyCheckpoint'),
     }));
+    if (others.length > 0) await holder.noteTakenBack?.(others, caller ?? 'a remote caller', id, result.safetyCheckpointId).catch(() => undefined);
     return { result, refused: false, refusal: null };
   };
 }
@@ -402,7 +484,7 @@ export function createCheckpointsRevertHunkPreviewHandler(
     // Diff paths are relative to the root the manager resolved at init (the
     // enclosing repository's top level when started in a subdirectory), in the
     // workspace of the session the diff came from.
-    const root = await managerFor(manager, sessionId).resolveRoot();
+    const root = await managerFor(manager, sessionId, callProjectOf(invocation)).resolveRoot();
     let content = '';
     const preview = previewHunkRevert(root, path, hunk, (read) => { content = read; });
     if (!preview.applies) {
@@ -470,7 +552,7 @@ export function createCheckpointsRevertHunkHandler(
     let receipt;
     let workspaceRoot = '';
     try {
-      receipt = await applyHunkRevert(managerFor(manager, sessionId), path, hunk, (content, root) => {
+      receipt = await applyHunkRevert(managerFor(manager, sessionId, callProjectOf(invocation)), path, hunk, (content, root) => {
         workspaceRoot = root;
         verify?.(content, root);
       });
@@ -512,8 +594,8 @@ const CHECKPOINT_CHANGES: readonly ListChange['change'][] = ['created', 'changed
  * announces it as LIST_CHANGED `checkpoints`, as its own checkpoint writes are, so a subscribed
  * client reads the list again. Nothing is stored; a repeat only announces again.
  */
-export function createSessionCheckpointNoticeHandler(broker: SessionCheckpointNoticeBroker): GatewayMethodHandler {
-  return (invocation) => {
+export function createSessionCheckpointNoticeHandler(broker: SessionCheckpointNoticeBroker, checkpoints?: CheckpointsGatewayManager): GatewayMethodHandler {
+  return async (invocation) => {
     const params = readInvocationParams(invocation);
     const sessionId = requireStringValue(params.sessionId, 'sessionId');
     const change = params.change;
@@ -527,15 +609,28 @@ export function createSessionCheckpointNoticeHandler(broker: SessionCheckpointNo
     if (broker.getSession(sessionId) == null) {
       throw new GatewayVerbError(`No shared session ${sessionId}: register it with sessions.register first. Nothing was announced.`, 'SESSION_NOT_FOUND', 404);
     }
-    noteListChanged({ list: 'checkpoints', change: change as ListChange['change'], ...(checkpointId ? { id: checkpointId } : {}) });
+    // A program's checkpoint is its project's (the call's project, already checked by the dispatch), and its session's.
+    const project = callProjectOf(invocation);
+    const identity = project !== undefined ? projectIdentityOf(project) : undefined;
+    // What the notice is about, declared only once the daemon checked it (events/about.ts): the checkpoint is one that
+    // project's store holds (the one store a project's programs and the daemon's runs share). A checkpoint it does not
+    // hold (another project's, or none) is not declared, so the stream filter gives the notice to the owner alone.
+    let about: { readonly about: { readonly project: string; readonly kind: 'checkpoint'; readonly id: string } } | undefined;
+    if (typeof checkpointId === 'string' && identity !== undefined && checkpoints?.forProject) {
+      const store = checkpoints.forProject(identity);
+      const held = store ? await store.list({}).then((list) => list.some((checkpoint) => checkpoint.id === checkpointId), () => false) : false;
+      if (held) about = { about: { project: identity, kind: 'checkpoint', id: checkpointId } };
+    }
+    noteListChanged({ list: 'checkpoints', change: change as ListChange['change'], ...(checkpointId ? { id: checkpointId } : {}),
+      ...(identity !== undefined ? { project: identity } : {}), sessionId, ...(about ?? {}) });
     return { announced: true };
   };
 }
 
 /** Attach `sessions.checkpoints.changed` to its descriptor; a missing descriptor is a silent no-op. */
-export function registerSessionCheckpointNotice(catalog: GatewayMethodCatalog, broker: SessionCheckpointNoticeBroker): void {
+export function registerSessionCheckpointNotice(catalog: GatewayMethodCatalog, broker: SessionCheckpointNoticeBroker, checkpoints?: CheckpointsGatewayManager): void {
   const descriptor = catalog.get('sessions.checkpoints.changed');
-  if (descriptor) catalog.register(descriptor, createSessionCheckpointNoticeHandler(broker), { replace: true });
+  if (descriptor) catalog.register(descriptor, createSessionCheckpointNoticeHandler(broker, checkpoints), { replace: true });
 }
 
 /**
@@ -558,6 +653,16 @@ export function registerCheckpointGatewayMethods(
   // to the hunk, its file and its workspace, so they never cross with
   // the whole-checkpoint restore tokens above.
   const revertHunkTokens = new ReviewTokenStore();
+
+  // A checkpoint's owner, for the one check of what a caller may reach by id (control-plane/caller-reach.ts): the
+  // workspace of the store that holds it, which is its project (a daemon's per-project store, found by `forCheckpoint`,
+  // or this manager's own when it lists it). Held by none (or by a daemon's own folder, which keeps none): no project.
+  catalog.setRecordOwner?.('checkpoint', async (id) => {
+    const routed = await manager.forCheckpoint?.(id).catch(() => undefined);
+    if (routed) return { project: routed.workspaceRoot };
+    const own = await manager.list({}).catch(() => []);
+    return { project: own.some((checkpoint) => checkpoint.id === id) ? manager.workspaceRoot : null };
+  });
 
   const listDescriptor = catalog.get('checkpoints.list');
   if (listDescriptor) catalog.register(listDescriptor, createCheckpointsListHandler(manager), { replace: true });

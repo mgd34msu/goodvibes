@@ -160,7 +160,11 @@ export function createAgentReminderScheduleTool(
         required: ['message', 'scheduleKind', 'scheduleValue'],
         additionalProperties: false,
       },
-      sideEffects: ['network', 'state'],
+      // This call only routes the reminder to the daemon's `automation.schedules.create`, a nested method call judged by
+      // that method's own declarations (its question "Add a schedule …?" is the one asked), and writes the act's receipt
+      // as its record (record-of-decided-call.ts). Classed a read: one act, one question.
+      sideEffects: ['state'],
+      category: 'read',
       // A webhook target is chosen in the call: one the owner has not configured or allowed is his to decide.
       subjects: { recipients: ['deliveryWebhook'] },
     },

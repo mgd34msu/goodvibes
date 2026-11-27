@@ -47,8 +47,10 @@ export {
 export type { PushSubscriptionField, PushSubscriptionProblem, PushSubscriptionCandidate } from './subscription-validation.js';
 export { deliverToSubscription, deliverToAll, DELIVERY_FAILURE_PRUNE_THRESHOLD } from './delivery.js';
 export type { PushTransport, DeliveryDeps } from './delivery.js';
-export { PushService, DEFAULT_PUSH_ESCALATION } from './service.js';
+export { PushService, DEFAULT_PUSH_ESCALATION, setPushAudience } from './service.js';
 export type {
+  PushAbout,
+  PushAudience,
   PushServiceDeps,
   SubscribeInput,
   ReconcileOutput,

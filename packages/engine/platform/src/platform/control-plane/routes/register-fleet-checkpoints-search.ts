@@ -69,6 +69,6 @@ export function registerFleetCheckpointsSearchGatewayMethods(catalog: GatewayMet
     }
     : undefined;
   registerCheckpointGatewayMethods(catalog, deps.workspaceCheckpointManager, checkpointsEmit);
-  registerSessionCheckpointNotice(catalog, deps.sessionBroker);
+  registerSessionCheckpointNotice(catalog, deps.sessionBroker, deps.workspaceCheckpointManager);
   registerSessionSearchGatewayMethod(catalog, deps.sessionBroker, deps.sessionOwners);
 }

@@ -98,6 +98,11 @@ export interface SpawnAutomationTaskInput {
   readonly spendingSource?: string | undefined;
   /** The project folder the run works in (its job's). */
   readonly workingDirectory?: string | undefined;
+  /**
+   * The schedule's own conversation key (`schedule:<id>`): its run starts inside it, so with what the conversation that
+   * made it had read, and what a run reads stays read for the next (security/conversation-exposure.ts).
+   */
+  readonly exposureKey?: string | undefined;
 }
 
 export function sortJobs(jobs: Iterable<AutomationJob>): AutomationJob[] {

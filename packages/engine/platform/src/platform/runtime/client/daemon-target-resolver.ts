@@ -184,13 +184,11 @@ function resolve(input: ResolveDaemonTargetInput): Resolved {
     origin = configured.origin;
     named = configured.connected;
     if (!origin) {
-      return { resolution: refuse('SERVICE_UNAVAILABLE', 'no daemon address is configured (daemon.connectedHost.url, controlPlane.publicBaseUrl or controlPlane.host and port)', ['set the daemon address with /setup connect-daemon']) };
+      return { resolution: refuse('SERVICE_UNAVAILABLE', 'no daemon address is configured (daemon.connectedHost.url, controlPlane.publicBaseUrl or controlPlane.host and port)', ['set the daemon address in the menu: System, Setup, "A daemon elsewhere"']) };
     }
   }
   const place = classifyDaemonOrigin(origin, configManager);
-  if (!named && place !== 'no' && configManager.get('daemon.enabled') === false) {
-    return { resolution: refuse('SERVICE_UNAVAILABLE', 'the daemon on this machine is disabled (daemon.enabled is false)', ['enable it in /settings, then retry']) };
-  }
+  // "Use the background daemon" (daemon.enabled) is retired: the daemon on this machine is always the one used.
   const homeDirectory = typeof input.homeDirectory === 'function' ? input.homeDirectory() : input.homeDirectory;
   const target = (credential: BoundCredential | null, proven = false): Resolved => ({ resolution: { ok: true, target: daemonTarget(origin!, credential, place === 'yes' || proven) } });
 
@@ -216,8 +214,8 @@ function resolve(input: ResolveDaemonTargetInput): Resolved {
         resolution: refuse('CREDENTIAL_NOT_FOR_TARGET',
           `no credential is stored for ${origin.baseUrl}; this machine's daemon token is never sent to another daemon`,
           explicitUrl
-            ? ['pass --token <token>', 'store it with /setup connect-daemon', 'pair with it: goodvibes-agent setup pair']
-            : ['connect to it again with /setup connect-daemon and its token', 'pair with it: goodvibes-agent setup pair']),
+            ? ['pass --token <token>', 'store it in the menu: System, Setup, "A daemon elsewhere"', 'pair with it: goodvibes-agent setup pair']
+            : ['connect to it again with its token in the menu: System, Setup, "A daemon elsewhere"', 'pair with it: goodvibes-agent setup pair']),
       };
     }
   }
@@ -308,7 +306,7 @@ export async function resolveDaemonTargetProven(input: ResolveDaemonTargetInput 
   if (!token || !await proveDaemonOrigin(origin, credential, token, input.fetch ?? fetch)) {
     return refuse('CREDENTIAL_NOT_FOR_TARGET',
       `${origin.baseUrl} did not prove it is the daemon on this machine, so this machine's daemon token was not sent to it`,
-      [`check that ${origin.baseUrl} reaches the daemon on this machine (controlPlane.publicBaseUrl, web.publicBaseUrl)`, 'or connect to it with its own token with /setup connect-daemon']);
+      [`check that ${origin.baseUrl} reaches the daemon on this machine (controlPlane.publicBaseUrl, web.publicBaseUrl)`, 'or connect to it with its own token in the menu: System, Setup, "A daemon elsewhere"']);
   }
   return resolve(input).resolution;
 }

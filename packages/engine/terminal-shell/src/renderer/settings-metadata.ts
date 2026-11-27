@@ -4,7 +4,7 @@ export const SHARED_SETTING_ENUM_DESCRIPTIONS = {
   'secureAddress.certificate': {
     'lets-encrypt': 'Let\'s Encrypt for a name under a domain you own: give the name and a Cloudflare token once; every phone trusts it with nothing installed. The name appears in public certificate logs.',
     'own-files': 'A certificate you made: give the certificate and key files; phones that trust its signer get https. Nothing leaves this computer.',
-    'local-authority': 'GoodVibes\' own certificate: install it once on each phone from /lan-https on the plain address. Nothing leaves this computer. Not yet tried on a real phone.',
+    'local-authority': 'GoodVibes\' own certificate: install it once on each phone from the link for phones that goodvibes-daemon pair prints (the page on the https address, with the certificate\'s fingerprint; never over plain http). Nothing leaves this computer. Not yet tried on a real phone.',
   },
   'behavior.hitlMode': {
     off: 'Keep the baseline notification delivery policy; verbosity mode changes are rejected.',

@@ -20,6 +20,36 @@ interface ProjectPlanningRouteContext {
   readonly parseJsonBody: (req: Request) => Promise<JsonRecord | Response>;
   readonly parseOptionalJsonBody: (req: Request) => Promise<JsonRecord | null | Response>;
   readonly requireAdmin: (req: Request) => Response | null;
+  /**
+   * The one folder check of every call (control-plane/caller-paths.ts), for the project a planning call names: why
+   * this caller may not name it, or undefined. Absent: only the owner himself names one (never "no rule, no check").
+   */
+  readonly refuseProject?: ((req: Request, folder: string) => string | undefined) | undefined;
+  /** The plan identity of a project folder (knowledge/project-planning/configured-project.ts `projectIdentityOfFolder`). */
+  readonly projectIdOf?: ((folder: string) => Promise<string>) | undefined;
+}
+
+/** The code of a planning call that names no project. */
+export const PLANNING_NO_PROJECT = 'NO_PROJECT';
+
+/**
+ * The project a planning call names: `workingDirectory` in its query or body, else the call's project
+ * (`x-goodvibes-project`, as every program and the web UI send theirs). Undefined: it names none.
+ */
+async function namedProject(req: Request, url: URL): Promise<string | undefined> {
+  const fromQuery = url.searchParams.get('workingDirectory')?.trim();
+  if (fromQuery) return fromQuery;
+  if (req.method !== 'GET' && req.method !== 'DELETE') {
+    const body = await req.clone().json().catch(() => undefined) as Record<string, unknown> | undefined;
+    const fromBody = typeof body?.['workingDirectory'] === 'string' ? body['workingDirectory'].trim() : '';
+    if (fromBody) return fromBody;
+  }
+  try {
+    const header = req.headers.get('x-goodvibes-project');
+    return header ? decodeURIComponent(header).trim() || undefined : undefined;
+  } catch {
+    return undefined;
+  }
 }
 
 /**
@@ -51,6 +81,31 @@ export class ProjectPlanningRoutes {
     const url = new URL(req.url);
     if (!url.pathname.startsWith('/api/projects/planning')) return null;
     try {
+      // Every planning call names its project, checked as every call's folder is (the one folder check): the plan it
+      // reads or changes is that project's, and what it announces says so (events/about.ts). One naming none is refused.
+      const folder = await namedProject(req, url);
+      if (!folder) {
+        throw new RefusalError(refusal({
+          code: PLANNING_NO_PROJECT, state: 'nothing was read or changed',
+          reason: 'A planning call works on one project\'s plan, and this call named no project',
+          next: ['Send the project folder as workingDirectory (in the query, or in the body of a POST or PATCH), or as the x-goodvibes-project header'],
+          status: 422,
+        }));
+      }
+      const refused = this.context.refuseProject ? this.context.refuseProject(req, folder) : 'this daemon has no rule for which projects a caller may name, so only the owner himself names one';
+      if (refused !== undefined) {
+        throw new RefusalError(refusal({ code: 'PROJECT_NOT_ALLOWED', state: 'nothing was read or changed', reason: refused,
+          next: ['Name a project the owner gave this caller (Devices and network, on its row)'], status: 403 }));
+      }
+      if (!this.context.projectIdOf) {
+        throw new RefusalError(refusal({ code: PLANNING_NO_PROJECT, state: 'nothing was read or changed',
+          reason: 'This daemon cannot tell which plan belongs to a project folder', next: ['Use the plan from a program working in that project'], status: 422 }));
+      }
+      const projectId = await this.context.projectIdOf(folder);
+      // The plan named is the folder's own, whatever id or space the caller also sent; its events name this folder.
+      url.searchParams.set('projectId', projectId);
+      url.searchParams.delete('knowledgeSpaceId');
+      this.context.projectPlanningService.noteProjectRoot(projectId, folder);
       if (url.pathname === '/api/projects/planning/status' && req.method === 'GET') {
         return Response.json(await this.context.projectPlanningService.status(readProjectSpaceFromUrl(url)));
       }
@@ -75,7 +130,7 @@ export class ProjectPlanningRoutes {
       }
       if (url.pathname === '/api/projects/planning/decisions' && req.method === 'POST') {
         return await this.admin(req, async () => Response.json(
-          await this.context.projectPlanningService.recordDecision(await this.readBody<ProjectPlanningDecisionRecordInput>(req)),
+          await this.context.projectPlanningService.recordDecision({ ...readProjectSpaceFromUrl(url), ...(await this.readBody<ProjectPlanningDecisionRecordInput>(req)) }),
         ));
       }
       if (url.pathname === '/api/projects/planning/language' && req.method === 'GET') {
@@ -162,13 +217,20 @@ export class ProjectPlanningRoutes {
 
   private async readBody<T>(req: Request): Promise<T> {
     const body = await this.context.parseJsonBody(req);
-    return requireParsedBody(body) as T;
+    return withoutOtherPlan(requireParsedBody(body)) as T;
   }
 
   private async readOptionalBody<T>(req: Request): Promise<T> {
     const body = await this.context.parseOptionalJsonBody(req);
-    return (requireParsedBody(body) ?? {}) as T;
+    return withoutOtherPlan(requireParsedBody(body) ?? {}) as T;
   }
+}
+
+/** A body without a plan of its own: the project the call named decides the plan (handle), never an id it also sends. */
+function withoutOtherPlan(body: unknown): unknown {
+  if (body === null || typeof body !== 'object' || Array.isArray(body)) return body;
+  const { projectId: _projectId, knowledgeSpaceId: _space, workingDirectory: _folder, ...rest } = body as JsonRecord;
+  return rest;
 }
 
 function readProjectSpaceFromUrl(url: URL): JsonRecord {

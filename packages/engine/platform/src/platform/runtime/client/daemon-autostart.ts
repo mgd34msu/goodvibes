@@ -43,6 +43,7 @@
 import { mkdirSync, readFileSync, watch } from 'node:fs';
 import { basename, dirname } from 'node:path';
 import { findDaemonProgram, startDaemonProgram, type DaemonProgram, type DaemonProgramStart } from './daemon-program.js';
+import { configuredDaemonOrigin } from './daemon-target-resolver.js';
 import { PlatformServiceManager, resolveDaemonServiceDefault, resolveServiceUnitHome, type ManagedServiceActionResult, type ManagedServiceStatus } from '../../daemon/index.js';
 import { readLifecycleMarker } from '../../daemon/lifecycle-marker.js';
 import { logger, summarizeError } from '../../utils/index.js';
@@ -203,7 +204,7 @@ export type DaemonAutostartOutcome =
    * answered yet: wait with {@link waitForStartingDaemon}. `since` is when this
    * start began (epoch ms); the daemon's ready record stamped at or after it is this start's.
    */
-  | { readonly action: 'starting'; readonly serviceName: string; readonly since: number }
+  | { readonly action: 'starting'; readonly serviceName: string; readonly since: number; readonly startedHere?: boolean | undefined }
   | { readonly action: 'start-failed'; readonly serviceName: string; readonly reason: string };
 
 export interface DaemonAutostartOptions {
@@ -223,6 +224,27 @@ export interface DaemonAutostartOptions {
   readonly program?: (() => DaemonProgram | null) | undefined;
   /** Starts the daemon program (default {@link startDaemonProgram}). */
   readonly startProgram?: ((program: DaemonProgram) => DaemonProgramStart) | undefined;
+  /**
+   * Whether the daemon program started here answers (default `isReachable`). A daemon that never ran before has
+   * written no credential yet when the program began, so its answer is read without one ({@link daemonAddressAnswers}).
+   */
+  readonly programAnswers?: (() => Promise<boolean>) | undefined;
+}
+
+/**
+ * Whether anything answers HTTP at the configured daemon's address (`/status`, any status: a daemon that refuses a
+ * request without a credential still answers). Used for a daemon program this process started.
+ */
+export async function daemonAddressAnswers(configManager: Parameters<typeof configuredDaemonOrigin>[0]): Promise<boolean> {
+  const origin = configuredDaemonOrigin(configManager);
+  if (!origin) return false;
+  try {
+    const response = await fetch(`${origin.baseUrl}/status`, { signal: AbortSignal.timeout(2_000), redirect: 'manual' });
+    await response.body?.cancel().catch(() => {});
+    return true;
+  } catch {
+    return false;
+  }
 }
 
 /** Whether the daemon program is on this machine ({@link findDaemonProgram}). */
@@ -251,8 +273,8 @@ function unitRunning(control: DaemonServiceControl, serviceName: string): boolea
 }
 
 /** What the foreground wait says once it ends unanswered: the service manager's state decides, not the time spent. */
-function unansweredOutcome(control: DaemonServiceControl, serviceName: string, since: number): DaemonAutostartOutcome {
-  if (unitRunning(control, serviceName)) return { action: 'starting', serviceName, since };
+function unansweredOutcome(control: DaemonServiceControl, serviceName: string, since: number, startedHere = false): DaemonAutostartOutcome {
+  if (unitRunning(control, serviceName)) return { action: 'starting', serviceName, since, ...(startedHere ? { startedHere: true } : {}) };
   return {
     action: 'start-failed',
     serviceName,
@@ -418,11 +440,13 @@ export async function autostartInstalledDaemon(options: DaemonAutostartOptions):
     const programAttempts = Math.max(1, Math.ceil(Math.max(waitTimeoutMs, PROGRAM_WAIT_TIMEOUT_MS) / pollIntervalMs));
     // A start that ended may have lost the port to another program's start at the same moment: a few more probes for that one.
     let endedAt: number | undefined;
+    // This wait holds the process open (a `do` has nothing else running while the daemon it started comes up).
+    const holdingSleep = options.sleep ?? ((ms: number) => new Promise<void>((resolve) => { setTimeout(resolve, ms); }));
     for (let attempt = 0; attempt < programAttempts; attempt += 1) {
-      if (attempt > 0) await sleep(pollIntervalMs);
+      if (attempt > 0) await holdingSleep(pollIntervalMs);
       try {
         // A daemon that answers is the one asked for, whether this start or another program's at the same moment won the port.
-        if (await options.isReachable()) return { action: 'program-started', command: program.command };
+        if (await (options.programAnswers ?? options.isReachable)()) return { action: 'program-started', command: program.command };
       } catch (error) {
         logger.debug('[startup] re-probing the daemon failed', { error: summarizeError(error) });
       }
@@ -466,7 +490,7 @@ export async function autostartInstalledDaemon(options: DaemonAutostartOptions):
     };
   }
   if (await waitForAnswer()) return { action: 'started', serviceName: target.serviceName };
-  return unansweredOutcome(options.control, target.serviceName, since);
+  return unansweredOutcome(options.control, target.serviceName, since, true);
 }
 
 /** What a surface says when no daemon answers and no daemon service is installed to start. */

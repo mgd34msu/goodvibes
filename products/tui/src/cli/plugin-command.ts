@@ -267,7 +267,8 @@ export async function handlePluginCommand(runtime: CliCommandRuntime): Promise<C
     return handlePluginBundlesCommand(runtime, runtime.cli.commandArgs.slice(1), {
       binary: 'goodvibes',
       confirmed: runtime.cli.flags.yes,
-      rollbackHint: (receipt) => `/marketplace rollback ${receipt.kind} ${receipt.entry.id} ${receipt.scope}`,
+      // No /marketplace command: the script form of the capability (a person has "roll back" on Tools and extensions, Installed).
+      rollbackHint: (receipt) => `goodvibes do marketplace.rollback --input kind=${receipt.kind} --input entry=${receipt.entry.id} --input scope=${receipt.scope}`,
     });
   }
   if (sub === 'trust' || sub === 'verify' || sub === 'capabilities') {

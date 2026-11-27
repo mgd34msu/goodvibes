@@ -836,6 +836,20 @@ export function createWriteTool(options?: {
             state = undefined;
             undoSkipReason = 'its content before the write could not be read';
           }
+          // A file that exists is replaced only over the bytes this session or agent last read or wrote
+          // there: a change someone else made since, or a file never read, is refused (until it is read
+          // again), never silently overwritten. A file that is not text, which no reader can read, is
+          // compared only when this reader has written it before.
+          if (state !== undefined && state.bytes !== null && options.fileCache && (fileInput.mode ?? 'fail_if_exists') !== 'fail_if_exists') {
+            const isText = Buffer.from(state.bytes.toString('utf-8'), 'utf-8').equals(state.bytes) && !state.bytes.includes(0);
+            const seen = options.fileCache.compare(resolvedPath, state.bytes.toString('utf-8'));
+            const stale = isText || seen === 'modified' ? options.fileCache.staleWrite(resolvedPath, state.bytes.toString('utf-8')) : null;
+            if (stale !== null) {
+              if (atomic) return await rollbackAtomic(fileInput.path, stale);
+              errors.push(`${fileInput.path}: ${stale}`);
+              continue;
+            }
+          }
           if (state !== undefined) {
             existedBeforeWrite = state.bytes !== null;
             if (state.bytes !== null) {

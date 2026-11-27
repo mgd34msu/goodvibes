@@ -70,5 +70,15 @@ export function restoreConfirmMessageWithPreview(
 ): string {
   const count = preview.affectedPathCount;
   if (count <= 0) return 'The workspace already matches it, so no files change.';
-  return `Files changed since then are replaced; ${count} ${count === 1 ? 'file changes' : 'files change'}.`;
+  const takesBack = previewTakesBack(preview);
+  return `Files changed since then are replaced; ${count} ${count === 1 ? 'file changes' : 'files change'}.${takesBack ? ` ${takesBack}` : ''}`;
+}
+
+/**
+ * The daemon's own sentence naming the other sessions (and their files) whose changes the restore takes back, from the
+ * preview; undefined when it takes back none. Read by name, so a preview from a daemon that does not say it reads as none.
+ */
+export function previewTakesBack(preview: CheckpointsRestorePreviewResult['preview']): string | undefined {
+  const sentence = (preview as { readonly takesBack?: unknown }).takesBack;
+  return typeof sentence === 'string' && sentence.length > 0 ? sentence : undefined;
 }

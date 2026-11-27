@@ -29,6 +29,14 @@ export function mcpTrustWords(mode: string | undefined | null): string {
   return String(level).replace(/[_-]+/g, ' ');
 }
 
+/**
+ * Why a call of a server kept at "Ask me about calls outside its limits" is put to the person: the server's level, never
+ * a rule of his ("<server> is set to ask before anything outside its limits").
+ */
+export function mcpAskWhy(serverName: string): string {
+  return `The tool server ${serverName} is set to ask you before anything outside its limits`;
+}
+
 /** The limits a level is held to, in words: only the folders and sites set are checked. */
 export function mcpLimitWords(server: { readonly allowedPaths?: readonly string[] | undefined; readonly allowedHosts?: readonly string[] | undefined }): string {
   const folders = server.allowedPaths?.length ?? 0, sites = server.allowedHosts?.length ?? 0;

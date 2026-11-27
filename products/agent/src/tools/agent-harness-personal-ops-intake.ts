@@ -307,7 +307,7 @@ export async function buildPersonalOpsIntakeCandidates(
       modelRoute: 'personal_ops action:"lane" laneId:"routines"',
       inspectRoutes: [
         'personal_ops action:"lane" laneId:"routines"',
-        'workspace action:"actions" categoryId:"routines"',
+        'capability_run id:"routines.list"',
       ],
       requiresConfirmation: true,
       safetyBoundary: 'Routine creation/review is Agent-local; schedule promotion requires explicit cadence and confirmation.',

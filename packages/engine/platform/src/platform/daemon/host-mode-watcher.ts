@@ -33,6 +33,33 @@ export interface HostModeWatcherOptions {
   onRestart: () => void;
   /** Returns true when the server/listener is currently running. */
   getIsRunning: () => boolean;
+  /**
+   * True while a listener is bound. A write that leaves a binding key at the value it had changes no binding, so
+   * while a listener is bound it is not rebound (a rebind closes the connections it holds). With nothing bound (a
+   * rebind that failed) the same value is still a request to bind again.
+   */
+  isBound?: (() => boolean) | undefined;
+}
+
+/**
+ * Subscribe to `key` and call `onChange` only when its effective value (its default included) differs from the
+ * value last seen (`unchanged` says when it does not): a write of the value a setting already holds changes nothing a
+ * listener or a restart acts on.
+ */
+export function onEffectiveChange(configManager: Pick<ConfigManager, 'get' | 'subscribe'>, key: ConfigKey, onChange: (unchanged: boolean) => void): () => void {
+  let seen: unknown = configManager.get(key);
+  return configManager.subscribe(key, () => {
+    const now = configManager.get(key);
+    const unchanged = sameSettingValue(now, seen);
+    seen = now;
+    onChange(unchanged);
+  });
+}
+
+/** Two values of a setting are the same (JSON equality: scalars and the few list settings alike). */
+function sameSettingValue(left: unknown, right: unknown): boolean {
+  if (Object.is(left, right)) return true;
+  try { return JSON.stringify(left) === JSON.stringify(right); } catch { return false; }
 }
 
 export interface HostModeWatcherHandle {
@@ -55,14 +82,13 @@ export interface HostModeWatcherHandle {
  * @returns A handle with an `unsubscribe` method.
  */
 export function createHostModeRestartWatcher(opts: HostModeWatcherOptions): HostModeWatcherHandle {
-  const { configManager, keys, onRestart, getIsRunning } = opts;
+  const { configManager, keys, onRestart, getIsRunning, isBound } = opts;
 
-  const listener = (): void => {
+  const unsubs = keys.map((key) => onEffectiveChange(configManager, key, (unchanged) => {
     if (!getIsRunning()) return;
+    if (unchanged && isBound?.() === true) return;
     onRestart();
-  };
-
-  const unsubs = keys.map((key) => configManager.subscribe(key, listener));
+  }));
 
   return {
     unsubscribe: () => {

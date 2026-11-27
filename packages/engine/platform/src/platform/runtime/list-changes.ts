@@ -9,6 +9,7 @@
  * Process-wide like the stores it serves; a notice costs one call per listener
  * and nothing with none.
  */
+import type { EventAbout } from '../../events/about.js';
 
 /**
  * The lists that announce their changes: also the mailbox (mail arrived or a
@@ -91,7 +92,42 @@ export interface ListChange {
   readonly project?: string | undefined;
   /** The session a per-session change is about; absent for anything not one session's. */
   readonly sessionId?: string | undefined;
+  /**
+   * Set (by `noteListChanged`, never by the store) on a notice about a thing every project shares: it names no project
+   * because none is concerned, so every screen showing the list reads again, and every follower of the event stream
+   * may be told (control-plane/event-reach.ts). A notice that names a project never carries it.
+   */
+  readonly shared?: true | undefined;
+  /**
+   * The record the change is about, declared by the daemon code that checked it (events/about.ts): a checkpoint and the
+   * project whose store holds it. Never from a caller's word: the stream filter delivers the notice by it.
+   */
+  readonly about?: EventAbout | undefined;
 }
+
+/**
+ * What each notice names: `project`, every notice of it names the project (its identity) it is about, so only that
+ * project's screens read again; `shared`, it is about a thing every project shares (the owner's, the daemon's or the
+ * machine's), so it names none and every screen showing the list reads again; `either`, it names its project when the
+ * changed thing is one project's and none when it is shared (a "this project" memory record or the person's own; a
+ * capability run in a project or with none; a hook run in a project or none; a trigger kept for a project or with none).
+ * Typed over the whole list union, so a new list does not compile until it says which.
+ */
+export const LIST_CHANGE_NAMES: Readonly<Record<ChangedList, 'project' | 'shared' | 'either'>> = {
+  memory: 'either', checkpoints: 'project', 'code-index': 'project', worktrees: 'project', capabilities: 'either',
+  'hook-trace': 'either', triggers: 'either', tools: 'either',
+  // The services list: a project's own services file names its project; the user's file is shared.
+  services: 'either',
+  'ci-watches': 'shared', 'check-ins': 'shared', people: 'shared', mail: 'shared', calendar: 'shared', dates: 'shared',
+  'paired-devices': 'shared', 'telegram-intake': 'shared', voice: 'shared', tailscale: 'shared', relay: 'shared',
+  work: 'project',
+  'remote-runners': 'shared', research: 'shared', 'handed-off': 'shared', safety: 'shared',
+  payments: 'shared', spending: 'shared', notes: 'shared', personas: 'shared', routines: 'shared', documents: 'shared',
+  artifacts: 'shared', 'agent-homes': 'shared', profile: 'shared', templates: 'shared', models: 'shared',
+  'network-scan': 'shared', 'settings-sync': 'shared', 'machine-group': 'shared',
+  'context-windows': 'shared', notifications: 'shared', google: 'shared', 'system-updates': 'shared', setup: 'shared',
+  settings: 'shared',
+};
 
 const listeners = new Set<(change: ListChange) => void>();
 
@@ -103,7 +139,12 @@ export function onListChanged(listener: (change: ListChange) => void): () => voi
 
 /** Say a list changed; never throws into the store that wrote. */
 export function noteListChanged(change: ListChange): void {
+  // A notice names its project, or says it is about a shared thing (LIST_CHANGE_NAMES): a `project` list's notice
+  // without one is a store's fault and is not marked shared (it stays the owner's on the event stream).
+  const { shared: _claimed, ...given } = change;
+  void _claimed;
+  const said: ListChange = given.project === undefined && given.sessionId === undefined && LIST_CHANGE_NAMES[given.list] !== 'project' ? { ...given, shared: true } : given;
   for (const listener of [...listeners]) {
-    try { listener(change); } catch { /* A listener cannot fail a store's write. */ }
+    try { listener(said); } catch { /* A listener cannot fail a store's write. */ }
   }
 }

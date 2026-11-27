@@ -292,6 +292,13 @@ function runnerState(transport: string, live: boolean): RunnerItem['state'] {
   return 'ended';
 }
 
+/** Whether a runner is in contact, in words (the supervisor's heartbeat). */
+const CONTACT_WORDS: Readonly<Record<string, string>> = { fresh: 'in contact', stale: 'contact lost for now', offline: 'no contact' };
+/** A runner's last error as a person reads it: the protocol library's own words for a closed connection are said plainly. */
+function runnerErrorWords(error: string): string {
+  return /^ACP connection closed/i.test(error) ? 'its agent went away without finishing' : error;
+}
+
 export function runnerItems(output: unknown): readonly RunnerItem[] {
   const data = listed(output);
   const connections = new Map((Array.isArray(data['connections']) ? data['connections'] : []).map((entry) => [text(record(entry)['id']), record(entry)]));
@@ -316,8 +323,9 @@ export function runnerItems(output: unknown): readonly RunnerItem[] {
       trust: text(contract['trustClass']), tools: strings(ceiling['allowedTools']), writeScope: strings(ceiling['writeScope']),
       ...(text(contract['workspaceRoot']) ? { folder: text(contract['workspaceRoot']) } : {}),
       errors: count(connection?.['errorCount'] ?? record(contract['transport'])['errorCount']),
-      ...(plain(connection?.['lastError'] ?? record(contract['transport'])['lastError']) ? { lastError: plain(connection?.['lastError'] ?? record(contract['transport'])['lastError']) } : {}),
-      ...(session ? { heartbeat: `${text(session['heartbeat'])}${text(session['heartbeatDetail']) ? ` (${plain(session['heartbeatDetail'])})` : ''}` } : {}),
+      ...(plain(connection?.['lastError'] ?? record(contract['transport'])['lastError']) ? { lastError: runnerErrorWords(plain(connection?.['lastError'] ?? record(contract['transport'])['lastError'])) } : {}),
+      // Whether it is in contact, in words (the supervisor's fresh, stale or offline), then why.
+      ...(session ? { heartbeat: `${CONTACT_WORDS[text(session['heartbeat'])] ?? text(session['heartbeat'])}${text(session['heartbeatDetail']) ? ` (${plain(session['heartbeatDetail'])})` : ''}` } : {}),
       recovery: (Array.isArray(session?.['recovery']) ? session['recovery'] as unknown[] : []).map((step) => [plain(record(step)['label']), plain(record(step)['reason'])].filter(Boolean).join(': ')).filter(Boolean),
     });
   }
@@ -404,7 +412,7 @@ const runnersList: PlaceList<WorkAgentItem> = {
       { label: 'Tools', text: runner.tools.length > 0 ? runner.tools.join(', ') : 'none set' },
       { label: 'May write', text: runner.writeScope.length > 0 ? runner.writeScope.join(', ') : 'its folder, under the permission rules' },
       // A heartbeat and how to recover are a live runner's; an ended one has neither.
-      ...(runner.heartbeat && (LIVE_RUNNER.includes(runner.state) || runner.state === 'failed') ? [{ label: 'Heartbeat', text: runner.heartbeat }] : []),
+      ...(runner.heartbeat && (LIVE_RUNNER.includes(runner.state) || runner.state === 'failed') ? [{ label: 'Contact', text: runner.heartbeat }] : []),
       ...(runner.errors > 0 ? [{ label: 'Errors', text: String(runner.errors), tone: 'warning' as const }] : []),
       ...(runner.lastError ? [{ label: 'Last error', text: runner.lastError, tone: 'warning' as const }] : []),
       ...(NEEDS_RECOVERY.includes(runner.state) ? runner.recovery.map((step, index) => ({ label: index === 0 ? 'To recover' : '', text: step })) : []),
@@ -429,7 +437,7 @@ const poolsList: PlaceList<WorkAgentItem> = {
     return [
       { label: 'Runners', text: pool.runnerNames.length > 0 ? pool.runnerNames.join(', ') : 'none yet' },
       { label: 'Limit', text: pool.limit !== undefined ? String(pool.limit) : 'none' },
-      { label: 'Trust', text: TRUST_WORDS[pool.trust] ?? (pool.trust || 'not said') },
+      { label: 'Holds', text: TRUST_WORDS[pool.trust] ?? (pool.trust || 'not said') },
       { label: 'Usual agent', text: pool.template ?? 'general' },
       ...(pool.description ? [{ label: 'About', text: pool.description }] : []),
     ];
@@ -738,8 +746,8 @@ export const WORK_AGENT_ACTIONS: readonly PlaceAction<WorkAgentItem>[] = [
   // What acts on the runners as a whole is on the tab whether or not a runner is selected (the first one is started here).
   { key: 'd', id: 'start-runner', list: 'runners', whole: true, capability: 'remote.dispatch', label: 'start a runner' },
   { key: 'D', id: 'start-from-pool', list: 'runners', whole: true, capability: 'remote.dispatch-pool', label: 'start from a pool' },
-  { key: 'enter', id: 'runner-contract', list: 'runners', capability: 'remote.contract', label: 'contract', fill: { runner: 'id' } },
-  { key: 'v', list: 'runners', states: LIVE_RUNNER, capability: 'remote.supervisor', label: 'supervisor', fill: { runner: 'id' } },
+  { key: 'enter', id: 'runner-contract', list: 'runners', capability: 'remote.contract', label: 'what it is held to', fill: { runner: 'id' } },
+  { key: 'v', list: 'runners', states: LIVE_RUNNER, capability: 'remote.supervisor', label: 'how it is doing', fill: { runner: 'id' } },
   { key: 'k', list: 'runners', states: LIVE_RUNNER, capability: 'remote.capabilities', label: 'what it can do', fill: { runner: 'id' } },
   { key: 'h', list: 'runners', states: [...NEEDS_RECOVERY], capability: 'remote.recover', label: 'how to recover', fill: { runner: 'id' } },
   { key: 'o', list: 'runners', states: LIVE_RUNNER, capability: 'remote.show', label: 'connection', fill: { connection: 'id' } },
@@ -755,6 +763,9 @@ export const WORK_AGENT_ACTIONS: readonly PlaceAction<WorkAgentItem>[] = [
   { key: 'S', id: 'save-runner-bundle', list: 'runners', whole: true, capability: 'remote.session-export', label: 'save runners' },
   { key: 'L', id: 'look-in-runner-bundle', list: 'runners', whole: true, capability: 'remote.session-inspect', label: 'look in a runner bundle' },
   { key: 'I', id: 'bring-in-runner-bundle', list: 'runners', whole: true, capability: 'remote.session-import', label: 'bring in runners' },
+  // How a runner's traffic reaches the daemon through a tunnel you run, and saving that guidance (commands-final: no control before).
+  { key: 't', id: 'tunnel', list: 'runners', whole: true, capability: 'remote.tunnel', label: 'how to tunnel' },
+  { key: 'T', id: 'save-tunnel', list: 'runners', whole: true, capability: 'remote.tunnel-export', label: 'save tunnel guidance' },
   // Pools.
   { key: 'm', id: 'make-pool', list: 'pools', whole: true, capability: 'remote.create-pool', label: 'make a pool' },
   { key: 'enter', id: 'pool-detail', list: 'pools', capability: 'remote.pool', label: 'pool', fill: { pool: 'id' } },

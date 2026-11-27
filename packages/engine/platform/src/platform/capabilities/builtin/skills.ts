@@ -12,7 +12,6 @@
  * install from the marketplace) is the asking program's, on this machine.
  */
 import { existsSync, readFileSync } from 'node:fs';
-import { isAbsolute, resolve } from 'node:path';
 import type { SkillLibrary } from '../../skills/library.js';
 import {
   buildAgentSkillRequirements, evaluateAgentSkillBundleReadiness, evaluateAgentSkillReadiness, formatAgentSkillRequirement,
@@ -26,6 +25,8 @@ import {
 } from '../types.js';
 import { fixedInput, pickedInput, wordsInput } from './agent-stores.js';
 import { noteListChanged } from '../../runtime/list-changes.js';
+import { unreadableFile } from '../path-inputs.js';
+import { heldPath } from '../held-paths.js';
 
 /** What the skills capabilities need: the store as the asking program's turns read it, and its curated catalog. */
 export interface SkillsCapabilityServices {
@@ -34,7 +35,7 @@ export interface SkillsCapabilityServices {
     library(caller: CapabilityCaller): SkillLibrary;
     /** The asking program's local curated catalog and installs. */
     catalogPaths(caller: CapabilityCaller): EcosystemCatalogPathOptions;
-    /** A file path the caller gave, in its own project folder when it is not absolute. */
+    /** A file path the caller gave, placed by capabilities/path-inputs.ts `callerPathOf` (inside its checked project). */
     resolvePath(caller: CapabilityCaller, path: string): string;
   };
 }
@@ -77,13 +78,28 @@ const REVIEW_IS_THE_OWNERS = {
 };
 
 /** Who made or changed a skill, as its provenance says it: the person's own press or line, else the model. */
+/**
+ * Who made or changed a skill, in its provenance, from who wrote it as the daemon authenticated the caller
+ * (CapabilityCaller.author): the owner, his model in his own turn, or someone else, named. Never the person's claim alone:
+ * a paired device's press carries the claim too.
+ */
+function byWhom(caller: CapabilityCaller, made: 'Made' | 'Changed'): string {
+  const author = caller.author ?? UNNAMED_AUTHOR;
+  if (author.kind === 'owner') return `${made} by you`;
+  if (author.kind === 'owner-model') return `${made} by the model in your conversation`;
+  return `${made} by someone else (${author.who ?? 'not named'})`;
+}
 function madeBy(caller: CapabilityCaller): string {
-  return caller.personAsked === true ? 'Made by you' : 'Made by the model';
+  return byWhom(caller, 'Made');
+}
+/** A skill's source: the owner's own, or written for him (his model's, or someone else's). */
+function sourceOf(caller: CapabilityCaller): 'user' | 'agent' {
+  return caller.author?.kind === 'owner' ? 'user' : 'agent';
 }
 
-/** Marking reviewed, and switching on what nobody reviewed, count only from the owner's own press or typed line. */
+/** Marking reviewed, and switching on what nobody reviewed, count only from the owner himself (his press, his yes). */
 function ownerMay(caller: CapabilityCaller, what: string): void {
-  if (caller.personAsked === true) return;
+  if (caller.author?.kind === 'owner') return;
   throw new CapabilityRefusal(`${what} is the owner's decision that its text may reach the prompt, so it counts only when the owner does it himself; nothing was changed.`,
     'Ask the owner to do it in Tools and extensions, on the skill.', 'OWNER_REVIEW_REQUIRED');
 }
@@ -210,6 +226,8 @@ type Fields = Pick<CapabilityDefinition<SkillsCapabilityServices>, 'actionId' | 
   readonly repeat?: 'safe' | 'unsafe' | undefined;
   readonly lasts?: CapabilityDefinition<SkillsCapabilityServices>['lasts'] | undefined;
   readonly ownerOnly?: CapabilityDefinition<SkillsCapabilityServices>['ownerOnly'] | undefined;
+  /** It writes what steers a model in the owner's turns (CapabilityDefinition `steersModel`). */
+  readonly steersModel?: true | undefined;
   readonly run: (values: ActionValues, library: SkillLibrary, caller: CapabilityCaller, services: SkillsCapabilityServices) => CapabilityResult | Promise<CapabilityResult>;
 };
 
@@ -229,6 +247,7 @@ function change(fields: Fields): CapabilityDefinition<SkillsCapabilityServices> 
     touches: 'this-machine', lasts: fields.lasts ?? 'kept', risk: fields.risk ?? 'none',
     ...(fields.undoneBy ? { undoneBy: fields.undoneBy } : {}),
     ...(fields.ownerOnly ? { ownerOnly: fields.ownerOnly } : {}),
+    ...(fields.steersModel ? { steersModel: true as const } : {}),
     example: fields.example,
     async run(values, services, caller) {
       const result = await guarded(() => fields.run(values, services.skills.library(caller), caller, services));
@@ -274,7 +293,7 @@ export const MY_SKILLS_SHOW = read({
   },
 });
 export const MY_SKILLS_CREATE = change({
-  id: 'my-skills.create', actionId: 'create', label: 'Make a new skill', word: 'create', repeat: 'unsafe',
+  id: 'my-skills.create', actionId: 'create', label: 'Make a new skill', word: 'create', repeat: 'unsafe', steersModel: true,
   inputs: [
     text('name', 'Name', 'A short name', { flag: '--name' }),
     text('description', 'What it is for', 'One line the model matches tasks against', { flag: '--description' }),
@@ -292,13 +311,13 @@ export const MY_SKILLS_CREATE = change({
     const skill = library.create({
       name: values.name!, description: values.description!, procedure: values.procedure!,
       triggers: splitList(values.triggers), tags: splitList(values.tags), requirements: requirementsOf(values, library)!,
-      enabled: values.enabled === 'yes', source: caller.personAsked === true ? 'user' : 'agent', provenance: madeBy(caller),
+      enabled: values.enabled === 'yes', source: sourceOf(caller), provenance: madeBy(caller), author: caller.author ?? UNNAMED_AUTHOR,
     });
     return { text: receipt('Made the skill', skill, [`  file ${skill.path ?? library.folder}`, skill.enabled ? '  switched on' : '  off until you review it and switch it on']), data: { skill: skillFacts(skill) } };
   },
 });
 export const MY_SKILLS_UPDATE = change({
-  id: 'my-skills.update', actionId: 'update', label: 'Change a skill', word: 'update',
+  id: 'my-skills.update', actionId: 'update', label: 'Change a skill', word: 'update', steersModel: true,
   inputs: [
     SKILL,
     text('name', 'Name', 'A new name', { flag: '--name' }, { default: '', means: 'unchanged' }),
@@ -314,7 +333,7 @@ export const MY_SKILLS_UPDATE = change({
     const skill = library.update(values.skill!, {
       name: values.name || undefined, description: values.description || undefined, procedure: values.procedure || undefined,
       triggers: values.triggers ? splitList(values.triggers) : undefined, tags: values.tags ? splitList(values.tags) : undefined,
-      requirements: requirementsOf(values, library, values.skill!), provenance: caller.personAsked === true ? 'Changed by you' : 'Changed by the model',
+      requirements: requirementsOf(values, library, values.skill!), provenance: byWhom(caller, 'Changed'), by: caller.author ?? UNNAMED_AUTHOR,
     });
     return { text: receipt('Changed the skill', skill, ['  waits for your review again']), data: { skill: skillFacts(skill) } };
   },
@@ -341,7 +360,7 @@ export const MY_SKILLS_REVIEW = change({
   sentence: '{skill} is marked reviewed by you until you change it, so it may be switched on.', example: { skill: 'release-notes' },
   run: (values, library, caller) => {
     ownerMay(caller, 'Marking a skill reviewed');
-    const skill = library.markReviewed(values.skill!);
+    const skill = library.markReviewed(values.skill!, { accept: true });
     return { text: receipt('Marked reviewed', skill), data: { skill: skillFacts(skill) } };
   },
 });
@@ -381,7 +400,7 @@ export const MY_SKILLS_DISCOVER = read({
   },
 });
 export const MY_SKILLS_IMPORT_DISCOVERED = change({
-  id: 'my-skills.import-discovered', actionId: 'import-discovered', label: 'Import a skill file found on disk', word: 'import-discovered',
+  id: 'my-skills.import-discovered', actionId: 'import-discovered', label: 'Import a skill file found on disk', word: 'import-discovered', steersModel: true,
   inputs: [pickedInput({ id: 'file', label: 'Skill file', help: 'Skill files found on disk', list: SKILL_FILES_LIST, other: 'a skill name' }), SWITCH_ON('Switch it on at once, or after you review it')],
   sentence: '{file} is copied into your skills, off until you review it unless you switch it on, until you change it; the file it was found in is not changed.', undoneBy: 'delete', example: { file: 'release-notes' },
   run: (values, library, caller) => {
@@ -390,7 +409,7 @@ export const MY_SKILLS_IMPORT_DISCOVERED = change({
     if (values.enabled === 'yes') ownerMay(caller, 'Switching on a skill nobody reviewed');
     if (found.marked === true) throw new CapabilityRefusal(`${found.id} is already one of your skills; nothing was copied.`, undefined, 'CAPABILITY_REFUSED');
     // The person's file is never changed: the skill is copied into the store and GoodVibes' facts go on the copy.
-    const { skill, original } = library.copyIn(found.id, { enabled: values.enabled === 'yes', source: caller.personAsked === true ? 'user' : 'agent' });
+    const { skill, original } = library.copyIn(found.id, { enabled: values.enabled === 'yes', source: sourceOf(caller), author: caller.author ?? UNNAMED_AUTHOR });
     return {
       text: receipt('Copied the skill into your skills as', { id: skill.id, name: skill.id }, [
         `  the copy is ${skill.path ?? library.folder}`,
@@ -402,36 +421,40 @@ export const MY_SKILLS_IMPORT_DISCOVERED = change({
   },
 });
 export const MY_SKILLS_IMPORT_STANDARD = change({
-  id: 'my-skills.import-standard', actionId: 'import-standard', label: 'Import a shared SKILL.md', word: 'import-standard', repeat: 'unsafe',
+  id: 'my-skills.import-standard', actionId: 'import-standard', label: 'Import a shared SKILL.md', word: 'import-standard', repeat: 'unsafe', steersModel: true,
   inputs: [wordsInput({ id: 'path', label: 'SKILL.md file', help: 'A skill in the shared SKILL.md format', why: 'a file path on this machine', kind: 'path', typed: { position: 1 } })],
   sentence: 'The skill in {path} is added, off until you review it, until you change it.', undoneBy: 'delete', example: { path: 'skills/release-notes/SKILL.md' },
   run: (values, library, caller, services) => {
     const sourcePath = services.skills.resolvePath(caller, values.path!);
     let content: string;
     try { content = readFileSync(sourcePath, 'utf-8'); } catch (error) {
-      throw new CapabilityRefusal(`${sourcePath} could not be read (${error instanceof Error ? error.message : String(error)}); nothing was added.`);
+      throw unreadableFile(sourcePath, 'a SKILL.md file', caller, error, 'Nothing was added.');
     }
     const parsed = parseSkillStandardMarkdown(content);
-    if ('error' in parsed) throw new CapabilityRefusal(`${sourcePath} was not added: ${parsed.error}.`);
-    const skill = library.importFromStandard(content);
+    // The parser's words can quote the file: only the person reads them (path-inputs.ts `unreadableFile`).
+    if ('error' in parsed) throw caller.personAsked === true ? new CapabilityRefusal(`${sourcePath} was not added: ${parsed.error}.`) : unreadableFile(sourcePath, 'a SKILL.md file', caller, undefined, 'Nothing was added.');
+    const skill = library.importFromStandard(content, caller.author ?? UNNAMED_AUTHOR);
     return { text: receipt('Imported the shared skill', skill, [`  from ${sourcePath}`, '  off until you review it and switch it on']), data: { skill: skillFacts(skill) } };
   },
 });
 export const MY_SKILLS_EXPORT_STANDARD = change({
   id: 'my-skills.export-standard', actionId: 'export-standard', label: 'Save a skill as a shared SKILL.md', word: 'export-standard', lasts: 'not-a-change',
-  inputs: [SKILL, wordsInput({ id: 'dir', label: 'Folder', help: 'Where to write its SKILL.md', why: 'a folder on this machine', kind: 'path', typed: { position: 2 } }),
+  inputs: [SKILL, { ...wordsInput({ id: 'dir', label: 'Folder', help: 'Where to write its SKILL.md', why: 'a folder on this machine', kind: 'path', typed: { position: 2 } }), file: 'written', workFolder: false },
     fixedInput({ id: 'overwrite', label: 'If a SKILL.md is there', help: 'Keep it, or replace it', choices: [{ value: 'keep', label: 'Refuse and keep it' }, { value: 'replace', label: 'Replace it', risk: 'cannot-be-undone', riskDone: REPLACED_DONE }], typed: { flag: '--overwrite', switchOn: 'replace' }, optional: { default: 'keep', means: 'refuse and keep it' } })],
   sentence: '{skill} is written as a SKILL.md into {dir}.', example: { skill: 'release-notes', dir: 'skills/release-notes' },
   run: (values, library, caller, services) => {
     const skill = library.get(values.skill!);
     if (!skill) throw new CapabilityRefusal(`No skill named ${values.skill}.`, undefined, 'NOT_FOUND');
     const targetDir = services.skills.resolvePath(caller, values.dir!);
+    // Beneath a folder the caller named, resolved through its held handle one component at a time (held-paths.ts): a
+    // link planted on the way is refused, never followed.
+    const file = heldPath(skillStandardFilePath(skill.name, targetDir), 'write');
     const overwrite = values.overwrite === 'replace';
-    const replaced = overwrite && existsSync(skillStandardFilePath(skill.name, targetDir));
-    if (!overwrite && existsSync(skillStandardFilePath(skill.name, targetDir))) {
-      throw new CapabilityRefusal(`A SKILL.md is already at ${skillStandardFilePath(skill.name, targetDir)}; it was kept and nothing was written.`, 'Choose "Replace it" to write over it.');
+    const replaced = overwrite && existsSync(file);
+    if (!overwrite && existsSync(file)) {
+      throw new CapabilityRefusal(`A SKILL.md is already at ${file}; it was kept and nothing was written.`, 'Choose "Replace it" to write over it.');
     }
-    const written = library.exportToStandard(skill.id, targetDir, overwrite);
+    const written = library.exportToStandardFile(skill.id, file, overwrite);
     // Where the file went, in one true sentence: "Saved garden journal as a shared SKILL.md at <path>."
     return {
       text: `Saved ${skill.name} as a shared SKILL.md at ${written}${replaced ? ', in place of the file that was there' : ''}.`,
@@ -479,22 +502,22 @@ const BUNDLE_SKILLS = (optional?: { default: string; means: string }): InputDesc
   id: 'skills', label: 'Skills in it', help: 'Skill names, separated by commas', why: 'names of your skills', typed: { flag: '--skills' }, ...(optional ? { optional } : {}),
 });
 export const MY_SKILLS_BUNDLE_CREATE = change({
-  id: 'my-skills.bundle-create', actionId: 'bundle-create', label: 'Make a skill bundle', word: 'bundle-create', repeat: 'unsafe',
+  id: 'my-skills.bundle-create', actionId: 'bundle-create', label: 'Make a skill bundle', word: 'bundle-create', repeat: 'unsafe', steersModel: true,
   inputs: [text('name', 'Name', 'A short name', { flag: '--name' }), text('description', 'What it is for', 'One line', { flag: '--description' }), BUNDLE_SKILLS(), SWITCH_ON('Switch it on at once, or after you review it')],
   sentence: 'The skills {skills} are grouped together as a new skill bundle {name} ("{description}"), kept until you change it.', undoneBy: 'bundle-delete',
   example: { name: 'releases', description: 'Everything for a release', skills: 'release-notes,changelog' },
   run: (values, library, caller) => {
     if (values.enabled === 'yes') ownerMay(caller, 'Switching on a skill bundle nobody reviewed');
-    const bundle = library.createBundle({ name: values.name!, description: values.description!, skillIds: splitList(values.skills), enabled: values.enabled === 'yes', source: caller.personAsked === true ? 'user' : 'agent', provenance: madeBy(caller) });
+    const bundle = library.createBundle({ name: values.name!, description: values.description!, skillIds: splitList(values.skills), enabled: values.enabled === 'yes', source: sourceOf(caller), provenance: madeBy(caller), author: caller.author ?? UNNAMED_AUTHOR });
     return { text: receipt('Made the skill bundle', bundle, [`  skills ${bundle.skillIds.join(', ')}`]), data: { bundle: bundleFacts(bundle, library.list()) } };
   },
 });
 export const MY_SKILLS_BUNDLE_UPDATE = change({
-  id: 'my-skills.bundle-update', actionId: 'bundle-update', label: 'Change a skill bundle', word: 'bundle-update',
+  id: 'my-skills.bundle-update', actionId: 'bundle-update', label: 'Change a skill bundle', word: 'bundle-update', steersModel: true,
   inputs: [BUNDLE, text('name', 'Name', 'A new name', { flag: '--name' }, { default: '', means: 'unchanged' }), text('description', 'What it is for', 'A new line', { flag: '--description' }, { default: '', means: 'unchanged' }), BUNDLE_SKILLS({ default: '', means: 'unchanged' })],
   sentence: '{bundle} is changed to what you gave until you change it; a changed bundle waits for review again.', example: { bundle: 'releases', skills: 'release-notes' },
   run: (values, library, caller) => {
-    const bundle = library.updateBundle(values.bundle!, { name: values.name || undefined, description: values.description || undefined, skillIds: values.skills ? splitList(values.skills) : undefined, provenance: caller.personAsked === true ? 'Changed by you' : 'Changed by the model' });
+    const bundle = library.updateBundle(values.bundle!, { name: values.name || undefined, description: values.description || undefined, skillIds: values.skills ? splitList(values.skills) : undefined, provenance: byWhom(caller, 'Changed'), by: caller.author ?? UNNAMED_AUTHOR });
     return { text: receipt('Changed the skill bundle', bundle, ['  waits for your review again']), data: { bundle: bundleFacts(bundle, library.list()) } };
   },
 });
@@ -518,7 +541,7 @@ export const MY_SKILLS_BUNDLE_REVIEW = change({
   sentence: '{bundle} is marked reviewed by you until you change it, so it may be switched on.', example: { bundle: 'releases' },
   run: (values, library, caller) => {
     ownerMay(caller, 'Marking a skill bundle reviewed');
-    const bundle = library.markBundleReviewed(values.bundle!);
+    const bundle = library.markBundleReviewed(values.bundle!, { accept: true });
     return { text: receipt('Marked reviewed', bundle), data: { bundle: bundleFacts(bundle, library.list()) } };
   },
 });
@@ -600,7 +623,7 @@ export const SKILLS_PUBLISH_LOCAL = change({
   id: 'skills.publish-local', actionId: 'publish-local', label: 'Publish a skill folder to the local catalog', word: 'publish-local',
   inputs: [
     wordsInput({ id: 'id', label: 'Catalog id', help: 'A short id you choose', why: 'a new id you choose', typed: { position: 1 } }),
-    wordsInput({ id: 'path', label: 'Skill folder', help: 'The folder with its SKILL.md', why: 'a folder on this machine', kind: 'path', typed: { position: 2 } }),
+    { ...wordsInput({ id: 'path', label: 'Skill folder', help: 'The folder with its SKILL.md', why: 'a folder on this machine', kind: 'path', typed: { position: 2 } }), workFolder: false },
     wordsInput({ id: 'summary', label: 'Summary', help: 'One line on what it does', why: 'your own words', typed: { tail: true } }),
   ],
   sentence: 'The skill in {path} is listed in the local curated catalog as {id} ("{summary}"), until you change it.', undoneBy: 'unpublish',
@@ -638,8 +661,3 @@ export const MY_SKILLS_CAPABILITIES: readonly CapabilityDefinition<SkillsCapabil
 export const SKILL_PACK_CAPABILITIES: readonly CapabilityDefinition<SkillsCapabilityServices>[] = [
   SKILLS_LIST_PACKS, SKILLS_SHOW_PACK, SKILLS_ORIGINS, SKILLS_PUBLISH_LOCAL, SKILLS_UNPUBLISH,
 ];
-
-/** A path the caller gave: as it is when absolute, else in the caller's project folder. */
-export function resolveCallerPath(base: string, path: string): string {
-  return isAbsolute(path) ? path : resolve(base, path);
-}

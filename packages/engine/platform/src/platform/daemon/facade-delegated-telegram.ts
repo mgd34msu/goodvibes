@@ -17,11 +17,8 @@ import {
 } from '../control-plane/delegated-inbound-wire.js';
 import { z } from 'zod/v4';
 const scopes = ['read:work-ledger', 'write:work-ledger'] as const;
-/** The one native owner rule (routes/native-owner.ts); a token credential, never a login session. */
+/** The one native owner rule (routes/native-owner.ts): the owner's machine, a device he paired, or the owner himself signed in. */
 function owner(invocation: GatewayMethodInvocation) {
-  if (invocation.context.principalKind !== 'token') {
-    throw new GatewayVerbError('Delegated Telegram intake runs for the owner\'s own machine or a paired device, not a login session. Use the app on the daemon\'s machine or a paired device, then retry.', PAIRED_OWNER_REQUIRED, 403);
-  }
   const authority = requireNativeOwner(invocation, scopes, 'Delegated Telegram intake');
   const current = authority.current();
   if (!current) throw new GatewayVerbError('Delegated Telegram intake: the caller\'s owner authority ended while the command started. Retry.', PAIRED_OWNER_REQUIRED, 403);

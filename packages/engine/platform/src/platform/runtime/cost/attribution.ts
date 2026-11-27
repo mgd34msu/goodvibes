@@ -23,6 +23,7 @@
  */
 import { computeUsageCostUsd, type CacheRatio } from '../../providers/model-pricing.js';
 import { noteListChanged } from '../list-changes.js';
+import { currentRecordReach } from '@goodvibes/engine/daemon-api';
 
 /** A single usage record. Every dimension is optional, the service attributes over whatever a record carries. */
 export interface CostUsageRecord {
@@ -251,9 +252,15 @@ export class CostAttributionService {
     const keyOf = DIMENSION_KEY[dimension];
     const groups = new Map<string, AccumulatorState>();
     const total = emptyAccumulator();
+    // A caller that is not the owner himself (daemon-api withRecordReach): only what was spent in a session or by an
+    // agent it may reach (control-plane/caller-reach.ts); spending that names neither is the owner's to see.
+    const reach = currentRecordReach();
+    const reachable = (rec: CostUsageRecord): boolean => !reach
+      || (rec.sessionId !== undefined ? reach('session', rec.sessionId) : rec.agentId !== undefined ? reach('task', rec.agentId) : false);
 
     for (const rec of this.records) {
       if (rec.at < windowStartMs) continue;
+      if (!reachable(rec)) continue;
       const { costUsd, state, source, asOf } = this.priceRecord(rec);
       const key = keyOf(rec) ?? UNATTRIBUTED;
       let group = groups.get(key);

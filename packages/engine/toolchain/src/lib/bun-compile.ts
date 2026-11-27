@@ -45,7 +45,10 @@ export async function compileBunBinary(root: string, args: readonly string[], de
   const result = await build({
     entrypoints: [resolve(root, options.entrypoint)],
     target: 'bun',
-    compile: { target: options.target, outfile: resolve(root, options.outfile) },
+    // A program built here reads no `bunfig.toml` and no `.env` from the folder it is started in: a repository's
+    // `bunfig.toml` `preload` would otherwise run its own code inside the owner's installed program (measured on 3.5.0),
+    // and its `.env` would set the program's environment; source runs pass `--no-env-file` for the same reason.
+    compile: { target: options.target, outfile: resolve(root, options.outfile), autoloadBunfig: false, autoloadDotenv: false },
     external: options.external,
     files: bunCompileCompatibilityFiles(root),
     ...(defines.define === undefined ? {} : { define: { ...defines.define } }),

@@ -13,12 +13,27 @@
 import { modelNeverRuns, ownerDecidesForModel, type CapabilityEntry } from '../../capabilities/catalog.js';
 import type { FixedChoice } from '../../capabilities/types.js';
 import type { ToolDefinition, ToolOwnerActs, ToolOwnerDecisions } from '../../types/tools.js';
+import { RUNS_LATER_CAPABILITY_IDS, RUNS_LATER_METHOD_IDS } from '../../control-plane/method-risk.js';
 
 /** What the daemon methods a call may name directly bring to the definition (the folded method tool's declarations). */
 export interface CapabilityRunMethodDeclarations {
   readonly ownerActs?: readonly string[] | undefined;
+  /** Of `ownerActs`, the ones put to the owner (opening on No) rather than refused: a method whose class is `owner-act`. */
+  readonly ownerActsAsked?: readonly string[] | undefined;
   readonly irreversible?: readonly string[] | undefined;
+  /** Methods whose class loosens a protection or writes a secret (control-plane/method-risk.ts). */
+  readonly loosens?: readonly string[] | undefined;
+  /** Methods that make something run by itself later (control-plane/method-risk.ts `RUNS_LATER_METHOD_IDS`). */
+  readonly runsLater?: readonly string[] | undefined;
+  /** Methods that spend money (class `spends-money`): asked each time after the conversation read text from outside. */
+  readonly sendsOrSpends?: readonly string[] | undefined;
   readonly contractChanges?: readonly string[] | undefined;
+  /**
+   * Methods that only read: class `none` in the risk table (control-plane/method-risk.ts) together with the method's
+   * declared read effect (`effect: 'read'`, every scope it needs a read scope). Classed a read, as a capability that only
+   * reads is: a turn on someone else's input may call one by id, within what its caller may reach.
+   */
+  readonly reads?: readonly string[] | undefined;
   /** Recipient paths under `inputs`, by method id. */
   readonly recipients?: Readonly<Record<string, readonly string[]>> | undefined;
   /**
@@ -99,9 +114,17 @@ export function capabilityRunDefinition(entries: readonly CapabilityEntry[], met
     contractChanges: [...(methods.contractChanges ?? [])],
     // A capability that writes a credential is the owner's to decide, as one that loosens a protection: asked,
     // opening on No (a model's call of it is never refused outright, and never run unasked).
-    loosens: entries.filter((entry) => entry.risk === 'loosens-a-protection' || ownerDecidesForModel(entry)).map((entry) => entry.id),
+    loosens: [...entries.filter((entry) => entry.risk === 'loosens-a-protection' || ownerDecidesForModel(entry)).map((entry) => entry.id), ...(methods.loosens ?? [])],
     loosensWhen,
     irreversibleWhen,
+    // What runs by itself later: a capability that makes it, or runs through a method that does, and such methods by id.
+    // A routed id is decided once, at the nested method call it becomes, with that method's own declarations.
+    runsLater: [...entries.filter((entry) => RUNS_LATER_CAPABILITY_IDS.has(entry.id) || (entry.method !== undefined && RUNS_LATER_METHOD_IDS.has(entry.method.id))).map((entry) => entry.id),
+      ...(methods.runsLater ?? [])].filter((id) => !(methods.routed ?? []).includes(id)),
+    // What sends out as the owner or spends his money: after the conversation read text from outside, asked each time in
+    // every mode (security/conversation-exposure.ts). A routed id is decided at its nested method call.
+    sendsOrSpends: [...entries.filter((entry) => entry.risk === 'sends-out' || entry.risk === 'spends-money').map((entry) => entry.id),
+      ...(methods.sendsOrSpends ?? [])].filter((id) => !(methods.routed ?? []).includes(id)),
     ...(methods.recipients ? { recipients: methods.recipients } : {}),
   };
   // Only the owner does it himself: its own flag, or an effect a model never causes that the owner cannot decide for it.
@@ -112,7 +135,7 @@ export function capabilityRunDefinition(entries: readonly CapabilityEntry[], met
     words: Object.fromEntries(ownerOwn.map((entry) => [entry.id, entry.label])),
     // A capability that is the owner's own act is put to him, opening on No, never refused outright; a daemon method
     // named directly whose act is his (answering an approval, minting a token) stays refused to a model.
-    asked: ownerOwn.map((entry) => entry.id),
+    asked: [...ownerOwn.map((entry) => entry.id), ...(methods.ownerActsAsked ?? [])],
     // One that hands on a card's detail the owner types is answered each time: never remembered.
     once: ownerOwn.filter((entry) => (entry.effects ?? []).includes('card.enter')).map((entry) => entry.id),
   };
@@ -133,7 +156,10 @@ export function capabilityRunDefinition(entries: readonly CapabilityEntry[], met
       additionalProperties: false,
     },
     sideEffects: ['network', 'state'],
-    readModes: { field: 'id', values: [...entries.filter((entry) => entry.touches === 'reads').map((entry) => entry.id), ...(methods.routed ?? [])] },
+    // A read is a capability that only reads and carries no risk: one that reads but sends, spends, loosens or cannot be
+    // undone is not one (a turn on someone else's input runs reads only, gate/classify.ts). A routed method is decided as
+    // the nested daemon-method call it becomes. A daemon method named by id that only reads (`methods.reads`) is one too.
+    readModes: { field: 'id', values: [...entries.filter((entry) => entry.touches === 'reads' && entry.risk === 'none').map((entry) => entry.id), ...(methods.routed ?? []), ...(methods.reads ?? [])] },
     // A capability that only tightens a protection (its definition's `tightens`) is never refused or asked about.
     tightens: {
       field: 'id',
@@ -145,6 +171,16 @@ export function capabilityRunDefinition(entries: readonly CapabilityEntry[], met
     ownWorkingState: { field: 'id', values: entries.filter((entry) => entry.ownWorkingState === true).map((entry) => entry.id) },
     ownerActs,
     ownerDecisions: decisions,
+    // The files a capability writes, its path inputs declared `file: 'written'`: the gate reads them as a file write's
+    // path, so one that runs by itself later is asked of the owner as a model's write of it is (gate/classify.ts). A file
+    // it only reads is never asked for its name.
+    writesFiles: {
+      field: 'id',
+      paths: Object.fromEntries(entries.flatMap((entry) => {
+        const inputs = entry.inputs.filter((input) => input.kind === 'path' && input.file === 'written').map((input) => `inputs.${input.id}`);
+        return inputs.length > 0 ? [[entry.id, inputs]] : [];
+      })),
+    },
     // A capability the daemon runs acts on what the daemon holds, in no project folder: the folder's trust neither
     // refuses nor asks about its call. The call itself is decided as any other (an act of the owner's, asked opening on No).
     // One that writes or runs in the project folder is not among them: the folder holds it as it holds a file write.

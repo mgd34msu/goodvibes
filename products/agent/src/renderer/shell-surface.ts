@@ -38,8 +38,8 @@ import { type BackToBottomState } from './back-to-bottom.ts';
  * auto-approved, the live microphone and the power chip ("sleep disabled" /
  * "sleep held"); the composer's intent; the unread notices with `ctrl+n`;
  * while a turn runs, the `esc` interrupt keycap; any background work. On the
- * right: the cost, `context 34%`, `model …` and the `ctrl+p` keycap for the
- * Agent workspace.
+ * right: the cost, `context 34%`, `model …` and the `ctrl+g m` keycap for the
+ * menu.
  *
  * Inside an agent or process view (shell/session-views.ts) the composer's bar
  * takes that session's color and its own placeholder (or a one-line reason in
@@ -118,10 +118,6 @@ export interface ShellFooterBuildOptions {
   readonly powerNote?: string;
   /** The Agent home (profile) the session runs in when it is not the default one: a `home <name>` chip. */
   readonly homeName?: string | null;
-  /** A contract's open question the next typed message answers (contract-question-composer.ts), a row above the composer. */
-  readonly contractQuestionHint?: string | null;
-  /** Typing left the Agent workspace for the composer: the area Esc goes back to, named in a row above the composer. */
-  readonly workspaceReturnArea?: string | null;
   /** Live microphone state; a visible state renders the microphone chip. */
   readonly voiceCapture?: VoiceCaptureIndicatorState | null;
   /** What main is doing while it works (a turn, a compaction): the throbber row. Null at rest. */
@@ -208,13 +204,5 @@ export const { buildShellFooter, estimateShellFooterHeight } = createShellFooter
     ...intentChips(options),
     ...((options.composerFlags ?? []).includes('attachments') ? [{ text: 'image attached', fg: activeTokens().info }] : []),
   ],
-  hints: (options) => [
-    ...(options.contractQuestionHint
-      ? [UIFactory.stringToLine(`   ${options.contractQuestionHint}`, options.width, { fg: activeTokens().textMuted, bold: true })]
-      : []),
-    // Typing out of the workspace is said where the typing goes, so the switch is never silent.
-    ...(options.workspaceReturnArea
-      ? [UIFactory.stringToLine(`   Typing to the assistant · Esc: back to ${options.workspaceReturnArea} (${options.promptText.trim().length <= 1 ? 'drops this letter' : 'keeps what you typed'})`, options.width, { fg: activeTokens().textMuted })]
-      : []),
-  ],
+  hints: () => [],
 });

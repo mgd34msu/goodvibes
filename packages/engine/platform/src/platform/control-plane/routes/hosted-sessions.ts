@@ -157,7 +157,7 @@ export function createHostedSessionCreateHandler(service: HostedSessionVerbServi
     const modelId = optionalString(params, 'modelId');
     const initialPrompt = optionalString(params, 'initialPrompt');
     const clientId = optionalString(params, 'clientId');
-    const principalId = invocation.context.principalId;
+    const principalId = ownerIdOf(invocation);
     // The surface the caller is creating this session FOR. It travels with the
     // create call because the host cannot infer it: every client reaches the
     // daemon the same way, so a session created by the agent and a session
@@ -209,11 +209,21 @@ export function createHostedSessionCreateHandler(service: HostedSessionVerbServi
   };
 }
 
+/**
+ * The id a session's owners name the caller by: its actor's id, which keeps a sign-in user whose name is another
+ * credential's id (`shared-token`) apart as `user:<name>` (daemon-api actor.ts), so its session is never this machine's
+ * token's, nor the token's its. The principal id when no actor was built.
+ */
+function ownerIdOf(invocation: Parameters<GatewayMethodHandler>[0]): string | undefined {
+  const actor = invocation.context.actor;
+  return actor !== undefined && actor.class !== 'peer' && actor.class !== 'system' ? actor.id : invocation.context.principalId;
+}
+
 export function createHostedSessionAttachHandler(service: HostedSessionVerbService): GatewayMethodHandler {
   return async (invocation) => {
     const params = readInvocationParams(invocation);
     const leaseMs = optionalPositiveNumber(params, 'leaseMs');
-    const principalId = invocation.context.principalId;
+    const principalId = ownerIdOf(invocation);
     try {
       const sessionId = requireString(params, 'sessionId');
       // Joining returns the transcript, so it is both effects, on this session's owners.
@@ -272,7 +282,7 @@ export function createHostedSessionDetachHandler(service: HostedSessionVerbServi
   return async (invocation) => {
     const params = readInvocationParams(invocation);
     try {
-      return { session: await service.detach(requireString(params, 'sessionId'), requireString(params, 'clientId'), invocation.context.principalId) };
+      return { session: await service.detach(requireString(params, 'sessionId'), requireString(params, 'clientId'), ownerIdOf(invocation)) };
     } catch (error) {
       return toGatewayVerbError(error);
     }

@@ -9,11 +9,11 @@ Provider and model state should be visible in:
 - the shell footer/status rows;
 - the Health tab of the System place in the TUI and `goodvibes-agent status` in the CLI;
 - `/model` (this conversation's model) and Models and providers in the menu (the default model, pins, backups, providers and sign-ins, routing, the same place as the terminal app's);
-- the Agent operator workspace setup checklist;
-- the TTS configuration workspace when spoken turns are used;
+- the Setup tab of the System place (its checklist);
+- the voice settings (the Voice tab of System, and the TTS rows of the settings screen) when spoken turns are used;
 - `models action:"status|route|local|providers|provider|smoke"` when the model needs provider/model route posture, selectable model metadata, pinned model status, reasoning support, context-window posture, readiness scores, safe setting keys, provider auth posture, subscription freshness, or the hardware-scored local model cookbook;
 - the same `models` routes with `includeParameters:true`, `action:"route"`, or `action:"provider"` for full capabilities, readiness dimensions, the local hardware profile, fit scores, setup/download guidance, local endpoint candidates with exact endpoint inspection, model-list smoke commands and triage, saved benchmark evidence, route-change hints, usage windows, issues, notes, and auth-flow hints;
-- lower-level `agent_harness` modes `model_routing`, `model_route`, `local_model_cookbook` (what `models action:"local"` reads; `query` filters its recipes), `provider_accounts`, `provider_account`, and confirmed `run_local_model_smoke`, which remain available for compatibility and detailed harness inspection; provider/account mutations stay on confirmed workspace or settings routes.
+- lower-level `agent_harness` modes `model_routing`, `model_route`, `local_model_cookbook` (what `models action:"local"` reads; `query` filters its recipes), `provider_accounts`, `provider_account`, and confirmed `run_local_model_smoke`, which remain available for compatibility and detailed harness inspection; provider/account mutations stay on Models and providers' controls or confirmed settings routes.
 
 When a selected model is provider-qualified, Agent keeps the runtime provider row and raw model id separate. For example, `openai:gpt-6.1-sol` routes as provider `openai` and model `gpt-6.1-sol` where the public route expects provider/model fields.
 
@@ -33,11 +33,11 @@ These files are local configuration. They are not Agent Knowledge records and sh
 
 ## Local model cookbook
 
-The Models workspace (Agent Workspace -> Models) keeps inspection, comparison, and route changes separate so nothing switches a model implicitly. Its detail pane summarizes route readiness, the local cookbook, local server checks, and benchmark evidence, and the model-visible `models` tool carries the same surfaces under these routes:
+Models and providers (the menu) and the model picker (`/model`) keep inspection, comparison, and route changes separate so nothing switches a model implicitly, and the model-visible `models` tool carries the same surfaces under these routes:
 
 | Surface | What it does |
 | --- | --- |
-| Choose provider and model | Workspace picker action for the main chat route; helper, tool, and spoken-turn routes have their own picker rows. |
+| Choose provider and model | The model picker (`/model`, or System, Setup, `Choose a model`): its Main chat tab for the main chat route; Side work, Tool work and Spoken replies are its other tabs. |
 | Benchmark local models | `b` on the Comparisons tab of Models and providers (`compare.benchmark`): a local-route benchmark through blind comparison that saves latency/task-fit evidence without changing the route. |
 | `models action:"status"` | Route readiness scores, missing signals, pinned state, and safe route keys. |
 | `models action:"local"` | The hardware-scored local model cookbook with recipe ranking and setup/download guidance. |

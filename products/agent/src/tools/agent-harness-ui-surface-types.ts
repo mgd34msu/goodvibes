@@ -2,7 +2,7 @@ import type { CommandContext } from '../input/command-registry.ts';
 import type { EffectResult } from './agent-harness-tool-utils.ts';
 import type { CatalogRankingOptions } from '@goodvibes/engine/terminal-shell/agent-turn/catalog-ranking';
 
-export type UiSurfaceKind = 'overlay' | 'modal' | 'workspace' | 'picker';
+export type UiSurfaceKind = 'overlay' | 'modal' | 'place' | 'screen' | 'picker';
 
 export interface AgentHarnessUiSurfaceArgs {
   readonly query?: unknown;

@@ -163,10 +163,6 @@ export interface BootstrapCommandSectionOptions {
   readonly memoryConsolidationScheduler?: ConsolidationReceiptSource;
 }
 
-function unwiredShellAction(name: string): never {
-  throw new Error(`Agent runtime action "${name}" was called before the operator route was attached.`);
-}
-
 export function createBootstrapCommandActions(
   options: BootstrapCommandActionOptions,
 ): Pick<
@@ -186,18 +182,8 @@ export function createBootstrapCommandActions(
   | 'exit'
   | 'reloadSystemPrompt'
   | 'openMcpWorkspace'
-  | 'openAgentWorkspace'
-  | 'dismissAgentWorkspace'
-  | 'openSecurityWorkspace'
-  | 'openKnowledgeWorkspace'
-  | 'openSubscriptionWorkspace'
 > {
   const { providerRegistry, configManager, conversation, runtime, requestRender, completeModelSelectionSideEffect } = options;
-
-  const pointToWorkspace = (what: string) => {
-    conversation.log(`${what} is not ready yet: the Agent is still starting. Open it from the menu (Ctrl+G then m) in a moment.`, { fg: activeTokens().warning });
-    requestRender();
-  };
 
   return {
     ...createBootstrapActionBase(options, {
@@ -220,17 +206,6 @@ export function createBootstrapCommandActions(
         },
       ),
     }),
-    openAgentWorkspace: () => unwiredShellAction('openAgentWorkspace'),
-    dismissAgentWorkspace: () => unwiredShellAction('dismissAgentWorkspace'),
-    openSecurityWorkspace: () => {
-      pointToWorkspace('Security review');
-    },
-    openKnowledgeWorkspace: () => {
-      pointToWorkspace('Knowledge');
-    },
-    openSubscriptionWorkspace: () => {
-      pointToWorkspace('Provider subscriptions');
-    },
   };
 }
 

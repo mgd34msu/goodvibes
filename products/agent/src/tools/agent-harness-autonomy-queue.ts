@@ -3,9 +3,9 @@ import { approvalLifecycle, isOpenApprovalStatus } from '@goodvibes/engine/platf
 import { rankHarnessCatalog, type CatalogRankingOptions } from '@goodvibes/engine/terminal-shell/agent-turn/catalog-ranking';
 import { contractMethodsForAutonomy } from './agent-harness-personal-ops-discovery.ts';
 import type { CommandContext } from '../input/command-registry.ts';
-import { buildAgentWorkspaceRoutineCounters } from '../input/agent-workspace-snapshot.ts';
-import { buildAgentWorkspaceResearchRunSnapshot, buildAgentWorkspaceRoutineScheduleReceiptsSnapshot } from '../input/agent-workspace-snapshot-builders.ts';
-import { buildAgentWorkspaceChannels } from '../input/agent-workspace-channels.ts';
+import { buildAgentRoutineCounters } from '../input/runtime-snapshot.ts';
+import { buildAgentResearchRunSnapshot, buildAgentRoutineScheduleReceiptsSnapshot } from '../input/runtime-snapshot-builders.ts';
+import { buildAgentChannels } from '../input/channel-readiness.ts';
 import { autonomyLiveNativeFacts, captureAutonomyLiveRecords, controlAvailable, firstAvailableControlRoute,
   type AutonomyLiveRecordBundle, type AutonomyLiveNativeFacts, type LiveSourceName } from './agent-harness-autonomy-live-records.ts';
 import { watcherReadModelLiveRecords, watcherReadModelNativeFacts, watcherReadModelPublication,
@@ -281,11 +281,11 @@ function buildQueueItems(context: CommandContext, watcherReadModelRecords: reado
   facts: AutonomyLiveNativeFacts = nativeFactsForBundle(records),
   watcherFacts: readonly Pick<AutonomyQueueLiveRecord, 'status'>[] = watcherReadModelRecords): readonly AutonomyQueueItem[] {
   // Only the parts the queue reads: channels, routines with their schedule receipts, research run counts.
-  const routineReceipts = buildAgentWorkspaceRoutineScheduleReceiptsSnapshot(context);
-  const researchRunCounts = buildAgentWorkspaceResearchRunSnapshot(context);
+  const routineReceipts = buildAgentRoutineScheduleReceiptsSnapshot(context);
+  const researchRunCounts = buildAgentResearchRunSnapshot(context);
   const snapshot = {
-    channels: buildAgentWorkspaceChannels(context),
-    localRoutines: buildAgentWorkspaceRoutineCounters(context).items,
+    channels: buildAgentChannels(context),
+    localRoutines: buildAgentRoutineCounters(context).items,
     routineScheduleReceiptCount: routineReceipts.count,
     successfulRoutineScheduleReceiptCount: routineReceipts.successful,
     failedRoutineScheduleReceiptCount: routineReceipts.failed,
@@ -361,7 +361,7 @@ function buildQueueItems(context: CommandContext, watcherReadModelRecords: reado
       visible: true,
       cancellable: true,
       methodsAvailable: taskMethods.length,
-      current: `Work-plan actions are available in the Agent workspace; ${taskMethods.length} task/work-plan daemon method(s) are discoverable.`,
+      current: `The checklist is on the Checklist tab of Work and agents; ${taskMethods.length} task/work-plan daemon method(s) are discoverable.`,
       next: 'Track ongoing user work here first, then update status to active, blocked, done, failed, or cancelled through the owning route under current recorded admission.',
       inspectRoute: 'agent_work_plan action:"list"',
       modelRoute: 'agent_work_plan',
@@ -426,7 +426,7 @@ function buildQueueItems(context: CommandContext, watcherReadModelRecords: reado
           : taskMethods.length > 0
             ? 'Inspect host tasks before changing any work plan or automation state.'
         : 'Update the connected GoodVibes host or connector set until task inspection methods are present.',
-      inspectRoute: 'workspace action:"action" actionId:"tasks-filter"',
+      inspectRoute: 'capability_run id:"work.tasks"',
       modelRoute: 'host action:"methods" query:"task"',
       ...(taskCancelRoute ? { cancelRoute: taskCancelRoute } : {}),
       methodIds: taskMethods,
@@ -450,9 +450,9 @@ function buildQueueItems(context: CommandContext, watcherReadModelRecords: reado
       next: facts.approvals.some((record) => isOpenApprovalStatus(record.status))
         ? 'Review pending approval records, risk, and args; approve, deny, or cancel exactly one id only when the user asks.'
         : 'Review the matrix, then approve, deny, or cancel one exact approval id only when the user asks.',
-      inspectRoute: 'workspace action:"action" actionId:"approval-review"',
+      inspectRoute: 'capability_find need:"see the approvals waiting for an answer"',
       modelRoute: 'host action:"methods" query:"approval"',
-      cancelRoute: 'workspace action:"run" actionId:"approval-cancel"',
+      cancelRoute: 'capability_find need:"cancel an approval"',
       methodIds: approvalMethods,
       unavailableMethodIds: methods?.approvals.unavailable,
       liveRecords: approvalRecords,
@@ -484,8 +484,8 @@ function buildQueueItems(context: CommandContext, watcherReadModelRecords: reado
                 ? 'Review durable watcher/run receipts, then wait for live platform/daemon run records before controlling any run.'
                 : 'Inspect automation posture first. Use exact run/job ids for owning run control under current recorded admission.',
       inspectRoute: 'host action:"methods" query:"automation"',
-      modelRoute: 'workspace action:"actions" categoryId:"automation"',
-      cancelRoute: 'workspace action:"run" actionId:"automation-run-cancel"',
+      modelRoute: 'capability_find need:"<what to do with schedules and automation runs>"',
+      cancelRoute: 'capability_run id:"schedule.stop-run"',
       methodIds: automationMethods,
       unavailableMethodIds: methods?.automation.unavailable,
       liveRecords: automationRecords,
@@ -575,9 +575,9 @@ function buildQueueItems(context: CommandContext, watcherReadModelRecords: reado
         : scheduleReadyRoutines > 0
           ? 'Promote one reviewed routine with exact recurrence scope under current recorded admission.'
           : 'Create, enable, and review a routine before schedule promotion.',
-      inspectRoute: 'workspace action:"action" actionId:"schedule-receipt"',
-      modelRoute: 'workspace action:"actions" categoryId:"routines"',
-      createRoute: 'workspace action:"run" actionId:"schedule-promote-routine"',
+      inspectRoute: 'capability_run id:"routines.receipt"',
+      modelRoute: 'capability_run id:"routines.receipts"',
+      createRoute: 'capability_run id:"routines.promote"',
       methodIds: scheduleMethods,
       unavailableMethodIds: methods?.schedules.unavailable,
     },
@@ -633,7 +633,7 @@ function buildQueueItems(context: CommandContext, watcherReadModelRecords: reado
         : 'Pair or configure a delivery channel before promising proactive follow-up.',
       inspectRoute: 'channels action:"status"',
       modelRoute: 'channels action:"status"',
-      createRoute: 'workspace action:"run" actionId:"personal-ops-channels"',
+      createRoute: 'capability_run id:"channels.setup"',
     },
   ];
   const unread = unreadQueueSources(facts, supervised);

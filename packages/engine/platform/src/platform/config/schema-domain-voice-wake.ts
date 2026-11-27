@@ -95,7 +95,7 @@ export function parseWakeModelList(value: string): string[] {
 
 export const voiceWakeConfigSettings: ConfigSettingDefinition[] = [
   {
-    key: 'voice.wake.enabled',
+    key: 'voice.wake.enabled', valueKind: 'opening-switch',
     label: 'Listen for the wake word',
     appliesWhen: 'now',
     type: 'boolean',
@@ -276,7 +276,7 @@ export const voiceWakeConfigSettings: ConfigSettingDefinition[] = [
       + '"none" is silent and leaves voice.wake.indicator as the only feedback.',
   },
   {
-    key: 'voice.wake.activationSoundPath',
+    key: 'voice.wake.activationSoundPath', valueKind: 'path',
     label: 'Your own wake sound file',
     type: 'string',
     description:
@@ -286,7 +286,7 @@ export const voiceWakeConfigSettings: ConfigSettingDefinition[] = [
       + 'either way.',
   },
   {
-    key: 'voice.wake.indicator',
+    key: 'voice.wake.indicator', valueKind: 'protection-switch',
     label: 'Show when the microphone is listening',
     type: 'enum',
     enumValues: ['off', 'statusline', 'banner'],
@@ -371,7 +371,7 @@ export const voiceWakeConfigSettings: ConfigSettingDefinition[] = [
       + 'clipped. 0 turns it off, so every loud frame resets the wait, the behaviour before this row existed.',
   },
   {
-    key: 'voice.wake.autoSubmit',
+    key: 'voice.wake.autoSubmit', valueKind: 'opening-switch',
     label: 'Send a spoken request without review',
     type: 'boolean',
     description:
@@ -382,7 +382,7 @@ export const voiceWakeConfigSettings: ConfigSettingDefinition[] = [
       + 'a submitted turn without a human seeing it first.',
   },
   {
-    key: 'voice.wake.retainAudio',
+    key: 'voice.wake.retainAudio', valueKind: 'protection-switch',
     label: 'Keep recordings on disk',
     type: 'enum',
     enumValues: ['none', 'session-temp'],
@@ -394,7 +394,7 @@ export const voiceWakeConfigSettings: ConfigSettingDefinition[] = [
       + 'clips it is not storing.',
   },
   {
-    key: 'voice.wake.customModelDir',
+    key: 'voice.wake.customModelDir', valueKind: 'path',
     label: 'Folder of your own wake word models',
     type: 'string',
     description:

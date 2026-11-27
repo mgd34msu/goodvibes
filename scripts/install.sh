@@ -2217,7 +2217,7 @@ install_sqlite_vec() {
 # without a wake word. The subcommand exits 0 whatever happens and prints one
 # plain line; if it is missing entirely (an older binary than this installer) the
 # `|| true` covers that too. A running daemon retries at every boot, and
-# `/voice wake setup` fetches it on demand.
+# "set up the wake word" (System, Voice) fetches it on demand.
 #
 # GOODVIBES_WAKE_MODEL=0 skips it, for an air-gapped host or a user who does not
 # want the feature.
@@ -2225,7 +2225,8 @@ install_wake_word_model() {
   [ "$WITH_WAKE_MODEL" = "1" ] || {
     say ""
     say "  note: skipping the wake-word model (GOODVIBES_WAKE_MODEL=0). Wake-word"
-    say "  detection will report not-provisioned until you run: goodvibes /voice wake setup"
+    say "  detection will report not-provisioned until you run: goodvibes-daemon provision-wake-model"
+    say "  (or, in goodvibes: the menu, System, Voice, \"set up the wake word\")"
     return 0
   }
 
@@ -2238,7 +2239,21 @@ install_wake_word_model() {
     done
   else
     say "  note: this build has no provision-wake-model command; wake-word detection"
-    say "  will fetch its model at the next daemon start, or run: goodvibes /voice wake setup"
+    say "  will fetch its model at the next daemon start, or in goodvibes: the menu, System, Voice, \"set up the wake word\""
+  fi
+}
+
+# --- the programs' hashes, recorded where the daemon trusts them ---
+# `goodvibes-daemon record-installed-programs` writes <daemon home>/program-hashes.json
+# (0600) from the reader files this run placed. A daemon that finds none records them
+# once at its start, so a failure here is said and the install still stands.
+record_program_hashes() {
+  [ "$os_tag" = linux ] || return 0
+  [ -x "$INSTALL_DIR/goodvibes-daemon" ] || return 0
+  if "$INSTALL_DIR/goodvibes-daemon" record-installed-programs >/dev/null 2>&1; then
+    say "  recorded   the programs' hashes in the daemon's home"
+  else
+    say "  note: the programs' hashes were not recorded in the daemon's home now; the daemon records them at its next start"
   fi
 }
 
@@ -3927,6 +3942,11 @@ main() {
   # installation. Provisioning still precedes the first service start.
   install_wake_word_model
   configure_webui
+
+  # The programs just placed, recorded in the daemon's own home (0600), where the
+  # daemon reads their hashes at its start: never the reader files in the install
+  # folder, which every program of the account can write. Before the restart.
+  record_program_hashes
 
   # The daemon names its service once for the steps below, then brings its own
   # definition to the current launch BEFORE the restart, so the restart applies it.

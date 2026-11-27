@@ -1,4 +1,5 @@
-import type { MemoryAddOptions } from '@goodvibes/engine/platform/platform/state';
+import type { MemoryAddOptions, MemoryAuthor } from '@goodvibes/engine/platform/platform/state';
+import { memoryAwaitsOwner } from '@goodvibes/engine/platform/platform/state';
 import type { ConfigManager } from '@goodvibes/engine/platform/platform/config';
 import type { AgentPersonaCreateInput, AgentPersonaUpdateInput } from './persona-registry.js';
 import type { AgentSkillCreateInput, AgentSkillUpdateInput } from './skill-registry.js';
@@ -9,7 +10,7 @@ import { AgentSkillRegistry } from './skill-registry.js';
 import { AgentRoutineRegistry } from './routine-registry.js';
 import { AgentResearchRunRegistry } from './research-run-registry.js';
 import { summarizeMemoryItem, summarizeNoteItem, summarizePersonaItem, summarizeSkillItem, summarizeSkillBundleItem, summarizeRoutineItem } from './local-library-items.js';
-import type { AgentWorkspaceLocalLibraryItem } from './local-library-items.js';
+import type { AgentLocalLibraryItem } from './local-library-items.js';
 import type { ShellPathService } from '@goodvibes/engine/platform/platform/runtime/shell';
 import type { SessionManager } from '@goodvibes/engine/platform/platform/sessions';
 import type { MemoryApi, ProjectWorkPlan, ProjectWorkPlanTask } from '@goodvibes/engine/platform/platform/knowledge';
@@ -73,7 +74,7 @@ export interface LearningSourceTransition {
 }
 
 export interface LearningRecord {
-  readonly item: AgentWorkspaceLocalLibraryItem;
+  readonly item: AgentLocalLibraryItem;
   readonly record: unknown;
 }
 
@@ -189,13 +190,16 @@ export function acquireLearningCuratorSource(context: LearningCuratorNativeConte
       },
     });
   };
+  // Someone else's words the owner has not accepted reach no model, the curator's included, and nothing is promoted
+  // from them (state/memory-author.ts, the one rule): they wait in Memory and knowledge for him.
+  const owners = <T extends { readonly author?: MemoryAuthor | undefined }>(records: readonly T[]): readonly T[] => records.filter((record) => !memoryAwaitsOwner(record));
   const libraries: Readonly<Record<LocalLearningCandidateDomain, readonly LearningRecord[]>> = {
-    memory: memoryRecords.map(record => ({ item: summarizeMemoryItem(record), record: projectMemoryRecord(record) })),
-    note: (noteSnapshot?.notes ?? []).map(record => ({ item: summarizeNoteItem(record), record })),
-    persona: (personaSnapshot?.personas ?? []).map(record => ({ item: summarizePersonaItem(record, personaSnapshot?.activePersonaId ?? null), record })),
-    skill: (skillSnapshot?.skills ?? []).map(record => ({ item: summarizeSkillItem(record), record })),
-    skill_bundle: (skillSnapshot?.bundles ?? []).map(record => ({ item: summarizeSkillBundleItem(record, skillSnapshot?.skills ?? []), record })),
-    routine: (routineSnapshot?.routines ?? []).map(record => ({ item: summarizeRoutineItem(record), record })),
+    memory: owners(memoryRecords).map(record => ({ item: summarizeMemoryItem(record), record: projectMemoryRecord(record) })),
+    note: owners(noteSnapshot?.notes ?? []).map(record => ({ item: summarizeNoteItem(record), record })),
+    persona: owners(personaSnapshot?.personas ?? []).map(record => ({ item: summarizePersonaItem(record, personaSnapshot?.activePersonaId ?? null), record })),
+    skill: owners(skillSnapshot?.skills ?? []).map(record => ({ item: summarizeSkillItem(record), record })),
+    skill_bundle: owners(skillSnapshot?.bundles ?? []).map(record => ({ item: summarizeSkillBundleItem(record, skillSnapshot?.skills ?? []), record })),
+    routine: owners(routineSnapshot?.routines ?? []).map(record => ({ item: summarizeRoutineItem(record), record })),
   };
   const curation = LearningCurationStore.forPaths(shellPaths);
   const scoped: LearningCuratorScopedOptions = Object.freeze({ ...options, assertCurrent, requirePreservedSource: true });
@@ -205,7 +209,7 @@ export function acquireLearningCuratorSource(context: LearningCuratorNativeConte
 export type LearningCuratorSource = ReturnType<typeof acquireLearningCuratorSource>;
 export interface LearningCandidateCollection {
   readonly candidates: readonly LearningCandidate[];
-  readonly promptRecords: readonly { readonly domain: LocalLearningCandidateDomain; readonly item: AgentWorkspaceLocalLibraryItem; readonly priority: LearningCandidate['priority']; readonly scores: LearningCandidate['scores'] }[];
+  readonly promptRecords: readonly { readonly domain: LocalLearningCandidateDomain; readonly item: AgentLocalLibraryItem; readonly priority: LearningCandidate['priority']; readonly scores: LearningCandidate['scores'] }[];
   /** Records no curation pass has read yet in their current form; `memory action:"curate"` reads them. */
   readonly unassessed: number;
   readonly lastCurationPassAt: number | null;

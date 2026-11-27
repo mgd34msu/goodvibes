@@ -111,28 +111,17 @@ export interface CommandShellUiOpeners extends TerminalCommandShellUiOpeners<imp
     reason?: 'no_processes' | 'not_found';
   };
 
-  openWorkspacePicker?: () => void;
   /** Open the command palette (terminal-shell/command-palette.ts): every registered command, searchable; Enter runs or opens its guided path. */
   openCommandPalette?: () => void;
   /** Open the menu of every place (Ctrl+G then m; terminal-shell/places). */
   openPlaceMenu?: () => void;
   /** Open one place by id (`automation`, `waiting`, `keys`). */
-  openPlace?: (placeId: string, start?: { readonly list?: string | undefined }) => void;
+  openPlace?: (placeId: string, start?: { readonly list?: string | undefined; readonly item?: string | undefined }) => void;
   /** Run what a place's key read in the composer names (`place.conversation-composer.<control>`: This conversation's controls). */
   runPlaceKey?: (action: string) => void;
-  /** A contract's open question on offer: the next message is sent as an ordinary one (contract-question-composer.ts). */
-  answerContractQuestionPlainly?: () => void;
   /** The model list's grouping, while the list is open (model-picker-token-route.ts). */
   cycleModelPickerGroup?: () => void;
 
-  /** Opens a workspace area on top; resolves when it closes. */
-  openAgentWorkspace?: (categoryId?: string) => Promise<void> | void;
-  /** Opens the form of one `/setup` topic: these rows of the setup category, and nothing else. */
-  openAgentSetupRows?: (actionIds: readonly string[]) => void;
-  dismissAgentWorkspace?: () => boolean;
-  openSecurityWorkspace?: () => void;
-  openKnowledgeWorkspace?: () => void;
-  openSubscriptionWorkspace?: () => void;
   /** Open Your agents (Ctrl+O, /agents). */
   openAgents?: (opts?: { readonly target?: string }) => void;
   /** Open the notification history (/notifications): every system notice in full. */

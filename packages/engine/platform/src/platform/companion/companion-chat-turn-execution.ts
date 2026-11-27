@@ -17,24 +17,24 @@ import type { ConfigManager } from '../config/manager.js';
 import type { AutonomousToolSource } from '../permissions/autonomous.js';
 import { executeToolCalls as executeOrchestratorToolCalls, toolBudgetFromConfig } from '../core/orchestrator-tool-runtime.js';
 import { maxParallelToolCalls } from '../core/tool-batch.js';
-import { AsyncLocalStorage } from 'node:async_hooks';
 import { decideInProject } from '../permissions/call-project.js';
+import { withFileWriter } from '../state/file-cache.js';
+import { chatToolCallSession, withChatToolCalls } from '../security/turn-session.js';
+import type { Actor } from '@goodvibes/engine/daemon-api/http-policy';
 
 type HookDispatcherLike = {
   fire(event: HookEvent): Promise<HookResult>;
 };
 
-/** The companion chat whose tool calls run in the current async context. */
-const companionToolSession = new AsyncLocalStorage<string>();
-
 /**
  * The chat a tool call being checked right now belongs to: the companion chat's
  * permission manager gives it to the approval it raises, so the ask is tied to
  * its chat (shown there, and in Work under that chat) instead of being taken
- * to the owner as an ask from nowhere.
+ * to the owner as an ask from nowhere. The chat's scope is security/turn-session.ts's,
+ * which every daemon-turn tool reads to say whose turn a call is (`whoseTurn`).
  */
 export function companionToolCallSession(): string | undefined {
-  return companionToolSession.getStore();
+  return chatToolCallSession();
 }
 
 export interface CompanionToolExecutionDeps {
@@ -47,6 +47,8 @@ export interface CompanionToolExecutionDeps {
   readonly autonomousSource?: (() => AutonomousToolSource) | undefined;
   /** The chat's project: every decision on its calls is made for that project (its rules, its folder trust). */
   readonly workingDirectory?: string | undefined;
+  /** Whom the chat's model acts for (its maker; absent: the owner's chat). See security/turn-session.ts. */
+  readonly maker?: Actor | undefined;
 }
 
 /**
@@ -91,7 +93,8 @@ export async function executeCompanionToolCalls(
   const settled = new Map<string, ToolResult>();
   const permissionManager = deps.permissionManager;
   try {
-    results = await companionToolSession.run(sessionId, () => decideInProject(deps.workingDirectory, () => executeOrchestratorToolCalls({
+    // Files are read and written as this chat: another chat or run in the same project never vouches for its reads.
+    results = await withChatToolCalls(sessionId, turnId, () => withFileWriter(`web chat ${sessionId}`, () => decideInProject(deps.workingDirectory, () => executeOrchestratorToolCalls({
       toolRegistry,
       permissionManager,
       hookDispatcher: deps.hookDispatcher,
@@ -107,7 +110,7 @@ export async function executeCompanionToolCalls(
         traceId: `${sessionId}:${id}`,
         source: 'companion-chat',
       }),
-    }, turnId, toolCalls)));
+    }, turnId, toolCalls))), deps.maker);
   } catch (error) {
     // A cancelled turn is closed by the turn loop. Any other failure becomes one
     // error result per call that has none, so the model sees what happened and

@@ -25,11 +25,11 @@
  * back reads them as it left them (it does not see what changed after the
  * upgrade). What was carried and merged is said once, in the owner's inbox.
  */
-import { Database } from 'bun:sqlite';
-import { copyFileSync, existsSync, mkdirSync, readdirSync, readFileSync, statSync, writeFileSync } from 'node:fs';
-import { dirname, join, relative, resolve } from 'node:path';
+import { existsSync, mkdirSync, readdirSync, readFileSync, statSync, writeFileSync } from 'node:fs';
+import { join, resolve } from 'node:path';
 import { readDaemonSetting } from '@goodvibes/engine/platform/platform/workspace/daemon-home';
 import { logger, summarizeError } from '@goodvibes/engine/platform/platform/utils';
+import { carryRecordsBetween, type RecordsCarryResult } from '@goodvibes/engine/platform/platform/runtime/operations';
 
 /** The folder under the daemon home whose `.goodvibes/` holds the daemon's own records. */
 export function daemonRecordsRoot(daemonHomeDirectory: string): string {
@@ -56,16 +56,6 @@ const DAEMON_RECORDS: readonly string[] = [
 
 /** Files only a daemon writes: a folder holding one is a folder a daemon ran in. */
 const DAEMON_MARKERS: readonly string[] = ['tui/cluster/cluster-node-id', 'tui/devices/device-grants.json'];
-
-/** Process locks and SQLite side files are never carried as files of their own. */
-function isSideFile(name: string): boolean {
-  return /\.(lock|held|owner-lock)$/.test(name) || name.endsWith('.writer.sqlite') || name.endsWith('-wal') || name.endsWith('-shm')
-    || name.includes('.writer.lock') || /\.unreadable-\d+/.test(name);
-}
-
-function isSqlite(name: string): boolean {
-  return name.endsWith('.sqlite') || name.endsWith('.db');
-}
 
 export interface DaemonRecordsCarry {
   /** The folders records were carried from, most recently used first. */
@@ -100,6 +90,19 @@ function rememberedFolders(homeDirectory: string, daemonHomeDirectory: string, s
   return [...folders];
 }
 
+/**
+ * The folders a 3.5.0 daemon ran in (the folders the tree root remembers that hold a record only a daemon writes), most
+ * recently used first: where its records were, and the folder its "in this project" rules were saved for
+ * (permissions/daemon-folder-rules-notice.ts), whatever folder this start was given.
+ */
+export function formerDaemonFolders(homeDirectory: string, daemonHomeDirectory: string, startedIn: string): readonly string[] {
+  const recordsRoot = resolve(daemonRecordsRoot(daemonHomeDirectory));
+  return rememberedFolders(homeDirectory, daemonHomeDirectory, startedIn)
+    .filter((folder) => resolve(folder) !== recordsRoot)
+    .filter((folder) => DAEMON_MARKERS.some((marker) => existsSync(join(folder, '.goodvibes', marker))))
+    .sort((a, b) => lastUsed(b) - lastUsed(a));
+}
+
 /** When a daemon last used the folder: the newest of its marker files. */
 function lastUsed(folder: string): number {
   let newest = 0;
@@ -107,76 +110,6 @@ function lastUsed(folder: string): number {
     try { newest = Math.max(newest, statSync(join(folder, '.goodvibes', marker)).mtimeMs); } catch { /* absent */ }
   }
   return newest;
-}
-
-function filesUnder(path: string): string[] {
-  let stat;
-  try { stat = statSync(path); } catch { return []; }
-  if (stat.isFile()) return [path];
-  if (!stat.isDirectory()) return [];
-  return readdirSync(path).flatMap((name) => filesUnder(join(path, name)));
-}
-
-type Json = null | boolean | number | string | Json[] | { [key: string]: Json };
-
-function isObject(value: Json | undefined): value is { [key: string]: Json } {
-  return value !== null && typeof value === 'object' && !Array.isArray(value);
-}
-
-/** The key an array item is known by: its id (or sessionId, key, name), else its whole text. */
-function itemKey(item: Json): string {
-  if (isObject(item)) {
-    for (const field of ['id', 'sessionId', 'key', 'name']) {
-      const value = item[field];
-      if (typeof value === 'string' || typeof value === 'number') return `${field}:${value}`;
-    }
-  }
-  return `json:${JSON.stringify(item)}`;
-}
-
-/** `kept` (the most recently used folder's) merged with `other`: nothing either holds is dropped. */
-function mergeJson(kept: Json, other: Json): Json {
-  if (isObject(kept) && isObject(other)) {
-    const out: { [key: string]: Json } = { ...kept };
-    for (const [key, value] of Object.entries(other)) out[key] = key in kept ? mergeJson(kept[key]!, value) : value;
-    return out;
-  }
-  if (Array.isArray(kept) && Array.isArray(other)) {
-    const seen = new Set(kept.map(itemKey));
-    return [...kept, ...other.filter((item) => !seen.has(itemKey(item)))];
-  }
-  return kept;
-}
-
-function copyWithSideFiles(from: string, to: string): void {
-  mkdirSync(dirname(to), { recursive: true, mode: 0o700 });
-  copyFileSync(from, to);
-  for (const suffix of ['-wal', '-shm']) if (existsSync(from + suffix)) copyFileSync(from + suffix, to + suffix);
-}
-
-/** Every row of `other` added to `target` where a table of that name exists in both; a row already there is kept. */
-function mergeSqlite(target: string, other: string): void {
-  const db = new Database(target);
-  try {
-    db.run('PRAGMA busy_timeout = 5000');
-    db.query('ATTACH DATABASE ? AS other').run(other);
-    const tables = db.query<{ name: string }, []>("SELECT name FROM other.sqlite_master WHERE type = 'table' AND name NOT LIKE 'sqlite_%'").all();
-    const mine = new Set(db.query<{ name: string }, []>("SELECT name FROM main.sqlite_master WHERE type = 'table'").all().map((row) => row.name));
-    db.transaction(() => {
-      for (const { name } of tables) {
-        if (!mine.has(name)) continue;
-        const quoted = `"${name.replace(/"/g, '""')}"`;
-        const columns = db.query<{ name: string }, []>(`PRAGMA main.table_info(${quoted})`).all().map((row) => `"${row.name.replace(/"/g, '""')}"`);
-        const theirs = new Set(db.query<{ name: string }, []>(`PRAGMA other.table_info(${quoted})`).all().map((row) => `"${row.name.replace(/"/g, '""')}"`));
-        const shared = columns.filter((column) => theirs.has(column));
-        if (shared.length === 0) continue;
-        db.run(`INSERT OR IGNORE INTO main.${quoted} (${shared.join(', ')}) SELECT ${shared.join(', ')} FROM other.${quoted}`);
-      }
-    })();
-    db.run('DETACH DATABASE other');
-  } finally {
-    db.close();
-  }
 }
 
 /**
@@ -193,55 +126,14 @@ export function carryDaemonRecordsOnce(input: {
   const record = join(input.recordsRoot, CARRY_RECORD);
   if (existsSync(record)) return undefined;
   const target = join(input.recordsRoot, '.goodvibes');
-  const folders = rememberedFolders(input.homeDirectory, input.daemonHomeDirectory, input.workingDirectory)
-    .filter((folder) => resolve(folder) !== resolve(input.recordsRoot))
-    .filter((folder) => DAEMON_MARKERS.some((marker) => existsSync(join(folder, '.goodvibes', marker))))
-    .sort((a, b) => lastUsed(b) - lastUsed(a));
-  const copied: string[] = [];
-  const merged = new Set<string>();
-  const singleValues: string[] = [];
-  const failed: string[] = [];
+  const folders = formerDaemonFolders(input.homeDirectory, input.daemonHomeDirectory, input.workingDirectory)
+    .filter((folder) => resolve(folder) !== resolve(input.recordsRoot));
+  // One rule for every carry of records (platform runtime/records-carry.ts): copied, or merged without dropping any.
+  const result: RecordsCarryResult = { copied: [], merged: [], singleValues: [], failed: [] };
   const firstFrom = new Map<string, string>();
   mkdirSync(input.recordsRoot, { recursive: true, mode: 0o700 });
-  for (const folder of folders) {
-    const source = join(folder, '.goodvibes');
-    for (const entry of DAEMON_RECORDS) {
-      for (const file of filesUnder(join(source, entry))) {
-        const rel = relative(source, file);
-        const name = file.split('/').pop() ?? file;
-        if (isSideFile(name)) continue;
-        const to = join(target, rel);
-        try {
-          if (!existsSync(to)) {
-            copyWithSideFiles(file, to);
-            firstFrom.set(rel, folder);
-            copied.push(`${rel} (from ${folder})`);
-          } else if (isSqlite(name)) {
-            mergeSqlite(to, file);
-            merged.add(rel);
-          } else if (name.endsWith('.jsonl')) {
-            const have = readFileSync(to, 'utf-8');
-            const lines = new Set(have.split('\n').filter(Boolean));
-            const added = readFileSync(file, 'utf-8').split('\n').filter((line) => line && !lines.has(line));
-            if (added.length > 0) writeFileSync(to, `${have}${have.endsWith('\n') || have === '' ? '' : '\n'}${added.join('\n')}\n`, { mode: 0o600 });
-            merged.add(rel);
-          } else if (name.endsWith('.json')) {
-            const kept = JSON.parse(readFileSync(to, 'utf-8')) as Json;
-            const other = JSON.parse(readFileSync(file, 'utf-8')) as Json;
-            writeFileSync(to, `${JSON.stringify(mergeJson(kept, other), null, 2)}\n`, { mode: 0o600 });
-            merged.add(rel);
-          } else if (readFileSync(to).equals(readFileSync(file))) {
-            // The same value in both: nothing to choose.
-          } else {
-            singleValues.push(`${rel}: kept the one from ${firstFrom.get(rel) ?? 'the first folder'}; the one in ${folder} was not used (it is still there)`);
-          }
-        } catch (error) {
-          failed.push(`${rel} from ${folder}: ${summarizeError(error)}`);
-        }
-      }
-    }
-  }
-  const carry: DaemonRecordsCarry = { folders, copied, merged: [...merged], singleValues, failed };
+  for (const folder of folders) carryRecordsBetween(join(folder, '.goodvibes'), target, DAEMON_RECORDS, folder, result, firstFrom);
+  const carry: DaemonRecordsCarry = { folders, ...result };
   writeFileSync(record, `${JSON.stringify({ version: 1, carriedAt: new Date().toISOString(), ...carry }, null, 2)}\n`, { mode: 0o600 });
   if (folders.length > 0) logger.info('[daemon] its own records were carried into its home', { recordsRoot: input.recordsRoot, ...carry });
   return carry;
@@ -257,6 +149,25 @@ export function describeDaemonRecordsCarry(carry: DaemonRecordsCarry): string | 
   if (carry.singleValues.length > 0) parts.push(`One value each: ${carry.singleValues.join('; ')}.`);
   if (carry.failed.length > 0) parts.push(`Not carried: ${carry.failed.join('; ')}.`);
   return parts.join(' ');
+}
+
+/**
+ * When a 3.5.0 daemon last wrote the machine group's shared settings in one of the folders it runs in, if that was
+ * after this version carried them into its home: the machine was put back to 3.5.0 and ran there since. Its changes
+ * from that run are in its settings but not in this version's record of the group's settings, and the group code
+ * marks them the owner's once (config-replication.ts `noteOlderReleaseRun`). Undefined when 3.5.0 has not run since.
+ */
+export function olderReleaseGroupSettingsWrittenAt(input: Parameters<typeof carryDaemonRecordsOnce>[0]): number | undefined {
+  let carriedAt: number;
+  try { carriedAt = statSync(join(input.recordsRoot, CARRY_RECORD)).mtimeMs; } catch { return undefined; }
+  let newest: number | undefined;
+  for (const folder of formerDaemonFolders(input.homeDirectory, input.daemonHomeDirectory, input.workingDirectory)) {
+    try {
+      const written = statSync(join(folder, '.goodvibes', 'tui', 'cluster', 'group-config.json')).mtimeMs;
+      if (written > carriedAt && (newest === undefined || written > newest)) newest = written;
+    } catch { /* that folder holds none */ }
+  }
+  return newest === undefined ? undefined : Math.trunc(newest);
 }
 
 /** Carry, then say it once; a failure is logged and the start goes on with what was carried. */

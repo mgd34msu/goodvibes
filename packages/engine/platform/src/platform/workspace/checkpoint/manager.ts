@@ -28,17 +28,19 @@ import { validateCheckpointManifest, CheckpointManifestShapeError, type Manifest
  */
 
 import { randomUUID } from 'node:crypto';
-import { existsSync } from 'node:fs';
+import { existsSync, readFileSync, writeFileSync } from 'node:fs';
 import { stat } from 'node:fs/promises';
 import { RefusalError, refusal } from '@goodvibes/engine/errors';
 import { homedir } from 'node:os';
-import { join } from 'node:path';
+import { join, sep } from 'node:path';
 import { logger } from '../../utils/logger.js';
 import { summarizeError } from '../../utils/error-display.js';
 import { JsonFileStore, JsonFileStoreParseError } from '../../state/json-file-store.js';
 import { captureQuarantineSource, quarantineCorruptFile } from '../../utils/atomic-json-store.js';
 import type { RuntimeEventBus } from '../../runtime/events/index.js';
 import { noteListChanged } from '../../runtime/list-changes.js';
+import { formerCheckpointsDirs } from '../../runtime/session-surface.js';
+import { projectIdentityOf } from '../project-identity.js';
 import type { TurnEvent } from '../../../events/turn.js';
 import type { AgentEvent } from '../../../events/agents.js';
 import { RetentionPolicy, DEFAULT_RETENTION_CONFIG, type RetentionConfig, type RetentionClass, type RetentionPruneReason } from '../../runtime/retention/index.js';
@@ -50,6 +52,8 @@ import { applyRestore } from './restore.js';
 import { noteProjectFilesChanged } from '../../intelligence/project-files-epoch.js';
 import { recordsForUnlistedRefs, deleteUnlistedRefs } from './unlisted-refs.js';
 import { CheckpointDiffObservations } from './diff-observations.js';
+import { recordFileWrites } from './write-record.js';
+import { otherWritersUndone, takenBackKey, takenBackLine, takenBackModelLine, TakenBackNotices, type OtherSessionChanges, type TakenBackNotice } from './taken-back.js';
 import {
   BROAD_ROOT_OVERRIDE,
   DEFAULT_MAX_FIRST_SNAPSHOT_FILES,
@@ -135,6 +139,7 @@ export class WorkspaceCheckpointManager {
   private sideGit!: SideGitRunner;
   private manifestStore!: JsonFileStore<Manifest>;
   private manifestPath!: string;
+  private takenBack!: TakenBackNotices;
   private retentionPolicy!: RetentionPolicy;
   private readonly now: () => number;
   private readonly runtimeBus: RuntimeEventBus | undefined;
@@ -146,6 +151,8 @@ export class WorkspaceCheckpointManager {
   private readonly rawWorkspaceRoot: string;
   private readonly explicitCheckpointDir: string | undefined;
   private readonly surfaceCheckpointsDir: string | undefined;
+  /** The surface's folder and store, to find a store an earlier release kept under the opened folder. */
+  private readonly surfaceStore: { readonly workingDirectory: string; readonly checkpointsDir: string } | undefined;
   private readonly retentionOverride: Partial<RetentionConfig> | undefined;
   private readonly preferGitRoot: boolean;
   private readonly allowBroadRoot: boolean;
@@ -239,6 +246,7 @@ export class WorkspaceCheckpointManager {
     this.rawWorkspaceRoot = opts.workspaceRoot;
     this.explicitCheckpointDir = opts.checkpointDir;
     this.surfaceCheckpointsDir = opts.surface?.checkpointsDir;
+    this.surfaceStore = opts.surface ? { workingDirectory: opts.surface.workingDirectory, checkpointsDir: opts.surface.checkpointsDir } : undefined;
     this.retentionOverride = opts.retention;
     this.preferGitRoot = opts.preferGitRoot ?? true;
     this.allowBroadRoot = opts.allowBroadRoot ?? false;
@@ -275,6 +283,7 @@ export class WorkspaceCheckpointManager {
     });
     this.manifestPath = join(this.checkpointRootDir, 'index.json');
     this.manifestStore = new JsonFileStore<Manifest>(this.manifestPath);
+    this.takenBack = new TakenBackNotices(this.checkpointRootDir);
     this.retentionPolicy = new RetentionPolicy(checkpointRetentionConfig(this.retentionOverride), this.now);
   }
 
@@ -346,6 +355,7 @@ export class WorkspaceCheckpointManager {
     }
     await this.reloadManifest();
     if (this.manifestQuarantined) await this.adoptUnlistedRefs();
+    await this.carryFormerStores();
     if (this.runtimeBus) {
       if (this.rootRefusal) {
         logger.warn('WorkspaceCheckpointManager: refusing automatic snapshot subscription for a broad root', {
@@ -355,6 +365,9 @@ export class WorkspaceCheckpointManager {
         });
       } else {
         this.subscribeToAutomaticSnapshots(this.runtimeBus);
+        // Who writes which file here, kept per file for every session sharing the project (write-record.ts): read by
+        // othersUndoneBy, so a restore names whose changes it takes back whatever snapshot held them.
+        this.unsubscribers.push(recordFileWrites(this.root, (who) => this.resolveSessionId?.(who.agentId ? { agentId: who.agentId } : {}), join(this.sideGit.gitDir, '.gv-lock')));
       }
     }
     if (this.runtimeBus && !this.rootRefusal) await this.takeBaseline();
@@ -401,7 +414,13 @@ export class WorkspaceCheckpointManager {
     let resolved = this.rawWorkspaceRoot;
     if (this.preferGitRoot) {
       const toplevel = await detectGitToplevel(this.rawWorkspaceRoot);
-      if (toplevel) resolved = toplevel;
+      // The repository's top level, unless the folder's project is nearer (a project registered inside the repository,
+      // workspace/project-identity.ts): two registered projects in one repository keep two stores, and a restore in one
+      // never takes back the other's files.
+      const project = projectIdentityOf(this.rawWorkspaceRoot);
+      if (toplevel) resolved = project.length > toplevel.length && project.startsWith(`${toplevel}${sep}`) ? project : toplevel;
+      // No repository: the registered project the folder is in (a plain folder opened in its subfolder is that project).
+      else resolved = project;
     }
     if (resolved !== this.workspaceRoot) {
       this.buildForRoot(resolved);
@@ -467,8 +486,10 @@ export class WorkspaceCheckpointManager {
     // A workspace that shares the bus with others snapshots only its own sessions'
     // events, stamped with the session the event names.
     const owned = (eventSessionId: string | undefined): boolean => this.ownsSession?.(eventSessionId) ?? true;
+    // Every checkpoint records the session whose turn or agent made it (the event names it), so a restore
+    // can say whose changes it takes back.
     const stamp = (resolved: string | undefined, eventSessionId: string | undefined): string | undefined =>
-      resolved ?? (this.ownsSession ? eventSessionId : undefined);
+      resolved ?? eventSessionId;
     const snapshotTurn = (turnId: string, reason: string, eventSessionId: string | undefined): void => {
       if (!owned(eventSessionId) || !this.automaticSnapshotsAllowed()) return;
       // Resolve the owning session synchronously, at event-fire time, so the id
@@ -507,6 +528,14 @@ export class WorkspaceCheckpointManager {
       bus.on<Extract<AgentEvent, { type: 'AGENT_COMPLETED' }>>('AGENT_COMPLETED', ({ payload, sessionId }) => {
         snapshotAgentRun(payload.agentId, sessionId);
       }),
+      // An agent run that failed or was cancelled (a daemon's schedule or trigger run cut off, a stop) after it changed
+      // files keeps its own checkpoint, as a finished one does: its changes are never the next run's or turn's.
+      bus.on<Extract<AgentEvent, { type: 'AGENT_FAILED' }>>('AGENT_FAILED', ({ payload, sessionId }) => {
+        snapshotAgentRun(payload.agentId, sessionId);
+      }),
+      bus.on<Extract<AgentEvent, { type: 'AGENT_CANCELLED' }>>('AGENT_CANCELLED', ({ payload, sessionId }) => {
+        snapshotAgentRun(payload.agentId, sessionId);
+      }),
     );
   }
 
@@ -522,7 +551,27 @@ export class WorkspaceCheckpointManager {
    * Serialized against every other index-touching operation on this manager
    *, see `withLock`.
    */
-  async create(opts: CreateCheckpointOptions): Promise<WorkspaceCheckpoint | null> {
+  create(opts: CreateCheckpointOptions): Promise<WorkspaceCheckpoint | null> {
+    const run = this.createNow(opts);
+    this.asked.add(run);
+    const done = (): void => { this.asked.delete(run); };
+    run.then(done, done);
+    return run;
+  }
+
+  /** Every create asked of this store and not finished (an automatic snapshot a turn's end asked for included). */
+  private readonly asked = new Set<Promise<unknown>>();
+
+  /**
+   * Resolves once every checkpoint asked of this store so far is taken (or failed). A turn that starts as another
+   * ends awaits it before its first tool call, so the earlier turn's checkpoint holds that turn's changes and never the
+   * next one's, however the earlier turn ended.
+   */
+  async settled(): Promise<void> {
+    while (this.asked.size > 0) await Promise.allSettled([...this.asked]);
+  }
+
+  private async createNow(opts: CreateCheckpointOptions): Promise<WorkspaceCheckpoint | null> {
     await this.init();
     if (this.rootRefusal) throw new Error(this.rootRefusal);
     const checkpoint = await this.withLock(() => this.createInternal(opts));
@@ -665,6 +714,68 @@ export class WorkspaceCheckpointManager {
   async sessionChanges(sessionId: string): Promise<CheckpointSessionChanges> {
     await this.init();
     return this.withLock(() => this.diffObservations.read(['session', sessionId], () => computeSessionChanges(this.checkpoints, this.sideGit, sessionId)));
+  }
+
+  /**
+   * The changes of sessions other than `sessionId` that restoring checkpoint
+   * `id` (to `paths` when given) would take back, by session: none when the
+   * restore touches only that session's own changes. Read before asking.
+   */
+  async othersUndoneBy(id: string, opts: { readonly sessionId?: string | undefined; readonly paths?: readonly string[] | undefined }): Promise<OtherSessionChanges[]> {
+    await this.init();
+    return this.withLock(async () => {
+      const target = this.requireCheckpoint(id);
+      if (!this.rootRefusal) await this.sideGit.stageAll();
+      let files = await this.sideGit.diffNameOnly(target.commit);
+      if (opts.paths) { const scope = new Set(opts.paths); files = files.filter((file) => scope.has(file)); }
+      return otherWritersUndone(this.root, this.checkpoints, this.sideGit, target, opts.sessionId, new Set(files));
+    });
+  }
+
+  /**
+   * Keep for each session in `others` the notice that `by` took back its
+   * change by restoring `restoredId`, and where the replaced state is kept;
+   * that session reads it at its next turn ({@link followTakenBack}).
+   */
+  async noteTakenBack(others: readonly OtherSessionChanges[], by: string, restoredId: string, keptAs: string | null): Promise<void> {
+    if (others.length === 0) return;
+    await this.init();
+    await this.withLock(async () => {
+      const restored = this.checkpoints.get(restoredId);
+      await this.takenBack.add(others.map((other) => ({
+        sessionId: other.sessionId, by, at: this.now(), files: other.files,
+        restored: { id: restoredId, label: restored?.label ?? restoredId }, keptAs,
+      })));
+    });
+  }
+
+  /**
+   * Tells the session `sessionId()` names each change of its that another
+   * session's restore took back: `line` for the person (its conversation),
+   * `forModel` for its model's next request. Read when that session submits a
+   * turn (no timer): at once from the file, so the turn's first request carries
+   * it, then removed under the store's lock; a notice is told once. Returns the stop.
+   */
+  followTakenBack(sessionId: () => string, tell: (line: string, forModel: string) => void, shortId: (id: string) => string = (id) => id): () => void {
+    const bus = this.runtimeBus;
+    if (!bus) return () => {};
+    const told = new Set<string>();
+    const say = (notice: TakenBackNotice): void => {
+      const key = takenBackKey(notice);
+      if (told.has(key)) return;
+      told.add(key);
+      tell(takenBackLine(notice, shortId), takenBackModelLine(notice));
+    };
+    return bus.on<Extract<TurnEvent, { type: 'TURN_SUBMITTED' }>>('TURN_SUBMITTED', ({ sessionId: eventSessionId }) => {
+      const mine = sessionId();
+      if (!mine || (eventSessionId !== undefined && eventSessionId !== mine)) return;
+      // The bus delivers on a microtask, before the turn's first request is assembled: read now, remove after.
+      if (this.initialized) for (const notice of this.takenBack.peekNow(mine)) say(notice);
+      void this.init()
+        .then(() => this.withLock(() => this.takenBack.take(mine)))
+        .then((notices) => { for (const notice of notices) say(notice); })
+        .catch((err: unknown) => logger.warn('WorkspaceCheckpointManager: a taken-back notice was not read', { error: summarizeError(err) }));
+    });
   }
 
   /**
@@ -978,6 +1089,60 @@ export class WorkspaceCheckpointManager {
     }
   }
 
+  /**
+   * One checkpoint store per project, shared by the terminal app, the Agent and the daemon (session-surface.ts
+   * `projectCheckpointsDir`). The stores each program kept of its own before (`.goodvibes/tui/checkpoints`, which the
+   * daemon used too, `.goodvibes/agent/checkpoints`, the unscoped one of the earliest releases), at the project and at
+   * the folder the program was opened in, are merged into it once: their snapshot refs fetched, their checkpoints listed
+   * with their ids, every checkpoint of every store in time order. Each old store is left exactly as it was, so the
+   * release before reads it as it was at the upgrade. Two programs starting at once carry under the store's lock; the
+   * second finds the stores carried.
+   */
+  private async carryFormerStores(): Promise<void> {
+    const surface = this.surfaceStore;
+    if (this.explicitCheckpointDir !== undefined || !surface) return;
+    const sources = [...new Set([surface.workingDirectory, this.rawWorkspaceRoot].flatMap((folder) => formerCheckpointsDirs(folder)))]
+      .filter((dir) => dir !== this.checkpointRootDir && existsSync(join(dir, 'index.json')) && existsSync(join(dir, 'git')));
+    if (sources.length === 0) return;
+    const marker = join(this.checkpointRootDir, 'carried.json');
+    const carriedNow = (): string[] => {
+      try { return (JSON.parse(readFileSync(marker, 'utf8')) as { from?: string[] }).from ?? []; } catch { return []; }
+    };
+    if (sources.every((dir) => carriedNow().includes(dir))) return;
+    const release = await this.acquireStoreLock();
+    try {
+      // Read again under the lock: another program sharing the store may have carried them meanwhile.
+      await this.reloadManifest();
+      const carried = carriedNow();
+      const done: string[] = [];
+      let added = 0;
+      for (const dir of sources) {
+        if (carried.includes(dir)) continue;
+        try {
+          const old = validateCheckpointManifest(JSON.parse(readFileSync(join(dir, 'index.json'), 'utf8')));
+          const missing = old.checkpoints.filter((checkpoint) => !this.checkpoints.has(checkpoint.id));
+          if (missing.length > 0) {
+            await this.sideGit.raw(['fetch', '--no-tags', '--quiet', join(dir, 'git'), `+${CHECKPOINT_REF_PREFIX}*:${CHECKPOINT_REF_PREFIX}*`]);
+            for (const checkpoint of missing) this.checkpoints.set(checkpoint.id, checkpoint);
+            added += missing.length;
+          }
+          done.push(dir);
+        } catch (error) {
+          logger.warn('WorkspaceCheckpointManager: an earlier checkpoint store was not carried into the project\'s one store; it stays where it is, and the next start tries again', { from: dir, error: summarizeError(error) });
+        }
+      }
+      if (added > 0) {
+        // One history in time order, whichever program made each checkpoint.
+        this.applyManifest({ checkpoints: [...this.checkpoints.values()].sort((a, b) => a.createdAt - b.createdAt) });
+        await this.persistManifest();
+      }
+      if (done.length > 0) writeFileSync(marker, JSON.stringify({ from: [...carried, ...done] }));
+      logger.info('WorkspaceCheckpointManager: carried the programs\' earlier checkpoint stores into the project\'s one store', { from: done, to: this.checkpointRootDir, checkpoints: added });
+    } finally {
+      release();
+    }
+  }
+
   /** After a quarantined index, list the snapshot refs still in the side repo again instead of leaving them unreachable. */
   private async adoptUnlistedRefs(): Promise<void> {
     const release = await this.acquireStoreLock();
@@ -999,6 +1164,7 @@ export class WorkspaceCheckpointManager {
   private async persistManifest(): Promise<void> {
     await this.manifestStore.save({ checkpoints: Array.from(this.checkpoints.values()) });
     this.manifestSignature = await this.readManifestSignature();
-    noteListChanged({ list: 'checkpoints', change: 'changed' });
+    // The project's one store changed: only that project's screens read again.
+    noteListChanged({ list: 'checkpoints', change: 'changed', project: projectIdentityOf(this.root) });
   }
 }

@@ -77,7 +77,7 @@ export const deviceConfigDefaults: { device: DeviceConfig } = {
 
 export const deviceConfigSettings: ConfigSettingDefinition[] = [
   {
-    key: 'device.capabilities.mode',
+    key: 'device.capabilities.mode', valueKind: 'protection-switch',
     label: "How a paired phone's camera, location and more are used",
     appliesWhen: 'now',
     type: 'enum',
@@ -85,7 +85,7 @@ export const deviceConfigSettings: ConfigSettingDefinition[] = [
     description: 'How a paired phone\'s camera, screen, location, clipboard, and device commands are reached. honor-grants (stock): every capability asks the first time and every time after, unless you chose "always allow" for that one capability on that one phone. ask-every-time: the prompt appears on every single request, permissions.mode yolo included, and no durable grant is ever consulted or offered, use it when someone else is holding the phone. off: no capability request reaches any paired device at all.',
   },
   {
-    key: 'device.capabilities.allowAlwaysOffer',
+    key: 'device.capabilities.allowAlwaysOffer', valueKind: 'protection-switch',
     label: 'Which phone features may be allowed for good',
     type: 'enum',
     enumValues: ['every-capability', 'standard-only', 'never'],
@@ -99,14 +99,14 @@ export const deviceConfigSettings: ConfigSettingDefinition[] = [
     description: 'How long the agent waits for a phone to answer one capability request before giving up. A phone that is asleep or off the network usually answers within a few seconds of waking; a long timeout keeps a slow wake from failing, a short one keeps the agent from stalling.',
   },
   {
-    key: 'device.location.precision',
+    key: 'device.location.precision', valueKind: 'protection-switch',
     label: "How exact the phone's location may be",
     type: 'enum',
     enumValues: ['coarse-only', 'ask-precise', 'precise-grantable'],
     description: 'How exact a location the phone will report. precise-grantable (stock): both approximate and street-level fixes are available, and either may be granted durably. ask-precise: street-level fixes are available but always ask, permissions.mode yolo included, and neither offer nor honour "always allow". coarse-only: street-level fixes are refused entirely; only city-scale approximate location is served.',
   },
   {
-    key: 'device.clipboard.readMode',
+    key: 'device.clipboard.readMode', valueKind: 'protection-switch',
     label: "Reading the phone's clipboard",
     type: 'enum',
     enumValues: ['off', 'ask-only', 'grantable'],

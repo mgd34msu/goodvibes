@@ -71,6 +71,8 @@ export function TurnFailureRow({ reading, latest, onRetry, onOtherModel }: TurnF
         <span className="turn-failure__mark" aria-hidden="true">✕</span> {reading.headline}
       </p>
       {line && <p className="turn-failure__cause">{line}</p>}
+      {/* What to do first, when the reading names it (a conversation too long for the model: shorten it). */}
+      {reading.also?.startsWith('first ') && <p className="turn-failure__cause">{`${reading.also.charAt(0).toUpperCase()}${reading.also.slice(1)}.`}</p>}
       {showDetails && reading.details.length > 0 && (
         <dl className="turn-failure__details">
           {reading.details.map((row, index) => (

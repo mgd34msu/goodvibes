@@ -86,7 +86,7 @@ export class CredentialOriginError extends RefusalError {
       code: 'CREDENTIAL_NOT_FOR_TARGET',
       state: 'nothing was sent',
       reason: `the credential for the daemon at ${credentialOrigin} is never sent to ${requestOrigin ?? 'an address that is not a daemon origin'}`,
-      next: [`connect to ${requestOrigin ?? 'that daemon'} with its own token (--token, /setup connect-daemon, or goodvibes-agent setup pair)`],
+      next: [`connect to ${requestOrigin ?? 'that daemon'} with its own token (--token; System, Setup, "A daemon elsewhere"; or goodvibes-agent setup pair)`],
       retryable: false,
     }), { category: 'authorization', source: 'transport' });
     this.name = 'CredentialOriginError';

@@ -31,12 +31,14 @@ export function shortcutGroups(keybindingsManager: KeybindingsManager): Shortcut
     ['@', 'Open file picker'],
     ['/', 'Slash command mode'],
     ['?', 'Help: every command and keyboard shortcut'],
-    [bound('next-field'), 'Collapse/expand the nearest block; inside the Agent workspace, move between its area list and its action list'],
+    [bound('next-field'), 'Collapse/expand the nearest block; in a place, the next tab'],
     [bound('cycle-permission-mode'), 'Change when GoodVibes asks, for this session (always; never switches sessions)'],
     // One step per press; the status line names what the next Esc does.
     [bound('back'), 'One step back: close the top overlay, else clear the prompt, else leave an agent or process view, else stop the running turn'],
     [bound('open-agents'), 'Open Your agents'],
     [bound('leader'), 'Starts a two-key shortcut: the screen shows every key that can follow'],
+    // Everything that is not one of the few typed commands is a control in a place: the menu reaches every place.
+    [bound('open-menu'), 'Open the menu of every place (everything that is not a command here)'],
   ];
   // Agent and process views (shell/session-views.ts).
   const sessions: ReadonlyArray<readonly [string, string]> = [

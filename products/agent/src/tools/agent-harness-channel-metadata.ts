@@ -1,9 +1,9 @@
 import { harnessDisplayPath } from './agent-harness-display-path.ts';
 import type { CommandContext } from '../input/command-registry.ts';
-import type { AgentWorkspaceChannelStatus } from '../input/agent-workspace-channels.ts';
+import type { AgentChannelStatus } from '../input/channel-readiness.ts';
 import { daemonChannelDeliveryReceiptPath, readAgentChannelDeliveryReceipts } from '@goodvibes/engine/terminal-shell/agent-turn/channel-delivery-receipts';
-import { buildAgentWorkspaceChannelTriage, type AgentWorkspaceChannelTriage } from '../input/agent-workspace-channel-triage.ts';
-import { buildAgentWorkspaceChannelSetupGuide, buildAgentWorkspaceChannels } from '../input/agent-workspace-channels.ts';
+import { buildAgentChannelTriage, type AgentChannelTriage } from '../input/channel-triage.ts';
+import { buildAgentChannelSetupGuide, buildAgentChannels } from '../input/channel-readiness.ts';
 import { previewHarnessText } from '@goodvibes/engine/terminal-shell/agent-turn/preview-text';
 import { withInventoryDisclosure } from '@goodvibes/engine/terminal-shell/agent-turn/inventory-disclosure';
 import { clampReadLimit } from '@goodvibes/engine/terminal-shell/agent-turn/read-helpers';
@@ -42,7 +42,7 @@ function channelLookupFromArgs(args: AgentHarnessChannelArgs): { readonly source
   return query ? { source: 'query', input: query } : null;
 }
 
-function channelSearchText(channel: AgentWorkspaceChannelStatus): string {
+function channelSearchText(channel: AgentChannelStatus): string {
   return [
     channel.id,
     channel.label,
@@ -58,7 +58,7 @@ function channelSearchText(channel: AgentWorkspaceChannelStatus): string {
   ].join('\n').toLowerCase();
 }
 
-function describeChannelCandidate(channel: AgentWorkspaceChannelStatus): Record<string, unknown> {
+function describeChannelCandidate(channel: AgentChannelStatus): Record<string, unknown> {
   return {
     channelId: channel.id,
     label: channel.label,
@@ -90,7 +90,7 @@ function channelTriageModelRoute(): string {
 }
 
 function describeChannel(
-  channel: AgentWorkspaceChannelStatus,
+  channel: AgentChannelStatus,
   options: { readonly includeParameters?: boolean; readonly lookup?: Record<string, unknown> } = {},
 ): Record<string, unknown> {
   return {
@@ -145,8 +145,8 @@ function describeChannel(
 }
 
 export function channelReadinessCatalogStatus(context: CommandContext): Record<string, unknown> {
-  const channels = buildAgentWorkspaceChannels(context);
-  const guide = buildAgentWorkspaceChannelSetupGuide(channels);
+  const channels = buildAgentChannels(context);
+  const guide = buildAgentChannelSetupGuide(channels);
   return {
     modes: ['channels', 'channel', 'channel_setup_guide', 'channel_triage', 'channel_deliveries'],
     modelRoute: 'channels action:"status"',
@@ -173,7 +173,7 @@ export function listHarnessChannels(context: CommandContext, args: AgentHarnessC
   const query = rawQuery.toLowerCase();
   const includeParameters = args.includeParameters === true;
   const limit = readLimit(args.limit, 200);
-  const channels = buildAgentWorkspaceChannels(context);
+  const channels = buildAgentChannels(context);
   const matched = channels.filter((channel) => !query || channelSearchText(channel).includes(query));
   const filtered = matched.slice(0, limit);
   const enabled = channels.filter((channel) => channel.enabled).length;
@@ -215,7 +215,7 @@ export function listHarnessChannels(context: CommandContext, args: AgentHarnessC
       }
       : {}),
     setupGuide: {
-      status: buildAgentWorkspaceChannelSetupGuide(channels).status,
+      status: buildAgentChannelSetupGuide(channels).status,
       modelRoute: channelSetupGuideModelRoute(),
     },
     triage: channelTriageModelRoute(),
@@ -239,7 +239,7 @@ export function describeHarnessChannel(context: CommandContext, args: AgentHarne
       usage: 'channels action:"channel" requires channelId, target, or query. Use channels action:"status" to inspect available channel ids.',
     };
   }
-  const channels = buildAgentWorkspaceChannels(context);
+  const channels = buildAgentChannels(context);
   const normalized = lookup.input.toLowerCase();
   const exact = channels.find((channel) => channel.id === lookup.input);
   if (exact) return { status: 'found', channel: describeChannel(exact, { includeParameters: true, lookup: { ...lookup, resolvedBy: 'id' } }) };
@@ -265,10 +265,10 @@ export function describeHarnessChannel(context: CommandContext, args: AgentHarne
 }
 
 export function describeHarnessChannelSetupGuide(context: CommandContext, args: AgentHarnessChannelArgs): ChannelSetupGuideResolution {
-  const channels = buildAgentWorkspaceChannels(context);
+  const channels = buildAgentChannels(context);
   const lookup = channelLookupFromArgs(args);
   if (!lookup) {
-    const guide = buildAgentWorkspaceChannelSetupGuide(channels);
+    const guide = buildAgentChannelSetupGuide(channels);
     return {
       status: 'found',
       guide: {
@@ -285,7 +285,7 @@ export function describeHarnessChannelSetupGuide(context: CommandContext, args: 
   const normalized = lookup.input.toLowerCase();
   const exact = channels.find((channel) => channel.id === lookup.input || channel.id.toLowerCase() === normalized || channel.label.toLowerCase() === normalized);
   if (exact) {
-    const guide = buildAgentWorkspaceChannelSetupGuide(channels, { channelId: exact.id });
+    const guide = buildAgentChannelSetupGuide(channels, { channelId: exact.id });
     return {
       status: 'found',
       guide: {
@@ -303,7 +303,7 @@ export function describeHarnessChannelSetupGuide(context: CommandContext, args: 
   const searched = channels.filter((channel) => channelSearchText(channel).includes(normalized));
   if (searched.length === 1) {
     const channel = searched[0]!;
-    const guide = buildAgentWorkspaceChannelSetupGuide(channels, { channelId: channel.id });
+    const guide = buildAgentChannelSetupGuide(channels, { channelId: channel.id });
     return {
       status: 'found',
       guide: {
@@ -339,7 +339,7 @@ export function describeHarnessChannelDeliveries(context: CommandContext, args: 
       status: 'unavailable',
       receipts: [],
       policy: 'Read-only delivery receipts require Agent shell path context. Sends still require explicit confirmation.',
-      nextActions: ['Open a normal Agent workspace before relying on channel delivery receipts.'],
+      nextActions: ['Start the Agent with its home folder before relying on channel delivery receipts.'],
     };
   }
   const limit = readLimit(args.limit, 20);
@@ -377,6 +377,6 @@ export function describeHarnessChannelDeliveries(context: CommandContext, args: 
   };
 }
 
-export async function describeHarnessChannelTriage(context: CommandContext, args: AgentHarnessChannelArgs): Promise<AgentWorkspaceChannelTriage> {
-  return buildAgentWorkspaceChannelTriage(context, args);
+export async function describeHarnessChannelTriage(context: CommandContext, args: AgentHarnessChannelArgs): Promise<AgentChannelTriage> {
+  return buildAgentChannelTriage(context, args);
 }

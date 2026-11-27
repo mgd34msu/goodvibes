@@ -2,6 +2,7 @@ import { logger } from '../../utils/logger.js';
 import type { JsonRpcRequest, JsonRpcResponse, JsonRpcNotification, Diagnostic } from './protocol.js';
 import type { LspCapabilities } from './capabilities.js';
 import { summarizeError } from '../../utils/error-display.js';
+import { inheritedEnvWithoutCredentials } from '../../tools/exec/credential-env.js';
 import type { ChildHandle } from '../../utils/owned-work.js';
 
 interface PendingRequest {
@@ -92,7 +93,8 @@ export class LspClient {
         stdout: 'pipe',
         stderr: 'pipe',
         ...(this.options?.cwd !== undefined ? { cwd: this.options.cwd } : {}),
-        ...(this.options?.env !== undefined ? { env: { ...process.env, ...this.options.env } } : {}),
+        // A language server inherits no credential of this process (tools/exec/credential-env.ts), only what it is given.
+        env: { ...inheritedEnvWithoutCredentials(), ...(this.options?.env ?? {}) },
       } as Parameters<typeof Bun.spawn>[1]);
       this._startReadLoop();
       this._drainStderr();

@@ -10,6 +10,8 @@
  */
 import { AFTER_REPLY, type ClusterGroupVerbs } from '../../daemon/http/cluster-group-routes.js';
 import type { GroupOperationResult } from '../../cluster/group-operations.js';
+import { describeReplicaAct } from '../../cluster/config-replication.js';
+import { refusedFromGroup } from '../../cluster/refused-from-group.js';
 import { generateQrMatrix, renderQrToString } from '../../pairing/qr-generator.js';
 import { CapabilityRefusal, type CapabilityCaller, type CapabilityDefinition, type CapabilityResult, type InputDescription, type ListName } from '../types.js';
 
@@ -127,14 +129,31 @@ export const CLUSTER_STATUS: Definition = {
     if (report.membership === 'unreadable-key-material') {
       return { text: 'This machine\'s group key could not be read, so it cannot take part in its group. Leave the group and join it again with its key.', data: { report } };
     }
+    // The latest shared settings changed on the other machines, each with who made it there and how it was decided.
+    const fromGroup = (report.replication?.recentFromGroup ?? []).map((change) =>
+      `${change.path}${change.deleted ? ' removed' : ''} on ${plain(change.machine)}, ${when(change.at)}: by ${plain(describeReplicaAct(change.act))}`);
+    // What does not cross from another machine, and why: never lost silently.
+    // A member known to run an older release is said as exactly that, never as out of step.
+    const older = report.replication?.olderReleaseMembers ?? [];
+    const olderRelease = older.map((machine) => `${plain(machine)} runs an older release; its changes cross once it is updated.`);
+    const notTaken = [
+      ...(report.replication?.notTakenFrom ?? []).filter((peer) => !peer.olderRelease && !older.includes(peer.machine)).map((peer) =>
+        `${peer.paths} change${peer.paths === 1 ? '' : 's'} made on ${plain(peer.machine)} outside its settings controls record no one who made ${peer.paths === 1 ? 'it' : 'them'} and ${peer.paths === 1 ? 'was' : 'were'} not taken here; change ${peer.paths === 1 ? 'it' : 'them'} there through its settings to share ${peer.paths === 1 ? 'it' : 'them'}.`),
+      // A change to who you are that arrived without your own act on the machine that wrote it (gate-review-6 G2).
+      ...refusedFromGroup().map((refused) =>
+        `Refused ${when(refused.at)}: ${plain(refused.what)}, written on another machine of the group (record ${plain(refused.origin)}) without your own act there. Only you, signed in or in your own program on that machine, change it. If you did not, remove that machine from the group.`),
+    ];
     return {
       text: [
         `This machine (${plain(report.nodeName)}) is in "${plain(report.groupName)}" with ${report.memberCount} machine${report.memberCount === 1 ? '' : 's'}.`,
         ...(report.keyGeneration !== null ? [`The group key: ${keyChanged(report.keyGeneration, report.keyChangedAt)}.`] : []),
         ...(report.replication?.awaitingSync ? ['This machine does not hold the group\'s settings yet.'] : []),
         ...(report.sharing === 'off' ? ['Sharing is off on this computer, so it is not on the group\'s network: nothing reaches the other machines from it until sharing is on.'] : []),
+        ...olderRelease,
+        ...notTaken,
+        ...(fromGroup.length > 0 ? ['Settings changed on the other machines:', ...fromGroup.map((line) => `  ${line}`)] : []),
       ].join('\n'),
-      data: { report },
+      data: { report, fromGroup, notTaken, olderRelease },
     };
   },
 };
@@ -187,9 +206,11 @@ export const CLUSTER_CREATE: Definition = {
   ],
   sentence: 'A new group is started on this machine, until you change it; other machines join it with its key.', done: '',
   touches: 'another-machine', lasts: 'kept', risk: 'none', undoneBy: 'leave', example: { name: 'the workshop' },
-  async run(values, services) {
+  async run(values, services, caller) {
     const created = settled(await verbsOf(services).create({
       ...(values.name ? { name: values.name } : {}), ...(values.passphrase ? { passphrase: values.passphrase } : {}),
+      // Starting the group makes this machine's shared settings the group's, under this act.
+      ...(caller?.settingAct ? { act: caller.settingAct } : {}),
     }));
     // The join key is shown only when asked for (cluster.key), never in a result kept in a conversation.
     return {
@@ -209,8 +230,8 @@ export const CLUSTER_JOIN: Definition = {
   // Joining a group implies sharing with it: when sharing is off, joining turns it on (the daemon restarts and joins then).
   sentence: 'This machine joins {group} and shares inbound channel work with its members, until you change it; sharing is turned on as part of joining when it is off.', done: '',
   touches: 'another-machine', lasts: 'kept', risk: 'sends-out', undoneBy: 'leave', example: { group: 'g-41a2', key: 'abc' },
-  async run(values, services) {
-    const joined = settled(await verbsOf(services).join({ groupId: values.group!, joinKey: values.key!, turnOnSharing: true }));
+  async run(values, services, caller) {
+    const joined = settled(await verbsOf(services).join({ groupId: values.group!, joinKey: values.key!, turnOnSharing: true, ...(caller?.settingAct ? { act: caller.settingAct } : {}) }));
     const later = pending(joined);
     // Kept for the daemon's next start: nothing has gone out yet.
     if (later) return { text: later, data: { groupId: joined.groupId, pending: true }, riskDone: 'Nothing was sent yet: the join goes out when the daemon starts again.' };
@@ -287,6 +308,8 @@ export const CLUSTER_KEY: Definition = {
   touches: 'credential', lasts: 'not-a-change', risk: 'none',
   ownerOnly: { reason: 'the join key lets any machine on the network join the group', instead: 'The Machine group tab of Devices and network shows the group and its machines.' },
   reveals: { label: 'Join key', note: 'Anyone with it can join the group. Type it on the other machine, under Nearby groups, join; this place shows it again when asked.' },
+  // The key it reveals lets any machine join the group.
+  resultSecret: 'the machine group\'s join key, which lets any machine join the group',
   example: {},
   async run(values, services) {
     const key = settled(await verbsOf(services).key());
@@ -370,9 +393,12 @@ function settingDecision(decision: 'publish' | 'accept'): Definition {
       ? '{setting} on every machine in the group is replaced with this machine\'s value.'
       : 'This machine\'s {setting} is replaced with the group\'s.',
     done: '', touches: 'another-machine', lasts: 'kept', risk: 'cannot-be-undone', example: { setting: 'provider.model' },
-    async run(values, services) {
+    async run(values, services, caller) {
       const verbs = verbsOf(services);
-      const result = settled(await (publish ? verbs.publish(values.setting!, sharingOf(values)) : verbs.accept(values.setting!, sharingOf(values))));
+      // A value sent to the group carries who pressed it and how it was decided (every member keeps the record).
+      const result = settled(await (publish
+        ? verbs.publish(values.setting!, { ...sharingOf(values), ...(caller?.settingAct ? { act: caller.settingAct } : {}) })
+        : verbs.accept(values.setting!, sharingOf(values))));
       const later = pending(result);
       if (later) return { text: later, data: { path: result.path, pending: true } };
       const user = result.path.startsWith('user:') ? result.path.slice('user:'.length) : null;

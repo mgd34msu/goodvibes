@@ -9,7 +9,22 @@
  * Every capability runs in the daemon; a file or folder path is the caller's
  * project's.
  */
-import { resolve } from 'node:path';
+import { callerPathOf, fileWorkRefusal, unreadableFile } from '../path-inputs.js';
+
+/** What a right list of addresses holds, and a right bookmarks file, as a refusal of a wrong one says them. */
+const URL_LIST_FILE = 'a list of web addresses (one http or https address per line)';
+const BOOKMARKS_FILE = 'a bookmarks file (the HTML file a browser exports, or a browser\'s Bookmarks JSON, holding http or https addresses)';
+/**
+ * An import of a list that threw. A file that could not be read or held no address (bookmarks.ts `NO_BOOKMARKS`; each
+ * page's own fetch failing is counted, never thrown) is refused as the wrong file it is, saying what a right one holds;
+ * anything else in its own words (fileWorkRefusal), never answered as an internal error.
+ */
+const wrongList = (path: string, what: string, caller: CapabilityCaller, error: unknown): CapabilityRefusal =>
+  ((error as { readonly code?: unknown } | null)?.code === 'NO_BOOKMARKS' ? unreadableFile(path, what, caller, undefined, 'Nothing was added.')
+    : fileWorkRefusal(path, what, caller, error, 'Nothing was added.'));
+/** An empty list: refused as a wrong file, never answered as an import of nothing. */
+const emptyList = (path: string, what: string): CapabilityRefusal =>
+  new CapabilityRefusal(`${path} is empty; a right file is ${what}. Nothing was added.`, undefined, 'BUNDLE_UNREADABLE', 422);
 import type { KnowledgeApi } from '../../knowledge/knowledge-api.js';
 import type { KnowledgeService } from '../../knowledge/service.js';
 import { CapabilityRefusal, type CapabilityCaller, type CapabilityDefinition, type FixedChoice, type InputDescription, type ListName } from '../types.js';
@@ -50,11 +65,16 @@ function pathFromElsewhere(path: string | undefined, caller: CapabilityCaller): 
   return new CapabilityRefusal(`Nothing was added: ${path} names a file on the machine that asked, and this daemon reads a file by path only on its own machine.`,
     'Send the file\'s content instead (the Agent reads a file its turn names on its own machine and sends it), or add it on the daemon\'s own machine');
 }
-/** A path the caller named, in the caller's project (the daemon reads it there), only for a caller on this machine. */
+/**
+ * A path the caller named, placed by the one rule for every capability's path (capabilities/path-inputs.ts): inside the
+ * caller's checked project for anyone but the person, only for a caller on this machine.
+ */
 const pathIn = (path: string, caller: CapabilityCaller): string => {
   const refused = pathFromElsewhere(path, caller);
   if (refused) throw refused;
-  return caller.workingDirectory ? resolve(caller.workingDirectory, path) : resolve(path);
+  // A relative path is placed in the asking project only: with none it is refused (callerPathOf), never read against
+  // the folder the daemon process happened to start in.
+  return callerPathOf(caller, path);
 };
 /** A file named by path, or its content sent: exactly one of the two. */
 function oneSource(values: Readonly<Record<string, string | undefined>>, caller: CapabilityCaller): CapabilityRefusal | undefined {
@@ -322,9 +342,12 @@ export const KNOWLEDGE_IMPORT_URLS = change({
     const refused = oneSource(values, caller);
     if (refused) throw refused;
     // A list sent as its content (read on the machine it is on) is read as the URL-list connector reads one.
-    const result = values.content
-      ? await services.knowledge.ingest.connectorInput({ connectorId: 'url-list', content: values.content, fetchMode: fetchMode(values) })
-      : await services.knowledge.ingest.urlsFile({ path: pathIn(values.path!, caller), fetchMode: fetchMode(values) });
+    const at = values.content ? undefined : pathIn(values.path!, caller);
+    const result = await (at === undefined
+      ? services.knowledge.ingest.connectorInput({ connectorId: 'url-list', content: values.content!, fetchMode: fetchMode(values) })
+      : services.knowledge.ingest.urlsFile({ path: at, fetchMode: fetchMode(values) }))
+      .catch((error: unknown) => { throw wrongList(values.path || 'The list sent', URL_LIST_FILE, caller, error); });
+    if (result.imported === 0 && result.failed === 0) throw emptyList(values.path || 'The list sent', URL_LIST_FILE);
     return { text: importLines('the pages in the list', result), data: { imported: result.imported, failed: result.failed } };
   },
 });
@@ -336,9 +359,12 @@ export const KNOWLEDGE_IMPORT_BOOKMARKS = change({
   async run(values, services, caller) {
     const refused = oneSource(values, caller);
     if (refused) throw refused;
-    const result = values.content
-      ? await services.knowledge.ingest.connectorInput({ connectorId: 'bookmark', content: values.content, fetchMode: fetchMode(values) })
-      : await services.knowledge.ingest.bookmarksFile({ path: pathIn(values.path!, caller), fetchMode: fetchMode(values) });
+    const at = values.content ? undefined : pathIn(values.path!, caller);
+    const result = await (at === undefined
+      ? services.knowledge.ingest.connectorInput({ connectorId: 'bookmark', content: values.content!, fetchMode: fetchMode(values) })
+      : services.knowledge.ingest.bookmarksFile({ path: at, fetchMode: fetchMode(values) }))
+      .catch((error: unknown) => { throw wrongList(values.path || 'The bookmarks sent', BOOKMARKS_FILE, caller, error); });
+    if (result.imported === 0 && result.failed === 0) throw emptyList(values.path || 'The bookmarks sent', BOOKMARKS_FILE);
     return { text: importLines('the bookmarked pages', result), data: { imported: result.imported, failed: result.failed } };
   },
 });
@@ -352,7 +378,9 @@ export const KNOWLEDGE_INGEST_FILE = change({
     if (refused) throw refused;
     const fields = { title: values.title || undefined, tags: tagsOf(values.tags), folderPath: values.folder || undefined, connectorId: 'goodvibes-agent-file' };
     if (!values.content) {
-      const result = await services.knowledge.ingest.artifact({ path: pathIn(values.path!, caller), ...fields });
+      const at = pathIn(values.path!, caller);
+      const result = await services.knowledge.ingest.artifact({ path: at, ...fields })
+        .catch((error: unknown) => { throw fileWorkRefusal(values.path!, 'a file to add (text, Markdown, a PDF or another document)', caller, error, 'Nothing was added.'); });
       return { text: fold([knowledgeIngestLine(result.source, values.path!), ...(result.source.summary ? [`  ${result.source.summary}`] : [])]), data: { source: result.source.id } };
     }
     // Content sent by the program that read the file on its own machine: kept as a saved artifact, then added as one.

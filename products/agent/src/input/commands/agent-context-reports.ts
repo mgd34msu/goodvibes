@@ -6,7 +6,7 @@
  */
 import { discoverProjectContextFiles } from '@goodvibes/engine/terminal-shell/agent-turn/project-context-files';
 import type { CommandContext } from '../command-registry.ts';
-import { buildProcessSupervisionSummary, buildPromptContextReceiptTimeline } from '../agent-workspace-context-snapshot.ts';
+import { buildProcessSupervisionSummary, buildPromptContextReceiptTimeline } from '../context-snapshot.ts';
 import { requireShellPaths } from './runtime-services.ts';
 
 export function instructionFilesReport(ctx: CommandContext): string {

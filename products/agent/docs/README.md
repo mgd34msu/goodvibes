@@ -30,7 +30,7 @@ These are the package-facing docs for the GoodVibes Agent `3.3.x` release line.
 - Connected host: owned outside Agent; Agent reports and uses it and does not manage its lifecycle, with two exceptions: the boot-time start of an installed but stopped host, and the daemon repair at start, made with nothing asked and said in one line (see [Connected host](connected-host.md)).
 - Agent Knowledge: only `/api/goodvibes-agent/knowledge/*`; no default knowledge fallback.
 - Local state: VIBE.md personality, project context files, memory, notes, personas, skills, routines, sessions, setup, and profiles live under the Agent home or current project.
-- Computer work: local read/edit/exec routes are allowed when the current Agent workspace and permissions are sufficient; process monitor/live tail/tool inspector supervision and local file edit/write recovery are inspectable and confirmation-gated; delegation is for isolation, parallelism, remote execution, separate worktrees, or user-requested delegated review.
+- Computer work: local read/edit/exec routes are allowed when the current project folder and permissions are sufficient; process monitor/live tail/tool inspector supervision and local file edit/write recovery are inspectable and confirmation-gated; delegation is for isolation, parallelism, remote execution, separate worktrees, or user-requested delegated review.
 
 ## Model access baseline
 
@@ -39,7 +39,7 @@ The main Agent model reaches Agent-controlled product surfaces through Agent-own
 - `setup` walks the first-run path, covering status, single-item lookup, checkpoint inspect/save/clear, connected-host token repair, setup smoke checklist and evidence, onboarding finish, and GoodVibes settings import, all through the existing setup gates.
 - `models` reads provider/model route readiness, provider and subscription posture, and the hardware-scored local model cookbook, and runs confirmed local server smoke checks.
 - `settings` lists, gets, sets, and resets Agent settings, and previews or applies shared GoodVibes settings import behind redacted confirmation gates.
-- `agent_harness` is the deep inspection surface. It serves the same assistant cockpit shown in TUI Home, searchable mode discovery, the workspace/command/keybinding/tool catalogs, channel and setup posture, the visible autonomy queue with live records and log tails, execution and delegation posture, service and connected-host posture, and operator/audit release artifacts.
+- `agent_harness` is the deep inspection surface. It serves the assistant cockpit, searchable mode discovery, the command, keybinding and tool catalogs (a key is bound with capability_run id:"keys.bind"), channel and setup posture, the visible autonomy queue with live records and log tails, execution and delegation posture, service and connected-host posture, and operator/audit release artifacts.
 - `computer` and `device` cover browser/PWA readiness, browser/screenshot/desktop-control route planning, companion/mobile pairing posture, and voice/TTS provider routes, with confirmation-gated handoffs for anything that opens a visible surface.
 - `agent_knowledge` reads isolated Agent Knowledge, and `agent_knowledge_ingest` writes to it after confirmation.
 - `vibe` inspects VIBE.md personality state and, with confirmation, initializes a project or global VIBE.md or imports one as an Agent-local persona.

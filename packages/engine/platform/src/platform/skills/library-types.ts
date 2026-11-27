@@ -5,6 +5,7 @@
  * daemon's skill store (roots.ts), and these facts are written into each
  * file's frontmatter (library.ts).
  */
+import type { MemoryAuthor } from '../state/memory-author.js';
 
 export type AgentSkillSource = 'user' | 'agent' | 'imported' | 'system';
 export type AgentSkillReviewState = 'fresh' | 'reviewed' | 'stale';
@@ -51,6 +52,8 @@ export interface AgentSkillRecord {
   readonly path?: string | undefined;
   readonly origin?: 'project-local' | 'global' | 'custom' | undefined;
   readonly marked?: boolean | undefined;
+  /** Who wrote it (state/memory-author.ts, the same three as a memory record), kept as `author`, `author-who`, `author-accepted-at` in the frontmatter; absent: the owner's. */
+  readonly author?: MemoryAuthor | undefined;
 }
 
 export interface AgentSkillBundleRecord {
@@ -66,6 +69,8 @@ export interface AgentSkillBundleRecord {
   readonly createdAt: string;
   readonly updatedAt: string;
   readonly reviewedAt?: string | undefined;
+  /** Who wrote it; absent: the owner's. */
+  readonly author?: MemoryAuthor | undefined;
 }
 
 export interface AgentSkillCreateInput {
@@ -78,6 +83,8 @@ export interface AgentSkillCreateInput {
   readonly enabled?: boolean | undefined;
   readonly source?: AgentSkillSource | undefined;
   readonly provenance?: string | undefined;
+  /** Who writes it, as the daemon authenticated the caller; absent: the owner's. */
+  readonly author?: MemoryAuthor | undefined;
 }
 
 export interface AgentSkillBundleCreateInput {
@@ -87,6 +94,8 @@ export interface AgentSkillBundleCreateInput {
   readonly enabled?: boolean | undefined;
   readonly source?: AgentSkillSource | undefined;
   readonly provenance?: string | undefined;
+  /** Who writes it, as the daemon authenticated the caller; absent: the owner's. */
+  readonly author?: MemoryAuthor | undefined;
 }
 
 export interface AgentSkillUpdateInput {
@@ -99,6 +108,8 @@ export interface AgentSkillUpdateInput {
   /** Applied in the same write as the field edit. */
   readonly enabled?: boolean | undefined;
   readonly provenance?: string | undefined;
+  /** Who makes the change (state/memory-author.ts `authorAfterChange`); absent: the author stays. */
+  readonly by?: MemoryAuthor | undefined;
 }
 
 export interface AgentSkillBundleUpdateInput {
@@ -108,6 +119,8 @@ export interface AgentSkillBundleUpdateInput {
   /** Applied in the same write as the field edit. */
   readonly enabled?: boolean | undefined;
   readonly provenance?: string | undefined;
+  /** Who makes the change (state/memory-author.ts `authorAfterChange`); absent: the author stays. */
+  readonly by?: MemoryAuthor | undefined;
 }
 
 /** What deleting a skill changed: the skill, the bundles left empty and removed, and the bundles now pending review. */

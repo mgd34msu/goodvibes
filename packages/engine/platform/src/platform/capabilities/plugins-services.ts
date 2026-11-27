@@ -17,6 +17,7 @@ import { DAEMON_STATE_SURFACE_ROOT } from '../daemon/lifecycle-marker.js';
 import type { PluginManagingControls, PluginProject, PluginsCapabilityServices } from './builtin/plugins.js';
 import type { MarketplaceCapabilityServices } from './builtin/marketplace.js';
 import { requireCallerProject } from './caller-project.js';
+import { logger, summarizeError } from '../utils/index.js';
 
 export interface PluginServiceSources {
   readonly configManager: { getWorkingDirectory(): string | null | undefined };
@@ -35,6 +36,38 @@ function catalogOf(cwd: string, homeDir: string) {
     projectCatalogRoot: join(cwd, '.goodvibes', CATALOG_SURFACE, 'ecosystem'),
     userCatalogRoot: join(homeDir, '.goodvibes', CATALOG_SURFACE, 'ecosystem'),
   };
+}
+
+/**
+ * A project's plugin manager whose switching on and off reaches the daemon's own running plugins too: the state file
+ * is the one every program reads, so a plugin the daemon can load (one in the user's plugin folder) is started or
+ * stopped in the daemon at once, as the programs start or stop it, and what it brings (a media provider, a tool) is
+ * there with no restart. A plugin only that project has is not the daemon's to start.
+ */
+function alsoInDaemon(manager: PluginManagingControls, daemon: PluginManagingControls | undefined): PluginManagingControls {
+  if (!daemon) return manager;
+  const inDaemon = (name: string) => {
+    try { return daemon.list().find((plugin) => plugin.name === name); } catch { return undefined; }
+  };
+  return Object.assign(Object.create(manager) as PluginManagingControls, {
+    list: () => manager.list(),
+    enable: async (name: string) => {
+      const result = await manager.enable(name);
+      // Switched on in the one state file: the daemon starts its own copy now when it has one and it is not running.
+      const known = inDaemon(name);
+      if (result.ok && known && !known.active && !known.quarantined) {
+        try {
+          const started = await daemon.enable(name);
+          if (!started.ok) logger.warn('[plugins] the daemon did not start a plugin switched on in a project', { plugin: name, error: started.error });
+        } catch (error) {
+          logger.warn('[plugins] the daemon did not start a plugin switched on in a project', { plugin: name, error: summarizeError(error) });
+        }
+      }
+      return result;
+    },
+    // Switched off: through the daemon's own manager when it has the plugin (it stops it and writes the same file).
+    disable: async (name: string) => (inDaemon(name)?.enabled === true ? daemon.disable(name) : manager.disable(name)),
+  });
 }
 
 export function createPluginCapabilityServices(sources: PluginServiceSources): PluginsCapabilityServices & MarketplaceCapabilityServices {
@@ -59,7 +92,7 @@ export function createPluginCapabilityServices(sources: PluginServiceSources): P
           manager = made;
         }
         return {
-          manager,
+          manager: live ? manager : alsoInDaemon(manager, sources.pluginManager),
           live,
           paths: { cwd, homeDir },
           catalog: catalogOf(cwd, homeDir),

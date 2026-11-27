@@ -14,13 +14,11 @@ import {
   AGENTS_HOSTABLE_LIST, AGENTS_RECIPE, AGENTS_RUNNING_LIST, AGENTS_START, AGENTS_START_ARCHETYPE, AGENTS_STOP, AGENTS_STOP_BRANCH, AGENTS_STOP_GROUP, AGENTS_TEAM,
   type AgentArchetypeRow, type AgentsCapabilityServices, type CapabilityDefinition, type RunningAgentRow,
 } from '@goodvibes/engine/platform/platform/capabilities';
-import { commandRefusal } from './command-confirmation.js';
 import type { TerminalCommandRegistry } from './command-registry.js';
 import { defineCommand } from './command-actions/define.js';
 import { defineList, type ListRow } from './command-actions/lists.js';
 import { daemonCapabilityAction, runDaemonCapability, sessionCapabilityAction, type DaemonCapabilityBinding } from './command-actions/capability-actions.js';
 import type { CommandActionContext, CommandDescription } from './command-actions/types.js';
-import { doAction } from './described-command-kit.js';
 
 export { TEAM_MODES, TEAM_RECIPES } from '@goodvibes/engine/platform/platform/capabilities';
 
@@ -124,9 +122,8 @@ defineList<CommandActionContext>({
 });
 
 const TERMINAL_ONLY = 'It runs in the terminal app\'s session.';
-type PlaceOpener = { readonly openPlace?: ((id: string, start?: { readonly list?: string | undefined }) => void) | undefined };
 
-function agentsCommand(daemon: DaemonCapabilityBinding<CommandActionContext>): CommandDescription<CommandActionContext> {
+function agentsCommand(daemon: DaemonCapabilityBinding<CommandActionContext>, opens: string): CommandDescription<CommandActionContext> {
   const session = (definition: CapabilityDefinition<AgentsCapabilityServices>) =>
     sessionCapabilityAction<CommandActionContext, AgentsCapabilityServices>(definition, agentsServices, { terminalOnly: TERMINAL_ONLY });
   return {
@@ -136,19 +133,11 @@ function agentsCommand(daemon: DaemonCapabilityBinding<CommandActionContext>): C
     title: 'Your agents',
     summary: 'What your agents are doing: open them in the Work place, start agents, host a coding agent, hand work on, and stop work',
     group: 'Agents and work',
-    // Typed bare by a person, it opens the Work place on Your agents.
-    bareOpens: 'open',
+    // Unlisted: typed bare by a person, it opens the Work place on the tab that lists this program's own agents (the
+    // command-level `opens`); its actions are that place's controls, and typed with an action word one runs.
+    firstScreen: false,
+    opens,
     actions: [
-      doAction<CommandActionContext>({
-        id: 'open', label: 'Open Your agents', word: 'open', touches: 'reads', inputs: [],
-        sentence: 'Opens the Work place on Your agents: what is running, the archetypes and the coding agents you can host.',
-        operator: { terminalOnly: 'It is a terminal screen; the web UI shows the same in its Work view.' },
-        async run(_values, ctx) {
-          const open = (ctx as CommandActionContext & PlaceOpener).openPlace;
-          if (!open) throw commandRefusal('This program has no screens to open.');
-          open('work', { list: 'agents' });
-        },
-      }),
       daemonCapabilityAction<CommandActionContext>(AGENTS_HOSTABLE, daemon),
       daemonCapabilityAction<CommandActionContext>(AGENTS_HOST, daemon),
       session(AGENTS_TEAM), session(AGENTS_START), session(AGENTS_RECIPE), session(AGENTS_ARCHETYPES), session(AGENTS_ARCHETYPE), session(AGENTS_START_ARCHETYPE),
@@ -159,9 +148,13 @@ function agentsCommand(daemon: DaemonCapabilityBinding<CommandActionContext>): C
   };
 }
 
-/** Register `/agents` (the one description) with this app's host and its daemon binding (capability-binding.ts). */
-export function registerAgentsCommand<Ctx extends CommandActionContext>(registry: Pick<TerminalCommandRegistry<Ctx>, 'register'>, host: AgentsHost<Ctx>, daemon: DaemonCapabilityBinding<Ctx>): void {
+/**
+ * Register `/agents` (the one description) with this app's host and its daemon binding (capability-binding.ts).
+ * `opens` is the Work tab that lists this program's own agents: Your agents in the terminal app (the default), Coding
+ * agents in the Agent, which runs no agents of its own (work-agents-entries.ts).
+ */
+export function registerAgentsCommand<Ctx extends CommandActionContext>(registry: Pick<TerminalCommandRegistry<Ctx>, 'register'>, host: AgentsHost<Ctx>, daemon: DaemonCapabilityBinding<Ctx>, opens = 'work/agents'): void {
   installed = host as unknown as AgentsHost<CommandActionContext>;
   binding = daemon as unknown as DaemonCapabilityBinding<CommandActionContext>;
-  registry.register(defineCommand(agentsCommand(binding)) as never);
+  registry.register(defineCommand(agentsCommand(binding, opens)) as never);
 }

@@ -360,7 +360,8 @@ which is the bot that version last polled for, keeping the saved offset. Only
 when no bot was ever recorded does polling wait (status `blocked`) for your
 review: in WebUI, open **Settings → Surfaces → Telegram cursor recovery** and
 choose **Review saved Telegram cursor**; TUI and Agent provide the same
-confirmation at **`/channels telegram-cursor`**. With polling enabled and a
+confirmation at **Telegram's reading position** (`c` on the Channels tab of Mail,
+calendar and channels). With polling enabled and a
 locally stored bot credential, the daemon verifies the selected bot through
 Telegram. Confirm only if that saved position belongs to the displayed bot:
 choosing the wrong bot can skip its waiting messages. Confirmation preserves the

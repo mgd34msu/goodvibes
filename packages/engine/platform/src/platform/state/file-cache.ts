@@ -1,42 +1,138 @@
+import { AsyncLocalStorage } from 'node:async_hooks';
 import { createHash } from 'node:crypto';
+import { callingAgentId } from '../agents/calling-agent.js';
+import { currentTurn } from '../security/turn-boundary.js';
 
 export type CacheStatus = 'miss' | 'unchanged' | 'modified';
 
-function digest(content: string): string {
-  return createHash('sha256').update(content, 'utf8').digest('hex');
+function digest(content: string | Uint8Array): string {
+  return typeof content === 'string'
+    ? createHash('sha256').update(content, 'utf8').digest('hex')
+    : createHash('sha256').update(content).digest('hex');
+}
+
+/** A writer the host names around a run that has no turn of its own in scope (a web chat's tool calls). */
+const namedWriter = new AsyncLocalStorage<string>();
+
+/** Runs `fn` with `writer` ("web chat <id>") as who reads and writes files in it. */
+export function withFileWriter<T>(writer: string, fn: () => T): T {
+  return namedWriter.run(writer, fn);
 }
 
 /**
- * FileStateCache: "is this file still what this session last saw?"
+ * Who is reading or writing a file now: the agent whose tool call runs (each
+ * agent of one turn on its own), else the writer the host named, else the
+ * session whose turn runs, else this process's own conversation (''). Read
+ * from the host's scope, never from tool arguments.
+ */
+export function currentFileWriter(): string {
+  const agent = callingAgentId() ?? currentTurn()?.callerAgentId ?? undefined;
+  if (agent) return `agent ${agent}`;
+  const named = namedWriter.getStore();
+  if (named) return named;
+  const session = currentTurn()?.sessionId;
+  return session ? `session ${session}` : '';
+}
+
+/**
+ * The last write each file had in this process, and by whom: lets a refused
+ * writer be told who changed the file when that writer is in this process
+ * (another agent of the turn, another session the daemon runs). A writer in
+ * another process is not known here; the refusal then names no one.
+ */
+const lastWrites = new Map<string, { readonly hash: string; readonly writer: string }>();
+
+/** One file a tool wrote, and who wrote it, read from the host's scope at the write. */
+export interface FileWritten {
+  readonly path: string;
+  readonly content: string | Uint8Array;
+  /** The session whose turn wrote it, when a turn is in scope. */
+  readonly sessionId: string | undefined;
+  /** The agent whose tool call wrote it, when an agent did. */
+  readonly agentId: string | undefined;
+  /** {@link currentFileWriter} at the write ('' outside any turn). */
+  readonly writer: string;
+}
+
+const writeListeners = new Set<(write: FileWritten) => void>();
+
+/**
+ * Be told of every file a tool of this process writes (write, edit, notebook edit), synchronously, after the write.
+ * A project's checkpoints keep who wrote which file from this (checkpoint/write-record.ts). Returns the stop.
+ */
+export function onFileWritten(listener: (write: FileWritten) => void): () => void {
+  writeListeners.add(listener);
+  return () => { writeListeners.delete(listener); };
+}
+
+/**
+ * FileStateCache: "is this file still what this reader last saw?"
  *
- * One SHA-256 per path (64 bytes), recorded when a tool reads or writes the
- * file. A read or edit compares the bytes it has just read itself with the
- * recorded hash, so the comparison and the operation see the same instant and
- * the file is read once per call. Nothing is evicted, so the protection does
- * not lapse for files read long ago; memory grows by one hash per file read.
+ * One SHA-256 per reader per path (64 bytes), recorded when a tool reads or
+ * writes the file. The reader is {@link currentFileWriter}: the session, or
+ * each agent of a turn on its own, so two agents sharing one registry never
+ * vouch for each other's reads. A read, write or edit compares the bytes it has
+ * just read itself with the recorded hash, so the comparison and the operation
+ * see the same instant and the file is read once per call. No lock is held and
+ * nothing waits on a clock. Nothing is evicted, so the protection does not
+ * lapse for files read long ago; memory grows by one hash per file read.
  *
- * - miss: this session has not seen the file
+ * - miss: this reader has not seen the file
  * - unchanged: the bytes are the ones last seen
- * - modified: the file changed since this session last saw it
+ * - modified: the file changed since this reader last saw it
  */
 export class FileStateCache {
   private readonly hashes = new Map<string, string>();
 
-  /** Compare content the caller just read with what this session last saw. Records nothing. */
-  compare(filePath: string, content: string): CacheStatus {
-    const seen = this.hashes.get(filePath);
+  private key(filePath: string): string {
+    return `${currentFileWriter()}\u0000${filePath}`;
+  }
+
+  /** Compare content the caller just read with what this reader last saw. Records nothing. */
+  compare(filePath: string, content: string | Uint8Array): CacheStatus {
+    const seen = this.hashes.get(this.key(filePath));
     if (seen === undefined) return 'miss';
     return seen === digest(content) ? 'unchanged' : 'modified';
   }
 
-  /** Record the content a tool read or wrote as what this session has seen. */
-  update(filePath: string, content: string, _metadata?: { tool?: string; agent?: string }): void {
-    this.hashes.set(filePath, digest(content));
+  /** Record the content a tool read or wrote as what this reader has seen; anything but a read is a write. */
+  update(filePath: string, content: string | Uint8Array, metadata?: { tool?: string; agent?: string }): void {
+    const hash = digest(content);
+    this.hashes.set(this.key(filePath), hash);
+    if (metadata?.tool === 'read') return;
+    const writer = currentFileWriter();
+    lastWrites.set(filePath, { hash, writer: writer || 'this conversation' });
+    if (writeListeners.size === 0) return;
+    const turn = currentTurn();
+    const written: FileWritten = { path: filePath, content, writer,
+      sessionId: turn?.sessionId ?? undefined, agentId: callingAgentId() ?? turn?.callerAgentId ?? undefined };
+    for (const listener of writeListeners) {
+      try { listener(written); } catch { /* a record that could not be kept never fails the write */ }
+    }
+  }
+
+  /**
+   * Why a write over `content` (the file's bytes now, read by the caller) must
+   * not happen, or null when this reader last saw exactly these bytes: the file
+   * changed since this session or agent read it, or it never read it. The
+   * sentence names who changed it when this process knows, and says to read it
+   * again. Records nothing, so the write stays refused until the file is read.
+   */
+  staleWrite(filePath: string, content: string | Uint8Array): string | null {
+    const status = this.compare(filePath, content);
+    if (status === 'unchanged') return null;
+    const me = currentFileWriter();
+    const last = lastWrites.get(filePath);
+    const by = last && last.hash === digest(content) && last.writer !== (me || 'this conversation') ? ` by ${last.writer}` : '';
+    return status === 'modified'
+      ? `'${filePath}' changed${by} since you last read it, so nothing was written: writing now would replace that change. Read it again, then write against what it holds now.`
+      : `'${filePath}' already exists and you have not read it${by ? ` (last written${by})` : ''}, so nothing was written: writing now could replace someone else's change. Read it first, then write against what it holds.`;
   }
 
   /** Forget a file (it was changed by something that did not read it, such as an undo). */
   invalidate(filePath: string): void {
-    this.hashes.delete(filePath);
+    const suffix = `\u0000${filePath}`;
+    for (const key of [...this.hashes.keys()]) if (key.endsWith(suffix)) this.hashes.delete(key);
   }
 
   /** Forget every file. */

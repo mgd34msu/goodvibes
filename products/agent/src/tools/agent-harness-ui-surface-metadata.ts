@@ -10,8 +10,7 @@ import { openExternalUrl } from '@goodvibes/engine/platform/platform/utils';
 import { captureVoiceListReadSource, captureVoiceProviderReadSource } from '@goodvibes/engine/platform/platform/voice';
 import { ToolInputProjectionError } from '@goodvibes/engine/platform/platform/tools';
 import { connectedBrowserCockpitRoute } from './agent-harness-browser-cockpit-route.ts';
-import { AGENT_WORKSPACE_CATEGORIES } from '../input/agent-workspace-categories.ts';
-import { isKnownAgentWorkspaceCategory } from '../input/agent-workspace-navigation.ts';
+import { PLACES } from '@goodvibes/engine/terminal-shell/places';
 import type { AgentHarnessUiSurfaceArgs, UiSurfaceDefinition, UiSurfaceLookup, UiSurfaceResolution } from './agent-harness-ui-surface-types.ts';
 import { clampReadLimit } from '@goodvibes/engine/terminal-shell/agent-turn/read-helpers';
 import { readString } from '@goodvibes/engine/terminal-shell/agent-turn/tool-args';
@@ -64,8 +63,9 @@ function optionalModelTarget(args: AgentHarnessUiSurfaceArgs): 'main' | 'helper'
   return target === 'main' || target === 'helper' || target === 'tool' || target === 'tts' ? target : undefined;
 }
 
-function workspaceCategory(args: AgentHarnessUiSurfaceArgs): string | undefined {
-  return readString(args.categoryId || args.category || args.target) || undefined;
+/** The place named by the call (`target`, `categoryId` or `category`): a place's id or its title. */
+function placeTarget(args: AgentHarnessUiSurfaceArgs): string | undefined {
+  return readString(args.target || args.categoryId || args.category) || undefined;
 }
 
 function settingsTarget(args: AgentHarnessUiSurfaceArgs): string | undefined {
@@ -89,36 +89,11 @@ function filePickerOptions(args: AgentHarnessUiSurfaceArgs): { injectMode: boole
   };
 }
 
-function openAgentWorkspaceCategory(
-  context: CommandContext,
-  surface: UiSurfaceDefinition,
-  categoryId: string,
-  extra: Record<string, unknown> = {},
-): EffectResult {
-  if (!context.openAgentWorkspace) return routeUnavailable(surface);
-  context.openAgentWorkspace(categoryId);
-  return opened(surface, { categoryId, ...extra });
-}
-
-function openNamedWorkspaceSurface(
-  context: CommandContext,
-  args: AgentHarnessUiSurfaceArgs,
-  surface: UiSurfaceDefinition,
-  options: {
-    readonly workspaceId: string;
-    readonly categoryId: string;
-    readonly opener?: (() => void) | undefined;
-  },
-): EffectResult {
-  if (context.openAgentWorkspace) {
-    context.openAgentWorkspace(options.categoryId);
-    return opened(surface, { categoryId: options.categoryId, workspaceId: options.workspaceId });
-  }
-  if (options.opener) {
-    options.opener();
-    return opened(surface, { categoryId: options.categoryId, workspaceId: options.workspaceId, route: 'named-opener' });
-  }
-  return routeUnavailable(surface);
+/** A surface that is one place of the menu (Permissions and safety, Memory and knowledge, ...), opened on its first tab. */
+function openPlaceSurface(context: CommandContext, surface: UiSurfaceDefinition, placeId: string): EffectResult {
+  if (!context.openPlace) return routeUnavailable(surface);
+  context.openPlace(placeId);
+  return opened(surface, { place: placeId });
 }
 
 function openSimpleContextSurface(context: CommandContext, surfaceId: string, openerKey: keyof CommandContext): EffectResult {
@@ -131,30 +106,34 @@ function openSimpleContextSurface(context: CommandContext, surfaceId: string, op
 
 const UI_SURFACES: readonly UiSurfaceDefinition[] = [
   {
-    id: 'agent-workspace',
-    label: 'Agent Workspace',
-    kind: 'workspace',
-    summary: 'Operator workspace for setup, knowledge, channels, and automation.',
+    id: 'places',
+    label: 'Places',
+    kind: 'place',
+    summary: 'The menu of every place (Work and agents, Memory and knowledge, Automation, System, ...), or one place by its id.',
     command: 'the menu (Ctrl+G then m)',
-    preferredModelRoute: `Use ${agentHarnessModes('workspace_actions', 'workspace_action', 'run_workspace_action')} for model operation; use mode:"open_ui_surface" only to visibly navigate.`,
-    parameters: ['categoryId'],
-    available: (context) => typeof context.openAgentWorkspace === 'function',
+    preferredModelRoute: 'Use capability_find and capability_run for model operation; use mode:"open_ui_surface" only to visibly show a place to the person.',
+    parameters: ['target'],
+    available: (context) => typeof context.openPlaceMenu === 'function' || typeof context.openPlace === 'function',
     open: (context, args, assertCurrent) => {
       assertCurrent?.();
-      const surface = findSurfaceById('agent-workspace')!;
-      if (!context.openAgentWorkspace) return routeUnavailable(surface);
-      const categoryId = workspaceCategory(args);
-      if (categoryId && !isKnownAgentWorkspaceCategory(AGENT_WORKSPACE_CATEGORIES, categoryId)) {
-        return notOpened(surface, `Unknown Agent workspace area "${categoryId}". Nothing was opened. Valid ids: ${AGENT_WORKSPACE_CATEGORIES.map((category) => category.id).join(', ')}.`);
+      const surface = findSurfaceById('places')!;
+      const wanted = placeTarget(args)?.toLowerCase();
+      if (!wanted) {
+        if (!context.openPlaceMenu) return routeUnavailable(surface);
+        context.openPlaceMenu();
+        return opened(surface, { place: 'menu' });
       }
-      context.openAgentWorkspace(categoryId);
-      return opened(surface, { categoryId: categoryId ?? 'default' });
+      const place = PLACES.find((candidate) => candidate.id === wanted || candidate.title.toLowerCase() === wanted);
+      if (!place) {
+        return notOpened(surface, `No place is called "${wanted}". Nothing was opened. Places: ${PLACES.map((candidate) => candidate.id).join(', ')}.`);
+      }
+      return openPlaceSurface(context, surface, place.id);
     },
   },
   {
     id: 'connected-browser-cockpit',
     label: 'Connected Browser Cockpit',
-    kind: 'workspace',
+    kind: 'screen',
     summary: 'Connected-host browser cockpit/PWA route.',
     command: 'connected host web route',
     preferredModelRoute: `Use ${hostActions('service', 'services', 'status')} or ${settingsActions('list', 'get')} to inspect or repair web readiness; use mode:"open_ui_surface" only to visibly open the configured cockpit URL.`,
@@ -210,82 +189,50 @@ const UI_SURFACES: readonly UiSurfaceDefinition[] = [
     },
   },
   {
-    id: 'panel-picker',
-    label: 'Workspace Picker',
-    kind: 'picker',
-    summary: 'Operator route into the Agent Workspace home.',
-    command: 'Ctrl+P',
-    preferredModelRoute: 'Use mode:"workspace_actions" for concrete model operation, or mode:"open_ui_surface" for visible routing.',
-    available: (context) => typeof context.openWorkspacePicker === 'function' || typeof context.openAgentWorkspace === 'function',
+    id: 'security-panel',
+    label: 'Permissions and safety',
+    kind: 'place',
+    summary: 'The Permissions and safety place: mode and rules, secrets, sign-in, device tokens, policy and sandbox.',
+    // No /security command: the person's control is Permissions and safety (/permissions opens it).
+    command: '/permissions',
+    preferredModelRoute: 'Use capability_run id:"security.review" for the review\'s text, or capability_find for the safety capabilities.',
+    available: (context) => typeof context.openPlace === 'function',
     open: (context, _args, assertCurrent) => {
       assertCurrent?.();
-      const surface = findSurfaceById('panel-picker')!;
-      if (context.openWorkspacePicker) {
-        context.openWorkspacePicker();
-        return opened(surface, { categoryId: 'home', route: 'workspace-picker' });
-      }
-      return openAgentWorkspaceCategory(context, surface, 'home');
-    },
-  },
-  {
-    id: 'security-panel',
-    label: 'Security Panel',
-    kind: 'workspace',
-    summary: 'Operator security review for tokens, MCP, policy, and plugin risk.',
-    command: '/security',
-    preferredModelRoute: `Use mode:"workspace_actions" for security review actions or ${agentHarnessModes('run_command')} for confirmed /security review output.`,
-    available: (context) => typeof context.openAgentWorkspace === 'function' || typeof context.openSecurityWorkspace === 'function',
-    open: (context, args, assertCurrent) => {
-      assertCurrent?.();
-      const surface = findSurfaceById('security-panel')!;
-      return openNamedWorkspaceSurface(context, args, surface, {
-        workspaceId: 'security',
-        categoryId: 'tools',
-        opener: context.openSecurityWorkspace,
-      });
+      return openPlaceSurface(context, findSurfaceById('security-panel')!, 'safety');
     },
   },
   {
     id: 'knowledge-panel',
-    label: 'Knowledge Panel',
-    kind: 'workspace',
-    summary: 'Operator Knowledge surface for isolated status, search, and ingest.',
+    label: 'Memory and knowledge',
+    kind: 'place',
+    summary: 'The Memory and knowledge place: memory, knowledge sources and entries, notes, personas, routines, documents.',
     command: '/memory',
-    preferredModelRoute: 'Use agent_knowledge, agent_knowledge_ingest, mode:"workspace_actions", or capability_run with a knowledge.* capability (capability_find names them).',
-    available: (context) => typeof context.openAgentWorkspace === 'function' || typeof context.openKnowledgeWorkspace === 'function',
-    open: (context, args, assertCurrent) => {
+    preferredModelRoute: 'Use agent_knowledge, agent_knowledge_ingest, or capability_run with a knowledge.* capability (capability_find names them).',
+    available: (context) => typeof context.openPlace === 'function',
+    open: (context, _args, assertCurrent) => {
       assertCurrent?.();
-      const surface = findSurfaceById('knowledge-panel')!;
-      return openNamedWorkspaceSurface(context, args, surface, {
-        workspaceId: 'knowledge',
-        categoryId: 'knowledge',
-        opener: context.openKnowledgeWorkspace,
-      });
+      return openPlaceSurface(context, findSurfaceById('knowledge-panel')!, 'memory');
     },
   },
   {
     id: 'subscription-panel',
-    label: 'Subscription Panel',
-    kind: 'workspace',
-    summary: 'Operator subscription surface for provider review, auth, and bundles.',
+    label: 'Models and providers',
+    kind: 'place',
+    summary: 'The Models and providers place: models, providers and their sign-ins, routing, services.',
     command: '/model',
     preferredModelRoute: 'Sign-ins are capabilities of Models and providers: capability_run id:"provider.sign-in", then id:"provider.finish".',
-    available: (context) => typeof context.openAgentWorkspace === 'function' || typeof context.openSubscriptionWorkspace === 'function',
-    open: (context, args, assertCurrent) => {
+    available: (context) => typeof context.openPlace === 'function',
+    open: (context, _args, assertCurrent) => {
       assertCurrent?.();
-      const surface = findSurfaceById('subscription-panel')!;
-      return openNamedWorkspaceSurface(context, args, surface, {
-        workspaceId: 'subscription',
-        categoryId: 'setup',
-        opener: context.openSubscriptionWorkspace,
-      });
+      return openPlaceSurface(context, findSurfaceById('subscription-panel')!, 'models');
     },
   },
   {
     id: 'settings',
     label: 'Settings',
     kind: 'modal',
-    summary: 'Fullscreen settings workspace for Agent config, secrets, MCP, and tools.',
+    summary: 'The settings screen: every Agent setting, by section, with search.',
     command: '/settings',
     preferredModelRoute: `Use ${settingsActions('list', 'get', 'set', 'reset', 'import')} for model operation; use mode:"open_ui_surface" only to visibly navigate.`,
     parameters: ['target', 'key', 'prefix'],
@@ -300,7 +247,7 @@ const UI_SURFACES: readonly UiSurfaceDefinition[] = [
       const selected = typeof landed === 'string' ? landed : 'unreported';
       if (selected === 'not-found') {
         return opened(surface, { target, selected,
-          next: `No setting or category is named "${target}"; the settings workspace is showing a search for it. Use settings action:"list" with a query to find the exact key.` });
+          next: `No setting or category is named "${target}"; the settings screen is showing a search for it. Use settings action:"list" with a query to find the exact key.` });
       }
       return opened(surface, { target: target ?? 'default', selected });
     },
@@ -308,10 +255,10 @@ const UI_SURFACES: readonly UiSurfaceDefinition[] = [
   {
     id: 'mcp-workspace',
     label: 'MCP Workspace',
-    kind: 'workspace',
+    kind: 'screen',
     summary: 'MCP server setup, trust posture, and tool inventory workspace.',
     command: '/mcp',
-    preferredModelRoute: `Use ${agentHarnessModes('workspace_actions', 'tools')} or ${settingsActions('list', 'get', 'set')} for model operation.`,
+    preferredModelRoute: `Use capability_find and capability_run, ${agentHarnessModes('tools')}, or ${settingsActions('list', 'get', 'set')} for model operation.`,
     available: (context) => typeof context.openMcpWorkspace === 'function',
     open: (context) => openSimpleContextSurface(context, 'mcp-workspace', 'openMcpWorkspace'),
   },
@@ -372,7 +319,7 @@ const UI_SURFACES: readonly UiSurfaceDefinition[] = [
     kind: 'picker',
     summary: 'Reasoning-effort selector for models that expose effort levels.',
     command: 'This conversation, in the menu: Choose how hard the model thinks (the capability effort.set)',
-    preferredModelRoute: `Use ${settingsActions('get', 'set')} for provider.reasoningEffort when a concrete level is known, or mode:"run_workspace_action" setup-reasoning-effort with confirmation.`,
+    preferredModelRoute: `Use ${settingsActions('get', 'set')} for provider.reasoningEffort when a concrete level is known (capability_run id:"settings.set" with key provider.reasoningEffort does the same).`,
     available: (context) => typeof context.openReasoningEffortPicker === 'function',
     open: (context, _args, assertCurrent) => {
       assertCurrent?.();
@@ -467,8 +414,9 @@ const UI_SURFACES: readonly UiSurfaceDefinition[] = [
     label: 'Context Inspector',
     kind: 'modal',
     summary: 'Context-window usage and token breakdown inspector.',
-    command: '/context',
-    preferredModelRoute: 'Use slash-command mirrors for text output; opening is visible navigation only.',
+    // No /context command: the person's control is This conversation (the menu); the model reads it as a capability.
+    command: 'menu › This conversation',
+    preferredModelRoute: 'Use capability_find "how full is the context window" for text output; opening is visible navigation only.',
     available: (context) => typeof context.openContextInspector === 'function',
     open: (context) => openSimpleContextSurface(context, 'context-inspector', 'openContextInspector'),
   },
@@ -636,18 +584,18 @@ const UI_SURFACES: readonly UiSurfaceDefinition[] = [
 
   {
     id: 'onboarding',
-    label: 'Agent Workspace Onboarding',
-    kind: 'workspace',
-    summary: 'Agent workspace entry for first-run and setup review.',
+    label: 'Setup',
+    kind: 'place',
+    summary: 'The Setup tab of System: every setup topic, done or not, each opening what sets it up.',
     command: 'Setup, in System in the menu (Ctrl+G then m)',
-    preferredModelRoute: `Use ${agentHarnessModes('workspace', 'workspace_actions')} or ${settingsActions('list', 'get', 'set')} for concrete setup operation.`,
-    available: (context) => typeof context.openAgentWorkspace === 'function',
+    preferredModelRoute: `Use capability_run with a setup.<topic> capability, or ${settingsActions('list', 'get', 'set')} for concrete setup operation.`,
+    available: (context) => typeof context.openPlace === 'function',
     open: (context, _args, assertCurrent) => {
       assertCurrent?.();
       const surface = findSurfaceById('onboarding')!;
-      if (!context.openAgentWorkspace) return routeUnavailable(surface);
-      context.openAgentWorkspace();
-      return opened(surface);
+      if (!context.openPlace) return routeUnavailable(surface);
+      context.openPlace('system', { list: 'setup' });
+      return opened(surface, { place: 'system', list: 'setup' });
     },
   },
 ];
@@ -681,46 +629,44 @@ function surfaceCandidate(surface: UiSurfaceDefinition): Record<string, unknown>
 function uiSurfaceModelRoute(surface: UiSurfaceDefinition): string {
   switch (surface.id) {
     case 'connected-browser-cockpit':
-      return 'computer action:"browser|open_browser" or workspace action:"open"';
-    case 'agent-workspace':
-    case 'panel-picker':
+      return 'computer action:"browser|open_browser" or screens_keys_commands action:"open"';
+    case 'places':
     case 'security-panel':
     case 'subscription-panel':
     case 'mcp-workspace':
     case 'onboarding':
-      return 'workspace action:"actions|open"';
+      return 'capability_find and capability_run, or screens_keys_commands action:"open"';
     case 'knowledge-panel':
-      return 'agent_knowledge, agent_knowledge_ingest, or workspace action:"actions"';
+      return 'agent_knowledge, agent_knowledge_ingest, or capability_find and capability_run';
     case 'settings':
     case 'tts-provider-picker':
     case 'tts-voice-picker':
     case 'reasoning-effort-picker':
-      return 'settings action:"list|get|set" or workspace action:"open"';
+      return 'settings action:"list|get|set" or screens_keys_commands action:"open"';
     case 'model-picker':
     case 'provider-picker':
-      return 'settings action:"get|set" or workspace action:"run_command"';
+      return 'settings action:"get|set" or screens_keys_commands action:"run_command"';
     case 'session-picker':
     case 'bookmark-modal':
     case 'context-inspector':
     case 'slash-command-mode':
     case 'block-actions':
-      return 'workspace action:"commands|run_command"';
+      return 'screens_keys_commands action:"commands|run_command"';
     case 'process-monitor':
     case 'live-tail':
     case 'file-picker':
-      return 'first-class tools or workspace action:"open"';
+      return 'first-class tools or screens_keys_commands action:"open"';
     case 'conversation-search':
     case 'prompt-history-search':
-      return 'workspace action:"open"';
+      return 'screens_keys_commands action:"open"';
     case 'help-overlay':
-      return 'workspace action:"commands|shortcuts"';
+      return 'screens_keys_commands action:"commands|shortcuts"';
     default:
-      return 'workspace action:"open"';
+      return 'screens_keys_commands action:"open"';
   }
 }
 
-const UI_CALLBACK_NAMES = ['openAgentWorkspace', 'openWorkspacePicker', 'openSecurityWorkspace', 'openKnowledgeWorkspace',
-  'openSubscriptionWorkspace', 'openSettingsModal', 'openMcpWorkspace', 'openModelPicker', 'openModelPickerWithTarget',
+const UI_CALLBACK_NAMES = ['openPlaceMenu', 'openPlace', 'openSettingsModal', 'openMcpWorkspace', 'openModelPicker', 'openModelPickerWithTarget',
   'openProviderPicker', 'openProviderModelPickerWithTarget', 'openReasoningEffortPicker', 'openSelection', 'openSessionPicker',
   'openProfilePicker', 'openBookmarkModal', 'openContextInspector', 'openProcessModal', 'openLiveTail', 'openConversationSearch',
   'openPromptHistorySearch', 'openSlashCommandMode', 'executeCommand', 'openFilePicker', 'openBlockActions', 'openCommandPalette',
@@ -806,7 +752,7 @@ async function describeSurface(
   readingOptions.assertCurrent?.(); readingOptions.signal?.throwIfAborted();
   const available = surface.available(context);
   const cockpit = surface.id === 'connected-browser-cockpit'
-    ? await connectedBrowserCockpitRoute(context, { includeWorkspaceCoverage: options.includeParameters === true }, readingOptions) : undefined;
+    ? await connectedBrowserCockpitRoute(context, { includeDetails: options.includeParameters === true }, readingOptions) : undefined;
   readingOptions.assertCurrent?.(); readingOptions.signal?.throwIfAborted();
   return {
     id: surface.id,
@@ -824,7 +770,7 @@ async function describeSurface(
       policy: {
         effect: 'visible-ui-navigation',
         confirmation: 'agent_harness mode:"open_ui_surface" opens a visible surface; confirm:true and explicitUserRequest are context only and grant nothing.',
-        boundary: 'UI surface routing opens the same visible Agent shell surface the user can open. Use first-class model tools, settings modes, workspace actions, or confirmed slash-command mirrors for actual operations.',
+        boundary: 'UI surface routing opens the same visible Agent shell surface the user can open. Use first-class model tools, settings modes, capabilities, or confirmed slash-command mirrors for actual operations.',
       },
     } : {}),
   };

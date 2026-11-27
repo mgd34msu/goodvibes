@@ -418,7 +418,8 @@ export async function install(options: Options, hooks: InstallHooks = {}): Promi
         // Writes the definition (through the installed launcher, which pins the
         // release and loads the private environment file) and reloads systemd.
         else {
-          execute(daemon, ['refresh-service', '--working-dir', options.workspace ?? ROOT], { cwd: options.dataDir, capture: true });
+          // The daemon has no working folder: the definition starts it in the home, and each program names its project.
+          execute(daemon, ['refresh-service'], { cwd: options.dataDir, capture: true });
           // The unit is named by the daemon's service.serviceName; manage the one it wrote.
           const written = readDaemonService(execute, daemon, options.dataDir);
           options.serviceName = written.serviceName;

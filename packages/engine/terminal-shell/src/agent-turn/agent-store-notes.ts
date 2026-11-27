@@ -3,14 +3,14 @@
  * on the one note store: `~/.goodvibes/agent/notes/notes.json`.
  */
 import { CapabilityRefusal, type ActionValues } from '@goodvibes/engine/platform/platform/capabilities';
-import type { MemoryClass, MemoryScope } from '@goodvibes/engine/platform/platform/state';
-import { memoryProjectIdentity } from '@goodvibes/engine/platform/platform/state';
+import type { MemoryAuthor, MemoryClass, MemoryScope } from '@goodvibes/engine/platform/platform/state';
+import { memoryAwaitsOwner, memoryProjectIdentity } from '@goodvibes/engine/platform/platform/state';
 import { AgentNoteRegistry, type AgentNoteRecord } from './note-registry.js';
 import { AgentPersonaRegistry } from './persona-registry.js';
 import { AgentSkillRegistry } from './skill-registry.js';
 import { AgentRoutineRegistry } from './routine-registry.js';
 import { formatAgentRecordReviewState } from './record-labels.js';
-import { splitWords, storeStep, storeStepAsync, type StoreAct, type StoreActContext } from './agent-store-common.js';
+import { ownersOwnReview, provenanceBy, splitWords, storeStep, storeStepAsync, writtenBy, type StoreAct, type StoreActContext } from './agent-store-common.js';
 
 const notesOf = (context: StoreActContext): AgentNoteRegistry => AgentNoteRegistry.fromShellPaths(context.shellPaths);
 
@@ -99,24 +99,32 @@ function recordMade(context: StoreActContext, note: AgentNoteRecord, domain: Mad
 
 const change = (note: AgentNoteRecord, text: string) => ({ text, data: { note: noteFacts(note) } });
 
+/**
+ * The author of a record made from a note: someone else's note the owner has not accepted stays someone else's in what
+ * is made from it; otherwise who makes it (state/memory-author.ts).
+ */
+function madeFromNoteBy(note: AgentNoteRecord, context: StoreActContext): MemoryAuthor {
+  return memoryAwaitsOwner(note) && note.author ? note.author : writtenBy(context);
+}
+
 export const NOTE_ACTS: Readonly<Record<string, StoreAct>> = {
   async 'notes.list'(_values, context) { return listed('Notes', storeStep(() => notesOf(context).list())); },
   async 'notes.show'(values, context) { const note = noteOrRefuse(context, values.note!); return { text: renderNote(note), data: { note: noteFacts(note) } }; },
   async 'notes.search'(values, context) { return listed(`Notes matching "${values.words}"`, storeStep(() => notesOf(context).search(values.words!))); },
   async 'notes.create'(values, context) {
     const note = storeStep(() => notesOf(context).create({
-      title: values.title || noteTitleFromText(values.body!), body: values.body!, tags: splitWords(values.tags), sourceUrl: values.url || undefined, source: 'user', provenance: 'Command',
+      title: values.title || noteTitleFromText(values.body!), body: values.body!, tags: splitWords(values.tags), sourceUrl: values.url || undefined, source: 'user', provenance: provenanceBy(context, 'Command'), author: writtenBy(context),
     }));
     return change(note, `Wrote note ${note.title}.`);
   },
   async 'notes.edit'(values, context) {
     const note = storeStep(() => notesOf(context).update(values.note!, {
       title: values.title || undefined, body: values.body || undefined, sourceUrl: values.url || undefined,
-      tags: values.tags ? splitWords(values.tags) : undefined, provenance: 'Command',
+      tags: values.tags ? splitWords(values.tags) : undefined, provenance: provenanceBy(context, 'Command'), by: writtenBy(context),
     }));
     return change(note, `Changed note ${note.title}.`);
   },
-  async 'notes.review'(values, context) { const note = storeStep(() => notesOf(context).markReviewed(values.note!)); return change(note, `Marked note ${note.id} reviewed.`); },
+  async 'notes.review'(values, context) { ownersOwnReview(context, 'Marking a note reviewed'); const note = storeStep(() => notesOf(context).markReviewed(values.note!, { accept: true })); return change(note, `Marked note ${note.id} reviewed.`); },
   async 'notes.stale'(values, context) { const note = storeStep(() => notesOf(context).markStale(values.note!, values.reason!)); return change(note, `Marked note ${note.id} out of date.`); },
   async 'notes.delete'(values, context) { const note = storeStep(() => notesOf(context).deleteNote(values.note!)); return change(note, `Deleted note ${note.title}.`); },
   async 'notes.to-memory'(values, context) {
@@ -134,6 +142,8 @@ export const NOTE_ACTS: Readonly<Record<string, StoreAct>> = {
       scope, ...(scope === 'project' ? { project: memoryProjectIdentity(context.shellPaths.workingDirectory) } : {}),
       cls: (values.class || 'fact') as MemoryClass, summary: note.title,
       detail: note.sourceUrl ? `${note.body}\n\nOrigin URL: ${note.sourceUrl}` : note.body, tags: noteTags(note), provenance: [],
+      // Who keeps it as a memory writes it: someone else's waits for the owner's review before any turn is given it.
+      author: madeFromNoteBy(note, context),
     }));
     recordMade(context, note, 'memory', record.id);
     return { text: `Kept note ${note.id} as memory record ${record.id}.`, data: { note: note.id, memory: record.id } };
@@ -142,7 +152,7 @@ export const NOTE_ACTS: Readonly<Record<string, StoreAct>> = {
     const note = noteOrRefuse(context, values.note!);
     refuseIfMade(note, 'persona');
     const persona = storeStep(() => AgentPersonaRegistry.fromShellPaths(context.shellPaths).create({
-      name: note.title, description: noteSummary(note), body: note.body, tags: noteTags(note), triggers: [], source: 'user', provenance: `Note ${note.id}`,
+      name: note.title, description: noteSummary(note), body: note.body, tags: noteTags(note), triggers: [], source: 'user', provenance: provenanceBy(context, `Note ${note.id}`), author: madeFromNoteBy(note, context),
     }));
     recordMade(context, note, 'persona', persona.id);
     return { text: `Made persona ${persona.id} from note ${note.id}; it is not in use yet.`, data: { note: note.id, persona: persona.id } };
@@ -152,7 +162,7 @@ export const NOTE_ACTS: Readonly<Record<string, StoreAct>> = {
     refuseIfMade(note, 'skill');
     const skill = storeStep(() => AgentSkillRegistry.fromShellPaths(context.shellPaths).create({
       name: note.title, description: noteSummary(note), procedure: note.body, tags: noteTags(note), triggers: [],
-      enabled: values.enabled === 'yes', source: 'user', provenance: `Note ${note.id}`,
+      enabled: values.enabled === 'yes', source: 'user', provenance: provenanceBy(context, `Note ${note.id}`), author: madeFromNoteBy(note, context),
     }));
     recordMade(context, note, 'skill', skill.id);
     return { text: `Made skill ${skill.id} from note ${note.id}${values.enabled === 'yes' ? ', switched on' : '; it is off until you switch it on'}.`, data: { note: note.id, skill: skill.id } };
@@ -162,7 +172,7 @@ export const NOTE_ACTS: Readonly<Record<string, StoreAct>> = {
     refuseIfMade(note, 'routine');
     const routine = storeStep(() => AgentRoutineRegistry.fromShellPaths(context.shellPaths).create({
       name: note.title, description: noteSummary(note), steps: note.body, tags: noteTags(note), triggers: [],
-      enabled: values.enabled === 'yes', source: 'user', provenance: `Note ${note.id}`,
+      enabled: values.enabled === 'yes', source: 'user', provenance: provenanceBy(context, `Note ${note.id}`), author: madeFromNoteBy(note, context),
     }));
     recordMade(context, note, 'routine', routine.id);
     return { text: `Made routine ${routine.id} from note ${note.id}${values.enabled === 'yes' ? ', switched on' : '; it is off until you switch it on'}.`, data: { note: note.id, routine: routine.id } };

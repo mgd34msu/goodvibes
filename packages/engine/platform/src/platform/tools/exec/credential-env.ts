@@ -63,3 +63,19 @@ export async function scrubCredentialEnv(
   withheld.sort();
   return { env: kept, withheld };
 }
+
+/**
+ * This process's environment without its credentials (a variable named like one, a URL carrying a password): what a
+ * long-lived program the product starts by itself inherits (a tool server, a language server), so the operator token
+ * and the keys the person exported are never copied into another process's environment, where any process of the
+ * account could read them. What the program's own configuration gives it (a tool server's `env`) is added by the
+ * caller after this, as given.
+ */
+export function inheritedEnvWithoutCredentials(env: NodeJS.ProcessEnv = process.env): Record<string, string> {
+  const kept: Record<string, string> = {};
+  for (const [name, value] of Object.entries(env)) {
+    if (value === undefined || readCredentialEnvName(name) || URL_WITH_PASSWORD.test(value)) continue;
+    kept[name] = value;
+  }
+  return kept;
+}

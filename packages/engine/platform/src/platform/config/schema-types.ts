@@ -112,6 +112,8 @@ export interface GoodVibesConfig {
   };
   storage: {
     secretPolicy: 'plaintext_allowed' | 'preferred_secure' | 'require_secure'; // default: 'preferred_secure'
+    codeIndexEnabled: boolean;   // default: false. The daemon's one choice: a project's code index is built when a turn first asks there
+    automaticProjectsFolder: string; // default: '' (a folder named goodvibes-projects in the owner's home folder). Where a chat with no project gets one
     artifacts: {
       maxBytes: number;          // default: 512 MiB
     };
@@ -320,7 +322,30 @@ export interface ConfigSetting {
    * their own (for example when redacting a support bundle).
    */
   closedShape?: true | undefined;
+  /**
+   * What the value IS, where that makes a change to it loosen a protection (config-key-facts.ts reads it, so a new key
+   * of such a kind is held back by every import, put to the owner when another caller sets it, and refused from a
+   * repository's project file, without anyone listing it):
+   *   - `command`: a command or program the product runs (a test command, a worktree setup command, a hooks file);
+   *   - `endpoint`: an address the product sends data or credentials to (a server, a bridge, a webhook, a topic, a
+   *     chat or recipient its messages go to, where updates come from);
+   *   - `request-target`: where requests are sent: which configured provider or model a conversation's, a helper's,
+   *     a tool's, a voice's or a search's request goes to (what it carries goes there);
+   *   - `path`: a file or folder outside the project the product reads or writes (a certificate, a served folder, a
+   *     prompt file, a model file);
+   *   - `trusted-list`: a list of who or what is trusted or allowed (accounts that are the owner, screened channels);
+   *   - `protection-switch`: a switch or choice that keeps a protection; any move away from it loosens;
+   *   - `opening-switch`: a switch that opens a door when turned on (a listener, a relay, a channel, telemetry of
+   *     prompts, a microphone).
+   * Every change to a key of the first four kinds counts as loosening (the direction of a command, an address or a
+   * path cannot be told from its value); a protection switch loosens when turned off (or, for a choice, changed);
+   * an opening switch when turned on. A key with its own rule keeps that rule.
+   */
+  valueKind?: ConfigValueKind | undefined;
 }
+
+/** What a setting's value is, where that makes a change to it loosen a protection (ConfigSetting `valueKind`). */
+export type ConfigValueKind = 'command' | 'endpoint' | 'request-target' | 'path' | 'trusted-list' | 'protection-switch' | 'opening-switch';
 
 /**
  * Settings whose value is one object, read and written whole, rather than a

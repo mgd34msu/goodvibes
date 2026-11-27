@@ -68,6 +68,7 @@ import type { McpServerConfig } from '../mcp/config.js';
 import { logger } from '../utils/logger.js';
 import { summarizeError } from '../utils/error-display.js';
 import { OwnedScope } from '../utils/owned-work.js';
+import type { TurnInputParty } from '../security/turn-input-party.js';
 
 /** Factory seam for the embedded-session substrate (tests inject fakes). */
 export type EmbeddedSessionFactory = (options: {
@@ -136,6 +137,13 @@ export interface AcpAgentOptions {
   readonly homeDirectory?: string | undefined;
   /** Substrate override; defaults to `createEmbeddedSession`. */
   readonly sessionFactory?: EmbeddedSessionFactory | undefined;
+  /**
+   * Whose input this connection's prompts are (security/turn-input-party.ts). The owner's when this is his own program
+   * on a connection he started (`goodvibes acp` launched by his editor: products/tui `acp-command.ts`); someone else's
+   * when the program was started for anyone else (the daemon's runner or hosted agent for another caller says so:
+   * acp/connection-party.ts `ACP_STARTED_FOR_ENV`). Absent: someone else's.
+   */
+  readonly inputParty?: TurnInputParty | undefined;
 }
 
 /** `session/close` (ACP schema 0.21): the session to end, and an empty answer. */
@@ -289,6 +297,8 @@ export class GoodVibesAcpAgent implements Agent {
           // are the ones the terminal app's settings name.
           surfaceKind: 'tui',
           boot: { settingsSurfaceRoot: GOODVIBES_TUI_SURFACE_ROOT },
+          // Whose input it is: the connection's party, never the owner's unless the program said so.
+          ...(this.options.inputParty ? { inputParty: this.options.inputParty } : {}),
           ...(servers && servers.length > 0 ? { mcpServers: servers } : {}),
         }));
     const state = await this.#opening.opening(`ACP session ${acpSessionId}`, async (signal): Promise<AcpSessionState> => {

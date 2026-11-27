@@ -39,16 +39,17 @@ before the migration request; when that happens after the attempt marker was
 written, the marker is released, so the next preview starts fresh and sends
 nothing on its own.
 
-Inside the interactive Agent, the owner types `/setup pair` (optionally
-`--name "Device name"`; `--apply` is accepted and changes nothing there): it
-shows the selected host and what pairing allows, then asks for the displayed
+Inside the interactive Agent, the owner presses Pair something, "This program
+with its daemon", in the Devices and network place (or "Pair with a host" on
+the Setup tab of System; both run `devices.pair`, and the name is a field of its
+form): it shows the selected host and what pairing allows, then asks for the displayed
 fresh exact phrase in the same step. Every message is in plain words (a "key"
 for the credential; no "principal", "migration" or "remint" on screen); the
 status ids in JSON output are unchanged. The phrase is kept rather than a `y`:
 input typed before the question appears is discarded either way, but a `y`
 pressed by habit once it is shown would answer a yes/no question, while the
 random phrase can only be typed after reading it, for access that lasts until
-it is revoked. Only direct terminal command input opens
+it is revoked. Only the owner's own press in the Agent's terminal opens
 that operation; any other caller gets the read-only summary. Model/harness calls,
 including `confirm:true`, nested commands, `--yes` and inline phrases cannot
 create or replace a credential. No confirmation answer enters normal chat,
@@ -66,7 +67,7 @@ visible draft, the abandoned pairing line is drained through Enter/Escape
 before that surface can accept an answer. Cancellation suppresses late preview and success
 messages. The durable pairing state remains authoritative: an unknown migration
 outcome remains unknown, and a stored credential survives interrupted verification.
-Run `/setup pair` or `goodvibes-agent setup status` to settle or reverify it rather
+Press Pair something again, or run `goodvibes-agent setup status`, to settle or reverify it rather
 than starting a new pairing or revoking. Pairing success does not establish provider, workspace,
 Jev or execution readiness.
 
@@ -75,7 +76,7 @@ migration request with a definite refusal (a 4xx other than a timeout or a
 conflict) or is not listening at all, nothing was created: the attempt is
 cleared, the result says `rejected`, and the next preview pairs normally. The
 migration request carries the attempt's id, so an unknown outcome after a lost
-reply is settled by the next `/setup pair` (or `goodvibes-agent setup pair`):
+reply is settled by the next pairing (Pair something, or `goodvibes-agent setup pair`):
 it sends the same request again under the same id, and the host answers it with
 the credential that attempt produced (same token id, new secret) while nobody
 has used it, or mints the first one if the earlier request never arrived. The
@@ -88,8 +89,8 @@ received, so it cannot sign in and lapses unused within 15 minutes.
 When the host no longer accepts the stored device credential (it was revoked
 there, or the daemon was reset), `setup pair` says `credential-rejected`, and
 `--apply` offers a `FORGET ...` phrase that removes the stored credential so
-this Agent can pair again. `goodvibes-agent setup unpair` (or `/setup unpair`,
-typed by the owner) forgets the stored credential for the selected host at any
+this Agent can pair again. `goodvibes-agent setup unpair` (or "forget its daemon pairing", `U` on the
+Paired tab of Devices and network, pressed by the owner) forgets the stored credential for the selected host at any
 time; nothing is sent to the host, and the token stays valid there until you
 revoke it. It exits 0 when a credential was forgotten and 1 otherwise. A
 pairing store that cannot be used names the cause, the path and the fix.
@@ -194,7 +195,7 @@ invalidates that observation. No success is cached or restored from setup
 receipts, checkpoints, or onboarding markers. Errors are fixed descriptions;
 remote error bodies and credential-file parser diagnostics are never displayed.
 
-The synchronous workspace snapshot cannot perform this live check and labels
+The synchronous setup snapshot cannot perform this live check and labels
 host/auth readiness unverified. Historical setup receipts remain available as
 history and durable evidence, but cannot promote those rows to ready or bypass
 an unresolved critical closeout check. Asynchronous setup status can report

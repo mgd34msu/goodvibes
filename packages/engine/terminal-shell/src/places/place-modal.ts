@@ -56,6 +56,7 @@ import { copyOutcomeWords, copyToClipboard } from '../clipboard.js';
 const COPY_ACTION = 'block-copy';
 import { ENDS_THE_PROGRAM, inPlaceKeyContext, isNavigationKey, MORE_KEYS_ACTION, placeActionName, placeKeyContextId, READ_AGAIN_ACTION, searchActionName } from './place-keys.js';
 import type { AnyPlace, PlaceAction, PlaceAnswer, PlaceCapabilityAction, PlaceFollow, PlaceItem, PlaceList, PlaceRow } from './place-types.js';
+import { actionOfferedFor, startingValues } from './place-types.js';
 
 /** `text` on one line of `width` cells: whole when it fits, else cut with "…" (a list row; its detail shows it whole). */
 function oneLine(text: string, width: number): string {
@@ -303,13 +304,16 @@ export class PlaceModal implements SurfaceModal {
     private readonly place: AnyPlace,
     private readonly host: PlaceHost,
     /** The tab it opens on; and an action to press at once (the menu ran it: its form or question opens over the place). */
-    start?: { readonly list?: string | undefined; readonly action?: string | undefined },
+    start?: { readonly list?: string | undefined; readonly action?: string | undefined; readonly item?: string | undefined },
   ) {
     this.name = `place:${place.id}`;
     this.context = placeKeyContextId(place);
     this.lists = place.lists.map(() => ({ items: [], status: 'reading', reason: undefined, lost: undefined, followed: false, selectedId: undefined, seq: 0 }));
     const startAt = start?.list ? place.lists.findIndex((list) => list.id === start.list) : -1;
     if (startAt >= 0) this.active = startAt;
+    // Opened on one row of that tab (a control elsewhere that opens it: "Pair something, A chat channel"): the read
+    // keeps the selection on it.
+    if (startAt >= 0 && start?.item) this.lists[startAt]!.selectedId = start.item;
     this.startFollowing();
     // The program's own daemon connection back (spine adoption): a list that could not be read, or a stream that
     // never opened, is read and followed again with no key pressed.
@@ -560,7 +564,7 @@ export class PlaceModal implements SurfaceModal {
         bound.push({ cap: this.capOf(action), label: this.label(action), action }); continue;
       }
       if (action.list !== list.id || !item) continue;
-      if (action.states && !action.states.includes(item.state)) continue;
+      if (!actionOfferedFor(action, item)) continue;
       if (action.kind !== 'program' && action.answers) {
         for (const answer of action.answers(item)) bound.push({ cap: answer.key, label: answer.label, action, answer });
         continue;
@@ -645,8 +649,10 @@ export class PlaceModal implements SurfaceModal {
       // A value the action names in words of its own (`shownAs`) reads so in the form too, not as the row's short title.
       const shown = this.shown(values, item, tab, action);
       const display = Object.fromEntries(given.flatMap((input) => shown[input] !== undefined ? [[input, shown[input]!]] : []));
+      // What is set now, from the item: the form opens on it, still asked (`startWith`).
+      const start = startingValues(action, item);
       // The form is titled with what it does (the capability's label), never with a command.
-      const formed = await this.host.openForm(action.capability, values, { title: resolved.action.label, given, display });
+      const formed = await this.host.openForm(action.capability, { ...start, ...values }, { title: resolved.action.label, given, display });
       // A form left with Esc is a change of mind: nothing ran, and nothing needs saying.
       if (!formed) { this.host.requestRender(); return; }
       values = formed;
@@ -710,7 +716,10 @@ export class PlaceModal implements SurfaceModal {
         // A value picked from a list in the form reads as its label in the outcome too: as a whole word, and not where
         // the line already says the label (a pool `beds` labelled "Garden beds" must not become "Garden Garden beds").
         .map((line) => Object.entries(valuesAsShown(resolved.action.inputs, values))
-          .filter(([input, label]) => values[input] !== undefined && values[input] !== label && values[input]!.length >= 3)
+          // A label that is the value's own word ("Done" for done, "The title" for title) says nothing the line does
+          // not: replacing it read '"Water bed 3" is Done. Checklist: 1 item: 1 Done.' and "Changed the its title".
+          .filter(([input, label]) => values[input] !== undefined && values[input] !== label && values[input]!.length >= 3
+            && label.toLowerCase().replace(/^(?:the|its|a|an)\s+/u, '') !== values[input]!.toLowerCase().replace(/_/gu, ' '))
           .reduce((current, [input, label]) => current.includes(label) ? current
             : current.replace(new RegExp(`(?<![\\w-])${values[input]!.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}(?![\\w-])`, 'g'), label), line))
         // A word inside a path or a file name (".../skills/compost.md") is part of that name, never replaced.
@@ -791,7 +800,7 @@ export class PlaceModal implements SurfaceModal {
     const listId = this.place.lists[this.active]!.id;
     for (const action of this.place.actions) {
       if (action.kind === 'program' || !action.answers || action.list !== listId) continue;
-      if (action.states && !action.states.includes(item.state)) continue;
+      if (!actionOfferedFor(action, item)) continue;
       const answers = action.answers(item);
       if (answers.length === 0) continue;
       this.choosing = { itemId: item.id, action, answers, index: Math.max(0, answers.findIndex((answer) => answer.opensOn === true)) };

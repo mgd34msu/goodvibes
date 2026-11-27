@@ -100,19 +100,25 @@ export async function admitExternalRequest(host: ExternalPermissionHost, transpo
     let finished = false, claimed = false;
     // Every request id is fresh, so nothing else ever releases what this admission recorded.
     const settle = () => { finished = true; unsubscribe(); host.permissionManager.retireAutonomousSource?.(requestId); };
-    const retainedCurrent = () => {
+    // The checks after the decision (the transport's last one, immediately before its answer goes out, and the claim)
+    // run for the same project the request was decided for: outside it they read another project's settings and
+    // refused every decided answer as "Permission configuration changed while deciding".
+    const inItsProject = <T>(work: () => T): T => decideInProject(transport.workingDirectory, work);
+    const retainedCurrent = () => inItsProject(() => {
       if (finished && input.effect) throw new Error('External admission is closed');
       assertCurrent();
       if (claimed && input.effect) assertCurrentExternalAdmission(admission, host.permissionManager, input.effect);
-    };
+    });
     return {
       result: admission.result,
       assertCurrent: retainedCurrent,
       claim() {
         if (finished || claimed) throw new Error('External response already consumed');
-        assertCurrent();
-        if (input.effect) claimExternalAdmission(admission, host.permissionManager, input.effect);
-        else admission.claim();
+        inItsProject(() => {
+          assertCurrent();
+          if (input.effect) claimExternalAdmission(admission, host.permissionManager, input.effect);
+          else admission.claim();
+        });
         claimed = true; retainedCurrent();
         // Existing protocol owners consume their response at claim. Native
         // multi-effect owners opt into the retained issuer lifetime explicitly.

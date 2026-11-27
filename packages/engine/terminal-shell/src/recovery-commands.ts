@@ -7,7 +7,7 @@
 // ---------------------------------------------------------------------------
 
 import { summarizeError } from '@goodvibes/engine/platform/platform/utils/native-error-summary';
-import type { WorkspaceCheckpoint, WorkspaceCheckpointManager } from '@goodvibes/engine/platform/platform/workspace';
+import { othersUndoneLines, type OtherSessionChanges, type WorkspaceCheckpoint, type WorkspaceCheckpointManager } from '@goodvibes/engine/platform/platform/workspace';
 import type { FileUndoManager } from '@goodvibes/engine/platform/platform/state';
 import { commandRefusal, type ConfirmationHost } from './command-confirmation.js';
 
@@ -56,7 +56,53 @@ export function redoLastFileChange(manager: FileUndoControls | undefined, print:
 }
 
 /** The checkpoint store calls listing and restoring use. */
-export type CheckpointControls = Pick<WorkspaceCheckpointManager, 'list' | 'diff' | 'restore' | 'historyTrimmed' | 'retentionFailure'>;
+export type CheckpointControls = Pick<WorkspaceCheckpointManager, 'list' | 'diff' | 'restore' | 'historyTrimmed' | 'retentionFailure'>
+  & Partial<Pick<WorkspaceCheckpointManager, 'othersUndoneBy' | 'noteTakenBack'>>;
+
+/**
+ * Asks before a restore that would take back other sessions' or agents' changes, whoever asked for it, opening on
+ * the choice that changes nothing; answers what to do after the restore (tell those sessions). Returns null when the
+ * restore touches only `sessionId`'s own changes (it then runs as before), 'cancelled' when the person kept things.
+ */
+export async function askBeforeTakingBackOthers(
+  context: CheckpointCommandContext,
+  manager: CheckpointControls,
+  checkpoint: WorkspaceCheckpoint,
+  sessionId: string | undefined,
+  what: string,
+): Promise<{ readonly others: readonly OtherSessionChanges[]; readonly tell: (keptAs: string | null) => Promise<void> } | null | 'cancelled'> {
+  if (!manager.othersUndoneBy) return null;
+  let others: OtherSessionChanges[];
+  try {
+    others = await manager.othersUndoneBy(checkpoint.id, { sessionId });
+  } catch (error) {
+    throw commandRefusal(`${what}: not done. Whose changes it would take back could not be read: ${summarizeError(error)}`, undefined, 'NOT_DONE');
+  }
+  if (others.length === 0) return null;
+  const sessions = others.length === 1 ? 'another session' : `${others.length} other sessions`;
+  const body = [
+    `This takes back changes ${sessions} made after "${checkpoint.label}":`,
+    ...othersUndoneLines(others),
+    '',
+    `${others.length === 1 ? 'That session is told in its conversation' : 'Those sessions are told in their conversations'} that the change was taken back. The state it replaces is kept as a checkpoint first, so the change can be put back.`,
+  ].join('\n');
+  if (!context.confirm) {
+    throw commandRefusal(`${what}: not done. It would take back changes ${sessions} made:\n${othersUndoneLines(others).join('\n')}`,
+      'Run it where you can be asked (the terminal app), or restore a later checkpoint that keeps their changes.', 'CONFIRMATION_REQUIRED');
+  }
+  const confirmed = await context.confirm({ title: `Take back ${others.length === 1 ? 'another session\'s change' : `${others.length} sessions' changes`}?`, body: `${what}.\n${body}`, confirmLabel: 'Take them back', cancelLabel: 'Keep them', tone: 'warning' });
+  if (!confirmed) {
+    context.print(`${what}: not done; nothing changed, and the other sessions' changes are kept.`);
+    return 'cancelled';
+  }
+  return {
+    others,
+    tell: async (keptAs) => {
+      try { await manager.noteTakenBack?.(others, sessionId ?? 'unknown', checkpoint.id, keptAs); }
+      catch (error) { context.print(`The other sessions could not be told: ${summarizeError(error)}. Tell them their change was taken back.`); }
+    },
+  };
+}
 
 /** A Changes preview with a question, where the app has one (the terminal app). */
 export type CheckpointPreview = (options: {
@@ -116,9 +162,12 @@ export async function restoreCheckpointFiles(
   context: CheckpointCommandContext,
   manager: CheckpointControls,
   checkpoint: WorkspaceCheckpoint,
-  options: { readonly yes: boolean; readonly record: (text: string) => void },
+  options: { readonly yes: boolean; readonly record: (text: string) => void; readonly sessionId?: string | undefined },
 ): Promise<void> {
   if (context.isGenerating?.()) throw commandRefusal(BUSY, undefined, 'BUSY');
+  // Another session's or agent's change is never taken back without asking, whoever asked for the restore.
+  const takingBack = await askBeforeTakingBackOthers(context, manager, checkpoint, options.sessionId, `Restore "${checkpoint.label}"`);
+  if (takingBack === 'cancelled') { context.renderRequest(); return; }
   let diff: string | undefined;
   let files: readonly string[] = [];
   let note: string | undefined;
@@ -180,9 +229,11 @@ export async function restoreCheckpointFiles(
     throw commandRefusal(`Checkpoint only partly restored (${failed.length} path${failed.length === 1 ? '' : 's'} failed): ${names}. Files only; the conversation is unchanged.`, undefined, 'PARTIAL');
   }
   const before = restored.safetyCheckpointId;
+  await takingBack?.tell(before);
   const beforeLabel = before ? (await manager.list().catch(() => [])).find((entry) => entry.id === before)?.label : undefined;
   options.record([
     `[Checkpoint] Restored "${checkpoint.label}" (${shortCheckpointId(checkpoint.id)}). Files only: the conversation is unchanged.`,
+    ...(takingBack ? [`${takingBack.others.length === 1 ? 'The other session was' : `The ${takingBack.others.length} other sessions were`} told their change was taken back.`] : []),
     ...(before ? [`The state before this is kept as "${beforeLabel ?? shortCheckpointId(before)}" (${shortCheckpointId(before)}): /checkpoint restore ${shortCheckpointId(before)} brings it back.`] : []),
   ].join(' '));
   context.renderRequest();

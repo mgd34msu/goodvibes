@@ -36,7 +36,7 @@ const requests = [];
 const requestShapes = { modelFactShape: 0, fieldNameShape: 0, settingFormShape: 0, other: 0 };
 let cleanupRefused = false;
 const childEnv = { PATH: '/usr/bin:/bin', HOME: home, TMPDIR: join(root, 'tmp'), XDG_CONFIG_HOME: join(root, 'xdg'),
-  GOODVIBES_HOME: tree, GOODVIBES_DAEMON_HOME: daemon, GOODVIBES_WORKING_DIR: work, NO_COLOR: '1',
+  GOODVIBES_HOME: tree, GOODVIBES_DAEMON_HOME: daemon, NO_COLOR: '1',
   // Existing production opt-out: no wake/provider/model acquisition is part of
   // this memory-vector proof. The shipped memory embedding still runs.
   GOODVIBES_SKIP_WAKE_MODEL_DOWNLOAD: '1' };

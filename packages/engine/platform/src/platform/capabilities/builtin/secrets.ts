@@ -10,6 +10,7 @@ import { isGoodVibesSecretReferenceValue, isMalformedGoodVibesSecretReferenceVal
 import { BUILTIN_SECRET_PROVIDER_SOURCES, describeSecretRef, resolveSecretRef } from '../../config/secret-refs.js';
 import { unreadableSecretStore } from '../../config/secret-store-unreadable.js';
 import { resolveSecretDeleteScope, type SecretsManager } from '../../config/secrets.js';
+import { listDaemonNeededKeyPrefixes, listExactDaemonNeededKeys } from '../../config/credential-scope-registry.js';
 import type { SecretScope, SecretStorageMedium } from '../../config/secrets-store-paths.js';
 import { summarizeError } from '../../utils/native-error-summary.js';
 import { CapabilityRefusal, type CapabilityCaller, type CapabilityDefinition, type FixedChoice, type InputDescription, type ListName } from '../types.js';
@@ -20,7 +21,8 @@ export type SecretsView = Pick<SecretsManager, 'listDetailed' | 'get' | 'getStor
 /** What the secrets capabilities need: the store a write of a scope lands in for the caller, and the stores it reads. */
 export interface SecretsCapabilityServices {
   readonly secrets: {
-    writerFor(scope: 'project' | 'user', caller: CapabilityCaller): {
+    /** `key` decides it too: a key the daemon itself reads is kept in the daemon's store whatever scope is asked. */
+    writerFor(scope: 'project' | 'user', caller: CapabilityCaller, key: string): {
       set(key: string, value: string, options: { readonly scope: SecretScope; readonly medium: SecretStorageMedium }): Promise<void>;
       /** The scope written (`daemon` for "All your projects"). */
       readonly scope: SecretScope;
@@ -46,8 +48,17 @@ export const UNCONFIRMED_SECRETS_LIST = 'secrets.unconfirmed' as ListName;
 
 const SCOPES: readonly FixedChoice[] = [
   { value: 'project', label: 'This project', help: 'Kept in this project\'s secret store, read only here.' },
-  { value: 'user', label: 'All your projects', help: 'Kept in your own secret store, read in every project.' },
+  { value: 'user', label: 'All your projects', help: 'Kept in the daemon\'s secret store, which every GoodVibes program on this machine reads first.' },
 ];
+
+/**
+ * The keys the daemon itself reads (a channel's token, a provider's key it runs with): it keeps them in its own store,
+ * for every project, whatever scope is asked, so "This project" is not offered for them and the words say where they go.
+ */
+const DAEMON_HELD_KEYS: readonly string[] = [...new Set(listExactDaemonNeededKeys())].sort();
+/** The families of keys the daemon reads, declared by their start (`GOODVIBES_PAYMENTS_CARD_<card>`): held the same way. */
+const DAEMON_HELD_KEY_PREFIXES: readonly string[] = [...new Set(listDaemonNeededKeyPrefixes())].sort();
+const DAEMON_HELD_SENTENCE = '{key} is read by the daemon itself, so it will be kept in the daemon\'s secret store ({storage}), for every project, until you change it.';
 const MEDIA: readonly FixedChoice[] = [
   { value: 'secure', label: 'Encrypted', help: 'Kept encrypted on this machine.' },
   { value: 'plaintext', label: 'Plain text', help: 'Kept readable by anything that can read the file.', risk: 'loosens-a-protection' },
@@ -56,6 +67,8 @@ const MEDIA: readonly FixedChoice[] = [
 export const SECRET_SCOPE_INPUT: InputDescription = {
   id: 'scope', label: 'Where to keep it', help: 'This project only, or every project', kind: 'choice', choices: SCOPES,
   required: { default: 'project', defaultMeans: 'this project only' }, typed: { flag: '--scope' },
+  // Not asked for a key the daemon itself reads: it has one place, the daemon's store.
+  showWhen: { input: 'key', isNoneOf: DAEMON_HELD_KEYS, startsWithNoneOf: DAEMON_HELD_KEY_PREFIXES },
 };
 export const SECRET_MEDIUM_INPUT: InputDescription = {
   id: 'storage', label: 'How to keep it', help: 'Encrypted, or as plain text', kind: 'choice', choices: MEDIA,
@@ -77,8 +90,10 @@ export const SECRETS_SET: CapabilityDefinition<SecretsCapabilityServices> = {
     SECRET_SCOPE_INPUT,
     SECRET_MEDIUM_INPUT,
   ],
-  sentence: '{key} will be kept in the {scope} secret store ({storage}) until you change it.',
-  done: 'Stored {key} in the {scope} secret store ({storage}).',
+  sentence: '{key} will be kept where you chose, {scope} ({storage}), until you change it.',
+  sentenceWhen: { input: 'key', values: DAEMON_HELD_KEYS, startsWith: DAEMON_HELD_KEY_PREFIXES, sentence: DAEMON_HELD_SENTENCE },
+  // Where it went is said by the run itself ("Kept in ..."), from the store that took it.
+  done: 'Stored {key} ({storage}).',
   touches: 'credential', lasts: 'kept', risk: 'none', undoneBy: 'delete-secret',
   // Writing a credential: an admin's act, and never a model's (it is the owner who knows the value).
   effects: ['control-plane.write', 'secret.write'],
@@ -92,7 +107,7 @@ export const SECRETS_SET: CapabilityDefinition<SecretsCapabilityServices> = {
     }
     const requested = values.scope === 'user' ? 'user' : 'project';
     const medium: SecretStorageMedium = values.storage === 'plaintext' ? 'plaintext' : 'secure';
-    const writer = services.secrets.writerFor(requested, caller);
+    const writer = services.secrets.writerFor(requested, caller, key);
     try {
       await writer.set(key, value, { scope: writer.scope, medium });
     } catch (error) {
@@ -205,7 +220,9 @@ export const SECRETS_LINK: CapabilityDefinition<SecretsCapabilityServices> = {
   capability: { id: 'secrets.link', group: 'safety', home: 'daemon', repeat: 'safe' },
   actionId: 'link-secret', label: 'Point a secret at a password manager', word: 'link',
   inputs: [SECRET_NEW_KEY_INPUT, REFERENCE, SECRET_SCOPE_INPUT, SECRET_MEDIUM_INPUT],
-  sentence: '{key} will be read from {reference}, kept in the {scope} secret store ({storage}), until you change it.',
+  sentence: '{key} will be read from {reference}, kept where you chose, {scope} ({storage}), until you change it.',
+  sentenceWhen: { input: 'key', values: DAEMON_HELD_KEYS, startsWith: DAEMON_HELD_KEY_PREFIXES,
+    sentence: '{key} will be read from {reference}. The daemon itself reads it, so the reference is kept in the daemon\'s secret store ({storage}), for every project, until you change it.' },
   done: '{key} now reads from {reference}.',
   touches: 'credential', lasts: 'kept', risk: 'none', undoneBy: 'delete-secret',
   // It writes the secret store (which value a key reads from), as storing a secret does: the owner decides it for a
@@ -218,7 +235,7 @@ export const SECRETS_LINK: CapabilityDefinition<SecretsCapabilityServices> = {
     if (!isGoodVibesSecretReferenceValue(reference)) throw new CapabilityRefusal(`${reference} is not a secret reference; nothing was stored.`, '"See where secrets can come from" shows the reference forms.');
     const requested = values.scope === 'user' ? 'user' : 'project';
     const medium: SecretStorageMedium = values.storage === 'plaintext' ? 'plaintext' : 'secure';
-    const writer = services.secrets.writerFor(requested, caller);
+    const writer = services.secrets.writerFor(requested, caller, key);
     try {
       await writer.set(key, reference, { scope: writer.scope, medium });
     } catch (error) {

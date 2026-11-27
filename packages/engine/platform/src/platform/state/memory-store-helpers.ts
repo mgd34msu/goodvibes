@@ -66,6 +66,9 @@ export function createSchema(db: { run(sql: string): void; exec(sql: string, par
   // stamps the revision itself. A 3.5.0 reader names its columns and does not read it.
   ensureColumn(db, 'memory_records', 'project TEXT', 'project');
   db.run('CREATE INDEX IF NOT EXISTS idx_memory_project ON memory_records(project)');
+  // Who wrote a record (memory-store.ts MemoryAuthor, as JSON); NULL is the owner's, every record written before
+  // authors were kept included. Outside the revision trigger's column list: who wrote it is not what it says.
+  ensureColumn(db, 'memory_records', 'author TEXT', 'author');
 
   // Small store-owned facts (the consolidation cursor) and the standing
   // consolidation proposals, one row each, keyed by kind and record ids.
@@ -152,7 +155,27 @@ export function rowToRecord(columns: string[], values: unknown[]): MemoryRecord 
     updatedAt,
     ...(row.valid_from !== null && row.valid_from !== undefined ? { validFrom: requireMemoryTimestamp(row.valid_from, 'valid_from') } : {}),
     ...(row.valid_until !== null && row.valid_until !== undefined ? { validUntil: requireMemoryTimestamp(row.valid_until, 'valid_until') } : {}),
+    ...authorOfRow(row.author),
   };
+}
+
+/**
+ * A record's author from its column. NULL (or no column) is the owner's. A value that cannot be read is someone
+ * else's, waiting for the owner: an unreadable author never makes a record his.
+ */
+function authorOfRow(raw: unknown): { author?: MemoryRecord['author'] } {
+  if (raw === null || raw === undefined) return {};
+  try {
+    const parsed = JSON.parse(String(raw)) as { kind?: unknown; who?: unknown; acceptedAt?: unknown };
+    if (parsed.kind === 'owner' || parsed.kind === 'owner-model' || parsed.kind === 'other') {
+      return { author: {
+        kind: parsed.kind,
+        ...(typeof parsed.who === 'string' && parsed.who ? { who: parsed.who } : {}),
+        ...(typeof parsed.acceptedAt === 'number' && Number.isFinite(parsed.acceptedAt) ? { acceptedAt: parsed.acceptedAt } : {}),
+      } };
+    }
+  } catch { /* unreadable: someone else's */ }
+  return { author: { kind: 'other', who: 'an author that could not be read' } };
 }
 
 function throwInvalidMemoryRow(fieldName: string, reason: string): never {
@@ -340,6 +363,8 @@ export function recordMatchesPostSqlFilter(record: MemoryRecord, filter: MemoryS
   if (filter.scope && record.scope !== filter.scope) return false;
   // Another project's record never answers this project's search.
   if (filter.project !== undefined && record.project !== undefined && record.project !== filter.project) return false;
+  // A search naming no project, narrowed to the records that belong to none (the person's own).
+  if (filter.projectless === true && record.project !== undefined) return false;
   if (filter.cls && record.cls !== filter.cls) return false;
   // Same rules as the literal path's SQL: `since` is creation time, and every tag must be present.
   if (filter.since && record.createdAt < filter.since) return false;

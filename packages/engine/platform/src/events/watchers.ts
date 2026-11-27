@@ -1,12 +1,13 @@
 /**
  * WatcherEvent, discriminated union covering managed watcher and listener lifecycle events.
  */
+import type { EventAbout } from './about.js';
 
 export const WATCHER_SOURCE_KINDS = ['poll', 'webhook', 'tail', 'file', 'api', 'stream'] as const;
 
 export type WatcherSourceKind = (typeof WATCHER_SOURCE_KINDS)[number];
 
-export type WatcherEvent =
+export type WatcherEvent = (
   /** A watcher began watching its source; `sourceKind` is how it reads it (poll, webhook, tail, file, api, stream) and `name` is its display name. */
   | {
       type: 'WATCHER_STARTED';
@@ -43,6 +44,10 @@ export type WatcherEvent =
       watcherId: string;
       sourceKind: WatcherSourceKind;
       reason: string;
-    };
+    }
+) & {
+  /** The watcher the event is about and the project it belongs to (null: none, the owner's), for the stream filter. */
+  readonly about?: EventAbout | undefined;
+};
 
 export type WatcherEventType = WatcherEvent['type'];

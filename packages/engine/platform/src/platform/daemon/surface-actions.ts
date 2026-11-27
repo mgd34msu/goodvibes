@@ -158,6 +158,8 @@ interface DaemonSurfaceActionContext {
    * `ChannelPluginRegistry` cannot see.
    */
   readonly ingressAlarm?: import('../channels/ingress-alarm.js').ChannelIngressAlarm | undefined;
+  /** Where a channel conversation's work runs when its channel has no project (surface-conversation-gate.ts). */
+  readonly projectForWork?: import('./surface-conversation-gate.js').ConversationGateDeps['projectForWork'];
 }
 
 /**
@@ -276,8 +278,8 @@ export class DaemonSurfaceActionHelper {
         const decision = await this.authorizeSurfaceIngress(input);
         if (decision.allowed) {
           // A sender with no identity is admitted by its surface secret, which only an
-          // empty allowlist allows, and only the generic webhook and Home Assistant send
-          // one (their secret is held by the owner's own systems); every chat adapter
+          // empty allowlist allows (the generic webhook, Home Assistant naming no user): a
+          // guest, since the secret proves the surface, not the person; every chat adapter
           // passes its sender. An identified sender is the operator only as the owner.
           // A guest's turn (`turn.start` asks the owner) runs with everything beyond a plain read put to him.
           const actor = channelSenderActor(decision, input.surface, input.userId);
@@ -480,17 +482,18 @@ export class DaemonSurfaceActionHelper {
       ownerConversations: (surface: string) => this.ownerConversations(surface),
       ownerInbox: this.context.ownerInbox,
       senderIsGuest: (surface: string, userId: string | undefined) => this.senderIsGuest(surface, userId),
+      projectForWork: this.context.projectForWork,
     };
   }
 
   /**
    * Whether a sender on a channel is someone it admits who is not its owner,
-   * the same rule ingress applies (`channelSenderActor`): a sender with no id is
-   * admitted by the surface's secret and is not a guest, which only the generic
-   * webhook and Home Assistant send; a chat adapter always passes its sender.
+   * the same rule ingress applies (`channelSenderActor`): a sender with no id
+   * (the generic webhook, Home Assistant naming no user) is a guest, never the
+   * owner; a chat adapter always passes its sender.
    */
   senderIsGuest(surface: string, userId: string | undefined): boolean {
-    if (userId === undefined || !isChannelSurfaceKind(surface)) return false;
+    if (!isChannelSurfaceKind(surface)) return false;
     return channelSenderActor({ policy: this.context.channelPolicy.getPolicy(surface) }, surface, userId).class === 'guest';
   }
 

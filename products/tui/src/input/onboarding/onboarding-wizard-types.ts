@@ -14,8 +14,11 @@ import type { SetupTopicId } from '@goodvibes/engine/terminal-shell/setup-comman
 
 export type OnboardingWizardMode = OnboardingMode;
 
-/** The `/setup` topics the terminal app opens as one form each (the rest open another screen). */
-export type OnboardingWizardTopic = Exclude<SetupTopicId, 'add-provider' | 'history' | 'import-settings' | 'first-run'>;
+/**
+ * The setup topics the terminal app opens as one form each (the rest open another screen: the four network topics
+ * open Devices and network's Addresses and ports, the one control for those settings in both programs).
+ */
+export type OnboardingWizardTopic = Exclude<SetupTopicId, 'add-provider' | 'history' | 'import-settings' | 'first-run' | 'local-only' | 'browser' | 'other-devices' | 'webhooks' | 'who-signs-in'>;
 
 export type OnboardingWizardExternalSurfaceStepId = `external-surface:${string}`;
 
@@ -64,6 +67,7 @@ export type OnboardingWizardAction =
   | 'start-openai-subscription'
   | 'finish-openai-subscription'
   | 'connect-existing-daemon'
+  | 'open-sign-in-account'
   | 'retry-hydration';
 
 export type OnboardingWizardApplyFeedbackSeverity = 'info' | 'warning' | 'error';
@@ -302,11 +306,6 @@ export interface OnboardingWizardControllerLike {
   shouldEnableHttpListener(): boolean;
   shouldExposeHttpListenerNetworkFields(): boolean;
   shouldExposeControlPlaneNetwork(): boolean;
-  requiresAuthBootstrap(): boolean;
-  hasAdminAuthUser(): boolean;
-  hasLocalAuthUser(): boolean;
-  hasBootstrapCredentialPresent(): boolean;
-  getDefaultAdminUsername(): string;
   getSharedIpDefault(enabled: { readonly controlPlane: boolean; readonly httpListener: boolean; readonly web: boolean }): boolean;
   getSharedIpHostDefault(enabled: { readonly controlPlane: boolean; readonly httpListener: boolean; readonly web: boolean }): string;
 

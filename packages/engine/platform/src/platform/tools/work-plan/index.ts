@@ -16,6 +16,12 @@ export type WorkPlanToolStore = Pick<ProjectWorkPlan, 'snapshot' | 'add' | 'upda
 export interface WorkPlanToolOptions {
   /** The session the tool runs in; recorded on the items it adds. Resolved per call. */
   readonly resolveSessionId?: (() => string | undefined) | undefined;
+  /**
+   * A registry several conversations use at once (the daemon's, for every web chat and run of a project): each
+   * conversation's list is its own. It lists, changes and clears only the items its conversation added, and the items
+   * no conversation is named on (kept before items were, or added by a person), which every conversation still sees.
+   */
+  readonly perConversation?: boolean | undefined;
 }
 
 const SOURCE = 'agent';
@@ -51,6 +57,16 @@ function changed(edit: Pick<ProjectWorkPlanMutationResult, 'counts' | 'reclaimed
  * sessions and restarts.
  */
 export function createWorkPlanTool(store: WorkPlanToolStore, options: WorkPlanToolOptions = {}): Tool {
+  /** Whether this call's conversation may see and change `task` (see `perConversation`). */
+  const ours = (task: ProjectWorkPlanTask, sessionId: string | undefined): boolean =>
+    options.perConversation !== true || task.sessionId === undefined || task.sessionId === sessionId;
+  /** Refuses a change of another conversation's item, by its id, before anything is changed. */
+  const othersItem = async (id: string): Promise<string | undefined> => {
+    if (options.perConversation !== true) return undefined;
+    const sessionId = options.resolveSessionId?.();
+    const task = (await store.snapshot({})).tasks.find((one) => one.taskId === id);
+    return task && !ours(task, sessionId) ? `Work plan not changed: item ${id} is another conversation's.` : undefined;
+  };
   return {
     definition: {
       name: 'work_plan',
@@ -74,9 +90,15 @@ export function createWorkPlanTool(store: WorkPlanToolStore, options: WorkPlanTo
           case 'list': {
             if (input.status !== undefined && !isWorkPlanTaskStatus(input.status)) return { success: false, error: `Unknown status "${input.status}". Use one of: ${WORK_PLAN_TASK_STATUSES.join(', ')}.` };
             const plan = await store.snapshot(input.status ? { status: input.status } : {});
+            const sessionId = options.resolveSessionId?.();
+            const tasks = plan.tasks.filter((task) => ours(task, sessionId));
             const counts: Record<string, number> = {};
-            for (const status of WORK_PLAN_TASK_STATUSES) if (plan.counts[status] > 0) counts[status] = plan.counts[status];
-            return { success: true, output: JSON.stringify({ revision: plan.revision, count: plan.counts.total, counts, items: plan.tasks.map(itemView) }) };
+            for (const status of WORK_PLAN_TASK_STATUSES) {
+              const n = options.perConversation === true ? tasks.filter((task) => task.status === status).length : plan.counts[status];
+              if (n > 0) counts[status] = n;
+            }
+            const total = options.perConversation === true ? tasks.length : plan.counts.total;
+            return { success: true, output: JSON.stringify({ revision: plan.revision, count: total, counts, items: tasks.map(itemView) }) };
           }
           case 'add': {
             const title = text(input.title);
@@ -100,6 +122,8 @@ export function createWorkPlanTool(store: WorkPlanToolStore, options: WorkPlanTo
             const owner = typeof input.owner === 'string' ? input.owner : undefined;
             const notes = typeof input.notes === 'string' ? input.notes : undefined;
             if (!title && owner === undefined && notes === undefined) return { success: false, error: 'update requires at least one of "title", "owner" or "notes". Nothing was changed.' };
+            const refusedUpdate = await othersItem(id);
+            if (refusedUpdate) return { success: false, error: refusedUpdate };
             const result = await store.update(id, {
               ...(title ? { title } : {}),
               ...(owner !== undefined ? { owner } : {}),
@@ -111,16 +135,28 @@ export function createWorkPlanTool(store: WorkPlanToolStore, options: WorkPlanTo
             const id = text(input.id);
             if (!id) return { success: false, error: 'set_status requires "id".' };
             if (!isWorkPlanTaskStatus(input.status)) return { success: false, error: `set_status requires "status", one of: ${WORK_PLAN_TASK_STATUSES.join(', ')}.` };
+            const refusedStatus = await othersItem(id);
+            if (refusedStatus) return { success: false, error: refusedStatus };
             const result = await store.setStatus(id, input.status);
             return { success: true, output: changed(result, itemView(result.task)) };
           }
           case 'remove': {
             const id = text(input.id);
             if (!id) return { success: false, error: 'remove requires "id".' };
+            const refusedRemove = await othersItem(id);
+            if (refusedRemove) return { success: false, error: refusedRemove };
             const result = await store.remove(id);
             return { success: true, output: changed(result, { removed: result.deletedTask.taskId, title: result.deletedTask.title }) };
           }
           case 'clear_completed': {
+            if (options.perConversation === true) {
+              // Only its own finished items (done, cancelled), one by one: another conversation's are not its to clear.
+              const sessionId = options.resolveSessionId?.();
+              const own = (await store.snapshot({})).tasks.filter((task) => task.sessionId !== undefined && task.sessionId === sessionId
+                && (task.status === 'done' || task.status === 'cancelled'));
+              for (const task of own) await store.remove(task.taskId);
+              return { success: true, output: JSON.stringify({ cleared: own.length }) };
+            }
             const result = await store.clearCompleted();
             const cleared = result.clearedTaskIds?.length ?? 0;
             return { success: true, output: cleared > 0 ? changed(result, { cleared }) : JSON.stringify({ cleared }) };

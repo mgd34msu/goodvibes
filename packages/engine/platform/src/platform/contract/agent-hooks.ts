@@ -14,6 +14,7 @@ import { nativeRecordedCheck } from './check.js';
 import { gateEventSummary } from './gates.js';
 import type { AutonomousToolSource } from '../permissions/autonomous.js';
 import { nativeContractSourceForAdmission } from './native-source.js';
+import { conflictResolvedBy, finishConflictMerge, readConflictStanding, type MergeConflictRepair } from './conflict-repair.js';
 /**
  * The seams the sub-agent loop (`runAgentTask`, agents/orchestrator-runner.ts)
  * calls for a contract-bound agent (docs/design/contract-runner.md section
@@ -106,6 +107,11 @@ export interface UnitCheckEscalations {
   unitStalled(run: ContractRun, unitId: string, check: DecidedCheck): Promise<void>;
   /** Unsettled readings reached `contract.evidenceNudgeLimit` (4.6): ask the owner to confirm (6.3). */
   unitAwaitsOwner(run: ContractRun, unitId: string, check: DecidedCheck): Promise<void>;
+  /**
+   * The step that resolves a conflicting merge ended its turn with conflict markers left in `files`: the owner is asked
+   * once which change to keep, or to stop. The step stays held; it is not nudged again.
+   */
+  conflictUnresolved(run: ContractRun, unitId: string, files: readonly string[]): Promise<void>;
 }
 
 export interface UnitCheckLoopDeps {
@@ -225,8 +231,30 @@ export function createUnitCheckLoop(deps: UnitCheckLoopDeps): UnitCheckLoop {
         },
       };
       run.moveUnit(unit, 'held');
-      void runCheck(run, unit, 'completion', candidateOutput);
+      const conflict = conflictResolvedBy(run.group(unit.groupId), unit.id);
+      if (conflict === undefined) { void runCheck(run, unit, 'completion', candidateOutput); return; }
+      void run.work.run('conflict repair', () => settleConflictThenCheck(run, unit, runtime.cwd, conflict, candidateOutput)).catch((error: unknown) => { abandonCheck(run, unit, 'completion', error); });
     });
+  }
+
+  /**
+   * The turn of the step that resolves a conflicting merge ended: the host reads its tree. Resolved (no conflict marker
+   * left), the host concludes the merge and the step is checked as any other. Not resolved, the owner is asked once and
+   * the step stays held: it is not nudged again, and nothing comes back to it on a clock.
+   */
+  async function settleConflictThenCheck(run: ContractRun, unit: ContractUnit, cwd: string, conflict: MergeConflictRepair, candidateOutput?: string): Promise<void> {
+    const standing = await readConflictStanding(cwd, conflict);
+    if (run.terminal || unit.status !== 'held') return;
+    if (standing.kind === 'unresolved') {
+      run.decide('stalled', unit.id, `its turn ended with the two changes to ${standing.files.join(', ')} not combined: the owner is asked which to keep`);
+      await deps.escalations.conflictUnresolved(run, unit.id, standing.files);
+      return;
+    }
+    if (standing.kind === 'resolved') {
+      await finishConflictMerge(cwd, conflict);
+      run.decide('checked', unit.id, `the two changes to ${conflict.files.join(', ')} are combined; the host finished the merge of ${conflict.branch}`);
+    }
+    await runCheck(run, unit, 'completion', candidateOutput);
   }
 
   /** Where the unit's agent is, for delivering a nudge (4.7). A session turn that ended takes its next nudge at the next completion check. */

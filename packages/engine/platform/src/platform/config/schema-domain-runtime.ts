@@ -266,7 +266,7 @@ export const runtimePrimaryConfigSettings: ConfigSettingDefinition[] = [
     description: 'Proactive check-in cadence as a cron expression (default: every 4 hours)',
   },
   {
-    key: 'checkin.deliveryChannel',
+    key: 'checkin.deliveryChannel', valueKind: 'endpoint',
     label: 'Where check-ins are sent',
     type: 'string',
     description: 'Where a proactive check-in message is delivered: "surfaceKind" or "surfaceKind:address" (e.g. "slack:C123"). Empty falls back to the owner profile field contactMe.channel.',
@@ -278,7 +278,7 @@ export const runtimePrimaryConfigSettings: ConfigSettingDefinition[] = [
     description: 'Proactive check-in quiet hours as "HH:MM-HH:MM" local time; no message is sent during this window. Empty falls back to the owner profile field contactMe.quietHours, and disables quiet hours only when the profile has none.',
   },
   {
-    key: 'controlPlane.enabled',
+    key: 'controlPlane.enabled', valueKind: 'opening-switch',
     label: 'Let other machines reach this daemon',
     type: 'boolean',
     description: 'Whether the control plane is served to other machines. Off (default): the daemon listener answers only requests from this machine (loopback or one of its own addresses), whatever controlPlane.hostMode binds, and refuses any other address with CONTROL_PLANE_LOCAL_ONLY naming this setting. On: every address the binding reaches is served (paired devices, the web UI from another device, a reverse proxy). Channel webhooks under /webhook/ are answered either way; each surface\'s own switch decides them. Takes effect on the next request; the outbound relay has its own switch (relay.enabled). goodvibes-daemon webui enable --lan turns it on with the network binding.',
@@ -311,7 +311,7 @@ export const runtimePrimaryConfigSettings: ConfigSettingDefinition[] = [
     ...port(),
   },
   {
-    key: 'controlPlane.publicBaseUrl',
+    key: 'controlPlane.publicBaseUrl', valueKind: 'endpoint',
     label: "The daemon's outside address",
     type: 'string',
     description:
@@ -333,7 +333,7 @@ export const runtimePrimaryConfigSettings: ConfigSettingDefinition[] = [
     description: 'Trust proxy forwarding headers such as x-forwarded-for for the control plane. Read at each request: a change applies at once, with no restart.',
   },
   {
-    key: 'controlPlane.openaiCompatible.enabled',
+    key: 'controlPlane.openaiCompatible.enabled', valueKind: 'opening-switch',
     label: 'Offer an OpenAI-compatible API',
     type: 'boolean',
     description: 'Expose OpenAI-compatible /v1/models and /v1/chat/completions routes on the authenticated daemon',
@@ -347,19 +347,19 @@ export const runtimePrimaryConfigSettings: ConfigSettingDefinition[] = [
     validationHint: 'a path such as /v1: segments of letters, digits, . _ ~ -, with no trailing slash and not just /',
   },
   {
-    key: 'controlPlane.webui.serve',
+    key: 'controlPlane.webui.serve', valueKind: 'opening-switch',
     label: 'Serve the web UI from the daemon',
     type: 'boolean',
     description: 'Serve a built web UI bundle same-origin from the daemon (opt-in; loopback default unchanged). The bundle is public and the app token-authenticates its own API calls. Turned on alone, it serves controlPlane.webui.bundleDir, or web.staticAssetsDir when that is empty, without checking that a bundle is there (a page load then answers 503 naming the setting); goodvibes-daemon webui enable --bundle-dir <dir> is the path that checks the bundle.',
   },
   {
-    key: 'controlPlane.webui.bundleDir',
+    key: 'controlPlane.webui.bundleDir', valueKind: 'path',
     label: 'Folder of the web UI the daemon serves',
     type: 'string',
     description: 'Directory holding the built web UI bundle (index.html + assets) served when controlPlane.webui.serve is true. Takes precedence over web.staticAssetsDir: this key is the specific answer for this daemon, so when it names a directory that is the one served. Empty falls back to web.staticAssetsDir.',
   },
   {
-    key: 'controlPlane.cors.enabled',
+    key: 'controlPlane.cors.enabled', valueKind: 'opening-switch',
     label: 'Let listed websites call the daemon',
     type: 'boolean',
     description: 'Answer OPTIONS preflight and emit Access-Control-Allow-* headers for allowlisted origins (opt-in; off by default). Never wildcards; credentials are allowlist-gated.',
@@ -378,22 +378,22 @@ export const runtimePrimaryConfigSettings: ConfigSettingDefinition[] = [
     enumValues: ['off', 'proxy', 'direct'],
   },
   {
-    key: 'controlPlane.tls.certFile',
+    key: 'controlPlane.tls.certFile', valueKind: 'path',
     label: 'Certificate file for the daemon',
     type: 'string',
     description: 'Certificate chain PEM path for direct control-plane TLS (empty = certs/fullchain.pem under this surface\'s settings directory, e.g. ~/.goodvibes/tui/certs/fullchain.pem for the terminal app and the daemon)',
   },
   {
-    key: 'controlPlane.tls.keyFile',
+    key: 'controlPlane.tls.keyFile', valueKind: 'path',
     label: 'Private key file for the daemon',
     type: 'string',
     description: 'Filesystem pathname of the PEM file used for direct control-plane TLS. This setting stores a path, not the private key contents. Empty uses certs/privkey.pem under this surface\'s settings directory (e.g. ~/.goodvibes/tui/certs/privkey.pem for the terminal app and the daemon).',
   },
   {
-    key: 'controlPlane.lanHttps.enabled',
+    key: 'controlPlane.lanHttps.enabled', valueKind: 'opening-switch',
     label: 'Serve the web UI over https on your network',
     type: 'boolean',
-    description: 'Off by default. On, the daemon also listens over https on controlPlane.lanHttps.port, beside its plain listener, with a certificate from a certificate authority made on this machine for its own names and private network addresses only (its key is kept in the secret store). A phone that installs that authority once (the page /lan-https on the plain address says how, for iPhone and Android) gets the microphone, push notifications and installing the app, which browsers allow only over https. Needs the web UI served to the network (goodvibes-daemon webui enable --lan --https turns both on). Off again: the https listener stops; the plain listener is unchanged either way.',
+    description: 'Off by default. On, the daemon also listens over https on controlPlane.lanHttps.port, beside its plain listener, with a certificate from a certificate authority made on this machine for its own names and private network addresses only (its key is kept in the secret store). A phone that installs that authority once (from the link for phones that goodvibes-daemon pair prints and the Secure address screen shows: the page /lan-https on the https address, which checks the certificate against the fingerprint in the link and says how, for iPhone and Android; nothing of it is served over plain http) gets the microphone, push notifications and installing the app, which browsers allow only over https. Needs the web UI served to the network (goodvibes-daemon webui enable --lan --https turns both on). Off again: the https listener stops; the plain listener is unchanged either way.',
   },
   {
     key: 'controlPlane.lanHttps.port',
@@ -442,13 +442,13 @@ export const runtimePrimaryConfigSettings: ConfigSettingDefinition[] = [
     enumValues: ['off', 'proxy', 'direct'],
   },
   {
-    key: 'httpListener.tls.certFile',
+    key: 'httpListener.tls.certFile', valueKind: 'path',
     label: 'Certificate file for webhooks',
     type: 'string',
     description: 'Certificate chain PEM path for direct webhook-listener TLS (empty = certs/fullchain.pem under this surface\'s settings directory)',
   },
   {
-    key: 'httpListener.tls.keyFile',
+    key: 'httpListener.tls.keyFile', valueKind: 'path',
     label: 'Private key file for webhooks',
     type: 'string',
     description: 'Private key PEM path for direct webhook-listener TLS (empty = certs/privkey.pem under this surface\'s settings directory)',
@@ -481,13 +481,13 @@ export const runtimePrimaryConfigSettings: ConfigSettingDefinition[] = [
     ...port(),
   },
   {
-    key: 'web.publicBaseUrl',
+    key: 'web.publicBaseUrl', valueKind: 'endpoint',
     label: 'Outside address used in web links',
     type: 'string',
     description: 'Public base URL for web links and notification deep links, for a web app served somewhere the daemon cannot describe (a tunnel or reverse proxy). Empty (the default) means links are derived live from the current settings: the daemon\'s own reachable address when it serves the web app (controlPlane.webui.serve), otherwise there is no web app and no link; a link only reachable on this machine is left out of messages read on other devices. Installers and goodvibes-daemon webui enable never fill it; set it only for an address the daemon cannot derive.',
   },
   {
-    key: 'web.staticAssetsDir',
+    key: 'web.staticAssetsDir', valueKind: 'path',
     label: 'Fallback folder of web UI files',
     type: 'string',
     description: 'Static asset directory for the embedded web surface (index.html + assets), served when controlPlane.webui.serve is true. Used when controlPlane.webui.bundleDir is empty; that more specific key wins when it names a directory.',
@@ -568,7 +568,7 @@ export const runtimeSecondaryConfigSettings: ConfigSettingDefinition[] = [
     description: 'Name of the daemon\'s service unit, used by the installer, the daemon\'s and the terminal apps\' service commands and onboarding alike. Empty (the default) uses goodvibes (goodvibes.service under systemd) on Linux and Windows, and sh.goodvibes.daemon (the launchd label) on macOS.',
   },
   {
-    key: 'service.logPath',
+    key: 'service.logPath', valueKind: 'path',
     label: 'Daemon log file',
     appliesWhen: 'restart',
     type: 'string',
@@ -614,14 +614,14 @@ export const runtimeSecondaryConfigSettings: ConfigSettingDefinition[] = [
       'Comma-separated hosts on your own network that deliveries you configured may reach: a watcher\'s target, a notification webhook, the default webhook target (a LAN device 192.168.1.20, a name such as ha.lan, or *.home.lan for every name under it). Such a host may resolve to a private, loopback, link-local, unique-local or shared (CGNAT, Tailscale) address; a cloud metadata address is always refused, and addresses from outside parties never use this list. Your own settings only: a project settings file cannot set it, and adding a host is yours to decide.',
   },
   {
-    key: 'relay.enabled',
+    key: 'relay.enabled', valueKind: 'opening-switch',
     label: 'Reach this daemon from outside through a relay',
     appliesWhen: 'now',
     type: 'boolean',
     description: 'Connect the daemon OUTBOUND to a zero-knowledge relay for reachability from outside the LAN. Default on, but no connection is ever made without an explicitly configured relay.url, leave the URL empty to keep the daemon LAN-only.',
   },
   {
-    key: 'relay.url',
+    key: 'relay.url', valueKind: 'endpoint',
     label: 'Relay address',
     appliesWhen: 'now',
     type: 'string',
@@ -684,7 +684,7 @@ export const runtimeSecondaryConfigSettings: ConfigSettingDefinition[] = [
     ...intRange(1, 64),
   },
   {
-    key: 'telemetry.includeRawPrompts',
+    key: 'telemetry.includeRawPrompts', valueKind: 'opening-switch',
     label: 'Allow reading prompts in telemetry',
     type: 'boolean',
     description:
@@ -693,13 +693,13 @@ export const runtimeSecondaryConfigSettings: ConfigSettingDefinition[] = [
       'Raw prompts may contain private data. Enabling the setting at startup emits a WARN log.',
   },
   {
-    key: 'telemetry.decisionOtlpEnabled',
+    key: 'telemetry.decisionOtlpEnabled', valueKind: 'opening-switch',
     label: 'Send permission decisions to a tracing collector',
     type: 'boolean',
     description: 'Export permission/policy decision-log records to an OTLP endpoint (export-only, no ingestion). Requires telemetry.decisionOtlpEndpoint',
   },
   {
-    key: 'telemetry.decisionOtlpEndpoint',
+    key: 'telemetry.decisionOtlpEndpoint', valueKind: 'endpoint',
     label: 'Tracing collector for permission decisions',
     type: 'string',
     description: 'OTLP/HTTP JSON endpoint base for decision-log export (empty = disabled). Spans POST to <base>/v1/traces, logs to <base>/v1/logs',
@@ -823,25 +823,25 @@ export const runtimeSecondaryConfigSettings: ConfigSettingDefinition[] = [
     description: 'Cloudflare account workers.dev subdomain used to infer cloudflare.workerBaseUrl',
   },
   {
-    key: 'cloudflare.workerHostname',
+    key: 'cloudflare.workerHostname', valueKind: 'endpoint',
     label: "Cloudflare worker's own address",
     type: 'string',
     description: 'Optional custom hostname for the GoodVibes Cloudflare Worker when DNS automation is enabled',
   },
   {
-    key: 'cloudflare.workerBaseUrl',
+    key: 'cloudflare.workerBaseUrl', valueKind: 'endpoint',
     label: 'Cloudflare worker address',
     type: 'string',
     description: 'Optional deployed GoodVibes Cloudflare Worker base URL used by clients that proxy batch signals through Workers',
   },
   {
-    key: 'cloudflare.daemonBaseUrl',
+    key: 'cloudflare.daemonBaseUrl', valueKind: 'endpoint',
     label: 'Address Cloudflare uses to reach the daemon',
     type: 'string',
     description: 'Daemon origin URL the Cloudflare Worker or Tunnel uses for Worker-to-daemon batch calls',
   },
   {
-    key: 'cloudflare.daemonHostname',
+    key: 'cloudflare.daemonHostname', valueKind: 'endpoint',
     label: 'Public address of the daemon through Cloudflare',
     type: 'string',
     description: 'Optional public daemon hostname managed through Cloudflare DNS, Tunnel, and Access provisioning',

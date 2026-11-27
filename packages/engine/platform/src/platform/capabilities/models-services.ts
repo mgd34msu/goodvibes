@@ -20,6 +20,7 @@ import type { ProviderOptimizer } from '../providers/optimizer.js';
 import type { ProviderRegistry } from '../providers/registry.js';
 import { emitProvidersChanged } from '../runtime/emitters/providers.js';
 import { noteListChanged } from '../runtime/list-changes.js';
+import { projectIdentityOf } from '../workspace/project-identity.js';
 import type { RuntimeEventBus } from '../runtime/events/index.js';
 import type { ShellPathService } from '../runtime/shell-paths.js';
 import { CapabilityRefusal, type CapabilityCaller } from './types.js';
@@ -104,7 +105,9 @@ export function createModelsCapabilityServices(sources: ModelsServiceSources): M
       forProject(caller: CapabilityCaller): ServiceRegistry {
         if (!ownServices || !sources.subscriptionManager) throw new CapabilityRefusal('This daemon was started without its services file; nothing was read or changed.', undefined, 'UNAVAILABLE');
         const daemonDirectory = settings.getWorkingDirectory();
-        const directory = caller.workingDirectory ? resolve(caller.workingDirectory) : undefined;
+        // The project the caller is in, by the one project identity (a call from its subfolder is the project's), as the
+        // programs keep the file (`<project>/.goodvibes/<program>/services.json`, shell-paths.ts `projectFolderOf`).
+        const directory = caller.workingDirectory ? projectIdentityOf(resolve(caller.workingDirectory)) : undefined;
         if (!directory || (daemonDirectory && resolve(daemonDirectory) === directory && (caller.program ?? 'tui') === 'tui')) return ownServices;
         const program = caller.program ?? 'tui';
         const key = `${program}\u0000${directory}`;

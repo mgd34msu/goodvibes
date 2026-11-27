@@ -20,6 +20,7 @@
  * the Agent, answered there): seeing them is the daemon's `google.waiting`.
  */
 import { formatRefusal } from '@goodvibes/engine/errors';
+import { currentRecordReach } from '@goodvibes/engine/daemon-api';
 import {
   listEveryOwnerItem, type OwnerAnswerDelivery, type OwnerAnswerOutcome, type OwnerInboxPort, type OwnerItem,
 } from '../../control-plane/owner-inbox.js';
@@ -220,8 +221,19 @@ const ITEM: InputDescription = {
   choices: { list: OPEN_INBOX_LIST, allowOther: { reason: 'the id of an item already answered' } }, required: true, typed: { position: 1 },
 };
 
+/**
+ * The inbox items the caller may reach (control-plane/caller-reach.ts): a question waiting for the owner as that
+ * question (its project); every other item (an ask, a claim, a purchase window, a decision) is the owner's own: only
+ * he sees it. The owner himself sees every one.
+ */
+function reachableItems<T extends Pick<OwnerItem, 'kind' | 'id'>>(items: readonly T[]): T[] {
+  const reach = currentRecordReach();
+  if (!reach) return [...items];
+  return items.filter((item) => item.kind === 'approval' && reach('approval', item.id));
+}
+
 async function listed(services: WaitingCapabilityServices, status: 'open' | 'all'): Promise<CapabilityResult> {
-  const items = await listEveryOwnerItem(inboxOf(services), { status });
+  const items = reachableItems(await listEveryOwnerItem(inboxOf(services), { status }));
   const data = { items: items.map(itemData) };
   if (items.length === 0) return { text: status === 'open' ? 'Nothing is waiting on you.' : 'Nothing has been asked of you yet.', data };
   return {
@@ -254,6 +266,8 @@ export const QUESTIONS_SHOW: CapabilityDefinition<WaitingCapabilityServices> = {
   touches: 'reads', lasts: 'not-a-change', risk: 'none', example: { item: 'q-41a2' },
   async run(values, services) {
     const item = await findItem(inboxOf(services), values.item!, 'all');
+    // The same words as for no item: another project's question is never said to exist.
+    if (reachableItems([item]).length === 0) throw new CapabilityRefusal(`item: no question "${values.item!}" is among what this caller may reach (only what belongs to a project the owner gave it)`, undefined, 'RECORD_NOT_YOURS', 403);
     return { text: formatOwnerItemDetail(item), data: { item: itemData(item) } };
   },
 };
@@ -396,8 +410,9 @@ export const DECISIONS_LIST: CapabilityDefinition<WaitingCapabilityServices> = {
       listEveryOwnerItem(inbox, { status: 'closed' }),
     ]);
     const inWindow = (at: number): boolean => window === undefined || (at >= window.from && at < window.to);
-    const open = allOpen.filter((item) => inWindow(item.createdAt)).slice(0, limit);
-    const closed = allClosed.filter((item) => inWindow(item.closedAt ?? item.createdAt)).slice(0, limit);
+    // What the caller may reach, before the latest are cut (Jev's decisions are the owner's own: only he sees them).
+    const open = reachableItems(allOpen).filter((item) => inWindow(item.createdAt)).slice(0, limit);
+    const closed = reachableItems(allClosed).filter((item) => inWindow(item.closedAt ?? item.createdAt)).slice(0, limit);
     const data = { open: open.map(itemData), decided: closed.map(itemData) };
     if (open.length === 0 && closed.length === 0) return { text: window === undefined ? 'Nothing has been decided yet.' : `Nothing was decided ${window.label}.`, data };
     const period = window === undefined ? '' : ` ${window.label}`;

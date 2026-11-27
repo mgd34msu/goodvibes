@@ -17,6 +17,9 @@ export function createWebSearchTool(service: WebSearchService): Tool {
         + ' metadata.ignoredFilters names any region, safeSearch or timeRange filter the answering provider could not apply.',
       parameters: toRecord(WEB_SEARCH_TOOL_SCHEMA),
       sideEffects: ['network'],
+      // A search reads, as a fetch that only GETs does: decided as one everywhere, a turn on someone else's input
+      // included (gate/classify.ts reads a call's category).
+      category: 'read',
       concurrency: 'parallel',
     },
 

@@ -32,12 +32,12 @@ function agentOnboarding(context: CommandContext, includeDetails: boolean): Reco
  * control-plane listener while it serves the bundle, else a set
  * `web.publicBaseUrl`; `web.port` is only a development server's) and the
  * Agent's own onboarding marker. The web UI has its own views (chat, work, library,
- * personal, phone, settings) and does not mirror the Agent workspace's
- * categories, so no category, touch or install coverage is claimed for it.
+ * personal, phone, settings), so no category, touch or install coverage is
+ * claimed for it.
  */
-export async function connectedBrowserCockpitRoute(context: CommandContext, rawOptions: { readonly includeWorkspaceCoverage?: boolean } = {}, readingOptions: CatalogRankingOptions = {}): Promise<Record<string, unknown>> {
+export async function connectedBrowserCockpitRoute(context: CommandContext, rawOptions: { readonly includeDetails?: boolean } = {}, readingOptions: CatalogRankingOptions = {}): Promise<Record<string, unknown>> {
   readingOptions.signal?.throwIfAborted(); readingOptions.assertCurrent?.();
-  const includeDetails = rawOptions.includeWorkspaceCoverage === true;
+  const includeDetails = rawOptions.includeDetails === true;
   const configManager = context.platform?.configManager;
   let enabled = false;
   let binding = { hostMode: 'local', configuredHost: '127.0.0.1', host: '127.0.0.1', port: 3423 };
@@ -70,7 +70,7 @@ export async function connectedBrowserCockpitRoute(context: CommandContext, rawO
       settings: ['web.enabled', 'web.hostMode', 'web.host', 'web.port', 'web.publicBaseUrl'],
     },
     agentOnboarding: agentOnboarding(context, includeDetails),
-    webViews: 'The web UI opens on chat, work, library, personal, phone and settings views; Agent workspace categories stay in the terminal Agent Workspace.',
+    webViews: 'The web UI opens on chat, work, library, personal, phone and settings views.',
     setupRoutes: {
       inspectEndpoint: 'host action:"service" endpointId:"web"',
       servicePosture: 'host action:"services" includeParameters:true',

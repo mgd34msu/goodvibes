@@ -23,7 +23,7 @@ export function renderSessionPickerPackageText(): string {
     'This week',
     'Earlier',
     'No saved sessions.',
-    'Open Agent Workspace -> Conversation -> Save current session.',
+    'Save this one from This conversation, in the menu (Ctrl+G then m).',
     'No sessions match "<query>".',
     '<n> msgs',
     'move',

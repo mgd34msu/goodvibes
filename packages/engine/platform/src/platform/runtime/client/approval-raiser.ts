@@ -121,14 +121,6 @@ const DEFAULT_ARBITER_WAIT_MS = 2_000;
 /** How often the raised id is re-read while the local prompt is open. */
 const DEFAULT_POLL_INTERVAL_MS = 750;
 
-/**
- * How long a raised record waits for an answer before the daemon expires it.
- * The daemon clamps to the same twelve hours; an ask open that long has been
- * abandoned, and without a deadline a record whose raiser vanished is shown as
- * "Approval required" on every other surface forever.
- */
-const DEFAULT_RAISE_TIMEOUT_MS = 12 * 60 * 60 * 1_000;
-
 const REMEMBER_TIERS: ReadonlySet<string> = new Set<RememberTier>(['session', 'exact', 'command-class', 'path', 'tool']);
 
 export interface ClientApprovalRaiserOptions {
@@ -152,8 +144,6 @@ export interface ClientApprovalRaiserOptions {
   readonly pollIntervalMs?: number;
   /** Injectable sleep (tests). */
   readonly sleep?: (ms: number) => Promise<void>;
-  /** How long the daemon keeps a raised record open before expiring it. */
-  readonly raiseTimeoutMs?: number;
   /** How long a local answer waits for the daemon's final record (tests). */
   readonly arbiterWaitMs?: number;
   /**
@@ -293,7 +283,7 @@ export function createClientApprovalRaiser(options: ClientApprovalRaiserOptions)
         ...(sessionId ? { sessionId } : {}),
         ...(input.routeId === undefined ? {} : { routeId: input.routeId }),
         ...(input.metadata === undefined ? {} : { metadata: input.metadata }),
-        timeoutMs: options.raiseTimeoutMs ?? DEFAULT_RAISE_TIMEOUT_MS,
+        // No expiry: a question waits until it is answered or the program that asked gives it up (its hold).
       });
       // approvalId is always sent; the record only to a caller that holds read:approvals.
       const id = typeof raised?.approvalId === 'string' ? raised.approvalId : raised?.approval?.id;

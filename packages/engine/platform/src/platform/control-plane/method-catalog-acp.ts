@@ -81,6 +81,8 @@ export const builtinGatewayAcpMethodDescriptors: readonly GatewayMethodDescripto
     category: 'acp',
     effects: ['fleet.write'],
     transport: ['ws'],
+    // The outside agent works in this folder: a project the caller may name (control-plane dispatch).
+    workFolders: ['cwd'],
     inputSchema: objectSchema({
       agentId: STRING_SCHEMA,
       cwd: STRING_SCHEMA,

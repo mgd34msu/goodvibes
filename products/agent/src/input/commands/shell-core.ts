@@ -42,7 +42,8 @@ export function registerShellCoreCommands(registry: CommandRegistry): void {
   });
 
   helpSources = {
-    commands: () => registry.getAll(),
+    // The listed commands; an unlisted one (it opens its place) is typed, never listed.
+    commands: () => registry.getVisible(),
     command: (name) => registry.get(name),
     keys: (ctx) => {
       const km = requireKeybindingsManager(ctx);

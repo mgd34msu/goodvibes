@@ -7,7 +7,7 @@ import { nativeSettlementDigest, nativeWorkSettlementSchema, nativeSettlementSto
 import type { SQLiteStore, SqlDatabase } from '../state/sqlite-store.js';
 import { readKnowledgeWorkLedgerImage, writeKnowledgeWorkLedger } from './store-work-ledger.js';
 import { durableKeyIdentity, durableKeyHash, durablePayloadRevision, sameDurableRequest, type DurableContractKey, type DurableContractRequest, type DurableContractReceipt } from '../contract/durable-admission.js';
-import { readWorkLedgerState, createEmptyWorkLedgerState, reduceWorkLedgerFailure, reduceWorkLedgerSettlement } from '../workflow/work-ledger/service.js';
+import { readWorkLedgerState, createEmptyWorkLedgerState, reduceWorkLedgerFailure, reduceWorkLedgerSettlement, reduceWorkLedgerStatus, reduceWorkLedgerStopped,nativeStatusReports, nativeTargetMatches, nativeBoundRevisions, NATIVE_STATUS_REQUEST_PREFIX } from '../workflow/work-ledger/service.js';
 import type { WorkLedgerState } from '../workflow/work-ledger/types.js';
 import { isNativeWorkSession } from '../workflow/work-ledger/native-work-session.js';
 import { NativeWorkExecutionError, nativeExecutionOriginalFor, parseNativeWorkExecutionRecord, parseNativeWorkExecutionIntent, parseNativeWorkExecutionRecordJson, parseNativeWorkExecutionIntentJson, nativeExecutionStorageKey, type NativeExecutionOriginal, type NativeWorkExecutionIntent, type NativeWorkExecutionRecord, type NativeWorkExecutionMutation, type NativeWorkExecutionStorage, type NativeWorkExecutionTransaction } from '../workflow/work-ledger/native-execution-types.js';
@@ -211,7 +211,9 @@ function read(db: SqlReader, projectId: string, key: Lookup, original?: NativeEx
       || !evidence || evidence.type !== 'record_evidence' || evidence.requestId !== settlement.evidenceRequestId || evidence.attemptId !== record.target.attemptId || evidence.evidence?.id !== settlement.evidenceId
       || !isDeepStrictEqual(evidence.evidence.target, settlement.targetAfterReport)
       || !isDeepStrictEqual({ outcome: evidence.evidence.outcome, reason: evidence.evidence.reason, references: evidence.evidence.references, source: evidence.evidence.source, criteriaResults: evidence.evidence.criteriaResults }, settlement.attestation)
-      || settlement.targetAfterReport.workRevision !== record.target.workRevision + 1 || settlement.targetAfterReport.attemptRevision !== record.target.attemptRevision + 1
+      // The host's status reports before the settlement (waiting for the owner, going on) moved both revisions too.
+      || settlement.targetAfterReport.workRevision !== record.target.workRevision + 1 + nativeStatusReports(ledger.history, record.target.workId, record.target.attemptId, settlement.reportSequence - 1)
+      || settlement.targetAfterReport.attemptRevision !== record.target.attemptRevision + 1 + nativeStatusReports(ledger.history,record.target.workId, record.target.attemptId, settlement.reportSequence - 1)
       || settlement.targetAfterReport.criteriaRevision !== record.target.criteriaRevision || settlement.targetAfterReport.workId !== record.target.workId || settlement.targetAfterReport.attemptId !== record.target.attemptId
       || report.actorId !== evidence.actorId || evidence.evidence.actorId !== report.actorId || reportedAttempt.ownerId !== report.actorId
       || settlement.attestation.source !== 'host_check' || settlement.attestation.criteriaResults.length !== record.request.input.nativeSource!.criteria.length
@@ -241,7 +243,7 @@ function assertCurrentTarget(current: NativeWorkExecutionTransaction, intent: Na
   const work = current.ledger.works.find(item => item.id === target.workId);
   const attempt = current.ledger.attempts.find(item => item.id === target.attemptId);
   if (!work || !attempt || attempt.workId !== work.id || work.currentAttemptId !== attempt.id
-    || work.revision !== target.workRevision || work.criteriaRevision !== target.criteriaRevision || attempt.revision !== target.attemptRevision
+    || !nativeTargetMatches(current.ledger.history,target, work, attempt)
     || attempt.state !== 'active' || work.reportedState === 'cancelled' || work.reportedState === 'complete'
     || work.title !== intent.request.input.ask || work.goal !== intent.request.input.nativeSource?.goal
     || JSON.stringify(work.criteria) !== JSON.stringify(intent.request.input.nativeSource.criteria)
@@ -407,11 +409,68 @@ export function createNativeWorkExecutionStorage(sqlite: SQLiteStore, projectId:
         if (!record?.receipt || current.settlement) return { changed: false, value: false };
         const work = current.ledger.works.find(item => item.id === record.target.workId);
         const attempt = current.ledger.attempts.find(item => item.id === record.target.attemptId);
-        if (!work || !attempt || work.currentAttemptId !== attempt.id || work.reportedState === 'blocked' || work.reportedState === 'complete' || work.reportedState === 'cancelled'
-          || work.revision !== record.target.workRevision || work.criteriaRevision !== record.target.criteriaRevision || attempt.revision !== record.target.attemptRevision) return { changed: false, value: false };
+        // A run waiting for the owner already says "blocked" with its wait; its failure replaces that.
+        if (!work || !attempt || work.currentAttemptId !== attempt.id || (work.reportedState === 'blocked' && attempt.blocker === reason) || work.reportedState === 'complete' || work.reportedState === 'cancelled'
+          || !nativeTargetMatches(current.ledger.history,record.target, work, attempt)) return { changed: false, value: false };
         const at = Math.max(Date.now(), current.ledger.history.at(-1)?.at ?? 0);
         const reduced = reduceWorkLedgerFailure(current.ledger, { target: record.target, actorId: attempt.ownerId, reason: reason.slice(0, 2000),
           requestId: `native-failed:${durableKeyIdentity(record.request.key)}` }, { now: () => at, newId: () => crypto.randomUUID() });
+        writeKnowledgeWorkLedger(db, reduced.state);
+        return { changed: true, value: true };
+      }, refresh).then(result => { if (result.kind !== 'completed') throw new NativeWorkExecutionError('unavailable'); return result.value; });
+      pending.add(operation); void operation.then(() => pending.delete(operation), () => pending.delete(operation)); return operation;
+    },
+    reportStopped(key, reason, original) {
+      if (closed) return Promise.reject(new NativeWorkExecutionError('closed'));
+      const lookup = { ...key }; durableKeyIdentity(lookup);
+      const operation = sqlite.transactPersisted(db => {
+        const current = read(db, projectId, lookup, original, undefined, undefined, ledgerCache);
+        if (current.settlement) return { changed: false, value: false };
+        const at = Math.max(Date.now(), current.ledger.history.at(-1)?.at ?? 0);
+        const reduced = reduceWorkLedgerStopped(current.ledger, { workId: key.workId, attemptId: key.attemptId, reason: (reason || 'Stopped by the owner.').slice(0, 2000),
+          requestId: `${NATIVE_STATUS_REQUEST_PREFIX}stop:${crypto.randomUUID()}` }, { now: () => at, newId: () => crypto.randomUUID() });
+        if (!reduced.changed) return { changed: false, value: false };
+        writeKnowledgeWorkLedger(db, reduced.state);
+        return { changed: true, value: true };
+      }, refresh).then(result => { if (result.kind !== 'completed') throw new NativeWorkExecutionError('unavailable'); return result.value; });
+      pending.add(operation); void operation.then(() => pending.delete(operation), () => pending.delete(operation)); return operation;
+    },
+    reportBeforeRun(workId, attemptId, status, words) {
+      if (closed) return Promise.reject(new NativeWorkExecutionError('closed'));
+      const operation = sqlite.transactPersisted(db => {
+        const current = read(db, projectId, { attemptId }, undefined, undefined, undefined, ledgerCache);
+        // Only before any run of this attempt exists: once one does, the run says where it stands.
+        if (current.record || current.intent) return { changed: false, value: false };
+        const work = current.ledger.works.find(item => item.id === workId);
+        const attempt = current.ledger.attempts.find(item => item.id === attemptId);
+        if (!work || !attempt || work.currentAttemptId !== attempt.id || attempt.state !== 'active' || work.reportedState === 'complete' || work.reportedState === 'cancelled') return { changed: false, value: false };
+        const bound = nativeBoundRevisions(current.ledger.history, work, attempt);
+        const at = Math.max(Date.now(), current.ledger.history.at(-1)?.at ?? 0);
+        const reduced = reduceWorkLedgerStatus(current.ledger, { target: { workId, workRevision: bound.workRevision, criteriaRevision: work.criteriaRevision, attemptId, attemptRevision: bound.attemptRevision },
+          actorId: attempt.ownerId, state: status, words: words.slice(0, 2000), requestId: `${NATIVE_STATUS_REQUEST_PREFIX}${crypto.randomUUID()}` }, { now: () => at, newId: () => crypto.randomUUID() });
+        if (!reduced.changed) return { changed: false, value: false };
+        writeKnowledgeWorkLedger(db, reduced.state);
+        return { changed: true, value: true };
+      }, refresh).then(result => { if (result.kind !== 'completed') throw new NativeWorkExecutionError('unavailable'); return result.value; });
+      pending.add(operation); void operation.then(() => pending.delete(operation), () => pending.delete(operation)); return operation;
+    },
+    reportStatus(key, status, words, original) {
+      if (closed) return Promise.reject(new NativeWorkExecutionError('closed'));
+      const lookup = { ...key }; durableKeyIdentity(lookup);
+      const operation = sqlite.transactPersisted(db => {
+        const current = read(db, projectId, lookup, original, undefined, undefined, ledgerCache);
+        const record = current.record;
+        // Only a launched run with no settlement, at its own target, while its work reads in progress or blocked.
+        if (!record?.receipt || current.settlement || record.state === 'cancelled') return { changed: false, value: false };
+        const work = current.ledger.works.find(item => item.id === record.target.workId);
+        const attempt = current.ledger.attempts.find(item => item.id === record.target.attemptId);
+        if (!work || !attempt || work.currentAttemptId !== attempt.id || attempt.state !== 'active' || work.reportedState === 'complete' || work.reportedState === 'cancelled'
+          || !nativeTargetMatches(current.ledger.history,record.target, work, attempt)) return { changed: false, value: false };
+        const at = Math.max(Date.now(), current.ledger.history.at(-1)?.at ?? 0);
+        const reduced = reduceWorkLedgerStatus(current.ledger, { target: record.target, actorId: attempt.ownerId, state: status, words: words.slice(0, 2000),
+          requestId: `${NATIVE_STATUS_REQUEST_PREFIX}${crypto.randomUUID()}` }, { now: () => at, newId: () => crypto.randomUUID() });
+        // It says exactly this already: said.
+        if (!reduced.changed) return { changed: false, value: true };
         writeKnowledgeWorkLedger(db, reduced.state);
         return { changed: true, value: true };
       }, refresh).then(result => { if (result.kind !== 'completed') throw new NativeWorkExecutionError('unavailable'); return result.value; });

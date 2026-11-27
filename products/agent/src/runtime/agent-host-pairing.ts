@@ -28,7 +28,7 @@ export interface AgentHostPairingResult {
 export interface AgentHostPairingPreview {
   readonly result: AgentHostPairingResult;
   /** Only a live owner-terminal pairing controller may call this one-shot capability. */
-  readonly confirm?: (answer: string, signal?: AbortSignal) => Promise<AgentHostPairingResult>;
+  readonly confirm?: (answer: string, signal?: AbortSignal, note?: (text: string) => void) => Promise<AgentHostPairingResult>;
 }
 
 /** How long one auth check against the host may take. */
@@ -43,7 +43,9 @@ const storeUnreadable = (home: string, refusal?: { readonly status: string; read
     ? `${refusal.reason} Nothing was created.`
     : `The pairing file at ${agentHostPairingStorePath(home)} cannot be read or written. Fix its permissions or move the damaged file aside, then pair again. Nothing was created.`,
 });
-const unknown = (host: string): AgentHostPairingResult => ({ status: 'unknown', host, message: 'The host\'s answer to the pairing request was lost, so this Agent does not know whether the host made its access key. Run setup pair again: the host answers the same request with the same key, never a second one.' });
+/** Where pairing is done: the place's control in the Agent, the CLI verb in a script. */
+const PAIR = 'Devices and network, Pair something (or goodvibes-agent setup pair in a shell)';
+const unknown = (host: string): AgentHostPairingResult => ({ status: 'unknown', host, message: `The host's answer to the pairing request was lost, so this Agent does not know whether the host made its access key. Pair again (${PAIR}): the host answers the same request with the same key, never a second one.` });
 const rejected = (host: string, status: number, repeat: boolean): AgentHostPairingResult => ({
   status: 'rejected', host,
   message: repeat
@@ -65,7 +67,7 @@ const cancelled = (): AgentHostPairingResult => ({ status: 'cancelled', message:
 /** An answer that is not the code shown: a cancel, said as what happened. Each code works once, so a new one is needed. */
 const notTheCode = (answer: string): AgentHostPairingResult => (answer.trim() === ''
   ? cancelled()
-  : { status: 'cancelled', message: 'That is not the code shown, so nothing was sent to the host and nothing was changed. Run setup pair again for a new code.' });
+  : { status: 'cancelled', message: `That is not the code shown, so nothing was sent to the host and nothing was changed. Pair again for a new code (${PAIR}).` });
 /** Whether an environment token outranks the pairing for `host` (this machine's daemon token only for this machine). */
 const envOverride = (host: string): boolean => environmentConnectedHostToken(host) !== null;
 
@@ -115,7 +117,7 @@ function clearPreview(home: string, host: string, attemptId: string, notRepeated
       if (answer !== confirmation) return notTheCode(answer);
       consumed = true;
       const cleared = await clearAgentHostPairingAttempt(home, host, attemptId);
-      if (cleared.status === 'cleared') return { status: 'cleared', host, message: 'The unfinished attempt was forgotten. Run setup pair to pair.' };
+      if (cleared.status === 'cleared') return { status: 'cleared', host, message: `The unfinished attempt was forgotten. To pair: ${PAIR}.` };
       return cleared.status === 'conflict' ? changed() : storeUnreadable(home, cleared);
     },
   };
@@ -124,7 +126,7 @@ function clearPreview(home: string, host: string, attemptId: string, notRepeated
 /** What forgetting a stored credential did. The token stays valid on the host until it is revoked there. */
 function forgotten(result: RemoveAgentHostPairingResult, host: string, tokenId: string): AgentHostPairingResult {
   if (result.status === 'unavailable') return { status: 'pairing-store-unreadable', host, message: `${result.reason} Nothing was forgotten.` };
-  if (result.status === 'removed') return { status: 'cleared', host, message: `This Agent forgot its key for the host (key ${tokenId}). The host still accepts that key until you revoke it there, in its paired devices. Run setup pair to pair again.` };
+  if (result.status === 'removed') return { status: 'cleared', host, message: `This Agent forgot its key for the host (key ${tokenId}). The host still accepts that key until you revoke it there, in its paired devices. To pair again: ${PAIR}.` };
   return changed();
 }
 
@@ -140,7 +142,7 @@ function forgetPreview(home: string, host: string, tokenId: string): AgentHostPa
     result: {
       status: 'credential-rejected', host, confirmation,
       confirmationPrompt: 'forget the key this Agent keeps for the host, so it can pair again',
-      message: `The host at ${host} no longer accepts the key this Agent keeps for it (it was revoked, or the daemon there was reset). Confirm below to forget it, then run setup pair to pair again.`,
+      message: `The host at ${host} no longer accepts the key this Agent keeps for it (it was revoked, or the daemon there was reset). Confirm below to forget it, then pair again (${PAIR}).`,
     },
     async confirm(answer) {
       if (consumed) return cancelled();
@@ -152,7 +154,7 @@ function forgetPreview(home: string, host: string, tokenId: string): AgentHostPa
 }
 
 /**
- * `goodvibes-agent setup unpair` and `/setup unpair`: forget this Agent's
+ * `goodvibes-agent setup unpair` and Devices and network's unpair control: forget this Agent's
  * stored device credential for the selected host. Local only; nothing is sent.
  */
 export async function unpairAgentHost(options: Pick<AgentDaemonVerbCallerOptions, 'configManager' | 'homeDirectory'>): Promise<AgentHostPairingResult> {
@@ -163,7 +165,7 @@ export async function unpairAgentHost(options: Pick<AgentDaemonVerbCallerOptions
   const state = readAgentHostPairing(home, host);
   if (state.status === 'unavailable') return { status: 'pairing-store-unreadable', host, message: `${state.reason} Nothing was forgotten.` };
   if (state.status === 'missing') return { status: 'blocked', host, message: 'This Agent keeps no key for this host; nothing to forget.' };
-  if (state.status === 'unknown') return { ...unknown(host), message: `${unknown(host).message} Or run setup pair to look at the unfinished attempt and forget it.` };
+  if (state.status === 'unknown') return { ...unknown(host), message: `${unknown(host).message} Or pair again (${PAIR}) to look at the unfinished attempt and forget it.` };
   return forgotten(await removeAgentHostPairing(home, host, state.tokenId), host, state.tokenId);
 }
 
@@ -184,18 +186,33 @@ async function sendAgentMigration(input: {
   /** This attempt was sent before, so an unreachable host proves nothing about it. */
   readonly repeat: boolean;
   readonly fetchImpl?: typeof fetch | undefined; readonly signal?: AbortSignal | undefined;
+  /** A line for the person at the terminal while the host waits on the owner's answer. */
+  readonly note?: ((text: string) => void) | undefined;
 }): Promise<MigrationOutcome> {
   const { home, host, name, attemptId, signal } = input;
   const settled = (result: AgentHostPairingResult): MigrationOutcome => ({ status: 'settled', result });
   try {
     // `pairing.tokens.migrate` has no route of its own in the operator
     // contract, so it goes through the daemon's invoke-by-id route.
-    const response = await (input.fetchImpl ?? fetch)(`${host}/api/control-plane/methods/pairing.tokens.migrate/invoke`, {
+    let response = await (input.fetchImpl ?? fetch)(`${host}/api/control-plane/methods/pairing.tokens.migrate/invoke`, {
       method: 'POST', redirect: 'error',
       headers: { authorization: `Bearer ${input.token}`, 'content-type': 'application/json' },
       body: JSON.stringify({ body: { name, attemptId } }),
       signal: AbortSignal.any([AbortSignal.timeout(PAIRING_MINT_DEADLINE_MS), ...(signal ? [signal] : [])]),
     });
+    // A computer whose programs the daemon cannot prove (another system, or a daemon home it cannot trust) sends this
+    // as a script would: the daemon puts the pairing to the owner (202, his question in Waiting for you). He is the one
+    // pairing it: the Agent waits for his answer there and reads the outcome back with the question's id.
+    if (response.status === 202) {
+      const waiting = await readHostPairingResponse(response) as { readonly code?: unknown; readonly approvalId?: unknown } | null;
+      const approvalId = typeof waiting?.approvalId === 'string' && waiting.approvalId ? waiting.approvalId : undefined;
+      // Only a confirmation at a terminal waits for him (a preview never holds the screen).
+      if (waiting?.code !== 'OWNER_APPROVAL_PENDING' || !approvalId || !input.note) return settled(unknown(host));
+      input.note(`The daemon put this pairing to you, the owner, as question ${approvalId}: approve it in Waiting for you (the web UI, a paired phone, or the terminal app) and this Agent gets its key here. Waiting...`);
+      const answered = await awaitOwnerAnswer({ host, token: input.token, approvalId, fetchImpl: input.fetchImpl, signal });
+      if (!answered) return settled(unknown(host));
+      response = answered;
+    }
     if (!response.ok) {
       await response.body?.cancel();
       if (!refusedWithoutMinting(response.status)) return settled(unknown(host));
@@ -215,6 +232,86 @@ async function sendAgentMigration(input: {
     }
     return settled(unknown(host));
   }
+}
+
+/** How long the Agent waits for the owner's answer to a pairing the daemon put to him (the host's offer lapses then). */
+const OWNER_ANSWER_WAIT_MS = 15 * 60_000;
+/** How often the outcome of the question is read while it waits. */
+const OWNER_ANSWER_READ_EVERY_MS = 1_000;
+
+/**
+ * The outcome of a pairing the daemon put to the owner, read back with the question's id (`capabilities.run
+ * { approvalId }`, the same credential) until he answers: the method's own answer as a response (his yes: the minted
+ * key; his No: the refusal, 4xx). Undefined when he has not answered in time, the read failed, or the person stopped it.
+ */
+async function awaitOwnerAnswer(input: { readonly host: string; readonly token: string; readonly approvalId: string;
+  readonly fetchImpl?: typeof fetch | undefined; readonly signal?: AbortSignal | undefined }): Promise<Response | undefined> {
+  const until = Date.now() + OWNER_ANSWER_WAIT_MS;
+  while (Date.now() < until && !input.signal?.aborted) {
+    let response: Response;
+    try {
+      response = await (input.fetchImpl ?? fetch)(`${input.host}/api/control-plane/methods/capabilities.run/invoke`, {
+        method: 'POST', redirect: 'error',
+        headers: { authorization: `Bearer ${input.token}`, 'content-type': 'application/json' },
+        body: JSON.stringify({ body: { approvalId: input.approvalId } }),
+        signal: AbortSignal.any([AbortSignal.timeout(PAIRING_MINT_DEADLINE_MS), ...(input.signal ? [input.signal] : [])]),
+      });
+    } catch { return undefined; }
+    if (response.status !== 202) return response;
+    await response.body?.cancel();
+    await new Promise<void>((resolve) => {
+      const timer = setTimeout(resolve, OWNER_ANSWER_READ_EVERY_MS);
+      input.signal?.addEventListener('abort', () => { clearTimeout(timer); resolve(); }, { once: true });
+    });
+  }
+  return undefined;
+}
+
+/**
+ * Pair this Agent as the owner's own device with the sign-in code his own screen showed (gate-review-6 G1): he starts
+ * the pairing himself, in his signed-in session (the web UI: Devices and network, Pair something; "Show the sign-in
+ * code once") or his verified program, and types or pastes that code here. The code IS the device's key, made by him
+ * (`pairing.handoff.create` from his own session records it as his device): this Agent keeps it and the host confirms
+ * it as this device. Nothing is put to him a second time, and no key of the operator token's is asked for.
+ *
+ * What it then is, on a computer that cannot prove its programs to the daemon: the owner's device. It runs his turns
+ * (the daemon's native work) under his mode, its own gate asking him in its own window; it answers a question another
+ * caller raised; its own risky acts at the daemon are put to him like anyone's (in Waiting for you, answered in his
+ * signed-in session or his verified program, never by this Agent); it is never the owner himself (no Agent credential
+ * is made for it, nothing it says it decided is believed).
+ */
+export async function pairAgentHostWithCode(options: AgentDaemonVerbCallerOptions, code: string, name = 'GoodVibes Agent', signal?: AbortSignal): Promise<AgentHostPairingResult> {
+  const trimmed = code.trim();
+  if (!/^gvp_[A-Za-z0-9_-]{16,}$/.test(trimmed)) return { status: 'cancelled', message: `That is not a sign-in code the daemon makes. In your signed-in web UI: Devices and network, Pair something, then "Show the sign-in code once"; type that code here. Nothing was changed.` };
+  if (!resolveConnectedHostDialEnabled(options.configManager)) return { status: 'blocked', message: 'This Agent is set not to reach its daemon (daemon.connectedHost.enabled is false). Turn it on in settings, then pair again. Nothing was sent.' };
+  const home = typeof options.homeDirectory === 'function' ? options.homeDirectory() : options.homeDirectory;
+  const address = resolveConnectedHostAddress(options.configManager);
+  if (address.refusal) return { status: 'no-host-configured', message: `${address.refusal} Then pair again. Nothing was sent.` };
+  const host = canonicalizePairingHost(address.baseUrl);
+  if (!host) return { status: 'no-host-configured', message: `The host address (${address.baseUrl}) is not a usable http:// or https:// address. Set daemon.connectedHost.url to the GoodVibes daemon, then pair again.` };
+  const state = readAgentHostPairing(home, host);
+  if (state.status === 'unavailable') return storeUnreadable(home, state);
+  if (state.status === 'paired') return { status: 'already-paired', host, message: 'This Agent is already paired with this host. To use the new code instead, run setup unpair first; the code stays unused and stops working within 15 minutes.' };
+  const selected = resolveConnectedHost({ configManager: options.configManager, homeDirectory: options.homeDirectory });
+  const connection: ConnectedHostConnection = { baseUrl: host, token: trimmed, credential: selected.credential };
+  let auth;
+  try {
+    auth = await createConnectedHost(() => connection, options.fetchImpl ? { fetchImpl: options.fetchImpl } : {})
+      .invoke('control.auth.current', {}, { signal, deadlineMs: PAIRING_AUTH_DEADLINE_MS });
+  } catch (error) {
+    const failed = authCheckFailed(error, host, Boolean(signal?.aborted));
+    return failed.status === 'credential-rejected'
+      ? { status: 'credential-rejected', host, message: 'The host did not accept that code (it was already used, it is older than 15 minutes, or it was never one). Make a new one in your signed-in web UI, then pair again. Nothing was changed.' }
+      : failed;
+  }
+  if (!isNativePairedPrincipal(auth)) return { status: 'blocked', host, message: 'The host took that code, but not as a device of yours. Make a new one in your signed-in web UI (Devices and network, Pair something), then pair again. Nothing was kept.' };
+  const tokenId = auth.principalId.slice('pairing:'.length);
+  const attemptId = randomUUID();
+  const begun = await beginAgentHostPairing(home, host, { attemptId, name, startedAt: Date.now() }, {}, () => !signal?.aborted);
+  if (begun.status !== 'begun') return begun.status === 'cancelled' ? cancelled() : begun.status === 'conflict' ? changed() : storeUnreadable(home, begun);
+  const complete = await completeAgentHostPairing(home, host, attemptId, { token: trimmed, tokenId, name, createdAt: Date.now() });
+  if (complete.status !== 'paired') return unknown(host);
+  return { status: 'paired', host, message: 'Paired as your own device, with the code your screen showed: this Agent has its own key for the host, and the host confirmed it. It runs your turns under your mode and answers questions other callers raised; its own risky acts are put to you in Waiting for you.' };
 }
 
 /** Preview is read-only, except that an attempt the owner already confirmed
@@ -323,7 +420,7 @@ export async function previewAgentHostPairing(
       scopeDisclosure: 'Pairing gives this Agent its own lasting administrator key for this host: it can do anything an operator can there, including starting work and running agents. The key is kept only in this Agent home and works only with this host. The shared operator token keeps working; nothing is revoked.',
       message: 'Nothing has been created yet. Confirming sends one pairing request to the host. You type the code shown, not just y, because this access lasts until you revoke it: a y pressed by habit can never grant it.',
     };
-    return { result, async confirm(answer, actionSignal) {
+    return { result, async confirm(answer, actionSignal, note) {
       if (consumed || actionSignal?.aborted) return cancelled();
       if (answer !== confirmation) { consumed = true; return notTheCode(answer); }
       consumed = true;
@@ -358,7 +455,7 @@ export async function previewAgentHostPairing(
           if (released.status !== 'cleared') return unknown(pairingHost);
           return actionSignal?.aborted ? cancelled() : changed();
         }
-        const outcome = await sendAgentMigration({ home, host: pairingHost, token: selectedToken, name, attemptId, repeat: false, fetchImpl: options.fetchImpl, signal: actionSignal });
+        const outcome = await sendAgentMigration({ home, host: pairingHost, token: selectedToken, name, attemptId, repeat: false, fetchImpl: options.fetchImpl, signal: actionSignal, note });
         if (outcome.status !== 'paired') return outcome.result;
         return await verifyStored(outcome, selectedToken, actionSignal);
       } catch (error) {

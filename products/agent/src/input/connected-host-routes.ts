@@ -1,5 +1,5 @@
 /**
- * Read-only connected-host reads for commands and workspace views, as result
+ * Read-only connected-host reads for commands and places, as result
  * values. The host, the credential, the deadline and what a failure means all
  * come from the Agent's one connected-host client (`agent/connected-host-client.ts`),
  * so `/channels accounts` and `/payments cards` talk to the host as the same

@@ -2,9 +2,7 @@
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 
-GoodVibes Agent is a personal assistant that runs in your terminal. It gives you one workspace for chat, research, mail and calendar, reminders and schedules, notes, memory and document drafts, and it can send messages through your chat channels. It works through the GoodVibes daemon on your machine, which keeps the schedules, channels and knowledge it uses; the installer sets the daemon up for you. Anything it sends, spends or writes comes with a plain-language confirmation and a receipt with private details removed. It can reuse the provider and permission settings you already made for the `goodvibes` terminal app, so setup does not start from zero.
-
-<img src="docs/assets/operator-workspace.png" alt="The fullscreen Agent workspace, titled Agent workspace › Home · 10 actions, with Agent home default, model rt-1 (rtfake) and daemon on this computer beside it. The left column lists areas in groups: get things done (Inbox and calendar, Research, Documents and Files, Conversation, Work and Approvals, Schedules), memory and habits, tools and knowledge, where it runs, then set up. The right pane is an Action and Command table, from Just start typing (selected) and Set up GoodVibes /setup to Work and Approvals /agent work and Set how much the app prints /verbosity set, with Just start typing and Home explained below it. The footer reads a-z ask the assistant (Esc comes back), then move, pane, open, / search and ctrl+r refresh." width="900">
+GoodVibes Agent is a personal assistant that runs in your terminal. It gives you one place for chat, research, mail and calendar, reminders and schedules, notes, memory and document drafts, and it can send messages through your chat channels. It works through the GoodVibes daemon on your machine, which keeps the schedules, channels and knowledge it uses; the installer sets the daemon up for you. Anything it sends, spends or writes comes with a plain-language confirmation and a receipt with private details removed. It can reuse the provider and permission settings you already made for the `goodvibes` terminal app, so setup does not start from zero.
 
 ## Install and start
 
@@ -14,15 +12,15 @@ Install with the [suite installer](../../docs/installation.md), which installs t
 curl -fsSL https://goodvibes.sh/install.sh | sh
 ```
 
-Then run `goodvibes-agent`. When no model is ready, it runs the same three-step first run as `goodvibes`: choose how to get a model (a ChatGPT subscription, an API key for Anthropic, OpenRouter or another provider, or a model server found on this computer), sign in or paste the key, and start the conversation. `/setup` sets up everything else one topic at a time (`/setup import-settings` brings over what you set in `goodvibes`), and `Ctrl+G` `w` opens the workspace at any time; `Ctrl+G` `m` opens the menu of every place. The [getting started guide](docs/getting-started.md) covers the rest. How often you are asked, and the optional decision model, are explained in the [decision-model policies](../../docs/decision-model-policy.md).
+Then run `goodvibes-agent`. When no model is ready, it runs the same three-step first run as `goodvibes`: choose how to get a model (a ChatGPT subscription, an API key for Anthropic, OpenRouter or another provider, or a model server found on this computer), sign in or paste the key, and start the conversation. The Setup tab of System (`Ctrl+G` `m` opens the menu of every place) sets up everything else one topic at a time (its row `Import settings` brings over what you set in `goodvibes`), and the menu reaches every place at any time. The [getting started guide](docs/getting-started.md) covers the rest. How often you are asked, and the optional decision model, are explained in the [decision-model policies](../../docs/decision-model-policy.md).
 
 ---
 
 ## A short tour
 
-**The workspace and the commands are one.** `goodvibes-agent` starts on a conversation. The fullscreen workspace opens with `Ctrl+G` `w` (the leader `Ctrl+G` starts a two-key shortcut and the screen lists what can follow); each of its rows names a slash command action and opens the same guided form that command opens, and its side pane says what the selected row does and shows that command's own report. The workspace reads its reports by itself: what is waiting is read at every start, each area's reports as soon as it is shown, and the work list stays live; `Ctrl+R` reads everything again now. Press `/` inside the workspace to search every action by name, category, command, or detail. `Ctrl+P`, `?` or `/help` opens the one list of every command and key.
+**Everything is a place in one menu.** `goodvibes-agent` starts on a conversation. `Ctrl+G` then `m` opens the menu of every place (the leader `Ctrl+G` starts a two-key shortcut and the screen lists what can follow), the same places as the `goodvibes` terminal app: Work and agents, Memory and knowledge, Mail, calendar and channels, Automation, System and the rest. Each place reads what it shows by itself and keeps it up to date, and a key on the selected row does each thing; typing in the menu finds a place, a tab or an action by name. `Ctrl+P`, `?` or `/help` opens the one list of the few commands that remain and every key.
 
-**One assistant, several jobs.** Beyond normal chat, the workspace gives you read-only web research with explicit hand-off into Agent Knowledge, versioned document drafting with blind model comparison, an Inbox & calendar area for inbox/agenda/task/reminder/note requests, and an Operator Runtime view of the connected host's own methods and service posture.
+**One assistant, several jobs.** Beyond normal chat, the places give you read-only web research with explicit hand-off into Agent Knowledge (Work and agents), versioned document drafting (Memory and knowledge) with blind model comparison (Models and providers), and your inbox, calendar and channels (Mail, calendar and channels).
 
 <img src="docs/assets/chat.png" alt="A chat turn in the Agent, titled GoodVibes Agent v3.5.0 with the question beside it. The user asks to explain the frost-date table and how to extend it; the reply, headed rt-1 · 1 tool, says Reading the table first, shows the folded tool line Reading files src/frost-dates.ts with a checkmark, then a syntax-highlighted TypeScript line, two bullets and the question Want me to add zones 5b to 7a? The status bar reads Permissions: Ask me, shift+tab, 3 notices (the newest saying it is not connected to a GoodVibes host), model rt-1 and ctrl+g workspace." width="900">
 
@@ -40,14 +38,14 @@ Then run `goodvibes-agent`. When no model is ready, it runs the same three-step 
 
 ## What's in the box
 
-Each row links to the page that documents it; the full list, including the pairing and legacy import procedures, is in [docs/README.md](docs/README.md). The workspace's own `/` search and `/help` are always the current authority.
+Each row links to the page that documents it; the full list, including the pairing and legacy import procedures, is in [docs/README.md](docs/README.md). The menu (`Ctrl+G` then `m`; typing there finds a place, a tab or an action) and `/help` are always the current authority.
 
 | Area | What you get | Docs |
 | --- | --- | --- |
 | Getting started | Requirements, install paths, first-run areas, model-visible route table, isolated profiles | [getting-started.md](docs/getting-started.md) |
 | Connected host | The one required daemon dependency, its knowledge routes, override env vars, product-boundary rules | [connected-host.md](docs/connected-host.md) |
 | Providers and routing | Provider/model visibility, local provider definitions, the local model cookbook | [providers-and-routing.md](docs/providers-and-routing.md) |
-| Tools and commands | Workspace actions, slash commands, CLI mirrors, model-tool catalog, settings and keybinding writes | [tools-and-commands.md](docs/tools-and-commands.md) |
+| Tools and commands | The places, slash commands, CLI mirrors, model-tool catalog, settings and keybinding writes | [tools-and-commands.md](docs/tools-and-commands.md) |
 | Knowledge, artifacts, and multimodal | Isolated Agent Knowledge, document/image/media artifacts, ingest and review routes | [knowledge-artifacts-and-multimodal.md](docs/knowledge-artifacts-and-multimodal.md) |
 | Channels, remote access, and API | Slack, Discord, Telegram, Matrix, webhook, and other configured channels; setup/triage/delivery; companion pairing; the operator method catalog | [channels-remote-and-api.md](docs/channels-remote-and-api.md) |
 | Voice and live TTS | Spoken playback, TTS/STT provider setup | [voice-and-live-tts.md](docs/voice-and-live-tts.md) |
@@ -59,7 +57,7 @@ Full index: [docs/README.md](docs/README.md).
 
 ## Configuration
 
-Settings live in a layered `settings.json`, editable through the `/settings` workspace or by hand:
+Settings live in a layered `settings.json`, editable through the settings screen (`/settings`) or by hand:
 
 - global: `~/.goodvibes/agent/settings.json`
 - project: `.goodvibes/agent/settings.json`
@@ -82,7 +80,7 @@ Other useful overrides:
 - `GOODVIBES_AGENT_HOME=/path/to/agent-home`: run with an isolated Agent home instead of the default one.
 - `GOODVIBES_AGENT_RUNTIME_URL=https://host:port` (or the `--runtime-url` flag; `http://` is accepted too): point at a GoodVibes host on a different address for one run, as `daemon.connectedHost.url` does persistently; `GOODVIBES_AGENT_BASE_URL` is accepted as a legacy alias.
 - `~/.goodvibes/agent/providers/*.json`: local, hot-reloaded custom provider definitions.
-- `/setup import-settings` (or the model tool `import_goodvibes_settings`): preview, then apply, provider/UI/permission/subscription/surface/tool/daemon-endpoint settings already configured for goodvibes-tui or another published GoodVibes platform store, without mutating the source.
+- `Import settings` on the Setup tab of System (or a model's `capability_run id:"settings.copy-from-terminal-app"`): each setting you set in the terminal app that the Agent holds differently is set the same in the Agent, and the answer names every one; a setting that loosens a protection is copied only when you choose to copy those too. The terminal app's settings are not changed; sign-ins are already shared by both programs.
 
 The full settings catalog, the checkpoint-guard keys, and the shared-settings-import contract are in [docs/tools-and-commands.md](docs/tools-and-commands.md) and [docs/getting-started.md](docs/getting-started.md).
 
@@ -135,29 +133,28 @@ reached the host; dropping it lets the next input be sent.
 The intake journal holds only inputs in flight (see below) and never refuses a
 new input for being full.
 
-To give Agent its own key for a daemon on another computer (with
-`daemon.connectedHost.url` set and the host's shared operator token given to
-the Agent), type `/setup pair` in the Agent's own terminal. It is one step: the
-Agent checks the host, says what pairing allows (lasting administrator access
-to that host, kept only in this Agent home), and asks you to type the code it
-shows, such as `PAIR 3f9a1c0b2d4e`, then Enter. Enter alone or Esc cancels; a
-different code cancels too and says so (`That is not the code shown…`), and
-each code works once, so `/setup pair` again gives a new one.
-The code is typed rather than a single `y` because the access lasts until you
-revoke it: a `y` pressed by habit can never grant it.
+To make Agent your own device on a daemon on another computer (with
+`daemon.connectedHost.url` set), start it yourself where you are signed in as
+yourself (that daemon's web UI with your password, or your terminal app on that
+computer: Devices and network, Pair something, A phone or another device, "Show
+the sign-in code once"). Then press Pair something, "This program with its
+daemon", in Devices and network (the menu, `Ctrl+G` then `m`) in the Agent's
+own terminal and type that code under Sign-in code (hidden as you type). The
+host confirms it as a device and the Agent keeps it in this Agent home. Each
+code works once and for 15 minutes. With no code the control says how the Agent
+reaches its daemon: for the daemon on the Agent's own computer there is nothing
+to pair, the Agent is your own program there.
 
-Use `--name Agent` to choose the device name. Only you can confirm: a model or
-another command gets the summary and nothing else. Opening Agent or finishing
-setup does not create a key, and pairing does not revoke the shared token. For
-the daemon on the Agent's own computer no pairing is needed: the operator token
-file the Agent already reads is your key there. From a shell,
-`goodvibes-agent setup pair` shows the summary and
-`goodvibes-agent setup pair --apply` asks for the code.
+Its form's Name field chooses the device name. Only you can pair: a model or
+another command cannot. From a shell, `goodvibes-agent setup pair --with-code`
+reads the code from the terminal. `goodvibes-agent setup pair --apply` asks
+that host for an administrator key from its shared operator token, put to you
+there; on your yes it is an ordinary key, never your device.
 
-If pairing is interrupted, run `/setup pair` again to see where it got to. When
+If a `setup pair --apply` request is interrupted, run it again to see where it got to. When
 the host's answer was lost, the same request is repeated and the host answers it
 with the key it already made, never a second one. A key that was kept but not
-yet confirmed by the host is kept and checked with `/setup status`. A key set in
+yet confirmed by the host is kept and checked with `goodvibes-agent setup status`. A key set in
 the environment is used before the saved one; the result says so
 (`paired-shadowed` in JSON) and leaves the environment as it is.
 

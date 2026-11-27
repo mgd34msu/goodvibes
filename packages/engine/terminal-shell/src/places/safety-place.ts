@@ -371,6 +371,9 @@ export const SAFETY_PLACE = definePlace<SafetyItem>({
     { key: 'n', id: 'add-user', list: 'users', whole: true, capability: 'local-auth.add', label: 'let someone sign in' },
     { key: 'p', id: 'change-password', list: 'users', capability: 'local-auth.password', label: 'change password', fill: { user: 'fill' } },
     { key: 'x', id: 'remove-user', list: 'users', capability: 'local-auth.remove', label: 'stop them signing in', fill: { user: 'fill' } },
+    // The projects of yours a member may work in (builtin/devices-projects.ts): with none they act on shared things only.
+    { key: 'w', id: 'give-member-project', list: 'users', capability: 'devices.give-project', label: 'let them work in a project', fill: { who: 'fill' }, form: true },
+    { key: 'W', id: 'take-member-project', list: 'users', capability: 'devices.take-project', label: 'stop them working in a project', fill: { who: 'fill' }, form: true },
     { key: 'x', id: 'sign-out', list: 'signed-in', capability: 'local-auth.sign-out', label: 'sign out', fill: { session: 'fill' } },
     // Who is who.
     { key: 'n', id: 'add-principal', list: 'people', whole: true, capability: 'principals.create', label: 'add' },

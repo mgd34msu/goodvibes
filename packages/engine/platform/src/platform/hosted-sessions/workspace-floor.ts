@@ -47,12 +47,9 @@
  * decision file under the workspace being asked about. A floor built for
  * workspace W must therefore be built with W's gate, which only the product can
  * supply. The engine owns the CACHING and the lifetime; the product owns what a
- * floor is made of.
- *
- * The exec POSTURE ({@link HostedWorkspaceFloor.execPosture}) is here for the
- * same reason and no other: it is a statement about how much authority a run on
- * this floor carries, which is the product's to make. The engine's own default
- *, stated when a floor says nothing, is the contained one.
+ * floor is made of. A run's commands follow the one rule every turn has
+ * (tools/exec/containment.ts `TURN_EXEC_CONTAINMENT`, held to the boundary only
+ * for someone else's input), so a floor states nothing about them.
  */
 
 import type { DevicePostureRuntime } from '../devices/device-posture-runtime.js';
@@ -60,7 +57,6 @@ import { logger } from '../utils/logger.js';
 import { summarizeError } from '../utils/error-display.js';
 import type { ClientRuntimeServices } from '../runtime/client-services.js';
 import type { ContractRunner } from '../contract/runner.js';
-import type { HostedExecPostureDecider } from './exec-posture.js';
 import { hostedLifecycleCallbacks } from './lifecycle-callbacks.js';
 
 /**
@@ -82,25 +78,30 @@ export interface HostedWorkspaceFloor {
    */
   readonly contractRunner: Pick<ContractRunner, 'start' | 'list' | 'get' | 'cancel' | 'reply' | 'hooks' | 'on'>;
   /**
-   * What a session on this floor may do with exec, decided per session.
-   *
-   * Omitted ⇒ `conversational`: the exec boundary is REQUIRED, so a command
-   * that cannot be contained refuses rather than running on the host (which
-   * also keeps it away from the owner's terminal). That is the posture every session created over
-   * `sessions.hosted.*` runs under.
-   *
-   * A product returns `workstream` only for a spawn it composed itself, for a
-   * work chain the owner authorized. It is a function on the FLOOR and not a
-   * field on `CreateHostedSessionInput` deliberately: a caller over the wire
-   * must have no spelling that reaches the host.
-   */
-  readonly execPosture?: HostedExecPostureDecider | undefined;
-  /**
    * GoodVibes' own capabilities for a terminal-app session on this floor (`capability_find`, `capability_run`,
    * run in this daemon as the session owner's model). A session with a surface turn of its own (the Agent's)
    * registers its own pair instead.
    */
   readonly capabilityTools?: import('../tools/capability/daemon-tools.js').DaemonCapabilityToolHost | undefined;
+  /**
+   * The project's own facilities, from the host's one turn assembly (agents/orchestrator.ts `acquireTurnEnvironment`):
+   * every session on this floor uses the project's tool servers, checklist, changed-files record and long-output
+   * folder, the same ones the host's other turns in this project use. Absent: the floor's own.
+   */
+  readonly project?: import('../agents/orchestrator.js').AgentProjectFacilities | undefined;
+  /**
+   * The tools of the person's own things the host gives every turn, whatever door it came through (the same the
+   * host's other turns have): remote runners (`remote`), the owner profile and occasions (`profile`), and the host's
+   * own decoration (mail and calendar, `google`; the paired phone), applied after a session's own tools so a surface
+   * turn that brings its own keeps it.
+   */
+  readonly hostTools?: {
+    readonly remoteRunnerRegistry?: import('../runtime/remote/index.js').RemoteRunnerRegistry | undefined;
+    readonly personalCapture?: import('../personal-capture/index.js').PersonalCaptureHolder | undefined;
+    readonly decorateRegistry?: ((registry: import('../tools/registry.js').ToolRegistry) => void) | undefined;
+    /** The owner's memory, given to each turn as the host's other turns are given it (this project's and his own). */
+    readonly memoryRegistry?: import('../state/index.js').MemoryRegistry | undefined;
+  } | undefined;
   /** Release everything this floor started. Called when its last session goes. */
   dispose(): void | Promise<void>;
 }

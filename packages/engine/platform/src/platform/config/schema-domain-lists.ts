@@ -59,7 +59,7 @@ function worktreeSetupList(value: unknown): boolean {
 
 export const listConfigSettings: readonly ListConfigSetting[] = [
   {
-    key: 'provider.fallbackModels',
+    key: 'provider.fallbackModels', valueKind: 'request-target',
     label: 'Backup models, in order',
     appliesWhen: 'next-answer',
     type: 'object',
@@ -69,7 +69,7 @@ export const listConfigSettings: readonly ListConfigSetting[] = [
     validationHint: 'list of provider-qualified model ids, for example ["anthropic:claude-sonnet-5"]',
   },
   {
-    key: 'cluster.peers',
+    key: 'cluster.peers', valueKind: 'endpoint',
     label: 'Machines to contact directly',
     type: 'object',
     description: 'Static list of cluster peers (host or host:port) contacted directly as well as over multicast. Set it on a network that drops multicast, so the nodes still find each other',
@@ -78,7 +78,7 @@ export const listConfigSettings: readonly ListConfigSetting[] = [
     validationHint: 'list of host or host:port strings, for example ["10.0.0.2", "10.0.0.3:4000"]',
   },
   {
-    key: 'conversationGate.gatedSurfaces',
+    key: 'conversationGate.gatedSurfaces', valueKind: 'trusted-list',
     label: 'Chat apps whose messages are screened',
     type: 'object',
     description: 'Channel surfaces whose inbound messages pass the conversation gate before a session sees them',
@@ -87,7 +87,7 @@ export const listConfigSettings: readonly ListConfigSetting[] = [
     validationHint: 'list of surface names, for example ["slack", "telegram"]',
   },
   {
-    key: 'contract.gates',
+    key: 'contract.gates', valueKind: 'command',
     label: 'Quality checks before work counts as done',
     type: 'object',
     description: 'Quality gates a contract runs before it reports work done: each is { name, command, enabled } with optional required and verification. Any gate passes or fails on its command\'s exit code. A list with a gate that cannot run is refused when saved',
@@ -97,7 +97,7 @@ export const listConfigSettings: readonly ListConfigSetting[] = [
   {
     // Declared a credential (secret-bearing-config-keys.ts): an incoming webhook
     // URL carries its key, so the list holds references and the URLs are in the secret store.
-    key: 'notifications.webhookUrls',
+    key: 'notifications.webhookUrls', valueKind: 'endpoint',
     label: 'Webhooks that receive notifications',
     type: 'object',
     description: 'Webhook URLs that receive the notifications this machine sends (turn ends, approvals waiting, budget alerts). Each URL carries its own key, so it is kept in the secret store and this list holds a goodvibes://secrets/ reference to each; add one with "add an address" on the Notifications tab of Mail, calendar and channels. One list, the daemon\'s, for every program on this machine. Screens show only each URL\'s host. Applies at the next start',
@@ -124,7 +124,7 @@ export const listConfigSettings: readonly ListConfigSetting[] = [
     validationHint: 'list of absolute paths',
   },
   {
-    key: 'surfaces.email.imap.authservIds',
+    key: 'surfaces.email.imap.authservIds', valueKind: 'trusted-list',
     label: "Your mail server's names in sender checks",
     type: 'object',
     description: 'Authserv-ids the mailbox\'s own receiving server writes in Authentication-Results, for a provider whose id is not built in (Gmail, Fastmail, Zoho, Yahoo and AOL are). Only a top-most header naming one of these is read as a sender verdict; with none, senders on such a mailbox read as unverified. An entry starting with "." matches the hosts under that domain',
@@ -133,7 +133,7 @@ export const listConfigSettings: readonly ListConfigSetting[] = [
     validationHint: 'list of host names, for example ["mx.example.com"] or [".mail.example.net"]',
   },
   {
-    key: 'worktree.setup.commands',
+    key: 'worktree.setup.commands', valueKind: 'command',
     label: 'Commands run in a new worktree',
     type: 'object',
     description: 'Commands run in a new worktree before an isolated agent starts in it. auto (the default, an empty list) runs the install command each lockfile in the repository names (bun install, npm ci, pnpm, yarn, uv sync, cargo fetch, go mod download; pip install -r requirements.txt only inside an active virtual environment). none runs nothing. A list runs exactly those commands, in order; one that exits non-zero marks the worktree setup failed',

@@ -34,8 +34,13 @@ import { randomUUID } from 'node:crypto';
 import { EngineErrorCodes, RefusalError, refusal } from '@goodvibes/engine/errors';
 import type { ConversationManager } from '../core/conversation.js';
 import { startTurnForOwnerInput } from '../security/turn-boundary.js';
-import { withOtherPartyInput, withOwnerInput } from '../security/turn-input-party.js';
+import { turnInputParty, withOtherPartyInput, withOwnerInput } from '../security/turn-input-party.js';
+import { callNeedsProject } from '../workspace/call-needs-project.js';
+import { inChannelWithoutProject } from '../channels/channel-project.js';
+import { HOME_ASSISTANT_SURFACE } from '../channels/builtin/homeassistant.js';
+import { isHomeAssistantChatSession } from '../daemon/homeassistant-chat.js';
 import { withUntrustedContentScope } from '../security/untrusted-content.js';
+import type { Actor } from '@goodvibes/engine/daemon-api/http-policy';
 import type { CompanionPostMessageOptions } from './companion-chat-turn-control.js';
 import type {
   CancelCompanionChatTurnInput,
@@ -107,8 +112,8 @@ import { logger } from '../utils/logger.js';
 import { noteModelUsage, spendingName } from '../runtime/cost/model-usage.js';
 import type { ConfigManager } from '../config/manager.js';
 import { resolve as resolvePath } from 'node:path';
-import { SCREENLESS_TURN_LINE, environmentBlock, sessionEnvironment } from '../core/environment-block.js';
-import { emitTurnCompleted } from '../runtime/emitters/index.js';
+import { SCREENLESS_TURN_LINE, environmentBlock, placelessEnvironment, sessionEnvironment } from '../core/environment-block.js';
+import { emitTurnCancel, emitTurnCompleted, emitTurnError } from '../runtime/emitters/index.js';
 
 // ---------------------------------------------------------------------------
 // Turn control (per-turn abort scope, cancel finalization, pending queue),
@@ -146,6 +151,14 @@ export interface CompanionTurnEnvironment {
   readonly toolCallHooks?: HookDispatcherLike | undefined;
   /** Resolves once the project's hooks are read and its checkpoint baseline is taken (awaited before the first tool call). */
   ready?(): Promise<void>;
+  /** The turn's knowledge (the owner's memory for this project and his own, the project's code context), as a terminal turn's. */
+  knowledge?(input: {
+    readonly task: string;
+    readonly conversationTail: ReturnType<ConversationManager['getMessagesForLLM']>;
+    readonly alreadyInjectedIds: readonly string[];
+    readonly turn: number;
+    readonly contextWindow: number;
+  }): Promise<{ readonly block: string; readonly injectedIds: readonly string[] } | null>;
   afterTurn(turn: { readonly sessionId?: string | undefined; readonly turnId?: string | undefined }): void;
   release(): Promise<void>;
 }
@@ -227,6 +240,8 @@ interface CompanionPostOptions {
   /** Steer: jump the pending queue (the caller cancels the active turn). */
   readonly steer?: boolean | undefined;
   readonly ownerDirect?: boolean | undefined;
+  /** See CompanionPostMessageOptions.ownerParty. */
+  readonly ownerParty?: boolean | undefined;
   /** Idempotency key chosen by the sender: a second post with the same key returns the first message's id and starts nothing. */
   readonly clientMessageId?: string | undefined;
   /** Called synchronously as the message joins the queue, with the turn running at that instant. */
@@ -243,6 +258,9 @@ interface InternalSession {
   abortController: AbortController;
   /** The in-flight turn, when one is running (see ActiveCompanionTurn). */
   activeTurn?: ActiveCompanionTurn | null;
+  /** Memory records already given to this chat's turns (not given again), and how many turns asked (environment.knowledge). */
+  knowledgeGiven?: string[];
+  knowledgeTurns?: number;
   /** User messages whose turns have not started yet (queue-when-busy + steer-to-front). */
   pendingTurns?: QueuedCompanionTurn[];
   preparingTurns?: number;
@@ -333,6 +351,14 @@ export interface CompanionChatManagerConfig {
    */
   readonly turnEnvironment?: ((project: string | undefined) => CompanionTurnEnvironment) | undefined;
   /**
+   * The project made for a chat that has none (workspace/automatic-projects.ts), asked the first time the owner's own
+   * message there needs somewhere to work: its folder and the sentence that says where its files are. Absent: such a
+   * call is refused (nothing is ever done in the daemon's own folder).
+   */
+  readonly automaticProject?: ((ask: { readonly key: string; readonly kind: string; readonly message: string; readonly signal?: AbortSignal | undefined }) => Promise<{ readonly folder: string; readonly said: string }>) | undefined;
+  /** The sign-in user the user store records as the owner: an older chat he made (no maker kept) is his model's. */
+  readonly ownerUsername?: (() => string | null) | undefined;
+  /**
    * Permission boundary used when executing model-originated tool calls.
    * Tool calls are denied when a registry is present without this manager.
    */
@@ -390,6 +416,8 @@ export class CompanionChatManager {
   private readonly eventPublisher: CompanionChatEventPublisher;
   private readonly toolRegistry: ToolRegistry | null;
   private readonly turnEnvironment: CompanionChatManagerConfig['turnEnvironment'];
+  private readonly automaticProject: CompanionChatManagerConfig['automaticProject'];
+  private readonly ownerUsername: CompanionChatManagerConfig['ownerUsername'];
   private readonly permissionManager: PermissionManager | null;
   private readonly hookDispatcher: HookDispatcherLike | null;
   private readonly runtimeBus: RuntimeEventBus | null;
@@ -421,6 +449,8 @@ export class CompanionChatManager {
     this.eventPublisher = config.eventPublisher;
     this.toolRegistry = config.toolRegistry ?? null;
     this.turnEnvironment = config.turnEnvironment;
+    this.automaticProject = config.automaticProject;
+    this.ownerUsername = config.ownerUsername;
     this.permissionManager = config.permissionManager ?? null;
     this.hookDispatcher = config.hookDispatcher ?? null;
     this.runtimeBus = config.runtimeBus ?? null;
@@ -524,6 +554,8 @@ export class CompanionChatManager {
       ...(input.reasoningEffort === undefined ? {} : { reasoningEffort: input.reasoningEffort }),
       systemPrompt: input.systemPrompt ?? null,
       ...(input.project ? { project: resolvePath(input.project) } : {}),
+      ...(input.createdBy ? { createdBy: input.createdBy } : {}),
+      ...(input.createdBy && input.maker ? { maker: input.maker } : {}),
       status: 'active',
       createdAt: now,
       updatedAt: now,
@@ -560,13 +592,20 @@ export class CompanionChatManager {
    * so every chat is reachable however many there are. A chat updated between two
    * reads moves to the top and is read there, not twice in the older pages.
    */
-  listSessions(input: { readonly includeClosed?: boolean | undefined; readonly limit?: number | undefined; readonly cursor?: string | undefined } = {}): {
+  listSessions(input: {
+    readonly includeClosed?: boolean | undefined;
+    readonly limit?: number | undefined;
+    readonly cursor?: string | undefined;
+    /** Only the chats this keeps, before the page is cut and the totals counted (a caller's reach: caller-reach.ts). */
+    readonly keep?: ((chat: CompanionChatSession) => boolean) | undefined;
+  } = {}): {
     readonly sessions: readonly CompanionChatSession[];
     readonly totals: { readonly sessions: number; readonly active: number; readonly closed: number };
     readonly hasMore: boolean;
     readonly nextCursor?: string | undefined;
   } {
-    const all = [...this.sessions.values()].map((session) => session.meta);
+    const keep = input.keep;
+    const all = [...this.sessions.values()].map((session) => session.meta).filter((chat) => !keep || keep(chat));
     const active = all.filter((session) => session.status === 'active').length;
     const closed = all.length - active;
     const limit = typeof input.limit === 'number' && Number.isFinite(input.limit)
@@ -733,6 +772,43 @@ export class CompanionChatManager {
     // title and message count from this manager (SharedSessionBroker.setExternalFacts).
     this._brokerSync.track(updated.id, () => this._brokerSync.registerSession(updated));
     return updated;
+  }
+
+  /**
+   * The chat moves to another project (a channel's "Project for this channel" changed), keeping its history: its next
+   * turn works in `project` (its tools, tool servers, hooks and checkpoints there); undefined, no project. A turn already
+   * running finishes where it started. Saved before it takes effect.
+   */
+  moveSessionToProject(sessionId: string, project: string | undefined): CompanionChatSession {
+    const session = this._requireOpenSession(sessionId);
+    const resolved = project ? resolvePath(project) : undefined;
+    if ((session.meta.project ?? undefined) === resolved) return session.meta;
+    const { project: _left, ...rest } = session.meta;
+    const updated: CompanionChatSession = { ...rest, ...(resolved ? { project: resolved } : {}), updatedAt: Date.now() };
+    this.saveForRequest(session, [], updated);
+    session.meta = updated;
+    this._brokerSync.track(updated.id, () => this._brokerSync.registerSession(updated));
+    return updated;
+  }
+
+  /**
+   * The project a chat with none works in from now on, made for it on the owner's own message the first time it needs
+   * somewhere to work (workspace/automatic-projects.ts), and kept as the chat's project. Anyone else's message makes none
+   * and changes nothing; a project that cannot be made is said, and nothing runs in the daemon's own folder.
+   */
+  private async placeChat(session: InternalSession, message: string, signal: AbortSignal): Promise<{ readonly folder: string; readonly said: string } | { readonly refused: string }> {
+    const kind = isHomeAssistantChatSession(session.meta) ? HOME_ASSISTANT_SURFACE : 'chat';
+    if (turnInputParty().party !== 'owner') {
+      return { refused: `Not done: this ${kind === 'chat' ? 'chat' : `${kind} conversation`} has no project, and a message the owner did not send makes none, so nothing is read, written, run or kept for later from it (never in the daemon's own folder). The owner's own message here gets the chat its project.` };
+    }
+    if (!this.automaticProject) return { refused: 'Not done: this chat has no project and none can be made for it here, so nothing is read, written, run or kept for later from it (never in the daemon\'s own folder).' };
+    try {
+      const made = await this.automaticProject({ key: session.meta.id, kind, message, signal });
+      this.moveSessionToProject(session.meta.id, made.folder);
+      return made;
+    } catch (error) {
+      return { refused: `Not done: ${summarizeError(error)} Nothing was written or run.` };
+    }
   }
 
   /** The HTTP form of {@link updateSession}: the change is saved before it is acknowledged. */
@@ -924,6 +1000,8 @@ export class CompanionChatManager {
       readonly onTurnEvent?: ((event: CompanionChatTurnEvent) => void) | undefined;
       /** Sender-chosen id for this send, kept with the message so the sender finds it again, also after a restart. */
       readonly clientMessageId?: string | undefined;
+      /** See CompanionPostOptions.ownerParty. */
+      readonly ownerParty?: boolean | undefined;
     } = {},
   ): Promise<CompanionChatReplyResult> {
     return awaitCompanionReply(
@@ -933,6 +1011,7 @@ export class CompanionChatManager {
         attachments: options.attachments,
         ...(options.onTurnEvent ? { onTurnEvent: options.onTurnEvent } : {}),
         ...(options.clientMessageId !== undefined ? { clientMessageId: options.clientMessageId } : {}),
+        ...(options.ownerParty === true ? { ownerParty: true } : {}),
       }),
       (messageId) => this.pendingReplies.delete(messageId),
     );
@@ -1100,6 +1179,7 @@ export class CompanionChatManager {
       providerContent,
       ...(options.onTurnEvent ? { onTurnEvent: options.onTurnEvent } : {}),
       ...(options.ownerDirect === undefined ? {} : { ownerDirect: options.ownerDirect }),
+      ...(options.ownerParty === true ? { ownerParty: true } : {}),
     };
     const queue = (session.pendingTurns ??= []);
     if (options.steer === true) queue.unshift(entry);
@@ -1382,7 +1462,7 @@ export class CompanionChatManager {
       const conversation = await this.ensureConversation(session, next.userMessageId);
       conversation.addUserMessage(next.providerContent);
       return conversation;
-    }));
+    }), next.ownerParty === true);
   }
 
   /**
@@ -1391,7 +1471,25 @@ export class CompanionChatManager {
    * window, and what this chat's tools read from counting against another
    * session's sends. Cost: one AsyncLocalStorage.run per turn.
    */
-  private launchTurn(session: InternalSession, ownerDirect: boolean, run: () => Promise<void>): void {
+  /**
+   * Whom the chat's model acts for: its maker, as kept when it was made (a member, a device, an admin who is not the
+   * owner), whoever sends a message there. Undefined for the owner's own chats (made with his credential or in process):
+   * his model, as before. An older chat kept no maker: made by the owner's sign-in or his machine's token it is his;
+   * made by anyone else, it is that principal's as a member holding no scope, the least a credential is.
+   */
+  private makerActorOf(meta: CompanionChatSession): Actor | undefined {
+    const by = meta.createdBy;
+    if (by === undefined || by === 'local' || by === 'shared-token') return undefined;
+    const maker = meta.maker;
+    if (maker === undefined) {
+      if (by === this.ownerUsername?.()) return undefined;
+      return Object.freeze({ class: 'member' as const, id: by, scopes: new Set<string>(), via: 'http' as const });
+    }
+    if (maker.class === 'owner' || maker.class === 'system') return undefined;
+    return Object.freeze({ class: maker.class, id: by, scopes: maker.scopes === 'all' ? 'all' as const : new Set(maker.scopes), via: 'http' as const });
+  }
+
+  private launchTurn(session: InternalSession, ownerDirect: boolean, run: () => Promise<void>, ownerParty = false): void {
     const sessionId = session.meta.id;
     const work = withUntrustedContentScope(companionChatContentScope(sessionId), () => {
       // The companion/webui turn boundary: this manager runs its own turn loop,
@@ -1400,7 +1498,17 @@ export class CompanionChatManager {
       // A message the owner did not send (Home Assistant's room, a signed-in person or device that is not the owner)
       // drives a turn on someone else's input: no command outside a real sandbox, no file written
       // (security/turn-input-party.ts).
-      return ownerDirect ? withOwnerInput(run) : withOtherPartyInput('a message to this chat that the owner did not send', run);
+      // His own message on a channel where he chose to be treated as himself, in a conversation proven his alone
+      // (`ownerParty`), is his input too, though it opens no new untrusted-content turn.
+      // Someone else's turn here runs for whoever made this chat: it reaches that caller's chats and sessions, never the
+      // owner's or another caller's in the same project (control-plane/caller-reach.ts).
+      const party = (): Promise<void> => ownerDirect || ownerParty ? withOwnerInput(run)
+        : withOtherPartyInput('a message to this chat that the owner did not send', run, session.meta.createdBy);
+      // A chat with no project (Home Assistant's, when no "Project for this channel" is chosen; a web chat started with
+      // none) is given its own project by the owner's own message the first time it needs one (placeChat); anyone
+      // else's message there changes nothing: a write or a command is refused naming the control (channels/channel-project.ts).
+      const someoneElse = !(ownerDirect || ownerParty);
+      return !session.meta.project && someoneElse && isHomeAssistantChatSession(session.meta) ? inChannelWithoutProject(HOME_ASSISTANT_SURFACE, party) : party();
     });
     this.activeWork.add(work);
     void work.then(() => { this.activeWork.delete(work); }, (error: unknown) => {
@@ -1571,6 +1679,27 @@ export class CompanionChatManager {
     let actualUsage = { inputTokens: 0, outputTokens: 0, cacheReadTokens: 0, cacheWriteTokens: 0 };
     // The turn's environment in the chat's project, from the host's one turn assembly; released when the turn ends.
     let environment: CompanionTurnEnvironment | undefined;
+    // The project this turn works in, taken as it starts: a move of the chat to another project while it runs takes
+    // effect for the next turn; this one finishes where it started, its decisions and its files that project's.
+    let turnProject = session.meta.project;
+    /**
+     * A turn that changed something and then failed, was cancelled or was cut off by the daemon's stop ends as every
+     * turn does: its session bound to its project's checkpoint store, then TURN_ERROR or TURN_CANCEL, which that store
+     * snapshots as a terminal turn's are. Its changes are its own checkpoint, never the next turn's.
+     */
+    const checkpointUnfinishedTurn = (ended: { readonly error: unknown } | 'cancelled'): void => {
+      if (!environment || !turnProject) return;
+      const changed = turnChanges.changes;
+      if (changed.files.length + changed.commands + changed.messages + changed.unknown === 0) return;
+      try {
+        environment.afterTurn({ sessionId, turnId });
+        const context = { sessionId, traceId: `${sessionId}:${turnId}`, source: 'companion-chat' };
+        if (this.runtimeBus && ended === 'cancelled') emitTurnCancel(this.runtimeBus, context, { turnId, stopReason: 'cancelled' });
+        else if (this.runtimeBus && ended !== 'cancelled') emitTurnError(this.runtimeBus, context, { turnId, error: summarizeError(ended.error), stopReason: 'unexpected_error' });
+      } catch (error) {
+        logger.warn('[companion-chat] an unfinished turn\'s checkpoint was not asked for', { sessionId, error: summarizeError(error) });
+      }
+    };
     try {
       // Inside the try so a throwing publisher still releases the slot and drains the queue.
       session.activeTurn = scope.activeTurn;
@@ -1578,15 +1707,31 @@ export class CompanionChatManager {
       else this.markTurn(session, userMessageId, 'started');
       publish({ type: 'turn.started', sessionId, messageId: userMessageId, turnId, envelope: startEnvelope });
       const conversation = await prepareConversation();
-      environment = this.turnEnvironment?.(session.meta.project);
-      const toolRegistry = environment?.registry ?? this.toolRegistry;
-      const turnHooks = environment ? environment.toolCallHooks ?? null : this.hookDispatcher;
-      const turnEnvironment = environment;
-      const environmentReady = (): Promise<void> => turnEnvironment?.ready?.() ?? Promise.resolve();
+      environment = this.turnEnvironment?.(turnProject);
+      // A chat with no project is given one on the first call that needs somewhere to work (placeChat below): from
+      // then on the turn runs in that project's environment.
+      let toolRegistry = environment?.registry ?? this.toolRegistry;
+      let turnHooks = environment ? environment.toolCallHooks ?? null : this.hookDispatcher;
+      const environmentReady = (): Promise<void> => environment?.ready?.() ?? Promise.resolve();
       // The facts every turn is told, in the host channel a terminal turn uses: the folder it works in, the system,
-      // today's date and the repository there (read once per chat, kept with its conversation).
-      if (environment) {
+      // today's date and the repository there (read once per chat, kept with its conversation). A chat with no project
+      // works in no folder (never the daemon's own): it is told so, and nothing is read there.
+      if (environment && !turnProject) {
+        conversation.hostInstructions.set('environment', `${environmentBlock(placelessEnvironment(), new Date())}\n${SCREENLESS_TURN_LINE}`);
+        conversation.hostInstructions.clear('knowledge');
+      } else if (environment) {
         conversation.hostInstructions.set('environment', `${environmentBlock(await sessionEnvironment(conversation, environment.workingDirectory), new Date())}\n${SCREENLESS_TURN_LINE}`);
+        // The turn's knowledge, as a terminal turn in the project is given it (agents/orchestrator.ts turnKnowledge):
+        // the owner's memory for this project and his own, the project's code context when it is on. A record given
+        // on an earlier turn of this chat is not given again.
+        const knowledge = await environment.knowledge?.({
+          task: userMsg?.content ?? '', conversationTail: conversation.getMessagesForLLM(),
+          alreadyInjectedIds: session.knowledgeGiven ?? [], turn: (session.knowledgeTurns = (session.knowledgeTurns ?? 0) + 1), contextWindow: 0,
+        });
+        if (knowledge) {
+          conversation.hostInstructions.set('knowledge', knowledge.block);
+          session.knowledgeGiven = [...(session.knowledgeGiven ?? []), ...knowledge.injectedIds];
+        } else conversation.hostInstructions.clear('knowledge');
       }
       const history = new TurnHistoryWriter(conversation, (name, args) => toolCallActivity(toolRegistry?.definitionOf(name)?.activity, args));
       writer = history;
@@ -1749,19 +1894,50 @@ export class CompanionChatManager {
         },
         ...(toolRegistry ? {
           // The project's hooks are read and its checkpoint baseline taken before the first call changes anything.
-          executeTools: async (calls: ToolCall[], { signal, onSettled }: { signal: AbortSignal; onSettled(result: ToolResult): void }) => environmentReady().then(() => executeCompanionToolCalls(
-            { toolRegistry, permissionManager: this.permissionManager, hookDispatcher: turnHooks, runtimeBus: this.runtimeBus, configManager: this.configManager,
+          executeTools: async (calls: ToolCall[], { signal, onSettled }: { signal: AbortSignal; onSettled(result: ToolResult): void }) => {
+            // A chat with no project never works in the daemon's own folder: the owner's own message gets the chat
+            // its own project here, on the first call that needs one; anyone else's changes nothing.
+            if (!turnProject && calls.some((call) => callNeedsProject(call.name, call.arguments))) {
+              const placed = await this.placeChat(session, userMsg?.content ?? '', signal);
+              if ('refused' in placed) {
+                return calls.map((call) => {
+                  const refused: ToolResult = { callId: call.id, success: false, error: placed.refused };
+                  publish({ type: 'turn.tool_result', sessionId, turnId, toolCallId: call.id, toolName: call.name, result: placed.refused, isError: true });
+                  onSettled(refused);
+                  return refused;
+                });
+              }
+              const previous = environment;
+              turnProject = placed.folder;
+              environment = this.turnEnvironment?.(placed.folder);
+              void previous?.release().catch(() => { /* the own folder's environment stays made */ });
+              toolRegistry = environment?.registry ?? this.toolRegistry;
+              turnHooks = environment ? environment.toolCallHooks ?? null : this.hookDispatcher;
+              if (environment) conversation.hostInstructions.set('environment', `${environmentBlock(await sessionEnvironment(conversation, environment.workingDirectory), new Date())}\n${SCREENLESS_TURN_LINE}`);
+              // Its first answer says where its files are (and the chat's row, from its project).
+              const said = `${placed.said}\n\n`;
+              uncommittedContent += said;
+              assistantContent += said;
+              publish({ type: 'turn.delta', sessionId, turnId, delta: said });
+            }
+            const registryNow = toolRegistry;
+            if (!registryNow) return [];
+            return environmentReady().then(() => executeCompanionToolCalls(
+            { toolRegistry: registryNow, permissionManager: this.permissionManager, hookDispatcher: turnHooks, runtimeBus: this.runtimeBus, configManager: this.configManager,
               autonomousSource: () => ({ goal: userMsg?.content ?? '', criteria: [] }),
               // Every decision on this chat's calls is made for its project (rules, folder trust, "in this project").
-              ...(session.meta.project ? { workingDirectory: session.meta.project } : {}) },
+              ...(turnProject ? { workingDirectory: turnProject } : {}),
+              // Its model acts for whoever made the chat (a member's, a device's chat: theirs), whoever sent the message.
+              maker: this.makerActorOf(session.meta) },
             calls, publish, sessionId, turnId, {
               signal,
               onSettled: (result) => {
-                turnChanges.note(calls, [result], (name) => toolRegistry.definitionOf(name));
+                turnChanges.note(calls, [result], (name) => registryNow.definitionOf(name));
                 onSettled(result);
               },
             },
-          )),
+          ));
+          },
         } : {}),
       }, {
         speaker: 'owner',
@@ -1793,6 +1969,7 @@ export class CompanionChatManager {
       // turn.cancelled, never record it as a successful complete reply.
       if (abortSignal.aborted) {
         finalizeCancelled();
+        checkpointUnfinishedTurn('cancelled');
         return;
       }
 
@@ -1838,8 +2015,10 @@ export class CompanionChatManager {
           error: err, ...(failoverStop ? { failoverStop } : {}), turnId, userMessageId, assistantMessageId, writer,
           assistantContent, uncommittedContent, publish, attempts: turnAttempts, changes: turnChanges.changes,
         });
+        checkpointUnfinishedTurn({ error: err });
       } else {
         finalizeCancelled();
+        checkpointUnfinishedTurn('cancelled');
       }
     } finally {
       // Release the active-turn slot only if this turn still owns it (a newer

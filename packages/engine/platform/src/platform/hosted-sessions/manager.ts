@@ -54,6 +54,7 @@ import { readNativeConversationTurnPermit, type NativeConversationTurnPermit } f
  */
 
 import { logger } from '../utils/logger.js';
+import { markedInputParty, withoutInputMark } from '../security/turn-input-party.js';
 import { forgetVerificationJournal } from '../core/verification/store.js';
 import { summarizeError } from '../utils/error-display.js';
 import type { AnyRuntimeEvent, RuntimeEventBus, RuntimeEventEnvelope, TurnEvent } from '../runtime/events/index.js';
@@ -678,8 +679,12 @@ export class HostedSessionManager {
       // the event stream. A failure before the loop reports its own turn error
       // (the loop could not be composed, the engine was disposed) is logged and
       // published here, so the first prompt is never lost without a trace.
-      // The create call itself was authenticated at the gateway: an operator's input.
-      void this.deliver(sessionId, input.initialPrompt, undefined, { operatorInput: true }).catch((error: unknown) => {
+      // The create call itself was authenticated at the gateway: an operator's input. It is the owner's own turn only
+      // when the call that asked for it is marked as his (capabilities/builtin/sessions.ts `hosted.new`, from the cause
+      // the daemon recorded: his verified program or his sign-in), as a message he typed into his own attached program
+      // is; anyone else's stays someone else's input. The turn itself runs with no mark, so nothing after it inherits it.
+      const ownersOwn = markedInputParty()?.party === 'owner';
+      void withoutInputMark(() => this.deliver(sessionId, input.initialPrompt!, undefined, { operatorInput: true, ...(ownersOwn ? { ownerTyped: true } : {}) })).catch((error: unknown) => {
         const detail = `the first prompt was not delivered: ${summarizeError(error)}`;
         logger.warn('[hosted-sessions] the initial prompt of a new session was not delivered', { sessionId, error: summarizeError(error) });
         this.publish('hosted-session-turn-ended', live.record, { detail });

@@ -147,6 +147,12 @@ export interface PlaceCapabilityAction<Item extends PlaceItem> {
   readonly list?: string | undefined;
   readonly states?: readonly string[] | undefined;
   /**
+   * Offered only on rows whose own data says so, beside `states`: the item's `field` (a string field of the item)
+   * is one of `isOneOf` ("Treat my own messages here as me" only on a channel whose kind proves its sender). Data,
+   * so the terminal programs and the web renderer read it alike (`actionOfferedFor`).
+   */
+  readonly offeredWhen?: PlaceOfferedWhen | undefined;
+  /**
    * It acts on the list's kind of thing, not on the selected item ("watch for something" on the Triggers tab):
    * shown while its list is the open tab, whether or not an item is selected, and given nothing from an item.
    */
@@ -159,6 +165,11 @@ export interface PlaceCapabilityAction<Item extends PlaceItem> {
   /** The hint's words; the capability's label is used when absent. */
   readonly label?: string | undefined;
   readonly fill?: Readonly<Record<string, string | ((item: Item) => string)>> | undefined;
+  /**
+   * Inputs the form opens on from the item, still asked and free to change (a field name of the item): what is set now
+   * ("Project for this channel" opens on the channel's current project). An item without the field opens on the input's default.
+   */
+  readonly startWith?: Readonly<Record<string, string>> | undefined;
   /**
    * One action per answer the item offers (an inbox item's options): each
    * with its own key, words and filled inputs. Replaces `key` and `label`.
@@ -242,6 +253,35 @@ export interface PlaceProgramAction<Item extends PlaceItem> {
 }
 
 export type PlaceAction<Item extends PlaceItem> = PlaceCapabilityAction<Item> | PlaceProgramAction<Item>;
+
+/** A row's own data an action is offered on (PlaceCapabilityAction `offeredWhen`). */
+export interface PlaceOfferedWhen {
+  readonly field: string;
+  readonly isOneOf: readonly string[];
+}
+
+/**
+ * Whether an action is offered on this item: its `states` hold the item's state, and its `offeredWhen` (when given)
+ * holds the item's field. The one test every renderer uses (the terminal modal, the web places view).
+ */
+export function actionOfferedFor<Item extends PlaceItem>(action: PlaceAction<Item>, item: Item): boolean {
+  if (action.states && !action.states.includes(item.state)) return false;
+  const when = action.kind === 'program' ? undefined : action.offeredWhen;
+  if (when) {
+    const value = (item as unknown as Readonly<Record<string, unknown>>)[when.field];
+    if (typeof value !== 'string' || !when.isOneOf.includes(value)) return false;
+  }
+  return true;
+}
+
+/** The values a form opens on from the item (`startWith`), still asked: every renderer's one reading of it. */
+export function startingValues<Item extends PlaceItem>(action: PlaceCapabilityAction<Item>, item: Item | undefined): Record<string, string> {
+  if (!item || !action.startWith) return {};
+  return Object.fromEntries(Object.entries(action.startWith).flatMap(([input, field]) => {
+    const value = (item as unknown as Readonly<Record<string, unknown>>)[field];
+    return typeof value === 'string' && value !== '' ? [[input, value]] : [];
+  }));
+}
 
 /** The count a menu row shows: something waiting or wrong. */
 export interface PlaceCount {

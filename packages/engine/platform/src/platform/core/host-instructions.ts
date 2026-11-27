@@ -13,14 +13,15 @@
  */
 
 /** The closed set of things the host tells the model. One entry per key; setting a key replaces it. */
-export type HostKey = 'environment' | 'plan' | 'breaker' | 'delegation' | 'handoffs' | 'replay' | 'knowledge' | 'correction' | 'mode' | 'evidence';
+export type HostKey = 'environment' | 'plan' | 'breaker' | 'delegation' | 'handoffs' | 'workspace' | 'replay' | 'knowledge' | 'correction' | 'mode' | 'evidence';
 
 /**
  * Render order. Standing context first (the environment: folder, system, date,
  * repository), one-request corrections after it, quoted evidence last so
- * nothing after it can be read as part of it.
+ * nothing after it can be read as part of it. `workspace`: files this session
+ * changed that another session changed back since (sent once).
  */
-export const HOST_KEYS: readonly HostKey[] = Object.freeze(['environment', 'mode', 'plan', 'delegation', 'handoffs', 'knowledge', 'replay', 'correction', 'breaker', 'evidence']);
+export const HOST_KEYS: readonly HostKey[] = Object.freeze(['environment', 'mode', 'plan', 'delegation', 'handoffs', 'workspace', 'knowledge', 'replay', 'correction', 'breaker', 'evidence']);
 
 export interface HostInstructionOptions {
   /** Send with the next accepted request only, then drop (see `delivered`). Default: kept until cleared. */

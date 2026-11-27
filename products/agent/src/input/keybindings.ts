@@ -18,11 +18,6 @@ export type KeyAction =
   | 'clear-cancel'
   | 'screen-clear'
   | 'command-palette'
-  | 'workspace-picker'
-  | 'workspace-close'
-  | 'workspace-close-all'
-  | 'workspace-tab-next'
-  | 'workspace-tab-prev'
   | 'open-agents'
   | 'history-search'
   | 'search'
@@ -48,16 +43,10 @@ export type KeyAction =
   | 'previous-session'
   | 'scroll-page-up'
   | 'scroll-page-down'
-  | 'contract-question-ordinary'
   | 'model-picker-group';
 
 export const ACTION_DESCRIPTIONS: Record<KeyAction, string> = { ...COMMON_ACTION_DESCRIPTIONS,
   'command-palette':       'Open help: every command and keyboard shortcut in one searchable list',
-  'workspace-picker':      'Open the Agent operator workspace',
-  'workspace-close':       'Close the Agent workspace',
-  'workspace-close-all':   'Close the Agent workspace',
-  'workspace-tab-next':    'Cycle Agent workspace category forward',
-  'workspace-tab-prev':    'Cycle Agent workspace category backward',
   'open-agents':           'Open Your agents: what is running, what waits for you, what is scheduled',
   'block-save':            'Save nearest block to file',
   'line-start':            'Move to start of line',
@@ -73,26 +62,17 @@ export const ACTION_DESCRIPTIONS: Record<KeyAction, string> = { ...COMMON_ACTION
 export const DEFAULT_KEYBINDINGS: Record<KeyAction, KeyCombo[]> = createKeybindingDefaults<KeyAction>([
   'leader', 'open-menu', 'next-field', 'choose', 'back',
   'move-up', 'move-down', 'move-left', 'move-right',
-  'copy-selection', 'clear-cancel', 'screen-clear', 'command-palette', 'workspace-picker',
-  'workspace-close', 'workspace-close-all', 'workspace-tab-next', 'workspace-tab-prev',
+  'copy-selection', 'clear-cancel', 'screen-clear', 'command-palette',
   'open-agents', 'history-search', 'search', 'block-copy',
   'bookmark', 'block-save', 'delete-word', 'line-start',
   'next-error-line-end', 'kill-line', 'clear-prompt', 'undo',
   'redo', 'paste', 'focus-work-tree', 'cycle-permission-mode',
   'open-notifications', 'failure-other-model', 'failure-details', 'failure-retry', 'failure-sign-in',
   'next-session', 'previous-session', 'scroll-page-up', 'scroll-page-down',
-  'contract-question-ordinary', 'model-picker-group',
+  'model-picker-group',
 ], {
   // Ctrl+P: the same help list as ? and /help, in both terminal programs.
   'command-palette':       [{ key: 'p', ctrl: true }],
-  // Ctrl+G is the leader now: the workspace opens with Ctrl+G then w, the menu of every place with Ctrl+G then m.
-  'workspace-picker':      [{ key: 'w', leader: true }],
-  'workspace-close':       [{ key: 'x', ctrl: true }],
-  // The actions that sat on an Alt or Ctrl+Shift chord are a leader sequence by default, beside
-  // a second key every terminal sends (keybinding-catalog.ts); a person can bind the chord back.
-  'workspace-close-all':   [{ key: 'x', leader: true }, { key: '\\', ctrl: true }],
-  'workspace-tab-next':    [{ key: ']', ctrl: true }],
-  'workspace-tab-prev':    [{ key: '[', ctrl: true }],
   // F2 and Ctrl+O: Your agents.
   'open-agents':           [{ key: 'f2' }, { key: 'o', ctrl: true }],
   // The Agent's conversation scrolls a page with PageUp and PageDown, with or without Ctrl.
@@ -113,11 +93,6 @@ export const DEFAULT_KEYBINDINGS: Record<KeyAction, KeyCombo[]> = createKeybindi
 });
 
 const KEY_ACTION_ALIASES: Readonly<Record<string, KeyAction>> = {
-        'panel-picker': 'workspace-picker',
-        'panel-close': 'workspace-close',
-        'panel-close-all': 'workspace-close-all',
-        'panel-tab-next': 'workspace-tab-next',
-        'panel-tab-prev': 'workspace-tab-prev',
         'sidebar-toggle': 'open-agents',
       };
 

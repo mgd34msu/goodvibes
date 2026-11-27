@@ -12,11 +12,19 @@
  *   3. else the folder itself.
  * The answer is the real path (symbolic links resolved), so one folder reached by two paths is one project. A folder
  * that does not exist (yet) is taken as written, resolved. Nothing here writes or spawns; a few `stat` calls walk up.
+ *
+ * The registered workspaces are ALWAYS read (this process's home, `resolveGoodVibesHome`, read again only when the
+ * register file changed), whoever asks: the caller check, the facilities, the settings view, the checkpoint store,
+ * the reach rule for daemon turns, Work and every program's records folder give one folder one project. So two
+ * projects registered inside one repository are two projects everywhere, and a registered folder that is no
+ * repository, opened in a subfolder, is that folder's project. A program records the folder it is first opened in by
+ * registering its project (runtime/workspace-registration.ts), never a subfolder of a repository.
  */
-import { existsSync, readFileSync, realpathSync } from 'node:fs';
+import { existsSync, readFileSync, realpathSync, statSync } from 'node:fs';
 import { homedir } from 'node:os';
 import { dirname, join, resolve, sep } from 'node:path';
 import { PRODUCT_WORKTREE_DIR_SEGMENTS } from '../git/product-worktree-marker.js';
+import { resolveGoodVibesHome } from '../config/goodvibes-home.js';
 
 function real(path: string): string {
   try { return realpathSync(path); } catch { return resolve(path); }
@@ -42,11 +50,45 @@ export function registeredWorkspaceRoots(homeDirectory: string | undefined): rea
   return [...roots];
 }
 
+let registerRead: { readonly path: string; readonly stamp: string; readonly roots: readonly string[] } | undefined;
+
+/**
+ * The registered workspace roots of this process's home ({@link registeredWorkspaceRoots} of `resolveGoodVibesHome()`),
+ * parsed again only when the register file changed (its size, time and inode); one `stat` otherwise.
+ */
+export function homeRegisteredRoots(): readonly string[] {
+  const home = resolveGoodVibesHome();
+  const path = join(home, '.goodvibes', 'shared', 'workspace-registrations.json');
+  let stamp = 'none';
+  try { const s = statSync(path); stamp = `${s.size}:${s.mtimeMs}:${s.ino}`; } catch { /* no register: no roots */ }
+  if (registerRead?.path === path && registerRead.stamp === stamp) return registerRead.roots;
+  const roots = stamp === 'none' ? [] : registeredWorkspaceRoots(home);
+  registerRead = { path, stamp, roots };
+  return roots;
+}
+
+/**
+ * How far a tool working in `folder` may read and write: the project it is in ({@link projectIdentityOf}), so a
+ * program opened in a subfolder works anywhere in its project; except that a worktree the product made for a piece of
+ * work is bounded by itself, never the project it was made from.
+ */
+export function projectWriteRootOf(folder: string): string {
+  const path = real(folder);
+  const marker = `${sep}${PRODUCT_WORKTREE_DIR_SEGMENTS.join(sep)}${sep}`;
+  const at = `${path}${sep}`.indexOf(marker);
+  if (at > 0) {
+    const worktree = path.slice(at + marker.length).split(sep)[0];
+    return worktree ? path.slice(0, at + marker.length) + worktree : path;
+  }
+  return projectIdentityOf(path);
+}
+
 /**
  * The project a folder belongs to (see the file's comment). `registered`: the registered workspace roots
- * ({@link registeredWorkspaceRoots}), when the caller knows the home; without them the repository root decides.
+ * ({@link registeredWorkspaceRoots}) of a home the caller names; without them this process's home's
+ * ({@link homeRegisteredRoots}).
  */
-export function projectIdentityOf(folder: string, registered: readonly string[] = []): string {
+export function projectIdentityOf(folder: string, registered: readonly string[] = homeRegisteredRoots()): string {
   const path = real(folder);
   const marker = `${sep}${PRODUCT_WORKTREE_DIR_SEGMENTS.join(sep)}${sep}`;
   const inWorktree = `${path}${sep}`.indexOf(marker);

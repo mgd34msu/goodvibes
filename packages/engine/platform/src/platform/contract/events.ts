@@ -82,10 +82,16 @@ const EMITTERS: { readonly [T in ContractEventType]: Emitter<T> } = {
   CONTRACT_SPAWN_GUARD_TRIGGERED: emitContractSpawnGuardTriggered,
 };
 
-/** Emits one contract event on the `contracts` domain with its contract's context. */
-export function emitContractEvent(bus: RuntimeEventBus, sessionId: string, event: ContractEvent): ContractEvent {
+/**
+ * Emits one contract event on the `contracts` domain with its contract's context. `project`: the folder the contract
+ * works in (its `projectRoot`), declared on the event as what it is about (events/about.ts), so the daemon's stream
+ * filter delivers it to the callers that may reach that project; an event of no contract declares nothing.
+ */
+export function emitContractEvent(bus: RuntimeEventBus, sessionId: string, event: ContractEvent, project?: string | null): ContractEvent {
+  const about = project !== undefined && typeof event.contractId === 'string' && event.contractId
+    ? { about: { project, kind: 'contract' as const, id: event.contractId } } : {};
   // A source occurrence is new even when an imported snapshot reuses its entity id.
-  const occurrence = { ...event, occurrenceId: randomUUID() };
+  const occurrence = { ...event, ...about, occurrenceId: randomUUID() };
   const { type, ...data } = occurrence;
   // The table is keyed by type, so the emitter found is the one for this
   // event's payload; the union cannot express that pairing, hence the widening.

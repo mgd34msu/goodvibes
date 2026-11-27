@@ -3,6 +3,7 @@ import { completeGatewayScopePolicyBootstrap, handleOwnerDecisions } from '@good
 import { createDisposalScope } from './disposal-wiring.js';
 import { createRuntimeBaseServices } from './service-graph.js';
 import { createDaemonHandlerComposition } from './daemon-handler-composition.js';
+import { mergeKeepingGetters } from './merge-keeping-getters.js';
 import { resumeContracts } from '@goodvibes/engine/platform/platform/runtime/operations';
 import { daemonReceiptStoreAt, daemonReceiptsPath } from '@goodvibes/engine/platform/platform/daemon/receipts';
 import { bridgeHeldForOwnerToInbox, bridgeJevDecisionsToInbox, processHeldForOwner, processJevDecisions } from '@goodvibes/engine/platform/platform/permissions';
@@ -59,13 +60,16 @@ export async function createRuntimeServices(options: RuntimeServicesOptions): Pr
     observeNativeStartupPhase('contract-recovery');
     // Legacy recovery can await planning or execution. Serve the host while
     // that work runs, and abort/drain it before releasing its dependencies.
-    const contractRecovery = resumeContracts(services.contractRunner, services.workingDirectory);
+    // The daemon's graph runs contracts (`contracts: 'run'`, the default).
+    const daemonContracts = services.contractRunner;
+    if (!daemonContracts) throw new Error('The daemon\'s graph was composed without its contract runner');
+    const contractRecovery = resumeContracts(daemonContracts, services.workingDirectory);
     // A contract whose checkpoint was refused at start is the owner's to decide: a receipt the next
     // attached terminal or web UI shows, with what happened and what to do, not only a log line.
     void contractRecovery.then((report) => {
       if ('failed' in report) {
         daemonReceiptStoreAt(daemonReceiptsPath(services.configManager))
-          .record(`Saved contracts could not be resumed at start-up: ${report.failed}. They are still on disk; restart to try again, or see them on the Work contracts tab of the Work place.`);
+          .record(`Saved contracts could not be resumed at start-up: ${report.failed}. They are still on disk; restart to try again. Your work is in Work.`);
         return;
       }
       if (report.refused.length === 0) return;
@@ -80,11 +84,12 @@ export async function createRuntimeServices(options: RuntimeServicesOptions): Pr
     }
     // The work-plan writes recovery queued are flushed by the graph's own contract-runner disposal, which runs after this.
     scope.registry.add('contract recovery', async () => {
-      services.contractRunner.dispose();
+      daemonContracts.dispose();
       await contractRecovery;
     });
     let bootTasks: DaemonBootController | undefined;
-    const runtime: RuntimeServices = { ...services, daemonHandlers, get bootTasks() { return bootTasks; }, close, dispose };
+    // Merged by property: a spread would read the graph's on-demand code index getter (merge-keeping-getters.ts).
+    const runtime: RuntimeServices = mergeKeepingGetters(services, { daemonHandlers, get bootTasks() { return bootTasks; }, close, dispose });
     if (options.createBootOperations) {
       const controller = createDaemonBootController(options.createBootOperations(runtime));
       let starting: ReturnType<DaemonBootController['start']> | undefined; let bootClosed = false;

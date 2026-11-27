@@ -5,11 +5,12 @@ export { normalizeSecretKeyPart, buildGoodVibesSecretKey, buildGoodVibesSecretRe
 export type { SecretBackedConfigUpdate, SecretBackedConfigManager, SecretBackedSecretStore } from '@goodvibes/engine/platform/platform/config';
 // The set of keys that route through the secret store is the engine's declared list.
 export { SECRET_CONFIG_KEYS, isSecretConfigKey } from '@goodvibes/engine/platform/platform/config';
-export const persistSecretBackedConfigValue = createSecretBackedConfigWriter(async (configKey, rawValue, update) => {
+export const persistSecretBackedConfigValue = createSecretBackedConfigWriter(async (configKey, rawValue, update, press) => {
   // Explicit scopes deliberately select local storage. Otherwise a connected
   // daemon owns its credential/config pair and a refusal must propagate.
+  // Who decided the write (the call site's press or gate decision) goes with it.
   if (isSecretReferenceValue(update.configValue) && update.secretValue === undefined) {
-    return await routeDaemonOwnedConfigWrite(configKey, update.configValue) === 'daemon';
+    return await routeDaemonOwnedConfigWrite(configKey, update.configValue, press) === 'daemon';
   }
-  return (await routeDaemonOwnedCredentialWrite(configKey, rawValue))?.appliedBy === 'daemon';
+  return (await routeDaemonOwnedCredentialWrite(configKey, rawValue, press))?.appliedBy === 'daemon';
 });

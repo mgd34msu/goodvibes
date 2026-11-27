@@ -40,7 +40,7 @@ import { registerAgentSetupTool } from '../tools/agent-setup-tool.ts';
 import { registerAgentSupportTool } from '../tools/agent-support-tool.ts';
 import { registerAgentTerminalProcessTools } from '../tools/agent-terminal-process-tools.ts';
 import { registerAgentVibeTool } from '../tools/agent-vibe-tool.ts';
-import { registerAgentWorkspaceTool } from '../tools/agent-workspace-tool.ts';
+import { registerScreensKeysCommandsTool } from '../tools/screens-keys-commands-tool.ts';
 import { compactRegisteredToolDefinitions } from '../tools/tool-definition-compaction.ts';
 import { declareAgentReadModes } from '@goodvibes/engine/terminal-shell/agent-turn/read-modes';
 import { wireCapabilityIndex } from './bootstrap-capability-wiring.ts';
@@ -113,8 +113,8 @@ export function registerAgentTools(deps: AgentToolRegistrationDeps): void {
   registerAgentSettingsTool(toolRegistry, commandRegistry, commandContext);
   registerAgentSupportTool(toolRegistry, commandRegistry, commandContext);
   registerAgentVibeTool(toolRegistry, commandContext);
-  registerAgentWorkspaceTool(toolRegistry, commandRegistry, commandContext);
-  registerAgentSettingsImportTool(toolRegistry, commandContext);
+  registerScreensKeysCommandsTool(toolRegistry, commandRegistry, commandContext);
+  registerAgentSettingsImportTool(toolRegistry);
   registerAgentTerminalProcessTools(toolRegistry, commandContext);
   // The capture floor, checked once every tool this build registers is in.
   // The operator policy tells every turn that recording what it learns is part

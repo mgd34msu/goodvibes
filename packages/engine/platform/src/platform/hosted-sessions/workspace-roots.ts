@@ -2,8 +2,8 @@
  * Where work may run on this daemon: the one answer every way of starting an
  * agent in a folder asks (a hosted session, contract work dispatched into one).
  *
- * The allowed roots are the daemon's own working directory and every workspace
- * registered with it (`workspaces.registrations.*`). A path is allowed when it
+ * The allowed roots are the workspaces registered with the daemon
+ * (`workspaces.registrations.*`). A path is allowed when it
  * is one of them or lies inside one, with symlinks resolved so a link inside a
  * root cannot lead out of it.
  */
@@ -38,12 +38,13 @@ export function allowedRootFor(path: string, roots: readonly string[]): string |
 }
 
 /**
- * The daemon's working directory plus every registered workspace root, in that
- * order, without duplicates. One small file read per call: a session create, or
- * the New menu asking which folders it can offer.
+ * Every registered workspace root, without duplicates. The daemon's own working folder is not one: it is a folder of
+ * its own in its home, never a project (products/daemon cli/configuration.ts `daemonOwnFolder`), so no work runs there
+ * and a refusal never names it. One small file read per call: a session create, or the New menu asking which folders
+ * it can offer.
  */
-export function allowedWorkspaceRoots(workingDirectory: string, registerPath: string): readonly string[] {
-  const roots = [workingDirectory];
+export function allowedWorkspaceRoots(_daemonFolder: string, registerPath: string): readonly string[] {
+  const roots: string[] = [];
   const register = readWorkspaceRegisterSync(registerPath);
   if (register.state === 'ok') for (const row of register.workspaces) roots.push(row.root);
   return [...new Set(roots)];

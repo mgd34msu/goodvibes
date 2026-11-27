@@ -22,6 +22,10 @@ export interface TriggerSupervisorDeps {
   readonly configManager: Pick<ConfigManager, 'get' | 'subscribe'>;
   /** Resolves a file in this surface's project directory (`<project>/.goodvibes/<surface>/<name>`). */
   readonly resolveStorePath: (name: string) => string;
+  /** The folder a trigger kept with no project ran in (TriggerManagerOptions.unplacedFolder). */
+  readonly unplacedFolder?: string | undefined;
+  /** Why a trigger may not be made or run in a folder (TriggerManagerOptions.projectRefusal). */
+  readonly projectRefusal?: ((folder: string | undefined) => string | undefined) | undefined;
   readonly agents: TriggerAgentSpawner;
   readonly processManager: ProcessManager;
   /** Where a fired turn's answer goes, and the connected tools (mail, calendar) it gets. */
@@ -80,6 +84,8 @@ export function createTriggerSupervisor(deps: TriggerSupervisorDeps): TriggerMan
   };
   const manager = new TriggerManager({
     storePath: deps.resolveStorePath('triggers.db'),
+    ...(deps.unplacedFolder ? { unplacedFolder: deps.unplacedFolder } : {}),
+    ...(deps.projectRefusal ? { projectRefusal: deps.projectRefusal } : {}),
     config: () => readTriggerConfig(configManager),
     actions: createTriggerActionExecutor({ agents: deps.agents, processManager, unattendedRuns: deps.unattendedRuns, conversationTools: deps.conversationTools }),
     processHost: createProcessManagerTriggerHost(processManager),

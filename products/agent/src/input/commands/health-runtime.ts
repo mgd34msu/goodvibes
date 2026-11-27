@@ -122,13 +122,14 @@ async function healthReport(ctx: CommandContext): Promise<CommandReport> {
   const snapshot = await buildSetupReviewSnapshot(ctx);
   const accounts = await loadProviderAccountSnapshot(ctx);
   const items: { sentence: string; fix?: { label: string; line: string } }[] = [];
-  const fixFor: Readonly<Record<string, { label: string; line: string }>> = {
-    providers: { label: 'Sign in to a provider', line: '/setup sign-in' },
-    integrations: { label: 'In System, Health, check one area: Services', line: '/setup' },
-    mcp: { label: 'See which servers need attention', line: '/mcp review' },
+  // What fixes each is a control in a place, not a line to type (as in the terminal app).
+  const placeFor: Readonly<Record<string, string>> = {
+    providers: ' Sign in on the Providers tab of Models and providers (s on the provider).',
+    integrations: ' The Services tab of Models and providers checks each one; in System, Health, "check one area" reads Services again.',
+    mcp: ' The Servers tab of Tools and extensions shows which servers need attention and how to fix each.',
   };
   for (const check of snapshot.checks.filter(isSetupIssue)) {
-    items.push({ sentence: `${check.area}: ${check.message}.`, ...(fixFor[check.area] ? { fix: fixFor[check.area] } : {}) });
+    items.push({ sentence: `${check.area}: ${check.message}.${placeFor[check.area] ?? ''}` });
   }
   for (const provider of accounts.providers) {
     // What fixes it is a control on the provider in Models and providers ("how to fix it"), not a line to type.

@@ -2,6 +2,7 @@ import { existsSync, mkdirSync, readFileSync, statSync } from 'node:fs';
 import { writeFileAtomic } from '../utils/atomic-json-store.js';
 import { fileChangeStamp } from '../utils/file-change-stamp.js';
 import { dirname, resolve } from 'node:path';
+import { shownPath } from '../capabilities/held-paths.js';
 import { logger } from '../utils/logger.js';
 import { getHookPointContract } from './contracts.js';
 import { matchesEventPath, matchesMatcher } from './matcher.js';
@@ -227,7 +228,8 @@ export class HookWorkbench {
   }
 
   private recordAction(action: HookAuthoringAction): void {
-    this.recentActions.unshift(action);
+    // A file a call holds (capabilities/held-paths.ts) is kept as the project's file, never the call's own folder.
+    this.recentActions.unshift({ ...action, target: shownPath(action.target) });
     if (this.recentActions.length > 25) this.recentActions.length = 25;
   }
 

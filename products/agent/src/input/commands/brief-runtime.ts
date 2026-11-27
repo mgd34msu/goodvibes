@@ -1,6 +1,6 @@
 import type { AutomationJob } from '@goodvibes/engine/platform/platform/automation';
 import type { CommandContext } from '../command-registry.ts';
-import { buildAgentWorkspaceBriefPart } from '../agent-workspace-snapshot.ts';
+import { buildAgentBriefPart } from '../runtime-snapshot.ts';
 import { WORK_PLAN_TASK_STATUSES as WORK_PLAN_STATUSES, type ProjectWorkPlanTaskStatus as WorkPlanItemStatus } from '@goodvibes/engine/platform/platform/knowledge';
 
 type StatusCounts = Record<WorkPlanItemStatus, number>;
@@ -65,7 +65,7 @@ function formatWarnings(warnings: readonly string[]): readonly string[] {
 }
 
 export function formatAgentOperatorBriefing(ctx: CommandContext): string {
-  const snapshot = buildAgentWorkspaceBriefPart(ctx);
+  const snapshot = buildAgentBriefPart(ctx);
   const workPlan = workPlanCounts(ctx);
   const jobReading = automationJobs(ctx);
   const jobs = 'jobs' in jobReading ? jobReading.jobs : [];

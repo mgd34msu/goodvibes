@@ -10,9 +10,13 @@ import { buildDurableRuleForDecision, compileRules, type CompiledRuleMatch, type
 import { projectIdentity, type UserPermissionRuleStore } from '../permissions/user-rule-store.js';
 import type { ControlPlaneSurfaceMessage } from './types.js';
 import type { AskPresentation } from '../permissions/ask-presentation.js';
+import { toolAskWords } from '../permissions/tool-ask-words.js';
+import { OPEN_QUESTIONS_PER_CALLER, OWNER_QUESTIONS_FULL, ownerQuestionsFullWords } from './owner-question-bounds.js';
+import { GatewayVerbError } from './routes/gateway-verb-error.js';
 import { logger } from '../utils/logger.js';
 import { isRecord } from '../utils/record-coerce.js';
 import { contentDigest } from '../utils/target-ref.js';
+import { processEnded, processNumberOf } from '../utils/process-identity.js';
 import { resolveApprovalHunkSelection } from './approval-hunk-apply.js';
 import { raiseSharedApproval, type PendingApprovalEntry, type RaisedApproval } from './approval-broker-raise.js';
 import { OwnerApprovalAuthority, type OwnerApprovalGuard, type OwnerApprovalProof, type RaisedOwnerApproval, type ResolveSharedApprovalInput } from './approval-broker-owner.js';
@@ -121,6 +125,8 @@ export interface RequestSharedApprovalInput {
    * cancelled, so the owner's answer still reaches the call.
    */
   readonly readsRecord?: true | undefined;
+  /** A wire raiser's process on this machine (`<pid>:<start>`, from its checked registration): its hold ends with it. */
+  readonly holdProcess?: string | undefined;
 }
 
 /** What the approvals port needs of the cross-node relay (approval-relay.ts implements it). */
@@ -196,8 +202,42 @@ type ApprovalPublisher = {
   publishSurfaceMessage(message: Omit<ControlPlaneSurfaceMessage, 'id' | 'createdAt'>): void;
 };
 
+/**
+ * Who asks a question, for the owner's list: the caller outside his own programs that a held call was put to him for
+ * (`requestedBy`, the attribution's principal), or `own` (his programs, his models' turns, the daemon itself).
+ */
+function askerOf(record: SharedApprovalRecord): string {
+  return askerOfRequest(record.metadata, record.request.attribution);
+}
+
+/** Who asks, from what a question records: the caller it names (`requestedBy`, an outside caller's attribution), or `own`. */
+function askerOfRequest(metadata: Readonly<Record<string, unknown>> | undefined, attribution: SharedApprovalRecord['request']['attribution']): string {
+  const requestedBy = metadata?.['requestedBy'];
+  if (typeof requestedBy === 'string' && requestedBy) return `caller:${requestedBy}`;
+  return attribution?.kind === 'outside-caller' && attribution.principalId ? `caller:${attribution.principalId}` : 'own';
+}
+
+/**
+ * The owner's list: the questions still open first, grouped by who asks, his own programs' first (oldest first), then
+ * one of each other caller's in turn (each caller's oldest first), so a flood from one caller never buries another's
+ * question; then every settled one, newest first.
+ */
 function sortApprovals(records: Iterable<SharedApprovalRecord>): SharedApprovalRecord[] {
-  return [...records].sort((a, b) => b.updatedAt - a.updatedAt || a.id.localeCompare(b.id));
+  const all = [...records];
+  const byAge = (a: SharedApprovalRecord, b: SharedApprovalRecord): number => a.createdAt - b.createdAt || a.id.localeCompare(b.id);
+  const groups = new Map<string, SharedApprovalRecord[]>();
+  for (const record of all.filter((one) => isOpenApprovalStatus(one.status)).sort(byAge)) {
+    const asker = askerOf(record);
+    groups.set(asker, [...(groups.get(asker) ?? []), record]);
+  }
+  const open: SharedApprovalRecord[] = [...(groups.get('own') ?? [])];
+  groups.delete('own');
+  const others = [...groups.values()];
+  for (let at = 0; others.some((group) => at < group.length); at += 1) {
+    for (const group of others) if (at < group.length) open.push(group[at]!);
+  }
+  const settled = all.filter((one) => !isOpenApprovalStatus(one.status)).sort((a, b) => b.updatedAt - a.updatedAt || a.id.localeCompare(b.id));
+  return [...open, ...settled];
 }
 
 /**
@@ -268,6 +308,7 @@ function validatePermissionPromptRequestSnapshot(value: unknown): void {
   }
   validateOptionalString(value['workingDirectory']);
   validateOptionalString(value['ownerOnly']);
+  validateOptionalString(value['ownerOnlyBecause']);
 }
 
 function validateApprovalAuditRecord(value: unknown): void {
@@ -295,6 +336,7 @@ function validateRequester(value: unknown): void {
   for (const hold of value['holds'] as unknown[]) {
     if (!isRecord(hold) || typeof hold['id'] !== 'string') throwInvalidApprovalSnapshot();
     validateOptionalNumber(hold['releasedAt']);
+    validateOptionalString(hold['process']);
   }
 }
 
@@ -452,6 +494,13 @@ function encodeStoredApproval(record: SharedApprovalRecord): SharedApprovalRecor
   return stored;
 }
 
+/** `args` with `kept` written as `now` in every text value, at the top and one level down (display words only). */
+function renamedIn(args: Record<string, unknown>, kept: string, now: string): Record<string, unknown> {
+  const swap = (value: unknown): unknown => typeof value === 'string' ? value.split(kept).join(now) : value;
+  return Object.fromEntries(Object.entries(args).map(([key, value]) => [key, isRecord(value)
+    ? Object.fromEntries(Object.entries(value).map(([inner, text]) => [inner, swap(text)])) : swap(value)]));
+}
+
 function failureText(error: unknown): string {
   return error instanceof Error ? error.message : String(error);
 }
@@ -552,6 +601,8 @@ export class ApprovalBroker {
   #homeNode: string | (() => string);
   /** Words each ask with the host's facts (permissions/ask-facts-host.ts); set by the composition that has them. */
   #presenter: ((request: PermissionPromptRequest, sessionId?: string | undefined) => AskPresentation) | null = null;
+  /** An open question's asker as called now (useAskerNames); null: the name kept at ask time. */
+  #askerName: ((principalId: string, kept: string) => string | undefined) | null = null;
   /** Where a remembered answer's rule is kept, inside the answer (keepRememberedRulesIn). */
   #ruleStore: Pick<UserPermissionRuleStore, 'remember'> | undefined;
 
@@ -664,6 +715,8 @@ export class ApprovalBroker {
     if (log.size > this.approvals.size + COMPACT_SLACK) await this.#compact();
     this.loaded = true;
     this.rearmRestoredTimers();
+    // A program that ended while the daemon was down left its holds: given up now, as it would have.
+    void this.releaseHoldsOfGonePrograms().catch(() => undefined);
   }
 
   /**
@@ -784,12 +837,52 @@ export class ApprovalBroker {
     return sortApprovals(this.approvals.values()).slice(0, Math.max(1, limit));
   }
 
+  /**
+   * Give up every hold whose raising program is no longer running (its process, read from the system: utils/
+   * process-identity.ts), as that program would have when leaving: the last hold of an open ask cancels it
+   * (`requester-left`), so a question whose caller is gone is ended, never left waiting. Run when the daemon starts,
+   * when a client's connection to it closes (a program that exits or dies closes its own) and when a person's list of
+   * questions is read; never on a timer. A hold with no process (a program on another machine, a script) is untouched.
+   */
+  async releaseHoldsOfGonePrograms(): Promise<void> {
+    await this.start();
+    for (const approval of [...this.approvals.values()]) {
+      if (!isOpenApprovalStatus(approval.status) || approval.requester.kind !== 'wire') continue;
+      for (const hold of approval.requester.holds) {
+        if (hold.releasedAt !== undefined || hold.process === undefined || !processEnded(hold.process)) continue;
+        const note = `the program that asked (process ${processNumberOf(hold.process)}) is no longer running`;
+        await approvedChangeScope.exit(() => this.#transition({ id: approval.id, expectedRevision: undefined,
+          transition: { to: 'released', actor: BROKER_ACTOR, holdId: hold.id, note } })).catch((error: unknown) => {
+          logger.warn('Releasing the hold of a program that is no longer running failed', { approvalId: approval.id, error: failureText(error) });
+        });
+      }
+    }
+  }
+
   getApproval(approvalId: string): SharedApprovalRecord | null {
     return this.approvals.get(approvalId) ?? null;
   }
 
   /** Raise a shared ask, optionally restricted to its host-owned decision capability. */
-  async raiseApproval(input: RequestSharedApprovalInput): Promise<RaisedApproval> {
+  async raiseApproval(given: RequestSharedApprovalInput): Promise<RaisedApproval> {
+    // A call of a tool that has its own words (a capability, a daemon method named by id: permissions/tool-ask-words.ts)
+    // is kept and announced as its own question, whichever gate raised it (a daemon-run turn's included), never as the
+    // tool's generic reading ("Delegate work through capability_run").
+    const worded = toolAskWords(given.request.tool, given.request.args);
+    // A tool with no words of its own whose reading is the generic one ("Delegate work through agent"): the question
+    // its card asks (permissions/ask-presentation.ts), the same words every surface shows.
+    let question = worded?.question;
+    if (!question && /^(?:Delegate work through|Request permission for) /.test(given.request.analysis.summary)) {
+      try { question = this.#presenter?.(given.request, given.sessionId).question; } catch { question = undefined; }
+    }
+    const input: RequestSharedApprovalInput = question && given.request.analysis.summary !== question
+      ? { ...given, request: { ...given.request, analysis: { ...given.request.analysis, summary: question } } } : given;
+    // The ONE place every question for the owner is raised: each caller's are bounded here, whichever door raised it (a
+    // capability's gate, a method the dispatch put to him, the unverified program's folder, the outside agent's project,
+    // pairing, sharing, a program's wire raise). The same ask again joins the open one (`coalesceKey` below); a caller
+    // already at the bound is refused with words, never held; the list keeps one caller from burying another (sortApprovals).
+    await this.start();
+    this.#refuseWhenCallerFull(input);
     return this.#ownerApprovals.raise(input, {
       start: () => this.start(),
       approvals: this.approvals,
@@ -797,9 +890,9 @@ export class ApprovalBroker {
       raising: this.raising,
       homeNode: () => this.homeNode,
       create: (record) => this.#create(record),
-      addHold: async (approvalId, holdId) => {
+      addHold: async (approvalId, hold) => {
         const outcome = await this.#transition({ id: approvalId, expectedRevision: undefined,
-          transition: { to: 'updated', actor: BROKER_ACTOR, addHold: holdId, note: 'another surface raised the same ask' } });
+          transition: { to: 'updated', actor: BROKER_ACTOR, addHold: hold, note: 'another surface raised the same ask' } });
         return outcome.applied ? outcome.record : null;
       },
       publish: (approval) => this.publish(approval),
@@ -814,6 +907,24 @@ export class ApprovalBroker {
       coalesceKey: approvalCoalesceKey,
       resolve: (id, decision, proof) => this.#resolveApproval(id, decision, proof),
     });
+  }
+
+  /**
+   * A new question from a caller that already has `OPEN_QUESTIONS_PER_CALLER` waiting is refused (429
+   * `OWNER_QUESTIONS_FULL`): the same ask as one still open is not a new question (it joins it). The owner's own
+   * programs' questions name no outside caller and are never bounded.
+   */
+  #refuseWhenCallerFull(input: RequestSharedApprovalInput): void {
+    const asker = askerOfRequest(input.metadata, input.request.attribution);
+    if (asker === 'own') return;
+    const key = approvalCoalesceKey(input.sessionId, input.request.tool, input.request.args, input.request.workingDirectory);
+    let open = 0;
+    for (const record of this.approvals.values()) {
+      if (!isOpenApprovalStatus(record.status) || askerOf(record) !== asker) continue;
+      if (approvalCoalesceKey(record.sessionId ?? undefined, record.request.tool, record.request.args, record.request.workingDirectory) === key) return;
+      open += 1;
+    }
+    if (open >= OPEN_QUESTIONS_PER_CALLER) throw new GatewayVerbError(ownerQuestionsFullWords(open), OWNER_QUESTIONS_FULL, 429);
   }
 
   /** The resolver is an in-process capability, never part of a stored approval. */
@@ -1284,7 +1395,7 @@ export class ApprovalBroker {
     if (!hold || hold.releasedAt !== undefined) {
       return { request, current, refusal: approvalRefusal('APPROVAL_SETTLED', current, 'That hold was already given up; nothing changed.') };
     }
-    const holds: ApprovalHold[] = requester.holds.map((entry) => (entry === hold ? { id: entry.id, releasedAt: now } : entry));
+    const holds: ApprovalHold[] = requester.holds.map((entry) => (entry === hold ? { ...entry, releasedAt: now } : entry));
     const released = this.#next(current, { to: 'updated', actor: transition.actor, note: transition.note ?? (open ? 'the asking surface left' : 'the asking surface received the answer') }, now, undefined, { kind: 'wire', holds });
     // Another surface that raised it still waits: it stays open for them.
     if (!open || holds.some((entry) => entry.releasedAt === undefined)) return { request, current, next: released };
@@ -1318,7 +1429,7 @@ export class ApprovalBroker {
           audit: [...current.audit, buildAudit('expired', BROKER_ACTOR.id, BROKER_ACTOR.surface, transition.note)] };
       case 'updated': {
         const holds: ApprovalRequester | undefined = transition.addHold === undefined ? requester
-          : { kind: 'wire', holds: [...(current.requester.kind === 'wire' ? current.requester.holds : []), { id: transition.addHold }] };
+          : { kind: 'wire', holds: [...(current.requester.kind === 'wire' ? current.requester.holds : []), transition.addHold] };
         return { ...base, metadata: { ...current.metadata, ...(transition.metadata ?? {}) },
           ...(holds !== undefined ? { requester: holds } : {}),
           audit: [...current.audit, buildAudit('updated', transition.actor.id, transition.actor.surface, transition.note, transition.actor.node)] };
@@ -1453,8 +1564,38 @@ export class ApprovalBroker {
    * consequence, choices and remember tiers) for a list row or an event, in
    * full (with the details: arguments, checklist) for the read of one record.
    */
-  presentationOf(record: SharedApprovalRecord, full = false): AskPresentation | undefined {
+  /**
+   * How an open question names its asker when it is shown: `resolve` gives the words for a principal as it is called
+   * now (a paired device by its current name), or undefined when it has none now (an unpaired device), which keeps the
+   * name the question kept when it was asked.
+   */
+  useAskerNames(resolve: ((principalId: string, kept: string) => string | undefined) | null): void {
+    this.#askerName = resolve;
+  }
+
+  /**
+   * The record as it is shown now: an open question raised by a caller the daemon named (`outside-caller`) names it as
+   * it is called now (a device renamed since it asked); a settled question, and an asker that is gone, keep the name
+   * kept at ask time. Display only: the stored record, its arguments and what runs are never changed.
+   */
+  shownRecord(record: SharedApprovalRecord): SharedApprovalRecord {
+    const attribution = record.request.attribution;
+    if (this.#askerName === null || attribution?.kind !== 'outside-caller' || !isOpenApprovalStatus(record.status)) return record;
+    let now: string | undefined;
+    try { now = this.#askerName(attribution.principalId, attribution.name); } catch { now = undefined; }
+    if (now === undefined || now === attribution.name) return record;
+    return { ...record, request: { ...record.request, attribution: { ...attribution, name: now } } };
+  }
+
+  presentationOf(given: SharedApprovalRecord, full = false): AskPresentation | undefined {
     if (this.#presenter === null) return undefined;
+    const shown = this.shownRecord(given);
+    // The asker's kept name also stands in words its arguments carry for the card (a caller's file, where a result
+    // goes): shown with the name it has now too. Display only; the arguments the call runs with are never changed.
+    const kept = given.request.attribution?.kind === 'outside-caller' ? given.request.attribution.name : undefined;
+    const now = shown.request.attribution?.kind === 'outside-caller' ? shown.request.attribution.name : undefined;
+    const record = kept !== undefined && now !== undefined && kept !== now
+      ? { ...shown, request: { ...shown.request, args: renamedIn(shown.request.args, kept, now) } } : shown;
     try {
       const settled = record.metadata['wording'];
       // A settled ask reads as it was asked: its kept words, never words rebuilt from withheld arguments.
@@ -1476,7 +1617,8 @@ export class ApprovalBroker {
     try {
       const now = Date.now();
       this.publisher?.publishEvent('approval-update', {
-        approval,
+        // As shown now: an open question's asker by the name it has now (shownRecord).
+        approval: this.shownRecord(approval),
         // The reading for an admin who may answer: what is waiting, the deadline, the decision and its receipt.
         reading: readApproval(approval, adminApprovalViewer(approval.homeNode), now),
         // The ask's words while it waits, so a surface draws the card from the frame alone.

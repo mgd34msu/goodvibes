@@ -126,7 +126,8 @@ export function renderOnboardingWizard(
   // is never clamped; the layer is then placed at the top row.
   const height = Math.max(5, viewportHeight - 2);
   const f = beginModal(width, Math.max(viewportHeight * 2, 12), {
-    title: '/setup',
+    // Named as the place it opens from (System, Setup), never a command to type.
+    title: 'Setup',
     sub: step.title,
     hints,
     width: width - 2,

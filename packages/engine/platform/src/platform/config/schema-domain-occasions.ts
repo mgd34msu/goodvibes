@@ -54,7 +54,7 @@ export const occasionsConfigSettings: ConfigSettingDefinition[] = [
       'The hours a nudge may arrive, HH:MM-HH:MM, reckoned in daemon.timezone. 08:00–22:00 because those hours are generally fine and anything outside them probably is not. Outside this window nothing is dropped, it waits. An empty or unreadable value means no restriction rather than permanent silence, so a typo cannot switch the feature off invisibly.',
   },
   {
-    key: 'occasions.nudgeChannel',
+    key: 'occasions.nudgeChannel', valueKind: 'endpoint',
     label: 'Where date reminders are sent',
     type: 'string',
     description:

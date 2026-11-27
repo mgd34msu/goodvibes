@@ -39,7 +39,7 @@ export const checkpointsConfigSettings: ConfigSettingDefinition[] = [
     description: 'Checkpoint the enclosing git repository (its top level) instead of only the working directory',
   },
   {
-    key: 'checkpoints.allowBroadRoot',
+    key: 'checkpoints.allowBroadRoot', valueKind: 'opening-switch',
     label: 'Allow checkpoints of your home folder or the whole disk',
     type: 'boolean',
     description: 'Allow checkpoints of a broad directory: the filesystem root, your home directory or ~/.goodvibes. Off, such a directory is not checkpointed',

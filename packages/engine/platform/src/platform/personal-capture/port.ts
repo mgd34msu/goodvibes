@@ -27,13 +27,13 @@ import type { OwnerProfileStore } from '../owner-profile/index.js';
  * nudge landed in a conversation and nowhere else, and the sweep, seeing no
  * answer, kept going.
  */
-export type CaptureOccasionsAccess = Pick<
-  OccasionsService,
-  'confirmOccasion' | 'confirmPlan' | 'list' | 'listPlans' | 'acknowledge'
->;
+export type CaptureOccasionsAccess = Pick<OccasionsService, 'confirmOccasion' | 'confirmPlan' | 'list' | 'acknowledge'> & {
+  /** The daemon's own service answers at once; a program asking the daemon over the wire answers later. */
+  readonly listPlans: () => ReturnType<OccasionsService['listPlans']> | Promise<ReturnType<OccasionsService['listPlans']>>;
+};
 
 /** The profile operations capture needs: set a declared field, append a prose fact. */
-export type CaptureProfileAccess = Pick<OwnerProfileStore, 'set' | 'append' | 'get' | 'status'>;
+export type CaptureProfileAccess = Pick<OwnerProfileStore, 'set' | 'append'>;
 
 export interface PersonalCapturePort {
   readonly occasions: CaptureOccasionsAccess;

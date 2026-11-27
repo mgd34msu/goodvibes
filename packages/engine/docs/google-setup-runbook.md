@@ -8,17 +8,11 @@ Say "connect my Google account". That is the whole of it.
 
 The agent works out the shortest route on its own: a credential already stored, an OAuth client that only needs your consent, or the gcloud CLI for the project and APIs. It asks you for at most one thing: opening a consent link and approving it. It reports what it is doing at every step, hands you only the pages that must genuinely be yours, and finishes by reading your mail and your calendar to prove the connection works.
 
-Where a step needs a value only you can see, it says how to hand it over: the private calendar address with `/google calendar-address <url>`, and an OAuth client (the id and secret Google shows once when you create it) with `/google client <client-id> <client-secret>` or by naming the downloaded client JSON. Each goes straight to the encrypted store; a client secret never passes through the model.
+Where a step needs a value only you can see, it says how to hand it over, on the Google tab of Mail, calendar and channels (the menu, `Ctrl+G` then `m`): the private calendar address with "calendar by private address" (`l`), and an OAuth client (the id and secret Google shows once when you create it) with "use your client id and secret" (`i`) or "use your client file" (`f`) for the downloaded client JSON. Each goes straight to the encrypted store; a client secret never passes through the model.
 
 <details><summary>Self-service equivalents</summary>
 
-These exist for anyone who prefers driving it themselves. They are not the intended route, and nothing in the flow will tell you to run one.
-
-```
-/google connect     # work out the route and connect
-/google status      # what is connected, proven by use
-/google reauthorize # a fresh consent covering every scope
-```
+These exist for anyone who prefers driving it themselves. They are not the intended route, and nothing in the flow will tell you to press one. On the Google tab: `c` connect (works out the route and connects), `k` check it (what is connected, proven by use), `a` ask for consent again (a fresh consent covering every scope). There is no `/google`.
 
 </details>
 

@@ -1,13 +1,18 @@
 #!/usr/bin/env bun
+// First, before any other module loads: this process turns private (utils/private-from-start.ts).
+import '@goodvibes/engine/platform/platform/utils/private-from-start';
 import { installedDataWriterAdmission } from './runtime/native-data-writer.ts';
 import { installedReaderCommand } from '@goodvibes/engine/platform/platform/runtime/self-update';
 import { COMPILED_VERSION } from './version.ts';
 import { metadataCliResult } from './cli/metadata.ts';
 import { writeExitingStdoutLine, writeFatalLine } from './utils/fatal-boot-write.ts';
 import { exemptLoopbackFromProxy } from '@goodvibes/engine/transport-http/paths';
+import { keepProcessPrivate } from '@goodvibes/engine/platform/platform/utils/process-privacy';
 
 // Requests to this machine never go through a proxy, from the first one on.
 exemptLoopbackFromProxy();
+// No other process of the account (a model's command among them) reads this one's environment or memory.
+keepProcessPrivate();
 
 // Informational CLI commands need no runtime, profile, provider, or terminal,
 // and they answer even when the installed image could not be admitted: that

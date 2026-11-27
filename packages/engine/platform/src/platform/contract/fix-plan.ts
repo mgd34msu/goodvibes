@@ -107,7 +107,7 @@ export function buildFixPlannerRequest(brief: FixBrief, repair?: { readonly prob
   ];
   if (brief.nativeSource !== undefined) sections.push('## Immutable native source\nPreserve this complete goal and ordered criteria; repair only derived work.\n' + JSON.stringify(nativeContractTaskSource(brief.nativeSource)));
   if (brief.conflict !== undefined) {
-    sections.push(`## Merge conflict\nThe work on branch ${brief.conflict.branch} conflicts with the contract's branch in: ${brief.conflict.files.join(', ')}. Bring that branch's changes in (git merge ${brief.conflict.branch}) and resolve the conflicts so both sides' behaviour is kept.`);
+    sections.push(`## Merge conflict\nThe work on branch ${brief.conflict.branch} conflicts with the contract's branch in: ${brief.conflict.files.join(', ')}. Plan one unit that resolves it and lists those files. Before that unit's agent starts, the host brings that branch in (git merge ${brief.conflict.branch}) in the unit's own tree, so each of those files holds both sides between conflict markers; the unit edits them so both sides' behaviour is kept and no conflict marker is left, and the host finishes the merge. The unit runs no git command.`);
   }
   if (brief.lastNudges.length > 0) sections.push('## The last corrections sent\n' + brief.lastNudges.map((text) => `---\n${text}`).join('\n'));
   if (brief.gateFailures.length > 0) sections.push('## Failing gates\n' + brief.gateFailures.join('\n\n'));
@@ -205,12 +205,16 @@ export function buildFixGroup(brief: FixBrief, round: number, planned: PlannedGr
   })));
   const units = planned.units.map((unit, index): ContractUnit => {
     const id = idOf.get(unit.id)!;
+    // The first unit of a conflict's repair is the one whose tree the host brings the other branch into (runner.ts).
+    const resolves = brief.conflict !== undefined && index === 0;
     return {
       id,
       groupId,
       title: unit.title,
       goal: unit.goal,
-      brief: unit.brief,
+      brief: resolves
+        ? `${unit.brief}\n\nThe host has brought branch ${brief.conflict!.branch} into this tree: ${brief.conflict!.files.join(', ')} hold both sides between conflict markers (<<<<<<<, =======, >>>>>>>). Edit them so both sides' behaviour is kept and no marker is left. Run no git command: the host finishes the merge when your turn ends.`
+        : unit.brief,
       role: unit.role as UnitRole,
       dependsOn: specs[index]!.dependsOn ?? [],
       files: [...unit.files],
@@ -240,7 +244,8 @@ export function buildFixGroup(brief: FixBrief, round: number, planned: PlannedGr
     title: planned.title,
     goal: planned.goal,
     kind: 'fix',
-    repairs: { scope: brief.scope, targetId: brief.targetId, criterionIds: [...brief.requiredIds] },
+    repairs: { scope: brief.scope, targetId: brief.targetId, criterionIds: [...brief.requiredIds],
+      ...(brief.conflict === undefined ? {} : { conflict: { branch: brief.conflict.branch, files: [...brief.conflict.files] } }) },
     dependsOn: [],
     criteria: [],
     unitIds: units.map((unit) => unit.id),

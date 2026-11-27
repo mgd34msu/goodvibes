@@ -16,6 +16,7 @@
 import type { ConfigKey, ConfigSetting } from '../../config/schema-types.js';
 import type { ConfigManager } from '../../config/manager.js';
 import { readResolvedSettingLookups } from '../../runtime/settings/control-plane.js';
+import { machineManagedLockFolders, managedLockRefusalText, readManagedLock, readManagedLocks } from '../../runtime/settings/host-setting-policy-read.js';
 import { noteListChanged } from '../../runtime/list-changes.js';
 import { PROGRAM_LIST_SETTINGS } from '../../runtime/program-host-settings.js';
 import { isDaemonOwnedConfigKey } from '../../config/config-ownership.js';
@@ -23,10 +24,13 @@ import { configKeyFacts, isProtectedConfigValue } from '../../config/config-key-
 import { CONFIG_SCHEMA } from '../../config/schema.js';
 import { isSecretConfigKey } from '../../config/secret-backed-config.js';
 import { localOwnerActor } from '@goodvibes/engine/daemon-api/http-policy';
-import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
+import { mkdirSync, writeFileSync } from 'node:fs';
 import { dirname } from 'node:path';
+import { readCallerJson } from '../path-inputs.js';
 import { CapabilityRefusal, type ActionValues, type CapabilityCaller, type CapabilityDefinition, type InputDescription, type ListName } from '../types.js';
 import type { ProgramSettingsCapabilityServices } from './program-settings.js';
+import { splitIncomingSettings } from '../../support/setup-transfer.js';
+import { bringsSecurity, heldBackLines, incomingSecurityInput } from './incoming-settings.js';
 
 type Services = ProgramSettingsCapabilityServices;
 type Def = CapabilityDefinition<Services>;
@@ -184,6 +188,39 @@ function settingFactsReader(config: ConfigManager): (key: string) => SettingFact
   };
 }
 
+/**
+ * A write of a setting locked as managed anywhere on this machine (host-setting-policy-read.ts readManagedLocks), refused
+ * before anything is asked: at `capabilities.run` before the owner is put a question, in the program's `capability_run`
+ * before its gate decides it. The write's own settings manager refuses it again with the same sentence.
+ */
+export function lockedSettingRefusal(key: string | undefined): CapabilityRefusal | undefined {
+  if (!key) return undefined;
+  let lock: ReturnType<typeof readManagedLock>;
+  try { lock = readManagedLock(key, machineManagedLockFolders()); }
+  catch (error) { return new CapabilityRefusal(`Nothing was changed: ${errorText(error)}`, undefined, 'CONFIG_MANAGED', 403); }
+  return lock ? new CapabilityRefusal(managedLockRefusalText(lock, isSecretConfigKey(key)), `Ask the owner: only he removes the lock ${lock.source} set`, 'CONFIG_MANAGED', 403) : undefined;
+}
+
+/**
+ * A file of settings (an import, a sync bundle) that holds a setting locked as managed: refused whole, before anything
+ * is asked, with each lock's sentence. `differs` says whether the file's value would change the key (a pull leaves a
+ * value equal to the present one alone); absent, every locked key in the file counts.
+ */
+export function lockedFileSettingsRefusal(file: string, entries: readonly { readonly key: string; readonly value: unknown }[],
+  differs: (key: string, value: unknown) => boolean = () => true): CapabilityRefusal | undefined {
+  let locks: ReturnType<typeof readManagedLocks>;
+  try { locks = readManagedLocks(machineManagedLockFolders()); }
+  catch (error) { return new CapabilityRefusal(`Nothing was applied from ${file}: ${errorText(error)}`, undefined, 'CONFIG_MANAGED', 403); }
+  const held = entries.flatMap(({ key, value }) => {
+    const lock = locks.get(key);
+    return lock && differs(key, value) ? [managedLockRefusalText(lock, isSecretConfigKey(key))] : [];
+  });
+  return held.length > 0
+    ? new CapabilityRefusal(`Nothing was applied from ${file}: it holds ${held.length === 1 ? 'a setting' : `${held.length} settings`} locked as managed. ${held.join(' ')}`,
+      'Take the locked settings out of the file, or ask the owner to remove the lock', 'CONFIG_MANAGED', 403)
+    : undefined;
+}
+
 /** A program's own setting changed through the daemon: every screen showing that program's settings reads them again. */
 function programSettingChanged(key: string): void {
   noteListChanged({ list: 'settings', change: 'changed', id: key });
@@ -248,6 +285,11 @@ export const SETTINGS_SET: Def = {
   touches: 'this-machine', lasts: 'kept', risk: 'none', undoneBy: 'reset',
   // Asked first only when the new value moves the setting the way that loosens it (sandbox off, a listener opened).
   loosensIf: (values) => Boolean(values.key) && !isSecretConfigKey(values.key!) && settingChangeMayLoosen(values.key!, settingValueOf(values.value ?? '')),
+  // A setting that holds a credential: its new value is a secret written to the secret store (the writes-a-secret
+  // class of the one owner decision), so anyone but the owner himself is put to him, once, before it runs.
+  secretWhen: { input: 'key', values: CONFIG_SCHEMA.filter((setting) => isSecretConfigKey(setting.key)).map((setting) => setting.key) },
+  // A locked setting is refused before any question.
+  check: (values) => lockedSettingRefusal(values.key),
   question: 'Set {key} to {value}?',
   example: { key: 'display.themeMode', value: 'light' },
   async run(values, services, caller) {
@@ -297,6 +339,8 @@ export const SETTINGS_RESET: Def = {
     // The card's risk line beside it says "GoodVibes keeps no copy." (a run that cannot be undone).
     sentence: 'The secret stored for {key} is removed from the secret store; only giving it again brings it back.',
   },
+  // A locked setting is refused before any question.
+  check: (values) => lockedSettingRefusal(values.key),
   question: 'Put {key} back to its default?',
   example: { key: 'display.showThinking' },
   async run(values, services, caller) {
@@ -378,14 +422,14 @@ const VOICE_FILE = (help: string): InputDescription => ({
   id: 'path', label: 'File', help, kind: 'path', freeTextReason: 'a file path', required: true, typed: { position: 1 },
 });
 
-function readVoiceFile(target: string): unknown {
-  if (!existsSync(target)) throw new CapabilityRefusal(`File not found: ${target}; nothing was read.`);
-  try { return JSON.parse(readFileSync(target, 'utf-8')); } catch (error) { throw new CapabilityRefusal(`Could not read the voice settings file: ${errorText(error)}.`); }
+/** A voice settings file; never the system's or the parser's words (capabilities/path-inputs.ts). */
+function readVoiceFile(target: string, caller: CapabilityCaller): unknown {
+  return readCallerJson(target, 'a voice settings file', caller, 'Nothing was read.');
 }
 
 export const VOICE_EXPORT: Def = {
   capability: { id: 'voice.export', group: 'system', home: 'daemon', repeat: 'safe' },
-  actionId: 'export', label: 'Save your voice settings to a file', word: 'export', inputs: [VOICE_FILE('Where to write them'), PROGRAM_INPUT],
+  actionId: 'export', label: 'Save your voice settings to a file', word: 'export', inputs: [{ ...VOICE_FILE('Where to write them'), file: 'written' }, PROGRAM_INPUT],
   sentence: 'The voice settings you changed from their defaults are written to {path}.', done: '',
   touches: 'this-machine', lasts: 'kept', risk: 'none', example: { path: 'voice.json' },
   async run(values, services, caller) {
@@ -412,30 +456,97 @@ export const VOICE_INSPECT: Def = {
   sentence: 'Shows the settings in {path} without applying them.', done: '',
   touches: 'reads', lasts: 'not-a-change', risk: 'none', example: { path: 'voice.json' },
   async run(values, services, caller) {
-    return { text: inspectVoiceBundle(readVoiceFile(services.programSettings.resolvePath(caller, values.path!))) };
+    return { text: inspectVoiceBundle(readVoiceFile(services.programSettings.resolvePath(caller, values.path!), caller)) };
   },
 };
 
 export const VOICE_IMPORT: Def = {
   capability: { id: 'voice.import', group: 'system', home: 'daemon', repeat: 'safe' },
-  actionId: 'import', label: 'Apply voice settings from a file', word: 'import', inputs: [VOICE_FILE('The file to apply'), PROGRAM_INPUT],
-  sentence: 'The voice settings in {path} are applied until you change it.', done: '',
+  actionId: 'import', label: 'Apply voice settings from a file', word: 'import', inputs: [VOICE_FILE('The file to apply'), incomingSecurityInput('Apply them too'), PROGRAM_INPUT],
+  sentence: 'The voice settings in {path} are applied until you change it; one that loosens a protection only if you choose to apply those too.', done: '',
   touches: 'this-machine', lasts: 'kept', risk: 'none', example: { path: 'voice.json' },
   async run(values, services, caller) {
     const program = programOf(values, caller);
     const config = services.programSettings.config({ ...caller, program });
     const target = services.programSettings.resolvePath(caller, values.path!);
-    const read = readVoiceBundle(readVoiceFile(target));
+    const read = readVoiceBundle(readVoiceFile(target, caller));
     if ('problem' in read) throw new CapabilityRefusal('Nothing was applied. ' + read.problem);
-    const changes = Object.entries(read.bundle.settings).map(([key, setting]) => ({ key: key as ConfigKey, value: setting }));
-    const result = config.setMany(changes, localOwnerActor());
+    // One rule for every import of settings: what loosens a protection is held back unless chosen (incoming-settings.ts).
+    const split = splitIncomingSettings((key: ConfigKey) => config.get(key),
+      Object.entries(read.bundle.settings).map(([key, setting]) => ({ key: key as ConfigKey, value: setting })), bringsSecurity(values));
+    const held = heldBackLines(split.heldBack, 'apply the file again choosing to apply them too');
+    if (split.apply.length === 0) {
+      return { text: [`No voice setting was applied for ${PROGRAM_WORDS[program]} from ${target}.`, ...held].join('\n'), data: { program, saved: 0, heldBack: split.heldBack.map((change) => change.key) } };
+    }
+    const result = config.setMany(split.apply.map((change) => ({ key: change.key, value: change.next })), localOwnerActor());
     if (!result.ok) throw new CapabilityRefusal(`Voice settings not applied: ${result.refusal.reason}`, result.refusal.next[0]);
-    return { text: `Voice settings applied for ${PROGRAM_WORDS[program]}: ${result.saved.length} setting${result.saved.length === 1 ? '' : 's'} from ${target}.`, data: { program, saved: result.saved.length } };
+    return {
+      text: [`Voice settings applied for ${PROGRAM_WORDS[program]}: ${result.saved.length} setting${result.saved.length === 1 ? '' : 's'} from ${target}.`, ...held].join('\n'),
+      data: { program, saved: result.saved.length, heldBack: split.heldBack.map((change) => change.key) },
+    };
+  },
+};
+
+// ---------------------------------------------------------------------------
+// The terminal app's settings, given to the Agent: settings.copy-from-terminal-app
+// ---------------------------------------------------------------------------
+
+/** The families of settings the Agent takes from the terminal app: the ones both programs read the same way. */
+const COPIED_FROM_THE_TERMINAL_APP = ['display.', 'provider.', 'behavior.', 'storage.', 'permissions.', 'ui.', 'tts.', 'surfaces.', 'helper.', 'tools.', 'release.', 'automation.'] as const;
+
+/**
+ * A project's settings file travels with a cloned repository, so a value it holds for these is never copied: it would
+ * change what may run, whether GoodVibes asks first, or where data goes. The same setting in your own settings is.
+ */
+const NEVER_FROM_A_PROJECT = ['permissions.', 'behavior.hitlMode', 'provider.', 'tools.', 'surfaces.', 'automation.', 'helper.'] as const;
+
+export const SETTINGS_COPY_FROM_TERMINAL_APP: Def = {
+  capability: { id: 'settings.copy-from-terminal-app', group: 'system', home: 'daemon', repeat: 'safe' },
+  actionId: 'copy-from-terminal-app', label: 'Give the Agent the settings the terminal app has', word: 'copy-from-terminal-app',
+  inputs: [incomingSecurityInput('Copy them too')],
+  sentence: 'Each setting you set in the terminal app (in your own settings, or this project\'s where a project may set it) that the Agent holds differently is set the same in the Agent, until you change it; one that loosens a protection is copied only if you choose to copy those too.', done: '',
+  touches: 'this-machine', lasts: 'kept', risk: 'none', example: {},
+  async run(values, services, caller) {
+    const from = services.programSettings.config({ ...caller, program: 'tui' });
+    const to = services.programSettings.config({ ...caller, program: 'agent' });
+    const incoming: { key: ConfigKey; value: unknown }[] = [];
+    for (const setting of CONFIG_SCHEMA) {
+      const key = setting.key;
+      if (setting.deprecated || isDaemonOwnedConfigKey(key) || !COPIED_FROM_THE_TERMINAL_APP.some((family) => key.startsWith(family))) continue;
+      // Only what the terminal app has set itself: its shipped default, and the tiers both programs read, are the Agent's already.
+      const tier = from.sourceOf(key);
+      if (tier !== 'global' && (tier !== 'project' || NEVER_FROM_A_PROJECT.some((family) => key.startsWith(family)))) continue;
+      let value: unknown;
+      try { value = from.get(key); } catch { continue; }
+      let current: unknown;
+      try { current = to.get(key); } catch { current = undefined; }
+      if (JSON.stringify(value) !== JSON.stringify(current)) incoming.push({ key, value });
+    }
+    // One rule for every import of settings: what loosens a protection is held back unless chosen (incoming-settings.ts).
+    const split = splitIncomingSettings((key: ConfigKey) => to.get(key), incoming, bringsSecurity(values));
+    const held = heldBackLines(split.heldBack, 'copy again choosing to copy them too');
+    if (split.apply.length === 0) {
+      return {
+        text: [held.length > 0 ? 'No setting was copied to the Agent.' : 'The Agent already has every setting the terminal app has; nothing was copied.', ...held].join('\n'),
+        data: { copied: [], heldBack: split.heldBack.map((change) => change.key) },
+      };
+    }
+    const result = to.setMany(split.apply.map((change) => ({ key: change.key, value: change.next })), localOwnerActor());
+    if (!result.ok) throw new CapabilityRefusal(`Nothing was copied: ${result.refusal.reason}`, result.refusal.next[0]);
+    for (const change of split.apply) programSettingChanged(change.key);
+    return {
+      text: [
+        `Copied ${split.apply.length} setting${split.apply.length === 1 ? '' : 's'} from the terminal app to the Agent:`,
+        ...split.apply.map((change) => `  ${change.key} = ${JSON.stringify(shown(change.key, change.next))}`),
+        ...held,
+      ].join('\n'),
+      data: { copied: split.apply.map((change) => change.key), heldBack: split.heldBack.map((change) => change.key) },
+    };
   },
 };
 
 /** Every capability of this file, with the command it came from. */
 export const SYSTEM_SETTINGS_CAPABILITIES: readonly { readonly definition: Def; readonly command: { readonly name: string; readonly title: string } }[] = [
-  ...[SETTINGS_LIST, SETTINGS_GET, SETTINGS_SET, SETTINGS_RESET].map((definition) => ({ definition, command: { name: 'settings', title: 'Settings' } })),
+  ...[SETTINGS_LIST, SETTINGS_GET, SETTINGS_SET, SETTINGS_RESET, SETTINGS_COPY_FROM_TERMINAL_APP].map((definition) => ({ definition, command: { name: 'settings', title: 'Settings' } })),
   ...[VOICE_EXPORT, VOICE_INSPECT, VOICE_IMPORT].map((definition) => ({ definition, command: { name: 'voice', title: 'Voice' } })),
 ];

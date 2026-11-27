@@ -219,8 +219,8 @@ export class ContractOperatorError extends Error {
 }
 
 export interface ContractOperatorServiceDeps {
-  /** The daemon's own runner. */
-  readonly runner: OperatorContractRunner;
+  /** The daemon's own runner; null where the graph runs no contracts (a terminal program). */
+  readonly runner: OperatorContractRunner | null;
   /** Where a contract started without a workspace or a hosted session works. */
   readonly workingDirectory: string;
 }
@@ -372,7 +372,7 @@ export function createContractOperatorService(deps: ContractOperatorServiceDeps)
   const nativeHolding = (contractId: string): Pick<ContractRunner, 'get' | 'list' | 'reply'> | undefined =>
     [...nativeRunners].find((runner) => runner.get(contractId) !== null);
   let dispatcher: OperatorWorkDispatcher | null = null;
-  const runners = (): readonly Pick<ContractRunner, 'get' | 'list' | 'reply' | 'held'>[] => [deps.runner, ...nativeRunners, ...(hostedRunners?.runners() ?? [])];
+  const runners = (): readonly Pick<ContractRunner, 'get' | 'list' | 'reply' | 'held'>[] => [...(deps.runner ? [deps.runner] : []), ...nativeRunners, ...(hostedRunners?.runners() ?? [])];
   /** Why a stored contract is held without running, from the runner holding it; null when none holds it. */
   const holdOf = (contractId: string): ContractHold | null => {
     for (const runner of runners()) {
@@ -465,6 +465,7 @@ export function createContractOperatorService(deps: ContractOperatorServiceDeps)
     }
     const origin: ContractOrigin = hosted === null ? 'external' : 'hosted';
     const runner = hosted?.runner ?? deps.runner;
+    if (!runner) throw new ContractOperatorError('This program runs no contracts: work runs on the daemon. Ask for it in Work.', 'CONTRACT_NATIVE', 409);
     const startInput: StartContractInput = {
       ask,
       ...(hosted?.selectedModel === undefined ? {} : { selectedModel: hosted.selectedModel }),

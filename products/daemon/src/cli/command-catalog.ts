@@ -170,7 +170,8 @@ export const GLOBAL_FLAGS: readonly DaemonCommandFlagSpec[] = [
     field: 'workingDir',
     kind: 'string',
     valueName: 'dir',
-    summary: 'The directory the daemon treats as its workspace.',
+    // Read only to refuse it with one sentence (cli/configuration.ts DAEMON_HAS_NO_WORKING_FOLDER).
+    summary: 'Refused: the daemon has no working folder; each program and each schedule names its own project.',
   },
   { tokens: ['--help', '-h'], field: 'help', kind: 'boolean', summary: 'Print help and exit 0.' },
   { tokens: ['--version', '-v'], field: 'version', kind: 'boolean', summary: 'Print the version and exit 0.' },

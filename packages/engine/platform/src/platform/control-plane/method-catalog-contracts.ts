@@ -105,11 +105,15 @@ export const builtinGatewayContractMethodDescriptors: readonly GatewayMethodDesc
       { code: 'IDEMPOTENCY_KEY_IN_FLIGHT', status: 409, meaning: 'Another process is still starting a contract with this key; send the same request again in a few seconds.' },
       { code: 'CONTRACT_KEY_UNRECORDED', status: 503, meaning: 'The key could not be recorded in the project\'s contract directory, so nothing was started; make the directory writable and retry.' },
     ],
+    // Its agents work in this folder: a project the caller may name (control-plane dispatch).
+    workFolders: ['workspaceRoot'],
     inputSchema: CONTRACTS_START_INPUT_SCHEMA,
     outputSchema: CONTRACTS_START_OUTPUT_SCHEMA,
   }),
   methodDescriptor({
     id: 'contracts.dispatch',
+    // Its hosted session works in this folder: a project the caller may name (control-plane dispatch).
+    workFolders: ['workspaceRoot'],
     replay: { in: 'body', name: 'idempotencyKey', behavior: 'A repeat by the same caller with the same `idempotencyKey`, `ask` and workspace returns the first dispatch\'s contract instead of starting a second one, and creates no second session; the same key with a different ask or workspace is refused with IDEMPOTENCY_KEY_REUSED. Keys are kept with the workspace\'s contract store per caller, as for contracts.start, so a retry after a daemon restart, or through another process on the same project, still returns the first contract. A dispatch whose key cannot be recorded is refused with CONTRACT_KEY_UNRECORDED and starts nothing; a repeat while another process is still starting the first is refused with IDEMPOTENCY_KEY_IN_FLIGHT.' },
     title: 'Dispatch Contract Work',
     description: 'Start a contract for `ask` (the person\'s words verbatim) in a hosted session created for it, in `workspaceRoot` (absolute, inside the daemon\'s working directory or a registered workspace, the folders sessions.hosted.workspaces lists) or the daemon\'s working directory. The contract\'s questions arrive as that session\'s replies, and the session ends when the contract passes, fails or is cancelled. Returns at once with the contract and its owner agent id; read it with `contracts.get`, stop it with `contracts.cancel`, answer it with `contracts.reply`. `idempotencyKey` returns the first dispatch\'s contract to a retry by the same caller, also after a daemon restart, and the session made for it still ends when it settles. 400 with INVALID_ARGUMENT when `ask` is empty or `workspaceRoot` is relative or outside those folders; 409 with NOT_HOSTING when this daemon hosts no sessions (use `contracts.start`).',

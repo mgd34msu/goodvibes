@@ -33,28 +33,34 @@
  */
 import { isDaemonOwnedConfigKey } from '../../config/index.js';
 import { logger, summarizeError } from '../../utils/index.js';
-import type { DaemonVerbCaller } from './daemon-verbs.js';
+import { pressInvokeOptions, type DaemonVerbCaller } from './daemon-verbs.js';
+import type { DaemonWritePress } from '../../config/manager.js';
 import {
   applyRemoteSettingsPrecondition, assertRemoteSettingsPrecondition, inspectRemoteSettingsPrecondition,
   type RemoteSettingsPrecondition, type RemoteSettingsPreconditionFacts, type RemoteSettingsReceipt,
   type SettingsPreconditionRequest,
 } from '../../config/settings-precondition-client.js';
-import { assertRemoteSettingsImportPrecondition, inspectRemoteSettingsImportPrecondition,
-  type RemoteSettingsImportPrecondition, type RemoteSettingsImportPreconditionFacts, type SettingsImportPreconditionRequest,
-  type RemoteSettingsImportRestriction } from '../../config/settings-import-precondition-client.js';
+
+/**
+ * A write the daemon put to the owner instead of applying (`202` `OWNER_APPROVAL_PENDING`: a value that loosens a
+ * protection, sent with no press of his) is not written: said as that, so the caller restores the value it showed
+ * and never reports it saved. Shared with the credentials client.
+ */
+export function throwIfPutToOwner(answer: unknown, what: string): void {
+  if (answer === null || typeof answer !== 'object') return;
+  const held = answer as { readonly code?: unknown; readonly approvalId?: unknown };
+  if (held.code !== 'OWNER_APPROVAL_PENDING') return;
+  throw new Error(`${what} was not changed yet: it is waiting for the owner's answer in Waiting for you (approval ${String(held.approvalId ?? '')}); it applies when he approves it.`);
+}
 
 /** This is a deterministic owner capability, not an admission grant. */
 export interface PreparedDaemonSettingsClient {
-  capture(request: SettingsPreconditionRequest): Promise<RemoteSettingsPrecondition>;
+  /** `press`: who decided the write (the person's press, the program's gate), sent with the capture and its apply. */
+  capture(request: SettingsPreconditionRequest, press?: DaemonWritePress): Promise<RemoteSettingsPrecondition>;
   inspect(handle: RemoteSettingsPrecondition): RemoteSettingsPreconditionFacts;
   assertCurrent(handle: RemoteSettingsPrecondition): void;
   /** The receipt, with the daemon's or transport's refusal (`failure`) and `receiptUnreadable` when the answer explains itself. */
   apply(handle: RemoteSettingsPrecondition): Promise<RemoteSettingsReceipt>;
-}
-export interface PreparedDaemonSettingsImportClient {
-  capture(request: SettingsImportPreconditionRequest, restriction?: RemoteSettingsImportRestriction): Promise<RemoteSettingsImportPrecondition>;
-  inspect(handle: RemoteSettingsImportPrecondition): RemoteSettingsImportPreconditionFacts;
-  assertCurrent(handle: RemoteSettingsImportPrecondition): void;
 }
 
 /** Re-exported so call sites classify a key through one import, not two. */
@@ -63,7 +69,6 @@ export { isDaemonOwnedConfigKey };
 export interface DaemonConfigClient {
   /** Absent on old/unbound transports; callers must fail closed, never fall back. */
   readonly preparedSettings?: PreparedDaemonSettingsClient;
-  readonly preparedImport?: PreparedDaemonSettingsImportClient;
   /** True when this key's value lives in the daemon's own settings tier. */
   ownsKey(key: string): boolean;
   /** Whether the daemon can take a write now (no request is made). */
@@ -79,18 +84,19 @@ export interface DaemonConfigClient {
    * no daemon is reachable, a write that configures nothing must not report
    * success.
    */
-  set(key: string, value: unknown): Promise<void>;
+  set(key: string, value: unknown, press?: DaemonWritePress): Promise<void>;
   /**
    * Write several daemon-owned keys as one update (`config.setMany`): the
    * daemon admits every entry before it writes any, so a refusal leaves all of
    * them as they were. Rejects, like `set`, when no daemon is reachable.
+   * `press`: who decided the write, sent with it (config/manager.ts `DaemonWritePress`).
    */
-  setMany(entries: readonly { readonly key: string; readonly value: unknown }[]): Promise<void>;
+  setMany(entries: readonly { readonly key: string; readonly value: unknown }[], press?: DaemonWritePress): Promise<void>;
   /**
    * Remove a daemon-owned key's explicit value so it reads as its default again
    * and follows later default changes. Absent on a client built before `config.reset`.
    */
-  reset?(key: string): Promise<void>;
+  reset?(key: string, press?: DaemonWritePress): Promise<void>;
   /** Read a daemon-owned key; `undefined` when the daemon could not answer. */
   get(key: string): Promise<unknown>;
   /** The daemon's whole resolved config snapshot, for a settings view that opens cold. */
@@ -115,22 +121,6 @@ function readDottedPath(snapshot: Record<string, unknown> | null, key: string): 
 }
 
 export function createDaemonConfigClient(verbs: DaemonVerbCaller): DaemonConfigClient {
-  const captureImport = verbs.captureSettingsImportPrecondition?.bind(verbs);
-  const importHandles = new WeakSet<RemoteSettingsImportPrecondition>();
-  const preparedImport: PreparedDaemonSettingsImportClient | undefined = captureImport ? Object.freeze({
-    capture: async (request: SettingsImportPreconditionRequest, restriction?: RemoteSettingsImportRestriction) => {
-      if (!request.settings.length || request.settings.some(setting => !isDaemonOwnedConfigKey(setting.key))) throw new Error('Settings are not owned by the connected daemon.');
-      const handle = await captureImport(request, restriction); importHandles.add(handle); return handle;
-    },
-    inspect: (handle: RemoteSettingsImportPrecondition) => {
-      if (!importHandles.has(handle)) throw new Error('Settings import owner unavailable: this capture was not issued by this client or is no longer held. Nothing was applied; capture the import again.');
-      return inspectRemoteSettingsImportPrecondition(handle);
-    },
-    assertCurrent: (handle: RemoteSettingsImportPrecondition) => {
-      if (!importHandles.has(handle)) throw new Error('Settings import owner unavailable: this capture was not issued by this client or is no longer held. Nothing was applied; capture the import again.');
-      assertRemoteSettingsImportPrecondition(handle);
-    },
-  }) : undefined;
   const capture = verbs.captureSettingsPrecondition?.bind(verbs);
   const handles = new WeakSet<RemoteSettingsPrecondition>();
   const assertCurrent = (handle: RemoteSettingsPrecondition): void => {
@@ -138,9 +128,9 @@ export function createDaemonConfigClient(verbs: DaemonVerbCaller): DaemonConfigC
     assertRemoteSettingsPrecondition(handle);
   };
   const preparedSettings: PreparedDaemonSettingsClient | undefined = capture ? Object.freeze({
-    capture: async (request: SettingsPreconditionRequest) => {
+    capture: async (request: SettingsPreconditionRequest, press?: DaemonWritePress) => {
       if (!isDaemonOwnedConfigKey(request.key)) throw new Error('Setting is not owned by the connected daemon.');
-      const handle = await capture(request); handles.add(handle); return handle;
+      const handle = await capture(request, press); handles.add(handle); return handle;
     },
     inspect: (handle: RemoteSettingsPrecondition) => {
       if (!handles.has(handle)) throw new Error('Settings owner precondition unavailable: this capture was not issued by this client or is no longer held. Nothing was applied; capture the setting again.');
@@ -150,35 +140,34 @@ export function createDaemonConfigClient(verbs: DaemonVerbCaller): DaemonConfigC
     apply: async (handle: RemoteSettingsPrecondition) => { assertCurrent(handle); return await applyRemoteSettingsPrecondition(handle); },
   }) : undefined;
   return {
-    ...(preparedImport ? { preparedImport } : {}),
     ...(preparedSettings ? { preparedSettings } : {}),
     ownsKey: (key) => isDaemonOwnedConfigKey(key),
     reachable: () => verbs.probe().available,
     thisMachine: () => verbs.probe().thisMachine !== false,
 
-    set: async (key, value) => {
+    set: async (key, value, press) => {
       const probe = verbs.probe();
       if (!probe.available) {
         throw new Error(`'${key}' is a daemon-owned setting and ${probe.reason}`);
       }
-      // The route takes a body envelope, not a flat pair.
-      await verbs.invoke('config.set', { key, value });
+      // The route takes a body envelope, not a flat pair. Who decided it goes with it.
+      throwIfPutToOwner(await verbs.invoke('config.set', { key, value }, pressInvokeOptions(press)), key);
     },
 
-    setMany: async (entries) => {
+    setMany: async (entries, press) => {
       const probe = verbs.probe();
       if (!probe.available) {
         throw new Error(`'${entries.map(entry => entry.key).join(', ')}' ${entries.length === 1 ? 'is a daemon-owned setting' : 'are daemon-owned settings'} and ${probe.reason}`);
       }
-      await verbs.invoke('config.setMany', { entries: entries.map(({ key, value }) => ({ key, value })) });
+      throwIfPutToOwner(await verbs.invoke('config.setMany', { entries: entries.map(({ key, value }) => ({ key, value })) }, pressInvokeOptions(press)), entries.map(entry => entry.key).join(', '));
     },
 
-    reset: async (key) => {
+    reset: async (key, press) => {
       const probe = verbs.probe();
       if (!probe.available) {
         throw new Error(`'${key}' is a daemon-owned setting and ${probe.reason}`);
       }
-      await verbs.invoke('config.reset', { key });
+      throwIfPutToOwner(await verbs.invoke('config.reset', { key }, pressInvokeOptions(press)), key);
     },
 
     get: async (key) => {

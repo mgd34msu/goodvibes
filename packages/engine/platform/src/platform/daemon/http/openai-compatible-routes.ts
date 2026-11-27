@@ -8,6 +8,7 @@ import { serviceFailureStatus } from './error-response.js';
 import { DaemonBatchError } from '../../batch/types.js';
 import type { DaemonBatchJob } from '../../batch/types.js';
 import type { DaemonBatchManager } from '../../batch/manager.js';
+import { currentRecordReach } from '@goodvibes/engine/daemon-api';
 
 type JsonRecord = Record<string, unknown>;
 
@@ -24,6 +25,8 @@ export interface OpenAICompatibleRouteContext {
    * run live and its provider has a Batch API. Absent: every completion runs live.
    */
   readonly batch?: Pick<DaemonBatchManager, 'createJob' | 'getJob' | 'currentMode' | 'canBatch'> | undefined;
+  /** The authenticated principal of a request: who queues a completion, and the only caller but the owner who reads it. */
+  readonly callerPrincipal?: ((request: Request) => string | undefined) | undefined;
 }
 
 /** How a caller asks for one execution or the other; any other value is refused. */
@@ -206,7 +209,7 @@ async function handleChatCompletions(
 
   const queue = decideBatchExecution(context.batch, execution, resolved);
   if (queue instanceof Response) return queue;
-  if (queue) return queueChatCompletion(queue, resolved, prepared, maxTokens, headers, prefix, request.signal);
+  if (queue) return queueChatCompletion(queue, resolved, prepared, maxTokens, headers, prefix, request.signal, context.callerPrincipal?.(request));
 
   try {
     const response = await resolved.provider.chat({
@@ -609,10 +612,13 @@ async function queueChatCompletion(
   headers: Record<string, string>,
   prefix: string,
   signal: AbortSignal,
+  /** Who queued it (the authenticated principal): the job is its own. */
+  createdBy?: string | undefined,
 ): Promise<Response> {
   let job: DaemonBatchJob;
   try {
     job = await batch.createJob({
+      ...(createdBy ? { createdBy } : {}),
       provider: resolved.providerId,
       model: resolved.modelId,
       request: {
@@ -646,7 +652,11 @@ async function handleQueuedCompletion(
   let jobId: string;
   try { jobId = decodeURIComponent(rawId); }
   catch { return openAIError('Malformed completion id in path.', 400, 'invalid_request_error', 'invalid_id'); }
-  const job = context.batch ? await context.batch.getJob(jobId) : null;
+  const found = context.batch ? await context.batch.getJob(jobId) : null;
+  // A caller that is not the owner himself reads back only a completion it queued (control-plane/caller-reach.ts),
+  // answered as for no completion: another caller's is never said to exist.
+  const reach = currentRecordReach();
+  const job = found && (!reach || reach('batch-job', found.id, { project: null, ...(found.createdBy ? { madeBy: found.createdBy } : {}) })) ? found : null;
   if (!job) return openAIError(`No queued completion '${jobId}' was found.`, 404, 'not_found_error', 'not_found');
   return answerForJob(job, {}, prefix);
 }

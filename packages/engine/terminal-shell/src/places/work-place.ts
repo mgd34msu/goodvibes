@@ -21,7 +21,7 @@
  * the same declaration with nothing of its own.
  */
 import { WORK_AGENT_ACTIONS, WORK_AGENT_LISTS, type WorkAgentItem } from './work-agents-entries.js';
-import { definePlace, type PlaceAction, type PlaceDetailLine, type PlaceFollow, type PlaceItem, type PlaceList, type PlaceProgramName } from './place-types.js';
+import { definePlace, type PlaceAction, type PlaceDetailLine, type PlaceFollow, type PlaceItem, type PlaceList } from './place-types.js';
 
 /**
  * Where a piece of work stands. `step-failed` is the daemon's "a step failed" where the steps after it need its result;
@@ -218,7 +218,8 @@ function workDetail(item: Item): readonly PlaceDetailLine[] {
     ]),
     ...work.questions.map((question) => ({ label: 'It asks', text: question, tone: 'warning' as const })),
     ...(work.blocker ? [{ label: 'Held up by', text: work.blocker, tone: 'warning' as const }] : []),
-    ...work.attention.map((reason) => ({ label: 'Needs a look', text: reason, tone: 'warning' as const })),
+    // A reason the blocker line already says is not said twice (a waiting plan was both).
+    ...work.attention.filter((reason) => reason !== work.blocker).map((reason) => ({ label: 'Needs a look', text: reason, tone: 'warning' as const })),
     ...(work.budget ? [{ label: 'May spend', text: work.budget }] : []),
     { text: '' },
     { label: 'What you asked for', text: work.goal || work.title },
@@ -263,7 +264,8 @@ const workList: PlaceList<Item> = {
   noun: 'your work',
   source: { kind: 'daemon', method: 'capabilities.run', input: { id: 'work.list' }, items: liveWorks },
   follows: WORK_EVENTS,
-  empty: 'No work going on. Say what you want done in the conversation, or ask for new work here.',
+  // True in every program: the web view offers no "new work" key here (its Work page's New does it).
+  empty: 'No work going on. Say what you want done in a conversation, or ask for new work.',
   row: workRow,
   detail: workDetail,
 };
@@ -373,14 +375,14 @@ const LIVE: readonly WorkState[] = ['starting', 'interrupted', 'running', 'needs
 /** The step the work stopped at (its first, when several failed). */
 const failedStep = (item: Item): string => (item as WorkItem).failedSteps[0]?.id ?? '';
 const OPEN_TASK = ['queued', 'running', 'blocked'];
-/** The programs where a task can be changed: the Agent's tasks are read only. */
-const TASK_CHANGERS: readonly PlaceProgramName[] = ['tui', 'web'];
 
 const WORK_ACTIONS: readonly PlaceAction<Item>[] = [
   // Asking for work: what you want done and when it is done, written in the form or read from a file; or your own words.
   // On the Work tab only: they make a piece of work, the tab's kind of thing.
   { key: 'n', id: 'new-work', list: 'work', whole: true, capability: 'work.new', label: 'new work', form: true, firstOnEmpty: true },
-  { key: 'y', id: 'ask', list: 'work', whole: true, capability: 'work.request', label: 'ask in your own words' },
+  // The terminal app only: in the Agent the chat itself goes through the daemon's intake, and its `y` could only
+  // answer "say it in the chat" (products/agent/src/input/commands/work-runtime.ts `requests.unavailable`).
+  { key: 'y', id: 'ask', list: 'work', whole: true, capability: 'work.request', label: 'ask in your own words', programs: ['tui'] },
   // What has no answer yet: the work you asked for, and the message you typed.
   { key: 'v', id: 'check-sent', list: 'unanswered', states: ['sent-work'], capability: 'work.submission', label: 'check' },
   { key: 't', id: 'send-again', list: 'unanswered', states: ['sent-work'], capability: 'work.submission-retry', label: 'send again' },
@@ -420,20 +422,24 @@ const WORK_ACTIONS: readonly PlaceAction<Item>[] = [
   { key: 'M', id: 'as-markdown', list: 'checklist', whole: true, capability: 'work.checklist-markdown', label: 'as Markdown', notOnEmpty: true },
   { key: 'E', id: 'save-markdown', list: 'checklist', whole: true, capability: 'work.checklist-export', label: 'save as a file', notOnEmpty: true },
   // Tasks here: this program's own; the daemon's take only cancel and run again.
-  // The Agent's tasks are read only (products/agent tasks-runtime.ts `mutations.readOnly`): a key that changes a task
-  // is the terminal app's alone, never a control that can only refuse.
-  { key: 'k', id: 'add-task', list: 'tasks-here', whole: true, capability: 'work.task-add', label: 'add a task', programs: TASK_CHANGERS },
-  { key: 'P', id: 'background-commands', list: 'tasks-here', whole: true, capability: 'work.processes', label: 'background commands' },
+  // The terminal app and the Agent change their own tasks alike (each program's tasks-runtime.ts `mutations`).
+  { key: 'k', id: 'add-task', list: 'tasks-here', whole: true, capability: 'work.task-add', label: 'add a task', firstOnEmpty: true },
+  // The Agent only: the terminal app shows its background commands in Your agents (F2), and its `P` could only say so.
+  { key: 'P', id: 'background-commands', list: 'tasks-here', whole: true, capability: 'work.processes', label: 'background commands', programs: ['agent'] },
   { key: 'enter', id: 'task-detail', list: 'tasks-here', capability: 'work.task', label: 'details', fill: { task: 'id' } },
   { key: 'v', id: 'task-output', list: 'tasks-here', capability: 'work.task-output', label: 'what it produced', fill: { task: 'id' } },
-  { key: 's', id: 'start-task', list: 'tasks-here', states: ['queued'], capability: 'work.task-start', label: 'start', fill: { task: 'id' }, programs: TASK_CHANGERS },
-  { key: 'e', id: 'change-task', list: 'tasks-here', capability: 'work.task-change', label: 'change', fill: { task: 'id' }, programs: TASK_CHANGERS },
-  { key: 'o', id: 'task-done', list: 'tasks-here', states: OPEN_TASK, capability: 'work.task-done', label: 'done', fill: { task: 'id' }, programs: TASK_CHANGERS },
-  { key: 'F', id: 'task-failed', list: 'tasks-here', states: OPEN_TASK, capability: 'work.task-failed', label: 'mark failed', fill: { task: 'id' }, programs: TASK_CHANGERS },
-  { key: 'z', id: 'pause-task', list: 'tasks-here', states: ['running', 'queued'], capability: 'work.task-pause', label: 'pause', fill: { task: 'id' }, programs: TASK_CHANGERS },
-  { key: 'z', id: 'resume-task', list: 'tasks-here', states: ['blocked'], capability: 'work.task-resume', label: 'resume', fill: { task: 'id' }, programs: TASK_CHANGERS },
-  { key: 'x', id: 'cancel-task', list: 'tasks-here', states: OPEN_TASK, capability: 'work.task-cancel', label: 'cancel', fill: { task: 'id' }, programs: TASK_CHANGERS },
-  { key: 't', id: 'retry-task', list: 'tasks-here', states: ['failed', 'cancelled'], capability: 'work.task-retry', label: 'run again', fill: { task: 'id' }, programs: TASK_CHANGERS },
+  { key: 's', id: 'start-task', list: 'tasks-here', states: ['queued'], capability: 'work.task-start', label: 'start', fill: { task: 'id' } },
+  { key: 'e', id: 'change-task', list: 'tasks-here', capability: 'work.task-change', label: 'change', fill: { task: 'id' } },
+  { key: 'o', id: 'task-done', list: 'tasks-here', states: OPEN_TASK, capability: 'work.task-done', label: 'done', fill: { task: 'id' } },
+  { key: 'F', id: 'task-failed', list: 'tasks-here', states: OPEN_TASK, capability: 'work.task-failed', label: 'mark failed', fill: { task: 'id' } },
+  // Pausing, going on, cancelling and running again are the operator's interventions (runtime/ops/control-plane.ts),
+  // which both programs build the same way (terminal-shell/src/task-interventions.ts).
+  { key: 'z', id: 'pause-task', list: 'tasks-here', states: ['running', 'queued'], capability: 'work.task-pause', label: 'pause', fill: { task: 'id' } },
+  { key: 'z', id: 'resume-task', list: 'tasks-here', states: ['blocked'], capability: 'work.task-resume', label: 'resume', fill: { task: 'id' } },
+  { key: 'x', id: 'cancel-task', list: 'tasks-here', states: OPEN_TASK, capability: 'work.task-cancel', label: 'cancel', fill: { task: 'id' } },
+  { key: 't', id: 'retry-task', list: 'tasks-here', states: ['failed', 'cancelled'], capability: 'work.task-retry', label: 'run again', fill: { task: 'id' } },
+  // A task given to an agent on the daemon itself: the add-a-task control the web has (it keeps no tasks of its own).
+  { key: 'k', id: 'add-daemon-task', list: 'daemon-tasks', whole: true, capability: 'work.daemon-task-add', label: 'give a task to an agent', firstOnEmpty: true },
   { key: 'enter', id: 'daemon-task-detail', list: 'daemon-tasks', capability: 'work.task', label: 'details', fill: { task: 'id' } },
   { key: 'v', id: 'daemon-task-output', list: 'daemon-tasks', capability: 'work.task-output', label: 'what it produced', fill: { task: 'id' } },
   { key: 'x', id: 'cancel-daemon-task', list: 'daemon-tasks', states: OPEN_TASK, capability: 'work.task-cancel', label: 'cancel', fill: { task: 'id' } },

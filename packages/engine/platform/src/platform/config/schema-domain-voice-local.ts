@@ -62,13 +62,13 @@ export const voiceLocalConfigSettings: ConfigSettingDefinition[] = [
     description: 'The program that turns your speech into text on this computer: whisper-cpp (the default; runs on the processor, fast enough for live speech) or faster-whisper (for NVIDIA graphics cards, through a wrapper script). Empty means not configured, and the machine says so honestly rather than erroring. Managed setup installs whisper-cpp and fills this in.',
   },
   {
-    key: 'voice.local.sttBinary',
+    key: 'voice.local.sttBinary', valueKind: 'command',
     label: 'Speech recognition program',
     type: 'string',
     description: 'Where the speech-to-text program is (a full path, for example whisper.cpp\'s whisper-cli). Managed setup installs the engine and sets this.',
   },
   {
-    key: 'voice.local.sttModelPath',
+    key: 'voice.local.sttModelPath', valueKind: 'path',
     label: 'Speech recognition model file',
     type: 'string',
     description: 'Where the speech-to-text model file is (a full path, for example ggml-tiny.en.bin). Managed setup downloads the model, checksum-verifies it and sets this path; a path you set yourself is kept unless it names an install the managed runtime replaces, which is reported when it happens.',
@@ -81,13 +81,13 @@ export const voiceLocalConfigSettings: ConfigSettingDefinition[] = [
     description: 'The program that reads answers aloud on this computer: piper (the default; starts speaking almost at once) or kokoro (a better-sounding voice, through a wrapper script). Empty means not configured. Managed setup installs piper and fills this in.',
   },
   {
-    key: 'voice.local.ttsBinary',
+    key: 'voice.local.ttsBinary', valueKind: 'command',
     label: 'Speech program',
     type: 'string',
     description: 'Where the text-to-speech program is (a full path, for example piper). Managed setup installs the engine and sets this.',
   },
   {
-    key: 'voice.local.ttsModelPath',
+    key: 'voice.local.ttsModelPath', valueKind: 'path',
     label: 'Voice model file',
     type: 'string',
     description: 'Where the voice model file is (a full path, for example en_US-lessac-low.onnx, with its .json file beside it). Managed setup downloads the voice, checksum-verifies it and sets this path; a path you set yourself is kept unless it names an install the managed runtime replaces, which is reported when it happens.',

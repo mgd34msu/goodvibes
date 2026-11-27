@@ -90,8 +90,8 @@ export class JevDecisionLedger {
   /** Save a standing rule for calls like decision `id`; throws with the reason when none can be saved. */
   async remember(id: string, effect: JevDecisionRuleEffect): Promise<string> {
     const entry = this.entries.get(id);
-    if (!entry) throw new Error('This decision is older than the ones this session keeps; set a standing rule with /permissions instead.');
-    if (!entry.remember || entry.scope === undefined) throw new Error(`No standing rule can be made from this ${entry.toolName} call; set one with /permissions instead.`);
+    if (!entry) throw new Error('This decision is older than the ones this session keeps; add a standing rule in Permissions and safety, Rules ("add a rule") instead.');
+    if (!entry.remember || entry.scope === undefined) throw new Error(`No standing rule can be made from this ${entry.toolName} call; add one in Permissions and safety, Rules ("add a rule") instead.`);
     return await entry.remember(effect);
   }
 }
@@ -165,7 +165,7 @@ export function bridgeJevDecisionsToInbox(
   const stopHandling = options.handle(prefix, async (item, option) => {
     const id = item.key?.slice(prefix.length) ?? '';
     const decision = ledger.get(id);
-    if (!decision) throw new Error('This decision is older than the ones this session keeps; set a standing rule with /permissions instead.');
+    if (!decision) throw new Error('This decision is older than the ones this session keeps; add a standing rule in Permissions and safety, Rules ("add a rule") instead.');
     switch (option) {
       case JEV_DECISION_CHOICES.keep:
         return `Kept: Jev ${decision.approved ? 'allowed' : 'refused'} it, and nothing changed.`;
@@ -217,7 +217,7 @@ export function bridgeJevDecisionsToInbox(
     stopListening();
     stopHandling();
     for (const itemId of posted.values()) {
-      try { inbox.withdraw(itemId, 'The session that made this decision has ended, so a choice on it can no longer be carried out. Set a standing rule with /permissions.'); } catch { /* already answered */ }
+      try { inbox.withdraw(itemId, 'The session that made this decision has ended, so a choice on it can no longer be carried out. Add a standing rule in Permissions and safety, Rules ("add a rule").'); } catch { /* already answered */ }
     }
     posted.clear();
   };

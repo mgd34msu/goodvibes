@@ -86,8 +86,12 @@ function drawDetail(palette: PaletteView, entry: PaletteEntry | null, canvas: Pa
 
 export function renderCommandPalette(palette: PaletteView, screenWidth: number, screenHeight: number): SurfaceLayer {
   const selected = palette.getSelected();
+  // The commands that remain are few: everything else is a control in a place, reached from the menu, named by its
+  // key as bound (the key table's `open-menu` shortcut row).
+  const menuKey = palette.entries.find((entry) => entry.kind === 'shortcut' && /menu of every place/i.test(entry.title))?.right;
   const f = beginModal(screenWidth, screenHeight, {
     title: 'Commands',
+    sub: `everything else: ${menuKey ? menuKey.toLowerCase() : 'the menu key'} opens the menu`,
     hints: selected?.kind === 'shortcut'
       ? [['↑↓', 'move']]
       : [['↑↓', 'move'], ['⏎', 'run'], ['tab', 'fill composer'], ...(palette.query.trim() ? [] : [['ctrl+]', 'next group'] as [string, string]])],

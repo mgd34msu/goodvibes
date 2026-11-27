@@ -172,7 +172,7 @@ export function parseBookmarkSeeds(content: string): KnowledgeBookmarkSeed[] {
       parsed = JSON.parse(trimmed);
     } catch (error) {
       // A truncated export must not look like an empty, successful import.
-      throw new Error(`Bookmark input looks like JSON but could not be parsed: ${error instanceof Error ? error.message : String(error)}`);
+      throw Object.assign(new Error(`Bookmark input looks like JSON but could not be parsed: ${error instanceof Error ? error.message : String(error)}`), { code: 'NO_BOOKMARKS' });
     }
     format = 'JSON';
     seeds = parseJsonBookmarks(parsed);
@@ -184,7 +184,8 @@ export function parseBookmarkSeeds(content: string): KnowledgeBookmarkSeed[] {
     seeds = parseUrlList(trimmed);
   }
   if (seeds.length === 0) {
-    throw new Error(`Bookmark input was read as ${format}, but no http(s) bookmark was found in it; nothing was imported.`);
+    // Its code says the input itself is wrong (NO_BOOKMARKS), so a caller refuses it as the wrong file it is.
+    throw Object.assign(new Error(`Bookmark input was read as ${format}, but no http(s) bookmark was found in it; nothing was imported.`), { code: 'NO_BOOKMARKS' });
   }
   return seeds;
 }

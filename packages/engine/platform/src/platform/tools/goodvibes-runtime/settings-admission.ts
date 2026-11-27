@@ -11,6 +11,7 @@ import { describeSettingsReceiptFailure } from '../../config/settings-owner-wire
 import { applyRemoteSettingsPrecondition, assertRemoteSettingsPrecondition, captureRemoteSettingsPrecondition,
   inspectRemoteSettingsPrecondition, resolvePreparedConfigWriteRoute, assertPreparedConfigWriteRoute, type RemoteSettingsPrecondition } from '../../config/settings-precondition-client.js';
 import type { ToolExecuteOptions } from '../../types/tools.js';
+import { programCallHeadersFor } from '../../runtime/client/call-context.js';
 import { assertProjectionExecution, ToolInputProjectionError, type ToolInputProjector, type ToolPreparedSettingsMutation } from '../input-projection.js';
 import { assertCurrentToolExecution, claimCurrentToolSettingsDispatch, commitCurrentToolSettings, currentToolSettingsPresentation } from '../registry.js';
 import { refusal, type Refusal } from '@goodvibes/engine/errors';
@@ -133,8 +134,12 @@ export function createAgentSettingsInputProjector(configManager: ConfigManager, 
           destinations: [{ path: clientStore.settingsPath, operation: 'set', tier: 'global' }],
           appliedBy: 'local', surface: clientStore.surface, previous: isSecretBearingConfigKey(key) ? posture(previous) : previous };
       } else if (route.mode === 'daemon') {
-        remote = await captureRemoteSettingsPrecondition(route.endpoint,
-          args.mode === 'reset' ? { operation: 'reset-default', key } : { operation: 'set', key, value: args.value }, routing);
+        // Applied only after this program's gate decided the model's call: sent with that gate's mark and this
+        // program's call context and registration, so the daemon does not decide it a second time.
+        const headers = await programCallHeadersFor(route.endpoint.baseUrl, route.endpoint.token);
+        remote = await captureRemoteSettingsPrecondition({ ...route.endpoint, headers },
+          args.mode === 'reset' ? { operation: 'reset-default', key } : { operation: 'set', key, value: args.value },
+          { ...routing, press: { decidedByProgramGate: true } });
         request.assertCurrent(); request.signal?.throwIfAborted();
         const facts = inspectRemoteSettingsPrecondition(remote);
         source = facts.endpoint;

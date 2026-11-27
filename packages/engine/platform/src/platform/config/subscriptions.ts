@@ -6,9 +6,6 @@ import { withSyncFileLock } from './sync-file-lock.js';
 import { ProcessLockBusyError } from '../utils/process-lock.js';
 import { summarizeError } from '../utils/error-display.js';
 import { injectiveKeyPart } from '../utils/target-ref.js';
-import { captureStrictJudgmentJson } from '../gate/judgment-result.js';
-import { observeImportFile, assertImportFileCurrent, type ImportFileObservation, type PreparedImportTransitionFacts } from './prepared-import.js';
-import type { PreparedConfigMutationReceipt } from './prepared-mutation.js';
 import type { SecretsManager } from './secrets.js';
 import { Secret, isSecret } from '../security/secret.js';
 import {
@@ -286,28 +283,6 @@ interface SubscriptionStore {
   readonly pending: Record<string, PendingSubscriptionLogin>;
 }
 
-declare const subscriptionImportBrand: unique symbol;
-declare const subscriptionImportTransitionBrand: unique symbol;
-export interface PreparedSubscriptionImport { readonly [subscriptionImportBrand]: true }
-export interface PreparedSubscriptionImportTransition { readonly [subscriptionImportTransitionBrand]: true }
-export type SubscriptionImportEntry =
-  | { readonly kind: 'active'; readonly value: SubscriptionGrant }
-  | { readonly kind: 'pending'; readonly value: PendingSubscriptionLogin };
-export interface PreparedSubscriptionImportFacts {
-  readonly operation: 'import';
-  readonly beforeGeneration: number;
-  readonly items: readonly { readonly provider: string; readonly kind: 'active' | 'pending'; readonly configured: true }[];
-  readonly destinations: readonly { readonly path: string; readonly operation: 'set'; readonly tier: 'shared' }[];
-}
-interface SubscriptionImportRecord {
-  readonly facts: PreparedSubscriptionImportFacts;
-  readonly store: SubscriptionStore;
-  readonly methods: readonly unknown[];
-  observation: ImportFileObservation;
-  phase: 'prepared' | 'pending' | 'committing' | 'committed' | 'failed';
-  transition?: PreparedSubscriptionImportTransition;
-}
-
 /**
  * How long a started re-login waits for its browser round trip. A re-login
  * abandoned past this, for a provider that still has a working subscription,
@@ -392,106 +367,6 @@ export class SubscriptionManager {
   private importGeneration = 0;
   /** One token refresh per provider at a time in this process; across processes the record's claim does the same. */
   private readonly refreshes = new Map<string, Promise<SubscriptionGrant>>();
-  private readonly preparedImports = new WeakMap<PreparedSubscriptionImport, SubscriptionImportRecord>();
-
-  /** Capture privately without invoking legacy recovery or publishing any token. */
-  prepareImport(entries: readonly SubscriptionImportEntry[]): PreparedSubscriptionImport {
-    try { return this.prepareImportOwned(entries); }
-    catch { throw new Error('Subscription import is unavailable.'); }
-  }
-  private prepareImportOwned(entries: readonly SubscriptionImportEntry[]): PreparedSubscriptionImport {
-    const values = captureStrictJudgmentJson(entries);
-    if (!values.length || new Set(values.map(entry => `${entry.kind}:${entry.value.provider}`)).size !== values.length) throw new Error('Invalid subscription import.');
-    for (const entry of values) {
-      const value = entry.value;
-      if (!value || typeof value.provider !== 'string' || !value.provider || !Number.isSafeInteger(value.createdAt)
-        || (entry.kind === 'active' ? !('accessToken' in value) || typeof value.accessToken !== 'string' || !('tokenType' in value) || typeof value.tokenType !== 'string' || !('authMode' in value) || value.authMode !== 'oauth'
-          || !('overrideAmbientApiKeys' in value) || typeof value.overrideAmbientApiKeys !== 'boolean' || !('updatedAt' in value) || !Number.isSafeInteger(value.updatedAt)
-          : entry.kind !== 'pending' || !('state' in value) || typeof value.state !== 'string' || !('verifier' in value) || typeof value.verifier !== 'string' || !('redirectUri' in value) || typeof value.redirectUri !== 'string')) throw new Error('Invalid subscription import.');
-    }
-    const observation = observeImportFile(this.path);
-    const parsed: unknown = observation.raw === null ? { version: 1, subscriptions: {}, pending: {} } : JSON.parse(observation.raw);
-    if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed) || !('version' in parsed) || parsed.version !== 1 || !('subscriptions' in parsed) || !('pending' in parsed)
-      || !parsed.subscriptions || typeof parsed.subscriptions !== 'object' || Array.isArray(parsed.subscriptions)
-      || !parsed.pending || typeof parsed.pending !== 'object' || Array.isArray(parsed.pending)) throw new Error('Subscription store is unavailable.');
-    const store = captureStrictJudgmentJson(parsed) as SubscriptionStore;
-    const subscriptions = { ...store.subscriptions }, pending = { ...store.pending };
-    for (const entry of values) {
-      if (entry.kind === 'active') { Object.defineProperty(subscriptions, entry.value.provider, { value: entry.value, enumerable: true, writable: true, configurable: true }); delete pending[entry.value.provider]; }
-      else Object.defineProperty(pending, entry.value.provider, { value: entry.value, enumerable: true, writable: true, configurable: true });
-    }
-    const handle = Object.freeze({}) as PreparedSubscriptionImport;
-    const facts: PreparedSubscriptionImportFacts = Object.freeze({ operation: 'import', beforeGeneration: this.importGeneration,
-      items: Object.freeze(values.map(entry => Object.freeze({ provider: entry.value.provider, kind: entry.kind, configured: true as const }))),
-      destinations: Object.freeze([Object.freeze({ path: this.path, operation: 'set' as const, tier: 'shared' as const })]) });
-    this.preparedImports.set(handle, { facts, store: captureStrictJudgmentJson({ ...store, subscriptions, pending }), observation,
-      methods: [this.get, this.getPending, this.saveSubscription, this.savePending], phase: 'prepared' });
-    this.assertPreparedImport(handle); return handle;
-  }
-  inspectPreparedImport(handle: PreparedSubscriptionImport): PreparedSubscriptionImportFacts {
-    const record = this.preparedImports.get(handle); if (!record) throw new Error('Subscription import is not authentic.'); return record.facts;
-  }
-  private assertImportRecord(record: SubscriptionImportRecord, generation: number): void {
-    if (this.importGeneration !== generation || this.path !== record.facts.destinations[0]?.path
-      || [this.get, this.getPending, this.saveSubscription, this.savePending].some((method, index) => method !== record.methods[index])) throw new Error('Subscription import owner changed.');
-    assertImportFileCurrent(this.path, record.observation);
-  }
-  assertPreparedImport(handle: PreparedSubscriptionImport): void {
-    const record = this.preparedImports.get(handle);
-    if (!record || record.phase !== 'prepared') throw new Error('Subscription import is unavailable.');
-    this.assertImportRecord(record, record.facts.beforeGeneration);
-  }
-  beginPreparedImport(handle: PreparedSubscriptionImport): PreparedSubscriptionImportTransition {
-    this.assertPreparedImport(handle); const record = this.preparedImports.get(handle)!;
-    const transition = Object.freeze({}) as PreparedSubscriptionImportTransition;
-    record.phase = 'pending'; record.transition = transition; this.importGeneration++;
-    this.assertPreparedImportTransition(handle, transition); return transition;
-  }
-  inspectPreparedImportTransition(handle: PreparedSubscriptionImport, transition: PreparedSubscriptionImportTransition): PreparedImportTransitionFacts {
-    this.assertPreparedImportTransition(handle, transition); const record = this.preparedImports.get(handle)!;
-    return Object.freeze({ beforeGeneration: record.facts.beforeGeneration, afterGeneration: this.importGeneration, phase: record.phase === 'committed' ? 'committed' : 'pending' });
-  }
-  assertPreparedImportTransition(handle: PreparedSubscriptionImport, transition: PreparedSubscriptionImportTransition): void {
-    const record = this.preparedImports.get(handle);
-    if (!record || record.transition !== transition || !['pending', 'committing', 'committed'].includes(record.phase)) throw new Error('Subscription import transition is not authentic.');
-    this.assertImportRecord(record, record.facts.beforeGeneration + (record.phase === 'committed' ? 2 : 1));
-  }
-  async finishPreparedImport(handle: PreparedSubscriptionImport, transition: PreparedSubscriptionImportTransition, beforeEffect: () => void): Promise<PreparedConfigMutationReceipt> {
-    const record = this.preparedImports.get(handle);
-    if (!record || record.phase !== 'pending' || record.transition !== transition) throw new Error('Subscription import is spent.');
-    record.phase = 'committing';
-    const completedPaths: string[] = [];
-    try {
-      const current = () => { beforeEffect(); this.assertPreparedImportTransition(handle, transition); };
-      current();
-      // The imported sign-ins' tokens go to the secret store first; the file gets the records that name them.
-      const store = this.secrets ? await this.storeImportedTokens(record) : record.store;
-      current();
-      writeJsonFileAtomic(this.path, store, { mode: 0o600, durable: true, cleanupStaleTemps: false, assertCurrent: current });
-      completedPaths.push(this.path); record.observation = observeImportFile(this.path); record.phase = 'committed';
-    } catch { record.phase = 'failed'; }
-    finally { this.importGeneration++; }
-    return Object.freeze({ status: record.phase === 'committed' ? 'committed' : completedPaths.length ? 'partial' : 'unknown', completedPaths: Object.freeze(completedPaths),
-      ...(record.phase === 'failed' ? { uncertainPath: this.path } : {}) });
-  }
-  /** The import's store with each imported sign-in's tokens moved into the secret store. */
-  private async storeImportedTokens(record: SubscriptionImportRecord): Promise<SubscriptionStore> {
-    const subscriptions = { ...record.store.subscriptions };
-    for (const item of record.facts.items) {
-      if (item.kind !== 'active') continue;
-      const imported = subscriptions[item.provider];
-      if (!imported || typeof imported.accessToken !== 'string' || !imported.accessToken) continue;
-      const revision = await this.storeTokens(imported as SubscriptionGrant, this.read().subscriptions[item.provider]?.tokenRevision);
-      subscriptions[item.provider] = storedForm(imported as SubscriptionGrant, revision);
-    }
-    return { ...record.store, subscriptions };
-  }
-
-  assertCompletedImport(handle: PreparedSubscriptionImport): void {
-    const record = this.preparedImports.get(handle);
-    if (!record || record.phase !== 'committed') throw new Error('Subscription import did not commit.');
-    this.assertImportRecord(record, record.facts.beforeGeneration + 2);
-  }
 
   private readonly secrets: SubscriptionTokenStore | undefined;
   private readonly changeListeners = new Set<(provider: string) => void>();

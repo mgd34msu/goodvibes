@@ -2,7 +2,7 @@ import type { DaemonRuntimeAutomationRouteHandlers } from './context.js';
 import type { DaemonRuntimeRouteContext } from './runtime-route-types.js';
 import { withAdmin } from './auth-helpers.js';
 import { jsonErrorResponse, readServiceErrorResponse } from './error-response.js';
-import { listingEnvelope, paginateItems } from './pagination.js';
+import { keepReachable, listingEnvelope, paginateItems } from './pagination.js';
 import { readBoundedPositiveInteger } from './route-helpers.js';
 
 const MAX_AUTOMATION_LIST_LIMIT = 500;
@@ -118,7 +118,8 @@ function readListLimit(url: URL | undefined, total: number): number {
  * the client to restart the listing, never silently restarted.
  */
 function handleGetAutomationJobs(context: DaemonRuntimeRouteContext, url: URL | undefined): Response {
-  const jobs = context.automationManager.listJobs();
+  // Only the schedules the caller may reach, before the page is cut (keepReachable: the owner's are all).
+  const jobs = keepReachable(context.automationManager.listJobs(), 'schedule', (job) => job.id);
   const result = paginateItems(jobs, readListLimit(url, jobs.length), url?.searchParams.get('cursor') ?? null, (j) => j.id);
   if ('error' in result) return jsonErrorResponse({ error: result.error, code: 'INVALID_CURSOR' }, { status: 400 });
   // While automation is enabled with zero routines, the response carries the
@@ -154,7 +155,8 @@ function filterRunsSince<T extends { readonly queuedAt: number; readonly endedAt
  * the cursor encodes, so a run deleted mid-walk is passed over.
  */
 function handleGetAutomationRuns(context: DaemonRuntimeRouteContext, url: URL | undefined): Response {
-  const runs = filterRunsSince(context.automationManager.listRuns(), url);
+  // Only the runs the caller may reach, before the page is cut (keepReachable: the owner's are all).
+  const runs = filterRunsSince(keepReachable(context.automationManager.listRuns(), 'schedule-run', (run) => run.id), url);
   const result = paginateItems(runs, readListLimit(url, runs.length), url?.searchParams.get('cursor') ?? null, (r) => r.id, (r) => r.queuedAt, { descending: true });
   if ('error' in result) return jsonErrorResponse({ error: result.error, code: 'INVALID_CURSOR' }, { status: 400 });
   return Response.json(listingEnvelope('runs', result));

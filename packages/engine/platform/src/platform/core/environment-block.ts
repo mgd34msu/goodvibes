@@ -41,6 +41,17 @@ export async function readSessionEnvironment(workingDirectory: string): Promise<
   }
 }
 
+/**
+ * The facts of a turn that works in no folder yet (a chat with no project): the system, and that it has no folder. No
+ * repository is read, since there is none.
+ */
+export function placelessEnvironment(): SessionEnvironment {
+  return {
+    workingDirectory: 'none yet (this chat has no project; one is made for it the first time it needs somewhere to work)',
+    operatingSystem: `${OS_NAMES[platform()] ?? platform()} ${release()}`,
+  };
+}
+
 /** The local calendar date, `2026-11-24 (Tuesday)`. */
 function localDate(now: Date): string {
   const pad = (value: number) => String(value).padStart(2, '0');

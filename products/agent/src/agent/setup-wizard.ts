@@ -128,7 +128,7 @@ export const DEFAULT_AGENT_SETUP_WIZARD_REVIEW_ROUTE = 'setup action:"status" in
 export const DEFAULT_AGENT_SETUP_WIZARD_RERUN_SMOKE_ROUTE = 'setup action:"smoke" setupItemId:"install-smoke" confirm:true explicitUserRequest:"..."';
 export const DEFAULT_AGENT_SETUP_WIZARD_SAVE_SMOKE_ROUTE = 'setup action:"smoke" setupItemId:"install-smoke" fields:{...} confirm:true explicitUserRequest:"..."';
 export const DEFAULT_AGENT_SETUP_WIZARD_FINISH_ROUTE = 'setup action:"finish" confirm:true explicitUserRequest:"Finish Agent onboarding after setup smoke evidence is ready."';
-export const DEFAULT_AGENT_SETUP_WIZARD_FINISH_USER_ROUTE = 'Agent Workspace -> Finish -> Apply & close';
+export const DEFAULT_AGENT_SETUP_WIZARD_FINISH_USER_ROUTE = 'System, Setup (the menu, Ctrl+G then m)';
 
 export function emptyAgentSetupSmokeHistory(reason = 'No saved setup smoke evidence artifact found.'): AgentSetupWizardSmokeHistory {
   return {
@@ -348,7 +348,7 @@ function buildCloseout(input: {
       nextAction: 'Run the confirmed setup smoke route, capture user-visible package/status and first-turn output, then save the redacted evidence.',
       primaryStepId: 'install-smoke',
       primaryStepLabel: 'Install smoke',
-      userRoute: 'Agent Workspace -> Start',
+      userRoute: 'System, Setup (the menu, Ctrl+G then m)',
       modelRoute: input.smokeHistory.saveRoute,
       requiresConfirmation: true,
       evidence,
@@ -379,7 +379,7 @@ function buildCloseout(input: {
     nextAction: 'Use setup only when provider, host, channel, automation, local behavior, or runtime-profile decisions change.',
     primaryStepId: null,
     primaryStepLabel: null,
-    userRoute: 'Agent Workspace -> Home',
+    userRoute: 'the menu (Ctrl+G then m)',
     modelRoute: input.reviewRoute,
     requiresConfirmation: false,
     evidence,

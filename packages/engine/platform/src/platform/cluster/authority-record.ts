@@ -111,7 +111,12 @@ export interface AuthorityPrivateParts {
   member: never;
   'key-epoch': never;
   'device-token': never;
-  user: { readonly passwordHash: string };
+  /**
+   * `passwordByOwner`: this version's password was set by the owner himself, on the machine that wrote it (his signed-in
+   * session or his verified program there, or his yes there). Another machine takes a new password for its own owner
+   * account from the record only with it (security/user-auth.ts `#overlay`, gate-review-6 G2).
+   */
+  user: { readonly passwordHash: string; readonly passwordByOwner?: true };
   'peer-token': never;
   'device-grant': never;
   'relay-route': never;

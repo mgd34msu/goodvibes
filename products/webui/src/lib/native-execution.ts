@@ -26,27 +26,29 @@ export type NativeExecutionObservation =
 
 function failure(error: unknown): Error {
   const code = errorCode(error);
+  // Said to a person: what happened to the work and what to do, in the Work page's words (work, plan, step, result),
+  // never the transport's, the access scopes' or the decision model's own names.
   const messages: Record<string, string> = {
     NATIVE_EXECUTION_UNSUPPORTED_AUTHORITY:
-      "Native execution requires current paired admin authority with read:work-ledger and write:fleet.",
+      "The work was not started: only the owner, or a device he paired, runs work on the daemon. Sign in with the owner's name and password, then try again.",
     PAIRED_OWNER_REQUIRED:
-      "Native execution runs from the daemon's own machine or a paired device with owner access. Open the web app on that machine, or pair this browser (Settings, Devices and pairing), then retry.",
+      "The work was not started: only the owner, or a device he paired, runs work on the daemon. Sign in with the owner's name and password, or pair this browser (Settings, Devices and pairing), then try again.",
     FORBIDDEN:
-      "This pairing lacks the access native execution needs (read:work-ledger and write:fleet). Pair this browser again with that access (Settings, Devices and pairing), then retry.",
+      "The work was not started: this browser's pairing does not allow running work. Pair it again with full access (Settings, Devices and pairing), then try again.",
     NATIVE_EXECUTION_REFUSED:
-      "Jev refused native execution. No automatic retry or legacy execution was requested.",
+      "The decision model refused to start this work, so nothing ran. Nothing was tried again by itself.",
     NATIVE_EXECUTION_DECISION_MODEL_FAILED:
       "Not started: the decision model failed before it decided whether to start this work, so nothing ran. Fix the decision model (its notice says what failed and how), then start the work again.",
     NATIVE_EXECUTION_STALE:
-      "The native execution target is stale. Inspect the original attempt; its saved revisions are unchanged.",
+      "The work changed meanwhile, so nothing was done. Look at it again and try once more.",
     NATIVE_EXECUTION_CONFLICT:
-      "The native execution target conflicts with recorded admission. Inspect the original attempt.",
+      "The work changed meanwhile, so nothing was done. Look at it again and try once more.",
     NATIVE_EXECUTION_RECOVERY_REQUIRED:
-      "Native execution needs reconciliation of its original effects before recovery. No execution was replayed.",
+      "This work's run cannot be picked up from here, so nothing was run again. Stop it and ask for the work again.",
   };
   return new Error(
     messages[code] ??
-      "Native execution outcome is unknown or unavailable. Inspect the saved attempt before continuing; no automatic retry was sent."
+      "Whether the work started is not known. Look at it in Work before trying again; nothing was tried again by itself."
   );
 }
 
@@ -105,7 +107,7 @@ export function createNativeIntakeExecution(options: {
     current(signal);
     if (saved) {
       if (saved.requestId !== original.command.requestId)
-        throw new Error("The saved execution target belongs to a different original request.");
+        throw new Error("This browser's saved record of the work belongs to another request, so nothing was done. Look at the work in Work.");
       return { saved, stored: true };
     }
     const found = await options.inspect(original, signal);
@@ -178,7 +180,7 @@ export function createNativeIntakeExecution(options: {
           return observed;
         if (!sameRevision(saved.target.expectedRevision, observed.snapshot.expectedRevision))
           throw new Error(
-            "Recorded native execution revisions differ from the saved target. Recovery was not requested."
+            "The work changed since this browser saw it, so it was not picked up again. Look at it again in Work and try once more."
           );
         operation = "resume";
       }

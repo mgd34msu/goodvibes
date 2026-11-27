@@ -28,8 +28,11 @@
  * the memory update verbs cannot change them, so an edit there is not a proposal.
  */
 
-import { existsSync, mkdirSync, readFileSync, readdirSync, realpathSync, unlinkSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, readdirSync, realpathSync, unlinkSync } from 'node:fs';
 import { createHash } from 'node:crypto';
+// The one way a file of the folder is written and read (a held folder: by a pending name and rename in its opened
+// folder, opened without following a link; anywhere else as it is).
+import { heldForChild, readHeldFile, writeHeldFile } from '../capabilities/held-paths.js';
 import { spawnSync } from 'node:child_process';
 import { join } from 'node:path';
 import type { MemoryClass, MemoryRecord, MemoryScope, MemoryTemporalStatus } from './memory-store.js';
@@ -88,8 +91,14 @@ function samePath(left: string, right: string): boolean {
  * and tolerates an unchanged tree.
  */
 export function createMemoryProjectionGit(): MemoryProjectionGit {
-  const run = (args: readonly string[]): { ok: boolean; status: number | null; stdout: string; stderr: string } => {
-    const result = spawnSync('git', [...args], { encoding: 'utf-8', timeout: 30_000 });
+  // A folder a caller named is held (capabilities/held-paths.ts): git inherits its opened descriptor and names it by its
+  // own `/proc/self/fd/3`, never by the daemon's `/proc/<pid>/fd/<n>` (`heldForChild`). Any other folder is as it is.
+  const run = (dir: string, args: (at: string) => readonly string[]): { ok: boolean; status: number | null; stdout: string; stderr: string } => {
+    const child = heldForChild(dir);
+    const result = spawnSync('git', [...args(child.path)], {
+      encoding: 'utf-8', timeout: 30_000,
+      ...(child.inherit !== undefined ? { stdio: ['pipe', 'pipe', 'pipe', child.inherit] } : {}),
+    });
     return {
       ok: result.status === 0,
       status: result.status,
@@ -99,17 +108,17 @@ export function createMemoryProjectionGit(): MemoryProjectionGit {
   };
   return {
     resolveToplevel(dir: string): string | null {
-      const result = run(['-C', dir, 'rev-parse', '--show-toplevel']);
+      const result = run(dir, (at) => ['-C', at, 'rev-parse', '--show-toplevel']);
       return result.ok && result.stdout.length > 0 ? result.stdout : null;
     },
     init(dir: string): void {
-      const result = run(['init', dir]);
+      const result = run(dir, (at) => ['init', at]);
       if (!result.ok) {
         throw new Error(`memory projection git init failed for ${dir}: ${result.stderr || result.stdout}`);
       }
     },
     add(dir: string): void {
-      const result = run(['-C', dir, 'add', '-A']);
+      const result = run(dir, (at) => ['-C', at, 'add', '-A']);
       if (!result.ok) {
         throw new Error(`memory projection git add failed for ${dir}: ${result.stderr || result.stdout}`);
       }
@@ -119,15 +128,15 @@ export function createMemoryProjectionGit(): MemoryProjectionGit {
       // something is: an unchanged tree skips the commit, and any commit
       // failure after that is a failure (git's messages are localized, so
       // they are never matched).
-      const staged = run(['-C', dir, 'diff', '--cached', '--quiet']);
+      const staged = run(dir, (at) => ['-C', at, 'diff', '--cached', '--quiet']);
       if (staged.status === 0) return false;
       if (staged.status !== 1) {
         throw new Error(`memory projection git diff failed for ${dir}: ${staged.stderr || staged.stdout}`);
       }
       // The projection's own identity, unsigned: the owner's signing settings
       // (a passphrase prompt, a hardware touch) must never hold a memory write.
-      const result = run([
-        '-C', dir,
+      const result = run(dir, (at) => [
+        '-C', at,
         '-c', 'user.name=GoodVibes Memory Projection',
         '-c', 'user.email=memory-projection@goodvibes.local',
         '-c', 'commit.gpgsign=false',
@@ -215,9 +224,16 @@ function fieldBasesOf(record: MemoryRecord): FieldBases {
   return bases;
 }
 
-function readManifest(dir: string): ProjectionManifest | null {
+/**
+ * Where a file of the projection folder is read or written: as it is, or (a capability working on a folder the caller
+ * named, capabilities/held-paths.ts `heldPath`) resolved through the folder's held handle without following a link.
+ */
+export type ProjectionPlace = (path: string, use: 'read' | 'write') => string;
+const asItIs: ProjectionPlace = (path) => path;
+
+function readManifest(dir: string, place: ProjectionPlace = asItIs): ProjectionManifest | null {
   try {
-    const parsed: unknown = JSON.parse(readFileSync(join(dir, MANIFEST_NAME), 'utf-8'));
+    const parsed: unknown = JSON.parse(readHeldFile(place(join(dir, MANIFEST_NAME), 'read'), 'utf-8'));
     const files = typeof parsed === 'object' && parsed !== null ? (parsed as { files?: unknown }).files : undefined;
     if (typeof files !== 'object' || files === null) return null;
     const out: Record<string, string> = {};
@@ -338,12 +354,14 @@ function recordFileName(id: string): string {
 export function projectMemoryToFiles(
   records: readonly MemoryRecord[],
   dir: string,
-  options: MemoryProjectionOptions & { readonly now?: number; readonly git?: MemoryProjectionGit } = {},
+  options: MemoryProjectionOptions & { readonly now?: number; readonly git?: MemoryProjectionGit; readonly place?: ProjectionPlace } = {},
 ): MemoryProjectionWriteReport {
   const now = options.now ?? Date.now();
+  const place = options.place ?? asItIs;
+  const at = (name: string, use: 'read' | 'write'): string => place(join(dir, name), use);
   mkdirSync(dir, { recursive: true });
   const standing = selectStandingRecords(records, options);
-  const previous: ProjectionManifest = readManifest(dir) ?? { files: {}, fields: {} };
+  const previous: ProjectionManifest = readManifest(dir, place) ?? { files: {}, fields: {} };
   const next: Record<string, string> = {};
   const nextFields: Record<string, FieldBases> = {};
   // A kept file keeps the bases it was written with, so review still tells its edits from the store's.
@@ -355,7 +373,7 @@ export function projectMemoryToFiles(
   const written: string[] = [];
   const kept: string[] = [];
   for (const record of standing) {
-    const path = join(dir, recordFileName(record.id));
+    const path = at(recordFileName(record.id), 'read');
     const markdown = projectMemoryRecordToMarkdown(record, now);
     const lastHash = previous.files[record.id];
     if (lastHash !== undefined && !existsSync(path)) {
@@ -366,9 +384,9 @@ export function projectMemoryToFiles(
       continue;
     }
     if (existsSync(path)) {
-      const onDisk = readFileSync(path, 'utf-8');
+      const onDisk = readHeldFile(path, 'utf-8');
       const changedSinceSync = lastHash === undefined || contentHash(onDisk) !== lastHash;
-      const parsed = parseProjectedMemoryFile(path, onDisk);
+      const parsed = parseProjectedMemoryFile(join(dir, recordFileName(record.id)), onDisk);
       // A file edited so it no longer parses (front-matter or id line removed) or
       // whose read-only `cls`, `confidence` or `reviewState` line was changed is
       // still the user's edit: keep it (the read-only lines have no proposal, so
@@ -387,10 +405,10 @@ export function projectMemoryToFiles(
         continue;
       }
     }
-    writeFileSync(path, markdown, 'utf-8');
+    writeHeldFile(at(recordFileName(record.id), 'write'), markdown);
     next[record.id] = contentHash(markdown);
     nextFields[record.id] = fieldBasesOf(record);
-    written.push(path);
+    written.push(join(dir, recordFileName(record.id)));
   }
   const standingIds = new Set(standing.map((record) => record.id));
   const removed: string[] = [];
@@ -398,7 +416,7 @@ export function projectMemoryToFiles(
   let unchecked = 0;
   for (const [id, lastHash] of Object.entries(previous.files)) {
     if (standingIds.has(id)) continue;
-    const path = join(dir, recordFileName(id));
+    const path = at(recordFileName(id), 'read');
     if (!existsSync(path)) continue;
     if (options.complete === false) {
       // A record outside a capped read may still exist: its file is not known to be stale.
@@ -406,8 +424,8 @@ export function projectMemoryToFiles(
       unchecked += 1;
       continue;
     }
-    if (contentHash(readFileSync(path, 'utf-8')) === lastHash) {
-      unlinkSync(path);
+    if (contentHash(readHeldFile(path, 'utf-8')) === lastHash) {
+      unlinkSync(at(recordFileName(id), 'write'));
       removed.push(id);
     } else {
       // Still tracked, so the next sync keeps it too until the user removes it.
@@ -415,7 +433,7 @@ export function projectMemoryToFiles(
       orphaned.push(id);
     }
   }
-  writeFileSync(join(dir, MANIFEST_NAME), `${JSON.stringify({ version: 2, files: next, fields: nextFields }, null, 2)}\n`, 'utf-8');
+  writeHeldFile(at(MANIFEST_NAME, 'write'), `${JSON.stringify({ version: 2, files: next, fields: nextFields }, null, 2)}\n`);
   let committed = false;
   if (options.git) {
     // Ownership gate: the projection only ever commits to a repository whose
@@ -570,9 +588,9 @@ export type ProjectedMemoryFiles = MemoryProjectionFile[] & {
  * so `diffProjectionToProposals(records, readProjectedMemoryFiles(dir))` can tell
  * a deleted file from a record the store gained since.
  */
-export function readProjectedMemoryFiles(dir: string): ProjectedMemoryFiles {
+export function readProjectedMemoryFiles(dir: string, place: ProjectionPlace = asItIs): ProjectedMemoryFiles {
   const files: MemoryProjectionFile[] = [];
-  const manifest = existsSync(dir) ? readManifest(dir) : null;
+  const manifest = existsSync(dir) ? readManifest(dir, place) : null;
   const idByName = new Map(Object.keys(manifest?.files ?? {}).map((id) => [recordFileName(id), id]));
   const untouched = new Set<string>();
   const unreadable = new Set<string>();
@@ -580,7 +598,7 @@ export function readProjectedMemoryFiles(dir: string): ProjectedMemoryFiles {
     for (const name of readdirSync(dir)) {
       if (!name.endsWith('.md')) continue;
       const path = join(dir, name);
-      const content = readFileSync(path, 'utf-8');
+      const content = readHeldFile(place(path, 'read'), 'utf-8');
       const parsed = parseProjectedMemoryFile(path, content);
       const projectedId = idByName.get(name);
       if (projectedId !== undefined && manifest?.files[projectedId] === contentHash(content)) untouched.add(projectedId);

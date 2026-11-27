@@ -153,8 +153,8 @@ const COMMAND_HELP: Record<string, CommandHelp> = {
   },
   setup: {
     usage: ['setup', 'setup status'],
-    summary: 'Open /setup: models, sign-in, keys, access, chat apps and features, one topic at a time; or say whether first run has been done for this user.',
-    line: 'Open /setup in the TUI, or say whether first run has been done',
+    summary: 'Start the app on System, Setup: models, sign-in, keys, access, chat apps and features, one topic at a time; or say whether first run has been done for this user.',
+    line: 'Start the app on System, Setup, or say whether first run has been done',
     examples: ['setup', 'setup status'],
   },
   status: {

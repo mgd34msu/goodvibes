@@ -68,7 +68,8 @@ export async function startAdmittedCiRepair(host: ExternalPermissionHost | undef
         prNumber: input.subscription.prNumber, triggerFixSession: input.subscription.triggerFixSession, failure: brief } },
   });
     assertCurrent();
-    if (!admission.result.approved) return { error: `CI repair denied by owner policy (${admission.result.reasonCode})`, refused: true };
+    // The gate's own words for why (who or what it was refused for), never its reason code alone.
+    if (!admission.result.approved) return { error: `The CI repair was refused: ${admission.result.detail ?? admission.result.decision?.reason ?? admission.result.reasonCode}`, refused: true };
     await input.refreshCurrent();
     assertCurrent();
     // One claim immediately precedes the owned starter; neither the flag nor logs are authority.

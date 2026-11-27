@@ -101,7 +101,7 @@ export const FEATURE_FLAGS: FeatureFlag[] = [
     id: 'unified-runtime-task',
     name: 'Unified RuntimeTask',
     description:
-      'The unified RuntimeTask interface used for task tracking across all subsystems, including the /tasks command and operator interventions. Turn runtime.unifiedTasks off to disable it.',
+      'The unified RuntimeTask interface used for task tracking across all subsystems, including the tasks of the Work place and operator interventions. Turn runtime.unifiedTasks off to disable it.',
     tier: 3,
     runtimeToggleable: false,
     settings: { key: 'runtime.unifiedTasks', kind: 'boolean' },

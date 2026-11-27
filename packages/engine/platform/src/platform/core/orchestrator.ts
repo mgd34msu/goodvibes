@@ -27,6 +27,7 @@ import { notifyCompletion } from '../utils/notify.js';
 import { logger } from '../utils/logger.js';
 import type { PermissionManager } from '../permissions/manager.js';
 import { currentTurn, inputOriginIsOwnerDirect, startTurnForOwnerInput, turnSurfaceOf, withTurn } from '../security/turn-boundary.js';
+import { withConversation } from '../security/conversation-exposure.js';
 import type { Actor } from '@goodvibes/engine/daemon-api/http-policy';
 import {
   isPassiveCodeInjectionEnabled,
@@ -289,9 +290,10 @@ export interface OrchestratorOptions {
   /** Required runtime service dependencies. */
   services: {
     readonly agentManager: Pick<AgentManager, 'list' | 'spawn'> & Partial<Pick<AgentManager, 'join'>>;
-    readonly contractRunner: Pick<ContractRunner, 'list'>;
-    /** Takes the person's answer to an open contract question; built with createContractIntake. */
-    readonly contractIntake: ContractIntake;
+    /** Null in a terminal program: it runs no contracts (its work runs on the daemon). */
+    readonly contractRunner: Pick<ContractRunner, 'list'> | null;
+    /** Takes the person's answer to an open contract question (createContractIntake); absent where no contracts run. */
+    readonly contractIntake?: ContractIntake | undefined;
   };
 }
 
@@ -419,8 +421,9 @@ export class Orchestrator {
 
   private readonly runtimeBus: RuntimeEventBus | null;
   private readonly agentManager: Pick<AgentManager, 'list' | 'spawn'> & Partial<Pick<AgentManager, 'join'>>;
+  /** The session's contracts as the turn reads them: none where this program runs no contracts. */
   private readonly contractRunner: Pick<ContractRunner, 'list'>;
-  private readonly contractIntake: ContractIntake;
+  private readonly contractIntake: ContractIntake | undefined;
   private coreServices: OrchestratorCoreServices = {};
   private readonly ownedSessionLineageTracker = new SessionLineageTracker();
   private readonly ownedIdempotencyStore = new IdempotencyStore();
@@ -508,7 +511,8 @@ export class Orchestrator {
     this.runtimeBus = runtimeBus;
     this.compactionSessionId = this.currentSessionId;
     this.compactionManager = createSessionCompactionManager(this.currentSessionId, runtimeBus, flagManager, () => this.coreServices.providerRegistry);
-    this.agentManager = services.agentManager; this.contractRunner = services.contractRunner; this.contractIntake = services.contractIntake;
+    // A program that runs no contracts reads none (its work runs on the daemon, read in Work).
+    this.agentManager = services.agentManager; this.contractRunner = services.contractRunner ?? { list: () => [] }; this.contractIntake = services.contractIntake;
     this.followUpRuntime = new OrchestratorFollowUpRuntime({
       // Compaction is reported separately: the follow-up runtime waits on it as its own condition.
       getThinkingState: () => ({ isThinking: this.isThinking || this.isTurnInFlight, isCompacting: this.isCompacting }),
@@ -1065,19 +1069,22 @@ export class Orchestrator {
     // A recovery turn continues the same request, so work it starts is recovered against that request too.
     this.turnRequests.set(turnId, Object.freeze({ text, ...(content ? { content } : {}), origin, ownerRequest, ...(guest ? { guest } : {}) }));
     while (this.turnRequests.size > MAX_TURN_REQUESTS) this.turnRequests.delete(this.turnRequests.keys().next().value!);
-    return withTurn({
+    // The conversation this turn is a turn of: what it reads stays read for its later turns (security/conversation-exposure.ts).
+    return withConversation(this.currentSessionId ? `conversation:${this.currentSessionId}` : undefined, () => withTurn({
       turnId,
       sessionId: this.currentSessionId || null,
       // A guest's turn keeps the guest and the channel it came in on (the gate reads both).
       surface: guest ? guest.surface : turnSurfaceOf(origin),
       ...(guest ? { actor: guest.actor } : {}),
       origin,
+      // The owner gave this input himself (his keyboard, input marked owner-direct): what makes a turn with no surface his.
+      ...(ownerRequest ? { ownerInput: true as const } : {}),
       requestText: text,
       ownerRequestText: ownerRequest ? text : null,
       // A turn of this conversation runs as no agent; an agent's own loop sets its id.
       callerAgentId: currentTurn()?.callerAgentId ?? null,
       ownerSessionId: this.currentSessionId || null,
-    }, () => this.runTurn(text, content, options, nativeTurn, resume, turnId));
+    }, () => this.runTurn(text, content, options, nativeTurn, resume, turnId)));
   }
 
   private async runTurn(

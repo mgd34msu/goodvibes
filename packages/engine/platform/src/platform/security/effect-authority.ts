@@ -46,6 +46,19 @@ interface EffectRow {
   readonly outward?: true | undefined;
   /** Anyone may cause it, signed in or not (signing in itself). */
   readonly public?: true | undefined;
+  /**
+   * The owner's own device causes it too (daemon-api actor.ts `ownerDevice`), though it is an admin and never the
+   * owner himself: reading his questions and answering one some other caller raised (the approval viewer refuses a
+   * question the device or a credential made from it raised, control-plane/approval-lifecycle.ts).
+   */
+  readonly ownerDevice?: true | undefined;
+  /**
+   * Below admin, holding one of these instead of `scope` causes it on a subject the actor made: the subject passed, else
+   * the one record reach rule, which holds a caller below admin to the records of the kind it made itself
+   * (control-plane/caller-reach.ts `madeBy: 'required'`: a web chat). Making, posting to and reading one's own web chat
+   * are one permission for a person; reading anyone else's still takes `scope`.
+   */
+  readonly ownScopes?: readonly string[] | undefined;
 }
 
 const ROWS = [
@@ -53,6 +66,8 @@ const ROWS = [
   { id: 'auth.sign-in', least: 'guest', scope: '', subject: 'any', public: true },
   // A paired device (a phone that only chats) reads, joins and shares the sessions it owns, as a member does.
   { id: 'session.transcript.read', least: 'device', scope: 'read:transcripts', subject: 'own' },
+  /** A web chat's messages, record and live frames: anyone's under read:transcripts; the caller's own chat under a sessions scope. */
+  { id: 'chat.read', least: 'device', scope: 'read:transcripts', subject: 'any', ownScopes: ['read:sessions', 'write:sessions'] },
   { id: 'session.attach', least: 'device', scope: 'write:sessions', subject: 'own' },
   /** Adding a principal to a session's owners; only an owner of the session (or an admin) shares it. */
   { id: 'session.share', least: 'device', scope: 'write:sessions', subject: 'own' },
@@ -69,9 +84,9 @@ const ROWS = [
   /** Reading an approval record the actor raised (a coalesced raise returns it only to its raiser). */
   { id: 'approval.read', least: 'device', scope: 'read:approvals', subject: 'own' },
   /** Answering an approval, a question or a purchase window put to the owner. */
-  { id: 'approval.answer', least: 'owner', scope: 'write:approvals', subject: 'any', modelRefused: true },
+  { id: 'approval.answer', least: 'owner', scope: 'write:approvals', subject: 'any', modelRefused: true, ownerDevice: true },
   { id: 'owner-inbox.post', least: 'device', scope: 'write:approvals', subject: 'own' },
-  { id: 'owner-inbox.read', least: 'owner', scope: 'read:approvals', subject: 'any' },
+  { id: 'owner-inbox.read', least: 'owner', scope: 'read:approvals', subject: 'any', ownerDevice: true },
   { id: 'stepup.credential.register', least: 'admin', scope: 'write:relay', subject: 'any', modelRefused: true },
   { id: 'hook.fire', least: 'admin', scope: 'write:hooks', subject: 'any' },
   { id: 'settings.write', least: 'admin', scope: 'write:config', subject: 'any' },
@@ -285,10 +300,13 @@ export type EffectAdmission =
 const ALLOWED: EffectAdmission = Object.freeze({ kind: 'allowed' });
 
 /** People, most authority first; a smaller rank holds more. */
-const RANK: Readonly<Record<Exclude<EffectClass, 'peer'>, number>> = { owner: 0, admin: 1, member: 2, device: 3, guest: 4 };
+// A script holding the operator token (no registration of the owner's verified program) stands where an admin who is not
+// the owner stands: every scope, never the owner's own acts (refused, or put to him where the row asks).
+const RANK: Readonly<Record<Exclude<EffectClass, 'peer'>, number>> = { owner: 0, admin: 1, script: 1, member: 2, device: 3, guest: 4 };
 
 const CLASS_WORDS: Readonly<Record<EffectClass, string>> = {
-  owner: 'the owner', admin: 'an admin', member: 'a signed-in user', device: 'a paired device', guest: 'a channel guest', peer: 'a remote peer',
+  owner: 'the owner', admin: 'an admin', script: 'a script holding the operator token (not one of the owner\'s own programs)',
+  member: 'a signed-in user', device: 'a paired device', guest: 'a channel guest', peer: 'a remote peer',
 };
 
 function refused(rule: EffectRule, code: 'MISSING_RIGHT' | 'NOT_YOURS' | 'OWNER_ONLY', missing: string, reason: string, next: string): EffectAdmission {
@@ -308,9 +326,14 @@ function admitOne(actor: Actor, rule: EffectRule, subject: { readonly owners: re
     return refused(rule, 'OWNER_ONLY', 'owner', `${rule.id} is the owner's own act; a model acting for him never makes it`,
       'Tell the owner what is waiting; he does it from his own app.');
   }
+  // The owner's own device (an admin, never the owner himself) on the rows marked for it; nothing else of his.
+  if (rule.ownerDevice === true && actor.class === 'admin' && actor.agentFor === undefined && actor.ownerDevice !== undefined) return ALLOWED;
   const rank = RANK[actor.class];
   if (rank <= RANK[rule.least]) {
     if (rank >= RANK.member && rule.scope !== '' && !actorHoldsScope(actor, rule.scope)) {
+      // Its own subject under one of the row's own scopes (a member's own web chat under her sessions scopes).
+      const ownSubject = subject === undefined || subject.owners.includes(actor.id);
+      if (ownSubject && rule.ownScopes?.some((scope) => actorHoldsScope(actor, scope)) === true) return ALLOWED;
       return refused(rule, 'MISSING_RIGHT', rule.scope, `the credential does not hold ${rule.scope}`,
         `Use a credential that holds ${rule.scope}, or an admin session.`);
     }
@@ -325,7 +348,7 @@ function admitOne(actor: Actor, rule: EffectRule, subject: { readonly owners: re
   }
   return rule.least === 'owner'
     ? refused(rule, 'OWNER_ONLY', 'owner', `${rule.id} is the owner's own act; ${CLASS_WORDS[actor.class]} cannot make it`,
-      'The owner does it from his own credential (the operator token, his sign-in or a device he paired).')
+      'The owner does it himself: from the terminal app or the Agent, or his sign-in.')
     : refused(rule, 'MISSING_RIGHT', rule.least, `${rule.id} needs ${CLASS_WORDS[rule.least]}; this credential is ${CLASS_WORDS[actor.class]}`,
       rule.least === 'admin' ? 'Sign in with an admin account or use the operator token.' : `Use ${CLASS_WORDS[rule.least]}'s credential.`);
 }

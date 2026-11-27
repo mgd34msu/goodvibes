@@ -10,13 +10,16 @@
  */
 import { CapabilityRefusal, type CapabilityDefinition, type ListName } from '../types.js';
 
-/** A request to pair this program with its daemon. */
+/**
+ * A request to pair this program with its daemon: the one way a device becomes the owner's own. He starts it himself
+ * on a screen where he is signed in as himself (the web UI, or his own program on the daemon's machine: Devices and
+ * network, Pair something, A phone or another device, "Show the sign-in code once"), and this program completes it
+ * with that code. Nothing here asks the daemon to mint a key for whoever asks.
+ */
 export interface PairHostRequest {
   readonly name: string;
-  /** Start from the daemon's shared token (bootstrap), for a daemon that holds no device token for this program yet. */
-  readonly bootstrapShared: boolean;
-  /** Review and confirm it now, rather than only see what it would do. */
-  readonly apply: boolean;
+  /** The sign-in code the owner's own screen showed; empty: say how this program reaches its daemon and what to do. */
+  readonly code: string;
 }
 
 /** This program's pairing: each piece it has; a piece it lacks is absent and refused in words. */
@@ -54,21 +57,17 @@ export const DEVICES_PAIR: CapabilityDefinition<DevicesSessionServices> = {
     { id: 'what', label: 'What to pair', help: 'A phone or another device, this program with its daemon, a device through the relay, or a chat channel', kind: 'choice',
       choices: [
         { value: 'device', label: 'A phone or another device', help: 'Shows a QR code; the device gets its own token' },
-        { value: 'host', label: 'This program with its daemon', help: 'For a daemon on another machine; you confirm it on this screen' },
+        { value: 'host', label: 'This program with its daemon', help: 'For a daemon on another machine: with the sign-in code your own screen shows, where you are signed in as yourself' },
         { value: 'relay', label: 'A device through the relay', help: 'Reaches the daemon from outside your network' },
-        { value: 'channel', label: 'A chat channel', help: 'Slack, Telegram, Discord, ...: asks for its keys, then switches it on' },
+        { value: 'channel', label: 'A chat channel', help: 'Slack, Telegram, Discord, ...: opens its row in Mail, calendar and channels, where its keys are entered' },
       ],
       required: true, typed: { position: 1 }, step: 1 },
     { id: 'channel', label: 'Channel', help: 'The channel to set up', kind: 'choice', choices: { list: CHANNELS, allowOther: { reason: 'a channel kind (slack, telegram, discord, ntfy, webhook, ...)' } },
       required: { default: '', defaultMeans: 'none' }, typed: { position: 2 }, showWhen: { input: 'what', is: 'channel' }, step: 2 },
     { id: 'name', label: 'Name', help: 'What to call it in the device list', kind: 'text', freeTextReason: 'a name you choose',
       required: { default: '', defaultMeans: 'a name chosen for it' }, typed: { flag: '--name' }, step: 2 },
-    { id: 'shared', label: 'Shared token', help: 'Pair with the daemon\'s shared token first (bootstrap), for a daemon that has no device token for this program yet', kind: 'choice',
-      choices: [{ value: 'no', label: 'No' }, { value: 'yes', label: 'Yes, start from the shared token' }],
-      required: { default: 'no', defaultMeans: 'no' }, typed: { flag: '--bootstrap-shared', switchOn: 'yes' }, showWhen: { input: 'what', is: 'host' }, step: 2 },
-    { id: 'apply', label: 'Apply', help: 'Review and confirm the pairing now, rather than only see what it would do', kind: 'choice',
-      choices: [{ value: 'no', label: 'Only show what it would do' }, { value: 'yes', label: 'Review and confirm it' }],
-      required: { default: 'no', defaultMeans: 'only show what it would do' }, typed: { flag: '--apply', switchOn: 'yes' }, showWhen: { input: 'what', is: 'host' }, step: 2 },
+    { id: 'code', label: 'Sign-in code', help: 'The code your own screen shows, where you are signed in as yourself: Devices and network, Pair something, A phone or another device, "Show the sign-in code once"; hidden as you type. Leave it empty to see how this program reaches its daemon', kind: 'secret',
+      required: { default: '', defaultMeans: 'none: say how this program reaches its daemon' }, typed: { flag: '--code' }, showWhen: { input: 'what', is: 'host' }, step: 2 },
   ],
   sentence: 'The {what} you chose is paired and may reach the daemon, until you change it.', done: '',
   touches: 'credential', lasts: 'kept', risk: 'none',
@@ -79,7 +78,7 @@ export const DEVICES_PAIR: CapabilityDefinition<DevicesSessionServices> = {
     const name = values.name?.trim() ?? '';
     if (values.what === 'device') return { text: (await pairing.pairDevice(name)) ?? '' };
     if (values.what === 'host') {
-      return { text: (await piece(pairing, 'pairHost', 'Pairing this program with its daemon')({ name, bootstrapShared: values.shared === 'yes', apply: values.apply === 'yes' })) ?? '' };
+      return { text: (await piece(pairing, 'pairHost', 'Pairing this program with its daemon')({ name, code: values.code?.trim() ?? '' })) ?? '' };
     }
     if (values.what === 'relay') return { text: await piece(pairing, 'pairRelay', 'Pairing a device through the relay')(name) };
     if (!values.channel) throw new CapabilityRefusal('Name the channel to pair.', 'Choose the channel under Channel.');

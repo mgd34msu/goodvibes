@@ -637,7 +637,8 @@ export function createWorkflowServices(options: { readonly workingDirectory?: st
 
 /** What the workflow tool's `contract` definition starts contracts with. */
 export interface WorkflowContractStarter {
-  readonly contractRunner: Pick<ContractRunner, 'start'>;
+  /** Absent in a program that runs no contracts: there, work is asked for in Work and runs on the daemon. */
+  readonly contractRunner?: Pick<ContractRunner, 'start'> | undefined;
   /** The project a contract started here works in. */
   readonly projectRoot: string;
   /** The conversation session a contract started here belongs to, read on each call. */
@@ -671,8 +672,10 @@ export function createWorkflowTool(services: WorkflowServices, contracts: Workfl
           }
           if (input.definition === CONTRACT_WORKFLOW_DEFINITION) {
             if (isNativeConversationTurn()) return { success: false, error: NATIVE_TURN_EXECUTION_REFUSAL };
+            const runner = contracts.contractRunner;
+            if (!runner) return { success: false, error: 'This program runs no contracts: hand the task over as a piece of work (the agent tool, mode spawn), and it runs on the daemon and shows in Work.' };
             const sessionId = contracts.resolveSessionId(), source = readDelegationRequest();
-            const task = input.task, projectRoot = contracts.projectRoot, runner = contracts.contractRunner;
+            const task = input.task, projectRoot = contracts.projectRoot;
             const signal = source?.signal && options?.signal ? AbortSignal.any([source.signal, options.signal]) : source?.signal ?? options?.signal;
             // Still wanted: the call's signal, the registry's one invocation check,
             // the delegation's own check, and the session (the conversation can

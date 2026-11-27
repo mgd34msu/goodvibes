@@ -1,4 +1,4 @@
-import type { ConfigManager } from '@goodvibes/engine/platform/platform/config';
+import type { ConfigManager, DaemonWritePress } from '@goodvibes/engine/platform/platform/config';
 import { effectivePermissionMode, gatePresetLabel, isGatePresetName } from '@goodvibes/engine/platform/platform/gate/presets';
 import type { GatePresetName } from '@goodvibes/engine/platform/platform/gate';
 import { describePermissionModeInForce, type ModeInForceWords, type PermissionModeInForce } from '@goodvibes/engine/platform/platform/permissions';
@@ -75,14 +75,18 @@ export async function refreshExecutionMode(config: object): Promise<void> {
   if (owner && (owner.hasHostedOwner?.() ?? owner.hostedSessionId() !== null)) await owner.refreshExecutionMode?.();
 }
 
-export async function setExecutionMode(config: Pick<ConfigManager, 'get' | 'set'>, mode: unknown): Promise<void> {
+/**
+ * `press`: who decided the change, from the call site (the person's own choice of mode, or the Agent's gate on the
+ * model's call); sent with the write, so a looser mode is not put to the owner as someone else's.
+ */
+export async function setExecutionMode(config: Pick<ConfigManager, 'get' | 'set'>, mode: unknown, press?: DaemonWritePress): Promise<void> {
   if (typeof mode !== 'string' || !isGatePresetName(mode)) throw new Error('Select an execution mode: ask-me, jev-decides, just-vibes, yolo or plan.');
   const owner = owners.get(config);
   if (owner && (owner.hasHostedOwner?.() ?? owner.hostedSessionId() !== null)) {
     await owner.setExecutionMode(mode);
     return;
   }
-  config.set('permissions.mode', mode);
+  config.set('permissions.mode', mode, press ? { press } : {});
 }
 
 /** Seed a newly authenticated session before it has a remote mode owner. */

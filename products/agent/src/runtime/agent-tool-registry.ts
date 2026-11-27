@@ -1,6 +1,7 @@
 import { buildAgentConfigRouting } from '../config/daemon-config-routing.ts';
 import { randomUUID } from 'node:crypto';
-import { ToolRegistry, registerAllTools } from '@goodvibes/engine/platform/platform/tools';
+import { ToolRegistry, type registerAllTools } from '@goodvibes/engine/platform/platform/tools';
+import { composeTurnTools, programProjectFacilities } from '@goodvibes/engine/platform/platform/agents';
 import { controlSurfacesFor } from './control-surfaces.ts';
 import { installAgentToolPolicyGuard } from '../tools/agent-tool-policy-guard.ts';
 import { agentBrowserProfileRoot, agentBrowserScreenshotRoot, agentBrowserToolBackend } from './agent-browser.ts';
@@ -66,7 +67,29 @@ export function decorateAgentWorkerRegistry(registry: ToolRegistry): void {
 export function composeAgentToolRegistry(deps: AgentToolRegistryDeps): AgentToolRegistry {
   const { services, configManager, homeDirectory, resolveSessionId } = deps;
   const toolRegistry = new ToolRegistry(services.permissionManager);
-  const { fileCache, projectIndex, dispose } = registerAllTools(toolRegistry, {
+  // The one composition every turn has (agents/turn-composition.ts), in this process: this program's host facts, the
+  // project's environment (this program's own, built once for the folder it runs in), and where the Agent differs
+  // on purpose, stated: its storage root, its read and settings admission, its settings routing through the daemon,
+  // and its own plan tool (registered with its turn tools below) in place of `work_plan`.
+  const { fileCache, projectIndex, dispose } = composeTurnTools(toolRegistry, {
+    project: programProjectFacilities(services, configManager),
+    program: {
+      surfaceRoot: GOODVIBES_AGENT_SURFACE_ROOT,
+      // The read and settings admission every Agent registry is built with, a hosted Agent session's included.
+      ...AGENT_PLATFORM_TOOL_ADMISSION,
+      // Daemon-owned settings (surfaces.*, the control-plane binding, watchers,
+      // pairing, retention) must be read and written through the daemon that owns
+      // them, not through this process's own store. Without this the settings
+      // tools silently fall back to the local file: a value written here would
+      // configure nothing, and reading it back afterwards would report it unset.
+      //
+      // The daemon home is derived from THIS process's home rather than the
+      // machine's, so a run rooted at a scratch home cannot reach a real daemon.
+      // Only an explicit GOODVIBES_DAEMON_HOME overrides that.
+      configRouting: buildAgentConfigRouting({ homeDir: homeDirectory }),
+      ownPlanTool: true,
+    },
+    host: {
     hookDispatcher: services.hookDispatcher,
     // A model changing a hook is always put to the owner, whatever the mode or earlier answers.
     hookChangeGate: (request, { signal }) => services.permissionManager.checkHookChange(request, { signal }),
@@ -74,8 +97,7 @@ export function composeAgentToolRegistry(deps: AgentToolRegistryDeps): AgentTool
     delegationAsk: (question, { signal }) => services.permissionManager.askDelegation(question, { signal }),
     // find, repo_map and the agent tool apply the same per-file read decision the read tool gets.
     readAccessFilter: async (absolutePath) => (await services.permissionManager.readAccess(absolutePath, resolveSessionId())) === 'allow',
-    // goodvibes_context reads Cloudflare tokens held in the secret store.
-    secretsManager: services.secretsManager,
+    // goodvibes_context reads Cloudflare tokens held in the secret store (the project's, above).
     // The query tool's questions go to the connected host's owner inbox; answers come back into this conversation.
     ownerQuestions: () => agentOwnerQuestions(services, { configManager, homeDirectory }, resolveSessionId),
     // The trigger tool works on the connected host's supervisor: the Agent leaves triggers to the daemon.
@@ -85,7 +107,8 @@ export function composeAgentToolRegistry(deps: AgentToolRegistryDeps): AgentTool
     execPromptAnswerHandler: services.execPromptAnswerHandler,
     localhostFetchApproval: services.localhostFetchApproval,
     sandboxEscalationHandler: services.sandboxEscalationHandler,
-    contractRunner: services.contractRunner,
+    // None in the Agent (its work runs on the daemon): the agent tool hands a task over as work.
+    ...(services.contractRunner ? { contractRunner: services.contractRunner } : {}),
     projectRoot: services.workingDirectory,
     // Task refs are owned by the REAL runtime session, read fresh on every call:
     // accepting a recovery snapshot reassigns runtime.sessionId in place, and a
@@ -93,28 +116,15 @@ export function composeAgentToolRegistry(deps: AgentToolRegistryDeps): AgentTool
     // just left. Without this the task graph falls back to the shared legacy
     // namespace and nothing is keyed to a session that can be reaped.
     resolveSessionId,
-    surfaceRoot: GOODVIBES_AGENT_SURFACE_ROOT,
     // A keyed state file is reclaimed only once no saved conversation carries its session id.
     isSessionResumable: (sessionToken) => services.sessionManager.has(sessionToken),
     controlSurfaces: controlSurfacesFor(services),
-    // The read and settings admission every Agent registry is built with, a hosted Agent session's included.
-    ...AGENT_PLATFORM_TOOL_ADMISSION,
     // ONE file cache and ONE project index for the process. registerAllTools
     // builds its own pair when none is passed, and then the file tools would read
     // an index the graph neither owns nor closes. Passing the graph's pair makes
     // the instance the tools read the instance the graph owns.
     fileCache: services.fileCache,
     projectIndex: services.projectIndex,
-    // Daemon-owned settings (surfaces.*, the control-plane binding, watchers,
-    // pairing, retention) must be read and written through the daemon that owns
-    // them, not through this process's own store. Without this the settings
-    // tools silently fall back to the local file: a value written here would
-    // configure nothing, and reading it back afterwards would report it unset.
-    //
-    // The daemon home is derived from THIS process's home rather than the
-    // machine's, so a run rooted at a scratch home cannot reach a real daemon.
-    // Only an explicit GOODVIBES_DAEMON_HOME overrides that.
-    configRouting: buildAgentConfigRouting({ homeDir: homeDirectory }),
     fileUndoManager: services.fileUndoManager,
     modeManager: services.modeManager,
     processManager: services.processManager,
@@ -125,7 +135,6 @@ export function composeAgentToolRegistry(deps: AgentToolRegistryDeps): AgentTool
     channelRegistry: services.channelPlugins,
     remoteRunnerRegistry: services.remoteRunnerRegistry,
     workflowServices: services.workflow,
-    mcpRegistry: services.mcpRegistry,
     sessionOrchestration: services.sessionOrchestration,
     sandboxSessionRegistry: services.sandboxSessionRegistry,
     workingDirectory: services.workingDirectory,
@@ -133,10 +142,7 @@ export function composeAgentToolRegistry(deps: AgentToolRegistryDeps): AgentTool
     runtimeBus: services.runtimeBus,
     providerRegistry: services.providerRegistry,
     toolLLM: services.toolLLM,
-    featureFlags: services.featureFlags,
     serviceRegistry: services.serviceRegistry,
-    overflowHandler: services.overflowHandler,
-    changeTracker: services.sessionChangeTracker,
     // state mode=memory reads and writes the one memory store, through the connected host while it serves memory.
     memoryAccess: services.memorySpineClient,
     // Same holder instance `services.contextAccountingHolder` exposes, the
@@ -146,6 +152,7 @@ export function composeAgentToolRegistry(deps: AgentToolRegistryDeps): AgentTool
     // would read an unbound holder of its own while the real source sits on a
     // different instance nothing reads.
     contextAccountingHolder: services.contextAccountingHolder,
+    },
   });
   // The Agent tools a turn has wherever it runs, the same list a turn the daemon
   // hosts for the Agent registers (agent-turn's registerAgentTurnTools).

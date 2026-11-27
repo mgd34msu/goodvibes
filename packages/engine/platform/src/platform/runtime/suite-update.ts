@@ -6,6 +6,10 @@
 import { assertSynchronousJudgmentGuard } from '@goodvibes/judgment/decisions';
 import { lstatSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
+import { homedir } from 'node:os';
+import { resolveGoodVibesDaemonHome } from '../config/goodvibes-home.js';
+import { recordInstalledProgramHashes } from '../daemon/program-hashes.js';
+import { logger } from '../utils/logger.js';
 import { applyVerifiedUpdate, CHECKSUM_MANIFEST_NAME, parseChecksumFile, rollbackKeptPrevious, sha256, UpdateTransactionError,
   verifyChecksum, withUpdateCancellation, type DaemonCurrentReader, type UpdateFetchLike, type UpdateRequestOptions } from './self-update.js';
 import { assertStagedClientReaderCompatible } from './client-reader-update.js';
@@ -41,6 +45,16 @@ export interface SuiteUpdateResult {
   /** Earlier unlabelled backups are retained instead of deleted by filename. */
   readonly preservedPaths: readonly string[];
 }
+/**
+ * The programs just swapped in, recorded in the daemon's own home from the reader files this update placed, so the
+ * daemon judges the new programs by them at its next start (daemon/program-hashes.ts, gate-review-6 G7). A failure is
+ * logged: the update stands, and that daemon then records them once at its start.
+ */
+function recordProgramsAfterSwap(installFolder: string): void {
+  try { recordInstalledProgramHashes(installFolder, resolveGoodVibesDaemonHome(homedir())); }
+  catch (error) { logger.warn('The updated programs could not be recorded in the daemon\'s home; the daemon records them at its next start', { error: error instanceof Error ? error.message : String(error) }); }
+}
+
 const nativeApply = Reflect.apply, nativeWeakGet = WeakMap.prototype.get, nativeWeakSet = WeakMap.prototype.set;
 const publications = new WeakMap<SuiteUpdateResult, () => void>();
 /** Only the exact native transaction's result retains its published outputs.
@@ -223,6 +237,7 @@ export async function applySuiteUpdate(options: SuiteUpdateOptions): Promise<Sui
       },
     });
     committed = true;
+    recordProgramsAfterSwap(plan.root);
     const preservedPaths: string[] = [];
     for (const directory of prepared) preservedPaths.push(...directory.finish().preservedPaths);
     const result = Object.freeze({ version: plan.version, programs: Object.freeze(plan.programs.map(program => program.name)),
@@ -309,6 +324,7 @@ export function rollbackSuiteUpdate(options: SuiteRollbackOptions): SuiteUpdateR
     }, { requireComplete: true, native: true, readerExecPath: options.execPath, ...(options.assertCurrent ? { assertCurrent: options.assertCurrent } : {}) });
     if (!result.restored.length || !previousVersion) throw new Error('The suite rollback did not restore a complete release');
     committed = true;
+    recordProgramsAfterSwap(plan.root);
     const preservedPaths = directories.flatMap(directory => [...directory.finish().preservedPaths]);
     return Object.freeze({ version: previousVersion, programs: Object.freeze(plan.programs.map(program => program.name)),
       files: Object.freeze(plan.files.map(file => Object.freeze({ label: file.label, path: file.path }))),

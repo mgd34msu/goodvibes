@@ -2,6 +2,7 @@ import { captureMemoryOperation, type MemoryOperationOptions } from './memory-op
 import type { MemoryClass, MemoryAddInsert, MemoryAddOptions, MemoryBundle, MemoryDoctorReport, MemoryLink, MemoryRecord, MemoryReviewPatch, MemoryScope, MemorySearchFilter, MemorySemanticSearchResult, MemoryStore } from './memory-store.js';
 import type { MemoryVectorStats } from './memory-vector-store.js';
 import type { MemoryImportResult } from './memory-store.js';
+import type { MemoryAuthor } from './memory-author.js';
 import type { MemoryUsageChange, MemoryUsageEntry, MemoryUsageTopEntry } from './memory-usage-stats.js';
 import {
   MEMORY_CONSOLIDATION_ACTIONS,
@@ -132,9 +133,9 @@ export class MemoryRegistry {
     return this.store.exportBundle(filter, options);
   }
 
-  async importBundle(bundle: MemoryBundle, options?: MemoryOperationOptions, intoProject?: string): Promise<MemoryImportResult> {
+  async importBundle(bundle: MemoryBundle, options?: MemoryOperationOptions, intoProject?: string, importedBy?: MemoryAuthor): Promise<MemoryImportResult> {
     const operation = captureMemoryOperation(options);
-    const result = await this.store.importBundle(bundle, operation, intoProject);
+    const result = await this.store.importBundle(bundle, operation, intoProject, importedBy);
     this.notify();
     return result;
   }
@@ -154,9 +155,17 @@ export class MemoryRegistry {
     return this.store.linksFor(id, options);
   }
 
-  update(id: string, patch: { cls?: MemoryClass; scope?: MemoryScope; project?: string | undefined; summary?: string; detail?: string; tags?: string[]; validFrom?: number | null; validUntil?: number | null; resetReview?: true }, options?: MemoryOperationOptions): MemoryRecord | null {
+  update(id: string, patch: { cls?: MemoryClass; scope?: MemoryScope; project?: string | undefined; summary?: string; detail?: string; tags?: string[]; validFrom?: number | null; validUntil?: number | null; resetReview?: true; by?: MemoryAuthor }, options?: MemoryOperationOptions): MemoryRecord | null {
     const operation = captureMemoryOperation(options);
     const record = this.store.update(id, patch, operation);
+    if (record) this.notify();
+    return record;
+  }
+
+  /** The owner accepts a record someone else wrote (see MemoryStore.accept). */
+  accept(id: string, options?: MemoryOperationOptions): MemoryRecord | null {
+    const operation = captureMemoryOperation(options);
+    const record = this.store.accept(id, operation);
     if (record) this.notify();
     return record;
   }

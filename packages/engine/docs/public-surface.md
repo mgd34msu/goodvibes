@@ -265,7 +265,7 @@ The following table lists the notable platform subpaths. The `exports` map in `p
 | `platform/batch` | Batch execution manager and types | beta |
 | `platform/bookmarks` | Bookmark manager | beta |
 | `platform/browser` | Browser automation as a platform capability: provisioning, sessions, snapshots, and page operations over an injected Playwright driver, with no product surface baked in | beta |
-| `platform/calendar` | External-calendar read connectivity behind `/calendar import` and `/calendar subscribe`: a vendored RFC 5545 (iCalendar) reader and a `SubscriptionStore` for named feeds with per-feed status and conditional refresh | beta |
+| `platform/calendar` | External-calendar read connectivity behind `calendar.import` and `calendar.subscribe` (the Calendar and Calendar feeds tabs): a vendored RFC 5545 (iCalendar) reader and a `SubscriptionStore` for named feeds with per-feed status and conditional refresh | beta |
 | `platform/channels` | Channel runtime, routing, policy, and plugin registry | beta |
 | `platform/cloudflare` | Cloudflare worker discovery, config, resources, and status helpers | beta |
 | `platform/cluster` | LAN leader election so exactly one node consumes each inbound surface (ntfy, Telegram, etc.), with elections held per surface over a LAN-only protocol | beta |

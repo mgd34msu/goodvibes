@@ -17,7 +17,6 @@ import {
   ChannelProfileRegistry,
 } from '../../channel-profiles/index.js';
 import type { ApprovalBroker } from '../approval-broker.js';
-import { putToOwner } from '../owner-act.js';
 import { systemActor } from '@goodvibes/engine/daemon-api/http-policy';
 import { admitEffects } from '../../security/effect-authority.js';
 import { configKeyFacts } from '../../config/config-key-facts.js';
@@ -51,47 +50,22 @@ async function channelModeOf(service: ChannelProfilesGatewayService, authority: 
 }
 
 /**
- * A change that loosens the mode a channel's sessions run under is the
- * owner's own act (`settings.loosen`), as sessions.permissionMode.set and
- * config.set treat it: allowed, it returns null and the caller applies it; from
- * a caller who is not the owner it is put to the owner (202
- * OWNER_APPROVAL_PENDING) and applied when he approves it; refused (or with no
- * approval path) it is 403 OWNER_ONLY and nothing changes.
+ * A change that loosens the mode a channel's sessions run under is decided by the one owner rule
+ * (daemon/method-owner-decision.ts), as sessions.permissionMode.set and config.set are: the dispatch tells this handler
+ * whether it admits the caller at once; one it does not is answered OWNER_DECISION_NEEDED, nothing changed, and the
+ * dispatch puts the same call to the owner's gate; a caller the effect table refuses outright is refused (403).
  */
 async function ownerActForLoosening(invocation: GatewayMethodInvocation, authority: ChannelProfilesModeAuthority,
-  service: ChannelProfilesGatewayService, target: { readonly surfaceKind: string; readonly channelId: string | undefined; readonly verb: string; readonly mode: GatePresetName | undefined },
-  apply: () => Promise<unknown>): Promise<Response | null> {
+  service: ChannelProfilesGatewayService, target: { readonly surfaceKind: string; readonly channelId: string | undefined; readonly mode: GatePresetName | undefined }): Promise<void> {
   const current = await channelModeOf(service, authority, target.surfaceKind, target.channelId);
   const next = await channelModeOf(service, authority, target.surfaceKind, target.channelId, { mode: target.mode });
-  if (configKeyFacts('permissions.mode').loosens?.(GATE_PRESETS[current].mode, GATE_PRESETS[next].mode) !== true) return null;
-  const actor = invocation.context.actor ?? systemActor('in-process');
-  const admission = admitEffects(actor, ['settings.loosen']);
-  if (admission.kind === 'allowed') return null;
+  if (configKeyFacts('permissions.mode').loosens?.(GATE_PRESETS[current].mode, GATE_PRESETS[next].mode) !== true) return;
+  if (invocation.context.metadata?.['ownerAdmitted'] === true) return;
   const key = `${target.surfaceKind}${target.channelId ? `:${target.channelId}` : ''}`;
-  if (admission.kind === 'refused' || !authority.ownerApprovals) {
+  if (admitEffects(invocation.context.actor ?? systemActor('in-process'), ['settings.loosen']).kind === 'refused') {
     throw new GatewayVerbError(`This would loosen the permission mode the sessions from channel ${key} run under, from ${current} to ${next}, which only the owner does. Nothing was changed.`, 'OWNER_ONLY', 403, 'permissionMode');
   }
-  const requestedBy = invocation.context.principalId ?? 'a caller who is not the owner';
-  const { approvalId } = await putToOwner(authority.ownerApprovals, {
-    summary: `${requestedBy} asks to run the sessions from channel ${key} in ${next}`,
-    reasons: [`Changing the permission mode of channel ${key} from ${current} to ${next} loosens it.`],
-    tool: target.verb,
-    args: { surfaceKind: target.surfaceKind, ...(target.channelId ? { channelId: target.channelId } : {}), permissionMode: next },
-    requestedBy,
-    apply: async () => { await apply(); },
-  });
-  const binding = await service.get(target.surfaceKind, target.channelId).catch(() => null);
-  return Response.json({
-    code: 'OWNER_APPROVAL_PENDING',
-    approvalId,
-    // Whether this caller may read the approval (approvals.list) and so follow it to its outcome.
-    followable: admitEffects(actor, ['approvals.read']).kind === 'allowed',
-    binding,
-    mode: current,
-    requestedMode: next,
-    state: `nothing was changed yet; this loosens the permission mode the sessions from channel ${key} run under, which only the owner does, so it was put to the owner and applies when the owner approves it`,
-    next: [`Watch approval ${approvalId} (approvals.list with approvalId, or the approval-update event).`],
-  }, { status: 202 });
+  throw new GatewayVerbError(`This loosens the permission mode the sessions from channel ${key} run under, from ${current} to ${next}: the owner decides it.`, 'OWNER_DECISION_NEEDED', 409, 'permissionMode');
 }
 
 const ERROR_STATUS: Readonly<Record<string, number>> = {
@@ -151,10 +125,7 @@ function createSetHandler(service: ChannelProfilesGatewayService, authority: Cha
         metadata: readMetadata(params.metadata),
       };
       // A set replaces the binding, so leaving permissionMode out removes the key's own mode too.
-      const pending = await ownerActForLoosening(invocation, authority, service,
-        { surfaceKind: input.surfaceKind, channelId: input.channelId, verb: 'channels.profiles.set', mode: input.permissionMode },
-        () => service.set(input));
-      if (pending) return pending;
+      await ownerActForLoosening(invocation, authority, service, { surfaceKind: input.surfaceKind, channelId: input.channelId, mode: input.permissionMode });
       const binding = await service.set(input);
       return { binding };
     } catch (error) {
@@ -170,10 +141,7 @@ function createDeleteHandler(service: ChannelProfilesGatewayService, authority: 
     const channelId = optionalString(params.channelId);
     try {
       // Removing a binding that held a tighter mode loosens the mode its channel's sessions run under.
-      const pending = await ownerActForLoosening(invocation, authority, service,
-        { surfaceKind, channelId, verb: 'channels.profiles.delete', mode: undefined },
-        () => service.delete(surfaceKind, channelId));
-      if (pending) return pending;
+      await ownerActForLoosening(invocation, authority, service, { surfaceKind, channelId, mode: undefined });
       const deleted = await service.delete(surfaceKind, channelId);
       return { surfaceKind, ...(channelId ? { channelId } : {}), deleted };
     } catch (error) {

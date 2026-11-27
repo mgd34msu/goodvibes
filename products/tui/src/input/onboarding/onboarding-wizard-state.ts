@@ -1,7 +1,7 @@
 import type { ModelPickerTarget } from '../model-picker.ts';
 import type { OnboardingStep1CapabilityItem } from '../../runtime/onboarding/index.ts';
 import { DEFAULT_CAPABILITIES, NETWORK_HOST_FIELD_IDS } from './onboarding-wizard-constants.ts';
-import { areSelectionsEqual, clamp, cloneSelection, getExternalSurfaceSetupFieldSpec, isMalformedGoodVibesSecretReferenceValue, isValidHostValue, normalizeText, VERBATIM_FIELD_IDS } from './onboarding-wizard-helpers.ts';
+import { areSelectionsEqual, clamp, cloneSelection, getExternalSurfaceSetupFieldSpec, isMalformedGoodVibesSecretReferenceValue, isValidHostValue, normalizeText } from './onboarding-wizard-helpers.ts';
 import type { OnboardingWizardControllerLike } from './onboarding-wizard-types.ts';
 import type { OnboardingWizardFieldDefinition, OnboardingWizardModelSelection, OnboardingWizardStepDefinition } from './onboarding-wizard-types.ts';
 
@@ -74,36 +74,10 @@ export function getFieldValidationError(
   ): string | null {
     if (field.kind !== 'text' && field.kind !== 'masked') return null;
 
-    const raw = controller.getFieldValue(field) as string;
-    // A password is checked as typed; other fields as trimmed.
-    const value = VERBATIM_FIELD_IDS.has(field.id) ? raw ?? '' : normalizeText(raw);
+    const value = normalizeText(controller.getFieldValue(field) as string);
     const required = field.required === true;
     if (required && value.length === 0) {
       return `${step.shortLabel}: ${field.label} is required.`;
-    }
-
-    if (field.id === 'accounts.admin-username') {
-      const password = normalizeText(controller.getStringFieldValue('accounts.admin-password', ''));
-      if (!required && password.length > 0 && value.length === 0) {
-        return `${step.shortLabel}: ${field.label} is required when setting a local auth password.`;
-      }
-      const existing = controller.runtimeSnapshot?.auth.snapshot.users.find((user) => user.username === value);
-      if ((required || password.length > 0) && existing && !existing.roles.includes('admin')) {
-        return `${step.shortLabel}: ${field.label} must be an existing admin user or a new username.`;
-      }
-    }
-
-    if (field.id === 'accounts.admin-password' && value.length > 0 && value.length < 8) {
-      return `${step.shortLabel}: ${field.label} must be at least 8 characters.`;
-    }
-
-    if (field.id === 'accounts.admin-password-confirm') {
-      // Compared exactly as the password is sent, before any auth call runs.
-      const password = controller.getStringFieldValue('accounts.admin-password', '');
-      if (password.length > 0 && controller.getStringFieldValue(field.id, '') !== password) {
-        return `${step.shortLabel}: ${field.label} does not match the password; type it again.`;
-      }
-      return null;
     }
 
     if (field.kind === 'masked' && isMalformedGoodVibesSecretReferenceValue(value)) {

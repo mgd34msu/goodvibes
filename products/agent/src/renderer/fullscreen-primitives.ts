@@ -6,7 +6,7 @@ import { activeUiTones, registerThemeRefresh } from './theme.ts';
 
 // Built from the active theme's chrome tones (activeUiTones) and rebuilt IN
 // PLACE on every theme or mode change via the registered refresher (read by
-// reference across the fullscreen workspace surfaces, see theme.ts's
+// reference across the fullscreen surfaces, see theme.ts's
 // active-theme runtime note).
 function buildFullscreenPalette(): Record<string, string> {
   const t = activeUiTones();

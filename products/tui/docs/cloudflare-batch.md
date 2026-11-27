@@ -12,7 +12,7 @@ The TUI owns the user flow. The platform daemon owns all Cloudflare API calls, t
 
 ## Setup
 
-`/setup cloudflare` (Use Cloudflare) opens the Cloudflare form. The form configures:
+"Use Cloudflare" on the Setup tab of System (the menu, `Ctrl+G` then `m`) opens the Cloudflare form. The form configures:
 
 | Field | Choices / notes |
 | --- | --- |

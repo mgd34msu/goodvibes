@@ -71,7 +71,7 @@ const KEY_GAP = 2;
 const SUMMARY_MIN = 20;
 /** What a click on a part of the status line opens. */
 /** `places`: the menu of every place (terminal-shell/places). */
-export type StatusTarget = 'mode' | 'notices' | 'context' | 'changes' | 'model' | 'usage' | 'agents' | 'commands' | 'workspace' | 'places';
+export type StatusTarget = 'mode' | 'notices' | 'context' | 'changes' | 'model' | 'usage' | 'agents' | 'commands' | 'places';
 /** A chip at the left end of the status line. */
 export interface StatusChip {
     readonly text: string;

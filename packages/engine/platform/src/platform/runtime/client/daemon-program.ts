@@ -138,9 +138,12 @@ export function startDaemonProgram(program: DaemonProgram, env: NodeJS.ProcessEn
     log = openSync(logPath, 'a');
     let code: number | null = null;
     let failed: string | undefined;
+    // GOODVIBES_WORKING_DIR is a program's own folder: the daemon has no working folder and refuses to start with it.
+    const daemonEnv: NodeJS.ProcessEnv = { ...env };
+    delete daemonEnv.GOODVIBES_WORKING_DIR;
     const child = spawn(program.command, [...program.args, 'serve'], {
       cwd: env.HOME?.trim() || homedir(),
-      env,
+      env: daemonEnv,
       detached: true,
       shell: false,
       stdio: ['ignore', log, log],

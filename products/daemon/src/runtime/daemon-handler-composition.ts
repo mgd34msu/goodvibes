@@ -15,6 +15,7 @@ import type { HandlerContext, HandlerLogger, OwnedHandlerSurface } from '../daem
 import { logger } from '@goodvibes/engine/platform/platform/utils';
 import { daemonReceiptStoreAt, daemonReceiptsPath } from '@goodvibes/engine/platform/platform/daemon/receipts';
 import { createPaymentsServices } from './payments-composition.js';
+import { mergeKeepingGetters } from './merge-keeping-getters.js';
 import { recordGroupSpend } from '@goodvibes/engine/platform/platform/payments';
 import { createOwnerMailRelay, OWNER_MAIL_PENDING_FILE } from './owner-mail-relay.js';
 import { controlPlaneStorePath } from '@goodvibes/engine/platform/platform/control-plane';
@@ -178,7 +179,7 @@ export async function createDaemonHandlerComposition(
         const failed = results.find((result): result is PromiseRejectedResult => result.status === 'rejected');
         if (failed) throw failed.reason;
       });
-      return { ...services, close, unregister: () => { void close().catch(() => {}); } };
+      return mergeKeepingGetters(services, { close, unregister: () => { void close().catch(() => {}); } });
     },
   });
 }

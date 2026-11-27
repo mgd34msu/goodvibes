@@ -23,29 +23,16 @@ import { RetainedGuards } from './retained-guards.js';
 
 type ToolExecuteOptions = NonNullable<Parameters<Tool['execute']>[1]>;
 
-/** A settings-import preview read once from its native source, with the check that it is still that source. */
-export interface CatalogPreviewCapture {
-  readonly preview: unknown;
-  readonly sourceViews: unknown;
-  readonly assertCurrent: () => void;
-}
-
 /** What the Agent's own process adds to a protected catalog call's admission. */
 export interface CatalogIngressContext {
-  /** The command context a settings-import preview is bound to; a preview is read only for this one. */
-  readonly owner?: object | undefined;
   /** Native references a call names (a channel draft, a setup smoke run), captured before projection. */
   readonly captureNativeReferences?: ToolInputProjector['captureNativeReferences'] | undefined;
-  /** Whether a workspace action is a settings-import preview, inspected from its native source. */
-  readonly isSettingsPreview?: ((args: Record<string, unknown>) => boolean) | undefined;
-  /** Reads the settings-import preview once; absent where no command context exists. */
-  readonly capturePreview?: (() => CatalogPreviewCapture) | undefined;
   /** The check over the process sources a protected call reads (settings when it inspects them, the live session, the MCP registry). */
   readonly sourceGuard?: ((settings: boolean) => () => void) | undefined;
 }
 
 const MEMORY_CATALOG_MODES = new Set(['memory_posture', 'memory_provider']);
-const PRESERVED_CATALOG_MODES = new Set([...MEMORY_CATALOG_MODES, 'route_decision', 'browser_control_route', 'run_local_model_smoke', 'autonomy_intake', 'autonomy_queue', 'autonomy_queue_item', 'learning_curator', 'learning_candidate', 'background_processes', 'background_process', 'cli_commands', 'cli_command', 'shortcuts', 'keybindings', 'keybinding', 'set_keybinding', 'reset_keybinding', 'run_keybinding', 'agent_orchestration', 'agent_orchestration_agent', 'execution_posture', 'execution_route', 'execution_history', 'execution_history_item', 'document_ops_lane', 'delegation_posture', 'delegation_route']);
+const PRESERVED_CATALOG_MODES = new Set([...MEMORY_CATALOG_MODES, 'route_decision', 'browser_control_route', 'run_local_model_smoke', 'autonomy_intake', 'autonomy_queue', 'autonomy_queue_item', 'learning_curator', 'learning_candidate', 'background_processes', 'background_process', 'cli_commands', 'cli_command', 'shortcuts', 'keybindings', 'keybinding', 'run_keybinding', 'agent_orchestration', 'agent_orchestration_agent', 'execution_posture', 'execution_route', 'execution_history', 'execution_history_item', 'document_ops_lane', 'delegation_posture', 'delegation_route']);
 const CATALOG_MODES = new Set(['modes', 'mode', 'commands', 'command', 'run_command', 'tools', 'tool', 'operator_methods', 'operator_method', ...PRESERVED_CATALOG_MODES]);
 const PERSONAL_OPS_MODES = new Set(['personal_ops_briefing', 'personal_ops', 'personal_ops_queue', 'personal_ops_intake', 'personal_ops_lane', 'run_personal_ops_read']);
 const PROTECTED_COMMS_EFFECT_MODES = new Set(['channel_draft_save', 'channel_draft_send', 'channel_routing_assign', 'channel_routing_remove']);
@@ -70,23 +57,6 @@ const callAdmissions = new WeakMap<ToolExecuteOptions, CallAdmission[]>();
 function admissionOf(options: ToolExecuteOptions | undefined): CallAdmission | undefined {
   const active = options === undefined ? undefined : callAdmissions.get(options);
   return active?.[active.length - 1];
-}
-interface SettingsPreviewBinding {
-  readonly owner: object;
-  readonly registry: ToolRegistry;
-  readonly capture: CatalogPreviewCapture;
-  readonly aliases: Set<object>;
-  released: boolean;
-}
-const settingsPreviewBindings = new WeakMap<object, SettingsPreviewBinding>();
-
-/** The body reads the exact native source acquired by its original projection. */
-export function capturedCatalogPreview(args: Record<string, unknown>, options: ToolExecuteOptions | undefined,
-  owner: object, registry: ToolRegistry): CatalogPreviewCapture {
-  const binding = settingsPreviewBindings.get(args);
-  if (!binding || binding.released || binding.owner !== owner || binding.registry !== registry) throw new ToolInputProjectionError('stale');
-  harnessCatalogExecutionGuard(args, options)(); binding.capture.assertCurrent();
-  return binding.capture;
 }
 function retainedGuards(args: object): RetainedGuards {
   let guards = publicationGuards.get(args);
@@ -138,24 +108,12 @@ export function createCatalogInputProjector(registry: ToolRegistry, fallback?: T
     const protectedQuery = selected(request.args);
     const retained = retainedGuards(request.args);
     const routing = catalogRoutingInput(request.args);
-    const previewInspection = routing.mode === 'run_workspace_action' && context?.isSettingsPreview?.(request.args) === true;
-    const settingsInspection = request.name === 'settings' || routing.mode === 'settings' || routing.mode === 'get_setting' || previewInspection;
+    const settingsInspection = request.name === 'settings' || routing.mode === 'settings' || routing.mode === 'get_setting';
     const assertContext = protectedQuery ? catalogContextGuard(registry, context, settingsInspection) : () => {};
     const modelInspection = routing.mode === 'model_routing' || routing.mode === 'model_route' || routing.mode === 'local_model_cookbook' || request.name === 'models'
       || routing.mode === 'memory_posture' || routing.mode === 'memory_provider' || request.name === 'memory';
     const original = protectedQuery && (modelInspection || settingsInspection) ? captureModelReadingInput(request.args) : undefined;
     const originalJson = original && JSON.stringify(original);
-    let previewBinding: SettingsPreviewBinding | undefined;
-    if (protectedQuery && previewInspection) {
-      const owner = context?.owner, capturePreview = context?.capturePreview;
-      if (!owner || !capturePreview) throw new ToolInputProjectionError('unconfigured');
-      request.assertCurrent(); request.signal?.throwIfAborted(); assertContext();
-      const native = capturePreview();
-      const view = captureModelReadingInput({ preview: native.preview, sources: native.sourceViews });
-      native.assertCurrent(); assertContext(); request.assertCurrent(); request.signal?.throwIfAborted();
-      previewBinding = { owner, registry, capture: { preview: view.preview, sourceViews: view.sources, assertCurrent: native.assertCurrent }, aliases: new Set(), released: false };
-      retained.add(native.assertCurrent);
-    }
     const guarded = protectedQuery ? { ...request, ...(original ? { args: original } : {}), assertCurrent: () => {
       request.assertCurrent(); assertContext();
       for (const guard of retained.values()) guard();
@@ -164,10 +122,6 @@ export function createCatalogInputProjector(registry: ToolRegistry, fallback?: T
     const result = await projector.project(guarded);
     if (!protectedQuery || result.status !== 'projected') return result;
     publicationGuards.set(result.args, retained);
-    const bindPreview = (args: object) => {
-      if (previewBinding) { settingsPreviewBindings.set(args, previewBinding); previewBinding.aliases.add(args); }
-    };
-    bindPreview(result.args);
     let released = false;
     const assertCurrent = () => {
       if (released) throw new ToolInputProjectionError('stale');
@@ -182,23 +136,15 @@ export function createCatalogInputProjector(registry: ToolRegistry, fallback?: T
         // The registry supplies this exact final argument object to execute.
         // A structural copy cannot inherit a protected invocation's lifetime.
         projectionGuards.set(candidate, assertCurrent); publicationGuards.set(candidate, retained);
-        bindPreview(candidate);
       },
       async release() {
         // Engine cleanup retires the one-use execution before releasing its
         // projection. Only retained source/backend facts survive that lease.
         released = true;
-        if (previewBinding) previewBinding.released = true;
-        try {
-          await result.release?.();
-          assertContext();
-          if (original) assertModelReadingInputCurrent(request.args, originalJson);
-          for (const guard of retained.values()) guard();
-        } finally {
-          if (previewBinding) for (const args of previewBinding.aliases) {
-            if (settingsPreviewBindings.get(args) === previewBinding) settingsPreviewBindings.delete(args);
-          }
-        }
+        await result.release?.();
+        assertContext();
+        if (original) assertModelReadingInputCurrent(request.args, originalJson);
+        for (const guard of retained.values()) guard();
       },
     };
   } };
@@ -288,13 +234,11 @@ export function protectCatalogTool(tool: Tool, registry: ToolRegistry, selected 
   return { ...tool, async execute(input, options) {
     if (!selected(input)) return tool.execute(input, options);
     const routing = catalogRoutingInput(input);
-    const previewInspection = routing.mode === 'run_workspace_action' && context?.isSettingsPreview?.(input) === true;
     if (!admissionOf(options) && !projectionGuards.has(input)) { publicationGuards.set(input, new RetainedGuards()); }
     const guard = harnessCatalogExecutionGuard(input, options);
     // The tool's registration, read once by name (no scan of every registered tool).
     const registration = registry.definitionOf(tool.definition.name);
-    const assertContext = catalogContextGuard(registry, context, tool.definition.name === 'settings' || routing.mode === 'settings' || routing.mode === 'get_setting'
-      || previewInspection);
+    const assertContext = catalogContextGuard(registry, context, tool.definition.name === 'settings' || routing.mode === 'settings' || routing.mode === 'get_setting');
     const assertRegistrationCurrent = () => {
       assertContext();
       if (registry.definitionOf(tool.definition.name) !== registration) throw new ToolInputProjectionError('stale');

@@ -13,7 +13,6 @@ type ModalRoute =
   | 'handleBlockActionsToken'
   | 'config'
   | 'onboarding'
-  | 'agent-workspace'
   | 'live-tail'
   | 'process';
 /** The key route of each tracked modal, by its name. Command mode has none: the composer routes it. */
@@ -21,7 +20,6 @@ const MODAL_ROUTES: Readonly<Partial<Record<string, ModalRoute>>> = {
   bookmark: 'handleBookmarkModalToken',
   liveTail: 'live-tail',
   mcpWorkspace: 'handleMcpWorkspaceToken',
-  agentWorkspace: 'agent-workspace',
   sessionPicker: 'handleSessionPickerToken',
   profilePicker: 'handleProfilePickerToken',
   config: 'config',
@@ -199,7 +197,7 @@ export function createModalTokenPipeline<State extends CommonModalRoutingState>(
     readonly additional?:
       | Readonly<
           Partial<
-            Record<'config' | 'onboarding' | 'agent-workspace' | 'live-tail' | 'process', (state: State, token: InputToken) => boolean>
+            Record<'config' | 'onboarding' | 'live-tail' | 'process', (state: State, token: InputToken) => boolean>
           >
         >
       | undefined;

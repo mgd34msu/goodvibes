@@ -15,7 +15,8 @@
  *    (tokens, policies, this folder's trust) read from the daemon.
  */
 import { existsSync } from 'node:fs';
-import { basename } from 'node:path';
+import { basename, dirname } from 'node:path';
+import { currentRecordReach } from '@goodvibes/engine/daemon-api';
 import type { DeepReadonly } from '../../config/manager.js';
 import type { GoodVibesConfig } from '../../config/schema-types.js';
 import { listBuiltinSubscriptionProviders } from '../../config/subscription-providers.js';
@@ -23,6 +24,7 @@ import { dispatchPolicyCommand, type PolicyMcpServerSecurity } from '../../gate/
 import type { PermissionModeInForce } from '../../permissions/decision-model-readiness.js';
 import { buildMcpAttackPathReview } from '../../runtime/mcp/permissions.js';
 import type { PolicyRuntimeState } from '../../runtime/permissions/policy-runtime.js';
+import { policyImpact } from '../../runtime/permissions/policy-impact.js';
 import {
   buildSandboxReview, inspectSandboxProbe, renderSandboxProfiles, renderSandboxRecommendation, renderSandboxReview, type ConfigManagerLike,
 } from '../../runtime/sandbox/manager.js';
@@ -31,6 +33,7 @@ import { atomicWriteFileSync } from '../../config/atomic-write.js';
 import { summarizeError } from '../../utils/native-error-summary.js';
 import { readRefusal } from '@goodvibes/engine/errors';
 import { CapabilityRefusal, type CapabilityCaller, type CapabilityDefinition, type CapabilityResult, type InputDescription } from '../types.js';
+import { fileWorkRefusal, unreadableFile } from '../path-inputs.js';
 import type { SecretsCapabilityServices } from './secrets.js';
 
 type AttackPathInput = Parameters<typeof buildMcpAttackPathReview>[0];
@@ -40,18 +43,18 @@ export interface SecurityReviewCapabilityServices {
   readonly securityReview: {
     /** The daemon's policy state: the bundle in force, the candidate, the history, the recorded calls; it writes the one activation record. */
     policy(): PolicyRuntimeState;
-    /** The daemon's settings, as the preflight reads them. */
-    config(): DeepReadonly<GoodVibesConfig>;
-    /** The MCP servers the daemon runs, with their trust (the preflight and the trust summary read them). */
-    mcpServers(): readonly (PolicyMcpServerSecurity & { readonly schemaFreshness: string })[];
-    /** The plugins the daemon runs, with their trust. */
-    plugins(): readonly { readonly trustTier: string; readonly quarantined?: boolean | undefined }[];
+    /** The settings in force for the asking project (the daemon's with the project's own file over them), as the preflight reads them. */
+    config(caller: CapabilityCaller): DeepReadonly<GoodVibesConfig>;
+    /** The MCP servers of the asking project, with their trust (the preflight and the trust summary read them). */
+    mcpServers(caller: CapabilityCaller): readonly (PolicyMcpServerSecurity & { readonly schemaFreshness: string })[];
+    /** The plugins of the asking project, with their trust. */
+    plugins(caller: CapabilityCaller): readonly { readonly trustTier: string; readonly quarantined?: boolean | undefined }[];
     /** The services set up. */
     serviceNames(): readonly string[];
-    /** The permission mode every program starts from, as the gate reads it. */
-    permissionMode(): PermissionModeInForce;
-    /** The settings the sandbox reads: the daemon's, which every program follows. */
-    sandboxConfig(): ConfigManagerLike;
+    /** The permission mode in force for the asking project, as the gate reads it for a call there. */
+    permissionMode(caller: CapabilityCaller): PermissionModeInForce;
+    /** The settings the sandbox reads for the asking project: the daemon's, with the project's own file over them. */
+    sandboxConfig(caller: CapabilityCaller): ConfigManagerLike;
     /** Write `sandbox.mcpIsolation` on the daemon's settings; every program follows it and restarts its running MCP servers under it. */
     setMcpIsolation(mode: 'contained' | 'disabled'): void;
     /** The daemon's `sandbox.enabled`, which every program follows: commands inside the sandbox, or on the host. */
@@ -87,6 +90,15 @@ function policyOf(services: Daemon): PolicyRuntimeState {
   return services.securityReview.policy();
 }
 
+/**
+ * Who asks, when it is not the owner at large: whether it may reach the things of a project, by its folder (the one
+ * reach rule, control-plane/caller-reach.ts); undefined for the owner, who sees every project's recorded calls.
+ */
+function policyReach(): ((project: string | undefined) => boolean) | undefined {
+  const reach = currentRecordReach();
+  return reach ? (project) => typeof project === 'string' && project.trim() !== '' && reach('project', project.trim()) : undefined;
+}
+
 /** One step of the policy workflow, run on the daemon's policy state; its lines without the workflow's prefix. */
 async function policyStep(services: Daemon, caller: CapabilityCaller, args: readonly string[]): Promise<string> {
   const printed: string[] = [];
@@ -99,8 +111,10 @@ async function policyStep(services: Daemon, caller: CapabilityCaller, args: read
         if (!caller.workingDirectory) throw new CapabilityRefusal('No folder was given: a bundle file is read against the folder of the program that asked.');
         return caller.workingDirectory;
       },
-      config: () => services.securityReview.config(),
-      listMcpServerSecurity: () => services.securityReview.mcpServers(),
+      config: () => services.securityReview.config(caller),
+      listMcpServerSecurity: () => services.securityReview.mcpServers(caller),
+      // A caller that is not the owner: the candidates and recorded calls of the projects it may reach only.
+      ...(policyReach() ? { reach: policyReach() } : {}),
     });
   } catch (error) {
     if (error instanceof CapabilityRefusal) throw error;
@@ -116,16 +130,30 @@ function policyFacts(services: Daemon): Record<string, unknown> {
   const state = policyOf(services);
   const registry = state.getRegistry();
   const current = registry.getCurrent();
-  const candidate = registry.getCandidate();
+  // A candidate is the owner's, loaded from a project's folder: a caller that is not the owner sees it only when it may
+  // reach that project (gate/policy/policy-dispatch.ts `visibleCandidate`, the same rule).
+  const held = registry.getCandidate();
+  const reach = policyReach();
+  const candidate = held && (!reach || (held.sourcePath !== undefined && reach(dirname(held.sourcePath)))) ? held : null;
   const snapshot = state.getSnapshot() as { readonly lintFindings?: readonly unknown[]; readonly lastPreflightReview?: { readonly status?: string } | null };
   const note = services.securityReview.carriedNote();
   const problem = state.getConfiguredBundleFailure();
+  // The counts are filtered like the rows (a count is information about other projects too): for a caller that is not
+  // the owner, the candidate's changes are its reached projects' recorded calls decided again (as its status shows them,
+  // gate/policy/policy-dispatch.ts), the lint findings are those of the policy in force and of a candidate it may see,
+  // and the preflight review (read over both bundles) only while it may see every bundle it read.
+  const changes = !candidate?.impact ? null : !reach ? candidate.impact.changed.length
+    : policyImpact({ currentRules: current?.rules ?? [], candidateRules: candidate.rules, projectRoot: dirname(candidate.sourcePath ?? '.'),
+      calls: state.getRecentPermissionAudit(), reaches: reach }).changed.length;
+  const lint = state.getLintCounts();
+  const lintFindings = !reach ? (Array.isArray(snapshot.lintFindings) ? snapshot.lintFindings.length : 0) : lint.current + (candidate ? lint.candidate : 0);
+  const preflight = reach && held && !candidate ? null : snapshot.lastPreflightReview?.status ?? null;
   return {
     ...(current ? { current: { id: current.bundle.bundleId, rules: current.rules.length, ...(current.activatedAt ? { since: current.activatedAt } : {}), ...(current.sourcePath ? { file: current.sourcePath } : {}) } } : {}),
-    ...(candidate ? { candidate: { id: candidate.bundle.bundleId, rules: candidate.rules.length, state: candidate.state, changes: candidate.impact?.changed.length ?? null, ...(candidate.sourcePath ? { file: candidate.sourcePath } : {}) } } : {}),
+    ...(candidate ? { candidate: { id: candidate.bundle.bundleId, rules: candidate.rules.length, state: candidate.state, changes, ...(candidate.sourcePath ? { file: candidate.sourcePath } : {}) } } : {}),
     history: registry.getHistory().length,
-    lintFindings: Array.isArray(snapshot.lintFindings) ? snapshot.lintFindings.length : 0,
-    preflight: snapshot.lastPreflightReview?.status ?? null,
+    lintFindings,
+    preflight,
     ...(problem ? { problem } : {}),
     ...(note ? { carried: note } : {}),
   };
@@ -147,12 +175,19 @@ export const SECURITY_LOAD_POLICY: CapabilityDefinition<Daemon> = {
   inputs: [PATH('The policy bundle file')],
   sentence: 'The bundle in {path} becomes the candidate policy until you change it; nothing is enforced until you enforce it.', done: '',
   touches: 'this-machine', lasts: 'kept', risk: 'none', example: { path: 'policy-bundle.json' },
+  // The candidate is the owner's (one for the daemon, what "Enforce" puts in force): loading one is his own act, so a
+  // device's, a member's or a model's load is put to him and never replaces his candidate on its own.
+  ownerOnly: { reason: 'the candidate is the one you review and enforce for every program on this machine', instead: 'Ask the owner to load it in Permissions and safety, Policy.' },
+  ownersAct: true,
   async run(values, services, caller) {
     const before = policyOf(services).getRegistry().getCandidate();
-    const said = await policyStep(services, caller, ['load', values.path!]);
+    // Placed by the one rule for every capability's path (capabilities/path-inputs.ts).
+    const path = services.securityReview.resolvePath(caller, values.path!);
+    const said = await policyStep(services, caller, ['load', path]);
     const after = policyOf(services).getRegistry().getCandidate();
-    // The workflow says a failed load in a line and leaves the candidate as it was: that is a refusal here.
-    if (!after || after === before) throw new CapabilityRefusal(said || 'No candidate was loaded.');
+    // The workflow says a failed load in a line and leaves the candidate as it was: that is a refusal here. Its words can
+    // quote the file (a parser's message): only the person reads them.
+    if (!after || after === before) throw caller.personAsked === true ? new CapabilityRefusal(said || 'No candidate was loaded.') : unreadableFile(values.path!, 'a policy bundle', caller, undefined, 'No candidate was loaded.');
     services.securityReview.changed();
     return { text: said, data: policyFacts(services) };
   },
@@ -201,6 +236,7 @@ export const SECURITY_ENFORCE_POLICY: CapabilityDefinition<Daemon> = {
   // A policy swap may tighten as well as loosen: the line says what is in force, not that it loosened.
   riskDone: 'The candidate is the policy in force now: the calls it decides differently go its way, looser or stricter.',
   ownerOnly: { reason: 'a new policy may allow what the one in force refuses', instead: 'Ask the owner to enforce it in Permissions and safety, Policy.' },
+  ownersAct: true,
   example: {},
   async run(_values, services, caller) {
     const said = await policyStep(services, caller, ['promote', '--yes']);
@@ -215,6 +251,7 @@ export const SECURITY_RESTORE_POLICY: CapabilityDefinition<Daemon> = {
   touches: 'this-machine', lasts: 'kept', risk: 'loosens-a-protection', undoneBy: 'enforce-policy',
   riskDone: 'The previous policy is in force again: the calls it decides differently go its way, looser or stricter.',
   ownerOnly: { reason: 'the previous policy may allow what the one in force refuses', instead: 'Ask the owner to go back in Permissions and safety, Policy.' },
+  ownersAct: true,
   example: {},
   async run(_values, services, caller) {
     const said = await policyStep(services, caller, ['rollback']);
@@ -236,7 +273,7 @@ async function trustBundle(services: Daemon, caller: CapabilityCaller) {
   }
   const review = services.securityReview;
   return buildTrustReviewBundle({
-    secretKeys, serviceNames: review.serviceNames(), plugins: review.plugins(), mcpServers: review.mcpServers(), permissionMode: review.permissionMode(),
+    secretKeys, serviceNames: review.serviceNames(), plugins: review.plugins(caller), mcpServers: review.mcpServers(caller), permissionMode: review.permissionMode(caller),
   });
 }
 
@@ -252,7 +289,7 @@ export const SECURITY_TRUST: CapabilityDefinition<Daemon> = {
 
 export const SECURITY_SAVE_TRUST: CapabilityDefinition<Daemon> = {
   capability: daemon('security.save-trust'), actionId: 'save-trust', label: 'Save the trust summary to a file', word: 'save-trust',
-  inputs: [PATH('Where to write it; only you can read it'), REPLACE],
+  inputs: [{ ...PATH('Where to write it; only you can read it'), file: 'written' }, REPLACE],
   sentence: 'The trust summary (secret names, not values) will be written to {path}, until you change it.', done: '',
   touches: 'this-machine', lasts: 'kept', risk: 'none', example: { path: 'trust-review.json' },
   async run(values, services, caller) {
@@ -279,7 +316,8 @@ export const SECURITY_READ_TRUST: CapabilityDefinition<Daemon> = {
     try {
       return { text: inspectTrustBundle(target) };
     } catch (error) {
-      throw new CapabilityRefusal(`Could not read ${basename(target)}: ${summarizeError(error)}`);
+      // Never the system's or the parser's words to anyone but the person (capabilities/path-inputs.ts).
+      throw fileWorkRefusal(basename(target), 'a trust summary', caller, error, 'Nothing was read from it.');
     }
   },
 };
@@ -292,8 +330,8 @@ export const SECURITY_SANDBOX: CapabilityDefinition<Daemon> = {
   capability: daemon('security.sandbox'), actionId: 'sandbox', label: 'See the sandbox', word: 'sandbox', inputs: [],
   sentence: 'Shows whether commands and MCP servers run inside a process boundary on this machine, and which backend does it.', done: '',
   touches: 'reads', lasts: 'not-a-change', risk: 'none', example: {},
-  async run(_values, services) {
-    const config = services.securityReview.sandboxConfig();
+  async run(_values, services, caller) {
+    const config = services.securityReview.sandboxConfig(caller);
     const review = buildSandboxReview(config);
     return {
       text: renderSandboxReview(config),
@@ -309,25 +347,25 @@ export const SECURITY_SANDBOX_ADVICE: CapabilityDefinition<Daemon> = {
   capability: daemon('security.sandbox-advice'), actionId: 'sandbox-advice', label: 'See what the sandbox should be', word: 'sandbox-advice', inputs: [],
   sentence: 'Says what to set for the sandbox on this machine, and why.', done: '',
   touches: 'reads', lasts: 'not-a-change', risk: 'none', example: {},
-  async run(_values, services) { return { text: renderSandboxRecommendation(services.securityReview.sandboxConfig()) }; },
+  async run(_values, services, caller) { return { text: renderSandboxRecommendation(services.securityReview.sandboxConfig(caller)) }; },
 };
 
 export const SECURITY_SANDBOX_PROFILES: CapabilityDefinition<Daemon> = {
   capability: daemon('security.sandbox-profiles'), actionId: 'sandbox-profiles', label: 'See the sandbox profiles', word: 'sandbox-profiles', inputs: [],
   sentence: 'Lists the sandbox profiles (commands, MCP servers) with what each may reach and the backend that runs it.', done: '',
   touches: 'reads', lasts: 'not-a-change', risk: 'none', example: {},
-  async run(_values, services) { return { text: renderSandboxProfiles(services.securityReview.sandboxConfig()) }; },
+  async run(_values, services, caller) { return { text: renderSandboxProfiles(services.securityReview.sandboxConfig(caller)) }; },
 };
 
 export const SECURITY_CONTAIN_MCP: CapabilityDefinition<Daemon> = {
   capability: daemon('security.contain-mcp'), actionId: 'contain-mcp', label: 'Run MCP servers inside the sandbox', button: 'Contain them', word: 'contain-mcp', inputs: [],
   sentence: 'Each MCP server runs inside its own process boundary in every program on this machine, and the running ones are restarted inside it, until you change it.', done: '',
   touches: 'this-machine', lasts: 'kept', risk: 'none', undoneBy: 'host-mcp', tightens: true, example: {},
-  async run(_values, services) {
+  async run(_values, services, caller) {
     const review = services.securityReview;
     try { review.setMcpIsolation('contained'); } catch (error) { throw new CapabilityRefusal(`Nothing was changed: ${summarizeError(error)}`); }
     review.changed();
-    const ready = buildSandboxReview(review.sandboxConfig()).host.secureSandboxReady;
+    const ready = buildSandboxReview(review.sandboxConfig(caller)).host.secureSandboxReady;
     return {
       text: ready
         ? 'MCP servers run inside their own bubblewrap boundary from now on; each program restarts its running ones inside it.'
@@ -354,11 +392,11 @@ export const SECURITY_CONTAIN_COMMANDS: CapabilityDefinition<Daemon> = {
   capability: daemon('security.contain-commands'), actionId: 'contain-commands', label: 'Run commands inside the sandbox', button: 'Contain them', word: 'contain-commands', inputs: [],
   sentence: 'Switches the command sandbox on, or back on: each command a tool runs goes inside the sandbox where this machine has one (the folder writable, the rest read-only, no network), in every program on this machine from its next start, until you change it.', done: '',
   touches: 'this-machine', lasts: 'kept', risk: 'none', undoneBy: 'host-commands', tightens: true, example: {},
-  async run(_values, services) {
+  async run(_values, services, caller) {
     const review = services.securityReview;
     try { review.setSandboxEnabled(true); } catch (error) { throw new CapabilityRefusal(`Nothing was changed: ${summarizeError(error)}`); }
     review.changed();
-    const ready = buildSandboxReview(review.sandboxConfig()).host.secureSandboxReady;
+    const ready = buildSandboxReview(review.sandboxConfig(caller)).host.secureSandboxReady;
     return {
       text: ready
         ? 'Commands run inside the sandbox from each program\'s next start.'

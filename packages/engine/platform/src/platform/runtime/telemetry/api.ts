@@ -42,6 +42,34 @@ import {
 } from './api-query.js';
 import { createTelemetryEventStream } from './api-stream.js';
 import { isOpenApprovalStatus } from '../../control-plane/approval-lifecycle.js';
+import { currentRecordReach, keepReachable, type RecordReachFilter } from '@goodvibes/engine/daemon-api';
+
+/**
+ * Whether a record is of a session or an agent the caller may reach (control-plane/caller-reach.ts): its session (a
+ * web chat as itself, a shared or hosted session), else the agent it names. A record of neither (the daemon's own
+ * session, its startup, its transport) is the owner's.
+ */
+function telemetryRecordReachable(record: Pick<TelemetryRecord, 'sessionId' | 'agentId'>, reach: RecordReachFilter): boolean {
+  if (record.sessionId && reach('session', record.sessionId)) return true;
+  return record.agentId !== undefined && reach('task', record.agentId);
+}
+
+/** The records the request's caller may reach (all of them for the owner himself). */
+function reachableTelemetryRecords(records: readonly TelemetryRecord[]): readonly TelemetryRecord[] {
+  const reach = currentRecordReach();
+  return reach ? records.filter((record) => telemetryRecordReachable(record, reach)) : records;
+}
+
+/** The spans of a session the request's caller may reach (`session.id` or a compaction's `compaction.session_id`). */
+function reachableSpans(spans: readonly ReadableSpan[]): readonly ReadableSpan[] {
+  const reach = currentRecordReach();
+  if (!reach) return spans;
+  return spans.filter((span) => {
+    const attributes = span.attributes as Readonly<Record<string, unknown>> | undefined;
+    const sessionId = attributes?.['session.id'] ?? attributes?.['compaction.session_id'];
+    return typeof sessionId === 'string' && sessionId !== '' && reach('session', sessionId);
+  });
+}
 import {
   ingestExternalTelemetryLogs,
   ingestExternalTelemetryTraces,
@@ -324,6 +352,8 @@ export class TelemetryApiService {
     rawAccessible = rawAccessible && this.isRawEnabled();
     const state = this.runtimeStore.getState();
     const limit = clampLimit(filter.limit, 20);
+    // A caller that is not the owner himself: every count is of what it may reach (control-plane/caller-reach.ts).
+    if (currentRecordReach() !== undefined) return this.reachableSnapshot(filter, view, rawAccessible, limit);
     return {
       version: 1,
       view,
@@ -357,6 +387,84 @@ export class TelemetryApiService {
       },
       sessionMetrics: this.getSessionMetrics(),
       aggregates: this.getAggregates(),
+      recent: {
+        events: this.listEventPage({ ...filter, limit }, view, rawAccessible),
+        errors: this.listErrorPage({ ...filter, limit }, view, rawAccessible),
+        spans: this.listSpanPage({ ...filter, limit }, view, rawAccessible),
+      },
+    };
+  }
+
+  /**
+   * The snapshot for a caller that is not the owner himself: the records, errors and spans it may reach (sessions and
+   * agents of the projects given it), and every count made of those (tasks, agents and waiting questions by the same
+   * rule; turns, tool calls, tokens and errors from the kept records it may reach). The daemon's own lifetime counters,
+   * which keep no session, are the owner's.
+   */
+  private reachableSnapshot(filter: TelemetryFilter, view: TelemetryViewMode, rawAccessible: boolean, limit: number): TelemetrySnapshot {
+    const state = this.runtimeStore.getState();
+    const records = reachableTelemetryRecords(this.records);
+    const errors = reachableTelemetryRecords(this.errors);
+    const spans = reachableSpans(this.spans);
+    const tasks = keepReachable([...state.tasks.tasks.values()], 'task', (task) => task.id);
+    const agents = keepReachable([...state.agents.agents.values()], 'task', (agent) => agent.id);
+    const approvals = this.listApprovals ? keepReachable(this.listApprovals(), 'approval', (approval) => approval.id) : [];
+    const count = (type: string): number => records.filter((record) => record.type === type).length;
+    const tokens = (field: 'inputTokens' | 'outputTokens' | 'cacheReadTokens'): number => records
+      .filter((record) => record.type === 'LLM_RESPONSE_RECEIVED')
+      .reduce((sum, record) => { const value = (record.payload as Record<string, unknown> | null)?.[field]; return sum + (typeof value === 'number' ? value : 0); }, 0);
+    const tally = (keys: readonly string[]): Record<string, number> => {
+      const out: Record<string, number> = {};
+      for (const key of keys) out[key] = (out[key] ?? 0) + 1;
+      return out;
+    };
+    const warnings = records.filter((record) => record.severity === 'warn').length;
+    return {
+      version: 1,
+      view,
+      rawAccessible,
+      generatedAt: Date.now(),
+      service: { name: SERVICE_NAME, version: VERSION },
+      capabilities: this.getCapabilities(),
+      runtime: {
+        sessionId: state.session.id,
+        conversationSessionId: state.session.conversationSessionId,
+        sessionStatus: state.session.status,
+        traceExport: readTraceExportState(),
+        tasks: {
+          total: tasks.length,
+          queued: tasks.filter((task) => task.status === 'queued').length,
+          running: tasks.filter((task) => task.status === 'running').length,
+          blocked: tasks.filter((task) => task.status === 'blocked').length,
+        },
+        agents: {
+          total: agents.length,
+          active: agents.filter((agent) => state.agents.activeAgentIds.includes(agent.id)).length,
+        },
+        approvals: { pending: approvals.filter((approval) => isOpenApprovalStatus(approval.status)).length },
+      },
+      sessionMetrics: {
+        turns: count('TURN_COMPLETED'),
+        toolCalls: count('TOOL_RECEIVED'),
+        toolErrors: count('TOOL_FAILED'),
+        agentsSpawned: count('AGENT_SPAWNING'),
+        inputTokens: tokens('inputTokens'),
+        outputTokens: tokens('outputTokens'),
+        cacheReadTokens: tokens('cacheReadTokens'),
+        permissionPrompts: approvals.length,
+        permissionDenials: approvals.filter((approval) => approval.status === 'denied').length,
+        errors: errors.length,
+        warnings,
+      },
+      aggregates: {
+        totalEvents: records.length,
+        totalErrors: errors.length,
+        totalWarnings: warnings,
+        totalSpans: spans.length,
+        byDomain: tally(records.map((record) => record.domain)),
+        byEventType: tally(records.map((record) => record.type)),
+        errorsByCategory: tally(errors.map((record) => String(record.error?.category ?? 'unknown'))),
+      },
       recent: {
         events: this.listEventPage({ ...filter, limit }, view, rawAccessible),
         errors: this.listErrorPage({ ...filter, limit }, view, rawAccessible),
@@ -420,7 +528,7 @@ export class TelemetryApiService {
     rawAccessible = view === 'raw',
   ): TelemetryListResponse<TelemetryRecord> {
     this.assertViewAvailable(view);
-    const { items, pageInfo } = applyTelemetryRecordFilter(this.records, this.resolveTraceFilter(filter), view);
+    const { items, pageInfo } = applyTelemetryRecordFilter(reachableTelemetryRecords(this.records), this.resolveTraceFilter(filter), view);
     return buildListResponse(items, view, rawAccessible && this.isRawEnabled(), pageInfo);
   }
 
@@ -430,7 +538,7 @@ export class TelemetryApiService {
     rawAccessible = view === 'raw',
   ): TelemetryListResponse<TelemetryRecord> {
     this.assertViewAvailable(view);
-    const { items, pageInfo } = applyTelemetryRecordFilter(this.errors, this.resolveTraceFilter(filter), view);
+    const { items, pageInfo } = applyTelemetryRecordFilter(reachableTelemetryRecords(this.errors), this.resolveTraceFilter(filter), view);
     return buildListResponse(items, view, rawAccessible && this.isRawEnabled(), pageInfo);
   }
 
@@ -440,7 +548,7 @@ export class TelemetryApiService {
     rawAccessible = view === 'raw',
   ): TelemetryListResponse<ReadableSpan> {
     this.assertViewAvailable(view);
-    const { items, pageInfo } = applyTelemetrySpanFilter(this.spans, this.resolveTraceFilter(filter), view);
+    const { items, pageInfo } = applyTelemetrySpanFilter(reachableSpans(this.spans), this.resolveTraceFilter(filter), view);
     return buildListResponse(items, view, rawAccessible && this.isRawEnabled(), pageInfo);
   }
 
@@ -451,6 +559,10 @@ export class TelemetryApiService {
     rawAccessible = view === 'raw',
   ): Response {
     this.assertViewAvailable(view);
+    // The reach of the caller who opened the stream, read now (its later frames are sent outside its request): it
+    // follows only records of sessions and agents it may reach (control-plane/caller-reach.ts), live and replayed.
+    const reach = currentRecordReach();
+    const mayFollow = (record: TelemetryRecord): boolean => !reach || telemetryRecordReachable(record, reach);
     return createTelemetryEventStream({
       request,
       filter,
@@ -458,7 +570,7 @@ export class TelemetryApiService {
       rawAccessible: rawAccessible && this.isRawEnabled(),
       assertViewAvailable: () => this.assertViewAvailable(view),
       records: this.records,
-      matchesRecord: (record, nextFilter) => telemetryRecordMatches(record, this.resolveTraceFilter(nextFilter)),
+      matchesRecord: (record, nextFilter) => mayFollow(record) && telemetryRecordMatches(record, this.resolveTraceFilter(nextFilter)),
       subscribe: (listener) => this.subscribe(listener),
       getCapabilities: () => this.getCapabilities(),
       getSubscriberCount: () => this.subscribers.size,

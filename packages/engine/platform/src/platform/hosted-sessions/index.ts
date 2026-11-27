@@ -54,17 +54,6 @@ export type { SessionContractObserver, SessionContractRunner } from './session-c
 export { EXTERNAL_CANCEL_REASON, createHostedContractWorkAdapter } from './contract-work-adapter.js';
 export type { HostedContractWorkAdapterDeps } from './contract-work-adapter.js';
 
-// How much authority a hosted run's exec tool carries, the contained default,
-// the explicitly-granted workstream posture, and the pieces a product needs to
-// state one on the floor it builds.
-export {
-  containmentFor,
-  resolveHostedExecPosture,
-  CONVERSATIONAL_CONTAINMENT,
-  WORKSTREAM_CONTAINMENT,
-} from './exec-posture.js';
-export type { HostedExecPostureDecider, HostedSessionExecPosture } from './exec-posture.js';
-
 export {
   HOSTED_ATTACHMENT_DEFAULT_LEASE_MS,
   HOSTED_ATTACHMENT_MAX_LEASE_MS,

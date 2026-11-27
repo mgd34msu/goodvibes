@@ -92,32 +92,7 @@ export function executeBlockActionForHandler(handler: InputHandler, actionId: st
  * - If prompt is empty: cancel generation (double-tap not needed)
  */
 export function handleEscapeForHandler(handler: InputHandler): void {
-  if (returnToWorkspaceAfterTyping(handler)) return;
   handleEscape(handler, handler.commandContext?.cancelGeneration);
-}
-
-/**
- * Typing in the workspace took the person to the composer. Esc on what they
- * typed, not yet sent, takes them back to the area and row they left: a single
- * stray character is discarded, anything longer stays in the composer. With an
- * empty composer (sent, or cleared) Esc does what it always does.
- */
-function returnToWorkspaceAfterTyping(handler: InputHandler): boolean {
-  const workspace = handler.agentWorkspace;
-  if (!workspace.leftByTyping || handler.surfaceModals.active) return false;
-  if (handler.prompt.length === 0) {
-    workspace.forgetTypedAway();
-    return false;
-  }
-  if (!workspace.returnFromTyping()) return false;
-  if (handler.prompt.trim().length <= 1) {
-    handler.saveUndoState();
-    handler.prompt = '';
-    handler.cursorPos = 0;
-  }
-  handler.indicatorFocused = false;
-  handler.requestRender();
-  return true;
 }
 
 export const {

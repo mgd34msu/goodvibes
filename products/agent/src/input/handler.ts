@@ -43,10 +43,6 @@ import { ContextInspectorModal } from '../renderer/context-inspector.ts';
 import { SurfaceModalHost, isTrackedModal, type TrackedModal } from '@goodvibes/engine/terminal-shell/surface-modal-host';
 import { BookmarkModal } from './bookmark-modal.ts';
 import { McpWorkspace } from './mcp-workspace.ts';
-import { AgentWorkspace } from './agent-workspace.ts';
-import { parseSlashCommand } from './slash-command-parser.ts';
-import { captureCommandPrint } from './workspace-command-output.ts';
-import { formatRefusal, readRefusal } from '@goodvibes/engine/errors';
 import { SessionPickerModal } from './session-picker-modal.ts';
 import { ProfilePickerModal } from './profile-picker-modal.ts';
 import {
@@ -132,9 +128,8 @@ export class InputHandler extends TerminalInputHandlerState {
   public surfaceModals = new SurfaceModalHost();
   /** The mouse over the last painted frame: a kit modal's rows, tabs and keycaps are clickable (terminal-shell/surface-pointer). */
   public readonly surfacePointer = new SurfacePointer();
-  /** The handler's own modals as objects on that stack: the shared ones, the workspace, the process monitor and its live tail. */
+  /** The handler's own modals as objects on that stack: the shared ones, the process monitor and its live tail. */
   public readonly modals: HandlerModals & {
-    readonly agentWorkspace: TrackedModal;
     readonly process: TrackedModal;
     readonly liveTail: TrackedModal;
   };
@@ -147,7 +142,6 @@ export class InputHandler extends TerminalInputHandlerState {
   public bookmarkModal: BookmarkModal;
   public blockActionsMenu = new BlockActionsMenu();
   public mcpWorkspace = new McpWorkspace();
-  public agentWorkspace = new AgentWorkspace();
   /** Screen row → what a click on that status bar row (and column) opens; set each frame. */
   public footerTargets: ReadonlyMap<number, FooterTarget> = new Map();
   /** Opens what a clicked status bar segment names; wired by the shell. */
@@ -218,14 +212,12 @@ export class InputHandler extends TerminalInputHandlerState {
     this.selectionQueue = attachSelectionModalQueue(this);
     this.modals = {
       ...createHandlerModals(this, { clearCommandText: true }),
-      agentWorkspace: ownModal('agentWorkspace', () => this.agentWorkspace, () => this.agentWorkspace.reopen()),
       process: ownModal('process', () => this.processModal, () => this.processModal.open()),
       liveTail: ownModal('liveTail', () => this.liveTailModal),
     };
     const modals = this.modals;
     this.surfaceModals.track(
       modals.command,
-      modals.agentWorkspace,
       modals.mcpWorkspace,
       modals.process,
       modals.liveTail,
@@ -242,10 +234,6 @@ export class InputHandler extends TerminalInputHandlerState {
       if (fromEmpty) this.modalReturnFocus = this.indicatorFocused ? 'indicator' : 'prompt';
       if (!isTrackedModal(modal)) return;
       this.setupPairing?.cancelForTakeover();
-      // The workspace stays under the model picker it opens (settings is a kit modal now, never tracked here); any
-      // other tracked modal replaces it.
-      const keepsWorkspaceUnder = modal === modals.modelPicker;
-      if (modal !== modals.agentWorkspace && !keepsWorkspaceUnder && this.agentWorkspace.active) this.closeAgentWorkspaceModal();
     };
     this.initFeedContext();
   }
@@ -260,7 +248,6 @@ export class InputHandler extends TerminalInputHandlerState {
       {
         ...projectFeedContextStable(this),
         burstGuard: this.burstGuard,
-        agentWorkspace: this.agentWorkspace,
         processModal: this.processModal,
         liveTailModal: this.liveTailModal,
       },
@@ -278,8 +265,6 @@ export class InputHandler extends TerminalInputHandlerState {
           this.handlePaste();
           return this.promptEdit();
         },
-        cycleAgentWorkspaceCategory: (direction: 'next' | 'prev') => this.cycleAgentWorkspaceCategory(direction),
-        dismissAgentWorkspace: () => this.dismissAgentWorkspace(),
         footerTargetAt: (row: number, col?: number) => resolveFooterTarget(this.footerTargets, row, col),
         openFooterTarget: (target: FooterTarget) => {
           this.onFooterTarget?.(target);
@@ -414,131 +399,6 @@ export class InputHandler extends TerminalInputHandlerState {
   public openMcpWorkspace(context: CommandContext): void {
     openHandlerMcpWorkspace(this, context);
   }
-  /** Opens the workspace on top of what is open (a place included); resolves when it closes. */
-  public openAgentWorkspace(context: CommandContext, categoryId?: string, onlyGroup?: string): Promise<void> {
-    // A workspace kept in the stack from an earlier opening would come back beneath what opened since: it leaves first.
-    if (!this.agentWorkspace.active) this.surfaceModals.close(this.modals.agentWorkspace);
-    const closed = this.agentWorkspace.whenClosed();
-    this.openAgentWorkspaceNow(context, categoryId, onlyGroup);
-    return closed;
-  }
-
-  private openAgentWorkspaceNow(context: CommandContext, categoryId?: string, onlyGroup?: string): void {
-    this.indicatorFocused = false;
-    this.agentWorkspace.open(
-      context,
-      (command, behavior, displayCommand) => this.dispatchAgentWorkspaceCommand(command, context, behavior, displayCommand),
-      categoryId,
-      onlyGroup as import('./agent-workspace-types.ts').AgentWorkspaceCategoryGroup | undefined,
-      () => this.requestRender(),
-    );
-    this.requestRender();
-  }
-
-  /** Close the workspace for good: it does not come back when a modal stacked over it closes. */
-  private closeAgentWorkspaceModal(): void {
-    this.surfaceModals.close(this.modals.agentWorkspace);
-  }
-
-  public dismissAgentWorkspace(): boolean {
-    if (!this.agentWorkspace.active) return false;
-    this.closeAgentWorkspaceModal();
-    this.indicatorFocused = false;
-    this.requestRender();
-    return true;
-  }
-
-  public dispatchAgentWorkspaceCommand(
-    command: string,
-    context: CommandContext,
-    behavior?: 'inline' | 'compose' | 'exit',
-    displayCommand: string = command,
-  ): void {
-    // Default to 'inline' so a row's typed line runs inside the workspace and its
-    // output shows in the result pane.
-    const resolved = behavior ?? 'inline';
-    const { name, args } = parseSlashCommand(command);
-    if (!name) return;
-    if (resolved === 'exit') {
-      this.closeAgentWorkspaceModal();
-      void context.executeCommand?.(name, [...args]).catch((error: unknown) => {
-        context.print(`Agent workspace command failed: ${error instanceof Error ? error.message : String(error)}`);
-        this.requestRender();
-      });
-      this.requestRender();
-      return;
-    }
-    if (resolved === 'inline') {
-      if (typeof context.executeCommand !== 'function') {
-        this.agentWorkspace.lastActionResult = {
-          kind: 'error',
-          title: `Command unavailable: ${displayCommand}`,
-          detail: 'No command dispatcher is configured for this runtime.',
-          command: displayCommand,
-          safety: 'safe',
-        };
-        this.requestRender();
-        return;
-      }
-      // The whole output goes to the result pane, which scrolls (PageUp and
-      // PageDown); nothing is cut. Output longer than a screen is also printed
-      // to the conversation, where it stays readable after the workspace closes.
-      const LONG_OUTPUT_LINES = 30;
-      const buildCapturedDetail = (capturedLines: readonly string[]): string => {
-        const joined = capturedLines.join('\n');
-        if (joined.split('\n').length <= LONG_OUTPUT_LINES) return joined || '(no output)';
-        return `Full output also printed to the conversation. PageUp and PageDown scroll it here.\n${joined}`;
-      };
-      const printLongOutput = (capturedLines: readonly string[]): void => {
-        const joined = capturedLines.join('\n');
-        if (joined.split('\n').length > LONG_OUTPUT_LINES) context.print(joined);
-      };
-      const executeCommand = context.executeCommand;
-      void captureCommandPrint(context, () => executeCommand(name, [...args])).then((outcome) => {
-        if (!outcome.ok) {
-          // A command that refuses throws its refusal: show its reason and next
-          // step, then whatever it printed before it stopped.
-          const refused = readRefusal(outcome.error);
-          const reason = refused ? formatRefusal(refused) : outcome.error instanceof Error ? outcome.error.message : String(outcome.error);
-          printLongOutput(outcome.lines);
-          this.agentWorkspace.lastActionResult = {
-            kind: 'error',
-            title: refused ? `${displayCommand} was refused` : `${displayCommand} failed`,
-            detail: outcome.lines.length > 0 ? `${reason}\n\nPrinted before it stopped:\n${buildCapturedDetail(outcome.lines)}` : reason,
-            command: displayCommand,
-          };
-        } else if (outcome.value === false) {
-          this.agentWorkspace.lastActionResult = {
-            kind: 'error',
-            title: `Unknown command: ${displayCommand}`,
-            detail: 'The command router has no command with that name.',
-            command: displayCommand,
-            safety: 'safe',
-          };
-        } else {
-          // It returned, so it did what it says; what it printed is the result, not a verdict.
-          printLongOutput(outcome.lines);
-          this.agentWorkspace.lastActionResult = {
-            kind: 'dispatched',
-            title: `Result: ${displayCommand}`,
-            detail: buildCapturedDetail(outcome.lines),
-            command: displayCommand,
-            safety: 'safe',
-          };
-        }
-        this.requestRender();
-      });
-      return;
-    }
-    // compose (default): close workspace then execute
-    this.closeAgentWorkspaceModal();
-    void context.executeCommand?.(name, [...args]).catch((error: unknown) => {
-      context.print(`Agent workspace command failed: ${error instanceof Error ? error.message : String(error)}`);
-      this.requestRender();
-    });
-    this.requestRender();
-  }
-
   public handleModelPickerCommit(): boolean {
     return false;
   }
@@ -645,23 +505,6 @@ export class InputHandler extends TerminalInputHandlerState {
    * Returns true if path completion was performed.
    */
 
-  public cycleAgentWorkspaceCategory(direction: 'next' | 'prev'): void {
-    const context = this.commandContext;
-    if (!this.agentWorkspace.active) {
-      if (!context) return;
-      this.indicatorFocused = false;
-      this.agentWorkspace.open(
-        context,
-        (command, behavior, displayCommand) => this.dispatchAgentWorkspaceCommand(command, context, behavior, displayCommand),
-        undefined,
-        undefined,
-        () => this.requestRender(),
-      );
-    }
-    this.agentWorkspace.cycleCategory(direction);
-    this.indicatorFocused = false;
-    this.requestRender();
-  }
 
   /**
    * Word-wrap a single line to fit within maxW columns.

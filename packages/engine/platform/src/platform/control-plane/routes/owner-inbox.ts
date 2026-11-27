@@ -20,9 +20,12 @@ import {
   type OwnerItemKind,
 } from '../owner-inbox.js';
 import { GatewayVerbError } from './gateway-verb-error.js';
+import { nativeIdentityIsCaller } from './native-owner.js';
 import { readInvocationParams, requireStringValue } from './invocation-params.js';
 import { missingScopes } from '@goodvibes/engine/daemon-api/route-helpers';
-import { LOCAL_OWNER_PRINCIPAL } from '../../pairing/principal-ids.js';
+import { callerKey, isLocalOwnerCaller } from '../../pairing/principal-ids.js';
+import { registrantMayName } from '../session-broker-sessions.js';
+import { ownersProgramCaller } from '../../daemon/method-owner-decision.js';
 
 export type OwnerInboxGatewayService = Pick<OwnerInbox, 'listNow' | 'listPageNow' | 'get' | 'answer' | 'postNow' | 'withdraw' | 'reportDelivery' | 'postedBy' | 'revision' | 'subscribe' | 'viewerOf'>;
 
@@ -32,9 +35,12 @@ export type SessionRegistrantLookup = (sessionId: string) => string | undefined;
 /** The metadata naming who asked a question and where its answer goes back to (owner-inbox.ts `askerOf`). */
 const ASKER_KEYS: readonly string[] = [OWNER_ANSWER_SESSION_METADATA, OWNER_ANSWER_AGENT_METADATA, OWNER_ASKER_SESSION_FILE_METADATA, OWNER_ASKER_HOST_METADATA];
 
-/** A principal as the registrant record names it: the daemon's own-machine credential is the operator token's. */
-function principalKey(principal: string | undefined): string {
-  return principal === undefined || principal === 'local' ? LOCAL_OWNER_PRINCIPAL : principal;
+/**
+ * The caller as the registrant record keys it (pairing/principal-ids.ts `callerKey`), by the kind of credential first:
+ * a sign-in user named `shared-token` is `user:shared-token`, never this machine's operator token.
+ */
+function principalKey(invocation: GatewayMethodInvocation): string {
+  return callerKey(invocation.context);
 }
 
 /**
@@ -49,13 +55,18 @@ function askerKeptFrom(invocation: GatewayMethodInvocation, metadata: Record<str
   const names = ASKER_KEYS.some((key) => metadata[key] !== undefined);
   if (!names) return Object.keys(metadata).length > 0 ? metadata : undefined;
   const kind = invocation.context.credentialKind;
-  const principal = principalKey(invocation.context.principalId);
+  const principal = principalKey(invocation);
   const session = metadata[OWNER_ANSWER_SESSION_METADATA];
   const holdsNone = kind === 'agent' || kind === 'user-session';
   const registrant = typeof session === 'string' ? registrantOf?.(session) : undefined;
+  // The registering program too: holders of one operator token are told apart by their registrations.
+  // An asker with no session: only from the owner's own program by who it is (his registered terminal program, a turn
+  // the daemon hosts; method-owner-decision.ts `ownersProgramCaller`), never from the operator token alone.
+  const context = invocation.context;
   const mayAsk = !holdsNone && (typeof session === 'string'
-    ? registrant !== undefined && principalKey(registrant) === principal
-    : session === undefined && principal === LOCAL_OWNER_PRINCIPAL);
+    ? registrantMayName(registrant, { key: principal, registration: context.call?.registration })
+    : session === undefined && isLocalOwnerCaller(context) && ownersProgramCaller({ actor: context.actor, credentialKind: kind ?? undefined,
+      registration: context.call?.registration, daemonHosted: context.call?.daemonHosted === true }));
   if (mayAsk) return metadata;
   const kept = Object.fromEntries(Object.entries(metadata).filter(([key]) => !ASKER_KEYS.includes(key)));
   return Object.keys(kept).length > 0 ? kept : undefined;
@@ -76,7 +87,8 @@ function optionalString(value: unknown, field: string): string | undefined {
 function answerSource(invocation: GatewayMethodInvocation): OwnerAnswerSource {
   const actor = invocation.context.actor;
   return {
-    actor: invocation.context.principalId ?? 'operator',
+    // A sign-in named like this machine's token is told apart by kind (`user:<name>`), never read as "you".
+    actor: actor !== undefined && actor.class !== 'peer' && actor.class !== 'system' ? actor.id : invocation.context.principalId ?? 'operator',
     surface: invocation.context.clientKind ?? 'web',
     // Whether the owner himself answered, from the actor the transport established (never a model acting for him).
     ...(actor?.class === 'owner' && actor.agentFor === undefined ? { owner: true as const } : {}),
@@ -157,16 +169,15 @@ export function createOwnerInboxListHandler(inbox: OwnerInboxGatewayService): Ga
  * body can supply it. Returns the authority to answer under, or throws.
  */
 function purchaseAnswerAuthority(invocation: GatewayMethodInvocation) {
-  const forbidden = () => new GatewayVerbError('Answering a purchase window is the owner\'s own act: it needs an app on the daemon\'s own machine '
-    + 'or a paired device, with admin and write:payments. Nothing was answered.', 'FORBIDDEN', 403);
+  const forbidden = () => new GatewayVerbError('Answering a purchase window is the owner\'s own act: it needs an app on the daemon\'s own machine, '
+    + 'a paired device or the owner\'s own sign-in, with admin and write:payments. Nothing was answered.', 'FORBIDDEN', 403);
   const context = invocation.context ?? {};
   const authority = invocation.nativeExecutionAuthority;
   let expected: ReturnType<NonNullable<typeof authority>['current']> | undefined;
   try { expected = authority?.current(); } catch { throw forbidden(); }
   let authorized = false;
   try { authorized = invocation.isAuthorized?.(['write:payments']) === true; } catch { authorized = false; }
-  if (!authority || !expected || (expected.kind !== 'pairing-token' && expected.kind !== 'local') || context.admin !== true
-    || context.principalKind !== 'token' || context.principalId !== expected.principalId
+  if (!authority || !expected || context.admin !== true || !nativeIdentityIsCaller(context, expected)
     || missingScopes(context.scopes ?? [], ['write:payments']).length > 0
     || missingScopes(expected.scopes, ['write:payments']).length > 0 || !authorized) throw forbidden();
   return { authority, expected, forbidden };
@@ -239,7 +250,7 @@ export function createOwnerInboxPostHandler(inbox: OwnerInboxGatewayService, reg
     const named = optionalString(params['sessionId'], 'sessionId');
     // The conversation a question is shown in (a program's question card shows it as asked there): only the principal
     // that registered that session names it, as for the asker below.
-    const sessionId = named !== undefined && registrantOf?.(named) !== undefined && principalKey(registrantOf(named)) === principalKey(invocation.context.principalId)
+    const sessionId = named !== undefined && registrantMayName(registrantOf?.(named), { key: principalKey(invocation), registration: invocation.context.call?.registration })
       ? named : undefined;
     const askedBy = optionalString(params['askedBy'], 'askedBy');
     const key = optionalString(params['key'], 'key');

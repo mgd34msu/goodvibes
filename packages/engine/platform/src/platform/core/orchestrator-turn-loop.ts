@@ -261,7 +261,8 @@ export interface OrchestratorTurnLoopContext {
   /** The contract runner's hooks: a session-mode contract's unit is worked, held and nudged in this session's turns. */
   readonly contractHooks?: ContractSessionHooks | undefined;
   /** Answers an open contract question with the person's message; code decides, no model is asked. */
-  readonly contractIntake: ContractIntake;
+  /** Absent where no contracts run (a terminal program): there is then no contract question to answer. */
+  readonly contractIntake?: ContractIntake | undefined;
   /** The open contract question (escalation id) this message answers, when the person chose to answer it from the composer. */
   readonly answersContractQuestion?: string | undefined;
   readonly continuationEvidence?: string | undefined;
@@ -463,7 +464,7 @@ export async function executeOrchestratorTurnLoop(context: OrchestratorTurnLoopC
   // The person answered an open contract question from the composer: the
   // message is that answer and goes to the contract, with no model request.
   // A refused answer (the question closed meanwhile) leaves an ordinary turn.
-  if (!nativeTurn && contractSession === undefined && context.answersContractQuestion !== undefined) {
+  if (!nativeTurn && contractSession === undefined && context.answersContractQuestion !== undefined && context.contractIntake !== undefined) {
     const intake = await context.contractIntake.intake({ text: context.text, sessionId: context.sessionId, signal, answersEscalationId: context.answersContractQuestion });
     assertActiveTurn();
     if (intake.kind !== 'turn') {

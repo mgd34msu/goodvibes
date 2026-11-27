@@ -337,6 +337,12 @@ export interface TriggerDefinition {
    */
   readonly workingDirectory?: string | undefined;
   readonly createdAt: number;
+  /**
+   * The name the person chose, when it is not the stored id: a trigger is stored as `<name>-<8 hex>`, made from its
+   * project and the name alone (TriggerManager `storedTriggerId`; a 3.5.0 trigger, or one stored as `<name>-<n>` by
+   * the release before, keeps its id). Its project's people see and type the name they chose (`resolveName`).
+   */
+  readonly chosenId?: string | undefined;
 }
 
 // ─── Termination metadata ─────────────────────────────────────────────────────

@@ -15,7 +15,7 @@ user. Both install the TUI with the daemon, Agent and WebUI; npm installs do not
 install this workspace.
 
 The checkout installer pairs the local TUI with the daemon and registers a project
-workspace; after the release installer, pair from the TUI in Devices and network (Ctrl+G, m opens the menu): Pair something, This program with its daemon (see
+workspace; after the release installer the TUI and the daemon on this machine need no pairing. For a daemon on another machine, pair from the TUI in Devices and network (Ctrl+G, m opens the menu): Pair something, This program with its daemon, with the sign-in code your own screen shows (see
 [host pairing](host-pairing.md)). Launch `goodvibes` from that directory, then configure a conversation provider below.
 Jev credentials and conversation-provider credentials serve different purposes.
 Use `goodvibes --version` and `goodvibes-daemon --version` to inspect the installed
@@ -45,8 +45,9 @@ run uses it and you start here.
 
 Leaving part way and starting again resumes from where you were: a provider
 chosen but not signed in opens step 2. After first run the splash names the
-model in use. Everything else is set up later with `/setup`, which lists
-topics and opens one form per topic.
+model in use. Everything else is set up later on the Setup tab of the System
+place (the menu, `Ctrl+G` then `m`), which lists topics and opens one form per
+topic.
 
 ## Configure a model provider
 
@@ -199,18 +200,18 @@ The specific files worth knowing:
 
 ## First things to open in the product
 
-These slash commands are the fastest way to get oriented once the TUI is running:
+The menu (the leader key `Ctrl+G`, then `m`) reaches every place; a few typed commands remain for the conversation itself:
 
-| Command | What it opens |
+| Command or place | What it opens |
 | --- | --- |
-| `/help` (also `?` and `Ctrl+P`) | One searchable list of every command and every key |
+| `/help` (also `?` and `Ctrl+P`) | The commands that remain, every key, and the menu |
 | `/model` | Your model and the others you can use, switching, and backup models |
 | `/settings` | The settings screen; every setting is shown by a plain name with its key beside it |
-| `/setup` | Setting GoodVibes up, one topic at a time |
-| `/memory` | Memory and knowledge: what the project remembers, your knowledge, what is known about you, your templates |
-| Tools and extensions (the menu: `Ctrl+G`, then `m`) | Your hooks and which ran, the model's tools, tool servers, plugins, the curated marketplace and skills |
+| System, Setup (the menu) | Setting GoodVibes up, one topic at a time |
+| Memory and knowledge (the menu) | What the project remembers, your knowledge, what is known about you, your templates |
+| Tools and extensions (the menu) | Your hooks and which ran, the model's tools, tool servers, plugins, the curated marketplace and skills |
 | Work and agents (the menu): Runners | Remote runners the daemon starts and keeps, if you use them |
-| `/mcp` | Add, edit, remove, reload, and inspect MCP servers while the TUI is running |
+| Tools and extensions, Servers (the menu) | Add, edit, remove, reload, and inspect MCP servers while the TUI is running |
 
 ## Local server discovery
 

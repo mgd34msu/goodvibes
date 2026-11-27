@@ -9,7 +9,7 @@ import { processClassificationOptions } from './agent-harness-process-launch.ts'
 import { createProcessInputProjector } from './agent-process-ingress.ts';
 import { createHarnessCatalogInputProjector, isHarnessCatalogQuery, protectHarnessCatalogTool, harnessCatalogExecutionGuard, harnessCatalogInvocationAuthority, retainHarnessCatalogCurrent } from './agent-harness-catalog-ingress.ts';
 import { createPersonalOpsInputProjector } from '@goodvibes/engine/terminal-shell/agent-turn/personal-ops-ingress';
-import { createAgentHarnessResearchProjector, protectAgentHarnessResearchTool } from './agent-research-ingress.ts';
+import { createAgentHarnessResearchProjector } from './agent-research-ingress.ts';
 import { snapshotJudgmentInput } from '@goodvibes/engine/platform/platform/gate/judgment-input';
 import type { Tool } from '@goodvibes/engine/platform/platform/types';
 import type { ToolRegistry } from '@goodvibes/engine/platform/platform/tools';
@@ -26,7 +26,7 @@ import { runAutoPromoter, assertAutoPromoteResultCurrent, completedPromotionWrit
 import { runSkillDraftProposer, assertSkillDraftRunResultCurrent } from '../agent/skill-draft-runner.ts';
 import { AgentSkillRegistry } from '@goodvibes/engine/terminal-shell/agent-turn/skill-registry';
 import { delegationPostureSummary, describeHarnessDelegationRoute } from './agent-harness-delegation-posture.ts';
-import { describeHarnessKeybinding, listHarnessKeybindings, listHarnessShortcuts, resetHarnessKeybinding, runHarnessKeybinding, setHarnessKeybinding, totalHarnessKeybindings, totalHarnessShortcuts } from './agent-harness-keybinding-metadata.ts';
+import { describeHarnessKeybinding, listHarnessKeybindings, listHarnessShortcuts, runHarnessKeybinding, totalHarnessKeybindings, totalHarnessShortcuts } from './agent-harness-keybinding-metadata.ts';
 import { describeHarnessMediaProvider, mediaPostureSummary } from './agent-harness-media-posture.ts';
 import { describeHarnessNotificationTarget, listHarnessNotificationTargets } from './agent-harness-notification-metadata.ts';
 import { connectedHostStatusSummary } from './agent-harness-connected-host-status.ts';
@@ -62,13 +62,12 @@ import { describeHarnessServiceEndpoint, servicePostureCatalogStatus, servicePos
 import { describeHarnessSetupItem, provisionConnectedHostOperatorToken, runSetupInstallSmoke, setupPostureSummary, setupRepairSummary } from './agent-harness-setup-posture.ts';
 import { AGENT_HARNESS_MODES, AGENT_HARNESS_PARAMETER_PROPERTIES } from './agent-harness-tool-schema.ts';
 import { runCommand } from './agent-harness-command-runner.ts';
-import { runWorkspaceAction } from './agent-harness-workspace-action-runner.ts';
 import type { AgentHarnessToolArgs, AgentHarnessToolDeps } from './agent-harness-tool-types.ts';
-import { CATALOG_PAGE_MAX, CATALOG_PAGE_SIZE, catalogEnvelope, catalogFilters, effectOutput, error, output, readString, requireConfirmedAction, settingLookupArgs } from './agent-harness-tool-utils.ts';
+import { catalogEnvelope, catalogFilters, effectOutput, error, output, readString, requireConfirmedAction, settingLookupArgs } from './agent-harness-tool-utils.ts';
+import { presentToolAskWith, type ToolAskWords } from '@goodvibes/engine/platform/platform/permissions';
 import { CATALOG_QUERIES as CQ } from './agent-harness-catalog-filters.ts';
 import { describeHarnessMode, HARNESS_MODE_DESCRIPTORS, HARNESS_READ_MODES, installedModeDescriptors, listHarnessModes, type AgentHarnessMode } from './agent-harness-mode-catalog.ts';
 import { describeHarnessUiSurface, listHarnessUiSurfaces, openHarnessUiSurface, totalHarnessUiSurfaces } from './agent-harness-ui-surface-metadata.ts';
-import { AGENT_WORKSPACE_CATEGORIES, allWorkspaceActions, describeWorkspaceAction, describeWorkspaceCategory, listWorkspaceActionsPage, resolveWorkspaceActionDetail } from './agent-harness-workspace-actions.ts';
 import { connectedHostSummary, describeConnectedHostCapability, settingsPolicySummary } from './agent-harness-metadata.ts';
 import { countHarnessSettingCatalog, formatHarnessError, resolveEffectiveHarnessSetting } from '../agent/harness-control.ts';
 import { harnessSettingsCatalog, isHarnessSettingsQuery } from './agent-harness-settings-catalog.ts';
@@ -102,16 +101,16 @@ export function compactHarnessModeGuide(descriptors: ReturnType<typeof installed
 
 function detailedHarnessModelAccessGuide(): Record<string, string> {
   return {
-    cliCommands: 'Prefer workspace action:"cli_commands|cli_command" for CLI discovery. Lower-level cli command modes remain available.',
-    uiSurfaces: 'Prefer workspace action:"surfaces|surface|open" for visible UI and computer action:"browser|open_browser" for browser/PWA. Lower-level UI modes remain available.',
-    shortcuts: 'Prefer workspace action:"shortcuts|keybindings|keybinding|run_keybinding|set_keybinding|reset_keybinding"; effects require current recorded effect admission.',
-    slashCommands: 'Prefer workspace action:"commands|command|run_command"; slash-command effects require current recorded admission.',
+    cliCommands: 'Prefer screens_keys_commands action:"cli_commands|cli_command" for CLI discovery. Lower-level cli command modes remain available.',
+    uiSurfaces: 'Prefer screens_keys_commands action:"surfaces|surface|open" for visible UI and computer action:"browser|open_browser" for browser/PWA. Lower-level UI modes remain available.',
+    shortcuts: 'Prefer screens_keys_commands action:"shortcuts|keybindings|keybinding|run_keybinding"; bind a key with capability_run id:"keys.bind" (keys.reset puts it back); effects require current recorded effect admission.',
+    slashCommands: 'Prefer screens_keys_commands action:"commands|command|run_command"; slash-command effects require current recorded admission.',
     channels: 'Prefer channels action:"status|channel|setup|triage|deliveries"; deliver with agent_channel_send under current recorded send admission. Lower-level channel harness modes remain available for detail.',
     notifications: 'List mode:"notifications"; inspect mode:"notification_target"; deliver with agent_notify under current recorded send admission.',
-    providerAccounts: 'Prefer models action:"providers|provider" for account and subscription posture. Lower-level mode:"provider_accounts" and mode:"provider_account" remain available; auth changes stay confirmed workspace/command flows.',
-    mcpServers: 'List mode:"mcp_servers"; inspect mode:"mcp_server"; trust/server changes stay confirmed workspace/command flows.',
+    providerAccounts: 'Prefer models action:"providers|provider" for account and subscription posture. Lower-level mode:"provider_accounts" and mode:"provider_account" remain available; auth changes stay confirmed capability flows.',
+    mcpServers: 'List mode:"mcp_servers"; inspect mode:"mcp_server"; trust/server changes stay confirmed capability flows.',
     setupPosture: 'Prefer setup action:"status|item|repair|token|smoke|finish"; lower-level setup_* modes remain available for detailed harness inspection.',
-    routeDecision: 'Prefer route action:"plan" before choosing a specialized tool when the user task could map to setup, Personal Ops, research, autonomy, execution, delegation, computer/browser, workspace, host, or device routes.',
+    routeDecision: 'Prefer route action:"plan" before choosing a specialized tool when the user task could map to setup, Personal Ops, research, autonomy, execution, delegation, computer/browser, screens, keys and commands, host, or device routes.',
     projectContext: 'Prefer context action:"files|file"; lower-level project_context modes remain available for detail. Context files are read-only and secret-scanned.',
     promptContext: 'Prefer context action:"prompt|receipts|receipt" for prompt composition, selected/suppressed records, token budget, and prompt receipt outcomes.',
     agentOrchestration: 'List mode:"agent_orchestration" for managed plan and closeout cards; keep local todos with agent_work_plan; new work from a JSON file is capability work.new with its file input (nothing starts until the work is started); inspect mode:"agent_orchestration_agent"; spawn/message/wait/cancel stay on first-class agent.',
@@ -134,7 +133,7 @@ function detailedHarnessModelAccessGuide(): Record<string, string> {
     supportBundles: 'Prefer support action:"status|bundle"; lower-level support-bundle modes remain available; export/import stays confirmation-gated.',
     mediaPosture: 'Prefer device action:"voice|provider" for voice/media posture. Lower-level mode:"media_posture" and mode:"media_provider" remain available; generate with agent_media_generate under current recorded effect admission.',
     sessions: 'Prefer sessions action:"list|get"; lower-level session modes remain available; save/resume/export/delete stays visible confirmed flow.',
-    workspace: 'Prefer workspace action:"status|actions|action|run|surfaces|surface|open|commands|command|run_command"; includeParameters:true inlines the command action each row runs (its blanks and line).',
+    screensKeysCommands: 'Prefer screens_keys_commands action:"surfaces|surface|open|commands|command|run_command" for this program\'s screen, keys and commands; any other action is a capability: capability_find says what you need, capability_run runs it.',
     settings: 'Prefer settings action:"list|get|set|reset|import"; list accepts category|prefix|query|includeHidden:true; lower-level settings modes remain for compatibility.',
     tools: 'List mode:"tools" with query|limit|includeParameters:true; inspect mode:"tool" with toolName|target|query.',
     modeCatalog: 'Search mode:"modes" with query|target; inspect one contract with mode:"mode" target:"...".',
@@ -280,8 +279,7 @@ function buildAgentHarnessTool(deps: AgentHarnessToolDeps): Tool {
       // own native restrictions while reading; join them at the publication
       // boundary instead of rereading every earlier catalog for every later
       // branch's model request.
-      const publicationGuards = dispatchMode === 'workspace_actions'
-        || dispatchMode === 'ui_surfaces'
+      const publicationGuards = dispatchMode === 'ui_surfaces'
         || dispatchMode === 'ui_surface'
         || dispatchMode === 'personal_ops'
         || dispatchMode === 'personal_ops_briefing'
@@ -405,8 +403,6 @@ function buildAgentHarnessTool(deps: AgentHarnessToolDeps): Tool {
             keybindings: totalHarnessKeybindings(deps.commandContext),
             commands: deps.commandRegistry.list().length,
             settings: countHarnessSettingCatalog(deps.commandContext.platform.configManager, { includeHidden: true }),
-            workspaceCategories: AGENT_WORKSPACE_CATEGORIES.length,
-            workspaceActions: allWorkspaceActions().length,
             tools: deps.toolRegistry.getToolDefinitions().length,
             operatorMethods: operatorMethodCatalogStatus(),
             servicePosture: servicePostureCatalogStatus(),
@@ -424,7 +420,7 @@ function buildAgentHarnessTool(deps: AgentHarnessToolDeps): Tool {
           return output({
             ...catalogEnvelope('commands', commands, totalHarnessCliCommands(), catalogFilters(args, CQ.cli_commands.filters), CQ.cli_commands.discovery),
             blockedTokens: blockedHarnessCliCommandTokens(),
-            policy: 'CLI modes are read-only discovery. Use first-class model tools, workspace actions, settings modes, or admitted slash-command mirrors for in-process operation.',
+            policy: 'CLI modes are read-only discovery. Use first-class model tools, capability_find and capability_run, settings modes, or admitted slash-command mirrors for in-process operation.',
           });
         }
         if (dispatchMode === 'cli_command') {
@@ -448,14 +444,6 @@ function buildAgentHarnessTool(deps: AgentHarnessToolDeps): Tool {
         if (dispatchMode === 'keybinding') {
           const binding = await describeHarnessKeybinding(deps.commandContext, args, catalogOptions);
           return binding ? output(binding) : error(`Unknown keybinding action ${readString(args.actionId || args.target || args.key || args.query) || '<missing>'}.`);
-        }
-        if (dispatchMode === 'set_keybinding') {
-          const confirmationError = requireConfirmedAction(rawArgs, options, 'Keybinding mutation');
-          return confirmationError ? error(confirmationError) : effectOutput(await setHarnessKeybinding(deps.commandContext, args, effectCatalogOptions));
-        }
-        if (dispatchMode === 'reset_keybinding') {
-          const confirmationError = requireConfirmedAction(rawArgs, options, 'Keybinding reset');
-          return confirmationError ? error(confirmationError) : effectOutput(await resetHarnessKeybinding(deps.commandContext, args, effectCatalogOptions));
         }
         if (dispatchMode === 'run_keybinding') {
           const confirmationError = requireConfirmedAction(rawArgs, options, 'Keybinding action');
@@ -723,38 +711,6 @@ function buildAgentHarnessTool(deps: AgentHarnessToolDeps): Tool {
         if (dispatchMode === 'set_setting' || dispatchMode === 'reset_setting') {
           return await executeAdmittedPreferredSettings(args as Record<string, unknown>, options);
         }
-        if (dispatchMode === 'workspace' || dispatchMode === 'workspace_categories') {
-          return output({
-            categories: AGENT_WORKSPACE_CATEGORIES.map(describeWorkspaceCategory),
-            actions: allWorkspaceActions().length,
-          });
-        }
-        if (dispatchMode === 'workspace_actions') {
-          const page = await listWorkspaceActionsPage(deps.commandContext, args, catalogOptions, CATALOG_PAGE_SIZE, CATALOG_PAGE_MAX);
-          for (const guard of publicationGuards ?? []) { guard(); retainPublicationCurrent(guard); }
-          assertCatalogExecution();
-          return output(catalogEnvelope('actions', page.actions, allWorkspaceActions().length, catalogFilters(args, CQ.workspace_actions.filters), CQ.workspace_actions.discovery,
-            { offset: page.offset, matched: page.matched }));
-        }
-        if (dispatchMode === 'workspace_action') {
-          const resolved = await resolveWorkspaceActionDetail(args, catalogOptions);
-          if (resolved?.status === 'found') {
-            return output(describeWorkspaceAction(resolved.category, resolved.action, { includeBlanks: true, lookup: resolved.lookup }));
-          }
-          if (resolved?.status === 'ambiguous') {
-            return error(`Ambiguous Agent workspace action ${resolved.input}. Candidates: ${JSON.stringify(resolved.candidates)}`);
-          }
-          return error(`Unknown Agent workspace action ${readString(args.actionId || args.command || args.target || args.query) || '<missing>'}. Use mode:"workspace_actions" to inspect available actions.`);
-        }
-        if (dispatchMode === 'run_workspace_action') {
-          // The original dispatcher owns its inspected mode and typed refusal
-          // contract. Protect workspace report bodies only after that routing
-          // boundary, without rereading unrelated Proxy/accessor modes.
-          const workspaceActionTool: Tool = { definition: tool.definition,
-            execute: (input, executionOptions) => runWorkspaceAction(deps, input, executionOptions),
-          };
-          return protectAgentHarnessResearchTool(workspaceActionTool, deps.toolRegistry).execute(rawArgs, options);
-        }
         if (dispatchMode === 'release_evidence') return publishCatalog(output(await releaseEvidenceSummary(args, catalogOptions, deps.releaseRoot)));
         if (dispatchMode === 'release_evidence_artifact') {
           const resolved = await describeHarnessReleaseEvidenceArtifact(args, catalogOptions, deps.releaseRoot);
@@ -852,12 +808,51 @@ function buildAgentHarnessTool(deps: AgentHarnessToolDeps): Tool {
   return protectHarnessCatalogTool(tool, deps.toolRegistry, input => isHarnessCatalogQuery(input) || isHarnessSettingsQuery(input, deps.commandContext.platform.configManager), deps.commandContext);
 }
 
+/**
+ * The question each mode that acts is asked with, in the words of its own act: one tool with many kinds of act is
+ * never asked one sentence for all of them ("Check app internals?"). A mode not listed only reads and is not asked.
+ */
+const HARNESS_MODE_QUESTIONS: Readonly<Partial<Record<string, string>>> = {
+  open_ui_surface: 'Open a place or picker on the screen?',
+  run_keybinding: 'Press a key\'s action on this screen?',
+  run_command: 'Run a slash command?',
+  provision_connected_host_token: 'Make or repair the token this Agent uses with the daemon?',
+  run_setup_smoke: 'Save the setup check evidence?',
+  run_local_model_smoke: 'Ask your local model servers which models they have?',
+  run_background_process: 'Start or control a background process?',
+  run_file_recovery: 'Undo or redo a file change?',
+  run_personal_ops_read: 'Read from your mail or calendar?',
+  run_memory_refinement: 'Refine your Agent Knowledge?',
+  learning_auto_promote: 'Promote what the Agent learned?',
+  set_setting: 'Change a setting?',
+  reset_setting: 'Put a setting back to its default?',
+  propose_skill_drafts: 'Draft skills from what the Agent learned?',
+  remote_pair_approve: 'Let a device pair with the daemon?',
+  remote_pair_reject: 'Refuse a device\'s pairing request?',
+  remote_peers_invoke: 'Run a command on another machine?',
+  remote_backends_register: 'Add or replace a machine that runs work?',
+  remote_backends_remove: 'Remove a machine that runs work?',
+  remote_work_cancel: 'Cancel remote work?',
+  channel_draft_save: 'Save a message draft?',
+  channel_draft_send: 'Send a message draft?',
+  channel_routing_assign: 'Send a chat app\'s messages to a profile?',
+  channel_routing_remove: 'Stop sending a chat app\'s messages to a profile?',
+  inbox_labels_apply: 'Label messages in your inbox?',
+  inbox_triage: 'Sort a page of your inbox?',
+};
+
+export function agentHarnessAskWords(args: Readonly<Record<string, unknown>>): ToolAskWords | undefined {
+  const question = HARNESS_MODE_QUESTIONS[readString(args.mode)];
+  return question ? { question, lines: [], subject: question.replace(/\?$/, '') } : undefined;
+}
+
 export function registerAgentHarnessTool(
   registry: ToolRegistry,
   commandRegistry: CommandRegistry,
   commandContext: CommandContext,
   taskRouteSources?: import('./agent-route-planner.ts').AgentTaskRouteSources,
 ): void {
+  presentToolAskWith('agent_harness', agentHarnessAskWords);
   registry.register(createAgentHarnessTool({ commandRegistry, commandContext, toolRegistry: registry, ...(taskRouteSources ? { taskRouteSources } : {}) }), {
     inputProjection: createHarnessCatalogInputProjector(registry,
       createProcessInputProjector(registry, 'agent_harness',

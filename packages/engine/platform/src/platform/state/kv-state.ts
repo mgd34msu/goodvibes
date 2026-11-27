@@ -1,6 +1,7 @@
 import { existsSync, readdirSync, statSync, unlinkSync } from 'fs';
 import { join } from 'path';
 import { logger } from '../utils/logger.js';
+import { outsideEveryCall } from '../utils/outside-every-call.js';
 import { createHash, randomBytes } from 'crypto';
 import { JsonFileStore } from './json-file-store.js';
 import { StoreWriteQueue } from './store-write-queue.js';
@@ -453,7 +454,8 @@ export class KVState {
     if (this.housekeepingStarted) return;
     this.housekeepingStarted = true;
     this.sweep();
-    this.sweepTimer = setInterval(() => this.sweep(), SWEEP_INTERVAL_MS);
+    // Started by the first read or write (a turn's): armed in the process's own context (utils/outside-every-call.ts).
+    this.sweepTimer = outsideEveryCall(() => setInterval(() => this.sweep(), SWEEP_INTERVAL_MS));
     this.sweepTimer.unref?.();
   }
 

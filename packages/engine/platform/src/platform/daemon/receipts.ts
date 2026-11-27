@@ -34,6 +34,11 @@ export interface DaemonReceipt {
   readonly deliveredAt?: number | undefined;
   /** Absent means `everyone`. */
   readonly audience?: 'owner' | undefined;
+  /**
+   * What the line waits on (`approval:<id>`), when it stands for something in Waiting for you: once that is answered
+   * the line is retired, so a program's start-up lines never say an answered ask still waits.
+   */
+  readonly about?: string | undefined;
 }
 
 export interface ReceiptStoreIo {
@@ -225,7 +230,7 @@ export class DaemonReceiptStore {
    * Record a receipt: logged immediately, persisted for the next surface.
    * `audience: 'owner'` keeps it for an owner-class reader only.
    */
-  record(text: string, options: { readonly audience?: DaemonReceiptAudience | undefined } = {}): DaemonReceipt {
+  record(text: string, options: { readonly audience?: DaemonReceiptAudience | undefined; readonly about?: string | undefined } = {}): DaemonReceipt {
     const ownerOnly = options.audience === 'owner';
     // One event is often both recorded and raised as an owner alert, and an
     // alert no channel took is kept here too: the same line still waiting for
@@ -245,6 +250,7 @@ export class DaemonReceiptStore {
       text,
       at: this.now(),
       ...(ownerOnly ? { audience: 'owner' as const } : {}),
+      ...(options.about === undefined ? {} : { about: options.about }),
     };
     const bounded = this.applyBounds([...this.receipts, receipt]);
     this.receipts = bounded.receipts;
@@ -285,6 +291,21 @@ export class DaemonReceiptStore {
     this.receipts = this.receipts.map((receipt) => {
       if (receipt.deliveredAt !== undefined || !ids.has(receipt.id)) return receipt;
       if (!owner && receipt.audience === 'owner') return receipt;
+      changed = true;
+      return { ...receipt, deliveredAt };
+    });
+    if (changed) this.persistOrLog();
+  }
+
+  /**
+   * Retires every undelivered line about `about` (an ask that was answered): it is marked delivered, so no reader is
+   * shown it; the line itself stays in the history.
+   */
+  retire(about: string): void {
+    const deliveredAt = this.now();
+    let changed = false;
+    this.receipts = this.receipts.map((receipt) => {
+      if (receipt.deliveredAt !== undefined || receipt.about !== about) return receipt;
       changed = true;
       return { ...receipt, deliveredAt };
     });

@@ -23,7 +23,7 @@ import type { AgentInProcessHost } from './in-process-host.js';
 const MAX_SENT_FILE_BYTES = 700 * 1024;
 const TOO_LARGE_TO_SEND = `Nothing was ingested: the file is larger than ${MAX_KNOWLEDGE_INGEST_FILE_BYTES / (1024 * 1024)} MiB, the most a file is read and sent to the daemon. Split it, or add a part of it.`;
 import { AGENT_KNOWLEDGE_METHODS } from './knowledge-methods.js';
-import { MAX_KNOWLEDGE_INGEST_FILE_BYTES, postAgentKnowledgeUpload, resolveConnectedHostConnection } from './knowledge-runtime.js';
+import { discardAgentKnowledgeUpload, MAX_KNOWLEDGE_INGEST_FILE_BYTES, postAgentKnowledgeUpload, resolveConnectedHostConnection } from './knowledge-runtime.js';
 import { daemonCapabilityRunner } from './capability-tools.js';
 import { readString } from './tool-args.js';
 import { confirmParameter, requestParameter } from './effect-admission.js';
@@ -482,24 +482,33 @@ export function createAgentKnowledgeIngestTool(
         return failure(`${preview(request)}\n\nNothing was ingested: it runs only as an admitted tool call.`);
       }
       let inputs = call.inputs;
+      let uploaded: { readonly connection: ReturnType<typeof resolveConnectedHostConnection>; readonly id: string } | undefined;
       if (call.upload) {
         // The file's bytes go up by the command line's upload (the daemon's artifact upload), then the daemon's
         // knowledge.ingest-artifact adds that artifact: its question is the one asked.
         try {
           const connection = resolveConnectedHostConnection({ configManager, homeDirectory: shellPaths.homeDirectory, ...(inProcess ? { inProcess } : {}) });
           if (connection.unavailable) return failure(`Nothing was ingested: ${connection.unavailable.reason}`);
-          const uploaded = await postAgentKnowledgeUpload<{ artifact?: { id?: unknown } }>(connection, '/api/artifacts',
+          const sent = await postAgentKnowledgeUpload<{ artifact?: { id?: unknown } }>(connection, '/api/artifacts',
             { bytes: call.upload.bytes, filename: call.upload.name }, { kind: 'document', metadata: { purpose: 'knowledge-ingest', originSurface: 'agent_knowledge_ingest' } },
             options?.signal ? { signal: options.signal } : {});
-          const artifactId = typeof uploaded.artifact?.id === 'string' ? uploaded.artifact.id : undefined;
+          const artifactId = typeof sent.artifact?.id === 'string' ? sent.artifact.id : undefined;
           if (!artifactId) return failure('Nothing was ingested: the daemon did not say which artifact it kept the file as.');
           inputs = { ...inputs, artifact: artifactId };
+          uploaded = { connection, id: artifactId };
         } catch (error) {
           return failure(`Nothing was ingested: the file could not be uploaded to the daemon (${error instanceof Error ? error.message : String(error)}).`);
         }
       }
       const answer = await runCapability(call.id, inputs, options);
-      if (!answer.ok) return failure(answer.error);
+      if (!answer.ok) {
+        // The file went up only so the owner could be asked: on his No (or a refusal) it does not stay on the daemon.
+        if (!uploaded) return failure(answer.error);
+        const notDiscarded = await discardAgentKnowledgeUpload(uploaded.connection, uploaded.id);
+        return failure(notDiscarded === undefined
+          ? `${answer.error}\nThe uploaded copy of the file was removed from the daemon.`
+          : `${answer.error}\nThe uploaded copy of the file (artifact ${uploaded.id}) could not be removed from the daemon: ${notDiscarded}.`);
+      }
       return output([answer.text || `${call.id}: done.`, ...(request.notes ?? [])].join('\n'));
     },
   };

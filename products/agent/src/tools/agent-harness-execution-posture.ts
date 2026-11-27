@@ -83,7 +83,7 @@ function routeDefinitions(): readonly ExecutionRoute[] {
     {
       id: 'local-edit-write',
       label: 'Local file edit and write',
-      detail: 'Use local edit/write tools for explicit implementation, fix, patch, or document changes when this Agent workspace is the intended target.',
+      detail: 'Use local edit/write tools for explicit implementation, fix, patch, or document changes when this working folder is the intended target.',
       userOutcome: 'The user gets the requested change in place without a handoff when local permissions are already sufficient.',
       effect: 'local-effect',
       preferredWhen: 'The user asks to implement, fix, patch, refactor, update docs, or edit files in the current workspace.',
@@ -214,14 +214,14 @@ function executionSupervisionRoutes(context: CommandContext, route: ExecutionRou
         id: 'process-monitor',
         label: 'Runtime Activity Monitor',
         available: typeof context.openProcessModal === 'function',
-        modelRoute: 'workspace action:"open" surfaceId:"process-monitor"',
+        modelRoute: 'screens_keys_commands action:"open" surfaceId:"process-monitor"',
         requiresConfirmation: true,
       },
       {
         id: 'live-tail',
         label: 'Live Process Output',
         available: typeof context.openLiveTail === 'function',
-        modelRoute: 'workspace action:"open" surfaceId:"live-tail"',
+        modelRoute: 'screens_keys_commands action:"open" surfaceId:"live-tail"',
         requiresConfirmation: true,
       },
     );
@@ -234,8 +234,8 @@ function executionSupervisionSummary(context: CommandContext): Record<string, un
     processMonitorAvailable: typeof context.openProcessModal === 'function',
     liveTailAvailable: typeof context.openLiveTail === 'function',
     routes: [
-      'workspace action:"open" surfaceId:"process-monitor"',
-      'workspace action:"open" surfaceId:"live-tail"',
+      'screens_keys_commands action:"open" surfaceId:"process-monitor"',
+      'screens_keys_commands action:"open" surfaceId:"live-tail"',
     ],
   };
 }

@@ -9,6 +9,7 @@ import {
   projectOrchestratorCoreServices,
 } from '@goodvibes/engine/terminal-shell/bootstrap-orchestrator';
 import { buildPluginStartupContext } from '@goodvibes/engine/terminal-shell/plugin-startup';
+import { createTaskInterventions } from '@goodvibes/engine/terminal-shell/task-interventions';
 import { bindCapabilityHost, hiddenLineFrom } from '@goodvibes/engine/terminal-shell/capability-host';
 import { sessionCapabilityServices } from '../input/commands/session-capabilities.ts';
 import { ownerInputFor } from '@goodvibes/engine/terminal-shell/companion-input';
@@ -374,8 +375,8 @@ export async function bootstrapRuntime(stdout: NodeJS.WriteStream, options: Boot
       resolveSessionId: () => runtime.sessionId,
       services: {
         agentManager: services.agentManager,
+        // The Agent runs no contracts: its work runs on the daemon and is read in Work.
         contractRunner: services.contractRunner,
-        contractIntake: services.contractIntake,
       },
     },
     requestRender,
@@ -436,6 +437,9 @@ export async function bootstrapRuntime(stdout: NodeJS.WriteStream, options: Boot
   // Task events carry the running session, which a resume or fork changes.
   const opsTaskManager = createTaskManager(store, runtimeBus, () => runtime.sessionId, services.featureFlags,
     (task) => task.kind === 'exec' ? processTaskAdapter.controllerFor(task.id) : undefined);
+  // Pause, go on, cancel and run again on this session's tasks: the one plane both programs build.
+  const opsControlPlane = createTaskInterventions({ taskManager: opsTaskManager, runtimeBus, store, sessionId: userSessionId,
+    agentCanceller: services.agentManager, featureFlags: services.featureFlags });
 
   // Surface-bound closure, not the raw multi-arg platform function, see
   // the platform's bindWriteLastSessionPointerToSurface for why that matters.
@@ -472,6 +476,7 @@ export async function bootstrapRuntime(stdout: NodeJS.WriteStream, options: Boot
     policyRuntimeState: services.policyRuntimeState,
     uiServices,
     taskManager: opsTaskManager,
+    opsControlPlane,
     completeModelSelectionSideEffect: () => {
       compositor.resetDiff();
     },
@@ -637,7 +642,7 @@ export async function bootstrapRuntime(stdout: NodeJS.WriteStream, options: Boot
             at: Date.now(),
           }]);
         });
-        // Readers that failed because the daemon did not answer (the workspace's reports) read again now.
+        // Readers that failed because the daemon did not answer (the places' lists) read again now.
         announceDaemonAttached();
         return services.consumeDaemonReceipts();
       },

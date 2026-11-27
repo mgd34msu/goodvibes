@@ -72,9 +72,13 @@ import {
   sweepConfigReplica,
   wireReplicaDocument,
   withApplied,
+  readReplicaAct,
+  withRecordedActsOnly,
+  CARRIED_ACT,
   type ConfigReplicaDocument,
   type ConfigReplicaEntry,
   type ConfigReplicaTombstone,
+  type ReplicaAct,
 } from './config-replica.js';
 import { MAX_GROUP_MEMBERS, type GroupStateDocument } from './group-state.js';
 import type { ClusterEnvelope } from './protocol-envelope.js';
@@ -110,6 +114,11 @@ export interface ReplicatedConfigStore {
   reset?(path: string): void;
   /** Actual successful local edits, including file-watcher reloads. */
   subscribe?(path: string, listener: () => void): () => void;
+  /**
+   * Who made the write whose change notice is being delivered now, and how it was decided (ConfigManager `writeAct`),
+   * read by a listener while it is called; undefined when the write stated none (an edit outside the daemon's controls).
+   */
+  writeAct?(): ReplicaAct | undefined;
 }
 
 /** The narrow slice of the secret store this layer touches. */
@@ -118,6 +127,8 @@ export interface ReplicatedSecretStore {
   set(key: string, value: string): Promise<void>;
   delete(key: string): Promise<void>;
   onDidChange?(listener: (key: string) => void): () => void;
+  /** Who made the write whose notice is being delivered now, and how it was decided (`SecretsManager.writeAct`). */
+  writeAct?(): ReplicaAct | undefined;
 }
 
 /** What the replication service borrows from the group runtime. */
@@ -159,6 +170,8 @@ export interface HeldConfigChange {
   readonly kind: 'set' | 'secret' | 'delete';
   readonly secret: boolean;
   readonly applyLocal: boolean;
+  /** Who made it and how it was decided (kept with it while it is held, sent with it after). */
+  readonly act?: ReplicaAct | undefined;
 }
 
 /** Held changes read back from disk; anything malformed or outside the replication policy is dropped. */
@@ -171,7 +184,8 @@ export function readHeldConfigChanges(value: unknown): HeldConfigChange[] {
     const path = record['path'], kind = record['kind'];
     if (typeof path !== 'string' || !isReplicatedConfigPath(path)) continue;
     if (kind !== 'set' && kind !== 'secret' && kind !== 'delete') continue;
-    held.push({ path, kind, secret: record['secret'] === true, applyLocal: record['applyLocal'] === true });
+    const act = readReplicaAct(record['act']);
+    held.push({ path, kind, secret: record['secret'] === true, applyLocal: record['applyLocal'] === true, ...(act ? { act } : {}) });
   }
   return held;
 }
@@ -211,6 +225,38 @@ export interface ConfigReplicationStatus {
    * group, `cluster accept <path>` takes the group's. Paths only, never a value.
    */
   readonly localDifferences: readonly ConfigLocalDifference[];
+  /**
+   * The latest shared settings changed on other machines, newest first, each with who made it there and how it was
+   * decided (the record the change carried). Paths and who, never a value.
+   */
+  readonly recentFromGroup: readonly ConfigRecentChange[];
+  /**
+   * Members whose own changes were not taken here because they record no one who made them: `olderRelease` when that
+   * member never recorded one (it runs an older release, such as 3.5.0: its changes cross once it is upgraded; this
+   * machine's changes still reach it), else changes made there outside its settings controls.
+   */
+  readonly notTakenFrom: readonly { readonly machine: string; readonly olderRelease: boolean; readonly paths: number; readonly at: number }[];
+  /** Members known to run an older release (their messages do not say they record who made a change), by name. */
+  readonly olderReleaseMembers: readonly string[];
+}
+
+/** One shared setting changed on another machine, as this one keeps it (ConfigReplicationStatus `recentFromGroup`). */
+export interface ConfigRecentChange {
+  readonly path: string;
+  /** The machine it was made on, by its name in the group (its id when the roster does not name it). */
+  readonly machine: string;
+  readonly deleted: boolean;
+  readonly at: number;
+  readonly act: ReplicaAct;
+}
+
+/** How a change was decided, in the owner's words: "his press", "his yes to <caller>", "<caller> under his rules". */
+export function describeReplicaAct(act: ReplicaAct): string {
+  const who = act.name ?? (act.owner ? 'you' : act.by);
+  if (act.how === 'press') return act.owner ? 'you, with your own press' : `${who}, with a press`;
+  if (act.how === 'yes') return `${who}, and you said yes to it`;
+  if (act.how === 'carried') return 'you (carried from before this record existed)';
+  return `${who}, allowed by your rules without asking`;
 }
 
 /** How often a machine that holds a credential marker without its value asks again. */
@@ -261,7 +307,10 @@ export class ConfigReplicationService {
     // until the next exchange replaces them, so nothing shared is missing between a restart and that exchange.
     // Changes made here are still held until that exchange (`inStep`), so none overwrites a newer group change.
     this.keptFromRecord = fromRecord && document.revision > 0;
-    this.document = this.publicDocument(document);
+    // A copy a release that did not record who made a change wrote (3.5.0), read by this release for the first time:
+    // its upgrade. What it holds now is all the carry mark may ever apply to (`carryUnrecorded`), kept with it.
+    const upgrading = document.carried !== true && document.carryThrough === undefined;
+    this.document = this.publicDocument(upgrading ? { ...document, carryThrough: document.revision } : document);
     // Changes held before a restart are held again, for the same group only.
     for (const change of held) this.held.set(change.path, { kind: change.kind, secret: change.secret, applyLocal: change.applyLocal });
   }
@@ -299,12 +348,35 @@ export class ConfigReplicationService {
       tombstones: this.document.tombstones.length,
       lastAppliedFrom: this.lastAppliedFrom,
       lastAppliedAt: this.lastAppliedAt,
-      awaitingSync: !(this.inStep || this.keptFromRecord) || this.resyncUntil !== null || this.divergentPeers.size > 0,
+      // A member known to run an older release differs by design until it is updated: said as that (`olderReleaseMembers`), not as out of step.
+      awaitingSync: !(this.inStep || this.keptFromRecord) || this.resyncUntil !== null || [...this.divergentPeers].some((peer) => !this.olderPeers.has(peer)),
+      olderReleaseMembers: [...this.olderPeers.keys()].filter((nodeId) => (this.host.groupState()?.members ?? []).some((member) => member.nodeId === nodeId))
+        .map((nodeId) => (this.host.groupState()?.members ?? []).find((member) => member.nodeId === nodeId)?.displayName ?? nodeId),
       credentialsMissing: this.missingCredentials().length,
       changesNotApplied: (() => { const pending = this.pendingEffects(); return pending.sets.length + pending.deletes.length; })(),
       localChangesHeld: this.held.size,
       localDifferences: [...this.localDifferences].map(([path, difference]) => ({ path, origin: difference.origin })),
+      recentFromGroup: this.recentFromGroup(),
+      notTakenFrom: [...this.unrecordedFrom].map(([nodeId, kept]) => ({
+        machine: (this.host.groupState()?.members ?? []).find((member) => member.nodeId === nodeId)?.displayName ?? nodeId,
+        olderRelease: !this.peersRecordingActs.has(nodeId), paths: kept.paths.size, at: kept.at,
+      })),
     };
+  }
+
+  /** The latest shared settings changed on other machines with who made each there (ConfigReplicationStatus). */
+  private recentFromGroup(limit = 5): readonly ConfigRecentChange[] {
+    const names = new Map((this.host.groupState()?.members ?? []).map((member) => [member.nodeId, member.displayName] as const));
+    const changes: ConfigRecentChange[] = [];
+    for (const entry of this.document.entries) {
+      if (entry.origin === this.host.nodeId || !entry.act) continue;
+      changes.push({ path: entry.path, machine: names.get(entry.origin) ?? entry.origin, deleted: false, at: entry.at, act: entry.act });
+    }
+    for (const tombstone of this.document.tombstones) {
+      if (tombstone.origin === this.host.nodeId || !tombstone.act) continue;
+      changes.push({ path: tombstone.path, machine: names.get(tombstone.origin) ?? tombstone.origin, deleted: true, at: tombstone.at, act: tombstone.act });
+    }
+    return changes.sort((a, b) => b.at - a.at).slice(0, limit);
   }
 
   /**
@@ -389,6 +461,79 @@ export class ConfigReplicationService {
    * and it is kept and reported as a local difference until the owner
    * publishes it or accepts the group's value.
    */
+  /** Members that sent a change of their own recording who made it: they run a release that keeps the record. */
+  private readonly peersRecordingActs = new Set<string>();
+  /** Members known to run an older release: their config messages do not say `actsRecorded`. */
+  private readonly olderPeers = new Map<string, true>();
+  /**
+   * Older-release members already asked for their copy once, with the membership generation they had then: such a
+   * member's copy differs by design, so it is not asked again on every pass; asked again when its release changes
+   * (`handle`) or it rejoins (a new generation on the roster).
+   */
+  private readonly askedOlder = new Map<string, number>();
+  /** Per member, its own changes not taken here because they record no one who made them (paths only). */
+  private readonly unrecordedFrom = new Map<string, { paths: Set<string>; at: number }>();
+
+  /**
+   * A member's own changes that record no one who made them were not taken. Said once per member and path, in the log
+   * and in the status: either it runs an older release of GoodVibes (one that never records who made a change, such as
+   * 3.5.0), whose changes do not cross to this machine until it is upgraded while this machine's still reach it; or the
+   * change was made there outside its settings controls.
+   */
+  /**
+   * Paths the group holds a change for that was not taken here (it records no one): this machine's own value of such a
+   * path is never folded in as the group's (`reconcileLocalConfig`), so a refused change is never overwritten by it.
+   */
+  private readonly refusedPaths = new Set<string>();
+
+  private noteUnrecorded(from: string, changes: readonly { readonly path: string; readonly revision: number; readonly origin: string }[]): void {
+    for (const change of changes) this.refusedPaths.add(change.path);
+    // A change this copy already holds (the same path, revision and origin) is not missing here, only its record is:
+    // a machine put back to 3.5.0 writes its copy back without it.
+    const held = (change: { readonly path: string; readonly revision: number; readonly origin: string }): boolean =>
+      [...this.document.entries, ...this.document.tombstones].some((own) => own.path === change.path && own.revision === change.revision && own.origin === change.origin);
+    const paths = changes.filter((change) => !held(change)).map((change) => change.path);
+    if (paths.length === 0) return;
+    const kept = this.unrecordedFrom.get(from) ?? { paths: new Set<string>(), at: 0 };
+    const fresh = paths.filter((path) => !kept.paths.has(path));
+    for (const path of paths) kept.paths.add(path);
+    kept.at = this.host.now();
+    this.unrecordedFrom.set(from, kept);
+    if (fresh.length === 0) return;
+    const machine = (this.host.groupState()?.members ?? []).find((member) => member.nodeId === from)?.displayName ?? from;
+    this.host.logger.warn(this.peersRecordingActs.has(from)
+      ? `cluster: changes made on ${machine} outside its settings controls record no one who made them, so this machine did not take them`
+      : `cluster: ${machine} runs an older release of GoodVibes that does not record who made a change, so its setting and credential changes do not cross to this machine until it is upgraded; changes made here still reach it`,
+    { path: fresh.slice(0, 8).join(', ') + (fresh.length > 8 ? ` and ${fresh.length - 8} more` : '') });
+  }
+
+  /** A member's change of these paths was taken with its record: what was said not taken for them is no longer so. */
+  private noteRecorded(from: string, paths: readonly string[]): void {
+    const kept = this.unrecordedFrom.get(from);
+    if (!kept) return;
+    for (const path of paths) kept.paths.delete(path);
+    if (kept.paths.size === 0) this.unrecordedFrom.delete(from);
+  }
+
+  /** The owner's act that started or joined the group here: the settings in force become the group's under it. */
+  private seedAct: ReplicaAct | undefined;
+  /** The same act, kept while this process runs: a credential held here that the group has no record of is seeded under it. */
+  private startAct: ReplicaAct | undefined;
+
+  /** When a 3.5.0 daemon put back on this machine last wrote the group's settings since the upgrade (group-runtime option). */
+  private olderReleaseRanAt: number | undefined;
+
+  /** Note that 3.5.0 ran on this machine since the upgrade: its own changes from that run are marked the owner's once. */
+  noteOlderReleaseRun(at: number | undefined): void {
+    this.olderReleaseRanAt = at;
+  }
+
+  /** Record the act that started or joined the group on this machine (its next reconcile seeds the group's settings under it). */
+  seedWith(act: ReplicaAct | undefined): void {
+    this.seedAct = act;
+    this.startAct = act;
+  }
+
   async reconcileLocalConfig(): Promise<void> {
     const check = this.host.captureAuthority();
     const config = this.host.config();
@@ -396,6 +541,8 @@ export class ConfigReplicationService {
     let next = this.document;
     const changed: string[] = [];
     const agreed: Record<string, number> = {};
+    // A run of 3.5.0 put back on this machine since the upgrade that this record has not taken in yet.
+    const olderRun = this.olderReleaseRanAt !== undefined && (this.document.olderReleaseRun ?? 0) < this.olderReleaseRanAt ? this.olderReleaseRanAt : undefined;
     const deleted = new Set(next.tombstones.map((entry) => entry.path));
     const pending = this.pendingEffects();
     const unapplied = new Set([...pending.sets.map((entry) => entry.path), ...pending.deletes.map((entry) => entry.path)]);
@@ -418,17 +565,31 @@ export class ConfigReplicationService {
         // Applied here and changed since: an edit made here that nothing announced.
         if (this.localDifferences.get(path)?.revision !== entry.revision) {
           this.localDifferences.set(path, { origin: entry.origin, revision: entry.revision });
-          this.host.logger.warn('cluster: this machine\'s value for a shared setting differs from the group\'s and was kept; run `cluster publish <path>` to send it to the group, or `cluster accept <path>` to take the group\'s', { path, origin: entry.origin });
+          this.host.logger.warn('cluster: this machine\'s value for a shared setting differs from the group\'s and was kept; in Devices and network, Machine group, "share a setting" sends this machine\'s value to the group and "take the group\'s setting" takes the group\'s', { path, origin: entry.origin });
         }
         continue;
       }
-      next = putReplicaEntry(next, { path, value, origin: this.host.nodeId, at: this.host.now() });
+      // A path the group has no entry for yet takes this machine's value as the group's when the owner started or
+      // joined the group here: that act is what made it the group's (`seedWith`). Any other is an edit nothing
+      // announced, recorded with no one who made it, which the other machines do not take.
+      // A path the group holds a change for that was not taken here is not folded in: that would overwrite it.
+      if (entry === null && this.refusedPaths.has(path)) continue;
+      // This machine's own change made while it ran 3.5.0 after the upgrade (it is in its settings, not in this
+      // record) records no one: the carry mark applies once, to what this machine held at its own upgrade, never to a
+      // change made after it (gate-review-6 G14). It stays here until the owner shares it ("share a setting").
+      const act = entry === null ? this.seedAct : undefined;
+      if (!act) this.host.logger.warn(olderRun !== undefined
+        ? 'cluster: a shared setting changed here while this machine ran an older release records no one who made it, so the other machines will not take it; in Devices and network, Machine group, "share a setting" sends it as your own'
+        : 'cluster: a shared setting changed here records no one who made it (it was not changed through the daemon\'s settings controls), so the other machines will not take it', { path });
+      next = putReplicaEntry(next, { path, value, origin: this.host.nodeId, at: this.host.now(), ...(act ? { act } : {}) });
       changed.push(path);
       agreed[path] = next.revision;
     }
-    if (changed.length === 0 && Object.keys(agreed).length === 0) return;
+    if (olderRun !== undefined) next = { ...next, olderReleaseRun: olderRun };
+    if (changed.length === 0 && Object.keys(agreed).length === 0 && olderRun === undefined) return;
     // One write for the batch: the new entries and the applied state together.
     this.commit(withApplied(next, agreed), check);
+    if (changed.length > 0) this.seedAct = undefined;
     for (const path of changed) this.localDifferences.delete(path);
     if (changed.length > 0) await this.broadcastDelta(this.document, changed, check);
   }
@@ -447,11 +608,11 @@ export class ConfigReplicationService {
    * group. Refused for a path that is not shared or holds a credential (those
    * have their own commands).
    */
-  async publishLocalValue(path: string): Promise<'published' | 'held'> {
+  async publishLocalValue(path: string, act?: ReplicaAct): Promise<'published' | 'held'> {
     if (!isReplicatedConfigPath(path) || isSecretBearingConfigKey(path)) throw new ConfigLocalDifferenceError(path, 'is not a shared setting this command publishes');
     // Before this copy holds the group's settings the change is held, then sent.
     const held = !this.inStep;
-    await this.announceLocalChange(path);
+    await this.announceLocalChange(path, undefined, act);
     return held ? 'held' : 'published';
   }
 
@@ -477,28 +638,30 @@ export class ConfigReplicationService {
    * Setting a deleted path again is the operator undoing the deletion, and this
    * is the only path that can.
    */
-  async announceLocalChange(path: string, observed?: () => void): Promise<void> {
+  async announceLocalChange(path: string, observed?: () => void, act?: ReplicaAct): Promise<void> {
     if (!isReplicatedConfigPath(path)) return;
     const authority = this.host.captureAuthority();
     const check = observed ? () => { observed(); authority(); } : authority;
     const config = this.host.config();
     if (isSecretBearingConfigKey(path)) {
       // An emptied credential setting is the deletion, already made here.
-      if (config?.get(path) !== '') await this.announceLocalSecret(path, check);
-      else if (!this.inStep) this.hold(path, { kind: 'delete', secret: true, applyLocal: false });
-      else await this.publishDelete(path, true, check, false);
+      if (config?.get(path) !== '') await this.announceLocalSecret(path, check, false, act);
+      else if (!this.inStep) this.hold(path, { kind: 'delete', secret: true, applyLocal: false, ...(act ? { act } : {}) });
+      else await this.publishDelete(path, true, check, false, act);
       return;
     }
     const value = config?.get(path);
     if (!isReplicableValue(value)) return;
-    if (!this.inStep) { this.hold(path, { kind: 'set', secret: false, applyLocal: false }); return; }
-    const next = this.appliedHere(putReplicaEntry(this.document, { path, value, origin: this.host.nodeId, at: this.host.now() }), path);
+    if (!this.inStep) { this.hold(path, { kind: 'set', secret: false, applyLocal: false, ...(act ? { act } : {}) }); return; }
+    // A change with no recorded actor (an edit outside the daemon's settings controls) is not taken by the others.
+    if (!act) this.host.logger.warn('cluster: a shared setting changed here records no one who made it (it was not changed through the daemon\'s settings controls), so the other machines will not take it', { path });
+    const next = this.appliedHere(putReplicaEntry(this.document, { path, value, origin: this.host.nodeId, at: this.host.now(), ...(act ? { act } : {}) }), path);
     this.commit(next, check);
     await this.broadcastDelta(next, [path], check);
   }
 
   /** Replicate a secret the operator set on this machine. A seed publishes only a credential the group has no record of. */
-  async announceLocalSecret(configPath: string, observed?: () => void, seed = false): Promise<void> {
+  async announceLocalSecret(configPath: string, observed?: () => void, seed = false, act?: ReplicaAct): Promise<void> {
     if (!isReplicatedConfigPath(configPath)) return;
     const authority = this.host.captureAuthority(), config = this.host.config();
     const classified = isSecretBearingConfigKey(configPath), configured = classified ? config?.get(configPath) : undefined;
@@ -506,21 +669,24 @@ export class ConfigReplicationService {
     const secrets = this.host.secrets();
     if (!secrets) return;
     if (seed && (!this.inStep || findReplicaEntry(this.document, configPath) || this.document.tombstones.some(entry => entry.path === configPath))) return;
-    if (!this.inStep) { this.hold(configPath, { kind: 'secret', secret: true, applyLocal: false }); return; }
+    if (!this.inStep) { this.hold(configPath, { kind: 'secret', secret: true, applyLocal: false, ...(act ? { act } : {}) }); return; }
     const literal = classified ? this.credentialLiteral(configPath, configured) : null;
     const value = literal ?? await secrets.get(replicatedSecretKeyFor(configPath));
     check();
-    if (value === null) { if (!seed) await this.publishDelete(configPath, true, check, false); return; }
-    await this.publishSecret(configPath, value, check);
+    if (value === null) { if (!seed) await this.publishDelete(configPath, true, check, false, act); return; }
+    // A seed is the group's first record of a credential held here when the owner started or joined it (`seedWith`).
+    const recorded = act ?? (seed ? this.seedAct ?? this.startAct : undefined);
+    if (!recorded) this.host.logger.warn('cluster: a credential changed here records no one who made it (it was not changed through the daemon\'s settings controls), so the other machines will not take it', { path: configPath });
+    await this.publishSecret(configPath, value, check, recorded);
   }
 
   /** Delete a setting across the group. */
-  async announceLocalDelete(path: string, secret = false, observed?: () => void): Promise<void> {
+  async announceLocalDelete(path: string, secret = false, observed?: () => void, act?: ReplicaAct): Promise<void> {
     if (!isReplicatedConfigPath(path)) return;
     const authority = this.host.captureAuthority();
     const check = observed ? () => { observed(); authority(); } : authority;
-    if (!this.inStep) { this.hold(path, { kind: 'delete', secret, applyLocal: true }); return; }
-    await this.publishDelete(path, secret, check, true);
+    if (!this.inStep) { this.hold(path, { kind: 'delete', secret, applyLocal: true, ...(act ? { act } : {}) }); return; }
+    await this.publishDelete(path, secret, check, true, act);
   }
 
   private hold(path: string, change: HeldChange): void {
@@ -559,9 +725,9 @@ export class ConfigReplicationService {
   private async releaseHeldOnce(): Promise<void> {
     for (const [path, change] of [...this.held]) {
       try {
-        if (change.kind === 'delete') await this.publishDelete(path, change.secret, this.host.captureAuthority(), change.applyLocal);
-        else if (change.kind === 'secret') await this.announceLocalSecret(path);
-        else await this.announceLocalChange(path);
+        if (change.kind === 'delete') await this.publishDelete(path, change.secret, this.host.captureAuthority(), change.applyLocal, change.act);
+        else if (change.kind === 'secret') await this.announceLocalSecret(path, undefined, false, change.act);
+        else await this.announceLocalChange(path, undefined, change.act);
       } catch (error) {
         // It, and the ones after it, are still held for the next pass.
         this.persistHeld();
@@ -574,7 +740,7 @@ export class ConfigReplicationService {
     this.persistHeld();
   }
 
-  private async publishDelete(path: string, secret: boolean, check: () => void, applyLocal: boolean): Promise<void> {
+  private async publishDelete(path: string, secret: boolean, check: () => void, applyLocal: boolean, act?: ReplicaAct): Promise<void> {
     // Clear it here too, where the store can. A deletion the operator made on
     // the group should not leave this machine still running the old value.
     if (applyLocal) {
@@ -585,10 +751,10 @@ export class ConfigReplicationService {
     const at = this.host.now();
     // Made here (applyLocal) or already the state here (an emptied credential):
     // recorded as applied in the same write as the deletion.
-    const next = this.appliedHere(deleteReplicaEntry(this.document, { path, origin: this.host.nodeId, at, secret }), path);
+    const next = this.appliedHere(deleteReplicaEntry(this.document, { path, origin: this.host.nodeId, at, secret, ...(act ? { act } : {}) }), path);
     this.commit(next, check);
     await this.send(check, CONFIG_MESSAGE_TYPES.delta, {
-      deletes: [{ path, revision: next.revision, origin: this.host.nodeId, at, secret }],
+      deletes: [{ path, revision: next.revision, origin: this.host.nodeId, at, secret, ...(act ? { act } : {}) }],
     });
   }
 
@@ -607,7 +773,10 @@ export class ConfigReplicationService {
 
   private async send(check: () => void, type: string, body: Record<string, unknown>): Promise<void> {
     check();
-    await this.host.send(type, body);
+    // Says this machine records who made each change (a release older than this one, such as 3.5.0, never sends it
+    // and ignores it), so a member tells an older release from a change made outside the settings controls.
+    // A snapshot part's body is read field for field (config-snapshot-transfer.ts, by 3.5.0 too): it goes as it is.
+    await this.host.send(type, type === CONFIG_MESSAGE_TYPES.snapshotPart ? body : { ...body, actsRecorded: true });
   }
 
   private async broadcastDelta(document: ConfigReplicaDocument, paths: readonly string[], check: () => void): Promise<void> {
@@ -640,7 +809,7 @@ export class ConfigReplicationService {
    * replica file and never appears in a snapshot that is not individually
    * sealed.
    */
-  private async publishSecret(configPath: string, value: string, check: () => void): Promise<void> {
+  private async publishSecret(configPath: string, value: string, check: () => void, act?: ReplicaAct): Promise<void> {
     // The value is in this machine's store already: applied under the new revision.
     const next = this.appliedHere(putReplicaEntry(this.document, {
       path: configPath,
@@ -648,6 +817,7 @@ export class ConfigReplicationService {
       origin: this.host.nodeId,
       at: this.host.now(),
       secret: true,
+      ...(act ? { act } : {}),
     }), configPath);
     this.commit(next, check);
     const entry = findReplicaEntry(next, configPath);
@@ -670,7 +840,8 @@ export class ConfigReplicationService {
     }
     const recipients = Object.keys(sealed);
     if (recipients.length === 0) return;
-    const header = { secretPath: entry.path, origin: entry.origin, revision: entry.revision };
+    // Who made it and how it was decided travels with the sealed value (a member takes none without it).
+    const header = { secretPath: entry.path, origin: entry.origin, revision: entry.revision, ...(entry.act ? { act: entry.act } : {}) };
     const body = { ...header, sealed };
     if (recipients.length === 1 || Buffer.byteLength(JSON.stringify(body), 'utf8') <= CONFIG_BODY_LIMIT) {
       await this.send(check, CONFIG_MESSAGE_TYPES.delta, body);
@@ -707,6 +878,14 @@ export class ConfigReplicationService {
   /** Route a config-replication datagram that already verified under the group key. */
   async handle(envelope: ClusterEnvelope): Promise<void> {
     if (envelope.nodeId === this.host.nodeId) return;
+    // What the member runs now: a machine put back to an older release stops saying it (a snapshot part never says it).
+    if (envelope.type !== CONFIG_MESSAGE_TYPES.snapshotPart) {
+      const older = envelope.body['actsRecorded'] !== true;
+      // Its release changed: it is asked for its copy again (`notePeerReplica`).
+      if (older !== this.olderPeers.has(envelope.nodeId)) this.askedOlder.delete(envelope.nodeId);
+      if (older) { this.peersRecordingActs.delete(envelope.nodeId); this.olderPeers.set(envelope.nodeId, true); }
+      else { this.peersRecordingActs.add(envelope.nodeId); this.olderPeers.delete(envelope.nodeId); }
+    }
     const check = this.host.captureAuthority(envelope);
     switch (envelope.type) {
       case CONFIG_MESSAGE_TYPES.request: return this.onRequest(envelope, check);
@@ -740,6 +919,7 @@ export class ConfigReplicationService {
           secretPath: entry.path,
           origin: entry.origin,
           revision: entry.revision,
+          ...(entry.act ? { act: entry.act } : {}),
           sealed: { [member.nodeId]: sealForMember(member.agreementKey, value, SECRET_SEAL_CONTEXT) },
         });
       } catch (error) {
@@ -770,8 +950,18 @@ export class ConfigReplicationService {
     await this.applySnapshot(incoming, envelope.nodeId, check);
   }
 
-  private async applySnapshot(incoming: ConfigReplicaDocument, from: string, check: () => void): Promise<void> {
-    if (!this.withinRevisionBound(incoming.revision, from)) return;
+  private async applySnapshot(received: ConfigReplicaDocument, from: string, check: () => void): Promise<void> {
+    if (!this.withinRevisionBound(received.revision, from)) return;
+    // A setting change that records no one who made it is not taken from another machine.
+    const { document: incoming, dropped } = withRecordedActsOnly(received);
+    // Only the sender's own changes say anything about the sender (it relays others' as it holds them).
+    const ownUnrecorded = [...received.entries, ...received.tombstones].filter((change) => !change.act && change.origin === from);
+    // A full document says everything the sender holds: what it no longer holds unrecorded is no longer said.
+    const stillUnrecorded = new Set(ownUnrecorded.map((change) => change.path));
+    this.noteRecorded(from, [...(this.unrecordedFrom.get(from)?.paths ?? [])].filter((path) => !stillUnrecorded.has(path)));
+    if (ownUnrecorded.length > 0) this.noteUnrecorded(from, ownUnrecorded);
+    else if (dropped > 0) this.host.logger.debug('cluster: changes relayed by another machine that record no one who made them were not taken', { from, dropped });
+    for (const change of [...received.entries, ...received.tombstones]) if (!change.act) this.refusedPaths.add(change.path);
     await this.applyDocument(mergeConfigReplica(this.document, this.publicDocument(incoming)), from, check);
     // A full document from a member: this copy now holds at least what it held.
     if (this.resyncUntil !== null && incoming.revision >= this.resyncUntil) this.resyncUntil = null;
@@ -822,12 +1012,17 @@ export class ConfigReplicationService {
     // A delta carries the sender's own changes; one naming another node as the
     // author is not something the sender can vouch for.
     const before = this.document.revision;
-    const own = { ...incoming, revision: before,
+    const originated = { ...incoming, revision: before,
       entries: incoming.entries.filter((entry) => entry.origin === envelope.nodeId),
       tombstones: incoming.tombstones.filter((entry) => entry.origin === envelope.nodeId) };
-    if (own.entries.length !== incoming.entries.length || own.tombstones.length !== incoming.tombstones.length) {
+    if (originated.entries.length !== incoming.entries.length || originated.tombstones.length !== incoming.tombstones.length) {
       this.host.logger.warn('cluster: ignored replicated changes the sender did not originate', { from: envelope.nodeId });
     }
+    // A setting change that records no one who made it is not taken from another machine.
+    const { document: own, dropped } = withRecordedActsOnly(originated);
+    if (dropped > 0) this.noteUnrecorded(envelope.nodeId, [...originated.entries, ...originated.tombstones].filter((change) => !change.act));
+    // A change taken with its record: whatever was said not taken for that path from this member is no longer so.
+    this.noteRecorded(envelope.nodeId, [...own.entries, ...own.tombstones].map((change) => change.path));
     if (own.entries.length === 0 && own.tombstones.length === 0) return;
     if (!this.withinRevisionBound(Math.max(...own.entries.map((entry) => entry.revision), ...own.tombstones.map((entry) => entry.revision)), envelope.nodeId)) return;
     const gap = this.noteGap(before, own);
@@ -868,8 +1063,15 @@ export class ConfigReplicationService {
       const suppliedOrigin = envelope.body['origin'], existing = findReplicaEntry(this.document, path);
       if (suppliedOrigin !== undefined && (typeof suppliedOrigin !== 'string' || suppliedOrigin.length === 0 || suppliedOrigin.length > 256)) return;
       const origin = typeof suppliedOrigin === 'string' ? suppliedOrigin : existing?.secret && existing.revision === revision ? existing.origin : envelope.nodeId;
+      // A credential that records no one who made it is not taken from another machine.
+      const act = readReplicaAct(envelope.body['act']);
+      if (!act) {
+        if (origin === envelope.nodeId) this.noteUnrecorded(envelope.nodeId, [{ path, revision, origin }]);
+        return;
+      }
+      if (origin === envelope.nodeId) this.noteRecorded(envelope.nodeId, [path]);
       const incoming: ConfigReplicaDocument = { version: 1, groupId: this.document.groupId, revision, tombstones: [], entries: [{
-        path, revision, origin, at: this.host.now(), secret: true, value: { secretRevision: revision },
+        path, revision, origin, at: this.host.now(), secret: true, value: { secretRevision: revision }, act,
       }] };
       const admitted = (): ConfigReplicaDocument | null => {
         const merged = mergeConfigReplica(this.document, incoming), selected = findReplicaEntry(merged, path);
@@ -889,7 +1091,7 @@ export class ConfigReplicationService {
       const gap = this.noteGap(this.document.revision, incoming);
       // The value is stored under exactly this revision: recorded in the same write.
       this.commit(withApplied(merged, { [path]: revision }), check);
-      this.logApplied(path, envelope.nodeId, true);
+      this.logApplied(path, envelope.nodeId, true, act);
       if (gap) await this.requestSnapshot(envelope.nodeId);
     });
   }
@@ -918,6 +1120,52 @@ export class ConfigReplicationService {
   async retryPendingEffects(): Promise<void> {
     await this.applyPendingEffects();
     await this.releaseHeld();
+    await this.carryUnrecorded();
+  }
+
+  /**
+   * The upgrade from a release that did not record who made a change (3.5.0): once, when this copy holds the group's
+   * settings, every shared change THIS machine made that was already in its copy at its own upgrade (`carryThrough`,
+   * stamped when this release first read the copy from disk) and records no one is marked the owner's, "carried from
+   * before this record existed", and sent again under the same revision, so every member, and a machine that joins
+   * later, takes it with nothing changed by hand. Never a change made after the upgrade (a hand edit since then records
+   * no one and stays here), and never another machine's: each machine carries its own at its own upgrade, and a machine
+   * removed from the group carries nothing, so its unrecorded changes are never re-sent as the owner's by the others
+   * (gate-review-6 G14). A document this release made is born marked (`carried`).
+   */
+  private async carryUnrecorded(): Promise<void> {
+    if (this.document.carried === true || !this.inStep) return;
+    let check: () => void;
+    try { check = this.host.captureAuthority(); } catch { return; }
+    const through = this.document.carryThrough ?? -1;
+    const ours = (change: { readonly origin: string; readonly revision: number }): boolean => change.origin === this.host.nodeId && change.revision <= through;
+    // The record is added to the SAME change (its path, revision and origin unchanged): a copy that keeps who made it
+    // wins over one that does not (config-replica.ts `beats`), and a newer change another machine made meanwhile, even
+    // one this machine did not take, is never overwritten by an older value sent again at a new revision.
+    const carry = <T extends { readonly act?: ReplicaAct | undefined; readonly origin: string; readonly revision: number }>(change: T): T =>
+      change.act || !ours(change) ? change : { ...change, act: CARRIED_ACT };
+    const entries = this.document.entries.map(carry);
+    const tombstones = this.document.tombstones.map(carry);
+    const settings = entries.filter((entry, index) => entry !== this.document.entries[index] && !entry.secret);
+    const credentials = entries.filter((entry, index) => entry !== this.document.entries[index] && entry.secret);
+    const deletions = tombstones.filter((tombstone, index) => tombstone !== this.document.tombstones[index]);
+    this.commit({ ...this.document, entries, tombstones, carried: true }, check);
+    // Only this machine's own changes are carried: they go to every member as deltas.
+    if (settings.length > 0) await this.broadcastDelta(this.document, settings.map((entry) => entry.path), check);
+    if (deletions.length > 0) await this.send(check, CONFIG_MESSAGE_TYPES.delta, { deletes: deletions });
+    // A credential is sent again sealed under its own revision, with its value as stored here.
+    for (const entry of credentials) {
+      if (appliedRevision(this.document, entry.path) !== entry.revision) continue;
+      try {
+        const value = await this.effectiveSecret(entry.path, check);
+        if (value !== null) await this.sendSealed(entry, value, check);
+      } catch (error) {
+        check();
+        this.host.logger.warn('cluster: a credential made before who made changes was recorded could not be sent again', { path: entry.path, error: error instanceof Error ? error.message : String(error) });
+      }
+    }
+    const carried = settings.length + deletions.length + credentials.length;
+    if (carried > 0) this.host.logger.info('cluster: shared changes made before who made them was recorded are marked yours and sent again', { carried });
   }
 
   /**
@@ -939,13 +1187,14 @@ export class ConfigReplicationService {
       try {
         check();
         if (!sameEffect(findReplicaEntry(this.document, path), entry)) continue;
-        if (JSON.stringify(config.get(path)) !== JSON.stringify(entry.value)) { config.set(path, entry.value); this.logApplied(path, entry.origin, false); }
+        if (JSON.stringify(config.get(path)) !== JSON.stringify(entry.value)) { config.set(path, entry.value); this.logApplied(path, entry.origin, false, entry.act); }
         applied[path] = entry.revision;
         this.localDifferences.delete(path);
       } catch (error) {
         if (error instanceof GroupConfigChangeRetiredError) continue;
         try { check(); } catch { break; }
-        this.host.logger.warn('cluster: a replicated setting was not applied and is awaiting retry', { path, origin: entry.origin });
+        // Why it was not applied (a managed lock on this machine names itself and who set it).
+        this.host.logger.warn('cluster: a replicated setting was not applied and is awaiting retry', { path, origin: entry.origin, reason: error instanceof Error ? error.message : String(error) });
       }
     }
     for (const tombstone of deletes) {
@@ -984,11 +1233,12 @@ export class ConfigReplicationService {
    * a log file, and the path plus the origin is what an operator actually needs
    * to answer "why did this machine change".
    */
-  private logApplied(path: string, origin: string, secret: boolean): void {
+  private logApplied(path: string, origin: string, secret: boolean, act?: ReplicaAct): void {
     this.host.logger.info('cluster: applied a setting from another machine in the group', {
       path,
       origin,
       kind: secret ? 'credential' : 'setting',
+      ...(act ? { madeBy: describeReplicaAct(act) } : {}),
     });
   }
 
@@ -1036,6 +1286,13 @@ export class ConfigReplicationService {
         return;
       }
     } else if (typeof revision !== 'number' || !Number.isFinite(revision) || revision <= this.document.revision) return;
+    // A member known to run an older release holds a different copy by design (it keeps changes that record no one):
+    // asked once, then not again until its release changes or it rejoins.
+    if (this.olderPeers.has(from)) {
+      const generation = (this.host.groupState()?.members ?? []).find((member) => member.nodeId === from)?.gen ?? -1;
+      if (this.askedOlder.get(from) === generation) { this.divergentPeers.delete(from); return; }
+      this.askedOlder.set(from, generation);
+    }
     if (!this.divergentPeers.has(from) && this.divergentPeers.size >= MAX_GROUP_MEMBERS) return;
     this.divergentPeers.add(from);
     const now = this.host.now(), last = this.lastExchange.get(from);

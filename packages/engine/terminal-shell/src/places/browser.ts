@@ -14,8 +14,10 @@
  */
 export type {
   AnyPlace, PlaceAction, PlaceAnswer, PlaceCapabilityAction, PlaceCount, PlaceDeclaration, PlaceDetailLine, PlaceFollow,
-  PlaceGroupId, PlaceItem, PlaceList, PlaceProgramAction, PlaceRow, PlaceSource,
+  PlaceGroupId, PlaceItem, PlaceList, PlaceOfferedWhen, PlaceProgramAction, PlaceRow, PlaceSource,
 } from './place-types.js';
+// Whether an action is offered on an item (its states and its `offeredWhen`): the one test every renderer uses.
+export { actionOfferedFor, startingValues } from './place-types.js';
 import type { AnyPlace } from './place-types.js';
 import { AUTOMATION_PLACE } from './automation-place.js';
 import { CODE_PLACE } from './code-place.js';

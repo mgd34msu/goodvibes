@@ -190,7 +190,7 @@ function createMarketplaceReadModel(runtimeServices: RuntimeServices): UiMarketp
       startupIssues.push(`${staleSchemas.length} MCP server schema${staleSchemas.length === 1 ? ' is' : 's are'} stale or quarantined.`);
     }
     if (isClassicOperation()) {
-      startupIssues.push('No decision model is in use: recommendations are not ranked; each live need lists its uninstalled entries in catalog order.');
+      startupIssues.push('No decision model is in use, so what fits is not ranked: for each need found in this project, the catalog entries not installed yet are listed in the catalog\'s order.');
       return { startupIssues, recommendations: unranked, ranking: 'off' };
     }
     if (ranking === 'failed' && failureMessage) {

@@ -1,5 +1,6 @@
 import type { ConfigManager } from '../../config/manager.js';
 import { join } from 'node:path';
+import { existsSync } from 'node:fs';
 import { CONFIG_SCHEMA } from '../../config/index.js';
 import type { ConfigKey } from '../../config/index.js';
 import { ProfileManager } from '../../profiles/manager.js';
@@ -7,6 +8,10 @@ import type { ManagedSettingsBundle } from '../sandbox/types.js';
 import { isSecretBearingConfigKey } from '../../config/secret-bearing-config-keys.js';
 import { ConfigError } from '../../types/errors.js';
 import { TargetChangedError, targetRef } from '../../utils/target-ref.js';
+import { shownPath } from '../../capabilities/held-paths.js';
+import { getSettingsControlPath, managedLockRefusalText, readManagedLock, readManagedLocks, readStrictManagedSettingLocks, releaseLockFolder, type ManagedLockHeld } from './host-setting-policy-read.js';
+import { logger } from '../../utils/logger.js';
+import { summarizeError } from '../../utils/error-display.js';
 import {
   SECRET_LITERAL_PLACEHOLDER,
   assertNoCredentialLiterals,
@@ -57,10 +62,12 @@ export type {
   StagedManagedBundle,
 };
 
+// A file a call holds (capabilities/held-paths.ts) is kept in the record as the project's file, never the call's folder.
 export function recordSettingsSyncEvent(event: SettingsSyncEvent, configDir: string): void {
+  const kept: SettingsSyncEvent = { ...event, path: shownPath(event.path) };
   withStoreLock(configDir, () => {
     const store = readStoreForWrite(configDir);
-    writeStore(trimStore({ ...store, events: [...store.events, event] }), configDir);
+    writeStore(trimStore({ ...store, events: [...store.events, kept] }), configDir);
   });
 }
 
@@ -69,9 +76,29 @@ export function recordSettingsSyncFailure(surface: SyncSurface, message: string,
     const store = readStoreForWrite(configDir);
     writeStore(trimStore({
       ...store,
-      failures: [...store.failures, { surface, message, timestamp: Date.now() }],
+      failures: [...store.failures, { surface, message: shownPath(message), timestamp: Date.now() }],
     }), configDir);
   });
+}
+
+/**
+ * A read view's store with every lock that holds on this machine (host-setting-policy-read.ts readManagedLocks), not
+ * only the ones this program's own file keeps: what Managed settings and Settings show as locked is what every write
+ * refuses. An unreadable lock file elsewhere leaves the view as this file has it (the write itself refuses).
+ */
+function withEveryLock(configManager: ConfigManager, store: SettingsControlPlaneStore): SettingsControlPlaneStore {
+  let held: ReadonlyMap<string, ManagedLockHeld>;
+  try { held = readManagedLocks(configManager.managedLockFolders()); } catch { return store; }
+  const own = new Set<string>(store.managedLocks.map((entry) => entry.key));
+  const elsewhere = [...held.values()].filter((lock) => !own.has(lock.key))
+    .map((lock): ManagedSettingLock => ({ key: lock.key as ConfigKey, source: lock.source, reason: lock.reason, updatedAt: lock.updatedAt }));
+  return elsewhere.length === 0 ? store : { ...store, managedLocks: [...store.managedLocks, ...elsewhere].sort((a, b) => a.key.localeCompare(b.key)) };
+}
+
+/** Refuses with the one sentence when `key` is locked by a lock this program's own file does not keep (it cannot release it). */
+function refuseLockedElsewhere(configManager: ConfigManager, key: ConfigKey, configDir: string): void {
+  const lock = readManagedLock(key, configManager.managedLockFolders());
+  if (lock && lock.file !== getSettingsControlPath(configDir)) throw new ConfigError(managedLockRefusalText(lock, isSecretBearingConfigKey(key)));
 }
 
 export function isManagedSettingLocked(key: ConfigKey, configDir: string): boolean {
@@ -116,6 +143,62 @@ function clearManagedSettingLockLocked(key: ConfigKey, configDir: string): boole
   return true;
 }
 
+/**
+ * Removes the managed lock on `key` from every lock file on this machine that keeps it (readManagedLocks reads them
+ * all, so a lock left in one would still hold). The owner's own act: its capability puts anyone else's call to him.
+ * Answers whether any lock was removed.
+ */
+export function clearManagedSettingLockEverywhere(key: ConfigKey, folders: readonly string[]): boolean {
+  let cleared = false;
+  for (const folder of folders) {
+    if (!existsSync(getSettingsControlPath(folder))) continue;
+    if (clearManagedSettingLock(key, folder)) cleared = true;
+  }
+  return cleared;
+}
+
+/**
+ * A released 3.5.0 reads managed locks only from the terminal app's lock file (`releaseFolder`, `~/.goodvibes/tui/`).
+ * So that a rollback never weakens a protection, every lock that holds but is recorded in another folder is also kept
+ * there, as a copy in the form 3.5.0 reads (`mirroredFrom` names the file it was recorded in; this version never reads a
+ * copy as a lock). Kept in step: copies of locks no longer recorded go, new ones come; the file is written only when
+ * that changes anything. Run at the daemon's start and after every lock change made here (lock, unlock, apply, rollback).
+ * A lock file elsewhere that cannot be read keeps the copies it had.
+ */
+export function mirrorLocksForRelease(folders: readonly string[], releaseFolder: string): void {
+  const recorded = new Map<string, ManagedSettingLock>();
+  const unreadable = new Set<string>();
+  for (const folder of folders) {
+    if (folder === releaseFolder) continue;
+    let locks: ReadonlyMap<string, { readonly source: string; readonly reason: string; readonly updatedAt: number }>;
+    try { locks = readStrictManagedSettingLocks(folder); } catch { unreadable.add(getSettingsControlPath(folder)); continue; }
+    for (const [key, lock] of locks) {
+      if (!recorded.has(key)) recorded.set(key, { key: key as ConfigKey, source: lock.source, reason: lock.reason, updatedAt: lock.updatedAt, mirroredFrom: getSettingsControlPath(folder) });
+    }
+  }
+  const releaseFile = getSettingsControlPath(releaseFolder);
+  if (recorded.size === 0 && !existsSync(releaseFile)) return;
+  withStoreLock(releaseFolder, () => {
+    const store = readStoreForWrite(releaseFolder);
+    const genuine = store.managedLocks.filter((lock) => lock.mirroredFrom === undefined);
+    const genuineKeys = new Set<string>(genuine.map((lock) => lock.key));
+    const kept = store.managedLocks.filter((lock) => lock.mirroredFrom !== undefined && unreadable.has(lock.mirroredFrom) && !recorded.has(lock.key));
+    const copies = [...[...recorded.values()].filter((lock) => !genuineKeys.has(lock.key)), ...kept];
+    const before = JSON.stringify(store.managedLocks.filter((lock) => lock.mirroredFrom !== undefined).map((lock) => [lock.key, lock.source, lock.reason, lock.mirroredFrom]).sort());
+    const after = JSON.stringify(copies.map((lock) => [lock.key, lock.source, lock.reason, lock.mirroredFrom]).sort());
+    if (before === after) return;
+    writeStore({ ...store, managedLocks: [...genuine, ...copies].sort((a, b) => a.key.localeCompare(b.key)) }, releaseFolder);
+  });
+}
+
+/** {@link mirrorLocksForRelease} for one settings manager's lock folders, under its home. */
+export function mirrorManagedLocksForRelease(configManager: Pick<ConfigManager, 'managedLockFolders' | 'getHomeDirectory'>): void {
+  const home = configManager.getHomeDirectory();
+  if (home === null) return;
+  try { mirrorLocksForRelease(configManager.managedLockFolders(), releaseLockFolder(home)); }
+  catch (error) { logger.warn('[settings] the copies of managed locks a released 3.5.0 reads could not be kept in step', { error: summarizeError(error) }); }
+}
+
 export function exportSettingsSyncBundle(configManager: ConfigManager): SettingsSyncBundle {
   return {
     version: 1,
@@ -147,7 +230,8 @@ function applySettingsSyncBundleLocked(
   const store = readStoreForWrite(configDir);
   const nextSynced: SettingsLayerRecord[] = [...store.syncedSettings];
   const nextConflicts = store.conflicts.filter((entry) => entry.source !== 'synced');
-  const lockedKeys = new Set(store.managedLocks.map((entry) => entry.key));
+  // Every lock that holds here, wherever it was recorded (readManagedLocks), not only this file's.
+  const lockedKeys = new Set<string>(readManagedLocks(configManager.managedLockFolders()).keys());
   const accepted: Array<{ key: ConfigKey; value: unknown }> = [];
   const skippedLockedKeys: ConfigKey[] = [];
   for (const [rawKey, nextValue] of Object.entries(bundle.settings)) {
@@ -232,6 +316,9 @@ function resolveSettingsSyncConflictLocked(
   const store = readStoreForWrite(configDir);
   const conflict = store.conflicts.find((entry) => entry.key === key && entry.source === 'synced');
   if (!conflict) return false;
+  // Settling writes the setting: a managed lock refuses it, wherever it was recorded.
+  const lock = readManagedLock(key, configManager.managedLockFolders());
+  if (lock) throw new ConfigError(managedLockRefusalText(lock, isSecretBearingConfigKey(key)));
 
   const nextConflicts = store.conflicts.filter((entry) => !(entry.key === key && entry.source === 'synced'));
   let nextSynced = store.syncedSettings.filter((entry) => entry.key !== key);
@@ -345,7 +432,7 @@ export async function stageManagedSettingsBundle(
   bundle: ManagedSettingsBundle,
   path: string,
 ): Promise<StagedManagedBundle> {
-  const stage = await buildManagedStage(configManager, bundle, path);
+  const stage = await buildManagedStage(configManager, bundle, shownPath(path));
   const configDir = getConfigControlPlaneDir(configManager);
   withStoreLock(configDir, () => {
     const store = readStoreForWrite(configDir);
@@ -412,8 +499,12 @@ function applyStagedManagedBundleLocked(
   const remainingChanges = stage.changes.filter((change) => !stagedChanges.some((candidate) => candidate.key === change.key));
   const remainingRisk = remainingChanges.length > 0 ? readBundleRisk(remainingChanges) : undefined;
   const before = configSnapshot(configManager);
-  // Refuse the whole apply before the first write: setDynamic persists per key.
-  for (const change of stagedChanges) configManager.validateDynamic(change.key, change.nextValue, { bypassManagedLock: true });
+  // Refuse the whole apply before the first write: setDynamic persists per key. The apply replaces this file's locks;
+  // a lock recorded elsewhere (the daemon's folder, another program's) is not its to replace.
+  for (const change of stagedChanges) {
+    refuseLockedElsewhere(configManager, change.key, configDir);
+    configManager.validateDynamic(change.key, change.nextValue, { bypassManagedLock: true });
+  }
   const previousValues: Partial<Record<ConfigKey, unknown>> = {};
   const appliedKeys = stagedChanges.map((change) => change.key);
   const replacedLayers = store.managedSettings.filter((entry) => appliedKeys.includes(entry.key));
@@ -501,6 +592,23 @@ export function rollbackManagedApply(configManager: ConfigManager, token: string
   return withStoreLock(configDir, () => rollbackManagedApplyLocked(configManager, token, configDir));
 }
 
+/**
+ * What a rollback would put back, read before it runs: each key it restores with the value it would hold after
+ * (the value from before the apply, or the default), so the one rule of settings that loosen (support/setup-transfer.ts
+ * `splitIncomingSettings`) can hold it back as it holds an import back. Undefined for a token that is not kept.
+ */
+export function managedRollbackValues(configManager: ConfigManager, token: string): readonly { readonly key: ConfigKey; readonly value: unknown }[] | undefined {
+  const record = readStore(getConfigControlPlaneDir(configManager)).rollbackHistory.find((entry) => entry.token === token);
+  if (!record) return undefined;
+  return record.restoredKeys.flatMap((key) => {
+    const previous = record.previousValues[key];
+    if (isSecretBearingConfigKey(key) && previous === SECRET_LITERAL_PLACEHOLDER) return [];
+    if (previous !== undefined) return [{ key, value: previous }];
+    const schema = CONFIG_SCHEMA.find((entry) => entry.key === key);
+    return schema ? [{ key, value: schema.default }] : [];
+  });
+}
+
 function rollbackManagedApplyLocked(configManager: ConfigManager, token: string, configDir: string): number {
   const store = readStoreForWrite(configDir);
   const record = store.rollbackHistory.find((entry) => entry.token === token);
@@ -524,6 +632,8 @@ function rollbackManagedApplyLocked(configManager: ConfigManager, token: string,
     ...(record.replacedLocks ?? []),
   ].sort((a, b) => a.key.localeCompare(b.key));
   const notRestorable: ConfigKey[] = [];
+  // The rollback releases this file's locks; a lock recorded elsewhere still holds its key.
+  for (const key of record.restoredKeys) refuseLockedElsewhere(configManager, key, configDir);
   const before = configSnapshot(configManager);
   const written: ConfigKey[] = [];
   // The live settings and the control-plane file change together or not at all:
@@ -629,7 +739,10 @@ function buildResolvedEntries(configManager: ConfigManager, store: SettingsContr
     } else if (JSON.stringify(localValue) !== JSON.stringify(setting.default)) {
       effectiveSource = 'local';
     }
-    const locked = store.managedLocks.some((entry) => entry.key === setting.key);
+    const lock = store.managedLocks.find((entry) => entry.key === setting.key);
+    const locked = lock !== undefined;
+    // A lock names who set it and why, whether or not a managed bundle put a value with it.
+    if (lock) lockReason = `managed by ${lock.source} (${lock.reason}); only the owner removes the lock, in Tools and extensions, Managed settings`;
     return {
       key: setting.key,
       category: setting.key.split('.')[0] ?? 'general',
@@ -651,7 +764,7 @@ function buildResolvedEntries(configManager: ConfigManager, store: SettingsContr
 }
 
 export function getSettingsControlPlaneSnapshot(configManager: ConfigManager): SettingsControlPlaneSnapshot {
-  const store = readStore(getConfigControlPlaneDir(configManager));
+  const store = withEveryLock(configManager, readStore(getConfigControlPlaneDir(configManager)));
   const hostKeys = new Set(configManager.getHostSettingsSchema?.().map(entry => entry.key) ?? []);
   const managedLocks = store.managedLocks.filter(entry => !hostKeys.has(entry.key));
   const resolvedEntries = buildResolvedEntries(configManager, store);
@@ -684,7 +797,7 @@ export function getResolvedSettingLookup(
   configManager: ConfigManager,
   key: ConfigKey,
 ): ResolvedSettingLookup | null {
-  const store = readStore(getConfigControlPlaneDir(configManager));
+  const store = withEveryLock(configManager, readStore(getConfigControlPlaneDir(configManager)));
   const entry = buildResolvedEntries(configManager, store, key)[0];
   return entry ? lookupFor(store, entry) : null;
 }
@@ -695,7 +808,7 @@ export function getResolvedSettingLookup(
  * and parses the file once per key.
  */
 export function readResolvedSettingLookups(configManager: ConfigManager): (key: ConfigKey) => ResolvedSettingLookup | null {
-  const store = readStore(getConfigControlPlaneDir(configManager));
+  const store = withEveryLock(configManager, readStore(getConfigControlPlaneDir(configManager)));
   const entries = new Map(buildResolvedEntries(configManager, store).map((entry) => [entry.key, entry] as const));
   return (key) => {
     const entry = entries.get(key);

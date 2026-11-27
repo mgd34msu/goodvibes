@@ -132,6 +132,12 @@ export interface PermissionPromptRequest {
    */
   ownerOnly?: OwnerOnlyKind | undefined;
   /**
+   * What really made `ownerOnly` the owner's, in words, when the kind's plain words would name another cause (a tool
+   * server set to ask before calls outside its limits, a file that runs by itself): the card says this instead.
+   * In-process only; approvals.raise does not carry it.
+   */
+  ownerOnlyBecause?: string | undefined;
+  /**
    * Set by the gate when the owner would be asked only about where the call
    * could reach, which a real containment boundary answers: a layer that runs
    * the call inside such a boundary may settle it (`settledBy`). Absent: only
@@ -183,6 +189,11 @@ export interface PermissionPromptDecision {
    * held for him, never as refused by him.
    */
   heldForOwner?: boolean | undefined;
+  /**
+   * Set when the ask ended with no answer from anyone: withdrawn (cancelled) or left until its deadline passed. Not a
+   * refusal by the owner: a caller that reports the outcome onwards (a runner's permission ask) says which it was.
+   */
+  unanswered?: 'withdrawn' | 'timed-out' | undefined;
 }
 
 /** In-process lifetime only; never stored in a prompt or sent over the wire. */

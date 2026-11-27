@@ -209,6 +209,19 @@ export function isDirectLoopbackRequest(req: Request, peerAddress: string | unde
   return isLoopbackHost(requestHostName(req));
 }
 
+/** Requests the daemon serves to itself in process (a turn it hosts calling its own request path). */
+const inProcessRequests = new WeakSet<Request>();
+
+/** Record that the daemon serves this request to itself, in process (no socket, no other process). */
+export function bindInProcessRequest(req: Request): void {
+  inProcessRequests.add(req);
+}
+
+/** True only for a request the daemon served to itself in process. */
+export function isInProcessRequest(req: Request): boolean {
+  return inProcessRequests.has(req);
+}
+
 const localOrigins = new WeakSet<Request>();
 
 /**

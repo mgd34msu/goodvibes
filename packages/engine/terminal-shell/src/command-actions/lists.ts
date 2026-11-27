@@ -7,6 +7,9 @@
  */
 import type { ListName } from './types.js';
 
+/** A fixed choice's caption inside a sentence ("An image" → "an image"; a name such as "Google" kept), as capabilities/outcome.ts says it. */
+const inSentence = (label: string): string => (/^[A-Z][a-z]+ [a-z]/.test(label) ? `${label.charAt(0).toLowerCase()}${label.slice(1)}` : label);
+
 export interface ListRow {
   readonly value: string;
   readonly label: string;
@@ -158,9 +161,11 @@ export function valuesAsShown(inputs: ReadonlyArray<{ readonly id: string; reado
     if (Array.isArray(input.choices)) {
       const fixed = new Map((input.choices as ReadonlyArray<{ readonly value?: unknown; readonly label?: unknown }>)
         .filter((choice) => typeof choice?.value === 'string' && typeof choice.label === 'string')
-        .map((choice) => [choice.value as string, choice.label as string]));
-      shown[input.id] = fixed.get(value) ?? value.split(',').map((part) => fixed.get(part.trim()) ?? part.trim()).join(', ');
-      if (!fixed.has(value) && !value.split(',').some((part) => fixed.has(part.trim()))) shown[input.id] = value;
+        .map((choice) => [choice.value as string, inSentence(choice.label as string)]));
+      const parts = value.split(',').map((part) => part.trim());
+      const whole = fixed.get(value);
+      if (whole !== undefined) shown[input.id] = whole;
+      else if (parts.some((part) => fixed.has(part))) shown[input.id] = parts.map((part) => fixed.get(part) ?? part).join(', ');
       continue;
     }
     const choices = input.choices as { readonly list?: string } | undefined;

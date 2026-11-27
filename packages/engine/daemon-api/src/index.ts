@@ -41,6 +41,7 @@ export {
   principalHasScope,
   resolveAuthenticatedPrincipal,
   resolvePrivateHostFetchOptions,
+  scriptActor,
   systemActor,
 } from './http-policy.js';
 export type { Actor, ActorClass, ActorPrincipal, OwnerIdentity } from './http-policy.js';
@@ -257,12 +258,16 @@ export {
 } from './remote-routes.js';
 export { buildErrorResponseBody, jsonErrorResponse, readErrorResponseBody, readJsonErrorResponse, summarizeErrorForRecord } from './error-response.js';
 export {
+  currentRecordReach,
   decodeCursor,
   encodeCursor,
   hasPaginationParams,
+  keepReachable,
+  keepReachableNaming,
   paginateItems,
+  withRecordReach,
 } from './pagination.js';
-export type { PaginatedResponse } from './pagination.js';
+export type { PaginatedResponse, RecordReachFilter, RecordReachOwner } from './pagination.js';
 export type { JsonErrorResponseOptions } from './error-response.js';
 export {
   AddressRateLimiter,
@@ -294,5 +299,3 @@ export * from './browser-judgment-routes.js';
 
 export { createSettingsPreconditionHandler } from './settings-precondition.js';
 export type { SettingsPreconditionRequest, SettingsPreconditionFacts, SettingsPreconditionReceipt, SettingsPreconditionHandler } from './settings-precondition.js';
-export { createSettingsImportPreconditionHandler } from './settings-import-precondition.js';
-export type { SettingsImportPreconditionRequest, SettingsImportPreconditionFacts, SettingsImportPreconditionReceipt, SettingsImportPreconditionHandler } from './settings-import-precondition.js';

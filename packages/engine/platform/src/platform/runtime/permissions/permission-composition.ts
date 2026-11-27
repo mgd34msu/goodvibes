@@ -15,6 +15,7 @@ import type { PermissionPromptDecision, PermissionPromptRequest } from '../../pe
 import { callingAgentId } from '../../agents/calling-agent.js';
 import type { GatePresetName } from '../../gate/presets.js';
 import { PermissionManager, createPermissionConfigReader, sessionOfPermissionDecision } from '../../permissions/manager.js';
+import { capabilityCommandsResolver } from '../../permissions/capability-commands.js';
 import { ownerPermissionRulesPath, previousOwnerPermissionRuleFiles, UserPermissionRuleStore } from '../../permissions/user-rule-store.js';
 import type { HookDispatcher } from '../../hooks/index.js';
 import { isFeatureGateEnabled, type FeatureFlagManager } from '../feature-flags/index.js';
@@ -151,7 +152,7 @@ export interface BrokeredPermissionManagerOptions {
  * attribution.
  */
 export function createBrokeredPermissionManager(options: BrokeredPermissionManagerOptions): PermissionManager {
-  return new PermissionManager(
+  const manager = new PermissionManager(
     (asked, execution) => {
       // An ask raised inside an agent's tool call names that agent even when
       // its gate passed no attribution (the autonomous admission path), so a
@@ -185,6 +186,9 @@ export function createBrokeredPermissionManager(options: BrokeredPermissionManag
     options.userRuleStore,
     { workspaceTrust: options.workspaceTrust, ...(options.workspaceTrustFor ? { workspaceTrustFor: options.workspaceTrustFor } : {}) },
   );
+  // A model's `code.test` and `worktree.setup` are decided as the commands they run (permissions/capability-commands.ts).
+  manager.useCapabilityCommands(capabilityCommandsResolver(options.configManager));
+  return manager;
 }
 
 export interface ApprovalDerivedHandlerOptions {

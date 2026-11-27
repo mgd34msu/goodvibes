@@ -4,11 +4,14 @@ import { DaemonBatchError } from '../../batch/index.js';
 import type { CreateDaemonBatchJobInput } from '../../batch/types.js';
 import { readReasoningEffortLevel } from '../../providers/reasoning-effort.js';
 import { decodePathSegment, readBoundedPositiveInteger } from './route-helpers.js';
+import { currentRecordReach } from '@goodvibes/engine/daemon-api';
 
 export interface DaemonBatchRouteContext {
   readonly batchManager: DaemonBatchManager;
   readonly parseJsonBody: (req: Request) => Promise<Record<string, unknown> | Response>;
   readonly parseOptionalJsonBody: (req: Request) => Promise<Record<string, unknown> | null | Response>;
+  /** The authenticated principal of a request: who queues a job (control-plane/caller-reach.ts `batch-job`). */
+  readonly callerPrincipal?: ((req: Request) => string | undefined) | undefined;
 }
 
 /**
@@ -41,14 +44,20 @@ export async function dispatchBatchRoutes(
 
   if (pathname === '/api/batch/jobs' && req.method === 'GET') {
     const limit = readBoundedPositiveInteger(url.searchParams.get('limit'), 100, 1_000);
-    return Response.json({ jobs: await context.batchManager.listJobs(limit) });
+    // A caller that is not the owner himself: only the jobs it queued, before the newest `limit` are cut (caller-reach.ts).
+    const reach = currentRecordReach();
+    if (!reach) return Response.json({ jobs: await context.batchManager.listJobs(limit) });
+    const every = await context.batchManager.listJobs(Number.MAX_SAFE_INTEGER);
+    return Response.json({ jobs: every.filter((job) => reach('batch-job', job.id, { project: null, ...(job.createdBy ? { madeBy: job.createdBy } : {}) })).slice(0, limit) });
   }
 
   if (pathname === '/api/batch/jobs' && req.method === 'POST') {
     const bodyOrErr = await context.parseJsonBody(req);
     if (bodyOrErr instanceof Response) return bodyOrErr;
     return handleBatchError(async () => {
-      const job = await context.batchManager.createJob(parseCreateJobInput(bodyOrErr));
+      // Who queued it, from the credential the daemon authenticated (never a body field): the job is its own.
+      const createdBy = context.callerPrincipal?.(req);
+      const job = await context.batchManager.createJob({ ...parseCreateJobInput(bodyOrErr), ...(createdBy ? { createdBy } : {}) });
       return Response.json({ job }, { status: 202 });
     });
   }

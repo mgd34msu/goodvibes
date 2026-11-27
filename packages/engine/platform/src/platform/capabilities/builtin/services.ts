@@ -7,9 +7,11 @@
  * key with a request stays with whichever program runs the turn (the fetch
  * tool reads the same files).
  */
-import { copyFileSync, existsSync, readFileSync } from 'node:fs';
-import { isAbsolute, resolve } from 'node:path';
+import { copyFileSync, existsSync } from 'node:fs';
+import { resolve } from 'node:path';
+import { projectIdentityOf } from '../../workspace/project-identity.js';
 import { atomicWriteFileSync } from '../../config/atomic-write.js';
+import { callerPathOf, readCallerJson } from '../path-inputs.js';
 import { describePendingProjectService, pendingProjectServiceLines, type ServiceRegistry } from '../../config/service-registry.js';
 import { summarizeError } from '../../utils/error-display.js';
 import { noteListChanged } from '../../runtime/list-changes.js';
@@ -53,10 +55,8 @@ function readable(services: ServicesCapabilityServices, caller: CapabilityCaller
 
 /** A full path as given, a relative one in the caller's project; never in the daemon's own folder (caller-project.ts). */
 function filePath(_services: ServicesCapabilityServices, caller: CapabilityCaller, path: string): string {
-  if (isAbsolute(path)) return resolve(path);
-  if (caller.workingDirectory) return resolve(caller.workingDirectory, path);
-  throw new CapabilityRefusal(`${path} is a relative path and no project folder came with the request, so it was not read or written. Nothing was changed.`,
-    'Give the full path of the file, or send workingDirectory, the project folder, with the request.', 'NO_PROJECT', 422);
+  // The one rule for every capability's path (capabilities/path-inputs.ts): inside the caller's checked project for anyone but the person.
+  return callerPathOf(caller, path);
 }
 
 /** Why `parsed` cannot be a services.json: a name-to-service object whose entries each name an auth type and a token key. */
@@ -267,14 +267,15 @@ export const SERVICES_TRUST: CapabilityDefinition<ServicesCapabilityServices> = 
       throw new CapabilityRefusal(`Nothing was confirmed: the confirmation could not be saved (${summarizeError(error)}).`);
     }
     if (!result.ok) throw new CapabilityRefusal(`Nothing was confirmed: ${result.reason}.`, 'Use it again from the Services list to approve it as it reads now.', 'TARGET_CHANGED');
-    noteListChanged({ list: 'services', change: 'changed', id: name });
+    // A project's own services file: the notice names that project (only its screens read again).
+    noteListChanged({ list: 'services', change: 'changed', id: name, ...(caller.workingDirectory ? { project: projectIdentityOf(resolve(caller.workingDirectory)) } : {}) });
     return { text: `${name} from this project is used from now on: ${describePendingProjectService(result.service)}.`, data: { service: name } };
   },
 };
 
 export const SERVICES_EXPORT: CapabilityDefinition<ServicesCapabilityServices> = {
   capability: { id: 'services.export', group: 'models', home: 'daemon', repeat: 'safe' },
-  actionId: 'save', label: 'Save your services list to a file', word: 'export', inputs: [FILE('Where to write it, such as services.json'), REPLACE],
+  actionId: 'save', label: 'Save your services list to a file', word: 'export', inputs: [{ ...FILE('Where to write it, such as services.json'), file: 'written' }, REPLACE],
   sentence: 'Your services list (names, addresses and the names of their keys, never the keys) is written to {path}.', done: '',
   touches: 'this-machine', lasts: 'kept', risk: 'none', example: { path: 'services.json' },
   async run(values, services, caller) {
@@ -298,12 +299,8 @@ export const SERVICES_IMPORT: CapabilityDefinition<ServicesCapabilityServices> =
   async run(values, services, caller) {
     const registry = services.apiServices.forProject(caller);
     const source = filePath(services, caller, values.path!);
-    let parsed: unknown;
-    try {
-      parsed = JSON.parse(readFileSync(source, 'utf-8')) as unknown;
-    } catch (error) {
-      throw new CapabilityRefusal(`${source} could not be read: ${summarizeError(error)}. Nothing was changed.`);
-    }
+    // Never the system's or the parser's words (capabilities/path-inputs.ts).
+    const parsed = readCallerJson(source, 'a services list', caller);
     const problems = servicesFileProblems(parsed);
     if (problems.length > 0) throw new CapabilityRefusal(`${source} is not a services list (${problems.slice(0, 3).join('; ')}). Nothing was changed.`);
     const current = registry.unreadableReason() ? {} : registry.getAll();

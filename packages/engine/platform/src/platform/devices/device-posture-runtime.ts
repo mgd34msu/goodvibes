@@ -339,6 +339,8 @@ function createConfirmationHandler(options: DevicePostureRuntimeOptions): Device
         deviceNodeKind: request.nodeKind,
         deviceCapability: request.capabilityId,
         allowAlwaysOffered: request.allowAlwaysOffered,
+        // Who asks: the device node, so its questions are bounded and listed as its own (control-plane/approval-broker.ts).
+        requestedBy: `device-node:${request.nodeId}`,
       },
       // The question must not outlive the request it belongs to.
       timeoutMs: readDeviceRequestTimeoutMs(options.config),

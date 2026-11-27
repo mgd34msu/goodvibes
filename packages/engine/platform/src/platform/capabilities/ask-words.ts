@@ -11,7 +11,7 @@ import { methodAskWords } from '../control-plane/native-mutation-words.js';
 import { CAPABILITY_RUN_TOOL } from '../tools/capability/definitions.js';
 import type { CapabilityEntry } from './catalog.js';
 import { fillSentence, hiddenSecret, lastsWords } from './outcome.js';
-import { RISK_WORDS, type FixedChoice } from './types.js';
+import { RISK_WORDS, sentenceWhenHolds, type FixedChoice } from './types.js';
 
 function valueText(value: unknown): string | undefined {
   if (typeof value === 'string') return value.trim() === '' ? undefined : value;
@@ -21,6 +21,15 @@ function valueText(value: unknown): string | undefined {
 }
 
 const clip = (text: string, max: number): string => text.length <= max ? text : `${text.slice(0, max - 1)}…`;
+
+/**
+ * The daemon's capability gate (daemon/capability-owner-gate.ts) adds these to the call it decides; a model's own
+ * `capability_run` cannot carry them (its parameters admit no other field). `carriedFrom`: input id to the words naming a
+ * carried file as the caller's own ("the paired device "laptop"'s file named "x""), shown in place of the input's value.
+ * `resultLeaves`: the sentence saying a secret result goes to that caller ("This sends your sign-in tokens to ...").
+ */
+export const CARRIED_FROM_ARG = 'carriedFrom';
+export const RESULT_LEAVES_ARG = 'resultLeaves';
 
 /** A thing's title by the id an input carries, from the live list the input chooses from; undefined when not known. */
 export type CapabilityValueTitle = (list: string, value: string) => string | undefined;
@@ -77,6 +86,12 @@ export function capabilityAskWords(lookup: (id: string) => CapabilityEntry | und
     const title = list ? titleOf(list, value) : undefined;
     return [name, title ? `"${clip(title.replace(/\s+/g, ' '), 100)}"` : value];
   }));
+  // A carried file is the caller's own, named as the caller named it: those words stand in for the value.
+  const carriedFrom = args[CARRIED_FROM_ARG] !== null && typeof args[CARRIED_FROM_ARG] === 'object' && !Array.isArray(args[CARRIED_FROM_ARG]) ? args[CARRIED_FROM_ARG] as Record<string, unknown> : {};
+  for (const [name, words] of Object.entries(carriedFrom)) {
+    if (typeof words === 'string' && words.trim() && entry.inputs.some((input) => input.id === name && input.kind === 'path')) shown[name] = clip(words.replace(/\s+/g, ' '), 240);
+  }
+  const leaves = typeof args[RESULT_LEAVES_ARG] === 'string' && args[RESULT_LEAVES_ARG].trim() ? clip(args[RESULT_LEAVES_ARG].replace(/\s+/g, ' '), 240) : undefined;
   // The capability's own risk, in plain words (a choice that raises it counts); none, no line.
   const chosenRisk = entry.inputs.flatMap((input) => Array.isArray(input.choices)
     ? (input.choices as readonly FixedChoice[]).filter((choice) => choice.value === values[input.id] && choice.risk !== undefined).map((choice) => choice.risk!)
@@ -87,11 +102,13 @@ export function capabilityAskWords(lookup: (id: string) => CapabilityEntry | und
   // not again among its lines. Any other risk is said here.
   const lines = [
     // What will really happen with these values, when the capability says it differs (a credential's reset).
-    fillSentence(entry.sentenceWhen && entry.sentenceWhen.values.includes(values[entry.sentenceWhen.input] ?? '') ? entry.sentenceWhen.sentence : entry.sentence,
+    fillSentence(entry.sentenceWhen && sentenceWhenHolds(entry.sentenceWhen, values) ? entry.sentenceWhen.sentence : entry.sentence,
       shown, lastsWords(entry, values)),
     ...entry.inputs.flatMap((input) => shown[input.id] !== undefined ? [`${input.label}: ${shown[input.id]}`] : []),
     // An input the capability does not have is shown as given, so nothing the call carries is left out of the ask.
     ...Object.keys(shown).filter((name) => !entry.inputs.some((input) => input.id === name)).map((name) => `${name}: ${shown[name]}`),
+    // A secret result leaving for a caller that is not the owner's own program: said before anything else is weighed.
+    ...(leaves ? [leaves] : []),
     ...(riskLine && risk !== 'cannot-be-undone' ? [riskLine] : []),
   ];
   return { question: `${entry.label}?`, lines, subject: entry.label, doing: actOf(entry.label), risk: riskLine ?? null };

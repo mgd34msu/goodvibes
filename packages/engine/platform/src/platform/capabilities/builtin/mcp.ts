@@ -22,6 +22,8 @@ import type { McpApi } from '../../mcp/mcp-api.js';
 import { MCP_TRUST_LEVEL_WORDS, mcpLimitWords, mcpTrustWords } from '../../mcp/trust-words.js';
 import { MCP_CREDENTIALS_REFUSED } from '../../runtime/mcp/manager.js';
 import { noteListChanged } from '../../runtime/list-changes.js';
+import { resolve } from 'node:path';
+import { projectIdentityOf } from '../../workspace/project-identity.js';
 import { summarizeError } from '../../utils/error-display.js';
 import { CapabilityRefusal, type ActionValues, type CapabilityDefinition, type FixedChoice, type InputDescription, type ListName } from '../types.js';
 
@@ -215,7 +217,13 @@ function configured(config: McpProjectConfig, name: string, change: string): Mcp
   return entry;
 }
 
-const changed = (): void => noteListChanged({ list: 'tools', change: 'changed' });
+/**
+ * A tool server config changed: a project's own file names that project (only its screens read again); the user's
+ * file is a shared thing (every screen reads again).
+ */
+const changed = (scope?: McpConfigScope, workingDirectory?: string): void => noteListChanged({
+  list: 'tools', change: 'changed', ...(scope === 'project' && workingDirectory ? { project: projectIdentityOf(resolve(workingDirectory)) } : {}),
+});
 
 export const MCP_ADD: CapabilityDefinition<McpCapabilityServices> = {
   capability: { id: 'mcp.add', group: 'tools', home: 'daemon', repeat: 'safe' },
@@ -233,7 +241,7 @@ export const MCP_ADD: CapabilityDefinition<McpCapabilityServices> = {
     { id: 'trust', label: 'Trust', help: 'What happens to a call outside its limits', kind: 'choice', choices: MCP_TRUST_MODES, required: { default: '', defaultMeans: 'ask me about calls outside its limits' }, typed: { flag: '--trust' }, step: 2 },
     { id: 'role', label: 'Role', help: 'What kind of server it is', kind: 'choice', choices: MCP_ROLES, required: { default: '', defaultMeans: 'general' }, typed: { flag: '--role' }, step: 2 },
     { ...SCOPE, step: 2 },
-    { id: 'path', label: 'Folders it may use', help: 'Folders, separated by commas', kind: 'path', freeTextReason: 'a folder on this machine', required: { default: '', defaultMeans: 'no folder limit: the folders it is called with are not checked' }, typed: { flag: '--path', repeats: true }, step: 2 },
+    { id: 'path', label: 'Folders it may use', help: 'Folders, separated by commas', kind: 'path', freeTextReason: 'a folder on this machine', workFolder: true, required: { default: '', defaultMeans: 'no folder limit: the folders it is called with are not checked' }, typed: { flag: '--path', repeats: true }, step: 2 },
     { id: 'host', label: 'Sites it may reach', help: 'Host names, separated by commas', kind: 'text', freeTextReason: 'a host name such as api.github.com', required: { default: '', defaultMeans: 'no site limit: the addresses it is called with are not checked' }, typed: { flag: '--host', repeats: true }, step: 2 },
     { id: 'env', label: 'Environment', help: 'NAME=VALUE for a command, separated by commas; hidden as you type', kind: 'secret', required: { default: '', defaultMeans: 'none' }, typed: { flag: '--env', repeats: true }, step: 2, showWhen: { input: 'start', is: 'command' } },
     { id: 'header', label: 'Request header', help: 'Name=Value for a web address (an Authorization header); hidden as you type', kind: 'secret', required: { default: '', defaultMeans: 'none' }, typed: { flag: '--header', repeats: true }, step: 2, showWhen: { input: 'start', is: 'url' } },
@@ -254,7 +262,7 @@ export const MCP_ADD: CapabilityDefinition<McpCapabilityServices> = {
     } catch (error) {
       refuse(`Tool server ${server.name} was not added: ${summarizeError(error)}`);
     }
-    changed();
+    changed(scope, caller.workingDirectory);
     return {
       text: [`Kept in ${scope} MCP config ${result.path}; ${result.connected === true ? 'connected' : 'each program starts it when it is first used'}.`, `Starts with: ${shownEndpoint(server)}.`].join('\n'),
       data: { server: server.name, scope, path: result.path },
@@ -280,7 +288,7 @@ export const MCP_REMOVE: CapabilityDefinition<McpCapabilityServices> = {
       refuse(`Tool server ${values.server} was not removed: ${summarizeError(error)}`);
     }
     if (!result.removed) refuse(`No ${scope} tool server named ${values.server} is in ${result.path}; nothing was removed.`, 'If it still shows, it comes from another config file: "See where servers are configured" lists them.');
-    changed();
+    changed(scope, caller.workingDirectory);
     return { text: `Deleted from ${result.path}.`, data: { server: values.server, scope, path: result.path } };
   },
 };
@@ -310,7 +318,7 @@ function exemption(exempt: boolean): CapabilityDefinition<McpCapabilityServices>
       } catch (error) {
         refuse(`Tool ${values.tool} on ${values.server} not changed: ${summarizeError(error)}`);
       }
-      changed();
+      changed(result.scope, caller.workingDirectory);
       const where = `${result.scope} MCP config ${result.path}`;
       return { text: exempt ? (result.changed ? `Kept in ${where}.` : `It was already kept in ${where}.`) : `Removed from ${where}.`, data: { server: values.server, tool: values.tool, ...result } };
     },
@@ -341,7 +349,7 @@ function policy(field: 'trust' | 'role'): CapabilityDefinition<McpCapabilityServ
       } catch (error) {
         refuse(`The ${trust ? 'trust level' : 'role'} of ${values.server} was not kept: ${summarizeError(error)}`);
       }
-      changed();
+      changed(result.scope, caller.workingDirectory);
       const where = `${result.scope} MCP config ${result.path}`;
       return {
         text: [...(trust ? [`${values.server} now ${mcpTrustWords(values.mode as McpTrustMode)}.`] : []),

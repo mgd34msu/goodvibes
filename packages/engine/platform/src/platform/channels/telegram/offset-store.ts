@@ -30,7 +30,7 @@ export type TelegramOffsetFailure = 'unavailable' | 'unbound' | 'invalid-request
 
 const FAILURE_MESSAGES: Record<TelegramOffsetFailure, string> = {
   unbound: 'The saved Telegram cursor was written by an earlier version and does not say which bot it belongs to, so polling waits. '
-    + 'Review it with /channels telegram-cursor or Settings → Surfaces → Telegram cursor recovery.',
+    + 'Review it with "Telegram\'s reading position" on the Channels tab of Mail, calendar and channels, or Settings → Surfaces → Telegram cursor recovery.',
   unavailable: 'Telegram cursor recovery is not available right now: Telegram ingress is not running. Check channel status, then open it again.',
   'invalid-request': 'The Telegram cursor request is invalid.',
   'identity-unavailable': 'Telegram could not confirm which bot this is right now (network or token). The saved cursor was not touched; try again shortly.',

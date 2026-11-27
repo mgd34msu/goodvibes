@@ -29,7 +29,7 @@ export interface TuiHostPairingOptions extends NativeHostCredentialOptions {
 }
 const unavailable = (): TuiHostPairingResult => ({ status: 'blocked', message: 'Pairing could not be verified. Check the selected host and safe local credential store, then preview again.' });
 /** How a lost pairing reply is repeated: the same request again, from the shared token (the place's Pair something form). */
-export const REPEAT_LOST_REQUEST = 'In Devices and network, press Pair something, This program with its daemon, with Shared token set to Yes, to repeat the same request: the host answers it with the credential it made, never a second one.';
+export const REPEAT_LOST_REQUEST = 'Run goodvibes host pair --bootstrap-shared --apply in a shell to repeat the same request: the host answers it with the credential it made, never a second one.';
 /** Pairing this terminal with its daemon, as the place's control names it. */
 export const PAIR_HOST_CONTROL = 'Devices and network, Pair something, This program with its daemon';
 const unknown = (host: string): TuiHostPairingResult => ({ status: 'unknown', host, message: `The reply to a pairing request was lost, so this terminal does not know whether the host created its credential. ${REPEAT_LOST_REQUEST} (Opening /work on this machine repeats it too.)` });
@@ -124,7 +124,7 @@ async function mintTuiDevicePairing(input: {
 function forgotten(result: RemoveTuiHostPairingResult, host: string, tokenId: string): TuiHostPairingResult {
   if (result.status === 'unavailable') return { status: 'blocked', host, message: `${result.reason} Nothing was forgotten.` };
   if (result.status === 'conflict') return changed();
-  return { status: 'cleared', host, message: `The stored device credential (token ${tokenId}) was forgotten. It stays valid on the host until it is revoked there. Pair again with ${PAIR_HOST_CONTROL}, Shared token: Yes, Apply: Review and confirm it.` };
+  return { status: 'cleared', host, message: `The stored device credential (token ${tokenId}) was forgotten. It stays valid on the host until it is revoked there. Pair again: ${PAIR_HOST_CONTROL}, with the sign-in code your own screen shows.` };
 }
 
 /**
@@ -139,7 +139,7 @@ function forgetPreview(home: string, host: string, tokenId: string): TuiHostPair
     result: {
       status: 'credential-rejected', host, confirmation,
       confirmationPrompt: 'forget the stored credential so this terminal can pair again',
-      message: `The host at ${host} no longer accepts the stored device credential (it was revoked, or the daemon there was reset). Use ${PAIR_HOST_CONTROL} with Apply: Review and confirm it, and confirm, to forget it; then pair again the same way with Shared token: Yes.`,
+      message: `The host at ${host} no longer accepts the stored device credential (it was revoked, or the daemon there was reset). Forget it (Devices and network, Paired tab, Forget its daemon pairing); then pair again: ${PAIR_HOST_CONTROL}, with the sign-in code your own screen shows.`,
     },
     async confirm(answer) {
       if (consumed || answer !== confirmation) return cancelled();
@@ -160,7 +160,7 @@ export async function unpairTuiHost(options: NativeHostCredentialOptions): Promi
   const state = readTuiHostPairing(home, host);
   if (state.status === 'unavailable') return { status: 'blocked', host, message: `${state.reason} Nothing was forgotten.` };
   if (state.status === 'missing') return { status: 'blocked', host, message: 'No device credential is stored for this host; nothing to forget.' };
-  if (state.status === 'unknown') return { ...unknown(host), message: `${unknown(host).message} Use ${PAIR_HOST_CONTROL} with Apply: Review and confirm it, to review the unresolved attempt and forget it.` };
+  if (state.status === 'unknown') return { ...unknown(host), message: `${unknown(host).message} Or run goodvibes host pair --apply in a shell to review the unresolved attempt and forget it.` };
   return forgotten(await removeTuiHostPairing(home, host, state.tokenId), host, state.tokenId);
 }
 
@@ -249,7 +249,7 @@ export async function previewTuiHostPairing(options: TuiHostPairingOptions, name
       if (signal?.aborted || !sameSelection() || !isNativePairedPrincipal(live, `pairing:${state.tokenId}`)) return { result: unverified(host) };
       return { result: { status: 'already-paired', host, message: 'This TUI host credential is saved and its expected native principal is verified. No credential will be minted or replaced. To forget it: Devices and network, Paired tab, Forget its daemon pairing.' } };
     }
-    if (!options.bootstrapShared) return { result: { status: 'blocked', host, message: 'No device credential is bound to this origin. For the daemon on this machine, /work creates one on first use. Set Shared token to Yes to create it now with the daemon operator token.' } };
+    if (!options.bootstrapShared) return { result: { status: 'blocked', host, message: `No device credential is bound to this origin. The daemon on this machine needs none. For a daemon on another machine: ${PAIR_HOST_CONTROL}, with the sign-in code your own screen shows. (--bootstrap-shared asks that daemon for an administrator key from its operator token; on the owner's yes it is an ordinary key, never his device.)` } };
     const token = readTuiLegacyPairingBootstrap(home);
     if (!token) return { result: { status: 'blocked', host, message: 'The selected legacy bootstrap is missing or unsafe. It must be an owned, private regular daemon operator-tokens.json file; this command never creates or repairs it.' } };
     const current = () => sameSelection() && readTuiLegacyPairingBootstrap(home) === token;
@@ -285,6 +285,47 @@ export async function previewTuiHostPairing(options: TuiHostPairingOptions, name
       } catch { return attempted ? unknown(host) : actionSignal?.aborted ? cancelled() : unavailable(); }
     } };
   } catch { return { result: signal?.aborted ? cancelled() : unavailable() }; }
+}
+
+/**
+ * Pair this terminal as the owner's own device with the sign-in code his own screen showed: the one way a device becomes
+ * his (Devices and network, Pair something, This program with its daemon). He starts it himself where he is signed in
+ * as himself (the web UI, or his own program on the daemon's machine: Pair something, A phone or another device, "Show
+ * the sign-in code once"), and types that code here. The code IS the device's key, made by him (`pairing.handoff.create`
+ * from his own session records it as his device): this terminal keeps it for the selected host once the host confirms
+ * it as a device. Nothing is minted for whoever asks, and no operator token is read.
+ */
+export async function pairTuiHostWithCode(options: TuiHostPairingOptions, code: string, name = 'GoodVibes TUI', signal?: AbortSignal): Promise<TuiHostPairingResult> {
+  const trimmed = code.trim();
+  if (!/^gvp_[A-Za-z0-9_-]{16,}$/.test(trimmed)) return { status: 'blocked', message: 'That is not a sign-in code the daemon makes. Where you are signed in as yourself: Devices and network, Pair something, A phone or another device, "Show the sign-in code once"; type that code here. Nothing was changed.' };
+  if (!name.trim() || name.length > 80 || /[\u0000-\u001f\u007f-\u009f‪-‮⁦-⁩]/u.test(name)) return { status: 'blocked', message: 'Use a nonempty device name of at most 80 characters without control characters.' };
+  try {
+    const home = typeof options.homeDirectory === 'function' ? options.homeDirectory() : options.homeDirectory;
+    const host = resolveTuiHostOrigin(options.configManager);
+    if (!host || !resolveDaemonEnabled(options.configManager)) return unavailable();
+    const state = readTuiHostPairing(home, host);
+    if (state.status === 'unavailable') return { status: 'blocked', host, message: `${state.reason} Nothing was changed.` };
+    if (state.status === 'paired') return { status: 'already-paired', host, message: 'This terminal already keeps a device credential for this host. To use the new code instead, forget it first (Devices and network, Paired tab, Forget its daemon pairing); the code stays unused and stops working within 15 minutes.' };
+    if (state.status === 'unknown') return { status: 'blocked', host, message: 'An earlier pairing request\'s reply was lost. Run goodvibes host pair --apply in a shell to forget that attempt, then pair with the code. Nothing was changed.' };
+    const client = createOperatorApiClient({ baseUrl: host, authToken: trimmed, fetchImpl: (input, init) => (options.fetchImpl ?? fetch)(input, { ...init, redirect: 'error' }) });
+    let auth;
+    try {
+      auth = await client.invoke('control.auth.current', {}, { signal: AbortSignal.any([AbortSignal.timeout(5000), ...(signal ? [signal] : [])]) });
+    } catch (error) {
+      if (signal?.aborted) return cancelled();
+      return error instanceof GoodVibesError && error.kind === 'auth'
+        ? { status: 'credential-rejected', host, message: 'The host did not accept that code (it was already used, it is older than 15 minutes, or it was never one). Make a new one on your own screen, then pair again. Nothing was changed.' }
+        : { status: 'blocked', host, message: `The host at ${host} could not be asked about that code just now. Check that it runs, then pair again. Nothing was changed.` };
+    } finally { client.dispose(); }
+    if (!isNativePairedPrincipal(auth)) return { status: 'blocked', host, message: 'The host took that code, but not as a device. Make a new one on your own screen (Pair something, A phone or another device), then pair again. Nothing was kept.' };
+    const tokenId = auth.principalId.slice('pairing:'.length);
+    const attemptId = randomUUID();
+    const begun = await beginTuiHostPairing(home, host, { attemptId, name: name.trim(), startedAt: Date.now() }, {}, () => !signal?.aborted);
+    if (begun.status !== 'begun') return begun.status === 'cancelled' ? cancelled() : begun.status === 'conflict' ? changed() : unavailable();
+    const complete = await completeTuiHostPairing(home, host, attemptId, { token: trimmed, tokenId, name: name.trim(), createdAt: Date.now() });
+    if (complete.status !== 'paired') return unknown(host);
+    return { status: 'paired', host, message: 'Paired with the code your own screen showed: this terminal keeps its own key for the host, and the host confirmed it as a device. If you made the code where you are signed in as yourself, it is your own device: it runs your turns under your mode and answers questions other callers raised; its own risky acts are put to you in Waiting for you.' };
+  } catch { return signal?.aborted ? cancelled() : unavailable(); }
 }
 
 export function formatTuiHostPairing(result: TuiHostPairingResult): string {

@@ -218,8 +218,8 @@ export function registerAgentTurnTools(registry: ToolRegistry, deps: AgentTurnTo
 
 /**
  * Agent tools that work through the Agent process's own slash-command registry
- * and `CommandContext` (its live session, conversation, workspace views,
- * panels, keybindings and command handlers, built only by that process), and
+ * and `CommandContext` (its live session, conversation, places, panels,
+ * keybindings and command handlers, built only by that process), and
  * the two that drive its own terminal and process table. A daemon-hosted turn
  * has none of that state, so these are refused there, with the platform tool
  * that covers the same facts named as the next step.
@@ -227,7 +227,7 @@ export function registerAgentTurnTools(registry: ToolRegistry, deps: AgentTurnTo
 export const AGENT_SHELL_TOOL_NAMES: readonly string[] = Object.freeze([
   'agent_harness', 'audit', 'autonomy', 'capability_status', 'channels', 'computer', 'context', 'delegation', 'device',
   'execution', 'host', 'import_goodvibes_settings', 'memory', 'models', 'personal_ops', 'process', 'research', 'route',
-  'security', 'sessions', 'settings', 'setup', 'support', 'terminal', 'vibe', 'workspace',
+  'screens_keys_commands', 'security', 'sessions', 'settings', 'setup', 'support', 'terminal', 'vibe',
 ]);
 
 /**

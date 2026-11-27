@@ -5,6 +5,7 @@
  * Emitted under the 'workspace' domain on the RuntimeEventBus. The daemon has no
  * working directory a caller can move, so there is no swap event.
  */
+import type { EventAbout } from './about.js';
 
 export type WorkspaceEvent =
   /**
@@ -71,6 +72,13 @@ export type WorkspaceEvent =
       project?: string | undefined;
       /** The session a per-session change is about; absent otherwise. */
       sessionId?: string | undefined;
+      /** About a thing every project shares (runtime/list-changes.ts): every screen showing the list reads again. */
+      shared?: true | undefined;
+      /**
+       * The record the change is about, declared by the daemon once it checked it (about.ts): a checkpoint and the project
+       * whose store holds it. The stream filter delivers the notice by it.
+       */
+      about?: EventAbout | undefined;
     }
   /**
    * A native request changed: a write to it committed (its capture, a host

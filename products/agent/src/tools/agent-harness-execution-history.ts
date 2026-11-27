@@ -94,7 +94,7 @@ function supervisionRoutes(context: CommandContext, record: AgentExecutionRecord
       routes.push({
         id: 'process-monitor',
         label: 'Runtime Activity Monitor',
-        modelRoute: 'workspace action:"open" surfaceId:"process-monitor"',
+        modelRoute: 'screens_keys_commands action:"open" surfaceId:"process-monitor"',
         requiresConfirmation: true,
       });
     }
@@ -102,7 +102,7 @@ function supervisionRoutes(context: CommandContext, record: AgentExecutionRecord
       routes.push({
         id: 'live-tail',
         label: 'Live Process Output',
-        modelRoute: 'workspace action:"open" surfaceId:"live-tail"',
+        modelRoute: 'screens_keys_commands action:"open" surfaceId:"live-tail"',
         requiresConfirmation: true,
       });
     }

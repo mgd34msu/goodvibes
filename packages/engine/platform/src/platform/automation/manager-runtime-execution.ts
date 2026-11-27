@@ -11,6 +11,7 @@ import type { AutomationSessionTarget } from './session-targets.js';
 import type { AutomationRunTrigger } from './types.js';
 import type { ConfigManager } from '../config/manager.js';
 import { summarizeError } from '../utils/error-display.js';
+import { RefusalError, refusal } from '@goodvibes/engine/errors';
 import { logger } from '../utils/logger.js';
 import { spendingName } from '../runtime/cost/model-usage.js';
 import { automationNoticeEffect, readAutomationRunTransience } from './manager-runtime-delivery.js';
@@ -47,6 +48,8 @@ export interface AutomationManagerExecutionContext {
     readonly toolAllowlist?: readonly string[] | undefined;
     readonly context?: string | undefined;
   }) => string;
+  /** Why a run may not start in its schedule's folder (AutomationManagerConfig.projectRefusal), or undefined. */
+  readonly projectRefusal?: ((folder: string | undefined) => string | undefined) | undefined;
   readonly saveJobs: () => Promise<void>;
   readonly saveRuns: () => Promise<void>;
   readonly pruneRunHistory: (jobId?: string) => void;
@@ -288,6 +291,13 @@ export async function executeAutomationJob(
       return runningRun;
     }
 
+    // A run works in its schedule's project; with none, or in the daemon's own folder, nothing starts.
+    const homeless = context.projectRefusal?.(effectiveJob.execution.workingDirectory);
+    if (homeless) {
+      throw new RefusalError(refusal({ code: 'NO_PROJECT', state: 'the schedule has no project to run in', status: 422,
+        reason: `Not run: this schedule ${homeless.startsWith('it ') ? homeless.slice(3) : `names ${homeless}`}, so nothing of it runs (never in the daemon's own folder)`,
+        next: ['Make it again from the project it is for'] }));
+    }
     const executionContext = buildAutomationExecutionContext(effectiveJob.execution, resolved.session?.id);
     assertSource();
     const agentId = context.spawnTask(bindAutomationAction({
@@ -306,6 +316,8 @@ export async function executeAutomationJob(
       spendingSource: `schedule "${spendingName(effectiveJob.name)}"`,
       // Its project: the folder of the program or caller that made the schedule.
       ...(effectiveJob.execution.workingDirectory ? { workingDirectory: effectiveJob.execution.workingDirectory } : {}),
+      // What the conversation that made it had read, its runs start with (security/conversation-exposure.ts).
+      exposureKey: `schedule:${effectiveJob.id}`,
     }, operation));
     spawnedAgentId = agentId;
     const runningRun: AutomationRun = {

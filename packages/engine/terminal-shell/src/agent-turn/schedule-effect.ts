@@ -9,6 +9,7 @@ import { captureOperatorAutomationTarget } from './operator-automation-target.js
 import { createDaemonOperatorInvoke } from './daemon-operator-client.js';
 import { findSameSchedule, ROUTINE_SCHEDULE_LIST_METHOD } from './schedule-delivery-targets.js';
 import { executeOperatorMethodWithReceipt } from './operator-method-receipt.js';
+import { noteDecidedAct } from './record-of-decided-call.js';
 import { scheduleNextRouteLines } from './schedule-next-routes.js';
 import { agentArtifactEffectGuard, captureAgentExportPath } from './artifact-effect.js';
 import type { AgentInProcessHost } from './in-process-host.js';
@@ -109,6 +110,9 @@ export function captureScheduleEffect(rawArgs: Record<string, unknown>, options:
       // Once the host has answered, its answer is the outcome: no fence runs after it.
       const receipt = await executeOperatorMethodWithReceipt(registry, `schedule-operator-${++nextScheduleCall}`, methodId,
         payload, options, { ...(options?.signal ? { signal: options.signal } : {}), assertCurrent: assertSource });
+      // The act this tool call performed, admitted by the method's own question and sent: what the call records of it
+      // afterwards (the reminder's receipt) is part of it, never a question of its own (record-of-decided-call.ts).
+      if (options && (receipt.result.success || receipt.kind === 'held')) noteDecidedAct(options);
       if (!receipt.result.success && methodId === 'automation.jobs.update' && /AUTOMATION_JOB_STALE|"status": 409\b/.test(receipt.result.error ?? '')) {
         return { success: false, error: `The schedule changed since it was read, so the host refused the edit and nothing was changed. Read it again with schedule action:"list" scheduleId:"${String(input.jobId)}" and repeat the edit if it still applies.` };
       }

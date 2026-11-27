@@ -87,7 +87,7 @@ export const triggersConfigDefaults: { triggers: TriggersConfig } = {
 
 export const triggersConfigSettings: ConfigSettingDefinition[] = [
   {
-    key: 'watchers.triggers.enabled',
+    key: 'watchers.triggers.enabled', valueKind: 'opening-switch',
     label: 'Run triggers that watch commands and conditions',
     appliesWhen: 'now',
     type: 'boolean',

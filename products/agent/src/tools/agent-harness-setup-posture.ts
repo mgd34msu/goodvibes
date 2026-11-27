@@ -60,8 +60,11 @@ export async function setupPostureCatalogStatus(context: CommandContext, options
   const setupWizard = buildSetupWizard(plan, context, smoke);
   return caller.publish({
     modes: ['setup_posture', 'setup_item', 'setup_repair', 'provision_connected_host_token', 'run_setup_smoke'],
-    // What the person sets up, one topic at a time: each is a /setup action (run_command "/setup <word>").
-    setupTopics: Object.values(SETUP_TOPICS).map((topic) => ({ label: topic.label, line: `/setup ${topic.word}` })),
+    // What the person sets up, one topic at a time: each a row of System's Setup tab and the capability setup.<topic>
+    // (a provider of your own is Models and providers' provider.add).
+    setupTopics: Object.values(SETUP_TOPICS).map((topic) => (topic.word === 'add-provider'
+      ? { label: topic.label, control: 'Models and providers, n', capability: 'provider.add' }
+      : { label: topic.label, control: 'System, Setup', capability: `setup.${topic.word}` })),
     capabilities: capabilities.length,
     planItems: plan.length,
     blockedPlanItems: plan.filter((item) => item.status === 'blocked').length,
@@ -227,7 +230,7 @@ export function provisionConnectedHostOperatorToken(context: CommandContext, arg
   if (pairing.status !== 'missing') return {
     status: 'blocked', done: false, mode: 'provision_connected_host_token', setupItemId: 'connected-host-auth',
     mutation: { performed: false },
-    error: 'Agent host-bound pairing already exists or requires review. Use /setup pair; this route will not rewrite shared-token storage to bypass it.',
+    error: 'Agent host-bound pairing already exists or requires review. Review it with capability_run id:"devices.pair" (the owner: Pair something in the Devices and network place); this route will not rewrite shared-token storage to bypass it.',
   };
   const before = readConnectedHostOperatorToken(shellPaths.homeDirectory);
   const explicitUserRequest = readString(args.explicitUserRequest);

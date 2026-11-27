@@ -72,7 +72,7 @@ export function settingsOwnerBase(subject: SettingsSubject, endpoint: DaemonConf
 }
 
 export function settingsOwnerHeaders(endpoint: DaemonConfigEndpoint): Readonly<Record<string, string>> {
-  return Object.freeze({ 'content-type': 'application/json', ...(endpoint.token ? { authorization: `Bearer ${endpoint.token}` } : {}) });
+  return Object.freeze({ ...(endpoint.headers ?? {}), 'content-type': 'application/json', ...(endpoint.token ? { authorization: `Bearer ${endpoint.token}` } : {}) });
 }
 
 

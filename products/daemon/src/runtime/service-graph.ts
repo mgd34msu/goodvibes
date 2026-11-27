@@ -1,28 +1,32 @@
-import { REGULAR_KNOWLEDGE_DB_FILE, prepareConfiguredProjectContext, projectIdentityOfFolder } from '@goodvibes/engine/platform/platform/knowledge';
+import { REGULAR_KNOWLEDGE_DB_FILE, normalizeProjectId, prepareConfiguredProjectContext, projectIdentityOfFolder } from '@goodvibes/engine/platform/platform/knowledge';
 import { FileStateCache, ProjectIndex } from '@goodvibes/engine/platform/platform/state';
 import { projectProxy, requestProject, routeByProject } from '@goodvibes/engine/platform/platform/control-plane';
 import { createProjectWorkSet } from './project-work-set.js';
+import { whoseTurn } from '@goodvibes/engine/platform/platform/security';
+import { mergeKeepingGetters } from './merge-keeping-getters.js';
 import { composeRuntimeServices, createBrokeredPermissionManager, registerGateRuntimeEvents, type ComposedRuntimeServices } from '@goodvibes/engine/platform/platform/runtime/bootstrap';
 import { askingQuestions, callingAgentAsker, daemonAgentPresence, useOwnerAnswerReader } from '@goodvibes/engine/platform/platform/agents';
 import { createDaemonWorkspaceTrustResolver } from './workspace-trust-composition.js';
-import { installNativeHostedConversationOwner, nativeHostedConversationOwner } from './native-hosted-conversation-composition.js';
+import { installNativeHostedConversationProjects, type NativeHostedProjectOwner } from './native-hosted-conversation-composition.js';
 import { createNativeWorkSubmissionHost } from '@goodvibes/engine/platform/platform/workflow/work-ledger/native-submission';
 import { createNativeConversationIntakeHost, createNativeRequirementProposer, type NativeConversationContinuationOwner } from '@goodvibes/engine/platform/platform/workflow/work-ledger/native-intake';
-import { carryOldWorkRecords, oldPlanningSourceIds, createLocalWorkLedgerReadBinding, createWorkPlans } from '@goodvibes/engine/platform/platform/workflow/work-ledger';
+import { carryOldWorkRecords, oldPlanningSourceIds, createLocalWorkLedgerReadBinding, createWorkPlans, askUnrecordedWorkCauses, carryProgramContracts } from '@goodvibes/engine/platform/platform/workflow/work-ledger';
 import { FeatureAnnouncementStore, featureAnnouncementsPath } from '@goodvibes/engine/platform/platform/runtime/feature-announcements';
 import { watchProgramSettingsFiles } from '@goodvibes/engine/platform/platform/runtime/program-settings-watch';
 import { createWorkstreamDraftService } from '@goodvibes/engine/platform/platform/orchestration';
 import { prepareGatewayScopePolicyOwner, registerNativeAutomationGatewayMethods, registerWorkLedgerGatewayMethods, registerNativeWorkExecutionGatewayMethods, registerNativeWorkSubmissionGatewayMethods, registerNativeConversationIntakeGatewayMethods, registerWorkGatewayMethods } from '@goodvibes/engine/platform/platform/control-plane';
-import { openWorkspaceRegistrationStore, sharedWorkspaceRegisterPath } from '@goodvibes/engine/platform/platform/workspace';
+import { openWorkspaceRegistrationStore, projectIdentityOf, registeredWorkspaceRoots, sharedWorkspaceRegisterPath, whyNeverAProject } from '@goodvibes/engine/platform/platform/workspace';
 import { ApprovalRelay, GatewayMethodCatalog, createOwnerInbox, ownerInboxStorePath, terminalSessionPresence, type DaemonBrowserGatewayService } from '@goodvibes/engine/platform/platform/control-plane';
 import { resolvePairingWebOrigin } from '@goodvibes/engine/platform/platform/pairing';
 import { describeModeInForceWords, hostApprovalPresentation, hostItemPresenter, noteDaemonFolderRules } from '@goodvibes/engine/platform/platform/permissions';
 import { daemonReceiptStoreAt, daemonReceiptsPath } from '@goodvibes/engine/platform/platform/daemon/receipts';
 import {
   carryAgentProviderStoresToDaemon, carryProgramSecretsToDaemon, describeProviderStoresCarryForward, describeSecretsCarryForward, resolveGoodVibesDaemonHome,
+  SecretsManager, ServiceRegistry,
 } from '@goodvibes/engine/platform/platform/config';
 import { logger, summarizeError } from '@goodvibes/engine/platform/platform/utils';
 import { join } from 'node:path';
+import { carriedRecordsFile, daemonRunRecordsRoot } from './run-records.js';
 import { carryAgentPluginStateForward } from '@goodvibes/engine/platform/platform/plugins';
 import { MailboxReaders } from '@goodvibes/engine/platform/platform/email';
 import { attachWsOnlyGatewayVerbHandlers } from '@goodvibes/engine/terminal-shell';
@@ -35,19 +39,20 @@ import { composeMailDeps } from './mail-composition.js';
 import { composeBrowserJudgment } from './browser-judgment-composition.js';
 import { createNativeWorkLedgerOwner } from './work-ledger-composition.js';
 import { createProjectTurnFacilities } from './project-turn-facilities.js';
-import { HooksFileAwaitingTrustError } from '@goodvibes/engine/platform/platform/hooks';
+import { refuseChannelChangesWithoutProject } from '@goodvibes/engine/platform/platform/channels';
 import { TURN_EXEC_CONTAINMENT } from '@goodvibes/engine/platform/platform/tools';
 import { createDaemonCapabilityServices, daemonCapabilityCatalog, loadedDaemonCapabilityCatalog } from '@goodvibes/engine/platform/platform/capabilities';
 import { wireMemoryPressureChannelNotice } from './notification-dispatch.js';
 import { createWorkspaceCheckpointing, daemonWorkspaceCheckpoints, type WorkspaceCheckpointing } from './workspace-checkpointing.js';
 import { createSessionConversationRewindPort, hostedRewindStorage } from './conversation-rewind-port.js';
 import { createShellPathService } from './index.js';
-import { carryDaemonRecordsAtStart, daemonRecordsRoot } from './daemon-records.js';
+import { carryDaemonRecordsAtStart, daemonRecordsRoot, formerDaemonFolders, olderReleaseGroupSettingsWrittenAt } from './daemon-records.js';
 import type { DaemonHandlerCompositionOptions } from './daemon-handler-composition.js';
 import { createDaemonNativeWorkExecutionActivation } from './native-work-execution-activation.js';
 import { createBrowserCheckoutSeamHolder } from './browser-checkout-seam-holder.js';
 import { createDevicePostureServices } from './device-posture-composition.js';
 import { composeUnattendedRunTools } from './unattended-run-tools.js';
+import { registerDevicePhoneTool } from '@goodvibes/engine/platform/platform/devices';
 import { installDaemonGoogleRepair } from './google-repair-composition.js';
 import { createClusterServices, startClusterServices } from './cluster-group-composition.js';
 import { GOODVIBES_DAEMON_SURFACE_ROOT } from '../config/surface.js';
@@ -79,7 +84,7 @@ interface ProjectWork {
   readonly intake: ReturnType<typeof createNativeConversationIntakeHost>;
   readonly activation: ReturnType<typeof createDaemonNativeWorkExecutionActivation>;
   readonly plans: ReturnType<typeof createWorkPlans>;
-  readonly hosted: NonNullable<ReturnType<typeof nativeHostedConversationOwner>>;
+  readonly hosted: NativeHostedProjectOwner;
   close(): Promise<void>;
 }
 export async function createRuntimeBaseServices(options: RuntimeServicesOptions): Promise<{ services: Omit<RuntimeServices, 'daemonHandlers'>; handlerOptions: Omit<DaemonHandlerCompositionOptions, 'distributedRuntimeReady'>; closeWorkLedger: () => Promise<void>; closeBrowserJudgment: () => Promise<void>; closeAutonomousPermissions: () => void; retireContinuationScope: () => void }> {
@@ -116,7 +121,8 @@ export async function createRuntimeBaseServices(options: RuntimeServicesOptions)
     const workingDirectory = options.workingDir;
     const homeDirectory = options.homeDirectory;
     observeNativeStartupPhase('base-project-context');
-    await prepareConfiguredProjectContext(options.configManager, workingDirectory, REGULAR_KNOWLEDGE_DB_FILE, { activate: true });
+    // The daemon's own folder is not a project: no identity is registered for it (configured-project.ts notAProject).
+    await prepareConfiguredProjectContext(options.configManager, workingDirectory, REGULAR_KNOWLEDGE_DB_FILE, { activate: true, notAProject: true });
     // The daemon's own records are in its home, never in the folder it was started in (daemon-records.ts): the
     // same sessions, devices, group identity and the rest whatever that folder is. Carried there once, before any
     // store opens, from every folder a 3.5.0 daemon kept them in.
@@ -168,11 +174,15 @@ export async function createRuntimeBaseServices(options: RuntimeServicesOptions)
         // Opted into by the real entrypoint only, so a one-shot command and a
         // test composing this graph fetch nothing and start no timer.
         provisionWakeModelsAtBoot: options.provisionWakeModelsAtBoot === true,
+        // The daemon's own folder is not a project: no checkpoint store there; a project's are reached by its sessions.
         workspaceCheckpoints: (input) => (checkpointingRef.current = createWorkspaceCheckpointing({
           ...input,
           ownsSession: workspaceCheckpoints.ownsSession(workingDirectory, { daemonOwn: true }),
+          notAProject: true,
         })),
       },
+      // Nor a code index: a project's turns read their project's (project-turn-facilities.ts).
+      codeIndex: 'on-demand',
       // The daemon serves the verb groups below with its own additions.
       gatewayVerbs: 'product',
       // DaemonServer's facade installs the single runner (configureDaemonSessionContinuation)
@@ -183,15 +193,27 @@ export async function createRuntimeBaseServices(options: RuntimeServicesOptions)
       taskGraphReaping: 'never',
       // The daemon is a service, not a terminal: a job it creates is attributed to the service surface.
       automationSurfaceKind: 'service',
+      // A schedule or trigger 3.5.0 kept names no project: it keeps working in the folder that daemon ran in (the most
+      // recently used, daemon-records.ts), never this daemon's own folder in its home.
+      unplacedRecordsFolder: formerDaemonFolders(homeDirectory, daemonHomeDirectory, workingDirectory)[0],
+      // The terminal app's own schedule file, where an earlier one kept schedules (its control-plane folder, and the
+      // terminal's own folder): taken once by this daemon when it is not the daemon's own store; left as it was.
+      formerJobStores: [
+        join(homeDirectory, '.goodvibes', 'tui', 'control-plane', 'automation-jobs.json'),
+        join(homeDirectory, '.goodvibes', 'tui', 'automation-jobs.json'),
+      ],
     });
     const graph = base;
     const {
       configManager, featureFlags, gatewayMethods, approvalBroker, sessionBroker, channelPolicy, secretsManager,
-      providerRegistry, judgment, distributedRuntime, pairingTokens, knowledgeStore, projectPlanningProjectId,
+      providerRegistry, judgment, distributedRuntime, pairingTokens, knowledgeStore,
       workPlan, agentManager, automationManager, nativeMutationHost: autonomousHost, triggerManager,
-      workspaceTrustManager, workspaceCheckpointManager, contractRunner, contractOperator, hookDispatcher,
+      workspaceTrustManager, contractRunner: builtContractRunner, contractOperator, hookDispatcher,
       permissionManager, acpHost,
     } = graph;
+    // The daemon runs contracts (its graph is composed with the default `contracts: 'run'`).
+    if (!builtContractRunner) throw new Error('The daemon\'s graph was composed without its contract runner');
+    const contractRunner = builtContractRunner;
     const daemonCheckpointing = checkpointingRef.current;
     if (!workspaceTrustManager || !triggerManager || !daemonCheckpointing) throw new Error('The daemon graph was composed without its trust owner, triggers or checkpoints');
     // A hosted session's workspace is read from its session record, so the
@@ -282,25 +304,10 @@ export async function createRuntimeBaseServices(options: RuntimeServicesOptions)
     // Where the email inbox (built with the handlers) meets the mailbox reader the facade composes later.
     const mailboxReaders = new MailboxReaders();
 
-    // This daemon's existing owner and host-selected project are authoritative.
-    // Request payloads can only verify this binding, never select a store or actor.
     observeNativeStartupPhase('base-knowledge');
-    const workLedgerOwner = createNativeWorkLedgerOwner({ projectId: projectPlanningProjectId, knowledgeStore });
-    disposalScope.registry.add('native work ledger', workLedgerOwner.close);
-    const workLedgerReadBinding = createLocalWorkLedgerReadBinding({
-      available: true, projectId: projectPlanningProjectId, actorId: 'host:operator-ledger-read',
-      // Gateway checks each request's read:knowledge scope before source provenance leaves the host.
-      allowLegacyProvenance: true,
-      service: workLedgerOwner.service, authority: workLedgerOwner.authority,
-    });
-    if (!workLedgerReadBinding.available) throw new Error(workLedgerReadBinding.reason);
-    const workLedgerReader = workLedgerReadBinding.client;
-    disposalScope.registry.add('native work ledger reader', () => workLedgerReader.dispose());
-    fenceWorkLedger = async () => {
-      const nativeClosing = fenceNativeWork?.();
-      try { workLedgerReader.dispose(); } finally { await Promise.all([nativeClosing, workLedgerOwner.close()]); }
-    };
-    // Its methods are registered with Work per project, below (each request served from the project it names).
+    // The daemon's own folder is no project and has no Work: every piece of work, its ledger and its runs are the
+    // project's its request names (Work per project, below); fencing Work fences every project's.
+    fenceWorkLedger = async () => { await fenceNativeWork?.(); };
 
     // The paired-phone feature for this host, on the SAME runtime phones pair onto
     // and the SAME approval broker every other confirmation rides. Every `device.*`
@@ -322,6 +329,8 @@ export async function createRuntimeBaseServices(options: RuntimeServicesOptions)
     // see cluster-group-composition.ts for why they are built together.
     const { clusterGroup, clusterCoordinator } = createClusterServices({ configManager, shellPaths, secretsManager,
       authorityRecord: graph.authorityRecord, setAuthorityPeers: graph.setAuthorityPeers,
+      // Put back to 3.5.0 since the upgrade: its group-settings changes from that run are marked the owner's once.
+      olderReleaseRanAt: olderReleaseGroupSettingsWrittenAt({ recordsRoot, homeDirectory, daemonHomeDirectory, workingDirectory }),
       // A group action finished (or not) at start after the restart it needed: said once, in the owner's inbox.
       // A notice: it needs no answer, only "Mark as read" (`read`), as the other reports.
       tellOwner: (title, detail) => { ownerInbox.postNow({ kind: 'report', key: 'cluster-pending-action', askedBy: 'your machine group', title, detail, options: ['read'] }, 'cluster'); } });
@@ -347,7 +356,7 @@ export async function createRuntimeBaseServices(options: RuntimeServicesOptions)
     let ciNativeContinuationRevocation: NonNullable<Parameters<typeof attachWsOnlyGatewayVerbHandlers>[1]['ciNativeContinuationRevocation']> | undefined;
     let ciNativeContinuationOwner: NonNullable<Parameters<typeof attachWsOnlyGatewayVerbHandlers>[1]['ciNativeContinuationOwner']> | undefined;
     let ciNativeContinuationReconcile: NonNullable<Parameters<typeof attachWsOnlyGatewayVerbHandlers>[1]['ciNativeContinuationReconcile']> | undefined;
-    let ciAutoWatchObserver: ((tool: string, args: Record<string, unknown>, success: boolean) => void) | undefined;
+    let ciAutoWatchObserver: ((tool: string, args: Record<string, unknown>, success: boolean, turn: { readonly project?: string | undefined }) => void) | undefined;
     // The methods that hold a request open while they wait (a host's take of rewind questions): ended by the daemon's
     // stop before it closes its listener, which waits for every running request (services.endLongWaits below).
     const longWaitEnds: { readonly label: string; readonly end: () => void }[] = [];
@@ -438,17 +447,11 @@ export async function createRuntimeBaseServices(options: RuntimeServicesOptions)
     });
     disposalScope.registry.add('browser checkout seam holder', () => browserCheckoutSeam.clear()); // newer than 'browser sessions' above, so runs first
     disposalScope.registry.add('native automation updates', registerNativeAutomationGatewayMethods(gatewayMethods, { manager: automationManager, host: graph.daemonMethodHost }));
-    // A piece of work's plan before it runs ("Show me the plan before it runs", planner.showPlanFirst): written by a
-    // planning agent of the daemon's own, kept in the project's draft store, approved in Work, carried into its run.
-    // A piece of work proposed with its plan (work.propose, plan mode's offer) waits here too.
-    const workPlans = createWorkPlans({
-      drafts: createWorkstreamDraftService({
-        agentManager, configManager, projectRoot: workingDirectory, contractRunner,
-        sessionId: `native-work:${projectPlanningProjectId}`, pricing: providerRegistry,
-      }),
-      file: shellPaths.resolveProjectPath(GOODVIBES_DAEMON_SURFACE_ROOT, 'work-plans.json'),
-      showPlanFirst: () => configManager.get('planner.showPlanFirst') === true,
-    });
+    // A piece of work's plan before it runs ("Show me the plan before it runs", planner.showPlanFirst) and a piece of
+    // work proposed with its plan wait in the project's own plans (Work per project, below); the daemon's own folder
+    // has none.
+    const workPlansFor = (folder: string): Promise<ReturnType<typeof createWorkPlans>> => workPlansForProject
+      ? workPlansForProject(folder) : Promise.reject(new Error('Work is not ready yet; ask again in a moment.'));
     // The Agent's own stores (notes, personas, routines, drafts, saved artifacts), managed here for every program.
     const agentStores = createAgentStoreRunner({
       homeDirectory, workingDirectory: () => configManager.getWorkingDirectory() ?? workingDirectory,
@@ -476,32 +479,58 @@ export async function createRuntimeBaseServices(options: RuntimeServicesOptions)
         policyRuntimeState: graph.policyRuntimeState, hookDispatcher, featureFlags, userRuleStore: graph.userPermissionRuleStore, secretsManager,
       }),
     });
+    // The folder of each project's plan the daemon's turns have worked in, by the plan's project id.
+    const projectPlanFolders = new Map<string, string>();
+    graph.projectPlanningService.declareProjectRoots((projectId) => projectPlanFolders.get(projectId));
     const projectTurns = createProjectTurnFacilities({
-      homeDirectory, shellPaths, hooksFile: () => String(configManager.get('tools.hooksFile')),
+      homeDirectory, daemonHome: daemonHomeDirectory, shellPaths, hooksFile: () => String(configManager.get('tools.hooksFile')),
       trustFor: createDaemonWorkspaceTrustResolver({ workingDirectory, homeDirectory, workspaceTrustManager }),
       ...(graph.agentToolDependencies.toolLLM ? { toolLLM: graph.agentToolDependencies.toolLLM } : {}), featureFlags,
+      // A project's hooks run as a program's do: agent hooks spawn on the daemon's manager, command actions on its runner.
+      agentManager: graph.agentToolDependencies.agentManager, hookActions: graph.agentToolDependencies.workflowServices.hookActions,
       // The project's tool servers, contained as the shared `sandbox.*` settings say and decided by the daemon's
       // permission owner for that project.
       tools: { configManager, runtimeBus: options.runtimeBus, permissionHost: graph.nativeMutationHost },
       // The project's checklist, in the one plan file every program keeps (the same plan a program in the folder shows).
-      workPlans: { knowledgeStore, planFile: graph.projectPlanningService.workPlanFile, projectIdOf: (folder: string) => projectIdentityOfFolder(configManager, folder) },
+      // Each project's plan announces its changes on the daemon's bus, about that project; the daemon's own planning
+      // service (the planning routes) names the project of a plan it is told of the same way.
+      workPlans: {
+        knowledgeStore, planFile: graph.projectPlanningService.workPlanFile, projectIdOf: (folder: string) => projectIdentityOfFolder(configManager, folder),
+        runtimeBus: options.runtimeBus,
+        noteProject: (projectId: string, folder: string) => { projectPlanFolders.set(normalizeProjectId(projectId), folder); },
+      },
       // The project's checkpoint store (the one a hosted session in that folder uses).
       checkpoints: workspaceCheckpoints,
+      // The project's secret store for its turns, the one a capability called from that project reads (secretsViewFor).
+      // The project's code index, the one the terminal app keeps there, built when a turn there first asks while the
+      // daemon's one setting (`storage.codeIndexEnabled`, Code and changes, Code index) is on.
+      ...(graph.agentToolDependencies.memoryEmbeddingRegistry
+        ? { codeIndex: { surfaceRoot: 'tui', configManager, memoryEmbeddingRegistry: graph.agentToolDependencies.memoryEmbeddingRegistry,
+          enabled: () => configManager.get('storage.codeIndexEnabled') === true } } : {}),
+      secretsFor: (folder: string) => new SecretsManager({ projectRoot: folder, globalHome: secretsManager.getGlobalHome(), surfaceRoot: 'tui', configManager }),
+      // The services a project's turn reaches (`fetch`'s service sign-in, the context tool): the daemon's services file
+      // with the project's own, a credential read from the project's secret store (a key kept for "This project" there)
+      // before the daemon's, as a capability called from that project reads it.
+      serviceRegistryFor: (folder: string) => new ServiceRegistry({ user: graph.serviceRegistry.userServicesFilePath, project: join(folder, '.goodvibes', 'tui', 'services.json') }, {
+        secretsManager: new SecretsManager({ projectRoot: folder, globalHome: secretsManager.getGlobalHome(), surfaceRoot: 'tui', configManager }),
+        subscriptionManager: graph.subscriptionManager,
+      }),
     });
     disposalScope.registry.add('project turn facilities', () => projectTurns.close());
-    // The daemon's own folder's hooks file, for the daemon's own turns there, read at start as a program reads its own
-    // (held while the folder is not trusted). Off the start path; a bad file leaves the turns without file hooks.
-    void graph.hookWorkbench.loadAndApplyManagedHooks().catch((error: unknown) => {
-      if (!(error instanceof HooksFileAwaitingTrustError)) logger.warn('[daemon] the hooks file of the daemon\'s own folder was not loaded', { error: summarizeError(error) });
-    });
+    // The daemon's own folder is no project and holds no hooks file: nothing is read there. A daemon-run turn fires its
+    // project's hooks (projectTurns, above); daemon-wide hooks are a daemon setting kept in its home.
     const agentToolDependencies = {
       ...graph.agentToolDependencies,
       // Workers keep the project work plan the work plan view shows.
       workPlan,
-      toolExecutionObserver: (tool: string, args: Record<string, unknown>, success: boolean) => ciAutoWatchObserver?.(tool, args, success),
+      // The turn's project rides along: a CI watch its push makes belongs to that project (ci-watch/auto-watch.ts).
+      toolExecutionObserver: (tool: string, args: Record<string, unknown>, success: boolean, turn: { readonly project?: string | undefined }) => ciAutoWatchObserver?.(tool, args, success, turn),
       // A background agent's `query` tool leaves its questions in the same inbox; the agent takes the
       // owner's answer on its next model request, or, if it stopped, on its next run (a channel's next turn).
       ownerQuestions: askingQuestions(ownerInbox, () => callingAgentAsker(agentManager)),
+      // Every web chat and run of a project shares its registry: each call names its own conversation (its task list,
+      // checklist, session state, questions and contracts are that conversation's; engine tools/index.ts).
+      turnSessionId: () => whoseTurn().sessionId,
       // A daemon turn's commands follow the one rule every door's turn does (tools/exec/containment.ts): the shared
       // sandbox setting decides the boundary, the gate under the owner's mode decides whether the command runs, and an
       // ask nobody is present for waits for the owner in Waiting for you.
@@ -510,7 +539,7 @@ export async function createRuntimeBaseServices(options: RuntimeServicesOptions)
       capabilityTools: {
         catalog: daemonCapabilityCatalog,
         loaded: loadedDaemonCapabilityCatalog,
-        services: createDaemonCapabilityServices({ configManager, hookDispatcher, hookWorkbench: graph.hookWorkbench, secretsManager, memoryRegistry: graph.memoryRegistry, sessionBroker,
+        services: createDaemonCapabilityServices({ configManager, hookDispatcher, secretsManager, memoryRegistry: graph.memoryRegistry, sessionBroker,
           // The daemon's remote runners (capabilities/builtin/remote.ts), the same holder every door reaches.
           remoteRunnerRegistry: graph.remoteRunnerRegistry, remoteSupervisor: graph.remoteSupervisor, runtimeStore: graph.runtimeStore,
           runtimeBus: graph.runtimeBus, agentManager, judgment: graph.judgment, permissionManager, shellPaths,
@@ -524,7 +553,7 @@ export async function createRuntimeBaseServices(options: RuntimeServicesOptions)
           channelSends,
           // Work (capabilities/builtin/work.ts): a piece of work proposed with its plan waits among the plans before they run,
           // the asking project's own.
-          workPlans, workPlansFor: (folder: string) => workPlansForProject ? workPlansForProject(folder) : Promise.resolve(workPlans),
+          workPlansFor,
           // Work and agents (capabilities/builtin/media-collect.ts): a collected file read back to save it in the asker's project.
           artifactStore: graph.artifactStore,
           // Models and providers (capabilities/builtin/models.ts, services.ts): the daemon's provider stack, sign-ins and services file.
@@ -533,14 +562,23 @@ export async function createRuntimeBaseServices(options: RuntimeServicesOptions)
         methods: gatewayMethods,
         workingDirectory: () => configManager.getWorkingDirectory() ?? workingDirectory,
       },
-      // The mail and calendar tool, offered only to a run that names it (a scheduled run or trigger turn).
+      // The tools of the person's own things every turn of the daemon has, whatever door it came through (the same a
+      // terminal turn has): mail and calendar (`google`) and the paired phone (`phone`, the daemon's own device posture).
       decorateRegistry: (registry: Parameters<typeof unattendedRunTools.decorateRegistry>[0]) => {
         graph.agentToolDependencies.decorateRegistry?.(registry);
         unattendedRunTools.decorateRegistry(registry);
+        registerDevicePhoneTool(registry, devicePosture);
+        // A channel's conversation with no project ("Project for this channel") writes no file and runs no command, and
+        // nothing is ever written in this daemon's own folder (channels/channel-project.ts).
+        refuseChannelChangesWithoutProject(registry, workingDirectory);
       },
       // A run of the daemon's own in another project (a schedule's, a trigger's, a piece of work's) fires that
       // project's hooks file and keeps its long output there: built once per project, on its first run.
       projectFacilities: projectTurns.forFolder,
+      // Let go with the folder's last kept registry: its tool servers stop and its checkpoint store closes until next used.
+      releaseProjectFacilities: projectTurns.release,
+      // A run's agent journals and run state are kept under the daemon's records, per project, never in its own folder.
+      runRecordsRootOf: (folder: string) => daemonRunRecordsRoot(shellPaths.recordsRoot, workingDirectory, folder),
       // No daemon run has a terminal screen: each is told so in one line, as the web chat is.
       screenless: true,
     };
@@ -548,41 +586,17 @@ export async function createRuntimeBaseServices(options: RuntimeServicesOptions)
     // The same store instance the workspaces.* verbs write through, so this process orders its own readers and writers.
     const nativeScopes = openWorkspaceRegistrationStore({ path: sharedWorkspaceRegisterPath(shellPaths), homeDir: homeDirectory,
       daemonStateDir: shellPaths.resolveUserPath() });
-    // The old planning records (planning sources and work-plan tasks) carried into Work once, at the first start of this
-    // version, by the host itself (workflow/work-ledger/carry-old-records.ts); off the start path, the old records untouched.
-    void carryOldWorkRecords({
-      hostId: workLedgerOwner.importHostId, projectId: projectPlanningProjectId,
-      service: workLedgerOwner.service, authority: workLedgerOwner.authority,
-      // The knowledge store and the shared plan file open alongside the start; the carry reads them once they are.
-      ready: () => knowledgeStore.init(),
-      // A planning record is a knowledge source, read as the ledger's own import reads it in its transaction.
-      readSource: (id) => knowledgeStore.getLegacyImportRecord(id),
-      // The planning interview's records (its state, work plans and decisions). The checklist's rows stay the checklist.
-      sourceIds: () => oldPlanningSourceIds(knowledgeStore, projectPlanningProjectId),
-      announcements: new FeatureAnnouncementStore(featureAnnouncementsPath(configManager)),
-    }).catch((error: unknown) => logger.warn('[Work] old planning records could not be carried into Work', { error: summarizeError(error) }));
     // Rules a 3.5.0 daemon kept for its own folder whatever project its work was in: placed in their project from the
     // answers that made them, a refusal that cannot be placed kept for every project, an allow kept for the folder. At
     // every start, for the rules this version has not written yet (a rollback's included); said once per carry, off the
-    // start path (permissions/daemon-folder-rules-notice.ts).
-    void noteDaemonFolderRules(graph.userPermissionRuleStore, configManager.getWorkingDirectory() ?? workingDirectory,
-      new FeatureAnnouncementStore(featureAnnouncementsPath(configManager)), approvalBroker);
-    const nativeSubmission = createNativeWorkSubmissionHost({ projectRoot: workingDirectory, projectId: projectPlanningProjectId,
-      sessionId: `native-work:${projectPlanningProjectId}`, service: workLedgerOwner.service, authority: workLedgerOwner.authority, scopes: nativeScopes,
-      // The owner asked for the work: an unregistered workspace is registered as part of the request.
-      registerScope: async (root: string) => { await nativeScopes.add(root, { origin: 'work-request' }); } });
-    disposalScope.registry.add('native work submission', nativeSubmission.close);
-    let nativeContinuationOwner: NativeConversationContinuationOwner | undefined;
-    const continuationOwner: NativeConversationContinuationOwner = {
-      capture: (sessionId, principalId, selectedDiff) => {
-        if (!nativeContinuationOwner) throw new Error('Native hosted continuation owner unavailable');
-        return nativeContinuationOwner.capture(sessionId, principalId, selectedDiff);
-      },
-      assertCurrent: (context, principalId, source) => {
-        if (!nativeContinuationOwner) throw new Error('Native hosted continuation owner unavailable');
-        nativeContinuationOwner.assertCurrent(context, principalId, source);
-      },
-    };
+    // start path (permissions/daemon-folder-rules-notice.ts). The folder those rules were saved for is the one a 3.5.0
+    // daemon ran in (daemon-records.ts `formerDaemonFolders`), never this daemon's own folder in its home.
+    void (async () => {
+      const announcements = new FeatureAnnouncementStore(featureAnnouncementsPath(configManager));
+      for (const folder of formerDaemonFolders(homeDirectory, daemonHomeDirectory, workingDirectory)) {
+        await noteDaemonFolderRules(graph.userPermissionRuleStore, folder, announcements, approvalBroker);
+      }
+    })();
     // Every committed write to a native request is announced, so a client showing native requests reads them again on it.
     disposalScope.registry.add('native request change events', knowledgeStore.onNativeRequestChange((change) => {
       emitNativeRequestChanged(options.runtimeBus, { sessionId: 'system', traceId: `native-request:${change.projectId}:${Date.now()}`, source: 'native-work' }, change);
@@ -591,47 +605,41 @@ export async function createRuntimeBaseServices(options: RuntimeServicesOptions)
     disposalScope.registry.add('list change events', onListChanged((change) => {
       emitListChanged(options.runtimeBus, { sessionId: 'system', traceId: `list:${change.list}:${Date.now()}`, source: 'list-changes' }, change);
     }));
-    observeNativeStartupPhase('base-native-intake-storage');
-    const nativeIntake = createNativeConversationIntakeHost({ projectRoot: workingDirectory, projectId: projectPlanningProjectId,
-      sessionId: `native-work:${projectPlanningProjectId}`, storage: await knowledgeStore.openNativeConversationStorage(projectPlanningProjectId),
-      scopes: nativeScopes, port: judgment.port, decisionLog: judgment.decisionLog, proposer: createNativeRequirementProposer(providerRegistry), continuation: continuationOwner,
-      // A request's attachments are the chat upload's artifacts (artifacts.create), read from the daemon's one store.
-      artifacts: graph.artifactStore });
-    observeNativeStartupPhase('base-native-intake-ready');
-    disposalScope.registry.add('native conversation intake', nativeIntake.close);
-    const removeHostedOwner = installNativeHostedConversationOwner(gatewayMethods, { projectId: projectPlanningProjectId,
-      projectRoot: workingDirectory, intake: nativeIntake, checkpoints: workspaceCheckpointManager, journalPath: shellPaths.resolveUserPath('native-hosted-turns.json'),
-      installContinuationOwner: owner => { nativeContinuationOwner = owner; },
-      // One journal serves every paired principal: a revoked or replaced pairing's finished turns are dropped from it.
-      principalCanAct: principalId => pairingTokens.nativePrincipalCurrent(principalId) },
-    // Every other project's native turns: over that project's own intake, each request in the project it names.
-    { route: (catalog) => routeByProject(catalog, (folder) => projectWork.ensure(folder)), forProject: (folder) => projectWork.get(folder).hosted });
-    disposalScope.registry.add('native hosted conversation binding', removeHostedOwner);
-    const nativeWork = createDaemonNativeWorkExecutionActivation({
-      workPlans,
-      nativeDataWriter: options.nativeDataWriter ?? configManager.getNativeDataWriter(),
-      runtimeBus: options.runtimeBus, configManager, providerRegistry,
-      projectRoot: workingDirectory, projectId: projectPlanningProjectId,
-      sessionId: `native-work:${projectPlanningProjectId}`, acpHost, knowledgeStore,
-      nativeScopes, continuationGrants: pairingTokens,
-      continuationScopeOwner: { current: () => { if (!continuationScopeOwner) throw new Error('Native CI scope owner is unavailable'); return continuationScopeOwner.current(); } },
-      judgmentPort: judgment.port, decisionLog: judgment.decisionLog,
-      permissionManager, hookDispatcher, featureFlags, toolDependencies: agentToolDependencies,
-      additionalFleetOwnership: () => agentManager.fleetOwnership(), contractOperator,
-      // Native work shares the daemon's fleet: a slot it frees is reported to the
-      // daemon's manager, and its units refused for capacity wait on that manager's releases.
-      notifyFleetSlotReleased: () => agentManager.notifyFleetSlotReleased(),
-      onFleetSlotReleased: (listener) => agentManager.onFleetSlotReleased(listener),
-    });
-    ciNativeContinuationRevocation = async watch => (await nativeWork.acquire()).revokeCiWatch(watch);
-    ciNativeContinuationOwner = async watch => (await nativeWork.acquire()).recoverCiWatchOwner(watch);
-    ciNativeContinuationReconcile = async () => (await nativeWork.acquire()).reconcileCiContinuations();
-    disposalScope.registry.add('native work execution', nativeWork.close);
+    // Every project's native turns: over that project's own intake, each request in the project it names (the daemon's
+    // own folder is no project and has none: a request naming no project is refused NO_PROJECT).
+    const removeHostedProjects = installNativeHostedConversationProjects(gatewayMethods,
+      { route: (catalog) => routeByProject(catalog, (folder) => projectWork.ensure(folder)), forProject: (folder) => projectWork.get(folder).hosted });
+    disposalScope.registry.add('native hosted conversation binding', removeHostedProjects);
+    // A CI watch made by a project's work: its native continuation is held by that project's records, so every read or
+    // change of it goes to the project whose store holds it, among the projects made so far and every registered one.
+    const projectHoldingCiWatch = async (watch: Parameters<NonNullable<typeof ciNativeContinuationOwner>>[0]) => {
+      const continuationId = watch.continuationId;
+      if (!continuationId) return undefined;
+      // A read of the continuation's one row in a project's store, nothing built for a project that does not hold it.
+      const holds = async (projectId: string): Promise<boolean> => {
+        try { return ((await knowledgeStore.openNativeWorkExecutionStorage(projectId)).continuations?.current(continuationId).record ?? null) !== null; } catch { return false; }
+      };
+      const roots = [...new Set([...projectWork.all().map((work) => work.hosted.projectRoot), ...registeredWorkspaceRoots(homeDirectory)])];
+      for (const root of roots) {
+        if (!await holds(await projectIdentityOfFolder(configManager, root))) continue;
+        await projectWork.ensure(root);
+        return projectWork.get(root).activation.acquire();
+      }
+      throw Object.assign(new Error(`The CI watch ${watch.id} names work whose project is none of the registered projects, so it was neither repaired nor changed. Register the project its work was in.`),
+        { code: 'NO_PROJECT', status: 422 });
+    };
+    ciNativeContinuationRevocation = async watch => { const host = await projectHoldingCiWatch(watch); if (host) await host.revokeCiWatch(watch); };
+    ciNativeContinuationOwner = async watch => (await projectHoldingCiWatch(watch))?.recoverCiWatchOwner(watch);
+    // A settings or scope change stops the continuations that no longer hold, in every project whose Work is made.
+    ciNativeContinuationReconcile = async () => (await Promise.all(projectWork.all().map(async (work) => {
+      const open = (await knowledgeStore.openNativeWorkExecutionStorage(work.projectId)).continuations?.listOpen?.() ?? [];
+      return open.length === 0 ? [] : (await work.activation.acquire()).reconcileCiContinuations();
+    }))).flat();
+    const announcements = new FeatureAnnouncementStore(featureAnnouncementsPath(configManager));
 
-    // Work per project: the daemon's own folder's (above), and each other project's, made on the first request that
-    // names it (its folder as `workingDirectory`) and kept for every later one. A program's Work, its messages and its
-    // native runs are its own project's, whatever folder the daemon runs in; nothing of one project is read or written
-    // under another's.
+    // Work per project: each project's, made on the first request that names it (its folder as `workingDirectory`) and
+    // kept for every later one. A program's Work, its messages and its native runs are its own project's, whatever folder
+    // the daemon runs in; nothing of one project is read or written under another's.
     const buildProjectWork = async (root: string): Promise<ProjectWork> => {
       const projectId = await projectIdentityOfFolder(configManager, root);
       const sessionId = `native-work:${projectId}`;
@@ -639,7 +647,8 @@ export async function createRuntimeBaseServices(options: RuntimeServicesOptions)
       const readBinding = createLocalWorkLedgerReadBinding({ available: true, projectId, actorId: 'host:operator-ledger-read',
         allowLegacyProvenance: true, service: ledger.service, authority: ledger.authority });
       if (!readBinding.available) { await ledger.close(); throw new Error(readBinding.reason); }
-      const turns = projectTurns.forFolder(root);
+      // Held for good: this graph's turns use the project's hooks and long-output folder for as long as it runs.
+      const turns = projectTurns.hold(root);
       const projectIndex = new ProjectIndex(root);
       // Its turns' tools are rooted in its folder, with its hooks and its own long-output folder; never the daemon's.
       // The graph's own folder is this project: its turns and runs take the project's environment (projectFacilities).
@@ -649,10 +658,34 @@ export async function createRuntimeBaseServices(options: RuntimeServicesOptions)
         ...(turns.toolCallHooks ? { toolCallHooks: turns.toolCallHooks } : {}), ...(turns.overflowHandler ? { overflowHandler: turns.overflowHandler } : {}) };
       const plans = createWorkPlans({
         drafts: createWorkstreamDraftService({ agentManager, configManager, projectRoot: root, contractRunner, sessionId, pricing: providerRegistry }),
-        // Kept with the daemon's records, one file per project, never inside the project.
-        file: shellPaths.resolveUserPath(GOODVIBES_DAEMON_SURFACE_ROOT, 'work-plans', `${projectId}.json`),
+        // Kept with the daemon's records, one file per project, never inside the project (carried once from the home's
+        // terminal folder, where an earlier build kept it, that file left as it was).
+        file: carriedRecordsFile(shellPaths.resolveProjectPath(GOODVIBES_DAEMON_SURFACE_ROOT, 'work-plans', `${projectId}.json`),
+          shellPaths.resolveUserPath(GOODVIBES_DAEMON_SURFACE_ROOT, 'work-plans', `${projectId}.json`)),
         showPlanFirst: () => configManager.get('planner.showPlanFirst') === true,
+        // Its `work` notices name this project (the one project identity), so only its screens read again.
+        project: projectIdentityOf(root),
       });
+      // This project's old planning records (an earlier version's planning sources and work-plan tasks, each naming the
+      // project it was kept for) carried into its Work once, by the host itself (workflow/work-ledger/carry-old-records.ts);
+      // off the making's path, the old records untouched. A 3.5.0 daemon's own folder was a project: its Work is made at
+      // start (below), so its records are carried there.
+      void carryOldWorkRecords({
+        hostId: ledger.importHostId, projectId, service: ledger.service, authority: ledger.authority,
+        ready: () => knowledgeStore.init(),
+        readSource: (id) => knowledgeStore.getLegacyImportRecord(id),
+        sourceIds: () => oldPlanningSourceIds(knowledgeStore, projectId),
+        announcements,
+      }).catch((error: unknown) => logger.warn('[Work] old planning records could not be carried into Work', { project: root, error: summarizeError(error) }));
+      // This project's live work with no recorded cause, put to the owner once (work-cause-question.ts).
+      const stopCauseQuestions = askUnrecordedWorkCauses({ projectId, service: ledger.service, authority: ledger.authority, plans, inbox: ownerInbox });
+      // Contracts a terminal program was running itself in this project (3.5.0's own runner), carried once into its
+      // Work as proposed work with their remaining steps; their files are only read (carry-program-contracts.ts).
+      try {
+        carryProgramContracts({ projectRoot: root, plans, carriedFile: carriedRecordsFile(
+          shellPaths.resolveProjectPath(GOODVIBES_DAEMON_SURFACE_ROOT, 'carried-program-contracts', `${projectId}.json`),
+          shellPaths.resolveUserPath(GOODVIBES_DAEMON_SURFACE_ROOT, 'carried-program-contracts', `${projectId}.json`)) });
+      } catch (error) { logger.warn('[Work] a program\'s contracts could not be carried into Work', { error: summarizeError(error) }); }
       const submission = createNativeWorkSubmissionHost({ projectRoot: root, projectId, sessionId, service: ledger.service, authority: ledger.authority,
         scopes: nativeScopes, registerScope: async (folder: string) => { await nativeScopes.add(folder, { origin: 'work-request' }); } });
       let hostedOwner: NativeConversationContinuationOwner | undefined;
@@ -682,29 +715,34 @@ export async function createRuntimeBaseServices(options: RuntimeServicesOptions)
       });
       return {
         projectId, reader: readBinding.client, submission, intake, activation, plans,
-        hosted: { projectId, projectRoot: root, intake, journalPath: shellPaths.resolveUserPath(GOODVIBES_DAEMON_SURFACE_ROOT, 'native-hosted-turns', `${projectId}.json`),
+        hosted: { projectId, projectRoot: root, intake, journalPath: shellPaths.resolveProjectPath(GOODVIBES_DAEMON_SURFACE_ROOT, 'native-hosted-turns', `${projectId}.json`),
           installContinuationOwner: (owner) => { hostedOwner = owner; },
           principalCanAct: (principalId) => pairingTokens.nativePrincipalCurrent(principalId) },
         async close() {
+          stopCauseQuestions();
           readBinding.client.dispose();
           try { await Promise.all([submission.close(), intake.close(), activation.close()]); }
           finally { await ledger.close(); await projectIndex.dispose(); }
         },
       };
     };
-    const projectWork = createProjectWorkSet<ProjectWork>({
-      ownFolder: workingDirectory,
-      // The daemon's own folder's work is closed by its own entries above.
-      own: { projectId: projectPlanningProjectId, reader: workLedgerReader, submission: nativeSubmission, intake: nativeIntake, activation: nativeWork, plans: workPlans,
-        hosted: nativeHostedConversationOwner(gatewayMethods)!, close: async () => {} },
-      build: buildProjectWork,
-    });
+    const projectWork = createProjectWorkSet<ProjectWork>({ build: buildProjectWork });
     workPlansForProject = async (folder) => { await projectWork.ensure(folder); return projectWork.get(folder).plans; };
     disposalScope.registry.add('project work', () => projectWork.close());
     nativeFleetOwnership = () => projectWork.all().flatMap((work) => work.activation.fleetOwnership());
-    fenceNativeWork = async () => { await Promise.all([nativeSubmission.close(), nativeIntake.close(), nativeWork.close(), projectWork.close()]); };
-    // Every Work and native method is served from the project its request names; a request naming none is the daemon's
-    // own folder's, as before.
+    fenceNativeWork = async () => { await projectWork.close(); };
+    // The folders a 3.5.0 daemon ran in were its projects: their Work is made at start, off the start path, so their old
+    // planning records are carried into it (above) and their work stands in Work there, as 3.5.0 showed it.
+    void (async () => {
+      for (const folder of formerDaemonFolders(homeDirectory, daemonHomeDirectory, workingDirectory)) {
+        // A 3.5.0 daemon started in the home folder (or anywhere that can never be a project) left no project's Work.
+        if (whyNeverAProject(folder, { homeDirectory, goodVibesHome: join(homeDirectory, '.goodvibes'), daemonHome: daemonHomeDirectory })) continue;
+        try { await projectWork.ensure(folder); }
+        catch (error) { logger.warn('[Work] the Work of a folder a 3.5.0 daemon ran in could not be opened', { folder, error: summarizeError(error) }); }
+      }
+    })();
+    // Every Work and native method is served from the project its request names; a request naming none is refused
+    // (NO_PROJECT): the daemon's own folder is no project.
     const routedMethods = routeByProject(gatewayMethods, (folder) => projectWork.ensure(folder));
     const current = (): ProjectWork => projectWork.get(requestProject());
     registerWorkLedgerGatewayMethods(routedMethods, projectProxy(() => current().reader));
@@ -723,8 +761,9 @@ export async function createRuntimeBaseServices(options: RuntimeServicesOptions)
     // this product has no screen, see notification-dispatch.ts.
     disposalScope.registry.add('memory pressure notice', wireMemoryPressureChannelNotice(options.runtimeBus, graph.webhookNotifier));
 
-    const services: Omit<RuntimeServices, 'daemonHandlers'> = {
-      ...graph,
+    // Merged by property: a spread of the graph would read its on-demand code index getter and open an index for the
+    // daemon's own folder (merge-keeping-getters.ts).
+    const services: Omit<RuntimeServices, 'daemonHandlers'> = mergeKeepingGetters(graph, {
       endLongWaits: () => {
         for (const { label, end } of longWaitEnds.splice(0)) {
           try { end(); } catch (error) { logger.warn('Ending a waiting request at stop failed', { label, error: summarizeError(error) }); }
@@ -741,11 +780,9 @@ export async function createRuntimeBaseServices(options: RuntimeServicesOptions)
       channelSends,
       // Models and providers: blind model comparisons, for the capabilities that run them through every door.
       modelComparisons,
-      workLedger: workLedgerOwner.service,
       // Work: the plans before they run, where a piece of work proposed with its plan waits (capabilities/builtin/work.ts),
       // each project's own.
-      workPlans,
-      workPlansFor: (folder: string) => workPlansForProject ? workPlansForProject(folder) : Promise.resolve(workPlans),
+      workPlansFor,
       browserJudgment,
       ...(browserGateway ? { browserGateway } : {}),
       devicePosture,
@@ -754,7 +791,7 @@ export async function createRuntimeBaseServices(options: RuntimeServicesOptions)
       startCluster: () => startClusterServices({ clusterGroup, clusterCoordinator }),
       close,
       dispose: (): void => { void close().catch(() => {}); },
-    };
+    });
     // Drain plugin work before releasing the graph it can call into.
     disposalScope.registry.add('plugins', () => graph.pluginManager.close());
     // The facade still registers hosted/update/relay/mail handlers. Its constructor

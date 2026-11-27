@@ -28,7 +28,6 @@ export const COMMON_ACTION_DESCRIPTIONS = {
   'previous-session':      'Show the previous session (agent or process) in the session row above the conversation',
   'scroll-page-up':        'Scroll the conversation up a page',
   'scroll-page-down':      'Scroll the conversation down a page',
-  'contract-question-ordinary': 'Send the next message as an ordinary one, not as the answer to a contract\'s question',
   'model-picker-group':    'In the model list: group it another way (provider, price, none)',
 };
 /**
@@ -69,8 +68,6 @@ const COMMON_DEFAULT_KEYBINDINGS = {
   'previous-session':      [{ key: 'p', leader: true }, { key: '_', ctrl: true }],
   'scroll-page-up':        [{ key: 'pageup' }],
   'scroll-page-down':      [{ key: 'pagedown' }],
-  // A contract's open question: the leader then q sends the next message as an ordinary one.
-  'contract-question-ordinary': [{ key: 'q', leader: true }],
   // The model list's grouping (it was the list's own Ctrl+G, which is the leader everywhere now).
   'model-picker-group':    [{ key: 'g', leader: true }],
 } satisfies Record<string, KeyCombo[]>;

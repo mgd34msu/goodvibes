@@ -28,7 +28,7 @@ import { lstatSync } from 'node:fs';
 import { resolve as resolvePath } from 'node:path';
 import { categoryForCode, categoryForStatus, GoodVibesError, httpStatusOf } from '@goodvibes/engine/errors';
 import { createOperatorApiClient, type OperatorApiClient } from '@goodvibes/engine/operator-client';
-import { programCallHeaders } from '@goodvibes/engine/platform/platform/runtime/client';
+import { programCallHeadersFor } from '@goodvibes/engine/platform/platform/runtime/client';
 import type { OperatorMethodId, OperatorMethodInput, OperatorMethodOutput } from '@goodvibes/engine/platform/contracts';
 import { resolveConnectedHostDialEnabled } from '@goodvibes/engine/platform/platform/config';
 import { resolveConnectedHostAddress, type ConnectedHostAddressKey } from './connected-host-dial.js';
@@ -418,9 +418,10 @@ function clientFor(baseUrl: string, token: string, fetchImpl: FetchLike, validat
     // A redirect would carry the credential to wherever the host points; refuse it.
     // Every call names the Agent, so what the owner does in it is attributed to it (an inbox answer says agent), and
     // carries the Agent's call context: the project it works in and the conversation it holds (call-context.ts).
-    const noRedirect = (input: string | URL | Request, init?: RequestInit) => {
+    const noRedirect = async (input: string | URL | Request, init?: RequestInit) => {
       const headers = new Headers(init?.headers ?? (input instanceof Request ? input.headers : undefined));
-      for (const [name, value] of Object.entries(programCallHeaders('agent'))) headers.set(name, value);
+      // With the registration this host issued the Agent (asked for on the first call, sent to this host only).
+      for (const [name, value] of Object.entries(await programCallHeadersFor(baseUrl, token, fetchImpl, 'agent'))) headers.set(name, value);
       return fetchImpl(input, { ...init, headers, redirect: 'error' });
     };
     client = createOperatorApiClient({ baseUrl, authToken: token, fetchImpl: noRedirect, retry: { maxAttempts: 1 }, validateResponses });

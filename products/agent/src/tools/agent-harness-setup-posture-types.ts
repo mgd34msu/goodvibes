@@ -32,7 +32,7 @@ export type SetupRepairCardEffect = 'read-only' | 'confirmed-effect';
 export type SetupRepairRecommendation = 'recommended' | 'inspect-first' | 'not-needed' | 'unavailable';
 export type SetupServiceProbeStatus = 'reachable' | 'unreachable' | 'not-enabled' | 'not-probed';
 export type SetupSmokeArtifactStore = Partial<Pick<ArtifactStore, 'create' | 'get'>>;
-export type SetupHandoffKind = 'diagnostic' | 'workspace-action' | 'ui-surface' | 'confirmed-route' | 'operator-method' | 'conversation' | 'user-command' | 'tool-discovery';
+export type SetupHandoffKind = 'diagnostic' | 'capability' | 'ui-surface' | 'confirmed-route' | 'operator-method' | 'conversation' | 'user-command' | 'tool-discovery';
 export type SetupHandoffEffect = 'read-only' | 'visible-navigation' | 'confirmed-effect' | 'user-run';
 
 export interface OperatorContractMethod {

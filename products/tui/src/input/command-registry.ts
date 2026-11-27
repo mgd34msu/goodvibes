@@ -180,15 +180,13 @@ export interface CommandShellUiOpeners extends TerminalCommandShellUiOpeners<imp
   /** Open the menu of every place (Ctrl+G then m; terminal-shell/places). */
   openPlaceMenu?: () => void;
   /** Open one place by id (`automation`, `waiting`, `keys`), on one of its lists when `start.list` names it. */
-  openPlace?: (placeId: string, start?: { readonly list?: string | undefined }) => void;
+  openPlace?: (placeId: string, start?: { readonly list?: string | undefined; readonly item?: string | undefined }) => void;
   /** Run what a place's key read in the composer names (`place.conversation-composer.<control>`: This conversation's controls). */
   runPlaceKey?: (action: string) => void;
   /** Send the failed turn again, when one is on offer (shell/retry-affordance.ts). */
   retryFailedTurn?: () => void;
   /** Open the fix session just started, when one is on offer. */
   openFixSession?: () => void;
-  /** A contract's open question on offer: the next message is sent as an ordinary one (contract-question-composer.ts). */
-  answerContractQuestionPlainly?: () => void;
   /** The model list's grouping, while the list is open (model-picker-token-route.ts). */
   cycleModelPickerGroup?: () => void;
   /**

@@ -12,6 +12,7 @@ import { ModeManager } from '../state/mode-manager.js';
 import { FileUndoManager } from '../state/file-undo.js';
 import type { ConfigManager } from '../config/manager.js';
 import { isEffectiveDangerMode } from '../config/index.js';
+import { turnInputParty } from '../security/turn-input-party.js';
 import type { ProviderRegistry } from '../providers/registry.js';
 import type { ToolLLM } from '../config/tool-llm.js';
 import { ReadTool } from './read/index.js';
@@ -26,7 +27,7 @@ import { createContractSelfCheckTool } from './contract-self-check/index.js';
 import { createFindTool } from './find/index.js';
 import { CodeIntelligence } from '../intelligence/index.js';
 import { withProjectFilesEpoch } from '../intelligence/project-files-epoch.js';
-import { createShellPathService } from '../runtime/shell-paths.js';
+import { createShellPathService, projectFolderOf } from '../runtime/shell-paths.js';
 import { createExecTool } from './exec/index.js';
 import { createExecValidatorRunner, type ExecToolOptions } from './exec/runtime.js';
 import type { CredentialEnvScrubConfig } from './exec/credential-env.js';
@@ -51,7 +52,7 @@ import { memoryProjectIdentity } from '../state/memory-project.js';
 import { createLocalMemoryAccess } from '../runtime/memory-spine/client.js';
 import { createWorkflowServices, createWorkflowTool } from './workflow/index.js';
 import { createRegistryTool } from './registry-tool/index.js';
-import { createKeyedStateReclaimCheck, createSessionBoundKvState } from './session-kv-state.js';
+import { createKeyedStateReclaimCheck, createPerConversationKvState, createSessionBoundKvState } from './session-kv-state.js';
 import { createTaskTool } from './task/index.js';
 import { createWorkPlanTool, type WorkPlanToolStore } from './work-plan/index.js';
 import { createMcpTool } from './mcp/index.js';
@@ -104,7 +105,7 @@ export type {
 } from './goodvibes-runtime/config-routing.js';
 
 export { runRegisteredTool, currentToolExecuteOptions, previewRegisteredTool } from './registry.js';
-export { ToolRegistry, assertCurrentToolExecution, assertCurrentToolInvocation, assertCurrentToolEffect, currentToolAutonomySource, commitCurrentToolSettingsPlan, currentToolSettingsPresentation, claimCurrentToolSettingsDispatch, toolActivityOf } from './registry.js';
+export { ToolRegistry, assertCurrentToolExecution, assertCurrentToolInvocation, assertCurrentToolEffect, currentToolAutonomySource, commitCurrentToolSettingsPlan, currentToolSettingsPresentation, claimCurrentToolSettingsDispatch, noteCurrentToolEffectSent, toolActivityOf } from './registry.js';
 export { registrySelect } from './batteries/registry-select.js';
 export { registryCatalogGroupFit } from './batteries/registry-catalog-group.js';
 export type { ToolExecutionEffect, CurrentToolAutonomySource } from './registry.js';
@@ -287,15 +288,19 @@ export function registerAllTools(
     processManager: ProcessManager;
     agentManager?: AgentManager | undefined;
     agentMessageBus: AgentMessageBus;
-    /** Starts the contracts the agent tool and the workflow tool's `contract` definition hand work to. */
-    contractRunner: Pick<ContractRunner, 'start' | 'list' | 'get'>;
+    /** Starts the contracts the agent tool and the workflow tool's `contract` definition hand work to; absent in a program that runs none. */
+    contractRunner?: Pick<ContractRunner, 'start' | 'list' | 'get'> | undefined;
     /** The project a contract started by a tool works in. */
     projectRoot: string;
+    /** Where this host keeps the journals of agents run here, when not in `projectRoot` (the daemon's records of the project). */
+    agentJournalRoot?: string | undefined;
     webSearchService?: WebSearchService | undefined;
     channelRegistry?: ChannelPluginRegistry | null | undefined;
     remoteRunnerRegistry?: RemoteRunnerRegistry | undefined;
     workflowServices: ReturnType<typeof createWorkflowServices>;
     mcpRegistry?: import('../mcp/registry.js').McpRegistry | undefined;
+    /** Starts the registry's servers; given, the `mcp` tool starts them on its first call rather than they start with the turn. */
+    mcpConnect?: (() => Promise<void>) | undefined;
     sessionOrchestration?: CrossSessionTaskRegistry | undefined;
     /**
      * Resolves the host's real runtime session id, called fresh on each task-tool
@@ -304,6 +309,14 @@ export function registerAllTools(
      * run, the bounds still apply, but nothing is keyed to a real session.
      */
     resolveSessionId?: (() => string) | undefined;
+    /**
+     * For a registry several conversations use at once (the daemon's, for every web chat and run of a project): the
+     * conversation a call belongs to, resolved per call (security/turn-session.ts `whoseTurn`). Given, and with no
+     * `resolveSessionId`, the task list, the checklist, session state, a question left for the owner and the contracts
+     * an agent or workflow starts are that conversation's; records that name none stay readable as before. The trigger
+     * tool keeps no conversation (its owner session is the one whose probe tools it uses and that reaps it).
+     */
+    turnSessionId?: (() => string | undefined) | undefined;
     /**
      * Whether the host still holds the session a keyed state file belongs to
      * (by its file-name token). Without it keyed state files are never reclaimed.
@@ -495,7 +508,10 @@ export function registerAllTools(
   // A contract started by a tool belongs to the conversation session; without a
   // resolver it takes AgentManager's own event session, the one the runner gives
   // agent-manager spawns.
-  const resolveContractSessionId = deps.resolveSessionId ?? (() => AGENT_MANAGER_SESSION_ID);
+  // A registry several conversations use names each call's own (deps.turnSessionId); a host's own session otherwise.
+  const conversationOf = deps.resolveSessionId === undefined ? deps.turnSessionId : undefined;
+  const sessionOfCall: (() => string) | undefined = deps.resolveSessionId ?? (conversationOf ? () => conversationOf() ?? '' : undefined);
+  const resolveContractSessionId = deps.resolveSessionId ?? (conversationOf ? () => conversationOf() || AGENT_MANAGER_SESSION_ID : () => AGENT_MANAGER_SESSION_ID);
   const archetypeLoader = deps?.archetypeLoader;
   const webSearchService = deps?.webSearchService;
   const channelRegistry = deps?.channelRegistry ?? null;
@@ -526,7 +542,8 @@ export function registerAllTools(
   if (!deps?.surfaceRoot || deps.surfaceRoot.trim().length === 0) {
     throw new Error('registerAllTools requires surfaceRoot');
   }
-  const projectIndex = deps?.projectIndex ?? new ProjectIndex(workingDirectory);
+  // The index is the project's (kept at the project root), relative paths the working folder's.
+  const projectIndex = deps?.projectIndex ?? new ProjectIndex(workingDirectory, projectFolderOf(workingDirectory));
   // `register` refuses a definition a provider or the gate cannot use.
   const registerTool = (tool: Tool, registration?: ToolRegistrationOptions): void => {
     registry.register(tool, registration);
@@ -568,7 +585,8 @@ export function registerAllTools(
         // at; the channel-bound case is produced per turn by bindCapture.
         defaultAuthority: {
           authority: 'owner-direct',
-          surface: 'agent',
+          // The program the owner is sitting at, named in the line's provenance: the terminal app's own turns say so.
+          surface: deps.surfaceRoot === 'tui' ? 'tui' : 'agent',
           canCapture: true,
           source: 'local-surface',
           reason: 'This turn came from a surface you are using directly, so it carries your authority.',
@@ -577,7 +595,11 @@ export function registerAllTools(
     );
   }
   const readConfigManager = deps.configManager;
-  const allowOutsideProject = () => isEffectiveDangerMode(readConfigManager);
+  // Reading outside the project (another project's files, the owner's home) is the owner's own turn's only, under his
+  // own settings (YOLO: his choice for his own turns). A turn on anyone else's input (a member's or a device's chat, a
+  // channel message, an outside agent, a runner, work someone else caused) reads inside its project only, by real
+  // path, whatever the mode. The product's own homes are never read from outside them (utils/path-safety.ts).
+  const allowOutsideProject = () => turnInputParty().party === 'owner' && isEffectiveDangerMode(readConfigManager);
   // One code-intelligence facade for read, find and post-edit diagnostics: one
   // parser, the workspace's language files, and one set of language servers
   // (started by find references, then also asked for type errors after an
@@ -711,6 +733,7 @@ export function registerAllTools(
       ...(archetypeLoader ? { archetypeLoader } : {}),
       contractRunner: deps.contractRunner,
       projectRoot: deps.projectRoot,
+      ...(deps.agentJournalRoot ? { journalRoot: deps.agentJournalRoot } : {}),
       surfaceRoot: deps.surfaceRoot,
       readAccessFilter: deps.readAccessFilter,
       resolveSessionId: resolveContractSessionId,
@@ -725,13 +748,12 @@ export function registerAllTools(
   // state set before a restart is read back when that session resumes; a registry with no host session
   // (a worker's) gets a generated id, as before.
   const reclaimCheck = createKeyedStateReclaimCheck(deps.isSessionResumable);
-  const kvBinding = createSessionBoundKvState(
-    {
-      stateDir: resolveScopedDirectory(workingDirectory, deps.surfaceRoot, 'state'),
-      ...(reclaimCheck ? { canReclaimKeyedState: reclaimCheck } : {}),
-    },
-    deps.resolveSessionId,
-  );
+  const kvOptions = {
+    stateDir: resolveScopedDirectory(workingDirectory, deps.surfaceRoot, 'state'),
+    ...(reclaimCheck ? { canReclaimKeyedState: reclaimCheck } : {}),
+  };
+  // Several conversations at once: each its own state file, side by side (session-kv-state.ts).
+  const kvBinding = conversationOf ? createPerConversationKvState(kvOptions, conversationOf) : createSessionBoundKvState(kvOptions, deps.resolveSessionId);
   // Every state-tool write is on disk when the call returns, so no exit hook is needed to flush it.
   const kvState = kvBinding.state;
   // A local trigger supervisor's platform-tool probes may call this registry's reading tools.
@@ -796,11 +818,16 @@ export function registerAllTools(
   // writing refs under the session the user just left.
   registerTool(
     createTaskTool(sessionOrchestration, {
-      ...(deps.resolveSessionId ? { resolveSessionId: deps.resolveSessionId } : {}),
+      ...(sessionOfCall ? { resolveSessionId: sessionOfCall } : {}),
+      ...(conversationOf ? { ownSessionOnly: true } : {}),
     }),
   );
   // The model's checklist is the project work plan the user sees; a host with its own work plan tool leaves this out.
-  if (deps.workPlan) registerTool(createWorkPlanTool(deps.workPlan, deps.resolveSessionId ? { resolveSessionId: deps.resolveSessionId } : {}));
+  // Several conversations at once: each lists and changes its own items (and those that name none).
+  if (deps.workPlan) registerTool(createWorkPlanTool(deps.workPlan, {
+    ...(sessionOfCall ? { resolveSessionId: sessionOfCall } : {}),
+    ...(conversationOf ? { perConversation: true } : {}),
+  }));
   // "Tell me when this build exits", "watch this log", "check this URL every minute": supervised by the host, not this turn.
   if (deps.triggers) {
     // A trigger made from this registry's turns works in its folder.
@@ -808,15 +835,16 @@ export function registerAllTools(
     if (deps.triggers instanceof TriggerManager) detachProbeTools = deps.triggers.attachProbeTools(registry, deps.resolveSessionId);
   }
   if (mcpRegistry) {
-    registerTool(createMcpTool(mcpRegistry));
+    registerTool(createMcpTool(mcpRegistry, deps?.mcpConnect));
   }
   if (deps.ownerQuestions) {
     // A question says the project this registry works in: a session the daemon hosts posts in process, with no
     // program's call context for the inbox route to read it from.
-    registerTool(createQueryTool({ inbox: deps.ownerQuestions, resolveProject: () => workingDirectory, ...(deps.resolveSessionId ? { resolveSessionId: deps.resolveSessionId } : {}) }));
+    registerTool(createQueryTool({ inbox: deps.ownerQuestions, resolveProject: () => workingDirectory, ...(sessionOfCall ? { resolveSessionId: sessionOfCall } : {}) }));
   }
   if (remoteRunnerRegistry) {
-    registerTool(createRemoteTool(remoteRunnerRegistry, { importRoot: workingDirectory }));
+    // Its turns see the runners and results of work made in this registry's project only (a turn is held to its own).
+    registerTool(createRemoteTool(remoteRunnerRegistry, { importRoot: workingDirectory, onlyProject: workingDirectory }));
   }
   // An ordinary session evaluates through exec's path, so repl is offered only
   // where that path is contained: the per-command sandbox is on and this host has it.

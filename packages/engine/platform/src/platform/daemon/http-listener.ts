@@ -375,6 +375,8 @@ export class HttpListener {
       keys: ['httpListener.hostMode', 'httpListener.host', 'httpListener.port', 'httpListener.tls.mode', 'httpListener.tls.certFile', 'httpListener.tls.keyFile'],
       onRestart: () => this.restartCycle.request(),
       getIsRunning: () => this.restartCycle.active,
+      // A write of the value a binding key already holds changes no binding: no restart while one is bound.
+      isBound: () => this.server !== null,
     });
     this._configWatchUnsub = () => watcher.unsubscribe();
   }

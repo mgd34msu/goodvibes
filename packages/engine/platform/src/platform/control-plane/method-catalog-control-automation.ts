@@ -119,14 +119,16 @@ export const builtinGatewayControlAutomationMethodDescriptors: readonly GatewayM
   }),
   methodDescriptor({
     id: 'automation.jobs.create',
-    replay: { in: 'body', name: 'id', behavior: 'A create that names an `id` returns the existing job unchanged when a job with that id exists, so a repeat creates nothing more. Without an id each call creates a job.' },
+    replay: { in: 'body', name: 'id', behavior: 'A create that names an `id` returns this project\'s job of that id unchanged when there is one, so a repeat creates nothing more. Without an id each call creates a job.' },
     recipients: ['delivery.targets[].address', 'delivery.fallbackTargets[].address'],
     title: 'Create Automation Job',
-    description: 'Create a durable automation job. An optional id keeps the job under that id and makes the create repeatable: when a job with that id already exists it is returned unchanged.',
+    description: 'Create a durable automation job. An optional id makes the create repeatable in its project: the job is kept under an id made from that id and the project (`<id>-<8 hex>`, the same for every create of it in that project), and when this project already has that job it is returned unchanged. Another project\'s job of the same id is never returned, and the id given says nothing about it.',
     category: 'automation',
     effects: ['automation.administer'],
     http: { method: 'POST', path: '/api/automation/jobs' },
     events: [runtimeEventId('automation')],
+    // Its runs' turns work in this project (control-plane dispatch and the router check it for the caller).
+    workFolders: ['workingDirectory'],
     inputSchema: automationScheduleInputSchema({
       id: STRING_SCHEMA,
       name: STRING_SCHEMA,
@@ -365,6 +367,8 @@ export const builtinGatewayControlAutomationMethodDescriptors: readonly GatewayM
     category: 'automation',
     effects: ['automation.administer'],
     http: { method: 'POST', path: '/api/automation/schedules' },
+    // Its runs' turns work in this project (control-plane dispatch and the router check it for the caller).
+    workFolders: ['workingDirectory'],
     inputSchema: automationScheduleInputSchema({
       name: STRING_SCHEMA,
       prompt: STRING_SCHEMA,

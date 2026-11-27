@@ -27,6 +27,12 @@ export interface PermissionAuditEntry {
   readonly requestedAt: number;
   readonly decidedAt?: number | undefined;
   readonly persisted?: boolean | undefined;
+  /**
+   * The project the call was decided for (the deciding gate's, or the posting program's checked project). A candidate
+   * policy's preview decides each call again against its own project, and shows a caller only the calls of projects
+   * it may reach (gate/policy/policy-dispatch.ts). None: the owner's alone.
+   */
+  readonly project?: string | undefined;
 }
 
 export class PolicyRuntimeState {
@@ -40,6 +46,8 @@ export class PolicyRuntimeState {
   private readonly _decisionListeners = new Set<(entry: PermissionAuditEntry) => void>();
   /** The findings of the last lint read of the loaded bundles (refreshLint). */
   private _lintFindings: readonly PolicyLintFinding[] = [];
+  /** How many of those findings are the policy in force's and the candidate's (a caller may see one and not the other). */
+  private _lintCounts: { readonly current: number; readonly candidate: number } = { current: 0, candidate: 0 };
   /** Why the bundle named by `policy.bundlePath` did not load, or null when it loaded or none is configured. */
   private _configuredBundleFailure: string | null = null;
 
@@ -85,6 +93,11 @@ export class PolicyRuntimeState {
     this.notify();
   }
 
+  /** The last lint read's finding counts, of the policy in force and of the candidate. */
+  public getLintCounts(): { readonly current: number; readonly candidate: number } {
+    return this._lintCounts;
+  }
+
   public getSnapshot(): PolicyPanelSnapshot {
     const lintFindings = this._lintFindings;
     const panel = new PolicyDiagnosticsPanel(
@@ -106,14 +119,14 @@ export class PolicyRuntimeState {
   public async refreshLint(registry: PolicyRegistry = this._registry): Promise<readonly PolicyLintFinding[]> {
     const current = registry.getCurrent();
     const candidate = registry.getCandidate();
-    const findings = [
-      ...(current ? await lintPolicyConfig({ mode: 'custom', rules: current.rules }) : []),
-      ...(candidate ? await lintPolicyConfig({ mode: 'custom', rules: candidate.rules }) : []),
-    ];
+    const ofCurrent = current ? await lintPolicyConfig({ mode: 'custom', rules: current.rules }) : [];
+    const ofCandidate = candidate ? await lintPolicyConfig({ mode: 'custom', rules: candidate.rules }) : [];
+    const findings = [...ofCurrent, ...ofCandidate];
     // A newer bundle may have been loaded while a judgment reader was pending.
     // Return this read to its caller, but never replace the newer snapshot.
     if (registry.getCurrent() === current && registry.getCandidate() === candidate) {
       this._lintFindings = findings;
+      this._lintCounts = { current: ofCurrent.length, candidate: ofCandidate.length };
       this.notify();
     }
     return findings;
@@ -134,6 +147,8 @@ export class PolicyRuntimeState {
     tool: string;
     category: string;
     analysis: PermissionCheckResult['analysis'];
+    /** The project the call is decided for. */
+    project?: string | undefined;
   }): void {
     this._upsertPermissionAudit({
       callId: params.callId,
@@ -146,6 +161,7 @@ export class PolicyRuntimeState {
       target: params.analysis.target,
       host: params.analysis.host,
       requestedAt: Date.now(),
+      ...(params.project ? { project: params.project } : {}),
     });
     this.notify();
   }
@@ -155,8 +171,11 @@ export class PolicyRuntimeState {
     tool: string;
     category: string;
     result: PermissionCheckResult;
+    /** The project the call was decided for. */
+    project?: string | undefined;
   }): void {
     const entry: PermissionAuditEntry = {
+      ...(params.project ? { project: params.project } : {}),
       callId: params.callId,
       tool: params.tool,
       category: params.category,

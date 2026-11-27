@@ -145,6 +145,8 @@ export {
 } from './control-plane.js';
 export type { DeliveryEvent, DeliveryEventType, DeliveryKind } from './deliveries.js';
 export { DELIVERY_KINDS } from './deliveries.js';
+export type { EventAbout, EventAboutKind } from './about.js';
+export { EVENT_ABOUT_KINDS } from './about.js';
 export type { WatcherEvent, WatcherEventType, WatcherSourceKind } from './watchers.js';
 export { WATCHER_SOURCE_KINDS } from './watchers.js';
 export type { SurfaceEvent, SurfaceEventType, SurfaceKind } from './surfaces.js';

@@ -85,7 +85,7 @@ export async function openNativeIntake(
       lifetimeAbort.signal.aborted ||
       !isClientLifetimeCurrent(lifetime)
     ) {
-      throw new Error("The selected connection changed. Reopen Native request to inspect it.");
+      throw new Error("The connection to the daemon changed meanwhile. Open the request again to see where it stands.");
     }
   };
   const combined = (operation?: AbortSignal) =>
@@ -100,10 +100,13 @@ export async function openNativeIntake(
     const auth = await platformClient.operator.invoke("control.auth.current", {}, current);
     check();
     current.throwIfAborted();
-    // The daemon states which credential this browser holds: a paired device is
-    // `device-token`; the operator token on the daemon's own machine is `local`.
-    const credential = (auth as { readonly credential?: unknown }).credential;
-    const owner = credential === "device-token" || credential === "local";
+    // The daemon says whether this browser is the owner himself (his sign-in with his
+    // name and password): its one test of who the owner is, never guessed here.
+    // A device he paired is not him, but does his native work (method-owner-decision.ts
+    // `ownersDevice`), so a paired browser keeps the form.
+    const owner =
+      (auth as { readonly ownerHimself?: unknown }).ownerHimself === true ||
+      (auth as { readonly credential?: unknown }).credential === "device-token";
     if (
       !auth.authenticated ||
       !auth.admin ||
@@ -116,26 +119,21 @@ export async function openNativeIntake(
           : ["read:work-ledger", authority === "execution" ? "write:fleet" : "write:work-ledger"]
       ).every((scope) => auth.scopes.includes("*") || auth.scopes.includes(scope))
     ) {
-      const scopes =
-        authority === "turn"
-          ? "read:work-ledger, write:work-ledger and write:sessions"
-          : authority === "execution"
-            ? "read:work-ledger and write:fleet"
-            : "read:work-ledger and write:work-ledger";
       const feature =
-        authority === "turn" ? "Native conversation delivery" : authority === "execution" ? "Native execution" : "Native requests";
+        // Said to a person: what he was doing, never the transport's name.
+        authority === "turn" ? "Sending a message to the daemon" : authority === "execution" ? "Running work on the daemon" : "Asking for work";
       throw Object.assign(
         new Error(
           owner
-            ? `${feature} needs owner access with ${scopes}; this credential does not hold it. Pair this browser again with those scopes (Settings, Devices and pairing), then retry.`
-            : `${feature} runs from the daemon's own machine or a paired device. Open the web app on that machine with its operator token, or pair this browser (Settings, Devices and pairing), then retry.`
+            ? `${feature} needs full access, and this browser's pairing does not have it. Pair it again with full access (Settings, Devices and pairing), then try again.`
+            : `${feature} is for the owner: sign in with the owner's name and password, or pair this browser (Settings, Devices and pairing), then try again.`
         ),
         { code: "PAIRED_OWNER_REQUIRED" }
       );
     }
     const diffScope = selectedDiff?.kind === "session" ? "read:sessions" : selectedDiff ? "read:checkpoints" : undefined;
     if (diffScope && !auth.scopes.includes("*") && !auth.scopes.includes(diffScope))
-      throw new Error(`Native selected change requires current ${diffScope} permission.`);
+      throw new Error(`Sending a chosen change needs access to read ${diffScope === "read:sessions" ? "conversations" : "checkpoints"}, and this browser does not have it. Pair it again with full access (Settings, Devices and pairing).`);
     const project = await platformClient.operator.invoke("workLedger.project", {}, current);
     check();
     current.throwIfAborted();
@@ -144,12 +142,12 @@ export async function openNativeIntake(
       !project.projectId ||
       project.projectId.length > 200
     )
-      throw new Error("The daemon did not identify its native project.");
+      throw new Error("The daemon did not say which project the work is for, so nothing was sent.");
     if (expectedProjectId !== undefined && project.projectId !== expectedProjectId)
-      throw new Error("The native session project changed. Reopen the session before submitting.");
+      throw new Error("The conversation's project changed meanwhile. Open the conversation again before sending.");
     const relay = getActiveRoute() === "relay" ? getStoredRelayPairing() : null;
     if (getActiveRoute() === "relay" && !relay)
-      throw new Error("The selected relay connection is unavailable.");
+      throw new Error("The connection through the relay is not set up in this browser, so nothing was sent.");
     // Only the public host key is retained. No token, relay rendezvous or grant.
     return {
       endpoint: GOODVIBES_BASE_URL,
@@ -179,7 +177,7 @@ export async function openNativeIntake(
     const owned = (record: NativeIntakeBrowserRecord) => {
       check();
       if (!sameBinding(binding, record.binding))
-        throw new Error("This request belongs to a different native owner.");
+        throw new Error("This request was saved under another sign-in, so it is left as it is.");
     };
     const inScope = (record: NativeIntakeBrowserRecord) =>
       record.command.continuation?.sessionId === continuationSessionId &&
@@ -190,7 +188,7 @@ export async function openNativeIntake(
     const confirm = async (record: NativeIntakeBrowserRecord) => {
       owned(record);
       if (!inScope(record))
-        throw new Error("This saved request belongs to a different session scope or selected change.");
+        throw new Error("This saved request belongs to another conversation or another chosen change, so it is left as it is.");
       await journal.confirm(record);
       check();
     };
@@ -220,7 +218,7 @@ export async function openNativeIntake(
           (result.kind === "work" && result.receipt.goal !== record.command.text))
       ) {
         throw new Error(
-          "The daemon returned a different original source. Keep the saved request for inspection."
+          "The daemon's record of this request does not match what this browser saved, so nothing was sent. The saved request is kept to look at."
         );
       }
       return result;

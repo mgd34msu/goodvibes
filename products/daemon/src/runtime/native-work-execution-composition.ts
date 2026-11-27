@@ -26,8 +26,11 @@ export async function createDaemonNativeWorkExecutionServices(options: Omit<Daem
   readonly joinForeground?: (contractId: string) => Promise<void>;
   readonly releaseForeground?: (contractId: string) => void;
   readonly readAccessFilter: NonNullable<DaemonContractCompositionOptions['readAccessFilter']>;
-  /** A piece of work's plan before it runs ("Show me the plan before it runs"). */
-  readonly workPlans?: Pick<import('@goodvibes/engine/platform/platform/workflow/work-ledger').WorkPlans, 'gate' | 'started'> | undefined;
+  /**
+   * A piece of work's plan before it runs ("Show me the plan before it runs"), and who caused each piece of work to run
+   * (read by the activation: each run's turns run as that party).
+   */
+  readonly workPlans?: Pick<import('@goodvibes/engine/platform/platform/workflow/work-ledger').WorkPlans, 'gate' | 'started' | 'causeOfSession'> | undefined;
 }) {
   const continuationOwner = options.continuationScopeOwner;
   const continuationPolicy = continuationOwner ? createDaemonContinuationPolicy(options.configManager, continuationOwner) : undefined;
@@ -46,8 +49,17 @@ export async function createDaemonNativeWorkExecutionServices(options: Omit<Daem
     const contracts = createDaemonContractServices({ ...options, nativeDataWriter: options.nativeDataWriter ?? options.configManager.getNativeDataWriter(), projectRoot: realpathSync(options.projectRoot), nativeOwner: execution.nativeOwner });
     execution.attachRunner(contracts.runner);
     let closing: Promise<void> | undefined;
-    return { execution, runner: contracts.runner, close() {
-      return closing ??= execution.close().finally(() => contracts.dispose());
+    let runsEnded = false;
+    // The daemon is stopping: every run keeps its restart checkpoint and ends now (the runner's disposal), so nothing
+    // that waits for a run (its owner record's join, a start or settlement in flight) waits past the stop. The work
+    // stands as interrupted at the next start. Once only.
+    const endRuns = (): void => {
+      if (runsEnded) return;
+      runsEnded = true;
+      contracts.dispose();
+    };
+    return { execution, runner: contracts.runner, endRuns, close() {
+      return closing ??= execution.close().finally(endRuns);
     } };
   } catch (error) { await execution.close(); throw error; }
 }

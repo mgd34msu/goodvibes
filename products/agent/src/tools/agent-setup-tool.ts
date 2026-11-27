@@ -6,7 +6,8 @@ import { createSetupSmokeReferenceCapture, resolveSetupSmokeNativeEvidence } fro
 import { runSetupInstallSmoke } from './agent-harness-setup-posture.ts';
 import { effectOutput, requireConfirmedAction } from './agent-harness-tool-utils.ts';
 import { confirmParameter, requestParameter } from '@goodvibes/engine/terminal-shell/agent-turn/effect-admission';
-import { readFlag, readString } from '@goodvibes/engine/terminal-shell/agent-turn/tool-args';
+import { readString } from '@goodvibes/engine/terminal-shell/agent-turn/tool-args';
+import { runCopyFromTerminalApp } from './agent-settings-import-tool.ts';
 
 type AgentSetupAction =
   | 'status'
@@ -15,8 +16,7 @@ type AgentSetupAction =
   | 'token'
   | 'smoke'
   | 'finish'
-  | 'import_settings'
-  | 'apply_import';
+  | 'import_settings';
 
 interface AgentSetupToolArgs {
   readonly action?: unknown;
@@ -30,6 +30,7 @@ interface AgentSetupToolArgs {
   readonly limit?: unknown;
   readonly confirm?: unknown;
   readonly explicitUserRequest?: unknown;
+  readonly security?: unknown;
 }
 
 interface AgentSetupToolDeps {
@@ -50,12 +51,11 @@ function normalizeSetupAction(value: unknown): AgentSetupAction | null {
   if (action === 'token' || action === 'auth' || action === 'provision_token' || action === 'repair_token') return 'token';
   if (action === 'smoke' || action === 'run_smoke' || action === 'install_smoke') return 'smoke';
   if (action === 'finish' || action === 'closeout' || action === 'apply_close' || action === 'apply_and_close') return 'finish';
-  if (action === 'import' || action === 'apply_import' || action === 'import_apply') return 'apply_import';
-  if (action === 'import_settings' || action === 'settings_import') return 'import_settings';
+  if (action === 'import' || action === 'apply_import' || action === 'import_apply' || action === 'import_settings' || action === 'settings_import') return 'import_settings';
   return null;
 }
 
-const SETUP_ACTION_WORDS = ['status', 'item', 'repair', 'token', 'smoke', 'finish', 'import_settings', 'import', 'apply_import'] as const;
+const SETUP_ACTION_WORDS = ['status', 'item', 'repair', 'token', 'smoke', 'finish', 'import_settings', 'import'] as const;
 
 /**
  * The action, inferred from the fields only when none was named. A word that was
@@ -115,7 +115,7 @@ export function createAgentSetupTool(deps: AgentSetupToolDeps): Tool {
           action: {
             type: 'string',
             enum: [...SETUP_ACTION_WORDS],
-            description: 'Setup action; status/item read (status lists the /setup topics a person sets things up with). import_settings previews the shared-settings import; import (or apply_import) applies it. Effects need a current recorded admission.',
+            description: 'Setup action; status/item read (status lists the setup topics a person sets things up with: each a row of System, Setup and a capability setup.<topic>). import_settings (or import) gives the Agent the settings the terminal app has: the capability settings.copy-from-terminal-app; one that loosens a protection only with security:"yes". Effects need a current recorded admission.',
           },
           setupItemId: { type: 'string', description: 'Setup item id.' },
           itemId: { type: 'string', description: 'Alias for setupItemId.' },
@@ -124,8 +124,9 @@ export function createAgentSetupTool(deps: AgentSetupToolDeps): Tool {
           fields: { type: 'object', description: 'Optional user-run setup smoke output.' },
           includeParameters: { type: 'boolean', description: 'Include bounded route details and parameters where supported.' },
           limit: { type: 'number', description: 'Optional status list limit.' },
-          confirm: confirmParameter('Only import_settings reads it, as a legacy way to ask for apply (use apply_import).'),
+          confirm: confirmParameter(),
           explicitUserRequest: requestParameter(),
+          security: { type: 'string', enum: ['no', 'yes'], description: 'For import_settings: yes also copies the settings that loosen a protection; no (the default) leaves them as they are.' },
         },
         additionalProperties: false,
       },
@@ -175,19 +176,12 @@ export function createAgentSetupTool(deps: AgentSetupToolDeps): Tool {
         // The evidence snapshot is the effect: a blocked plan is still a saved result (done says whether it was saved).
         return effectOutput(result);
       }
+      // First run recorded as finished for this Agent: the daemon's setup.mark-done, as a capability_run call.
       if (action === 'finish') {
-        return run('agent_harness', {
-          mode: 'run_workspace_action',
-          actionId: 'onboarding-apply-close',
-          ...confirmedArgs(args),
-        });
+        return run('capability_run', { id: 'setup.mark-done', inputs: { program: 'agent' } });
       }
-      if (action === 'import_settings' || action === 'apply_import') {
-        return run('import_goodvibes_settings', {
-          action: action === 'apply_import' || readFlag(args.confirm, 'confirm', false) ? 'apply' : 'preview',
-          ...confirmedArgs(args),
-        });
-      }
+      // The terminal app's settings: the one capability, settings.copy-from-terminal-app, as a capability_run call.
+      if (action === 'import_settings') return runCopyFromTerminalApp(deps.toolRegistry, args as Record<string, unknown>, options);
 
       return error(`Unknown setup action. Use one of: ${SETUP_ACTION_WORDS.join(', ')}.`);
     },

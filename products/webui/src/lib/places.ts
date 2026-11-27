@@ -14,10 +14,11 @@
  */
 import { isRuntimeEventDomain, type RuntimeEventDomain } from '@goodvibes/engine/contracts';
 import {
-  BROWSER_PLACES, TERMINAL_ONLY_PLACES, type AnyPlace, type PlaceAction, type PlaceCapabilityAction, type PlaceCount, type PlaceItem, type PlaceList,
+  actionOfferedFor, startingValues, BROWSER_PLACES, TERMINAL_ONLY_PLACES, type AnyPlace, type PlaceAction, type PlaceCapabilityAction, type PlaceCount, type PlaceItem, type PlaceList,
 } from '@goodvibes/engine/terminal-shell/places/browser';
 import { CAPABILITY_GROUPS, type CapabilityGroupId } from '@goodvibes/engine/platform/platform/capabilities/words';
 import { invokeMethod, invokeOwnerMethod, invokeThroughMethod } from './goodvibes';
+import { EVERY_PROJECT } from './place-project';
 import type { ViewId } from './router';
 
 export type { AnyPlace, PlaceAction, PlaceCapabilityAction, PlaceCount, PlaceItem, PlaceList };
@@ -111,6 +112,9 @@ export function webListsOf(place: AnyPlace): { readonly shown: readonly PlaceLis
   };
 }
 
+/** The reads that take `everyProject` (the daemon's memory reads, method-catalog-runtime.ts). */
+const EVERY_PROJECT_READS: ReadonlySet<string> = new Set(['memory.records.list', 'memory.records.search']);
+
 /** The key of a read: lists of one method and input are one call per refresh. */
 export function readKey(list: PlaceList<PlaceItem>): string {
   return list.source.kind === 'daemon' ? `${list.source.method} ${JSON.stringify(list.source.input)}` : `${list.source.kind}:${list.source.name}`;
@@ -123,15 +127,22 @@ export function readKey(list: PlaceList<PlaceItem>): string {
 export async function readSource(list: PlaceList<PlaceItem>, project?: string | undefined, signal?: AbortSignal): Promise<unknown> {
   if (list.source.kind !== 'daemon') throw new Error(`${list.noun} is kept by the terminal program you work in`);
   const { method, input } = list.source;
-  // A capability's read is bound to the project the person chose (place-project.ts), never the daemon's own folder.
-  if (method === 'capabilities.run') return invokeOwnerMethod(method, project ? { ...input, workingDirectory: project } : input, signal);
+  // A capability's read is bound to the project the person chose (place-project.ts), never the daemon's own folder;
+  // "Every project" names none and says so (the daemon takes it from the owner himself only).
+  if (method === 'capabilities.run') {
+    return invokeOwnerMethod(method, project === EVERY_PROJECT ? { ...input, everyProject: true } : project ? { ...input, workingDirectory: project } : input, signal);
+  }
   // A list bound to a project (`projectAs`) is read through the method invoke with the chosen project; with none
   // chosen yet it is not read, so the daemon's own folder is never read in its place.
   const projectAs = list.source.projectAs;
   if (projectAs) {
+    if (project === EVERY_PROJECT) throw new Error('this list is one project\'s: choose a project to read it');
     if (!project) throw new Error('no project is chosen yet');
     return invokeThroughMethod(method, { ...input, [projectAs]: project }, signal);
   }
+  // "Every project": a read of per-project memory says so (the daemon takes it from the owner himself only); no
+  // project is named, so every other read covers what belongs to no project.
+  if (project === EVERY_PROJECT && EVERY_PROJECT_READS.has(method)) return invokeThroughMethod(method, { ...input, everyProject: true }, signal);
   // The method id is the declaration's, held to the daemon's catalog; it goes through the typed signature as itself.
   return invokeMethod(method as Parameters<typeof invokeMethod>[0], input as never) as Promise<unknown>;
 }
@@ -145,7 +156,7 @@ export interface PlaceCountRow {
 
 /** Every place's count in one call, for the browser's view of each place and the chosen project. */
 export async function readPlaceCounts(project: string | undefined): Promise<Readonly<Record<string, PlaceCountRow>>> {
-  const answer = await invokeOwnerMethod('places.counts', { program: 'web', ...(project ? { workingDirectory: project } : {}) });
+  const answer = await invokeOwnerMethod('places.counts', { program: 'web', ...(project && project !== EVERY_PROJECT ? { workingDirectory: project } : {}) });
   const rows = answer && typeof answer === 'object' && Array.isArray((answer as { places?: unknown }).places) ? (answer as { places: unknown[] }).places : [];
   const out: Record<string, PlaceCountRow> = {};
   for (const entry of rows) {
@@ -236,10 +247,15 @@ export function wholeActions(place: AnyPlace, listId: string): readonly PlaceCap
   return webActions(place).filter((action) => action.list === listId && action.whole === true);
 }
 
-/** The actions that apply to the selected item in its state. */
+/** The actions that apply to the selected item: its state, and its own data where the action says (`offeredWhen`). */
 export function itemActions(place: AnyPlace, listId: string, item: PlaceItem): readonly PlaceCapabilityAction<PlaceItem>[] {
-  return webActions(place).filter((action) => action.list === listId && action.whole !== true && (!action.states || action.states.includes(item.state)));
+  return webActions(place).filter((action) => action.list === listId && action.whole !== true && actionOfferedFor(action, item));
 }
+
+/** Whether an action is offered on an item (the engine's one test, place-types.ts `actionOfferedFor`). */
+export { actionOfferedFor };
+/** The values a form opens on from the item (the engine's one reading, place-types.ts `startingValues`). */
+export { startingValues };
 
 /** The action that undoes one just run: the place's web action on the same list whose capability is named by `undoneBy`. */
 export function undoActionOf(

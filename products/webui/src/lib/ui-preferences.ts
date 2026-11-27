@@ -1,7 +1,18 @@
 import { useEffect, useState } from 'react';
+import { accountKey } from './account-storage';
+import { subscribeClientLifetime } from './client-lifetime';
 
-export const WEBUI_PREFERENCES_KEY = 'goodvibes.webui.preferences';
+/** Kept for the person signed in (account-storage.ts): another person's choices and consents are never read. */
+export const WEBUI_PREFERENCES_KEY = 'goodvibes.webui.preferences' as const;
 export const WEBUI_PREFERENCES_EVENT = 'goodvibes:webui-preferences';
+
+// Another person signed in (or nobody is): their own preferences, read and applied again.
+if (typeof window !== 'undefined') {
+  subscribeClientLifetime(() => {
+    unpersisted = null;
+    window.dispatchEvent(new CustomEvent(WEBUI_PREFERENCES_EVENT, { detail: readWebUiPreferences() }));
+  });
+}
 
 export interface WebUiPreferences {
   codeBlockLineNumbers: boolean;
@@ -96,7 +107,7 @@ export function readWebUiPreferences(): WebUiPreferences {
   if (unpersisted !== null) return unpersisted;
   if (!storageAvailable()) return DEFAULT_WEBUI_PREFERENCES;
   try {
-    const stored = window.localStorage.getItem(WEBUI_PREFERENCES_KEY);
+    const stored = window.localStorage.getItem(accountKey(WEBUI_PREFERENCES_KEY));
     if (!stored) return DEFAULT_WEBUI_PREFERENCES;
     const parsed = JSON.parse(stored) as Partial<WebUiPreferences>;
     return {
@@ -119,7 +130,7 @@ export function writeWebUiPreference<Key extends PreferenceKey>(key: Key, value:
   const next = { ...readWebUiPreferences(), [key]: value };
   if (storageAvailable()) {
     try {
-      window.localStorage.setItem(WEBUI_PREFERENCES_KEY, JSON.stringify(next));
+      window.localStorage.setItem(accountKey(WEBUI_PREFERENCES_KEY), JSON.stringify(next));
       unpersisted = null;
     } catch {
       // The preference still applies for this session, it just is not remembered.

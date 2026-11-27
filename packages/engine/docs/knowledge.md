@@ -843,7 +843,7 @@ daemon routes and operator method ids.
 ## Project planning
 
 Project Planning keeps the project's work plan, the durable task checklist that
-agent tools, the web SDK and `/workstream` read and write, together with project
+agent tools, the web SDK and the Work place's Checklist tab read and write, together with project
 decision records. The work plan's tasks are stored one row each in the user's
 shared plan file (`~/.goodvibes/work-plans.sqlite`), which the terminal app,
 the Agent and the daemon all open, so they never appear in search, listings,

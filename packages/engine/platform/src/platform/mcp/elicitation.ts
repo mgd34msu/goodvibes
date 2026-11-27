@@ -97,7 +97,8 @@ export function createMcpElicitationApprovalHandler(
     };
     const decision = await requestApproval({
       request: promptRequest,
-      metadata: { source: 'mcp-elicitation', serverName: request.serverName },
+      // Who asks: the tool server, so its questions are bounded and listed as its own (control-plane/approval-broker.ts).
+      metadata: { source: 'mcp-elicitation', serverName: request.serverName, requestedBy: `mcp-server:${request.serverName}` },
     });
     if (!decision.approved) {
       return { action: 'decline' };

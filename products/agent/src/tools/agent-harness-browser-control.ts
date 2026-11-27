@@ -363,7 +363,7 @@ function browserControlDecision(
       id: 'inspect-configured-browser-control',
       status: 'ready-to-inspect-tool',
       modelRoute: route?.modelRoute ?? (firstToolRoute || firstReadyMcpRoute || posture.recommendedRoute || posture.executionRoute),
-      userRoute: 'Agent Workspace -> Work & Approvals or Tools & MCP',
+      userRoute: 'Tools and extensions, Tools and Servers (the menu, Ctrl+G then m)',
       nextStep: route
         ? `Call ${route.modelRoute} directly, replacing any <placeholder> with a real value. ${route.summary}`
         : 'Inspect the configured browser tool/server before acting.',
@@ -380,7 +380,7 @@ function browserControlDecision(
       id: 'review-browser-control-connector',
       status: 'review-connector-first',
       modelRoute: firstReviewMcpRoute || 'computer action:"mcp" query:"browser desktop" includeParameters:true',
-      userRoute: 'Agent Workspace -> Tools & MCP',
+      userRoute: 'Tools and extensions, Servers (the menu, Ctrl+G then m)',
       nextStep: 'Review connector trust, connectivity, and schema freshness before treating browser or desktop control as available.',
       reason: 'A browser/desktop connector exists but needs trust, connectivity, or schema review.',
       safety: 'Do not use stale or untrusted browser/desktop connectors for screenshots, authenticated pages, or desktop actions.',
@@ -390,7 +390,7 @@ function browserControlDecision(
     id: 'setup-browser-control',
     status: 'setup-needed',
     modelRoute: posture.setupRoute,
-    userRoute: 'Agent Workspace -> Start',
+    userRoute: 'Tools and extensions, Servers, A (add a server)',
     nextStep: 'Configure a trusted browser/desktop tool or MCP server, or use the public web/fetch fallback when live UI state is not required.',
     reason: 'No trusted browser/desktop control tool or fresh MCP server is configured.',
     safety: 'This planner does not open, observe, or control the browser or desktop.',

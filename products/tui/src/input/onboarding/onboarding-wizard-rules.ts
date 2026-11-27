@@ -6,7 +6,7 @@ import {
   getExternalSurfaceAutoStartFieldId,
   isExternalSurfaceSelectedByDefault,
 } from './onboarding-wizard-external-surfaces.ts';
-import { getExternalSurfaceSpecByFieldId, normalizeText, uniqueNonEmpty, VERBATIM_FIELD_IDS } from './onboarding-wizard-helpers.ts';
+import { getExternalSurfaceSpecByFieldId, normalizeText, uniqueNonEmpty } from './onboarding-wizard-helpers.ts';
 import type { OnboardingWizardControllerLike } from './onboarding-wizard-types.ts';
 
 export function getSharedIpDefault(
@@ -193,45 +193,13 @@ export function shouldExposeControlPlaneNetwork(controller: OnboardingWizardCont
       && (controller.isCapabilitySelected('browser-access') || controller.isCapabilitySelected('network-access'));
   }
 
-export function requiresAuthBootstrap(controller: OnboardingWizardControllerLike): boolean {
-    return controller.hasServerCapabilitiesSelected()
-      && (!controller.hasLocalAuthUser() || controller.hasBootstrapCredentialPresent());
-  }
-
-export function hasAdminAuthUser(controller: OnboardingWizardControllerLike): boolean {
-    return (controller.runtimeSnapshot?.auth.snapshot.users ?? [])
-      .some((user) => user.roles.includes('admin'));
-  }
-
-export function hasLocalAuthUser(controller: OnboardingWizardControllerLike): boolean {
-    return (controller.runtimeSnapshot?.auth.snapshot.userCount ?? 0) > 0
-      || (controller.runtimeSnapshot?.auth.snapshot.users ?? []).length > 0;
-  }
-
-export function hasBootstrapCredentialPresent(controller: OnboardingWizardControllerLike): boolean {
-    return controller.runtimeSnapshot?.auth.snapshot.bootstrapCredentialPresent === true;
-  }
-
-export function getDefaultAdminUsername(controller: OnboardingWizardControllerLike): string {
-    const users = controller.runtimeSnapshot?.auth.snapshot.users ?? [];
-    if (controller.hasBootstrapCredentialPresent()) {
-      const existingAdmin = users.find((user) => user.roles.includes('admin'));
-      if (existingAdmin) return existingAdmin.username;
-    }
-    const candidates = controller.hasBootstrapCredentialPresent()
-      ? ['goodvibes-admin', 'admin']
-      : ['admin', 'goodvibes-admin'];
-    const candidate = candidates.find((username) => !users.some((user) => user.username === username));
-    return candidate ?? `goodvibes-admin-${users.length + 1}`;
-  }
-
 export function getBooleanFieldValue(controller: OnboardingWizardControllerLike, fieldId: string, fallback: boolean): boolean {
     return controller.toggleState.get(fieldId) ?? fallback;
   }
 
 export function getStringFieldValue(controller: OnboardingWizardControllerLike, fieldId: string, fallback: string): string {
     const value = controller.textState.get(fieldId) ?? controller.radioState.get(fieldId);
-    return VERBATIM_FIELD_IDS.has(fieldId) ? value ?? fallback : normalizeText(value ?? fallback);
+    return normalizeText(value ?? fallback);
   }
 
 export function parseIntegerFieldValue(controller: OnboardingWizardControllerLike, fieldId: string, fallback: number): number | null {

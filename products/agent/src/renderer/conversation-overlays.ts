@@ -22,7 +22,6 @@ import { renderSessionPickerModal } from './session-picker-modal.ts';
 import { renderProfilePickerModal } from './profile-picker-modal.ts';
 import { renderBookmarkModal } from './bookmark-modal.ts';
 import { renderAutocompleteOverlay } from './autocomplete-overlay.ts';
-import { renderAgentWorkspace } from './agent-workspace.ts';
 import { renderBlockActionsMenu } from './block-actions-overlay.ts';
 import type { SurfaceLayer } from './surface-kit.ts';
 
@@ -38,7 +37,7 @@ export interface ConversationOverlayContext {
 
 /** True while a modal covers the screen, so the composer-anchored popups stay hidden. */
 export function modalOpen(input: InputHandler): boolean {
-  return isCommonConversationModalOpen(input) || input.agentWorkspace.active || input.processModal.active || input.liveTailModal.active;
+  return isCommonConversationModalOpen(input) || input.processModal.active || input.liveTailModal.active;
 }
 
 /**
@@ -82,15 +81,10 @@ export interface ConversationLayerContext {
   readonly permission?: SurfaceLayer | null;
 }
 
-/** The Agent workspace as it is painted on screen. */
-export function renderAgentWorkspaceLayer(workspace: InputHandler['agentWorkspace'], width: number, height: number): SurfaceLayer {
-  return renderAgentWorkspace(workspace, width, height);
-}
-
 /**
  * Modal surfaces drawn with the surface kit, as layers the compositor stamps
  * over the dimmed screen (surface-compose.ts). When one modal opens another
- * (the Agent workspace opening settings or the model picker, the process
+ * (a place opening settings or the model picker, the process
  * monitor opening a live tail), both are drawn in the order they were opened
  * (the input layer's modal stack, kit modals such as the activity modal
  * included), the newer on top, each dimming what is under it. The permission
@@ -99,7 +93,6 @@ export function renderAgentWorkspaceLayer(workspace: InputHandler['agentWorkspac
 export function buildConversationLayers(context: ConversationLayerContext): SurfaceLayer[] {
   const { input, screenWidth: w, screenHeight: h } = context;
   const entries: ModalEntry[] = [
-    ['agentWorkspace', input.agentWorkspace.active, () => renderAgentWorkspaceLayer(input.agentWorkspace, w, h)],
     ['modelPicker', input.modelPicker.active, () => renderModelWorkspace(input.modelPicker, w, h)],
     ['mcpWorkspace', input.mcpWorkspace.active, () => renderMcpWorkspace(input.mcpWorkspace, w, h)],
     ['sessionPicker', input.sessionPickerModal.active, () => renderSessionPickerModal(input.sessionPickerModal, w, h)],

@@ -56,6 +56,7 @@ import {
   type JsonRpcResponse,
 } from './jsonrpc.js';
 import { buildParamHeaders, hasValidHeaderAnnotations } from './http-headers.js';
+import { inheritedEnvWithoutCredentials } from '../tools/exec/credential-env.js';
 import {
   buildModernMeta,
   isInputRequiredResult,
@@ -625,7 +626,9 @@ export class McpClient {
       throw new Error(`McpClient(${this.config.name}): no command configured (stdio servers need 'command'; HTTP servers need 'url')`);
     }
     const args = processSpec?.args ?? this.config.args ?? [];
-    const env = { ...process.env, ...(this.config.env ?? {}), ...(processSpec?.env ?? {}) };
+    // What the server inherits carries no credential of this process (the operator token, the person's exported keys):
+    // only what its own configuration gives it (tools/exec/credential-env.ts).
+    const env = { ...inheritedEnvWithoutCredentials(), ...(this.config.env ?? {}), ...(processSpec?.env ?? {}) };
     const cwd = processSpec?.cwd;
 
     try {

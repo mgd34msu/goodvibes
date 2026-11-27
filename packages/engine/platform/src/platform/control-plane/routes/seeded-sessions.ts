@@ -50,6 +50,8 @@ export async function startCiFixSession(
   brief: FixSessionBrief,
 ): Promise<FixSessionStartOutcome> {
   const operation = currentExternalOperationSource();
+  // The repair works in the watch's project; a watch that names none has no folder to work in (never the daemon's own).
+  if (!brief.project) return { error: `The CI repair for ${brief.repo} was not started: its watch names no project to work in.`, refused: true };
   const prompt = ciRepairPrompt(brief);
   let createdJobId: string | undefined;
   try {
@@ -57,6 +59,8 @@ export async function startCiFixSession(
       name: `Fix CI: ${brief.repo}`,
       ...(operation ? { requiresSourceOwner: true } : {}),
       prompt,
+      // Its run works in the watch's project (the project of the turn whose push made the watch).
+      workingDirectory: brief.project,
       schedule: { kind: 'at', at: Date.now() },
       target: {
         kind: 'main',
@@ -119,6 +123,8 @@ export async function startConflictResolutionSession(
     const job = await automation.createJob({
       name: `Resolve merge conflict: ${seed.title}`,
       prompt,
+      // Its run works in the kept worktree (its project's), never the daemon's own folder.
+      workingDirectory: seed.worktreePath,
       schedule: { kind: 'at', at: Date.now() },
       target: {
         kind: 'main',

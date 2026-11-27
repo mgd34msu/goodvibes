@@ -19,10 +19,6 @@ const CLI_COMMAND_DISCOVERY = 'agent_harness mode:"cli_commands" with no query';
 const COMMAND_FILTERS = ['query', 'command', 'commandName', 'target'] as const;
 const COMMAND_DISCOVERY = 'agent_harness mode:"commands" with no query';
 
-const WORKSPACE_ACTION_FILTERS = ['query', 'category', 'categoryId'] as const;
-const WORKSPACE_ACTION_DISCOVERY =
-  'agent_harness mode:"workspace_actions" with no category or query, page by page with offset';
-
 const SETTING_FILTERS = ['query', 'category', 'prefix'] as const;
 const SETTING_DISCOVERY = 'agent_harness mode:"settings" with no category, prefix, or query, page by page with offset';
 
@@ -36,6 +32,5 @@ export const CATALOG_QUERIES = {
   ui_surfaces: { filters: UI_SURFACE_FILTERS, discovery: UI_SURFACE_DISCOVERY },
   cli_commands: { filters: CLI_COMMAND_FILTERS, discovery: CLI_COMMAND_DISCOVERY },
   commands: { filters: COMMAND_FILTERS, discovery: COMMAND_DISCOVERY },
-  workspace_actions: { filters: WORKSPACE_ACTION_FILTERS, discovery: WORKSPACE_ACTION_DISCOVERY },
   methods: { filters: METHOD_FILTERS, discovery: METHOD_DISCOVERY },
 } as const;

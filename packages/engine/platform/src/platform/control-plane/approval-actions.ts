@@ -21,11 +21,14 @@
 import type { AskPresentation } from '../permissions/ask-presentation.js';
 import type { Actor } from '@goodvibes/engine/daemon-api/http-policy';
 import { admitEffects } from '../security/effect-authority.js';
+import { keepReachable } from '@goodvibes/engine/daemon-api';
 import type { ApprovalActionInput, ApprovalBroker, ApprovalRelayPort, SharedApprovalRecord } from './approval-broker.js';
 import type { ResolveSharedApprovalInput } from './approval-broker-owner.js';
+import { refusal } from '@goodvibes/engine/errors';
 import {
   approvalAdministerRefusal,
   approvalRefusal,
+  deviceAnswerRefusal,
   isOpenApprovalStatus,
   parseApprovalRef,
   readApproval,
@@ -70,7 +73,7 @@ export interface ApprovalActions {
 /** The broker surface the port needs; `relay` is set when the daemon is in a group. */
 export type ApprovalActionsBroker = Pick<ApprovalBroker, 'homeNode' | 'listApprovals' | 'getApproval' | 'claimApproval' | 'resolveApproval' | 'cancelApproval' | 'releaseApproval'>
   & { readonly relay?: ApprovalRelayPort | null | undefined }
-  & Partial<Pick<ApprovalBroker, 'presentationOf'>>;
+  & Partial<Pick<ApprovalBroker, 'presentationOf' | 'releaseHoldsOfGonePrograms' | 'shownRecord'>>;
 
 /**
  * The viewer an actor is. In-process callers (no actor) are the program
@@ -78,20 +81,26 @@ export type ApprovalActionsBroker = Pick<ApprovalBroker, 'homeNode' | 'listAppro
  * the effect table, the same rows the routes enforce.
  */
 export function approvalViewerOfActor(actor: Actor | undefined, node: string): ApprovalViewer {
+  // No actor is nobody: it reads what anyone may and answers nothing. The daemon's own in-process code names itself
+  // (the system actor), which is how it reads and acts as the program; nothing is filled in as the owner.
   if (actor === undefined) {
-    return { kind: 'owner-route', scopes: ['*'], node, mayAnswer: true, mayAdminister: true };
+    return { kind: 'operator', scopes: [], node, mayAnswer: false, mayAdminister: false };
   }
   const kind: ApprovalViewer['kind'] = actor.agentFor !== undefined ? 'agent'
     : actor.class === 'peer' ? 'remote-node'
       : actor.class === 'owner' || actor.class === 'system' ? 'owner-route'
         : actor.class === 'admin' ? 'admin' : 'operator';
+  // The owner's own device (an admin that is never the owner himself) answers, but only a question another caller
+  // raised: never its own, nor one of a credential made from it (approval-lifecycle.ts `answersOthersOnly`).
+  const device = actor.agentFor === undefined && actor.class === 'admin' ? actor.ownerDevice : undefined;
   return {
     kind,
     id: actor.id,
     scopes: actor.scopes === 'all' ? ['*'] : [...actor.scopes],
     node,
-    mayAnswer: admitEffects(actor, ['approval.answer']).kind === 'allowed',
+    mayAnswer: admitEffects(actor, ['approval.answer']).kind === 'allowed' || device !== undefined,
     mayAdminister: admitEffects(actor, ['approvals.administer']).kind === 'allowed',
+    ...(device !== undefined ? { answersOthersOnly: { self: actor.id, madeFromIt: device.madeFromIt } } : {}),
   };
 }
 
@@ -102,8 +111,10 @@ export function approvalViewerOfActor(actor: Actor | undefined, node: string): A
  * relaying the action to the node that owns it, which decides.
  */
 export function localApprovalActions(broker: ApprovalActionsBroker, now: () => number = Date.now): ApprovalActions {
-  const row = (record: SharedApprovalRecord, viewer: ApprovalViewer, full = false): ApprovalReadingRow => {
-    const presentation = broker.presentationOf?.(record, full);
+  const row = (stored: SharedApprovalRecord, viewer: ApprovalViewer, full = false): ApprovalReadingRow => {
+    // As shown now: an open question's asker by the name it has now (a renamed device; an unpaired one keeps its name).
+    const record = broker.shownRecord?.(stored) ?? stored;
+    const presentation = broker.presentationOf?.(stored, full);
     return { record, reading: readApproval(record, viewer, now()), ...(presentation ? { presentation } : {}) };
   };
   const remoteRow = (record: SharedApprovalRecord, viewer: ApprovalViewer, relay: ApprovalRelayPort): ApprovalReadingRow =>
@@ -157,13 +168,16 @@ export function localApprovalActions(broker: ApprovalActionsBroker, now: () => n
     get homeNode() { return broker.homeNode; },
     viewerOf: (actor) => approvalViewerOfActor(actor, broker.homeNode),
     list: (viewer, limit = 50) => {
+      // Read when shown: a question whose program is no longer running is ended (its update follows on the stream).
+      void broker.releaseHoldsOfGonePrograms?.().catch(() => undefined);
       // The newest `limit`, and every ask still open however many settled since: a waiting ask is never out of reach.
       const shown = (record: SharedApprovalRecord, index: number): boolean => index < limit || isOpenApprovalStatus(record.status);
-      const rows = broker.listApprovals(Number.MAX_SAFE_INTEGER).filter(shown).map((record) => row(record, viewer));
+      // Only the questions the caller may reach, before the newest `limit` are cut (control-plane/caller-reach.ts).
+      const rows = keepReachable(broker.listApprovals(Number.MAX_SAFE_INTEGER), 'approval', (record) => record.id).filter(shown).map((record) => row(record, viewer));
       const relay = broker.relay;
       if (!relay) return rows;
       // This node's own first, then the group's, newest first within each.
-      return [...rows, ...relay.remote().filter(shown).map((record) => remoteRow(record, viewer, relay))];
+      return [...rows, ...keepReachable(relay.remote(), 'approval', (record) => record.id).filter(shown).map((record) => remoteRow(record, viewer, relay))];
     },
     page: (viewer, options) => {
       const relay = broker.relay;
@@ -193,6 +207,14 @@ export function localApprovalActions(broker: ApprovalActionsBroker, now: () => n
     },
     resolve: async (ref, input, viewer) => {
       const id = local(ref);
+      // The owner's own device answers only a question some other caller raised (approval-lifecycle.ts).
+      const record = id !== null && viewer.answersOthersOnly !== undefined ? broker.getApproval(id) : null;
+      const own = record ? deviceAnswerRefusal(record, viewer) : undefined;
+      if (record && own) {
+        return { applied: false, record, reading: readApproval(record, viewer, now()),
+          refusal: refusal({ code: own.code, state: `${record.status} (revision ${record.revision})`, status: 403, reason: own.reason,
+            next: ['The owner answers it himself, in his signed-in session or his own program.'] }) };
+      }
       if (id !== null) return withReading(await broker.resolveApproval(id, input), viewer);
       // Only hunk indexes travel; changed arguments are computed by the node that owns the ask.
       if (input.modifiedArgs !== undefined && input.selectedHunks === undefined) {

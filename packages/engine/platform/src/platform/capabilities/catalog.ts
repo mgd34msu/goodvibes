@@ -53,6 +53,8 @@ export interface CapabilityEntry {
   readonly loosensIf?: ((values: Readonly<Record<string, string>>) => boolean) | undefined;
   /** The chosen values with which a run cannot be undone (types.ts `irreversibleWhen`): put to the owner for a model. */
   readonly irreversibleWhen?: CapabilityTightensWhen | undefined;
+  /** The chosen values with which a run writes a secret (types.ts `secretWhen`): the `secret.write` effect. */
+  readonly secretWhen?: CapabilityTightensWhen | undefined;
   /** The sentence said instead with some values (types.ts `sentenceWhen`): what will really happen. */
   readonly sentenceWhen?: CapabilitySentenceWhen | undefined;
   readonly inputs: readonly InputDescription[];
@@ -83,6 +85,7 @@ export interface CatalogActionSource {
   readonly ownWorkingState?: true | undefined;
   readonly loosensIf?: ((values: Readonly<Record<string, string>>) => boolean) | undefined;
   readonly irreversibleWhen?: CapabilityTightensWhen | undefined;
+  readonly secretWhen?: CapabilityTightensWhen | undefined;
   readonly sentenceWhen?: CapabilitySentenceWhen | undefined;
   readonly inputs: readonly InputDescription[];
   readonly operator?: { readonly method?: string | undefined; readonly fields?: Readonly<Record<string, string>> | undefined; readonly preview?: string | undefined; readonly project?: true | undefined; readonly terminalOnly?: string | undefined } | undefined;
@@ -129,6 +132,7 @@ function entryOf(command: Pick<CatalogCommandSource, 'name' | 'title'>, action: 
     ...(action.ownWorkingState ? { ownWorkingState: action.ownWorkingState } : {}),
     ...(action.loosensIf ? { loosensIf: action.loosensIf } : {}),
     ...(action.irreversibleWhen ? { irreversibleWhen: action.irreversibleWhen } : {}),
+    ...(action.secretWhen ? { secretWhen: action.secretWhen } : {}),
     ...(action.sentenceWhen ? { sentenceWhen: action.sentenceWhen } : {}),
     inputs: action.inputs,
     ...(method ? { method } : {}),
@@ -182,8 +186,11 @@ export class CapabilityCatalog {
  * `cannot-be-undone` adds `record.destroy`, `sends-out` and `spends-money` add `outward.send`, `ownerOnly` adds
  * `model.refused`). A chosen value that raises the risk adds its row either way.
  */
-export function capabilityEffects(entry: Pick<CapabilityEntry, 'risk' | 'inputs' | 'touches' | 'ownerOnly' | 'effects'>, values: Readonly<Record<string, string>> = {}): readonly EffectId[] {
+export function capabilityEffects(entry: Pick<CapabilityEntry, 'risk' | 'inputs' | 'touches' | 'ownerOnly' | 'effects'> & Partial<Pick<CapabilityEntry, 'secretWhen'>>, values: Readonly<Record<string, string>> = {}): readonly EffectId[] {
   const effects = new Set<EffectId>(entry.effects ?? [entry.touches === 'reads' ? 'control-plane.read' : 'control-plane.write']);
+  // A run whose chosen value makes it write a secret (a setting that holds a credential): the secret write it is.
+  const secret = entry.secretWhen;
+  if (secret && secret.values.includes((values[secret.input] ?? '').trim())) effects.add('secret.write');
   const risk = effectiveRisk(entry, values);
   if (risk === 'cannot-be-undone') effects.add('record.destroy');
   if (risk === 'sends-out' || risk === 'spends-money') effects.add('outward.send');

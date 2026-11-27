@@ -16,6 +16,9 @@ import {
 import { KNOWLEDGE_SOURCE_SCHEMA } from './operator-contract-schemas-knowledge.js';
 
 export const PROJECT_PLANNING_SPACE_INPUT_SCHEMA = objectSchema({
+  // The project folder the plan is of: every planning call names it (by this field, or the program's call context), and
+  // it is checked as every caller's project is (daemon/http/project-planning-routes.ts; refused `NO_PROJECT` without).
+  workingDirectory: STRING_SCHEMA,
   projectId: STRING_SCHEMA,
   knowledgeSpaceId: STRING_SCHEMA,
 }, [], { additionalProperties: true });

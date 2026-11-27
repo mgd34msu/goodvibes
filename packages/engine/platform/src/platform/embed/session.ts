@@ -36,6 +36,7 @@ import type { McpServerConfig } from '../mcp/config.js';
 import type { AgentEvent } from '../../events/agents.js';
 import type { ToolEvent } from '../../events/tools.js';
 import { logger } from '../utils/logger.js';
+import type { TurnInputParty } from '../security/turn-input-party.js';
 
 /** Options for {@link createEmbeddedSession}. */
 export interface EmbedSessionOptions {
@@ -68,7 +69,16 @@ export interface EmbedSessionOptions {
   readonly mcpServers?: readonly McpServerConfig[] | undefined;
   /** Escape hatch for the remaining boot options (port, host, serveFactory…). Part of the daemon's settings. */
   readonly boot?: Partial<Omit<BootDaemonOptions, 'workingDir' | 'homeDirectory' | 'token'>> | undefined;
+  /**
+   * Whose input this session's submissions are (security/turn-input-party.ts): the party of the connection that
+   * started it. The owner's only when the embedder is his own program on his own connection (`goodvibes acp` started by
+   * his editor, not for anyone else: acp/agent.ts); absent, someone else's, so its agents run reads only.
+   */
+  readonly inputParty?: TurnInputParty | undefined;
 }
+
+/** An embedder that named no party: its input is someone else's (unknown leans to someone else). */
+const EMBEDDER_NAMED_NO_PARTY: TurnInputParty = Object.freeze({ party: 'other', who: 'a program that embeds GoodVibes and named no party' });
 
 /** Structured input to {@link EmbeddedSession.submit}. */
 export interface EmbeddedSessionInput {
@@ -361,6 +371,8 @@ export async function createEmbeddedSession(options: EmbedSessionOptions): Promi
           started = await server.startSessionAgent({
             sessionId: submission.session.id,
             task: submission.task ?? body,
+            // The party of the connection that started this session, never the owner's by default.
+            inputParty: options.inputParty ?? EMBEDDER_NAMED_NO_PARTY,
             ...(workspace === daemon.workingDir ? {} : { workingDirectory: workspace }),
           });
         } catch (error) {

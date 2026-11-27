@@ -6,8 +6,8 @@ conversation holds something the saved session does not, a crash snapshot.
 ## Saved session
 
 After every completed assistant turn (`TURN_COMPLETED`), `persistConversation` writes the whole
-conversation through `SessionManager` (one temp file, one rename). This is the copy `/session
-resume`, `--continue`, `--resume` and the session browser read. The first line of the file carries
+conversation through `SessionManager` (one temp file, one rename). This is the copy `/resume`,
+`--continue`, `--resume` and the Sessions place read. The first line of the file carries
 the session's title, model and message count, so listing sessions reads one line per file.
 
 Saved sessions are kept until you delete them. The start-up retention sweep that bounds agent

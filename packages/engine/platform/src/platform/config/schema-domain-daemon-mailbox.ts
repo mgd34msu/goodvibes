@@ -121,7 +121,7 @@ export const daemonMailboxConfigDefaults = {
 /** Schema rows for the daemon's own mail account and calendar. */
 export const daemonMailboxConfigSettings: ConfigSettingDefinition[] = [
   {
-    key: 'surfaces.email.host',
+    key: 'surfaces.email.host', valueKind: 'endpoint',
     label: 'Mail server',
     type: 'string',
     description: 'Mail server hostname used for both IMAP and SMTP unless overridden below',
@@ -152,7 +152,7 @@ export const daemonMailboxConfigSettings: ConfigSettingDefinition[] = [
       + 'Off: labels stay in GoodVibes and channels.inbox.applyLabels refuses for this account.',
   },
   {
-    key: 'surfaces.email.imap.host',
+    key: 'surfaces.email.imap.host', valueKind: 'endpoint',
     label: 'Incoming mail server',
     type: 'string',
     description: 'IMAP hostname (e.g. imap.gmail.com), overriding surfaces.email.host',
@@ -195,7 +195,7 @@ export const daemonMailboxConfigSettings: ConfigSettingDefinition[] = [
     description: 'Mailbox drafts are appended to. Empty (the default) means ask the server which folder carries the \\Drafts flag, which is right for providers such as Gmail whose Drafts folder is not literally named "Drafts"',
   },
   {
-    key: 'surfaces.email.smtp.host',
+    key: 'surfaces.email.smtp.host', valueKind: 'endpoint',
     label: 'Outgoing mail server',
     type: 'string',
     description: 'SMTP hostname, overriding surfaces.email.host',
@@ -224,7 +224,7 @@ export const daemonMailboxConfigSettings: ConfigSettingDefinition[] = [
   // See docs/decisions/2026-07-27-inbound-email-design.md §8 for the ruled defaults and the rationale
   // behind each one; every default here is the owner's to confirm.
   {
-    key: 'surfaces.email.inbound.enabled',
+    key: 'surfaces.email.inbound.enabled', valueKind: 'opening-switch',
     label: 'Tell you when mail arrives',
     type: 'boolean',
     description: 'Turns on inbound notices: arriving mail is matched against open verification expectations, '
@@ -424,7 +424,7 @@ export const daemonMailboxConfigSettings: ConfigSettingDefinition[] = [
   },
 
   {
-    key: 'surfaces.calendar.caldavUrl',
+    key: 'surfaces.calendar.caldavUrl', valueKind: 'endpoint',
     label: 'Calendar server',
     type: 'string',
     description: 'CalDAV server URL the daemon reads and writes events through',

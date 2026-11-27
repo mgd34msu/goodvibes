@@ -1,6 +1,7 @@
 import { isDeepStrictEqual } from 'node:util';
 import type { TypedHandler } from '../../control-plane/host-handlers.js';
 import { GatewayVerbError } from '../../control-plane/routes/gateway-verb-error.js';
+import { nativeIdentityIsCaller } from '../../control-plane/routes/native-owner.js';
 import { PurchaseReconciliationError, type PurchaseReconciliations } from './purchase-reconciliation.js';
 import { PaymentOperationStoreError } from './operation-store.js';
 import { missingScopes } from '@goodvibes/engine/daemon-api/route-helpers';
@@ -24,8 +25,8 @@ export function purchaseReconciliationHandler(owner: PurchaseReconciliations): T
       admin: context.admin, scopes: [...context.scopes], explicitUserRequest: context.explicitUserRequest });
     const expected = (() => { try { return authority?.current(); } catch { throw forbidden(); } })();
     const has = (scopes: readonly string[]) => missingScopes(scopes, ['write:payments']).length === 0;
-    if (!authority || !expected || (expected.kind !== 'pairing-token' && expected.kind !== 'local') || !context.admin || context.principalKind !== 'token'
-      || expected.principalId !== context.principalId || !has(expected.scopes) || !has(context.scopes)) throw forbidden();
+    if (!authority || !expected || !context.admin || !nativeIdentityIsCaller(context, expected)
+      || !has(expected.scopes) || !has(context.scopes)) throw forbidden();
     const paired = structuredClone(expected), original = snapshot(), signal = context.signal, isAuthorized = context.isAuthorized;
     const current = () => {
       signal?.throwIfAborted();

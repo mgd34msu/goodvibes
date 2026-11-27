@@ -24,7 +24,6 @@ import {
 } from '../command-actions/capability-actions.js';
 import type { SurfaceModal } from '../surface-modal-host.js';
 import { parseSlashCommand } from '../slash-command-parser.js';
-import { asPersonsOwnAct } from '../persons-own-act.js';
 import { describedCommandByName } from '../command-actions/define.js';
 import { openGuidedPanel } from '../command-actions/panel.js';
 import { fixedChoices } from '../command-actions/typed-line.js';
@@ -105,7 +104,7 @@ export interface PlaceHost {
    * Open a place, on its list `start.list` when given (a tab the menu found by name), pressing its action
    * `start.action` (by its name in the place's key context) at once when given (an action the menu ran).
    */
-  openPlace(id: string, start?: { readonly list?: string | undefined; readonly action?: string | undefined }): void;
+  openPlace(id: string, start?: { readonly list?: string | undefined; readonly action?: string | undefined; readonly item?: string | undefined }): void;
 }
 
 /** What a program action may ask of the place that runs it. */
@@ -287,7 +286,7 @@ export interface PlaceHostOptions {
   readonly sessionServices?: (() => SessionCapabilityServices) | undefined;
   readonly modals: { push(modal: SurfaceModal): void; close(modal: SurfaceModal): void };
   readonly requestRender: () => void;
-  readonly openPlace: (id: string, start?: { readonly list?: string | undefined; readonly action?: string | undefined }) => void;
+  readonly openPlace: (id: string, start?: { readonly list?: string | undefined; readonly action?: string | undefined; readonly item?: string | undefined }) => void;
 }
 
 /** The one host both terminal programs build for their places. */
@@ -346,8 +345,7 @@ export function createPlaceHost(options: PlaceHostOptions): PlaceHost {
     onDaemonBack: options.onDaemonBack,
     source: (name) => options.sources?.[name],
     capability: resolve,
-    // A press is the person's own act: what it makes (an artifact it saves) is part of what he asked (persons-own-act.ts).
-    runCapability(id, values) { return asPersonsOwnAct(async (): Promise<PlaceRunOutcome> => {
+    async runCapability(id, values): Promise<PlaceRunOutcome> {
       const resolved = resolve(id);
       if (!resolved) return { ok: false, reason: `${id} is not a capability this program has.` };
       const printed: string[] = [];
@@ -382,7 +380,7 @@ export function createPlaceHost(options: PlaceHostOptions): PlaceHost {
       } catch (error) {
         return { ok: false, reason: reasonOf(error) };
       }
-    }); },
+    },
     async openForm(id, values, form) {
       const resolved = resolve(id);
       if (!resolved) return undefined;

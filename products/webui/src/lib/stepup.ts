@@ -28,6 +28,8 @@
  * a not-yet-registered passkey are each surfaced distinctly, never swallowed.
  */
 
+import { accountKey } from './account-storage';
+
 /** The request header a step-up assertion rides on. Mirrors the platform's STEP_UP_ASSERTION_HEADER. */
 export const STEP_UP_ASSERTION_HEADER = 'x-goodvibes-stepup-assertion';
 
@@ -36,7 +38,9 @@ export const STEP_UP_ASSERTION_HEADER = 'x-goodvibes-stepup-assertion';
  * daemon's `stepup.credentials.list` is the record of what is registered. Both registration
  * paths (Settings and the pairing hand-off) write it once the daemon has recorded the passkey.
  */
-const REGISTERED_CREDENTIAL_KEY = 'goodvibes.webui.stepup.credential';
+// Kept for the person signed in (account-storage.ts), and gone at sign-out.
+const REGISTERED_CREDENTIAL_BASE = 'goodvibes.webui.stepup.credential' as const;
+const registeredCredentialKey = (): string => accountKey(REGISTERED_CREDENTIAL_BASE);
 
 // ---------------------------------------------------------------------------
 // base64url <-> bytes
@@ -166,7 +170,7 @@ export interface RegisteredCredentialRecord {
 export function getRegisteredCredential(): RegisteredCredentialRecord | null {
   if (typeof localStorage === 'undefined') return null;
   try {
-    const raw = localStorage.getItem(REGISTERED_CREDENTIAL_KEY);
+    const raw = localStorage.getItem(registeredCredentialKey());
     if (!raw) return null;
     const parsed = JSON.parse(raw) as RegisteredCredentialRecord;
     return typeof parsed?.credentialId === 'string' ? parsed : null;
@@ -178,7 +182,7 @@ export function getRegisteredCredential(): RegisteredCredentialRecord | null {
 export function setRegisteredCredential(record: RegisteredCredentialRecord): void {
   if (typeof localStorage === 'undefined') return;
   try {
-    localStorage.setItem(REGISTERED_CREDENTIAL_KEY, JSON.stringify(record));
+    localStorage.setItem(registeredCredentialKey(), JSON.stringify(record));
   } catch {
     // A storage failure just means the assert step cannot pass allowCredentials; not fatal.
   }
@@ -187,7 +191,7 @@ export function setRegisteredCredential(record: RegisteredCredentialRecord): voi
 export function clearRegisteredCredential(): void {
   if (typeof localStorage === 'undefined') return;
   try {
-    localStorage.removeItem(REGISTERED_CREDENTIAL_KEY);
+    localStorage.removeItem(registeredCredentialKey());
   } catch {
     // ignore
   }

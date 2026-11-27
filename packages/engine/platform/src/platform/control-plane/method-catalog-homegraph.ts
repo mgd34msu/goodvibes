@@ -61,6 +61,8 @@ function homeGraphDescriptor(input: {
   /** The call cannot be undone; see GatewayMethodDescriptor.irreversible. */
   readonly irreversible?: boolean | undefined;
   readonly metadata?: Record<string, unknown> | undefined;
+  /** Inputs naming a file on the daemon's disk; see GatewayMethodDescriptor.daemonFiles. */
+  readonly daemonFiles?: readonly string[] | undefined;
 }): GatewayMethodDescriptor {
   return methodDescriptor({
     id: input.id,
@@ -80,6 +82,7 @@ function homeGraphDescriptor(input: {
     outputSchema: input.outputSchema,
     ...(input.dangerous ? { dangerous: true } : {}),
     ...(input.metadata ? { metadata: input.metadata } : {}),
+    ...(input.daemonFiles ? { daemonFiles: input.daemonFiles } : {}),
   });
 }
 
@@ -154,6 +157,8 @@ export const builtinGatewayHomeGraphMethodDescriptors: readonly GatewayMethodDes
     method: 'POST',
     path: '/api/homeassistant/home-graph/ingest/artifact',
     write: true,
+    // A daemon-local path or file: URI is read on the daemon's disk (control-plane/caller-paths.ts).
+    daemonFiles: ['path', 'uri'],
     // With no `artifactId` the service creates the artifact instead, and the
     // store refuses an input with no content source (`Artifact input requires
     // dataBase64, text, path, or uri`, platform/artifacts/store.ts), this verb

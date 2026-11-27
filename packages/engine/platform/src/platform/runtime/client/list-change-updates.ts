@@ -10,8 +10,10 @@
  * list when it opens. Nothing here retries or waits on a clock.
  */
 import { resolve } from 'node:path';
+import { projectIdentityOf } from '../../workspace/project-identity.js';
 import { openRawServerSentEventStream } from '../transports/sse-stream.js';
 import { buildUrl } from '../transports/transport-paths.js';
+import { programFetch } from './program-fetch.js';
 import { logger } from '../../utils/logger.js';
 import { summarizeError } from '../../utils/error-display.js';
 
@@ -30,9 +32,26 @@ export interface ListChangeSubscriberOptions {
   readonly workingDirectory?: string | undefined;
 }
 
-/** Whether a notice that names a project is about another project than the screen's (so the screen ignores it). */
+/** The one project identity of a folder (workspace/project-identity.ts), read once per folder: a few `stat` calls. */
+const identities = new Map<string, string>();
+function identityOf(folder: string): string {
+  const key = resolve(folder);
+  let known = identities.get(key);
+  if (known === undefined) {
+    known = projectIdentityOf(key);
+    if (identities.size > 256) identities.clear();
+    identities.set(key, known);
+  }
+  return known;
+}
+
+/**
+ * Whether a notice that names a project is about another project than the screen's (so the screen ignores it). Both
+ * are compared as the one project identity: a screen opened in a project's subfolder, or reached through a link, hears
+ * its own project's notices.
+ */
 function aboutAnotherProject(record: { readonly project?: string | undefined } | undefined, workingDirectory: string | undefined): boolean {
-  return record?.project !== undefined && workingDirectory !== undefined && resolve(workingDirectory) !== record.project;
+  return record?.project !== undefined && workingDirectory !== undefined && identityOf(workingDirectory) !== identityOf(record.project);
 }
 
 /** The `list` a frame's LIST_CHANGED names (the envelope or its payload), or undefined for any other frame. */
@@ -126,7 +145,8 @@ export function subscribeDaemonEventFrames(
       const url = new URL(buildUrl(baseUrl, '/api/control-plane/events'));
       url.searchParams.set('domains', [...new Set(interest.domains)].join(','));
       const opened = await openRawServerSentEventStream(
-        fetchImpl,
+        // With this program's registration: the operator token alone is a script and hears no project's changes.
+        programFetch(fetchImpl),
         url.toString(),
         {
           onEvent: ({ name: eventName, payload }) => {
@@ -192,7 +212,7 @@ export function subscribeDaemonListChanges(
       const url = new URL(buildUrl(baseUrl, '/api/control-plane/events'));
       url.searchParams.set('domains', LIST_CHANGE_DOMAIN);
       const opened = await openRawServerSentEventStream(
-        fetchImpl,
+        programFetch(fetchImpl),
         url.toString(),
         {
           onEvent: ({ name: eventName, payload }) => {

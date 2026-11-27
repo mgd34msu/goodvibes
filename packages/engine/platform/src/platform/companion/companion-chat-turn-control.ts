@@ -410,6 +410,13 @@ export interface CompanionPostMessageOptions {
    * only works in one direction.
    */
   readonly ownerDirect?: boolean | undefined;
+  /**
+   * The owner's own input without his being at the screen: a channel message from his account in a conversation proven
+   * his alone, on a channel where he chose "Treat my own messages here as me" (daemon/owner-channel-conversation.ts).
+   * Its turn may change files and run commands under his mode (security/turn-input-party.ts); unlike `ownerDirect` it
+   * starts no new untrusted-content turn.
+   */
+  readonly ownerParty?: boolean | undefined;
   /** In-process tap for this turn's events, called when the turn runs (which may be after earlier queued turns). */
   readonly onTurnEvent?: ((event: CompanionChatTurnEvent) => void) | undefined;
 }
@@ -429,6 +436,8 @@ export interface QueuedCompanionTurn {
    * for why that asymmetry only works in one direction.
    */
   readonly ownerDirect?: boolean | undefined;
+  /** See CompanionPostMessageOptions.ownerParty; rides the queue entry for the same reason. */
+  readonly ownerParty?: boolean | undefined;
   /** Provider-ready user content (attachments resolved at post time). */
   readonly providerContent: Parameters<ConversationManager['addUserMessage']>[0];
   /** In-process tap for this turn's incremental events (rides the queue entry). */

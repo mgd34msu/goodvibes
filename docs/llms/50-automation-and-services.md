@@ -93,7 +93,7 @@ Scheduled. "check the build status": every 15 minutes; next 2026-11-18 10:15 Ame
 
 Run now says what ran and how it stands: `Started "Morning brief". Its run is running.` The Runs tab shows how it ends.
 
-When the terminal app starts, schedules an earlier terminal app kept in its own store for a daemon it could not use (a daemon on another machine or under another home) are handed to the daemon once and the move is reported; the file is renamed, not deleted, so a rollback finds it.
+Schedules an earlier terminal app kept in its own file (`~/.goodvibes/tui/control-plane/automation-jobs.json`, when that was not the daemon's own store) are taken by the daemon itself when it starts, as its upgrade step: each one the daemon does not hold is added once, in the folder the 3.5.0 daemon ran in, and nothing is asked. The file is read only and left as it was, so a rollback finds it; a later start finds each schedule held and takes nothing again. The terminal app no longer moves schedules at its start.
 
 Failures:
 
@@ -495,63 +495,29 @@ Prerequisites: a CalDAV server URL, user and password (or an app password).
    ```
 
    Optional: `surfaces.calendar.defaultCalendarId` and `surfaces.calendar.calendars`.
-2. Check: `/calendar status`.
-3. First use: `/calendar upcoming`.
+2. Check: "what it reads" (`s`) on the Calendar tab of Mail, calendar and channels (the menu, `Ctrl+G` then `m`).
+3. First use: the Calendar tab lists the days ahead by itself (`w` the days ahead in words).
 
-`/calendar` is one command in both apps; `/calendar` alone lists its actions ("See what is coming up" first), and a model or script running it bare gets the days ahead. In the terminal app it works on the daemon's calendar:
+There is no `/calendar`: the calendar is the daemon's, the same in both programs, on the Calendar, Calendar accounts and Calendar feeds tabs of Mail, calendar and channels, and each action is a capability (`calendar.*`) a model or a script runs too. On the Calendar tab: Enter opens an event, `n` new event, `c` change one, `x` remove one, `w` the days ahead, `s` what it reads, `a` every event, `i` import a file, `e` export to a file. On Calendar accounts: Enter signs Google or Outlook in, `o` signs one out, `u` use your own app, `l` lists them in words. On Calendar feeds: `n` subscribe to a feed, `g` read one again now, `a` read every feed now, `x` stop subscribing, `l` lists them in words.
 
-```text
-/calendar upcoming [--days 7]
-/calendar get <event>
-/calendar add --title "Design review" --start 2026-12-01T14:00:00Z --end 2026-12-01T15:00:00Z [--location "Room 4"] [--notes "..."] [--again]
-/calendar change <event> [--title ...] [--start ...] [--end ...]
-/calendar delete <event>
-/calendar status
-```
-
-A blank left out keeps its value in `change`. `change` and `delete` reach the guests and ask once; the daemon's calendar needs an end time for `add`, and an identical `add` from the same session is refused unless `--again` ("Add it again"). A time without a zone is read in this machine's zone. A daemon answer of `CALENDAR_NOT_CONFIGURED` means the URL or user is missing, and `CALENDAR_CREDENTIALS_MISSING` that no CalDAV password is stored. `CALENDAR_CREDENTIALS_UNREADABLE` (HTTP 412) means a password may well be stored but the secret store on the daemon's computer could not be read; the answer gives the cause, and no screen asks for the password again: make the store readable on that computer (its key file, `~/.goodvibes/secrets.key`, must be the one the store was written with) and the calendar reads again. The Agent's own actions (`all`, `import`, `export`, `accounts`, `connect`, `disconnect`, `subscriptions`, `subscribe`, `refresh`, `unsubscribe`) are refused here saying so.
+A blank left out keeps its value in a change. A change and a removal reach the guests and ask once; the daemon's calendar needs an end time for a new event, and an identical new event from the same session is refused unless "Add it again" is chosen. A time without a zone is read in this machine's zone. A daemon answer of `CALENDAR_NOT_CONFIGURED` means the URL or user is missing, and `CALENDAR_CREDENTIALS_MISSING` that no CalDAV password is stored. `CALENDAR_CREDENTIALS_UNREADABLE` (HTTP 412) means a password may well be stored but the secret store on the daemon's computer could not be read; the answer gives the cause, and no screen asks for the password again: make the store readable on that computer (its key file, `~/.goodvibes/secrets.key`, must be the one the store was written with) and the calendar reads again.
 
 Google Calendar cannot be reached over CalDAV with a password: Google refuses Basic authentication on its CalDAV endpoint. Use the Google route below.
 
-### The Agent: `/calendar`
-
-The Agent keeps local events, subscribes to ICS feeds, and connects Google or Microsoft calendars over OAuth.
-
-```text
-/calendar upcoming --days 7
-/calendar all
-/calendar get <event>
-/calendar add --title "Dentist" --start 2026-12-03T15:00:00 --end 2026-12-03T16:00:00 --location "Main St"
-/calendar delete <event>                          deletes it for good (/calendar add makes it again)
-/calendar import <path.ics>
-/calendar export [<path.ics>]
-/calendar subscribe <ics-url> --name work --every 30 [--allow-private-host]
-/calendar subscriptions
-/calendar refresh [<feed>]
-/calendar unsubscribe <feed>                      stops reading the feed (/calendar subscribe brings it back)
-/calendar connect google
-/calendar connect outlook --with device
-/calendar connect google --with code              asks for the address the browser landed on, masked
-/calendar accounts
-/calendar disconnect <google|outlook>             removes the stored sign-in (/calendar connect brings it back)
-```
-
-`/calendar change` and `/calendar status` are the terminal app's (the daemon's calendar) and are refused here saying so.
-
-A subscribed feed is read at the Agent's start and again whenever the calendar is read (`/calendar upcoming`, `/calendar all`, and the same reads by the assistant) and the feed is older than its `--every` interval (conditional requests; a feed that cannot be read keeps its last events, its status says why). `/calendar refresh` reads every feed now, whatever its age. There is no timer: a feed nobody reads is not fetched.
+A subscribed feed is read whenever the calendar is read (the Calendar tab, "every event", and the same reads by the assistant) and the feed is older than its interval (conditional requests; a feed that cannot be read keeps its last events, its status says why). "Read every feed now" reads them all, whatever their age. There is no timer: a feed nobody reads is not fetched.
 
 Connecting a calendar account over OAuth needs your own OAuth client id: no client id ships with the product. Steps:
 
 1. Register a free OAuth app (Google Cloud Console for Google, the Azure portal for Microsoft) and copy its client id. A desktop or public-client app needs no secret.
-2. Keep the client id with `/calendar use-app google <client-id>` (or `outlook`); add `--secret` to be asked for a client secret, masked. The id goes in `calendar.google.clientId` or `calendar.microsoft.clientId`; a client secret goes in the secret store and is referenced by `calendar.google.clientSecretRef` / `calendar.microsoft.clientSecretRef`. The rows "Use your own Google Calendar app" and "Use your own Outlook calendar app" in the Agent workspace's personal-ops area (`Ctrl+G` then `w`) open the same action.
-3. Run `/calendar connect google` (or `outlook`). A browser opens; approve. On a machine with no browser, add `--with device`: Outlook shows a device code to enter on another device; Google prints a link to open anywhere, and after approving you run `/calendar connect google --with code` within ten minutes and give the 127.0.0.1 address the browser landed on (asked for masked).
-4. The answer lists the account, the transport and the scopes. `/calendar upcoming` then merges that account's events.
+2. Keep the client id with "use your own app" (`u`) on the account's row of Calendar accounts; its form asks for a client secret too, masked, when you give one. The id goes in `calendar.google.clientId` or `calendar.microsoft.clientId`; a client secret goes in the secret store and is referenced by `calendar.google.clientSecretRef` / `calendar.microsoft.clientSecretRef`.
+3. Sign in: Enter on the account's row. A browser opens; approve. On a machine with no browser, choose the device route in its form: Outlook shows a device code to enter on another device; Google prints a link to open anywhere, and after approving you sign in again with the code route within ten minutes and give the 127.0.0.1 address the browser landed on (asked for masked).
+4. The answer lists the account, the transport and the scopes. The Calendar tab then merges that account's events.
 
-A Google account has one connection on a machine. `/calendar connect google`, "connect" on the Google tab and the model's `google` tool all store the same one (the refresh token `GOODVIBES_GOOGLE_OAUTH_REFRESH_TOKEN`, and beside it `GOODVIBES_GOOGLE_OAUTH_ACCOUNT`: the account's label, the scopes granted at connect and a digest of the token, never the token), and the daemon's calendar (the web Calendar), its Gmail access and the Agent's `/calendar` all read it. Every Google sign-in asks for the same scopes: `gmail.readonly`, `gmail.send`, `calendar.readonly`, `calendar.events`. A connection made earlier with fewer (a `/calendar connect google` from 3.4.4 or before has no Gmail scope; one from the Agent's Google connection before 3.4.5 has no `calendar.readonly`, which listing calendars needs) works for what it was granted and names the missing scope when a feature needs it; connecting once more grants them all. A Microsoft account connected with `/calendar connect outlook` is one connection too (`GOODVIBES_CALENDAR_MICROSOFT_TOKENS`, with the client id in `calendar.microsoft.clientId`): the Agent's `/calendar` and the daemon's calendar (the web Calendar) both read it. The daemon serves it beside the CalDAV server or the Google connection: a read of the default calendars returns the events of both, Outlook's events and calendars carry ids that start with `outlook:` (its calendars are listed as "<name> (Outlook)"), and a read, change or removal of an `outlook:` event goes to Outlook. With Outlook the only account, it is the daemon's calendar and a new event goes there. An `.ics` import into an Outlook calendar is refused (`CALENDAR_NOT_SUPPORTED`): import it in Outlook. With no usable account at all, the answer (`CALENDAR_NOT_CONFIGURED`) names the accounts that exist and why none can be read; when the reason is a secret store this computer cannot read, the answer is `CALENDAR_CREDENTIALS_UNREADABLE` ("No calendar this daemon can read: …" with the cause), and the Agent's `/calendar accounts` says the store could not be read instead of "not connected".
+A Google account has one connection on a machine. Signing Google in on Calendar accounts, "connect" on the Google tab and the model's `google` tool all store the same one (the refresh token `GOODVIBES_GOOGLE_OAUTH_REFRESH_TOKEN`, and beside it `GOODVIBES_GOOGLE_OAUTH_ACCOUNT`: the account's label, the scopes granted at connect and a digest of the token, never the token), and the daemon's calendar (the web Calendar), its Gmail access and both terminal programs' calendar tabs all read it. Every Google sign-in asks for the same scopes: `gmail.readonly`, `gmail.send`, `calendar.readonly`, `calendar.events`. A connection made earlier with fewer (an Agent calendar connection from 3.4.4 or before has no Gmail scope; one from the Agent's Google connection before 3.4.5 has no `calendar.readonly`, which listing calendars needs) works for what it was granted and names the missing scope when a feature needs it; connecting once more grants them all. A Microsoft account signed in on Calendar accounts is one connection too (`GOODVIBES_CALENDAR_MICROSOFT_TOKENS`, with the client id in `calendar.microsoft.clientId`): the daemon's calendar (both terminal programs and the web Calendar) reads it. The daemon serves it beside the CalDAV server or the Google connection: a read of the default calendars returns the events of both, Outlook's events and calendars carry ids that start with `outlook:` (its calendars are listed as "<name> (Outlook)"), and a read, change or removal of an `outlook:` event goes to Outlook. With Outlook the only account, it is the daemon's calendar and a new event goes there. An `.ics` import into an Outlook calendar is refused (`CALENDAR_NOT_SUPPORTED`): import it in Outlook. With no usable account at all, the answer (`CALENDAR_NOT_CONFIGURED`) names the accounts that exist and why none can be read; when the reason is a secret store this computer cannot read, the answer is `CALENDAR_CREDENTIALS_UNREADABLE` ("No calendar this daemon can read: …" with the cause), and the Calendar accounts tab says the store could not be read instead of "not connected".
 
-Up to 3.4.4, `/calendar connect google` kept a second Google connection (`GOODVIBES_CALENDAR_GOOGLE_TOKENS`) that the daemon never read. The daemon's first start of 3.4.5 moves it into the one connection, once, and says "Carried forward from the earlier version: 1 Google connection." When a different Google connection was already there, that one stays (the daemon's mail and calendar were using it), the earlier one is kept unused, and the notice names both accounts and how to choose the other: `/calendar connect google` signed in as it. Going back to 3.4.4 after the move: the daemon, the web Calendar and mail keep the connection, and the Agent's `/calendar accounts` lists no Google account until `/calendar connect google` is run there.
+Up to 3.4.4, the Agent's calendar kept a second Google connection (`GOODVIBES_CALENDAR_GOOGLE_TOKENS`) that the daemon never read. The daemon's first start of 3.4.5 moves it into the one connection, once, and says "Carried forward from the earlier version: 1 Google connection." When a different Google connection was already there, that one stays (the daemon's mail and calendar were using it), the earlier one is kept unused, and the notice names both accounts and how to choose the other: disconnect Google on the Google tab, then "connect" there and sign in as it. Going back to 3.4.4 after the move: the daemon, the web Calendar and mail keep the connection, and the 3.4.4 Agent lists no Google account until Google is connected there again.
 
-`disconnect` revokes the access at the provider when it offers revocation, and clears local tokens. `/calendar disconnect google` ends the one Google connection, so the daemon's calendar and its Gmail access stop too.
+Signing out revokes the access at the provider when it offers revocation, and clears local tokens. Signing Google out ends the one Google connection, so the daemon's calendar and its Gmail access stop too.
 
 Daemon operator methods for calendars: `calendar.calendars.list`, `calendar.events.list`, `calendar.events.get`, `calendar.events.create`, `calendar.events.update`, `calendar.events.delete`, `calendar.ics.import`, `calendar.ics.export`.
 
@@ -619,7 +585,7 @@ Prerequisites: a Google Cloud account. The `gcloud` CLI is installed by the daem
 6. Open the consent link the Google tab shows in its own pane (the copy key copies it). Check the account shown at the top. Expect "Google hasn't verified this app": click Advanced, then "Go to goodvibes agent (unsafe)". Leave every permission ticked; Continue. The browser lands on a local page confirming the connection.
 7. The flow reads your mailbox and calendar with the new credential and reports the account, both answers and the publishing status.
 
-Scopes requested: `gmail.readonly`, `gmail.send`, `calendar.readonly`, `calendar.events`. Stored: the client secret as `GOODVIBES_CALENDAR_GOOGLE_CLIENT_SECRET_REF` (none is needed for a Desktop-app client signed in with PKCE), the refresh token as `GOODVIBES_GOOGLE_OAUTH_REFRESH_TOKEN`, the same one connection `/calendar connect google` stores; settings `calendar.google.clientId`, `calendar.google.clientSecretRef`, `google.oauth.projectId`, `google.oauth.publishingStatus`. No secret is written to settings files, logs, transcripts or status output.
+Scopes requested: `gmail.readonly`, `gmail.send`, `calendar.readonly`, `calendar.events`. Stored: the client secret as `GOODVIBES_CALENDAR_GOOGLE_CLIENT_SECRET_REF` (none is needed for a Desktop-app client signed in with PKCE), the refresh token as `GOODVIBES_GOOGLE_OAUTH_REFRESH_TOKEN`, the same one connection signing Google in on Calendar accounts stores; settings `calendar.google.clientId`, `calendar.google.clientSecretRef`, `google.oauth.projectId`, `google.oauth.publishingStatus`. No secret is written to settings files, logs, transcripts or status output.
 
 ### Google failures
 
@@ -646,10 +612,10 @@ A channel is a chat surface the daemon sits behind: Slack, Discord, Telegram, nt
 1. Get the credentials from the provider (each surface below says which).
 2. In the terminal app, open Devices and network (`Ctrl+G` then `m`) and press Pair something, A chat channel, then choose the surface. It lists the surface's declared fields, asks for every missing required value (and offers the optional ones), stores secret values in the daemon's secret store with a reference in the setting, and switches the surface on once every required field is set. A surface whose schema marks no field required (Slack, ntfy, the generic webhook, Google Chat) is switched on even when you skip every value, so enter its tokens before you finish, or set them with `/settings set` as below.
    - Alternatively set each key with `/settings set surfaces.<surface>.<field> <value>` and switch it on with `/settings set surfaces.<surface>.enabled true` or `goodvibes surfaces enable <surface>`.
-   - In the Agent: `/channels setup <id>`, `/channels doctor <id>`, `/channels guide <id>`.
-3. Prove it end to end: `/channels test <surface>` sends a real test message through the daemon and reports the delivered or error outcome.
+   - In either program, the Channels tab of Mail, calendar and channels shows what a channel needs (Enter), checks it (`k`) and says what to set up next (`h`).
+3. Prove it end to end: "send a test" (`t` on the channel's row of the Channels tab) sends a real test message through the daemon and reports the delivered or error outcome.
 4. Send a first message from your own account. On a surface whose allowlists are empty it is not answered: it raises an owner claim (see "Who may talk to the assistant"). Accept it in Waiting for you (the menu, Ctrl+G then m): select the claim and press its accept key (or in the web UI inbox). You are then the surface's owner; send your message again and it is answered.
-5. Check: `goodvibes surfaces check <surface>`, `/channels status`, `/channels rules <surface>`.
+5. Check: `goodvibes surfaces check <surface>`, the Channels tab (each channel's state), and "who may write" (`w`) on its row.
 
 A surface switched on, or given a credential, while the daemon runs is picked up without a restart. A surface switched off answers inbound requests with HTTP 503 `SURFACE_DISABLED`.
 
@@ -657,7 +623,7 @@ An answer to a channel message is recorded as owed (on the session's input) befo
 
 A send that fails after its request left (a timeout, a reset connection, a 5xx or 429 answer) is sent again only on a surface that drops a repeat: the generic webhook, a Discord bot post or interaction edit, and Matrix. Anywhere else it is not repeated and is reported undelivered with `The message to <surface> may have arrived: the send failed after the request left, and <surface> cannot drop a repeat, so it was not sent again. Look in the conversation before sending it again.` A refusal the surface answered (Slack's `ok: false`, a Slack 429) is retried as before.
 
-A surface's inbound webhook with no credential to check callers against answers HTTP 503 `Webhook not configured: set <setting>`, naming the setting (or environment variable) to set. `/channels doctor <surface>` reports the same as the `inbound-credential` warning `Inbound messages are refused until <setting> is set.` for Slack, Discord, WhatsApp, Google Chat, Signal, iMessage, BlueBubbles, Mattermost and Matrix; it is a warning because Slack Socket Mode and a surface used only to send need none.
+A surface's inbound webhook with no credential to check callers against answers HTTP 503 `Webhook not configured: set <setting>`, naming the setting (or environment variable) to set. "Check it" (`k` on the channel's row of the Channels tab) reports the same as the `inbound-credential` warning `Inbound messages are refused until <setting> is set.` for Slack, Discord, WhatsApp, Google Chat, Signal, iMessage, BlueBubbles, Mattermost and Matrix; it is a warning because Slack Socket Mode and a surface used only to send need none.
 
 A channel credential is read in one order everywhere (status, the doctor, sending, the inbound webhooks, Telegram polling and the Slack and Discord notifications): the services file, then the setting, then the environment variable. A setting that holds a `goodvibes://secrets/...` or password-manager reference that does not resolve is reported as unresolved and is never replaced by the environment variable.
 
@@ -704,15 +670,7 @@ Each surface has an ingress policy.
 
   Authority belongs to the person, not the surface. The owner's own messages keep the surface's authority: on Telegram (a command-authority surface) his turn runs as if typed in the terminal app, in his permission mode; on every other chat surface a change his turn asks for becomes an approval for him each time (`channel-request`); on email, webhook and ntfy it is refused. A guest's turn runs under the guest form of the surface (`guest:<surface>`), which carries no authority on any surface, Telegram included. A guest's message is also never handed to an agent already running in that conversation; it starts a guest's turn of its own. A surface with no owner (`open`, below) has only guests.
 
-```text
-/channels rules                             every surface's rules
-/channels rules slack
-/channels set-rules slack --require-mention on --allow-dms on --allow-users U0123,U0456
-/channels set-rules discord --allowed-commands status,help --commands-without-mention on
-/channels set-rules matrix --allow-users none
-```
-
-`/channels set-rules` replaces the rules at once and counts only when the owner types it (`set-rules` again changes them back) (it decides who may reach the assistant). Options: `--enabled`, `--require-mention`, `--allow-dms`, `--allow-groups`, `--allow-threads`, `--commands-without-mention`, `--open` take `on` or `off`; `--dm-policy` and `--group-policy` take `allow`, `deny` or `inherit`; `--allow-users`, `--allow-channels`, `--allow-group-ids`, `--allowed-commands` take a comma list or `none`. A list replaces the whole stored list on every surface, so to remove one admitted sender set the list again without him (for example `/channels set-rules telegram --allow-users <your-id>`); include yourself, or you lock yourself out. `--open on` makes a shared channel: while every list is empty, every sender is admitted and no owner claim is raised (off by default); everyone on it talks as a guest. The operator method `channels.policies.update` takes the same field as `open`, and `channels.policies.list` reports it.
+The rules are on the channel's row of the Channels tab of Mail, calendar and channels: "who may write" (`w`) shows them, "change who may write" (`e`) opens their form. A change replaces the rules at once and counts only as the owner's own press or submitted form (changing them again puts them back) (it decides who may reach the assistant); the same is `channels.set-rules` for a model or a script, put to the owner. Its fields: enabled, require a mention, allow direct messages, allow groups, allow threads, commands without a mention and open take on or off; the direct-message and group policies take allow, deny or inherit; the users, channels, group ids and allowed commands take a comma list or `none`. A list replaces the whole stored list on every surface, so to remove one admitted sender set the list again without him; include yourself, or you lock yourself out. Open on makes a shared channel: while every list is empty, every sender is admitted and no owner claim is raised (off by default); everyone on it talks as a guest. The operator method `channels.policies.update` takes the same field as `open`, and `channels.policies.list` reports it.
 
 A message names a command only when its first word is written as one (`/status`, `!status`, `/status@yourbot`); `allowedCommands` limits those.
 
@@ -726,25 +684,11 @@ Every chat surface lets the owner ask about, cancel or retry a run, agent or ses
 
 Only the channel's owner controls runs: a guest (anyone else the channel admits) who sends one of these, or presses a run's Cancel or Retry button on Slack or Discord, is refused (`Not done: cancel <id> was refused. Status, cancel and retry act on the owner's runs and agents, so only the owner of this channel may send them.`). The typed command and the button are the same control: a button cancels a run or an agent, as `/cancel` does.
 
-### Other `/channels` actions (both apps)
+### The Channels tab (both programs)
 
-```text
-/channels                 the list of actions; a model or script gets "See your channels"
-/channels status          each channel, on or off, ready or not
-/channels setup <channel> what a channel needs (no value shown)
-/channels doctor <channel>  the daemon's checks and the repairs it offers
-/channels test <channel>  a real test message through the daemon (sent at once; it cannot be called back)
-/channels accounts        the channel accounts, configured, linked and signed in
-/channels profiles        the model, provider and permission mode each channel's sessions get
-/channels profile <channel> [<conversation>]
-/channels set-profile <channel> [<conversation>] [--model ...] [--provider ...] [--permission-mode ...]
-/channels remove-profile <channel> [<conversation>]
-/channels telegram-cursor recover the Telegram update cursor
-```
+There is no `/channels`. The Channels tab of Mail, calendar and channels lists each channel with its state, read by itself; on a channel's row: Enter what it needs (no value shown), `s` set it up (a channel not set up or off), `t` send a test (a real test message through the daemon, sent at once; it cannot be called back), `k` check it (the daemon's checks and the repairs it offers), `f` how it is configured, `w` who may write, `e` change who may write, `p` what its sessions get, `g` give it a model or mode, `u` use the defaults; on the tab: `a` the channel accounts, `o` every channel's profile, `y` which are set up, `h` what to set up next, `i` what came in, `n` send a message, `d` what was sent, `v` how sends went, `b` the routes (where replies go), `O` what the channels carry, `c` Telegram's reading position. Each is a capability (`channels.*`) a model or a script runs too. Pairing a channel is Pair something, A chat channel, in Devices and network.
 
-The terminal app adds `overview`, `routes` (where replies go), `delivery` (delivery strategies) and `open` (the routes view); the Agent adds `readiness [--show all|ready|attention]`, `configured <channel>`, `guide [<channel>]`, `triage`, `send` and `deliveries`. Each app refuses the other's, saying where it is done. Pairing a channel is Pair something, A chat channel, in Devices and network.
-
-A profile change that loosens the permission mode a channel's sessions run under (`set-profile` with a looser `--permission-mode`, a `set-profile` that leaves out a tighter mode the binding had, or `remove-profile` of a binding that held one) is the owner's own act, like `config.set` of `permissions.mode`: asked with a credential that is not the owner's, `channels.profiles.set` and `channels.profiles.delete` answer `202` `OWNER_APPROVAL_PENDING` with the approval id, nothing changes until the owner approves it from his own app, and the command reads `Not applied: <state>. It was put to the owner as approval <id>; ...`; with no approval path the answer is `403` `OWNER_ONLY`.
+A profile change that loosens the permission mode a channel's sessions run under ("give it a model or mode" with a looser mode, one that leaves out a tighter mode the binding had, or "use the defaults" on a binding that held one) is the owner's own act, like `config.set` of `permissions.mode`: asked with a credential that is not the owner's, `channels.profiles.set` and `channels.profiles.delete` answer `202` `OWNER_APPROVAL_PENDING` with the approval id, nothing changes until the owner approves it from his own app, and the command reads `Not applied: <state>. It was put to the owner as approval <id>; ...`; with no approval path the answer is `403` `OWNER_ONLY`.
 
 ### Slack
 
@@ -793,8 +737,8 @@ From nothing to the first answered message (Socket Mode, no public address neede
 
 9. In Slack, open a direct message with the bot and send anything. It is not answered; an owner claim appears. In the terminal app: open Waiting for you from the menu, select the claim and press its accept key.
 10. Send the message again: it is answered. A request for work is proposed back; reply `yes` to start it.
-11. To use it in a channel: `/invite @<bot name>` in that channel, and turn on mentions so the bot answers only when addressed: `/channels set-rules slack --require-mention on`. With mentions off (the default), every message in a channel the bot is in is handled.
-12. To allow a second person, accept their claim, or `/channels set-rules slack --allow-users <your-U-id>,<their-U-id>` (listing replaces the list, so include yourself).
+11. To use it in a channel: `/invite @<bot name>` in that channel, and turn on mentions so the bot answers only when addressed: "change who may write" (`e` on Slack's row of the Channels tab), require a mention on. With mentions off (the default), every message in a channel the bot is in is handled.
+12. To allow a second person, accept their claim, or set the users in "change who may write" to `<your-U-id>,<their-U-id>` (listing replaces the list, so include yourself).
 
 Slack delivers every message as a channel or thread conversation, direct messages included, so `--allow-dms` and `--dm-policy` do not separate Slack direct messages from channels; use the user list. A Slack start is reported running only once its socket opens; a socket that does not open within 30 seconds is a failed start. Without Socket Mode, set the request URLs and `surfaces.slack.signingSecret` as above. A change the assistant is asked for from Slack is approved by the owner each time (`channel-request`), even in `yolo`.
 
@@ -854,7 +798,7 @@ On the public server a topic name is the only thing keeping strangers out, so ea
 
 ### Generic webhook
 
-`surfaces.webhook.defaultTarget` (where outbound JSON goes), `surfaces.webhook.secret` (shared secret for signing and verifying), `surfaces.webhook.timeoutMs` (default 10000). Inbound JSON is posted to `/webhook/generic`; a body sent as `application/json` must be a JSON object, and anything else (`null`, an array, a string or a number) is answered 400 `Invalid JSON body: expected a JSON object`. A `correlationId` (in the body, or the `x-goodvibes-correlation-id` header) is the message's identity: posting the same message again with the same `correlationId` (after a timeout or a lost answer, also across a daemon restart) answers as a duplicate and starts nothing. Outbound posts carry `Idempotency-Key`, the same for every attempt at one message. A webhook caller receives refusals as HTTP 403 with `ok: false`, `outcome: "refused"`, the reason and the next step. A change asked for over the webhook is refused.
+`surfaces.webhook.defaultTarget` (where outbound JSON goes), `surfaces.webhook.secret` (shared secret for signing and verifying), `surfaces.webhook.timeoutMs` (default 10000). Inbound JSON is posted to `/webhook/generic`; a body sent as `application/json` must be a JSON object, and anything else (`null`, an array, a string or a number) is answered 400 `Invalid JSON body: expected a JSON object`. A `correlationId` (in the body, or the `x-goodvibes-correlation-id` header) is the message's identity: posting the same message again with the same `correlationId` (after a timeout or a lost answer, also across a daemon restart) answers as a duplicate and starts nothing. Outbound posts carry `Idempotency-Key`, the same for every attempt at one message. A webhook caller receives refusals as HTTP 403 with `ok: false`, `outcome: "refused"`, the reason and the next step. A change asked for over the webhook is refused. A message with no sender is a guest's, never yours: holding the secret proves the message came through the webhook, not who wrote it.
 
 ### Home Assistant
 
@@ -879,7 +823,7 @@ Setup from nothing:
 2. In the terminal app: Devices and network, Pair something, A chat channel, homeassistant, and enter the instance URL, the access token and a webhook secret you choose (or use `/settings set` for each key), then switch the surface on.
 3. Make the daemon reachable from Home Assistant: Home Assistant calls the daemon's control plane, which listens on `127.0.0.1:3421` by default, so a Home Assistant on another machine needs the daemon exposed on the network (see "Network exposure" in "The daemon, the web UI and networking").
 4. Send a prompt. Two routes:
-   - Webhook, authenticated by the webhook secret: `POST http://<daemon>:3421/webhook/homeassistant` with header `x-goodvibes-homeassistant-secret: <secret>` (or `x-goodvibes-webhook-secret: <secret>`, or `Authorization: Bearer <secret>`) and a JSON body such as `{"type":"prompt","message":"turn on the kitchen lights","conversationId":"home","messageId":"ha-msg-1"}`. The prompt text may be in `message`, `prompt`, `text` or `task`; optional `areaId`, `entityId`, `userId`, `displayName`, `providerId`, `modelId`. The request is held until the turn ends (at most 120 seconds) and answers with `delivered`, `sessionId` and `assistantMessageId`; the reply text arrives as the event below. A body with a `tools` list is refused with 400. A body whose text is a run-control command (see "Run control" under "Who may talk to the assistant") controls a run started from the same conversation.
+   - Webhook, authenticated by the webhook secret: `POST http://<daemon>:3421/webhook/homeassistant` with header `x-goodvibes-homeassistant-secret: <secret>` (or `x-goodvibes-webhook-secret: <secret>`, or `Authorization: Bearer <secret>`) and a JSON body such as `{"type":"prompt","message":"turn on the kitchen lights","conversationId":"home","messageId":"ha-msg-1"}`. The prompt text may be in `message`, `prompt`, `text` or `task`; optional `areaId`, `entityId`, `userId`, `displayName`, `providerId`, `modelId`. A prompt with no `userId`, or with one that is not the channel's recorded owner, is a guest's: its plain reads run and everything else is put to you (see "Where the instruction came from" in "Permissions and decisions"). The request is held until the turn ends (at most 120 seconds) and answers with `delivered`, `sessionId` and `assistantMessageId`; the reply text arrives as the event below. A body with a `tools` list is refused with 400. A body whose text is a run-control command (see "Run control" under "Who may talk to the assistant") controls a run started from the same conversation.
    - Conversation API, authenticated by an operator token with the `write:sessions` scope (`Authorization: Bearer <operator-token>`; tokens are described under "Credentials and pairing" in "The daemon, the web UI and networking"): `POST /api/homeassistant/conversation` with `{"text":"what is on my calendar today","conversationId":"home"}`. The answer carries `status`, `sessionId` and `assistant` with `text` and `speechText`. It waits up to 120 seconds by default (`timeoutMs` 1000 to 600000; `wait: false` returns at once). `POST /api/homeassistant/conversation/stream` returns the same as one server-sent `final` or `error` event. A `messageId` the caller chooses makes a repeat of either safe, also across a daemon restart: the utterance is posted once per installation and conversation (`surfaceId`, `conversationId`) and the repeat answers with that turn's outcome; `POST /api/homeassistant/conversation/cancel` with `sessionId` (or a known `messageId`, with the same `surfaceId` and `conversationId` the submit sent, when it sent them) stops a turn and answers `cancelled` (or `stopping` while a tool call ends); when nothing was running, a known `messageId` answers what that message came to (`completed` with its `assistant` reply, `cancelled` or `failed`) and a `sessionId` alone answers `not-running`. `GET /api/homeassistant/health` reports the surface's state and endpoints.
 5. Receive replies: the daemon fires the event `goodvibes_message` on Home Assistant (`POST <instanceUrl>/api/events/goodvibes_message` with the access token). Its data includes `body`, `speechText`, `status`, `sessionId`, `conversationId`, `messageId` and `replyToMessageId`. In Home Assistant, an automation with an event trigger of that type can notify, speak or update a helper from it.
 
@@ -1314,7 +1258,7 @@ A date heard in conversation is confirmed with the owner once, at the time ("Not
 
 Answers, interviews, gift history and calendar-mirror records are kept apart from the profile, in the daemon's `occasions-state.json`.
 
-Operator methods: `occasions.list`, `occasions.pending`, `occasions.state`, `occasions.sweep`, `occasions.propose`, `occasions.confirm`, `occasions.update`, `occasions.remove`, `occasions.answer`, `occasions.acknowledge`, `occasions.interview.get`, `occasions.interview.answer`, `occasions.interview.record`, `occasions.gifts`, `occasions.conflict.resolve`, `occasions.plans.list`, `occasions.plans.propose`, `occasions.plans.confirm`, `occasions.plans.update`, `occasions.plans.remove`. The methods that write the profile (`confirm`, `update`, `remove` and the plan equivalents) take a required `authority`; `update` without `confirmed` returns the line to put to the owner and writes nothing.
+Operator methods: `occasions.list`, `occasions.pending`, `occasions.state`, `occasions.sweep`, `occasions.propose`, `occasions.confirm`, `occasions.update`, `occasions.remove`, `occasions.answer`, `occasions.acknowledge`, `occasions.interview.get`, `occasions.interview.answer`, `occasions.interview.record`, `occasions.gifts`, `occasions.conflict.resolve`, `occasions.plans.list`, `occasions.plans.propose`, `occasions.plans.confirm`, `occasions.plans.update`, `occasions.plans.remove`. The methods that write the profile (`confirm`, `update`, `remove` and the plan equivalents) take a required `authority`; `update` without `confirmed` returns the line to put to the owner and writes nothing. Your reply about an occasion (`occasions.answer`, `occasions.interview.answer`, `occasions.acknowledge`) is your own act (risk class `owner-act`): your model in your own turn records it under your mode, as it does in the Agent's conversation; anyone else's (a script, a device, a member, the outside agent) is put to you in Waiting for you.
 
 ## List-valued settings
 

@@ -30,6 +30,11 @@ function translateOperation(error: unknown): never {
   if (carried) throw new GatewayVerbError([carried.reason, ...carried.next].join('. '), carried.code, carried.status ?? 409);
   throw error;
 }
+/** The project a trigger call is made in: its call context's (checked by the dispatch), else the folder it names. */
+export function triggerCallProject(invocation: Pick<GatewayMethodInvocation, 'context'>, params: Record<string, unknown>): string | undefined {
+  const named = invocation.context.call?.project ?? params['workingDirectory'];
+  return typeof named === 'string' && named.trim() ? named.trim() : undefined;
+}
 function optionalStrings(value: unknown, field: string): string[] | undefined {
   if (value === undefined) return undefined;
   if (!Array.isArray(value) || value.some((entry) => typeof entry !== 'string')) throw new GatewayVerbError(`${field} must be a list of strings`, 'INVALID_ARGUMENT', 400, field);
@@ -46,12 +51,16 @@ export function registerTriggerSupervisorGatewayMethods(
   // The operations need the supervisor itself; a host that hands over only the status view serves only status.
   if (typeof supervisor.create !== 'function' || typeof supervisor.registerGrant !== 'function') return;
   const operations = localTriggerOperations(supervisor as TriggerManager);
+  // A name typed in a project is that project's trigger of the name its people chose (TriggerManager `resolveName`),
+  // the same resolution the one check of what a caller may reach makes (control-plane/caller-reach.ts).
+  const named = (invocation: GatewayMethodInvocation, params: Record<string, unknown>): string =>
+    (supervisor as TriggerManager).resolveName?.(requireString(params, 'id'), triggerCallProject(invocation, params)) ?? requireString(params, 'id');
   const handlers: Record<string, (invocation: GatewayMethodInvocation, params: Record<string, unknown>) => Promise<unknown>> = {
     'watchers.triggers.list': async () => operations.list(),
-    'watchers.triggers.history': async (_invocation, params) => {
+    'watchers.triggers.history': async (invocation, params) => {
       const limit = params['limit'];
       if (limit !== undefined && (typeof limit !== 'number' || !Number.isInteger(limit) || limit < 1)) throw new GatewayVerbError('limit must be a positive whole number', 'INVALID_ARGUMENT', 400, 'limit');
-      return operations.history(requireString(params, 'id'), limit as number | undefined);
+      return operations.history(named(invocation, params), limit as number | undefined);
     },
     'watchers.triggers.create': async (_invocation, params) => {
       const definition = params['definition'];
@@ -79,8 +88,8 @@ export function registerTriggerSupervisorGatewayMethods(
         throw error;
       }
     },
-    'watchers.triggers.cancel': async (_invocation, params) => ({ trigger: await operations.cancel(requireString(params, 'id')) }),
-    'watchers.triggers.reset': async (_invocation, params) => ({ trigger: await operations.reset(requireString(params, 'id')) }),
+    'watchers.triggers.cancel': async (invocation, params) => ({ trigger: await operations.cancel(named(invocation, params)) }),
+    'watchers.triggers.reset': async (invocation, params) => ({ trigger: await operations.reset(named(invocation, params)) }),
     'watchers.triggers.grant.list': async () => ({ grants: await operations.listGrants() }),
     'watchers.triggers.grant.register': async (invocation, params) => {
       // Its descriptor's confirmation (`not-declined`) was checked by the catalog before this handler ran.
@@ -95,8 +104,9 @@ export function registerTriggerSupervisorGatewayMethods(
             command: requireString(params, 'command', { verbatim: true }),
             ...(args !== undefined ? { args } : {}),
             ...(cwd !== undefined ? { cwd } : {}),
-            // Who approved it is the authenticated operator, never a field the caller sends.
-            confirmedBy: invocation.context.principalId ?? 'owner',
+            // Who approved it is the authenticated operator, never a field the caller sends; a call naming no caller is never
+            // written down as the owner's.
+            confirmedBy: invocation.context.principalId ?? 'a caller this daemon did not name',
           }),
         };
       } catch (error) {

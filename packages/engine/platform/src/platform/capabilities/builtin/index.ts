@@ -6,6 +6,8 @@
  */
 import { entryOfDefinition, type CapabilityEntry } from '../catalog.js';
 import type { CapabilityDefinition } from '../types.js';
+import { assertWorkFoldersDeclared, workFolderInputsOf } from '../work-folders.js';
+import { assertCapabilityAddressesDeclared } from '../../control-plane/record-addresses.js';
 import { CONVERSATION_CLEAR, CONVERSATION_COMPACT, CONVERSATION_UNDO } from './conversation.js';
 import { CONVERSATION_CONTROLS } from './conversation-controls.js';
 import { CODE_DAEMON_CAPABILITIES, CODE_SESSION_CAPABILITIES, codeCommandOf } from './code.js';
@@ -30,6 +32,9 @@ import { ARTIFACTS_CAPABILITIES } from './artifacts.js';
 import { DOCUMENTS_CAPABILITIES } from './documents.js';
 import { AGENT_HOMES_CAPABILITIES } from './agent-homes.js';
 import { DEVICES_CAPABILITIES, DEVICES_MIGRATE_SHARED } from './devices.js';
+import { CALLER_PROJECTS_CAPABILITIES, type CallerProjectsCapabilityServices } from './devices-projects.js';
+import { CALLER_SHARED_CAPABILITIES, type CallerSharedCapabilityServices } from './devices-shared.js';
+import { NETWORK_SIGN_IN_ACCOUNT } from './network-account.js';
 import { DEVICES_SESSION_CAPABILITIES } from './devices-session.js';
 import { CLUSTER_CAPABILITIES, type ClusterCapabilityServices } from './cluster.js';
 import { NETWORK_SCAN_CAPABILITIES, type NetworkScanCapabilityServices } from './network-scan.js';
@@ -50,6 +55,7 @@ import {
 } from './system.js';
 // System, Workspaces (workspaces.ts): the folders registered as workspaces, each a daemon method run as the caller.
 import { WORKSPACES_CAPABILITIES } from './workspaces.js';
+import { CHATS_CAPABILITIES } from './chats.js';
 import {
   SYSTEM_QUIT, SYSTEM_STATUS, VERBOSITY_SET, VERBOSITY_SET_DOMAIN, VERBOSITY_SHOW, VOICE_OFF, VOICE_ON, VOICE_REVIEW, VOICE_SPEAK, VOICE_WAKE_AGAIN,
 } from './system-session.js';
@@ -72,9 +78,9 @@ import { HANDED_OFF_CAPABILITIES } from './handed-off.js';
 
 /** Your agents' session capabilities (builtin/agents.ts), in their command's order. */
 const AGENTS_SESSION_CAPABILITIES = [AGENTS_TEAM, AGENTS_START, AGENTS_RECIPE, AGENTS_ARCHETYPES, AGENTS_ARCHETYPE, AGENTS_START_ARCHETYPE, AGENTS_STOP, AGENTS_STOP_GROUP, AGENTS_STOP_BRANCH];
-import { WORK_DELEGATE, WORK_METHOD_CAPABILITIES, type WorkProposalCapabilityServices } from './work.js';
+import { WORK_DELEGATE, WORK_METHOD_CAPABILITIES, type WorkCauseCapabilityServices, type WorkProposalCapabilityServices } from './work.js';
 import { CHECKLIST_CAPABILITIES } from './checklist.js';
-import { TASKS_CAPABILITIES } from './tasks.js';
+import { TASKS_CAPABILITIES, WORK_DAEMON_TASK_ADD } from './tasks.js';
 import { WORK_INTAKE_CAPABILITIES } from './work-intake.js';
 import {
   APPROVAL_KINDS_CAPABILITY, DECISIONS_ALWAYS, DECISIONS_ASK, DECISIONS_KEEP, DECISIONS_LIST, DECISIONS_NEVER, GOOGLE_WAITING,
@@ -221,6 +227,10 @@ export type DaemonCapabilityServices = HooksCapabilityServices & SecretsCapabili
   & NetworkScanCapabilityServices
   // Devices and network (builtin/settings-sync.ts): the daemon's own settings, beside the asking program's.
   & SettingsSyncCapabilityServices
+  // Devices and network, Permissions and safety (builtin/devices-projects.ts): the projects each device or member may work in.
+  & CallerProjectsCapabilityServices
+  // Devices and network (builtin/devices-shared.ts): what of the owner's shared things each caller may reach.
+  & CallerSharedCapabilityServices
   // Waiting for you (builtin/waiting.ts): the daemon's one owner inbox.
   & WaitingCapabilityServices
   // Permissions and safety (builtin/permissions.ts, security.ts): the one rule store, the token audit, folder trust.
@@ -247,8 +257,9 @@ export type DaemonCapabilityServices = HooksCapabilityServices & SecretsCapabili
   & Pick<SystemBundleCapabilityServices, 'supportBundles'>
   // Models and providers (builtin/compare.ts): the daemon's comparison runner.
   & ModelComparisonCapabilityServices
-  // Work (builtin/work.ts): the daemon's plans before they run, where a proposed piece of work waits.
-  & WorkProposalCapabilityServices;
+  // Work (builtin/work.ts): the daemon's plans before they run, where a proposed piece of work waits, and who caused
+  // each piece of work to run (kept on its record).
+  & WorkProposalCapabilityServices & WorkCauseCapabilityServices;
 
 interface Moved<Services> {
   readonly definition: CapabilityDefinition<Services>;
@@ -297,6 +308,9 @@ export const DAEMON_CAPABILITIES: readonly Moved<DaemonCapabilityServices>[] = [
   { definition: LOCAL_AUTH_REMOVE_FIRST_RUN_FILE as CapabilityDefinition<DaemonCapabilityServices>, command: { name: 'local-auth', title: 'Local sign-in' } },
   // System, Workspaces (builtin/workspaces.ts): the registered workspaces, unregistering one and registering one again.
   ...WORKSPACES_CAPABILITIES.map((definition) => ({ definition: definition as CapabilityDefinition<DaemonCapabilityServices>, command: { name: 'workspaces', title: 'Workspaces' } })),
+  // Sessions, Chats and System, Workspaces (builtin/chats.ts): the chats and their projects, moving one to another
+  // project, and the folder a chat with none is given its own in.
+  ...CHATS_CAPABILITIES.map((definition) => ({ definition: definition as CapabilityDefinition<DaemonCapabilityServices>, command: { name: 'workspaces', title: 'Workspaces' } })),
   // System (builtin/system-settings.ts, system-daemon.ts): every setting, the voice settings as a file, updates, setup, support bundles.
   ...SYSTEM_SETTINGS_CAPABILITIES.map(({ definition, command }) => ({ definition: definition as CapabilityDefinition<DaemonCapabilityServices>, command })),
   ...SYSTEM_UPDATE_CAPABILITIES.map(({ definition, command }) => ({ definition: definition as CapabilityDefinition<DaemonCapabilityServices>, command })),
@@ -312,6 +326,8 @@ export const DAEMON_CAPABILITIES: readonly Moved<DaemonCapabilityServices>[] = [
   ...CODE_DAEMON_CAPABILITIES.map((definition) => ({ definition: definition as CapabilityDefinition<DaemonCapabilityServices>, command: { name: 'worktree', title: 'Worktrees' } })),
   // Work and agents (builtin/media-collect.ts): a media job still being made, collected by the daemon's media.collect.
   { definition: MEDIA_COLLECT as CapabilityDefinition<DaemonCapabilityServices>, command: { name: 'media', title: 'Media' } },
+  // Work and agents (builtin/tasks.ts): a task given to an agent on the daemon (tasks.create), from any program or the web.
+  { definition: WORK_DAEMON_TASK_ADD as unknown as CapabilityDefinition<DaemonCapabilityServices>, command: { name: 'work', title: 'Work' } },
   // Work and agents (builtin/research.ts, handed-off.ts): research runs, the research queue and reports, and coding work
   // handed to the terminal app, kept and run by the daemon's runner over the Agent's stores.
   ...RESEARCH_DAEMON_CAPABILITIES.map((definition) => ({ definition: definition as CapabilityDefinition<DaemonCapabilityServices>, command: { name: 'research', title: 'Research' } })),
@@ -340,6 +356,11 @@ export const DAEMON_CAPABILITIES: readonly Moved<DaemonCapabilityServices>[] = [
   ...SETTINGS_SYNC_CAPABILITIES.map((definition) => ({ definition: definition as CapabilityDefinition<DaemonCapabilityServices>, command: { name: 'settings-sync', title: 'Settings sync' } })),
   // A device on the old shared token given its own; the token is the outcome's reveal (builtin/devices.ts).
   { definition: DEVICES_MIGRATE_SHARED as CapabilityDefinition<DaemonCapabilityServices>, command: { name: 'devices', title: 'Paired devices' } },
+  // The projects a paired device or a member may work in, given and taken by the owner (builtin/devices-projects.ts).
+  ...CALLER_PROJECTS_CAPABILITIES.map((definition) => ({ definition: definition as CapabilityDefinition<DaemonCapabilityServices>, command: { name: 'devices', title: 'Paired devices' } })),
+  ...CALLER_SHARED_CAPABILITIES.map((definition) => ({ definition: definition as CapabilityDefinition<DaemonCapabilityServices>, command: { name: 'devices', title: 'Paired devices' } })),
+  // The account that signs in from other devices, made on Addresses and ports (builtin/network-account.ts).
+  { definition: NETWORK_SIGN_IN_ACCOUNT as CapabilityDefinition<DaemonCapabilityServices>, command: { name: 'devices', title: 'Paired devices' } },
   // Waiting for you, Purchases (builtin/purchases.ts): the purchases that wait on the owner, and what he does on each.
   ...PURCHASES_CAPABILITIES.map((definition) => ({ definition: definition as CapabilityDefinition<DaemonCapabilityServices>, command: { name: 'payments', title: 'Purchases waiting for you' } })),
   // The sends the Agent's content check refused, posted to the owner inbox (builtin/waiting.ts).
@@ -504,6 +525,16 @@ export const SESSION_CAPABILITIES: readonly Moved<never>[] = [
 /** A moved daemon capability by id. */
 export function daemonCapability(id: string): CapabilityDefinition<DaemonCapabilityServices> | undefined {
   return DAEMON_CAPABILITIES.find((moved) => moved.definition.capability.id === id)?.definition;
+}
+
+// Every daemon capability's folder input states whether a turn or process works in it (capabilities/work-folders.ts).
+assertWorkFoldersDeclared(DAEMON_CAPABILITIES.map((moved) => moved.definition));
+// Every daemon capability's input that names a record by id says what it addresses (control-plane/record-addresses.ts).
+assertCapabilityAddressesDeclared(DAEMON_CAPABILITIES.map((moved) => moved.definition));
+
+/** The inputs of a daemon capability a turn or process works in: checked by the dispatch as projects the caller may name. */
+export function capabilityWorkFolderInputs(id: string): readonly string[] {
+  return workFolderInputsOf(daemonCapability(id));
 }
 
 /** The catalog entries of every moved capability. */

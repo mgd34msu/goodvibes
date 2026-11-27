@@ -209,9 +209,12 @@ export function parseMemoryRecordFilterBody(body: JsonRecord): MemoryRecordSearc
   if (limit instanceof Response) return limit;
   const project = readString(body, 'project');
   if (project instanceof Response) return project;
+  const everyProject = readBoolean(body, 'everyProject');
+  if (everyProject instanceof Response) return everyProject;
   return {
     ...(scope.value ? { scope: scope.value } : {}),
     ...(project.value ? { project: project.value } : {}),
+    ...(everyProject.value === true ? { everyProject: true } : {}),
     ...(cls.value ? { cls: cls.value } : {}),
     ...(tags.value && tags.value.length > 0 ? { tags: tags.value } : {}),
     ...(query.value ? { query: query.value } : {}),

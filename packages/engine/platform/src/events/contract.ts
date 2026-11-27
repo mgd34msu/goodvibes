@@ -8,6 +8,7 @@
  * are declared here once, as const arrays, so the runtime validators and the
  * contract data model (platform/contract/types.ts) share one list.
  */
+import type { EventAbout } from './about.js';
 
 /** Contract lifecycle status. */
 export const CONTRACT_STATUSES = [
@@ -507,6 +508,8 @@ export type ContractEvent = (
 ) & {
   /** Identity minted once by the producer, retained by notice and replay deliveries. */
   readonly occurrenceId?: string | undefined;
+  /** The contract the event is about and the project it works in (about.ts), set by the runner for the stream filter. */
+  readonly about?: EventAbout | undefined;
 };
 
 export type ContractEventType = ContractEvent['type'];

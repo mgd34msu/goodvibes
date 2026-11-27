@@ -1,4 +1,4 @@
-import type { AgentWorkspaceReviewPacketTimeline, AgentWorkspaceReviewPacketWizard } from '../input/agent-workspace-types.ts';
+import type { AgentReviewPacketTimeline, AgentReviewPacketWizard } from '../input/runtime-snapshot-types.ts';
 
 export type DocumentOpsLaneId =
   | 'documents'
@@ -33,11 +33,12 @@ export interface DocumentOpsLane {
   readonly userRoute: string;
   readonly modelRoute: string;
   readonly signals: readonly string[];
-  readonly actionIds: readonly string[];
+  /** The controls the lane's work is done with: place, tab, key (what the key says). */
+  readonly controls: readonly string[];
   readonly reviewerReadiness?: ReviewerReadinessChecklist;
-  readonly reviewPacketWizard?: AgentWorkspaceReviewPacketWizard;
+  readonly reviewPacketWizard?: AgentReviewPacketWizard;
   /** The whole timeline (the lane's signals list only the latest five); the daemon's documents.timeline tells the same. */
-  readonly reviewPacketTimeline?: AgentWorkspaceReviewPacketTimeline;
+  readonly reviewPacketTimeline?: AgentReviewPacketTimeline;
 }
 
 // The readiness checklist is computed by the daemon too, from the stores themselves (terminal-shell agent-turn/review-packet-report.ts).

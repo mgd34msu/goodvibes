@@ -13,7 +13,7 @@
  * (builtin/memory-session.ts): the memory its turns were given, what it holds
  * that can be remembered, and memory kept as files in its project.
  */
-import { existsSync } from 'node:fs';
+import { existsSync, realpathSync } from 'node:fs';
 import type { ConfigManager } from '@goodvibes/engine/platform/platform/config';
 import type { MemorySpineClient } from '@goodvibes/engine/platform/platform/runtime/memory-spine';
 import type { ShellPathService } from '@goodvibes/engine/platform/platform/runtime/shell';
@@ -26,7 +26,7 @@ import {
   type MemoryScope,
 } from '@goodvibes/engine/platform/platform/state';
 import {
-  CapabilityRefusal, describeMemoryFileChange, memoryFileProposals,
+  CapabilityRefusal, describeMemoryFileChange, holdCallerPath, memoryFileProposals,
   type MemorySessionCapabilityServices,
 } from '@goodvibes/engine/platform/platform/capabilities';
 import { commandRefusal } from './command-confirmation.js';
@@ -34,7 +34,6 @@ import { defineCommand, type DescribedCommand } from './command-actions/define.j
 import { defineList, type ListRow } from './command-actions/lists.js';
 import { runDaemonCapability, type DaemonCapabilityBinding } from './command-actions/capability-actions.js';
 import type { CommandActionContext, CommandDescription } from './command-actions/types.js';
-import { doAction } from './described-command-kit.js';
 import { resolveConfinedBundlePath } from './recall-shared.js';
 
 type CaptureExtensions = {
@@ -94,9 +93,16 @@ function pathsOf(ctx: MemoryCommandContext): ShellPathService {
 }
 /** A folder inside the workspace (memory files are the project's). */
 function confinedPath(ctx: MemoryCommandContext, path: string, byModel: boolean): string {
-  const resolved = resolveConfinedBundlePath(path, pathsOf(ctx), byModel);
+  const paths = pathsOf(ctx);
+  const resolved = resolveConfinedBundlePath(path, paths, byModel);
   if (resolved === undefined) throw new CapabilityRefusal(`${path} is outside the project. Memory files are kept in a folder of the project; nothing was read or written.`, 'Name a folder inside the project.');
-  return resolved;
+  // A folder of the project, in a call that holds what it names (capabilities/held-paths.ts): held from here to the end
+  // of the call and worked on in place through its handle, so a link put in its place, or planted inside it, leads
+  // nowhere. A folder the person named outside the project is his own and is used as he named it.
+  if (!paths.isWithinWorkingDirectory(resolved)) return resolved;
+  let projectReal: string;
+  try { projectReal = realpathSync(paths.workingDirectory); } catch { return resolved; }
+  return holdCallerPath(resolved, projectReal) ?? resolved;
 }
 
 // ---------------------------------------------------------------------------
@@ -204,21 +210,11 @@ function describeMemory<Ctx extends MemoryCommandContext>(): CommandDescription<
     title: 'Memory and knowledge',
     summary: 'Opens Memory and knowledge: what the project remembers, your knowledge, what is known about you, and your templates',
     group: 'Knowledge',
-    // Unlisted: typed, it opens the place; the menu reaches the place too.
+    // Unlisted: typed, it opens the place (the command-level `opens`); the menu reaches the place too. It has no action:
+    // everything in the place is a capability with its control there.
     firstScreen: false,
-    bareOpens: 'open',
-    report: 'open',
-    actions: [
-      doAction<Ctx>({
-        id: 'open', label: 'Open Memory and knowledge', word: 'open', touches: 'reads',
-        sentence: 'Opens Memory and knowledge: memory, knowledge, what is known about you and your templates.',
-        operator: { terminalOnly: 'It is a terminal screen.' },
-        async run(_values, ctx) {
-          if (!ctx.openPlace) throw commandRefusal('This program has no screens to open.');
-          ctx.openPlace('memory');
-        },
-      }),
-    ],
+    opens: 'memory',
+    actions: [],
   };
 }
 

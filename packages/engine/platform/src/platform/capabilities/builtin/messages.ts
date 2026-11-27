@@ -24,6 +24,8 @@ import { createSurfaceEmailConfigReader, readEmailConfig, readSurfaceEmailSettin
 import { CapabilityRefusal, type CapabilityCaller, type CapabilityDefinition, type FixedChoice, type InputDescription, type ListName } from '../types.js';
 import type { MethodCapabilityDefinition } from './method-capability.js';
 import { CHANNEL_STATE_WORDS, channelReasonOf, channelStateOf } from '../../channels/channel-state.js';
+import { getBuiltinSetupSchema } from '../../channels/builtin/setup-schema.js';
+import type { ChannelSetupFieldDescriptor, ChannelSetupSchema, ChannelSurface } from '../../channels/types.js';
 import { SESSION_GATE_PRESET_NAMES, gatePresetLabel } from '../../gate/presets.js';
 
 // ── The lists inputs choose from (registered in terminal-shell) ──────────────
@@ -32,6 +34,8 @@ export const MAIL_INBOX_LIST = 'mail.inbox' as ListName;
 export const CALENDAR_EVENTS_LIST = 'calendar.events' as ListName;
 export const CHANNELS_LIST_NAME = 'channels' as ListName;
 export const CHANNEL_PROFILES_LIST = 'channels.profiles' as ListName;
+/** The registered projects "Project for this channel" chooses from. */
+export const CHANNEL_PROJECTS_LIST = 'channels.projects' as ListName;
 
 const READ = { done: '', touches: 'reads', lasts: 'not-a-change', risk: 'none' } as const;
 
@@ -292,6 +296,13 @@ export interface MessagesCapabilityServices {
      */
     test?: (() => Promise<MailboxCheck>) | undefined;
   };
+  /** A chat channel's own settings (`surfaces.<channel>.*`, the daemon's) and its secret store, for "Enter a channel's keys". */
+  readonly channelKeys?: {
+    get(key: string): unknown;
+    set(key: string, value: unknown): void;
+    /** Keep a secret in the daemon's secret store; the setting holds only its reference. */
+    storeSecret(key: string, value: string): Promise<void>;
+  } | undefined;
 }
 
 /** One half of a mailbox check: it worked, or why not (`failure` when a person acts on it differently). */
@@ -559,7 +570,14 @@ function policySaid(policy: Readonly<Record<string, unknown>>): string {
     const list = Array.isArray(policy[key]) ? (policy[key] as unknown[]).map(word).filter(Boolean) : [];
     return list.length > 0 ? list.join(', ') : 'anyone';
   };
-  return `${word(policy['surface'])}: messages ${policy['enabled'] === true ? 'accepted' : 'refused'}; only when mentioned: ${on('requireMention')}; direct messages: ${on('allowDirectMessages')}; groups: ${on('allowGroupMessages')}; users: ${names('allowlistUserIds')}`;
+  return `${word(policy['surface'])}: messages ${policy['enabled'] === true ? 'accepted' : 'refused'}; only when mentioned: ${on('requireMention')}; direct messages: ${on('allowDirectMessages')}; groups: ${on('allowGroupMessages')}; users: ${names('allowlistUserIds')}; your own messages act as you: ${on('ownMessagesAsOwner')}; project: ${projectSaid(policy['project'])}`;
+}
+
+/** A channel's project as the rules line names it: the project's folder name, or none ("Project for this channel"). */
+function projectSaid(project: unknown): string {
+  const folder = word(project);
+  if (!folder || folder === 'none') return 'none (conversations here write no file and run no command)';
+  return folder.replace(/\/+$/, '').split('/').pop() || folder;
 }
 
 function profileSaid(binding: Readonly<Record<string, unknown>>): string {
@@ -767,6 +785,67 @@ export const CHANNELS_SET_RULES: MethodCapabilityDefinition = {
   said: (answer) => `Who may write on ${policySaid(answer)}.`,
 };
 
+/**
+ * "Treat my own messages here as me" on one channel (off by default, channels/types.ts `ownMessagesAsOwner`). A message on
+ * a channel is someone else's input, also from the owner's own verified account; with this on, his own messages in a
+ * conversation that is his alone act as him. Turning it on loosens a protection: a model's call is put to the owner,
+ * opening on No.
+ */
+export const CHANNELS_OWN_MESSAGES: MethodCapabilityDefinition = {
+  capability: { id: 'channels.own-messages', group: 'messages', home: 'daemon', repeat: 'safe' },
+  actionId: 'own-messages', word: 'own-messages', label: 'Treat my own messages here as me',
+  inputs: [
+    { ...CHANNEL, step: 1 },
+    { id: 'as-me', label: 'Treat my own messages here as me', help: 'Whether a message you send from your own account here, in a conversation that is yours alone, acts as you',
+      kind: 'choice', choices: [{ value: 'off', label: 'No' }, { value: 'on', label: 'Yes', risk: 'loosens-a-protection' }],
+      required: { default: 'off', defaultMeans: 'no: every message here is someone else\'s input' }, typed: { flag: '--as-me' }, step: 2 },
+  ],
+  sentence: 'With this on, a message you send from your own verified account on {channel}, in a conversation that is yours alone (a direct message; never a group, a channel or a thread), acts as you: it can change files and run commands under your mode. Off, every message there is someone else\'s input: it is read and answered, and changes nothing.',
+  done: '',
+  touches: 'another-machine', lasts: 'kept', risk: 'loosens-a-protection',
+  riskDone: 'Whether your own messages on {channel} act as you is now what you gave.',
+  // Turning it on is the owner's own act through every door: a model's call and any other caller's (an admin pairing,
+  // a member, a device not his) are put to him, opening on No. It exists only for a channel that proves the sender and
+  // a one-to-one conversation (channels/own-messages-proof.ts); the channel route refuses it for any other.
+  ownerOnly: { reason: 'it lets your own messages on a channel change files and run commands as you', instead: 'Ask the owner to turn it on in Mail, calendar and channels, on the channel\'s row.' },
+  ownersAct: true,
+  example: { channel: 'telegram', 'as-me': 'on' },
+  method: { id: 'channels.policies.update', fields: { surface: 'channel', ownMessagesAsOwner: 'as-me:onoff' } },
+  said: (answer) => answer['ownMessagesAsOwner'] === true
+    ? `Your own messages on ${word(answer['surface'])}, in a conversation that is yours alone, now act as you: they can change files and run commands under your mode.`
+    : `Every message on ${word(answer['surface'])} is someone else's input, also yours: it is read and answered, and changes nothing.`,
+};
+
+/**
+ * "Project for this channel": the registered project a conversation on the channel works in (its files, commands and
+ * tool servers). None by default: a turn there that would read or write a file, run a command or reach anything else
+ * that needs a place is refused, naming this control (channels/channel-project.ts); nothing is done in the daemon's own
+ * folder.
+ */
+export const CHANNELS_PROJECT: MethodCapabilityDefinition = {
+  capability: { id: 'channels.project', group: 'messages', home: 'daemon', repeat: 'safe' },
+  actionId: 'channel-project', word: 'project', label: 'Project for this channel',
+  inputs: [
+    { ...CHANNEL, step: 1 },
+    { id: 'project', label: 'Project', help: 'A registered project, or none', kind: 'choice',
+      choices: { list: CHANNEL_PROJECTS_LIST, allowOther: { reason: 'none, or the full path of a registered project' } },
+      required: { default: 'none', defaultMeans: 'none' }, typed: { flag: '--project' }, step: 2 },
+  ],
+  sentence: 'Conversations on {channel} work in {project}: its files, its commands and its tool servers, as the rules of who may change things there allow. A conversation already going on moves there and keeps its history.',
+  // With none chosen (the default), the sentence says what none means, not "work in none".
+  sentenceWhen: { input: 'project', values: ['', 'none'], sentence: 'Conversations on {channel} have no project: they read no file, write none and run no command (your own message there gets the conversation a project of its own when it needs one), and a conversation already going on keeps its history.' },
+  done: '',
+  touches: 'another-machine', lasts: 'kept', risk: 'none',
+  // Where messages from a channel may change things is the owner's own choice, through every door.
+  ownerOnly: { reason: 'it decides which project a channel\'s messages may change', instead: 'Ask the owner to choose it in Mail, calendar and channels, on the channel\'s row.' },
+  ownersAct: true,
+  example: { channel: 'homeassistant', project: '/home/sam/projects/garden-planner' },
+  method: { id: 'channels.policies.update', fields: { surface: 'channel', project: 'project' } },
+  said: (answer) => word(answer['project']) && word(answer['project']) !== 'none'
+    ? `Conversations on ${word(answer['surface'])} now work in ${word(answer['project'])}.`
+    : `Conversations on ${word(answer['surface'])} have no project: they read no file, write none and run no command.`,
+};
+
 export const CHANNELS_PROFILES: MethodCapabilityDefinition = {
   capability: { id: 'channels.profiles', group: 'messages', home: 'daemon', repeat: 'safe' },
   actionId: 'profiles', word: 'profiles', label: 'See channel profiles', inputs: [], ...READ,
@@ -853,12 +932,89 @@ export const MAIL_CAPABILITIES: readonly CapabilityDefinition<MessagesCapability
 /** The calendar's handler capabilities (the window of days ahead is the handler's; the act is calendar.events.list). */
 export const CALENDAR_HANDLER_CAPABILITIES: readonly CapabilityDefinition<MessagesCapabilityServices>[] = [CALENDAR_UPCOMING];
 
+// ── A channel's own keys, entered on its row ─────────────────────────────────
+
+/** The chat channels a person connects with their own keys: every channel kind but the two the programs are themselves. */
+const CONNECTABLE_CHANNELS: readonly ChannelSurface[] = ['slack', 'discord', 'ntfy', 'webhook', 'homeassistant', 'telegram', 'google-chat', 'signal',
+  'whatsapp', 'telephony', 'imessage', 'msteams', 'bluebubbles', 'mattermost', 'matrix'];
+
+/** The values a person supplies for a channel (secrets and plain values); switches and choices keep their defaults. */
+function channelKeyFields(schema: ChannelSetupSchema): readonly ChannelSetupFieldDescriptor[] {
+  return schema.fields.filter((field) => field.configKey !== undefined
+    && (field.kind === 'secret' || field.kind === 'string' || field.kind === 'url' || field.kind === 'number'));
+}
+
+/** One form input per value of each channel, shown only for that channel (the row gives the channel). */
+const CHANNEL_KEY_INPUTS: readonly InputDescription[] = CONNECTABLE_CHANNELS.flatMap((surface) => {
+  const schema = getBuiltinSetupSchema(surface);
+  return channelKeyFields(schema).map((field): InputDescription => ({
+    id: `${surface}.${field.id}`,
+    label: field.label,
+    help: `${field.detail ?? field.placeholder ?? field.label}${field.required ? ' (needed)' : ''}; blank keeps what is set${field.kind === 'secret' ? '; it goes to the secret store and is never shown' : ''}`,
+    kind: field.kind === 'secret' ? 'secret' : field.kind === 'number' ? 'number' : 'text',
+    ...(field.kind === 'secret' || field.kind === 'number' ? {} : { freeTextReason: `the ${field.label.toLowerCase()} the channel gives you` }),
+    required: { default: '', defaultMeans: 'kept as it is' },
+    typed: { flag: `--${`${surface}-${field.id}`.replace(/[^a-zA-Z0-9-]/g, '-')}` as `--${string}` },
+    showWhen: { input: 'channel', is: surface },
+  }));
+});
+
+export const CHANNELS_CONNECT: CapabilityDefinition<MessagesCapabilityServices> = {
+  capability: { id: 'channels.connect', group: 'messages', home: 'daemon', repeat: 'safe' },
+  actionId: 'connect', word: 'connect', label: 'Enter a channel\'s keys and switch it on',
+  inputs: [
+    { ...CHANNEL, help: 'The chat channel to connect' },
+    ...CHANNEL_KEY_INPUTS,
+  ],
+  sentence: '{channel} gets the values entered (each secret in the secret store, settings holding only its reference) and is switched on once everything it needs is set, until you change it.', done: '',
+  touches: 'credential', lasts: 'kept', risk: 'none',
+  // Writing a credential: a model's call is put to the owner, opening on No, and a secret it leaves out is typed by the
+  // person in the form.
+  effects: ['control-plane.write', 'secret.write'],
+  example: { channel: 'ntfy' },
+  async run(values, services) {
+    const surface = (values.channel ?? '').trim() as ChannelSurface;
+    if (!CONNECTABLE_CHANNELS.includes(surface)) {
+      throw new CapabilityRefusal(`"${values.channel ?? ''}" is not a chat channel that takes keys.`, `Choose one of ${CONNECTABLE_CHANNELS.join(', ')}.`);
+    }
+    const keys = services.channelKeys;
+    if (!keys) throw new CapabilityRefusal('This daemon keeps no channel settings here.');
+    const schema = getBuiltinSetupSchema(surface);
+    const stored: string[] = [];
+    for (const field of channelKeyFields(schema)) {
+      const raw = values[`${surface}.${field.id}`] ?? '';
+      if (raw.trim().length === 0) continue;
+      const key = field.configKey!;
+      if (field.kind === 'secret') await keys.storeSecret(key, raw);
+      else if (field.kind === 'number') {
+        const number = Number(raw);
+        if (!Number.isFinite(number)) throw new CapabilityRefusal(`"${raw}" is not a number for ${field.label}; nothing after it was set.`);
+        keys.set(key, number);
+      } else keys.set(key, raw.trim());
+      stored.push(field.label);
+    }
+    const missing = channelKeyFields(schema).filter((field) => field.required && !stored.includes(field.label)
+      && !(typeof keys.get(field.configKey!) === 'string' ? (keys.get(field.configKey!) as string).trim() : keys.get(field.configKey!)));
+    const enabledKey = schema.fields.find((field) => field.id === 'enabled' && field.kind === 'boolean')?.configKey;
+    const lines = [stored.length > 0 ? `${schema.label}: stored ${stored.join(', ')}.` : `${schema.label}: nothing new was entered.`];
+    if (missing.length > 0) {
+      lines.push(`It is not switched on yet: it still needs ${missing.map((field) => field.label).join(', ')}.`);
+    } else if (enabledKey && keys.get(enabledKey) !== true) {
+      keys.set(enabledKey, true);
+      lines.push('Everything it needs is set: it is switched on.');
+    } else {
+      lines.push('Everything it needs is set.');
+    }
+    return { text: lines.join(' '), data: { channel: surface, stored, missing: missing.map((field) => field.label), enabled: enabledKey ? keys.get(enabledKey) === true : null } };
+  },
+};
+
 /** The channels' handler capabilities (a profile set keeps what was not changed; the act is channels.profiles.set). */
-export const CHANNELS_HANDLER_CAPABILITIES: readonly CapabilityDefinition<MessagesCapabilityServices>[] = [CHANNELS_SET_PROFILE];
+export const CHANNELS_HANDLER_CAPABILITIES: readonly CapabilityDefinition<MessagesCapabilityServices>[] = [CHANNELS_SET_PROFILE, CHANNELS_CONNECT];
 
 /** Every capability of the group that runs through its own daemon method. */
 export const MESSAGES_METHOD_CAPABILITIES: readonly { readonly definition: MethodCapabilityDefinition; readonly command: { readonly name: string; readonly title: string } }[] = [
   ...[CALENDAR_GET, CALENDAR_ADD, CALENDAR_CHANGE, CALENDAR_DELETE].map((definition) => ({ definition, command: { name: 'calendar', title: 'Calendar' } })),
-  ...[CHANNELS_STATUS, CHANNELS_SETUP, CHANNELS_DOCTOR, CHANNELS_TEST, CHANNELS_ACCOUNTS, CHANNELS_RULES, CHANNELS_SET_RULES, CHANNELS_PROFILES, CHANNELS_PROFILE, CHANNELS_REMOVE_PROFILE]
+  ...[CHANNELS_STATUS, CHANNELS_SETUP, CHANNELS_DOCTOR, CHANNELS_TEST, CHANNELS_ACCOUNTS, CHANNELS_RULES, CHANNELS_SET_RULES, CHANNELS_OWN_MESSAGES, CHANNELS_PROJECT, CHANNELS_PROFILES, CHANNELS_PROFILE, CHANNELS_REMOVE_PROFILE]
     .map((definition) => ({ definition, command: { name: 'channels', title: 'Channels' } })),
 ];

@@ -184,6 +184,7 @@ export {
   type ConfigReplicaDocument,
   type ConfigReplicaEntry,
   type ConfigReplicaTombstone,
+  type ReplicaAct,
 } from './config-replica.js';
 export {
   CONFIG_MESSAGE_TYPES,
@@ -192,6 +193,8 @@ export {
   type ConfigLocalDifference,
   type ConfigReplicationHost,
   type ConfigReplicationStatus,
+  type ConfigRecentChange,
+  describeReplicaAct,
   type HeldConfigChange,
   type ReplicatedConfigStore,
   type ReplicatedSecretStore,

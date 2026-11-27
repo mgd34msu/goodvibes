@@ -177,7 +177,7 @@ export async function mintAgentDevicePairing(
       offers: [...PAIRING_HANDOFF_OFFER_KINDS],
       ...(thisMachine ? { forThisMachine: true } : {}),
       ...(serveToNetwork ? { serveToNetwork: true } : {}),
-    });
+    }, { explicitUserRequest: true }); // Only from the person's own pairing command or press: his request.
   } catch (error) {
     return {
       ok: false,

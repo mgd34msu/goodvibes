@@ -65,6 +65,15 @@ export {
   unobservableRuntime,
 } from './health.js';
 export type { ChannelHealthInput } from './health.js';
+// "Project for this channel": where a channel's conversations work, and the refusal when they have none.
+export {
+  CHANNEL_PROJECT_CONTROL,
+  channelProjectRefusal,
+  channelTurnWithoutProject,
+  channelWithoutProjectRefusal,
+  inChannelWithoutProject,
+  refuseChannelChangesWithoutProject,
+} from './channel-project.js';
 export { ChannelIngressAlarm } from './ingress-alarm.js';
 export type { ChannelIngressAlarmDeps, ChannelIngressFailureState, IngressFailureDelivery } from './ingress-alarm.js';
 export { ChannelHealthWatcher } from './health-watcher.js';

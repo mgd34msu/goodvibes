@@ -9,7 +9,8 @@
  * slash action and the place make it read it at once).
  */
 import { existsSync } from 'node:fs';
-import { basename, isAbsolute, relative, resolve } from 'node:path';
+import { basename, resolve } from 'node:path';
+import { callerPathOf, unreadableFile } from '../path-inputs.js';
 import type { ApiTokenAuditor } from '../../security/token-audit.js';
 import type { WorkspaceTrustManager } from '../../runtime/workspace-trust.js';
 import { inspectSandboxSessionArtifact, listSandboxPresets, listSandboxProfiles, renderSandboxSessions, type ConfigManagerLike } from '../../runtime/sandbox/manager.js';
@@ -312,6 +313,13 @@ export const SECURITY_RUN_IN_SANDBOX: CapabilityDefinition<SandboxSessionService
   async run(values, services) {
     const [program, ...args] = values.command!.trim().split(/\s+/);
     if (!program) throw new CapabilityRefusal('Name the program to run; nothing was run.');
+    // Unasked only inside a real boundary: a host session (started without a sandbox, because the person asked for
+    // one or none was there) is no sandbox, so this never runs a command on the host.
+    const session = sandboxSessions(services).registry.get(values.session!);
+    if (session && session.backend !== 'bubblewrap') {
+      throw new CapabilityRefusal(`Not run: sandbox session ${values.session} has no sandbox around it (it runs on this machine as you), and this action runs a command only inside one.`,
+        'Start a sandbox session on a machine where the sandbox works (bubblewrap), or run the command yourself.');
+    }
     try {
       const result = await sandboxSessions(services).registry.execute(values.session!, program, args, { timeoutMs: 10000 });
       const stdout = result.stdout.trim();
@@ -329,16 +337,12 @@ export const SECURITY_RUN_IN_SANDBOX: CapabilityDefinition<SandboxSessionService
 export const SECURITY_SAVE_SANDBOX: CapabilityDefinition<SandboxSessionServices> = {
   capability: { id: 'security.save-sandbox', group: 'safety', home: 'session', repeat: 'safe' }, available: keepsSandboxSessions,
   actionId: 'save-sandbox', label: 'Save a sandbox session\'s record to a file', word: 'save-sandbox',
-  inputs: [SESSION_INPUT, pathInput('Where to write it', 2), REPLACE_INPUT],
+  inputs: [SESSION_INPUT, { ...pathInput('Where to write it', 2), file: 'written' }, REPLACE_INPUT],
   sentence: 'The record of sandbox session {session} will be written to {path}, until you change it.',
   done: '', touches: 'this-machine', lasts: 'kept', risk: 'none', example: { session: 'sbx-1a2b', path: 'sandbox-session.json' },
-  async run(values, services) {
+  async run(values, services, caller) {
     const held = sandboxSessions(services);
-    const target = held.resolvePath(values.path!);
-    if (held.insideOnly) {
-      const inside = relative(held.resolvePath('.'), target);
-      if (inside.startsWith('..') || isAbsolute(inside)) throw new CapabilityRefusal(`Nothing was written: ${target} is outside the working folder, and a model writes only inside it.`);
-    }
+    const target = sandboxRecordPath(held, caller, values.path!);
     if (existsSync(target) && values.replace !== 'yes') throw new CapabilityRefusal(`${target} already exists; nothing was written.`, 'Choose "Write over it" to replace it.');
     try {
       held.registry.exportArtifact(values.session!, resolve(target), held.config);
@@ -355,12 +359,23 @@ export const SECURITY_READ_SANDBOX: CapabilityDefinition<SandboxSessionServices>
   inputs: [pathInput('A sandbox session record saved earlier', 1)],
   sentence: 'Reads the sandbox session record saved in {path} and shows what it recorded.', done: '',
   touches: 'reads', lasts: 'not-a-change', risk: 'none', example: { path: 'sandbox-session.json' },
-  async run(values, services) {
+  async run(values, services, caller) {
     const held = sandboxSessions(services);
+    const source = sandboxRecordPath(held, caller, values.path!);
     try {
-      return { text: inspectSandboxSessionArtifact(held.registry.inspectArtifact(held.resolvePath(values.path!))) };
+      return { text: inspectSandboxSessionArtifact(held.registry.inspectArtifact(source)) };
     } catch (error) {
-      throw new CapabilityRefusal(`Could not read ${values.path}: ${summarizeError(error)}`);
+      // Never the system's or the parser's words (capabilities/path-inputs.ts).
+      throw unreadableFile(values.path!, 'a sandbox session record', caller, error, 'Nothing was read from it.');
     }
   },
 };
+
+/**
+ * The file a sandbox session record is written to or read from, placed by capabilities/path-inputs.ts `callerPathOf`
+ * in the program's working folder: a model (or anyone but the person) names only a file inside it.
+ */
+function sandboxRecordPath(held: NonNullable<SandboxSessionServices['sandboxSessions']>, caller: CapabilityCaller, raw: string): string {
+  const folder = held.resolvePath('.');
+  return callerPathOf({ ...caller, workingDirectory: caller.workingDirectory ?? folder, personAsked: caller.personAsked === true && !held.insideOnly }, raw);
+}

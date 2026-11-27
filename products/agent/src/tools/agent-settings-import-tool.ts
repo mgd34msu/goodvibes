@@ -1,74 +1,50 @@
 import type { Tool } from '@goodvibes/engine/platform/platform/types';
-import type { ToolRegistry } from '@goodvibes/engine/platform/platform/tools';
-import type { CommandContext } from '../input/command-registry.ts';
-import {
-  previewAgentWorkspaceTuiSettingsImport,
-} from '../input/agent-workspace-settings.ts';
-import { settingsThrownFailure } from './agent-settings-admission.ts';
-import { createAgentSettingsImportProjector, executeAdmittedAgentSettingsImport, isAgentSettingsImportMutation } from './agent-settings-import-admission.ts';
-import { confirmParameter, requestParameter } from '@goodvibes/engine/terminal-shell/agent-turn/effect-admission';
+import { assertCurrentToolInvocation, type ToolRegistry } from '@goodvibes/engine/platform/platform/tools';
+import { randomUUID } from 'node:crypto';
 
-interface AgentSettingsImportArgs {
-  readonly action?: unknown;
-  readonly mode?: unknown;
-  readonly confirm?: unknown;
-  readonly explicitUserRequest?: unknown;
+/** The one capability that gives the Agent the terminal app's settings (the daemon's; the person's Setup row runs it too). */
+export const COPY_FROM_TERMINAL_APP = 'settings.copy-from-terminal-app';
+
+/**
+ * The capability's inputs from a model's call: `security: "yes"` (also read from `includeSecurity: true`) copies the
+ * settings that loosen a protection too; anything else leaves them as they are.
+ */
+export function copyFromTerminalAppInputs(args: Readonly<Record<string, unknown>>): Record<string, unknown> {
+  return args.security === 'yes' || args.includeSecurity === true ? { security: 'yes' } : {};
 }
 
-function output(value: unknown): { readonly success: true; readonly output: string } {
-  return {
-    success: true,
-    output: typeof value === 'string' ? value : JSON.stringify(value, null, 2),
-  };
+/** Runs settings.copy-from-terminal-app as a nested capability_run of this call, so the same gate decides it. */
+export function runCopyFromTerminalApp(registry: ToolRegistry, args: Readonly<Record<string, unknown>>, options: Parameters<Tool['execute']>[1]): ReturnType<Tool['execute']> {
+  return registry.executeNested(randomUUID(), 'capability_run', { id: COPY_FROM_TERMINAL_APP, inputs: copyFromTerminalAppInputs(args) }, options);
 }
 
-function error(message: string): { readonly success: false; readonly error: string } {
-  return { success: false, error: message };
-}
-
-export function createAgentSettingsImportTool(commandContext: CommandContext): Tool {
+export function createAgentSettingsImportTool(registry: ToolRegistry): Tool {
   return {
     definition: {
       name: 'import_goodvibes_settings',
-      activity: { doing: 'Importing', did: 'imported', object: 'settings' },
-      description: 'Preview or apply shared GoodVibes settings import.',
+      activity: { doing: 'Copying', did: 'copied', object: 'the terminal app\'s settings' },
+      description: 'Give the Agent the settings the terminal app has: runs the capability settings.copy-from-terminal-app (the same as capability_run id:"settings.copy-from-terminal-app"). A setting that loosens a protection is copied only with security:"yes".',
       parameters: {
         type: 'object',
         properties: {
-          action: {
-            type: 'string',
-            enum: ['preview', 'import', 'apply'],
-            description: 'preview inspects sources; apply/import uses current recorded settings admission.',
-          },
-          confirm: confirmParameter(),
-          explicitUserRequest: requestParameter(),
+          security: { type: 'string', enum: ['no', 'yes'], description: 'yes: also copy the settings that loosen a protection; no (the default): leave them as they are.' },
         },
         additionalProperties: false,
       },
       sideEffects: ['state'],
+      // It only routes to the capability (a nested capability_run judged by the capability's own risk): classed a read,
+      // so the capability's question is the only one.
+      category: 'read',
       concurrency: 'serial',
     },
     execute: async (rawArgs: unknown, options) => {
-      const args = (rawArgs && typeof rawArgs === 'object' && !Array.isArray(rawArgs) ? rawArgs : {}) as AgentSettingsImportArgs;
-      if (isAgentSettingsImportMutation('import_goodvibes_settings', args as Record<string, unknown>)) {
-        try { return await executeAdmittedAgentSettingsImport(commandContext, args as Record<string, unknown>, options); }
-        catch (thrown) { return settingsThrownFailure('import', thrown); }
-      }
-      // Every word that applies the import is a mutation above; anything else previews.
-      const preview = previewAgentWorkspaceTuiSettingsImport(commandContext);
-      if (!preview) return error('GoodVibes settings import is unavailable in this runtime.');
-      return output({
-        status: 'preview',
-        action: 'import_goodvibes_settings',
-        preview,
-        next: 'Use action:"import" to apply the captured import through recorded settings admission.',
-      });
+      const args = (rawArgs && typeof rawArgs === 'object' && !Array.isArray(rawArgs) ? rawArgs : {}) as Record<string, unknown>;
+      if (!assertCurrentToolInvocation(args, options)) return { success: false, error: 'Copying the terminal app\'s settings requires a current recorded invocation.' };
+      return runCopyFromTerminalApp(registry, args, options);
     },
   };
 }
 
-export function registerAgentSettingsImportTool(registry: ToolRegistry, commandContext: CommandContext): void {
-  if (!registry.has('import_goodvibes_settings')) registry.register(createAgentSettingsImportTool(commandContext), {
-    inputProjection: createAgentSettingsImportProjector(commandContext, undefined, registry),
-  });
+export function registerAgentSettingsImportTool(registry: ToolRegistry): void {
+  if (!registry.has('import_goodvibes_settings')) registry.register(createAgentSettingsImportTool(registry));
 }

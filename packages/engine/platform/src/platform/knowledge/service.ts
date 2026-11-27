@@ -115,6 +115,7 @@ import {
   matchesKnowledgeQuery,
 } from './shared.js';
 import { isGeneratedKnowledgeSource } from './generated-projections.js';
+import { knowledgeRecordReachable } from './knowledge-reach.js';
 import {
   prepareKnowledgeScopeSelection,
   KnowledgeScopeSelectionHeldError,
@@ -539,7 +540,14 @@ export class KnowledgeService {
   }
 
   getItem(id: string): KnowledgeItemView | null {
-    const item = this.store.getItem(id);
+    const found = this.store.getItem(id);
+    // Another project's record is answered as none, to a caller that may not reach that project (knowledge-reach.ts).
+    const primary = found?.source ? { kind: 'source' as const, record: found.source } : found?.node ? { kind: 'node' as const, record: found.node }
+      : found?.issue ? { kind: 'issue' as const, record: found.issue } : undefined;
+    const shown = found && primary && !knowledgeRecordReachable(this.store, primary.kind, primary.record) ? null : found;
+    const item = shown ? { ...shown,
+      linkedSources: shown.linkedSources.filter((source) => knowledgeRecordReachable(this.store, 'source', source)),
+      linkedNodes: shown.linkedNodes.filter((node) => knowledgeRecordReachable(this.store, 'node', node)) } : shown;
     if (item?.source) this.deferUsage({ targetKind: 'source', targetId: item.source.id, usageKind: 'item-open' });
     if (item?.node) this.deferUsage({ targetKind: 'node', targetId: item.node.id, usageKind: 'item-open' });
     if (item?.issue) this.deferUsage({ targetKind: 'issue', targetId: item.issue.id, usageKind: 'item-open' });
@@ -758,6 +766,9 @@ export class KnowledgeService {
     readonly metadata?: Record<string, unknown> | undefined;
   }, ownership: KnowledgeIngestOwnership = {}): Promise<{ source: KnowledgeSourceRecord; artifactId?: string; extraction?: KnowledgeExtractionRecord; issues: readonly KnowledgeIssueRecord[] }> {
     this.requireAdmission('knowledge artifact ingestion');
+    // A file added in a project (a call that names one, or a daemon turn's conversation there) is that project's, and
+    // keeps who added it; one added outside any project is the owner's shared knowledge (knowledge-reach.ts, stamped
+    // by every ingest in ingest-inputs.ts).
     return ingestKnowledgeArtifact(this.getIngestContext(), input, ownership);
   }
 

@@ -28,7 +28,7 @@ import { resolveGoodVibesDaemonHome } from '@goodvibes/engine/platform/platform/
 import { AcpManager } from '@goodvibes/engine/platform/platform/acp';
 import { readTierPromptSupplement } from '@goodvibes/engine/platform/platform/providers';
 import { factsFor } from '@goodvibes/engine/platform/platform/routing';
-import { CONTROL_PLANE_FEATURE_FLAG } from '@goodvibes/engine/platform/platform/runtime/operations';
+import { createTaskInterventions } from '@goodvibes/engine/terminal-shell/task-interventions';
 import { logger, summarizeError } from '@goodvibes/engine/platform/platform/utils';
 import type { PermissionRequestHandler } from '@goodvibes/engine/platform/platform/permissions';
 import type { WorkspaceTrustLevel } from '@goodvibes/engine/platform/platform/runtime/operations';
@@ -42,7 +42,6 @@ import type { RuntimeContext, BootstrapOptions } from './context.ts';
 import type { SystemMessageRouter } from '../core/system-message-router.ts';
 import {
   createTaskManager,
-  OpsControlPlane,
   AcpTaskAdapter,
   loadLastConversation,
   leaveHostedSessionOnExit,
@@ -75,6 +74,7 @@ import { bindSessionContextAccounting } from '@goodvibes/engine/platform/platfor
 import {
   autostartInstalledDaemon,
   createDaemonServiceControl,
+  daemonAddressAnswers,
   DAEMON_PROGRAM_STARTED_LINE,
   daemonNotInstalledNotice,
   daemonProgramStartFailedLine,
@@ -88,7 +88,6 @@ import { createRelayReadAccessors } from './relay-reachability-bridge.ts';
 import { GOODVIBES_TUI_SURFACE_ROOT } from '../config/surface.ts';
 import { registerStartupProviders } from './startup-provider-registration.ts';
 import { createSerialSteps } from './serial-steps.ts';
-import { retryTerminalRoutineMove, startTerminalRoutines } from './terminal-routines.ts';
 import { wireFailedTurnActions } from '@goodvibes/engine/terminal-shell/turn-failure-actions';
 import { FeatureAnnouncementStore, featureAnnouncementsPath } from '@goodvibes/engine/platform/platform/runtime/feature-announcements';
 
@@ -264,8 +263,8 @@ export async function bootstrapRuntime(stdout: NodeJS.WriteStream, options: Boot
       resolveSessionId: () => runtime.sessionId,
       services: {
         agentManager: services.agentManager,
+        // This program runs no contracts: its work runs on the daemon and is read in Work.
         contractRunner: services.contractRunner,
-        contractIntake: services.contractIntake,
       },
     },
     requestRender,
@@ -332,11 +331,9 @@ export async function bootstrapRuntime(stdout: NodeJS.WriteStream, options: Boot
   const opsTaskManager = createTaskManager(store, runtimeBus, () => runtime.sessionId, services.featureFlags,
     (task) => task.kind === 'acp' ? { cancel: () => acpManager.cancel(task.owner) }
       : task.kind === 'exec' ? processTaskAdapter.controllerFor(task.id) : undefined);
-  // Operator interventions ride the control-plane gateway capability
-  // (controlPlane.gateway, on by default; the old never-registered gate id shipped this dead).
-  const opsControlPlane = services.featureFlags.isEnabled(CONTROL_PLANE_FEATURE_FLAG)
-    ? new OpsControlPlane(opsTaskManager, runtimeBus, store, userSessionId, services.agentManager)
-    : undefined;
+  // Pause, go on, cancel and run again on this session's tasks: the one plane both programs build.
+  const opsControlPlane = createTaskInterventions({ taskManager: opsTaskManager, runtimeBus, store, sessionId: userSessionId,
+    agentCanceller: services.agentManager, featureFlags: services.featureFlags });
 
   // One surface-bound pointer writer, shared by the resume seam below and the
   // context's `_writeLastSessionPointer`. Both slots want a one-argument
@@ -447,23 +444,6 @@ export async function bootstrapRuntime(stdout: NodeJS.WriteStream, options: Boot
   const settleHomeHousekeeping = (): void => {
     const adopted = externalServices.daemonStatus.mode === 'external';
     services.settleHomeHousekeeping(adopted);
-    if (adopted) retryRoutineMove();
-  };
-  // Moving the owner's routines changes where they run, so it is a notice; one left unmoved is a warning.
-  const showRoutineMove = (lines: readonly string[]): void => {
-    systemMessageRouter.high(lines.join('\n'), lines.some((line) => line.startsWith('Not moved yet')) ? 'warning' : undefined);
-    requestRender();
-  };
-  // Routines a start-up move left running nowhere (the daemon could not be
-  // reached then) are moved once a daemon is adopted or comes back.
-  const retryRoutineMove = (): void => {
-    if (!configManager.get('automation.enabled')) return;
-    void retryTerminalRoutineMove({ configManager, homeDirectory: services.homeDirectory })
-      .then((lines) => {
-        if (lines.length === 0) return;
-        showRoutineMove(lines);
-      })
-      .catch((error: unknown) => logger.warn('Moving terminal routines to the daemon failed', { error: summarizeError(error) }));
   };
 
   const inspectExternalServices = () => {
@@ -559,7 +539,7 @@ export async function bootstrapRuntime(stdout: NodeJS.WriteStream, options: Boot
   // adopted and the status bar redraws.
   const startingDaemonWait = new AbortController();
   bootstrapUnsubs.push(() => startingDaemonWait.abort());
-  const adoptWhenStarted = (control: DaemonServiceControl, serviceName: string, since: number): void => {
+  const adoptWhenStarted = (control: DaemonServiceControl, serviceName: string, since: number, startedHere = false): void => {
     void waitForStartingDaemon({
       control,
       serviceName,
@@ -570,7 +550,8 @@ export async function bootstrapRuntime(stdout: NodeJS.WriteStream, options: Boot
       .then(async (result) => {
         if (result === 'online') {
           await adoptStartedDaemon();
-          announceAutostart({ action: 'came-online', serviceName });
+          // Started by this program's start of the service: said as started, not as one that was already starting.
+          announceAutostart(startedHere ? { action: 'started', serviceName } : { action: 'came-online', serviceName });
         } else if (result === 'stopped') {
           announceAutostart({
             action: 'start-failed',
@@ -597,9 +578,11 @@ export async function bootstrapRuntime(stdout: NodeJS.WriteStream, options: Boot
         daemonMode: externalServices.daemonStatus.mode,
         control,
         isReachable,
+        // A daemon program started here may be the first ever: it is heard at its address before any credential exists.
+        programAnswers: () => daemonAddressAnswers(configManager),
       });
       if (outcome.action === 'started' || outcome.action === 'came-online' || outcome.action === 'program-started') await adoptStartedDaemon();
-      if (outcome.action === 'starting') adoptWhenStarted(control, outcome.serviceName, outcome.since);
+      if (outcome.action === 'starting') adoptWhenStarted(control, outcome.serviceName, outcome.since, outcome.startedHere === true);
       announceAutostart(outcome);
     } catch (error) {
       logger.debug('Boot-time daemon start check failed', { error: summarizeError(error) });
@@ -668,7 +651,6 @@ export async function bootstrapRuntime(stdout: NodeJS.WriteStream, options: Boot
   sessionUnionCache.setOnTransition((online) => {
     requestRender();
     daemonHandshake.onLivenessTransition(online);
-    if (online) retryRoutineMove();
     // Readers that failed while the daemon was away (a place's lists) read again now.
     if (online) announceDaemonAttached();
   });
@@ -744,28 +726,12 @@ export async function bootstrapRuntime(stdout: NodeJS.WriteStream, options: Boot
     requestRender,
     shellPaths: services.shellPaths,
     surfaceRoot: GOODVIBES_TUI_SURFACE_ROOT,
+    // A headless run starts them on its turn's first `mcp` call (turn-tool-composition.ts).
+    connectOnStart: options.toolServersOnFirstUse !== true,
   });
   wireTerminalMcpReload(services.shellPaths, services.mcpRegistry, mcpDiscovery, bootstrapUnsubs, systemMessageRouter, requestRender);
-  // Schedules belong to the daemon, so each runs once with or without a program
-  // open: this moves any an earlier terminal app kept to it (runtime/terminal-routines.ts).
-  if (configManager.get('automation.enabled')) {
-    deferredStartup.schedule({
-      label: 'automation',
-      run: async () => {
-        // The daemon may be being started or attached by the external-services
-        // task; moving before it answers would report routines as not running.
-        await externalServicesStarted;
-        const lines = await startTerminalRoutines({ configManager, homeDirectory: services.homeDirectory });
-        if (lines.length > 0) showRoutineMove(lines);
-      },
-      onError: (error) => {
-        const message = summarizeError(error);
-        logger.error('Deferred automation startup failed', { error: message });
-        systemMessageRouter.high(`[Startup] The schedules this terminal kept could not be handed to the daemon: ${message}. Automation, in the menu, shows the daemon's schedules.`, 'error');
-        requestRender();
-      },
-    });
-  }
+  // Schedules belong to the daemon, so each runs once with or without a program open. Any an earlier terminal app
+  // kept in its own file are taken by the daemon itself when it starts (automation/manager-runtime.ts `load`).
 
   // ── Phase 12: Session:start lifecycle hook ─────────────────────────────
 

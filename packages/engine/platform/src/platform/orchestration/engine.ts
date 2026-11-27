@@ -328,7 +328,9 @@ export function createOrchestrationEngine(deps: OrchestrationEngineDeps): Orches
   const runWorktreeSetupHook =
     deps.runWorktreeSetup ??
     (async (worktreePath: string, signal?: AbortSignal): Promise<string | void> => {
-      const registry = new WorktreeRegistry(deps.projectRoot);
+      // The project's own register (the state root), never a file inside the contract's tree: product state written
+      // there made that tree read as holding the owner's work, so it was kept on disk after every stop.
+      const registry = new WorktreeRegistry(stateRoot);
       // Derived-by-default (lockfile → install, .env carry-over); user config overrides.
       const config = resolveEffectiveWorktreeSetup((key) => (deps.configManager.get as unknown as (k: string) => unknown)(key), deps.projectRoot);
       const result = await runWorktreeSetup(worktreePath, deps.projectRoot, config, {
@@ -343,6 +345,9 @@ export function createOrchestrationEngine(deps: OrchestrationEngineDeps): Orches
   const worktreeIsolation: WorktreeIsolationManager = createWorktreeIsolationManager({
     nativeDataWriter: deps.nativeDataWriter ?? deps.configManager.getNativeDataWriter?.(),
     projectRoot: deps.projectRoot,
+    // A contract's steps branch from its worktree but sit beside it under the project, never inside it: a tree
+    // nested in another is left on disk when the outer one is removed.
+    worktreeRoot: stateRoot,
     stateNamespace: deps.stateNamespace,
     ownedWork,
     emit,

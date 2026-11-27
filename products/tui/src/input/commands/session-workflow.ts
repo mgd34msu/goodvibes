@@ -121,21 +121,6 @@ export const sessionWorkflow = createSessionWorkflowCommands<CommandContext>(req
   postureSeparator: '=',
   reviewSeparator: ': ',
   reviewDetailSeparator: ': ',
-  field(view, key, value) {
-    const labels: Readonly<Record<string, string>> =
-      view === 'current'
-        ? { id: '  ID:       ', name: '  Name:     ', started: '  Started:  ', messages: '  Messages: ', model: '  Model:    ' }
-        : {
-            heading: 'Session: ',
-            title: '  Title:    ',
-            model: '  Model:    ',
-            provider: '  Provider: ',
-            date: '  Date:     ',
-            messages: '  Messages: ',
-            file: '  File:     ',
-          };
-    return (labels[key] ?? '') + value;
-  },
   deleted: (name, title) => 'Session deleted: ' + name + (title ? ' (' + title + ')' : ''),
   failed: (action, error) => 'Failed to ' + (action === 'rename' ? 'rename' : action + ' session') + ': ' + summarizeError(error),
   captureSession(ctx) {

@@ -67,7 +67,7 @@ export const POLICY_TARGETS = {
   memory: 'Memory',
   computer: 'The browser, screenshots or computer use',
   device: 'Devices, voice or text-to-speech',
-  workspace: 'Workspace actions',
+  screens_keys_commands: 'The screen in front of the user: opening a place or view, running a key, or a typed slash command',
   host: 'The connected host or daemon',
   none: 'No particular tool or area',
 } as const;
@@ -180,7 +180,7 @@ export const taskRouteSlots = defineBattery({
     { name: 'telegram send', state: { request: 'send message to Telegram' }, expect: { channelTask: 'send', changes: 'yes' } },
     { name: 'channels configured', state: { request: 'which messaging channels are configured?' }, expect: { channelTask: 'status', changes: 'no' } },
     // Policy targets.
-    { name: 'harness target', state: { request: 'can you run agent_harness mode run_workspace_action without asking me?' }, expect: { policyTarget: 'agent_harness' } },
+    { name: 'harness target', state: { request: 'can you run agent_harness mode run_background_process without asking me?' }, expect: { policyTarget: 'agent_harness' } },
     { name: 'settings target', state: { request: 'Why would settings action:set need confirmation?' }, expect: { policyTarget: 'settings' } },
     { name: 'terminal target', state: { request: 'why was that terminal command blocked' }, expect: { policyTarget: 'terminal' } },
     { name: 'process target', state: { request: 'why was killing the background process denied?' }, expect: { policyTarget: 'process' } },
@@ -192,7 +192,7 @@ export const taskRouteSlots = defineBattery({
     { name: 'memory target', state: { request: 'why was the memory write denied?' }, expect: { policyTarget: 'memory' } },
     { name: 'computer target', state: { request: 'why was the screenshot blocked?' }, expect: { policyTarget: 'computer' } },
     { name: 'device target', state: { request: 'why does text-to-speech playback need confirmation?' }, expect: { policyTarget: 'device' } },
-    { name: 'workspace target', state: { request: 'why was that workspace action denied?' }, expect: { policyTarget: 'workspace' } },
+    { name: 'screen target', state: { request: 'why was opening that place on my screen held for confirmation?' }, expect: { policyTarget: 'screens_keys_commands' } },
     { name: 'host target', state: { request: 'would restarting the daemon be blocked?' }, expect: { policyTarget: 'host' } },
     { name: 'no target', state: { request: 'why was that blocked?' }, expect: { policyTarget: 'none' } },
   ],

@@ -1,5 +1,5 @@
 import { assertAutonomousData, captureAutonomousChoices } from '../permissions/autonomous.js';
-import { captureProjectionArgs, type ProjectedToolCall, type ToolInputProjectionOptions } from '../tools/input-projection.js';
+import { captureProjectionArgs, describeToolInputProjectionProblem, ToolInputProjectionError, type ProjectedToolCall, type ToolInputProjectionOptions } from '../tools/input-projection.js';
 import type { ToolRegistry } from '../tools/registry.js';
 import type { ToolCall } from '../types/tools.js';
 
@@ -69,7 +69,17 @@ export async function projectToolInputBatch(
       // Unknown tools retain the existing recoverable UnknownPreparedToolError
       // path, after complete local preflight. They have no registered projector.
       if (!registry.has(call.name)) { calls.push(Object.freeze(call)); continue; }
-      const projected = await registry.projectCall(call.id, call.name, call.arguments, options);
+      let projected: ProjectedToolCall;
+      try {
+        projected = await registry.projectCall(call.id, call.name, call.arguments, options);
+      } catch (error) {
+        // The host refused these arguments with its own sentence (a setting locked as managed, a value only the owner
+        // sets): this call is answered with it and never run or asked about; the rest of the batch goes on. A hold with
+        // no sentence (authority, privacy, judgment) still stops the batch.
+        if (!(error instanceof ToolInputProjectionError) || error.problem !== 'held' || !error.detail) throw error;
+        calls.push(Object.freeze({ ...call, argumentError: describeToolInputProjectionProblem(error.problem, error.detail) }));
+        continue;
+      }
       projections.push(projected);
       calls.push(Object.freeze({ id: projected.callId, name: projected.name, arguments: projected.args, ...(call.argumentError === undefined ? {} : { argumentError: call.argumentError }) }));
     }

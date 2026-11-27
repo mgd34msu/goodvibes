@@ -119,7 +119,7 @@ export const memoryConfigSettings: ConfigSettingDefinition[] = [
     ...intRange(1, 100),
   },
   {
-    key: 'memory.projection.dir',
+    key: 'memory.projection.dir', valueKind: 'path',
     label: 'Folder memories are written to as files',
     type: 'string',
     description:

@@ -38,6 +38,8 @@ export function shortcutGroups(keybindingsManager: KeybindingsManager): Shortcut
     // otherwise it collapses or expands the nearest block.
     [bound('next-field'), 'Path-complete, else collapse/expand the nearest block'],
     [bound('leader'), 'Starts a two-key shortcut: the screen shows every key that can follow'],
+    // Everything that is not one of the few typed commands is a control in a place: the menu reaches every place.
+    [bound('open-menu'), 'Open the menu of every place (everything that is not a command here)'],
   ];
   // Where the views live now (they open as modals over the conversation).
   const views: ReadonlyArray<readonly [string, string]> = [

@@ -1,5 +1,5 @@
 import { createDaemonWorkspaceTrustResolver } from './workspace-trust-composition.js';
-import { nativeHostedConversationOwner, nativeHostedConversationProjects } from './native-hosted-conversation-composition.js';
+import { nativeHostedConversationProjects } from './native-hosted-conversation-composition.js';
 /**
  * hosted-session-composition.ts, what this daemon states so it may host
  * conversation loops.
@@ -37,38 +37,18 @@ import { nativeHostedConversationOwner, nativeHostedConversationProjects } from 
  * and $HOME masked, the workspace writable, and `sandbox.egressAllowlist` the
  * one way network comes back, with the self-labelling note on every result.
  *
- * What was NOT the same was the fallback. When no boundary could be applied,
- * the exec tool ran the command on the host and said so, which is right for a
- * terminal (a person asked, a person is reading) and wrong for a turn nobody is
- * watching. A hosted conversational turn reached the whole host that way: the
- * full process table, the owner's /proc, and his tmux session, where it typed.
- *
- * So this daemon states the posture rather than inheriting a default:
- *
- *  - CONVERSATIONAL is what every session created over `sessions.hosted.*`
- *    gets, and it is the posture the engine defaults to. The boundary is
- *    REQUIRED: a command that cannot be contained is refused, naming why, and
- *    running on the host is not a fallback available to it. The owner's
- *    terminal is denied outright, at the exec guard, regardless of boundary.
- *  - WORKSTREAM, a real work chain the owner authorized, which may genuinely
- *    need the machine itself (the boundary where available, the host where
- *    not), is a grant a daemon composition makes explicitly. Hosted sessions
- *    never hold it: they are always conversational, and the function below
- *    never returns anything else. The one holder today is native work
- *    execution's delegated agents: native-work-execution-activation.ts sets
- *    `execContainment: WORKSTREAM_CONTAINMENT` on their tool dependencies, and
- *    the operator method `workLedger.execution.start` (owner-authorized) is
- *    what admits that work. Nothing on the wire and nothing in a tool argument
- *    can reach the grant otherwise.
+ * When no boundary can be applied, what happens depends on whose input drives
+ * the turn, never on the door: the owner's turns run commands by the one rule
+ * (`TURN_EXEC_CONTAINMENT`: the sandbox setting and his mode), and a turn acting
+ * on someone else's input (an outside caller's message into a hosted session) runs
+ * no command outside a real sandbox and writes no file (security/turn-input-party.ts,
+ * tools/exec/containment.ts `containmentForTurn`).
  */
 import { createClientRuntimeServices } from '@goodvibes/engine/platform/platform/runtime/client-services';
 import { createRuntimeStore } from '@goodvibes/engine/platform/platform/runtime/store';
 import { createShellPathService } from '@goodvibes/engine/platform/platform/runtime/shell';
 import type { DaemonHostedSessionsOptions } from '@goodvibes/engine/platform/platform/daemon';
-import type {
-  HostedSessionExecPosture,
-  HostedWorkspaceFloor,
-} from '@goodvibes/engine/platform/platform/hosted-sessions';
+import type { HostedWorkspaceFloor } from '@goodvibes/engine/platform/platform/hosted-sessions';
 import {
   hostedAgentAsker,
   hostedWorkerSurface,
@@ -108,21 +88,6 @@ function hostedSystemPrompt(input: { readonly workspaceRoot: string }): string {
 }
 
 /**
- * What a hosted session's exec tool may do.
- *
- * Every session this daemon hosts is a conversation, so every one of them is
- * contained (see the module header). Stated on the floor rather than left to
- * the engine's default, beside the trust gate, which is the other statement
- * this daemon makes about how much authority a hosted run carries. The
- * workstream grant is not made here: its one holder is native work
- * execution's delegated agents (native-work-execution-activation.ts, the
- * `execContainment` line), admitted by `workLedger.execution.start`.
- */
-function hostedExecPosture(): HostedSessionExecPosture {
-  return 'conversational';
-}
-
-/**
  * Build the hosted-session options this daemon passes to `DaemonServer`.
  *
  * `services` is the daemon's own graph: its config manager, event bus, secrets
@@ -158,8 +123,8 @@ export function createHostedSessionOptions(services: RuntimeServices): DaemonHos
   const capabilityServices = createDaemonCapabilityServices(services);
 
   return {
-    nativeConversation: nativeHostedConversationOwner(services.gatewayMethods),
-    // Every other project's native turns, each over that project's own intake (the program's project, not the daemon's).
+    // Every native turn is a project's, over that project's own intake (the program's project); the daemon's own folder
+    // is no project and has none.
     nativeConversationProjects: nativeHostedConversationProjects(services.gatewayMethods),
     // A hosted session in the daemon's own project keeps this plan with `work_plan`.
     workPlan: services.workPlan,
@@ -167,7 +132,23 @@ export function createHostedSessionOptions(services: RuntimeServices): DaemonHos
       const taskGraphPath = createShellPathService({ workingDirectory: workspaceRoot, homeDirectory: services.homeDirectory })
         .resolveProjectPath(GOODVIBES_DAEMON_SURFACE_ROOT, 'sessions', 'task-graph.json');
       const sessionOrchestration = services.sessionOrchestration.borrowForGraphPath(taskGraphPath);
-      const floor = createClientRuntimeServices({
+      // The project's own environment, from the daemon's one turn assembly (built by the ONE builder,
+      // project-environment.ts): its tool servers (started in the project, under its trust), its hooks file, checklist,
+      // changed-files record, long-output folder and checkpoint baseline, the same ones the web chat, schedules and work
+      // in this project use. Taken first, so the floor composes over it rather than building a second set. Held while
+      // the floor lives.
+      const environment = services.agentOrchestrator.acquireTurnEnvironment(workspaceRoot);
+      const project = environment.project;
+      const lent = project?.hookDispatcher && project.hookActivityTracker && project.hookWorkbench && project.overflowHandler
+        ? { hookDispatcher: project.hookDispatcher, hookActivityTracker: project.hookActivityTracker, hookWorkbench: project.hookWorkbench, overflowHandler: project.overflowHandler }
+        : undefined;
+      let floor: ReturnType<typeof createClientRuntimeServices>;
+      try {
+        await environment.ready();
+        floor = createClientRuntimeServices({
+        // The project's hooks (its dispatcher, with the project's hooks file) and long-output folder: the floor's
+        // permission decisions, file watch and workers fire the project's hooks, as every other turn there does.
+        ...(lent ? { projectEnvironment: lent } : {}),
         sessionOrchestration,
         judgment: services.judgment,
         configManager: services.configManager,
@@ -212,16 +193,24 @@ export function createHostedSessionOptions(services: RuntimeServices): DaemonHos
         workerSurface: hostedWorkerSurface,
         // The daemon's settings are lent: their one hook slot keeps the daemon's own dispatcher.
         configHookSlot: 'host',
-      });
+        });
+      } catch (error) {
+        void environment.release();
+        throw error;
+      }
       let stopLending = (): void => {};
-      // This project's hooks file, for this floor's turns: held until the owner trusts the folder, its runs in the
-      // hook trace as this project's. Read before the first session's first turn.
-      const stopHookTrust = floor.hookWorkbench.bindTrustGate(repositoryFileGate(trustFor(workspaceRoot), services.homeDirectory));
-      traceProjectHookRuns(services.shellPaths, workspaceRoot, floor.hookActivityTracker);
-      await floor.hookWorkbench.loadAndApplyManagedHooks().catch((error: unknown) => {
-        if (!(error instanceof HooksFileAwaitingTrustError)) logger.warn('[daemon] a hosted project\'s hooks file was not loaded; its sessions run without its hooks', { workspaceRoot, error: summarizeError(error) });
-      });
+      // A folder the daemon keeps no project environment for (its own): the floor's own hooks file, held until the
+      // owner trusts the folder, its runs in the hook trace as this folder's. Read before the first session's first turn.
+      let stopHookTrust = (): void => {};
+      if (!lent) {
+        stopHookTrust = floor.hookWorkbench.bindTrustGate(repositoryFileGate(trustFor(workspaceRoot), services.homeDirectory));
+        traceProjectHookRuns(services.shellPaths, workspaceRoot, floor.hookActivityTracker);
+        await floor.hookWorkbench.loadAndApplyManagedHooks().catch((error: unknown) => {
+          if (!(error instanceof HooksFileAwaitingTrustError)) logger.warn('[daemon] a hosted project\'s hooks file was not loaded; its sessions run without its hooks', { workspaceRoot, error: summarizeError(error) });
+        });
+      }
       try {
+        const held = environment;
         // The floor's own tolerant custom load must settle before cached names
         // can be copied or a hosted model can be selected. The shared floor
         // owner drains this async acquisition and refuses late shutdown leases.
@@ -246,11 +235,16 @@ export function createHostedSessionOptions(services: RuntimeServices): DaemonHos
             workingDirectory: () => workspaceRoot,
           },
           devicePosture: services.devicePosture,
+          // The person's remote runners, owner profile, mail and calendar: the daemon's other turns have them too.
+          hostTools: services.agentOrchestrator.hostTurnTools(),
           // Each workspace floor owns its own contract store and runner.
           contractRunner: floor.contractRunner,
-          execPosture: hostedExecPosture,
+          ...(held.project ? { project: held.project } : {}),
           // Resolves once every owner the floor started has drained (its background processes included).
-          dispose: (): Promise<void> => { stopLending(); stopHookTrust(); return floor.close(); },
+          dispose: async (): Promise<void> => {
+            stopLending(); stopHookTrust();
+            try { await floor.close(); } finally { await held.release(); }
+          },
         };
       } catch (error) {
         // Until publication, this factory owns its returned client graph. The
@@ -258,6 +252,7 @@ export function createHostedSessionOptions(services: RuntimeServices): DaemonHos
         // the create with the workspace named.
         stopLending();
         stopHookTrust();
+        void environment.release();
         try { floor.dispose(); }
         catch (cleanupError) { throw new AggregateError([error, cleanupError], 'Daemon hosted workspace provider preload and cleanup failed'); }
         throw new Error('Daemon hosted workspace provider preload failed', { cause: error });

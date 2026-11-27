@@ -19,6 +19,7 @@ import { readNormalizedError, summarizeError } from '../utils/error-display.js';
 import { logger } from '../utils/logger.js';
 import { createSemanticWriteGuard } from './semantic/primary-source-plan.js';
 import { finalizeKnowledgeIngestedSource } from './ingest-compile.js';
+import { KNOWLEDGE_PROJECT_KEY, knowledgeMakerMetadata, knowledgeProjectOf } from './knowledge-reach.js';
 import type { KnowledgeIngestContext, KnowledgeIngestOwnership } from './ingest-context.js';
 import {
   inferSourceTypeFromArtifact,
@@ -77,9 +78,13 @@ export async function ingestKnowledgeUrl(
     assertOwned();
     await context.store.init();
     assertOwned();
+    // Whose it is: the project and maker of the call or turn adding it (knowledge-reach.ts); a scheduled refresh keeps
+    // the source's own. Refused here, before anything is fetched, when it would add to the owner's shared knowledge for
+    // a caller he did not give it.
+    const ownMetadata = input.refresh === true ? input.metadata : knowledgeMakerMetadata(input.metadata);
     const uris = createKnowledgeIngestUriCanonicalizer(context, ownership, assertOwned, signal);
     const canonicalUri = await uris.canonicalize(input.url) ?? undefined;
-    const sourceId = reserveSourceId(context, canonicalUri);
+    const sourceId = reserveSourceId(context, canonicalUri, ownMetadata);
     uris.reserveSource(sourceId, canonicalUri);
     const connectorId = input.connectorId ?? (input.sourceType === 'bookmark' ? 'bookmark' : 'url');
     const sourceCurrent = knowledgeIngestGuard(context, sourceId, canonicalUri, signal);
@@ -101,7 +106,7 @@ export async function ingestKnowledgeUrl(
     }
     // Remember an allow-private-hosts fetch on the source itself so a later refresh repeats it,
     // whichever entry point (API, HTTP route, batch import) made the request.
-    const metadata = withPrivateHostIntent(input.metadata, input.allowPrivateHosts);
+    const metadata = withPrivateHostIntent(ownMetadata, input.allowPrivateHosts);
     const pending = stageKnowledgePendingSource(context, {
       id: sourceId,
       connectorId,
@@ -207,6 +212,9 @@ export async function ingestKnowledgeArtifact(
     assertOwned();
     await context.store.init();
     assertOwned();
+    // Whose it is (knowledge-reach.ts); refused before anything is fetched when it would add to the owner's shared
+    // knowledge for a caller he did not give it.
+    const ownMetadata = knowledgeMakerMetadata(input.metadata);
     const uris = createKnowledgeIngestUriCanonicalizer(context, ownership, assertOwned, signal);
     // A URI role must settle before this route performs an external artifact fetch.
     if (input.uri) await uris.canonicalize(input.uri);
@@ -244,7 +252,7 @@ export async function ingestKnowledgeArtifact(
     if (!record) throw Object.assign(new Error(`Unknown artifact: ${artifactId}`), { status: 400 });
     sourceUri ??= record.sourceUri;
     const canonicalUri = await uris.canonicalize(sourceUri ?? '') ?? undefined;
-    const sourceId = reserveSourceId(context, canonicalUri);
+    const sourceId = reserveSourceId(context, canonicalUri, ownMetadata);
     uris.reserveSource(sourceId, canonicalUri);
     const sourceCurrent = knowledgeIngestGuard(context, sourceId, canonicalUri, signal);
     const assertCurrent = () => { assertOwned(); uris.assertCurrent(); sourceCurrent(); };
@@ -264,7 +272,7 @@ export async function ingestKnowledgeArtifact(
       status: 'pending',
       sessionId: input.sessionId,
       metadata: {
-        ...(withPrivateHostIntent(input.metadata, input.uri ? input.allowPrivateHosts : undefined) ?? {}),
+        ...(withPrivateHostIntent(ownMetadata, input.uri ? input.allowPrivateHosts : undefined) ?? {}),
         artifactMimeType: record.mimeType,
       },
     });
@@ -289,7 +297,7 @@ export async function ingestKnowledgeArtifact(
         sessionId: input.sessionId ?? pending.sessionId,
         metadata: {
           ...pending.metadata,
-          ...(withPrivateHostIntent(input.metadata, input.uri ? input.allowPrivateHosts : undefined) ?? {}),
+          ...(withPrivateHostIntent(ownMetadata, input.uri ? input.allowPrivateHosts : undefined) ?? {}),
         },
       }, uris, { ...ownership, signal, assertCurrent: assertOwned });
       const issues = await lintCommittedIngest(context, result.source.id);
@@ -585,9 +593,21 @@ function eventSafeUri(uri: string | undefined): string | undefined {
 }
 
 /** Reserve identity without publishing pending or overwriting an existing source. */
-function reserveSourceId(context: KnowledgeIngestContext, canonicalUri: string | undefined): string {
-  return (canonicalUri ? context.store.getSourceByCanonicalUri(canonicalUri)?.id : undefined)
-    ?? `source-${crypto.randomUUID()}`;
+/**
+ * The source an ingest writes: the one already kept for this address when it is of the same kind of knowledge (the same
+ * project, or both the owner's shared knowledge), else a new one. An addition in one project never rewrites, moves or
+ * refreshes another project's source or the owner's shared one (knowledge-reach.ts), whoever sends the address.
+ */
+function reserveSourceId(context: KnowledgeIngestContext, canonicalUri: string | undefined, metadata: Record<string, unknown> | undefined): string {
+  if (!canonicalUri) return `source-${crypto.randomUUID()}`;
+  const project = typeof metadata?.[KNOWLEDGE_PROJECT_KEY] === 'string' ? String(metadata[KNOWLEDGE_PROJECT_KEY]).trim() || undefined : undefined;
+  const first = context.store.getSourceByCanonicalUri(canonicalUri);
+  if (first && knowledgeProjectOf(first) === project) return first.id;
+  // The address is kept for another kind (or none): this kind's own copy, if it has one (an ingest is rare beside its
+  // fetch and extraction; the walk is over the kept sources only).
+  const own = first ? context.store.listSources(Number.MAX_SAFE_INTEGER)
+    .find((source) => source.canonicalUri === canonicalUri && knowledgeProjectOf(source) === project) : undefined;
+  return own?.id ?? `source-${crypto.randomUUID()}`;
 }
 
 type ExtractionPreparation =

@@ -5,9 +5,9 @@ import { readTierPromptSupplement } from '@goodvibes/engine/platform/platform/pr
 import type { MemoryRecord } from '@goodvibes/engine/platform/platform/state';
 import { isMemoryForProject, memoryProjectOf } from '@goodvibes/engine/platform/platform/state';
 import { describeMemoryPromptEligibility, isPromptActiveMemory, MIN_PROMPT_MEMORY_CONFIDENCE } from '@goodvibes/engine/terminal-shell/agent-turn/memory-prompt';
-import { AgentPersonaRegistry, buildActivePersonaPrompt } from '@goodvibes/engine/terminal-shell/agent-turn/persona-registry';
+import { AgentPersonaRegistry, buildActivePersonaPrompt, personaGivenToTurns } from '@goodvibes/engine/terminal-shell/agent-turn/persona-registry';
 import { buildProjectContextPrompt, discoverProjectContextFiles } from '@goodvibes/engine/terminal-shell/agent-turn/project-context-files';
-import { AgentRoutineRegistry, buildEnabledRoutinesPrompt, evaluateAgentRoutineReadiness } from '@goodvibes/engine/terminal-shell/agent-turn/routine-registry';
+import { AgentRoutineRegistry, buildEnabledRoutinesPrompt, evaluateAgentRoutineReadiness, routineGivenToTurns } from '@goodvibes/engine/terminal-shell/agent-turn/routine-registry';
 import { AgentSkillRegistry, buildEnabledSkillsPrompt, evaluateAgentSkillReadiness } from '@goodvibes/engine/terminal-shell/agent-turn/skill-registry';
 import { buildVibePrompt, discoverVibeFiles } from '@goodvibes/engine/terminal-shell/agent-turn/vibe-file';
 import { buildCapabilitySummaryPrompt } from '@goodvibes/engine/terminal-shell/agent-turn/capability-summary-prompt';
@@ -445,7 +445,7 @@ async function promptContextSegments(context: CommandContext, includeParameters:
   const activePersona = personaSnapshot.activePersona;
   const personaPrompt = buildActivePersonaPrompt(shellPaths) ?? '';
   const routineSnapshot = AgentRoutineRegistry.fromShellPaths(shellPaths).snapshot();
-  const activeRoutines = routineSnapshot.enabledRoutines.filter((routine) => routine.reviewState === 'reviewed' && evaluateAgentRoutineReadiness(routine).ready);
+  const activeRoutines = routineSnapshot.enabledRoutines.filter((routine) => routineGivenToTurns(routine) && evaluateAgentRoutineReadiness(routine).ready);
   const suppressedRoutines = routineSnapshot.enabledRoutines.filter((routine) => !activeRoutines.some((active) => active.id === routine.id));
   const routinePrompt = buildEnabledRoutinesPrompt(shellPaths) ?? '';
   const skillSnapshot = AgentSkillRegistry.fromShellPaths(shellPaths).snapshot();
@@ -565,15 +565,15 @@ async function promptContextSegments(context: CommandContext, includeParameters:
     segment({
       id: 'persona',
       label: 'Active persona',
-      status: activePersona && activePersona.reviewState !== 'reviewed' ? 'attention' : activePersona ? 'active' : 'empty',
+      status: activePersona && !personaGivenToTurns(activePersona) ? 'attention' : activePersona ? 'active' : 'empty',
       order: 7,
-      activeCount: activePersona?.reviewState === 'reviewed' ? 1 : 0,
-      suppressedCount: activePersona && activePersona.reviewState !== 'reviewed' ? 1 : 0,
+      activeCount: activePersona && personaGivenToTurns(activePersona) ? 1 : 0,
+      suppressedCount: activePersona && !personaGivenToTurns(activePersona) ? 1 : 0,
       promptChars: personaPrompt.length,
       promptText: personaPrompt,
       route: 'memory action:"curator" query:"persona"',
-      selected: activePersona?.reviewState === 'reviewed' ? [{ id: activePersona.id, name: activePersona.name, inspectRoute: `agent_local_registry domain:"persona" action:"get" recordId:"${activePersona.id}"` }] : [],
-      suppressed: activePersona && activePersona.reviewState !== 'reviewed' ? [{ id: activePersona.id, name: activePersona.name, reviewState: activePersona.reviewState }] : [],
+      selected: activePersona && personaGivenToTurns(activePersona) ? [{ id: activePersona.id, name: activePersona.name, inspectRoute: `agent_local_registry domain:"persona" action:"get" recordId:"${activePersona.id}"` }] : [],
+      suppressed: activePersona && !personaGivenToTurns(activePersona) ? [{ id: activePersona.id, name: activePersona.name, reviewState: activePersona.reviewState }] : [],
     }, includeParameters),
     segment({
       id: 'context_window_supplement',

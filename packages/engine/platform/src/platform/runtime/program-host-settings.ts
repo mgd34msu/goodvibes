@@ -89,13 +89,8 @@ export const TERMINAL_NOTIFY_AGENT_BLOCKED_SETTING = alertToggle('behavior.termi
 export const TERMINAL_BELL_SETTING = alertToggle('behavior.terminalBell', 'Ring the terminal bell with notifications',
   'Also ring the terminal bell alongside in-terminal notifications. Off by default.', false);
 
-export const CODE_INDEX_ENABLED_SETTING: HostBooleanSetting = Object.freeze({
-  key: 'storage.codeIndexEnabled',
-  label: 'Keep the code index up to date',
-  type: 'boolean',
-  default: false,
-  description: 'Keep the repo source-tree code index running: build it on startup, reindex files after edits, and (with the agent-passive-code-injection flag) inject code hits into coding turns. Bounded file/size scan; Code and changes, Code index, shows how it stands. Off by default: "Build it" there builds it on demand, and from then on the session\'s own file writes keep it current; at the next start it is not built or kept current until it is built again.',
-});
+// `storage.codeIndexEnabled` is no longer the terminal app's own: it is the daemon's one setting (config schema,
+// config-ownership.ts), followed by every program and the daemon's own turns.
 
 /** Setting key: show the per-turn memory-provenance chip. Default OFF. */
 export const MEMORY_SHOW_PROVENANCE_CONFIG_KEY = 'memory.showProvenance';
@@ -125,7 +120,6 @@ export const TUI_EXTENSION_SETTINGS: readonly HostSetting[] = Object.freeze([
   TERMINAL_NOTIFY_TURN_END_SETTING,
   TERMINAL_NOTIFY_AGENT_BLOCKED_SETTING,
   TERMINAL_BELL_SETTING,
-  CODE_INDEX_ENABLED_SETTING,
 ]);
 
 // ─── The Agent's own settings ───────────────────────────────────────────────

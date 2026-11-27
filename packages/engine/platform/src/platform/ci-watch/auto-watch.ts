@@ -29,6 +29,11 @@ import type { CreateCiWatchInput } from './service.js';
 /** The default delivery channel: the daemon's operator web surface (control-plane delivery). */
 export const DEFAULT_AUTO_WATCH_CHANNEL = 'web';
 
+/** The turn a tool ran in: its project folder, absent for the host's own folder (no project). */
+export interface CiWatchTurn {
+  readonly project?: string | undefined;
+}
+
 /** A push detected in an exec command list. */
 export interface DetectedCiPush {
   readonly kind: 'push' | 'pr';
@@ -201,7 +206,7 @@ export interface CiWatchAutoMintDeps {
     createWatch(input: CreateCiWatchInput, operation?: ExternalOperationSource): Promise<CiWatchSubscription>;
     listWatches(): Promise<CiWatchSubscription[]>;
   };
-  /** The working directory pushes resolve against when exec args carry none. */
+  /** The host's own folder (the daemon's): not a project, so a turn there makes no watch. */
   readonly workingDirectory: string;
   /** Delivery channel for minted watches; defaults to the operator web surface. */
   readonly deliveryChannel?: string | undefined;
@@ -222,19 +227,25 @@ export class CiWatchAutoMinter {
   private mintQueue: Promise<unknown> = Promise.resolve();
   constructor(private readonly deps: CiWatchAutoMintDeps) {}
 
-  /** Tool-execution observer: mints on a successful exec containing a push/PR-create. */
-  onToolExecuted(toolName: string, args: Record<string, unknown>, success: boolean): void {
+  /**
+   * Tool-execution observer: mints on a successful exec containing a push/PR-create. The watch belongs to the project of
+   * the turn that ran it (`turn.project`), and its repair works there; a turn in no project (the daemon's own folder)
+   * makes no watch.
+   */
+  onToolExecuted(toolName: string, args: Record<string, unknown>, success: boolean, turn?: CiWatchTurn): void {
     if (toolName !== 'exec' || !success) return;
+    const project = turn?.project;
+    if (!project || resolve(project) === resolve(this.deps.workingDirectory)) return;
     for (const command of execCommandsFromArgs(args)) {
       const detected = detectCiPushInCommand(command);
       if (!detected) continue;
       const execCwd = typeof args.working_dir === 'string' && args.working_dir.trim()
-        ? args.working_dir
-        : this.deps.workingDirectory;
+        ? resolve(project, args.working_dir)
+        : project;
       // The push's own directory (`git -C`, a `cd` before it) names the repository, not the exec's.
       const cwd = detected.dir !== undefined ? resolve(execCwd, detected.dir) : execCwd;
       try {
-        void this.mint(cwd, detected, captureCiWatchOwner(currentExternalOperationSource())).catch((error) => {
+        void this.mint(cwd, detected, captureCiWatchOwner(currentExternalOperationSource()), project).catch((error) => {
           logger.warn('[ci-watch] auto-mint failed', { command, error: summarizeError(error) });
         });
       } catch (error) { logger.warn('[ci-watch] auto-mint refused', { error: summarizeError(error) }); }
@@ -242,20 +253,21 @@ export class CiWatchAutoMinter {
     }
   }
 
-  /** GitService-path tap: a platform push through GitService mints the same way. */
-  onGitPushed(input: { readonly cwd: string; readonly branch?: string | undefined }): void {
+  /** GitService-path tap: a platform push through GitService mints the same way, for the project it names. */
+  onGitPushed(input: { readonly cwd: string; readonly branch?: string | undefined; readonly project?: string | undefined }): void {
+    if (!input.project || resolve(input.project) === resolve(this.deps.workingDirectory)) return;
     try {
-      void this.mint(input.cwd, { kind: 'push', branch: input.branch }, captureCiWatchOwner(currentExternalOperationSource())).catch((error) => {
+      void this.mint(input.cwd, { kind: 'push', branch: input.branch }, captureCiWatchOwner(currentExternalOperationSource()), input.project).catch((error) => {
         logger.warn('[ci-watch] auto-mint failed', { cwd: input.cwd, error: summarizeError(error) });
       });
     } catch (error) { logger.warn('[ci-watch] auto-mint refused', { error: summarizeError(error) }); }
   }
 
-  private mint(cwd: string, detected: DetectedCiPush, operation?: ExternalOperationSource): Promise<CiWatchSubscription | null> {
-    const pending = this.mintQueue.then(() => this.mintOwned(cwd, detected, operation));
+  private mint(cwd: string, detected: DetectedCiPush, operation: ExternalOperationSource | undefined, project: string): Promise<CiWatchSubscription | null> {
+    const pending = this.mintQueue.then(() => this.mintOwned(cwd, detected, operation, project));
     this.mintQueue = pending.catch(() => {}); return pending;
   }
-  private async mintOwned(cwd: string, detected: DetectedCiPush, operation?: ExternalOperationSource): Promise<CiWatchSubscription | null> {
+  private async mintOwned(cwd: string, detected: DetectedCiPush, operation: ExternalOperationSource | undefined, project: string): Promise<CiWatchSubscription | null> {
     const repo = await (this.deps.resolveRepoSlug
       ? this.deps.resolveRepoSlug(cwd)
       : runGit(cwd, ['remote', 'get-url', 'origin']).then((url) => (url ? parseGitHubSlug(url) : null)));
@@ -277,6 +289,7 @@ export class CiWatchAutoMinter {
       repo,
       ref: branch,
       deliveryChannel: this.deps.deliveryChannel ?? DEFAULT_AUTO_WATCH_CHANNEL,
+      project,
     }, operation);
     logger.info('[ci-watch] watch self-minted at the push seam', { repo, ref: branch, id: watch.id });
     return watch;

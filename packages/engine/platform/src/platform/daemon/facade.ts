@@ -1,4 +1,5 @@
 import { requestedEffortOverride } from '../providers/reasoning-effort-surface.js';
+import { signInActorId } from '../pairing/principal-ids.js';
 import { DAEMON_RESTART_SETTINGS } from '../runtime/program-host-settings.js';
 import { completeGatewayScopePolicyBootstrap } from '../control-plane/scope-policy-bootstrap.js';
 import { markUnservedGatewayMethods } from '../control-plane/method-catalog-route-reconcile.js';
@@ -18,6 +19,8 @@ import { AgentSpawnInputError } from '../tools/agent/model-routing.js';
 import { summarizeError } from '../utils/error-display.js';
 import { DaemonLifecycleRuntime, type NativeHandover, createDaemonOwnerAlerter, registerDaemonHeartbeatWatcher, runDaemonSessionStoreBoot } from './facade-lifecycle.js';
 import { deliverOwnerAlert } from './owner-alert.js';
+import { createOwnerChannelConversationReader } from './owner-channel-conversation.js';
+import { setOwnerChannelConversationReader, withInputParty, type TurnInputParty } from '../security/turn-input-party.js';
 import { registerUpdateGatewayMethods } from '../control-plane/routes/update.js';
 import { registerRelayGatewayMethods } from '../control-plane/routes/relay.js';
 import { AgentManager } from '../tools/agent/index.js';
@@ -37,6 +40,7 @@ import type {
   ChannelReplyPipeline,
   ChannelPluginRegistry,
   ChannelPolicyManager,
+  ChannelSurface,
   RouteBindingManager,
   SurfaceRegistry,
 } from '../channels/index.js';
@@ -97,14 +101,15 @@ import { LanHttpsListener, type LanHttpsState } from './lan-https/listener.js';
 import { lanHttpsPageResponse } from './lan-https/page.js';
 import { SecureAddressGroupShare } from './lan-https/group-share.js';
 import { registerSecureAddressGatewayMethods } from '../control-plane/routes/secure-address.js';
-import { registerDaemonCapabilities } from './capability-wiring.js';
+import { daemonMethodCallOf, registerDaemonCapabilities } from './capability-wiring.js';
 import { activeTailscaleServeOrigin } from '../remote-access/tailscale.js';
 import { lanHttpsOriginOf } from '../pairing/web-origin.js';
-import { createHostModeRestartWatcher, RestartController } from './host-mode-watcher.js';
+import { createHostModeRestartWatcher, onEffectiveChange, RestartController } from './host-mode-watcher.js';
+import type { ConfigKey } from '../config/schema.js';
 import { configureJudgmentRequestLifetime } from './http/judgment-request-lifetime.js';
 import { createJudgmentRuntimeScope, runInJudgmentRuntime } from '../runtime/judgment-runtime-scope.js';
 import { configureVoiceRequestLifetime } from './http/voice-request-lifetime.js';
-import { bindClientAddress, bindLocalOrigin, isDirectLoopbackRequest, resolveClientAddress } from './client-address.js';
+import { bindClientAddress, bindInProcessRequest, bindLocalOrigin, isDirectLoopbackRequest, resolveClientAddress } from './client-address.js';
 import { readControlPlaneStreamingMode, refuseUnservedListenerRequest } from './http/listener-admission.js';
 import type { ServiceCommandRunner } from './service-handover.js';
 import { inFlightWorkIds } from '../runtime/fleet/registry.js';
@@ -127,7 +132,7 @@ export type DaemonServerConfig = DaemonConfig & {
 interface UpgradeCapableServer {
   upgrade(req: Request, options?: { data?: unknown }): boolean;
   timeout?(req: Request, seconds: number): void;
-  requestIP?(req: Request): { readonly address: string } | null;
+  requestIP?(req: Request): { readonly address: string; readonly port?: number } | null;
 }
 
 type JsonBody = Record<string, unknown>;
@@ -144,6 +149,8 @@ interface StartupDrain { readonly pending: Set<Promise<void>>; readonly failures
 const startupDrains = new WeakMap<object, StartupDrain>();
 /** The client address of a request this daemon makes to itself in process: its own machine. */
 const IN_PROCESS_CLIENT_ADDRESS = '127.0.0.1';
+/** How long a listener move waits for the answers in flight when it was caused (afterAnswers). */
+const ANSWERS_BEFORE_MOVE_MS = 10_000;
 function ownStartup(owner: object, label: StartupOwner, action: () => Promise<void>): Promise<void> {
   let drain = startupDrains.get(owner);
   if (!drain) { drain = { pending: new Set(), failures: new Map() }; startupDrains.set(owner, drain); }
@@ -290,6 +297,7 @@ export class DaemonServer {
   private approvalBrokerUnsubscribe: (() => void) | null = null;
   /** Stops the surface registry publishing surface changes on the runtime bus; cleared on stop(). */
   private surfaceEventsDetach: (() => void) | null = null;
+  private ownerChannelReaderDetach: (() => void) | null = null;
   /** Unsubscribe from controlPlane config key watchers; cleared on stop(). */
   private _configWatchUnsub: (() => void) | null = null;
   /**
@@ -306,6 +314,30 @@ export class DaemonServer {
     },
     onError: (err) => logger.error('DaemonServer: restart after config change failed', { error: summarizeError(err) }),
   });
+  /** The answers being made now, by either listener (HTTP requests and WebSocket messages): see afterAnswers. */
+  private readonly answering = new Set<Promise<unknown>>();
+
+  /** Track one answer while it is made. */
+  private trackAnswer<T>(answer: Promise<T>): Promise<T> {
+    this.answering.add(answer);
+    void answer.then(() => this.answering.delete(answer), () => this.answering.delete(answer));
+    return answer;
+  }
+
+  /**
+   * Run `then` once every answer being made now has been made and handed to its connection (a turn of the event loop
+   * after the last one settles): a setting write that moves or restarts a listener is answered on the connection it
+   * came on before the listener moves, whichever door it came through. An answer begun after this call is not waited for.
+   */
+  private afterAnswers(then: () => void): void {
+    const pending = [...this.answering];
+    // A request that waits on something else (a held turn's answer, a long read) does not hold the move for ever: the
+    // write's own answer is a settings write, made well inside this bound.
+    let bound: ReturnType<typeof setTimeout> | undefined;
+    const limit = new Promise<void>((resolve) => { bound = setTimeout(resolve, ANSWERS_BEFORE_MOVE_MS); });
+    void Promise.race([Promise.allSettled(pending), limit]).then(() => { clearTimeout(bound); setImmediate(then); });
+  }
+
   private stoppingRuntime: Promise<void> | null = null;
   /** Full stop retires pending listener acquisition, including binding ABA. */
   private listenerTransition: object = {};
@@ -467,7 +499,7 @@ export class DaemonServer {
     // operator credential on it is the `local` credential, as the Agent's is
     // when it runs here.
     this.hostedSessions?.setRequestPath({
-      serve: (req) => { bindClientAddress(req, IN_PROCESS_CLIENT_ADDRESS); bindLocalOrigin(req); return this.handleRequest(req); },
+      serve: (req) => { bindClientAddress(req, IN_PROCESS_CLIENT_ADDRESS); bindLocalOrigin(req); bindInProcessRequest(req); return this.handleRequest(req); },
       operatorToken: () => this.authToken,
     });
     // Whether this daemon is keeping itself current, asked over the wire
@@ -488,17 +520,8 @@ export class DaemonServer {
       : null;
     // capabilities.find and capabilities.run: every capability by need and by id, through this daemon's own dispatch and gate.
     // A nested call is described as the outer one was: the operator token from this machine stays the `local` credential.
-    registerDaemonCapabilities(this.runtimeServices, ({ localOrigin, transport, daemonTurn, asCaller, ...given }) => {
-      // A held call run on the owner's yes after a restart: dispatched as the caller it was held for, never with any
-      // credential (capability-wiring.ts).
-      if (asCaller) return this.invokeGatewayMethodCall({ ...given, authToken: '', principal: asCaller });
-      // A call nested in one of the daemon's own turns carries no credential: it goes with the daemon's own, its
-      // effects already admitted for that turn's actor (capability-wiring.ts).
-      const input = daemonTurn === true ? { ...given, authToken: this.authToken ?? '' } : given;
-      const described = localOrigin === true || transport !== undefined ? this.controlPlaneHelper.describeRequestPrincipal(input.authToken, localOrigin === true) : null;
-      const principal = described && transport !== undefined ? { ...described, transport } : described;
-      return this.invokeGatewayMethodCall({ ...input, ...(principal ? { principal } : {}) });
-    }, { clusterVerbs: () => groupVerbs, ...(config.places ? { places: config.places } : {}), users: this.userAuth });
+    registerDaemonCapabilities(this.runtimeServices, daemonMethodCallOf(() => this.controlPlaneHelper, () => this.authToken),
+      { clusterVerbs: () => groupVerbs, ...(config.places ? { places: config.places } : {}), users: this.userAuth });
     // A group's machines share the secure address of the one that set it up (lan-https/group-share.ts).
     if (config.secureAddressGroup) {
       const share = new SecureAddressGroupShare(config.secureAddressGroup, this.lanHttps.secureAddress);
@@ -657,18 +680,27 @@ export class DaemonServer {
    * run: its tool calls, its permission asks and its end, which a contract's
    * owner record does not have.
    */
-  async startSessionAgent(input: { readonly sessionId: string; readonly task: string; readonly workingDirectory?: string | undefined }): Promise<AgentRecord> {
+  async startSessionAgent(input: {
+    readonly sessionId: string; readonly task: string; readonly workingDirectory?: string | undefined;
+    /**
+     * The party of the ACP connection (or other embedder) that started the session: the owner's own connection makes
+     * it his turn; anyone else's, or none named, is someone else's input, whose agent runs reads only
+     * (security/turn-input-party.ts; the agent manager keeps the party it was spawned under).
+     */
+    readonly inputParty?: TurnInputParty | undefined;
+  }): Promise<AgentRecord> {
     await this.runtimeServices.providerRegistry.ready();
     const refusal = this.workAdmission.refusal();
     if (refusal) throw new Error(refusal.error);
-    return this.agentManager.spawn({
+    const party: TurnInputParty = input.inputParty ?? { party: 'other', who: 'a session whose connection named no party' };
+    return withInputParty(party, () => this.agentManager.spawn({
       mode: 'spawn',
       task: input.task,
       sessionId: input.sessionId,
       outsideContract: true,
       replyStyle: 'conversational',
       ...(input.workingDirectory !== undefined ? { workingDirectory: input.workingDirectory } : {}),
-    });
+    }));
   }
 
   /**
@@ -816,6 +848,11 @@ export class DaemonServer {
     this.surfaceRegistry.attachRuntime(this.runtimeStore);
     // Surface switches and capability changes are published, so a client of surfaces.list stays current without polling.
     this.surfaceEventsDetach ??= this.surfaceRegistry.attachRuntimeBus(this.runtimeBus);
+    // "Treat my own messages here as me" (off by default): the owner's own message on such a channel, in a conversation
+    // proven his alone, is his own input (security/turn-input-party.ts, daemon/owner-channel-conversation.ts).
+    this.ownerChannelReaderDetach ??= setOwnerChannelConversationReader(createOwnerChannelConversationReader({
+      sessions: this.sessionBroker, routeBindings: this.routeBindings, channelPolicy: this.channelPolicy,
+    }));
     this.deliveryManager.attachRuntime({
       runtimeBus: this.runtimeBus,
       runtimeStore: this.runtimeStore,
@@ -1035,6 +1072,8 @@ export class DaemonServer {
       this.approvalBrokerUnsubscribe = null;
       this.surfaceEventsDetach?.();
       this.surfaceEventsDetach = null;
+      this.ownerChannelReaderDetach?.();
+      this.ownerChannelReaderDetach = null;
       this.surfaceActionHelper.closeDelegatedTelegram();
       this.relaySettingsUnsubscribe?.();
       this.relaySettingsUnsubscribe = null;
@@ -1122,7 +1161,8 @@ export class DaemonServer {
           configureJudgmentRequestLifetime(req, server);
           configureVoiceRequestLifetime(req, server);
           // Resolved once here; every security event, the sign-in limiter and the audit read this one value.
-          const peerAddress = server.requestIP?.(req)?.address;
+          const peer = server.requestIP?.(req);
+          const peerAddress = peer?.address;
           const clientAddress = resolveClientAddress(req, peerAddress, { trustProxy: self.trustProxyEnabled() });
           bindClientAddress(req, clientAddress);
           // The operator token is the `local` credential only on a direct connection from this machine.
@@ -1142,21 +1182,23 @@ export class DaemonServer {
           const upgrade = self.tryUpgradeControlPlaneWebSocket(req, server);
           if (upgrade === 'upgraded') return;
           if (upgrade) return upgrade;
-          return runInJudgmentRuntime(self.judgmentRuntime, () => self.handleRequest(req));
+          // Tracked while it is made, so a listener move this request causes waits for its answer (afterAnswers).
+          return self.trackAnswer(Promise.resolve(runInJudgmentRuntime(self.judgmentRuntime, () => self.handleRequest(req))));
         },
         websocket: {
           open(ws) {
             self.handleControlPlaneWebSocketOpen(ws as unknown as { data: ControlPlaneWebSocketData; send(message: string): void });
           },
           message(ws, message) {
-            void runInJudgmentRuntime(self.judgmentRuntime, () => self.handleControlPlaneWebSocketMessage(
+            // Tracked as an HTTP request is: a listener move this message causes waits for its answer (afterAnswers).
+            void self.trackAnswer(Promise.resolve(runInJudgmentRuntime(self.judgmentRuntime, () => self.handleControlPlaneWebSocketMessage(
               ws as unknown as { data: ControlPlaneWebSocketData; send(message: string): void },
               message,
             ).catch((error: unknown) => {
               logger.warn('DaemonServer: control-plane websocket message failed', {
                 error: summarizeError(error),
               });
-            }));
+            }))));
           },
           close(ws) {
             self.handleControlPlaneWebSocketClose(ws as unknown as { data: ControlPlaneWebSocketData });
@@ -1495,7 +1537,11 @@ export class DaemonServer {
     }
 
     const runtimeCloseFailures: unknown[] = [];
-    const close = async (action: () => void | Promise<void>): Promise<void> => {
+    // What the stop waits on, step by step, in the ordinary log at debug level: a stop that hangs names its step.
+    const stepFrom = Date.now();
+    const step = (label: string): void => { logger.debug(`DaemonServer stop: ${label}`, { ms: Date.now() - stepFrom }); };
+    const close = async (action: () => void | Promise<void>, label?: string): Promise<void> => {
+      if (label) step(`waiting on ${label}`);
       try { await action(); } catch (error) { runtimeCloseFailures.push(error); }
     };
     this._configWatchUnsub?.();
@@ -1508,8 +1554,8 @@ export class DaemonServer {
     // The fleet observes triggers. Retire the owned observer before its source.
     // An injected graph remains the composing host's to close, in graph order.
     if (this.ownsRuntimeServices) {
-      await close(() => this.runtimeServices.processRegistry.dispose());
-      await close(async () => { this.triggerManager?.shutdown(); await this.triggerManager?.join(); });
+      await close(() => this.runtimeServices.processRegistry.dispose(), 'the process registry');
+      await close(async () => { this.triggerManager?.shutdown(); await this.triggerManager?.join(); }, 'the triggers');
     }
     this.channelHealth.stop();
     this.replySettlement?.();
@@ -1519,6 +1565,8 @@ export class DaemonServer {
     this.approvalBrokerUnsubscribe = null;
     this.surfaceEventsDetach?.();
     this.surfaceEventsDetach = null;
+    this.ownerChannelReaderDetach?.();
+    this.ownerChannelReaderDetach = null;
     this.relaySettingsUnsubscribe?.();
     this.relaySettingsUnsubscribe = null;
     this.stopTelemetryOptInWarning();
@@ -1527,37 +1575,40 @@ export class DaemonServer {
     this.stopRelayRevocationWatch?.();
     this.stopRelayRevocationWatch = null;
     this.relayCodeStore = null;
-    await close(() => this.httpRouter.dispose());
+    await close(() => this.httpRouter.dispose(), 'the HTTP router');
     this.controlPlaneHelper.dispose();
     this.unbindSharedToken?.();
     this.unbindSharedToken = null;
     this.surfaceActionHelper.closeDelegatedTelegram();
     this.surfaceActionHelper.closeProposalAnswers();
+    step('waiting on the web chats');
     try { await this.companionChatManager.close(); }
     catch (error) { runtimeCloseFailures.push(error); }
     // Kill-policy sessions end here; survive-policy ones are parked with their transcript.
-    if (this.hostedSessions) await close(() => this.hostedSessions!.dispose());
+    if (this.hostedSessions) await close(() => this.hostedSessions!.dispose(), 'the hosted sessions');
 
     // Stop services with async teardown in reverse start order (sessionBroker,
     // approvalBroker, channelPolicy, distributedRuntime end when the socket closes).
     // Inbound consumers stop through the cluster gate so a clean shutdown hands the
     // role over in ~1s instead of making the next node wait out the crash timeout.
-    await close(() => this.clusterCoordinator.stop('daemon stop'));
+    await close(() => this.clusterCoordinator.stop('daemon stop'), 'the machine group');
     this.automationManager.stop();
     // Tear down the adapter bus subscription and session broker GC interval.
     this.agentTaskAdapterUnsub?.();
     this.agentTaskAdapterUnsub = null;
     this.processTaskAdapterUnsub?.();
     this.processTaskAdapterUnsub = null;
-    await close(() => this.sessionBroker.stop());
+    await close(() => this.sessionBroker.stop(), 'the session broker');
+    step('waiting on the power manager');
     try {
       await this.runtimeServices.powerManager.stop();
     } catch (error) {
       logger.warn('DaemonServer: power-manager stop failed', { error: summarizeError(error) });
       runtimeCloseFailures.push(error);
     }
-    await close(this.closeSupplementalResources);
+    await close(this.closeSupplementalResources, 'the supplemental resources');
     if (this.ownsRuntimeServices) {
+      step('waiting on the runtime services');
       try { await this.runtimeServices.close(); }
       catch (error) { runtimeCloseFailures.push(error); }
     }
@@ -1568,18 +1619,19 @@ export class DaemonServer {
 
     // Disposal closed admission synchronously. Drain the existing serialized
     // write chain before a host can remove or replace this daemon's root.
-    await close(() => this.workProposals.flush());
+    await close(() => this.workProposals.flush(), 'the work proposals');
 
     this.tlsState = null;
     this.controlPlaneGateway.setServerState({ enabled: this.enabled, host: this.host, port: this.port }, this.server !== null);
     // A daemon that never listened has no disconnect to announce and no "stopped" to claim; everything above was released either way.
-    await close(async () => { await this.restartCycle.pending; });
+    await close(async () => { await this.restartCycle.pending; }, 'a pending restart');
     const hadListener = this.acceptedTransportBinding !== null || this.server !== null || this.listenerDrain !== null;
     // Closing the listener waits for every running request: a request held open while it waits (a crashed program's
     // take of rewind questions) is ended first, or it holds the stop until its own wait runs out.
     try { this.runtimeServices.endLongWaits?.(); this.distributedRuntime.endWaits(); }
     catch (error) { logger.warn('DaemonServer: ending waiting requests failed', { error: summarizeError(error) }); }
-    await close(() => this.detachControlPlaneListener());
+    await close(() => this.detachControlPlaneListener(), 'the listener and its running requests');
+    step('closed');
     if (hadListener) { this.transportEventsHelper.emitTransportDisconnected('Daemon server stopped', false); logger.info('DaemonServer stopped'); }
     else logger.debug('DaemonServer released without ever binding a socket');
     this.acceptedTransportBinding = null;
@@ -1617,25 +1669,32 @@ export class DaemonServer {
       configManager: this.configManager,
       // The address and its TLS: a rebind reads both again (a certificate or mode change is a rebind too).
       keys: ['controlPlane.hostMode', 'controlPlane.host', 'controlPlane.port', 'controlPlane.tls.mode', 'controlPlane.tls.certFile', 'controlPlane.tls.keyFile'],
-      onRestart: () => this.restartCycle.request(),
+      // A change is answered before the listener moves: the write that caused it, and every request in flight with it,
+      // get their answer on the connection they came on (afterAnswers); only then is the listener rebound.
+      onRestart: () => this.afterAnswers(() => this.restartCycle.request()),
       getIsRunning: () => this.restartCycle.active,
+      // A write of the value a binding key already holds changes no binding: no rebind while one is bound.
+      isBound: () => this.server !== null,
     });
     // The stream mode needs no rebind: the listener reads it per request; clients read it from the gateway state.
     const unsubscribeStreamMode = this.configManager.subscribe('controlPlane.streamMode', (mode) => {
       this.controlPlaneGateway.setServerState({ streamingMode: readControlPlaneStreamingMode(mode) });
     });
-    // Switching the LAN https listener on or off, or moving its port, starts, restarts or stops only it.
+    // Switching the LAN https listener on or off, or moving its port, starts, restarts or stops only it: on a change of
+    // value only, after the answers in flight (a write over that listener is answered on it first).
+    const resyncLanHttps = (unchanged: boolean): void => { if (!unchanged) this.afterAnswers(() => { void this.lanHttps.resync(); }); };
     const unsubscribeLanHttps = [
-      this.configManager.subscribe('controlPlane.lanHttps.enabled', () => { void this.lanHttps.resync(); }),
-      this.configManager.subscribe('controlPlane.lanHttps.port', () => { void this.lanHttps.resync(); }),
+      onEffectiveChange(this.configManager, 'controlPlane.lanHttps.enabled', resyncLanHttps),
+      onEffectiveChange(this.configManager, 'controlPlane.lanHttps.port', resyncLanHttps),
       // Which certificate it serves (the Secure address screen): the same resync.
       ...(['secureAddress.certificate', 'secureAddress.domain', 'secureAddress.acmeDirectory', 'secureAddress.certFile', 'secureAddress.keyFile'] as const)
-        .map((key) => this.configManager.subscribe(key, () => { void this.lanHttps.resync(); })),
+        .map((key) => onEffectiveChange(this.configManager, key, resyncLanHttps)),
     ];
     // The webhook listener is composed at the daemon's start (on or off): switching it restarts the daemon itself,
-    // after the change's answer (DAEMON_RESTART_SETTINGS; every other listener setting above rebinds in place).
-    const unsubscribeRestart = DAEMON_RESTART_SETTINGS.map((setting) => this.configManager.subscribe(setting.key, () => {
-      if (!this.restartCycle.active) return;
+    // after the change's answer (DAEMON_RESTART_SETTINGS; every other listener setting above rebinds in place). A write
+    // of the value it already holds changes nothing to restart for.
+    const unsubscribeRestart = DAEMON_RESTART_SETTINGS.map((setting) => onEffectiveChange(this.configManager, setting.key as ConfigKey, (unchanged) => {
+      if (unchanged || !this.restartCycle.active) return;
       const outcome = this.lifecycle?.restartToApply(setting.label);
       logger.info('DaemonServer: a setting read only at start changed', { key: setting.key, outcome: outcome ?? 'no lifecycle' });
     }));
@@ -1714,6 +1773,10 @@ export class DaemonServer {
     readonly principal?: Parameters<DaemonControlPlaneHelper['invokeGatewayMethodCall']>[0]['principal'];
     /** The owner approved the outer call (control-plane/owner-approved-call.ts); kept for the dispatch to spend. */
     readonly ownerApproved?: Parameters<DaemonControlPlaneHelper['invokeGatewayMethodCall']>[0]['ownerApproved'];
+    /** The capability this call is nested in was decided already (owner-approved-call.ts `capabilityDecidedMark`). */
+    readonly decidedUpstream?: object | undefined;
+    /** Nested in one of the daemon's own turns (control-plane.ts `GatewayMethodCallInput.daemonTurn`). */
+    readonly daemonTurn?: true | undefined;
   }): Promise<{ status: number; ok: boolean; body: unknown; replayed?: boolean }> {
     return await this.controlPlaneHelper.invokeGatewayMethodCall(input);
   }
@@ -1781,9 +1844,12 @@ export class DaemonServer {
       channelPolicy: this.channelPolicy,
       interaction,
       parseBody: (request) => this.parseOptionalJsonBody(request),
-      actor: (request) => interaction
-        ? `${interaction.surface}:${interaction.userId}`
-        : this.requireAuthenticatedSession(request)?.username ?? (this.authToken ? 'shared-token' : 'operator'),
+      actor: (request) => {
+        if (interaction) return `${interaction.surface}:${interaction.userId}`;
+        // A sign-in named like this machine's token is recorded as `user:<name>`, never as the token.
+        const name = this.requireAuthenticatedSession(request)?.username;
+        return name !== undefined ? signInActorId(name) : this.authToken ? 'shared-token' : 'operator';
+      },
       surface: () => interaction?.surface ?? 'web',
       record: (request, path, response) => this.recordApiResponse(request, path, response),
     }, approvalId, action, req);
@@ -1815,10 +1881,17 @@ export class DaemonServer {
         }, session))
         : channelProfiled;
       // An agent started for a session belongs to it: that session's listings and reports carry it.
-      const spawnInput = sessionId !== undefined && profiled.sessionId === undefined ? { ...profiled, sessionId } : profiled;
+      const owned = sessionId !== undefined && profiled.sessionId === undefined ? { ...profiled, sessionId } : profiled;
+      // A channel's conversation works in the channel's project ("Project for this channel"); with none it stays in the
+      // daemon's own folder, where a write or a command is refused naming that control (channels/channel-project.ts).
+      const channelProject = triggerSurface ? this.channelPolicy.getPolicy(triggerSurface as ChannelSurface).project : undefined;
+      const spawnInput = channelProject && owned.workingDirectory === undefined ? { ...owned, workingDirectory: channelProject } : owned;
       // A guest's turn in scope stays the guest's (its actor), so the agent never runs with the channel's own authority.
       const scope = channelTurnScope(triggerSurface);
-      const record = withTurnSurfaceId(scope.surface, () => withChannelExecutionMode(this.sessionBroker, sessionId, () => this.agentManager.spawn(spawnInput)), scope.actor);
+      // The spawn turn names its channel conversation, so whose input it is can be read from it ("Treat my own messages
+      // here as me": the owner's own conversation, his alone, is his; any other stays someone else's).
+      const record = withTurnSurfaceId(scope.surface, () => withChannelExecutionMode(this.sessionBroker, sessionId, () => this.agentManager.spawn(spawnInput)), scope.actor,
+        triggerSurface !== undefined ? sessionId : undefined);
       this.syncSpawnedAgentTask(record, sessionId);
       // Register the agent with AgentTaskAdapter so bus events can transition its task.
       if (this.agentTaskAdapter) {

@@ -7,6 +7,7 @@ import { computeNextRun, nextJobEnablement } from './manager-runtime-helpers.js'
 import { summarizeError } from '../utils/error-display.js';
 import { scheduleCapacityWaitKey, type AutomationCapacityWait } from './scheduler-capacity.js';
 import { WORK_ADMISSION_RECHECK_MS } from '../daemon/work-admission.js';
+import { outsideEveryCall } from '../utils/outside-every-call.js';
 
 const MAX_TIMEOUT_MS = 24 * 60 * 60 * 1000;
 
@@ -157,10 +158,12 @@ export function scheduleAutomationJob(context: AutomationSchedulingContext, job:
   const delayMs = Math.max(0, nextRunAt - Date.now());
   if (delayMs > MAX_TIMEOUT_MS) {
     // The hop re-reads the live record, so a job changed, disabled or removed meanwhile is never written back from this snapshot.
-    const timer = setTimeout(() => {
+    // Every timer of a schedule is armed in the process's own context, never the request that added or changed the job
+    // (utils/outside-every-call.ts): its runs are no caller's, each taking its project from the job.
+    const timer = outsideEveryCall(() => setTimeout(() => {
       const live = context.jobs.get(job.id);
       if (live) scheduleAutomationJob(context, live);
-    }, MAX_TIMEOUT_MS);
+    }, MAX_TIMEOUT_MS));
     timer.unref?.();
     context.timers.set(job.id, timer);
     return;
@@ -175,7 +178,7 @@ export function scheduleAutomationJob(context: AutomationSchedulingContext, job:
     // The daemon takes no new work (a self-update's restart): the occurrence stays due and is asked about again.
     if (context.admitted?.() === false) {
       reserved?.();
-      const recheck = setTimeout(() => fire(), WORK_ADMISSION_RECHECK_MS);
+      const recheck = outsideEveryCall(() => setTimeout(() => fire(), WORK_ADMISSION_RECHECK_MS));
       recheck.unref?.();
       context.timers.set(job.id, recheck);
       return;
@@ -200,7 +203,8 @@ export function scheduleAutomationJob(context: AutomationSchedulingContext, job:
       // starts it when a run ends. Its stored next run time stays the due time,
       // so nothing is written and a restart finds it due.
       context.capacityWaits.set(waitKey, {
-        kind: 'schedule', jobId: latest.id, since: waiting?.since ?? Date.now(), nextRunAt: latest.nextRunAt ?? nextRunAt, resume: fire,
+        // Started when a run slot frees, by whichever run ended: in the process's own context, not that run's.
+        kind: 'schedule', jobId: latest.id, since: waiting?.since ?? Date.now(), nextRunAt: latest.nextRunAt ?? nextRunAt, resume: (slot) => outsideEveryCall(() => fire(slot)),
       });
       return;
     }
@@ -255,7 +259,7 @@ export function scheduleAutomationJob(context: AutomationSchedulingContext, job:
       })
       .finally(() => { if (claimedHere) advance(); });
   };
-  const timer = setTimeout(() => fire(), delayMs);
+  const timer = outsideEveryCall(() => setTimeout(() => fire(), delayMs));
   timer.unref?.();
   context.timers.set(job.id, timer);
 }

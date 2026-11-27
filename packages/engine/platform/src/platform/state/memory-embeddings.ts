@@ -165,12 +165,11 @@ export class MemoryEmbeddingProviderRegistry {
       throw new Error(`Memory embedding provider already registered: ${id}`);
     }
     const registered = { ...provider, id };
-    this.providers.set(id, registered);
     const previousDefault = options.makeDefault ? getConfiguredEmbeddingProviderId(this.configManager) : undefined;
-    if (options.makeDefault) {
-      persistDefaultEmbeddingProviderId(this.configManager, id);
-      this.activeProviderId = id;
-    }
+    // Saved first: a refused default (a managed lock) registers nothing.
+    if (options.makeDefault) persistDefaultEmbeddingProviderId(this.configManager, id);
+    this.providers.set(id, registered);
+    if (options.makeDefault) this.activeProviderId = id;
     return () => {
       if (this.providers.get(id) === registered) {
         if (previous) this.providers.set(id, previous);
@@ -362,7 +361,8 @@ export class MemoryEmbeddingProviderRegistry {
 }
 
 function persistDefaultEmbeddingProviderId(configManager: ConfigManager, providerId: string): void {
-  configManager.set('provider.embeddingProvider', providerId, { bypassManagedLock: true });
+  // A managed lock on the setting refuses this write as it refuses every other (host-setting-policy-read.ts readManagedLocks).
+  configManager.set('provider.embeddingProvider', providerId);
 }
 
 export const HASHED_MEMORY_EMBEDDING_PROVIDER: MemoryEmbeddingProvider = {

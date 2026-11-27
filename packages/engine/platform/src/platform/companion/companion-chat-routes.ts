@@ -45,6 +45,7 @@ import type {
 } from './companion-chat-types.js';
 import type { CompanionChatRouteContext } from './companion-chat-route-types.js';
 import { parseSessionListCursor } from './companion-chat-manager.js';
+import { currentRecordReach } from '@goodvibes/engine/daemon-api';
 
 // ---------------------------------------------------------------------------
 // Route dispatch, called from DaemonHttpRouter.dispatchApiRoutes
@@ -262,9 +263,26 @@ async function handleCreateSession(
     // `workingDirectory`, as capabilities.run takes it, else the `x-goodvibes-project` header).
     project: chatProjectOf(body, req),
   };
+  // A chat works in the project the caller names; nothing falls back to the daemon's own folder. A chat started with
+  // none is given its own project the first time the owner's own message there needs somewhere to work
+  // (workspace/automatic-projects.ts, companion-chat-manager.ts placeChat); until then it reads and answers only.
   if (input.project !== undefined && !isAbsolute(input.project)) {
     return Response.json({ error: 'workingDirectory must be an absolute folder', code: 'INVALID_ARGUMENT' }, { status: 400 });
   }
+  // The project is checked as every door checks a caller's project (workspace/caller-project.ts): never the home
+  // folder, the root or a GoodVibes home, and for a device or member only a project the owner gave it.
+  const checked = input.project === undefined ? undefined : context.checkProject?.(req, input.project);
+  if (checked && !checked.ok) {
+    return Response.json({ error: `No chat was made: ${checked.reason}.`, code: 'PROJECT_NOT_ALLOWED' }, { status: 403 });
+  }
+  // Who made it: with its project, who the chat belongs to (control-plane/caller-reach.ts).
+  const madeBy = context.callerPrincipal?.(req);
+  // And what it is (its class and scopes): the chat's model acts for it (security/turn-session.ts).
+  const madeAs = context.callerActor?.(req);
+  const makerActor = madeAs?.agentFor ?? madeAs;
+  const maker = makerActor ? { class: makerActor.class, scopes: makerActor.scopes === 'all' ? 'all' as const : [...makerActor.scopes] } : undefined;
+  const chatInput: CreateCompanionChatSessionInput = { ...(checked?.ok ? { ...input, project: checked.project } : input), ...(madeBy ? { createdBy: madeBy } : {}),
+    ...(madeBy && maker ? { maker } : {}) };
 
   if (shouldResolveDefaults
     && (!input.provider || !input.model)
@@ -277,7 +295,7 @@ async function handleCreateSession(
 
   try {
     // Saved before it is returned: a chat whose save failed is refused, not half-created.
-    const session = context.chatManager.createSession(input);
+    const session = context.chatManager.createSession(chatInput);
     // Drain the best-effort broker mirror before responding so /api/sessions
     // reflects this session synchronously, matching CompanionBrokerSync's
     // documented contract (see companion-chat-broker-sync.ts).
@@ -353,7 +371,10 @@ function handleSearchMessages(url: URL, context: CompanionChatRouteContext): Res
   }
   const includeClosed = readBooleanQuery(url, 'includeClosed') === true;
   const needle = query.toLowerCase();
-  const { sessions } = context.chatManager.listSessions({ includeClosed, limit: Number.MAX_SAFE_INTEGER });
+  // Only the chats the caller may reach are searched, so the page, `total` and `hasMore` are about those (caller-reach.ts).
+  const reach = currentRecordReach();
+  const { sessions } = context.chatManager.listSessions({ includeClosed, limit: Number.MAX_SAFE_INTEGER,
+    ...(reach ? { keep: (chat: { readonly id: string }) => reach('chat', chat.id) } : {}) });
   const hits: {
     readonly sessionId: string;
     readonly sessionTitle: string;
@@ -403,7 +424,9 @@ function handleListSessions(
     limit,
     cursor,
   };
-  return Response.json(context.chatManager.listSessions(input));
+  // Only the chats the caller may reach, before the page is cut and the totals counted (caller-reach.ts).
+  const reach = currentRecordReach();
+  return Response.json(context.chatManager.listSessions({ ...input, ...(reach ? { keep: (chat) => reach('chat', chat.id) } : {}) }));
 }
 
 // ---------------------------------------------------------------------------

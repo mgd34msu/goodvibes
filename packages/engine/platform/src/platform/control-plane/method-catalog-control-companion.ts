@@ -89,6 +89,8 @@ export const builtinGatewayControlCompanionMethodDescriptors: readonly GatewayMe
     category: 'companion',
     effects: ['sessions.write'],
     http: { method: 'POST', path: '/api/companion/chat/sessions' },
+    // The chat's turns work in this project (also checked by the chat's own creation, companion-chat-routes.ts).
+    workFolders: ['workingDirectory'],
     inputSchema: bodyEnvelopeSchema({
       title: STRING_SCHEMA,
       model: STRING_SCHEMA,
@@ -106,9 +108,9 @@ export const builtinGatewayControlCompanionMethodDescriptors: readonly GatewayMe
   methodDescriptor({
     id: 'companion.chat.sessions.list',
     title: 'List Companion Chat Sessions',
-    description: 'List active companion-chat sessions, newest first, one page of `limit` (default 100). Pass `includeClosed` to include closed sessions. While `hasMore` is true, pass `nextCursor` back as `cursor` for the page of older chats; a cursor this list did not return is 400 INVALID_CURSOR. Each record carries its title and system prompt, so it needs read:transcripts.',
+    description: 'List active companion-chat sessions, newest first, one page of `limit` (default 100). Pass `includeClosed` to include closed sessions. While `hasMore` is true, pass `nextCursor` back as `cursor` for the page of older chats; a cursor this list did not return is 400 INVALID_CURSOR. Each record carries its title and system prompt, so it needs read:transcripts; a caller below admin is listed only the chats it made, under read:sessions or write:sessions as well.',
     category: 'companion',
-    effects: ['transcripts.read'],
+    effects: ['chat.read'],
     http: { method: 'GET', path: '/api/companion/chat/sessions' },
     inputSchema: objectSchema({
       includeClosed: BOOLEAN_SCHEMA,
@@ -120,9 +122,9 @@ export const builtinGatewayControlCompanionMethodDescriptors: readonly GatewayMe
   methodDescriptor({
     id: 'companion.chat.sessions.get',
     title: 'Get Companion Chat Session',
-    description: 'Return a companion-chat session record together with its full message history.',
+    description: 'Return a companion-chat session record together with its full message history. Needs read:transcripts; the chat\'s own maker reads it under read:sessions or write:sessions as well.',
     category: 'companion',
-    effects: ['transcripts.read'],
+    effects: ['chat.read'],
     http: { method: 'GET', path: '/api/companion/chat/sessions/{sessionId}' },
     inputSchema: objectSchema({ sessionId: STRING_SCHEMA }, ['sessionId']),
     outputSchema: COMPANION_CHAT_SESSION_WITH_MESSAGES_SCHEMA,
@@ -214,9 +216,9 @@ export const builtinGatewayControlCompanionMethodDescriptors: readonly GatewayMe
   methodDescriptor({
     id: 'companion.chat.messages.list',
     title: 'List Companion Chat Messages',
-    description: 'Return the messages of a companion-chat session, oldest first. With neither `limit` nor `before` the whole transcript is returned. With `limit` (1-1000, default 100 when only `before` is given) and/or `before` (a message id) one page is returned: the messages just before `before`, or the newest ones. Every answer carries `total` and `more`; while `more` is true, pass `nextBefore` back as `before` to read the page before it. A `before` that names no message in the chat is 404 MESSAGE_NOT_FOUND.',
+    description: 'Return the messages of a companion-chat session, oldest first. With neither `limit` nor `before` the whole transcript is returned. With `limit` (1-1000, default 100 when only `before` is given) and/or `before` (a message id) one page is returned: the messages just before `before`, or the newest ones. Every answer carries `total` and `more`; while `more` is true, pass `nextBefore` back as `before` to read the page before it. A `before` that names no message in the chat is 404 MESSAGE_NOT_FOUND. Needs read:transcripts; the chat\'s own maker reads it under read:sessions or write:sessions as well.',
     category: 'companion',
-    effects: ['transcripts.read'],
+    effects: ['chat.read'],
     http: { method: 'GET', path: '/api/companion/chat/sessions/{sessionId}/messages' },
     inputSchema: objectSchema({ sessionId: STRING_SCHEMA, limit: NUMBER_SCHEMA, before: STRING_SCHEMA }, ['sessionId']),
     outputSchema: COMPANION_CHAT_MESSAGES_LIST_SCHEMA,
@@ -224,9 +226,9 @@ export const builtinGatewayControlCompanionMethodDescriptors: readonly GatewayMe
   methodDescriptor({
     id: 'companion.chat.messages.search',
     title: 'Search Companion Chat Messages',
-    description: 'Find companion-chat messages whose text contains `query` (case-insensitive) across every chat, newest first. Each item names the chat (`sessionId`, `sessionTitle`), the message (`messageId`, `role`), a snippet around the match and `createdAt`. History retained behind a regenerate or edit is not searched. Closed chats are searched only with `includeClosed`. Paged: `limit` 1-100 (default 25); pass `nextCursor` back as `cursor` while `hasMore` is true. A blank query is 400 INVALID_ARGUMENT; a cursor this search did not return is 400 INVALID_CURSOR.',
+    description: 'Find companion-chat messages whose text contains `query` (case-insensitive) across every chat, newest first. Each item names the chat (`sessionId`, `sessionTitle`), the message (`messageId`, `role`), a snippet around the match and `createdAt`. History retained behind a regenerate or edit is not searched. Closed chats are searched only with `includeClosed`. Paged: `limit` 1-100 (default 25); pass `nextCursor` back as `cursor` while `hasMore` is true. A blank query is 400 INVALID_ARGUMENT; a cursor this search did not return is 400 INVALID_CURSOR. A caller below admin searches only the chats it made (under read:transcripts, read:sessions or write:sessions).',
     category: 'companion',
-    effects: ['transcripts.read'],
+    effects: ['chat.read'],
     http: { method: 'GET', path: '/api/companion/chat/messages/search' },
     inputSchema: objectSchema({
       query: STRING_SCHEMA,
@@ -352,9 +354,9 @@ export const builtinGatewayControlCompanionMethodDescriptors: readonly GatewayMe
   methodDescriptor({
     id: 'companion.chat.queuedMessages.list',
     title: 'List Queued Companion Chat Messages',
-    description: 'The messages of a companion chat waiting behind the running reply (sent while it was still being written), in the order they will be answered. Each stays editable and removable until its turn starts; a message whose turn has started no longer appears. An unknown chat is 404 SESSION_NOT_FOUND.',
+    description: 'The messages of a companion chat waiting behind the running reply (sent while it was still being written), in the order they will be answered. Each stays editable and removable until its turn starts; a message whose turn has started no longer appears. An unknown chat is 404 SESSION_NOT_FOUND. Needs read:transcripts; the chat\'s own maker reads it under read:sessions or write:sessions as well.',
     category: 'companion',
-    effects: ['transcripts.read'],
+    effects: ['chat.read'],
     http: { method: 'GET', path: '/api/companion/chat/sessions/{sessionId}/queued-messages' },
     inputSchema: objectSchema({ sessionId: STRING_SCHEMA }, ['sessionId']),
     outputSchema: objectSchema({
@@ -429,9 +431,9 @@ export const builtinGatewayControlCompanionMethodDescriptors: readonly GatewayMe
   methodDescriptor({
     id: 'companion.chat.events.stream',
     title: 'Stream Companion Chat Events',
-    description: 'Server-Sent Events stream of turn and agent events scoped to a single companion-chat session. Besides the turn frames (`companion-chat.turn.*`), `companion-chat.transcript.changed` (`{ type: "transcript.changed", sessionId, change: "attachment-removed" | "branch-switched", messageIds }`) says the transcript changed outside a turn (companion.chat.attachments.remove, companion.chat.branches.switch): read the messages again.',
+    description: 'Server-Sent Events stream of turn and agent events scoped to a single companion-chat session. Besides the turn frames (`companion-chat.turn.*`), `companion-chat.transcript.changed` (`{ type: "transcript.changed", sessionId, change: "attachment-removed" | "branch-switched", messageIds }`) says the transcript changed outside a turn (companion.chat.attachments.remove, companion.chat.branches.switch): read the messages again. Needs read:transcripts; the chat\'s own maker follows it under read:sessions or write:sessions as well.',
     category: 'companion',
-    effects: ['transcripts.read'],
+    effects: ['chat.read'],
     transport: ['http'],
     http: { method: 'GET', path: '/api/companion/chat/sessions/{sessionId}/events' },
     inputSchema: objectSchema({ sessionId: STRING_SCHEMA }, ['sessionId']),

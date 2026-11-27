@@ -91,9 +91,35 @@ function maskPairingCredential(text: string): string {
   return text.replace(PAIRING_CREDENTIAL, (_match, fragment: string | undefined) => `${fragment ?? ''}[REDACTED_PAIRING_TOKEN]`);
 }
 
+/**
+ * A module Bun could not load (a file that does not parse: BuildMessage; a module or export it cannot find:
+ * ResolveMessage). Their message and position are accessors of Bun's own classes, not data properties, so the
+ * general read below found nothing and the daemon said only "could not continue". Only an instance of Bun's own
+ * class is read, and only its message and where: the file, line and column (and for a module not found, which
+ * file asked for it).
+ */
+function bunLoadMessageText(value: unknown): string | undefined {
+  const own = globalThis as unknown as { readonly BuildMessage?: abstract new () => unknown; readonly ResolveMessage?: abstract new () => unknown };
+  const isBuild = typeof own.BuildMessage === 'function' && value instanceof own.BuildMessage;
+  const isResolve = typeof own.ResolveMessage === 'function' && value instanceof own.ResolveMessage;
+  if (!isBuild && !isResolve) return undefined;
+  try {
+    const loaded = value as { readonly message?: unknown; readonly referrer?: unknown; readonly position?: { readonly file?: unknown; readonly line?: unknown; readonly column?: unknown } | null };
+    const message = typeof loaded.message === 'string' && loaded.message.length > 0 ? loaded.message : isBuild ? 'a source file could not be built' : 'a module could not be found';
+    const position = loaded.position;
+    const file = typeof position?.file === 'string' && position.file.length > 0 ? position.file : typeof loaded.referrer === 'string' && loaded.referrer.length > 0 ? loaded.referrer : undefined;
+    const line = typeof position?.line === 'number' && position.line > 0 ? `:${position.line}${typeof position.column === 'number' && position.column >= 0 ? `:${position.column + 1}` : ''}` : '';
+    return file === undefined || (line === '' && message.includes(file)) ? message : `${message} (in ${file}${line})`;
+  } catch {
+    return isBuild ? 'a source file could not be built' : 'a module could not be found';
+  }
+}
+
 /** One link's own text: a refusal's reason, or the error's own message (data properties only). */
 function linkText(value: unknown): string | undefined {
   if (typeof value === 'string') return value;
+  const loading = bunLoadMessageText(value);
+  if (loading !== undefined) return loading;
   const carried = readRefusal(value);
   if (carried) return carried.reason.replace(/\.+$/, '');
   const message = ownValue(value, 'message');

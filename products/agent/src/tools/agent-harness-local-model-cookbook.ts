@@ -238,7 +238,7 @@ function cookbookSnapshot(context: CommandContext, includeParameters: boolean, e
       : topLabel ? `Review ${topLabel} and its setupPlan before any installation.`
       : 'Recipe readiness is unknown. Inspect hardware requirements and gather exact route and benchmark evidence.',
     'Refresh the model catalog after the local server is running.',
-    'Run the local benchmark workspace action or saved model comparison before changing the default route.',
+    'Run the local benchmark capability or a saved model comparison before changing the default route.',
   ];
   return {
     status: detection.stacks.length > 0

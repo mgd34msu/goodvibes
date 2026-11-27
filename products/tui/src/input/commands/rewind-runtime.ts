@@ -44,6 +44,7 @@ import { logger, readDocument, writeDocument } from '@goodvibes/engine/platform/
 import { join } from 'node:path';
 import type { WorkspaceCheckpointManager } from '@goodvibes/engine/platform/platform/workspace';
 import { commandRefusal } from '@goodvibes/engine/terminal-shell/command-confirmation';
+import { askBeforeTakingBackOthers } from '@goodvibes/engine/terminal-shell/recovery-commands';
 import type { RewindScope } from '@goodvibes/engine/terminal-shell/checkpoint-command';
 import type { CommandContext } from '../command-registry.ts';
 import { buildRewindReceiptBlock } from '../../core/rewind-receipt.ts';
@@ -229,6 +230,16 @@ async function confirmFileRestore(
   return confirmed ? 'confirmed' : 'cancelled';
 }
 
+/**
+ * A rewind's files go back to a checkpoint of the project, which other sessions and agents share: when that
+ * would take back another session's change it is asked first, whoever asked for it (recovery-commands.ts).
+ */
+async function askAboutOtherSessions(ctx: CommandContext, mgr: WorkspaceCheckpointManager, checkpointId: string, what: string): Promise<Awaited<ReturnType<typeof askBeforeTakingBackOthers>>> {
+  const checkpoint = (await mgr.list()).find((entry) => entry.id === checkpointId);
+  if (!checkpoint) return null;
+  return askBeforeTakingBackOthers(ctx, mgr, checkpoint, ctx.session.runtime.sessionId, what);
+}
+
 const NO_PREVIEW_MESSAGE = (what: string): string =>
   `${what} was not started: restoring files needs the Changes view to show what would be overwritten, and it is not available in this session. Nothing changed.`;
 
@@ -254,7 +265,18 @@ async function undoLastRewindNow(ctx: CommandContext): Promise<RewindReversalRes
   }
 
   const mgr = ctx.workspace.workspaceCheckpointManager;
+  let takingBack: Awaited<ReturnType<typeof askAboutOtherSessions>> = null;
   if (receipt.undo.files && mgr) {
+    try {
+      takingBack = await askAboutOtherSessions(ctx, mgr, receipt.undo.files.restoreCheckpointId, 'Undo the rewind');
+    } catch (error) {
+      state.undo.push(receipt);
+      return { handled: true, message: summarizeError(error) };
+    }
+    if (takingBack === 'cancelled') {
+      state.undo.push(receipt);
+      return { handled: true, message: 'Undo rewind cancelled: nothing changed, and the other sessions\' changes are kept. The rewind is still listed under /undo rewind.' };
+    }
     const answer = await confirmFileRestore(ctx, mgr, receipt.undo.files.restoreCheckpointId, 'Undo the rewind: put the files back as they were before it?');
     if (answer !== 'confirmed' || ctx.isGenerating?.()) {
       state.undo.push(receipt);
@@ -278,6 +300,7 @@ async function undoLastRewindNow(ctx: CommandContext): Promise<RewindReversalRes
   try {
     if (receipt.undo.files && mgr) {
       const restored = await mgr.restore(receipt.undo.files.restoreCheckpointId, { safetyCheckpoint: true });
+      if (takingBack) { await takingBack.tell(restored.safetyCheckpointId); parts.push('the other sessions told their change was taken back'); }
       const failed = restored.failedPaths ?? [];
       if (failed.length > 0) {
         filesFailed = failed.map((f) => `${f.path}: ${f.reason}`).join('; ');
@@ -350,7 +373,18 @@ async function redoLastRewindNow(ctx: CommandContext): Promise<RewindReversalRes
   if (before !== null && before !== 0) return refusedSince(before);
 
   const mgr = ctx.workspace.workspaceCheckpointManager;
+  let takingBack: Awaited<ReturnType<typeof askAboutOtherSessions>> = null;
   if (receipt.files?.checkpointId && mgr) {
+    try {
+      takingBack = await askAboutOtherSessions(ctx, mgr, receipt.files.checkpointId, 'Redo the rewind');
+    } catch (error) {
+      state.redo.push(receipt);
+      return { handled: true, message: summarizeError(error) };
+    }
+    if (takingBack === 'cancelled') {
+      state.redo.push(receipt);
+      return { handled: true, message: 'Redo rewind cancelled: nothing changed, and the other sessions\' changes are kept. The rewind is still listed under /redo rewind.' };
+    }
     const answer = await confirmFileRestore(ctx, mgr, receipt.files.checkpointId, 'Redo the rewind: restore the files to the rewound turn again?');
     if (answer !== 'confirmed' || ctx.isGenerating?.()) {
       state.redo.push(receipt);
@@ -370,6 +404,7 @@ async function redoLastRewindNow(ctx: CommandContext): Promise<RewindReversalRes
   try {
     if (receipt.files?.checkpointId && mgr) {
       const restored = await mgr.restore(receipt.files.checkpointId, { safetyCheckpoint: true });
+      if (takingBack) { await takingBack.tell(restored.safetyCheckpointId); parts.push('the other sessions told their change was taken back'); }
       const failed = restored.failedPaths ?? [];
       if (failed.length > 0) {
         filesFailed = failed.map((f) => `${f.path}: ${f.reason}`).join('; ');
@@ -502,6 +537,9 @@ export async function rewindToTurn(ctx: CommandContext, input: { readonly turn: 
   if (wants(scope, 'conversation')) summaryParts.push(conversationAvailable ? `${plan.conversation?.messagesToDrop ?? 0} message(s)` : 'conversation: unavailable');
 
   for (const w of plan.warnings) ctx.print(`  note: ${w}`);
+  const takingBack = wants(scope, 'files') && filesAvailable && checkpointId && ctx.workspace.workspaceCheckpointManager
+    ? await askAboutOtherSessions(ctx, ctx.workspace.workspaceCheckpointManager, checkpointId, `Go back to "${resolved.label}"`) : null;
+  if (takingBack === 'cancelled') { ctx.renderRequest(); return 'Nothing changed: you chose to keep the other sessions\' changes.'; }
   if (asked && ctx.previewChanges) {
     ctx.print(`Previewing going back to turn "${resolved.label}" (${scope}: ${summaryParts.join(', ')}). Enter or y goes back, n or Esc cancels.`);
     ctx.renderRequest();
@@ -527,6 +565,7 @@ export async function rewindToTurn(ctx: CommandContext, input: { readonly turn: 
   }
   const receipt = result.receipt;
   if (!receipt) throw commandRefusal(`Nothing changed: ${result.refusal?.reason ?? 'the plan shown no longer matches the conversation'}.`, '/checkpoint rewind shows the plan again.');
+  if (takingBack && receipt.files) await takingBack.tell(receipt.undo.files?.restoreCheckpointId ?? null);
   if (undoAvailable(receipt)) {
     state.undo.push(receipt);
     state.redo.length = 0; // a fresh apply invalidates the redo stack

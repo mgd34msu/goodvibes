@@ -37,7 +37,7 @@ import { amendTarget } from './amendment.js';
 import { assertJudgmentInput } from '../gate/judgment-input.js';
 import { latestSeverity, QUALITY_EVIDENCE_SENTENCES } from './nudge.js';
 import { lastFencedBlock } from './plan-schema.js';
-import { acceptEscalatedPlan, planContract, withOwnerWritingDecision } from './planner.js';
+import { acceptEscalatedPlan, NATIVE_REPEAT_STOP_ANSWERS, planContract, withOwnerWritingDecision } from './planner.js';
 import { failureFromError, isAbortError, type ContractRun } from './run-context.js';
 import type { StepContext } from './steps.js';
 import {
@@ -57,6 +57,7 @@ import { addJudgmentUsage } from './usage.js';
 import { logger } from '../utils/logger.js';
 import { summarizeError } from '../utils/error-display.js';
 import { releaseSharedTreeForOwner, retakeSharedTreeAfterOwner } from './workstreams.js';
+import { keepOneSide } from './conflict-repair.js';
 
 /** The decision site owner replies are logged under. */
 export const OWNER_REPLY_SITE = 'contract.owner-reply';
@@ -326,6 +327,50 @@ export function buildOwnerAcceptanceQuestion(contract: Contract, input: OwnerAcc
   ].join('\n');
 }
 
+/**
+ * Whether an escalation is a native work's repeated plan put to its owner: answered by code, "stop" stops the work and
+ * any other words are a correction for the plan, which the planner writes again from them.
+ */
+export function isRepeatedPlanPause(escalation: Pick<Escalation, 'failurePause' | 'scope' | 'reason'>): boolean {
+  return escalation.failurePause === true && escalation.scope === 'plan' && escalation.reason === 'plan-unresolved';
+}
+
+/**
+ * Whether an escalation is the question a conflicting merge's repair asks when its turn ended with the two changes not
+ * combined: answered by code, "first" or "second" keeps that change in the conflicting files, "stop" stops the work.
+ * It is asked about the repair's group (the repair step stays held), never twice for one group.
+ */
+export function isConflictPause(escalation: Pick<Escalation, 'failurePause' | 'scope' | 'reason'>): boolean {
+  return escalation.failurePause === true && escalation.scope === 'group' && escalation.reason === 'stalled';
+}
+
+/** The answers the conflict question takes, as Waiting for you offers them. */
+export const CONFLICT_ANSWERS = ['first', 'second', 'stop'] as const;
+export type ConflictAnswer = (typeof CONFLICT_ANSWERS)[number];
+
+/** The answer a reply to the conflict question names, or undefined. */
+export function readConflictAnswer(text: string): ConflictAnswer | undefined {
+  const words = text.trim().replace(/[.!]+$/, '').trim().toLowerCase().replace(/\s+/g, ' ');
+  if (['first', 'keep the first', 'keep the first change', 'the first'].includes(words)) return 'first';
+  if (['second', 'keep the second', 'keep the second change', 'the second'].includes(words)) return 'second';
+  if (['stop', 'cancel', 'stop the work'].includes(words)) return 'stop';
+  return undefined;
+}
+
+/** The conflict question's first line, as Waiting for you titles it. */
+export function conflictHeadline(files: readonly string[]): string {
+  return `The two changes to ${files.length === 0 ? 'the same files' : files.join(', ')} could not be combined`;
+}
+
+/** The conflict question, built in code: which two changes, what each answer does. */
+export function buildConflictQuestion(contract: Contract, files: readonly string[], first: string, second: string): string {
+  return [
+    `${conflictHeadline(files)}.`,
+    `In the work "${titleOf(contract.goal || contract.ask)}", the step "${titleOf(first)}" and the step "${titleOf(second)}" both changed ${files.length === 1 ? 'it' : 'them'}, and the step that was to combine them ended its turn with both versions still in place.`,
+    `Answer "first" to keep the change of "${titleOf(first)}" (already in the work), "second" to keep the change of "${titleOf(second)}", or "stop" to stop the work. The other changes of both steps are kept either way.`,
+  ].join('\n');
+}
+
 /** Whether an escalation is the owner-acceptance question of a result no decision model checked. */
 export function isOwnerAcceptance(escalation: Pick<Escalation, 'failurePause' | 'scope' | 'reason'>): boolean {
   return escalation.failurePause === true && escalation.scope === 'deliverable' && escalation.reason === 'unsettled';
@@ -499,6 +544,11 @@ export interface Escalations {
    */
   pauseFailedUnit(run: ContractRun, unit: ContractUnit, reason: string): Escalation | null;
   /**
+   * The step resolving a conflicting merge ended its turn with the two changes to `files` not combined: its group waits
+   * on the owner with one question (keep the first, keep the second, stop), asked once; the step stays held.
+   */
+  conflictUnresolved(run: ContractRun, unitId: string, files: readonly string[]): Promise<void>;
+  /**
    * An operator picked a unit's attempt through `fleet.attempts.pick`: the
    * unit's open `attempts-undecided` escalation closes, and the attempt is
    * taken as the owner's pick would be. The caller has checked that the
@@ -646,6 +696,71 @@ export function createEscalations(context: StepContext, rejudge: Rejudge): Escal
     // A restart must find the question still open; the debounced write follows if this one fails.
     try { context.checkpoint?.(run); } catch { /* the contract is held and its write is scheduled */ }
     return escalation;
+  }
+
+  async function conflictUnresolved(run: ContractRun, unitId: string, files: readonly string[]): Promise<void> {
+    const { contract } = run;
+    const unit = run.unit(unitId);
+    const group = unit === undefined ? undefined : run.group(unit.groupId);
+    const conflict = group?.repairs?.conflict;
+    if (run.terminal || unit === undefined || group === undefined || conflict === undefined) return;
+    // Asked once: a question already open (or answered) for this repair is not put again.
+    if (contract.escalations.some((entry) => isConflictPause(entry) && entry.targetId === group.id)) return;
+    const target = run.unit(group.repairs!.targetId);
+    const shared = new Set(conflict.files);
+    const first = contract.units.find((candidate) => candidate.id !== target?.id && candidate.groupId !== group.id && candidate.status === 'passed'
+      && candidate.touchedPaths.some((path) => shared.has(path)));
+    raise(run, {
+      scope: 'group', targetId: group.id, reason: 'stalled', unmetCriterionIds: [], decisionIds: [], retryOrCancel: true,
+      question: buildConflictQuestion(contract, files, first?.title || 'the work so far', target?.title || target?.id || 'the other step'),
+    });
+    contract.statusLine = `${conflictHeadline(files)}; it waits for you to keep the first change, keep the second, or stop the work.`;
+    try { context.checkpoint?.(run); } catch { /* the contract is held and its write is scheduled */ }
+  }
+
+  /**
+   * The owner's answer to the conflict question: "first" or "second" keeps that change in the conflicting files (the
+   * host applies it in the repair step's tree and finishes the merge) and the repair step passes, as he decided it;
+   * "stop" stops the work. Any other answer leaves the question open.
+   */
+  async function replyToConflict(run: ContractRun, escalation: Escalation, text: string): Promise<OwnerReplyOutcome> {
+    const answer = readConflictAnswer(text);
+    if (answer === undefined) {
+      throw new OwnerReplyRefusedError(`"${titleOf(text)}" is not an answer here: it takes "first" (keep the first change), "second" (keep the second) or "stop" (stop the work); the question is still open`, 'not-an-answer');
+    }
+    const group = run.group(escalation.targetId);
+    const conflict = group?.repairs?.conflict;
+    const unit = group === undefined ? undefined : run.unit(group.unitIds[0]!);
+    if (group === undefined || conflict === undefined || unit === undefined) throw new OwnerReplyRefusedError('the step that was to combine the two changes no longer waits', 'not-open');
+    const reading: OwnerReplyReading = answer === 'stop' ? 'reject' : 'amend';
+    const action: OwnerReplyAction = answer === 'stop' ? 'stopped' : 'amended';
+    if (answer === 'stop') {
+      escalation.reply = { text: answer, reading, outcome: 'act', decisionId: undefined };
+      escalation.resolvedAt = run.env.now();
+      run.decide('owner-replied', group.id, `${escalation.id}: stop, the work is stopped`);
+      run.emit({ type: 'CONTRACT_OWNER_REPLIED', contractId: run.id, escalationId: escalation.id, reading, outcome: 'act', action });
+      run.contract.failureKind = 'owner-rejected';
+      run.control.cancel(`stopped by you: ${conflictHeadline(conflict.files).toLowerCase().replace(/^the/, 'the')}`);
+      return { escalationId: escalation.id, reading, outcome: 'act', action };
+    }
+    // Applied before the question closes: a failure leaves it open, said in words.
+    try {
+      await keepOneSide(run.runtime(unit).cwd, conflict, answer);
+    } catch (error) {
+      throw new OwnerReplyRefusedError(`keeping the ${answer} change could not be done (${failureFromError(error).reason}); answer again, or "stop"`, 'not-an-answer');
+    }
+    escalation.reply = { text: answer, reading, outcome: 'act', decisionId: undefined };
+    escalation.resolvedAt = run.env.now();
+    run.contract.statusLine = undefined;
+    if (group.status === 'awaiting-owner') run.moveGroup(group, 'running');
+    leaveOwnerWait(run);
+    run.decide('owner-replied', group.id, `${escalation.id}: ${answer}, the ${answer} change to ${conflict.files.join(', ')} is kept and the merge of ${conflict.branch} finished`);
+    run.emit({ type: 'CONTRACT_OWNER_REPLIED', contractId: run.id, escalationId: escalation.id, reading, outcome: 'act', action });
+    // The owner settled what the step was to do: it passes as he decided, and its tree (with the finished merge) goes in.
+    context.checks().passUnit(run, unit, `The two changes to ${conflict.files.join(', ')} could not be combined; you chose to keep the ${answer} one.`, `the owner kept the ${answer} change`);
+    context.ownerProgress(run);
+    try { context.checkpoint?.(run); } catch { /* the contract is held and its write is scheduled */ }
+    return { escalationId: escalation.id, reading, outcome: 'act', action };
   }
 
   /** Back to the status the contract left for the owner, once nothing else waits on them. */
@@ -891,6 +1006,8 @@ export function createEscalations(context: StepContext, rejudge: Rejudge): Escal
     if (run.replying.has(escalationId)) throw new OwnerReplyRefusedError(`a reply to ${escalationId} is already being read; wait for its result`, 'already-reading');
     run.replying.add(escalationId);
     try {
+      if (isRepeatedPlanPause(escalation)) return replyToRepeatedPlan(run, escalation, text);
+      if (isConflictPause(escalation)) return await replyToConflict(run, escalation, text);
       // A failure pause's answer is checked before anything is taken: a refused reply never takes the tree.
       if (escalation.failurePause === true) failurePauseAnswer(run, escalation, text);
       // The waiting group gave the shared tree up; it takes it again before the reply acts.
@@ -907,6 +1024,37 @@ export function createEscalations(context: StepContext, rejudge: Rejudge): Escal
     } finally {
       run.replying.delete(escalationId);
     }
+  }
+
+  /**
+   * A native work's repeated plan, answered: "stop" stops the work; any other words go to the planner as a correction of
+   * the derived plan (the native roots stay fixed), and planning runs again from them. The reply returns once the
+   * question is closed; the planner's run follows on the work (a failure there ends the work in its own words).
+   */
+  function replyToRepeatedPlan(run: ContractRun, escalation: Escalation, text: string): OwnerReplyOutcome {
+    const words = text.trim();
+    if (words.length === 0) throw new OwnerReplyRefusedError('an empty answer is not an answer here: say what to change, or "stop" to stop the work; the question is still open', 'not-an-answer');
+    const stop = NATIVE_REPEAT_STOP_ANSWERS.includes(words.replace(/[.!]+$/, '').trim().toLowerCase());
+    const reading: OwnerReplyReading = stop ? 'reject' : 'amend';
+    const action: OwnerReplyAction = stop ? 'stopped' : 'amended';
+    escalation.reply = { text: words, reading, outcome: 'act', decisionId: undefined };
+    escalation.resolvedAt = run.env.now();
+    run.contract.statusLine = undefined;
+    run.decide('owner-replied', escalation.targetId, `${escalation.id}: ${stop ? 'stop, the work is stopped' : 'the plan is written again from the owner\'s words'}`);
+    run.emit({ type: 'CONTRACT_OWNER_REPLIED', contractId: run.id, escalationId: escalation.id, reading, outcome: 'act', action });
+    if (stop) {
+      run.contract.failureKind = 'owner-rejected';
+      run.control.cancel('stopped by you after the planner offered the same plan again');
+      return { escalationId: escalation.id, reading, outcome: 'act', action };
+    }
+    context.ownerProgress(run);
+    context.checkpoint?.(run);
+    void plan(run, { ownerInstruction: words, previousPlan: lastFencedBlock(escalation.question) }).catch((error: unknown) => {
+      if (run.terminal || isAbortError(error, run.abort.signal)) return;
+      const failure = failureFromError(error);
+      run.control.fail(failure.kind, `its plan could not be written again from your words: ${failure.reason}`);
+    });
+    return { escalationId: escalation.id, reading, outcome: 'act', action };
   }
 
   /**
@@ -1179,7 +1327,7 @@ export function createEscalations(context: StepContext, rejudge: Rejudge): Escal
     }
   }
 
-  return { raise, unitAwaitsOwner, attemptsUndecided, pauseForOwnerRetry, pauseFailedUnit, reply, operatorPick };
+  return { raise, unitAwaitsOwner, attemptsUndecided, pauseForOwnerRetry, pauseFailedUnit, conflictUnresolved, reply, operatorPick };
 }
 
 /** A reply as the runner acts on it: the decision model's reading, or code's literal reading with no model in use. */

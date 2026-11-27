@@ -31,13 +31,13 @@ function isPlainObject(value: unknown): value is Record<string, unknown> {
  * reads a file, an environment variable or runs a program, which repository
  * content must not choose.
  */
-function isForeignSecretRef(value: unknown): boolean {
+export function isForeignSecretRef(value: unknown): boolean {
   if (typeof value !== 'string' && !(isPlainObject(value) && ('source' in value || 'provider' in value || 'type' in value))) return false;
   const source = normalizeSecretRef(value)?.source;
   return source !== undefined && source !== 'goodvibes';
 }
 
-function collectLeaves(value: unknown, path: string, out: Array<{ path: string; value: unknown }>): void {
+export function collectLeaves(value: unknown, path: string, out: Array<{ path: string; value: unknown }>): void {
   if (isPlainObject(value) && !isForeignSecretRef(value)) {
     for (const [field, child] of Object.entries(value)) collectLeaves(child, path ? `${path}.${field}` : field, out);
     return;
@@ -51,7 +51,7 @@ function collectLeaves(value: unknown, path: string, out: Array<{ path: string; 
  * (an object-valued setting such as a price table), else the leaf as written
  * (a per-tool permission, or a key nothing declares).
  */
-function settingFor(path: string, isHostSetting: (key: string) => boolean): string {
+export function settingFor(path: string, isHostSetting: (key: string) => boolean = () => false): string {
   if (CONFIG_KEYS.has(path) || isHostSetting(path)) return path;
   for (let end = path.lastIndexOf('.'); end > 0; end = path.lastIndexOf('.', end - 1)) {
     const parent = path.slice(0, end);

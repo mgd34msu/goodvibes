@@ -51,13 +51,6 @@ export type TerminalOnboardingApplyOperation<Key extends string, Scope extends S
     readonly scope?: Scope | undefined;
     readonly medium: 'secure' | 'plaintext';
 } | {
-    readonly kind: 'ensure-auth-user';
-    readonly username: string;
-    readonly password: string;
-    readonly roles?: readonly string[] | undefined;
-    readonly createSession?: boolean | undefined;
-    readonly retireBootstrapCredential?: boolean | undefined;
-} | {
     readonly kind: 'acknowledge';
     readonly target: OnboardingAcknowledgementTarget;
     readonly acknowledged: boolean;

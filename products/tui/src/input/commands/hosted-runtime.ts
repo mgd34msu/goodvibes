@@ -65,7 +65,8 @@ export function renderHostedStatus(feed: HostedSessionFeed): string {
       ? '  live event stream open'
       : `  no live stream: ${state.streamNote ?? 'not subscribed'}`,
     state.runningToolCalls.length > 0
-      ? `  running: ${state.runningToolCalls.map((call) => `${call.tool} (${call.callId})`).join(', ')}`
+      // The tool by its name, as the row says it ("running read"); a call id means nothing to a person.
+      ? `  running: ${state.runningToolCalls.map((call) => call.tool).join(', ')}`
       : '  no tool call is running',
   ].join('\n');
 }

@@ -117,11 +117,11 @@ export function rankRoutes(request: string, selection: Selection, slots: TaskRou
 }
 
 async function catalogMatches(
-  lookup: TaskRouteDeps['workspaceMatches'],
+  lookup: TaskRouteDeps['modeMatches'],
   request: string,
   limit: number,
   options: JudgmentReadingOptions,
-): Promise<{ matches: readonly Record<string, unknown>[]; ranked: TaskRouteJudgment['workspace'] }> {
+): Promise<{ matches: readonly Record<string, unknown>[]; ranked: TaskRouteJudgment['harness'] }> {
   if (lookup === undefined) return { matches: [], ranked: [] };
   options.signal?.throwIfAborted(); options.assertCurrent?.();
   const result = captureStrictJudgmentJson(await whileCurrent(Promise.resolve().then(() => {
@@ -259,10 +259,9 @@ export async function planTaskRoute(
     const matchLimit = includeParameters ? 6 : 3;
     const call = { site: TASK_ROUTE_SITE, signal: authority.signal, beforeAttempt: authority.assertCurrent };
     const catalogOptions = { ...options, signal: authority.signal, assertCurrent: authority.assertCurrent };
-    const [selection, slotRun, workspaceMatches, harnessModeMatches] = await Promise.all([
+    const [selection, slotRun, harnessModeMatches] = await Promise.all([
       taskRoutePick.select(authority.port, { request: protectedRequest }, routeSource, call),
       readSlots(authority.port, protectedRequest, { ...call, namedIds, assertCurrent: authority.assertCurrent }),
-      catalogMatches(deps.workspaceMatches, protectedRequest, matchLimit, catalogOptions),
       catalogMatches(deps.modeMatches, protectedRequest, matchLimit, catalogOptions),
     ]);
     authority.assertCurrent();
@@ -270,7 +269,6 @@ export async function planTaskRoute(
       selection: selectionEvidence(selection),
       slots: { readings: slotRun.readings, decisionId: slotRun.decisionId },
       named: Object.fromEntries(Object.entries(slotRun.named).map(([kind, value]) => [kind, selectionEvidence(value)])),
-      workspace: workspaceMatches.ranked,
       harness: harnessModeMatches.ranked,
     };
     const ranked = rankRoutes(protectedRequest, selection, slotRun.slots);
@@ -310,7 +308,6 @@ export async function planTaskRoute(
       nextAction: preferred.requiresConfirmation
         ? 'Inspect the preferred route, collect missing fields, then run the returned confirmed route only after the user explicitly asks for that effect.'
         : 'Use the preferred read-only route first; only move to a confirmed route if the returned plan asks for one and the user requested the effect.',
-      workspaceMatches: workspaceMatches.matches,
       harnessModeMatches: harnessModeMatches.matches,
       policy: 'GoodVibes Agent routes by user outcome. Package, daemon, TUI, platform, and host ownership are diagnostic details; the model should choose the visible route that is easiest and safest for the user.',
     };

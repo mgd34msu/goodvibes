@@ -1,6 +1,10 @@
 import { assertSynchronousJudgmentGuard, drainOwned } from '@goodvibes/judgment/decisions';
 import { builtinTriggerOperationMethodDescriptors, builtinTriggerSupervisorMethodDescriptors } from './method-catalog-trigger-supervisor.js';
 import { builtinDelegatedInboundMethodDescriptors } from './method-catalog-delegated-inbound.js';
+import { CALLER_RULES_ABSENT, callerPathRefusal, type CallerPathRules } from './caller-paths.js';
+import { callerReachRefusal, reachableAnswer, reachFilterOf, type CallerReachRules, type RecordKind, type RecordOwnerLookup } from './caller-reach.js';
+import { withRecordReach } from '@goodvibes/engine/daemon-api';
+import { assertMethodAddressesDeclared, capabilityAddressesOf } from './record-addresses.js';
 import { builtinGatewayNativeHostedTurnMethodDescriptors } from './method-catalog-native-hosted-turn.js';
 import { builtinGatewayNativeConversationIntakeMethodDescriptors } from './method-catalog-native-intake.js';
 import { builtinGatewayNativeWorkSubmissionMethodDescriptors } from './method-catalog-native-work-submission.js';
@@ -62,6 +66,7 @@ import { builtinGatewayCapabilityMethodDescriptors } from './method-catalog-capa
 import { builtinGatewayHookTraceMethodDescriptors } from './method-catalog-hooks.js';
 import { builtinGatewayContextWindowMethodDescriptors } from './method-catalog-context-windows.js';
 import { builtinGatewayPolicyAuditMethodDescriptors } from './method-catalog-policy-audit.js';
+import { builtinGatewayProgramsMethodDescriptors } from './method-catalog-programs.js';
 import {
   builtinGatewayAcpMethodDescriptors,
 } from './method-catalog-acp.js';
@@ -145,6 +150,12 @@ export type {
   GatewayMethodTransport,
 } from './method-catalog-shared.js';
 
+/**
+ * One method call of a daemon-run turn sent through the daemon's dispatch: the turn's invocation (its actor, its call
+ * context, no credential) and the method's body; answers the method's answer, or throws its refusal.
+ */
+export type DaemonTurnMethodCall = (methodId: string, body: unknown, invocation: GatewayMethodInvocation) => Promise<unknown>;
+
 interface RegisteredGatewayMethod {
   readonly descriptor: GatewayMethodDescriptor;
   readonly handler?: GatewayMethodHandler | undefined;
@@ -199,6 +210,8 @@ export const BUILTIN_GATEWAY_METHODS: readonly GatewayMethodDescriptor[] = [
   ...builtinGatewayContextWindowMethodDescriptors,
   // The permission audit: each terminal program posts the calls its gate decided (method-catalog-policy-audit.ts).
   ...builtinGatewayPolicyAuditMethodDescriptors,
+  // A terminal program's registration and the outside agent's own credential (method-catalog-programs.ts).
+  ...builtinGatewayProgramsMethodDescriptors,
   ...builtinGatewayAcpMethodDescriptors,
   ...builtinGatewaySkillsMethodDescriptors,
   ...builtinGatewayPrincipalsMethodDescriptors,
@@ -215,11 +228,17 @@ export const BUILTIN_GATEWAY_METHODS: readonly GatewayMethodDescriptor[] = [
   ...builtinGatewayStepUpMethodDescriptors,
 ];
 
+// Every builtin method's id inputs say what they address (control-plane/record-addresses.ts), or the catalog does not load.
+assertMethodAddressesDeclared(BUILTIN_GATEWAY_METHODS);
+
 /**
  * Metadata key the daemon's start-up sweep sets on a method it cannot answer
  * (see markUnservedGatewayMethods), so a client reads why it is not callable.
  */
 export const UNSERVED_METHOD_REASON_KEY = 'unservedReason';
+
+/** The code of a call naming a record the caller may not reach (control-plane/caller-reach.ts). */
+export const RECORD_NOT_YOURS = 'RECORD_NOT_YOURS';
 
 /**
  * A handler attached after the start-up sweep makes the method callable again:
@@ -328,6 +347,57 @@ export class GatewayMethodCatalog {
   private grantCache: { write?: readonly string[]; read?: readonly string[] } = {};
   /** Every authenticated REST request looks its route up here; rebuilt only after a method changes. */
   private httpBindingIndex: HttpBindingIndex | undefined;
+  /** The one check of the folders and files a call names (caller-paths.ts), given by the daemon; absent, none is made. */
+  private callerPathRules: CallerPathRules | undefined;
+
+  /** Check every call's folders and files with these rules before its handler (caller-paths.ts); set once by the daemon. */
+  setCallerPathRules(rules: CallerPathRules): void {
+    this.callerPathRules = rules;
+  }
+
+  /**
+   * The rules set by `setCallerPathRules`, for a door that reaches a route without a handler (the dispatch, REST). While
+   * none are set, the rules of a catalog without them (caller-paths.ts `CALLER_RULES_ABSENT`): only the owner himself
+   * names a folder or reaches a record; never no check.
+   */
+  pathRules(): CallerPathRules {
+    return this.callerPathRules ?? CALLER_RULES_ABSENT;
+  }
+
+  /** The daemon's own dispatch of a method one of its turns calls (daemon/capability-wiring.ts); set once by the daemon. */
+  private turnMethodCall: DaemonTurnMethodCall | undefined;
+
+  /**
+   * Send a daemon turn's method call through the daemon's one dispatch (its native and administrative authority for the
+   * owner's own turn, a method served only by its route, the folder and reach checks), as a capability's nested method
+   * goes; set once by the daemon. Without it a turn calls a method's handler in process only.
+   */
+  setDaemonTurnMethodCall(call: DaemonTurnMethodCall): void {
+    this.turnMethodCall = call;
+  }
+
+  /** The dispatch set by `setDaemonTurnMethodCall`, for the daemon's own turns (tools/capability/daemon-tools.ts). */
+  daemonTurnMethodCall(): DaemonTurnMethodCall | undefined {
+    return this.turnMethodCall;
+  }
+
+  /** Each kind's owner lookup (control-plane/caller-reach.ts), set by the daemon that holds the kind's store. */
+  private readonly recordOwners = new Map<RecordKind, RecordOwnerLookup>();
+
+  /** The lookup of a kind of record's owner (its project, who made it), for the one check of what a caller may reach. */
+  setRecordOwner(kind: RecordKind, lookup: RecordOwnerLookup): void {
+    this.recordOwners.set(kind, lookup);
+  }
+
+  /**
+   * The rules of the one check of what a caller may reach (control-plane/caller-reach.ts): the project check the daemon
+   * set, each kind's owner lookup, and the capabilities' declared record inputs. While the daemon set no rules, those of
+   * a catalog without them (`CALLER_RULES_ABSENT`): anyone but the owner himself reaches nothing.
+   */
+  reachRules(): CallerReachRules {
+    const paths = this.pathRules();
+    return { ...paths, recordOwner: (kind) => this.recordOwners.get(kind), capabilityAddresses: capabilityAddressesOf };
+  }
 
   /**
    * Called after initial host construction. Startup registration is hydration,
@@ -565,9 +635,12 @@ export class GatewayMethodCatalog {
       const binding = entry.descriptor.http;
       if (!binding) continue;
       const parts = pathSegments(binding.path);
-      const key = `${binding.method} ${parts.length}`;
-      const bucket = index.get(key);
-      if (bucket) bucket.push({ parts, descriptor: entry.descriptor }); else index.set(key, [{ parts, descriptor: entry.descriptor }]);
+      // The binding's own verb, and any other verb at the same path that is this same method (`alsoAt`).
+      for (const verb of [binding.method, ...(binding.alsoAt ?? [])]) {
+        const key = `${verb} ${parts.length}`;
+        const bucket = index.get(key);
+        if (bucket) bucket.push({ parts, descriptor: entry.descriptor }); else index.set(key, [{ parts, descriptor: entry.descriptor }]);
+      }
     }
     return this.httpBindingIndex = index;
   }
@@ -636,10 +709,22 @@ export class GatewayMethodCatalog {
       }
       throw new Error(`Gateway method has no internal handler: ${id}`);
     }
+    // The one check of the folders and files a call names (control-plane/caller-paths.ts), before its handler runs, on
+    // every path that reaches a handler: the daemon's dispatch and its own turns' in-process calls alike.
+    const pathRefusal = callerPathRefusal(entry.descriptor, invocation.body, invocation.query, invocation.context, this.pathRules());
+    if (pathRefusal !== undefined) throw new GatewayVerbError(`Not done: ${pathRefusal}. Nothing was read or changed.`, 'PROJECT_NOT_ALLOWED', 403);
+    // The one check of what a caller may reach by id (control-plane/caller-reach.ts), on the same paths.
+    const reach = this.reachRules();
+    const reachRefusal = await callerReachRefusal(id, invocation.body, invocation.query, invocation.context, reach);
+    if (reachRefusal !== undefined) throw new GatewayVerbError(`Not done: ${reachRefusal}. Nothing was read or changed.`, RECORD_NOT_YOURS, 403);
     // The one confirmation gate: what the method declares, before its handler runs, on every path.
     const confirmation = entry.descriptor.confirmation;
     if (confirmation !== undefined) requireConfirmation(confirmation, id, readInvocationParams(invocation), invocation.context);
-    return entry.handler(invocation);
+    // A paged list the handler serves keeps only what the caller may reach before it cuts its page (daemon-api
+    // `keepReachable`); the owner at large is served as before.
+    const answer = await withRecordReach(reachFilterOf(invocation.context, reach, invocation.body), () => entry.handler(invocation));
+    // A list or a search it declares is what the caller may reach of it, by the same rule.
+    return !(answer instanceof Response) ? reachableAnswer(id, answer, invocation.context, reach, invocation.body) : answer;
   }
 }
 import { createHash, randomUUID } from 'node:crypto';

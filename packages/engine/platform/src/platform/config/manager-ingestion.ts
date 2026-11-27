@@ -14,6 +14,7 @@ import { summarizeError } from '../utils/error-display.js';
 import { unknownSettingNotices } from './settings-unknown-forms.js';
 import { DAEMON_KEYS_KEPT_FOR_ROLLBACK, MERGED_DAEMON_LISTS, MERGED_DAEMON_RECORDS } from './settings-carry-forward.js';
 import { CONFIG_SCHEMA } from './schema.js';
+import { configKeyFacts } from './config-key-facts.js';
 import {
   SettingsIngestionRefusal,
   announceIngestionNotice,
@@ -50,6 +51,7 @@ export function ingestManagerSettings(
   sink: IngestionNoticeSink,
   knownHostKeys?: ReadonlySet<string>,
   daemonOwned?: ((key: string) => boolean) | undefined,
+  projectFile = false,
 ): Record<string, unknown> {
   const noticedKeys = new Set<string>();
   const result = ingestSettingsFile(parsed, file, {
@@ -57,7 +59,7 @@ export function ingestManagerSettings(
     onNotice: (entry) => { noticedKeys.add(entry.key); noticeTo(sink, entry); },
   });
   for (const entry of result.unknownKeys) noticedKeys.add(entry.key);
-  const config = daemonOwned ? omitDaemonOwnedLeaves(result.config, file, daemonOwned) : { layer: result.config, notices: [] };
+  const config = daemonOwned ? omitDaemonOwnedLeaves(result.config, file, daemonOwned, projectFile) : { layer: result.config, notices: [] };
   for (const entry of config.notices) noticedKeys.add(entry.key);
   forgetFixedKeyReceipts(sink, file, noticedKeys);
   for (const entry of [...unknownSettingNotices(file, result.unknownKeys, knownHostKeys), ...config.notices]) {
@@ -78,6 +80,7 @@ function omitDaemonOwnedLeaves(
   layer: Record<string, unknown>,
   file: string,
   daemonOwned: (key: string) => boolean,
+  projectFile: boolean,
 ): { readonly layer: Record<string, unknown>; readonly notices: readonly SettingsIngestionNotice[] } {
   const notices: SettingsIngestionNotice[] = [];
   const visit = (node: Record<string, unknown>, prefix: string): Record<string, unknown> => {
@@ -85,8 +88,19 @@ function omitDaemonOwnedLeaves(
     for (const [name, value] of Object.entries(node)) {
       const key = prefix ? `${prefix}.${name}` : name;
       if (daemonOwned(key)) {
+        // A project may make a protection the daemon sets stricter (Ask me under the daemon's YOLO): such a key stays in
+        // the project's layer, is judged as every project key is (only stricter, project-layer-restrictions.ts), and is
+        // laid again over the daemon's value where it is stricter (manager.ts `#keepProjectStricter`).
+        const facts = projectFile ? configKeyFacts(key) : undefined;
+        if (facts?.projectSettable === true && facts.loosens !== undefined) {
+          kept[name] = value;
+          continue;
+        }
         // Left in a program's file for an earlier version (settings-carry-forward.ts): not read here, and nothing to say.
         if (DAEMON_KEYS_KEPT_FOR_ROLLBACK.includes(key) || MERGED_DAEMON_LISTS.includes(key) || MERGED_DAEMON_RECORDS.includes(key)) continue;
+        // A project's worktree settings are read by the daemon itself when it sets up that project's worktrees
+        // (runtime/worktree/project-setup-settings.ts), and what it does not use is said there, once: nothing here.
+        if (projectFile && (key === 'worktree' || key.startsWith('worktree.'))) continue;
         notices.push({
           file, key, action: 'skipped',
           reason: "only the daemon's settings file sets this, so the value here is not used",

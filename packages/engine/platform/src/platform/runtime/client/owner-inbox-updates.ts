@@ -35,6 +35,7 @@ import type { HostInstructions } from '../../core/host-instructions.js';
 import type { QuestionInbox } from '../../tools/query/index.js';
 import { openRawServerSentEventStream } from '../transports/sse-stream.js';
 import { buildUrl } from '../transports/transport-paths.js';
+import { programFetch } from './program-fetch.js';
 import { logger } from '../../utils/logger.js';
 import { summarizeError } from '../../utils/error-display.js';
 import { callingAgentId } from '../../agents/calling-agent.js';
@@ -81,7 +82,8 @@ export async function watchOwnerInboxUpdates(options: WatchOwnerInboxUpdatesOpti
       options.onTerminate?.();
     };
     const close = await openRawServerSentEventStream(
-      fetchImpl,
+      // With this program's registration: an owner-inbox update reaches the owner's own programs only (event-reach.ts).
+      programFetch(fetchImpl),
       url.toString(),
       {
         onEvent: ({ name: eventName, payload }) => {

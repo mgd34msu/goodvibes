@@ -16,28 +16,23 @@ import { clipboardPasteReceipt } from '@goodvibes/engine/terminal-shell/input-co
 
 /**
  * Keys the shell handles itself before configurable bindings are consulted, and
- * the two commands that show them. One table: the shortcut listing shows `key`,
- * and a new binding is checked for a clash against `chords`.
+ * the two commands that show them (the shortcut listing).
  */
-const FIXED_KEYS: readonly { readonly key: string; readonly description: string; readonly chords: readonly KeyCombo[] }[] = [
-  { key: 'Enter', description: 'Send prompt', chords: [{ key: 'enter' }] },
-  { key: 'Shift+Enter / Ctrl+J', description: 'Insert newline', chords: [{ key: 'enter', shift: true }, { key: 'j', ctrl: true }] },
-  { key: 'Up / Down', description: 'Navigate input history, lists, and scrollable overlays', chords: [{ key: 'up' }, { key: 'down' }] },
-  { key: 'Tab', description: 'Autocomplete slash command or file mention', chords: [{ key: 'tab' }] },
-  { key: 'Esc', description: 'Close overlays, pickers, and transient input modes', chords: [{ key: 'escape' }] },
-  { key: '?', description: 'Open help: every command and keyboard shortcut in one list', chords: [{ key: '?' }] },
-  { key: '/help keys', description: 'List every key and the file that changes them', chords: [] },
+const FIXED_SHORTCUTS: readonly { readonly key: string; readonly description: string }[] = [
+  { key: 'Enter', description: 'Send prompt' },
+  { key: 'Shift+Enter / Ctrl+J', description: 'Insert newline' },
+  { key: 'Up / Down', description: 'Navigate input history, lists, and scrollable overlays' },
+  { key: 'Tab', description: 'Autocomplete slash command or file mention' },
+  { key: 'Esc', description: 'Close overlays, pickers, and transient input modes' },
+  { key: '?', description: 'Open help: every command and keyboard shortcut in one list' },
+  { key: '/help keys', description: 'List every key and the file that changes them' },
 ];
-const FIXED_SHORTCUTS: readonly { readonly key: string; readonly description: string }[] = FIXED_KEYS.map(({ key, description }) => ({ key, description }));
 
 interface HarnessKeybindingArgs {
   readonly query?: unknown;
   readonly actionId?: unknown;
   readonly target?: unknown;
   readonly key?: unknown;
-  readonly fields?: unknown;
-  readonly combo?: unknown;
-  readonly combos?: unknown;
   readonly value?: unknown;
   readonly limit?: unknown;
   readonly includeParameters?: unknown;
@@ -64,8 +59,8 @@ interface KeybindingOperationRoute {
 type KeybindingEntry = { readonly action: KeyAction; readonly description: string; readonly combos: KeyCombo[] };
 type KeybindingContext = Pick<CommandContext, 'workspace'>;
 type KeybindingExecutionContext = KeybindingContext & Pick<CommandContext,
-  'renderRequest' | 'clearScreen' | 'openWorkspacePicker' | 'openAgentWorkspace' | 'openCommandPalette'
-  | 'dismissAgentWorkspace' | 'focusPrompt' | 'openPromptHistorySearch' | 'openConversationSearch'
+  'renderRequest' | 'clearScreen' | 'openCommandPalette'
+  | 'focusPrompt' | 'openPromptHistorySearch' | 'openConversationSearch'
   | 'pasteFromClipboard' | 'openBlockActions'>;
 
 interface KeybindingLookup {
@@ -128,53 +123,12 @@ function isKeyAction(action: string): action is KeyAction {
   return Object.hasOwn(ACTION_DESCRIPTIONS, action);
 }
 
-const MODIFIER_NAMES: ReadonlySet<string> = new Set(['ctrl', 'control', 'shift', 'alt', 'option', 'meta', 'cmd', 'command']);
-const NAMED_KEYS: ReadonlySet<string> = new Set(['enter', 'escape', 'tab', 'backspace', 'delete', 'insert', 'space', 'up', 'down', 'left', 'right',
-  'home', 'end', 'pageup', 'pagedown', ...Array.from({ length: 12 }, (_, index) => `f${index + 1}`)]);
 const KEY_NAME_ALIASES: Readonly<Record<string, string>> = { esc: 'escape', return: 'enter', pgup: 'pageup', pgdn: 'pagedown', del: 'delete', ins: 'insert' };
 
 /** The shell matches keys by lowercase logical name, so a combo stored as "G" or "Esc" would never fire. */
 function normalizeKeyName(key: string): string {
   const lower = key.trim().toLowerCase();
   return KEY_NAME_ALIASES[lower] ?? lower;
-}
-
-function invalidKeyReason(key: string): string | null {
-  if (MODIFIER_NAMES.has(key)) return `"${key}" is a modifier; set it with ctrl, shift or alt and name the key that goes with it.`;
-  if ([...key].length === 1 || NAMED_KEYS.has(key)) return null;
-  return `"${key}" is not a key the shell can match. Use one character or one of: ${[...NAMED_KEYS].join(', ')}.`;
-}
-
-/** The closed set of spellings a modifier flag accepts; anything else is refused with the parameter's name. */
-const MODIFIER_FLAG_WORDS: Readonly<Record<string, boolean>> = {
-  true: true, false: false, yes: true, no: false, on: true, off: false, '1': true, '0': false,
-};
-
-function readModifierFlag(parameter: 'ctrl' | 'shift' | 'alt', value: unknown): boolean | undefined {
-  if (value === undefined || value === null) return undefined;
-  if (typeof value === 'boolean') return value;
-  if (typeof value === 'number' && (value === 0 || value === 1)) return value === 1;
-  if (typeof value === 'string') {
-    const flag = MODIFIER_FLAG_WORDS[value.trim().toLowerCase()];
-    if (flag !== undefined) return flag;
-  }
-  throw new ComboInputError(`${parameter} must be true or false (also accepted: yes/no, on/off, 1/0); got ${JSON.stringify(value)}.`);
-}
-
-/** A combo the caller described in a way the shell cannot match. */
-class ComboInputError extends Error {}
-
-function normalizeCombo(value: unknown): KeyCombo | null {
-  if (typeof value !== 'object' || value === null || Array.isArray(value)) return null;
-  const fields = value as Readonly<Record<string, unknown>>;
-  const key = normalizeKeyName(readString(fields.key));
-  if (!key) return null;
-  const combo: KeyCombo = { key };
-  for (const parameter of ['ctrl', 'shift', 'alt'] as const) {
-    const flag = readModifierFlag(parameter, fields[parameter]);
-    if (flag !== undefined) combo[parameter] = flag;
-  }
-  return combo;
 }
 
 function parseComboLabel(value: string): KeyCombo | null {
@@ -191,30 +145,6 @@ function parseComboLabel(value: string): KeyCombo | null {
     else return null;
   }
   return combo;
-}
-
-function combosFromArgs(args: HarnessKeybindingArgs): KeyCombo[] {
-  const combos = readCombosFromArgs(args);
-  for (const combo of combos) {
-    const reason = invalidKeyReason(combo.key);
-    if (reason) throw new ComboInputError(reason);
-  }
-  return combos;
-}
-
-function readCombosFromArgs(args: HarnessKeybindingArgs): KeyCombo[] {
-  if (Array.isArray(args.combos)) {
-    const combos = args.combos.map((value) => normalizeCombo(value));
-    if (combos.every((combo): combo is KeyCombo => combo !== null)) return combos;
-    throw new ComboInputError('combos must be objects with key and optional boolean ctrl/shift/alt fields.');
-  }
-  const combo = normalizeCombo(args.combo);
-  if (combo) return [combo];
-  const fieldCombo = normalizeCombo(args.fields);
-  if (fieldCombo) return [fieldCombo];
-  const labelCombo = parseComboLabel(readString(args.value));
-  if (labelCombo) return [labelCombo];
-  throw new ComboInputError('no combo was given: pass combo, combos, fields (key plus optional ctrl/shift/alt), or a value such as "Ctrl+G".');
 }
 
 function comboFingerprint(combo: KeyCombo): string {
@@ -316,20 +246,20 @@ async function resolveHarnessKeybinding(sources: ReturnType<typeof readKeybindin
 
 function keybindingModelRoute(action: KeyAction): string {
   const route = keybindingOperationRoute(action);
-  if (route.preferredMode === 'run_keybinding') return `workspace action:"run_keybinding" actionId:"${action}"`;
-  if (route.preferredMode === 'open_ui_surface' && route.surfaceId) return `workspace action:"open" surfaceId:"${route.surfaceId}"`;
-  if (route.preferredMode === 'open_ui_surface') return 'workspace action:"open"';
-  if (route.preferredMode === 'run_command' && route.command) return `workspace action:"run_command" command:"${route.command}"`;
-  if (route.preferredMode === 'run_command') return 'workspace action:"run_command"';
+  if (route.preferredMode === 'run_keybinding') return `screens_keys_commands action:"run_keybinding" actionId:"${action}"`;
+  if (route.preferredMode === 'open_ui_surface' && route.surfaceId) return `screens_keys_commands action:"open" surfaceId:"${route.surfaceId}"`;
+  if (route.preferredMode === 'open_ui_surface') return 'screens_keys_commands action:"open"';
+  if (route.preferredMode === 'run_command' && route.command) return `screens_keys_commands action:"run_command" command:"${route.command}"`;
+  if (route.preferredMode === 'run_command') return 'screens_keys_commands action:"run_command"';
   return 'direct-user-interaction';
 }
 
 function keybindingModelAccess(action: KeyAction, operation: KeybindingOperationRoute): Record<string, unknown> {
   return {
-    inspect: `workspace action:"keybinding" actionId:"${action}"`,
-    run: operation.supported ? `workspace action:"run_keybinding" actionId:"${action}"` : 'not exposed',
-    set: `workspace action:"set_keybinding" actionId:"${action}" combo:{...}`,
-    reset: `workspace action:"reset_keybinding" actionId:"${action}"`,
+    inspect: `screens_keys_commands action:"keybinding" actionId:"${action}"`,
+    run: operation.supported ? `screens_keys_commands action:"run_keybinding" actionId:"${action}"` : 'not exposed',
+    set: `capability_run id:"keys.bind" inputs:{"action":"${action}","key":"<key>"}`,
+    reset: `capability_run id:"keys.reset" inputs:{"action":"${action}"}`,
     preferred: keybindingModelRoute(action),
   };
 }
@@ -401,31 +331,6 @@ function keybindingOperationRoute(action: KeyAction): KeybindingOperationRoute {
         confirmation: 'agent_harness mode:"run_keybinding" requires current recorded Jev effect admission.',
         note: 'Opens help: every command and keyboard shortcut in one searchable list.',
       };
-    case 'workspace-picker':
-      return {
-        supported: true,
-        effect: 'visible-ui-navigation',
-        preferredMode: 'run_keybinding',
-        surfaceId: 'agent-workspace',
-        confirmation: 'agent_harness mode:"run_keybinding" requires current recorded Jev effect admission.',
-        note: 'Opens the Agent workspace home.',
-      };
-    case 'workspace-close':
-      return {
-        supported: true,
-        effect: 'visible-ui-navigation',
-        preferredMode: 'run_keybinding',
-        confirmation: 'agent_harness mode:"run_keybinding" requires current recorded Jev effect admission.',
-        note: 'Dismisses the Agent workspace.',
-      };
-    case 'workspace-close-all':
-      return {
-        supported: true,
-        effect: 'visible-ui-navigation',
-        preferredMode: 'run_keybinding',
-        confirmation: 'agent_harness mode:"run_keybinding" requires current recorded Jev effect admission.',
-        note: 'Dismisses the Agent workspace (its leader sequence, Ctrl+G then x, has the same effect as Ctrl+X).',
-      };
     case 'history-search':
       return {
         supported: true,
@@ -469,16 +374,6 @@ function keybindingOperationRoute(action: KeyAction): KeybindingOperationRoute {
         surfaceId: 'block-actions',
         confirmation: 'agent_harness mode:"run_keybinding" requires current recorded Jev effect admission.',
         note: 'Opens the visible nearest-block actions surface. The exact block action remains an interactive visible-shell selection because it depends on cursor/scroll position.',
-      };
-    case 'workspace-tab-next':
-    case 'workspace-tab-prev':
-      return {
-        supported: false,
-        effect: 'visible-ui-navigation',
-        preferredMode: 'open_ui_surface',
-        surfaceId: 'agent-workspace',
-        confirmation: 'agent_harness mode:"run_keybinding" requires current recorded Jev effect admission; open the workspace with agent_harness mode:"open_ui_surface" and an explicit categoryId or target instead of cycling hidden UI state.',
-        note: 'Category cycling depends on the live workspace focus position. The model should open the intended Agent workspace category directly.',
       };
     case 'copy-selection':
       return {
@@ -557,7 +452,6 @@ function keybindingOperationRoute(action: KeyAction): KeybindingOperationRoute {
       };
     case 'scroll-page-up':
     case 'scroll-page-down':
-    case 'contract-question-ordinary':
     case 'model-picker-group':
       return {
         supported: false,
@@ -579,9 +473,9 @@ export function totalHarnessShortcuts(context: KeybindingContext): number {
 
 function fixedShortcutModelRoute(shortcut: Record<string, string>): string {
   switch (shortcut.key) {
-    case '/help keys': return 'workspace action:"keybindings"';
-    case '?': return 'workspace action:"open" surfaceId:"help-overlay"';
-    case 'Tab': return 'workspace action:"commands"';
+    case '/help keys': return 'screens_keys_commands action:"keybindings"';
+    case '?': return 'screens_keys_commands action:"open" surfaceId:"help-overlay"';
+    case 'Tab': return 'screens_keys_commands action:"commands"';
     case 'Enter':
     case 'Shift+Enter / Ctrl+J': return 'main conversation';
     default: return 'direct-user-interaction';
@@ -595,8 +489,8 @@ function describeFixedShortcut(shortcut: Record<string, string>): Record<string,
     userEditable: false,
     modelRoute: fixedShortcutModelRoute(shortcut),
     modelAccess: {
-      inspectShortcuts: 'workspace action:"shortcuts"',
-      inspectKeybindings: 'workspace action:"keybindings"',
+      inspectShortcuts: 'screens_keys_commands action:"shortcuts"',
+      inspectKeybindings: 'screens_keys_commands action:"keybindings"',
       preferred: fixedShortcutModelRoute(shortcut),
     },
   };
@@ -624,7 +518,7 @@ export async function listHarnessShortcuts(context: KeybindingContext, args: Har
     total: totalHarnessShortcuts(context),
     policy: degraded
       ? 'Fixed shortcuts and default keybindings are available for discovery. Live keybinding execution and mutation require the runtime keybinding manager.'
-      : 'Fixed shortcuts are runtime/editor controls. Configurable keybindings can be inspected, supported shell-safe actions can be run with run_keybinding, and bindings can be changed with set_keybinding/reset_keybinding.',
+      : 'Fixed shortcuts are runtime/editor controls. Configurable keybindings can be inspected, supported shell-safe actions can be run with run_keybinding, and bindings can be changed with capability_run id:"keys.bind" (keys.reset puts one back).',
   };
 }
 
@@ -645,8 +539,8 @@ export async function listHarnessKeybindings(context: KeybindingContext, args: H
     returned: entries.length,
     total: sources.entries.length,
     policy: manager
-      ? 'Reads the live resolved keybindings; workspace action:"keybinding" actionId:"<action>" (or includeParameters:true) shows a binding\'s defaults and routes. run_keybinding executes only supported shell-safe actions. set_keybinding/reset_keybinding write the same keybindings.json file the user can edit and reload the runtime manager.'
-      : 'Live keybinding manager is unavailable; default keybindings are shown for discovery only. run_keybinding, set_keybinding, and reset_keybinding require a live manager.',
+      ? 'Reads the live resolved keybindings; screens_keys_commands action:"keybinding" actionId:"<action>" (or includeParameters:true) shows a binding\'s defaults and routes. run_keybinding executes only supported shell-safe actions. capability_run id:"keys.bind" (keys.reset puts one back) writes the same keybindings.json file the user can edit.'
+      : 'Live keybinding manager is unavailable; default keybindings are shown for discovery only. run_keybinding needs a live manager; capability_run id:"keys.bind" (keys.reset puts one back) changes a binding.',
   };
 }
 
@@ -663,14 +557,14 @@ export async function describeHarnessKeybinding(context: KeybindingContext, args
     configPath: sources.configPath,
     ...describeBinding(manager, entry.action, entry.combos, resolved.lookup),
     ...(resolved.judgment ? { judgment: resolved.judgment } : {}),
-    ...(manager ? {} : { note: 'Default keybinding descriptor only; live run/set/reset operations require the runtime keybinding manager.' }),
+    ...(manager ? {} : { note: 'Default keybinding descriptor only; run_keybinding requires the runtime keybinding manager.' }),
   } : null;
 }
 
 function unknownKeybinding(mode: string, args: HarnessKeybindingArgs): EffectResult {
   const given = readString(args.actionId) || readString(args.target) || readString(args.key) || readString(args.query);
   return refused('not_found', given ? `No keybinding action matches ${JSON.stringify(given)}, so nothing was done.` : `${mode} needs an actionId, key, target or query.`,
-    'List the actions with workspace action:"keybindings" and repeat with one actionId.');
+    'List the actions with screens_keys_commands action:"keybindings" and repeat with one actionId.');
 }
 
 function runUnavailable(action: KeyAction, route: KeybindingOperationRoute, reason?: string): EffectResult {
@@ -720,46 +614,6 @@ export async function runHarnessKeybinding(context: KeybindingExecutionContext, 
       if (!context.openCommandPalette) return runUnavailable(resolved.action, route, 'Command palette route is unavailable.');
       context.openCommandPalette();
       return { status: 'executed', done: true, action: resolved.action, effect: 'help-opened', route: 'openCommandPalette', keybinding: descriptor };
-    case 'workspace-picker':
-      if (context.openWorkspacePicker) {
-        context.openWorkspacePicker();
-        return { status: 'executed', done: true, action: resolved.action, effect: 'agent-workspace-opened', route: 'openWorkspacePicker', keybinding: descriptor };
-      }
-      if (context.openAgentWorkspace) {
-        context.openAgentWorkspace('home');
-        return { status: 'executed', done: true, action: resolved.action, effect: 'agent-workspace-opened', route: 'openAgentWorkspace', categoryId: 'home', keybinding: descriptor };
-      }
-      return runUnavailable(resolved.action, route, 'No workspace picker or Agent workspace route is available.');
-    case 'workspace-close': {
-      if (!context.dismissAgentWorkspace) return runUnavailable(resolved.action, route, 'Agent workspace dismiss route is unavailable.');
-      const dismissedAgentWorkspace = context.dismissAgentWorkspace();
-      if (dismissedAgentWorkspace) {
-        return {
-          status: 'executed', done: true,
-          action: resolved.action,
-          effect: 'agent-workspace-dismissed',
-          route: 'dismissAgentWorkspace',
-          keybinding: descriptor,
-        };
-      }
-      // The real shortcut only dismisses the workspace; focusing the prompt here would be an effect it does not have.
-      return { status: 'nothing_to_dismiss', done: true, action: resolved.action, reason: 'No Agent workspace is open, so nothing was dismissed.', keybinding: descriptor };
-    }
-    case 'workspace-close-all': {
-      if (!context.dismissAgentWorkspace) return runUnavailable(resolved.action, route, 'Agent workspace dismiss route is unavailable.');
-      const dismissedAgentWorkspace = context.dismissAgentWorkspace();
-      if (dismissedAgentWorkspace) {
-        return {
-          status: 'executed', done: true,
-          action: resolved.action,
-          effect: 'agent-workspace-dismissed',
-          route: 'dismissAgentWorkspace',
-          keybinding: descriptor,
-        };
-      }
-      // The real shortcut only dismisses the workspace; focusing the prompt here would be an effect it does not have.
-      return { status: 'nothing_to_dismiss', done: true, action: resolved.action, reason: 'No Agent workspace is open, so nothing was dismissed.', keybinding: descriptor };
-    }
     case 'history-search': {
       if (!context.openPromptHistorySearch) return runUnavailable(resolved.action, route, 'Prompt history search route is unavailable.');
       const query = readString(args.value);
@@ -815,93 +669,3 @@ export async function runHarnessKeybinding(context: KeybindingExecutionContext, 
   }
 }
 
-/** Other actions that use one of `combos`, and which of the two wins (the later action in catalog order takes the chord). */
-function chordConflicts(manager: KeybindingsManager, action: KeyAction, combos: readonly KeyCombo[]): Record<string, unknown>[] {
-  const mine = new Set(combos.map(comboFingerprint));
-  const all = manager.getAll();
-  const position = all.findIndex((entry) => entry.action === action);
-  const conflicts: Record<string, unknown>[] = [];
-  all.forEach((entry, index) => {
-    if (entry.action === action) return;
-    const shared = entry.combos.filter((combo) => mine.has(comboFingerprint(combo)));
-    if (shared.length === 0) return;
-    conflicts.push({ action: entry.action, chord: formatCombo(manager, shared[0]!), takesTheChord: index > position ? entry.action : action });
-  });
-  for (const combo of combos) {
-    const fixed = FIXED_KEYS.find((entry) => entry.chords.some((chord) => comboFingerprint(chord) === comboFingerprint(combo)));
-    if (fixed) conflicts.push({ fixedShortcut: fixed.description, chord: formatCombo(manager, combo) });
-  }
-  return conflicts;
-}
-
-export async function setHarnessKeybinding(context: KeybindingContext, args: HarnessKeybindingArgs, options: CatalogRankingOptions = {}): Promise<EffectResult> {
-  const sources = readKeybindingSources(context, options);
-  const manager = sources.manager;
-  if (!manager) return NO_MANAGER();
-  const resolved = await resolveHarnessKeybinding(sources, args, options);
-  options.signal?.throwIfAborted();
-  if (resolved?.status === 'ambiguous') return refused('ambiguous', `${resolved.input} matches more than one keybinding, so nothing was changed.`,
-    'Repeat with one actionId from candidates.', { input: resolved.input, candidates: resolved.candidates });
-  if (!resolved) return unknownKeybinding('set_keybinding', args);
-  let combos: KeyCombo[];
-  try { combos = combosFromArgs(args); } catch (failure) {
-    if (!(failure instanceof ComboInputError)) throw failure;
-    return refused('not_applied', `set_keybinding was not applied: ${failure.message}`,
-      'Repeat with combo:{ key:"g", ctrl:true } or value:"Ctrl+G".', { action: resolved.action });
-  }
-  const configPath = sources.configPath;
-  // The manager reads, drops any legacy-name entry for this action, writes once and reloads;
-  // a file it cannot read or parse is left as it is and the call is refused with the reason.
-  let loadNotices: readonly string[];
-  try { loadNotices = manager.setOverride(resolved.action, combos); } catch (failure) {
-    return refused('not_applied', `set_keybinding was not applied: ${failure instanceof Error ? failure.message : String(failure)}`,
-      'Fix or move keybindings.json as the reason says, then repeat the call.', { action: resolved.action, configPath });
-  }
-  options.signal?.throwIfAborted();
-  const keybinding = await describeHarnessKeybinding(context, { actionId: resolved.action }, options);
-  const conflicts = chordConflicts(manager, resolved.action, combos);
-  const warnings = [
-    ...loadNotices,
-    // The loader already names a chord two actions share; only a clash it cannot see (a fixed shortcut) needs this text.
-    ...(conflicts.some((conflict) => 'fixedShortcut' in conflict) || (conflicts.length > 0 && !loadNotices.some((notice) => notice.includes(' is bound to '))) ? ['The chord is also used elsewhere (see conflicts); only one binding takes it. Rebind the other action, or reset this one, if that was not intended.'] : []),
-  ];
-  return {
-    status: 'updated',
-    done: true,
-    configPath,
-    keybinding,
-    lookup: resolved.lookup,
-    ...(conflicts.length > 0 ? { conflicts } : {}),
-    ...(warnings.length > 0 ? { warnings } : {}),
-    ...(resolved.judgment ? { selectionJudgment: resolved.judgment } : {}),
-  };
-}
-
-export async function resetHarnessKeybinding(context: KeybindingContext, args: HarnessKeybindingArgs, options: CatalogRankingOptions = {}): Promise<EffectResult> {
-  const sources = readKeybindingSources(context, options);
-  const manager = sources.manager;
-  if (!manager) return NO_MANAGER();
-  const resolved = await resolveHarnessKeybinding(sources, args, options);
-  options.signal?.throwIfAborted();
-  if (resolved?.status === 'ambiguous') return refused('ambiguous', `${resolved.input} matches more than one keybinding, so nothing was changed.`,
-    'Repeat with one actionId from candidates.', { input: resolved.input, candidates: resolved.candidates });
-  if (!resolved) return unknownKeybinding('reset_keybinding', args);
-  const configPath = sources.configPath;
-  let loadNotices: readonly string[];
-  try { loadNotices = manager.clearOverride(resolved.action); } catch (failure) {
-    return refused('not_applied', `reset_keybinding was not applied: ${failure instanceof Error ? failure.message : String(failure)}`,
-      'Fix or move keybindings.json as the reason says, then repeat the call.', { action: resolved.action, configPath });
-  }
-  options.signal?.throwIfAborted();
-  const keybinding = await describeHarnessKeybinding(context, { actionId: resolved.action }, options);
-  const warnings = [...loadNotices];
-  return {
-    status: 'reset',
-    done: true,
-    configPath,
-    keybinding,
-    lookup: resolved.lookup,
-    ...(warnings.length > 0 ? { warnings } : {}),
-    ...(resolved.judgment ? { selectionJudgment: resolved.judgment } : {}),
-  };
-}

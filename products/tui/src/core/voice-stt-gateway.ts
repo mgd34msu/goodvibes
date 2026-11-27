@@ -63,7 +63,7 @@ export function createVoiceSttGateway(deps: VoiceSttGatewayDeps): VoiceSttGatewa
  */
 export function describeTranscriptionFailure(error: unknown): string {
   if (error instanceof GoodVibesError && (error.status === 501 || error.status === 404)) {
-    return 'speech-to-text is not set up on this daemon, so nothing was transcribed. The local speech-to-text runtime can be installed for you: /voice setup does it, and /voice wake-setup offers it with the wake word.';
+    return 'speech-to-text is not set up on this daemon, so nothing was transcribed. The local speech-to-text runtime can be installed for you: "install" on the Voice tab of System does it, and "set up the wake word" there offers it with the wake word.';
   }
   return describeOperatorRpcError(error);
 }

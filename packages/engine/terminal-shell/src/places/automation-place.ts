@@ -47,6 +47,8 @@ interface ScheduleItem extends PlaceItem {
   readonly lastRunAt?: number | undefined;
   readonly runCount: number;
   readonly prompt: string;
+  /** The project folder it runs in (its execution's); empty for a schedule kept before schedules kept one. */
+  readonly project: string;
   /** The last run's outcome when it needs attention. */
   readonly trouble?: string | undefined;
   readonly pausedReason?: string | undefined;
@@ -156,6 +158,7 @@ function schedules(output: unknown): readonly ScheduleItem[] {
       lastRunAt: time(job['lastRunAt']),
       runCount: time(job['runCount']) ?? 0,
       prompt: text(execution['prompt']) || text(job['description']),
+      project: text(execution['workingDirectory']),
       ...(trouble ? { trouble } : {}),
       ...(text(job['pausedReason']) ? { pausedReason: text(job['pausedReason']) } : {}),
     };
@@ -280,16 +283,19 @@ export const AUTOMATION_PLACE = definePlace<Item>({
       empty: 'No schedules yet: nothing runs by itself.',
       row: (item) => {
         const schedule = item as ScheduleItem;
-        // The row names only a state that needs a word (paused, failed); its times are in the detail.
+        // One schedule list for the person: each row names its project; a state that needs a word (paused, failed)
+        // comes first; its times are in the detail.
+        const where = schedule.project ? `in ${schedule.project.split(/[\\/]/).filter(Boolean).pop() ?? schedule.project}` : 'in no project';
         return {
           title: schedule.name,
-          ...(schedule.state === 'paused' ? { right: 'paused' } : schedule.trouble ? { right: schedule.trouble } : {}),
+          right: schedule.state === 'paused' ? `paused, ${where}` : schedule.trouble ? `${schedule.trouble}, ${where}` : where,
           mark: schedule.state === 'paused' ? 'paused' : schedule.trouble ? 'attention' : 'ok',
         };
       },
       detail: (item) => {
         const schedule = item as ScheduleItem;
         return [
+          { label: 'Project', text: schedule.project || 'none kept (made before schedules kept their project)' },
           { label: 'When', text: schedule.timing },
           { label: 'Next run', text: schedule.state === 'paused' ? 'none (paused)' : formatScheduleTime(schedule.nextRunAt) },
           { label: 'Last run', text: schedule.lastRunAt ? formatScheduleTime(schedule.lastRunAt) : 'never' },
